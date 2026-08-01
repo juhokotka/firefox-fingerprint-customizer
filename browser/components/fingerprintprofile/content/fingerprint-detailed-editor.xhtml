@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<?csp default-src chrome:; img-src resource: chrome:; style-src chrome: 'unsafe-inline'; ?>
+
+<window
+  xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  xmlns:html="http://www.w3.org/1999/xhtml"
+  data-l10n-attrs="title"
+  persist="screenX screenY width height"
+  width="640"
+  height="720"
+>
+  <dialog
+    id="fingerprint-detailed-editor-dialog"
+    buttons="accept,cancel"
+    buttonlabelaccept="Save"
+    buttonaccesskeyaccept="S"
+  >
+    <linkset>
+      <html:link rel="stylesheet" href="chrome://global/skin/global.css" />
+      <html:link rel="stylesheet" href="chrome://browser/skin/usercontext/container-editor.css" />
+    </linkset>
+
+    <script src="chrome://browser/content/fingerprintprofile/fingerprint-detailed-editor.js" />
+
+    <html:div id="detailedEditorHost" />
+  </dialog>
+</window>

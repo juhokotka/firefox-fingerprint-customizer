@@ -1,0 +1,407 @@
+name: Build & Release
+
+# Trigger on version tags (e.g. v1.0.0, v1.0.0-beta).
+# This conserves CI minutes — pushes to main don't trigger a build.
+# To release, tag and push:  git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags:
+      - 'v*'
+  # Allow manual runs from the Actions tab for testing.
+  workflow_dispatch:
+
+# Prevent concurrent builds per ref (avoid cache races).
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            os: macos-14
+            artifact_ext: zip
+            archive_name: macos-arm64
+            toolchain_cache_path: /Users/runner/.mozbuild
+            shell: bash
+          - name: Linux x86_64
+            os: ubuntu-22.04
+            artifact_ext: tar.bz2
+            archive_name: linux-x86_64
+            toolchain_cache_path: /home/runner/.mozbuild
+            shell: bash
+          - name: Windows x86_64
+            os: windows-latest
+            artifact_ext: zip
+            archive_name: windows-x86_64
+            toolchain_cache_path: C:\Users\runneradmin\.mozbuild
+            shell: msys2 {0}
+
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+      # ── 1. Checkout ──
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Free disk space (Linux only) ──
+      - name: Free disk space (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          df -h /
+          echo "Removing unused toolchains and caches..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/.ghcup
+          sudo apt-get clean
+          docker system prune -af --volumes || true
+          df -h /
+
+      # ── 3. Free disk space (macOS) ──
+      - name: Free disk space (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /opt/ghc
+          sudo rm -rf ~/Library/Caches/Homebrew/*
+          rm -rf ~/Library/Caches/pip
+          df -h /
+
+      # ── 4. Install Linux system dependencies ──
+      # Firefox on Linux needs GTK, X11, GL, and various multimedia libs.
+      # mach bootstrap can install these, but pre-installing is faster and
+      # avoids interactive prompts.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3 python3-pip python3-setuptools \
+            wget curl unzip zip \
+            pkg-config autoconf2.13 \
+            libgtk-3-dev libglib2.0-dev libxt-dev \
+            libasound2-dev libpulse-dev \
+            libdbus-glib-1-dev \
+            libx11-xcb-dev libxcomposite-dev libxdamage-dev libxrandr-dev \
+            libxss-dev libxcursor-dev libxinerama-dev \
+            libpango1.0-dev libcairo2-dev \
+            libfreetype6-dev libfontconfig1-dev \
+            libavcodec-dev libavutil-dev libvpx-dev \
+            nasm yasm \
+            libssl-dev libsqlite3-dev \
+            libnotify-dev libxtst-dev \
+            libgl1-mesa-dev libgles2-mesa-dev \
+            build-essential
+
+      # ── 5. Setup MSYS2 (Windows only) ──
+      # Firefox Windows builds use the MSYS2/MinGW toolchain. mach bootstrap
+      # handles the details, but MSYS2 must be present first.
+      - name: Setup MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-binutils
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-nsis
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-rust
+            tar
+            zip
+            unzip
+            diffutils
+            patch
+            make
+            autoconf2.13
+
+      # ── 6. Restore toolchain cache (~/.mozbuild, ~5-10 GB) ──
+      # Keyed on OS + mozconfig + mozboot scripts. On cache hit, skip
+      # downloading Clang, Rust, Node, and other toolchains during bootstrap.
+      - name: Restore toolchain cache
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.toolchain_cache_path }}
+          key: mozbuild-${{ matrix.archive_name }}-${{ hashFiles('mozconfig', 'python/mozboot/**') }}
+          restore-keys: |
+            mozbuild-${{ matrix.archive_name }}-
+
+      # ── 7. Restore sccache (compiled C/C++/Rust objects, ~2-5 GB) ──
+      # sccache caches compiled objects by content hash. Unchanged source
+      # files compile instantly on subsequent builds. This is the key
+      # to fast incremental builds after the first full run.
+      - name: Restore sccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.sccache
+          key: sccache-${{ matrix.archive_name }}-${{ github.sha }}
+          restore-keys: |
+            sccache-${{ matrix.archive_name }}-
+
+      # ── 8. Create mozconfig (platform-specific) ──
+      - name: Create mozconfig (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cat > mozconfig << 'EOF'
+          # Build the browser (Firefox), not other apps.
+          ac_add_options --enable-application=browser
+          # Release-style optimized build — no debug symbols, no tests.
+          ac_add_options --disable-debug
+          ac_add_options --enable-optimize="-O2"
+          ac_add_options --disable-tests
+          # Use sccache for C/C++/Rust compilation caching.
+          ac_add_options --with-ccache=sccache
+          EOF
+          echo "--- mozconfig ---"
+          cat mozconfig
+
+      - name: Create mozconfig (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cat > mozconfig << 'EOF'
+          # Build the browser (Firefox), not other apps.
+          ac_add_options --enable-application=browser
+          # Release-style optimized build — no debug symbols, no tests.
+          ac_add_options --disable-debug
+          ac_add_options --enable-optimize="-O2"
+          ac_add_options --disable-tests
+          # Use sccache for C/C++/Rust compilation caching.
+          ac_add_options --with-ccache=sccache
+          EOF
+          echo "--- mozconfig ---"
+          cat mozconfig
+
+      - name: Create mozconfig (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cat > mozconfig << 'EOF'
+          # Build the browser (Firefox), not other apps.
+          ac_add_options --enable-application=browser
+          # Release-style optimized build — no debug symbols, no tests.
+          ac_add_options --disable-debug
+          ac_add_options --enable-optimize="-O2"
+          ac_add_options --disable-tests
+          # Use sccache for C/C++/Rust compilation caching.
+          ac_add_options --with-ccache=sccache
+          # Use the MinGW toolchain (matches MSYS2 setup above).
+          ac_add_options --target=x86_64-pc-mingw32
+          EOF
+          echo "--- mozconfig ---"
+          cat mozconfig
+
+      # ── 9. Bootstrap dependencies ──
+      # On first run (cache miss): downloads and installs all toolchains (~20 min).
+      # On subsequent runs (cache hit): verifies everything is present (~2 min).
+      - name: Bootstrap dependencies
+        shell: ${{ matrix.shell }}
+        run: |
+          ./mach bootstrap --no-interactive --no-system-changes --application=browser
+
+      # ── 10. Build ──
+      # First run: full C++ + Rust + JS build (~2-4 hours on 2-core runner).
+      # Subsequent runs: sccache hits make C++ fast; only changed files recompile.
+      - name: Build Firefox
+        shell: ${{ matrix.shell }}
+        env:
+          SCCACHE_DIR: ${{ github.workspace }}/.sccache
+        run: |
+          sccache --show-stats || true
+          ./mach build
+          sccache --show-stats || true
+
+      # ── 11. Package ──
+      # Creates the distributable in obj-*/dist/:
+      #   macOS:   .app bundle
+      #   Linux:   .tar.bz2
+      #   Windows: .zip (via mach package)
+      - name: Package Firefox
+        shell: ${{ matrix.shell }}
+        run: |
+          ./mach package
+
+      # ── 12. Create distributable archive ──
+      - name: Create distributable archive (macOS)
+        if: runner.os == 'macOS'
+        id: archive-macos
+        run: |
+          APP_PATH=$(find obj-*.*/dist -maxdepth 1 -name "*.app" -type d 2>/dev/null | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: No .app bundle found in obj-*/dist/"
+            ls -la obj-*.*/dist/ || true
+            exit 1
+          fi
+          echo "Found app bundle: $APP_PATH"
+          ARCHIVE_NAME="Firefox-Fingerprint-Customizer-${{ github.ref_name }}-${{ matrix.archive_name }}.zip"
+          rm -f "$ARCHIVE_NAME"
+          ditto -c -k --keepParent "$APP_PATH" "$ARCHIVE_NAME"
+          echo "Created: $ARCHIVE_NAME"
+          echo "archive_name=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+          echo "artifact_path=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+          shasum -a 256 "$ARCHIVE_NAME" | awk '{print $1}' > "$ARCHIVE_NAME.sha256sum"
+          echo "Checksum:"
+          cat "$ARCHIVE_NAME.sha256sum"
+
+      - name: Create distributable archive (Linux)
+        if: runner.os == 'Linux'
+        id: archive-linux
+        run: |
+          TARBALL=$(find obj-*.*/dist -maxdepth 1 -name "*.tar.bz2" -type f 2>/dev/null | head -1)
+          if [ -z "$TARBALL" ]; then
+            echo "ERROR: No .tar.bz2 found in obj-*/dist/"
+            ls -la obj-*.*/dist/ || true
+            exit 1
+          fi
+          echo "Found tarball: $TARBALL"
+          ARCHIVE_NAME="Firefox-Fingerprint-Customizer-${{ github.ref_name }}-${{ matrix.archive_name }}.tar.bz2"
+          cp "$TARBALL" "$ARCHIVE_NAME"
+          echo "Created: $ARCHIVE_NAME"
+          echo "archive_name=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+          echo "artifact_path=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+          sha256sum "$ARCHIVE_NAME" | awk '{print $1}' > "$ARCHIVE_NAME.sha256sum"
+          echo "Checksum:"
+          cat "$ARCHIVE_NAME.sha256sum"
+
+      - name: Create distributable archive (Windows)
+        if: runner.os == 'Windows'
+        id: archive-windows
+        shell: msys2 {0}
+        run: |
+          ZIPFILE=$(find obj-*.*/dist -maxdepth 1 -name "*.zip" -type f 2>/dev/null | head -1)
+          if [ -z "$ZIPFILE" ]; then
+            echo "ERROR: No .zip found in obj-*/dist/"
+            ls -la obj-*.*/dist/ || true
+            exit 1
+          fi
+          echo "Found zip: $ZIPFILE"
+          ARCHIVE_NAME="Firefox-Fingerprint-Customizer-${{ github.ref_name }}-${{ matrix.archive_name }}.zip"
+          cp "$ZIPFILE" "$ARCHIVE_NAME"
+          echo "Created: $ARCHIVE_NAME"
+          echo "archive_name=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+          echo "artifact_path=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+          sha256sum "$ARCHIVE_NAME" | awk '{print $1}' > "$ARCHIVE_NAME.sha256sum"
+          echo "Checksum:"
+          cat "$ARCHIVE_NAME.sha256sum"
+
+      # ── 13. Upload as workflow artifact ──
+      # Downloadable from the Actions run page for 90 days. Used by the
+      # release job below to gather all platforms into one release.
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.archive-macos.outputs.archive_name || steps.archive-linux.outputs.archive_name || steps.archive-windows.outputs.archive_name }}
+          path: |
+            ${{ steps.archive-macos.outputs.archive_name || steps.archive-linux.outputs.archive_name || steps.archive-windows.outputs.archive_name }}
+            ${{ steps.archive-macos.outputs.archive_name || steps.archive-linux.outputs.archive_name || steps.archive-windows.outputs.archive_name }}.sha256sum
+          retention-days: 90
+
+      # ── 14. sccache stats (always, for debugging) ──
+      - name: sccache stats
+        if: always()
+        shell: ${{ matrix.shell }}
+        env:
+          SCCACHE_DIR: ${{ github.workspace }}/.sccache
+        run: sccache --show-stats || true
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Release job: runs after all build jobs succeed. Downloads every platform
+  # artifact and attaches them to a single GitHub Release on the tag.
+  # ──────────────────────────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: false
+
+      - name: List artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f | sort
+          echo "---"
+          echo "Files to release:"
+          find artifacts -type f \( -name "*.zip" -o -name "*.tar.bz2" -o -name "*.sha256sum" \) | sort
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( -name "*.zip" -o -name "*.tar.bz2" -o -name "*.sha256sum" \) -exec cp {} release-files/ \;
+          echo "--- Release files ---"
+          ls -la release-files/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body: |
+            ## Firefox Fingerprint Customizer ${{ github.ref_name }}
+
+            ### Downloads
+
+            | Platform | File |
+            | --- | --- |
+            | macOS (Apple Silicon) | `Firefox-Fingerprint-Customizer-${{ github.ref_name }}-macos-arm64.zip` |
+            | Linux (x86_64) | `Firefox-Fingerprint-Customizer-${{ github.ref_name }}-linux-x86_64.tar.bz2` |
+            | Windows (x86_64) | `Firefox-Fingerprint-Customizer-${{ github.ref_name }}-windows-x86_64.zip` |
+
+            Each download has a matching `.sha256sum` file for verification.
+
+            ### Installation
+
+            **macOS:** Download the `.zip`, unzip it, and drag the app to your
+            Applications folder. Apple Silicon only (M1/M2/M3/M4).
+
+            **Linux:** Download the `.tar.bz2`, extract it, and run
+            `./firefox` from the extracted directory.
+
+            **Windows:** Download the `.zip`, extract it, and run `firefox.exe`
+            from the extracted directory.
+
+            ### Verification
+
+            ```bash
+            # macOS / Linux
+            shasum -a 256 <downloaded-file>
+            # Compare with the corresponding .sha256sum file
+
+            # Windows (PowerShell)
+            Get-FileHash <downloaded-file> -Algorithm SHA256
+            ```
+
+            ### Build Info
+
+            - **Built from commit:** ${{ github.sha }}
+            - **Build date:** ${{ github.run_started_at }}
+            - **Built on:** GitHub Actions (macOS 14, Ubuntu 22.04, Windows Server)
+          files: |
+            release-files/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
