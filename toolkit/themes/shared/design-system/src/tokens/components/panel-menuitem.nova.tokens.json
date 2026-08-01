@@ -1,0 +1,7 @@
+{
+  "border": {
+    "radius": {
+      "value": "{button.border.radius}"
+    }
+  }
+}

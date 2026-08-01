@@ -1,0 +1,347 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+@import url("chrome://browser/content/usercontext/usercontext.css");
+
+.container-editor {
+  display: flex;
+  padding: var(--space-large);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-large);
+
+  moz-input-text::part(label) {
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .swatches::part(inputs) {
+    justify-content: space-between;
+  }
+
+  .swatch {
+    --visual-picker-item-border-radius: var(--border-radius-circle);
+    --visual-picker-item-border-color: transparent;
+    inline-size: var(--size-item-large);
+    block-size: var(--size-item-large);
+
+    .userContext-icon {
+      display: block;
+      inline-size: 100%;
+      block-size: 100%;
+      background-size: 22px;
+    }
+  }
+
+  .icon-swatches .userContext-icon {
+    fill: var(--icon-color);
+    background-size: 16px;
+  }
+
+  /* Fingerprint Settings section — device/location pickers, regenerate
+     button, and a one-line summary of the generated profile. */
+  .fingerprint-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-small);
+    padding-block-start: var(--space-large);
+    border-top: 1px solid var(--border-color);
+
+    h3 {
+      margin: 0;
+      font-weight: var(--font-weight-semibold);
+      font-size: var(--font-size-root);
+    }
+  }
+
+  .fingerprint-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-small);
+
+    label {
+      flex: 0 0 auto;
+      font-weight: var(--font-weight-semibold);
+    }
+
+    select {
+      flex: 1 1 auto;
+      min-inline-size: 12em;
+    }
+  }
+
+  .fingerprint-button-row {
+    display: flex;
+    gap: var(--space-small);
+    margin-top: var(--space-small);
+  }
+
+  .fingerprint-generate-btn {
+    flex: 1 1 auto;
+  }
+
+  .fingerprint-detailed-edit-btn {
+    flex: 0 0 auto;
+  }
+
+  .fingerprint-summary {
+    color: var(--text-color-deemphasized);
+    font-size: var(--font-size-small);
+    word-break: break-all;
+  }
+}
+
+/* When the URL-bar container indicator is revealed solely to anchor the
+   container-creation panel, keep it as a minimal, empty anchor. */
+#userContext-icons.container-anchor-pinned {
+  min-inline-size: var(--size-item-small);
+}
+
+#userContext-icons.container-anchor-pinned > * {
+  display: none;
+}
+
+
+/* Containers panel (toolbar button dropdown) */
+.containers-panel-content {
+  padding: 8px;
+  min-width: 240px;
+}
+
+.containers-panel-empty {
+  padding: 16px 8px;
+  color: var(--text-color-deemphasized);
+  font-size: var(--font-size-small);
+  text-align: center;
+}
+
+.containers-panel-row {
+  /* This is now a toolbarbutton, not an hbox. */
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  margin: 0;
+}
+
+.containers-panel-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  appearance: none;
+  border: none;
+  background: transparent;
+  text-align: start;
+  /* Override XUL toolbarbutton defaults that center content */
+  -moz-box-pack: start;
+  -moz-box-align: center;
+}
+
+/* When the row is both .containers-panel-item and .containers-panel-row,
+   it should fill the panel width. */
+.containers-panel-item.containers-panel-row {
+  width: 100%;
+}
+
+.containers-panel-item:hover {
+  background-color: var(--button-background-color-hover, rgba(0,0,0,0.06));
+}
+
+.containers-panel-item:hover:active {
+  background-color: var(--button-background-color-active, rgba(0,0,0,0.1));
+}
+
+/* Active/selected container — highlighted with accent background */
+.containers-panel-item.selected {
+  background-color: var(--button-background-color-hover, rgba(0,0,0,0.06));
+  font-weight: 600;
+}
+
+.containers-panel-edit-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--font-size-small, 11px);
+  color: var(--text-color-deemphasized, gray);
+  min-width: 40px;
+}
+
+.containers-panel-edit-btn:hover {
+  background-color: var(--button-background-color-hover, rgba(0,0,0,0.06));
+  color: var(--toolbar-color, inherit);
+}
+
+.containers-panel-namebox {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 0;
+}
+
+.containers-panel-name {
+  margin: 0;
+  font-size: var(--font-size-root, 13px);
+}
+
+.containers-panel-subtitle {
+  margin: 0;
+  font-size: var(--font-size-small, 11px);
+  color: var(--text-color-deemphasized, gray);
+}
+
+.containers-panel-check {
+  margin: 0;
+  color: #0a84ff;
+  font-size: 14px;
+}
+
+.containers-panel-mode-btn {
+  font-weight: 500;
+}
+
+.containers-panel-clear-btn {
+  color: var(--text-color-deemphasized, gray);
+  font-style: italic;
+}
+
+.containers-panel-add-btn {
+  margin-top: 4px;
+}
+
+.containers-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.containers-status-on {
+  background-color: #2ec27e; /* green */
+}
+
+.containers-status-off {
+  background-color: #e01b24; /* red */
+}
+
+.containers-panel-status {
+  color: var(--text-color-deemphasized);
+  font-size: var(--font-size-small);
+  margin: 0;
+}
+
+.containers-panel-new-btn {
+  margin-top: 8px;
+}
+
+
+/* Container status button — styled to match urlbar buttons.
+   Uses toolbarbutton-1 for base behavior, plus urlbar-like hover states. */
+.container-status-button {
+  -moz-box-align: center;
+  padding-inline: 6px;
+  border-radius: var(--urlbar-inner-border-radius, 4px);
+  appearance: none;
+  border: none;
+  background: transparent;
+}
+
+.container-status-button:hover:not([open="true"]) {
+  background-color: var(--urlbar-box-background-color-hover, rgba(0,0,0,0.06));
+}
+
+.container-status-button:hover:active,
+.container-status-button[open="true"] {
+  background-color: var(--urlbar-box-background-color-active, rgba(0,0,0,0.1));
+}
+
+.container-status-content {
+  -moz-box-align: center;
+  -moz-box-pack: center;
+  gap: 6px;
+}
+
+.container-status-dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 50%;
+}
+
+.container-status-dot.on {
+  background-color: #2ec27e;
+}
+
+.container-status-dot.off {
+  background-color: #e01b24;
+}
+
+.container-status-text {
+  font-size: var(--font-size-small, 11px);
+  margin: 0;
+  white-space: nowrap;
+  color: inherit;
+}
+
+/* Detailed fingerprint editor (independent window) */
+.detailed-fingerprint-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.detailed-fingerprint-editor fieldset {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+
+.detailed-fingerprint-editor legend {
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+.detailed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.detailed-row label {
+  flex: 0 0 180px;
+  font-size: 12px;
+}
+
+.detailed-input {
+  flex: 1 1 auto;
+  min-width: 200px;
+}
+
+.detailed-checkbox {
+  flex: 0 0 auto;
+}
+
+.detailed-btn-row {
+  display: flex;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+

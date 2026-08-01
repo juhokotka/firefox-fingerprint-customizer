@@ -1,0 +1,191 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "VideoSegment.h"
+
+#include "ImageContainer.h"
+#include "VideoUtils.h"
+#include "gfx2DGlue.h"
+#include "mozilla/CheckedInt.h"
+#include "mozilla/UniquePtrExtensions.h"
+
+namespace mozilla {
+
+using namespace layers;
+
+VideoFrame::VideoFrame(already_AddRefed<Image> aImage,
+                       const gfx::IntSize& aIntrinsicSize)
+    : mImage(aImage),
+      mIntrinsicSize(aIntrinsicSize),
+      mForceBlack(false),
+      mPrincipalHandle(PRINCIPAL_HANDLE_NONE) {}
+
+VideoFrame::VideoFrame()
+    : mIntrinsicSize(0, 0),
+      mForceBlack(false),
+      mPrincipalHandle(PRINCIPAL_HANDLE_NONE) {}
+
+VideoFrame::~VideoFrame() = default;
+
+void VideoFrame::SetNull() {
+  mImage = nullptr;
+  mIntrinsicSize = gfx::IntSize(0, 0);
+  mPrincipalHandle = PRINCIPAL_HANDLE_NONE;
+}
+
+void VideoFrame::TakeFrom(VideoFrame* aFrame) {
+  mImage = std::move(aFrame->mImage);
+  mIntrinsicSize = aFrame->mIntrinsicSize;
+  mForceBlack = aFrame->GetForceBlack();
+  mPrincipalHandle = aFrame->mPrincipalHandle;
+}
+
+already_AddRefed<Image> VideoFrame::CloneAsBlackImage() const {
+  const gfx::IntSize size = GetIntrinsicSize();
+
+  // Cap on input dimensions. Without this, valid int32_t dimensions can produce
+  // astronomically large-but-non-overflowing size_t values, causing the OS to
+  // thrash or kill lower priority processes when there are too many page
+  // faults. 16384 (16K) bounds the allocation to ~384 MB.
+  constexpr int32_t kMaxBlackImageDimension = 16384;
+  if (size.width <= 0 || size.height <= 0 ||
+      size.width > kMaxBlackImageDimension ||
+      size.height > kMaxBlackImageDimension) {
+    return nullptr;
+  }
+
+  RefPtr<ImageContainer> container = MakeAndAddRef<ImageContainer>(
+      ImageUsageType::BlackImage, ImageContainer::ASYNCHRONOUS);
+  RefPtr<PlanarYCbCrImage> image = container->CreatePlanarYCbCrImage();
+  if (!image) {
+    return nullptr;
+  }
+
+  auto checkedYLen = CheckedInt32(size.width) * size.height;
+  if (!checkedYLen.isValid()) {
+    return nullptr;
+  }
+  auto checkedCbCrWidth = (CheckedInt32(size.width) + 1) / 2;
+  auto checkedCbCrHeight = (CheckedInt32(size.height) + 1) / 2;
+  auto checkedCbCrLen = checkedCbCrWidth * checkedCbCrHeight;
+  if (!checkedCbCrLen.isValid()) {
+    return nullptr;
+  }
+  size_t yLen = checkedYLen.value();
+  size_t cbcrLen = checkedCbCrLen.value();
+
+  // Generate a black image.
+  auto frame = MakeUniqueFallible<uint8_t[]>(yLen + 2 * cbcrLen);
+  if (!frame) {
+    return nullptr;
+  }
+  // Fill Y plane.
+  memset(frame.get(), 0x10, yLen);
+  // Fill Cb/Cr planes.
+  memset(frame.get() + yLen, 0x80, 2 * cbcrLen);
+
+  layers::PlanarYCbCrData data;
+  data.mYChannel = frame.get();
+  data.mYStride = size.width;
+  data.mCbCrStride = checkedCbCrWidth.value();
+  data.mCbChannel = frame.get() + yLen;
+  data.mCrChannel = data.mCbChannel + cbcrLen;
+  data.mPictureRect = gfx::IntRect(0, 0, size.width, size.height);
+  data.mStereoMode = StereoMode::MONO;
+  data.mYUVColorSpace = gfx::YUVColorSpace::BT601;
+  // This could be made FULL once bug 1568745 is complete. A black pixel being
+  // 0x00, 0x80, 0x80
+  data.mColorRange = gfx::ColorRange::LIMITED;
+  data.mChromaSubsampling = gfx::ChromaSubsampling::HALF_WIDTH_AND_HEIGHT;
+
+  // Copies data, so we can free data.
+  if (NS_FAILED(image->CopyData(data))) {
+    return nullptr;
+  }
+
+  return image.forget();
+}
+
+void VideoSegment::AppendFrame(const VideoChunk& aChunk,
+                               const Maybe<bool>& aForceBlack,
+                               const Maybe<TimeStamp>& aTimeStamp) {
+  VideoChunk* chunk = AppendChunk(0);
+  chunk->mTimeStamp = aTimeStamp ? *aTimeStamp : aChunk.mTimeStamp;
+  chunk->mProcessingDuration = aChunk.mProcessingDuration;
+  chunk->mMediaTime = aChunk.mMediaTime;
+  chunk->mWebrtcCaptureTime = aChunk.mWebrtcCaptureTime;
+  chunk->mWebrtcReceiveTime = aChunk.mWebrtcReceiveTime;
+  chunk->mRtpTimestamp = aChunk.mRtpTimestamp;
+  VideoFrame frame(do_AddRef(aChunk.mFrame.GetImage()),
+                   aChunk.mFrame.GetIntrinsicSize());
+  MOZ_ASSERT_IF(!IsNull(), !aChunk.mTimeStamp.IsNull());
+  frame.SetForceBlack(aForceBlack ? *aForceBlack
+                                  : aChunk.mFrame.GetForceBlack());
+  frame.SetPrincipalHandle(aChunk.mFrame.GetPrincipalHandle());
+  chunk->mFrame.TakeFrom(&frame);
+}
+
+void VideoSegment::AppendFrame(already_AddRefed<Image> aImage,
+                               const IntSize& aIntrinsicSize,
+                               const PrincipalHandle& aPrincipalHandle,
+                               bool aForceBlack, TimeStamp aTimeStamp,
+                               media::TimeUnit aProcessingDuration,
+                               media::TimeUnit aMediaTime) {
+  VideoChunk* chunk = AppendChunk(0);
+  chunk->mTimeStamp = aTimeStamp;
+  chunk->mProcessingDuration = aProcessingDuration;
+  chunk->mMediaTime = aMediaTime;
+  VideoFrame frame(std::move(aImage), aIntrinsicSize);
+  MOZ_ASSERT_IF(!IsNull(), !aTimeStamp.IsNull());
+  frame.SetForceBlack(aForceBlack);
+  frame.SetPrincipalHandle(aPrincipalHandle);
+  chunk->mFrame.TakeFrom(&frame);
+}
+
+void VideoSegment::AppendWebrtcRemoteFrame(
+    already_AddRefed<Image> aImage, const IntSize& aIntrinsicSize,
+    const PrincipalHandle& aPrincipalHandle, bool aForceBlack,
+    TimeStamp aTimeStamp, media::TimeUnit aProcessingDuration,
+    uint32_t aRtpTimestamp, int64_t aWebrtcCaptureTimeNtp,
+    int64_t aWebrtcReceiveTimeUs) {
+  VideoChunk* chunk = AppendChunk(0);
+  chunk->mTimeStamp = aTimeStamp;
+  chunk->mProcessingDuration = aProcessingDuration;
+  if (aWebrtcCaptureTimeNtp > 0) {
+    chunk->mWebrtcCaptureTime = AsVariant(aWebrtcCaptureTimeNtp);
+  }
+  if (aWebrtcReceiveTimeUs > 0) {
+    chunk->mWebrtcReceiveTime = Some(aWebrtcReceiveTimeUs);
+  }
+  chunk->mRtpTimestamp = Some(aRtpTimestamp);
+  VideoFrame frame(std::move(aImage), aIntrinsicSize);
+  MOZ_ASSERT_IF(!IsNull(), !aTimeStamp.IsNull());
+  frame.SetForceBlack(aForceBlack);
+  frame.SetPrincipalHandle(aPrincipalHandle);
+  chunk->mFrame.TakeFrom(&frame);
+}
+
+void VideoSegment::AppendWebrtcLocalFrame(
+    already_AddRefed<Image> aImage, const IntSize& aIntrinsicSize,
+    const PrincipalHandle& aPrincipalHandle, bool aForceBlack,
+    TimeStamp aTimeStamp, TimeStamp aWebrtcCaptureTime) {
+  VideoChunk* chunk = AppendChunk(0);
+  chunk->mTimeStamp = aTimeStamp;
+  chunk->mWebrtcCaptureTime = AsVariant(aWebrtcCaptureTime);
+  VideoFrame frame(std::move(aImage), aIntrinsicSize);
+  MOZ_ASSERT_IF(!IsNull(), !aTimeStamp.IsNull());
+  frame.SetForceBlack(aForceBlack);
+  frame.SetPrincipalHandle(aPrincipalHandle);
+  chunk->mFrame.TakeFrom(&frame);
+}
+
+VideoSegment::VideoSegment()
+    : MediaSegmentBase<VideoSegment, VideoChunk>(VIDEO) {}
+
+VideoSegment::VideoSegment(VideoSegment&& aSegment)
+    : MediaSegmentBase<VideoSegment, VideoChunk>(std::move(aSegment)) {}
+
+VideoSegment::~VideoSegment() = default;
+
+}  // namespace mozilla

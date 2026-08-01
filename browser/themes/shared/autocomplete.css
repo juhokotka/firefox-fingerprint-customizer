@@ -1,0 +1,64 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+@namespace html url("http://www.w3.org/1999/xhtml");
+
+/* General popup rules */
+#PopupAutoComplete:is(
+    [resultstyles~="autofill"],
+    [resultstyles~="loginsFooter"],
+    [resultstyles~="insecureWarning"],
+    [resultstyles~="importableLogins"],
+    [resultstyles~="generatedPassword"]
+  )::part(content) {
+  min-width: 250px;
+}
+
+#PopupAutoComplete > richlistbox {
+  padding: var(--space-medium);
+}
+
+#PopupAutoComplete > richlistbox > richlistitem.autocomplete-row-item {
+  display: flex;
+
+  &:not(:only-child) {
+    margin-block-end: var(--space-xsmall);
+  }
+
+  &[selected] {
+    background-color: unset;
+    color: unset;
+
+    > autocomplete-row-item:not([selected]) {
+      background-color: var(--button-background-color-ghost-hover);
+      color: var(--button-text-color-ghost-hover);
+    }
+
+    &:not(:hover) > autocomplete-row-item[selected] {
+      border-color: var(--focus-outline-color);
+    }
+  }
+
+  &[footer] {
+    margin-block-end: 0;
+
+    &:not(:first-child) {
+      border-block-start: 1px solid var(--panel-separator-color);
+      padding-block-start: var(--space-xsmall);
+    }
+  }
+
+  &[type="payment"] > autocomplete-row-item {
+    /* Payment icons are credit-card network logos, which are wider than they
+       are tall, so use a wider width to preserve their aspect ratio. */
+    --icon-height: var(--icon-size-medium);
+    --icon-width: var(--icon-size-large);
+  }
+
+  > autocomplete-row-item {
+    flex: 1;
+    border: var(--focus-outline-width) solid transparent;
+    border-radius: var(--border-radius-large);
+  }
+}

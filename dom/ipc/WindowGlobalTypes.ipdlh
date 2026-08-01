@@ -1,0 +1,107 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include "mozilla/dom/PermissionMessageUtils.h";
+include "mozilla/ipc/URIUtils.h";
+
+include NeckoChannelParams;
+include DOMTypes;
+
+using mozilla::dom::WindowContextInitializer from "mozilla/dom/WindowContext.h";
+[RefCounted] using mozilla::dom::ParentProcessChannelHandle from "mozilla/dom/ParentProcessChannelHandle.h";
+using mozilla::dom::MaybeDiscardedWindowContext from "mozilla/dom/WindowContext.h";
+
+namespace mozilla {
+namespace dom {
+
+struct FingerprintScreenArgs
+{
+  int32_t width;
+  int32_t height;
+  int32_t availWidth;
+  int32_t availHeight;
+  int32_t availLeft;
+  int32_t availTop;
+  int32_t pixelDepth;
+  int32_t colorDepth;
+};
+
+struct FingerprintMediaDeviceArgs
+{
+  nsCString kind;
+  nsCString label;
+};
+
+struct FingerprintDeviceArgs
+{
+  nsCString name;
+  nsCString platform;
+  nsCString userAgent;
+  nsCString oscpu;
+  nsCString appVersion;
+  nsCString navigatorPlatform;
+  int32_t hardwareConcurrency;
+  int32_t maxTouchPoints;
+  nsCString doNotTrack;
+  FingerprintScreenArgs screen;
+  double devicePixelRatio;
+  nsCString webglVendor;
+  nsCString webglRenderer;
+  int32_t audioSampleRate;
+  nsCString[] fontSet;
+  FingerprintMediaDeviceArgs[] mediaDevices;
+};
+
+struct FingerprintLocationArgs
+{
+  nsCString country;
+  nsCString timezone;
+  nsCString language;
+  nsCString[] languages;
+};
+
+struct FingerprintNoiseArgs
+{
+  uint8_t[] canvasSeed;
+  uint8_t[] webglSeed;
+};
+
+struct ProfileArgs
+{
+  FingerprintDeviceArgs? device;
+  FingerprintLocationArgs? location;
+  FingerprintNoiseArgs? noise;
+  bool webrtcHideIP;
+  nsCString geolocation;
+  nsCString[] allowedExtensions;
+};
+
+struct WindowGlobalInit
+{
+  // Fields which are synchronized to other processes are found here.
+  WindowContextInitializer context;
+
+  // Private fields only shared with the parent process.
+  nullable nsIPrincipal principal;
+  nullable nsIPrincipal storagePrincipal;
+  nullable nsIURI documentURI;
+  nullable ParentProcessChannelHandle documentChannelHandle;
+  nullable ParentProcessChannelHandle failedChannelHandle;
+
+  // If this window is for a static clone (i.e. print-preview), the window
+  // global it was cloned from.
+  MaybeDiscardedWindowContext staticCloneOf;
+
+  bool isInitialDocument;
+  bool isUncommittedInitialDocument;
+  bool isVideoDocument;
+  bool blockAllMixedContent;
+  bool upgradeInsecureRequests;
+  uint32_t sandboxFlags;
+  CookieJarSettingsArgs cookieJarSettings;
+  uint32_t httpsOnlyStatus;
+};
+
+} // namespace dom
+} // namespace mozilla

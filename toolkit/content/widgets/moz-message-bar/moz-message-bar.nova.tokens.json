@@ -1,0 +1,9 @@
+{
+  "background": {
+    "color": {
+      "@base": {
+        "value": "{background.color.box.@base}"
+      }
+    }
+  }
+}
