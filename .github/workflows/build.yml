@@ -41,13 +41,43 @@ jobs:
             toolchain_cache_path: C:\Users\runneradmin\.mozbuild
 
     steps:
+      # ── 0. Enable long paths (Windows only) ──
+      # The Firefox source tree contains test files with paths exceeding
+      # the Windows 260-character limit. Enable long path support at both
+      # the OS registry and git config level before checkout.
+      - name: Enable long paths (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+            -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+          git config --global core.longpaths true
+          Write-Host "Long paths enabled"
+
       # ── 1. Checkout ──
       - name: Checkout source
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # ── 2. Free disk space (Linux only) ──
+      # ── 2. Free disk space ──
+      # The Firefox source tree is ~4.5 GB. After checkout, we remove
+      # test suites (not needed for building) to reclaim ~1.5 GB.
+      # This is critical — GitHub runners have limited disk space.
+      - name: Remove test suites (not needed for build)
+        shell: bash
+        run: |
+          echo "Disk space before cleanup:"
+          df -h / 2>/dev/null || df -h / 2>/dev/null
+          echo ""
+          echo "Removing test suites..."
+          rm -rf testing/web-platform/tests || true
+          rm -rf js/src/tests/test262 || true
+          rm -rf testing/mozbase || true
+          echo ""
+          echo "Disk space after cleanup:"
+          df -h / 2>/dev/null || df -h / 2>/dev/null
+
       - name: Free disk space (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -63,7 +93,6 @@ jobs:
           docker system prune -af --volumes || true
           df -h /
 
-      # ── 3. Free disk space (macOS) ──
       - name: Free disk space (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -76,10 +105,9 @@ jobs:
           rm -rf ~/Library/Caches/pip
           df -h /
 
-      # ── 4. Install Linux system dependencies ──
+      # ── 3. Install Linux system dependencies ──
       # Firefox on Linux needs GTK, X11, GL, and various multimedia libs.
-      # mach bootstrap can install these, but pre-installing is faster and
-      # avoids interactive prompts.
+      # Pre-installing avoids mach bootstrap interactive prompts.
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         shell: bash
@@ -103,9 +131,7 @@ jobs:
             libgl1-mesa-dev libgles2-mesa-dev \
             build-essential
 
-      # ── 5. Setup MSYS2 (Windows only) ──
-      # Firefox Windows builds use the MSYS2/MinGW toolchain. mach bootstrap
-      # handles the details, but MSYS2 must be present first.
+      # ── 4. Setup MSYS2 (Windows only) ──
       - name: Setup MSYS2 (Windows)
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
@@ -127,9 +153,7 @@ jobs:
             make
             autoconf2.13
 
-      # ── 6. Restore toolchain cache (~/.mozbuild, ~5-10 GB) ──
-      # Keyed on OS + mozconfig + mozboot scripts. On cache hit, skip
-      # downloading Clang, Rust, Node, and other toolchains during bootstrap.
+      # ── 5. Restore toolchain cache (~/.mozbuild, ~5-10 GB) ──
       - name: Restore toolchain cache
         id: toolchain-cache
         uses: actions/cache@v4
@@ -139,10 +163,7 @@ jobs:
           restore-keys: |
             mozbuild-${{ matrix.archive_name }}-
 
-      # ── 7. Restore sccache (compiled C/C++/Rust objects, ~2-5 GB) ──
-      # sccache caches compiled objects by content hash. Unchanged source
-      # files compile instantly on subsequent builds. This is the key
-      # to fast incremental builds after the first full run.
+      # ── 6. Restore sccache ──
       - name: Restore sccache
         uses: actions/cache@v4
         with:
@@ -151,19 +172,16 @@ jobs:
           restore-keys: |
             sccache-${{ matrix.archive_name }}-
 
-      # ── 8. Create mozconfig (platform-specific) ──
+      # ── 7. Create mozconfig ──
       - name: Create mozconfig (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
           cat > mozconfig << 'EOF'
-          # Build the browser (Firefox), not other apps.
           ac_add_options --enable-application=browser
-          # Release-style optimized build — no debug symbols, no tests.
           ac_add_options --disable-debug
-          ac_add_options --enable-optimize="-O2"
+          ac_add_options --enable-optimize
           ac_add_options --disable-tests
-          # Use sccache for C/C++/Rust compilation caching.
           ac_add_options --with-ccache=sccache
           EOF
           echo "--- mozconfig ---"
@@ -174,13 +192,10 @@ jobs:
         shell: bash
         run: |
           cat > mozconfig << 'EOF'
-          # Build the browser (Firefox), not other apps.
           ac_add_options --enable-application=browser
-          # Release-style optimized build — no debug symbols, no tests.
           ac_add_options --disable-debug
-          ac_add_options --enable-optimize="-O2"
+          ac_add_options --enable-optimize
           ac_add_options --disable-tests
-          # Use sccache for C/C++/Rust compilation caching.
           ac_add_options --with-ccache=sccache
           EOF
           echo "--- mozconfig ---"
@@ -191,39 +206,38 @@ jobs:
         shell: msys2 {0}
         run: |
           cat > mozconfig << 'EOF'
-          # Build the browser (Firefox), not other apps.
           ac_add_options --enable-application=browser
-          # Release-style optimized build — no debug symbols, no tests.
           ac_add_options --disable-debug
-          ac_add_options --enable-optimize="-O2"
+          ac_add_options --enable-optimize
           ac_add_options --disable-tests
-          # Use sccache for C/C++/Rust compilation caching.
           ac_add_options --with-ccache=sccache
-          # Use the MinGW toolchain (matches MSYS2 setup above).
           ac_add_options --target=x86_64-pc-mingw32
           EOF
           echo "--- mozconfig ---"
           cat mozconfig
 
+      # ── 8. Make mach executable ──
+      - name: Make mach executable
+        shell: bash
+        run: chmod +x ./mach
+
       # ── 9. Bootstrap dependencies ──
-      # On first run (cache miss): downloads and installs all toolchains (~20 min).
-      # On subsequent runs (cache hit): verifies everything is present (~2 min).
-      # Split by OS because Windows needs MSYS2 shell, others use bash.
+      # Downloads and installs all toolchains (Clang, Rust, Node, etc.)
+      # On cache hit: verifies everything is present (~2 min).
+      # On cache miss: downloads and installs (~20 min).
       - name: Bootstrap dependencies (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          ./mach bootstrap --no-interactive --no-system-changes --application=browser
+          ./mach bootstrap --no-interactive --application=browser
 
       - name: Bootstrap dependencies (macOS/Linux)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          ./mach bootstrap --no-interactive --no-system-changes --application=browser
+          ./mach bootstrap --no-interactive --application=browser
 
       # ── 10. Build ──
-      # First run: full C++ + Rust + JS build (~2-4 hours on 2-core runner).
-      # Subsequent runs: sccache hits make C++ fast; only changed files recompile.
       - name: Build Firefox (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -245,10 +259,6 @@ jobs:
           sccache --show-stats || true
 
       # ── 11. Package ──
-      # Creates the distributable in obj-*/dist/:
-      #   macOS:   .app bundle
-      #   Linux:   .tar.bz2
-      #   Windows: .zip (via mach package)
       - name: Package Firefox (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -327,8 +337,6 @@ jobs:
           cat "$ARCHIVE_NAME.sha256sum"
 
       # ── 13. Upload as workflow artifact ──
-      # Downloadable from the Actions run page for 90 days. Used by the
-      # release job below to gather all platforms into one release.
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
