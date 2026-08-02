@@ -40,10 +40,6 @@ jobs:
             archive_name: windows-x86_64
             toolchain_cache_path: C:\Users\runneradmin\.mozbuild
 
-    defaults:
-      run:
-        shell: ${{ runner.os == 'Windows' && 'msys2 {0}' || 'bash' }}
-
     steps:
       # ── 1. Checkout ──
       - name: Checkout source
@@ -70,6 +66,7 @@ jobs:
       # ── 3. Free disk space (macOS) ──
       - name: Free disk space (macOS)
         if: runner.os == 'macOS'
+        shell: bash
         run: |
           df -h /
           sudo rm -rf /usr/local/share/boost
@@ -157,6 +154,7 @@ jobs:
       # ── 8. Create mozconfig (platform-specific) ──
       - name: Create mozconfig (macOS)
         if: runner.os == 'macOS'
+        shell: bash
         run: |
           cat > mozconfig << 'EOF'
           # Build the browser (Firefox), not other apps.
@@ -173,6 +171,7 @@ jobs:
 
       - name: Create mozconfig (Linux)
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           cat > mozconfig << 'EOF'
           # Build the browser (Firefox), not other apps.
@@ -209,14 +208,35 @@ jobs:
       # ── 9. Bootstrap dependencies ──
       # On first run (cache miss): downloads and installs all toolchains (~20 min).
       # On subsequent runs (cache hit): verifies everything is present (~2 min).
-      - name: Bootstrap dependencies
+      # Split by OS because Windows needs MSYS2 shell, others use bash.
+      - name: Bootstrap dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          ./mach bootstrap --no-interactive --no-system-changes --application=browser
+
+      - name: Bootstrap dependencies (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
           ./mach bootstrap --no-interactive --no-system-changes --application=browser
 
       # ── 10. Build ──
       # First run: full C++ + Rust + JS build (~2-4 hours on 2-core runner).
       # Subsequent runs: sccache hits make C++ fast; only changed files recompile.
-      - name: Build Firefox
+      - name: Build Firefox (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          SCCACHE_DIR: ${{ github.workspace }}/.sccache
+        run: |
+          sccache --show-stats || true
+          ./mach build
+          sccache --show-stats || true
+
+      - name: Build Firefox (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
         env:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
         run: |
@@ -229,7 +249,15 @@ jobs:
       #   macOS:   .app bundle
       #   Linux:   .tar.bz2
       #   Windows: .zip (via mach package)
-      - name: Package Firefox
+      - name: Package Firefox (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          ./mach package
+
+      - name: Package Firefox (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
           ./mach package
 
@@ -237,6 +265,7 @@ jobs:
       - name: Create distributable archive (macOS)
         if: runner.os == 'macOS'
         id: archive-macos
+        shell: bash
         run: |
           APP_PATH=$(find obj-*.*/dist -maxdepth 1 -name "*.app" -type d 2>/dev/null | head -1)
           if [ -z "$APP_PATH" ]; then
@@ -258,6 +287,7 @@ jobs:
       - name: Create distributable archive (Linux)
         if: runner.os == 'Linux'
         id: archive-linux
+        shell: bash
         run: |
           TARBALL=$(find obj-*.*/dist -maxdepth 1 -name "*.tar.bz2" -type f 2>/dev/null | head -1)
           if [ -z "$TARBALL" ]; then
@@ -311,6 +341,7 @@ jobs:
       # ── 14. sccache stats (always, for debugging) ──
       - name: sccache stats
         if: always()
+        shell: bash
         env:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
         run: sccache --show-stats || true
@@ -333,6 +364,7 @@ jobs:
           merge-multiple: false
 
       - name: List artifacts
+        shell: bash
         run: |
           echo "Downloaded artifacts:"
           find artifacts -type f | sort
@@ -341,6 +373,7 @@ jobs:
           find artifacts -type f \( -name "*.zip" -o -name "*.tar.bz2" -o -name "*.sha256sum" \) | sort
 
       - name: Flatten artifacts
+        shell: bash
         run: |
           mkdir -p release-files
           find artifacts -type f \( -name "*.zip" -o -name "*.tar.bz2" -o -name "*.sha256sum" \) -exec cp {} release-files/ \;
