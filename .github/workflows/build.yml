@@ -29,23 +29,20 @@ jobs:
             artifact_ext: zip
             archive_name: macos-arm64
             toolchain_cache_path: /Users/runner/.mozbuild
-            shell: bash
           - name: Linux x86_64
             os: ubuntu-22.04
             artifact_ext: tar.bz2
             archive_name: linux-x86_64
             toolchain_cache_path: /home/runner/.mozbuild
-            shell: bash
           - name: Windows x86_64
             os: windows-latest
             artifact_ext: zip
             archive_name: windows-x86_64
             toolchain_cache_path: C:\Users\runneradmin\.mozbuild
-            shell: msys2 {0}
 
     defaults:
       run:
-        shell: ${{ matrix.shell }}
+        shell: ${{ runner.os == 'Windows' && 'msys2 {0}' || 'bash' }}
 
     steps:
       # ── 1. Checkout ──
@@ -213,7 +210,6 @@ jobs:
       # On first run (cache miss): downloads and installs all toolchains (~20 min).
       # On subsequent runs (cache hit): verifies everything is present (~2 min).
       - name: Bootstrap dependencies
-        shell: ${{ matrix.shell }}
         run: |
           ./mach bootstrap --no-interactive --no-system-changes --application=browser
 
@@ -221,7 +217,6 @@ jobs:
       # First run: full C++ + Rust + JS build (~2-4 hours on 2-core runner).
       # Subsequent runs: sccache hits make C++ fast; only changed files recompile.
       - name: Build Firefox
-        shell: ${{ matrix.shell }}
         env:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
         run: |
@@ -235,7 +230,6 @@ jobs:
       #   Linux:   .tar.bz2
       #   Windows: .zip (via mach package)
       - name: Package Firefox
-        shell: ${{ matrix.shell }}
         run: |
           ./mach package
 
@@ -317,7 +311,6 @@ jobs:
       # ── 14. sccache stats (always, for debugging) ──
       - name: sccache stats
         if: always()
-        shell: ${{ matrix.shell }}
         env:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
         run: sccache --show-stats || true
