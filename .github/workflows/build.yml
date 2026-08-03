@@ -73,7 +73,8 @@ jobs:
           echo "Removing test suites..."
           rm -rf testing/web-platform/tests || true
           rm -rf js/src/tests/test262 || true
-          rm -rf testing/mozbase || true
+          # NOTE: Do NOT remove testing/mozbase — mach depends on mozfile,
+          # mozinfo, mozlog, etc. from that directory.
           echo ""
           echo "Disk space after cleanup:"
           df -h / 2>/dev/null || df -h / 2>/dev/null
