@@ -141,7 +141,16 @@ jobs:
             libgl1-mesa-dev libgles2-mesa-dev \
             build-essential
 
-      # ── 4. Setup MSYS2 (Windows only) ──
+      # ── 4. Setup Python (Windows only) ──
+      # mach requires Python ≤3.12. GitHub's default Python is 3.14+ which
+      # breaks mach's virtualenv creation. Install 3.12 explicitly.
+      - name: Setup Python 3.12 (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ── 5. Setup MSYS2 (Windows only) ──
       - name: Setup MSYS2 (Windows)
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
@@ -153,7 +162,6 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-nsis
             mingw-w64-x86_64-pkg-config
-            mingw-w64-x86_64-python
             mingw-w64-x86_64-rust
             tar
             zip
@@ -239,7 +247,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          ./mach bootstrap --application-choice=browser --no-system-changes
+          python mach bootstrap --application-choice=browser --no-system-changes
 
       - name: Bootstrap dependencies (macOS/Linux)
         if: runner.os != 'Windows'
@@ -255,7 +263,7 @@ jobs:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
         run: |
           sccache --show-stats || true
-          ./mach build
+          python mach build
           sccache --show-stats || true
 
       - name: Build Firefox (macOS/Linux)
@@ -273,7 +281,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          ./mach package
+          python mach package
 
       - name: Package Firefox (macOS/Linux)
         if: runner.os != 'Windows'
