@@ -29,31 +29,28 @@ jobs:
             artifact_ext: zip
             archive_name: macos-arm64
             toolchain_cache_path: /Users/runner/.mozbuild
+            target: native
           - name: Linux x86_64
             os: ubuntu-22.04
             artifact_ext: tar.bz2
             archive_name: linux-x86_64
             toolchain_cache_path: /home/runner/.mozbuild
+            target: native
+          # Windows is cross-compiled on Linux because GitHub's windows-latest
+          # runner does NOT have MozillaBuild installed, and mach hard-fails
+          # without it (see build/mach_initialize.py:_maybe_activate_mozillabuild_environment).
+          # Cross-compiling with clang-cl (MSVC ABI) is a Tier-1 supported
+          # configuration per Mozilla's own docs. --enable-bootstrap downloads
+          # the Visual Studio sysroot + Windows SDK into ~/.mozbuild, so no
+          # manual SDK install is needed.
           - name: Windows x86_64
-            os: windows-latest
+            os: ubuntu-22.04
             artifact_ext: zip
             archive_name: windows-x86_64
-            toolchain_cache_path: C:\Users\runneradmin\.mozbuild
+            toolchain_cache_path: /home/runner/.mozbuild
+            target: x86_64-pc-windows-msvc
 
     steps:
-      # ── 0. Enable long paths (Windows only) ──
-      # The Firefox source tree contains test files with paths exceeding
-      # the Windows 260-character limit. Enable long path support at both
-      # the OS registry and git config level before checkout.
-      - name: Enable long paths (Windows)
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
-            -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
-          git config --global core.longpaths true
-          Write-Host "Long paths enabled"
-
       # ── 1. Checkout ──
       - name: Checkout source
         uses: actions/checkout@v4
@@ -63,12 +60,13 @@ jobs:
       # ── 2. Free disk space ──
       # The Firefox source tree is ~4.5 GB. After checkout, we remove
       # test suites (not needed for building) to reclaim ~1.5 GB.
-      # This is critical — GitHub runners have limited disk space.
+      # This is critical — GitHub runners have limited disk space, and the
+      # Windows cross-compile additionally downloads the Windows SDK (~3 GB).
       - name: Remove test suites (not needed for build)
         shell: bash
         run: |
           echo "Disk space before cleanup:"
-          df -h / 2>/dev/null || df -h / 2>/dev/null
+          df -h / 2>/dev/null || true
           echo ""
           echo "Removing test suites..."
           rm -rf testing/web-platform/tests || true
@@ -77,7 +75,7 @@ jobs:
           # mozinfo, mozlog, etc. from that directory.
           echo ""
           echo "Disk space after cleanup:"
-          df -h / 2>/dev/null || df -h / 2>/dev/null
+          df -h / 2>/dev/null || true
 
       - name: Free disk space (Linux)
         if: runner.os == 'Linux'
@@ -117,7 +115,10 @@ jobs:
 
       # ── 4. Install Linux system dependencies ──
       # Firefox on Linux needs GTK, X11, GL, and various multimedia libs.
-      # Pre-installing avoids mach bootstrap interactive prompts.
+      # This also covers the Windows cross-compile job (which runs on
+      # ubuntu-22.04): it needs the base build toolchain to compile host
+      # tools, plus msitools (provides `msiextract`) to unpack the Windows
+      # SDK .msi packages during bootstrap.
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         shell: bash
@@ -139,40 +140,18 @@ jobs:
             libssl-dev libsqlite3-dev \
             libnotify-dev libxtst-dev \
             libgl1-mesa-dev libgles2-mesa-dev \
+            msitools \
             build-essential
 
-      # ── 4. Setup Python (Windows only) ──
-      # mach requires Python ≤3.12. GitHub's default Python is 3.14+ which
-      # breaks mach's virtualenv creation. Install 3.12 explicitly.
-      - name: Setup Python 3.12 (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      # ── 5. Add Rust Windows target (cross-compile only) ──
+      - name: Add Rust target (Windows cross-compile)
+        if: matrix.target != 'native'
+        shell: bash
+        run: |
+          rustup target add ${{ matrix.target }}
+          rustup target list --installed
 
-      # ── 5. Setup MSYS2 (Windows only) ──
-      - name: Setup MSYS2 (Windows)
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          path-type: inherit
-          install: >-
-            mingw-w64-x86_64-binutils
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-nsis
-            mingw-w64-x86_64-pkg-config
-            mingw-w64-x86_64-rust
-            tar
-            zip
-            unzip
-            diffutils
-            patch
-            make
-            autoconf2.13
-
-      # ── 5. Restore toolchain cache (~/.mozbuild, ~5-10 GB) ──
+      # ── 6. Restore toolchain cache (~/.mozbuild, ~5-10 GB) ──
       - name: Restore toolchain cache
         id: toolchain-cache
         uses: actions/cache@v4
@@ -182,7 +161,7 @@ jobs:
           restore-keys: |
             mozbuild-${{ matrix.archive_name }}-
 
-      # ── 6. Restore sccache ──
+      # ── 7. Restore sccache ──
       - name: Restore sccache
         uses: actions/cache@v4
         with:
@@ -191,9 +170,13 @@ jobs:
           restore-keys: |
             sccache-${{ matrix.archive_name }}-
 
-      # ── 7. Create mozconfig ──
-      - name: Create mozconfig (macOS)
-        if: runner.os == 'macOS'
+      # ── 8. Create mozconfig ──
+      # Native builds (macOS/Linux) use a plain optimize config.
+      # The Windows cross-compile adds:
+      #   --target=x86_64-pc-windows-msvc  -> build for Windows MSVC ABI
+      #   --enable-bootstrap               -> auto-download VS sysroot + Win SDK
+      - name: Create mozconfig (native)
+        if: matrix.target == 'native'
         shell: bash
         run: |
           cat > mozconfig << 'EOF'
@@ -206,8 +189,8 @@ jobs:
           echo "--- mozconfig ---"
           cat mozconfig
 
-      - name: Create mozconfig (Linux)
-        if: runner.os == 'Linux'
+      - name: Create mozconfig (Windows cross-compile)
+        if: matrix.target != 'native'
         shell: bash
         run: |
           cat > mozconfig << 'EOF'
@@ -216,63 +199,30 @@ jobs:
           ac_add_options --enable-optimize
           ac_add_options --disable-tests
           ac_add_options --with-ccache=sccache
+          ac_add_options --target=${{ matrix.target }}
+          ac_add_options --enable-bootstrap
           EOF
           echo "--- mozconfig ---"
           cat mozconfig
 
-      - name: Create mozconfig (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          cat > mozconfig << 'EOF'
-          ac_add_options --enable-application=browser
-          ac_add_options --disable-debug
-          ac_add_options --enable-optimize
-          ac_add_options --disable-tests
-          ac_add_options --with-ccache=sccache
-          ac_add_options --target=x86_64-pc-mingw32
-          EOF
-          echo "--- mozconfig ---"
-          cat mozconfig
-
-      # ── 8. Make mach executable ──
+      # ── 9. Make mach executable ──
       - name: Make mach executable
         shell: bash
         run: chmod +x ./mach
 
-      # ── 9. Bootstrap dependencies ──
-      # Downloads and installs all toolchains (Clang, Rust, Node, etc.)
+      # ── 10. Bootstrap dependencies ──
+      # Downloads and installs all toolchains (Clang, Rust, Node, etc.).
+      # For the Windows cross-compile, --enable-bootstrap in mozconfig also
+      # pulls down the Visual Studio sysroot + Windows SDK into ~/.mozbuild.
       # On cache hit: verifies everything is present (~2 min).
-      # On cache miss: downloads and installs (~20 min).
-      - name: Bootstrap dependencies (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          PYEXE="$(cygpath -u "$pythonLocation")/python.exe"
-          echo "Using: $PYEXE"
-          "$PYEXE" --version
-          "$PYEXE" mach bootstrap --application-choice=browser --no-system-changes
-
-      - name: Bootstrap dependencies (macOS/Linux)
-        if: runner.os != 'Windows'
+      # On cache miss: downloads and installs (~20-40 min for cross-compile).
+      - name: Bootstrap dependencies
         shell: bash
         run: |
           ./mach bootstrap --application-choice=browser --no-system-changes
 
-      # ── 10. Build ──
-      - name: Build Firefox (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        env:
-          SCCACHE_DIR: ${{ github.workspace }}/.sccache
-        run: |
-          PYEXE="$(cygpath -u "$pythonLocation")/python.exe"
-          sccache --show-stats || true
-          "$PYEXE" mach build
-          sccache --show-stats || true
-
-      - name: Build Firefox (macOS/Linux)
-        if: runner.os != 'Windows'
+      # ── 11. Build ──
+      - name: Build Firefox
         shell: bash
         env:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
@@ -281,21 +231,13 @@ jobs:
           ./mach build
           sccache --show-stats || true
 
-      # ── 11. Package ──
-      - name: Package Firefox (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          PYEXE="$(cygpath -u "$pythonLocation")/python.exe"
-          "$PYEXE" mach package
-
-      - name: Package Firefox (macOS/Linux)
-        if: runner.os != 'Windows'
+      # ── 12. Package ──
+      - name: Package Firefox
         shell: bash
         run: |
           ./mach package
 
-      # ── 12. Create distributable archive ──
+      # ── 13. Create distributable archive ──
       - name: Create distributable archive (macOS)
         if: runner.os == 'macOS'
         id: archive-macos
@@ -319,7 +261,7 @@ jobs:
           cat "$ARCHIVE_NAME.sha256sum"
 
       - name: Create distributable archive (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.target == 'native'
         id: archive-linux
         shell: bash
         run: |
@@ -339,14 +281,17 @@ jobs:
           echo "Checksum:"
           cat "$ARCHIVE_NAME.sha256sum"
 
-      - name: Create distributable archive (Windows)
-        if: runner.os == 'Windows'
+      - name: Create distributable archive (Windows cross-compile)
+        if: matrix.target != 'native'
         id: archive-windows
-        shell: msys2 {0}
+        shell: bash
         run: |
+          # The Windows cross-compile produces a .zip in
+          # obj-x86_64-pc-windows-msvc/dist/
           ZIPFILE=$(find obj-*.*/dist -maxdepth 1 -name "*.zip" -type f 2>/dev/null | head -1)
           if [ -z "$ZIPFILE" ]; then
             echo "ERROR: No .zip found in obj-*/dist/"
+            echo "Contents of obj-*/dist/:"
             ls -la obj-*.*/dist/ || true
             exit 1
           fi
@@ -360,7 +305,7 @@ jobs:
           echo "Checksum:"
           cat "$ARCHIVE_NAME.sha256sum"
 
-      # ── 13. Upload as workflow artifact ──
+      # ── 14. Upload as workflow artifact ──
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -370,7 +315,7 @@ jobs:
             ${{ steps.archive-macos.outputs.archive_name || steps.archive-linux.outputs.archive_name || steps.archive-windows.outputs.archive_name }}.sha256sum
           retention-days: 90
 
-      # ── 14. sccache stats (always, for debugging) ──
+      # ── 15. sccache stats (always, for debugging) ──
       - name: sccache stats
         if: always()
         shell: bash
@@ -455,7 +400,8 @@ jobs:
 
             - **Built from commit:** ${{ github.sha }}
             - **Build date:** ${{ github.run_started_at }}
-            - **Built on:** GitHub Actions (macOS 14, Ubuntu 22.04, Windows Server)
+            - **Built on:** GitHub Actions (macOS 14, Ubuntu 22.04)
+            - **Windows build:** cross-compiled on Linux with clang-cl (MSVC ABI)
           files: |
             release-files/*
           draft: false
