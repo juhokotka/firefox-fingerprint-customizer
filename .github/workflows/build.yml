@@ -248,7 +248,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          python mach bootstrap --application-choice=browser --no-system-changes
+          PYEXE="$(cygpath -u "$pythonLocation")/python.exe"
+          echo "Using: $PYEXE"
+          "$PYEXE" --version
+          "$PYEXE" mach bootstrap --application-choice=browser --no-system-changes
 
       - name: Bootstrap dependencies (macOS/Linux)
         if: runner.os != 'Windows'
@@ -263,8 +266,9 @@ jobs:
         env:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
         run: |
+          PYEXE="$(cygpath -u "$pythonLocation")/python.exe"
           sccache --show-stats || true
-          python mach build
+          "$PYEXE" mach build
           sccache --show-stats || true
 
       - name: Build Firefox (macOS/Linux)
@@ -282,7 +286,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          python mach package
+          PYEXE="$(cygpath -u "$pythonLocation")/python.exe"
+          "$PYEXE" mach package
 
       - name: Package Firefox (macOS/Linux)
         if: runner.os != 'Windows'
