@@ -106,7 +106,16 @@ jobs:
           rm -rf ~/Library/Caches/pip
           df -h /
 
-      # ── 3. Install Linux system dependencies ──
+      # ── 3. Install macOS system dependencies ──
+      # mach bootstrap --no-system-changes skips Homebrew installs, so we
+      # pre-install the packages Firefox needs.
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install nasm yasm watchman pkg-config || true
+
+      # ── 4. Install Linux system dependencies ──
       # Firefox on Linux needs GTK, X11, GL, and various multimedia libs.
       # Pre-installing avoids mach bootstrap interactive prompts.
       - name: Install Linux dependencies
@@ -230,13 +239,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          ./mach bootstrap --no-interactive --application=browser
+          ./mach bootstrap --application-choice=browser --no-system-changes
 
       - name: Bootstrap dependencies (macOS/Linux)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          ./mach bootstrap --no-interactive --application=browser
+          ./mach bootstrap --application-choice=browser --no-system-changes
 
       # ── 10. Build ──
       - name: Build Firefox (Windows)
