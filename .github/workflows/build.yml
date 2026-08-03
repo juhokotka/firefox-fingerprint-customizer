@@ -243,10 +243,10 @@ jobs:
         id: archive-macos
         shell: bash
         run: |
-          APP_PATH=$(find obj-*.*/dist -maxdepth 1 -name "*.app" -type d 2>/dev/null | head -1)
+          APP_PATH=$(find obj-*/dist -maxdepth 1 -name "*.app" -type d 2>/dev/null | head -1)
           if [ -z "$APP_PATH" ]; then
             echo "ERROR: No .app bundle found in obj-*/dist/"
-            ls -la obj-*.*/dist/ || true
+            ls -la obj-*/dist/ || true
             exit 1
           fi
           echo "Found app bundle: $APP_PATH"
@@ -265,10 +265,10 @@ jobs:
         id: archive-linux
         shell: bash
         run: |
-          TARBALL=$(find obj-*.*/dist -maxdepth 1 -name "*.tar.bz2" -type f 2>/dev/null | head -1)
+          TARBALL=$(find obj-*/dist -maxdepth 1 -name "*.tar.bz2" -type f 2>/dev/null | head -1)
           if [ -z "$TARBALL" ]; then
             echo "ERROR: No .tar.bz2 found in obj-*/dist/"
-            ls -la obj-*.*/dist/ || true
+            ls -la obj-*/dist/ || true
             exit 1
           fi
           echo "Found tarball: $TARBALL"
@@ -288,11 +288,11 @@ jobs:
         run: |
           # The Windows cross-compile produces a .zip in
           # obj-x86_64-pc-windows-msvc/dist/
-          ZIPFILE=$(find obj-*.*/dist -maxdepth 1 -name "*.zip" -type f 2>/dev/null | head -1)
+          ZIPFILE=$(find obj-*/dist -maxdepth 1 -name "*.zip" -type f 2>/dev/null | head -1)
           if [ -z "$ZIPFILE" ]; then
             echo "ERROR: No .zip found in obj-*/dist/"
             echo "Contents of obj-*/dist/:"
-            ls -la obj-*.*/dist/ || true
+            ls -la obj-*/dist/ || true
             exit 1
           fi
           echo "Found zip: $ZIPFILE"
