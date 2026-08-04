@@ -56,7 +56,7 @@ struct FingerprintDeviceArgs
 struct FingerprintLocationArgs
 {
   nsCString country;
-  nsCString timezone;
+  nsCString timezoneStr;
   nsCString language;
   nsCString[] languages;
 };

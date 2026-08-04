@@ -2291,7 +2291,7 @@ FingerprintLocationArgs ConvertLocationDict(
     const FingerprintLocationDict& aDict) {
   FingerprintLocationArgs args;
   args.country() = NS_ConvertUTF16toUTF8(aDict.mCountry);
-  args.timezone() = NS_ConvertUTF16toUTF8(aDict.mTimezone);
+  args.timezoneStr() = NS_ConvertUTF16toUTF8(aDict.mTimezone);
   args.language() = NS_ConvertUTF16toUTF8(aDict.mLanguage);
 
   nsTArray<nsCString>& languages = args.languages();
