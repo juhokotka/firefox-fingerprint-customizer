@@ -15,6 +15,10 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: false
 
+# GITHUB_TOKEN needs contents:write to create releases and upload assets.
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build (${{ matrix.name }})
