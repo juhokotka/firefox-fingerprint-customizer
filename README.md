@@ -4,10 +4,15 @@
 
 ### Per-container fingerprint customization & isolation for Firefox
 
-[![Firefox Base](https://img.shields.io/badge/Based%20on-Firefox-FF7139?logo=firefox&logoColor=white)](https://firefox-source-docs.mozilla.org/)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)]()
-[![License](https://img.shields.io/badge/License-MPL%202.0-green)](https://www.mozilla.org/en-US/MPL/)
-[![Status](https://img.shields.io/badge/Status-Active%20Development-orange)]()
+![Firefox Base](https://img.shields.io/badge/Based%20on-Firefox-FF7139?logo=firefox\&logoColor=white)
+
+![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)
+
+![Release](https://img.shields.io/github/v/release/juhokotka/firefox-fingerprint-customizer?label=Release\&color=success)
+
+![License](https://img.shields.io/badge/License-MPL%202.0-green)
+
+![Status](https://img.shields.io/badge/Status-Active%20Development-orange)
 
 </div>
 
@@ -41,13 +46,13 @@ Traditional privacy browsers (Tor Browser, LibreWolf with RFP) pursue a **unifor
 
 **Firefox Fingerprint Customizer takes the opposite approach:**
 
-| Traditional RFP | Firefox Fingerprint Customizer |
-|:---:|:---:|
-| One fingerprint for everyone | One fingerprint **per container** |
-| Hardcoded timezone (`Atlantic/Reykjavik`) | Choose timezone per container |
-| Hardcoded UA (`Windows NT 10.0`) | Real device pools (Mac / Linux / Windows) |
-| Shared storage across tabs | **Storage partitioned** by `userContextId` |
-| Binary on/off switch | Two modes: **Normal** vs **Privacy Mode** |
+|              Traditional RFP              |       Firefox Fingerprint Customizer       |
+| :---------------------------------------: | :----------------------------------------: |
+|        One fingerprint for everyone       |      One fingerprint **per container**     |
+| Hardcoded timezone (`Atlantic/Reykjavik`) |        Choose timezone per container       |
+|      Hardcoded UA (`Windows NT 10.0`)     |  Real device pools (Mac / Linux / Windows) |
+|         Shared storage across tabs        | **Storage partitioned** by `userContextId` |
+|            Binary on/off switch           |  Two modes: **Normal** vs **Privacy Mode** |
 
 Each container gets its own **device fingerprint, location, and noise seed** — persisted across sessions, isolated at the process level.
 
@@ -60,53 +65,59 @@ Each container gets its own **device fingerprint, location, and noise seed** —
 Each container carries an independent `FingerprintProfile` with a complete device fingerprint:
 
 <details>
+
 <summary><b>Device Layer</b> — Hardware fingerprint (click to expand)</summary>
 
-<br>
+  
 
-| Surface | Example | Source |
-|---|---|---|
-| User Agent | `Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5...)` | `profile.device.userAgent` |
-| Platform | `MacIntel` / `Win32` / `Linux x86_64` | `profile.device.platform` |
-| OS CPU | `Intel Mac OS X 14.5` | `profile.device.oscpu` |
-| Screen | `2560 × 1440`, `pixelDepth: 30` | `profile.device.screen` |
-| Hardware Concurrency | `8` / `10` / `12` / `16` | `profile.device.hardwareConcurrency` |
-| Touch Points | `0` (desktop) / `5` / `10` (mobile) | `profile.device.maxTouchPoints` |
-| Device Pixel Ratio | `2.0` (Retina) / `1.0` / `1.25` | `profile.device.devicePixelRatio` |
-| WebGL Vendor | `Google Inc. (Apple)` | `profile.device.webglVendor` |
-| WebGL Renderer | `Apple GPU` | `profile.device.webglRenderer` |
-| Font Set | 18 macOS fonts / 22 Linux fonts | `profile.device.fontSet` |
-| Media Devices | Microphone, Camera, Speakers | `profile.device.mediaDevices` |
-| Audio Sample Rate | `44100` / `48000` | `profile.device.audioSampleRate` |
+
+| Surface              | Example                                           | Source                               |
+| -------------------- | ------------------------------------------------- | ------------------------------------ |
+| User Agent           | `Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5...)` | `profile.device.userAgent`           |
+| Platform             | `MacIntel` / `Win32` / `Linux x86_64`             | `profile.device.platform`            |
+| OS CPU               | `Intel Mac OS X 14.5`                             | `profile.device.oscpu`               |
+| Screen               | `2560 × 1440`, `pixelDepth: 30`                   | `profile.device.screen`              |
+| Hardware Concurrency | `8` / `10` / `12` / `16`                          | `profile.device.hardwareConcurrency` |
+| Touch Points         | `0` (desktop) / `5` / `10` (mobile)               | `profile.device.maxTouchPoints`      |
+| Device Pixel Ratio   | `2.0` (Retina) / `1.0` / `1.25`                   | `profile.device.devicePixelRatio`    |
+| WebGL Vendor         | `Google Inc. (Apple)`                             | `profile.device.webglVendor`         |
+| WebGL Renderer       | `Apple GPU`                                       | `profile.device.webglRenderer`       |
+| Font Set             | 18 macOS fonts / 22 Linux fonts                   | `profile.device.fontSet`             |
+| Media Devices        | Microphone, Camera, Speakers                      | `profile.device.mediaDevices`        |
+| Audio Sample Rate    | `44100` / `48000`                                 | `profile.device.audioSampleRate`     |
 
 </details>
 
 <details>
+
 <summary><b>Location Layer</b> — Language & timezone (click to expand)</summary>
 
-<br>
+  
 
-| Country | Timezone | Language |
-|---|---|---|
-| US | `America/New_York` | `en-US` |
-| GB | `Europe/London` | `en-GB` |
-| JP | `Asia/Tokyo` | `ja-JP` |
-| DE | `Europe/Berlin` | `de-DE` |
-| CN | `Asia/Shanghai` | `zh-CN` |
-| FR | `Europe/Paris` | `fr-FR` |
-| KR | `Asia/Seoul` | `ko-KR` |
-| BR | `America/Sao_Paulo` | `pt-BR` |
-| IN | `Asia/Kolkata` | `en-IN` |
-| SG | `Asia/Singapore` | `en-SG` |
+
+| Country | Timezone            | Language |
+| ------- | ------------------- | -------- |
+| US      | `America/New_York`  | `en-US`  |
+| GB      | `Europe/London`     | `en-GB`  |
+| JP      | `Asia/Tokyo`        | `ja-JP`  |
+| DE      | `Europe/Berlin`     | `de-DE`  |
+| CN      | `Asia/Shanghai`     | `zh-CN`  |
+| FR      | `Europe/Paris`      | `fr-FR`  |
+| KR      | `Asia/Seoul`        | `ko-KR`  |
+| BR      | `America/Sao_Paulo` | `pt-BR`  |
+| IN      | `Asia/Kolkata`      | `en-IN`  |
+| SG      | `Asia/Singapore`    | `en-SG`  |
 
 *12 locations available; each container picks one independently of device.*
 
 </details>
 
 <details>
+
 <summary><b>Noise Layer</b> — Randomized Canvas/WebGL seeds (click to expand)</summary>
 
-<br>
+  
+
 
 - **Canvas Seed** — Persistent per-container random seed injected into `toDataURL()` / `getImageData()` output
 - **WebGL Seed** — Persistent per-container random seed injected into WebGL rendering
@@ -126,10 +137,10 @@ Built on Firefox's native **Containers** (`ContextualIdentityService`):
 
 ### Two Modes, Not One
 
-| Mode | Behavior |
-|:---:|---|
-| **Normal Mode** | Standard Firefox — no container fingerprinting, no isolation |
-| **Privacy Mode** | Containers active, each with its own fingerprint profile |
+|       Mode       | Behavior                                                     |
+| :--------------: | ------------------------------------------------------------ |
+|  **Normal Mode** | Standard Firefox — no container fingerprinting, no isolation |
+| **Privacy Mode** | Containers active, each with its own fingerprint profile     |
 
 Switch instantly via the **container button** next to the URL bar.
 
@@ -179,25 +190,77 @@ Switch instantly via the **container button** next to the URL bar.
 
 **Design principles:**
 
-| Principle | Implementation |
-|---|---|
-| **Separation of concerns** | Profile generation & UI in JS layer; fingerprint interception in C++ layer |
-| **Adapter pattern** | Thin adapters isolate Firefox internal API changes from profile logic |
-| **Zero IPC overhead** | After initial profile sync, content process uses local cache |
+| Principle                   | Implementation                                                              |
+| --------------------------- | --------------------------------------------------------------------------- |
+| **Separation of concerns**  | Profile generation & UI in JS layer; fingerprint interception in C++ layer  |
+| **Adapter pattern**         | Thin adapters isolate Firefox internal API changes from profile logic       |
+| **Zero IPC overhead**       | After initial profile sync, content process uses local cache                |
 | **Cross-session stability** | Seeds persist to disk per container, not intended as cross-site identifiers |
 
 ---
 
 ## Getting Started
 
-### Prerequisites
+There are two ways to get Firefox Fingerprint Customizer running:
+
+- **Download a prebuilt binary** — recommended for most users. Every release is compiled automatically by GitHub Actions, so you don't need a toolchain or a terminal.
+- **Build from source** — intended for contributors who want to modify the code.
+
+---
+
+### Option 1: Download a Prebuilt Binary (Recommended)
+
+Prebuilt binaries are produced automatically by GitHub Actions for every release tag (`v*`). Three platforms are built in parallel and published together on a single GitHub Release.
+
+1. Go to the [Releases page](https://github.com/juhokotka/firefox-fingerprint-customizer/releases).
+2. Under the latest release, download the archive that matches your platform:
+   | Platform    | Download file                                               | Architecture                |
+   | ----------- | ----------------------------------------------------------- | --------------------------- |
+   | **macOS**   | `Firefox-Fingerprint-Customizer-vX.Y.Z-macos-arm64.zip`     | Apple Silicon (M1/M2/M3/M4) |
+   | **Linux**   | `Firefox-Fingerprint-Customizer-vX.Y.Z-linux-x86_64.tar.xz` | x86_64                      |
+   | **Windows** | `Firefox-Fingerprint-Customizer-vX.Y.Z-windows-x86_64.zip`  | x86_64                      |
+3. *(Optional)* Download the matching `.sha256sum` file to verify the download (see below).
+4. Extract and launch:
+
+   **macOS** — Unzip the archive, then drag the `.app` bundle into your Applications folder. **Apple Silicon only.**
+
+   **Linux** — Extract the tarball and run the binary inside:
+   ```bash
+   tar -xf Firefox-Fingerprint-Customizer-vX.Y.Z-linux-x86_64.tar.xz
+   cd firefox
+   ./firefox
+   ```
+   **Windows** — Unzip the archive and double-click `firefox.exe`.
+
+#### Verifying the Download (Optional)
+
+Each release ships a `.sha256sum` file alongside every archive. To verify integrity:
+
+```bash
+# macOS / Linux
+shasum -a 256 <downloaded-archive>
+# Compare the output with the contents of the matching .sha256sum file
+
+# Windows (PowerShell)
+Get-FileHash <downloaded-archive> -Algorithm SHA256
+```
+
+> **Note on platform coverage:** The macOS build targets **Apple Silicon only**. Intel Mac users, as well as anyone who wants to tweak the code, should follow the source-build path below. The Windows build is cross-compiled on Linux with clang-cl (MSVC ABI) — a Tier-1 supported Mozilla configuration — so no Windows toolchain is required on your machine to *use* it.
+
+---
+
+### Option 2: Build from Source (Contributors)
+
+Building from source is the way to go if you want to modify the code, debug, or contribute back.
+
+#### Prerequisites
 
 - **macOS 11+** (Apple Silicon or Intel), **Linux**, or **Windows 10+**
 - [Mozilla build dependencies](https://firefox-source-docs.mozilla.org/setup/macos_build.html)
 - Python 3.8+, Rust toolchain, Ninja
 - ~20 GB free disk space
 
-### Build
+#### Build
 
 ```bash
 # Clone the repository
@@ -222,14 +285,14 @@ EOF
 ./mach run
 ```
 
-### Quick Build (JS-only changes)
+#### Quick Build (JS-only changes)
 
 ```bash
 # After modifying .js/.sys.mjs/.css files — no C++ rebuild needed
 ./mach build faster
 ```
 
-### Run with Purged Cache
+#### Run with Purged Cache
 
 When JS files don't seem to update, purge the startup cache:
 
@@ -238,6 +301,8 @@ When JS files don't seem to update, purge the startup cache:
 # or
 obj-*/dist/Nightly.app/Contents/MacOS/firefox --purgecaches
 ```
+
+> **For maintainers — cutting a release:** The CI workflow in `.github/workflows/build.yml` is triggered by pushing a `v*` tag (e.g. `git tag v1.0.0 && git push origin v1.0.0`). It builds all three platforms, generates SHA256 checksums, and publishes a GitHub Release with the archives attached. Manual runs are also possible from the Actions tab (`workflow_dispatch`).
 
 ---
 
@@ -269,17 +334,17 @@ When a container tab is opened:
 
 In Privacy Mode, `nsRFPService::ShouldResistFingerprinting()` returns `true` for all surfaces. The `GetSpoofed*` methods then read from the cached profile instead of hardcoded values:
 
-| API | Interception Point | Reads From |
-|---|---|---|
-| `navigator.userAgent` | `Navigator.cpp` | `profile.device.userAgent` |
-| `navigator.platform` | `Navigator.cpp` | `profile.device.platform` |
-| `navigator.languages` | `Navigator.cpp` | `profile.location.languages` |
-| `screen.width/height` | `nsScreen.cpp` | `profile.device.screen` |
-| `Canvas.toDataURL()` | `nsCanvasRenderingContext2D.cpp` | `profile.noise.canvasSeed` |
-| `WebGL.getParameter()` | `ClientWebGLContext.cpp` | `profile.noise.webglSeed` |
-| `AudioContext.sampleRate` | `AudioContext.cpp` | `profile.device.audioSampleRate` |
-| `Intl.DateTimeFormat` | `BrowsingContext.cpp` | `profile.location.timezone` |
-| `MediaDevices.enumerateDevices()` | `MediaDevices.cpp` | `profile.device.mediaDevices` |
+| API                               | Interception Point               | Reads From                       |
+| --------------------------------- | -------------------------------- | -------------------------------- |
+| `navigator.userAgent`             | `Navigator.cpp`                  | `profile.device.userAgent`       |
+| `navigator.platform`              | `Navigator.cpp`                  | `profile.device.platform`        |
+| `navigator.languages`             | `Navigator.cpp`                  | `profile.location.languages`     |
+| `screen.width/height`             | `nsScreen.cpp`                   | `profile.device.screen`          |
+| `Canvas.toDataURL()`              | `nsCanvasRenderingContext2D.cpp` | `profile.noise.canvasSeed`       |
+| `WebGL.getParameter()`            | `ClientWebGLContext.cpp`         | `profile.noise.webglSeed`        |
+| `AudioContext.sampleRate`         | `AudioContext.cpp`               | `profile.device.audioSampleRate` |
+| `Intl.DateTimeFormat`             | `BrowsingContext.cpp`            | `profile.location.timezone`      |
+| `MediaDevices.enumerateDevices()` | `MediaDevices.cpp`               | `profile.device.mediaDevices`    |
 
 ---
 
@@ -287,12 +352,12 @@ In Privacy Mode, `nsRFPService::ShouldResistFingerprinting()` returns `true` for
 
 ### Key Preferences
 
-| Preference | Default | Description |
-|---|---|---|
-| `privacy.browser.containerMode` | `false` | Master switch for Privacy Mode |
-| `privacy.userContext.enabled` | `false` | Enable Firefox container tabs |
-| `privacy.userContext.ui.enabled` | `false` | Show container UI in new-tab button |
-| `privacy.fingerprint.profileMode` | `false` | Enable per-container fingerprint spoofing |
+| Preference                                               | Default | Description                                    |
+| -------------------------------------------------------- | ------- | ---------------------------------------------- |
+| `privacy.browser.containerMode`                          | `false` | Master switch for Privacy Mode                 |
+| `privacy.userContext.enabled`                            | `false` | Enable Firefox container tabs                  |
+| `privacy.userContext.ui.enabled`                         | `false` | Show container UI in new-tab button            |
+| `privacy.fingerprint.profileMode`                        | `false` | Enable per-container fingerprint spoofing      |
 | `privacy.userContext.newTabContainerOnLeftClick.enabled` | `false` | Left-click new-tab button opens container menu |
 
 ### Toggle via `about:config`
@@ -376,9 +441,11 @@ node -c browser/base/content/browser.js
 ### Key Engineering Notes
 
 <details>
+
 <summary><b>Important constraints (click to expand)</b></summary>
 
-<br>
+  
+
 
 - **`nsTHashMap` entry size limit** — Entries must not exceed 255 bytes. Store large structs (e.g., `ProfileArgs`) behind `UniquePtr`.
 - **XUL event handling** — `oncommand` attribute is unreliable for lazy-loaded modules. Use `addEventListener('click')` instead.
