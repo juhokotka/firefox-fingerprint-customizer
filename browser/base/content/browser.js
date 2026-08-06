@@ -1694,21 +1694,33 @@ var ContainerProfileSync = {
    * and from the TabOpen listener.
    */
   syncToTab(tab) {
-    if (!tab) return;
+    if (!tab) {
+      console.log("[CPS] syncToTab: tab is null");
+      return;
+    }
     let ucId = tab.userContextId;
-    if (!ucId || ucId === 0) return;
+    if (!ucId || ucId === 0) {
+      console.log("[CPS] syncToTab: no container (userContextId=0), skipping");
+      return;
+    }
 
     try {
       let profile = FingerprintProfileStore.getProfile(ucId);
+      console.log(`[CPS] syncToTab: ucId=${ucId}, profile=${profile ? "FOUND" : "NULL"}`);
       if (!profile) return;
 
       let browser = tab.linkedBrowser;
-      if (!browser) return;
+      if (!browser) {
+        console.log("[CPS] syncToTab: no linkedBrowser");
+        return;
+      }
       let bc = browser.browsingContext;
-      if (!bc) return;
+      if (!bc) {
+        console.log("[CPS] syncToTab: no browsingContext");
+        return;
+      }
 
-      // The WindowGlobalParent may not exist immediately after addTab.
-      // Try now; if not ready, retry once after a short delay.
+      console.log(`[CPS] syncToTab: pushing profile. device=${profile.device?.name}, ua=${profile.device?.userAgent?.substring(0, 60)}`);
       this._pushProfile(bc, profile);
     } catch (e) {
       console.error("[ContainerProfileSync] syncToTab error:", e);
@@ -1716,12 +1728,19 @@ var ContainerProfileSync = {
   },
 
   _pushProfile(bc, profile) {
+    // Set BrowsingContext override fields (UA, platform, oscpu, language,
+    // timezone) on the top-level BC.  These are read directly by Navigator,
+    // nsHttpHandler, ICU, etc. — independent of the ProfileArgs IPC cache.
+    this._applyOverrides(bc, profile);
+
     try {
       let wgp = bc.currentWindowGlobal;
       if (wgp) {
         wgp.updateProfile(profile);
+        console.log("[CPS] _pushProfile: updateProfile sent to WGP");
         return;
       }
+      console.log("[CPS] _pushProfile: no WGP yet, will retry");
     } catch (e) {
       console.error("[ContainerProfileSync] _pushProfile error:", e);
     }
@@ -1735,15 +1754,72 @@ var ContainerProfileSync = {
           let wgp = bc.currentWindowGlobal;
           if (wgp) {
             wgp.updateProfile(profile);
+            console.log(`[CPS] _pushProfile: updateProfile sent on retry ${attempts}`);
             clearInterval(timer);
             return;
           }
         } catch (e) { /* ignore */ }
         if (attempts >= 10) {
+          console.log("[CPS] _pushProfile: gave up after 10 retries (no WGP)");
           clearInterval(timer);
         }
       }, 200);
     }
+  },
+
+  /**
+   * Set BrowsingContext override fields from the profile.
+   * WebIDL exposes these as attributes on BrowsingContext:
+   *   customUserAgent, customPlatform, customOscpu,
+   *   languageOverride, timezoneOverride
+   * Each is set in its own try/catch so one failure doesn't block others.
+   */
+  _applyOverrides(bc, profile) {
+    let top = bc.top;
+    let { device, location } = profile;
+    if (!device && !location) {
+      console.log("[CPS] _applyOverrides: no device or location in profile");
+      return;
+    }
+
+    console.log(`[CPS] _applyOverrides: device=${device?.name}, location=${location?.country}`);
+    let applied = [];
+
+    if (location) {
+      if (location.languages?.length) {
+        try {
+          top.languageOverride = location.languages.join(",");
+          applied.push(`lang=${location.languages.join(",")}`);
+        } catch (e) { console.error("[ContainerProfileSync] languageOverride:", e); }
+      }
+      if (location.timezone) {
+        try {
+          top.timezoneOverride = location.timezone;
+          applied.push(`tz=${location.timezone}`);
+        } catch (e) { console.error("[ContainerProfileSync] timezoneOverride:", e); }
+      }
+    }
+    if (device) {
+      if (device.userAgent) {
+        try {
+          top.customUserAgent = device.userAgent;
+          applied.push(`ua=${device.userAgent.substring(0, 40)}...`);
+        } catch (e) { console.error("[ContainerProfileSync] customUserAgent:", e); }
+      }
+      if (device.platform) {
+        try {
+          top.customPlatform = device.platform;
+          applied.push(`platform=${device.platform}`);
+        } catch (e) { console.error("[ContainerProfileSync] customPlatform:", e); }
+      }
+      if (device.oscpu) {
+        try {
+          top.customOscpu = device.oscpu;
+          applied.push(`oscpu=${device.oscpu}`);
+        } catch (e) { console.error("[ContainerProfileSync] customOscpu:", e); }
+      }
+    }
+    console.log(`[CPS] _applyOverrides: applied [${applied.join(", ")}]`);
   },
 
   /**
@@ -1753,17 +1829,22 @@ var ContainerProfileSync = {
   syncAll() {
     try {
       let identities = ContextualIdentityService.getPublicIdentities();
+      console.log(`[CPS] syncAll: ${identities.length} containers found`);
       for (let identity of identities) {
         let ucId = identity.userContextId;
         let profile = FingerprintProfileStore.getProfile(ucId);
+        console.log(`[CPS] syncAll: ucId=${ucId}, profile=${profile ? "FOUND" : "null"}`);
         if (!profile) continue;
 
         // Push to every open tab in this container.
+        let matchedTabs = 0;
         for (let tab of gBrowser.tabs) {
           if (tab.userContextId === ucId) {
+            matchedTabs++;
             this.syncToTab(tab);
           }
         }
+        console.log(`[CPS] syncAll: ucId=${ucId}, matched ${matchedTabs} tab(s)`);
       }
     } catch (e) {
       console.error("[ContainerProfileSync] syncAll error:", e);

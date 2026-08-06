@@ -62,25 +62,9 @@ jobs:
           fetch-depth: 1
 
       # ── 2. Free disk space ──
-      # The Firefox source tree is ~4.5 GB. After checkout, we remove
-      # test suites (not needed for building) to reclaim ~1.5 GB.
-      # This is critical — GitHub runners have limited disk space, and the
-      # Windows cross-compile additionally downloads the Windows SDK (~3 GB).
-      - name: Remove test suites (not needed for build)
-        shell: bash
-        run: |
-          echo "Disk space before cleanup:"
-          df -h / 2>/dev/null || true
-          echo ""
-          echo "Removing test suites..."
-          rm -rf testing/web-platform/tests || true
-          rm -rf js/src/tests/test262 || true
-          # NOTE: Do NOT remove testing/mozbase — mach depends on mozfile,
-          # mozinfo, mozlog, etc. from that directory.
-          echo ""
-          echo "Disk space after cleanup:"
-          df -h / 2>/dev/null || true
-
+      # Remove pre-installed toolchains that GitHub runners include but we
+      # don't need. This reclaims ~20 GB on Linux (critical for the build
+      # output + Windows SDK for cross-compile).
       - name: Free disk space (Linux)
         if: runner.os == 'Linux'
         shell: bash

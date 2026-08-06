@@ -68,30 +68,50 @@ export const ProfileSyncAdapter = {
     if (!device && !location) {
       return;
     }
-    try {
-      if (location) {
-        if (location.languages?.length) {
-          top.setLanguageOverride(location.languages.join(","));
-        }
-        if (location.timezone) {
-          top.setTimezoneOverride(location.timezone);
-        }
-      }
-      if (device) {
-        if (device.userAgent) {
-          top.setUserAgentOverride(device.userAgent);
-        }
-        if (device.platform) {
-          top.setPlatformOverride(device.platform);
-        }
-        if (device.oscpu) {
-          top.setCustomOscpu(device.oscpu);
+
+    // Each override is set in its own try/catch so that a failure on one
+    // field does not prevent the others from being applied.
+    // WebIDL exposes these as attributes (not setXxx() methods):
+    //   languageOverride, timezoneOverride, customUserAgent,
+    //   customPlatform, customOscpu
+    if (location) {
+      if (location.languages?.length) {
+        try {
+          top.languageOverride = location.languages.join(",");
+        } catch (e) {
+          Cu.reportError(`ProfileSyncAdapter: languageOverride failed: ${e}`);
         }
       }
-    } catch (e) {
-      Cu.reportError(
-        `ProfileSyncAdapter: failed to set BC overrides: ${e}`
-      );
+      if (location.timezone) {
+        try {
+          top.timezoneOverride = location.timezone;
+        } catch (e) {
+          Cu.reportError(`ProfileSyncAdapter: timezoneOverride failed: ${e}`);
+        }
+      }
+    }
+    if (device) {
+      if (device.userAgent) {
+        try {
+          top.customUserAgent = device.userAgent;
+        } catch (e) {
+          Cu.reportError(`ProfileSyncAdapter: customUserAgent failed: ${e}`);
+        }
+      }
+      if (device.platform) {
+        try {
+          top.customPlatform = device.platform;
+        } catch (e) {
+          Cu.reportError(`ProfileSyncAdapter: customPlatform failed: ${e}`);
+        }
+      }
+      if (device.oscpu) {
+        try {
+          top.customOscpu = device.oscpu;
+        } catch (e) {
+          Cu.reportError(`ProfileSyncAdapter: customOscpu failed: ${e}`);
+        }
+      }
     }
   },
 };

@@ -544,7 +544,14 @@ void InitGlobalObjectOptions(JS::RealmOptions& aOptions,
     aOptions.creationOptions().setSecureContext(aSecureContext);
   }
 
-  if (aForceUTC) {
+  // When profileMode is active, per-container BrowsingContext overrides
+  // take precedence over RFP's hardcoded timezone/locale values, because
+  // the fingerprint profile provides container-specific settings that
+  // should replace RFP's global defaults.
+  bool profileMode =
+      mozilla::Preferences::GetBool("privacy.fingerprint.profileMode", false);
+
+  if (aForceUTC && !(profileMode && !aTimezoneOverride.IsEmpty())) {
     nsCString timeZone = nsRFPService::GetSpoofedJSTimeZone();
     aOptions.behaviors().setTimeZoneOverride(timeZone.get());
   } else if (!aTimezoneOverride.IsEmpty()) {
@@ -552,7 +559,7 @@ void InitGlobalObjectOptions(JS::RealmOptions& aOptions,
         NS_ConvertUTF16toUTF8(aTimezoneOverride).get());
   }
   aOptions.creationOptions().setAlwaysUseFdlibm(aAlwaysUseFdlibm);
-  if (aLocaleEnUS) {
+  if (aLocaleEnUS && !(profileMode && !aLanguageOverride.IsEmpty())) {
     nsCString locale = nsRFPService::GetSpoofedJSLocale();
     aOptions.behaviors().setLocaleOverride(locale.get());
   } else if (!aLanguageOverride.IsEmpty()) {
