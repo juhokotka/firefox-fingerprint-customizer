@@ -275,17 +275,63 @@ jobs:
         id: archive-windows
         shell: bash
         run: |
-          # The Windows cross-compile produces a .zip in
-          # obj-x86_64-pc-windows-msvc/dist/
-          ZIPFILE=$(find obj-*/dist -maxdepth 1 -name "*.zip" -type f 2>/dev/null | head -1)
-          if [ -z "$ZIPFILE" ]; then
-            echo "ERROR: No .zip found in obj-*/dist/"
-            echo "Contents of obj-*/dist/:"
-            ls -la obj-*/dist/ || true
+          # The Windows cross-compile produces the full package in
+          # obj-x86_64-pc-windows-msvc/dist/. `mach package` also emits
+          # intermediate artifacts (e.g. *.xpt_artifacts.zip) that MUST NOT be
+          # published — a naive `find -name "*.zip" | head -1` picks the wrong
+          # file. Instead:
+          #   1. Prefer dist/package_name.txt, which `mach package` writes with
+          #      the real package filename (firefox-<ver>.<locale>.<platform>.zip).
+          #   2. Fall back to matching the full Firefox package name explicitly,
+          #      excluding xpt_artifacts / symbols / tests intermediates.
+          #   3. Sanity-check the archive actually contains firefox.exe.
+          DIST_DIR=$(find . -maxdepth 3 -type d -path "obj-*/dist" 2>/dev/null | head -1)
+          if [ -z "$DIST_DIR" ]; then
+            echo "ERROR: No obj-*/dist directory found"
+            ls -la . || true
             exit 1
           fi
+          echo "Dist dir: $DIST_DIR"
+
+          ZIPFILE=""
+          # Preferred: read the package name recorded by `mach package`
+          if [ -f "$DIST_DIR/package_name.txt" ]; then
+            PKG_NAME=$(tr -d '[:space:]' < "$DIST_DIR/package_name.txt")
+            if [ -n "$PKG_NAME" ] && [ -f "$DIST_DIR/$PKG_NAME" ]; then
+              ZIPFILE="$DIST_DIR/$PKG_NAME"
+              echo "Using package_name.txt: $PKG_NAME"
+            fi
+          fi
+
+          # Fallback: explicit full-package match, no intermediates
+          if [ -z "$ZIPFILE" ]; then
+            ZIPFILE=$(find "$DIST_DIR" -maxdepth 1 -type f \
+              \( -name "firefox-*.zip" -o -name "*.win64.zip" -o -name "*.win32.zip" \) \
+              ! -name "*xpt_artifacts*" \
+              ! -name "*crashreporter-symbols*" \
+              ! -name "*mozharness*" \
+              ! -name "*tests*" \
+              2>/dev/null | head -1)
+          fi
+
+          if [ -z "$ZIPFILE" ] || [ ! -f "$ZIPFILE" ]; then
+            echo "ERROR: No full Firefox package zip found in $DIST_DIR/"
+            echo "Contents of $DIST_DIR/:"
+            ls -la "$DIST_DIR/" || true
+            exit 1
+          fi
+
+          # Sanity check: a real Windows build contains firefox.exe,
+          # not just .xpt typelib files.
+          if ! unzip -l "$ZIPFILE" 2>/dev/null | grep -q "firefox.exe"; then
+            echo "ERROR: $ZIPFILE does not contain firefox.exe — refusing to publish an incomplete package."
+            unzip -l "$ZIPFILE" 2>/dev/null | head -20 || true
+            exit 1
+          fi
+
           echo "Found zip: $ZIPFILE"
           ARCHIVE_NAME="Firefox-Fingerprint-Customizer-${{ github.ref_name }}-${{ matrix.archive_name }}.zip"
+          rm -f "$ARCHIVE_NAME"
           cp "$ZIPFILE" "$ARCHIVE_NAME"
           echo "Created: $ARCHIVE_NAME"
           echo "archive_name=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
