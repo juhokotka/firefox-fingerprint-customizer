@@ -285,7 +285,10 @@ jobs:
           #   2. Fall back to matching the full Firefox package name explicitly,
           #      excluding xpt_artifacts / symbols / tests intermediates.
           #   3. Sanity-check the archive actually contains firefox.exe.
-          DIST_DIR=$(find . -maxdepth 3 -type d -path "obj-*/dist" 2>/dev/null | head -1)
+          # NOTE: use `find obj-*/dist` (shell expands the glob) — `find . -path`
+          # would yield "./obj-*/dist" paths that never match a bare "obj-*/dist"
+          # pattern, so DIST_DIR would end up empty and the step would fail.
+          DIST_DIR=$(find obj-*/dist -maxdepth 0 -type d 2>/dev/null | head -1)
           if [ -z "$DIST_DIR" ]; then
             echo "ERROR: No obj-*/dist directory found"
             ls -la . || true
