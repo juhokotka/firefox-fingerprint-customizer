@@ -151,6 +151,9 @@ class nsPresContext : public nsISupports,
   // no Profile is available (no filtering).
   bool IsFontAllowedByProfile(const nsACString& aFamilyName) const override;
 
+  // Returns the container identity for per-container font spoofing.
+  uint32_t GetUserContextId() const override;
+
   enum nsPresContextType : uint8_t {
     eContext_Galley,        // unpaginated screen presentation
     eContext_PrintPreview,  // paginated screen presentation

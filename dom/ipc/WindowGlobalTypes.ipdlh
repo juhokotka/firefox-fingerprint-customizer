@@ -65,6 +65,7 @@ struct FingerprintNoiseArgs
 {
   uint8_t[] canvasSeed;
   uint8_t[] webglSeed;
+  uint8_t[] textSeed;
 };
 
 struct ProfileArgs

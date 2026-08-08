@@ -21,6 +21,7 @@
 #include "gfxFont.h"
 #include "gfxPlatform.h"
 #include "gfxTextRun.h"
+#include "gfxTextFingerprint.h"
 #include "gfxUtils.h"
 #include "js/Array.h"  // JS::GetArrayLength
 #include "js/Conversions.h"
@@ -58,6 +59,7 @@
 #include "mozilla/dom/CanvasPattern.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
 #include "mozilla/dom/DOMMatrix.h"
+#include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/FontFaceSet.h"
 #include "mozilla/dom/FontFaceSetImpl.h"
@@ -5042,6 +5044,15 @@ UniquePtr<TextMetrics> CanvasRenderingContext2D::DrawOrMeasureText(
   RefPtr<PresShell> presShell = GetPresShell();
   RefPtr<Document> document = presShell ? presShell->GetDocument() : nullptr;
 
+  // Propagate container identity for per-container text-metric perturbation.
+  if (document) {
+    dom::BrowsingContext* bc = document->GetBrowsingContext();
+    if (bc) {
+      currentFontStyle->SetUserContextId(
+          bc->OriginAttributesRef().mUserContextId);
+    }
+  }
+
   // replace all the whitespace characters with U+0020 SPACE
   nsAutoString textToDraw(aText);
   TextReplaceWhitespaceCharacters(textToDraw);
@@ -5190,7 +5201,36 @@ UniquePtr<TextMetrics> CanvasRenderingContext2D::DrawOrMeasureText(
   processor.mFontgrp
       ->UpdateUserFonts();  // ensure user font generation is current
   RefPtr<gfxFont> font = processor.mFontgrp->GetFirstValidFont();
-  const gfxFont::Metrics& fontMetrics = font->GetMetrics(fontOrientation);
+  // Copy metrics (not reference) so we can apply per-container spoofing.
+  gfxFont::Metrics fontMetrics = font->GetMetrics(fontOrientation);
+
+  // Apply per-container vertical metric spoofing (Gap 1).
+  // Substitutes maxAscent, maxDescent, xHeight, capHeight from the target OS
+  // metric database, covering fontBoundingBoxAscent/Descent,
+  // emHeightAscent/Descent, and baseline anchoring in TextMetrics.
+  uint32_t userContextId = processor.mFontgrp->GetUserContextId();
+  if (userContextId != 0) {
+    nsCString fontFamily = font->GetFontEntry()->FamilyName();
+    nsCString entryName = font->GetFontEntry()->Name();
+    float fontSize = font->GetAdjustedSize();
+    gfxTextFingerprint::VerticalMetrics spoofed;
+    if (gfxTextFingerprint::GetSpoofedVerticalMetrics(
+            userContextId, fontFamily, entryName, fontSize, spoofed)) {
+      if (spoofed.maxAscent >= 0) fontMetrics.maxAscent = spoofed.maxAscent;
+      if (spoofed.maxDescent >= 0) fontMetrics.maxDescent = spoofed.maxDescent;
+      if (spoofed.xHeight >= 0) fontMetrics.xHeight = spoofed.xHeight;
+      if (spoofed.capHeight >= 0) fontMetrics.capHeight = spoofed.capHeight;
+      // Recompute derived metrics (same logic as CalculateDerivedMetrics)
+      fontMetrics.maxHeight = fontMetrics.maxAscent + fontMetrics.maxDescent;
+      fontMetrics.internalLeading =
+          std::max(0.0, fontMetrics.maxHeight - fontMetrics.emHeight);
+      if (fontMetrics.maxHeight > 0) {
+        fontMetrics.emAscent =
+            fontMetrics.maxAscent * fontMetrics.emHeight / fontMetrics.maxHeight;
+        fontMetrics.emDescent = fontMetrics.emHeight - fontMetrics.emAscent;
+      }
+    }
+  }
 
   // calls bidi algo twice since it needs the full text width and the
   // bounding boxes before rendering anything

@@ -43,6 +43,7 @@
 #include "mozilla/dom/CSSMozDocumentRule.h"
 #include "mozilla/dom/CSSTransition.h"
 #include "mozilla/dom/DocumentInlines.h"
+#include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/dom/HTMLBodyElement.h"
@@ -1387,6 +1388,18 @@ GeckoFontMetrics Gecko_GetFontMetrics(const nsPresContext* aPresContext,
       presContext, aIsVertical, aFont, aFontSize,
       bool(flags & StyleQueryFontMetricsFlags::USE_USER_FONT_SET));
   auto* fontGroup = fm->GetThebesFontGroup();
+
+  // Propagate container identity for per-container font metric spoofing
+  // (CSS ch/ex units). The font group's mUserContextId is 0 by default;
+  // without this, CSS units use real OS metrics even in spoofed containers.
+  dom::Document* doc = presContext->Document();
+  if (doc) {
+    dom::BrowsingContext* bc = doc->GetBrowsingContext();
+    if (bc) {
+      fontGroup->SetUserContextId(bc->OriginAttributesRef().mUserContextId);
+    }
+  }
+
   auto metrics = fontGroup->GetMetricsForCSSUnits(fm->Orientation(), flags);
 
   float scriptPercentScaleDown = 0;

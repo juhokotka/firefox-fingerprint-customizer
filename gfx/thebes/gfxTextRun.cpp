@@ -11,6 +11,7 @@
 #include "gfxGlyphExtents.h"
 #include "gfxHarfBuzzShaper.h"
 #include "gfxPlatformFontList.h"
+#include "gfxTextFingerprint.h"
 #include "gfxUserFontSet.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/WorkerCommon.h"
@@ -1568,7 +1569,8 @@ void gfxTextRun::SetSpaceGlyph(gfxFont* aFont, DrawTarget* aDrawTarget,
                     aOrientation, isCJK);
         CopyGlyphDataFrom(aShapedWord, aCharIndex);
         GetCharacterGlyphs()[aCharIndex].SetIsSpace();
-      });
+      },
+      GetUserContextId());
 }
 
 bool gfxTextRun::SetSpaceGlyphIfSimple(gfxFont* aFont, uint32_t aCharIndex,
@@ -2502,6 +2504,9 @@ already_AddRefed<gfxTextRun> gfxFontGroup::MakeTextRun(
   if (!textRun) {
     return nullptr;
   }
+
+  // Propagate container identity for per-container text-metric perturbation.
+  textRun->SetUserContextId(mUserContextId);
 
   InitTextRun(aParams->mDrawTarget, textRun.get(), aString, aLength, aMFR);
 
@@ -4110,6 +4115,34 @@ gfxFont::Metrics gfxFontGroup::GetMetricsForCSSUnits(
     if (icFont != font) {
       const auto& icMetrics = icFont->GetMetrics(aOrientation);
       metrics.ideographicWidth = icMetrics.ideographicWidth;
+    }
+  }
+
+  // Apply per-container vertical metric spoofing (Gap 1/Gap 2).
+  // Substitutes maxAscent, maxDescent, xHeight, capHeight, zeroWidth from
+  // the target OS metric database, covering CSS 'ch'/'ex' units.
+  uint32_t userContextId = GetUserContextId();
+  if (userContextId != 0 && aOrientation == nsFontMetrics::eHorizontal) {
+    nsCString fontFamily = font->GetFontEntry()->FamilyName();
+    nsCString entryName = font->GetFontEntry()->Name();
+    float fontSize = font->GetAdjustedSize();
+    gfxTextFingerprint::VerticalMetrics spoofed;
+    if (gfxTextFingerprint::GetSpoofedVerticalMetrics(
+            userContextId, fontFamily, entryName, fontSize, spoofed)) {
+      if (spoofed.maxAscent >= 0) metrics.maxAscent = spoofed.maxAscent;
+      if (spoofed.maxDescent >= 0) metrics.maxDescent = spoofed.maxDescent;
+      if (spoofed.xHeight >= 0) metrics.xHeight = spoofed.xHeight;
+      if (spoofed.capHeight >= 0) metrics.capHeight = spoofed.capHeight;
+      if (spoofed.zeroWidth >= 0) metrics.zeroWidth = spoofed.zeroWidth;
+      // Recompute derived metrics (same logic as CalculateDerivedMetrics)
+      metrics.maxHeight = metrics.maxAscent + metrics.maxDescent;
+      metrics.internalLeading =
+          std::max(0.0, metrics.maxHeight - metrics.emHeight);
+      if (metrics.maxHeight > 0) {
+        metrics.emAscent =
+            metrics.maxAscent * metrics.emHeight / metrics.maxHeight;
+        metrics.emDescent = metrics.emHeight - metrics.emAscent;
+      }
     }
   }
 

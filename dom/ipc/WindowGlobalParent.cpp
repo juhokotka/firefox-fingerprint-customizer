@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "gfxTextFingerprint.h"
 #include "MMPrinter.h"
 #include "mozilla/AntiTrackingUtils.h"
 #include "mozilla/AsyncEventDispatcher.h"
@@ -2307,6 +2308,7 @@ FingerprintNoiseArgs ConvertNoiseDict(const FingerprintNoiseDict& aDict) {
   FingerprintNoiseArgs args;
   args.canvasSeed() = aDict.mCanvasSeed;
   args.webglSeed() = aDict.mWebglSeed;
+  args.textSeed() = aDict.mTextSeed;
   return args;
 }
 
@@ -2322,7 +2324,8 @@ ProfileArgs ConvertProfileDict(const FingerprintProfileDict& aDict) {
   if (!aDict.mLocation.mCountry.IsEmpty()) {
     args.location() = Some(ConvertLocationDict(aDict.mLocation));
   }
-  if (!aDict.mNoise.mCanvasSeed.IsEmpty()) {
+  if (!aDict.mNoise.mCanvasSeed.IsEmpty() ||
+      !aDict.mNoise.mTextSeed.IsEmpty()) {
     args.noise() = Some(ConvertNoiseDict(aDict.mNoise));
   }
 
@@ -2357,11 +2360,23 @@ void WindowGlobalParent::CacheProfile(uint32_t aUserContextId,
                                       const ProfileArgs& aProfile) {
   ParentProfileCache().InsertOrUpdate(aUserContextId,
                                       MakeUnique<ProfileArgs>(aProfile));
+  // Register text-metric perturbation seed (parent process side).
+  if (aProfile.noise().isSome()) {
+    const auto& textSeed = aProfile.noise().ref().textSeed();
+    if (!textSeed.IsEmpty()) {
+      gfxTextFingerprint::SetSeed(aUserContextId, textSeed);
+    } else {
+      gfxTextFingerprint::ClearSeed(aUserContextId);
+    }
+  } else {
+    gfxTextFingerprint::ClearSeed(aUserContextId);
+  }
 }
 
 /* static */
 void WindowGlobalParent::RemoveCachedProfile(uint32_t aUserContextId) {
   ParentProfileCache().Remove(aUserContextId);
+  gfxTextFingerprint::ClearSeed(aUserContextId);
 }
 
 void WindowGlobalParent::UpdateProfile(

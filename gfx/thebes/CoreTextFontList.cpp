@@ -5,7 +5,9 @@
 #include "AppleUtils.h"
 #include "CoreTextFontList.h"
 #include "gfxFontConstants.h"
+#include "gfxFontMetricDatabase.h"
 #include "gfxMacFont.h"
+#include "gfxTextFingerprint.h"
 #include "gfxUserFontSet.h"
 
 #include "harfbuzz/hb.h"
@@ -1440,6 +1442,59 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
   // lookup face based on postscript or full name
   AutoCFTypeRef<CGFontRef> fontRef(CGFontCreateWithFontName(faceName));
   if (!fontRef) {
+    // Gap 3: Font enumeration consistency. When the probed font doesn't exist
+    // on the host OS but the container is spoofing as another OS where it does
+    // exist, substitute with a mapped macOS font. The @font-face family name
+    // (set at gfxUserFontSet.cpp:488) preserves the probe name, so the metric
+    // hooks will look up the correct target OS metrics automatically.
+    if (aFontVisibilityProvider) {
+      uint32_t userContextId = aFontVisibilityProvider->GetUserContextId();
+      if (userContextId != 0) {
+        nsCString targetPlatform =
+            gfxTextFingerprint::GetTargetPlatform(userContextId);
+        if (!targetPlatform.IsEmpty()) {
+          auto targetOS =
+              gfxFontMetricDatabase::PlatformToOS(targetPlatform);
+          if (targetOS != gfxFontMetricDatabase::TargetOS::None &&
+              targetOS != gfxFontMetricDatabase::TargetOS::MacOS) {
+            // Map the probed name to a macOS equivalent for rendering
+            nsCString mappedFamily = gfxFontMetricDatabase::MapFontFamily(
+                aFontName, gfxFontMetricDatabase::TargetOS::MacOS);
+            CGFontRef substituteRef = nullptr;
+            // If mapping returned a different name, try to load it
+            if (!mappedFamily.Equals(aFontName,
+                                     nsCaseInsensitiveCStringComparator)) {
+              AutoCFTypeRef<CFStringRef> mappedName(
+                  CreateCFStringForString(mappedFamily));
+              if (mappedName) {
+                substituteRef = CGFontCreateWithFontName(mappedName);
+              }
+            }
+            // If no mapping or mapping failed, fall back to Helvetica Neue
+            // as a generic sans-serif substitute
+            if (!substituteRef) {
+              CFStringRef fallbackName = CFStringCreateWithCString(
+                  nullptr, "Helvetica Neue", kCFStringEncodingUTF8);
+              if (fallbackName) {
+                substituteRef = CGFontCreateWithFontName(fallbackName);
+                CFRelease(fallbackName);
+              }
+            }
+            // If we got a substitute font, create the entry with the ORIGINAL
+            // probed name (not the substitute's name). SetFamilyName() at
+            // gfxUserFontSet.cpp:488 will set the family name to the @font-face
+            // family name, ensuring metric hooks use the correct target OS.
+            if (substituteRef) {
+              auto entry = MakeAndAddRef<CTFontEntry>(
+                  aFontName, substituteRef, aWeightForEntry,
+                  aStretchForEntry, aStyleForEntry, false, true);
+              CFRelease(substituteRef);
+              return entry;
+            }
+          }
+        }
+      }
+    }
     return nullptr;
   }
 

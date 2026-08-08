@@ -26,6 +26,7 @@
 #include "gfxFontMissingGlyphs.h"
 #include "gfxGraphiteShaper.h"
 #include "gfxHarfBuzzShaper.h"
+#include "gfxTextFingerprint.h"
 #include "gfxUserFontSet.h"
 #include "nsCRT.h"
 #include "nsContentUtils.h"
@@ -3200,6 +3201,25 @@ gfxFont::RunMetrics gfxFont::Measure(const gfxTextRun* aTextRun,
   metrics.mAscent = fontMetrics.maxAscent * appUnitsPerDevUnit;
   metrics.mDescent = fontMetrics.maxDescent * appUnitsPerDevUnit;
 
+  // Apply per-container vertical metric spoofing for
+  // actualBoundingBoxAscent/Descent. The text run's userContextId
+  // identifies the container; we override the ascent/descent with the
+  // target OS's font metrics from the metric database.
+  uint32_t userContextId = aTextRun->GetUserContextId();
+  if (userContextId != 0) {
+    nsCString fontFamily = GetFontEntry()->FamilyName();
+    nsCString entryName = GetFontEntry()->Name();
+    float fontSize = GetAdjustedSize();
+    gfxTextFingerprint::VerticalMetrics spoofed;
+    if (gfxTextFingerprint::GetSpoofedVerticalMetrics(
+            userContextId, fontFamily, entryName, fontSize, spoofed)) {
+      if (spoofed.maxAscent >= 0)
+        metrics.mAscent = (gfxFloat)spoofed.maxAscent * appUnitsPerDevUnit;
+      if (spoofed.maxDescent >= 0)
+        metrics.mDescent = (gfxFloat)spoofed.maxDescent * appUnitsPerDevUnit;
+    }
+  }
+
   if (aStart == aEnd) {
     // exit now before we look at aSpacing[0], which is undefined
     metrics.mAscent -= baselineOffset;
@@ -3342,9 +3362,10 @@ bool gfxFont::ProcessShapedWordInternal(
     const T* aText, uint8_t aLength, uint32_t aHash, Script aRunScript,
     nsAtom* aLanguage, bool aVertical, uint16_t aAppUnitsPerDevUnit,
     gfx::ShapedTextFlags aFlags, RoundingFlags aRounding,
-    gfxTextPerfMetrics* aTextPerf GFX_MAYBE_UNUSED, Func aCallback) {
+    gfxTextPerfMetrics* aTextPerf GFX_MAYBE_UNUSED, Func aCallback,
+    uint32_t aUserContextId) {
   WordCacheKey key(aText, aLength, aHash, aRunScript, aLanguage,
-                   aAppUnitsPerDevUnit, aFlags, aRounding);
+                   aAppUnitsPerDevUnit, aFlags, aRounding, aUserContextId);
   {
     // If we have a word cache, attempt to look up the word in it.
     AutoReadLock lock(mLock);
@@ -3370,7 +3391,8 @@ bool gfxFont::ProcessShapedWordInternal(
 
   UniquePtr<gfxShapedWord> newShapedWord(
       gfxShapedWord::Create(aText, aLength, aRunScript, aLanguage,
-                            aAppUnitsPerDevUnit, aFlags, aRounding));
+                            aAppUnitsPerDevUnit, aFlags, aRounding,
+                            aUserContextId));
   if (!newShapedWord) {
     NS_WARNING("failed to create gfxShapedWord - expect missing text");
     return false;
@@ -3431,7 +3453,9 @@ bool gfxFont::WordCacheKey::HashPolicy::match(const Key& aKey,
   if (aKey.mLength != aLookup.mLength || aKey.mFlags != aLookup.mFlags ||
       aKey.mRounding != aLookup.mRounding ||
       aKey.mAppUnitsPerDevUnit != aLookup.mAppUnitsPerDevUnit ||
-      aKey.mScript != aLookup.mScript || aKey.mLanguage != aLookup.mLanguage) {
+      aKey.mScript != aLookup.mScript ||
+      aKey.mLanguage != aLookup.mLanguage ||
+      aKey.mUserContextId != aLookup.mUserContextId) {
     return false;
   }
 
@@ -3463,12 +3487,13 @@ bool gfxFont::WordCacheKey::HashPolicy::match(const Key& aKey,
 bool gfxFont::ProcessSingleSpaceShapedWord(
     bool aVertical, uint16_t aAppUnitsPerDevUnit, gfx::ShapedTextFlags aFlags,
     RoundingFlags aRounding,
-    const std::function<void(gfxShapedWord*)>& aCallback) {
+    const std::function<void(gfxShapedWord*)>& aCallback,
+    uint32_t aUserContextId) {
   static const uint8_t space = ' ';
   return ProcessShapedWordInternal(
       &space, 1, gfxShapedWord::HashMix(gfxShapedWord::sHashInitialValue, ' '),
       Script::LATIN, /* aLanguage = */ nullptr, aVertical, aAppUnitsPerDevUnit,
-      aFlags, aRounding, nullptr, aCallback);
+      aFlags, aRounding, nullptr, aCallback, aUserContextId);
 }
 
 bool gfxFont::ShapeText(const uint8_t* aText, uint32_t aOffset,
@@ -3827,7 +3852,8 @@ bool gfxFont::SplitAndInitTextRun(
           aLanguage, vertical, appUnitsPerDevUnit, wordFlags, rounding, tp,
           [&](gfxShapedWord* aShapedWord) {
             aTextRun->CopyGlyphDataFrom(aShapedWord, aRunStart + wordStart);
-          });
+          },
+          aTextRun->GetUserContextId());
       if (!processed) {
         return false;  // failed, presumably out of memory?
       }
@@ -3856,7 +3882,8 @@ bool gfxFont::SplitAndInitTextRun(
               if (boundary == ' ') {
                 aTextRun->GetCharacterGlyphs()[aRunStart + i].SetIsSpace();
               }
-            });
+            },
+            aTextRun->GetUserContextId());
         if (!processed) {
           return false;
         }

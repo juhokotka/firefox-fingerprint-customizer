@@ -3140,6 +3140,14 @@ bool nsPresContext::IsFontAllowedByProfile(const nsACString& aFamilyName) const 
   return false;
 }
 
+uint32_t nsPresContext::GetUserContextId() const {
+  dom::BrowsingContext* bc = mDocument ? mDocument->GetBrowsingContext() : nullptr;
+  if (!bc) {
+    return 0;
+  }
+  return bc->OriginAttributesRef().mUserContextId;
+}
+
 void nsPresContext::ReportBlockedFontFamily(const nsCString& aMsg) const {
   MOZ_LOG(gFingerprinterDetection, LogLevel::Info, ("%s", aMsg.get()));
   nsContentUtils::ReportToConsoleNonLocalized(NS_ConvertUTF8toUTF16(aMsg),

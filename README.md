@@ -54,7 +54,7 @@ Traditional privacy browsers (Tor Browser, LibreWolf with RFP) pursue a **unifor
 |         Shared storage across tabs        | **Storage partitioned** by `userContextId` |
 |            Binary on/off switch           |  Two modes: **Normal** vs **Privacy Mode** |
 
-Each container gets its own **device fingerprint, location, and noise seed** — persisted across sessions, isolated at the process level.
+Each container gets its own **device fingerprint, location, and noise seed (Canvas/WebGL/Text)** — persisted across sessions, isolated at the process level.
 
 ---
 
@@ -114,17 +114,52 @@ Each container carries an independent `FingerprintProfile` with a complete devic
 
 <details>
 
-<summary><b>Noise Layer</b> — Randomized Canvas/WebGL seeds (click to expand)</summary>
+<summary><b>Noise Layer</b> — Randomized Canvas/WebGL/Text seeds (click to expand)</summary>
 
   
 
-
 - **Canvas Seed** — Persistent per-container random seed injected into `toDataURL()` / `getImageData()` output
 - **WebGL Seed** — Persistent per-container random seed injected into WebGL rendering
+- **Text Seed** — Persistent per-container random seed injected into glyph advance widths at the HarfBuzz shaping layer, perturbing `measureText()`, `getBoundingClientRect()`, `offsetWidth`, and all text-metric surfaces **simultaneously and consistently**
 - Seeds are **stable across sessions** (persisted to disk) — they are persistent per-container and not intended to be used as cross-site identifiers
 - Reuses RFP's existing `RandomizePixels` / `GenerateKey` infrastructure, bucketed by `OriginAttributes`
 
 </details>
+
+### Text Metric Perturbation
+
+Unlike Canvas/WebGL noise (which randomizes pixel output), the **Text Seed** modifies glyph advance widths **at the shaping layer** (`gfxHarfBuzzShaper::ShapeText`), upstream of all text-metric consumers. This ensures cross-surface consistency: `measureText()`, `getBoundingClientRect()`, and `offsetWidth` all return the **same** perturbed values.
+
+**How it defeats fingerprinting:**
+
+- **Per-glyph deltas** — Each glyph receives a deterministic ±0.05px perturbation derived from `textSeedHash ^ glyphCodepoint`, not a uniform offset. This defeats linear-regression attacks that can crack a constant-offset scheme (like Camoufox's approach).
+- **Per-container isolation** — The `textSeed` is unique per container (`userContextId`), so different containers produce different metric values. The word cache (`WordCacheKey`) includes `userContextId` in its hash to prevent cross-container cache leakage.
+- **Cross-surface consistency** — Because perturbation happens at the HarfBuzz shaping layer (before any API consumes the metrics), all downstream surfaces (`CanvasRenderingContext2D.measureText()`, `Element.getBoundingClientRect()`, `Element.offsetWidth`, layout reflow) see identical perturbed values.
+- **No anomalous values** — Perturbations are small (±0.05px) and deterministic, so the reported metrics remain plausible and don't trigger anomaly detection in risk engines.
+
+### Font Metric Spoofing (OS Masking)
+
+Text perturbation alone hides the *exact* machine metrics but preserves the host OS's metric *patterns* — enough for an advanced detector to infer the real platform. To achieve **true OS masking** (e.g. a macOS host presenting as Windows), this project layers **real target-OS metric substitution** on top of per-glyph perturbation.
+
+**Two-layer architecture:**
+
+1. **OS metric substitution (primary)** — When a container targets a different OS, glyph advance widths and font-level vertical metrics (ascent, descent, xHeight, capHeight, zero-width) are replaced with the **target OS's real values** from a metric database. This makes `measureText()`, CSS `ch`/`ex`, and `TextMetrics` vertical fields report the target OS's actual values, not the host's.
+2. **Per-glyph perturbation (fallback/overlay)** — When target-OS data is unavailable for a font/codepoint, the `textSeed` perturbation from the layer above kicks in as a fallback. When both are active, perturbation adds a small per-container variation on top of the substituted values.
+
+**Metric data sources:**
+
+| Target OS  | Source                                                                          |
+| ---------- | ------------------------------------------------------------------------------- |
+| **macOS**  | Generated locally at build time from the host's system fonts via `fonttools` (no Apple font data committed to the repo) |
+| **Windows**| Open-source metric-compatible fonts (Carlito → Calibri, Liberation → Arial/Times, etc.) |
+| **Linux**  | Open-source metric-compatible fonts (Liberation, Noto, etc.)                   |
+
+**Cross-OS font mapping** — A name-mapping table (`gfxFontMetricDatabase::MapFontFamily`) translates between equivalent family names across platforms (e.g. `Segoe UI` ↔ `Helvetica Neue` ↔ `DejaVu Sans`), so a request for "Segoe UI" on a macOS host resolves to the correct target-OS metric record.
+
+**Font enumeration consistency (Gap 3)** — Advanced detectors probe `@font-face { src: local('Segoe UI') }` and `document.fonts.check()` to enumerate the *installed* font roster. To keep "font exists" and "font metrics" in sync:
+
+- When a container spoofs a non-host OS and a `local()` probe names a font that doesn't exist on the host, `CoreTextFontList::LookupLocalFont` substitutes a metric-compatible macOS font (e.g. Helvetica Neue) but **labels the entry with the original probe name** (e.g. "Segoe UI"). This makes the probe resolve successfully while the metric hooks below look up the target-OS metrics.
+- All four metric-spoofing call sites (shaping advance widths, `gfxFont::Measure`, `gfxTextRun` CSS units, Canvas `TextMetrics`) key off the font's **entry name** (`gfxFontEntry::Name()`, which holds the original probe name) as a fallback when the family name (overwritten to the `@font-face` alias) doesn't map in the DB. This ensures aliased probes like `@font-face { font-family: "probe"; src: local("Segoe UI") }` resolve to spoofed Segoe UI metrics, not the substitute's real Mac metrics.
 
 ### Storage Isolation
 
@@ -161,6 +196,7 @@ Switch instantly via the **container button** next to the URL bar.
 │  FingerprintProfileStore (JS Runtime, Parent Process)        │
 │  - Stores Profile by userContextId (JSON, persisted to disk) │
 │  - 3-layer random generator: Device DB + Location DB + Noise │
+│  - Noise: canvasSeed + webglSeed + textSeed (16 bytes each)  │
 │  - Generated once at container creation, fixed across sessions│
 │  - Depends only on Adapter interfaces (no direct Firefox API)│
 └────────────────────────────┬─────────────────────────────────┘
@@ -179,12 +215,40 @@ Switch instantly via the **container button** next to the URL bar.
 │  - Profile cached per-BrowsingContext (zero IPC on hot path) │
 │  - GetSpoofed* reads Profile in profileMode                  │
 │  - Canvas/WebGL noise via existing per-OA key mechanism      │
+│  - Text seed registered with gfxTextFingerprint (per-OA)     │
+└────────────────────────────┬─────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│  gfxHarfBuzzShaper (Two-Layer Font Metric Spoofing)          │
+│  - Layer 1: OS metric substitution (primary)                 │
+│    advance widths & vertical metrics from target-OS DB       │
+│  - Layer 2: Per-glyph ±0.05px delta from textSeedHash        │
+│    (fallback when no target-OS data; overlay when both)      │
+│  - WordCacheKey includes userContextId (cache isolation)     │
+└────────────────────────────┬─────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│  gfxFontMetricDatabase (Target-OS Metric DB)                 │
+│  - font_metrics_{macos,windows,linux}.json (generated)       │
+│  - MapFontFamily: cross-OS name equivalence                  │
+│  - GetAdvanceWidth / GetFontMetrics (design-unit → px)       │
+└────────────────────────────┬─────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│  CoreTextFontList::LookupLocalFont (Gap 3: Font Enumeration) │
+│  - local('Segoe UI') probe → substitute macOS font           │
+│  - Entry labeled with original probe name (metric sync)      │
 └────────────────────────────┬─────────────────────────────────┘
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  BrowsingContext Override (Lang / UA / Platform / Timezone)  │
 │  + Navigator / nsScreen / MediaDevices / AudioContext API    │
+│  + measureText() / getBoundingClientRect() / offsetWidth     │
+│  + @font-face local() probes / document.fonts.check()        │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -317,7 +381,7 @@ When a user creates a container via the panel UI:
 3. `FingerprintProfileStore.generateProfile()` creates a 3-layer profile:
    - **Device**: randomly picked from `DEVICE_DATABASE` (25 real device variants across Mac/Linux/Windows)
    - **Location**: randomly picked from `LOCATION_DATABASE` (12 countries)
-   - **Noise**: fresh random seeds for Canvas/WebGL
+   - **Noise**: fresh random seeds for Canvas/WebGL/Text
 4. Profile is persisted to disk (`containers.json` + profile store)
 
 ### 2. Profile Sync (Parent → Content Process)
@@ -342,6 +406,13 @@ In Privacy Mode, `nsRFPService::ShouldResistFingerprinting()` returns `true` for
 | `screen.width/height`             | `nsScreen.cpp`                   | `profile.device.screen`          |
 | `Canvas.toDataURL()`              | `nsCanvasRenderingContext2D.cpp` | `profile.noise.canvasSeed`       |
 | `WebGL.getParameter()`            | `ClientWebGLContext.cpp`         | `profile.noise.webglSeed`        |
+| `CanvasRenderingContext2D.measureText()` | `gfxHarfBuzzShaper.cpp`   | `profile.noise.textSeed` + OS metric DB         |
+| `Element.getBoundingClientRect()` | `gfxHarfBuzzShaper.cpp`          | `profile.noise.textSeed` + OS metric DB         |
+| `Element.offsetWidth`             | `gfxHarfBuzzShaper.cpp`          | `profile.noise.textSeed` + OS metric DB         |
+| `TextMetrics` vertical fields     | `gfxFont.cpp` / `CanvasRenderingContext2D.cpp` | OS metric DB (ascent/descent/xHeight) |
+| CSS `ch` / `ex` units             | `gfxTextRun.cpp`                 | OS metric DB (zeroWidth / xHeight)              |
+| `@font-face { src: local() }`     | `CoreTextFontList.cpp`           | Font roster substitution (Gap 3)                |
+| `document.fonts.check()`          | `CoreTextFontList.cpp`           | Font roster substitution (Gap 3)                |
 | `AudioContext.sampleRate`         | `AudioContext.cpp`               | `profile.device.audioSampleRate` |
 | `Intl.DateTimeFormat`             | `BrowsingContext.cpp`            | `profile.location.timezone`      |
 | `MediaDevices.enumerateDevices()` | `MediaDevices.cpp`               | `profile.device.mediaDevices`    |
@@ -393,7 +464,8 @@ firefox-main/
 │   ├── contextualidentity/
 │   │   └── ContextualIdentityService.sys.mjs  # Container registry (containers.json)
 │   ├── resistfingerprinting/
-│   │   └── nsRFPService.{h,cpp}         # Fingerprint interception (C++)
+│   │   ├── nsRFPService.{h,cpp}         # Fingerprint interception (C++)
+│   │   └── FontVisibilityProvider.h     # GetUserContextId() for per-container font substitution
 │   └── fingerprintprofile/              # Profile store & adapters
 │       ├── FingerprintProfileStore.sys.mjs
 │       └── adapters/
@@ -405,9 +477,24 @@ firefox-main/
 │   │   ├── PWindowGlobal.ipdl           # UpdateProfile IPC message
 │   │   ├── WindowGlobalParent.cpp       # Parent-side profile cache (UniquePtr)
 │   │   ├── WindowGlobalChild.cpp        # Child-side profile cache (UniquePtr)
-│   │   └── WindowGlobalTypes.ipdlh      # ProfileArgs / FingerprintDeviceArgs structs
+│   │   └── WindowGlobalTypes.ipdlh      # ProfileArgs / FingerprintDeviceArgs / FingerprintNoiseArgs structs
 │   └── chrome-webidl/
-│       └── FingerprintProfile.webidl    # WebIDL dictionary definitions
+│       └── FingerprintProfile.webidl    # WebIDL dictionary definitions (incl. textSeed)
+├── gfx/thebes/
+│   ├── gfxTextFingerprint.{h,cpp}       # Per-container text seed storage (FNV-1a hash, thread-safe)
+│   ├── gfxHarfBuzzShaper.cpp            # Two-layer metric spoofing: OS substitution + per-glyph perturbation
+│   ├── gfxFontMetricDatabase.{h,cpp}    # Target-OS metric DB + cross-OS font name mapping
+│   ├── CoreTextFontList.cpp             # Gap 3: local() probe substitution (font enumeration consistency)
+│   ├── gfxFont.h                        # userContextId threading (gfxShapedText, WordCacheKey)
+│   ├── gfxFont.cpp                      # Vertical metric spoofing (gfxFont::Measure)
+│   ├── gfxTextRun.{h,cpp}               # userContextId propagation + CSS ch/ex spoofing
+│   ├── gfxPlatformFontList.cpp          # Profile fontSet whitelist (IsFontAllowedByProfile)
+│   ├── font_metrics_{macos,windows,linux}.json  # Generated target-OS metric data (not committed)
+│   └── moz.build                        # Build config (gfxTextFingerprint + gfxFontMetricDatabase added)
+├── layout/base/
+│   └── nsPresContext.{h,cpp}            # GetUserContextId() override (reads BrowsingContext OriginAttributes)
+├── tools/fonts/
+│   └── extract_font_metrics.py          # Build-time macOS metric extraction (fonttools)
 └── docshell/base/
     └── BrowsingContext.{h,cpp}          # Lang/UA/Platform/Timezone overrides
 ```
@@ -452,6 +539,12 @@ node -c browser/base/content/browser.js
 - **XUL hbox click events** — `hbox` elements in panels have unreliable click events. Use `toolbarbutton` elements instead.
 - **Static imports in xpcshell tests** — `import` with `moz-src:///` URLs don't resolve; use `ChromeUtils.defineESModuleGetters` with `resource://gre/modules/` URLs.
 - **Container tab binding** — Tabs are permanently bound to their container at creation. Switching containers opens a new tab (Firefox architectural constraint).
+- **Text perturbation hook point** — Perturbation must happen at `gfxHarfBuzzShaper::ShapeText` (the shaping layer), not at individual API surfaces (`measureText`, `getBoundingClientRect`). Hooking at the API level would break cross-surface consistency.
+- **Word cache isolation** — `WordCacheKey` must include `userContextId` in its hash (`aUserContextId * 0x1000000`). Without this, shaped words from one container leak into another's cache, breaking per-container isolation.
+- **Per-glyph vs. uniform perturbation** — A uniform offset (Camoufox's approach) is detectable via linear regression on `measureText` widths. Per-glyph deltas derived from `seedHash ^ codepoint` defeat this attack.
+- **Two-layer font metric spoofing** — OS metric substitution (Layer 1) is the primary mechanism for OS masking; per-glyph perturbation (Layer 2) is a fallback when target-OS data is missing and an overlay adding per-container variation when both are active. Substitution must use *real* target-OS values (not synthetic noise) to avoid anomaly detection.
+- **Vertical metric call sites** — `gfxFont::Metrics` is computed once at font init from platform APIs (`CTFontGetAscent`, DWrite, FreeType) and cached, so it cannot be modified per-container at the cached struct level. Vertical spoofing must copy and override at each of the 3 call sites: `gfxTextRun::GetMetricsForCSSUnits` (CSS `ch`/`ex`), `CanvasRenderingContext2D::DrawOrMeasureText` (TextMetrics vertical), and `gfxFont::Measure` (`actualBoundingBoxAscent/Descent`). Derived metrics (`emAscent`, `emDescent`, `maxHeight`, `internalLeading`) must be recomputed after overriding `maxAscent`/`maxDescent`.
+- **Gap 3: local() probe metric sync** — When `@font-face { src: local() }` resolves via font substitution, `gfxUserFontSet` overwrites the entry's `FamilyName()` with the `@font-face` family name (often an arbitrary alias). Metric hooks must fall back to `gfxFontEntry::Name()` (the original probe name) when `FamilyName()` doesn't map in the target-OS DB, otherwise "font exists" (Windows) and "font metrics" (Mac) would disagree.
 
 </details>
 

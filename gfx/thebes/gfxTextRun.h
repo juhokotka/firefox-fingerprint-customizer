@@ -958,6 +958,12 @@ class gfxFontGroup final : public gfxTextRunFactory {
 
   const gfxFontStyle* GetStyle() const { return &mStyle; }
 
+  // Container identity for per-container text-metric perturbation.
+  uint32_t GetUserContextId() const { return mUserContextId; }
+  void SetUserContextId(uint32_t aUserContextId) {
+    mUserContextId = aUserContextId;
+  }
+
   // Get the presContext for which this fontGroup was constructed. This may be
   // null! (In the case of canvas not connected to a document.)
   FontVisibilityProvider* GetFontVisibilityProvider() const {
@@ -1432,6 +1438,11 @@ class gfxFontGroup final : public gfxTextRunFactory {
 
   uint32_t mFontListGeneration = 0;  // platform font list generation for this
                                      // fontgroup
+
+  // Container identity for per-container text-metric perturbation.
+  // Set by the document/canvas that owns this font group. Propagated to
+  // gfxTextRun → gfxShapedWord → HarfBuzz shaper.
+  uint32_t mUserContextId = 0;
 
   /**
    * Textrun creation short-cuts for special cases where we don't need to

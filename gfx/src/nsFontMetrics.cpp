@@ -22,6 +22,8 @@
 #include "nsStyleConsts.h"       // for StyleHyphens::None
 #include "mozilla/Assertions.h"  // for MOZ_ASSERT
 #include "mozilla/UniquePtr.h"   // for UniquePtr
+#include "mozilla/dom/BrowsingContext.h"
+#include "mozilla/dom/Document.h"
 
 class gfxUserFontSet;
 using namespace mozilla;
@@ -149,6 +151,18 @@ nsFontMetrics::nsFontMetrics(const nsFont& aFont, const Params& aParams,
   mFontGroup = new gfxFontGroup(
       mPresContext, aFont.family.families, &style, mLanguage, mExplicitLanguage,
       aParams.textPerf, aParams.userFontSet, devToCssSize, aFont.variantEmoji);
+
+  // Propagate container identity for per-container text-metric perturbation.
+  if (mPresContext && mFontGroup) {
+    dom::Document* doc = mPresContext->Document();
+    if (doc) {
+      dom::BrowsingContext* bc = doc->GetBrowsingContext();
+      if (bc) {
+        mFontGroup->SetUserContextId(
+            bc->OriginAttributesRef().mUserContextId);
+      }
+    }
+  }
 }
 
 nsFontMetrics::~nsFontMetrics() {

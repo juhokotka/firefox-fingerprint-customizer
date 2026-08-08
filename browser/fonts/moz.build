@@ -5,3 +5,12 @@
 if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("windows", "gtk"):
     DIST_SUBDIR = ""
     FINAL_TARGET_FILES.fonts += ["TwemojiMozilla.ttf"]
+
+# Font metric databases for cross-platform font metric spoofing.
+# These JSON files contain advance widths extracted from real font files
+# and are loaded at runtime from the GRE directory.
+FINAL_TARGET_FILES.fonts += [
+    "font_metrics_linux.json",
+    "font_metrics_macos.json",
+    "font_metrics_windows.json",
+]

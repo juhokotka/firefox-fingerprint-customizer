@@ -47,6 +47,7 @@ dictionary FingerprintLocationDict {
 dictionary FingerprintNoiseDict {
   sequence<octet> canvasSeed = [];
   sequence<octet> webglSeed = [];
+  sequence<octet> textSeed = [];
 };
 
 dictionary FingerprintProfileDict {

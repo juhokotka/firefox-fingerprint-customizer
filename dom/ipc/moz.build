@@ -226,6 +226,7 @@ LOCAL_INCLUDES += [
     "/dom/storage",
     "/extensions/spellcheck/src",
     "/gfx/2d",
+    "/gfx/thebes",
     "/hal/sandbox",
     "/js/xpconnect/loader",
     "/js/xpconnect/src",

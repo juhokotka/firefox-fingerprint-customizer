@@ -90,6 +90,7 @@ function buildEditor(host, profile, userContextId) {
   container.appendChild(buildSection(doc, "Fingerprint Noise", [
     buildRow(doc, "Canvas Seed (hex)", buildTextarea(doc, "canvasSeed", (noise.canvasSeed || []).map(b => b.toString(16).padStart(2, "0")).join(""))),
     buildRow(doc, "WebGL Seed (hex)", buildTextarea(doc, "webglSeed", (noise.webglSeed || []).map(b => b.toString(16).padStart(2, "0")).join(""))),
+    buildRow(doc, "Text Seed (hex)", buildTextarea(doc, "textSeed", (noise.textSeed || []).map(b => b.toString(16).padStart(2, "0")).join(""))),
   ]));
 
   // Section: Privacy Options
@@ -275,6 +276,13 @@ document.addEventListener("dialogaccept", () => {
     profile.noise.webglSeed = [];
     for (let i = 0; i < webglHex.length; i += 2) {
       profile.noise.webglSeed.push(parseInt(webglHex.substr(i, 2), 16));
+    }
+  }
+  let textHex = getVal(form, "textSeed");
+  if (textHex) {
+    profile.noise.textSeed = [];
+    for (let i = 0; i < textHex.length; i += 2) {
+      profile.noise.textSeed.push(parseInt(textHex.substr(i, 2), 16));
     }
   }
 

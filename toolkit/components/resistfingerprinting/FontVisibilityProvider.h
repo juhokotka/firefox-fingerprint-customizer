@@ -50,6 +50,11 @@ class FontVisibilityProvider {
     return true;
   }
 
+  // Returns the container identity (userContextId) for per-container
+  // font spoofing. Default returns 0 (no container). Overridden by
+  // nsPresContext to read from BrowsingContext::OriginAttributes.
+  virtual uint32_t GetUserContextId() const { return 0; }
+
   void ReportBlockedFontFamily(const gfxFontFamily& aFamily) const;
   void ReportBlockedFontFamily(const mozilla::fontlist::Family& aFamily) const;
   void FormatBlockedFontFamilyMessage(nsCString& aMsg, const nsCString& aFamily,

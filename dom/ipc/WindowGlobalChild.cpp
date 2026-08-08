@@ -6,6 +6,7 @@
 
 #include "GeckoProfiler.h"
 #include "Navigator.h"
+#include "gfxTextFingerprint.h"
 #include "mozilla/AntiTrackingUtils.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/ErrorResult.h"
@@ -1027,8 +1028,25 @@ mozilla::ipc::IPCResult WindowGlobalChild::RecvUpdateProfile(
   if (aProfile.isSome()) {
     cache.InsertOrUpdate(userContextId,
                          MakeUnique<ProfileArgs>(aProfile.ref()));
+    // Register text-metric spoofing state (content process side).
+    // Pass both the textSeed (for perturbation) and the target platform
+    // (for OS metric substitution) to the gfxTextFingerprint layer.
+    nsTArray<uint8_t> textSeed;
+    nsAutoCString targetPlatform;
+    if (aProfile->noise().isSome()) {
+      textSeed = aProfile->noise().ref().textSeed().Clone();
+    }
+    if (aProfile->device().isSome()) {
+      targetPlatform = aProfile->device().ref().platform();
+    }
+    if (!textSeed.IsEmpty() || !targetPlatform.IsEmpty()) {
+      gfxTextFingerprint::SetSeed(userContextId, textSeed, targetPlatform);
+    } else {
+      gfxTextFingerprint::ClearSeed(userContextId);
+    }
   } else {
     cache.Remove(userContextId);
+    gfxTextFingerprint::ClearSeed(userContextId);
   }
   return IPC_OK();
 }

@@ -918,6 +918,7 @@ export const FingerprintProfileStore = {
       noise: {
         canvasSeed: generateRandomBytes(16),
         webglSeed: generateRandomBytes(16),
+        textSeed: generateRandomBytes(16),
       },
       webrtcHideIP: true,
       geolocation: "blocked",
@@ -1023,6 +1024,7 @@ export const FingerprintProfileStore = {
     profile.noise = {
       canvasSeed: generateRandomBytes(16),
       webglSeed: generateRandomBytes(16),
+      textSeed: generateRandomBytes(16),
     };
     this.saveProfile(userContextId, profile);
     return profile;

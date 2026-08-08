@@ -7,6 +7,8 @@
 #include "gfxFontConstants.h"
 #include "gfxHarfBuzzShaper.h"
 #include "gfxFontUtils.h"
+#include "gfxFontMetricDatabase.h"
+#include "gfxTextFingerprint.h"
 #include "gfxTextRun.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/intl/String.h"
@@ -1486,6 +1488,120 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
                       0, length);
 
   hb_shape(mHBFont, mBuffer, features.Elements(), features.Length());
+
+  // ── Per-container text-metric spoofing ──────────────────────────
+  // Two-layer approach:
+  //
+  // 1. OS metric substitution (primary): Replace glyph advance widths with
+  //    the target OS's real metric values from the font metric database.
+  //    This achieves true OS-masking — measureText/boundingRect return the
+  //    target OS's actual values, not the host OS's values with noise.
+  //
+  // 2. Per-glyph perturbation (fallback/overlay): When target OS metric
+  //    data is unavailable for a font/codepoint, apply a deterministic
+  //    ±0.05px perturbation from the textSeed. This hides the real machine's
+  //    exact metrics as a fallback, and adds a small per-container variation
+  //    on top of the substituted values when both are active.
+  uint32_t userContextId = aShapedText->GetUserContextId();
+  if (userContextId != 0) {
+    uint32_t seedHash = gfxTextFingerprint::GetSeedHash(userContextId);
+    nsCString targetPlatform =
+        gfxTextFingerprint::GetTargetPlatform(userContextId);
+
+    if (seedHash != 0 || !targetPlatform.IsEmpty()) {
+      using mozilla::gfx::gfxFontMetricDatabase;
+      gfxFontMetricDatabase::TargetOS targetOS =
+          targetPlatform.IsEmpty()
+              ? gfxFontMetricDatabase::TargetOS::None
+              : gfxFontMetricDatabase::PlatformToOS(targetPlatform);
+
+      // Get the font family name for metric lookup
+      nsAutoCString fontFamily;
+      if (targetOS != gfxFontMetricDatabase::TargetOS::None) {
+        gfxFontEntry* entry = GetFont()->GetFontEntry();
+        nsCString family = entry->FamilyName();
+        fontFamily = gfxFontMetricDatabase::MapFontFamily(family, targetOS);
+        // Gap 3: for substitute local() fonts, FamilyName() is the @font-face
+        // family name (possibly an arbitrary alias), while Name() holds the
+        // original local() probe name (e.g. "Segoe UI"). Fall back to it so
+        // that "font exists" and "font metrics" stay in sync.
+        if (fontFamily.Equals(family, nsCaseInsensitiveCStringComparator)) {
+          nsCString entryName = entry->Name();
+          nsCString mappedName =
+              gfxFontMetricDatabase::MapFontFamily(entryName, targetOS);
+          if (!mappedName.Equals(entryName,
+                                 nsCaseInsensitiveCStringComparator)) {
+            fontFamily = mappedName;
+          }
+        }
+      }
+
+      // Get font size for design-unit → pixel conversion
+      // The font's adjusted size is in device pixels
+      float fontSizePx = GetFont()->GetAdjustedSize();
+
+      uint32_t numGlyphs;
+      hb_glyph_position_t* glyphPositions =
+          hb_buffer_get_glyph_positions(mBuffer, &numGlyphs);
+      const hb_glyph_info_t* glyphInfos =
+          hb_buffer_get_glyph_infos(mBuffer, &numGlyphs);
+
+      // Ensure the metric database is loaded
+      if (targetOS != gfxFontMetricDatabase::TargetOS::None) {
+        gfxFontMetricDatabase::EnsureLoaded();
+      }
+
+      for (uint32_t i = 0; i < numGlyphs; i++) {
+        // Look up the source Unicode codepoint from the cluster index
+        // (hb_glyph_info_t.cluster is the index into the input text)
+        uint32_t cluster = glyphInfos[i].cluster;
+        uint32_t codepoint = 0;
+        bool hasCodepoint = false;
+        if (cluster < aLength) {
+          // Handle surrogate pairs
+          char16_t ch = aText[cluster];
+          if (ch >= 0xD800 && ch <= 0xDBFF && cluster + 1 < aLength) {
+            char16_t low = aText[cluster + 1];
+            if (low >= 0xDC00 && low <= 0xDFFF) {
+              codepoint = 0x10000 + ((ch - 0xD800) << 10) + (low - 0xDC00);
+              hasCodepoint = true;
+            }
+          }
+          if (!hasCodepoint) {
+            codepoint = ch;
+            hasCodepoint = true;
+          }
+        }
+
+        // Layer 1: Try metric substitution from the target OS database
+        if (targetOS != gfxFontMetricDatabase::TargetOS::None &&
+            hasCodepoint && !fontFamily.IsEmpty()) {
+          uint32_t targetUnitsPerEm = 0;
+          mozilla::Maybe<int32_t> targetAdvance =
+              gfxFontMetricDatabase::GetAdvanceWidth(
+                  targetOS, fontFamily, codepoint, &targetUnitsPerEm);
+          if (targetAdvance.isSome() && targetUnitsPerEm > 0) {
+            // Convert design units → device pixels → HarfBuzz 26.6 fixed-point
+            // target_advance_px = (design_units / units_per_em) * font_size_px
+            // HarfBuzz advance = target_advance_px * 64
+            float advancePx =
+                (float)targetAdvance.value() / (float)targetUnitsPerEm *
+                fontSizePx;
+            glyphPositions[i].x_advance = (int32_t)(advancePx * 64.0f);
+          }
+        }
+
+        // Layer 2: Per-glyph perturbation (fallback or overlay)
+        if (seedHash != 0) {
+          uint32_t h = seedHash ^ (hasCodepoint ? codepoint : glyphInfos[i].codepoint);
+          h *= 0x9e3779b9u;  // golden ratio constant for good diffusion
+          h ^= h >> 16;
+          float deltaPx = ((int32_t)h / 2147483648.0f) * 0.05f;
+          glyphPositions[i].x_advance += (int32_t)(deltaPx * 64.0f);
+        }
+      }
+    }
+  }
 
   if (isRightToLeft) {
     hb_buffer_reverse(mBuffer);

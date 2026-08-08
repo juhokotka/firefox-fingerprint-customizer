@@ -739,12 +739,20 @@ class gfxShapedText {
   typedef mozilla::intl::Script Script;
 
   gfxShapedText(uint32_t aLength, mozilla::gfx::ShapedTextFlags aFlags,
-                uint16_t aAppUnitsPerDevUnit)
+                uint16_t aAppUnitsPerDevUnit, uint32_t aUserContextId = 0)
       : mLength(aLength),
         mFlags(aFlags),
-        mAppUnitsPerDevUnit(aAppUnitsPerDevUnit) {}
+        mAppUnitsPerDevUnit(aAppUnitsPerDevUnit),
+        mUserContextId(aUserContextId) {}
 
   virtual ~gfxShapedText() = default;
+
+  // Container identity for per-container text-metric perturbation.
+  // Returns 0 for non-profile browsing (no perturbation applied).
+  uint32_t GetUserContextId() const { return mUserContextId; }
+  void SetUserContextId(uint32_t aUserContextId) {
+    mUserContextId = aUserContextId;
+  }
 
   /**
    * This class records the information associated with a character in the
@@ -1301,6 +1309,9 @@ class gfxShapedText {
   mozilla::gfx::ShapedTextFlags mFlags;
 
   uint16_t mAppUnitsPerDevUnit;
+
+  // Container identity for per-container text-metric perturbation (0 = none).
+  uint32_t mUserContextId = 0;
 };
 
 /*
@@ -1327,7 +1338,8 @@ class gfxShapedWord final : public gfxShapedText {
                                Script aRunScript, nsAtom* aLanguage,
                                uint16_t aAppUnitsPerDevUnit,
                                mozilla::gfx::ShapedTextFlags aFlags,
-                               gfxFontShaper::RoundingFlags aRounding) {
+                               gfxFontShaper::RoundingFlags aRounding,
+                               uint32_t aUserContextId = 0) {
     NS_ASSERTION(aLength <= gfxPlatform::GetPlatform()->WordCacheCharLimit(),
                  "excessive length for gfxShapedWord!");
 
@@ -1342,14 +1354,16 @@ class gfxShapedWord final : public gfxShapedText {
 
     // Construct in the pre-allocated storage, using placement new
     return new (storage) gfxShapedWord(aText, aLength, aRunScript, aLanguage,
-                                       aAppUnitsPerDevUnit, aFlags, aRounding);
+                                       aAppUnitsPerDevUnit, aFlags, aRounding,
+                                       aUserContextId);
   }
 
   static gfxShapedWord* Create(const char16_t* aText, uint32_t aLength,
                                Script aRunScript, nsAtom* aLanguage,
                                uint16_t aAppUnitsPerDevUnit,
                                mozilla::gfx::ShapedTextFlags aFlags,
-                               gfxFontShaper::RoundingFlags aRounding) {
+                               gfxFontShaper::RoundingFlags aRounding,
+                               uint32_t aUserContextId = 0) {
     NS_ASSERTION(aLength <= gfxPlatform::GetPlatform()->WordCacheCharLimit(),
                  "excessive length for gfxShapedWord!");
 
@@ -1361,7 +1375,7 @@ class gfxShapedWord final : public gfxShapedText {
       LossyAppendUTF16toASCII(nsDependentSubstring(aText, aLength), narrowText);
       return Create((const uint8_t*)(narrowText.BeginReading()), aLength,
                     aRunScript, aLanguage, aAppUnitsPerDevUnit, aFlags,
-                    aRounding);
+                    aRounding, aUserContextId);
     }
 
     uint32_t size = offsetof(gfxShapedWord, mCharGlyphsStorage) +
@@ -1372,7 +1386,8 @@ class gfxShapedWord final : public gfxShapedText {
     }
 
     return new (storage) gfxShapedWord(aText, aLength, aRunScript, aLanguage,
-                                       aAppUnitsPerDevUnit, aFlags, aRounding);
+                                       aAppUnitsPerDevUnit, aFlags, aRounding,
+                                       aUserContextId);
   }
 
   // Override operator delete to properly free the object that was
@@ -1431,10 +1446,11 @@ class gfxShapedWord final : public gfxShapedText {
   gfxShapedWord(const uint8_t* aText, uint32_t aLength, Script aRunScript,
                 nsAtom* aLanguage, uint16_t aAppUnitsPerDevUnit,
                 mozilla::gfx::ShapedTextFlags aFlags,
-                gfxFontShaper::RoundingFlags aRounding)
+                gfxFontShaper::RoundingFlags aRounding,
+                uint32_t aUserContextId = 0)
       : gfxShapedText(aLength,
                       aFlags | mozilla::gfx::ShapedTextFlags::TEXT_IS_8BIT,
-                      aAppUnitsPerDevUnit),
+                      aAppUnitsPerDevUnit, aUserContextId),
         mLanguage(aLanguage),
         mScript(aRunScript),
         mRounding(aRounding),
@@ -1448,8 +1464,9 @@ class gfxShapedWord final : public gfxShapedText {
   gfxShapedWord(const char16_t* aText, uint32_t aLength, Script aRunScript,
                 nsAtom* aLanguage, uint16_t aAppUnitsPerDevUnit,
                 mozilla::gfx::ShapedTextFlags aFlags,
-                gfxFontShaper::RoundingFlags aRounding)
-      : gfxShapedText(aLength, aFlags, aAppUnitsPerDevUnit),
+                gfxFontShaper::RoundingFlags aRounding,
+                uint32_t aUserContextId = 0)
+      : gfxShapedText(aLength, aFlags, aAppUnitsPerDevUnit, aUserContextId),
         mLanguage(aLanguage),
         mScript(aRunScript),
         mRounding(aRounding),
@@ -1939,7 +1956,8 @@ class gfxFont {
   bool ProcessSingleSpaceShapedWord(
       bool aVertical, uint16_t aAppUnitsPerDevUnit,
       mozilla::gfx::ShapedTextFlags aFlags, RoundingFlags aRounding,
-      const std::function<void(gfxShapedWord*)>& aCallback);
+      const std::function<void(gfxShapedWord*)>& aCallback,
+      uint32_t aUserContextId = 0);
 
   // Called by the gfxFontCache timer to increment the age of all the words,
   // so that they'll expire after a sufficient period of non-use.
@@ -2207,7 +2225,8 @@ class gfxFont {
                                  uint16_t aAppUnitsPerDevUnit,
                                  mozilla::gfx::ShapedTextFlags aFlags,
                                  RoundingFlags aRounding,
-                                 gfxTextPerfMetrics* aTextPerf, Func aCallback);
+                                 gfxTextPerfMetrics* aTextPerf, Func aCallback,
+                                 uint32_t aUserContextId = 0);
 
   // whether a given feature is included in feature settings from both the
   // font and the style. aFeatureOn set if resolved feature value is non-zero
@@ -2242,12 +2261,13 @@ class gfxFont {
     } mText;
     PLDHashNumber mHashKey;
     bool mTextIs8Bit;
-    // 3 bytes of padding here
+    uint32_t mUserContextId = 0;
+    // (padding to alignment)
 
     WordCacheKey(const uint8_t* aText, uint8_t aLength, uint32_t aStringHash,
                  Script aScriptCode, nsAtom* aLanguage,
                  uint16_t aAppUnitsPerDevUnit, ShapedTextFlags aFlags,
-                 RoundingFlags aRounding)
+                 RoundingFlags aRounding, uint32_t aUserContextId = 0)
         : mLanguage(aLanguage),
           mFlags(aFlags),
           mScript(aScriptCode),
@@ -2256,8 +2276,10 @@ class gfxFont {
           mRounding(aRounding),
           mHashKey(aStringHash + static_cast<int32_t>(aScriptCode) +
                    aAppUnitsPerDevUnit * 0x100 + uint16_t(aFlags) * 0x10000 +
-                   int(aRounding) + (aLanguage ? aLanguage->hash() : 0)),
-          mTextIs8Bit(true) {
+                   int(aRounding) + (aLanguage ? aLanguage->hash() : 0) +
+                   aUserContextId * 0x1000000),
+          mTextIs8Bit(true),
+          mUserContextId(aUserContextId) {
       NS_ASSERTION(aFlags & ShapedTextFlags::TEXT_IS_8BIT,
                    "8-bit flag should have been set");
       mText.mSingle = aText;
@@ -2266,7 +2288,7 @@ class gfxFont {
     WordCacheKey(const char16_t* aText, uint8_t aLength, uint32_t aStringHash,
                  Script aScriptCode, nsAtom* aLanguage,
                  uint16_t aAppUnitsPerDevUnit, ShapedTextFlags aFlags,
-                 RoundingFlags aRounding)
+                 RoundingFlags aRounding, uint32_t aUserContextId = 0)
         : mLanguage(aLanguage),
           mFlags(aFlags),
           mScript(aScriptCode),
@@ -2275,8 +2297,9 @@ class gfxFont {
           mRounding(aRounding),
           mHashKey(aStringHash + static_cast<int32_t>(aScriptCode) +
                    aAppUnitsPerDevUnit * 0x100 + uint16_t(aFlags) * 0x10000 +
-                   int(aRounding)),
-          mTextIs8Bit(false) {
+                   int(aRounding) + aUserContextId * 0x1000000),
+          mTextIs8Bit(false),
+          mUserContextId(aUserContextId) {
       // We can NOT assert that TEXT_IS_8BIT is false in aFlags here,
       // because this might be an 8bit-only word from a 16-bit textrun,
       // in which case the text we're passed is still in 16-bit form,
