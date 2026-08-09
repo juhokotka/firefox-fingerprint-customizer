@@ -29,10 +29,13 @@ namespace gfx {
 // another OS. When spoofing, we look up the target OS's font that matches
 // the requested family.
 struct FontMapping {
-  const char* generic;       // CSS generic family (nullptr if not generic)
+  const char* generic;        // CSS generic family (nullptr if not generic)
   const char* macos;
   const char* windows;
-  const char* linux;
+  // NOTE: member must NOT be named `linux` — `linux` is a predefined macro
+  // (value 1) on Linux GCC/Clang, which would expand the member declaration
+  // to `const char* 1;` and break the whole struct (excess-elements errors).
+  const char* linuxFamily;
 };
 
 // Fonts that are cross-platform (same name on all OSes) don't need mapping.
@@ -149,7 +152,7 @@ nsCString gfxFontMetricDatabase::MapFontFamily(const nsACString& aFamily,
         targetName = m.windows;
         break;
       case TargetOS::Linux:
-        targetName = m.linux;
+        targetName = m.linuxFamily;
         break;
       default:
         break;
@@ -160,8 +163,8 @@ nsCString gfxFontMetricDatabase::MapFontFamily(const nsACString& aFamily,
       sourceName = m.macos;
     } else if (aFamily.Equals(m.windows, nsCaseInsensitiveCStringComparator)) {
       sourceName = m.windows;
-    } else if (aFamily.Equals(m.linux, nsCaseInsensitiveCStringComparator)) {
-      sourceName = m.linux;
+    } else if (aFamily.Equals(m.linuxFamily, nsCaseInsensitiveCStringComparator)) {
+      sourceName = m.linuxFamily;
     } else if (m.generic && aFamily.LowerCaseEqualsASCII(m.generic)) {
       sourceName = m.generic;
     }

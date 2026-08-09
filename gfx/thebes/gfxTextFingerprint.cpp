@@ -12,6 +12,7 @@
 #include "nsHashKeys.h"
 
 using namespace mozilla;
+using namespace mozilla::gfx;  // for gfxFontMetricDatabase (unified-build safe)
 
 static StaticMutex gTextFpLock MOZ_UNANNOTATED;
 
