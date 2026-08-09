@@ -13,16 +13,19 @@
 #include "js/CallArgs.h"
 #include "js/TypeDecls.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/FileSystemManager.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseWorkerProxy.h"
 #include "mozilla/dom/StorageManagerBinding.h"
+#include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerRunnable.h"
@@ -78,19 +81,26 @@ class RequestResolver final : public nsIQuotaCallback {
   StorageEstimate mStorageEstimate;
   const Type mType;
   bool mPersisted;
+  uint32_t mUserContextId;
 
  public:
-  RequestResolver(Type aType, Promise* aPromise)
+  RequestResolver(Type aType, Promise* aPromise, uint32_t aUserContextId = 0)
       : mPromise(aPromise),
         mResultCode(NS_OK),
         mType(aType),
-        mPersisted(false) {
+        mPersisted(false),
+        mUserContextId(aUserContextId) {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(aPromise);
   }
 
-  RequestResolver(Type aType, PromiseWorkerProxy* aProxy)
-      : mProxy(aProxy), mResultCode(NS_OK), mType(aType), mPersisted(false) {
+  RequestResolver(Type aType, PromiseWorkerProxy* aProxy,
+                  uint32_t aUserContextId = 0)
+      : mProxy(aProxy),
+        mResultCode(NS_OK),
+        mType(aType),
+        mPersisted(false),
+        mUserContextId(aUserContextId) {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(aProxy);
   }
@@ -332,8 +342,11 @@ already_AddRefed<Promise> ExecuteOpOnMainOrWorkerThread(
       }
 
       case RequestResolver::Type::Estimate: {
-        RefPtr<RequestResolver> resolver =
-            new RequestResolver(RequestResolver::Type::Estimate, promise);
+        uint32_t userContextId = BasePrincipal::Cast(principal)
+                                     ->OriginAttributesRef()
+                                     .mUserContextId;
+        RefPtr<RequestResolver> resolver = new RequestResolver(
+            RequestResolver::Type::Estimate, promise, userContextId);
 
         RefPtr<nsIQuotaRequest> request;
         aRv = Estimate(principal, resolver, getter_AddRefs(request));
@@ -477,6 +490,19 @@ nsresult RequestResolver::GetStorageEstimate(nsIVariant* aResult) {
   MOZ_ALWAYS_SUCCEEDS(
       estimateResult->GetLimit(&mStorageEstimate.mQuota.Construct()));
 
+  if (StaticPrefs::privacy_fingerprint_profileMode() && mUserContextId != 0) {
+    ProfileArgs profile;
+    if (WindowGlobalChild::GetProfileForUserContextId(mUserContextId,
+                                                      &profile) &&
+        profile.storage().isSome()) {
+      mStorageEstimate.mUsage.Construct() = profile.storage().ref().usage();
+      mStorageEstimate.mQuota.Construct() = profile.storage().ref().quota();
+    } else {
+      mStorageEstimate.mUsage.Construct() = 50ULL * 1024 * 1024;
+      mStorageEstimate.mQuota.Construct() = 100ULL * 1024 * 1024 * 1024;
+    }
+  }
+
   return NS_OK;
 }
 
@@ -609,8 +635,10 @@ bool EstimateWorkerMainThreadRunnable::MainThreadRun() {
 
   MOZ_ASSERT(principal);
 
-  RefPtr<RequestResolver> resolver =
-      new RequestResolver(RequestResolver::Type::Estimate, mProxy);
+  uint32_t userContextId =
+      BasePrincipal::Cast(principal)->OriginAttributesRef().mUserContextId;
+  RefPtr<RequestResolver> resolver = new RequestResolver(
+      RequestResolver::Type::Estimate, mProxy, userContextId);
 
   RefPtr<nsIQuotaRequest> request;
   nsresult rv = Estimate(principal, resolver, getter_AddRefs(request));

@@ -32,6 +32,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 44100,
+      diskSizeGB: 256,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Air Microphone" },
@@ -54,6 +55,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 44100,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Pro Microphone" },
@@ -76,6 +78,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 256,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Air Microphone" },
@@ -98,6 +101,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Pro Microphone" },
@@ -120,6 +124,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Pro Microphone" },
@@ -142,6 +147,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Air Microphone" },
@@ -164,6 +170,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Pro Microphone" },
@@ -186,6 +193,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 1024,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Pro Microphone" },
@@ -208,6 +216,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 1024,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Pro Microphone" },
@@ -230,6 +239,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Air Microphone" },
@@ -252,6 +262,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Pro Microphone" },
@@ -274,6 +285,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 1024,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Pro Microphone" },
@@ -296,6 +308,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 1024,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "MacBook Pro Microphone" },
@@ -318,6 +331,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 256,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "External Microphone" },
@@ -340,6 +354,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "External Microphone" },
@@ -362,6 +377,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 256,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "External Microphone" },
@@ -384,6 +400,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "External Microphone" },
@@ -406,6 +423,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 256,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "iMac Microphone" },
@@ -428,6 +446,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 256,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "iMac Microphone" },
@@ -450,6 +469,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "External Microphone" },
@@ -472,6 +492,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 1024,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "External Microphone" },
@@ -494,6 +515,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
+      diskSizeGB: 1024,
       fontSet: ["Arial", "Avenir", "Avenir Next", "Comic Sans MS", "Courier New", "Geneva", "Georgia", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "Optima", "Palatino", "Palatino Linotype", "Times", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "External Microphone" },
@@ -518,6 +540,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (NVIDIA)",
       webglRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
       audioSampleRate: 48000,
+      diskSizeGB: 1000,
       fontSet: ["Bitstream Charter", "Bitstream Vera Sans", "Bitstream Vera Sans Mono", "Bitstream Vera Serif", "Courier 10 Pitch", "DejaVu Sans", "DejaVu Sans Mono", "DejaVu Serif", "FreeMono", "FreeSans", "FreeSerif", "Liberation Mono", "Liberation Sans", "Liberation Serif", "Noto Sans", "Noto Serif", "Ubuntu", "Ubuntu Condensed", "Ubuntu Mono"],
       mediaDevices: [
         { kind: "audioinput", label: "USB Audio Device (Microphone)" },
@@ -540,6 +563,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Intel)",
       webglRenderer: "Mesa Intel(R) UHD Graphics 770 (ADL-S GT1)",
       audioSampleRate: 48000,
+      diskSizeGB: 500,
       fontSet: ["Bitstream Charter", "Bitstream Vera Sans", "Bitstream Vera Sans Mono", "Bitstream Vera Serif", "Courier 10 Pitch", "DejaVu Sans", "DejaVu Sans Mono", "DejaVu Serif", "FreeMono", "FreeSans", "FreeSerif", "Liberation Mono", "Liberation Sans", "Liberation Serif", "Noto Sans", "Noto Serif", "Ubuntu", "Ubuntu Condensed", "Ubuntu Mono"],
       mediaDevices: [
         { kind: "audioinput", label: "USB Audio Device (Microphone)" },
@@ -562,6 +586,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (AMD)",
       webglRenderer: "ANGLE (AMD, AMD Radeon RX 7600 (navy24, LLVM 15.0.7, DRM 3.54, 6.8.0), OpenGL 4.6)",
       audioSampleRate: 48000,
+      diskSizeGB: 1000,
       fontSet: ["Bitstream Charter", "Bitstream Vera Sans", "Bitstream Vera Sans Mono", "Bitstream Vera Serif", "Courier 10 Pitch", "DejaVu Sans", "DejaVu Sans Mono", "DejaVu Serif", "FreeMono", "FreeSans", "FreeSerif", "Liberation Mono", "Liberation Sans", "Liberation Serif", "Noto Sans", "Noto Serif", "Ubuntu", "Ubuntu Condensed", "Ubuntu Mono"],
       mediaDevices: [
         { kind: "audioinput", label: "USB Audio Device (Microphone)" },
@@ -584,6 +609,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (NVIDIA)",
       webglRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
       audioSampleRate: 48000,
+      diskSizeGB: 1000,
       fontSet: ["Bitstream Charter", "Bitstream Vera Sans", "Bitstream Vera Sans Mono", "Bitstream Vera Serif", "Courier 10 Pitch", "DejaVu Sans", "DejaVu Sans Mono", "DejaVu Serif", "FreeMono", "FreeSans", "FreeSerif", "Liberation Mono", "Liberation Sans", "Liberation Serif", "Noto Sans", "Noto Serif", "Cantarell", "Ubuntu", "Ubuntu Condensed", "Ubuntu Mono"],
       mediaDevices: [
         { kind: "audioinput", label: "USB Audio Device (Microphone)" },
@@ -606,6 +632,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Intel)",
       webglRenderer: "Mesa Intel(R) Iris(R) Xe Graphics (TGL GT2)",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Bitstream Charter", "Bitstream Vera Sans", "Bitstream Vera Sans Mono", "Bitstream Vera Serif", "Courier 10 Pitch", "DejaVu Sans", "DejaVu Sans Mono", "DejaVu Serif", "FreeMono", "FreeSans", "FreeSerif", "Liberation Mono", "Liberation Sans", "Liberation Serif", "Noto Sans", "Noto Serif", "Ubuntu", "Ubuntu Condensed", "Ubuntu Mono"],
       mediaDevices: [
         { kind: "audioinput", label: "Integrated Microphone" },
@@ -630,6 +657,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Intel)",
       webglRenderer: "ANGLE (Intel, Intel(R) UHD Graphics 770 Direct3D11 vs_5_0 ps_5_0, D3D11)",
       audioSampleRate: 48000,
+      diskSizeGB: 1000,
       fontSet: ["Arial", "Calibri", "Cambria", "Candara", "Comic Sans MS", "Consolas", "Constantia", "Corbel", "Courier New", "Ebrima", "Franklin Gothic Medium", "Gabriola", "Gadugi", "Georgia", "Impact", "Javanese Text", "Leelawadee UI", "Lucida Console", "Lucida Sans Unicode", "Malgun Gothic", "Microsoft Sans Serif", "Mongolian Baiti", "MS Gothic", "MV Boli", "Nirmala UI", "Palatino Linotype", "Segoe Print", "Segoe Script", "Segoe UI", "Segoe UI Emoji", "Segoe UI Historic", "Segoe UI Symbol", "SimSun", "Sylfaen", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "Microphone Array (Realtek Audio)" },
@@ -652,6 +680,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (NVIDIA)",
       webglRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
       audioSampleRate: 48000,
+      diskSizeGB: 1000,
       fontSet: ["Arial", "Calibri", "Cambria", "Candara", "Comic Sans MS", "Consolas", "Constantia", "Corbel", "Courier New", "Ebrima", "Franklin Gothic Medium", "Gabriola", "Gadugi", "Georgia", "Impact", "Javanese Text", "Leelawadee UI", "Lucida Console", "Lucida Sans Unicode", "Malgun Gothic", "Microsoft Sans Serif", "Mongolian Baiti", "MS Gothic", "MV Boli", "Nirmala UI", "Palatino Linotype", "Segoe Print", "Segoe Script", "Segoe UI", "Segoe UI Emoji", "Segoe UI Historic", "Segoe UI Symbol", "SimSun", "Sylfaen", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "Microphone Array (Realtek Audio)" },
@@ -674,6 +703,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (NVIDIA)",
       webglRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Direct3D11 vs_5_0 ps_5_0, D3D11)",
       audioSampleRate: 48000,
+      diskSizeGB: 2000,
       fontSet: ["Arial", "Calibri", "Cambria", "Candara", "Comic Sans MS", "Consolas", "Constantia", "Corbel", "Courier New", "Ebrima", "Franklin Gothic Medium", "Gabriola", "Gadugi", "Georgia", "Impact", "Javanese Text", "Leelawadee UI", "Lucida Console", "Lucida Sans Unicode", "Malgun Gothic", "Microsoft Sans Serif", "Mongolian Baiti", "MS Gothic", "MV Boli", "Nirmala UI", "Palatino Linotype", "Segoe Print", "Segoe Script", "Segoe UI", "Segoe UI Emoji", "Segoe UI Historic", "Segoe UI Symbol", "SimSun", "Sylfaen", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "Microphone Array (Realtek Audio)" },
@@ -696,6 +726,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (AMD)",
       webglRenderer: "ANGLE (AMD, AMD Radeon RX 7800 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
       audioSampleRate: 48000,
+      diskSizeGB: 1000,
       fontSet: ["Arial", "Calibri", "Cambria", "Candara", "Comic Sans MS", "Consolas", "Constantia", "Corbel", "Courier New", "Ebrima", "Franklin Gothic Medium", "Gabriola", "Gadugi", "Georgia", "Impact", "Javanese Text", "Leelawadee UI", "Lucida Console", "Lucida Sans Unicode", "Malgun Gothic", "Microsoft Sans Serif", "Mongolian Baiti", "MS Gothic", "MV Boli", "Nirmala UI", "Palatino Linotype", "Segoe Print", "Segoe Script", "Segoe UI", "Segoe UI Emoji", "Segoe UI Historic", "Segoe UI Symbol", "SimSun", "Sylfaen", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "Microphone Array (Realtek Audio)" },
@@ -718,6 +749,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (Intel)",
       webglRenderer: "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Calibri", "Cambria", "Candara", "Comic Sans MS", "Consolas", "Constantia", "Corbel", "Courier New", "Ebrima", "Franklin Gothic Medium", "Gabriola", "Gadugi", "Georgia", "Impact", "Javanese Text", "Leelawadee UI", "Lucida Console", "Lucida Sans Unicode", "Malgun Gothic", "Microsoft Sans Serif", "Mongolian Baiti", "MS Gothic", "MV Boli", "Nirmala UI", "Palatino Linotype", "Segoe Print", "Segoe Script", "Segoe UI", "Segoe UI Emoji", "Segoe UI Historic", "Segoe UI Symbol", "SimSun", "Sylfaen", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "Microphone Array (Realtek Audio)" },
@@ -740,6 +772,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (AMD)",
       webglRenderer: "ANGLE (AMD, AMD Radeon 780M Direct3D11 vs_5_0 ps_5_0, D3D11)",
       audioSampleRate: 48000,
+      diskSizeGB: 512,
       fontSet: ["Arial", "Calibri", "Cambria", "Candara", "Comic Sans MS", "Consolas", "Constantia", "Corbel", "Courier New", "Ebrima", "Franklin Gothic Medium", "Gabriola", "Gadugi", "Georgia", "Impact", "Javanese Text", "Leelawadee UI", "Lucida Console", "Lucida Sans Unicode", "Malgun Gothic", "Microsoft Sans Serif", "Mongolian Baiti", "MS Gothic", "MV Boli", "Nirmala UI", "Palatino Linotype", "Segoe Print", "Segoe Script", "Segoe UI", "Segoe UI Emoji", "Segoe UI Historic", "Segoe UI Symbol", "SimSun", "Sylfaen", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "Microphone Array (Realtek Audio)" },
@@ -762,6 +795,7 @@ const DEVICE_DATABASE = {
       webglVendor: "Google Inc. (NVIDIA)",
       webglRenderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 Direct3D11 vs_5_0 ps_5_0, D3D11)",
       audioSampleRate: 48000,
+      diskSizeGB: 1000,
       fontSet: ["Arial", "Calibri", "Cambria", "Candara", "Comic Sans MS", "Consolas", "Constantia", "Corbel", "Courier New", "Ebrima", "Franklin Gothic Medium", "Gabriola", "Gadugi", "Georgia", "Impact", "Javanese Text", "Leelawadee UI", "Lucida Console", "Lucida Sans Unicode", "Malgun Gothic", "Microsoft Sans Serif", "Mongolian Baiti", "MS Gothic", "MV Boli", "Nirmala UI", "Palatino Linotype", "Segoe Print", "Segoe Script", "Segoe UI", "Segoe UI Emoji", "Segoe UI Historic", "Segoe UI Symbol", "SimSun", "Sylfaen", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"],
       mediaDevices: [
         { kind: "audioinput", label: "Microphone Array (Realtek Audio)" },
@@ -901,9 +935,22 @@ export const FingerprintProfileStore = {
       webglVendor: device.webglVendor,
       webglRenderer: device.webglRenderer,
       audioSampleRate: device.audioSampleRate,
+      diskSizeGB: device.diskSizeGB,
       fontSet: [...device.fontSet],
       mediaDevices: device.mediaDevices.map(d => ({ ...d })),
     };
+  },
+
+  _generateStorage(device) {
+    let diskSizeGB = device.diskSizeGB || 256;
+    let diskBytes = diskSizeGB * 1024 * 1024 * 1024;
+    let quotaFraction = 0.20 + Math.random() * 0.60;
+    let quota = Math.floor(diskBytes * quotaFraction);
+    let usageMB = 5 * Math.pow(10, Math.random() * 2);
+    let usage = Math.floor(usageMB * 1024 * 1024);
+    usage = Math.min(usage, Math.floor(quota * 0.01));
+    usage = Math.max(usage, 5 * 1024 * 1024);
+    return { quota, usage };
   },
 
   _buildProfile(device, location, deviceType) {
@@ -920,6 +967,7 @@ export const FingerprintProfileStore = {
         webglSeed: generateRandomBytes(16),
         textSeed: generateRandomBytes(16),
       },
+      storage: this._generateStorage(device),
       webrtcHideIP: true,
       geolocation: "blocked",
       allowedExtensions: [],
@@ -984,6 +1032,7 @@ export const FingerprintProfileStore = {
       }
     }
     profile.device = this._deviceToDict(device, resolvedType);
+    profile.storage = this._generateStorage(device);
     this.saveProfile(userContextId, profile);
     return profile;
   },

@@ -2312,6 +2312,15 @@ FingerprintNoiseArgs ConvertNoiseDict(const FingerprintNoiseDict& aDict) {
   return args;
 }
 
+// Convert a WebIDL FingerprintStorageDict to an IPDL FingerprintStorageArgs.
+FingerprintStorageArgs ConvertStorageDict(
+    const FingerprintStorageDict& aDict) {
+  FingerprintStorageArgs args;
+  args.quota() = aDict.mQuota;
+  args.usage() = aDict.mUsage;
+  return args;
+}
+
 // Convert a full WebIDL FingerprintProfileDict to an IPDL ProfileArgs.
 ProfileArgs ConvertProfileDict(const FingerprintProfileDict& aDict) {
   ProfileArgs args;
@@ -2327,6 +2336,9 @@ ProfileArgs ConvertProfileDict(const FingerprintProfileDict& aDict) {
   if (!aDict.mNoise.mCanvasSeed.IsEmpty() ||
       !aDict.mNoise.mTextSeed.IsEmpty()) {
     args.noise() = Some(ConvertNoiseDict(aDict.mNoise));
+  }
+  if (aDict.mStorage.mQuota > 0) {
+    args.storage() = Some(ConvertStorageDict(aDict.mStorage));
   }
 
   args.webrtcHideIP() = aDict.mWebrtcHideIP;

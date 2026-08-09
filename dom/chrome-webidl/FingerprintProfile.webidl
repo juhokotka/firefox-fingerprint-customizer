@@ -33,6 +33,7 @@ dictionary FingerprintDeviceDict {
   DOMString webglVendor = "";
   DOMString webglRenderer = "";
   long audioSampleRate = 48000;
+  unsigned long long diskSizeGB = 0;
   sequence<DOMString> fontSet = [];
   sequence<FingerprintMediaDeviceDict> mediaDevices = [];
 };
@@ -50,10 +51,16 @@ dictionary FingerprintNoiseDict {
   sequence<octet> textSeed = [];
 };
 
+dictionary FingerprintStorageDict {
+  unsigned long long quota = 0;
+  unsigned long long usage = 0;
+};
+
 dictionary FingerprintProfileDict {
   FingerprintDeviceDict device = {};
   FingerprintLocationDict location = {};
   FingerprintNoiseDict noise = {};
+  FingerprintStorageDict storage = {};
   boolean webrtcHideIP = false;
   DOMString geolocation = "";
   sequence<DOMString> allowedExtensions = [];

@@ -54,7 +54,7 @@ Traditional privacy browsers (Tor Browser, LibreWolf with RFP) pursue a **unifor
 |         Shared storage across tabs        | **Storage partitioned** by `userContextId` |
 |            Binary on/off switch           |  Two modes: **Normal** vs **Privacy Mode** |
 
-Each container gets its own **device fingerprint, location, and noise seed (Canvas/WebGL/Text)** — persisted across sessions, isolated at the process level.
+Each container gets its own **device fingerprint, location, noise seed (Canvas/WebGL/Text), and storage quota** — persisted across sessions, isolated at the process level.
 
 ---
 
@@ -85,6 +85,7 @@ Each container carries an independent `FingerprintProfile` with a complete devic
 | Font Set             | 18 macOS fonts / 22 Linux fonts                   | `profile.device.fontSet`             |
 | Media Devices        | Microphone, Camera, Speakers                      | `profile.device.mediaDevices`        |
 | Audio Sample Rate    | `44100` / `48000`                                 | `profile.device.audioSampleRate`     |
+| Disk Size            | `256` / `512` / `1024` GB                         | `profile.device.diskSizeGB`          |
 
 </details>
 
@@ -123,6 +124,25 @@ Each container carries an independent `FingerprintProfile` with a complete devic
 - **Text Seed** — Persistent per-container random seed injected into glyph advance widths at the HarfBuzz shaping layer, perturbing `measureText()`, `getBoundingClientRect()`, `offsetWidth`, and all text-metric surfaces **simultaneously and consistently**
 - Seeds are **stable across sessions** (persisted to disk) — they are persistent per-container and not intended to be used as cross-site identifiers
 - Reuses RFP's existing `RandomizePixels` / `GenerateKey` infrastructure, bucketed by `OriginAttributes`
+
+</details>
+
+<details>
+
+<summary><b>Storage Quota Layer</b> — Disk space spoofing (click to expand)</summary>
+
+
+
+| Surface | Example | Source |
+| --- | --- | --- |
+| `navigator.storage.estimate()` quota | `128 GB` (20–80% of `diskSizeGB`) | `profile.storage.quota` |
+| `navigator.storage.estimate()` usage | `47 MB` (5–500 MB, log-uniform) | `profile.storage.usage` |
+
+- **`quota`** — High-entropy per-container value derived from the device's `diskSizeGB` (20–80% of disk), simulating realistic free-space variation
+- **`usage`** — Log-uniform 5–500 MB per container, matching the heavy-tailed distribution of real-world site storage
+- Both values persisted to disk (stable across sessions, like noise seeds)
+- **Worker consistency** — `userContextId` extracted from the worker's principal (captured at spawn, immutable), ensuring main-thread and worker `estimate()` calls report identical spoofed values
+- **Safe fallback** — If the profile cache misses (race at container creation), returns 50 MB usage / 100 GB quota — never leaks real host disk size
 
 </details>
 
@@ -195,8 +215,9 @@ Switch instantly via the **container button** next to the URL bar.
 ┌──────────────────────────────────────────────────────────────┐
 │  FingerprintProfileStore (JS Runtime, Parent Process)        │
 │  - Stores Profile by userContextId (JSON, persisted to disk) │
-│  - 3-layer random generator: Device DB + Location DB + Noise │
+│  - 4-layer random generator: Device + Location + Noise + Storage │
 │  - Noise: canvasSeed + webglSeed + textSeed (16 bytes each)  │
+│  - Storage: quota + usage derived from device.diskSizeGB     │
 │  - Generated once at container creation, fixed across sessions│
 │  - Depends only on Adapter interfaces (no direct Firefox API)│
 └────────────────────────────┬─────────────────────────────────┘
@@ -216,6 +237,7 @@ Switch instantly via the **container button** next to the URL bar.
 │  - GetSpoofed* reads Profile in profileMode                  │
 │  - Canvas/WebGL noise via existing per-OA key mechanism      │
 │  - Text seed registered with gfxTextFingerprint (per-OA)     │
+│  - Storage estimate overridden in RequestResolver            │
 └────────────────────────────┬─────────────────────────────────┘
                              │
                              ▼
@@ -249,6 +271,7 @@ Switch instantly via the **container button** next to the URL bar.
 │  + Navigator / nsScreen / MediaDevices / AudioContext API    │
 │  + measureText() / getBoundingClientRect() / offsetWidth     │
 │  + @font-face local() probes / document.fonts.check()        │
+│  + navigator.storage.estimate() (quota / usage)              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -378,10 +401,11 @@ When a user creates a container via the panel UI:
 
 1. `ContainerEditor.mjs` calls `ContextualIdentityService.create(name, icon, color)`
 2. A new `userContextId` is assigned (monotonically increasing)
-3. `FingerprintProfileStore.generateProfile()` creates a 3-layer profile:
-   - **Device**: randomly picked from `DEVICE_DATABASE` (25 real device variants across Mac/Linux/Windows)
+3. `FingerprintProfileStore.generateProfile()` creates a 4-layer profile:
+   - **Device**: randomly picked from `DEVICE_DATABASE` (34 real device variants across Mac/Linux/Windows)
    - **Location**: randomly picked from `LOCATION_DATABASE` (12 countries)
    - **Noise**: fresh random seeds for Canvas/WebGL/Text
+   - **Storage**: `quota` (20–80% of `diskSizeGB`) and `usage` (5–500 MB log-uniform), derived from the device's `diskSizeGB`
 4. Profile is persisted to disk (`containers.json` + profile store)
 
 ### 2. Profile Sync (Parent → Content Process)
@@ -413,6 +437,7 @@ In Privacy Mode, `nsRFPService::ShouldResistFingerprinting()` returns `true` for
 | CSS `ch` / `ex` units             | `gfxTextRun.cpp`                 | OS metric DB (zeroWidth / xHeight)              |
 | `@font-face { src: local() }`     | `CoreTextFontList.cpp`           | Font roster substitution (Gap 3)                |
 | `document.fonts.check()`          | `CoreTextFontList.cpp`           | Font roster substitution (Gap 3)                |
+| `navigator.storage.estimate()`    | `StorageManager.cpp`             | `profile.storage.quota` / `profile.storage.usage` |
 | `AudioContext.sampleRate`         | `AudioContext.cpp`               | `profile.device.audioSampleRate` |
 | `Intl.DateTimeFormat`             | `BrowsingContext.cpp`            | `profile.location.timezone`      |
 | `MediaDevices.enumerateDevices()` | `MediaDevices.cpp`               | `profile.device.mediaDevices`    |
@@ -477,9 +502,11 @@ firefox-main/
 │   │   ├── PWindowGlobal.ipdl           # UpdateProfile IPC message
 │   │   ├── WindowGlobalParent.cpp       # Parent-side profile cache (UniquePtr)
 │   │   ├── WindowGlobalChild.cpp        # Child-side profile cache (UniquePtr)
-│   │   └── WindowGlobalTypes.ipdlh      # ProfileArgs / FingerprintDeviceArgs / FingerprintNoiseArgs structs
+│   │   └── WindowGlobalTypes.ipdlh      # ProfileArgs / FingerprintDeviceArgs / FingerprintStorageArgs structs
+│   ├── quota/
+│   │   └── StorageManager.cpp           # Storage estimate spoofing (RequestResolver hook)
 │   └── chrome-webidl/
-│       └── FingerprintProfile.webidl    # WebIDL dictionary definitions (incl. textSeed)
+│       └── FingerprintProfile.webidl    # WebIDL dictionary definitions (incl. textSeed + storage)
 ├── gfx/thebes/
 │   ├── gfxTextFingerprint.{h,cpp}       # Per-container text seed storage (FNV-1a hash, thread-safe)
 │   ├── gfxHarfBuzzShaper.cpp            # Two-layer metric spoofing: OS substitution + per-glyph perturbation
@@ -545,6 +572,9 @@ node -c browser/base/content/browser.js
 - **Two-layer font metric spoofing** — OS metric substitution (Layer 1) is the primary mechanism for OS masking; per-glyph perturbation (Layer 2) is a fallback when target-OS data is missing and an overlay adding per-container variation when both are active. Substitution must use *real* target-OS values (not synthetic noise) to avoid anomaly detection.
 - **Vertical metric call sites** — `gfxFont::Metrics` is computed once at font init from platform APIs (`CTFontGetAscent`, DWrite, FreeType) and cached, so it cannot be modified per-container at the cached struct level. Vertical spoofing must copy and override at each of the 3 call sites: `gfxTextRun::GetMetricsForCSSUnits` (CSS `ch`/`ex`), `CanvasRenderingContext2D::DrawOrMeasureText` (TextMetrics vertical), and `gfxFont::Measure` (`actualBoundingBoxAscent/Descent`). Derived metrics (`emAscent`, `emDescent`, `maxHeight`, `internalLeading`) must be recomputed after overriding `maxAscent`/`maxDescent`.
 - **Gap 3: local() probe metric sync** — When `@font-face { src: local() }` resolves via font substitution, `gfxUserFontSet` overwrites the entry's `FamilyName()` with the `@font-face` family name (often an arbitrary alias). Metric hooks must fall back to `gfxFontEntry::Name()` (the original probe name) when `FamilyName()` doesn't map in the target-OS DB, otherwise "font exists" (Windows) and "font metrics" (Mac) would disagree.
+- **Storage quota worker consistency** — `navigator.storage.estimate()` is callable from both main thread and Web Workers. The `userContextId` must be extracted from the principal (`BasePrincipal::Cast(principal)->OriginAttributesRef().mUserContextId`) and passed to `RequestResolver` at creation time. For workers, the principal is captured at spawn time in `WorkerPrivate::mLoadInfo` and remains immutable for the worker's lifetime — even for detached workers whose original document is gone. Never fall back to `userContextId = 0` (real values) in Privacy Mode, as this leaks the host's real disk size and creates a detectable main-thread-vs-worker inconsistency.
+- **Storage quota safe fallback** — If the profile cache misses (race condition at container creation), return conservative consumer-laptop defaults (50 MB usage / 100 GB quota) rather than the real host values. A server-room host with a 2 TB disk would immediately expose the spoofing if real values leaked through.
+- **Storage quota derivation bounds** — `quota` must be 20–80% of `diskSizeGB` (plausible free-space range), and `usage` must be 5–500 MB log-uniform (heavy-tailed real-world site storage distribution). `usage` must never exceed 1% of `quota`. These bounds prevent anomalous combinations even with full per-container randomization.
 
 </details>
 

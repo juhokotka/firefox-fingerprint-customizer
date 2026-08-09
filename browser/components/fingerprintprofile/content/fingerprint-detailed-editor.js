@@ -51,6 +51,7 @@ function buildEditor(host, profile, userContextId) {
     buildRow(doc, "Max Touch Points", buildNumberInput(doc, "maxTouchPoints", profile.device?.maxTouchPoints)),
     buildRow(doc, "Do Not Track", buildInput(doc, "doNotTrack", profile.device?.doNotTrack)),
     buildRow(doc, "Device Pixel Ratio", buildNumberInput(doc, "devicePixelRatio", profile.device?.devicePixelRatio)),
+    buildRow(doc, "Disk Size (GB)", buildNumberInput(doc, "diskSizeGB", profile.device?.diskSizeGB)),
   ]));
 
   // Section: Screen
@@ -74,6 +75,13 @@ function buildEditor(host, profile, userContextId) {
   container.appendChild(buildSection(doc, "Audio & Media", [
     buildRow(doc, "Audio Sample Rate", buildNumberInput(doc, "audioSampleRate", profile.device?.audioSampleRate)),
     buildRow(doc, "Fonts (comma-separated)", buildTextarea(doc, "fontSet", (profile.device?.fontSet || []).join(", "))),
+  ]));
+
+  // Section: Storage
+  let storage = profile.storage || {};
+  container.appendChild(buildSection(doc, "Storage", [
+    buildRow(doc, "Quota (bytes)", buildNumberInput(doc, "storageQuota", storage.quota)),
+    buildRow(doc, "Usage (bytes)", buildNumberInput(doc, "storageUsage", storage.usage)),
   ]));
 
   // Section: Location
@@ -136,7 +144,27 @@ function buildEditor(host, profile, userContextId) {
     }
   });
 
-  btnRow.append(rerollDeviceBtn, rerollLocationBtn, rerollNoiseBtn);
+  let recalcStorageBtn = doc.createElementNS(HTML_NS, "button");
+  recalcStorageBtn.textContent = "Recalculate Storage";
+  recalcStorageBtn.type = "button";
+  recalcStorageBtn.addEventListener("click", () => {
+    let diskSizeGB =
+      parseInt(container.querySelector('[name="diskSizeGB"]')?.value, 10) || 256;
+    let diskBytes = diskSizeGB * 1024 * 1024 * 1024;
+    let quotaFraction = 0.20 + Math.random() * 0.60;
+    let quota = Math.floor(diskBytes * quotaFraction);
+    let usageMB = 5 * Math.pow(10, Math.random() * 2);
+    let usage = Math.floor(usageMB * 1024 * 1024);
+    usage = Math.min(usage, Math.floor(quota * 0.01));
+    usage = Math.max(usage, 5 * 1024 * 1024);
+    let quotaEl = container.querySelector('[name="storageQuota"]');
+    let usageEl = container.querySelector('[name="storageUsage"]');
+    if (quotaEl) quotaEl.value = quota;
+    if (usageEl) usageEl.value = usage;
+  });
+
+  btnRow.append(rerollDeviceBtn, rerollLocationBtn, rerollNoiseBtn,
+                recalcStorageBtn);
   container.appendChild(btnRow);
 
   host.appendChild(container);
@@ -256,7 +284,13 @@ document.addEventListener("dialogaccept", () => {
   profile.device.webglRenderer = getVal(form, "webglRenderer");
 
   profile.device.audioSampleRate = parseInt(getVal(form, "audioSampleRate"), 10);
+  profile.device.diskSizeGB = parseInt(getVal(form, "diskSizeGB"), 10);
   profile.device.fontSet = getVal(form, "fontSet").split(",").map(s => s.trim()).filter(s => s);
+
+  profile.storage = {
+    quota: parseInt(getVal(form, "storageQuota"), 10),
+    usage: parseInt(getVal(form, "storageUsage"), 10),
+  };
 
   profile.location.country = getVal(form, "country");
   profile.location.timezone = getVal(form, "timezone");

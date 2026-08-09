@@ -68,11 +68,18 @@ struct FingerprintNoiseArgs
   uint8_t[] textSeed;
 };
 
+struct FingerprintStorageArgs
+{
+  uint64_t quota;
+  uint64_t usage;
+};
+
 struct ProfileArgs
 {
   FingerprintDeviceArgs? device;
   FingerprintLocationArgs? location;
   FingerprintNoiseArgs? noise;
+  FingerprintStorageArgs? storage;
   bool webrtcHideIP;
   nsCString geolocation;
   nsCString[] allowedExtensions;
