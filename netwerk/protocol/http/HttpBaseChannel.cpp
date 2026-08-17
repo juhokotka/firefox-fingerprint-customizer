@@ -47,6 +47,7 @@
 #include "mozilla/dom/PolicyContainer.h"
 #include "mozilla/dom/ProcessIsolation.h"
 #include "mozilla/dom/RequestBinding.h"
+#include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/net/OpaqueResponseUtils.h"
 #include "mozilla/net/ChannelClassifierUtils.h"
@@ -540,6 +541,30 @@ HttpBaseChannel::SetDocshellUserAgentOverride() {
 
   nsAutoString customUserAgent;
   bc->GetCustomUserAgent(customUserAgent);
+
+  // Fallback: if the BrowsingContext override hasn't been synced yet
+  // (e.g., timing race in e10s), try the profile cache.
+  if (customUserAgent.IsEmpty() || customUserAgent.IsVoid()) {
+    uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
+    if (userContextId != 0) {
+      dom::ProfileArgs profile;
+      bool found = false;
+      if (XRE_IsParentProcess()) {
+        found = dom::WindowGlobalParent::GetCachedProfile(userContextId,
+                                                           &profile);
+      } else {
+        found = dom::WindowGlobalChild::GetProfileForUserContextId(
+            userContextId, &profile);
+      }
+      if (found && profile.device().isSome()) {
+        const auto& ua = profile.device().ref().userAgent();
+        if (!ua.IsEmpty()) {
+          CopyUTF8toUTF16(ua, customUserAgent);
+        }
+      }
+    }
+  }
+
   if (customUserAgent.IsEmpty() || customUserAgent.IsVoid()) {
     return NS_OK;
   }

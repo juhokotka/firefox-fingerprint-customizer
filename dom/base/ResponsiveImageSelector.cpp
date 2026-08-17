@@ -7,8 +7,10 @@
 #include "mozilla/PresShell.h"
 #include "mozilla/PresShellInlines.h"
 #include "mozilla/ServoStyleSetInlines.h"
+#include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentInlines.h"
+#include "mozilla/dom/WindowGlobalChild.h"
 #include "nsCSSProps.h"
 #include "nsContentUtils.h"
 #include "nsIURI.h"
@@ -291,8 +293,23 @@ bool ResponsiveImageSelector::SelectImage(bool aReselect) {
     displayDensity = overrideDPPX;
   }
   if (doc->ShouldResistFingerprinting(RFPTarget::WindowDevicePixelRatio)) {
-    displayDensity =
-        nsRFPService::GetDevicePixelRatioAtZoom(pctx->GetFullZoom());
+    bool useFallback = true;
+    if (dom::BrowsingContext* bc = doc->GetBrowsingContext()) {
+      uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
+      if (userContextId != 0) {
+        dom::ProfileArgs profile;
+        if (dom::WindowGlobalChild::GetProfileForUserContextId(userContextId,
+                                                               &profile) &&
+            profile.device().isSome()) {
+          displayDensity = profile.device().ref().devicePixelRatio();
+          useFallback = false;
+        }
+      }
+    }
+    if (useFallback) {
+      displayDensity =
+          nsRFPService::GetDevicePixelRatioAtZoom(pctx->GetFullZoom());
+    }
   }
 
   // Per spec, "In a UA-specific manner, choose one image source"

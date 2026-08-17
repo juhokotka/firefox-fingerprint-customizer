@@ -422,3 +422,6 @@ CLAUDE.local.md
 
 # Build output directory (top-level)
 obj-*
+
+# Local debug logs (never upload)
+*.log

@@ -5,13 +5,9 @@
 ### Per-container fingerprint customization & isolation for Firefox
 
 ![Firefox Base](https://img.shields.io/badge/Based%20on-Firefox-FF7139?logo=firefox\&logoColor=white)
-
 ![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)
-
 ![Release](https://img.shields.io/github/v/release/juhokotka/firefox-fingerprint-customizer?label=Release\&color=success)
-
 ![License](https://img.shields.io/badge/License-MPL%202.0-green)
-
 ![Status](https://img.shields.io/badge/Status-Active%20Development-orange)
 
 </div>
@@ -54,7 +50,7 @@ Traditional privacy browsers (Tor Browser, LibreWolf with RFP) pursue a **unifor
 |         Shared storage across tabs        | **Storage partitioned** by `userContextId` |
 |            Binary on/off switch           |  Two modes: **Normal** vs **Privacy Mode** |
 
-Each container gets its own **device fingerprint, location, noise seed (Canvas/WebGL/Text), and storage quota** — persisted across sessions, isolated at the process level.
+Each container gets its own **device fingerprint (hardware + storage estimate), location, and noise seed (Canvas/WebGL/Text)** — persisted across sessions, isolated at the process level.
 
 ---
 
@@ -68,15 +64,13 @@ Each container carries an independent `FingerprintProfile` with a complete devic
 
 <summary><b>Device Layer</b> — Hardware fingerprint (click to expand)</summary>
 
-  
-
 
 | Surface              | Example                                           | Source                               |
 | -------------------- | ------------------------------------------------- | ------------------------------------ |
 | User Agent           | `Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5...)` | `profile.device.userAgent`           |
 | Platform             | `MacIntel` / `Win32` / `Linux x86_64`             | `profile.device.platform`            |
 | OS CPU               | `Intel Mac OS X 14.5`                             | `profile.device.oscpu`               |
-| Screen               | `2560 × 1440`, `pixelDepth: 30`                   | `profile.device.screen`              |
+| Screen               | `2560 × 1440`, `pixelDepth: 30` (laptop: fixed; desktop: randomized) | `profile.device.screen` |
 | Hardware Concurrency | `8` / `10` / `12` / `16`                          | `profile.device.hardwareConcurrency` |
 | Touch Points         | `0` (desktop) / `5` / `10` (mobile)               | `profile.device.maxTouchPoints`      |
 | Device Pixel Ratio   | `2.0` (Retina) / `1.0` / `1.25`                   | `profile.device.devicePixelRatio`    |
@@ -86,14 +80,17 @@ Each container carries an independent `FingerprintProfile` with a complete devic
 | Media Devices        | Microphone, Camera, Speakers                      | `profile.device.mediaDevices`        |
 | Audio Sample Rate    | `44100` / `48000`                                 | `profile.device.audioSampleRate`     |
 | Disk Size            | `256` / `512` / `1024` GB                         | `profile.device.diskSizeGB`          |
+| Storage Estimate     | `128 GB` quota / `47 MB` usage                    | `profile.storage.quota` / `profile.storage.usage` |
+
+The claimed **Firefox version** is aligned with the current **latest stable** release (e.g. `Firefox/153.0`), not frozen at an older one. An out-of-date UA is itself a fingerprint signal — it triggers "your browser is out of date" detection and makes the profile statistically rare. Presenting the latest stable keeps the claimed version as close as possible to the (much newer) engine, minimizing both out-of-date warnings and feature-mismatch detection.
+
+**Storage estimate** — `navigator.storage.estimate()` reports a `quota` derived from the device's `diskSizeGB` (20–80%, simulating realistic free-space variation) and an `usage` that is an independent log-uniform 5–500 MB value (simulating per-site storage use; capped at 1% of `quota`). Both persist per container, stable across sessions, and report identically from main thread and workers. Storage spoofing lives in the device layer because `quota` derives from the device's disk size — it is a device-property API surface, not a separate random dimension.
 
 </details>
 
 <details>
 
 <summary><b>Location Layer</b> — Language & timezone (click to expand)</summary>
-
-  
 
 
 | Country | Timezone            | Language |
@@ -111,38 +108,19 @@ Each container carries an independent `FingerprintProfile` with a complete devic
 
 *12 locations available; each container picks one independently of device.*
 
+The HTTP **`Accept-Language`** header is generated from the profile's language list with proper `q`-values (via `PrepareAcceptLanguages`), so `["en-GB", "en"]` becomes `Accept-Language: en-GB,en;q=0.5` — matching a real browser's header instead of a bare language list without weights.
+
 </details>
 
 <details>
 
 <summary><b>Noise Layer</b> — Randomized Canvas/WebGL/Text seeds (click to expand)</summary>
 
-  
-
 - **Canvas Seed** — Persistent per-container random seed injected into `toDataURL()` / `getImageData()` output
 - **WebGL Seed** — Persistent per-container random seed injected into WebGL rendering
 - **Text Seed** — Persistent per-container random seed injected into glyph advance widths at the HarfBuzz shaping layer, perturbing `measureText()`, `getBoundingClientRect()`, `offsetWidth`, and all text-metric surfaces **simultaneously and consistently**
 - Seeds are **stable across sessions** (persisted to disk) — they are persistent per-container and not intended to be used as cross-site identifiers
 - Reuses RFP's existing `RandomizePixels` / `GenerateKey` infrastructure, bucketed by `OriginAttributes`
-
-</details>
-
-<details>
-
-<summary><b>Storage Quota Layer</b> — Disk space spoofing (click to expand)</summary>
-
-
-
-| Surface | Example | Source |
-| --- | --- | --- |
-| `navigator.storage.estimate()` quota | `128 GB` (20–80% of `diskSizeGB`) | `profile.storage.quota` |
-| `navigator.storage.estimate()` usage | `47 MB` (5–500 MB, log-uniform) | `profile.storage.usage` |
-
-- **`quota`** — High-entropy per-container value derived from the device's `diskSizeGB` (20–80% of disk), simulating realistic free-space variation
-- **`usage`** — Log-uniform 5–500 MB per container, matching the heavy-tailed distribution of real-world site storage
-- Both values persisted to disk (stable across sessions, like noise seeds)
-- **Worker consistency** — `userContextId` extracted from the worker's principal (captured at spawn, immutable), ensuring main-thread and worker `estimate()` calls report identical spoofed values
-- **Safe fallback** — If the profile cache misses (race at container creation), returns 50 MB usage / 100 GB quota — never leaks real host disk size
 
 </details>
 
@@ -181,6 +159,20 @@ Text perturbation alone hides the *exact* machine metrics but preserves the host
 - When a container spoofs a non-host OS and a `local()` probe names a font that doesn't exist on the host, `CoreTextFontList::LookupLocalFont` substitutes a metric-compatible macOS font (e.g. Helvetica Neue) but **labels the entry with the original probe name** (e.g. "Segoe UI"). This makes the probe resolve successfully while the metric hooks below look up the target-OS metrics.
 - All four metric-spoofing call sites (shaping advance widths, `gfxFont::Measure`, `gfxTextRun` CSS units, Canvas `TextMetrics`) key off the font's **entry name** (`gfxFontEntry::Name()`, which holds the original probe name) as a fallback when the family name (overwritten to the `@font-face` alias) doesn't map in the DB. This ensures aliased probes like `@font-face { font-family: "probe"; src: local("Segoe UI") }` resolve to spoofed Segoe UI metrics, not the substitute's real Mac metrics.
 
+### Screen Resolution Handling
+
+A device's screen resolution is treated differently depending on whether it has a **built-in display**:
+
+| Device category | Examples | Screen resolution |
+| --- | --- | --- |
+| Laptops | MacBook Air/Pro, Linux/Windows laptops | **Fixed** per model — every unit worldwide ships with identical display hardware |
+| All-in-ones | iMac 24-inch | **Fixed** per model — built-in display |
+| Desktops (no display) | Mac mini, Mac Studio, Mac Pro, Linux/Windows desktops | **Randomized** per profile — real users connect different external monitors |
+
+**Why this matters:** A MacBook Air M1 has the same 2560×1600 screen whether it's in Tokyo or Berlin. Randomizing its resolution would produce a combination that exists on **no real device**, making the fingerprint trivially detectable as synthetic. Conversely, a Mac mini has no built-in display — its resolution depends entirely on the external monitor the user connects, so fixing it to a single value would narrow the fingerprint population unrealistically.
+
+**Implementation:** During profile generation, `_deviceToDict` checks `deviceHasBuiltInDisplay()` (name-based: MacBook/iMac/Laptop → true, all others → false). For desktops, a random entry is picked from `EXTERNAL_DISPLAYS` (per-OS pool of common monitor resolutions with matching `devicePixelRatio`, `pixelDepth`, and `colorDepth`). The `availTop`/`availHeight` chrome is computed from the OS (macOS menu bar = 23–24 px, Windows taskbar = 40 px, Linux top bar = 24 px). The `screen` and `devicePixelRatio` fields in `DEVICE_DATABASE` for desktop entries serve only as fallback defaults and are always overridden.
+
 ### Storage Isolation
 
 Built on Firefox's native **Containers** (`ContextualIdentityService`):
@@ -215,9 +207,9 @@ Switch instantly via the **container button** next to the URL bar.
 ┌──────────────────────────────────────────────────────────────┐
 │  FingerprintProfileStore (JS Runtime, Parent Process)        │
 │  - Stores Profile by userContextId (JSON, persisted to disk) │
-│  - 4-layer random generator: Device + Location + Noise + Storage │
-│  - Noise: canvasSeed + webglSeed + textSeed (16 bytes each)  │
-│  - Storage: quota + usage derived from device.diskSizeGB     │
+│  - 3-layer random generator: Device + Location + Noise           │
+│  - Device layer includes storage quota/usage (disk-derived)      │
+│  - Noise: canvasSeed + webglSeed + textSeed (16 bytes each)      │
 │  - Generated once at container creation, fixed across sessions│
 │  - Depends only on Adapter interfaces (no direct Firefox API)│
 └────────────────────────────┬─────────────────────────────────┘
@@ -401,11 +393,10 @@ When a user creates a container via the panel UI:
 
 1. `ContainerEditor.mjs` calls `ContextualIdentityService.create(name, icon, color)`
 2. A new `userContextId` is assigned (monotonically increasing)
-3. `FingerprintProfileStore.generateProfile()` creates a 4-layer profile:
-   - **Device**: randomly picked from `DEVICE_DATABASE` (34 real device variants across Mac/Linux/Windows)
+3. `FingerprintProfileStore.generateProfile()` creates a 3-layer profile:
+   - **Device**: randomly picked from `DEVICE_DATABASE` (34 real device variants across Mac/Linux/Windows), applying the built-in vs. external screen-resolution policy described in [Screen Resolution Handling](#screen-resolution-handling); includes **storage spoofing** — `quota` (20–80% of `diskSizeGB`) and `usage` (5–500 MB log-uniform) reported via `navigator.storage.estimate()`
    - **Location**: randomly picked from `LOCATION_DATABASE` (12 countries)
    - **Noise**: fresh random seeds for Canvas/WebGL/Text
-   - **Storage**: `quota` (20–80% of `diskSizeGB`) and `usage` (5–500 MB log-uniform), derived from the device's `diskSizeGB`
 4. Profile is persisted to disk (`containers.json` + profile store)
 
 ### 2. Profile Sync (Parent → Content Process)
@@ -533,10 +524,9 @@ firefox-main/
 This project builds on Firefox (Mozilla codebase). To contribute:
 
 1. **Fork & clone** the repository
-2. **Use `./mach build faster`** for JS/CSS-only changes (avoids full C++ rebuild)
-3. **Run with `--purgecaches`** if JS changes don't seem to take effect
-4. **Check the Browser Console** (Cmd+Shift+J) — logging is extensive under `[ContainerButton]` and `[ContainerStatusUI]` prefixes
-5. **Follow existing conventions** — `nsTHashMap` entries must use `UniquePtr` for large structs (255-byte limit)
+2. **Fast builds** — use `./mach build faster` for JS/CSS-only changes and `--purgecaches` when JS changes don't seem to take effect (see [Getting Started](#getting-started))
+3. **Check the Browser Console** (Cmd+Shift+J) — logging is extensive under `[ContainerButton]` and `[ContainerStatusUI]` prefixes
+4. **Follow existing conventions** — `nsTHashMap` entries must use `UniquePtr` for large structs (255-byte limit)
 
 ### Build Verification
 
@@ -545,20 +535,17 @@ This project builds on Firefox (Mozilla codebase). To contribute:
 node -c browser/base/content/browser-init.js
 node -c browser/base/content/browser.js
 
-# Build JS/CSS only (fast)
-./mach build faster
-
 # Full C++ rebuild (after modifying .cpp/.h/.ipdl)
 ./mach build binaries
 ```
+
+JS/CSS-only changes only need `./mach build faster` — see [Getting Started](#getting-started).
 
 ### Key Engineering Notes
 
 <details>
 
-<summary><b>Important constraints (click to expand)</b></summary>
-
-  
+<summary><b>Engineering notes for maintainers (click to expand)</b></summary>
 
 
 - **`nsTHashMap` entry size limit** — Entries must not exceed 255 bytes. Store large structs (e.g., `ProfileArgs`) behind `UniquePtr`.
@@ -566,15 +553,11 @@ node -c browser/base/content/browser.js
 - **XUL hbox click events** — `hbox` elements in panels have unreliable click events. Use `toolbarbutton` elements instead.
 - **Static imports in xpcshell tests** — `import` with `moz-src:///` URLs don't resolve; use `ChromeUtils.defineESModuleGetters` with `resource://gre/modules/` URLs.
 - **Container tab binding** — Tabs are permanently bound to their container at creation. Switching containers opens a new tab (Firefox architectural constraint).
-- **Text perturbation hook point** — Perturbation must happen at `gfxHarfBuzzShaper::ShapeText` (the shaping layer), not at individual API surfaces (`measureText`, `getBoundingClientRect`). Hooking at the API level would break cross-surface consistency.
-- **Word cache isolation** — `WordCacheKey` must include `userContextId` in its hash (`aUserContextId * 0x1000000`). Without this, shaped words from one container leak into another's cache, breaking per-container isolation.
-- **Per-glyph vs. uniform perturbation** — A uniform offset (Camoufox's approach) is detectable via linear regression on `measureText` widths. Per-glyph deltas derived from `seedHash ^ codepoint` defeat this attack.
-- **Two-layer font metric spoofing** — OS metric substitution (Layer 1) is the primary mechanism for OS masking; per-glyph perturbation (Layer 2) is a fallback when target-OS data is missing and an overlay adding per-container variation when both are active. Substitution must use *real* target-OS values (not synthetic noise) to avoid anomaly detection.
 - **Vertical metric call sites** — `gfxFont::Metrics` is computed once at font init from platform APIs (`CTFontGetAscent`, DWrite, FreeType) and cached, so it cannot be modified per-container at the cached struct level. Vertical spoofing must copy and override at each of the 3 call sites: `gfxTextRun::GetMetricsForCSSUnits` (CSS `ch`/`ex`), `CanvasRenderingContext2D::DrawOrMeasureText` (TextMetrics vertical), and `gfxFont::Measure` (`actualBoundingBoxAscent/Descent`). Derived metrics (`emAscent`, `emDescent`, `maxHeight`, `internalLeading`) must be recomputed after overriding `maxAscent`/`maxDescent`.
-- **Gap 3: local() probe metric sync** — When `@font-face { src: local() }` resolves via font substitution, `gfxUserFontSet` overwrites the entry's `FamilyName()` with the `@font-face` family name (often an arbitrary alias). Metric hooks must fall back to `gfxFontEntry::Name()` (the original probe name) when `FamilyName()` doesn't map in the target-OS DB, otherwise "font exists" (Windows) and "font metrics" (Mac) would disagree.
 - **Storage quota worker consistency** — `navigator.storage.estimate()` is callable from both main thread and Web Workers. The `userContextId` must be extracted from the principal (`BasePrincipal::Cast(principal)->OriginAttributesRef().mUserContextId`) and passed to `RequestResolver` at creation time. For workers, the principal is captured at spawn time in `WorkerPrivate::mLoadInfo` and remains immutable for the worker's lifetime — even for detached workers whose original document is gone. Never fall back to `userContextId = 0` (real values) in Privacy Mode, as this leaks the host's real disk size and creates a detectable main-thread-vs-worker inconsistency.
-- **Storage quota safe fallback** — If the profile cache misses (race condition at container creation), return conservative consumer-laptop defaults (50 MB usage / 100 GB quota) rather than the real host values. A server-room host with a 2 TB disk would immediately expose the spoofing if real values leaked through.
-- **Storage quota derivation bounds** — `quota` must be 20–80% of `diskSizeGB` (plausible free-space range), and `usage` must be 5–500 MB log-uniform (heavy-tailed real-world site storage distribution). `usage` must never exceed 1% of `quota`. These bounds prevent anomalous combinations even with full per-container randomization.
+- **Don't re-`Construct()` already-built Optional members** — `mStorageEstimate.mUsage`/`mQuota` are `Optional<uint64_t>` that the stock quota-result code already `Construct()`s before the profile override runs. Overwriting them via `.Value()` (never `.Construct()` again) avoids tripping `MOZ_RELEASE_ASSERT(!isSome())`, which silently crashed the content process on sites that call `navigator.storage.estimate()` (e.g. amiunique.org).
+- **Storage quota safe fallback** — On profile-cache miss (race at container creation), return conservative consumer defaults (50 MB usage / 100 GB quota) — a server-room host's real disk size would instantly expose the spoofing.
+- **Storage quota derivation bounds** — `quota` must be 20–80% of `diskSizeGB`; `usage` must be 5–500 MB log-uniform and never exceed 1% of `quota`. These bounds prevent anomalous combinations even with full per-container randomization.
 
 </details>
 

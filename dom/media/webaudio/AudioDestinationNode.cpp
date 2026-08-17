@@ -193,8 +193,7 @@ class DestinationNodeEngine final : public AudioNodeEngine {
  public:
   explicit DestinationNodeEngine(AudioDestinationNode* aNode)
       : AudioNodeEngine(aNode),
-        mSampleRate(CubebUtils::PreferredSampleRate(
-            aNode->Context()->ShouldResistFingerprinting())),
+        mSampleRate(aNode->Context()->SampleRate()),
         mVolume(1.0f),
         mAudibilityMonitor(
             mSampleRate,

@@ -741,6 +741,10 @@ nsresult nsHttpHandler::AddAcceptAndDictionaryHeaders(
   return rv;
 }
 
+// Forward declaration: defined later in this file.
+static nsresult PrepareAcceptLanguages(const char* i_AcceptLanguages,
+                                       nsACString& o_AcceptLanguages);
+
 nsresult nsHttpHandler::AddStandardRequestHeaders(
     nsHttpRequestHead* request, nsIURI* aURI, bool aIsHTTPS,
     ExtContentPolicyType aContentPolicyType, bool aShouldResistFingerprinting,
@@ -780,7 +784,9 @@ nsresult nsHttpHandler::AddStandardRequestHeaders(
 
   if (!aLanguageOverride.IsEmpty()) {
     nsAutoCString acceptLanguage;
-    acceptLanguage.Assign(aLanguageOverride.get());
+    // Run through PrepareAcceptLanguages so q-values are generated
+    // (e.g. "en-GB,en" → "en-GB,en;q=0.5").
+    PrepareAcceptLanguages(aLanguageOverride.get(), acceptLanguage);
     rv = request->SetHeader(nsHttp::Accept_Language, acceptLanguage, false,
                             nsHttpHeaderArray::eVarietyRequestOverride);
     if (NS_FAILED(rv)) return rv;

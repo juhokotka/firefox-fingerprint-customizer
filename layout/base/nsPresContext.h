@@ -151,6 +151,11 @@ class nsPresContext : public nsISupports,
   // no Profile is available (no filtering).
   bool IsFontAllowedByProfile(const nsACString& aFamilyName) const override;
 
+  // profileMode: strict membership test against the Profile's device.fontSet
+  // (no host→target mapping). Used by @font-face { src: local() } probes so
+  // the reported font roster matches the spoofed OS.
+  bool IsFontInTargetRoster(const nsACString& aFamilyName) const override;
+
   // Returns the container identity for per-container font spoofing.
   uint32_t GetUserContextId() const override;
 

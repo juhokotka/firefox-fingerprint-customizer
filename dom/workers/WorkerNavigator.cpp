@@ -16,6 +16,8 @@
 #include "mozilla/dom/Serial.h"
 #include "mozilla/dom/ServiceWorkerContainer.h"
 #include "mozilla/dom/StorageManager.h"
+#include "mozilla/dom/WindowGlobalChild.h"
+#include "mozilla/dom/WindowGlobalTypes.h"
 #include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/dom/WorkerNavigatorBinding.h"
 #include "mozilla/dom/WorkerStatus.h"
@@ -36,6 +38,123 @@ struct JSContext;
 namespace mozilla::dom {
 
 using namespace workerinternals;
+
+namespace {
+
+/*
+ * Fetch the fingerprint Profile's navigator.platform / appVersion on the
+ * main thread (the profile cache is main-thread-only), so worker-scope
+ * navigator values match the container's spoofed OS.
+ */
+class GetProfilePlatformRunnable final : public WorkerMainThreadRunnable {
+  nsString& mPlatform;
+  bool& mFound;
+
+ public:
+  GetProfilePlatformRunnable(WorkerPrivate* aWorkerPrivate, nsString& aPlatform,
+                             bool& aFound)
+      : WorkerMainThreadRunnable(aWorkerPrivate, "Platform getter"_ns),
+        mPlatform(aPlatform),
+        mFound(aFound) {
+    MOZ_ASSERT(aWorkerPrivate);
+    aWorkerPrivate->AssertIsOnWorkerThread();
+  }
+
+  virtual bool MainThreadRun() override {
+    AssertIsOnMainThread();
+    MOZ_ASSERT(mWorkerRef);
+    WorkerPrivate* workerPrivate = mWorkerRef->Private();
+    uint32_t userContextId =
+        workerPrivate->GetOriginAttributes().mUserContextId;
+    if (userContextId != 0) {
+      ProfileArgs profile;
+      if (WindowGlobalChild::GetProfileForUserContextId(
+              userContextId, &profile) &&
+          profile.device().isSome()) {
+        const auto& platform = profile.device().ref().platform();
+        if (!platform.IsEmpty()) {
+          mPlatform = NS_ConvertUTF8toUTF16(platform);
+          mFound = true;
+        }
+      }
+    }
+    return true;
+  }
+};
+
+class GetProfileAppVersionRunnable final : public WorkerMainThreadRunnable {
+  nsString& mAppVersion;
+  bool& mFound;
+
+ public:
+  GetProfileAppVersionRunnable(WorkerPrivate* aWorkerPrivate,
+                               nsString& aAppVersion, bool& aFound)
+      : WorkerMainThreadRunnable(aWorkerPrivate, "AppVersion getter"_ns),
+        mAppVersion(aAppVersion),
+        mFound(aFound) {
+    MOZ_ASSERT(aWorkerPrivate);
+    aWorkerPrivate->AssertIsOnWorkerThread();
+  }
+
+  virtual bool MainThreadRun() override {
+    AssertIsOnMainThread();
+    MOZ_ASSERT(mWorkerRef);
+    WorkerPrivate* workerPrivate = mWorkerRef->Private();
+    uint32_t userContextId =
+        workerPrivate->GetOriginAttributes().mUserContextId;
+    if (userContextId != 0) {
+      ProfileArgs profile;
+      if (WindowGlobalChild::GetProfileForUserContextId(
+              userContextId, &profile) &&
+          profile.device().isSome()) {
+        const auto& appVersion = profile.device().ref().appVersion();
+        if (!appVersion.IsEmpty()) {
+          mAppVersion = NS_ConvertUTF8toUTF16(appVersion);
+          mFound = true;
+        }
+      }
+    }
+    return true;
+  }
+};
+
+class GetProfileHwConcurrencyRunnable final : public WorkerMainThreadRunnable {
+  uint64_t& mHwConcurrency;
+  bool& mFound;
+
+ public:
+  GetProfileHwConcurrencyRunnable(WorkerPrivate* aWorkerPrivate,
+                                  uint64_t& aHwConcurrency, bool& aFound)
+      : WorkerMainThreadRunnable(aWorkerPrivate, "HwConcurrency getter"_ns),
+        mHwConcurrency(aHwConcurrency),
+        mFound(aFound) {
+    MOZ_ASSERT(aWorkerPrivate);
+    aWorkerPrivate->AssertIsOnWorkerThread();
+  }
+
+  virtual bool MainThreadRun() override {
+    AssertIsOnMainThread();
+    MOZ_ASSERT(mWorkerRef);
+    WorkerPrivate* workerPrivate = mWorkerRef->Private();
+    uint32_t userContextId =
+        workerPrivate->GetOriginAttributes().mUserContextId;
+    if (userContextId != 0) {
+      ProfileArgs profile;
+      if (WindowGlobalChild::GetProfileForUserContextId(
+              userContextId, &profile) &&
+          profile.device().isSome()) {
+        const auto& hw = profile.device().ref().hardwareConcurrency();
+        if (hw != 0) {
+          mHwConcurrency = hw;
+          mFound = true;
+        }
+      }
+    }
+    return true;
+  }
+};
+
+}  // namespace
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_CLASS(WorkerNavigator)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(WorkerNavigator)
@@ -137,6 +256,17 @@ void WorkerNavigator::GetAppVersion(nsString& aAppVersion,
   WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
   MOZ_ASSERT(workerPrivate);
 
+  // profileMode: honor the per-container appVersion override.
+  nsString profileAppVersion;
+  bool found = false;
+  RefPtr<GetProfileAppVersionRunnable> runnable =
+      new GetProfileAppVersionRunnable(workerPrivate, profileAppVersion, found);
+  runnable->Dispatch(workerPrivate, Canceling, aRv);
+  if (found) {
+    aAppVersion = std::move(profileAppVersion);
+    return;
+  }
+
   if (aCallerType != CallerType::System) {
     if (workerPrivate->ShouldResistFingerprinting(
             RFPTarget::NavigatorAppVersion)) {
@@ -158,6 +288,17 @@ void WorkerNavigator::GetPlatform(nsString& aPlatform, CallerType aCallerType,
                                   ErrorResult& aRv) const {
   WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
   MOZ_ASSERT(workerPrivate);
+
+  // profileMode: honor the per-container platform override.
+  nsString profilePlatform;
+  bool found = false;
+  RefPtr<GetProfilePlatformRunnable> runnable =
+      new GetProfilePlatformRunnable(workerPrivate, profilePlatform, found);
+  runnable->Dispatch(workerPrivate, Canceling, aRv);
+  if (found) {
+    aPlatform = std::move(profilePlatform);
+    return;
+  }
 
   // navigator.platform is the same for default and spoofed values. The
   // "general.platform.override" pref should override the default platform,
@@ -199,6 +340,23 @@ class GetUserAgentRunnable final : public WorkerMainThreadRunnable {
 
     WorkerPrivate* workerPrivate = mWorkerRef->Private();
 
+    // profileMode: honor the per-container user-agent override from the
+    // fingerprint Profile before falling back to the generic path.
+    uint32_t userContextId =
+        workerPrivate->GetOriginAttributes().mUserContextId;
+    if (userContextId != 0) {
+      ProfileArgs profile;
+      if (WindowGlobalChild::GetProfileForUserContextId(
+              userContextId, &profile) &&
+          profile.device().isSome()) {
+        const auto& ua = profile.device().ref().userAgent();
+        if (!ua.IsEmpty()) {
+          mUA = NS_ConvertUTF8toUTF16(ua);
+          return true;
+        }
+      }
+    }
+
     nsCOMPtr<nsPIDOMWindowInner> window = workerPrivate->GetWindow();
 
     nsresult rv =
@@ -230,12 +388,27 @@ uint64_t WorkerNavigator::HardwareConcurrency() const {
   RuntimeService* rts = RuntimeService::GetService();
   MOZ_ASSERT(rts);
 
-  WorkerPrivate* aWorkerPrivate = GetCurrentThreadWorkerPrivate();
+  WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
+  MOZ_ASSERT(workerPrivate);
+
+  // profileMode: return the per-container hardwareConcurrency from the
+  // fingerprint Profile, so the worker value matches the main-thread value.
+  if (workerPrivate->GetOriginAttributes().mUserContextId != 0) {
+    // Fetch the profile value synchronously on the main thread.
+    uint64_t profileVal = 0;
+    bool found = false;
+    RefPtr<GetProfileHwConcurrencyRunnable> runnable =
+        new GetProfileHwConcurrencyRunnable(workerPrivate, profileVal, found);
+    runnable->Dispatch(workerPrivate, Canceling, IgnoreErrors());
+    if (found) {
+      return profileVal;
+    }
+  }
 
   return rts->ClampedHardwareConcurrency(
-      aWorkerPrivate->ShouldResistFingerprinting(
+      workerPrivate->ShouldResistFingerprinting(
           RFPTarget::NavigatorHWConcurrency),
-      aWorkerPrivate->ShouldResistFingerprinting(
+      workerPrivate->ShouldResistFingerprinting(
           RFPTarget::NavigatorHWConcurrencyTiered));
 }
 

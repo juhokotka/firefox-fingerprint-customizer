@@ -15,6 +15,7 @@
 #include "LayerUserData.h"
 #include "MobileViewportManager.h"
 #include "base/basictypes.h"
+#include "gfxFontMetricDatabase.h"
 #include "gfxPlatform.h"
 #include "gfxTextRun.h"
 #include "mozilla/AnimationEventDispatcher.h"
@@ -3114,6 +3115,75 @@ bool nsPresContext::IsFontAllowedByProfile(const nsACString& aFamilyName) const 
   // profileMode: check if the font family name is in the container's
   // Profile device.fontSet. If profileMode is inactive or no Profile is
   // available, allow all fonts (return true).
+  if (!mozilla::StaticPrefs::privacy_fingerprint_profileMode()) {
+    return true;
+  }
+  dom::BrowsingContext* bc = mDocument ? mDocument->GetBrowsingContext() : nullptr;
+  if (!bc) {
+    return true;
+  }
+  uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
+  if (userContextId == 0) {
+    return true;
+  }
+  ProfileArgs profile;
+  if (!dom::WindowGlobalChild::GetProfileForUserContextId(userContextId,
+                                                          &profile) ||
+      profile.device().isNothing()) {
+    return true;
+  }
+  const auto& fontSet = profile.device().ref().fontSet();
+  for (const auto& allowed : fontSet) {
+    if (aFamilyName.Equals(allowed, nsCaseInsensitiveCStringComparator)) {
+      return true;
+    }
+  }
+  // The family name isn't in the target OS's fontSet. But when the page
+  // renders with a host-OS font (e.g. "Menlo" on macOS) whose metrics are
+  // being spoofed against a target-OS equivalent (e.g. "Consolas" on
+  // Windows), the family name may map to a target-OS font that IS allowed.
+  // Allow it so that text renders with the host font instead of falling
+  // back to an arbitrary decorative font (which garbles the page).
+  dom::BrowsingContext* top = bc->Top();
+  nsCString targetPlatform;
+  if (top) {
+    nsAutoString customUA;
+    top->GetCustomUserAgent(customUA);
+    NS_ConvertUTF16toUTF8 ua8(customUA);
+    if (ua8.Find("Macintosh") != kNotFound) {
+      targetPlatform.AssignLiteral("MacIntel");
+    } else if (ua8.Find("Windows NT") != kNotFound) {
+      targetPlatform.AssignLiteral("Win32");
+    } else if (ua8.Find("Linux") != kNotFound) {
+      targetPlatform.AssignLiteral("Linux x86_64");
+    }
+  }
+  if (targetPlatform.IsEmpty()) {
+    targetPlatform = profile.device().ref().platform();
+  }
+  mozilla::gfx::gfxFontMetricDatabase::TargetOS targetOS =
+      mozilla::gfx::gfxFontMetricDatabase::PlatformToOS(targetPlatform);
+  if (targetOS != mozilla::gfx::gfxFontMetricDatabase::TargetOS::None) {
+    // Map the HOST font family name to its equivalent on the TARGET OS.
+    // If the target-OS equivalent is in the fontSet, the host font is
+    // allowed to render (its metrics are spoofed to match the target).
+    nsCString mapped = mozilla::gfx::gfxFontMetricDatabase::MapFontFamily(
+        aFamilyName, targetOS);
+    for (const auto& allowed : fontSet) {
+      if (mapped.Equals(allowed, nsCaseInsensitiveCStringComparator)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool nsPresContext::IsFontInTargetRoster(const nsACString& aFamilyName) const {
+  // Strict membership test against the Profile's device.fontSet (no
+  // host→target mapping). @font-face { src: local() } probes use this so the
+  // reported font roster matches the spoofed OS instead of leaking
+  // host-OS-only fonts (e.g. "American Typewriter" on macOS when spoofing
+  // Windows). If profileMode is inactive or no Profile is available, allow.
   if (!mozilla::StaticPrefs::privacy_fingerprint_profileMode()) {
     return true;
   }

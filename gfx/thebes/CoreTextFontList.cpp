@@ -1448,6 +1448,12 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
     // (set at gfxUserFontSet.cpp:488) preserves the probe name, so the metric
     // hooks will look up the correct target OS metrics automatically.
     if (aFontVisibilityProvider) {
+      // profileMode: only fabricate the substitution when the probed name is
+      // actually part of the spoofed OS's roster. Otherwise return null so
+      // the probe fails and the host font roster is not fabricated/leaked.
+      if (!aFontVisibilityProvider->IsFontInTargetRoster(aFontName)) {
+        return nullptr;
+      }
       uint32_t userContextId = aFontVisibilityProvider->GetUserContextId();
       if (userContextId != 0) {
         nsCString targetPlatform =
@@ -1535,6 +1541,14 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
   // If the family can't be looked up, this font is not available for use.
   FontFamily family = FindFamily(aFontVisibilityProvider, key);
   if (family.IsNull()) {
+    return nullptr;
+  }
+
+  // profileMode: strict roster check. @font-face { src: local("...") } must
+  // only succeed for fonts that exist in the spoofed OS's roster, so the
+  // reported font list (fontFaceLoadFonts) does not leak host-OS-only fonts.
+  if (aFontVisibilityProvider &&
+      !aFontVisibilityProvider->IsFontInTargetRoster(aFontName)) {
     return nullptr;
   }
 

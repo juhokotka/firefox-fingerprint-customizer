@@ -10,6 +10,7 @@
 #include "gfxFontMetricDatabase.h"
 #include "gfxTextFingerprint.h"
 #include "gfxTextRun.h"
+#include "mozilla/Logging.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/intl/String.h"
 #include "mozilla/intl/UnicodeProperties.h"
@@ -1573,6 +1574,11 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
           }
         }
 
+        // DIAGNOSTIC: capture original advance before spoofing to detect
+        // garbled output (zero/negative/distorted advances).
+        int32_t origAdvance = glyphPositions[i].x_advance;
+        bool didSubstitute = false;
+
         // Layer 1: Try metric substitution from the target OS database
         if (targetOS != gfxFontMetricDatabase::TargetOS::None &&
             hasCodepoint && !fontFamily.IsEmpty()) {
@@ -1581,13 +1587,15 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
               gfxFontMetricDatabase::GetAdvanceWidth(
                   targetOS, fontFamily, codepoint, &targetUnitsPerEm);
           if (targetAdvance.isSome() && targetUnitsPerEm > 0) {
-            // Convert design units → device pixels → HarfBuzz 26.6 fixed-point
+            // Convert design units → device pixels → HarfBuzz 16.16 fixed-point
             // target_advance_px = (design_units / units_per_em) * font_size_px
-            // HarfBuzz advance = target_advance_px * 64
+            // HarfBuzz advance = target_advance_px * 65536 (16.16, matching the
+            // font scale set via hb_font_set_scale(FloatToFixed(size)))
             float advancePx =
                 (float)targetAdvance.value() / (float)targetUnitsPerEm *
                 fontSizePx;
-            glyphPositions[i].x_advance = (int32_t)(advancePx * 64.0f);
+            glyphPositions[i].x_advance = FloatToFixed(advancePx);
+            didSubstitute = true;
           }
         }
 
@@ -1597,7 +1605,27 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
           h *= 0x9e3779b9u;  // golden ratio constant for good diffusion
           h ^= h >> 16;
           float deltaPx = ((int32_t)h / 2147483648.0f) * 0.05f;
-          glyphPositions[i].x_advance += (int32_t)(deltaPx * 64.0f);
+          glyphPositions[i].x_advance += FloatToFixed(deltaPx);
+        }
+
+        // DIAGNOSTIC:
+        // 1) Always log the first few substitutions so we can see the normal
+        //    values being applied (family, size, cp, orig->new).
+        // 2) Log any suspicious advance (zero/negative/4x distortion) always.
+        static int sDiagLogged = 0;
+        bool suspicious =
+            glyphPositions[i].x_advance <= 0 ||
+            (origAdvance > 64 &&
+             glyphPositions[i].x_advance < origAdvance / 4) ||
+            (origAdvance > 64 &&
+             glyphPositions[i].x_advance > origAdvance * 4);
+        if ((didSubstitute && sDiagLogged < 30) || suspicious) {
+          sDiagLogged++;
+          printf_stderr(
+              "[TEXTSPOOF] ua=C%u os=%s fam=%s cp=%u adv=%d->%d size=%.1f%s\n",
+              userContextId, targetPlatform.get(), fontFamily.get(), codepoint,
+              origAdvance, glyphPositions[i].x_advance, fontSizePx,
+              suspicious ? " SUSPICIOUS" : "");
         }
       }
     }

@@ -490,16 +490,19 @@ nsresult RequestResolver::GetStorageEstimate(nsIVariant* aResult) {
   MOZ_ALWAYS_SUCCEEDS(
       estimateResult->GetLimit(&mStorageEstimate.mQuota.Construct()));
 
+  // mUsage/mQuota are already constructed by the quota result above; only
+  // overwrite their values here (calling Construct() again would trip the
+  // MOZ_RELEASE_ASSERT(!isSome()) in Maybe/Nullable).
   if (StaticPrefs::privacy_fingerprint_profileMode() && mUserContextId != 0) {
     ProfileArgs profile;
     if (WindowGlobalChild::GetProfileForUserContextId(mUserContextId,
                                                       &profile) &&
         profile.storage().isSome()) {
-      mStorageEstimate.mUsage.Construct() = profile.storage().ref().usage();
-      mStorageEstimate.mQuota.Construct() = profile.storage().ref().quota();
+      mStorageEstimate.mUsage.Value() = profile.storage().ref().usage();
+      mStorageEstimate.mQuota.Value() = profile.storage().ref().quota();
     } else {
-      mStorageEstimate.mUsage.Construct() = 50ULL * 1024 * 1024;
-      mStorageEstimate.mQuota.Construct() = 100ULL * 1024 * 1024 * 1024;
+      mStorageEstimate.mUsage.Value() = 50ULL * 1024 * 1024;
+      mStorageEstimate.mQuota.Value() = 100ULL * 1024 * 1024 * 1024;
     }
   }
 

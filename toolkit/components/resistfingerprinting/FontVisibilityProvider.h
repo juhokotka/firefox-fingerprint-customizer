@@ -50,6 +50,14 @@ class FontVisibilityProvider {
     return true;
   }
 
+  // profileMode: strict membership test against the Profile's device.fontSet
+  // (no host→target mapping). Used by @font-face { src: local() } probes so
+  // the reported font roster matches the spoofed OS and does not leak
+  // host-OS-only fonts. Default returns true (no filtering).
+  virtual bool IsFontInTargetRoster(const nsACString& aFamilyName) const {
+    return true;
+  }
+
   // Returns the container identity (userContextId) for per-container
   // font spoofing. Default returns 0 (no container). Overridden by
   // nsPresContext to read from BrowsingContext::OriginAttributes.

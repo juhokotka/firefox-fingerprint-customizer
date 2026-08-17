@@ -20,7 +20,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M1",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -43,7 +43,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M1",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -66,7 +66,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M2",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -89,15 +89,15 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M2",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
-      hardwareConcurrency: 10,
+      hardwareConcurrency: 8,
       maxTouchPoints: 0,
       doNotTrack: "unspecified",
       devicePixelRatio: 2.0,
-      screen: { width: 3024, height: 1964, availWidth: 3024, availHeight: 1941, availLeft: 0, availTop: 23, pixelDepth: 30, colorDepth: 30 },
+      screen: { width: 2560, height: 1600, availWidth: 2560, availHeight: 1577, availLeft: 0, availTop: 23, pixelDepth: 30, colorDepth: 30 },
       webglVendor: "Google Inc. (Apple)",
       webglRenderer: "Apple GPU",
       audioSampleRate: 48000,
@@ -112,7 +112,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M2 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -135,7 +135,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M3",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -158,7 +158,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M3",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -181,7 +181,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M3 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -204,7 +204,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M3 Max",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -227,7 +227,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -250,7 +250,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -273,7 +273,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M4 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -296,7 +296,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M4 Max",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -319,7 +319,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M2",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -342,7 +342,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M2 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -365,7 +365,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -388,7 +388,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M4 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -411,7 +411,7 @@ const DEVICE_DATABASE = {
     {
       name: "iMac 24-inch M3",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -434,7 +434,7 @@ const DEVICE_DATABASE = {
     {
       name: "iMac 24-inch M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -457,7 +457,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac Studio M2 Max",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -480,7 +480,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac Studio M2 Ultra",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -503,7 +503,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac Pro M2 Ultra",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -528,7 +528,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Ubuntu, NVIDIA RTX 3060)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -538,7 +538,7 @@ const DEVICE_DATABASE = {
       devicePixelRatio: 1.0,
       screen: { width: 2560, height: 1440, availWidth: 2560, availHeight: 1416, availLeft: 0, availTop: 24, pixelDepth: 24, colorDepth: 24 },
       webglVendor: "Google Inc. (NVIDIA)",
-      webglRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      webglRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 OpenGL 4.6)",
       audioSampleRate: 48000,
       diskSizeGB: 1000,
       fontSet: ["Bitstream Charter", "Bitstream Vera Sans", "Bitstream Vera Sans Mono", "Bitstream Vera Serif", "Courier 10 Pitch", "DejaVu Sans", "DejaVu Sans Mono", "DejaVu Serif", "FreeMono", "FreeSans", "FreeSerif", "Liberation Mono", "Liberation Sans", "Liberation Serif", "Noto Sans", "Noto Serif", "Ubuntu", "Ubuntu Condensed", "Ubuntu Mono"],
@@ -551,7 +551,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Ubuntu, Intel UHD 770)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -574,7 +574,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Ubuntu, AMD RX 7600)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -597,7 +597,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Fedora, NVIDIA RTX 4070)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -607,10 +607,10 @@ const DEVICE_DATABASE = {
       devicePixelRatio: 1.0,
       screen: { width: 2560, height: 1440, availWidth: 2560, availHeight: 1416, availLeft: 0, availTop: 24, pixelDepth: 24, colorDepth: 24 },
       webglVendor: "Google Inc. (NVIDIA)",
-      webglRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      webglRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 OpenGL 4.6)",
       audioSampleRate: 48000,
       diskSizeGB: 1000,
-      fontSet: ["Bitstream Charter", "Bitstream Vera Sans", "Bitstream Vera Sans Mono", "Bitstream Vera Serif", "Courier 10 Pitch", "DejaVu Sans", "DejaVu Sans Mono", "DejaVu Serif", "FreeMono", "FreeSans", "FreeSerif", "Liberation Mono", "Liberation Sans", "Liberation Serif", "Noto Sans", "Noto Serif", "Cantarell", "Ubuntu", "Ubuntu Condensed", "Ubuntu Mono"],
+      fontSet: ["Bitstream Charter", "Bitstream Vera Sans", "Bitstream Vera Sans Mono", "Bitstream Vera Serif", "Courier 10 Pitch", "DejaVu Sans", "DejaVu Sans Mono", "DejaVu Serif", "FreeMono", "FreeSans", "FreeSerif", "Liberation Mono", "Liberation Sans", "Liberation Serif", "Noto Sans", "Noto Serif", "Cantarell"],
       mediaDevices: [
         { kind: "audioinput", label: "USB Audio Device (Microphone)" },
         { kind: "videoinput", label: "USB Camera" },
@@ -620,7 +620,7 @@ const DEVICE_DATABASE = {
     {
       name: "Laptop (Ubuntu, Intel Iris Xe)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -645,7 +645,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Desktop (Intel i7, UHD 770)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -668,7 +668,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Desktop (AMD Ryzen 9, RTX 4070)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -691,7 +691,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Desktop (Intel i9, RTX 4090)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -714,7 +714,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Desktop (AMD Ryzen 7, RX 7800 XT)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -737,7 +737,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Laptop (Intel i5, Iris Xe)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -760,7 +760,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Laptop (AMD Ryzen 7, Radeon 780M)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -783,7 +783,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 10 Desktop (Intel i7, GTX 1660)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -805,6 +805,46 @@ const DEVICE_DATABASE = {
     },
   ],
 };
+
+// --- External Display Pool ---
+// Desktop devices without built-in displays (Mac mini, Mac Studio, Mac Pro,
+// Linux/Windows desktops) are connected to external monitors whose resolution
+// varies per user. The screen resolution is randomized from these pools to
+// reflect real-world diversity. Devices with built-in displays (MacBooks, iMacs,
+// laptops) keep their fixed screen resolution since every unit of the same model
+// ships with identical display hardware.
+const EXTERNAL_DISPLAYS = {
+  Mac: [
+    { width: 1920, height: 1080, devicePixelRatio: 1.0, pixelDepth: 24, colorDepth: 24 },
+    { width: 2560, height: 1440, devicePixelRatio: 1.0, pixelDepth: 24, colorDepth: 24 },
+    { width: 2560, height: 1440, devicePixelRatio: 2.0, pixelDepth: 30, colorDepth: 30 },
+    { width: 3440, height: 1440, devicePixelRatio: 1.0, pixelDepth: 24, colorDepth: 24 },
+    { width: 3840, height: 2160, devicePixelRatio: 1.5, pixelDepth: 30, colorDepth: 30 },
+    { width: 3840, height: 2160, devicePixelRatio: 2.0, pixelDepth: 30, colorDepth: 30 },
+    { width: 5120, height: 2880, devicePixelRatio: 2.0, pixelDepth: 30, colorDepth: 30 },
+  ],
+  Linux: [
+    { width: 1920, height: 1080, devicePixelRatio: 1.0, pixelDepth: 24, colorDepth: 24 },
+    { width: 2560, height: 1440, devicePixelRatio: 1.0, pixelDepth: 24, colorDepth: 24 },
+    { width: 3440, height: 1440, devicePixelRatio: 1.0, pixelDepth: 24, colorDepth: 24 },
+    { width: 3840, height: 2160, devicePixelRatio: 1.0, pixelDepth: 24, colorDepth: 24 },
+    { width: 3840, height: 2160, devicePixelRatio: 1.5, pixelDepth: 30, colorDepth: 30 },
+  ],
+  Windows: [
+    { width: 1920, height: 1080, devicePixelRatio: 1.0, pixelDepth: 24, colorDepth: 24 },
+    { width: 1920, height: 1080, devicePixelRatio: 1.25, pixelDepth: 24, colorDepth: 24 },
+    { width: 2560, height: 1440, devicePixelRatio: 1.0, pixelDepth: 24, colorDepth: 24 },
+    { width: 2560, height: 1440, devicePixelRatio: 1.25, pixelDepth: 24, colorDepth: 24 },
+    { width: 3440, height: 1440, devicePixelRatio: 1.0, pixelDepth: 24, colorDepth: 24 },
+    { width: 3840, height: 2160, devicePixelRatio: 1.5, pixelDepth: 30, colorDepth: 30 },
+    { width: 3840, height: 2160, devicePixelRatio: 2.0, pixelDepth: 30, colorDepth: 30 },
+  ],
+};
+
+function deviceHasBuiltInDisplay(device) {
+  let name = (device.name || "").toLowerCase();
+  return name.includes("macbook") || name.includes("imac") || name.includes("laptop");
+}
 
 // --- Location Database ---
 const LOCATION_DATABASE = [
@@ -919,6 +959,40 @@ export const FingerprintProfileStore = {
   },
 
   _deviceToDict(device, deviceType) {
+    let screen;
+    let devicePixelRatio;
+    if (!deviceHasBuiltInDisplay(device)) {
+      let pool = EXTERNAL_DISPLAYS[deviceType] || EXTERNAL_DISPLAYS.Mac;
+      let display = pool[Math.floor(Math.random() * pool.length)];
+      if (deviceType === "Windows") {
+        screen = {
+          width: display.width,
+          height: display.height,
+          availWidth: display.width,
+          availHeight: display.height - 40,
+          availLeft: 0,
+          availTop: 40,
+          pixelDepth: display.pixelDepth,
+          colorDepth: display.colorDepth,
+        };
+      } else {
+        let menuBar = display.devicePixelRatio >= 2.0 ? 23 : 24;
+        screen = {
+          width: display.width,
+          height: display.height,
+          availWidth: display.width,
+          availHeight: display.height - menuBar,
+          availLeft: 0,
+          availTop: menuBar,
+          pixelDepth: display.pixelDepth,
+          colorDepth: display.colorDepth,
+        };
+      }
+      devicePixelRatio = display.devicePixelRatio;
+    } else {
+      screen = { ...device.screen };
+      devicePixelRatio = device.devicePixelRatio;
+    }
     return {
       type: deviceType || "",
       name: device.name,
@@ -930,8 +1004,8 @@ export const FingerprintProfileStore = {
       hardwareConcurrency: device.hardwareConcurrency,
       maxTouchPoints: device.maxTouchPoints,
       doNotTrack: device.doNotTrack,
-      screen: { ...device.screen },
-      devicePixelRatio: device.devicePixelRatio,
+      screen,
+      devicePixelRatio,
       webglVendor: device.webglVendor,
       webglRenderer: device.webglRenderer,
       audioSampleRate: device.audioSampleRate,

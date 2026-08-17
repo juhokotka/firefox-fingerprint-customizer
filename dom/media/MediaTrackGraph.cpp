@@ -17,6 +17,7 @@
 #include "mozilla/Logging.h"
 #include "nsContentUtils.h"
 #include "nsGlobalWindowInner.h"
+#include "nsPIDOMWindowInlines.h"
 #include "nsPrintfCString.h"
 #include "nsServiceManagerUtils.h"
 #include "prerror.h"
@@ -38,7 +39,9 @@
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_media.h"
 #include "mozilla/dom/BaseAudioContextBinding.h"
+#include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/Document.h"
+#include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/WorkletThread.h"
 #include "mozilla/media/MediaUtils.h"
 #include "transport/runnable_utils.h"
@@ -3492,17 +3495,43 @@ MediaTrackGraphImpl* MediaTrackGraphImpl::GetInstanceIfExists(
   return p ? *p : nullptr;
 }
 
+// Returns the profile's audio sample rate for the given window's container, or
+// 0 if no profile is set.
+static TrackRate ProfileSampleRate(nsPIDOMWindowInner* aWindow) {
+  if (!aWindow) {
+    return 0;
+  }
+  BrowsingContext* bc = aWindow->GetBrowsingContext();
+  if (!bc) {
+    return 0;
+  }
+  uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
+  if (userContextId == 0) {
+    return 0;
+  }
+  ProfileArgs profile;
+  if (WindowGlobalChild::GetProfileForUserContextId(userContextId, &profile) &&
+      profile.device().isSome()) {
+    return static_cast<TrackRate>(profile.device().ref().audioSampleRate());
+  }
+  return 0;
+}
+
 // Public method has an nsPIDOMWindowInner* parameter to ensure that the
 // window is a real inner Window, not a WindowProxy.
 /* static */
 MediaTrackGraph* MediaTrackGraph::GetInstanceIfExists(
     nsPIDOMWindowInner* aWindow, TrackRate aSampleRate,
     AudioDeviceID aPrimaryOutputDeviceID) {
-  TrackRate sampleRate =
-      aSampleRate ? aSampleRate
-                  : CubebUtils::PreferredSampleRate(
-                        aWindow->AsGlobal()->ShouldResistFingerprinting(
-                            RFPTarget::AudioSampleRate));
+  TrackRate sampleRate = aSampleRate;
+  if (!sampleRate) {
+    sampleRate = ProfileSampleRate(aWindow);
+    if (!sampleRate) {
+      sampleRate = CubebUtils::PreferredSampleRate(
+          aWindow->AsGlobal()->ShouldResistFingerprinting(
+              RFPTarget::AudioSampleRate));
+    }
+  }
   return MediaTrackGraphImpl::GetInstanceIfExists(
       aWindow->WindowID(), sampleRate, aPrimaryOutputDeviceID);
 }
@@ -3547,11 +3576,15 @@ MediaTrackGraphImpl* MediaTrackGraphImpl::GetInstance(
 MediaTrackGraph* MediaTrackGraph::GetInstance(
     GraphDriverType aGraphDriverRequested, nsPIDOMWindowInner* aWindow,
     TrackRate aSampleRate, AudioDeviceID aPrimaryOutputDeviceID) {
-  TrackRate sampleRate =
-      aSampleRate ? aSampleRate
-                  : CubebUtils::PreferredSampleRate(
-                        aWindow->AsGlobal()->ShouldResistFingerprinting(
-                            RFPTarget::AudioSampleRate));
+  TrackRate sampleRate = aSampleRate;
+  if (!sampleRate) {
+    sampleRate = ProfileSampleRate(aWindow);
+    if (!sampleRate) {
+      sampleRate = CubebUtils::PreferredSampleRate(
+          aWindow->AsGlobal()->ShouldResistFingerprinting(
+              RFPTarget::AudioSampleRate));
+    }
+  }
   return MediaTrackGraphImpl::GetInstance(
       aGraphDriverRequested, aWindow->WindowID(), sampleRate,
       aPrimaryOutputDeviceID, GetMainThreadSerialEventTarget());

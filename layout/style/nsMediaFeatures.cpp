@@ -16,6 +16,7 @@
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/ScreenBinding.h"
+#include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "nsCSSProps.h"
 #include "nsCSSValue.h"
@@ -202,6 +203,17 @@ float Gecko_MediaFeatures_GetResolution(const Document* aDocument) {
   }
 
   if (aDocument->ShouldResistFingerprinting(RFPTarget::CSSResolution)) {
+    if (dom::BrowsingContext* bc = aDocument->GetBrowsingContext()) {
+      uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
+      if (userContextId != 0) {
+        dom::ProfileArgs profile;
+        if (dom::WindowGlobalChild::GetProfileForUserContextId(userContextId,
+                                                               &profile) &&
+            profile.device().isSome()) {
+          return profile.device().ref().devicePixelRatio();
+        }
+      }
+    }
     return float(nsRFPService::GetDevicePixelRatioAtZoom(pc->GetFullZoom()));
   }
   // Get the actual device pixel ratio, which also takes zoom into account.

@@ -24,12 +24,14 @@
 #include "mozilla/PermissionDelegateHandler.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/StaticPrefs_media.h"
-#include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/FeaturePolicyUtils.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/GetUserMediaRequestBinding.h"
+#include "nsPIDOMWindowInlines.h"
 #include "mozilla/dom/MediaDeviceInfo.h"
 #include "mozilla/dom/MediaDevices.h"
 #include "mozilla/dom/MediaDevicesBinding.h"
@@ -3409,13 +3411,17 @@ RefPtr<LocalDeviceSetPromise> MediaManager::AnonymizeDevices(
   }
   bool resistFingerprinting =
       aWindow->AsGlobal()->ShouldResistFingerprinting(RFPTarget::MediaDevices);
+  uint32_t userContextId =
+      aWindow->GetBrowsingContext()
+          ? aWindow->GetBrowsingContext()->OriginAttributesRef().mUserContextId
+          : 0;
   bool persist =
       IsActivelyCapturingOrHasAPermission(windowId) && !resistFingerprinting;
   return media::GetPrincipalKey(principalInfo, persist)
       ->Then(
           GetMainThreadSerialEventTarget(), __func__,
-          [rawDevices = std::move(aDevices), windowId,
-           resistFingerprinting](const nsCString& aOriginKey) {
+          [rawDevices = std::move(aDevices), windowId, resistFingerprinting,
+           userContextId](const nsCString& aOriginKey) {
             MOZ_ASSERT(!aOriginKey.IsEmpty());
             RefPtr anonymized = new LocalMediaDeviceSetRefCnt();
             for (const RefPtr<MediaDevice>& device : *rawDevices) {
@@ -3426,7 +3432,8 @@ RefPtr<LocalDeviceSetPromise> MediaManager::AnonymizeDevices(
 
               nsString id = device->mRawID;
               if (resistFingerprinting) {
-                nsRFPService::GetMediaDeviceName(name, device->mKind);
+                nsRFPService::GetMediaDeviceName(name, device->mKind,
+                                                 userContextId);
                 id = name;
                 id.AppendInt(windowId);
               }

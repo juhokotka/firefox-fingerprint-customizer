@@ -45,6 +45,8 @@
 #include "mozilla/layers/WebRenderCanvasRenderer.h"
 #include "mozilla/layers/WebRenderUserData.h"
 #include "nsContentUtils.h"
+#include "nsPIDOMWindow.h"
+#include "mozilla/dom/BrowsingContext.h"
 #include "nsDisplayList.h"
 
 namespace mozilla {
@@ -2292,15 +2294,57 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
     // are bypassed so the Profile's webglVendor/webglRenderer take effect.
     const FingerprintDeviceArgs* profileDevice = nullptr;
     ProfileArgs profileStorage;
+    // Fallback: when the profile IPC hasn't arrived yet, derive target OS
+    // from the BrowsingContext's customUserAgent (a synced field available
+    // immediately) and use OS-appropriate WebGL strings.
+    nsAutoCString fallbackVendor;
+    nsAutoCString fallbackRenderer;
+    bool hasFallback = false;
+    // The context may be bound to a regular <canvas> or to an OffscreenCanvas
+    // (e.g. CreepJS creates its WebGL tests via `new OffscreenCanvas(...)`).
+    // Reach the owning BrowsingContext from either path so the per-container
+    // profile/fallback is applied even when mCanvasElement is null.
+    dom::BrowsingContext* bc = nullptr;
     if (mCanvasElement) {
       if (Document* doc = mCanvasElement->OwnerDoc()) {
-        if (BrowsingContext* bc = doc->GetBrowsingContext()) {
-          uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
-          if (userContextId != 0 &&
-              WindowGlobalChild::GetProfileForUserContextId(
-                  userContextId, &profileStorage) &&
-              profileStorage.device().isSome()) {
-            profileDevice = &profileStorage.device().ref();
+        bc = doc->GetBrowsingContext();
+      }
+    } else if (mOffscreenCanvas) {
+      nsIGlobalObject* global = mOffscreenCanvas->GetRelevantGlobal();
+      if (nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(global)) {
+        bc = win->GetBrowsingContext();
+      }
+    }
+    if (bc) {
+      uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
+      if (userContextId != 0) {
+        if (WindowGlobalChild::GetProfileForUserContextId(
+                userContextId, &profileStorage) &&
+            profileStorage.device().isSome()) {
+          profileDevice = &profileStorage.device().ref();
+        }
+        // Fallback: profile IPC may not have arrived yet. Use the
+        // BrowsingContext's customUserAgent (synced field) to infer
+        // the target OS and provide matching WebGL strings.
+        if (!profileDevice) {
+          nsAutoString customUA;
+          bc->GetCustomUserAgent(customUA);
+          NS_ConvertUTF16toUTF8 ua8(customUA);
+          if (ua8.Find("Macintosh") != kNotFound) {
+            fallbackVendor.AssignLiteral("Google Inc. (Apple)");
+            fallbackRenderer.AssignLiteral("Apple GPU");
+            hasFallback = true;
+          } else if (ua8.Find("Windows NT") != kNotFound) {
+            fallbackVendor.AssignLiteral("Google Inc. (Intel)");
+            fallbackRenderer.AssignLiteral(
+                "ANGLE (Intel, Intel(R) UHD Graphics Direct3D11"
+                " vs_5_0 ps_5_0, D3D11)");
+            hasFallback = true;
+          } else if (ua8.Find("Linux") != kNotFound) {
+            fallbackVendor.AssignLiteral("Google Inc. (Intel)");
+            fallbackRenderer.AssignLiteral(
+                "Mesa Intel(R) UHD Graphics 770 (ADL-S GT1)");
+            hasFallback = true;
           }
         }
       }
@@ -2314,6 +2358,11 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
           return Some(std::string(renderer.BeginReading(),
                                   renderer.Length()));
         }
+      }
+      // Fallback: use OS-derived renderer when profile IPC hasn't arrived.
+      if (hasFallback) {
+        return Some(std::string(fallbackRenderer.BeginReading(),
+                                fallbackRenderer.Length()));
       }
       const auto prefLock = StaticPrefs::webgl_override_unmasked_renderer();
       if (!prefLock->IsEmpty()) {
@@ -2329,6 +2378,11 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
         if (!vendor.IsEmpty()) {
           return Some(std::string(vendor.BeginReading(), vendor.Length()));
         }
+      }
+      // Fallback: use OS-derived vendor when profile IPC hasn't arrived.
+      if (hasFallback) {
+        return Some(std::string(fallbackVendor.BeginReading(),
+                                fallbackVendor.Length()));
       }
       const auto prefLock = StaticPrefs::webgl_override_unmasked_vendor();
       if (!prefLock->IsEmpty()) {
@@ -2348,14 +2402,14 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
 
       case LOCAL_GL_RENDERER: {
         bool allowRenderer = StaticPrefs::webgl_enable_renderer_query();
-        if (!profileDevice &&
+        if (!profileDevice && !hasFallback &&
             (ShouldResistFingerprinting(RFPTarget::WebGLRenderInfo) ||
              ShouldResistFingerprinting(RFPTarget::WebGLRendererConstant))) {
           allowRenderer = false;
         }
         if (allowRenderer) {
           ret = GetUnmaskedRenderer();
-          if (ret) {
+          if (ret && !profileDevice && !hasFallback) {
             ret = Some(webgl::SanitizeRenderer(*ret));
           }
         }
@@ -2390,14 +2444,14 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
 
         switch (pname) {
           case dom::WEBGL_debug_renderer_info_Binding::UNMASKED_RENDERER_WEBGL:
-            if (!profileDevice &&
+            if (!profileDevice && !hasFallback &&
                 (ShouldResistFingerprinting(RFPTarget::WebGLRenderInfo) ||
                  ShouldResistFingerprinting(
                      RFPTarget::WebGLRendererConstant))) {
               ret = Some("Mozilla"_ns);
             } else {
               ret = GetUnmaskedRenderer();
-              if (ret && !profileDevice &&
+              if (ret && !profileDevice && !hasFallback &&
                   StaticPrefs::webgl_sanitize_unmasked_renderer()) {
                 ret = Some(webgl::SanitizeRenderer(*ret));
               }
@@ -2405,10 +2459,11 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
             break;
 
           case dom::WEBGL_debug_renderer_info_Binding::UNMASKED_VENDOR_WEBGL:
-            if (!profileDevice &&
+            if (!profileDevice && !hasFallback &&
                 ShouldResistFingerprinting(RFPTarget::WebGLRenderInfo)) {
               ret = Some("Mozilla"_ns);
-            } else if (!profileDevice && ShouldResistFingerprinting(
+            } else if (!profileDevice && !hasFallback &&
+                       ShouldResistFingerprinting(
                            RFPTarget::WebGLVendorRandomize)) {
               // Generate "Mozilla <Base64(uint64)>"
               auto randomValue = RandomUint64();
@@ -2426,12 +2481,13 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
               } else {
                 ret = Some("Mozilla"_ns);
               }
-            } else if (!profileDevice && ShouldResistFingerprinting(
+            } else if (!profileDevice && !hasFallback &&
+                       ShouldResistFingerprinting(
                            RFPTarget::WebGLVendorConstant)) {
               ret = Some("Mozilla"_ns);
             } else {
               ret = GetUnmaskedVendor();
-              if (ret && !profileDevice &&
+              if (ret && !profileDevice && !hasFallback &&
                   ShouldResistFingerprinting(RFPTarget::WebGLVendorSanitize)) {
                 ret = Some(webgl::SanitizeVendor(*ret));
               }

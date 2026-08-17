@@ -575,12 +575,12 @@ class nsRFPService final : public nsIObserver, public nsIRFPService {
   // --------------------------------------------------------------------------
 
   // Generates a fake media device name with given kind and index.
-  // Example: Internal Microphone
+  // If aUserContextId is non-zero, reads from the profile's mediaDevices.
   static void GetMediaDeviceName(nsString& aName,
-                                 mozilla::dom::MediaDeviceKind aKind);
+                                 mozilla::dom::MediaDeviceKind aKind,
+                                 uint32_t aUserContextId = 0);
 
   // Generates a fake media device group name with given kind and index.
-  // Example: Audio Group
   static void GetMediaDeviceGroup(nsString& aGroup,
                                   mozilla::dom::MediaDeviceKind aKind);
 

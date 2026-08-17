@@ -3120,7 +3120,33 @@ Maybe<RFPTargetSet> nsRFPService::GetOverriddenFingerprintingSettingsForURI(
 
 /* static */
 void nsRFPService::GetMediaDeviceName(nsString& aName,
-                                      dom::MediaDeviceKind aKind) {
+                                      dom::MediaDeviceKind aKind,
+                                      uint32_t aUserContextId) {
+  if (aUserContextId != 0) {
+    dom::ProfileArgs profile;
+    if (dom::WindowGlobalParent::GetCachedProfile(aUserContextId, &profile) &&
+        profile.device().isSome()) {
+      const auto& devices = profile.device().ref().mediaDevices();
+      nsAutoCString kindStr;
+      switch (aKind) {
+        case dom::MediaDeviceKind::Audioinput:
+          kindStr = "audioinput"_ns;
+          break;
+        case dom::MediaDeviceKind::Videoinput:
+          kindStr = "videoinput"_ns;
+          break;
+        case dom::MediaDeviceKind::Audiooutput:
+          kindStr = "audiooutput"_ns;
+          break;
+      }
+      for (const auto& dev : devices) {
+        if (dev.kind() == kindStr) {
+          aName = NS_ConvertUTF8toUTF16(dev.label());
+          return;
+        }
+      }
+    }
+  }
   switch (aKind) {
     case dom::MediaDeviceKind::Audioinput:
       aName.Assign(u"Internal Microphone"_ns);

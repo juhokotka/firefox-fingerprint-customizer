@@ -287,6 +287,25 @@ void Navigator::GetUserAgent(nsAString& aUserAgent, CallerType aCallerType,
         aUserAgent = std::move(customUserAgent);
         return;
       }
+
+      // Fallback: if the BrowsingContext override hasn't been synced yet,
+      // try the profile cache (content process side).
+      BrowsingContext* bc = docshell->GetBrowsingContext();
+      if (bc) {
+        uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
+        if (userContextId != 0) {
+          ProfileArgs profile;
+          if (WindowGlobalChild::GetProfileForUserContextId(
+                  userContextId, &profile) &&
+              profile.device().isSome()) {
+            const auto& ua = profile.device().ref().userAgent();
+            if (!ua.IsEmpty()) {
+              aUserAgent = NS_ConvertUTF8toUTF16(ua);
+              return;
+            }
+          }
+        }
+      }
     }
   }
 
@@ -321,6 +340,31 @@ void Navigator::GetAppCodeName(nsAString& aAppCodeName, ErrorResult& aRv) {
 
 void Navigator::GetAppVersion(nsAString& aAppVersion, CallerType aCallerType,
                               ErrorResult& aRv) const {
+  // profileMode: derive appVersion from customUserAgent to keep OS
+  // consistent with the spoofed navigator.userAgent.
+  if (mWindow) {
+    nsIDocShell* docshell = mWindow->GetDocShell();
+    if (docshell) {
+      nsAutoString customUA;
+      docshell->GetBrowsingContext()->GetCustomUserAgent(customUA);
+      if (!customUA.IsEmpty()) {
+        NS_ConvertUTF16toUTF8 ua8(customUA);
+        aAppVersion.AssignLiteral("5.0 (");
+        if (ua8.Find("Macintosh") != kNotFound) {
+          aAppVersion.AppendLiteral("Macintosh");
+        } else if (ua8.Find("Windows NT") != kNotFound) {
+          aAppVersion.AppendLiteral("Windows");
+        } else if (ua8.Find("Linux") != kNotFound) {
+          aAppVersion.AppendLiteral("X11");
+        } else {
+          aAppVersion.AppendLiteral("Windows");
+        }
+        aAppVersion.Append(char16_t(')'));
+        return;
+      }
+    }
+  }
+
   nsCOMPtr<Document> doc = mWindow->GetExtantDoc();
 
   nsresult rv = GetAppVersion(
@@ -446,6 +490,23 @@ void Navigator::GetPlatform(nsAString& aPlatform, CallerType aCallerType,
         aPlatform = std::move(customPlatform);
         return;
       }
+
+      // Fallback: if the BrowsingContext customPlatform hasn't been synced
+      // yet, use the profile cache (content process side) so navigator.platform
+      // matches the spoofed OS instead of leaking the host OS.
+      uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
+      if (userContextId != 0) {
+        ProfileArgs profile;
+        if (WindowGlobalChild::GetProfileForUserContextId(
+                userContextId, &profile) &&
+            profile.device().isSome()) {
+          const auto& platform = profile.device().ref().navigatorPlatform();
+          if (!platform.IsEmpty()) {
+            aPlatform = NS_ConvertUTF8toUTF16(platform);
+            return;
+          }
+        }
+      }
     }
   }
 
@@ -470,6 +531,23 @@ void Navigator::GetOscpu(nsAString& aOSCPU, CallerType aCallerType,
       if (!customOscpu.IsEmpty()) {
         aOSCPU = std::move(customOscpu);
         return;
+      }
+
+      // Fallback: if the BrowsingContext customOscpu hasn't been synced yet,
+      // use the profile cache so navigator.oscpu matches the spoofed OS
+      // instead of leaking the host OS.
+      uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
+      if (userContextId != 0) {
+        ProfileArgs profile;
+        if (WindowGlobalChild::GetProfileForUserContextId(
+                userContextId, &profile) &&
+            profile.device().isSome()) {
+          const auto& oscpu = profile.device().ref().oscpu();
+          if (!oscpu.IsEmpty()) {
+            aOSCPU = NS_ConvertUTF8toUTF16(oscpu);
+            return;
+          }
+        }
       }
     }
   }
