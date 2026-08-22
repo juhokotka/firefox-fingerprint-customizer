@@ -105,7 +105,7 @@
 /* Containers panel (toolbar button dropdown) */
 .containers-panel-content {
   padding: 8px;
-  min-width: 240px;
+  min-width: 300px;
 }
 
 .containers-panel-empty {
@@ -293,6 +293,233 @@
   margin: 0;
   white-space: nowrap;
   color: inherit;
+}
+
+/* ── Persona indicator states ───────────────────────────────
+   off      → faded fingerprint icon, red dot
+   active   → persona's container icon (identity color), green dot
+   mismatch → amber warning icon, pulsing amber dot, dashed tint  */
+
+.container-status-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  -moz-context-properties: fill;
+}
+
+.container-status-icon.off {
+  background-image: url("resource://usercontext-content/fingerprint.svg");
+  fill: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+.container-status-icon.warn {
+  background-image: url("chrome://global/skin/icons/warning.svg");
+  fill: #ffbd4f;
+}
+
+.container-status-button.mismatch {
+  background-color: color-mix(in srgb, #ffbd4f 14%, transparent);
+  outline: 1px dashed color-mix(in srgb, #ffbd4f 80%, transparent);
+  outline-offset: -2px;
+}
+
+.container-status-dot.warn {
+  background-color: #ffbd4f;
+  animation: container-status-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes container-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ── Per-tab identity badge ──────────────────────────────────
+   Collapsed to a tinted dot at rest; expands into a pill
+   (icon + name) on hover/selection.  A dashed amber ring marks
+   tabs whose container differs from the active persona; a hollow
+   dashed circle marks normal tabs while Privacy Mode is on.   */
+
+.tab-container-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  block-size: 18px;
+  max-inline-size: 18px;
+  padding-inline: 2.5px;
+  margin-inline-end: 4px;
+  border-radius: 9px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background-color: color-mix(in srgb, var(--identity-icon-color, currentColor) 16%, transparent);
+  transition: max-inline-size 160ms ease, padding-inline 160ms ease;
+}
+
+.tabbrowser-tab:hover .tab-container-badge,
+.tabbrowser-tab[visuallyselected] .tab-container-badge {
+  max-inline-size: 96px;
+  padding-inline: 4px 7px;
+}
+
+.tab-badge-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.tab-badge-name {
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--identity-icon-color, inherit);
+}
+
+.tabbrowser-tab[pinned] .tab-container-badge {
+  display: none;
+}
+
+.tabbrowser-tab.persona-mismatch .tab-container-badge {
+  background-color: color-mix(in srgb, #ffbd4f 22%, transparent);
+  outline: 1.5px dashed color-mix(in srgb, #ffbd4f 85%, transparent);
+  outline-offset: -2.5px;
+  animation: persona-badge-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes persona-badge-pulse {
+  0%, 100% { outline-color: color-mix(in srgb, #ffbd4f 85%, transparent); }
+  50% { outline-color: color-mix(in srgb, #ffbd4f 30%, transparent); }
+}
+
+.tab-container-badge.ghost {
+  background-color: transparent;
+  outline: 1.5px dashed color-mix(in srgb, currentColor 40%, transparent);
+  outline-offset: -2.5px;
+}
+
+.tab-container-badge.ghost .tab-badge-icon {
+  display: none;
+}
+
+/* Ghost badges never expand. */
+.tabbrowser-tab:hover .tab-container-badge.ghost,
+.tabbrowser-tab[visuallyselected] .tab-container-badge.ghost {
+  max-inline-size: 18px;
+  padding-inline: 2.5px;
+}
+
+/* ── Identity mismatch card (containers panel) ───────────── */
+
+.persona-mismatch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 2px 0 8px;
+  border-radius: 8px;
+  background-color: color-mix(in srgb, #ffbd4f 12%, transparent);
+  outline: 1px dashed color-mix(in srgb, #ffbd4f 70%, transparent);
+  animation: persona-card-in 180ms ease-out;
+}
+
+@keyframes persona-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.pmc-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pmc-header-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  background-image: url("chrome://global/skin/icons/warning.svg");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  -moz-context-properties: fill;
+  fill: #ffbd4f;
+}
+
+.pmc-title {
+  margin: 0;
+  font-size: var(--font-size-root, 13px);
+  font-weight: var(--font-weight-semibold, 600);
+}
+
+.pmc-text {
+  font-size: var(--font-size-small, 11px);
+  line-height: 1.6;
+  color: var(--text-color-deemphasized, gray);
+}
+
+.pmc-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background-color: color-mix(in srgb, var(--identity-icon-color, currentColor) 18%, transparent);
+  color: var(--identity-icon-color, inherit);
+  font-weight: var(--font-weight-semibold, 600);
+  white-space: nowrap;
+}
+
+.pmc-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.pmc-btn {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 0;
+  border-radius: 6px;
+  appearance: none;
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.15));
+  background-color: var(--button-background-color, rgba(0, 0, 0, 0.04));
+  color: inherit;
+  font-size: var(--font-size-root, 13px);
+  text-align: center;
+  cursor: pointer;
+}
+
+.pmc-btn:hover {
+  background-color: var(--button-background-color-hover, rgba(0, 0, 0, 0.08));
+}
+
+.pmc-btn:hover:active {
+  background-color: var(--button-background-color-active, rgba(0, 0, 0, 0.12));
+}
+
+.pmc-btn-primary {
+  border-color: transparent;
+  background-color: var(--button-primary-bgcolor, #0061e0);
+  color: var(--button-primary-color, #ffffff);
+  font-weight: var(--font-weight-semibold, 600);
+}
+
+.pmc-btn-primary:hover {
+  background-color: var(--button-primary-bgcolor-hover, #0250bb);
+}
+
+.pmc-btn-primary:hover:active {
+  background-color: var(--button-primary-bgcolor-active, #053eae);
 }
 
 /* Detailed fingerprint editor (independent window) */

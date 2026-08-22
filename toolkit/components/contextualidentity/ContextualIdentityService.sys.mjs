@@ -496,7 +496,18 @@ _ContextualIdentityService.prototype = {
     Services.clearData.deleteDataFromOriginAttributesPattern({ userContextId });
 
     // Delete the fingerprint profile associated with this container.
-    lazy.FingerprintProfileStore.removeProfile(userContextId);
+    // removeProfile is async; keep its failures from aborting removal of
+    // the identity itself, but surface them in the console.
+    try {
+      lazy.FingerprintProfileStore.removeProfile(userContextId)?.catch(e =>
+        console.error(
+          "[ContextualIdentityService] removeProfile failed:",
+          e
+        )
+      );
+    } catch (e) {
+      console.error("[ContextualIdentityService] removeProfile failed:", e);
+    }
 
     let deletedOutput = this.getIdentityObserverOutput(
       this.getPublicIdentityFromId(userContextId)
@@ -777,8 +788,29 @@ _ContextualIdentityService.prototype = {
   closeContainerTabs(userContextId = 0, removeTabOptions = {}) {
     return new Promise(resolve => {
       let remoteTabIds = new Set();
+      let done = false;
+      let finish = () => {
+        if (done) {
+          return;
+        }
+        done = true;
+        try {
+          Services.obs.removeObserver(observer, "ipc:browser-destroyed");
+        } catch (e) {
+          // Already removed when the last tab was destroyed mid-sweep.
+        }
+        resolve();
+      };
+
+      // Register the observer BEFORE removing any tab.  If a browser is
+      // destroyed synchronously inside removeTab (e.g. a lazy browser
+      // forced to load by the frameLoader access below), its
+      // "ipc:browser-destroyed" notification would fire before the
+      // observer existed and the promise would never resolve.
+      let observer = new _TabRemovalObserver(finish, remoteTabIds);
+
       this._forEachContainerTab((tab, tabbrowser) => {
-        let frameLoader = tab.linkedBrowser.frameLoader;
+        let frameLoader = tab.linkedBrowser?.frameLoader;
 
         // We don't have remoteTab in non-e10s mode.
         if (frameLoader?.remoteTab) {
@@ -789,11 +821,8 @@ _ContextualIdentityService.prototype = {
       }, userContextId);
 
       if (remoteTabIds.size == 0) {
-        resolve();
-        return;
+        finish();
       }
-
-      new _TabRemovalObserver(resolve, remoteTabIds);
     });
   },
 

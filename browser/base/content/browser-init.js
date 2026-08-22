@@ -850,6 +850,106 @@ var gBrowserInit = {
             let vbox = document.createXULElement("vbox");
             vbox.className = "containers-panel-content";
 
+            // ── Identity mismatch card ──
+            // When the selected tab's real identity differs from the
+            // browser-level identity (active persona OR Normal Mode),
+            // surface it at the top with one-click resolution.
+            try {
+              let ms = ContainerStatusUI._getState();
+              if (ms && ms.mismatch && (ms.persona || ms.tabIdentity)) {
+                const HTML_NS = "http://www.w3.org/1999/xhtml";
+                let makePill = identity => {
+                  let pill = document.createElementNS(HTML_NS, "span");
+                  pill.className =
+                    "pmc-pill identity-color-" + identity.color;
+                  pill.textContent = identity.name ||
+                    ("Container " + identity.userContextId);
+                  return pill;
+                };
+                let makeHeader = () => {
+                  let header = document.createXULElement("hbox");
+                  header.className = "pmc-header";
+                  header.setAttribute("align", "center");
+                  let hIcon = document.createXULElement("image");
+                  hIcon.className = "pmc-header-icon";
+                  let hTitle = document.createXULElement("label");
+                  hTitle.className = "pmc-title";
+                  hTitle.value = "Identity mismatch";
+                  header.appendChild(hIcon);
+                  header.appendChild(hTitle);
+                  return header;
+                };
+                let makeBtn = (label, onClick, primary) => {
+                  let btn = document.createXULElement("toolbarbutton");
+                  btn.className = primary
+                    ? "pmc-btn pmc-btn-primary" : "pmc-btn";
+                  btn.setAttribute("label", label);
+                  btn.addEventListener("click", function () {
+                    panel.hidePopup();
+                    onClick();
+                  });
+                  return btn;
+                };
+
+                let card = document.createXULElement("vbox");
+                card.className = "persona-mismatch-card";
+                card.appendChild(makeHeader());
+
+                let text = document.createElementNS(HTML_NS, "div");
+                text.className = "pmc-text";
+
+                if (ms.persona) {
+                  // Active persona, but this tab lives elsewhere.
+                  let personaName = ms.persona.name;
+                  if (ms.tabIdentity) {
+                    text.append("This tab is browsing as ",
+                      makePill(ms.tabIdentity),
+                      ". Your active persona is ",
+                      makePill(ms.persona), ".");
+                  } else {
+                    text.append(
+                      "This is a normal tab using your real device ",
+                      "fingerprint. Your active persona is ",
+                      makePill(ms.persona), ".");
+                  }
+                  card.appendChild(text);
+                  card.appendChild(makeBtn("Reopen in " + personaName,
+                    () => ContainerStatusUI.reopenSelectedTabInActivePersona(),
+                    true));
+                } else {
+                  // Normal Mode, but this tab still belongs to a container
+                  // and keeps presenting that container's fingerprint.
+                  let tabName = ms.tabIdentity.name ||
+                    ("Container " + ms.tabUcId);
+                  text.append("This tab is still browsing as ",
+                    makePill(ms.tabIdentity),
+                    ", but privacy containers are off. New pages you open ",
+                    "will use your real fingerprint.");
+                  card.appendChild(text);
+                  card.appendChild(makeBtn("Switch to " + tabName,
+                    () => ContainerStatusUI.switchPersonaToSelectedTab(),
+                    true));
+                }
+
+                let row = document.createXULElement("hbox");
+                row.className = "pmc-actions";
+                if (ms.persona) {
+                  row.appendChild(makeBtn("Close tab",
+                    () => ContainerStatusUI.closeSelectedTab()));
+                } else {
+                  row.appendChild(makeBtn("Reopen as normal tab",
+                    () => ContainerStatusUI.reopenSelectedTabAsNormal()));
+                }
+                row.appendChild(makeBtn("Keep", () => {}));
+                card.appendChild(row);
+
+                vbox.appendChild(card);
+                vbox.appendChild(document.createXULElement("menuseparator"));
+              }
+            } catch (e) {
+              console.error("[ContainerButton] Mismatch card error:", e);
+            }
+
             // ── Normal Mode button ──
             let normalBtn = document.createXULElement("toolbarbutton");
             normalBtn.className = "containers-panel-item containers-panel-mode-btn";
@@ -860,9 +960,26 @@ var gBrowserInit = {
               normalBtn.setAttribute("label", "Normal Mode");
             }
             normalBtn.addEventListener("click", function () {
+              // Only a real state change (a persona was active) counts as a
+              // switch; clicking the already-selected Normal Mode must not
+              // spawn tabs.
+              let wasActive =
+                Services.prefs.getBoolPref("privacy.browser.containerMode", false) ||
+                Services.prefs.getIntPref(
+                  "privacy.browser.selectedUserContextId", 0) > 0;
+
               Services.prefs.setBoolPref("privacy.browser.containerMode", false);
               Services.prefs.setBoolPref("privacy.fingerprint.profileMode", false);
               Services.prefs.setIntPref("privacy.browser.selectedUserContextId", 0);
+
+              // Mirror container switching: every identity switch lands you
+              // in a new tab of the new identity.  Old container tabs stay
+              // open and keep their fingerprints, so the mismatch UI rings
+              // them instead.
+              if (wasActive) {
+                let newTab = gBrowser.addTrustedTab(BROWSER_NEW_TAB_URL);
+                gBrowser.selectedTab = newTab;
+              }
               ContainerStatusUI._updateButtonStatus();
               panel.hidePopup();
             });
@@ -877,6 +994,12 @@ var gBrowserInit = {
                 "Close all tabs in the current container and return to Normal Mode");
               clearBtn.addEventListener("click", function () {
                 try {
+                  // Open the fresh normal-mode tab FIRST: it is not in the
+                  // container so it survives the tab sweep below, and it
+                  // guarantees the window never runs out of tabs mid-close.
+                  let newTab = gBrowser.addTrustedTab(BROWSER_NEW_TAB_URL);
+                  gBrowser.selectedTab = newTab;
+
                   // Close all tabs in the active container
                   ContextualIdentityService.closeContainerTabs(activeUcId);
                 } catch (e) {
@@ -1155,6 +1278,11 @@ var gBrowserInit = {
       // on each open container tab's WindowGlobalParent.
       ContainerProfileSync.syncAll();
 
+      // Add identity badges to tabs restored before this listener existed,
+      // plus a delayed catch-up for late session-restore tabs.
+      ContainerStatusUI.updateTabBadges();
+      setTimeout(() => ContainerStatusUI.updateTabBadges(), 1500);
+
       // When a new container tab is opened (via link click, session restore,
       // etc.), push the profile to its content process.
       gBrowser.tabContainer.addEventListener("TabOpen", function(event) {
@@ -1162,6 +1290,7 @@ var gBrowserInit = {
         if (tab.userContextId && tab.userContextId !== 0) {
           ContainerProfileSync.syncToTab(tab);
         }
+        ContainerStatusUI.updateTabBadges();
       });
     } catch (e) {
       console.error("[ContainerButton] Init error:", e);

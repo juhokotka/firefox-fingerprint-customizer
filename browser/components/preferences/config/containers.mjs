@@ -66,9 +66,51 @@ async function removeContainer(userContextId) {
     if (rv != 0) {
       return;
     }
-    await lazy.ContextualIdentityService.closeContainerTabs(userContextId);
   }
-  lazy.ContextualIdentityService.remove(userContextId);
+  // If the deleted container is the active privacy persona, clear the
+  // persona state so the toolbar button doesn't point at a dead container.
+  try {
+    if (
+      Services.prefs.getIntPref(
+        "privacy.browser.selectedUserContextId", 0) == userContextId
+    ) {
+      Services.prefs.setBoolPref("privacy.browser.containerMode", false);
+      Services.prefs.setBoolPref("privacy.fingerprint.profileMode", false);
+      Services.prefs.setIntPref(
+        "privacy.browser.selectedUserContextId", 0);
+    }
+  } catch (e) {
+    console.error("[containers] persona pref cleanup failed:", e);
+  }
+
+  // Remove the identity BEFORE closing its tabs, and never await anything
+  // before this point.  In persona/container mode the preferences page
+  // itself usually lives in a tab of the container being deleted, so
+  // closeContainerTabs() destroys this very document; any continuation
+  // scheduled after an await (including the removal below) would die with
+  // the nuked compartment and the container would silently survive.
+  // Doing the synchronous removal first keeps deletion atomic even when
+  // this page is closed as part of it.
+  try {
+    lazy.ContextualIdentityService.remove(userContextId);
+  } catch (e) {
+    console.error("[containers] remove failed:", e);
+  }
+
+  // Close the container's tabs last.  A failure or a hang in the
+  // tab-removal pipeline cannot block the deletion anymore (it already
+  // happened above), so the promise is only guarded to keep this function
+  // from staying pending forever when the document survives.
+  if (count > 0) {
+    try {
+      await Promise.race([
+        lazy.ContextualIdentityService.closeContainerTabs(userContextId),
+        new Promise(resolve => setTimeout(resolve, 5000)),
+      ]);
+    } catch (e) {
+      console.error("[containers] closeContainerTabs failed:", e);
+    }
+  }
 }
 
 Preferences.addSetting(

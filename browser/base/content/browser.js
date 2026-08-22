@@ -1610,60 +1610,350 @@ var gContainerCreation = {
 };
 
 // Container status UI — button creation and click handling is in browser-init.js.
-// This object handles button status updates only.
+// Tracks the "active persona" (sticky pref) against the selected tab's real
+// container and keeps three surfaces in sync:
+//   - the toolbar button (off / active / mismatch states)
+//   - per-tab identity badges in the tab strip
+// A tab can never change its container mid-session, so when the selected tab
+// belongs to a different container than the active persona the UI must report
+// the tab's actual identity (truth), not the persona.
 var ContainerStatusUI = {
+  _getState() {
+    let containerMode = Services.prefs.getBoolPref(
+      "privacy.browser.containerMode", false
+    );
+    let activeUcId = Services.prefs.getIntPref(
+      "privacy.browser.selectedUserContextId", 0
+    );
+
+    let persona = null;
+    if (containerMode && activeUcId > 0) {
+      try {
+        persona = ContextualIdentityService.getPublicIdentityFromId(activeUcId);
+      } catch (e) {
+        console.error("[ContainerStatusUI] Identity lookup failed:", e);
+      }
+      if (!persona || !persona.name) {
+        // Container was deleted — clear the stale selection.
+        Services.prefs.setIntPref(
+          "privacy.browser.selectedUserContextId", 0
+        );
+        Services.prefs.setBoolPref(
+          "privacy.browser.containerMode", false
+        );
+        containerMode = false;
+        activeUcId = 0;
+        persona = null;
+      }
+    }
+
+    let tab = window.gBrowser ? gBrowser.selectedTab : null;
+    let tabUcId = tab ? tab.userContextId : 0;
+    let tabIdentity = null;
+    if (tabUcId > 0) {
+      try {
+        tabIdentity = ContextualIdentityService.getPublicIdentityFromId(tabUcId);
+      } catch (e) {}
+    }
+
+    // The browser-level identity: the active persona's container, or 0 when
+    // no persona is active (Normal Mode).
+    let browserUcId = containerMode && activeUcId > 0 ? activeUcId : 0;
+
+    // Mismatch whenever the selected tab's real identity differs from the
+    // browser-level identity, in EITHER direction:
+    //   - a persona is active but the tab lives in another container (or is
+    //     a normal tab), and
+    //   - Normal Mode is on but the tab still belongs to a container and
+    //     keeps presenting that container's fingerprint — its
+    //     BrowsingContext overrides survive the mode switch, and syncAll()
+    //     re-pushes container profiles on startup regardless of mode.
+    let mismatch = tabUcId !== browserUcId;
+    return { containerMode, activeUcId, browserUcId, persona, tab, tabUcId,
+             tabIdentity, mismatch };
+  },
+
   _updateButtonStatus() {
     try {
+      let state = this._getState();
       let button = document.getElementById("urlbar-container-button");
-      if (!button) {
-        console.warn("[ContainerStatusUI] Button not found in DOM");
-        return;
-      }
-      let containerMode = Services.prefs.getBoolPref(
-        "privacy.browser.containerMode", false
-      );
-      let selectedUcId = Services.prefs.getIntPref(
-        "privacy.browser.selectedUserContextId", 0
-      );
-      let dot = button.querySelector(".container-status-dot");
-      let text = button.querySelector(".container-status-text");
+      if (button) {
+        let dot = button.querySelector(".container-status-dot");
+        let text = button.querySelector(".container-status-text");
+        let icon = this._ensureButtonIcon(button);
 
-      // A container is "active" only when ALL of these hold:
-      //   1. containerMode is on
-      //   2. a container is selected (selectedUcId > 0)
-      //   3. that container still exists in ContextualIdentityService
-      // If any condition fails, no fingerprinting is happening, so the
-      // button must show "Off" — never "On" without a real container.
-      let label = "Privacy Container: Off";
-      let isActive = false;
+        let label = "Privacy Container: Off";
+        let isActive = false;
+        let mismatch = false;
 
-      if (containerMode && selectedUcId > 0) {
-        try {
-          let identity =
-            ContextualIdentityService.getPublicIdentityFromId(selectedUcId);
-          if (identity && identity.name) {
-            label = "Privacy Container: " + identity.name;
-            isActive = true;
+        if (state.mismatch) {
+          mismatch = true;
+          label = "Mismatch \u2014 " + (state.tabIdentity
+            ? (state.tabIdentity.name || ("Container " + state.tabUcId))
+            : "normal tab");
+        } else if (state.containerMode && state.activeUcId > 0 && state.persona) {
+          isActive = true;
+          label = "Privacy Container: " + state.persona.name;
+        }
+
+        button.classList.toggle("mismatch", mismatch);
+
+        if (icon) {
+          if (mismatch) {
+            icon.className = "container-status-icon warn";
+          } else if (isActive) {
+            icon.className = "container-status-icon userContext-icon identity-icon-" +
+              (state.persona.icon || "fingerprint") +
+              " identity-color-" + state.persona.color;
           } else {
-            // Container was deleted — clear the stale selection.
-            Services.prefs.setIntPref(
-              "privacy.browser.selectedUserContextId", 0
-            );
-            Services.prefs.setBoolPref(
-              "privacy.browser.containerMode", false
-            );
+            icon.className = "container-status-icon off";
           }
-        } catch (e2) {
-          console.error("[ContainerStatusUI] Identity lookup failed:", e2);
+        }
+        if (dot) {
+          dot.className = "container-status-dot " +
+            (mismatch ? "warn" : isActive ? "on" : "off");
+        }
+        if (text) {
+          text.value = label;
+        }
+
+        if (mismatch) {
+          let tabName = state.tabIdentity
+            ? (state.tabIdentity.name || ("Container " + state.tabUcId))
+            : "a normal tab (your real fingerprint)";
+          let personaPart = state.persona
+            ? "Active persona: " + state.persona.name + "."
+            : "Privacy containers are off.";
+          button.setAttribute("tooltiptext",
+            "This tab is browsing as " + tabName + ". " + personaPart +
+            " Click for options.");
+        } else if (isActive) {
+          button.setAttribute("tooltiptext",
+            "Active persona: " + state.persona.name);
+        } else {
+          button.setAttribute("tooltiptext", "Privacy Container");
         }
       }
 
-      if (dot) {
-        dot.className = "container-status-dot " + (isActive ? "on" : "off");
-      }
-      if (text) { text.value = label; }
+      this.updateTabBadges(state);
     } catch (e) {
       console.error("[ContainerStatusUI] _updateButtonStatus error:", e);
+    }
+  },
+
+  _ensureButtonIcon(button) {
+    let icon = button.querySelector(".container-status-icon");
+    if (!icon) {
+      let content = button.querySelector(".container-status-content");
+      if (!content) {
+        return null;
+      }
+      icon = document.createXULElement("image");
+      icon.className = "container-status-icon off";
+      content.insertBefore(icon, content.firstChild);
+    }
+    return icon;
+  },
+
+  updateTabBadges(state) {
+    try {
+      if (!window.gBrowser || !gBrowser.tabs) {
+        return;
+      }
+      if (!state) {
+        state = this._getState();
+      }
+      let browserUcId = state.browserUcId;
+      for (let tab of gBrowser.tabs) {
+        let ucId = tab.userContextId;
+        if (ucId > 0) {
+          this._ensureTabBadge(tab, ucId);
+          // Ring any container tab that isn't the browser-level identity —
+          // including container tabs left over in Normal Mode, which keep
+          // presenting their container's fingerprint.
+          tab.classList.toggle("persona-mismatch", ucId !== browserUcId);
+        } else if (browserUcId > 0) {
+          this._ensureGhostBadge(tab);
+          tab.classList.remove("persona-mismatch");
+        } else {
+          let badge = tab.querySelector(".tab-container-badge");
+          if (badge) {
+            badge.remove();
+          }
+          tab.classList.remove("persona-mismatch");
+        }
+      }
+    } catch (e) {
+      console.error("[ContainerStatusUI] updateTabBadges error:", e);
+    }
+  },
+
+  _ensureTabBadge(tab, ucId) {
+    let badge = tab.querySelector(".tab-container-badge");
+    let identity = null;
+    try {
+      identity = ContextualIdentityService.getPublicIdentityFromId(ucId);
+    } catch (e) {}
+    if (!identity) {
+      if (badge) {
+        badge.remove();
+      }
+      return null;
+    }
+    if (!badge) {
+      badge = this._createTabBadge(tab);
+      if (!badge) {
+        return null;
+      }
+    }
+    badge.classList.remove("ghost");
+    let icon = badge.querySelector(".tab-badge-icon");
+    icon.className = "tab-badge-icon userContext-icon identity-icon-" +
+      (identity.icon || "fingerprint");
+    let name = badge.querySelector(".tab-badge-name");
+    name.textContent = identity.name || ("Container " + ucId);
+    badge.title = "Container: " + name.textContent;
+    return badge;
+  },
+
+  // Ghost badge: marks a normal (non-container) tab while Privacy Mode is on.
+  _ensureGhostBadge(tab) {
+    let badge = tab.querySelector(".tab-container-badge");
+    if (!badge) {
+      badge = this._createTabBadge(tab);
+      if (!badge) {
+        return null;
+      }
+    }
+    badge.classList.add("ghost");
+    let icon = badge.querySelector(".tab-badge-icon");
+    icon.className = "tab-badge-icon";
+    badge.querySelector(".tab-badge-name").textContent = "";
+    badge.title = "Normal tab \u2014 uses your real fingerprint";
+    return badge;
+  },
+
+  _createTabBadge(tab) {
+    let content = tab.querySelector(".tab-content");
+    let labelContainer = tab.querySelector(".tab-label-container");
+    if (!content || !labelContainer) {
+      return null;
+    }
+    const HTML_NS = "http://www.w3.org/1999/xhtml";
+    let badge = document.createElementNS(HTML_NS, "span");
+    badge.className = "tab-container-badge";
+    let icon = document.createElementNS(HTML_NS, "span");
+    icon.className = "tab-badge-icon";
+    let name = document.createElementNS(HTML_NS, "span");
+    name.className = "tab-badge-name";
+    badge.appendChild(icon);
+    badge.appendChild(name);
+    content.insertBefore(badge, labelContainer);
+    return badge;
+  },
+
+  // Close the mismatched tab and reopen its URL in the active persona.
+  reopenSelectedTabInActivePersona() {
+    try {
+      let state = this._getState();
+      if (!(state.containerMode && state.activeUcId > 0) || !state.tab) {
+        return;
+      }
+      let tab = state.tab;
+      let url = null;
+      try {
+        url = tab.linkedBrowser && tab.linkedBrowser.currentURI
+          ? tab.linkedBrowser.currentURI.spec
+          : null;
+      } catch (e) {}
+      if (!url || url === "about:blank") {
+        url = BROWSER_NEW_TAB_URL;
+      }
+      let triggeringPrincipal =
+        Services.scriptSecurityManager.createNullPrincipal({
+          userContextId: state.activeUcId,
+        });
+      let newTab = gBrowser.addTab(url, {
+        userContextId: state.activeUcId,
+        triggeringPrincipal,
+        index: tab._tPos + 1,
+      });
+      gBrowser.selectedTab = newTab;
+      ContainerProfileSync.syncToTab(newTab);
+      gBrowser.removeTab(tab);
+      this._updateButtonStatus();
+    } catch (e) {
+      console.error("[ContainerStatusUI] reopenSelectedTabInActivePersona error:", e);
+    }
+  },
+
+  closeSelectedTab() {
+    try {
+      let tab = gBrowser.selectedTab;
+      if (!tab) {
+        return;
+      }
+      if (gBrowser.tabs.length === 1) {
+        gBrowser.addTrustedTab(BROWSER_NEW_TAB_URL);
+      }
+      gBrowser.removeTab(tab);
+      this._updateButtonStatus();
+    } catch (e) {
+      console.error("[ContainerStatusUI] closeSelectedTab error:", e);
+    }
+  },
+
+  // Adopt the selected tab's container as the active persona.  Used when a
+  // container tab is open in Normal Mode: instead of touching the tab (its
+  // fingerprint is immutable once loaded), the browser switches its persona
+  // so the UI matches the page's real identity.
+  switchPersonaToSelectedTab() {
+    try {
+      let state = this._getState();
+      if (!state.tab || state.tabUcId <= 0 || !state.tabIdentity) {
+        return;
+      }
+      Services.prefs.setBoolPref("privacy.browser.containerMode", true);
+      Services.prefs.setBoolPref("privacy.userContext.enabled", true);
+      Services.prefs.setBoolPref("privacy.userContext.ui.enabled", true);
+      Services.prefs.setBoolPref("privacy.fingerprint.profileMode", true);
+      Services.prefs.setIntPref(
+        "privacy.browser.selectedUserContextId", state.tabUcId
+      );
+      this._updateButtonStatus();
+    } catch (e) {
+      console.error("[ContainerStatusUI] switchPersonaToSelectedTab error:", e);
+    }
+  },
+
+  // Close the selected container tab and reopen its URL as a normal tab
+  // (no container, real fingerprint).
+  reopenSelectedTabAsNormal() {
+    try {
+      let tab = gBrowser.selectedTab;
+      if (!tab) {
+        return;
+      }
+      let url = null;
+      try {
+        url = tab.linkedBrowser && tab.linkedBrowser.currentURI
+          ? tab.linkedBrowser.currentURI.spec
+          : null;
+      } catch (e) {}
+      if (!url || url === "about:blank") {
+        url = BROWSER_NEW_TAB_URL;
+      }
+      let triggeringPrincipal =
+        Services.scriptSecurityManager.createNullPrincipal({});
+      let newTab = gBrowser.addTab(url, {
+        triggeringPrincipal,
+        index: tab._tPos + 1,
+      });
+      gBrowser.selectedTab = newTab;
+      gBrowser.removeTab(tab);
+      this._updateButtonStatus();
+    } catch (e) {
+      console.error("[ContainerStatusUI] reopenSelectedTabAsNormal error:", e);
     }
   },
 };
