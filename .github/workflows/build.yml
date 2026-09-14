@@ -403,54 +403,47 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           body: |
-            ## Firefox Fingerprint Customizer ${{ github.ref_name }}
+            > **Beta pre-release.** This build is usable but still buggy, and is
+            > deliberately not published as an official release — please report
+            > problems on the issue tracker.
 
-            ### Downloads
+            ### Download
 
-            | Platform | File |
-            | --- | --- |
-            | macOS (Apple Silicon) | `Firefox-Fingerprint-Customizer-${{ github.ref_name }}-macos-arm64.zip` |
-            | Linux (x86_64) | `Firefox-Fingerprint-Customizer-${{ github.ref_name }}-linux-x86_64.tar.xz` |
-            | Windows (x86_64) | `Firefox-Fingerprint-Customizer-${{ github.ref_name }}-windows-x86_64.zip` |
-            | Checksums | `SHA256SUMS.txt` |
+            **macOS** — Apple Silicon (M-series)
+            - `Firefox-Fingerprint-Customizer-${{ github.ref_name }}-macos-arm64.zip` — unzip, then drag the app to Applications
+            - Intel Macs: no prebuilt binary, build from source instead (see the README)
 
-            Verify every download against the single `SHA256SUMS.txt` file.
+            **Windows** — x86_64
+            - `Firefox-Fingerprint-Customizer-${{ github.ref_name }}-windows-x86_64.zip` — unzip, then run `firefox.exe`
 
-            ### Installation
+            **Linux** — x86_64
+            - `Firefox-Fingerprint-Customizer-${{ github.ref_name }}-linux-x86_64.tar.xz` — extract, then run `./firefox`
 
-            **macOS:** Download the `.zip`, unzip it, and drag the app to your
-            Applications folder. Apple Silicon only (M1/M2/M3/M4).
+            **Checksums** — `SHA256SUMS.txt` (covers every file above)
 
-            **Linux:** Download the `.tar.xz`, extract it, and run
-            `./firefox` from the extracted directory.
-
-            **Windows:** Download the `.zip`, extract it, and run `firefox.exe`
-            from the extracted directory.
-
-            ### Verification
-
-            Download `SHA256SUMS.txt`, then run:
+            ### Verify (optional)
 
             ```bash
             # macOS / Linux
             shasum -a 256 -c SHA256SUMS.txt
-            # All files should report: OK
+            # every file should report: OK
 
             # Windows (PowerShell)
-            # Compare Get-FileHash of each file against SHA256SUMS.txt
             Get-FileHash Firefox-Fingerprint-Customizer-${{ github.ref_name }}-windows-x86_64.zip -Algorithm SHA256
+            # then compare it with the matching line in SHA256SUMS.txt
             ```
 
-            ### Build Info
+            ### Build info
 
-            - **Built from commit:** ${{ github.sha }}
-            - **Build date:** ${{ github.run_started_at }}
-            - **Built on:** GitHub Actions (macOS 14, Ubuntu 22.04)
-            - **Windows build:** cross-compiled on Linux with clang-cl (MSVC ABI)
+            GitHub Actions · commit `${{ github.sha }}` · ${{ github.run_started_at }}
+            Windows is cross-compiled on Linux with clang-cl (MSVC ABI).
           files: |
             release-files/*
           draft: false
+          # Releases stay pre-releases: every tag carries a -beta suffix, and the
+          # build is intentionally not presented as an official release.
           prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: false
+          # Append the auto-generated "What's Changed" section after the body.
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

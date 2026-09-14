@@ -17912,6 +17912,21 @@
   value: false
   mirror: always
 
+# privacy.fingerprint.debugFontProfile enables [FONTSPOOF] diagnostics on
+# stderr for the per-container font filter. It exists to make the filter's two
+# silent failure modes observable:
+#   allow-no-profile  -- no Profile in this content process, so the roster
+#                        cannot be applied and EVERY family is allowed;
+#   blocked-by-roster -- the family was rejected against the container's
+#                        device.fontSet (was previously silent, because the
+#                        check ran before ReportBlockedFontFamily).
+# Output is rate-limited to 500 distinct (kind, container, family) tuples.
+# Diagnostic only; leave disabled in normal use.
+- name: privacy.fingerprint.debugFontProfile
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 # privacy.fingerprintingProtection enables a set of fingerprinting protections
 # designed to minimize breakage while maximizing protection.
 - name: privacy.fingerprintingProtection

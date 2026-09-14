@@ -1209,7 +1209,8 @@ void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
     if (families) {
       for (uint32_t i = 0; i < list->NumFamilies(); i++) {
         auto& f = families[i];
-        if (!IsVisibleToCSS(f, FontVisibility::User) || f.IsAltLocaleFamily()) {
+        if (!IsVisibleToCSS(f, FontVisibility::User, nullptr) ||
+            f.IsAltLocaleFamily()) {
           continue;
         }
         // XXX TODO: filter families for aGenericFamily, if supported by
@@ -1222,7 +1223,7 @@ void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
   }
 
   for (const RefPtr<gfxFontFamily>& family : mFontFamilies.Values()) {
-    if (!IsVisibleToCSS(*family, FontVisibility::User)) {
+    if (!IsVisibleToCSS(*family, FontVisibility::User, nullptr)) {
       continue;
     }
     if (family->FilterForFontList(aLangGroup, aGenericFamily)) {
@@ -1831,7 +1832,8 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
     // Check whether the family we found is actually allowed to be looked up,
     // according to current font-visibility prefs.
     if (family) {
-      bool visible = IsVisibleToCSS(*family, visibilityLevel);
+      bool visible =
+          IsVisibleToCSS(*family, visibilityLevel, aFontVisibilityProvider);
       if (visible || (allowHidden && family->IsHidden())) {
         aOutput->AppendElement(FamilyAndGeneric(family, aGeneric));
         return true;
@@ -1847,7 +1849,8 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
                "system font list was not initialized correctly");
 
   auto isBlockedByVisibilityLevel = [=, this](gfxFontFamily* aFamily) -> bool {
-    bool visible = IsVisibleToCSS(*aFamily, visibilityLevel);
+    bool visible =
+        IsVisibleToCSS(*aFamily, visibilityLevel, aFontVisibilityProvider);
     if (visible || (allowHidden && aFamily->IsHidden())) {
       return false;
     }

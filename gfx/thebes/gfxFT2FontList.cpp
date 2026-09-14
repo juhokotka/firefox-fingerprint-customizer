@@ -1865,7 +1865,7 @@ already_AddRefed<gfxFontEntry> gfxFT2FontList::LookupLocalFont(
                              : FontVisibility::User;
 
   for (const RefPtr<gfxFontFamily>& fontFamily : mFontFamilies.Values()) {
-    if (!IsVisibleToCSS(*fontFamily, level)) {
+    if (!IsVisibleToCSS(*fontFamily, level, aFontVisibilityProvider)) {
       continue;
     }
 

@@ -6,7 +6,7 @@
 
 ![Firefox Base](https://img.shields.io/badge/Based%20on-Firefox-FF7139?logo=firefox\&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)
-![Release](https://img.shields.io/github/v/release/juhokotka/firefox-fingerprint-customizer?label=Release\&color=success)
+![Release](https://img.shields.io/github/v/release/juhokotka/firefox-fingerprint-customizer?include_prereleases\&label=Release\&color=success)
 ![License](https://img.shields.io/badge/License-MPL%202.0-green)
 ![Status](https://img.shields.io/badge/Status-Active%20Development-orange)
 
@@ -76,7 +76,7 @@ Each container carries an independent `FingerprintProfile` with a complete devic
 | Device Pixel Ratio   | `2.0` (Retina) / `1.0` / `1.25`                   | `profile.device.devicePixelRatio`    |
 | WebGL Vendor         | `Google Inc. (Apple)`                             | `profile.device.webglVendor`         |
 | WebGL Renderer       | `Apple GPU`                                       | `profile.device.webglRenderer`       |
-| Font Set             | 18 macOS fonts / 22 Linux fonts                   | `profile.device.fontSet`             |
+| Font Set             | Per-OS stock roster (see `FontRosterData.sys.mjs`) | `profile.device.fontSet`             |
 | Media Devices        | Microphone, Camera, Speakers                      | `profile.device.mediaDevices`        |
 | Audio Sample Rate    | `44100` / `48000`                                 | `profile.device.audioSampleRate`     |
 | Disk Size            | `256` / `512` / `1024` GB                         | `profile.device.diskSizeGB`          |
@@ -101,6 +101,8 @@ The claimed **Firefox version** is aligned with the current **latest stable** re
 | DE      | `Europe/Berlin`     | `de-DE`  |
 | CN      | `Asia/Shanghai`     | `zh-CN`  |
 | FR      | `Europe/Paris`      | `fr-FR`  |
+| CA      | `America/Toronto`   | `en-CA`  |
+| AU      | `Australia/Sydney`  | `en-AU`  |
 | KR      | `Asia/Seoul`        | `ko-KR`  |
 | BR      | `America/Sao_Paulo` | `pt-BR`  |
 | IN      | `Asia/Kolkata`      | `en-IN`  |
@@ -151,6 +153,8 @@ Text perturbation alone hides the *exact* machine metrics but preserves the host
 | **macOS**  | Generated locally at build time from the host's system fonts via `fonttools` (no Apple font data committed to the repo) |
 | **Windows**| Open-source metric-compatible fonts (Carlito → Calibri, Liberation → Arial/Times, etc.) |
 | **Linux**  | Open-source metric-compatible fonts (Liberation, Noto, etc.)                   |
+
+**Font roster baseline** — `device.fontSet` is the list of families a machine of the target OS is expected to expose. It decides both what the page can **see** and what may be **rendered**, so its baseline has to be stated explicitly: **a stock OS install with an en-US locale — what the OS image ships, excluding fonts that are downloaded on demand.** On macOS that means `/System/Library/Fonts/**` plus `Supplemental/**`, *minus* `/System/Library/AssetsV2/com_apple_MobileAsset_Font*/**` (PingFang, Kaiti, Yuanti, Xingkai, Baoli, Hanzipen, Weibei, Wawa, Yuppy, LingWai, …). Those on-demand families are locale/region-triggered, so listing them would both misrepresent a stock Mac and leak the machine's region; conversely, omitting the base set — including the CJK families every Mac ships — makes pages fall back to `.notdef` boxes and leaves the font list looking synthetic. The rosters live in a generated module, `FontRosterData.sys.mjs` (`tools/gen_font_roster.py`), not hand-written.
 
 **Cross-OS font mapping** — A name-mapping table (`gfxFontMetricDatabase::MapFontFamily`) translates between equivalent family names across platforms (e.g. `Segoe UI` ↔ `Helvetica Neue` ↔ `DejaVu Sans`), so a request for "Segoe UI" on a macOS host resolves to the correct target-OS metric record.
 
@@ -225,7 +229,7 @@ Switch instantly via the **container button** next to the URL bar.
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Content Process Local Cache + nsRFPService Interception     │
-│  - Profile cached per-BrowsingContext (zero IPC on hot path) │
+│  - Profile cached per-process; zero IPC on the hot path     │
 │  - GetSpoofed* reads Profile in profileMode                  │
 │  - Canvas/WebGL noise via existing per-OA key mechanism      │
 │  - Text seed registered with gfxTextFingerprint (per-OA)     │
@@ -295,7 +299,7 @@ Prebuilt binaries are produced automatically by GitHub Actions for every release
 2. Under the latest release, download the archive that matches your platform:
    | Platform    | Download file                                               | Architecture                |
    | ----------- | ----------------------------------------------------------- | --------------------------- |
-   | **macOS**   | `Firefox-Fingerprint-Customizer-vX.Y.Z-macos-arm64.zip`     | Apple Silicon (M1/M2/M3/M4) |
+   | **macOS**   | `Firefox-Fingerprint-Customizer-vX.Y.Z-macos-arm64.zip`     | Apple Silicon (M-series)    |
    | **Linux**   | `Firefox-Fingerprint-Customizer-vX.Y.Z-linux-x86_64.tar.xz` | x86_64                      |
    | **Windows** | `Firefox-Fingerprint-Customizer-vX.Y.Z-windows-x86_64.zip`  | x86_64                      |
 3. *(Optional)* Download the matching `.sha256sum` file to verify the download (see below).
@@ -367,7 +371,16 @@ EOF
 #### Quick Build (JS-only changes)
 
 ```bash
-# After modifying .js/.sys.mjs/.css files — no C++ rebuild needed
+# After modifying .js/.sys.mjs/.css files — no C++ rebuild needed.
+#
+# NOTE: `build faster` is also REQUIRED (not just a speed-up) in two cases
+# where `build binaries` silently does nothing:
+#   - after adding a JS module: it installs EXTRA_JS_MODULES into
+#     dist/bin/modules and into the app bundle. `build binaries` does not, so
+#     `resource://gre/modules/<new-module>.mjs` fails to load at runtime.
+#   - after adding a pref to StaticPrefList.yaml: it regenerates the
+#     StaticPrefList_*.h headers. `build binaries` does not, so
+#     `StaticPrefs::<newPref>()` does not exist and compilation fails.
 ./mach build faster
 ```
 
@@ -430,7 +443,7 @@ In Privacy Mode, `nsRFPService::ShouldResistFingerprinting()` returns `true` for
 | `document.fonts.check()`          | `CoreTextFontList.cpp`           | Font roster substitution (Gap 3)                |
 | `navigator.storage.estimate()`    | `StorageManager.cpp`             | `profile.storage.quota` / `profile.storage.usage` |
 | `AudioContext.sampleRate`         | `AudioContext.cpp`               | `profile.device.audioSampleRate` |
-| `Intl.DateTimeFormat`             | `BrowsingContext.cpp`            | `profile.location.timezone`      |
+| `Intl.DateTimeFormat`             | `browser.js` (`_applyOverrides`) | `profile.location.timezone`      |
 | `MediaDevices.enumerateDevices()` | `MediaDevices.cpp`               | `profile.device.mediaDevices`    |
 
 ---
@@ -472,10 +485,13 @@ firefox-main/
 │   │   │   └── ContainerEditor.mjs      # Container creation/editing form
 │   │   ├── fingerprintprofile/content/
 │   │   │   └── fingerprint-detailed-editor.{js,xhtml}
-│   │   └── preferences/dialogs/
-│   │       └── containers.xhtml         # Settings → Containers section
-│   └── themes/shared/usercontext/
-│       └── container-editor.css         # Panel & editor styling
+│   │   └── preferences/config/
+│   │       └── containers.mjs           # Settings → Containers section
+│   ├── themes/shared/usercontext/
+│   │   └── container-editor.css         # Panel & editor styling
+│   └── fonts/
+│       ├── font_metrics_{macos,windows,linux}.json  # Target-OS metric DB (installed via moz.build)
+│       └── metric-compat/               # Open-source metric-compatible fonts (Carlito, Liberation)
 ├── toolkit/components/
 │   ├── contextualidentity/
 │   │   └── ContextualIdentityService.sys.mjs  # Container registry (containers.json)
@@ -484,6 +500,7 @@ firefox-main/
 │   │   └── FontVisibilityProvider.h     # GetUserContextId() for per-container font substitution
 │   └── fingerprintprofile/              # Profile store & adapters
 │       ├── FingerprintProfileStore.sys.mjs
+│       ├── FontRosterData.sys.mjs       # Generated per-OS font rosters (device.fontSet)
 │       └── adapters/
 │           ├── ContainerAdapter.sys.mjs
 │           ├── StorageAdapter.sys.mjs
@@ -507,12 +524,12 @@ firefox-main/
 │   ├── gfxFont.cpp                      # Vertical metric spoofing (gfxFont::Measure)
 │   ├── gfxTextRun.{h,cpp}               # userContextId propagation + CSS ch/ex spoofing
 │   ├── gfxPlatformFontList.cpp          # Profile fontSet whitelist (IsFontAllowedByProfile)
-│   ├── font_metrics_{macos,windows,linux}.json  # Generated target-OS metric data (not committed)
 │   └── moz.build                        # Build config (gfxTextFingerprint + gfxFontMetricDatabase added)
 ├── layout/base/
 │   └── nsPresContext.{h,cpp}            # GetUserContextId() override (reads BrowsingContext OriginAttributes)
-├── tools/fonts/
-│   └── extract_font_metrics.py          # Build-time macOS metric extraction (fonttools)
+├── tools/
+│   ├── extract_font_metrics.py          # Metric-DB extraction from font files (fonttools)
+│   └── gen_font_roster.py               # Generates FontRosterData.sys.mjs from a stock OS
 └── docshell/base/
     └── BrowsingContext.{h,cpp}          # Lang/UA/Platform/Timezone overrides
 ```

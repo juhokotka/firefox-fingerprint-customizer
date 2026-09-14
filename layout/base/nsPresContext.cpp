@@ -17,6 +17,7 @@
 #include "base/basictypes.h"
 #include "gfxFontMetricDatabase.h"
 #include "gfxPlatform.h"
+#include "gfxTextFingerprint.h"
 #include "gfxTextRun.h"
 #include "mozilla/AnimationEventDispatcher.h"
 #include "mozilla/ContentBlockingAllowList.h"
@@ -3130,23 +3131,20 @@ bool nsPresContext::IsFontAllowedByProfile(const nsACString& aFamilyName) const 
   if (!dom::WindowGlobalChild::GetProfileForUserContextId(userContextId,
                                                           &profile) ||
       profile.device().isNothing()) {
+    // Observability: with no Profile in this content process the roster filter
+    // cannot run at all, so EVERY family is allowed. This used to fail silently,
+    // which made "the whitelist is not being applied" impossible to tell apart
+    // from "the whitelist allows this font".
+    gfxTextFingerprint::DebugLogOnce("allow-no-profile", userContextId,
+                                     aFamilyName);
     return true;
   }
-  const auto& fontSet = profile.device().ref().fontSet();
-  for (const auto& allowed : fontSet) {
-    if (aFamilyName.Equals(allowed, nsCaseInsensitiveCStringComparator)) {
-      return true;
-    }
-  }
-  // The family name isn't in the target OS's fontSet. But when the page
-  // renders with a host-OS font (e.g. "Menlo" on macOS) whose metrics are
-  // being spoofed against a target-OS equivalent (e.g. "Consolas" on
-  // Windows), the family name may map to a target-OS font that IS allowed.
-  // Allow it so that text renders with the host font instead of falling
-  // back to an arbitrary decorative font (which garbles the page).
-  dom::BrowsingContext* top = bc->Top();
+  // The roster membership test and the host->target mapping live in
+  // WindowGlobalChild::IsFamilyAllowedByProfile so that every
+  // FontVisibilityProvider implementation (nsPresContext, OffscreenCanvas,
+  // WorkerPrivate) applies the same policy.
   nsCString targetPlatform;
-  if (top) {
+  if (dom::BrowsingContext* top = bc->Top()) {
     nsAutoString customUA;
     top->GetCustomUserAgent(customUA);
     NS_ConvertUTF16toUTF8 ua8(customUA);
@@ -3158,24 +3156,16 @@ bool nsPresContext::IsFontAllowedByProfile(const nsACString& aFamilyName) const 
       targetPlatform.AssignLiteral("Linux x86_64");
     }
   }
-  if (targetPlatform.IsEmpty()) {
-    targetPlatform = profile.device().ref().platform();
+
+  bool allowed = dom::WindowGlobalChild::IsFamilyAllowedByProfile(
+      userContextId, aFamilyName, targetPlatform);
+  if (!allowed) {
+    // Observability: rejected by the container roster -- neither the family
+    // itself nor any host->target mapping of it is listed. Previously silent.
+    gfxTextFingerprint::DebugLogOnce("blocked-by-roster", userContextId,
+                                     aFamilyName);
   }
-  mozilla::gfx::gfxFontMetricDatabase::TargetOS targetOS =
-      mozilla::gfx::gfxFontMetricDatabase::PlatformToOS(targetPlatform);
-  if (targetOS != mozilla::gfx::gfxFontMetricDatabase::TargetOS::None) {
-    // Map the HOST font family name to its equivalent on the TARGET OS.
-    // If the target-OS equivalent is in the fontSet, the host font is
-    // allowed to render (its metrics are spoofed to match the target).
-    nsCString mapped = mozilla::gfx::gfxFontMetricDatabase::MapFontFamily(
-        aFamilyName, targetOS);
-    for (const auto& allowed : fontSet) {
-      if (mapped.Equals(allowed, nsCaseInsensitiveCStringComparator)) {
-        return true;
-      }
-    }
-  }
-  return false;
+  return allowed;
 }
 
 bool nsPresContext::IsFontInTargetRoster(const nsACString& aFamilyName) const {
@@ -3201,12 +3191,16 @@ bool nsPresContext::IsFontInTargetRoster(const nsACString& aFamilyName) const {
       profile.device().isNothing()) {
     return true;
   }
-  const auto& fontSet = profile.device().ref().fontSet();
-  for (const auto& allowed : fontSet) {
-    if (aFamilyName.Equals(allowed, nsCaseInsensitiveCStringComparator)) {
-      return true;
-    }
+  // Strict membership test, shared with the other FontVisibilityProvider
+  // implementations; see WindowGlobalChild::IsFamilyInTargetRoster.
+  if (dom::WindowGlobalChild::IsFamilyInTargetRoster(userContextId,
+                                                     aFamilyName)) {
+    return true;
   }
+  // Observability: rejected by the strict target roster (no host->target
+  // mapping considered, which is what @font-face local() probes need).
+  gfxTextFingerprint::DebugLogOnce("blocked-by-target-roster", userContextId,
+                                   aFamilyName);
   return false;
 }
 

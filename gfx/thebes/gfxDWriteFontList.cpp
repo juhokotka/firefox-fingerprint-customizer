@@ -2162,7 +2162,7 @@ bool gfxDWriteFontList::FindAndAddFamiliesLocked(
     FontVisibility level = aFontVisibilityProvider
                                ? aFontVisibilityProvider->GetFontVisibility()
                                : FontVisibility::User;
-    if (ff && IsVisibleToCSS(*ff, level)) {
+    if (ff && IsVisibleToCSS(*ff, level, aFontVisibilityProvider)) {
       aOutput->AppendElement(FamilyAndGeneric(ff, aGeneric));
       return true;
     }

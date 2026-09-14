@@ -666,12 +666,15 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
 
   // Return whether the given font-family record should be visible to CSS,
   // in a context with the given FontVisibility setting.
+  // The provider must be passed explicitly (no default): when it is null the
+  // profile-based fontSet check (profileMode) is skipped entirely, so a missing
+  // argument silently disables per-container font filtering.
   bool IsVisibleToCSS(const gfxFontFamily& aFamily,
                       FontVisibility aVisibility,
-                      const FontVisibilityProvider* aProvider = nullptr) const;
+                      const FontVisibilityProvider* aProvider) const;
   bool IsVisibleToCSS(const mozilla::fontlist::Family& aFamily,
                       FontVisibility aVisibility,
-                      const FontVisibilityProvider* aProvider = nullptr) const;
+                      const FontVisibilityProvider* aProvider) const;
 
   // (Re-)initialize the set of codepoints that we know cannot be rendered.
   void InitializeCodepointsWithNoFonts() MOZ_REQUIRES(mLock);

@@ -11,4 +11,6 @@ DIRS += [
 
 EXTRA_JS_MODULES += [
     "FingerprintProfileStore.sys.mjs",
+    # Per-OS font rosters (device.fontSet). Generated — see tools/gen_font_roster.py.
+    "FontRosterData.sys.mjs",
 ]

@@ -21,6 +21,9 @@
 #include "mozilla/dom/OffscreenCanvasDisplayHelper.h"
 #include "mozilla/dom/OffscreenCanvasRenderingContext2D.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/StaticPrefs_privacy.h"
+#include "mozilla/dom/BrowsingContext.h"
+#include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerRef.h"
 #include "mozilla/dom/WorkerScope.h"
@@ -643,6 +646,55 @@ already_AddRefed<OffscreenCanvas> OffscreenCanvas::CreateFromCloneData(
 // FontVisibilityProvider implementation
 FontVisibility OffscreenCanvas::GetFontVisibility() const {
   return mFontVisibility;
+}
+
+uint32_t OffscreenCanvas::GetUserContextId() const {
+  // On the main thread the owning document determines the container; in a
+  // worker the principal carries the container the worker was spawned in.
+  if (NS_IsMainThread()) {
+    nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(GetRelevantGlobal());
+    if (win) {
+      if (nsCOMPtr<Document> doc = win->GetExtantDoc()) {
+        if (dom::BrowsingContext* bc = doc->GetBrowsingContext()) {
+          return bc->OriginAttributesRef().mUserContextId;
+        }
+      }
+    }
+    return 0;
+  }
+
+  if (dom::WorkerPrivate* worker = dom::GetCurrentThreadWorkerPrivate()) {
+    return worker->GetUserContextId();
+  }
+  return 0;
+}
+
+bool OffscreenCanvas::IsFontAllowedByProfile(
+    const nsACString& aFamilyName) const {
+  // Without this override the base class allows every family, so
+  // OffscreenCanvas.measureText() could be used to enumerate the host's fonts.
+  if (!mozilla::StaticPrefs::privacy_fingerprint_profileMode()) {
+    return true;
+  }
+  uint32_t userContextId = GetUserContextId();
+  if (userContextId == 0) {
+    return true;
+  }
+  return dom::WindowGlobalChild::IsFamilyAllowedByProfile(userContextId,
+                                                          aFamilyName, ""_ns);
+}
+
+bool OffscreenCanvas::IsFontInTargetRoster(
+    const nsACString& aFamilyName) const {
+  if (!mozilla::StaticPrefs::privacy_fingerprint_profileMode()) {
+    return true;
+  }
+  uint32_t userContextId = GetUserContextId();
+  if (userContextId == 0) {
+    return true;
+  }
+  return dom::WindowGlobalChild::IsFamilyInTargetRoster(userContextId,
+                                                        aFamilyName);
 }
 
 void OffscreenCanvas::ReportBlockedFontFamily(const nsCString& aMsg) const {

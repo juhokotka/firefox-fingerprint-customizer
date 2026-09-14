@@ -39,6 +39,7 @@
 #include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_javascript.h"
+#include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/StorageAccess.h"
 #include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/ThreadEventQueue.h"
@@ -88,6 +89,7 @@
 #include "mozilla/dom/WorkerBinding.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/dom/WorkerStatus.h"
+#include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/nsCSPContext.h"
 #include "mozilla/dom/nsCSPUtils.h"
 #include "mozilla/extensions/ExtensionBrowser.h"  // extensions::Create{AndDispatchInitWorkerContext,WorkerLoaded,WorkerDestroyed}Runnable
@@ -7067,6 +7069,41 @@ WorkerPrivate::AutoPushEventLoopGlobal::~AutoPushEventLoopGlobal() {
 // FontVisibilityProvider implementation
 FontVisibility WorkerPrivate::GetFontVisibility() const {
   return mFontVisibility;
+}
+
+uint32_t WorkerPrivate::GetUserContextId() const {
+  // The principal is captured at spawn time in mLoadInfo and stays immutable
+  // for the worker's lifetime, so this also holds for a detached worker whose
+  // original document is gone.
+  return mLoadInfo.mOriginAttributes.mUserContextId;
+}
+
+bool WorkerPrivate::IsFontAllowedByProfile(
+    const nsACString& aFamilyName) const {
+  // Without this override the base class allows every family, so font access
+  // from a worker (e.g. OffscreenCanvas.measureText()) bypassed the container
+  // roster entirely.
+  if (!mozilla::StaticPrefs::privacy_fingerprint_profileMode()) {
+    return true;
+  }
+  uint32_t userContextId = GetUserContextId();
+  if (userContextId == 0) {
+    return true;
+  }
+  return dom::WindowGlobalChild::IsFamilyAllowedByProfile(userContextId,
+                                                          aFamilyName, ""_ns);
+}
+
+bool WorkerPrivate::IsFontInTargetRoster(const nsACString& aFamilyName) const {
+  if (!mozilla::StaticPrefs::privacy_fingerprint_profileMode()) {
+    return true;
+  }
+  uint32_t userContextId = GetUserContextId();
+  if (userContextId == 0) {
+    return true;
+  }
+  return dom::WindowGlobalChild::IsFamilyInTargetRoster(userContextId,
+                                                        aFamilyName);
 }
 
 void WorkerPrivate::ReportBlockedFontFamily(const nsCString& aMsg) const {

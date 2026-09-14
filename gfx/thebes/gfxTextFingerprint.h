@@ -70,6 +70,21 @@ class gfxTextFingerprint {
   static nsCString GetTargetPlatform(uint32_t aUserContextId);
 
   /**
+   * Emit a rate-limited diagnostic on stderr, prefixed with "[FONTSPOOF]".
+   * No-op unless privacy.fingerprint.debugFontProfile is enabled.
+   *
+   * Exists so the per-container font filter's silent failure modes are
+   * observable: a missing Profile (roster filter cannot run, so every family is
+   * allowed) and a family rejected against the container roster.
+   *
+   * @param aKind short tag, e.g. "allow-no-profile" / "blocked-by-roster"
+   * @param aUserContextId container identity (0 = none)
+   * @param aDetail usually the font family name being examined
+   */
+  static void DebugLogOnce(const char* aKind, uint32_t aUserContextId,
+                           const nsACString& aDetail);
+
+  /**
    * Get spoofed vertical metrics for a font, based on the container's target
    * platform. Converts design units from the metric DB to device pixels using
    * the font size.

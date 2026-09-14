@@ -231,6 +231,23 @@ public:
                                          ProfileArgs* aOutProfile);
   static void ClearProfileForUserContextId(uint32_t aUserContextId);
 
+  // ── Per-container font roster checks ─────────────────────────────────
+  // Consulted by every FontVisibilityProvider implementation (nsPresContext,
+  // OffscreenCanvas, WorkerPrivate) so that the per-container roster is applied
+  // uniformly. Implemented next to the Profile cache, which lives here.
+  //
+  // aTargetPlatformOverride lets a caller pass a platform it resolved itself
+  // (nsPresContext derives it from the top-level custom user agent). When empty,
+  // the target platform comes from the text-fingerprint state, then from the
+  // Profile's own device.platform.
+  static bool IsFamilyAllowedByProfile(uint32_t aUserContextId,
+                                       const nsACString& aFamilyName,
+                                       const nsACString& aTargetPlatformOverride);
+  // Strict membership test against device.fontSet, with no host->target
+  // mapping. Used by @font-face { src: local() } probes.
+  static bool IsFamilyInTargetRoster(uint32_t aUserContextId,
+                                     const nsACString& aFamilyName);
+
  private:
   WindowGlobalChild(dom::WindowContext* aWindowContext,
                     nsIPrincipal* aPrincipal, nsIURI* aURI);

@@ -1596,6 +1596,13 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
                 fontSizePx;
             glyphPositions[i].x_advance = FloatToFixed(advancePx);
             didSubstitute = true;
+          } else {
+            // Observability: the family backing this text run has no entry in
+            // the target-OS metric database, so Layer 1 does not apply and only
+            // the Layer 2 noise is hiding the host's real advance widths.
+            // DebugLogOnce deduplicates per (container, family).
+            gfxTextFingerprint::DebugLogOnce("layer1-no-metric", userContextId,
+                                             fontFamily);
           }
         }
 

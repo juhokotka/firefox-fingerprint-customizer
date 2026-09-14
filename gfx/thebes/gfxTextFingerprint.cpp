@@ -6,7 +6,11 @@
 
 #include "gfxTextFingerprint.h"
 
+#include <cstdio>
+
 #include "gfxFontMetricDatabase.h"
+#include "mozilla/Atomics.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/StaticMutex.h"
 #include "nsTHashMap.h"
 #include "nsHashKeys.h"
@@ -22,6 +26,11 @@ struct ContainerTextState {
 };
 
 static nsTHashMap<nsUint32HashKey, ContainerTextState>* gStateMap = nullptr;
+
+// Rate-limiting state for DebugLogOnce(). Guarded by gTextFpLock; capped so a
+// page that probes thousands of families cannot flood stderr.
+static nsTHashSet<nsCString>* gDebugLogged = nullptr;
+static constexpr uint32_t kDebugLogCap = 500;
 
 static uint32_t ComputeSeedHash(const nsTArray<uint8_t>& aSeed) {
   // Simple but well-distributed hash (FNV-1a variant).
@@ -144,4 +153,50 @@ bool gfxTextFingerprint::GetSpoofedVerticalMetrics(
   }
 
   return true;
+}
+
+/* static */
+void gfxTextFingerprint::DebugLogOnce(const char* aKind,
+                                      uint32_t aUserContextId,
+                                      const nsACString& aDetail) {
+  // Read by name rather than through StaticPrefs: adding an entry to
+  // StaticPrefList.yaml does not necessarily regenerate the generated
+  // StaticPrefList_*.h in an existing objdir, which makes the accessor miss at
+  // compile time. Cached per process (-1 = not read yet) because this is called
+  // from the shaping loop; changing the pref therefore needs a restart.
+  static mozilla::Atomic<int32_t> sEnabled(-1);
+  int32_t enabled = sEnabled;
+  if (enabled < 0) {
+    enabled = Preferences::GetBool("privacy.fingerprint.debugFontProfile",
+                                   false)
+                  ? 1
+                  : 0;
+    sEnabled = enabled;
+  }
+  if (enabled != 1) {
+    return;
+  }
+
+  // Key on (kind, container, family) so each distinct conclusion is reported
+  // once rather than once per family lookup.
+  nsCString key(aKind);
+  key.Append(':');
+  key.AppendInt(aUserContextId);
+  key.Append(':');
+  key.Append(aDetail);
+
+  StaticMutexAutoLock lock(gTextFpLock);
+  if (!gDebugLogged) {
+    gDebugLogged = new nsTHashSet<nsCString>();
+  }
+  if (gDebugLogged->Count() >= kDebugLogCap || gDebugLogged->Contains(key)) {
+    return;
+  }
+  gDebugLogged->Insert(key);
+
+  // Copy first: get() on a temporary nsCString is always NUL-terminated,
+  // whereas the input may be a non-terminated substring.
+  nsCString detail(aDetail);
+  fprintf(stderr, "[FONTSPOOF] %s uc=%u fam=%s\n", aKind, aUserContextId,
+          detail.get());
 }

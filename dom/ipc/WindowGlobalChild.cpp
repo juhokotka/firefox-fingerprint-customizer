@@ -6,6 +6,7 @@
 
 #include "GeckoProfiler.h"
 #include "Navigator.h"
+#include "gfxFontMetricDatabase.h"
 #include "gfxTextFingerprint.h"
 #include "mozilla/AntiTrackingUtils.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -1013,6 +1014,74 @@ bool WindowGlobalChild::GetProfileForUserContextId(
 void WindowGlobalChild::ClearProfileForUserContextId(
     uint32_t aUserContextId) {
   ProfileCache().Remove(aUserContextId);
+}
+
+// ── Per-container font roster checks ────────────────────────────────
+// Shared by every FontVisibilityProvider implementation. Before this existed
+// the logic lived only in nsPresContext, so OffscreenCanvas and WorkerPrivate
+// inherited the base-class default of "allow everything" and a page could
+// enumerate the host's fonts with OffscreenCanvas.measureText().
+
+/* static */
+bool WindowGlobalChild::IsFamilyInTargetRoster(
+    uint32_t aUserContextId, const nsACString& aFamilyName) {
+  ProfileArgs profile;
+  if (!GetProfileForUserContextId(aUserContextId, &profile) ||
+      profile.device().isNothing()) {
+    // No Profile in this content process (e.g. a sync race). Stay fail-open so
+    // a missing sync cannot make every page render without fonts; the
+    // [FONTSPOOF] "allow-no-profile" diagnostic exists to make this visible.
+    return true;
+  }
+  const auto& fontSet = profile.device().ref().fontSet();
+  for (const auto& allowed : fontSet) {
+    if (aFamilyName.Equals(allowed, nsCaseInsensitiveCStringComparator)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* static */
+bool WindowGlobalChild::IsFamilyAllowedByProfile(
+    uint32_t aUserContextId, const nsACString& aFamilyName,
+    const nsACString& aTargetPlatformOverride) {
+  ProfileArgs profile;
+  if (!GetProfileForUserContextId(aUserContextId, &profile) ||
+      profile.device().isNothing()) {
+    return true;  // fail-open, see IsFamilyInTargetRoster
+  }
+  const auto& fontSet = profile.device().ref().fontSet();
+  for (const auto& allowed : fontSet) {
+    if (aFamilyName.Equals(allowed, nsCaseInsensitiveCStringComparator)) {
+      return true;
+    }
+  }
+
+  // The family name isn't in the target OS's fontSet. But when the page renders
+  // with a host-OS font (e.g. "Menlo" on macOS) whose metrics are being spoofed
+  // against a target-OS equivalent (e.g. "Consolas" on Windows), the name may
+  // map to a target-OS font that IS allowed. Allow it so text renders with the
+  // host font rather than falling back to an arbitrary decorative font.
+  nsCString targetPlatform(aTargetPlatformOverride);
+  if (targetPlatform.IsEmpty()) {
+    targetPlatform = gfxTextFingerprint::GetTargetPlatform(aUserContextId);
+  }
+  if (targetPlatform.IsEmpty()) {
+    targetPlatform = profile.device().ref().platform();
+  }
+  auto targetOS = mozilla::gfx::gfxFontMetricDatabase::PlatformToOS(
+      targetPlatform);
+  if (targetOS != mozilla::gfx::gfxFontMetricDatabase::TargetOS::None) {
+    nsCString mapped = mozilla::gfx::gfxFontMetricDatabase::MapFontFamily(
+        aFamilyName, targetOS);
+    for (const auto& allowed : fontSet) {
+      if (mapped.Equals(allowed, nsCaseInsensitiveCStringComparator)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 mozilla::ipc::IPCResult WindowGlobalChild::RecvUpdateProfile(
