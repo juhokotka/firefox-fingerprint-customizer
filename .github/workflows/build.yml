@@ -57,6 +57,12 @@ jobs:
             archive_name: windows-x86_64
             toolchain_cache_path: C:\Users\runneradmin\.mozbuild
             target: native
+            # mach rejects a source path longer than 62 chars on Windows
+            # (configure.py checks os.path.realpath, which resolves subst, so a
+            # mapped drive does not help) — the tree is cloned to this short
+            # physical path instead. macOS/Linux leave build_dir unset and fall
+            # back to the workspace.
+            build_dir: 'D:\mozilla-source\firefox'
 
     steps:
       # ── 0. Enable long paths (Windows) ──
@@ -77,7 +83,33 @@ jobs:
           Write-Host "LongPathsEnabled = $((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem').LongPathsEnabled)"
 
       # ── 1. Checkout ──
-      - name: Checkout source
+      # Windows clones to a SHORT physical path. configure.py does
+      #   topsrcdir = os.path.realpath(os.path.dirname(__file__))
+      # and rejects anything over 62 characters, and realpath resolves subst
+      # mappings, so a mapped drive letter does NOT help — the source must
+      # genuinely live somewhere short. D:\a\<repo>\<repo> is 66 chars for this
+      # repo name; D:\mozilla-source\firefox (the path mach itself suggests) is
+      # 25. The sha is fetched rather than the branch so tag pushes build the
+      # tagged commit.
+      - name: Checkout source (Windows, short path)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          SRC=/d/mozilla-source/firefox
+          rm -rf "$SRC"
+          mkdir -p "$SRC"
+          cd "$SRC"
+          git init -q
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git fetch -q --depth 1 origin "${{ github.sha }}"
+          git checkout -q FETCH_HEAD
+          git config core.longpaths true
+          git config --global --add safe.directory "$SRC"
+          echo "source dir: $(pwd) — $(pwd | wc -c) chars (limit 62)"
+          test -f mach && echo "mach present"
+
+      - name: Checkout source (macOS/Linux)
+        if: runner.os != 'Windows'
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -143,20 +175,6 @@ jobs:
           }
           $after = (Get-PSDrive C).Free
           Write-Host ("Free after:  {0:N1} GB (reclaimed {1:N1} GB)" -f ($after / 1GB), (($after - $before) / 1GB))
-
-      # ── 2d. Map the workspace to a short drive letter (Windows) ──
-      # mach enforces a <=62-character source path on Windows (some build
-      # tools misbehave deeper). The default workspace
-      # D:\a\<repo>\<repo> is 66 characters for this repo name, so map it to
-      # X: — same physical directory, much shorter path. Windows mach steps
-      # below run with working-directory: X:.
-      - name: Map short source drive (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          subst X: ${{ github.workspace }}
-          subst
-          Write-Host "X: -> ${{ github.workspace }}"
 
       # ── 3. Install macOS system dependencies ──
       # mach bootstrap --no-system-changes skips Homebrew installs, so we
@@ -269,6 +287,7 @@ jobs:
       - name: Create mozconfig (Windows)
         if: runner.os == 'Windows'
         shell: bash
+        working-directory: ${{ matrix.build_dir }}
         run: |
           cat > mozconfig << 'EOF'
           ac_add_options --enable-application=browser
@@ -282,18 +301,18 @@ jobs:
       # ── 9. Make mach executable ──
       - name: Make mach executable
         shell: bash
+        working-directory: ${{ matrix.build_dir || github.workspace }}
         run: chmod +x ./mach
 
       # ── 10. Bootstrap dependencies ──
       # Downloads and installs all toolchains (Clang, Rust, Node, etc.) into
       # ~/.mozbuild. On cache hit: verifies everything is present (~2 min).
       # On cache miss: downloads and installs (~10-20 min).
-      # Windows runs from the mapped X: drive — see the subst step above;
-      # X: and the default workspace are the same physical directory, so
-      # mozconfig and sources resolve identically, only shorter.
+      # build_dir is the short Windows source path (see the matrix) and the
+      # workspace everywhere else.
       - name: Bootstrap dependencies
         shell: bash
-        working-directory: ${{ runner.os == 'Windows' && 'X:' || '.' }}
+        working-directory: ${{ matrix.build_dir || github.workspace }}
         run: |
           ./mach bootstrap --application-choice=browser --no-system-changes
 
@@ -302,7 +321,7 @@ jobs:
       # stats calls are guarded rather than unconditional.
       - name: Build Firefox
         shell: bash
-        working-directory: ${{ runner.os == 'Windows' && 'X:' || '.' }}
+        working-directory: ${{ matrix.build_dir || github.workspace }}
         env:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
         run: |
@@ -313,7 +332,7 @@ jobs:
       # ── 12. Package ──
       - name: Package Firefox
         shell: bash
-        working-directory: ${{ runner.os == 'Windows' && 'X:' || '.' }}
+        working-directory: ${{ matrix.build_dir || github.workspace }}
         run: |
           ./mach package
 
@@ -366,7 +385,7 @@ jobs:
         if: runner.os == 'Windows'
         id: archive-windows
         shell: bash
-        working-directory: "X:"
+        working-directory: ${{ matrix.build_dir }}
         run: |
           # MozillaBuild's MSYS2 supplies unzip/sha256sum/etc. — the git-bash
           # that GitHub provides on Windows does not ship unzip, which the
@@ -440,6 +459,12 @@ jobs:
           sha256sum "$ARCHIVE_NAME" > "$ARCHIVE_NAME.sha256sum"
           echo "Checksum:"
           cat "$ARCHIVE_NAME.sha256sum"
+
+          # upload-artifact resolves relative paths against GITHUB_WORKSPACE,
+          # but this build ran from the short source path — copy the artifacts
+          # back so the upload step (and the release job) can find them.
+          cp "$ARCHIVE_NAME" "$ARCHIVE_NAME.sha256sum" "$GITHUB_WORKSPACE/"
+          echo "Copied artifacts to GITHUB_WORKSPACE"
 
       # ── 14. Upload as workflow artifact ──
       - name: Upload workflow artifact
