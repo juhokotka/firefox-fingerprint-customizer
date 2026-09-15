@@ -128,9 +128,17 @@ jobs:
           foreach ($p in @('C:\Android', 'C:\Program Files\Google\Chrome',
                            'C:\Program Files (x86)\Google\Chrome',
                            'C:\Program Files\Microsoft\Edge\Application')) {
+            # "{0}"-formatting on purpose: a colon right after a variable name
+            # inside a double-quoted string is parsed as a scoped variable
+            # reference, which is a parser error.
             if (Test-Path $p) {
-              try { Remove-Item -Recurse -Force $p -ErrorAction Stop; Write-Host "removed $p" }
-              catch { Write-Host "could not remove $p: $($_.Exception.Message)" }
+              try {
+                Remove-Item -Recurse -Force $p -ErrorAction Stop
+                Write-Host ("removed {0}" -f $p)
+              }
+              catch {
+                Write-Host ("could not remove {0}: {1}" -f $p, $_.Exception.Message)
+              }
             }
           }
           $after = (Get-PSDrive C).Free
