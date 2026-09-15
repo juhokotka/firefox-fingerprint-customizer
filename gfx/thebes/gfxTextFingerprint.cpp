@@ -13,6 +13,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticMutex.h"
 #include "nsTHashMap.h"
+#include "nsTHashSet.h"
 #include "nsHashKeys.h"
 
 using namespace mozilla;
