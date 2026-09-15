@@ -144,6 +144,20 @@ jobs:
           $after = (Get-PSDrive C).Free
           Write-Host ("Free after:  {0:N1} GB (reclaimed {1:N1} GB)" -f ($after / 1GB), (($after - $before) / 1GB))
 
+      # ── 2d. Map the workspace to a short drive letter (Windows) ──
+      # mach enforces a <=62-character source path on Windows (some build
+      # tools misbehave deeper). The default workspace
+      # D:\a\<repo>\<repo> is 66 characters for this repo name, so map it to
+      # X: — same physical directory, much shorter path. Windows mach steps
+      # below run with working-directory: X:.
+      - name: Map short source drive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          subst X: ${{ github.workspace }}
+          subst
+          Write-Host "X: -> ${{ github.workspace }}"
+
       # ── 3. Install macOS system dependencies ──
       # mach bootstrap --no-system-changes skips Homebrew installs, so we
       # pre-install the packages Firefox needs.
@@ -274,8 +288,12 @@ jobs:
       # Downloads and installs all toolchains (Clang, Rust, Node, etc.) into
       # ~/.mozbuild. On cache hit: verifies everything is present (~2 min).
       # On cache miss: downloads and installs (~10-20 min).
+      # Windows runs from the mapped X: drive — see the subst step above;
+      # X: and the default workspace are the same physical directory, so
+      # mozconfig and sources resolve identically, only shorter.
       - name: Bootstrap dependencies
         shell: bash
+        working-directory: ${{ runner.os == 'Windows' && 'X:' || '.' }}
         run: |
           ./mach bootstrap --application-choice=browser --no-system-changes
 
@@ -284,6 +302,7 @@ jobs:
       # stats calls are guarded rather than unconditional.
       - name: Build Firefox
         shell: bash
+        working-directory: ${{ runner.os == 'Windows' && 'X:' || '.' }}
         env:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
         run: |
@@ -294,6 +313,7 @@ jobs:
       # ── 12. Package ──
       - name: Package Firefox
         shell: bash
+        working-directory: ${{ runner.os == 'Windows' && 'X:' || '.' }}
         run: |
           ./mach package
 
@@ -346,6 +366,7 @@ jobs:
         if: runner.os == 'Windows'
         id: archive-windows
         shell: bash
+        working-directory: "X:"
         run: |
           # MozillaBuild's MSYS2 supplies unzip/sha256sum/etc. — the git-bash
           # that GitHub provides on Windows does not ship unzip, which the
