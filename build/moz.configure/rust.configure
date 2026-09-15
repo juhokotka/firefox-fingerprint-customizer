@@ -415,6 +415,16 @@ def detect_rustc_target(
         if len(narrowed) == 1:
             return narrowed[0].rust_target
 
+        # The host vendor from config.guess (e.g. "pc") usually does not exist
+        # in rust's target list, which conventionally uses "unknown" for
+        # generic OS targets. rust 1.98 added OE (OpenEmbedded) targets
+        # (e.g. x86_64-oe-linux-gnu) whose raw_os is identical to the GNU ones
+        # ("linux-gnu"), leaving every narrowing above ambiguous. Fall back to
+        # the conventional "unknown"-vendor candidate before giving up.
+        narrowed = [c for c in candidates if c.target.vendor == "unknown"]
+        if len(narrowed) == 1:
+            return narrowed[0].rust_target
+
         return None
 
     rustc_target = find_candidate(candidates)

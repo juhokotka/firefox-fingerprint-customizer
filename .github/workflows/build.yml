@@ -59,6 +59,23 @@ jobs:
             target: native
 
     steps:
+      # ── 0. Enable long paths (Windows) ──
+      # Must run BEFORE checkout: this tree contains test262 fixtures whose
+      # file names alone are a whole sentence, and `actions/checkout` failed on
+      # Windows with "unable to create file ...: Filename too long" once the
+      # 260-char MAX_PATH limit was exceeded. core.longpaths makes git use the
+      # \\?\ prefix; the LongPathsEnabled policy covers the rest of the OS.
+      - name: Enable long paths (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          git config --system core.longpaths true
+          git config --global core.longpaths true
+          New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' `
+            -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force | Out-Null
+          Write-Host "core.longpaths = $(git config --system core.longpaths)"
+          Write-Host "LongPathsEnabled = $((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem').LongPathsEnabled)"
+
       # ── 1. Checkout ──
       - name: Checkout source
         uses: actions/checkout@v4
@@ -95,6 +112,29 @@ jobs:
           sudo rm -rf ~/Library/Caches/Homebrew/*
           rm -rf ~/Library/Caches/pip
           df -h /
+
+      # ── 2c. Report disk space (Windows) ──
+      # A Firefox build needs ~35 GB. The windows-2022 image is far tighter
+      # than the Linux one, so surface the numbers up front: if a build dies
+      # midway this tells us immediately whether space was the cause, and the
+      # caches the image ships that this job never uses can be reclaimed.
+      - name: Free disk space (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $before = (Get-PSDrive C).Free
+          Write-Host ("Free before: {0:N1} GB" -f ($before / 1GB))
+          # Not used by this job, but large on the image.
+          foreach ($p in @('C:\Android', 'C:\Program Files\Google\Chrome',
+                           'C:\Program Files (x86)\Google\Chrome',
+                           'C:\Program Files\Microsoft\Edge\Application')) {
+            if (Test-Path $p) {
+              try { Remove-Item -Recurse -Force $p -ErrorAction Stop; Write-Host "removed $p" }
+              catch { Write-Host "could not remove $p: $($_.Exception.Message)" }
+            }
+          }
+          $after = (Get-PSDrive C).Free
+          Write-Host ("Free after:  {0:N1} GB (reclaimed {1:N1} GB)" -f ($after / 1GB), (($after - $before) / 1GB))
 
       # ── 3. Install macOS system dependencies ──
       # mach bootstrap --no-system-changes skips Homebrew installs, so we
@@ -151,36 +191,18 @@ jobs:
           Write-Host "MozillaBuild installed:"
           Get-Content 'C:\mozilla-build\VERSION' -ErrorAction SilentlyContinue
 
-      # ── 5. Add Rust target (Windows native) ──
-      # The Windows build needs the MSVC host target; it is normally the
-      # rustup default, but make it explicit so a missing component fails
-      # here rather than deep inside configure.
-      - name: Add Rust target (Windows)
-        if: runner.os == 'Windows'
+      # ── 5. Rust toolchain ──
+      # No explicit pinning: rust.configure's host-triplet detection was fixed
+      # in this tree to handle rust 1.98+ (the OE targets it added made the
+      # GNU linux candidates ambiguous). The runner's rust is used as-is; if
+      # detection ever fails again, configure prints the target-list mismatch
+      # and this job fails fast.
+      - name: Check Rust toolchain
         shell: bash
         run: |
-          rustup target add x86_64-pc-windows-msvc
-          rustup target list --installed
           rustc --version
-
-      # ── 5b. Pin the Rust toolchain (Linux) ──
-      # v0.6.9-beta died at configure with:
-      #   "Don't know how to translate x86_64-pc-linux-gnu for rustc"
-      # (build/moz.configure/rust.configure:423) — the rustc taken from the
-      # runner image offered no linux candidate in `rustc --print target-list`,
-      # so mozbuild gave up. Pin an explicit stable toolchain instead of
-      # trusting whatever the floating runner image ships.
-      - name: Ensure Rust toolchain (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          rustup toolchain install stable --profile minimal --no-self-update || true
-          rustup default stable
-          echo "--- rustc ---"
-          rustc --version
-          echo "--- x86_64 linux targets in rustc target list ---"
-          rustc --print target-list | grep -E "^x86_64-(unknown|pc)-linux" \
-            || echo "WARNING: rustc exposes no x86_64 linux target"
+          cargo --version
+          rustup target list --installed 2>/dev/null || true
 
       # ── 6. Restore toolchain cache (~/.mozbuild, ~5-10 GB) ──
       - name: Restore toolchain cache
