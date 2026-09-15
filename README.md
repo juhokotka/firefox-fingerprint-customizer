@@ -328,7 +328,7 @@ shasum -a 256 <downloaded-archive>
 Get-FileHash <downloaded-archive> -Algorithm SHA256
 ```
 
-> **Note on platform coverage:** The macOS build targets **Apple Silicon only**. Intel Mac users, as well as anyone who wants to tweak the code, should follow the source-build path below. The Windows build is cross-compiled on Linux with clang-cl (MSVC ABI) — a Tier-1 supported Mozilla configuration — so no Windows toolchain is required on your machine to *use* it.
+> **Note on platform coverage:** The macOS build targets **Apple Silicon only**. Intel Mac users, as well as anyone who wants to tweak the code, should follow the source-build path below. Each release is built natively on its own platform's CI runner, so nothing extra needs to be installed on your machine to *use* it.
 
 ---
 

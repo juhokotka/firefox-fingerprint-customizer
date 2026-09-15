@@ -40,19 +40,23 @@ jobs:
             archive_name: linux-x86_64
             toolchain_cache_path: /home/runner/.mozbuild
             target: native
-          # Windows is cross-compiled on Linux because GitHub's windows-latest
-          # runner does NOT have MozillaBuild installed, and mach hard-fails
-          # without it (see build/mach_initialize.py:_maybe_activate_mozillabuild_environment).
-          # Cross-compiling with clang-cl (MSVC ABI) is a Tier-1 supported
-          # configuration per Mozilla's own docs. --enable-bootstrap downloads
-          # the Visual Studio sysroot + Windows SDK into ~/.mozbuild, so no
-          # manual SDK install is needed.
+          # Windows is built natively on the windows-2022 image. It ships
+          # Visual Studio 2022 (17.14) + Windows SDK 10.0.26100 — exactly what
+          # mozbuild asks for — so no multi-GB SDK download is needed at build
+          # time. (The old cross-compile on Linux had to fetch the VS sysroot +
+          # Win11SDK into ~/.mozbuild via --enable-bootstrap, which is what made
+          # that job time out.) The image tag is pinned rather than
+          # `windows-latest` because `-latest` is being migrated to Windows
+          # Server 2025 (VS 2026) and we want a predictable toolset.
+          # MozillaBuild is installed in a dedicated step below, because mach
+          # hard-fails without it on Windows
+          # (see build/mach_initialize.py:_maybe_activate_mozillabuild_environment).
           - name: Windows x86_64
-            os: ubuntu-22.04
+            os: windows-2022
             artifact_ext: zip
             archive_name: windows-x86_64
-            toolchain_cache_path: /home/runner/.mozbuild
-            target: x86_64-pc-windows-msvc
+            toolchain_cache_path: C:\Users\runneradmin\.mozbuild
+            target: native
 
     steps:
       # ── 1. Checkout ──
@@ -63,8 +67,8 @@ jobs:
 
       # ── 2. Free disk space ──
       # Remove pre-installed toolchains that GitHub runners include but we
-      # don't need. This reclaims ~20 GB on Linux (critical for the build
-      # output + Windows SDK for cross-compile).
+      # don't need. This reclaims ~20 GB on Linux, which the build output
+      # needs.
       - name: Free disk space (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -103,10 +107,6 @@ jobs:
 
       # ── 4. Install Linux system dependencies ──
       # Firefox on Linux needs GTK, X11, GL, and various multimedia libs.
-      # This also covers the Windows cross-compile job (which runs on
-      # ubuntu-22.04): it needs the base build toolchain to compile host
-      # tools, plus msitools (provides `msiextract`) to unpack the Windows
-      # SDK .msi packages during bootstrap.
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         shell: bash
@@ -128,16 +128,59 @@ jobs:
             libssl-dev libsqlite3-dev \
             libnotify-dev libxtst-dev \
             libgl1-mesa-dev libgles2-mesa-dev \
-            msitools \
             build-essential
 
-      # ── 5. Add Rust Windows target (cross-compile only) ──
-      - name: Add Rust target (Windows cross-compile)
-        if: matrix.target != 'native'
+      # ── 4b. Install MozillaBuild (Windows only) ──
+      # mach requires a MozillaBuild install on Windows and asserts that
+      # C:\mozilla-build exists (build/mach_initialize.py). The official
+      # unattended install is `/S` with the default target directory, which
+      # is what Mozilla's own release SRE does on its Windows workers.
+      # Visual Studio 2022 + the Windows SDK are already on the runner, so
+      # nothing else needs downloading.
+      - name: Install MozillaBuild (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = 'https://ftp.mozilla.org/pub/mozilla/libraries/win32/MozillaBuildSetup-Latest.exe'
+          $exe = Join-Path $env:TEMP 'MozillaBuildSetup.exe'
+          Invoke-WebRequest -Uri $url -OutFile $exe
+          Start-Process -FilePath $exe -ArgumentList '/S' -Wait
+          if (-not (Test-Path 'C:\mozilla-build\msys2\usr\bin')) {
+            throw 'MozillaBuild did not install to C:\mozilla-build as expected'
+          }
+          Write-Host "MozillaBuild installed:"
+          Get-Content 'C:\mozilla-build\VERSION' -ErrorAction SilentlyContinue
+
+      # ── 5. Add Rust target (Windows native) ──
+      # The Windows build needs the MSVC host target; it is normally the
+      # rustup default, but make it explicit so a missing component fails
+      # here rather than deep inside configure.
+      - name: Add Rust target (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: |
-          rustup target add ${{ matrix.target }}
+          rustup target add x86_64-pc-windows-msvc
           rustup target list --installed
+          rustc --version
+
+      # ── 5b. Pin the Rust toolchain (Linux) ──
+      # v0.6.9-beta died at configure with:
+      #   "Don't know how to translate x86_64-pc-linux-gnu for rustc"
+      # (build/moz.configure/rust.configure:423) — the rustc taken from the
+      # runner image offered no linux candidate in `rustc --print target-list`,
+      # so mozbuild gave up. Pin an explicit stable toolchain instead of
+      # trusting whatever the floating runner image ships.
+      - name: Ensure Rust toolchain (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update || true
+          rustup default stable
+          echo "--- rustc ---"
+          rustc --version
+          echo "--- x86_64 linux targets in rustc target list ---"
+          rustc --print target-list | grep -E "^x86_64-(unknown|pc)-linux" \
+            || echo "WARNING: rustc exposes no x86_64 linux target"
 
       # ── 6. Restore toolchain cache (~/.mozbuild, ~5-10 GB) ──
       - name: Restore toolchain cache
@@ -159,12 +202,14 @@ jobs:
             sccache-${{ matrix.archive_name }}-
 
       # ── 8. Create mozconfig ──
-      # Native builds (macOS/Linux) use a plain optimize config.
-      # The Windows cross-compile adds:
-      #   --target=x86_64-pc-windows-msvc  -> build for Windows MSVC ABI
-      #   --enable-bootstrap               -> auto-download VS sysroot + Win SDK
-      - name: Create mozconfig (native)
-        if: matrix.target == 'native'
+      # All three platforms build natively now, so the config is nearly
+      # uniform. (The Windows job used to cross-compile from Linux and needed
+      # --target=x86_64-pc-windows-msvc plus --enable-bootstrap to download the
+      # VS sysroot + Windows SDK into ~/.mozbuild.)
+      # Windows omits sccache: the windows-2022 runner image does not ship the
+      # sccache binary, and `--with-ccache=sccache` would fail configure.
+      - name: Create mozconfig (macOS/Linux)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           cat > mozconfig << 'EOF'
@@ -177,8 +222,8 @@ jobs:
           echo "--- mozconfig ---"
           cat mozconfig
 
-      - name: Create mozconfig (Windows cross-compile)
-        if: matrix.target != 'native'
+      - name: Create mozconfig (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: |
           cat > mozconfig << 'EOF'
@@ -186,9 +231,6 @@ jobs:
           ac_add_options --disable-debug
           ac_add_options --enable-optimize
           ac_add_options --disable-tests
-          ac_add_options --with-ccache=sccache
-          ac_add_options --target=${{ matrix.target }}
-          ac_add_options --enable-bootstrap
           EOF
           echo "--- mozconfig ---"
           cat mozconfig
@@ -199,25 +241,25 @@ jobs:
         run: chmod +x ./mach
 
       # ── 10. Bootstrap dependencies ──
-      # Downloads and installs all toolchains (Clang, Rust, Node, etc.).
-      # For the Windows cross-compile, --enable-bootstrap in mozconfig also
-      # pulls down the Visual Studio sysroot + Windows SDK into ~/.mozbuild.
-      # On cache hit: verifies everything is present (~2 min).
-      # On cache miss: downloads and installs (~20-40 min for cross-compile).
+      # Downloads and installs all toolchains (Clang, Rust, Node, etc.) into
+      # ~/.mozbuild. On cache hit: verifies everything is present (~2 min).
+      # On cache miss: downloads and installs (~10-20 min).
       - name: Bootstrap dependencies
         shell: bash
         run: |
           ./mach bootstrap --application-choice=browser --no-system-changes
 
       # ── 11. Build ──
+      # sccache is only used on macOS/Linux (see the mozconfig steps), so the
+      # stats calls are guarded rather than unconditional.
       - name: Build Firefox
         shell: bash
         env:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
         run: |
-          sccache --show-stats || true
+          if command -v sccache >/dev/null 2>&1; then sccache --show-stats || true; fi
           ./mach build
-          sccache --show-stats || true
+          if command -v sccache >/dev/null 2>&1; then sccache --show-stats || true; fi
 
       # ── 12. Package ──
       - name: Package Firefox
@@ -249,7 +291,7 @@ jobs:
           cat "$ARCHIVE_NAME.sha256sum"
 
       - name: Create distributable archive (Linux)
-        if: runner.os == 'Linux' && matrix.target == 'native'
+        if: runner.os == 'Linux'
         id: archive-linux
         shell: bash
         run: |
@@ -270,12 +312,17 @@ jobs:
           echo "Checksum:"
           cat "$ARCHIVE_NAME.sha256sum"
 
-      - name: Create distributable archive (Windows cross-compile)
-        if: matrix.target != 'native'
+      - name: Create distributable archive (Windows)
+        if: runner.os == 'Windows'
         id: archive-windows
         shell: bash
         run: |
-          # The Windows cross-compile produces the full package in
+          # MozillaBuild's MSYS2 supplies unzip/sha256sum/etc. — the git-bash
+          # that GitHub provides on Windows does not ship unzip, which the
+          # firefox.exe sanity check below needs.
+          export PATH="/c/mozilla-build/msys2/usr/bin:$PATH"
+
+          # The Windows build produces the full package in
           # obj-x86_64-pc-windows-msvc/dist/. `mach package` also emits
           # intermediate artifacts (e.g. *.xpt_artifacts.zip) that MUST NOT be
           # published — a naive `find -name "*.zip" | head -1` picks the wrong
@@ -359,7 +406,12 @@ jobs:
         shell: bash
         env:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
-        run: sccache --show-stats || true
+        run: |
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats || true
+          else
+            echo "sccache is not installed on this platform (Windows) — skipping"
+          fi
 
   # ──────────────────────────────────────────────────────────────────────────
   # Release job: runs after all build jobs succeed. Downloads every platform
@@ -436,7 +488,7 @@ jobs:
             ### Build info
 
             GitHub Actions · commit `${{ github.sha }}` · ${{ github.run_started_at }}
-            Windows is cross-compiled on Linux with clang-cl (MSVC ABI).
+            Each platform is built natively on its own runner.
           files: |
             release-files/*
           draft: false
