@@ -198,7 +198,7 @@ def mozconfig_options(mozconfig, early_options, automation, help):
         if "MOZ_AUTOMATION_MOZCONFIG" in mozconfig["env"]["added"]:
             if not automation:
                 log.error(
-                    "%s directly or indirectly includes an in-tree " "mozconfig.",
+                    "%s directly or indirectly includes an in-tree mozconfig.",
                     mozconfig["path"],
                 )
                 log.error(
@@ -436,13 +436,15 @@ option("--host", nargs=1, help="Define the system type performing the build")
 option(
     "--target",
     nargs=1,
-    help="Define the system type where the resulting executables will be " "used",
+    help="Define the system type where the resulting executables will be used",
 )
 
 
 def check_mingw_triplet(triplet, host_or_target):
     if triplet.endswith(("-mingw32", "-mingw64")):
-        die(f"{host_or_target.capitalize()} {triplet} is no longer supported, try {triplet[:-8]}-windows-gnu or {triplet[:-8]}-windows-msvc instead")
+        die(
+            f"{host_or_target.capitalize()} {triplet} is no longer supported, try {triplet[:-8]}-windows-gnu or {triplet[:-8]}-windows-msvc instead"
+        )
 
 
 @imports(_from="mozbuild.configure.constants", _import="Abi")
@@ -818,9 +820,7 @@ set_config("OS_ARCH", target_variables.OS_ARCH)
 obsolete_config("CPU_ARCH", replacement="TARGET_CPU")
 set_config("INTEL_ARCHITECTURE", target_variables.INTEL_ARCHITECTURE)
 set_config("TARGET_CPU", target.cpu)
-set_config("TARGET_RAW_CPU", target.raw_cpu)
 set_config("TARGET_OS", target.os)
-set_config("TARGET_RAW_OS", target.raw_os)
 set_config("TARGET_KERNEL", target.kernel)
 set_config("TARGET_ENDIANNESS", target.endianness)
 
@@ -1038,10 +1038,12 @@ def version_path(path):
 # This is useful for performance profiling, as there are things that we don't
 # enable in release (like the background hang monitor) that can affect
 # performance.
+# "early-beta" and "late-beta" are deprecated aliases of "beta" (bug 2051729)
+# and will be removed.
 option(
     "--as-milestone",
     help="Build with another milestone configuration (e.g., as release)",
-    choices=("early-beta", "late-beta", "release"),
+    choices=("beta", "early-beta", "late-beta", "release"),
     default=None,
 )
 
@@ -1087,16 +1089,19 @@ def milestone(build_env, build_project, version_path, as_milestone, _):
                 die("Could not find a version number in {}".format(p))
             versions.append(content[-1])
 
-    is_early_beta_or_earlier = None
     if as_milestone:
         if "a1" not in versions[0]:
             # We could make this work with some effort
             die("--as-milestone only works on nightly builds")
         as_milestone = as_milestone[0]
+        if as_milestone in ("early-beta", "late-beta"):
+            log.warning(
+                "--as-milestone=%s is deprecated now that the distinct early and "
+                "late beta periods are being phased out. Use --as-milestone=beta.",
+                as_milestone,
+            )
         as_milestone_flag = "" if as_milestone == "release" else "b1"
         versions = [v.replace("a1", as_milestone_flag) for v in versions]
-        if as_milestone == "early-beta":
-            is_early_beta_or_earlier = True
 
     milestone, firefox_version, firefox_version_display = versions[:3]
 
@@ -1119,23 +1124,6 @@ def milestone(build_env, build_project, version_path, as_milestone, _):
     m = re.search(r"([ab]\d+)", milestone)
     ab_patch = m.group(1) if m else ""
 
-    if not as_milestone:
-        defines = os.path.join(build_env.topsrcdir, "build", "defines.sh")
-        with open(defines, "r") as fh:
-            for line in fh.read().splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                name, _, value = line.partition("=")
-                name = name.strip()
-                value = value.strip()
-                if name != "EARLY_BETA_OR_EARLIER":
-                    die(
-                        "Only the EARLY_BETA_OR_EARLIER variable can be set in build/defines.sh"
-                    )
-                if value and any(x in app_version_display for x in "ab"):
-                    is_early_beta_or_earlier = True
-
     # Only expose the major version milestone in the UA string and hide the
     # patch leve (bugs 572659 and 870868).
     #
@@ -1147,7 +1135,9 @@ def milestone(build_env, build_project, version_path, as_milestone, _):
         symbolversion="%s%s" % (major_version, ab_patch),
         is_nightly=is_nightly,
         is_release_or_beta=is_release_or_beta,
-        is_early_beta_or_earlier=is_early_beta_or_earlier,
+        # EARLY_BETA_OR_EARLIER is an alias for NIGHTLY_BUILD, pending its
+        # removal in bug 2052054.
+        is_early_beta_or_earlier=is_nightly,
         is_esr=app_version_display.endswith("esr") or None,
         app_version=app_version,
         app_version_display=app_version_display,
@@ -1214,8 +1204,7 @@ set_define("MOZ_UPDATE_CHANNEL", update_channel)
 option(
     env="MOZBUILD_STATE_PATH",
     nargs=1,
-    help="Path to a persistent state directory for the build system "
-    "and related tools",
+    help="Path to a persistent state directory for the build system and related tools",
 )
 
 
@@ -1236,20 +1225,6 @@ def mozillabuild_bin_paths(mozillabuild, shell, host_is_windows):
     paths.append(os.path.dirname(shell))
     paths.append(str(Path(mozillabuild[0]) / "bin"))
     return paths
-
-
-@depends(mozillabuild_bin_paths)
-@imports("os")
-def prefer_mozillabuild_path(mozillabuild_bin_paths):
-    return mozillabuild_bin_paths + os.environ["PATH"].split(os.pathsep)
-
-
-# milestone.is_nightly corresponds to cases NIGHTLY_BUILD is set.
-
-
-@depends(milestone)
-def enabled_in_nightly(milestone):
-    return milestone.is_nightly
 
 
 # Check if we need the 32-bit Linux SSE2 error dialog

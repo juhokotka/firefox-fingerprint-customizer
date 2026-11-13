@@ -2,7 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "jsapi-tests/tests.h"
+
 #include "mozilla/Utf8.h"  // mozilla::Utf8Unit
+
+#include <utility>  // std::move
 
 #include "builtin/TestingFunctions.h"
 #include "js/ColumnNumber.h"  // JS::LimitedColumnNumberOneOrigin, JS::TaggedColumnNumberOneOrigin
@@ -11,7 +15,6 @@
 #include "js/SavedFrameAPI.h"
 #include "js/SourceText.h"  // JS::Source{Ownership,Text}
 #include "js/Stack.h"
-#include "jsapi-tests/tests.h"
 #include "util/Text.h"
 #include "vm/ArrayObject.h"
 #include "vm/Realm.h"
@@ -25,6 +28,44 @@ BEGIN_TEST(testSavedStacks_withNoStack) {
   return true;
 }
 END_TEST(testSavedStacks_withNoStack)
+
+BEGIN_TEST(testSavedStacks_FirstSubsumedFrameMove) {
+  struct Principals final : public TestJSPrincipals {
+    size_t destroyCalls = 0;
+
+    static void destroy(JSPrincipals* p) {
+      static_cast<Principals*>(p)->destroyCalls++;
+    }
+  };
+
+  JS_InitDestroyPrincipalsCallback(cx, Principals::destroy);
+  Principals principals;
+
+  {
+    JS::FirstSubsumedFrame frame(cx, &principals, false);
+    CHECK(principals.refcount == 1);
+    {
+      JS::StackCapture capture(std::move(frame));
+      CHECK(frame.principals == nullptr);
+
+      JS::StackCapture moved(std::move(capture));
+      CHECK(capture.as<JS::FirstSubsumedFrame>().principals == nullptr);
+      const auto& target = moved.as<JS::FirstSubsumedFrame>();
+      CHECK(target.cx == cx);
+      CHECK(target.principals == &principals);
+      CHECK(!target.ignoreSelfHosted);
+      CHECK(principals.refcount == 1);
+      CHECK(principals.destroyCalls == 0);
+    }
+    CHECK(principals.refcount == 0);
+    CHECK(principals.destroyCalls == 1);
+  }
+
+  CHECK(principals.refcount == 0);
+  CHECK(principals.destroyCalls == 1);
+  return true;
+}
+END_TEST(testSavedStacks_FirstSubsumedFrameMove)
 
 BEGIN_TEST(testSavedStacks_ApiDefaultValues) {
   JS::Rooted<js::SavedFrame*> savedFrame(cx, nullptr);

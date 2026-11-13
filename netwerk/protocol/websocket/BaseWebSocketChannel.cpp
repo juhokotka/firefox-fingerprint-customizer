@@ -2,20 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "WebSocketLog.h"
 #include "BaseWebSocketChannel.h"
-#include "mozilla/dom/Document.h"
+
+#include "LoadInfo.h"
 #include "MainThreadUtils.h"
+#include "WebSocketLog.h"
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/Document.h"
 #include "nsContentUtils.h"
 #include "nsIClassifiedChannel.h"
+#include "nsIInterfaceRequestor.h"
 #include "nsILoadGroup.h"
 #include "nsINode.h"
-#include "nsIInterfaceRequestor.h"
+#include "nsITransportProvider.h"
 #include "nsProxyRelease.h"
 #include "nsStandardURL.h"
-#include "LoadInfo.h"
-#include "mozilla/dom/ContentChild.h"
-#include "nsITransportProvider.h"
 
 using mozilla::dom::ContentChild;
 
@@ -292,39 +293,6 @@ BaseWebSocketChannel::SetServerParameters(
 NS_IMETHODIMP
 BaseWebSocketChannel::GetHttpChannelId(uint64_t* aHttpChannelId) {
   *aHttpChannelId = mHttpChannelId;
-  return NS_OK;
-}
-
-//-----------------------------------------------------------------------------
-// BaseWebSocketChannel::nsIProtocolHandler
-//-----------------------------------------------------------------------------
-
-NS_IMETHODIMP
-BaseWebSocketChannel::GetScheme(nsACString& aScheme) {
-  LOG(("BaseWebSocketChannel::GetScheme() %p\n", this));
-
-  if (mEncrypted) {
-    aScheme.AssignLiteral("wss");
-  } else {
-    aScheme.AssignLiteral("ws");
-  }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-BaseWebSocketChannel::NewChannel(nsIURI* aURI, nsILoadInfo* aLoadInfo,
-                                 nsIChannel** outChannel) {
-  LOG(("BaseWebSocketChannel::NewChannel() %p\n", this));
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-BaseWebSocketChannel::AllowPort(int32_t port, const char* scheme,
-                                bool* _retval) {
-  LOG(("BaseWebSocketChannel::AllowPort() %p\n", this));
-
-  // do not override any blacklisted ports
-  *_retval = false;
   return NS_OK;
 }
 

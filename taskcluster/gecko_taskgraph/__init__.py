@@ -4,6 +4,7 @@
 
 import os
 
+import yaml
 from android_taskgraph import register as register_android_taskgraph
 from mozilla_taskgraph import register as register_mozilla_taskgraph
 from taskgraph import config as taskgraph_config
@@ -12,6 +13,7 @@ from taskgraph import morph as taskgraph_morph
 from taskgraph.transforms.task import payload_builders
 from taskgraph.util import docker, schema
 from taskgraph.util import taskcluster as tc_util
+from taskgraph.util.readonlydict import ReadOnlyDict
 
 from gecko_taskgraph.config import GraphConfigSchema
 
@@ -20,6 +22,18 @@ TEST_CONFIGS = os.path.join(GECKO, "taskcluster", "test_configs")
 
 # Overwrite Taskgraph's default graph_config_schema with a custom one.
 taskgraph_config.graph_config_schema = GraphConfigSchema
+
+
+def _represent_ro_dict(dumper, data):
+    return dumper.represent_dict(dict(data))
+
+
+# Teach the default SafeDumper how to serialize ReadOnlyDict. Registering here
+# (rather than on a one-off Dumper subclass) ensures the representer is present
+# in worker processes spawned by ProcessPoolExecutor, which on macOS use the
+# "spawn" start method and therefore do not inherit registrations made in the
+# parent process.
+yaml.SafeDumper.add_representer(ReadOnlyDict, _represent_ro_dict)
 
 # Overwrite Taskgraph's RUN_TASK_SNIPPET to place the binaries in Gecko
 # specific locations.
@@ -30,9 +44,13 @@ docker.RUN_TASK_FILES = {
         "fetch-content",
     ]
 }
+docker.RUN_TASK_FILES["run-task/run-task-setup.py"] = os.path.join(
+    GECKO, "taskcluster", "scripts", "run-task-setup.py"
+)
 docker.RUN_TASK_SNIPPET = [
     "COPY run-task/run-task /builds/worker/bin/run-task-git\n",
     "COPY run-task/fetch-content /builds/worker/bin/fetch-content\n",
+    "COPY run-task/run-task-setup.py /builds/worker/bin/run-task-setup.py\n",
 ]
 
 # Don't use any of the upstream morphs.

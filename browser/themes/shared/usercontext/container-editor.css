@@ -4,17 +4,68 @@
 
 @import url("chrome://browser/content/usercontext/usercontext.css");
 
-.container-editor {
+/* Semantic colors for the container state indicators (toolbar button dot,
+   panel rows, tab badges, mismatch surfaces).  Derived from the design
+   system palette so light / dark / HCM all follow the rest of the UI. */
+:root {
+  --container-status-on-color: light-dark(var(--color-green-60), var(--color-green-30));
+  --container-status-off-color: light-dark(var(--color-red-60), var(--color-red-30));
+  --container-status-warn-color: light-dark(var(--color-yellow-50), var(--color-yellow-30));
+}
+
+/* ══ Container editor (upstream) ═══════════════════════════════════════ */
+
+.container-editor,
+.site-container-editor {
   display: flex;
   padding: var(--space-large);
   flex-direction: column;
   align-items: stretch;
   gap: var(--space-large);
 
-  moz-input-text::part(label) {
+  moz-input-text::part(label),
+  container-select::part(label) {
     font-weight: var(--font-weight-semibold);
   }
+}
 
+.site-container-editor {
+  min-inline-size: 32em;
+
+  container-select {
+    --select-margin-inline: 0;
+    --select-min-width: 100%;
+  }
+
+  .site-container-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xxsmall);
+  }
+
+  .site-container-error {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xsmall);
+    font-size: var(--font-size-small);
+    color: var(--text-color-error);
+
+    &:empty {
+      display: none;
+    }
+
+    &::before {
+      content: url("chrome://global/skin/icons/error.svg");
+      display: flex;
+      inline-size: var(--icon-size);
+      block-size: var(--icon-size);
+      fill: var(--icon-color-critical);
+      -moz-context-properties: fill;
+    }
+  }
+}
+
+.container-editor {
   .swatches::part(inputs) {
     justify-content: space-between;
   }
@@ -35,60 +86,59 @@
 
   .icon-swatches .userContext-icon {
     fill: var(--icon-color);
-    background-size: 16px;
+    background-size: var(--icon-size-small);
   }
 
-  /* Fingerprint Settings section — device/location pickers, regenerate
-     button, and a one-line summary of the generated profile. */
-  .fingerprint-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-small);
-    padding-block-start: var(--space-large);
-    border-top: 1px solid var(--border-color);
+  @media -moz-pref("browser.nova.enabled") {
+    .color-swatches .userContext-icon {
+      background-image: none;
+      background-color: var(--identity-stroke-color);
+      border-radius: var(--border-radius-circle);
+      inline-size: var(--size-item-medium);
+      block-size: var(--size-item-medium);
+      margin: auto;
+    }
+  }
+}
 
-    h3 {
-      margin: 0;
+/* ══ Fingerprint section (container editor) ════════════════════════════ */
+
+.fingerprint-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-medium);
+  padding-block-start: var(--space-large);
+  border-top: 1px solid var(--border-color);
+}
+
+.fingerprint-heading {
+  margin: 0;
+  font-size: var(--font-size-root);
+  font-weight: var(--font-weight-heading);
+}
+
+.fingerprint-rows {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-medium);
+
+  > moz-select {
+    --select-margin-inline: 0;
+    --select-min-width: 100%;
+
+    &::part(label) {
       font-weight: var(--font-weight-semibold);
-      font-size: var(--font-size-root);
     }
   }
+}
 
-  .fingerprint-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-small);
-
-    label {
-      flex: 0 0 auto;
-      font-weight: var(--font-weight-semibold);
-    }
-
-    select {
-      flex: 1 1 auto;
-      min-inline-size: 12em;
-    }
-  }
-
-  .fingerprint-button-row {
-    display: flex;
-    gap: var(--space-small);
-    margin-top: var(--space-small);
-  }
-
-  .fingerprint-generate-btn {
-    flex: 1 1 auto;
-  }
-
-  .fingerprint-detailed-edit-btn {
-    flex: 0 0 auto;
-  }
-
-  .fingerprint-summary {
-    color: var(--text-color-deemphasized);
-    font-size: var(--font-size-small);
-    word-break: break-all;
-  }
+.fingerprint-summary {
+  margin: 0;
+  font-size: var(--font-size-small);
+  line-height: 1.5;
+  color: var(--text-color-deemphasized);
+  overflow-wrap: anywhere;
 }
 
 /* When the URL-bar container indicator is revealed solely to anchor the
@@ -101,209 +151,43 @@
   display: none;
 }
 
+/* ══ Toolbar button: container status ═════════════════════════════════ */
 
-/* Containers panel (toolbar button dropdown) */
-.containers-panel-content {
-  padding: 8px;
-  min-width: 300px;
-}
-
-.containers-panel-empty {
-  padding: 16px 8px;
-  color: var(--text-color-deemphasized);
-  font-size: var(--font-size-small);
-  text-align: center;
-}
-
-.containers-panel-row {
-  /* This is now a toolbarbutton, not an hbox. */
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 6px 8px;
-  margin: 0;
-}
-
-.containers-panel-item {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  appearance: none;
-  border: none;
-  background: transparent;
-  text-align: start;
-  /* Override XUL toolbarbutton defaults that center content */
-  -moz-box-pack: start;
-  -moz-box-align: center;
-}
-
-/* When the row is both .containers-panel-item and .containers-panel-row,
-   it should fill the panel width. */
-.containers-panel-item.containers-panel-row {
-  width: 100%;
-}
-
-.containers-panel-item:hover {
-  background-color: var(--button-background-color-hover, rgba(0,0,0,0.06));
-}
-
-.containers-panel-item:hover:active {
-  background-color: var(--button-background-color-active, rgba(0,0,0,0.1));
-}
-
-/* Active/selected container — highlighted with accent background */
-.containers-panel-item.selected {
-  background-color: var(--button-background-color-hover, rgba(0,0,0,0.06));
-  font-weight: 600;
-}
-
-.containers-panel-edit-btn {
-  appearance: none;
-  border: none;
-  background: transparent;
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: var(--font-size-small, 11px);
-  color: var(--text-color-deemphasized, gray);
-  min-width: 40px;
-}
-
-.containers-panel-edit-btn:hover {
-  background-color: var(--button-background-color-hover, rgba(0,0,0,0.06));
-  color: var(--toolbar-color, inherit);
-}
-
-.containers-panel-namebox {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  min-width: 0;
-}
-
-.containers-panel-name {
-  margin: 0;
-  font-size: var(--font-size-root, 13px);
-}
-
-.containers-panel-subtitle {
-  margin: 0;
-  font-size: var(--font-size-small, 11px);
-  color: var(--text-color-deemphasized, gray);
-}
-
-.containers-panel-check {
-  margin: 0;
-  color: #0a84ff;
-  font-size: 14px;
-}
-
-.containers-panel-mode-btn {
-  font-weight: 500;
-}
-
-.containers-panel-clear-btn {
-  color: var(--text-color-deemphasized, gray);
-  font-style: italic;
-}
-
-.containers-panel-add-btn {
-  margin-top: 4px;
-}
-
-.containers-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.containers-status-on {
-  background-color: #2ec27e; /* green */
-}
-
-.containers-status-off {
-  background-color: #e01b24; /* red */
-}
-
-.containers-panel-status {
-  color: var(--text-color-deemphasized);
-  font-size: var(--font-size-small);
-  margin: 0;
-}
-
-.containers-panel-new-btn {
-  margin-top: 8px;
-}
-
-
-/* Container status button — styled to match urlbar buttons.
-   Uses toolbarbutton-1 for base behavior, plus urlbar-like hover states. */
 .container-status-button {
   -moz-box-align: center;
-  padding-inline: 6px;
-  border-radius: var(--urlbar-inner-border-radius, 4px);
-  appearance: none;
+  padding-inline: var(--space-xsmall);
   border: none;
-  background: transparent;
+  border-radius: var(--toolbarbutton-border-radius);
+  background-color: transparent;
+  color: inherit;
+  appearance: none;
 }
 
 .container-status-button:hover:not([open="true"]) {
-  background-color: var(--urlbar-box-background-color-hover, rgba(0,0,0,0.06));
+  background-color: var(--toolbarbutton-background-color-hover);
 }
 
 .container-status-button:hover:active,
 .container-status-button[open="true"] {
-  background-color: var(--urlbar-box-background-color-active, rgba(0,0,0,0.1));
+  background-color: var(--toolbarbutton-background-color-active);
+}
+
+.container-status-button.mismatch {
+  background-color: color-mix(in srgb, var(--container-status-warn-color) 15%, transparent);
+  outline: 1px dashed color-mix(in srgb, var(--container-status-warn-color) 80%, transparent);
+  outline-offset: -2px;
 }
 
 .container-status-content {
   -moz-box-align: center;
   -moz-box-pack: center;
-  gap: 6px;
+  gap: var(--space-xsmall);
 }
-
-.container-status-dot {
-  width: 8px;
-  height: 8px;
-  min-width: 8px;
-  min-height: 8px;
-  border-radius: 50%;
-}
-
-.container-status-dot.on {
-  background-color: #2ec27e;
-}
-
-.container-status-dot.off {
-  background-color: #e01b24;
-}
-
-.container-status-text {
-  font-size: var(--font-size-small, 11px);
-  margin: 0;
-  white-space: nowrap;
-  color: inherit;
-}
-
-/* ── Persona indicator states ───────────────────────────────
-   off      → faded fingerprint icon, red dot
-   active   → persona's container icon (identity color), green dot
-   mismatch → amber warning icon, pulsing amber dot, dashed tint  */
 
 .container-status-icon {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
+  inline-size: var(--icon-size-small);
+  block-size: var(--icon-size-small);
+  flex: none;
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
@@ -317,17 +201,39 @@
 
 .container-status-icon.warn {
   background-image: url("chrome://global/skin/icons/warning.svg");
-  fill: #ffbd4f;
+  fill: var(--container-status-warn-color);
 }
 
-.container-status-button.mismatch {
-  background-color: color-mix(in srgb, #ffbd4f 14%, transparent);
-  outline: 1px dashed color-mix(in srgb, #ffbd4f 80%, transparent);
-  outline-offset: -2px;
+/* Active persona: the container icon sits inside the same round, tinted
+   badge that Nova uses for containers everywhere else. */
+.container-status-icon.userContext-icon {
+  box-sizing: border-box;
+  inline-size: var(--icon-size-small);
+  block-size: var(--icon-size-small);
+  padding: var(--space-xxsmall);
+  border-radius: var(--border-radius-circle);
+  background-color: var(--identity-fill-tint, transparent);
+  background-origin: content-box;
+  fill: var(--identity-fill-color, var(--identity-icon-color));
+}
+
+.container-status-dot {
+  inline-size: var(--space-small);
+  block-size: var(--space-small);
+  flex: none;
+  border-radius: var(--border-radius-circle);
+}
+
+.container-status-dot.on {
+  background-color: var(--container-status-on-color);
+}
+
+.container-status-dot.off {
+  background-color: var(--container-status-off-color);
 }
 
 .container-status-dot.warn {
-  background-color: #ffbd4f;
+  background-color: var(--container-status-warn-color);
   animation: container-status-pulse 1.8s ease-in-out infinite;
 }
 
@@ -336,49 +242,193 @@
   50% { opacity: 0.35; }
 }
 
-/* ── Per-tab identity badge ──────────────────────────────────
-   Collapsed to a tinted dot at rest; expands into a pill
-   (icon + name) on hover/selection.  A dashed amber ring marks
-   tabs whose container differs from the active persona; a hollow
-   dashed circle marks normal tabs while Privacy Mode is on.   */
+.container-status-text {
+  margin: 0;
+  font-size: var(--font-size-small);
+  white-space: nowrap;
+  color: inherit;
+}
+
+/* ══ Containers panel ════════════════════════════════════════════════ */
+
+#containers-panel {
+  min-inline-size: 24em;
+}
+
+/* .panel-subview-body already supplies the block padding; the inline gutter
+   lives on the rows so their hover fill matches a standard menuitem. */
+.containers-panel-content {
+  gap: var(--space-xxsmall);
+}
+
+.containers-panel-empty {
+  margin: 0;
+  padding: var(--space-large) var(--panel-menuitem-margin-inline);
+  color: var(--text-color-deemphasized);
+  text-align: center;
+}
+
+.containers-panel-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  -moz-box-align: center;
+  -moz-box-pack: start;
+  gap: var(--space-small);
+  padding: var(--panel-menuitem-padding);
+  margin: var(--panel-menuitem-margin);
+  border: none;
+  border-radius: var(--panel-menuitem-border-radius);
+  background-color: transparent;
+  color: var(--panel-text-color);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  appearance: none;
+}
+
+.containers-panel-item:hover {
+  background-color: var(--button-background-color-hover);
+}
+
+.containers-panel-item:hover:active {
+  background-color: var(--button-background-color-active);
+}
+
+.containers-panel-item.selected {
+  background-color: var(--button-background-color-selected);
+  font-weight: var(--font-weight-semibold);
+}
+
+.containers-panel-item:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.containers-panel-namebox {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-xxsmall);
+  min-inline-size: 0;
+}
+
+/* Leading icon: container entries use the identity icon, action rows a
+   neutral glyph.  Both sit inside a round, tinted badge — the same shape
+   Nova uses for container icons in menus and the preferences list. */
+.containers-panel-item > :is(.userContext-icon, .containers-panel-action-icon) {
+  box-sizing: border-box;
+  inline-size: var(--icon-size-large);
+  block-size: var(--icon-size-large);
+  flex: none;
+  padding: var(--identity-icon-inset, var(--space-xsmall));
+  border-radius: var(--border-radius-circle);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  background-origin: content-box;
+  -moz-context-properties: fill;
+}
+
+.containers-panel-item > .userContext-icon {
+  background-color: var(--identity-fill-tint, transparent);
+  fill: var(--identity-fill-color, var(--identity-icon-color));
+}
+
+.containers-panel-item > .containers-panel-action-icon {
+  background-color: var(--button-background-color-hover);
+  background-image: url("chrome://global/skin/icons/close.svg");
+  fill: currentColor;
+}
+
+.containers-panel-name {
+  margin: 0;
+  font-size: var(--font-size-root);
+  line-height: 1.3;
+}
+
+.containers-panel-subtitle {
+  margin: 0;
+  font-size: var(--font-size-small);
+  line-height: 1.3;
+  color: var(--text-color-deemphasized);
+}
+
+.containers-panel-check {
+  flex: none;
+  inline-size: var(--icon-size-small);
+  block-size: var(--icon-size-small);
+  background-image: url("chrome://global/skin/icons/check.svg");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  -moz-context-properties: fill;
+  fill: var(--color-accent-primary);
+}
+
+.containers-panel-edit-btn {
+  flex: none;
+  margin-inline-start: auto;
+}
+
+.containers-panel-clear-btn,
+.containers-panel-mode-btn {
+  font-weight: var(--font-weight-semibold);
+}
+
+.containers-panel-footer {
+  display: flex;
+}
+
+.containers-panel-footer > moz-button-group {
+  flex: 1 1 auto;
+}
+
+/* ══ Per-tab identity badge ═══════════════════════════════════════════
+   Collapsed to a tinted dot at rest; expands into a pill (icon + name) on
+   hover/selection.  A dashed ring marks tabs whose container differs from
+   the browser-level identity; a hollow dashed circle marks normal tabs
+   while a persona is active. */
 
 .tab-container-badge {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 4px;
-  block-size: 18px;
-  max-inline-size: 18px;
-  padding-inline: 2.5px;
-  margin-inline-end: 4px;
-  border-radius: 9px;
+  box-sizing: border-box;
+  gap: var(--space-xxsmall);
+  block-size: var(--size-item-small);
+  max-inline-size: var(--size-item-small);
+  padding-inline: var(--space-xxsmall);
+  margin-inline-end: var(--space-xsmall);
+  border-radius: var(--border-radius-circle);
   overflow: hidden;
-  flex-shrink: 0;
-  background-color: color-mix(in srgb, var(--identity-icon-color, currentColor) 16%, transparent);
+  flex: none;
+  background-color: var(--identity-fill-tint, color-mix(in srgb, currentColor 15%, transparent));
   transition: max-inline-size 160ms ease, padding-inline 160ms ease;
 }
 
 .tabbrowser-tab:hover .tab-container-badge,
 .tabbrowser-tab[visuallyselected] .tab-container-badge {
-  max-inline-size: 96px;
-  padding-inline: 4px 7px;
+  max-inline-size: 10em;
+  padding-inline: var(--space-xsmall) var(--space-small);
 }
 
 .tab-badge-icon {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
+  inline-size: var(--icon-size-xsmall);
+  block-size: var(--icon-size-xsmall);
+  flex: none;
+  fill: var(--identity-fill-color, var(--identity-icon-color));
 }
 
 .tab-badge-name {
   flex: 0 1 auto;
   min-inline-size: 0;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-semibold);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--identity-icon-color, inherit);
+  color: var(--identity-fill-color, var(--identity-icon-color, inherit));
 }
 
 .tabbrowser-tab[pinned] .tab-container-badge {
@@ -386,21 +436,24 @@
 }
 
 .tabbrowser-tab.persona-mismatch .tab-container-badge {
-  background-color: color-mix(in srgb, #ffbd4f 22%, transparent);
-  outline: 1.5px dashed color-mix(in srgb, #ffbd4f 85%, transparent);
-  outline-offset: -2.5px;
+  background-color: color-mix(in srgb, var(--container-status-warn-color) 22%, transparent);
+  outline: 1.5px dashed color-mix(in srgb, var(--container-status-warn-color) 85%, transparent);
+  outline-offset: -2px;
   animation: persona-badge-pulse 2.4s ease-in-out infinite;
 }
 
 @keyframes persona-badge-pulse {
-  0%, 100% { outline-color: color-mix(in srgb, #ffbd4f 85%, transparent); }
-  50% { outline-color: color-mix(in srgb, #ffbd4f 30%, transparent); }
+  0%, 100% { outline-color: color-mix(in srgb, var(--container-status-warn-color) 85%, transparent); }
+  50% { outline-color: color-mix(in srgb, var(--container-status-warn-color) 30%, transparent); }
 }
 
 .tab-container-badge.ghost {
+  inline-size: var(--size-item-small);
+  justify-content: center;
+  padding-inline: 0;
   background-color: transparent;
   outline: 1.5px dashed color-mix(in srgb, currentColor 40%, transparent);
-  outline-offset: -2.5px;
+  outline-offset: -2px;
 }
 
 .tab-container-badge.ghost .tab-badge-icon {
@@ -410,21 +463,22 @@
 /* Ghost badges never expand. */
 .tabbrowser-tab:hover .tab-container-badge.ghost,
 .tabbrowser-tab[visuallyselected] .tab-container-badge.ghost {
-  max-inline-size: 18px;
-  padding-inline: 2.5px;
+  max-inline-size: var(--size-item-small);
+  inline-size: var(--size-item-small);
+  padding-inline: 0;
 }
 
-/* ── Identity mismatch card (containers panel) ───────────── */
+/* ══ Identity mismatch card (containers panel) ════════════════════════ */
 
 .persona-mismatch-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  margin: 2px 0 8px;
-  border-radius: 8px;
-  background-color: color-mix(in srgb, #ffbd4f 12%, transparent);
-  outline: 1px dashed color-mix(in srgb, #ffbd4f 70%, transparent);
+  gap: var(--space-small);
+  padding: var(--space-medium);
+  margin: var(--space-xsmall) var(--panel-menuitem-margin-inline) var(--space-small);
+  border-radius: var(--border-radius-medium);
+  background-color: color-mix(in srgb, var(--container-status-warn-color) 12%, transparent);
+  outline: 1px dashed color-mix(in srgb, var(--container-status-warn-color) 70%, transparent);
   animation: persona-card-in 180ms ease-out;
 }
 
@@ -438,137 +492,107 @@
 .pmc-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-xsmall);
 }
 
 .pmc-header-icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
+  inline-size: var(--icon-size-small);
+  block-size: var(--icon-size-small);
+  flex: none;
   background-image: url("chrome://global/skin/icons/warning.svg");
-  background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
+  background-size: contain;
   -moz-context-properties: fill;
-  fill: #ffbd4f;
+  fill: var(--container-status-warn-color);
 }
 
 .pmc-title {
   margin: 0;
-  font-size: var(--font-size-root, 13px);
-  font-weight: var(--font-weight-semibold, 600);
+  font-size: var(--font-size-root);
+  font-weight: var(--font-weight-semibold);
 }
 
 .pmc-text {
-  font-size: var(--font-size-small, 11px);
+  font-size: var(--font-size-small);
   line-height: 1.6;
-  color: var(--text-color-deemphasized, gray);
+  color: var(--text-color-deemphasized);
 }
 
 .pmc-pill {
   display: inline-flex;
   align-items: center;
-  padding: 1px 7px;
-  border-radius: 9px;
-  background-color: color-mix(in srgb, var(--identity-icon-color, currentColor) 18%, transparent);
-  color: var(--identity-icon-color, inherit);
-  font-weight: var(--font-weight-semibold, 600);
+  padding: 0 var(--space-xsmall);
+  border-radius: var(--border-radius-circle);
+  background-color: var(--identity-fill-tint, color-mix(in srgb, var(--identity-icon-color, currentColor) 18%, transparent));
+  color: var(--identity-fill-color, var(--identity-icon-color, inherit));
+  font-weight: var(--font-weight-semibold);
   white-space: nowrap;
 }
 
 .pmc-actions {
   display: flex;
-  gap: 6px;
+  gap: var(--space-xsmall);
 }
 
-.pmc-btn {
+.pmc-actions > moz-button {
   flex: 1 1 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 6px 10px;
-  margin: 0;
-  border-radius: 6px;
-  appearance: none;
-  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.15));
-  background-color: var(--button-background-color, rgba(0, 0, 0, 0.04));
-  color: inherit;
-  font-size: var(--font-size-root, 13px);
-  text-align: center;
-  cursor: pointer;
 }
 
-.pmc-btn:hover {
-  background-color: var(--button-background-color-hover, rgba(0, 0, 0, 0.08));
-}
+/* ══ Detailed fingerprint editor (standalone dialog) ══════════════════ */
 
-.pmc-btn:hover:active {
-  background-color: var(--button-background-color-active, rgba(0, 0, 0, 0.12));
-}
-
-.pmc-btn-primary {
-  border-color: transparent;
-  background-color: var(--button-primary-bgcolor, #0061e0);
-  color: var(--button-primary-color, #ffffff);
-  font-weight: var(--font-weight-semibold, 600);
-}
-
-.pmc-btn-primary:hover {
-  background-color: var(--button-primary-bgcolor-hover, #0250bb);
-}
-
-.pmc-btn-primary:hover:active {
-  background-color: var(--button-primary-bgcolor-active, #053eae);
-}
-
-/* Detailed fingerprint editor (independent window) */
 .detailed-fingerprint-editor {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  max-height: 600px;
+  gap: var(--space-large);
+  padding: var(--space-large);
+  min-inline-size: 38em;
+  max-block-size: calc(100vh - 10em);
   overflow-y: auto;
 }
 
-.detailed-fingerprint-editor fieldset {
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 8px 12px;
+.detailed-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-small);
 }
 
-.detailed-fingerprint-editor legend {
-  font-weight: 600;
-  padding: 0 4px;
+.detailed-section-title {
+  margin: 0;
+  font-size: var(--font-size-root);
+  font-weight: var(--font-weight-heading);
+  color: var(--text-color-deemphasized);
 }
 
 .detailed-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
+  gap: var(--space-small);
 
-.detailed-row label {
-  flex: 0 0 180px;
-  font-size: 12px;
-}
+  > label {
+    flex: 0 0 14em;
+    font-size: var(--font-size-small);
+    color: var(--text-color-deemphasized);
+  }
 
-.detailed-input {
-  flex: 1 1 auto;
-  min-width: 200px;
+  > :is(moz-input-text, moz-input-number, moz-textarea) {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+  }
+
+  > moz-select {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    --select-margin-inline: 0;
+    --select-min-width: 100%;
+  }
 }
 
 .detailed-checkbox {
-  flex: 0 0 auto;
+  flex: none;
 }
 
 .detailed-btn-row {
-  display: flex;
-  gap: 8px;
-  padding-top: 8px;
+  padding-block-start: var(--space-small);
   border-top: 1px solid var(--border-color);
 }
-
-

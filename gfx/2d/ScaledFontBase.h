@@ -6,7 +6,6 @@
 #define MOZILLA_GFX_SCALEDFONTBASE_H_
 
 #include "2D.h"
-
 #include "skia/include/core/SkFont.h"
 #include "skia/include/core/SkPath.h"
 #include "skia/include/core/SkTypeface.h"
@@ -42,6 +41,10 @@ class ScaledFontBase : public ScaledFont {
   Atomic<SkTypeface*> mTypeface;
   virtual SkTypeface* CreateSkTypeface() { return nullptr; }
   SkPath GetSkiaPathForGlyphs(const GlyphBuffer& aBuffer);
+#ifdef USE_CAIRO
+  cairo_path_t* GetCairoPathForGlyphs(const GlyphBuffer& aBuffer, cairo_t* aCtx,
+                                      const Maybe<Matrix>& aTransform);
+#endif
   virtual cairo_font_face_t* CreateCairoFontFace(
       cairo_font_options_t* aFontOptions) {
     return nullptr;

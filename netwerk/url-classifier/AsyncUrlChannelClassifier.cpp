@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/net/AsyncUrlChannelClassifier.h"
+
 #include "ChannelClassifierService.h"
 #include "Classifier.h"
 #include "ContentClassifierService.h"
@@ -14,10 +16,9 @@
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/glean/UrlClassifierMetrics.h"
-#include "mozilla/net/AsyncUrlChannelClassifier.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
+#include "mozilla/glean/UrlClassifierMetrics.h"
 #include "mozilla/net/UrlClassifierCommon.h"
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "mozilla/net/UrlClassifierFeatureResult.h"
@@ -32,7 +33,6 @@
 #include "nsServiceManagerUtils.h"
 #include "nsUrlClassifierDBService.h"
 #include "nsUrlClassifierUtils.h"
-#include "mozilla/net/UrlClassifierCommon.h"
 
 namespace mozilla {
 namespace net {
@@ -845,7 +845,7 @@ nsresult FeatureData::InitializeList(
   }
 
   if (found) {
-    mHostInPrefTables[aListType] = tableName;
+    mHostInPrefTables[aListType] = std::move(tableName);
   }
 
   RefPtr<URIData> uriData;

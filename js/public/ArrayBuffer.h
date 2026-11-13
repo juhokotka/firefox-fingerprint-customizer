@@ -7,12 +7,14 @@
 #ifndef js_ArrayBuffer_h
 #define js_ArrayBuffer_h
 
+#include "mozilla/Span.h"
 #include "mozilla/UniquePtr.h"
 
 #include <stddef.h>  // size_t
 #include <stdint.h>  // uint32_t
 
 #include "jstypes.h"  // JS_PUBLIC_API
+
 #include "js/TypeDecls.h"
 #include "js/Utility.h"
 
@@ -29,6 +31,20 @@ class JS_PUBLIC_API AutoRequireNoGC;
  * Create a new ArrayBuffer with the given byte length.
  */
 extern JS_PUBLIC_API JSObject* NewArrayBuffer(JSContext* cx, size_t nbytes);
+
+/**
+ * Create a new ArrayBuffer and copy in the given contents.
+ *
+ * Care must be taken that the data in |source| remains valid for the duration
+ * of this call.  In particular, passing existing typed array or ArrayBuffer
+ * data is generally unsafe: if a GC occurs while creating the ArrayBuffer
+ * within this function, it could move those contents to a different location
+ * before the data can be copied.
+ *
+ * Return nullptr and set an exception on OOM or if the size is too large.
+ */
+extern JS_PUBLIC_API JSObject* NewArrayBuffer(
+    JSContext* cx, mozilla::Span<const uint8_t> source);
 
 /**
  * Create a new ArrayBuffer with the given |contents|, which may be null only

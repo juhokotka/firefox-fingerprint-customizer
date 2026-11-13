@@ -2,14 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <string.h>
-
 #include "PKCS11Slot.h"
 
+#include <string.h>
+
+#include "PKCS11Token.h"
+#include "mozilla/RefPtr.h"
 #include "nsComponentManagerUtils.h"
 #include "nsNSSCertHelper.h"
-#include "PKCS11Token.h"
 
+using namespace mozilla;
 using namespace mozilla::psm;
 
 NS_IMPL_ISUPPORTS(PKCS11Slot, nsIPKCS11Slot)
@@ -135,6 +137,9 @@ PKCS11Slot::GetFWVersion(/*out*/ nsACString& fwVersion) {
 NS_IMETHODIMP
 PKCS11Slot::GetToken(nsIPKCS11Token** _retval) {
   NS_ENSURE_ARG_POINTER(_retval);
+  if (!PK11_IsPresent(mSlot.get())) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
   nsCOMPtr<nsIPKCS11Token> token = new PKCS11Token(mSlot.get());
   token.forget(_retval);
   return NS_OK;
@@ -218,6 +223,15 @@ nsresult PKCS11Slot::GetSlotInfo(SlotInfo& slotInfo) {
   if (NS_FAILED(rv)) {
     return rv;
   }
+  if (PK11_IsPresent(mSlot.get())) {
+    RefPtr<PKCS11Token> token(MakeAndAddRef<PKCS11Token>(mSlot.get()));
+    TokenInfo tokenInfo;
+    rv = token->GetTokenInfo(tokenInfo);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    slotInfo.tokenInfo().emplace(std::move(tokenInfo));
+  }
   return NS_OK;
 }
 
@@ -257,8 +271,12 @@ RemotePKCS11Slot::GetFWVersion(/*out*/ nsACString& fwVersion) {
 }
 
 NS_IMETHODIMP
-RemotePKCS11Slot::GetToken(nsIPKCS11Token** _retval) {
-  return NS_ERROR_NOT_AVAILABLE;
+RemotePKCS11Slot::GetToken(nsIPKCS11Token** token) {
+  if (mSlotInfo.tokenInfo().isNothing()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  *token = MakeAndAddRef<RemotePKCS11Token>(*mSlotInfo.tokenInfo()).take();
+  return NS_OK;
 }
 
 NS_IMETHODIMP

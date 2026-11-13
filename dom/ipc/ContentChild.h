@@ -11,6 +11,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/BlobImpl.h"
 #include "mozilla/dom/GetFilesHelper.h"
+#include "mozilla/dom/LoadedOriginSet.h"
 #include "mozilla/dom/PContentChild.h"
 #include "mozilla/dom/ProcessActor.h"
 #include "mozilla/dom/RemoteType.h"
@@ -68,6 +69,7 @@ class SharedMap;
 
 class ConsoleListener;
 class BrowserChild;
+class IPCTabContext;
 class TabContext;
 enum class CallerType : uint32_t;
 
@@ -392,14 +394,14 @@ class ContentChild final : public PContentChild,
       const nsCString& UAName, const nsCString& ID, const nsCString& vendor,
       const nsCString& sourceURL, const nsCString& updateURL);
 
-  mozilla::ipc::IPCResult RecvRemoteType(const nsCString& aRemoteType,
-                                         const nsCString& aProfile);
+  mozilla::ipc::IPCResult RecvSetRemoteType(const RemoteType& aRemoteType,
+                                            const nsCString& aProfile);
 
   void PreallocInit();
 
-  // Call RemoteTypePrefix() on the result to remove URIs if you want to use
-  // this for telemetry.
-  const nsACString& GetRemoteType() const override;
+  const RemoteType& GetRemoteType() const override;
+
+  mozilla::ipc::IPCResult RecvAddLoadedOrigin(nsIPrincipal* aPrincipal);
 
   mozilla::ipc::IPCResult RecvInitRemoteWorkerService(
       Endpoint<PRemoteWorkerServiceChild>&& aEndpoint,
@@ -479,14 +481,6 @@ class ContentChild final : public PContentChild,
   bool DeallocPWebrtcGlobalChild(PWebrtcGlobalChild* aActor);
 #endif
 
-  PContentPermissionRequestChild* AllocPContentPermissionRequestChild(
-      Span<const PermissionRequest> aRequests, nsIPrincipal* aPrincipal,
-      nsIPrincipal* aTopLevelPrincipal, const bool& aIsHandlingUserInput,
-      const bool& aMaybeUnsafePermissionDelegate, const TabId& aTabId,
-      const bool& aIgnoreAllowSitePermission);
-  bool DeallocPContentPermissionRequestChild(
-      PContentPermissionRequestChild* actor);
-
   // GetFiles for WebKit/Blink FileSystem API and Directory API must run on the
   // parent process.
   void CreateGetFilesRequest(nsTArray<nsString>&& aDirectoryPath,
@@ -512,7 +506,9 @@ class ContentChild final : public PContentChild,
 
   mozilla::ipc::IPCResult RecvDecodeImage(NotNull<nsIURI*> aURI,
                                           const ImageIntSize& aSize,
+                                          const bool& aStretch,
                                           const ColorScheme& aColoScheme,
+                                          NotNull<nsIPrincipal*> aPrincipal,
                                           DecodeImageResolver&& aResolver);
 
 #if defined(XP_WIN)
@@ -677,7 +673,7 @@ class ContentChild final : public PContentChild,
   mozilla::ipc::IPCResult RecvSetUseOriginAgentCluster(
       uint64_t aGroupId, nsIPrincipal* aPrincipal, bool aUseOriginAgentCluster);
 
-  mozilla::ipc::IPCResult RecvWindowClose(
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY mozilla::ipc::IPCResult RecvWindowClose(
       const MaybeDiscarded<BrowsingContext>& aContext, bool aTrustedCaller);
   mozilla::ipc::IPCResult RecvWindowFocus(
       const MaybeDiscarded<BrowsingContext>& aContext, CallerType aCallerType,
@@ -755,6 +751,7 @@ class ContentChild final : public PContentChild,
       const LoadInfoArgs& loadInfoArgs, const nsString& entryName,
       const nsString& initiatorType, UniquePtr<PerformanceTimingData>&& aData);
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvLoadURI(
       const MaybeDiscarded<BrowsingContext>& aContext,
       nsDocShellLoadState* aLoadState, bool aSetNavigating);
@@ -787,13 +784,27 @@ class ContentChild final : public PContentChild,
       const uint32_t aStopFlags);
 
   mozilla::ipc::IPCResult RecvDeactivateDocuments(
-      const MaybeDiscarded<BrowsingContext>& aContext);
+      const MaybeDiscarded<BrowsingContext>& aContext,
+      const Maybe<SessionHistoryInfo>& aPageSwapTargetInfo,
+      const NavigationType& aNavigationType, const bool aForUnload);
+
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  mozilla::ipc::IPCResult RecvBeginOutboundCrossDocumentViewTransition(
+      const MaybeDiscarded<BrowsingContext>& aContext,
+      const Maybe<SessionHistoryInfo>& aPageSwapTargetInfo,
+      const NavigationType& aNavigationType, const TabId& aSnapshotTargetTab,
+      BeginOutboundCrossDocumentViewTransitionResolver&& aResolver);
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvReactivateDocuments(
       const MaybeDiscarded<BrowsingContext>& aContext,
       const Maybe<SessionHistoryInfo>& aReactivatedEntry,
       const nsTArray<SessionHistoryInfo>& aNewSHEs,
       const Maybe<PreviousSessionHistoryInfo>& aPreviousEntryForActivation);
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  mozilla::ipc::IPCResult RecvFirePageSwap(
+      const MaybeDiscarded<BrowsingContext>& aContext,
+      const Maybe<SessionHistoryInfo>& aPageSwapTargetInfo,
+      const NavigationType& aNavigationType);
 
   mozilla::ipc::IPCResult RecvRawMessage(const JSActorMessageMeta& aMeta,
                                          JSIPCValue&& aData,
@@ -903,7 +914,7 @@ class ContentChild final : public PContentChild,
   AppInfo mAppInfo;
 
   bool mIsForBrowser;
-  nsCString mRemoteType = NOT_REMOTE_TYPE;
+  RemoteType mRemoteType;
   bool mIsAlive;
   nsCString mProcessName;
 
@@ -944,12 +955,20 @@ class ContentChild final : public PContentChild,
   // See `BrowsingContext::mEpochs` for an explanation of this field.
   uint64_t mBrowsingContextFieldEpoch = 0;
 
-  hal::ProcessPriority mProcessPriority = hal::PROCESS_PRIORITY_UNKNOWN;
+  // Atomic because the profiler reads it from another thread.
+  Atomic<hal::ProcessPriority, Relaxed> mProcessPriority{
+      hal::PROCESS_PRIORITY_UNKNOWN};
 
   // Session created when the process priority is FOREGROUND to ensure high
   // priority scheduling of important threads. (Currently main thread and style
   // threads.) The work duration is reported by the RefreshDriverTimer.
   UniquePtr<hal::PerformanceHintSession> mPerformanceHintSession;
+
+#ifdef XP_WIN
+  // True when the main thread runs at THREAD_PRIORITY_ABOVE_NORMAL because
+  // the process is in the foreground.
+  bool mMainThreadPriorityRaised = false;
+#endif
 };
 
 inline nsISupports* ToSupports(mozilla::dom::ContentChild* aContentChild) {
@@ -957,7 +976,10 @@ inline nsISupports* ToSupports(mozilla::dom::ContentChild* aContentChild) {
 }
 
 // Threadsafe getter for the current process's RemoteType.
-nsCString CurrentRemoteType();
+RemoteType CurrentRemoteType();
+
+// Threadsafe getter for the current process's loaded origins.
+already_AddRefed<LoadedOriginSet> CurrentLoadedOriginSet();
 
 }  // namespace dom
 }  // namespace mozilla

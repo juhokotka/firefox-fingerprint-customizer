@@ -11,7 +11,8 @@
 #  include "jit/x64/Assembler-x64.h"
 #endif
 
-using js::wasm::FaultingCodeOffset;
+using js::wasm::FaultingCodeRange;
+using js::wasm::FaultingCodeRangePair;
 
 namespace js {
 namespace jit {
@@ -177,10 +178,9 @@ class MacroAssemblerX86Shared : public Assembler {
   void convertInt32ToDouble(Register src, FloatRegister dest) {
     // vcvtsi2sd and friends write only part of their output register, which
     // causes slowdowns on out-of-order processors. Explicitly break
-    // dependencies with vxorpd (and vxorps elsewhere), which are handled
-    // specially in modern CPUs, for this purpose. See sections 8.14, 9.8,
-    // 10.8, 12.9, 13.16, 14.14, and 15.8 of Agner's Microarchitecture
-    // document.
+    // dependencies with vxorps, which is handled specially in modern CPUs,
+    // for this purpose. See sections 8.14, 9.8, 10.8, 12.9, 13.16, 14.14,
+    // and 15.8 of Agner's Microarchitecture document.
     zeroDouble(dest);
     vcvtsi2sd(src, dest, dest);
   }
@@ -256,63 +256,71 @@ class MacroAssemblerX86Shared : public Assembler {
   };
 
   void load8ZeroExtend(const Operand& src, Register dest) { movzbl(src, dest); }
-  FaultingCodeOffset load8ZeroExtend(const Address& src, Register dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange load8ZeroExtend(const Address& src, Register dest) {
+    auto before = currentOffset();
     movzbl(Operand(src), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
-  FaultingCodeOffset load8ZeroExtend(const BaseIndex& src, Register dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange load8ZeroExtend(const BaseIndex& src, Register dest) {
+    auto before = currentOffset();
     movzbl(Operand(src), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   void load8SignExtend(const Operand& src, Register dest) { movsbl(src, dest); }
-  FaultingCodeOffset load8SignExtend(const Address& src, Register dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange load8SignExtend(const Address& src, Register dest) {
+    auto before = currentOffset();
     movsbl(Operand(src), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
-  FaultingCodeOffset load8SignExtend(const BaseIndex& src, Register dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange load8SignExtend(const BaseIndex& src, Register dest) {
+    auto before = currentOffset();
     movsbl(Operand(src), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   template <typename T>
   void store8(Imm32 src, const T& dest) {
     movb(src, Operand(dest));
   }
   template <typename T>
-  FaultingCodeOffset store8(Register src, const T& dest) {
+  FaultingCodeRange store8(Register src, const T& dest) {
     AutoEnsureByteRegister ensure(this, dest, src);
     // We must read the current offset only after AutoEnsureByteRegister's
     // constructor has done its thing, since it may insert instructions, and
     // we want to get the offset for the `movb` itself.
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+    auto before = currentOffset();
     movb(ensure.reg(), Operand(dest));
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   void load16ZeroExtend(const Operand& src, Register dest) {
     movzwl(src, dest);
   }
-  FaultingCodeOffset load16ZeroExtend(const Address& src, Register dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange load16ZeroExtend(const Address& src, Register dest) {
+    auto before = currentOffset();
     movzwl(Operand(src), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
-  FaultingCodeOffset load16ZeroExtend(const BaseIndex& src, Register dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange load16ZeroExtend(const BaseIndex& src, Register dest) {
+    auto before = currentOffset();
     movzwl(Operand(src), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   template <typename S>
   void load16UnalignedZeroExtend(const S& src, Register dest) {
     load16ZeroExtend(src, dest);
   }
   template <typename S, typename T>
-  FaultingCodeOffset store16(const S& src, const T& dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange store16(const S& src, const T& dest) {
+    auto before = currentOffset();
     movw(src, Operand(dest));
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   template <typename S, typename T>
   void store16Unaligned(const S& src, const T& dest) {
@@ -321,29 +329,33 @@ class MacroAssemblerX86Shared : public Assembler {
   void load16SignExtend(const Operand& src, Register dest) {
     movswl(src, dest);
   }
-  FaultingCodeOffset load16SignExtend(const Address& src, Register dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange load16SignExtend(const Address& src, Register dest) {
+    auto before = currentOffset();
     movswl(Operand(src), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
-  FaultingCodeOffset load16SignExtend(const BaseIndex& src, Register dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange load16SignExtend(const BaseIndex& src, Register dest) {
+    auto before = currentOffset();
     movswl(Operand(src), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   template <typename S>
   void load16UnalignedSignExtend(const S& src, Register dest) {
     load16SignExtend(src, dest);
   }
-  FaultingCodeOffset load32(const Address& address, Register dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange load32(const Address& address, Register dest) {
+    auto before = currentOffset();
     movl(Operand(address), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
-  FaultingCodeOffset load32(const BaseIndex& src, Register dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange load32(const BaseIndex& src, Register dest) {
+    auto before = currentOffset();
     movl(Operand(src), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   void load32(const Operand& src, Register dest) { movl(src, dest); }
   template <typename S>
@@ -351,24 +363,27 @@ class MacroAssemblerX86Shared : public Assembler {
     load32(src, dest);
   }
   template <typename S, typename T>
-  FaultingCodeOffset store32(const S& src, const T& dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange store32(const S& src, const T& dest) {
+    auto before = currentOffset();
     movl(src, Operand(dest));
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   template <typename S, typename T>
   void store32Unaligned(const S& src, const T& dest) {
     store32(src, dest);
   }
-  FaultingCodeOffset loadDouble(const Address& src, FloatRegister dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange loadDouble(const Address& src, FloatRegister dest) {
+    auto before = currentOffset();
     vmovsd(src, dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
-  FaultingCodeOffset loadDouble(const BaseIndex& src, FloatRegister dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange loadDouble(const BaseIndex& src, FloatRegister dest) {
+    auto before = currentOffset();
     vmovsd(src, dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   void loadDouble(const Operand& src, FloatRegister dest) {
     switch (src.kind()) {
@@ -386,13 +401,27 @@ class MacroAssemblerX86Shared : public Assembler {
     // Use vmovapd instead of vmovsd to avoid dependencies.
     vmovapd(src, dest);
   }
-  void zeroDouble(FloatRegister reg) { vxorpd(reg, reg, reg); }
+  void zeroDouble(FloatRegister reg) { vxorps(reg, reg, reg); }
   void zeroFloat32(FloatRegister reg) { vxorps(reg, reg, reg); }
   void convertFloat32ToDouble(FloatRegister src, FloatRegister dest) {
-    vcvtss2sd(src, dest, dest);
+    // If we have AVX, pass the source register as src0 to avoid a false
+    // dependency on the output register.
+    vcvtss2sd(src, HasAVX() ? src : dest, dest);
   }
   void convertDoubleToFloat32(FloatRegister src, FloatRegister dest) {
-    vcvtsd2ss(src, dest, dest);
+    vcvtsd2ss(src, HasAVX() ? src : dest, dest);
+  }
+
+  // ROUNDSD/ROUNDSS read src0 as their merge operand, so pass the source
+  // register as src0 (when we have AVX) to avoid a false dependency on the
+  // output register.
+  void roundDoubleWithMode(X86Encoding::RoundingMode mode, FloatRegister src,
+                           FloatRegister dest) {
+    vroundsd(mode, src, HasAVX() ? src : dest, dest);
+  }
+  void roundFloat32WithMode(X86Encoding::RoundingMode mode, FloatRegister src,
+                            FloatRegister dest) {
+    vroundss(mode, src, HasAVX() ? src : dest, dest);
   }
 
   void convertDoubleToFloat16(FloatRegister src, FloatRegister dest) {
@@ -633,36 +662,75 @@ class MacroAssemblerX86Shared : public Assembler {
     moveSimd128Int(src, dest);
     return dest;
   }
+  // Three-operand SIMD operations require AVX. Without it, we may need to
+  // shuffle the operands to use a two-operand encoding, which requires
+  // dest == lhs. If rhs is already in dest, then commutative operations
+  // can reverse the order of the operands.
+  FloatRegister moveSimd128IntIfNotAVXCommutative(FloatRegister lhs,
+                                                  FloatRegister* rhs,
+                                                  FloatRegister dest) {
+    MOZ_ASSERT(lhs.isSimd128() && rhs->isSimd128() && dest.isSimd128());
+    if (HasAVX()) {
+      return lhs;
+    }
+    if (*rhs == dest) {
+      *rhs = lhs;
+      return dest;
+    }
+    moveSimd128Int(lhs, dest);
+    return dest;
+  }
+  // As above, but non-commutative operations need a scratch register if
+  // rhs is already in dest.
+  FloatRegister moveSimd128IntIfNotAVX(FloatRegister lhs, FloatRegister* rhs,
+                                       FloatRegister dest,
+                                       FloatRegister scratch) {
+    MOZ_ASSERT(lhs.isSimd128() && rhs->isSimd128() && dest.isSimd128());
+    MOZ_ASSERT_IF(*rhs == dest, lhs != scratch && dest != scratch);
+    if (HasAVX() || lhs == dest) {
+      return lhs;
+    }
+    if (*rhs == dest) {
+      moveSimd128Int(*rhs, scratch);
+      *rhs = scratch;
+    }
+    moveSimd128Int(lhs, dest);
+    return dest;
+  }
   FloatRegister selectDestIfAVX(FloatRegister src, FloatRegister dest) {
     MOZ_ASSERT(src.isSimd128() && dest.isSimd128());
     return HasAVX() ? dest : src;
   }
-  FaultingCodeOffset loadUnalignedSimd128Int(const Address& src,
-                                             FloatRegister dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange loadUnalignedSimd128Int(const Address& src,
+                                            FloatRegister dest) {
+    auto before = currentOffset();
     vmovdqu(Operand(src), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
-  FaultingCodeOffset loadUnalignedSimd128Int(const BaseIndex& src,
-                                             FloatRegister dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange loadUnalignedSimd128Int(const BaseIndex& src,
+                                            FloatRegister dest) {
+    auto before = currentOffset();
     vmovdqu(Operand(src), dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   void loadUnalignedSimd128Int(const Operand& src, FloatRegister dest) {
     vmovdqu(src, dest);
   }
-  FaultingCodeOffset storeUnalignedSimd128Int(FloatRegister src,
-                                              const Address& dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange storeUnalignedSimd128Int(FloatRegister src,
+                                             const Address& dest) {
+    auto before = currentOffset();
     vmovdqu(src, Operand(dest));
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
-  FaultingCodeOffset storeUnalignedSimd128Int(FloatRegister src,
-                                              const BaseIndex& dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange storeUnalignedSimd128Int(FloatRegister src,
+                                             const BaseIndex& dest) {
+    auto before = currentOffset();
     vmovdqu(src, Operand(dest));
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   void storeUnalignedSimd128Int(FloatRegister src, const Operand& dest) {
     vmovdqu(src, dest);
@@ -716,6 +784,37 @@ class MacroAssemblerX86Shared : public Assembler {
     moveSimd128Float(src, dest);
     return dest;
   }
+  // See moveSimd128IntIfNotAVXCommutative.
+  FloatRegister moveSimd128FloatIfNotAVXCommutative(FloatRegister lhs,
+                                                    FloatRegister* rhs,
+                                                    FloatRegister dest) {
+    MOZ_ASSERT(lhs.isSimd128() && rhs->isSimd128() && dest.isSimd128());
+    if (HasAVX()) {
+      return lhs;
+    }
+    if (*rhs == dest) {
+      *rhs = lhs;
+      return dest;
+    }
+    moveSimd128Float(lhs, dest);
+    return dest;
+  }
+  // See moveSimd128IntIfNotAVX.
+  FloatRegister moveSimd128FloatIfNotAVX(FloatRegister lhs, FloatRegister* rhs,
+                                         FloatRegister dest,
+                                         FloatRegister scratch) {
+    MOZ_ASSERT(lhs.isSimd128() && rhs->isSimd128() && dest.isSimd128());
+    MOZ_ASSERT_IF(*rhs == dest, lhs != scratch && dest != scratch);
+    if (HasAVX() || lhs == dest) {
+      return lhs;
+    }
+    if (*rhs == dest) {
+      moveSimd128Float(*rhs, scratch);
+      *rhs = scratch;
+    }
+    moveSimd128Float(lhs, dest);
+    return dest;
+  }
   FloatRegister moveSimd128FloatIfEqual(FloatRegister src, FloatRegister dest,
                                         FloatRegister other) {
     MOZ_ASSERT(src.isSimd128() && dest.isSimd128());
@@ -736,17 +835,19 @@ class MacroAssemblerX86Shared : public Assembler {
     return dest;
   }
 
-  FaultingCodeOffset loadUnalignedSimd128(const Operand& src,
-                                          FloatRegister dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange loadUnalignedSimd128(const Operand& src,
+                                         FloatRegister dest) {
+    auto before = currentOffset();
     vmovups(src, dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
-  FaultingCodeOffset storeUnalignedSimd128(FloatRegister src,
-                                           const Operand& dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange storeUnalignedSimd128(FloatRegister src,
+                                          const Operand& dest) {
+    auto before = currentOffset();
     vmovups(src, dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
 
   static uint32_t ComputeShuffleMask(uint32_t x = 0, uint32_t y = 1,
@@ -765,15 +866,17 @@ class MacroAssemblerX86Shared : public Assembler {
   void moveHighPairToLowPairFloat32(FloatRegister src, FloatRegister dest) {
     vmovhlps(src, dest, dest);
   }
-  FaultingCodeOffset loadFloat32(const Address& src, FloatRegister dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange loadFloat32(const Address& src, FloatRegister dest) {
+    auto before = currentOffset();
     vmovss(src, dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
-  FaultingCodeOffset loadFloat32(const BaseIndex& src, FloatRegister dest) {
-    FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  FaultingCodeRange loadFloat32(const BaseIndex& src, FloatRegister dest) {
+    auto before = currentOffset();
     vmovss(src, dest);
-    return fco;
+    auto after = currentOffset();
+    return FaultingCodeRange(before, after);
   }
   void loadFloat32(const Operand& src, FloatRegister dest) {
     switch (src.kind()) {
@@ -792,23 +895,23 @@ class MacroAssemblerX86Shared : public Assembler {
     vmovaps(src, dest);
   }
 
-  FaultingCodeOffset loadFloat16(const Address& addr, FloatRegister dest,
-                                 Register scratch) {
-    auto fco = load16ZeroExtend(addr, scratch);
+  FaultingCodeRange loadFloat16(const Address& addr, FloatRegister dest,
+                                Register scratch) {
+    auto fcr = load16ZeroExtend(addr, scratch);
 
     // Move from GPR to FloatRegister.
     vmovd(scratch, dest);
 
-    return fco;
+    return fcr;
   }
-  FaultingCodeOffset loadFloat16(const BaseIndex& src, FloatRegister dest,
-                                 Register scratch) {
-    auto fco = load16ZeroExtend(src, scratch);
+  FaultingCodeRange loadFloat16(const BaseIndex& src, FloatRegister dest,
+                                Register scratch) {
+    auto fcr = load16ZeroExtend(src, scratch);
 
     // Move from GPR to FloatRegister.
     vmovd(scratch, dest);
 
-    return fco;
+    return fcr;
   }
 
   // Checks whether a double is representable as a 32-bit integer. If so, the
@@ -894,7 +997,7 @@ class MacroAssemblerX86Shared : public Assembler {
 
   bool maybeInlineSimd128Int(const SimdConstant& v, const FloatRegister& dest) {
     if (v.isZeroBits()) {
-      vpxor(dest, dest, dest);
+      vxorps(dest, dest, dest);
       return true;
     }
     if (v.isOneBits()) {

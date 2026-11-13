@@ -15,12 +15,11 @@ use crate::frame_builder::Frame;
 use crate::profiler::TransactionProfile;
 use crate::segment::EdgeMask;
 use crate::spatial_tree::SpatialNodeIndex;
-use crate::prim_store::PrimitiveInstanceIndex;
+use crate::visibility::PrimitiveDrawIndex;
 use crate::svg_filter::{FilterGraphNode, FilterGraphOp, FilterGraphPictureReference};
 use rustc_hash::FxHasher;
 use plane_split::BspSplitter;
 use smallvec::SmallVec;
-use std::{usize, i32};
 use std::collections::{HashMap, HashSet};
 use std::f32;
 use std::hash::BuildHasherDefault;
@@ -181,21 +180,24 @@ impl FrameStamp {
 #[cfg_attr(feature = "capture", derive(Serialize))]
 pub struct PlaneSplitAnchor {
     pub spatial_node_index: SpatialNodeIndex,
-    pub instance_index: PrimitiveInstanceIndex,
+    /// The draw this plane composites. Both consumers (the draw header lookup
+    /// and the split-composite command) need a draw index, so the anchor carries
+    /// one rather than an instance index the consumer would have to convert.
+    pub draw_index: PrimitiveDrawIndex,
     /// The split picture's unclipped local rect used by the shader to map plane
     /// positions to texture coordinates.
-    pub local_rect: LayoutRect,
+    pub pattern_rect: LayoutRect,
 }
 
 impl PlaneSplitAnchor {
     pub fn new(
         spatial_node_index: SpatialNodeIndex,
-        instance_index: PrimitiveInstanceIndex,
+        draw_index: PrimitiveDrawIndex,
     ) -> Self {
         PlaneSplitAnchor {
             spatial_node_index,
-            instance_index,
-            local_rect: LayoutRect::zero(),
+            draw_index,
+            pattern_rect: LayoutRect::zero(),
         }
     }
 }
@@ -204,8 +206,8 @@ impl Default for PlaneSplitAnchor {
     fn default() -> Self {
         PlaneSplitAnchor {
             spatial_node_index: SpatialNodeIndex::INVALID,
-            instance_index: PrimitiveInstanceIndex(!0),
-            local_rect: LayoutRect::zero(),
+            draw_index: PrimitiveDrawIndex::INVALID,
+            pattern_rect: LayoutRect::zero(),
         }
     }
 }
@@ -289,15 +291,9 @@ impl Filter {
             Filter::Opacity(api::PropertyBinding::Value(amount), _) => amount >= 1.0,
             Filter::Saturate(amount) => amount == 1.0,
             Filter::Sepia(amount) => amount == 0.0,
-            Filter::DropShadows(ref shadows) => {
-                for shadow in shadows {
-                    if shadow.offset.x != 0.0 || shadow.offset.y != 0.0 || shadow.blur_radius != 0.0 {
-                        return false;
-                    }
-                }
-
-                true
-            }
+            // A shadow with no offset and no blur is still visible beneath
+            // any translucent pixels of the source.
+            Filter::DropShadows(ref shadows) => shadows.iter().all(|shadow| shadow.color.a == 0.0),
             Filter::ColorMatrix(ref matrix) => {
                 **matrix == [
                     1.0, 0.0, 0.0, 0.0,
@@ -318,7 +314,9 @@ impl Filter {
 
 
     pub fn as_int(&self) -> i32 {
-        // Must be kept in sync with brush_blend.glsl
+        // Must be kept in sync with the FILTER_* defines in blend.glsl. Only the
+        // filters handled by that shader are defined there; the rest (blur, drop
+        // shadow, opacity, SVG graph nodes) use other shaders.
         match *self {
             Filter::Identity => 0, // matches `Contrast(1)`
             Filter::Contrast(..) => 0,
@@ -345,10 +343,10 @@ impl From<FilterOp> for Filter {
     fn from(op: FilterOp) -> Self {
         match op {
             FilterOp::Identity => Filter::Identity,
-            FilterOp::Blur(width, height) => Filter::Blur {
+            FilterOp::Blur(width, height, should_inflate) => Filter::Blur {
                 width,
                 height,
-                should_inflate: true,
+                should_inflate,
                 edge_mode: BlurEdgeMode::Duplicate,
             },
             FilterOp::Brightness(b) => Filter::Brightness(b),
@@ -396,7 +394,7 @@ impl From<FilterOp> for Filter {
             FilterOp::SVGFEDiffuseLightingDistant{node, surface_scale, diffuse_constant, kernel_unit_length_x, kernel_unit_length_y, azimuth, elevation} => Filter::SVGGraphNode(node.into(), FilterGraphOp::SVGFEDiffuseLightingDistant{surface_scale, diffuse_constant, kernel_unit_length_x, kernel_unit_length_y, azimuth, elevation}),
             FilterOp::SVGFEDiffuseLightingPoint{node, surface_scale, diffuse_constant, kernel_unit_length_x, kernel_unit_length_y, x, y, z} => Filter::SVGGraphNode(node.into(), FilterGraphOp::SVGFEDiffuseLightingPoint{surface_scale, diffuse_constant, kernel_unit_length_x, kernel_unit_length_y, x, y, z}),
             FilterOp::SVGFEDiffuseLightingSpot{node, surface_scale, diffuse_constant, kernel_unit_length_x, kernel_unit_length_y, x, y, z, points_at_x, points_at_y, points_at_z, cone_exponent, limiting_cone_angle} => Filter::SVGGraphNode(node.into(), FilterGraphOp::SVGFEDiffuseLightingSpot{surface_scale, diffuse_constant, kernel_unit_length_x, kernel_unit_length_y, x, y, z, points_at_x, points_at_y, points_at_z, cone_exponent, limiting_cone_angle}),
-            FilterOp::SVGFEDisplacementMap{node, scale, x_channel_selector, y_channel_selector} => Filter::SVGGraphNode(node.into(), FilterGraphOp::SVGFEDisplacementMap{scale, x_channel_selector, y_channel_selector}),
+            FilterOp::SVGFEDisplacementMap{node, scale_x, scale_y, x_channel_selector, y_channel_selector} => Filter::SVGGraphNode(node.into(), FilterGraphOp::SVGFEDisplacementMap{scale_x, scale_y, x_channel_selector, y_channel_selector}),
             FilterOp::SVGFEDropShadow{node, color, dx, dy, std_deviation_x, std_deviation_y} => Filter::SVGGraphNode(node.into(), FilterGraphOp::SVGFEDropShadow{color, dx, dy, std_deviation_x, std_deviation_y}),
             FilterOp::SVGFEFlood{node, color} => Filter::SVGGraphNode(node.into(), FilterGraphOp::SVGFEFlood{color}),
             FilterOp::SVGFEGaussianBlur{node, std_deviation_x, std_deviation_y} => Filter::SVGGraphNode(node.into(), FilterGraphOp::SVGFEGaussianBlur{std_deviation_x, std_deviation_y}),
@@ -809,6 +807,8 @@ pub enum ResultMsg {
     UpdateResources {
         resource_updates: ResourceUpdateList,
         memory_pressure: bool,
+        discard_active_documents: bool,
+        trim_upload_buffers: bool,
     },
     PublishPipelineInfo(PipelineInfo),
     PublishDocument(

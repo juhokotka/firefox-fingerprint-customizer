@@ -5,8 +5,10 @@
 
 #include "CredentialManagerSecret.h"
 
+// clang-format off
 #include <windows.h>
 #include <wincred.h>
+// clang-format on
 
 #include "mozilla/Logging.h"
 #include "mozilla/SyncRunnable.h"
@@ -33,10 +35,6 @@ struct ScopedMaybeDelete {
 };
 typedef std::unique_ptr<CREDENTIALA, ScopedMaybeDelete<CREDENTIALA>>
     ScopedCREDENTIALA;
-
-CredentialManagerSecret::CredentialManagerSecret() {}
-
-CredentialManagerSecret::~CredentialManagerSecret() {}
 
 nsresult CredentialManagerSecret::StoreSecret(const nsACString& aSecret,
                                               const nsACString& aLabel) {

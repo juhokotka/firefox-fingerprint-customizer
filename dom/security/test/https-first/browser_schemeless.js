@@ -4,7 +4,7 @@
 "use strict";
 
 // We explicitly need HTTP URLs in this test
-/* eslint-disable @microsoft/sdl/no-insecure-url */
+/* eslint-disable sdl/no-insecure-url */
 
 ChromeUtils.defineLazyGetter(this, "UrlbarTestUtils", () => {
   const { UrlbarTestUtils: module } = ChromeUtils.importESModule(
@@ -127,15 +127,14 @@ async function runPasteAndGoTest(aInput, aDesc, aExpectedScheme) {
     });
 
     const loaded = BrowserTestUtils.browserLoaded(browser, false, null, true);
-    const textBox = gURLBar.querySelector("moz-input-box");
-    const cxmenu = textBox.menupopup;
+    const cxmenu = window.EditContextMenu.popup;
     const cxmenuPromise = BrowserTestUtils.waitForEvent(cxmenu, "popupshown");
     EventUtils.synthesizeMouseAtCenter(gURLBar.inputField, {
       type: "contextmenu",
       button: 2,
     });
     await cxmenuPromise;
-    const menuitem = textBox.getMenuItem("paste-and-go");
+    const menuitem = cxmenu.querySelector('[anonid="paste-and-go"]');
     menuitem.closest("menupopup").activateItem(menuitem);
     await loaded;
 

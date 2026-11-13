@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+@import url("chrome://global/content/elements/panel-list.tokens.css");
+
 /*
  * Override the default popover styles to ensure the panel-list
  * stays anchored to the element that opened it.
@@ -22,29 +24,20 @@
 }
 
 :host {
-  --panel-list-background-color: var(--background-color-box);
-  --panel-list-color: var(--text-color);
-  --panel-list-border-radius: var(--border-radius-small);
-  --panel-list-box-shadow: var(--popup-box-shadow);
-  --panel-list-border-color: var(--border-color-deemphasized);
-
   /* display: block ensures dimensions are available during setAlign()
      positioning, since the popover UA stylesheet hides [popover]:not(:popover-open). */
   display: block;
   position: absolute;
   font: menu;
-  background-color: var(--panel-list-background-color);
-  color: var(--panel-list-color);
-  border-radius: var(--panel-list-border-radius);
-  padding-block: var(--space-small);
+  padding-block: var(--panel-list-padding-block);
   margin-block-end: var(--space-large);
-  box-shadow: var(--panel-list-box-shadow);
   min-width: 12em;
   z-index: var(--z-index-popup, 10);
   white-space: nowrap;
   cursor: default;
   overflow-y: auto;
   box-sizing: border-box;
+  user-select: none;
 }
 
 :host([has-submenu]) {
@@ -65,8 +58,14 @@
   margin: 0;
 }
 
+/* In a XUL panel the panel paints the surface the list sits on along with its
+   text color, casts its shadow, and rounds and clips its corners. */
 :host(:not([inxulpanel])) {
+  background-color: var(--panel-list-background-color);
+  color: var(--panel-list-text-color);
   border: 1px solid var(--panel-list-border-color);
+  border-radius: var(--panel-list-border-radius);
+  box-shadow: var(--panel-list-box-shadow);
 }
 
 .list {
@@ -76,12 +75,9 @@
 
 ::slotted(hr:not([hidden])) {
   display: block !important;
-  /* This element is used like a border, so border tokens apply. */
-  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
-  height: var(--border-width) !important;
-  background-color: var(--panel-list-border-color) !important;
   color: inherit !important;
   padding: 0 !important;
-  margin-block: var(--space-small) !important;
+  margin: var(--panel-separator-padding) !important;
   border: none !important;
+  border-block-start: var(--border-width) solid var(--panel-separator-color) !important;
 }

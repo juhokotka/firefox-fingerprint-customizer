@@ -7,8 +7,8 @@
 #ifndef WIDGET_WEBCUSTOMFORMATUTILS_H
 #define WIDGET_WEBCUSTOMFORMATUTILS_H
 
-#include "nsTHashMap.h"
 #include "nsString.h"
+#include "nsTHashMap.h"
 
 namespace mozilla::widget {
 

@@ -118,26 +118,25 @@ class JS_PUBLIC_API PrefableCompileOptions {
  public:
   PrefableCompileOptions()
       : sourcePragmas_(true),
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-        explicitResourceManagement_(
-            JS::Prefs::experimental_explicit_resource_management()),
+        sourcePhaseImports_(JS::Prefs::experimental_source_phase_imports()),
+        deferImportEval_(
+#ifdef NIGHTLY_BUILD
+            JS::Prefs::experimental_defer_import_eval()
+#else
+            false
 #endif
-        sourcePhaseImports_(JS::Prefs::experimental_source_phase_imports()) {
+        ) {
   }
-
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-  bool explicitResourceManagement() const {
-    return explicitResourceManagement_;
-  }
-  PrefableCompileOptions& setExplicitResourceManagement(bool enabled) {
-    explicitResourceManagement_ = enabled;
-    return *this;
-  }
-#endif
 
   bool sourcePhaseImports() const { return sourcePhaseImports_; }
   PrefableCompileOptions& setSourcePhaseImports(bool enabled) {
     sourcePhaseImports_ = enabled;
+    return *this;
+  }
+
+  bool deferImportEval() const { return deferImportEval_; }
+  PrefableCompileOptions& setDeferImportEval(bool enabled) {
+    deferImportEval_ = enabled;
     return *this;
   }
 
@@ -153,10 +152,8 @@ class JS_PUBLIC_API PrefableCompileOptions {
   void dumpWith(Printer& print) const {
 #  define PrintFields_(Name) print(#Name, Name)
     PrintFields_(sourcePragmas_);
-#  ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-    PrintFields_(explicitResourceManagement_);
-#  endif
     PrintFields_(sourcePhaseImports_);
+    PrintFields_(deferImportEval_);
 #  undef PrintFields_
   }
 #endif  // defined(DEBUG) || defined(JS_JITSPEW)
@@ -167,13 +164,10 @@ class JS_PUBLIC_API PrefableCompileOptions {
   // The context has specified that source pragmas should be parsed.
   bool sourcePragmas_ : 1;
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-  // The context has specified that explicit resource management syntax
-  // should be parsed.
-  bool explicitResourceManagement_ : 1;
-#endif
-
   bool sourcePhaseImports_ : 1;
+
+  // defer import evaluation
+  bool deferImportEval_ : 1;
 };
 
 /**
@@ -254,6 +248,7 @@ class JS_PUBLIC_API TransitiveCompileOptions {
   bool sourceIsLazy = false;
   bool allowHTMLComments = true;
   bool nonSyntacticScope = false;
+  bool allowRedeclaringExistingLexicalBinding = false;
 
   // Top-level await is enabled by default but is not supported for chrome
   // modules loaded with ChromeUtils.importModule.
@@ -351,14 +346,11 @@ class JS_PUBLIC_API TransitiveCompileOptions {
   }
 
   bool sourcePragmas() const { return prefableOptions_.sourcePragmas(); }
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-  bool explicitResourceManagement() const {
-    return prefableOptions_.explicitResourceManagement();
-  }
-#endif
   bool sourcePhaseImports() const {
     return prefableOptions_.sourcePhaseImports();
   }
+
+  bool deferImportEval() const { return prefableOptions_.deferImportEval(); }
 
   JS::ConstUTF8CharsZ filename() const { return filename_; }
   JS::ConstUTF8CharsZ introducerFilename() const { return introducerFilename_; }
@@ -391,6 +383,7 @@ class JS_PUBLIC_API TransitiveCompileOptions {
     PrintFields_(sourceIsLazy);
     PrintFields_(allowHTMLComments);
     PrintFields_(nonSyntacticScope);
+    PrintFields_(allowRedeclaringExistingLexicalBinding);
     PrintFields_(topLevelAwait);
     PrintFields_(borrowBuffer);
     PrintFields_(usePinnedBytecode);
@@ -439,13 +432,13 @@ class JS_PUBLIC_API ReadOnlyCompileOptions : public TransitiveCompileOptions {
   bool isRunOnce = false;
   bool noScriptRval = false;
 
+  ReadOnlyCompileOptions(const ReadOnlyCompileOptions&) = delete;
+  ReadOnlyCompileOptions& operator=(const ReadOnlyCompileOptions&) = delete;
+
  protected:
   ReadOnlyCompileOptions() = default;
 
   void copyPODNonTransitiveOptions(const ReadOnlyCompileOptions& rhs);
-
-  ReadOnlyCompileOptions(const ReadOnlyCompileOptions&) = delete;
-  ReadOnlyCompileOptions& operator=(const ReadOnlyCompileOptions&) = delete;
 
  public:
 #if defined(DEBUG) || defined(JS_JITSPEW)
@@ -489,6 +482,9 @@ class JS_PUBLIC_API OwningCompileOptions final : public ReadOnlyCompileOptions {
 
   ~OwningCompileOptions();
 
+  OwningCompileOptions(const OwningCompileOptions&) = delete;
+  OwningCompileOptions& operator=(const OwningCompileOptions&) = delete;
+
  private:
   template <typename ContextT>
   bool copyImpl(ContextT* cx, const ReadOnlyCompileOptions& rhs);
@@ -523,9 +519,6 @@ class JS_PUBLIC_API OwningCompileOptions final : public ReadOnlyCompileOptions {
 
  private:
   void release();
-
-  OwningCompileOptions(const OwningCompileOptions&) = delete;
-  OwningCompileOptions& operator=(const OwningCompileOptions&) = delete;
 };
 
 /**
@@ -623,6 +616,11 @@ class MOZ_STACK_CLASS JS_PUBLIC_API CompileOptions final
 
   CompileOptions& setNonSyntacticScope(bool n) {
     nonSyntacticScope = n;
+    return *this;
+  }
+
+  CompileOptions& setAllowRedeclaringExistingLexicalBinding(bool allow) {
+    allowRedeclaringExistingLexicalBinding = allow;
     return *this;
   }
 
@@ -787,11 +785,11 @@ class JS_PUBLIC_API ReadOnlyDecodeOptions {
   uint32_t introductionLineno = 0;
   uint32_t introductionOffset = 0;
 
- protected:
-  ReadOnlyDecodeOptions() = default;
-
   ReadOnlyDecodeOptions(const ReadOnlyDecodeOptions&) = delete;
   ReadOnlyDecodeOptions& operator=(const ReadOnlyDecodeOptions&) = delete;
+
+ protected:
+  ReadOnlyDecodeOptions() = default;
 
   template <typename T>
   void copyPODOptionsFrom(const T& options) {
@@ -840,6 +838,9 @@ class JS_PUBLIC_API OwningDecodeOptions final : public ReadOnlyDecodeOptions {
 
   ~OwningDecodeOptions();
 
+  OwningDecodeOptions(const OwningDecodeOptions&) = delete;
+  OwningDecodeOptions& operator=(const OwningDecodeOptions&) = delete;
+
   bool copy(JS::FrontendContext* maybeFc, const ReadOnlyDecodeOptions& rhs);
   void infallibleCopy(const ReadOnlyDecodeOptions& rhs);
 
@@ -847,9 +848,6 @@ class JS_PUBLIC_API OwningDecodeOptions final : public ReadOnlyDecodeOptions {
 
  private:
   void release();
-
-  OwningDecodeOptions(const OwningDecodeOptions&) = delete;
-  OwningDecodeOptions& operator=(const OwningDecodeOptions&) = delete;
 };
 
 }  // namespace JS

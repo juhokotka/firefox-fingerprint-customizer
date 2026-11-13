@@ -11,6 +11,7 @@ import mozilla.components.service.pocket.ext.toSponsoredContentEntity
 import mozilla.components.service.pocket.helpers.PocketTestResources
 import mozilla.components.service.pocket.mars.db.SponsoredContentImpressionEntity
 import mozilla.components.service.pocket.mars.db.SponsoredContentsDao
+import mozilla.components.support.test.argumentCaptor
 import mozilla.components.support.test.robolectric.testContext
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -59,22 +60,26 @@ class SponsoredContentsRepositoryTest {
     }
 
     @Test
-    fun `GIVEN a sponsored contents response WHEN sponsored contents are added THEN persist the provided sponsored contents in storage`() = runTest {
-        val response = PocketTestResources.marsSpocsResponse
-        val entities = response.spocs.map { it.toSponsoredContentEntity() }
+    fun `GIVEN a sponsored contents response WHEN sponsored contents are added THEN persist the provided sponsored contents in storage`() =
+        runTest {
+            val response = PocketTestResources.marsSpocsResponse
+            val entities = response.spocs.map { it.toSponsoredContentEntity() }
 
-        repository.addSponsoredContents(response)
+            repository.addSponsoredContents(response)
 
-        verify(dao).cleanOldAndInsertNewSponsoredContents(sponsoredContents = entities)
-    }
+            verify(dao).cleanOldAndInsertNewSponsoredContents(sponsoredContents = entities)
+        }
 
     @Test
     fun `WHEN sponsored content impressions are recorded THEN persist the impressions in storage`() = runTest {
         val sponsoredContents = listOf(PocketTestResources.marsSpocsResponseItem)
-        val impressions = sponsoredContents.map { SponsoredContentImpressionEntity(it.url) }
 
         repository.recordImpressions(impressions = sponsoredContents.map { it.url })
 
-        verify(dao).recordImpressions(impressions)
+        // Compare by url only: the entity's impressionDateInSeconds defaults to the current time,
+        // so asserting full equality against a separately-constructed list would be time-sensitive.
+        val captor = argumentCaptor<List<SponsoredContentImpressionEntity>>()
+        verify(dao).recordImpressions(captor.capture())
+        assertEquals(sponsoredContents.map { it.url }, captor.value.map { it.url })
     }
 }

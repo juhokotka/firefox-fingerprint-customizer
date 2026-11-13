@@ -7,14 +7,14 @@
 #ifndef mozilla_CheckedInt_h
 #define mozilla_CheckedInt_h
 
-#include "mozilla/Assertions.h"
-#include "mozilla/Attributes.h"
-#include "mozilla/CheckedArithmetic.h"
-
 #include <cstdint>
 #include <limits>
 #include <type_traits>
 #include <utility>
+
+#include "mozilla/Assertions.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/CheckedArithmetic.h"
 
 namespace mozilla {
 
@@ -421,7 +421,6 @@ class CheckedInt {
     return tmp;
   }
 
- private:
   /**
    * The !=, <, <=, >, >= operators are disabled:
    * see the comment on operator==.

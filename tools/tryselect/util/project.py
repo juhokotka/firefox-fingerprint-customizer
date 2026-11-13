@@ -6,6 +6,8 @@
 
 import os
 
+import mozpack.path as mozpath
+
 
 def get_project_topsrcdir(build):
     """
@@ -16,12 +18,12 @@ def get_project_topsrcdir(build):
     has its own taskgraph config (e.g. comm/taskcluster/config.yml).
     """
     project_path = build.base_mozconfig_info["project"][0]
-    project_topsrcdir = os.path.join(build.topsrcdir, project_path.split(os.sep)[0])
+    project_topsrcdir = mozpath.join(build.topsrcdir, mozpath.split(project_path)[0])
 
     if not os.path.exists(os.path.join(project_topsrcdir, "taskcluster", "config.yml")):
         return build.topsrcdir
 
-    if os.getcwd().startswith(project_topsrcdir):
+    if mozpath.normpath(os.getcwd()).startswith(project_topsrcdir):
         return project_topsrcdir
 
     return build.topsrcdir

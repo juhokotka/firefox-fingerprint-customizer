@@ -11,10 +11,15 @@ import android.graphics.Color
 import android.os.Looper.getMainLooper
 import android.view.View
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import mozilla.components.browser.engine.gecko.GeckoEngineView.Companion.DARK_COVER
+import mozilla.components.browser.engine.gecko.facts.GeckoEngineViewFacts
 import mozilla.components.browser.engine.gecko.selection.GeckoSelectionActionDelegate
 import mozilla.components.concept.engine.mediaquery.PreferredColorScheme
 import mozilla.components.concept.engine.selection.SelectionActionDelegate
+import mozilla.components.support.base.Component
+import mozilla.components.support.base.facts.processor.CollectionProcessor
 import mozilla.components.support.test.argumentCaptor
 import mozilla.components.support.test.mock
 import mozilla.components.support.test.whenever
@@ -33,8 +38,6 @@ import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
 import org.robolectric.Robolectric.buildActivity
 import org.robolectric.Shadows.shadowOf
-import kotlin.test.assertIs
-import kotlin.test.assertNotNull
 
 @RunWith(AndroidJUnit4::class)
 class GeckoEngineViewTest {
@@ -61,36 +64,89 @@ class GeckoEngineViewTest {
     }
 
     @Test
-    fun captureThumbnail() {
+    fun captureThumbnail() =
+        assertCaptureForwardsGeckoResult(
+            geckoViewCapture = { capturePixels() },
+            engineViewCapture = { captureThumbnail(it) },
+        )
+
+    @Test
+    fun captureFullPage() =
+        assertCaptureForwardsGeckoResult(
+            geckoViewCapture = { captureFullPage() },
+            engineViewCapture = { captureFullPage(it) },
+        )
+
+    private fun assertCaptureForwardsGeckoResult(
+        geckoViewCapture: NestedGeckoView.() -> GeckoResult<Bitmap>?,
+        engineViewCapture: GeckoEngineView.(onFinish: (Bitmap?) -> Unit) -> Unit,
+    ) {
         val engineView = GeckoEngineView(context)
         val mockGeckoView = mock<NestedGeckoView>()
-        var thumbnail: Bitmap? = null
+        var captured: Bitmap? = null
 
         var geckoResult = GeckoResult<Bitmap>()
-        whenever(mockGeckoView.capturePixels()).thenReturn(geckoResult)
+        whenever(mockGeckoView.geckoViewCapture()).thenReturn(geckoResult)
         engineView.geckoView = mockGeckoView
 
         // Test GeckoResult resolves successfuly
-        engineView.captureThumbnail {
-            thumbnail = it
-        }
-        verify(mockGeckoView).capturePixels()
+        engineView.engineViewCapture { captured = it }
+        verify(mockGeckoView).geckoViewCapture()
         geckoResult.complete(mock())
         shadowOf(getMainLooper()).idle()
 
-        assertNotNull(thumbnail)
+        assertNotNull(captured)
 
         geckoResult = GeckoResult()
-        whenever(mockGeckoView.capturePixels()).thenReturn(geckoResult)
+        whenever(mockGeckoView.geckoViewCapture()).thenReturn(geckoResult)
 
         // Test GeckoResult resolves in error
-        engineView.captureThumbnail {
-            thumbnail = it
-        }
+        engineView.engineViewCapture { captured = it }
         geckoResult.completeExceptionally(mock())
         shadowOf(getMainLooper()).idle()
 
-        assertNull(thumbnail)
+        assertNull(captured)
+    }
+
+    @Test
+    fun `captureFullPage emits attempted and success facts`() {
+        val engineView = GeckoEngineView(context)
+        val mockGeckoView = mock<NestedGeckoView>()
+        val geckoResult = GeckoResult<Bitmap>()
+        whenever(mockGeckoView.captureFullPage()).thenReturn(geckoResult)
+        engineView.geckoView = mockGeckoView
+
+        CollectionProcessor.withFactCollection { facts ->
+            engineView.captureFullPage {}
+            geckoResult.complete(mock())
+            shadowOf(getMainLooper()).idle()
+
+            assertEquals(2, facts.size)
+            assertEquals(Component.BROWSER_ENGINE_GECKO, facts[0].component)
+            assertEquals(GeckoEngineViewFacts.Items.CAPTURE_FULL_PAGE_ATTEMPTED, facts[0].item)
+            assertEquals(GeckoEngineViewFacts.Items.CAPTURE_FULL_PAGE_RESULT, facts[1].item)
+            assertEquals(GeckoEngineViewFacts.CaptureFullPageResults.SUCCEEDED, facts[1].value)
+        }
+    }
+
+    @Test
+    fun `captureFullPage emits failure fact when the capture is rejected`() {
+        val engineView = GeckoEngineView(context)
+        val mockGeckoView = mock<NestedGeckoView>()
+        val geckoResult = GeckoResult<Bitmap>()
+        whenever(mockGeckoView.captureFullPage()).thenReturn(geckoResult)
+        engineView.geckoView = mockGeckoView
+
+        CollectionProcessor.withFactCollection { facts ->
+            engineView.captureFullPage {}
+            geckoResult.completeExceptionally(mock())
+            shadowOf(getMainLooper()).idle()
+
+            assertEquals(2, facts.size)
+            assertEquals(GeckoEngineViewFacts.Items.CAPTURE_FULL_PAGE_ATTEMPTED, facts[0].item)
+            assertEquals(GeckoEngineViewFacts.Items.CAPTURE_FULL_PAGE_RESULT, facts[1].item)
+            assertEquals(GeckoEngineViewFacts.CaptureFullPageResults.FAILED, facts[1].value)
+        }
     }
 
     @Test
@@ -162,9 +218,10 @@ class GeckoEngineViewTest {
 
     @Test
     fun `after rendering currentSelection should be a GeckoSelectionActionDelegate`() {
-        val engineView = GeckoEngineView(context).apply {
-            selectionActionDelegate = mock()
-        }
+        val engineView =
+            GeckoEngineView(context).apply {
+                selectionActionDelegate = mock()
+            }
         val engineSession = mock<GeckoEngineSession>()
         val geckoSession = mock<GeckoSession>()
         val geckoView = mock<NestedGeckoView>()
@@ -181,9 +238,10 @@ class GeckoEngineViewTest {
     fun `will attach and detach selection action delegate when rendering and releasing`() {
         val delegate: SelectionActionDelegate = mock()
 
-        val engineView = GeckoEngineView(context).apply {
-            selectionActionDelegate = delegate
-        }
+        val engineView =
+            GeckoEngineView(context).apply {
+                selectionActionDelegate = delegate
+            }
         val engineSession = mock<GeckoEngineSession>()
         val geckoSession = mock<GeckoSession>()
         val geckoView = mock<NestedGeckoView>()
@@ -212,9 +270,10 @@ class GeckoEngineViewTest {
     fun `will attach and detach selection action delegate when rendering new session`() {
         val delegate: SelectionActionDelegate = mock()
 
-        val engineView = GeckoEngineView(context).apply {
-            selectionActionDelegate = delegate
-        }
+        val engineView =
+            GeckoEngineView(context).apply {
+                selectionActionDelegate = delegate
+            }
         val engineSession = mock<GeckoEngineSession>()
         val geckoSession = mock<GeckoSession>()
         val geckoView = mock<NestedGeckoView>()
@@ -239,7 +298,7 @@ class GeckoEngineViewTest {
         engineView.render(
             mock<GeckoEngineSession>().apply {
                 whenever(this.geckoSession).thenReturn(mock())
-            },
+            }
         )
 
         verify(geckoSession).selectionActionDelegate = null
@@ -247,9 +306,10 @@ class GeckoEngineViewTest {
 
     fun `WHEN rendering a new session THEN start observing scroll events`() {
         val listener: GeckoVerticalScrollListener = mock()
-        val engineView = GeckoEngineView(context).apply {
-            verticalScrollListener = listener
-        }
+        val engineView =
+            GeckoEngineView(context).apply {
+                verticalScrollListener = listener
+            }
         val geckoSession: GeckoSession = mock()
         val engineSession = mock<GeckoEngineSession>()
         doReturn(geckoSession).`when`(engineSession).geckoSession
@@ -261,9 +321,10 @@ class GeckoEngineViewTest {
 
     fun `WHEN releasing a session THEN stop observing scroll events`() {
         val listener: GeckoVerticalScrollListener = mock()
-        val engineView = GeckoEngineView(context).apply {
-            verticalScrollListener = listener
-        }
+        val engineView =
+            GeckoEngineView(context).apply {
+                verticalScrollListener = listener
+            }
 
         engineView.release()
 

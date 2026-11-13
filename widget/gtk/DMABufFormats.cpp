@@ -2,23 +2,28 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <xf86drm.h>
+#include "DMABufFormats.h"
+
+#include <gbm.h>
 #include <sys/mman.h>
 #include <sys/types.h>
-#include <gbm.h>
+#include <xf86drm.h>
+
 #include <mutex>
 
 #include "DMABufDevice.h"
-#include "DMABufFormats.h"
 #include "WidgetUtilsGtk.h"
-#ifdef MOZ_WAYLAND
-#  include "nsWaylandDisplay.h"
-#  include "mozilla/widget/mozwayland.h"
-#  include "mozilla/widget/linux-dmabuf-unstable-v1-client-protocol.h"
-#endif
-#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/gfx/Logging.h"  // for gfxCriticalNote
+#include "mozilla/gfx/gfxVars.h"
+
+// clang-format off
+#ifdef MOZ_WAYLAND
+#  include "mozilla/widget/mozwayland.h"
+#  include "mozilla/widget/linux-dmabuf-unstable-v1-client-protocol.h"
+#  include "nsWaylandDisplay.h"
+#endif
+// clang-format on
 
 // drm_fourcc.h defines DRM_FORMAT_MOD_INVALID without a guard; undef the
 // fallback from DMABufFormats.h first so the unified build doesn't see a
@@ -27,10 +32,20 @@
 #  undef DRM_FORMAT_MOD_INVALID
 #endif
 #include <libdrm/drm_fourcc.h>
+
 #include "GfxInfo.h"
 #include "mozilla/Components.h"
 
 using namespace mozilla::gfx;
+
+// DMABufDevice.h is included only once by the unified build so redefine
+// the logging macros here, other files in the same unit use their own ones.
+#undef LOGDMABUF
+#ifdef MOZ_LOGGING
+#  define LOGDMABUF(args) MOZ_LOG(gDmabufLog, mozilla::LogLevel::Debug, args)
+#else
+#  define LOGDMABUF(args)
+#endif /* MOZ_LOGGING */
 
 #ifndef GBM_FORMAT_P010
 #  define GBM_FORMAT_P010 \
@@ -373,6 +388,7 @@ void DMABufFormats::EnsureBasicFormats() {
   EnsureBasicFormat(GBM_FORMAT_P010);
   EnsureBasicFormat(GBM_FORMAT_NV12);
   EnsureBasicFormat(GBM_FORMAT_YUV420);
+  EnsureBasicFormat(GBM_FORMAT_ABGR2101010);
 
   mDMABufFeedback->PendingTrancheDone();
 }
@@ -465,6 +481,7 @@ void GlobalDMABufFormats::SetModifiersToGfxVars() {
   }
 
   ConfigureFormat(formats, mFormatYUV420, GBM_FORMAT_YUV420);
+  ConfigureFormat(formats, mFormatABGR2101010, GBM_FORMAT_ABGR2101010);
 }
 
 void GlobalDMABufFormats::GetModifiersFromGfxVars() {
@@ -496,6 +513,8 @@ DRMFormat* GlobalDMABufFormats::GetDRMFormat(int32_t aFOURCCFormat) {
       return mFormatNV12;
     case GBM_FORMAT_YUV420:
       return mFormatYUV420;
+    case GBM_FORMAT_ABGR2101010:
+      return mFormatABGR2101010;
     default:
       gfxCriticalNoteOnce << "DMABufDevice::GetDRMFormat() unknow format: "
                           << aFOURCCFormat;
@@ -517,6 +536,8 @@ bool GlobalDMABufFormats::SupportsDirectComposition(
       return !!mFormatYUV420;
     case gfx::SurfaceFormat::P010:
       return !!mFormatP010;
+    case gfx::SurfaceFormat::R10G10B10A2_UINT32:
+      return !!mFormatABGR2101010;
     default:
       MOZ_ASSERT_UNREACHABLE("unexpected to be called");
       return false;

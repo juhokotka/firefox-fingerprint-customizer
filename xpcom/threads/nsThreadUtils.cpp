@@ -4,8 +4,9 @@
 
 #include "nsThreadUtils.h"
 
-#include "chrome/common/ipc_message.h"  // for IPC::Message
 #include "MaybeLeakRefPtr.h"
+#include "TaskController.h"
+#include "chrome/common/ipc_message.h"  // for IPC::Message
 #include "mozilla/Likely.h"
 #include "mozilla/TaskQueue.h"
 #include "mozilla/TimeStamp.h"
@@ -14,13 +15,11 @@
 #include "nsIEventTarget.h"
 #include "nsITimer.h"
 #include "nsString.h"
+#include "nsThreadManager.h"
+#include "nsThreadPool.h"
 #include "nsThreadSyncDispatch.h"
 #include "nsTimerImpl.h"
 #include "prsystem.h"
-
-#include "nsThreadManager.h"
-#include "nsThreadPool.h"
-#include "TaskController.h"
 
 #ifdef XP_WIN
 #  include <windows.h>
@@ -235,7 +234,7 @@ nsresult NS_DispatchToMainThread(already_AddRefed<nsIRunnable> aEvent,
                                      aDispatchFlags & NS_DISPATCH_FALLIBLE);
   nsCOMPtr<nsIThread> thread;
   nsresult rv = NS_GetMainThread(getter_AddRefs(thread));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  if (NS_FAILED(rv)) {
     NS_ASSERTION(aDispatchFlags & NS_DISPATCH_FALLIBLE,
                  "Failed NS_DispatchToMainThread() in shutdown; leaking");
     return rv;
@@ -571,7 +570,7 @@ nsISerialEventTarget* GetCurrentSerialEventTarget() {
     return nullptr;
   }
 
-  return thread;
+  return thread.get();
 }
 
 nsISerialEventTarget* GetMainThreadSerialEventTarget() {

@@ -3,13 +3,32 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { actionCreators as ac, actionTypes as at } from "common/Actions.mjs";
+import {
+  WIDGET_REGISTRY,
+  hasContentAreaWidgets,
+  isWidgetsContainerVisible,
+} from "common/WidgetsRegistry.mjs";
+import {
+  DEFAULT_PAGE_LAYOUT_VARIANT,
+  PAGE_LAYOUT_VARIANTS,
+  PREF_PAGE_LAYOUT_VARIANT,
+  isSideBySideAssigned,
+  isSpacesAssigned,
+  isSpacesThematicAssigned,
+  PREF_SPACES_CONFIG,
+  resolvePageLayoutVariant,
+  resolvePopulatedSpaces,
+  resolveThematicSpacesConfig,
+} from "common/PageLayoutVariants.mjs";
+// @nova-cleanup(move-directory): Update import path after useWidgetLabels moves
+// to components/CustomizeMenu/WidgetsManagementPanel/
+import { useWidgetLabels } from "content-src/components/Nova/CustomizeMenu/WidgetsManagementPanel/useWidgetLabels.jsx";
 import { connect } from "react-redux";
 import React from "react";
 
 // Pref Constants
 const PREF_AD_SIZE_MEDIUM_RECTANGLE = "newtabAdSize.mediumRectangle";
 const PREF_AD_SIZE_BILLBOARD = "newtabAdSize.billboard";
-const PREF_AD_SIZE_LEADERBOARD = "newtabAdSize.leaderboard";
 const PREF_SECTIONS_ENABLED = "discoverystream.sections.enabled";
 const PREF_SPOC_PLACEMENTS = "discoverystream.placements.spocs";
 const PREF_SPOC_COUNTS = "discoverystream.placements.spocs.counts";
@@ -24,6 +43,180 @@ const PREF_UNIFIED_ADS_ENDPOINT = "unifiedAds.endpoint";
 const PREF_ALLOWED_ENDPOINTS = "discoverystream.endpoints";
 const PREF_OHTTP_CONFIG = "discoverystream.ohttp.configURL";
 const PREF_OHTTP_RELAY = "discoverystream.ohttp.relayURL";
+const PREF_WIDGETS_SYSTEM_ENABLED = "widgets.system.enabled";
+
+// Internal, pref-gated widget features that default off but we want to test in
+// devtools. Hand-maintained (outside the automatic registry-driven toggles).
+// Each `pref` is the full activity-stream-relative pref; toggles reuse
+// handleWidgetToggle, which sets the pref named by the toggle's id.
+const WIDGET_EXTRA_FEATURES = {
+  pictureOfTheDay: [
+    {
+      pref: "widgets.pictureOfTheDay.setAsWallpaper.enabled",
+      label: "Set as wallpaper",
+    },
+  ],
+  privacy: [{ pref: "widgets.privacy.showVpnMessages", label: "VPN messages" }],
+};
+
+// Indents a JSON string for editing, or hands back whatever it was given when
+// that is not possible -- a draft mid-edit is often not valid JSON.
+function prettyJson(value) {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+// Sorted A-Z by the customize panel label, the rule the panel and the
+// about:preferences Widgets group use. onToggle sets the pref named by the
+// toggle's id.
+function WidgetSystemToggles({ otherPrefs, widgetsSystemEnabled, onToggle }) {
+  const activeWidgets = WIDGET_REGISTRY.filter(w => !w.retired);
+  const labels = useWidgetLabels(activeWidgets);
+  const sortedWidgets = labels
+    ? [...activeWidgets].sort((a, b) =>
+        (labels.get(a.id) ?? a.id).localeCompare(labels.get(b.id) ?? b.id)
+      )
+    : [];
+
+  return sortedWidgets.map(widget => (
+    <React.Fragment key={widget.id}>
+      <div className="toggle-wrapper">
+        <moz-toggle
+          id={widget.systemEnabledPref}
+          pressed={otherPrefs[widget.systemEnabledPref] || null}
+          disabled={!widgetsSystemEnabled || null}
+          ontoggle={onToggle}
+          data-l10n-id={widget.customizeL10nId}
+        />
+      </div>
+      {(WIDGET_EXTRA_FEATURES[widget.id] || []).map(feature => (
+        <div
+          className="toggle-wrapper"
+          key={feature.pref}
+          style={{ marginInlineStart: "var(--space-large)" }}
+        >
+          <moz-toggle
+            id={feature.pref}
+            pressed={otherPrefs[feature.pref] || null}
+            disabled={!widgetsSystemEnabled || null}
+            ontoggle={onToggle}
+            label={feature.label}
+          />
+        </div>
+      ))}
+    </React.Fragment>
+  ));
+}
+
+// Devtools-only copy, so not localized. A variant with no entry falls back to its
+// raw pref value and renders no description.
+const PAGE_LAYOUTS_INFO = {
+  // @experiment(remove) { bug 2066527 }
+  [PAGE_LAYOUT_VARIANTS.AUTO_MINIMIZE_WIDGETS]: {
+    label: "Auto-minimize Widgets",
+    description:
+      "Nova, but the widgets section collapses to just its title a few " +
+      "seconds after load.",
+  },
+  [PAGE_LAYOUT_VARIANTS.NOVA_FULL_WIDTH]: {
+    label: "Nova",
+    description:
+      "Today's layout. Widgets sit in a row above the stories, and both run " +
+      "the full width of the screen.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SIDE_BY_SIDE_CONTENT_LEAD]: {
+    label: "Side-by-side (Content lead)",
+    description:
+      "Stories on the left, widgets stacked in one narrow column on the " +
+      "right. Stories get up to three cards across.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SIDE_BY_SIDE_WIDGETS_LEAD]: {
+    label: "Side-by-side (Widgets lead)",
+    description:
+      "Widgets stacked in one narrow column on the left, stories on the " +
+      "right. Stories get up to three cards across.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SIDE_BY_SIDE_CONTENT_LEAD_FIVE]: {
+    label: "Side-by-side (Content lead, five columns)",
+    description:
+      "Same as Content lead, but stories get a fourth card across on wide " +
+      "screens.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SIDE_BY_SIDE_WIDGETS_LEAD_FIVE]: {
+    label: "Side-by-side (Widgets lead, five columns)",
+    description:
+      "Same as Widgets lead, but stories get a fourth card across on wide " +
+      "screens.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SPACES_BUTTONS_BOTTOM]: {
+    label: "Spaces (Buttons at the bottom)",
+    description:
+      "Stories, widgets and Highlights each get their own panel, navigated " +
+      "with a segmented control floating at the bottom of the window.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SPACES_BUTTONS_TOP]: {
+    label: "Spaces (Buttons at the top)",
+    description: "Same as above, with the segmented control above the content.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SPACES_THEMATIC_V1]: {
+    label: "Spaces (Thematic)",
+    description:
+      "Panels named for interests rather than for what is in them, each " +
+      "holding the whole side-by-side pair over only its own content topics " +
+      "and widgets.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SPACES_FLOATING_ARROWS]: {
+    label: "Spaces (Floating arrows)",
+    description:
+      "Same panels as the buttons variants, navigated with an arrow at each " +
+      "edge leading to the space beyond it instead of a segmented control. " +
+      "pageLayouts.spacesOrder sets the order.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SPACES_PREVIEW_KIT]: {
+    label: "Spaces (Preview with Kit)",
+    description:
+      "Buttons at the bottom, where each tab previews its space with an " +
+      "illustration of Kit moving through it.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SPACES_PREVIEW_ILLUSTRATED]: {
+    label: "Spaces (Preview without Kit)",
+    description: "Same as above, with the illustrations alone.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SPACES_PREVIEW_CARDS]: {
+    label: "Spaces (Preview with cards)",
+    description:
+      "Buttons at the bottom, where each tab previews its space's first " +
+      "medium story card, else its first widget or Recent activity card.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SPACES_PEEK]: {
+    label: "Spaces (Peek)",
+    description:
+      "Buttons at the bottom, plus a preview of the spaces on either side in " +
+      "the page margins. Clicking one navigates there.",
+  },
+  // @experiment(remove) { bug 2069496 }
+  [PAGE_LAYOUT_VARIANTS.WIDGETS_AD_LARGE]: {
+    label: "Widgets row ad (large)",
+    description:
+      "Nova, plus a large sponsored card at the end of the first widget row. " +
+      "At one card column it sits second. It stays large when minimized.",
+  },
+  // @experiment(remove) { bug 2078816 }
+  [PAGE_LAYOUT_VARIANTS.WIDGET_FIRST_CONTENT_SLOT]: {
+    label: "Widget in first content slot",
+    description:
+      "A widget occupies the first card of Popular Today. " +
+      "pageLayouts.widgetFirstContentSlot.widget picks the widget type.",
+  },
+};
+
+// Falls back to the raw pref value for a variant with no PAGE_LAYOUTS_INFO entry.
+function variantLabel(variant) {
+  return PAGE_LAYOUTS_INFO[variant]?.label ?? variant;
+}
 
 const Row = props => (
   <tr className="message-item" {...props}>
@@ -60,7 +253,7 @@ export class ToggleStoryButton extends React.PureComponent {
   }
 
   render() {
-    return <button onClick={this.handleClick}>collapse/open</button>;
+    return <moz-button onClick={this.handleClick}>collapse/open</moz-button>;
   }
 }
 
@@ -115,6 +308,18 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
     this.handleDebugOverrideChange = this.handleDebugOverrideChange.bind(this);
     this.handleResetAllOverrides = this.handleResetAllOverrides.bind(this);
     this.handleSectionsToggle = this.handleSectionsToggle.bind(this);
+    this.handleWidgetsSystemToggle = this.handleWidgetsSystemToggle.bind(this);
+    this.handleWidgetToggle = this.handleWidgetToggle.bind(this);
+    this.handleWidgetsToggleAll = this.handleWidgetsToggleAll.bind(this);
+    this.handleResetWidgetInteractions =
+      this.handleResetWidgetInteractions.bind(this);
+    this.handleResetWidgetsToDefaults =
+      this.handleResetWidgetsToDefaults.bind(this);
+    this.handlePageLayoutChange = this.handlePageLayoutChange.bind(this);
+    this.handleResetPageLayout = this.handleResetPageLayout.bind(this);
+    this.handleSpacesConfigChange = this.handleSpacesConfigChange.bind(this);
+    this.handleResetSpacesConfig = this.handleResetSpacesConfig.bind(this);
+    this.handleSubmitSpacesConfig = this.handleSubmitSpacesConfig.bind(this);
     this.toggleIABBanners = this.toggleIABBanners.bind(this);
     this.handleAllizomToggle = this.handleAllizomToggle.bind(this);
     this.sendConversionEvent = this.sendConversionEvent.bind(this);
@@ -123,6 +328,8 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
       weatherQuery: "",
       pendingOverrides: {},
       overridesTogglePressed: null,
+      // null means "show the pref", so an external change is picked up.
+      spacesConfigDraft: null,
     };
   }
 
@@ -304,11 +511,6 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
         this.props.dispatch(ac.SetPref(PREF_AD_SIZE_BILLBOARD, pressed));
 
         break;
-      case "newtab_leaderboard":
-        // Update boolean pref for billboard ad size
-        this.props.dispatch(ac.SetPref(PREF_AD_SIZE_LEADERBOARD, pressed));
-
-        break;
       case "newtab_rectangle":
         // Update boolean pref for mediumRectangle (MREC) ad size
         this.props.dispatch(ac.SetPref(PREF_AD_SIZE_MEDIUM_RECTANGLE, pressed));
@@ -332,11 +534,7 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
           .filter(item => item) || [];
 
       // Confirm that the IAB type will have a count value of "1"
-      const supportIABAdTypes = [
-        "newtab_leaderboard",
-        "newtab_rectangle",
-        "newtab_billboard",
-      ];
+      const supportIABAdTypes = ["newtab_rectangle", "newtab_billboard"];
       let countValue;
       if (supportIABAdTypes.includes(id)) {
         countValue = "1"; // Default count value for all IAB ad types
@@ -380,19 +578,15 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
           ac.SetPref(PREF_CONTEXTUAL_BANNER_PLACEMENTS, "newtab_billboard")
         );
         this.props.dispatch(ac.SetPref(PREF_CONTEXTUAL_BANNER_COUNTS, "1"));
-      } else if (
-        PREF_AD_SIZE_LEADERBOARD &&
-        placements.includes("newtab_leaderboard")
-      ) {
-        this.props.dispatch(
-          ac.SetPref(PREF_CONTEXTUAL_BANNER_PLACEMENTS, "newtab_leaderboard")
-        );
-        this.props.dispatch(ac.SetPref(PREF_CONTEXTUAL_BANNER_COUNTS, "1"));
       } else {
         this.props.dispatch(ac.SetPref(PREF_CONTEXTUAL_BANNER_PLACEMENTS, ""));
         this.props.dispatch(ac.SetPref(PREF_CONTEXTUAL_BANNER_COUNTS, ""));
       }
     }
+
+    // The layout is cached, so the new placements only take effect once the
+    // cache is rebuilt.
+    this.refreshCache();
   }
 
   handleSectionsToggle(e) {
@@ -400,6 +594,244 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
     this.props.dispatch(ac.SetPref(PREF_SECTIONS_ENABLED, pressed));
     this.props.dispatch(
       ac.SetPref("discoverystream.sections.cards.enabled", pressed)
+    );
+  }
+
+  handleWidgetsSystemToggle(e) {
+    this.props.dispatch(
+      ac.SetPref(PREF_WIDGETS_SYSTEM_ENABLED, e.target.pressed)
+    );
+  }
+
+  handleWidgetToggle(e) {
+    // e.target.id is the widget's systemEnabledPref (widgets.system.<name>.enabled)
+    this.props.dispatch(ac.SetPref(e.target.id, e.target.pressed));
+  }
+
+  handleWidgetsToggleAll() {
+    const value = !this.areAllWidgetsEnabled();
+    const values = { [PREF_WIDGETS_SYSTEM_ENABLED]: value };
+    for (const widget of WIDGET_REGISTRY) {
+      values[widget.systemEnabledPref] = value;
+    }
+    this.props.dispatch(ac.SetMultiplePrefs(values));
+  }
+
+  areAllWidgetsEnabled() {
+    const { otherPrefs } = this.props;
+    return Boolean(
+      otherPrefs[PREF_WIDGETS_SYSTEM_ENABLED] &&
+      WIDGET_REGISTRY.every(widget => otherPrefs[widget.systemEnabledPref])
+    );
+  }
+
+  clearPrefs(prefNames) {
+    for (const prefName of prefNames) {
+      this.props.dispatch(
+        ac.OnlyToMain({ type: at.CLEAR_PREF, data: { name: prefName } })
+      );
+    }
+  }
+
+  handleResetWidgetInteractions() {
+    this.clearPrefs(
+      Object.keys(this.props.otherPrefs).filter(prefName =>
+        /^widgets\..+\.interaction$/.test(prefName)
+      )
+    );
+  }
+
+  handleResetWidgetsToDefaults() {
+    this.clearPrefs(
+      Object.keys(this.props.otherPrefs).filter(prefName =>
+        prefName.startsWith("widgets.")
+      )
+    );
+  }
+
+  handlePageLayoutChange(e) {
+    this.props.dispatch(ac.SetPref(PREF_PAGE_LAYOUT_VARIANT, e.target.value));
+  }
+
+  handleResetPageLayout() {
+    this.clearPrefs([PREF_PAGE_LAYOUT_VARIANT]);
+  }
+
+  // Held locally and applied on submit, so typing does not reconfigure the page
+  // on every keystroke.
+  handleSpacesConfigChange(e) {
+    this.setState({ spacesConfigDraft: e.target.value });
+  }
+
+  handleSubmitSpacesConfig() {
+    const draft = this.state.spacesConfigDraft;
+    let value = draft;
+    try {
+      // Stored compact whatever was typed. An unparseable draft is written as
+      // typed, so the config's own warning explains it rather than this.
+      value = JSON.stringify(JSON.parse(draft));
+    } catch {}
+    this.props.dispatch(ac.SetPref(PREF_SPACES_CONFIG, value));
+  }
+
+  // Clears the user value, so the pref falls back to the default this build
+  // ships. Clearing the draft too, or the box would still show the old edit.
+  handleResetSpacesConfig() {
+    this.setState({ spacesConfigDraft: null });
+    this.clearPrefs([PREF_SPACES_CONFIG]);
+  }
+
+  // The spaces config as it stands, so a recipe or a hand-edit can be checked
+  // against what the page will actually do with it.
+  renderSpacesConfig() {
+    const prefs = this.props.otherPrefs;
+    const prefValue = prefs[PREF_SPACES_CONFIG] ?? "";
+    // The pref holds it compact, which is what about:config and a recipe want.
+    // Indented here because this is the one place it gets read and edited.
+    const draft = this.state.spacesConfigDraft ?? prettyJson(prefValue);
+    const trainhopConfig = prefs.trainhopConfig?.spaces;
+    const resolved = resolveThematicSpacesConfig(prefs);
+
+    return (
+      <>
+        <p className="layout-status">
+          Space ids, order, labels, icons, sections and widgets. Nothing is
+          merged: an unusable config turns the layout off rather than
+          half-applying, so a mistake here is visible.
+        </p>
+        <textarea
+          className="spaces-config-input"
+          rows="12"
+          value={draft}
+          onChange={this.handleSpacesConfigChange}
+        />
+        <moz-button
+          disabled={draft === prettyJson(prefValue) ? true : null}
+          onClick={this.handleSubmitSpacesConfig}
+        >
+          Apply config
+        </moz-button>
+        <moz-button onClick={this.handleResetSpacesConfig}>
+          Reset to default
+        </moz-button>
+        {trainhopConfig && (
+          <p className="layout-status layout-status-warning">
+            A train-hop experiment is supplying the config, so editing here does
+            nothing. See Train Hop above.
+          </p>
+        )}
+        {!resolved && (
+          <p className="layout-status layout-status-warning">
+            This config cannot render: it needs an <code>order</code> array of
+            ids and a <code>spaces</code> object giving each of them a label.
+          </p>
+        )}
+      </>
+    );
+  }
+
+  // Names the first isSideBySideActive gate that fails, so a variant falling back to
+  // one column says why. Callers check the variant is side-by-side first.
+  pageLayoutInactiveReason() {
+    const prefs = this.props.otherPrefs;
+    if (!prefs["feeds.section.topstories"]) {
+      return "stories are turned off (feeds.section.topstories)";
+    }
+    if (!prefs["feeds.system.topstories"]) {
+      return "stories are turned off (feeds.system.topstories)";
+    }
+    if (!isWidgetsContainerVisible(prefs)) {
+      return "widgets are turned off (widgets.system.enabled)";
+    }
+    if (!hasContentAreaWidgets(prefs)) {
+      return "no widgets are showing to sit beside the stories";
+    }
+    return null;
+  }
+
+  // Same idea for spaces, which needs two places to navigate between. Without
+  // this an assigned-but-inactive spaces variant is indistinguishable from
+  // today's page, since spaces adds no visible frame of its own when it falls
+  // back. Callers check the variant is spaces first.
+  spacesInactiveReason() {
+    // Every thematic space holds the pair, so when they are empty it is the pair
+    // that is missing rather than any one space's own feed.
+    if (isSpacesThematicAssigned(this.props.otherPrefs)) {
+      return this.pageLayoutInactiveReason();
+    }
+    const populated = resolvePopulatedSpaces(this.props.otherPrefs);
+    if (populated.length > 1) {
+      return null;
+    }
+    return populated.length
+      ? `only the ${populated[0]} space has content, so there is nowhere to navigate to`
+      : "no space has content";
+  }
+
+  renderLayouts() {
+    const prefs = this.props.otherPrefs;
+    // The pref, not the effective value: what the radio sets and reset clears.
+    const prefVariant =
+      prefs[PREF_PAGE_LAYOUT_VARIANT] || DEFAULT_PAGE_LAYOUT_VARIANT;
+    const effectiveVariant = resolvePageLayoutVariant(prefs);
+    const trainhopOverride = effectiveVariant !== prefVariant;
+    const inactiveReason =
+      (isSideBySideAssigned(prefs) && this.pageLayoutInactiveReason()) ||
+      (isSpacesAssigned(prefs) && this.spacesInactiveReason());
+
+    return (
+      <>
+        <div className="layout-variants">
+          {Object.values(PAGE_LAYOUT_VARIANTS)
+            // By pref value, not label: locale collation orders the
+            // parenthesised labels' punctuation unintuitively.
+            .sort((a, b) => a.localeCompare(b))
+            .map(variant => (
+              <label key={variant} className="layout-variant">
+                <input
+                  type="radio"
+                  name="page-layout-variant"
+                  value={variant}
+                  checked={prefVariant === variant}
+                  onChange={this.handlePageLayoutChange}
+                />
+                <span className="layout-variant-text">
+                  <span className="layout-variant-name">
+                    {variantLabel(variant)}
+                    {variant === DEFAULT_PAGE_LAYOUT_VARIANT
+                      ? " (default)"
+                      : ""}
+                    {/* The pref value, for a Nimbus recipe or about:config. */}
+                    <code className="layout-variant-value">{variant}</code>
+                  </span>
+                  {PAGE_LAYOUTS_INFO[variant]?.description && (
+                    <span className="layout-variant-description">
+                      {PAGE_LAYOUTS_INFO[variant].description}
+                    </span>
+                  )}
+                </span>
+              </label>
+            ))}
+        </div>
+        <moz-button
+          disabled={prefVariant === DEFAULT_PAGE_LAYOUT_VARIANT ? true : null}
+          onClick={this.handleResetPageLayout}
+        >
+          Reset layout
+        </moz-button>
+        {trainhopOverride && (
+          <p className="layout-status layout-status-warning">
+            A train-hop experiment is forcing <code>{effectiveVariant}</code>,
+            so picking a layout here does nothing. See Train Hop above.
+          </p>
+        )}
+        {inactiveReason && (
+          <p className="layout-status">
+            Showing as one column instead of side-by-side because{" "}
+            {inactiveReason}.
+          </p>
+        )}
+      </>
     );
   }
 
@@ -451,7 +883,7 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
               onChange={this.handleWeatherUpdate}
               value={this.weatherQuery}
             />
-            <button type="submit">Submit</button>
+            <moz-button onClick={this.handleWeatherSubmit}>Submit</moz-button>
           </form>
           <table>
             <tbody>
@@ -538,15 +970,12 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
         <div className="inferred-overrides-header">
           <h3 className="inferred-overrides-title">Inferred Personalization</h3>
           <div className="inferred-overrides-actions">
-            <button
-              className="button"
-              onClick={this.refreshInferredPersonalizationAndDebug}
-            >
+            <moz-button onClick={this.refreshInferredPersonalizationAndDebug}>
               Recompute Interest Vector
-            </button>
-            <button className="button" onClick={this.refreshCache}>
+            </moz-button>
+            <moz-button onClick={this.refreshCache}>
               Refresh Story Cache
-            </button>
+            </moz-button>
           </div>
         </div>
         <div className="inferred-overrides-last-refreshed">
@@ -573,13 +1002,12 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
             </Row>
             <Row className="inferred-overrides-refresh-row">
               <td colSpan="3">
-                <button
-                  className="button"
+                <moz-button
                   disabled={hasAnyNonZeroOverride ? null : true}
                   onClick={this.handleResetAllOverrides}
                 >
                   Reset overrides
-                </button>
+                </moz-button>
               </td>
             </Row>
             <Row className="inferred-overrides-table-header">
@@ -656,6 +1084,55 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
     );
   }
 
+  renderTrainhop() {
+    const {
+      trainhopConfig = {},
+      trainhopVersion,
+      nimbusDebug,
+    } = this.props.otherPrefs;
+    return (
+      <>
+        <table className="minimal-table trainhop-info">
+          <tbody>
+            <Row>
+              <td className="min">Installed version</td>
+              <td>{trainhopVersion ?? "unknown"}</td>
+            </Row>
+            <Row>
+              <td className="min">nimbus.debug</td>
+              <td>{nimbusDebug ? "true" : "false"}</td>
+            </Row>
+          </tbody>
+        </table>
+        <p>
+          Manage the experiments and rollouts that populate this config in{" "}
+          <a target="_blank" rel="noopener noreferrer" href="about:studies">
+            about:studies
+          </a>
+          , or install the{" "}
+          <a
+            target="_blank"
+            rel="noopener noreferrer"
+            href="https://github.com/mozilla-extensions/nimbus-devtools/releases"
+          >
+            Nimbus devtools extension
+          </a>
+          .
+        </p>
+        {Object.keys(trainhopConfig || {}).length ? (
+          <pre className="trainhop-config">
+            {JSON.stringify(trainhopConfig, null, 2)}
+          </pre>
+        ) : (
+          <p className="trainhop-empty">
+            No train-hop config. This build isn&apos;t enrolled in any
+            newtabTrainhop experiment or rollout.
+          </p>
+        )}
+      </>
+    );
+  }
+
   renderFeedsData() {
     const { feeds } = this.props.state.DiscoveryStream;
     return (
@@ -691,9 +1168,7 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
     return (
       <>
         <h4>Blocks</h4>
-        <button className="button" onClick={this.resetBlocks}>
-          Reset Blocks
-        </button>{" "}
+        <moz-button onClick={this.resetBlocks}>Reset Blocks</moz-button>{" "}
         <table>
           <tbody>
             {Object.keys(blocks).map(key => {
@@ -764,6 +1239,10 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
     const adsFeedEnabled =
       this.props.otherPrefs[PREF_UNIFIED_ADS_ADSFEED_ENABLED];
 
+    const PREF_UNIFIED_ADS_ADSCLIENT_ENABLED = "unifiedAds.adsClient.enabled";
+    const adsClientEnabled =
+      this.props.otherPrefs[PREF_UNIFIED_ADS_ADSCLIENT_ENABLED];
+
     const unifiedAdsEndpoint = this.props.otherPrefs[PREF_UNIFIED_ADS_ENDPOINT];
     const spocsEndpoint = unifiedAdsSpocsEnabled
       ? unifiedAdsEndpoint
@@ -796,6 +1275,10 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
               </td>
             </Row>
             <Row>
+              <td className="min">MAC enabled</td>
+              <td>{adsClientEnabled ? "true" : "false"}</td>
+            </Row>
+            <Row>
               <td className="min">adsfeed enabled</td>
               <td>{adsFeedEnabled ? "true" : "false"}</td>
             </Row>
@@ -809,6 +1292,12 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
             </Row>
           </tbody>
         </table>
+        <moz-button
+          style={{ marginBlockStart: "var(--space-large)" }}
+          onClick={this.sendConversionEvent}
+        >
+          Send conversion event
+        </moz-button>
         <h4>Spoc data</h4>
         <table>
           <tbody>{spocsData.map(spoc => this.renderStoryData(spoc))}</tbody>
@@ -884,41 +1373,32 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
     const mediumRectangleEnabled =
       this.props.otherPrefs[PREF_AD_SIZE_MEDIUM_RECTANGLE];
     const billboardsEnabled = this.props.otherPrefs[PREF_AD_SIZE_BILLBOARD];
-    const leaderboardEnabled = this.props.otherPrefs[PREF_AD_SIZE_LEADERBOARD];
     const spocPlacements = this.props.otherPrefs[PREF_SPOC_PLACEMENTS];
     const mediumRectangleEnabledPressed =
       mediumRectangleEnabled && spocPlacements.includes("newtab_rectangle");
     const billboardPressed =
       billboardsEnabled && spocPlacements.includes("newtab_billboard");
-    const leaderboardPressed =
-      leaderboardEnabled && spocPlacements.includes("newtab_leaderboard");
+
+    const widgetsSystemEnabled =
+      this.props.otherPrefs[PREF_WIDGETS_SYSTEM_ENABLED];
 
     return (
       <div>
-        <button className="button" onClick={this.refreshCache}>
-          Refresh Cache
-        </button>
-        <br />
-        <button className="button" onClick={this.expireCache}>
-          Expire Cache
-        </button>{" "}
-        <button className="button" onClick={this.systemTick}>
-          Trigger System Tick
-        </button>{" "}
-        <button className="button" onClick={this.idleDaily}>
-          Trigger Idle Daily
-        </button>
-        <br />
-        <button className="button" onClick={this.syncRemoteSettings}>
-          Sync Remote Settings
-        </button>{" "}
-        <button className="button" onClick={this.refreshTopicSelectionCache}>
-          Refresh Topic selection count
-        </button>
-        <br />
-        <button className="button" onClick={this.showPlaceholder}>
-          Show Placeholder Cards
-        </button>{" "}
+        <div className="admin-button-row">
+          <moz-button onClick={this.refreshCache}>Refresh Cache</moz-button>
+          <moz-button onClick={this.expireCache}>Expire Cache</moz-button>
+          <moz-button onClick={this.systemTick}>Trigger System Tick</moz-button>
+          <moz-button onClick={this.idleDaily}>Trigger Idle Daily</moz-button>
+          <moz-button onClick={this.syncRemoteSettings}>
+            Sync Remote Settings
+          </moz-button>
+          <moz-button onClick={this.refreshTopicSelectionCache}>
+            Refresh Topic selection count
+          </moz-button>
+          <moz-button onClick={this.showPlaceholder}>
+            Show Placeholder Cards
+          </moz-button>
+        </div>
         <div className="toggle-wrapper">
           <moz-toggle
             id="sections-toggle"
@@ -929,15 +1409,21 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
         </div>
         {/* Collapsible Sections for experiments for easy on/off */}
         <details className="details-section">
+          <summary>Train Hop</summary>
+          {this.renderTrainhop()}
+        </details>
+        <details className="details-section">
+          <summary>Page Layouts (experimental)</summary>
+          {this.renderLayouts()}
+        </details>
+        {isSpacesThematicAssigned(this.props.otherPrefs) && (
+          <details className="details-section">
+            <summary>Thematic spaces config</summary>
+            {this.renderSpacesConfig()}
+          </details>
+        )}
+        <details className="details-section">
           <summary>IAB Banner Ad Sizes</summary>
-          <div className="toggle-wrapper">
-            <moz-toggle
-              id="newtab_leaderboard"
-              pressed={leaderboardPressed || null}
-              ontoggle={this.toggleIABBanners}
-              label="Enable IAB Leaderboard"
-            />
-          </div>
           <div className="toggle-wrapper">
             <moz-toggle
               id="newtab_billboard"
@@ -955,9 +1441,37 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
             />
           </div>
         </details>
-        <button className="button" onClick={this.sendConversionEvent}>
-          Send conversion event
-        </button>
+        <details className="details-section">
+          <summary>Widgets</summary>
+          <div className="toggle-wrapper">
+            <moz-toggle
+              id="widgets-system-enabled"
+              pressed={widgetsSystemEnabled || null}
+              ontoggle={this.handleWidgetsSystemToggle}
+              label="Enable widget system"
+            />
+          </div>
+          <div className="admin-button-row">
+            <moz-button onClick={this.handleWidgetsToggleAll}>
+              {this.areAllWidgetsEnabled() ? "Disable all" : "Enable all"}
+            </moz-button>
+            <moz-button onClick={this.handleResetWidgetInteractions}>
+              Reset interaction
+            </moz-button>
+            <moz-button
+              type="destructive"
+              onClick={this.handleResetWidgetsToDefaults}
+            >
+              Reset to defaults
+            </moz-button>
+          </div>
+          <hr />
+          <WidgetSystemToggles
+            otherPrefs={this.props.otherPrefs}
+            widgetsSystemEnabled={widgetsSystemEnabled}
+            onToggle={this.handleWidgetToggle}
+          />
+        </details>
         <h3>Layout</h3>
         {layout.map((row, rowIndex) => (
           <div key={`row-${rowIndex}`}>
@@ -990,6 +1504,32 @@ export class DiscoveryStreamAdminInner extends React.PureComponent {
   constructor(props) {
     super(props);
     this.setState = this.setState.bind(this);
+    this.dismiss = this.dismiss.bind(this);
+    this.handleKeyDown = this.handleKeyDown.bind(this);
+  }
+
+  componentDidMount() {
+    globalThis.addEventListener("keydown", this.handleKeyDown);
+  }
+
+  componentWillUnmount() {
+    globalThis.removeEventListener("keydown", this.handleKeyDown);
+  }
+
+  dismiss() {
+    globalThis.location.hash = "";
+  }
+
+  handleKeyDown(e) {
+    if (e.key !== "Escape" || e.defaultPrevented) {
+      return;
+    }
+    // Don't hijack Escape while the user is typing in a field.
+    const tag = e.target?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") {
+      return;
+    }
+    this.dismiss();
   }
 
   render() {
@@ -999,6 +1539,14 @@ export class DiscoveryStreamAdminInner extends React.PureComponent {
           this.props.collapsed ? "collapsed" : "expanded"
         }`}
       >
+        <moz-button
+          className="discoverystream-admin-close"
+          type="icon ghost"
+          title="Close devtools"
+          aria-label="Close devtools"
+          iconsrc="chrome://global/skin/icons/close.svg"
+          onClick={this.dismiss}
+        />
         <main className="main-panel">
           <h1>Discovery Stream Admin</h1>
 
@@ -1032,26 +1580,43 @@ export class DiscoveryStreamAdminInner extends React.PureComponent {
 export function CollapseToggle(props) {
   const { devtoolsCollapsed } = props;
   const label = `${devtoolsCollapsed ? "Expand" : "Collapse"} devtools`;
+  // @nova-cleanup(remove-conditional): Remove this novaEnabled read and the
+  // ternary below in the returned JSX; always render the moz-button icon button
+  // and delete the legacy classic-enabled <button> branch.
+  const novaEnabled = props.Prefs?.values?.["nova.enabled"];
+  const className = `discoverystream-admin-toggle ${
+    devtoolsCollapsed ? "expanded" : "collapsed"
+  }`;
+  const onToggleClick = () => {
+    globalThis.location.hash = devtoolsCollapsed ? "#devtools" : "";
+  };
 
   return (
     <>
-      <button
-        title={label}
-        aria-label={label}
-        className={`discoverystream-admin-toggle ${
-          devtoolsCollapsed ? "expanded" : "collapsed"
-        }`}
-        onClick={() => {
-          globalThis.location.hash = devtoolsCollapsed ? "#devtools" : "";
-        }}
-      >
-        <div>
-          <img
-            role="presentation"
-            src="chrome://global/skin/icons/developer.svg"
-          />
-        </div>
-      </button>
+      {novaEnabled ? (
+        <moz-button
+          type="primary"
+          className={className}
+          title={label}
+          aria-label={label}
+          iconsrc="chrome://global/skin/icons/developer.svg"
+          onClick={onToggleClick}
+        />
+      ) : (
+        <button
+          title={label}
+          aria-label={label}
+          className={`${className} classic-enabled`}
+          onClick={onToggleClick}
+        >
+          <div>
+            <img
+              role="presentation"
+              src="chrome://global/skin/icons/developer.svg"
+            />
+          </div>
+        </button>
+      )}
       {!devtoolsCollapsed ? (
         <DiscoveryStreamAdminInner {...props} collapsed={devtoolsCollapsed} />
       ) : null}

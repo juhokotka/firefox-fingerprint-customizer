@@ -12,6 +12,10 @@ ChromeUtils.defineESModuleGetters(lazy, {
   assert: "chrome://remote/content/shared/webdriver/Assert.sys.mjs",
   browser: "chrome://remote/content/marionette/browser.sys.mjs",
   capture: "chrome://remote/content/shared/Capture.sys.mjs",
+  ConnectionPrompt:
+    "chrome://remote/content/shared/webdriver/ConnectionPrompt.sys.mjs",
+  ConnectionPromptResult:
+    "chrome://remote/content/shared/webdriver/ConnectionPrompt.sys.mjs",
   Context: "chrome://remote/content/marionette/browser.sys.mjs",
   cookie: "chrome://remote/content/marionette/cookie.sys.mjs",
   disableEventsActor:
@@ -22,7 +26,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
   getMarionetteCommandsActorProxy:
     "chrome://remote/content/marionette/actors/MarionetteCommandsParent.sys.mjs",
-  isParentProcess:
+  isPrivilegedContext:
     "chrome://remote/content/shared/BrowsingContextUtils.sys.mjs",
   isWebdriverSafeNavigationURL:
     "chrome://remote/content/shared/BrowsingContextUtils.sys.mjs",
@@ -141,6 +145,8 @@ class ActionsHelper {
    *
    * @throws {MoveTargetOutOfBoundsError}
    *     If target is outside the viewport.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   assertInViewPort(target, browsingContext) {
     return this.#getActor(browsingContext).assertInViewPort(target);
@@ -158,13 +164,18 @@ class ActionsHelper {
    *
    * @returns {Promise}
    *     Promise that resolves once the event is dispatched.
+   *
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   dispatchEvent(eventName, browsingContext, details) {
     if (
       (eventName === "synthesizeWheelAtPoint" &&
         lazy.actions.useAsyncWheelEvents) ||
       (eventName == "synthesizeMouseAtPoint" &&
-        lazy.actions.useAsyncMouseEvents)
+        lazy.actions.useAsyncMouseEvents) ||
+      (eventName == "synthesizeTouchAtPoint" &&
+        lazy.actions.useAsyncTouchEvents)
     ) {
       browsingContext = browsingContext.topChromeWindow?.browsingContext;
       details.eventData.asyncEnabled = true;
@@ -178,6 +189,9 @@ class ActionsHelper {
    *
    * @param {BrowsingContext} browsingContext
    *     The browsing context to dispatch the event to.
+   *
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async finalizeAction(browsingContext) {
     try {
@@ -215,6 +229,9 @@ class ActionsHelper {
    *
    * @returns {Promise<Array<Map.<string, number>>>}
    *     Promise that resolves to a list of DOMRect-like objects.
+   *
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   getClientRects(element, browsingContext) {
     return this.#getActor(browsingContext).getClientRects(element);
@@ -231,6 +248,9 @@ class ActionsHelper {
    * @returns {Promise<Map.<string, number>>}
    *     X and Y coordinates that denotes the in-view centre point of
    *     `rect`.
+   *
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   getInViewCentrePoint(rect, browsingContext) {
     return this.#getActor(browsingContext).getInViewCentrePoint(rect);
@@ -291,6 +311,9 @@ class ActionsHelper {
    * @param {number} position.y - Y coordinate.
    * @param {BrowsingContext} browsingContext - The Browsing Context to convert the
    *     coordinates for.
+   *
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   toBrowserWindowCoordinates(position, browsingContext) {
     return this.#getActor(browsingContext).toBrowserWindowCoordinates(position);
@@ -329,6 +352,7 @@ export class GeckoDriver {
   #reftest;
   #server;
   #sessionConfigFlags;
+  #sessionCreationPending;
 
   constructor(server) {
     this.#server = server;
@@ -384,6 +408,10 @@ export class GeckoDriver {
     this.#sessionConfigFlags = new Set([
       lazy.WebDriverSession.SESSION_FLAG_HTTP,
     ]);
+
+    // Set when creating sessions for dynamic non-automation servers, while we
+    // wait for the user to accept or deny the connection.
+    this.#sessionCreationPending = false;
   }
 
   /**
@@ -400,7 +428,12 @@ export class GeckoDriver {
     if (options.top === undefined) {
       options.top = true;
     }
-    const browsingContext = this.getBrowsingContext(options);
+    // Reading the URL is safe and needs to work while on a privileged page,
+    // e.g. to determine the target of a navigation.
+    const browsingContext = this.getBrowsingContext({
+      ...options,
+      skipPrivilegeCheck: true,
+    });
 
     return new URL(browsingContext.currentURI.spec);
   }
@@ -450,6 +483,9 @@ export class GeckoDriver {
    *
    * @returns {string}
    *     Read-only property containing the title of the loaded URL.
+   *
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   get title() {
     const browsingContext = this.getBrowsingContext({ top: true });
@@ -497,6 +533,8 @@ export class GeckoDriver {
    *     If there is no current user prompt.
    * @throws {NoSuchWindowError}
    *     Top-level browsing context has been discarded.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async acceptAlert() {
     lazy.assert.open(this.getBrowsingContext({ top: true }));
@@ -529,6 +567,7 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    * @throws {UnsupportedOperationError}
    *     Not available in current context.
+   *     Not supported for browsing contexts in privileged scope.
    */
   async addCookie(cmd) {
     lazy.assert.content(this.context);
@@ -568,6 +607,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>id</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async clearElement(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -601,6 +642,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>id</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async clickElement(cmd) {
     const browsingContext = lazy.assert.open(this.getBrowsingContext());
@@ -654,7 +697,11 @@ export class GeckoDriver {
    */
   async close() {
     lazy.assert.open(
-      this.getBrowsingContext({ context: lazy.Context.Content, top: true })
+      this.getBrowsingContext({
+        context: lazy.Context.Content,
+        skipPrivilegeCheck: true,
+        top: true,
+      })
     );
     await this.#handleUserPrompts();
 
@@ -688,6 +735,8 @@ export class GeckoDriver {
    *
    * @throws {NoSuchWindowError}
    *     Top-level browsing context has been discarded.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async closeChromeWindow() {
     lazy.assert.desktop();
@@ -729,6 +778,7 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    * @throws {UnsupportedOperationError}
    *     Not available in current context.
+   *     Not supported for browsing contexts in privileged scope.
    */
   async deleteAllCookies() {
     lazy.assert.content(this.context);
@@ -756,6 +806,7 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    * @throws {UnsupportedOperationError}
    *     Not available in current context.
+   *     Not supported for browsing contexts in privileged scope.
    */
   async deleteCookie(cmd) {
     lazy.assert.content(this.context);
@@ -836,6 +887,8 @@ export class GeckoDriver {
    *     If there is no current user prompt.
    * @throws {NoSuchWindowError}
    *     Top-level browsing context has been discarded.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async dismissAlert() {
     lazy.assert.open(this.getBrowsingContext({ top: true }));
@@ -911,6 +964,8 @@ export class GeckoDriver {
    * @throws {StaleElementReferenceError}
    *     If an element that was passed as part of <var>args</var> or that is
    *     returned as result has gone stale.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   executeAsyncScript(cmd) {
     let { script, args } = cmd.parameters;
@@ -979,6 +1034,8 @@ export class GeckoDriver {
    * @throws {StaleElementReferenceError}
    *     If an element that was passed as part of <var>args</var> or that is
    *     returned as result has gone stale.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   executeScript(cmd) {
     let { script, args } = cmd.parameters;
@@ -1018,6 +1075,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>element</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async findElement(cmd) {
     const { element: el, using, value } = cmd.parameters;
@@ -1074,6 +1133,8 @@ export class GeckoDriver {
    *     Browsing context has been discarded.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async findElementFromShadowRoot(cmd) {
     const { shadowRoot, using, value } = cmd.parameters;
@@ -1121,6 +1182,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>element</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async findElements(cmd) {
     const { element: el, using, value } = cmd.parameters;
@@ -1174,6 +1237,8 @@ export class GeckoDriver {
    *     Browsing context has been discarded.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async findElementsFromShadowRoot(cmd) {
     const { shadowRoot, using, value } = cmd.parameters;
@@ -1215,7 +1280,10 @@ export class GeckoDriver {
    *     Not available for current application.
    */
   async fullscreenWindow() {
-    lazy.assert.open(this.getBrowsingContext({ top: true }));
+    // Window manipulation doesn't interact with the page content.
+    lazy.assert.open(
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
+    );
     await this.#handleUserPrompts();
 
     lazy.assert.desktop();
@@ -1232,6 +1300,9 @@ export class GeckoDriver {
    *
    * @returns {object}
    *     The properties for this accessibility node
+   *
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getAccessibilityPropertiesForAccessibilityNode(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -1254,6 +1325,9 @@ export class GeckoDriver {
    *
    * @returns {object}
    *     The Accessibility properties for this element
+   *
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getAccessibilityPropertiesForElement(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -1285,6 +1359,7 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    * @throws {UnsupportedOperationError}
    *     Not available in chrome context.
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getActiveElement() {
     lazy.assert.content(this.context);
@@ -1322,15 +1397,28 @@ export class GeckoDriver {
    * @param {boolean=} options.parent
    *     If set to true return the window's parent browsing context,
    *     otherwise the one from the currently selected frame. Defaults to false.
+   * @param {boolean=} options.skipPrivilegeCheck
+   *     If set to true the privileged scope check is skipped, allowing a
+   *     privileged content browsing context to be returned without requiring
+   *     system access. Defaults to false. Should only be set for commands that
+   *     are safe regardless of the context's privilege level.
    * @param {boolean=} options.top
    *     If set to true return the window's top-level browsing context,
    *     otherwise the one from the currently selected frame. Defaults to false.
    *
    * @returns {BrowsingContext}
    *     The browsing context, or `null` if none is available
+   *
+   * @throws {UnsupportedOperationError}
+   *     If the browsing context is privileged and system access is not allowed.
    */
   getBrowsingContext(options = {}) {
-    const { context = this.context, parent = false, top = false } = options;
+    const {
+      context = this.context,
+      parent = false,
+      skipPrivilegeCheck = false,
+      top = false,
+    } = options;
 
     let browsingContext = null;
     if (context === lazy.Context.Chrome) {
@@ -1345,6 +1433,18 @@ export class GeckoDriver {
 
     if (browsingContext && top) {
       browsingContext = browsingContext.top;
+    }
+
+    // Without system access no command may run in a privileged browsing
+    // context.
+    if (
+      !skipPrivilegeCheck &&
+      !lazy.RemoteAgent.allowSystemAccess &&
+      lazy.isPrivilegedContext(browsingContext)
+    ) {
+      throw new lazy.error.UnsupportedOperationError(
+        "The command does not support browsing contexts in privileged scope"
+      );
     }
 
     return browsingContext;
@@ -1384,6 +1484,9 @@ export class GeckoDriver {
    *
    * @returns {string}
    *     The Accessibility label for this element
+   *
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getComputedLabel(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -1410,6 +1513,9 @@ export class GeckoDriver {
    *
    * @returns {string}
    *     The Accessibility role for this element
+   *
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getComputedRole(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -1452,6 +1558,7 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    * @throws {UnsupportedOperationError}
    *     Not available in current context.
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getCookies() {
     lazy.assert.content(this.context);
@@ -1480,7 +1587,10 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    */
   async getCurrentUrl() {
-    lazy.assert.open(this.getBrowsingContext({ top: true }));
+    // Reading the URL of a privileged page is safe.
+    lazy.assert.open(
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
+    );
     await this.#handleUserPrompts();
 
     return this._getCurrentURL().href;
@@ -1548,6 +1658,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>id</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getElementAttribute(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -1590,6 +1702,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>id</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getElementProperty(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -1623,6 +1737,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>id</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getElementRect(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -1647,7 +1763,7 @@ export class GeckoDriver {
    *     Reference ID to the element that will be inspected.
    *
    * @returns {string}
-   *     Local tag name of element.
+   *     Qualified name of the element.
    *
    * @throws {InvalidArgumentError}
    *     If <var>id</var> is not a string.
@@ -1659,6 +1775,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>id</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getElementTagName(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -1696,6 +1814,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>id</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getElementText(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -1734,6 +1854,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>id</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getElementValueOfCssProperty(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -1765,6 +1887,8 @@ export class GeckoDriver {
    *     Browsing context has been discarded.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getPageSource() {
     lazy.assert.open(this.getBrowsingContext());
@@ -1785,7 +1909,10 @@ export class GeckoDriver {
    */
   getScreenOrientation() {
     lazy.assert.mobile();
-    lazy.assert.open(this.getBrowsingContext({ top: true }));
+    // Window manipulation doesn't interact with the page content.
+    lazy.assert.open(
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
+    );
 
     const win = this.getCurrentWindow();
 
@@ -1817,6 +1944,7 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    * @throws {UnsupportedOperationError}
    *     Not available in chrome current context.
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getShadowRoot(cmd) {
     // Bug 1743541: Add support for chrome scope.
@@ -1854,6 +1982,8 @@ export class GeckoDriver {
    *     Top-level browsing context has been discarded.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async getTitle() {
     lazy.assert.open(this.getBrowsingContext({ top: true }));
@@ -1882,7 +2012,10 @@ export class GeckoDriver {
    *     Top-level browsing context has been discarded.
    */
   getWindowHandle() {
-    lazy.assert.open(this.getBrowsingContext({ top: true }));
+    // Retrieving the window handle doesn't interact with the page content.
+    lazy.assert.open(
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
+    );
 
     if (this.context == lazy.Context.Chrome) {
       return lazy.NavigableManager.getIdForBrowsingContext(
@@ -1983,7 +2116,10 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    */
   async getWindowRect() {
-    lazy.assert.open(this.getBrowsingContext({ top: true }));
+    // Window manipulation doesn't interact with the page content.
+    lazy.assert.open(
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
+    );
     await this.#handleUserPrompts();
 
     return lazy.windowManager.getWindowRect(this.getCurrentWindow());
@@ -1999,7 +2135,10 @@ export class GeckoDriver {
    *     Top-level browsing context has been discarded.
    */
   getWindowType() {
-    lazy.assert.open(this.getBrowsingContext({ top: true }));
+    // Retrieving the window type doesn't interact with the page content.
+    lazy.assert.open(
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
+    );
 
     return this.windowType;
   }
@@ -2019,8 +2158,11 @@ export class GeckoDriver {
    */
   async goBack() {
     lazy.assert.content(this.context);
+    // Skip the privilege check here since the command needs to work regardless
+    // of the current page. The URL safety check below handles destination
+    // restrictions.
     const browsingContext = lazy.assert.open(
-      this.getBrowsingContext({ top: true })
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
     );
     await this.#handleUserPrompts();
 
@@ -2066,8 +2208,11 @@ export class GeckoDriver {
    */
   async goForward() {
     lazy.assert.content(this.context);
+    // Skip the privilege check here since the command needs to work regardless
+    // of the current page. The URL safety check below handles destination
+    // restrictions.
     const browsingContext = lazy.assert.open(
-      this.getBrowsingContext({ top: true })
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
     );
     await this.#handleUserPrompts();
 
@@ -2169,6 +2314,8 @@ export class GeckoDriver {
    *     Browsing context has been discarded.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async isElementDisplayed(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -2208,6 +2355,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>id</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async isElementEnabled(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -2245,6 +2394,8 @@ export class GeckoDriver {
    *     Browsing context has been discarded.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async isElementSelected(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -2324,7 +2475,10 @@ export class GeckoDriver {
    *     Not available for current application.
    */
   async maximizeWindow() {
-    lazy.assert.open(this.getBrowsingContext({ top: true }));
+    // Window manipulation doesn't interact with the page content.
+    lazy.assert.open(
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
+    );
     await this.#handleUserPrompts();
 
     lazy.assert.desktop();
@@ -2350,7 +2504,10 @@ export class GeckoDriver {
    *     Not available for current application.
    */
   async minimizeWindow() {
-    lazy.assert.open(this.getBrowsingContext({ top: true }));
+    // Window manipulation doesn't interact with the page content.
+    lazy.assert.open(
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
+    );
     await this.#handleUserPrompts();
 
     lazy.assert.desktop();
@@ -2393,8 +2550,11 @@ export class GeckoDriver {
    */
   async navigateTo(cmd) {
     lazy.assert.content(this.context);
+    // Skip the privilege check here since the command needs to work regardless
+    // of the current page. The URL safety check below handles destination
+    // restrictions.
     const browsingContext = lazy.assert.open(
-      this.getBrowsingContext({ top: true })
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
     );
     await this.#handleUserPrompts();
 
@@ -2430,7 +2590,7 @@ export class GeckoDriver {
 
     await lazy.navigate.waitForNavigationCompleted(
       this,
-      () => lazy.navigate.navigateTo(browsingContext, targetURL),
+      () => lazy.navigate.navigateTo(browsingContext, targetURL.URI),
       { loadEventExpected }
     );
 
@@ -2460,6 +2620,12 @@ export class GeckoDriver {
       );
     }
 
+    if (this.#sessionCreationPending) {
+      throw new lazy.error.SessionNotCreatedError(
+        "Maximum number of active sessions (session creation in progress)"
+      );
+    }
+
     const { parameters: capabilities } = cmd;
 
     try {
@@ -2473,9 +2639,29 @@ export class GeckoDriver {
       } else {
         // If it's not the case then Marionette itself needs to handle it, and
         // has to nullify the "webSocketUrl" capability.
+
+        // Sessions unrelated to browser automation need an explicit user
+        // confirmation. When WebDriverBiDi is enabled this is handled by
+        // WebDriverBiDi.createSession, which checks the Remote Agent flag:
+        // both servers are always started with the same isBrowserAutomation.
+        if (!lazy.Marionette.isBrowserAutomationRunning) {
+          this.#sessionCreationPending = true;
+          try {
+            const promptResult = await lazy.ConnectionPrompt.show();
+            if (promptResult === lazy.ConnectionPromptResult.DENY) {
+              throw new lazy.error.SessionNotCreatedError(
+                "The connection was denied by the user"
+              );
+            }
+          } finally {
+            this.#sessionCreationPending = false;
+          }
+        }
+
         this.#currentSession = new lazy.WebDriverSession(
           capabilities,
-          this.#sessionConfigFlags
+          this.#sessionConfigFlags,
+          { useDedicatedContainer: lazy.Marionette.isDynamicStartRunning }
         );
         this.#currentSession.capabilities.delete("webSocketUrl");
       }
@@ -2552,7 +2738,7 @@ export class GeckoDriver {
         this.#dialog = lazy.modal.findPrompt(this.#curBrowser);
       }
 
-      lazy.registerCommandsActor(this.currentSession.id);
+      lazy.registerCommandsActor(this.currentSession);
       lazy.enableEventsActor();
 
       Services.obs.addObserver(this.#observer, TOPIC_BROWSER_READY);
@@ -2592,7 +2778,10 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    */
   async newWindow(cmd) {
-    lazy.assert.open(this.getBrowsingContext({ top: true }));
+    // Window manipulation doesn't interact with the page content.
+    lazy.assert.open(
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
+    );
     await this.#handleUserPrompts();
 
     let focus = false;
@@ -2699,6 +2888,7 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    * @throws {UnsupportedOperationError}
    *     Not yet available in current context.
+   *     Not supported for browsing contexts in privileged scope.
    */
   async performActions(cmd) {
     const { actions } = cmd.parameters;
@@ -2770,6 +2960,7 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    * @throws {UnsupportedOperationError}
    *     Not available in chrome context.
+   *     Not supported for browsing contexts in privileged scope.
    */
   async print(cmd) {
     lazy.assert.content(this.context);
@@ -2821,13 +3012,10 @@ export class GeckoDriver {
     );
 
     const browsingContext = this.#curBrowser.tab.linkedBrowser.browsingContext;
-    const printSettings = await lazy.print.getPrintSettings(settings);
-    const binaryString = await lazy.print.printToBinaryString(
-      browsingContext,
-      printSettings
-    );
+    const printSettings = lazy.print.getPrintSettings(settings);
+    const bytes = await lazy.print.printToBytes(browsingContext, printSettings);
 
-    return btoa(binaryString);
+    return bytes.toBase64();
   }
 
   /**
@@ -2924,8 +3112,11 @@ export class GeckoDriver {
    */
   async refresh() {
     lazy.assert.content(this.context);
+    // Skip the privilege check here since the command needs to work regardless
+    // of the current page. The URL safety check below handles destination
+    // restrictions.
     const browsingContext = lazy.assert.open(
-      this.getBrowsingContext({ top: true })
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
     );
     await this.#handleUserPrompts();
 
@@ -3027,6 +3218,7 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    * @throws {UnsupportedOperationError}
    *     Not available in current context.
+   *     Not supported for browsing contexts in privileged scope.
    */
   async releaseActions() {
     const browsingContext = lazy.assert.open(this.getBrowsingContext());
@@ -3109,6 +3301,7 @@ export class GeckoDriver {
    * @throws {UnsupportedOperationError}
    *     If the current user prompt is something other than an alert,
    *     confirm, or a prompt.
+   *     Not supported for browsing contexts in privileged scope.
    */
   async sendKeysToDialog(cmd) {
     lazy.assert.open(this.getBrowsingContext({ top: true }));
@@ -3158,6 +3351,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>id</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async sendKeysToElement(cmd) {
     lazy.assert.open(this.getBrowsingContext());
@@ -3222,7 +3417,10 @@ export class GeckoDriver {
    */
   async setScreenOrientation(cmd) {
     lazy.assert.mobile();
-    lazy.assert.open(this.getBrowsingContext({ top: true }));
+    // Window manipulation doesn't interact with the page content.
+    lazy.assert.open(
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
+    );
 
     const ors = [
       "portrait",
@@ -3406,7 +3604,10 @@ export class GeckoDriver {
    *     Not applicable to application.
    */
   async setWindowRect(cmd) {
-    lazy.assert.open(this.getBrowsingContext({ top: true }));
+    // Window manipulation doesn't interact with the page content.
+    lazy.assert.open(
+      this.getBrowsingContext({ skipPrivilegeCheck: true, top: true })
+    );
     await this.#handleUserPrompts();
 
     lazy.assert.desktop();
@@ -3466,6 +3667,8 @@ export class GeckoDriver {
    *     If element represented by reference <var>element</var> has gone stale.
    * @throws {UnexpectedAlertOpenError}
    *     A modal dialog is open, blocking this operation.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async switchToFrame(cmd) {
     const { element: el, id } = cmd.parameters;
@@ -3521,7 +3724,8 @@ export class GeckoDriver {
    *     A modal dialog is open, blocking this operation.
    */
   async switchToParentFrame() {
-    let browsingContext = this.getBrowsingContext();
+    // Selecting the parent browsing context doesn't interact with the page.
+    let browsingContext = this.getBrowsingContext({ skipPrivilegeCheck: true });
     if (browsingContext && !browsingContext.parent) {
       return;
     }
@@ -3620,6 +3824,8 @@ export class GeckoDriver {
    *     Browsing context has been discarded.
    * @throws {StaleElementReferenceError}
    *     If element represented by reference <var>id</var> has gone stale.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async takeScreenshot(cmd) {
     lazy.assert.open(this.getBrowsingContext({ top: true }));
@@ -3727,6 +3933,9 @@ export class GeckoDriver {
    * Simulates user modification of a PermissionDescriptor's permission state.
    *
    * @see https://www.w3.org/TR/permissions/#webdriver-command-set-permission
+   *
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async permissions_setPermission(cmd) {
     const { descriptor, oneRealm = false, state } = cmd.parameters;
@@ -3783,6 +3992,8 @@ export class GeckoDriver {
    *
    * @throws {InvalidArgumentError}
    *     If a message argument wasn't passed in the parameters.
+   * @throws {UnsupportedOperationError}
+   *     Not supported for browsing contexts in privileged scope.
    */
   async reporting_generateTestReport(cmd) {
     const { message, group = "default" } = cmd.parameters;
@@ -3844,12 +4055,7 @@ export class GeckoDriver {
       signCount,
     } = credentials;
 
-    lazy.assert.string(
-      authenticatorId,
-      lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
-    );
-
-    // Bug 1976492: Check for valid authenticator id and raise invalid argument
+    this.#assertVirtualAuthenticator(authenticatorId);
 
     lazy.assert.string(
       credentialId,
@@ -3984,12 +4190,7 @@ export class GeckoDriver {
   webAuthn_getCredentials(cmd) {
     const { authenticatorId } = cmd.parameters;
 
-    lazy.assert.string(
-      authenticatorId,
-      lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
-    );
-
-    // Bug 1976492: Check for valid authenticator id and raise invalid argument
+    this.#assertVirtualAuthenticator(authenticatorId);
 
     return lazy.webauthn.getCredentials(authenticatorId);
   }
@@ -4009,16 +4210,8 @@ export class GeckoDriver {
   webAuthn_removeCredential(cmd) {
     const { authenticatorId, credentialId } = cmd.parameters;
 
-    lazy.assert.string(
-      authenticatorId,
-      lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
-    );
-    // Bug 1976492: Check for valid authenticator id and raise invalid argument
-
-    lazy.assert.string(
-      credentialId,
-      lazy.pprint`Expected "credentialId" to be a string, got ${credentialId}`
-    );
+    this.#assertVirtualAuthenticator(authenticatorId);
+    this.#assertCredential(authenticatorId, credentialId);
 
     lazy.webauthn.removeCredential(authenticatorId, credentialId);
   }
@@ -4036,12 +4229,7 @@ export class GeckoDriver {
   webAuthn_removeAllCredentials(cmd) {
     const { authenticatorId } = cmd.parameters;
 
-    lazy.assert.string(
-      authenticatorId,
-      lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
-    );
-
-    // Bug 1976492: Check for valid authenticator id and raise invalid argument
+    this.#assertVirtualAuthenticator(authenticatorId);
 
     lazy.webauthn.removeAllCredentials(authenticatorId);
   }
@@ -4059,12 +4247,7 @@ export class GeckoDriver {
   webAuthn_removeVirtualAuthenticator(cmd) {
     const { authenticatorId } = cmd.parameters;
 
-    lazy.assert.string(
-      authenticatorId,
-      lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
-    );
-
-    // Bug 1976492: Check for valid authenticator id and raise invalid argument
+    this.#assertVirtualAuthenticator(authenticatorId);
 
     lazy.webauthn.removeVirtualAuthenticator(authenticatorId);
   }
@@ -4084,17 +4267,12 @@ export class GeckoDriver {
   webAuthn_setUserVerified(cmd) {
     const { authenticatorId, isUserVerified } = cmd.parameters;
 
-    lazy.assert.string(
-      authenticatorId,
-      lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
-    );
+    this.#assertVirtualAuthenticator(authenticatorId);
 
     lazy.assert.boolean(
       isUserVerified,
       lazy.pprint`Expected "isUserVerified" to be a boolean, got ${isUserVerified}`
     );
-
-    // Bug 1976492: Check for valid authenticator id and raise invalid argument
 
     lazy.webauthn.setUserVerified(authenticatorId, isUserVerified);
   }
@@ -4116,6 +4294,60 @@ export class GeckoDriver {
 
     this.#browsers[winId] = context;
     this.#curBrowser = this.#browsers[winId];
+  }
+
+  /**
+   * Assert that a credential with the given id is stored in the virtual
+   * authenticator identified by authenticatorId.
+   *
+   * @param {string} authenticatorId
+   *     The ID of the virtual authenticator to look up. It must refer to an
+   *     existing authenticator.
+   * @param {string} credentialId
+   *     The ID of the credential to look up.
+   *
+   * @throws {InvalidArgumentError}
+   *     If credentialId is not a string, or no credential with the given id is
+   *     stored in the authenticator.
+   */
+  #assertCredential(authenticatorId, credentialId) {
+    lazy.assert.string(
+      credentialId,
+      lazy.pprint`Expected "credentialId" to be a string, got ${credentialId}`
+    );
+
+    const credentials = lazy.webauthn.getCredentials(authenticatorId);
+    if (
+      !credentials.some(credential => credential.credentialId === credentialId)
+    ) {
+      throw new lazy.error.InvalidArgumentError(
+        lazy.pprint`No credential found with id ${credentialId}`
+      );
+    }
+  }
+
+  /**
+   * Assert that the given id refers to a virtual authenticator stored in the
+   * Virtual Authenticator Database.
+   *
+   * @param {string} authenticatorId
+   *     The ID of the virtual authenticator to look up.
+   *
+   * @throws {InvalidArgumentError}
+   *     If authenticatorId is not a string, or no virtual authenticator with
+   *     the given id is stored in the Virtual Authenticator Database.
+   */
+  #assertVirtualAuthenticator(authenticatorId) {
+    lazy.assert.string(
+      authenticatorId,
+      lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
+    );
+
+    if (!lazy.webauthn.hasVirtualAuthenticator(authenticatorId)) {
+      throw new lazy.error.InvalidArgumentError(
+        lazy.pprint`No virtual authenticator found with id ${authenticatorId}`
+      );
+    }
   }
 
   #checkIfAlertIsPresent() {
@@ -4174,15 +4406,6 @@ export class GeckoDriver {
       async,
     };
 
-    // Script evaluation against parent process contexts should only be allowed
-    // if allowSystemAccess is true.
-    const context = this.getBrowsingContext();
-    if (!lazy.RemoteAgent.allowSystemAccess && lazy.isParentProcess(context)) {
-      throw new lazy.error.UnsupportedOperationError(
-        `ExecuteScript and ExecuteAsyncScript are not supported for parent process browsing contexts: ${context.id}`
-      );
-    }
-
     return this.#getActor().executeScript(script, args, opts);
   }
 
@@ -4231,6 +4454,9 @@ export class GeckoDriver {
    * Get the current "MarionetteCommands" parent actor.
    *
    * @param {object} options
+   * @param {boolean=} options.skipPrivilegeCheck
+   *     If set to true the command may also be forwarded to a privileged
+   *     content browsing context without system access. Defaults to false.
    * @param {boolean=} options.top
    *     If set to true use the window's top-level browsing context for the actor,
    *     otherwise the one from the currently selected frame. Defaults to false.
@@ -4239,8 +4465,11 @@ export class GeckoDriver {
    *     The parent actor.
    */
   #getActor(options = {}) {
-    return lazy.getMarionetteCommandsActorProxy(() =>
-      this.getBrowsingContext(options)
+    const { skipPrivilegeCheck = false } = options;
+
+    return lazy.getMarionetteCommandsActorProxy(
+      () => this.getBrowsingContext(options),
+      { skipPrivilegeCheck }
     );
   }
 
@@ -4304,7 +4533,11 @@ export class GeckoDriver {
     }
 
     if (!this.#isShuttingDown) {
-      this.#getActor().notifyDialogOpened(this.#dialog);
+      // Notifying the actor about an opened dialog doesn't interact with the
+      // page and is safe regardless of the context's privilege level.
+      this.#getActor({ skipPrivilegeCheck: true }).notifyDialogOpened(
+        this.#dialog
+      );
     }
   }
 

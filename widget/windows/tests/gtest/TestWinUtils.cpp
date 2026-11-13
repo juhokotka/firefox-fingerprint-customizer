@@ -2,15 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gtest/gtest.h"
 #include "WinUtils.h"
-
+#include "gtest/gtest.h"
+#include "mozilla/SpinEventLoopUntil.h"
+#include "mozilla/dom/ReferrerInfo.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsIFile.h"
 #include "nsNetUtil.h"
 #include "nsStreamUtils.h"
-#include "mozilla/dom/ReferrerInfo.h"
-#include "mozilla/SpinEventLoopUntil.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -270,4 +269,52 @@ TEST(WinUtils, MaybeWriteFileZoneId)
   for (auto& data : fileTestDatas) {
     SetAndTestFileZone(data);
   }
+}
+
+/*****************************************************************************/
+
+TEST(WinUtils, TelemetryPathPrefix)
+{
+  constexpr auto kNoTransform = static_cast<WinUtils::PathTransformFlags>(0);
+
+  struct Case {
+    const char16_t* mInput;
+    const char16_t* mExpected;
+  };
+
+  const Case cases[] = {
+      {u"%SystemRoot%\\System32\\foo.dll", u"%SystemRoot%\\System32\\foo.dll"},
+      {u"%ProgramFiles%\\Vendor\\foo.dll", u"%ProgramFiles%\\Vendor\\foo.dll"},
+      {u"%SystemRoot%", u"%SystemRoot%"},
+      {u"%ProgramFiles% (x86)\\Vendor\\foo.dll",
+       u"%ProgramFiles% (x86)\\Vendor\\foo.dll"},
+      {u"%SystemRoot%.old\\bar.dll", u"bar.dll"},
+      {u"%SystemRoot%Apps\\baz.dll", u"baz.dll"},
+      {u"%ProgramFiles%2\\Vendor\\baz.dll", u"baz.dll"},
+      {u"%ProgramFiles% (x86)Steam\\qux.dll", u"qux.dll"},
+  };
+
+  for (const auto& c : cases) {
+    nsAutoString path(c.mInput);
+    EXPECT_TRUE(WinUtils::PreparePathForTelemetry(path, kNoTransform));
+    EXPECT_STREQ(NS_ConvertUTF16toUTF8(path).get(),
+                 NS_ConvertUTF16toUTF8(nsDependentString(c.mExpected)).get())
+        << "input=" << NS_ConvertUTF16toUTF8(c.mInput).get();
+  }
+}
+
+/*****************************************************************************/
+
+TEST(WinUtils, CanonicalizePathLength)
+{
+  nsAutoString shortPath(u"C:\\a\\.\\b");
+  EXPECT_TRUE(WinUtils::CanonicalizePath(shortPath));
+  EXPECT_STREQ(NS_ConvertUTF16toUTF8(shortPath).get(), "C:\\a\\b");
+
+  nsAutoString longPath(u"C:\\");
+  for (size_t i = 0; i < 5000; ++i) {
+    longPath.Append(u'A');
+  }
+  EXPECT_FALSE(WinUtils::CanonicalizePath(longPath));
+  EXPECT_EQ(longPath.Length(), 5003u);
 }

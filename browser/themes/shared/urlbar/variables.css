@@ -9,11 +9,10 @@
 :root {
   --identity-box-margin-inline: 4px;
 
-  --urlbar-inner-border-radius: calc(var(--urlbarview-border-radius) - var(--urlbarView-padding));
+  --urlbar-inner-border-radius: calc(var(--urlbarview-border-radius) - var(--urlbarview-padding));
   --urlbar-input-gap: 0.45em;
-  --urlbar-min-height: max(32px, 1.4em);
+  --urlbar-height: max(32px, 1.4em);
 
-  /* stylelint-disable-next-line media-query-no-invalid */
   @media not -moz-pref("browser.nova.enabled") {
     /* This should be used for icons and chiclets inside the input field, as
        well as result rows. It makes the gap around them more uniform when they
@@ -28,10 +27,14 @@
    * Tracked by https://bugzilla.mozilla.org/show_bug.cgi?id=2015371
    */
   &[uidensity="compact"] {
-    --urlbar-min-height: max(26px, 1.4em);
+    --urlbar-height: max(28px, 1.4em);
+
+    @media not -moz-pref("browser.nova.enabled") {
+      --urlbar-height: max(26px, 1.4em);
+    }
   }
 
   &[uidensity="touch"] {
-    --urlbar-min-height: max(34px, 1.4em);
+    --urlbar-height: max(34px, 1.4em);
   }
 }

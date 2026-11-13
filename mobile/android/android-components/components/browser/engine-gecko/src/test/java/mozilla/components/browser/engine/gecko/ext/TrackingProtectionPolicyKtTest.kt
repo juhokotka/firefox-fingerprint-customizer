@@ -23,8 +23,6 @@ class TrackingProtectionPolicyKtTest {
     fun `transform the policy to a GeckoView ContentBlockingSetting`() {
         val policy = TrackingProtectionPolicy.recommended()
         val setting = policy.toContentBlockingSetting()
-        val cookieBannerSetting = EngineSession.CookieBannerHandlingMode.REJECT_OR_ACCEPT_ALL
-        val cookieBannerSettingPrivateBrowsing = EngineSession.CookieBannerHandlingMode.DISABLED
 
         assertEquals(policy.getEtpLevel(), setting.enhancedTrackingProtectionLevel)
         assertEquals(policy.getAntiTrackingPolicy(), setting.antiTrackingCategories)
@@ -33,33 +31,21 @@ class TrackingProtectionPolicyKtTest {
         assertEquals(defaultSafeBrowsing.sumOf { it.id }, setting.safeBrowsingCategories)
         assertEquals(setting.strictSocialTrackingProtection, policy.strictSocialTrackingProtection)
         assertEquals(setting.cookiePurging, policy.cookiePurging)
-        assertEquals(EngineSession.CookieBannerHandlingMode.DISABLED.mode, setting.cookieBannerMode)
-        assertEquals(EngineSession.CookieBannerHandlingMode.REJECT_ALL.mode, setting.cookieBannerModePrivateBrowsing)
-        assertFalse(setting.cookieBannerDetectOnlyMode)
         assertFalse(setting.queryParameterStrippingEnabled)
         assertFalse(setting.queryParameterStrippingPrivateBrowsingEnabled)
         assertEquals("", setting.queryParameterStrippingAllowList[0])
         assertEquals("", setting.queryParameterStrippingStripList[0])
 
         val policyWithSafeBrowsing =
-            TrackingProtectionPolicy.recommended().toContentBlockingSetting(
-                safeBrowsingPolicy = emptyArray(),
-                cookieBannerHandlingMode = cookieBannerSetting,
-                cookieBannerHandlingModePrivateBrowsing = cookieBannerSettingPrivateBrowsing,
-                cookieBannerHandlingDetectOnlyMode = true,
-                cookieBannerGlobalRulesEnabled = true,
-                cookieBannerGlobalRulesSubFramesEnabled = true,
-                queryParameterStripping = true,
-                queryParameterStrippingPrivateBrowsing = true,
-                queryParameterStrippingAllowList = "AllowList",
-                queryParameterStrippingStripList = "StripList",
-            )
+            TrackingProtectionPolicy.recommended()
+                .toContentBlockingSetting(
+                    safeBrowsingPolicy = emptyArray(),
+                    queryParameterStripping = true,
+                    queryParameterStrippingPrivateBrowsing = true,
+                    queryParameterStrippingAllowList = "AllowList",
+                    queryParameterStrippingStripList = "StripList",
+                )
         assertEquals(0, policyWithSafeBrowsing.safeBrowsingCategories)
-        assertEquals(cookieBannerSetting.mode, policyWithSafeBrowsing.cookieBannerMode)
-        assertEquals(cookieBannerSettingPrivateBrowsing.mode, policyWithSafeBrowsing.cookieBannerModePrivateBrowsing)
-        assertTrue(policyWithSafeBrowsing.cookieBannerDetectOnlyMode)
-        assertTrue(policyWithSafeBrowsing.cookieBannerGlobalRulesEnabled)
-        assertTrue(policyWithSafeBrowsing.cookieBannerGlobalRulesSubFramesEnabled)
         assertTrue(policyWithSafeBrowsing.queryParameterStrippingEnabled)
         assertTrue(policyWithSafeBrowsing.queryParameterStrippingPrivateBrowsingEnabled)
         assertEquals("AllowList", policyWithSafeBrowsing.queryParameterStrippingAllowList[0])
@@ -76,15 +62,17 @@ class TrackingProtectionPolicyKtTest {
         assertEquals(300, defaultSetting.safeBrowsingRealTimeSimulationNegativeCacheTTLSec)
 
         // Verify safe browsing simulation custom values
-        val customSetting = TrackingProtectionPolicy.recommended().toContentBlockingSetting(
-            safeBrowsingGlobalCacheEnabled = true,
-            safeBrowsingRealTimeEnabled = true,
-            safeBrowsingRealTimeSimulationEnabled = true,
-            safeBrowsingRealTimeSimulationHitProbability = 50,
-            safeBrowsingRealTimeSimulationCacheTTLSec = 600,
-            safeBrowsingRealTimeSimulationNegativeCacheEnabled = true,
-            safeBrowsingRealTimeSimulationNegativeCacheTTLSec = 120,
-        )
+        val customSetting =
+            TrackingProtectionPolicy.recommended()
+                .toContentBlockingSetting(
+                    safeBrowsingGlobalCacheEnabled = true,
+                    safeBrowsingRealTimeEnabled = true,
+                    safeBrowsingRealTimeSimulationEnabled = true,
+                    safeBrowsingRealTimeSimulationHitProbability = 50,
+                    safeBrowsingRealTimeSimulationCacheTTLSec = 600,
+                    safeBrowsingRealTimeSimulationNegativeCacheEnabled = true,
+                    safeBrowsingRealTimeSimulationNegativeCacheTTLSec = 120,
+                )
         assertTrue(customSetting.safeBrowsingGlobalCacheEnabled)
         assertTrue(customSetting.safeBrowsingRealTimeEnabled)
         assertTrue(customSetting.safeBrowsingRealTimeSimulationEnabled)

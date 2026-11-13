@@ -113,40 +113,33 @@
 @BINPATH@/@DLL_PREFIX@Microsoft.UI.Input@DLL_SUFFIX@
 @BINPATH@/@DLL_PREFIX@Microsoft.UI.Windowing.Core@DLL_SUFFIX@
 @BINPATH@/@DLL_PREFIX@Microsoft.UI.Windowing@DLL_SUFFIX@
+@BINPATH@/@DLL_PREFIX@Microsoft.WindowsAppRuntime@DLL_SUFFIX@
+@BINPATH@/@DLL_PREFIX@Microsoft.WindowsAppRuntime.Insights.Resource@DLL_SUFFIX@
 #endif
 #ifdef MOZ_GTK
 ; This is a standalone binary launched by Firefox on Linux to verify
 ; the system's graphics capabilities and behavior.
 ; It is separate because it may crash, and handling this within Firefox
 ; itself would be more challenging.
-@BINPATH@/glxtest
+@BINPATH@/gfxtest
 @BINPATH@/@DLL_PREFIX@mozgtk@DLL_SUFFIX@
 #ifdef MOZ_WAYLAND
 @BINPATH@/@DLL_PREFIX@mozwayland@DLL_SUFFIX@
-#endif
-#ifdef MOZ_ENABLE_V4L2
-; Similar to glxtest, this tests the hardware decoding for Video for Linux.
-; Currently, it doesn't ship for Firefox targeting typical Intel CPU (or compatible).
-@BINPATH@/v4l2test
-#endif
-#ifdef MOZ_ENABLE_VAAPI
-; Similar to glxtest, this tests the capabilities of the Video Acceleration API (VA-API).
-@BINPATH@/vaapitest
-#endif
-#ifdef MOZ_ENABLE_VULKAN_VIDEO
-; Vulkan video decode probe (device extension / codec support).
-@BINPATH@/vulkantest
 #endif
 #endif
 
 ; We don't have a complete view of which dlls to expect when doing an artifact
 ; build because we haven't run the relevant parts of configure, so we guess
 ; here and trust what came from our source build.
-#if defined(MOZ_ARTIFACT_BUILDS) && defined(XP_WIN)
+#ifdef MOZ_ARTIFACT_BUILDS
+#ifdef XP_WIN
 @BINPATH@/vcruntime*.dll
 @BINPATH@/msvcp*.dll
-@BINPATH@/libEGL.dll
-@BINPATH@/libGLESv2.dll
+#endif
+#if defined(XP_WIN) || defined(XP_MACOSX)
+@BINPATH@/libEGL@DLL_SUFFIX@
+@BINPATH@/libGLESv2@DLL_SUFFIX@
+#endif
 #endif
 
 #ifdef ONNX_RUNTIME
@@ -211,10 +204,10 @@
 @RESPATH@/browser/actors/*
 @RESPATH@/actors/*
 
-; ANGLE GLES-on-D3D rendering library
+; ANGLE GLES rendering libraries
 #ifdef MOZ_ANGLE_RENDERER
-@BINPATH@/libEGL.dll
-@BINPATH@/libGLESv2.dll
+@BINPATH@/libEGL@DLL_SUFFIX@
+@BINPATH@/libGLESv2@DLL_SUFFIX@
 #endif # MOZ_ANGLE_RENDERER
 
 #ifdef MOZ_DXCOMPILER
@@ -431,6 +424,18 @@ bin/libfreebl_64int_3.so
 ;
 #if defined(MOZ_NOTIFICATION_SERVER)
 @BINPATH@/@DLL_PREFIX@notificationserver@DLL_SUFFIX@
+#endif
+
+; [ MSIX Background Task COM Server ]
+;
+#if defined(XP_WIN) && defined(MOZ_BACKGROUNDTASKS)
+@BINPATH@/@DLL_PREFIX@msixcomserver@DLL_SUFFIX@
+#endif
+
+; [ Push Notification Helper ]
+;
+#if defined(MOZ_PUSH_NOTIFICATION_HELPER)
+@BINPATH@/notification-helper@BIN_SUFFIX@
 #endif
 
 #ifdef LLVM_SYMBOLIZER

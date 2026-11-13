@@ -16,8 +16,8 @@ const { BaseAction } = ChromeUtils.importESModule(
 const { RecipeRunner } = ChromeUtils.importESModule(
   "resource://normandy/lib/RecipeRunner.sys.mjs"
 );
-const { ClientEnvironment } = ChromeUtils.importESModule(
-  "resource://normandy/lib/ClientEnvironment.sys.mjs"
+const { ClientEnvironmentBase } = ChromeUtils.importESModule(
+  "resource://gre/modules/components-utils/ClientEnvironment.sys.mjs"
 );
 const { CleanupManager } = ChromeUtils.importESModule(
   "resource://normandy/lib/CleanupManager.sys.mjs"
@@ -44,14 +44,12 @@ add_task(async function getFilterContext() {
     "locale",
     "plugins",
     "recipe",
-    "request_time",
     "searchEngine",
     "syncDesktopDevices",
     "syncMobileDevices",
     "syncSetup",
     "syncTotalDevices",
     "telemetry",
-    "userId",
     "version",
   ];
   for (const key of expectedNormandyKeys) {
@@ -70,9 +68,9 @@ add_task(async function getFilterContext() {
     "environment.recipe is the recipe passed to getFilterContext"
   );
   is(
-    ClientEnvironment.recipe,
+    ClientEnvironmentBase.recipe,
     undefined,
-    "ClientEnvironment has not been mutated"
+    "ClientEnvironmentBase has not been mutated"
   );
   delete recipe.unrelated;
   Assert.deepEqual(
@@ -85,11 +83,19 @@ add_task(async function getFilterContext() {
   await SpecialPowers.pushPrefEnv({
     set: [["app.normandy.user_id", "some id"]],
   });
-  is(context.env.userId, "some id", "User id is read from prefs when accessed");
+  is(
+    context.env.legacyRandomizationId,
+    "some id",
+    "legacyRandomizationId is read from prefs when accessed"
+  );
   await SpecialPowers.pushPrefEnv({
     set: [["app.normandy.user_id", "real id"]],
   });
-  is(context.env.userId, "some id", "userId was cached");
+  is(
+    context.env.legacyRandomizationId,
+    "some id",
+    "legacyRandomizationId was cached"
+  );
 });
 
 decorate_task(
@@ -203,51 +209,6 @@ decorate_task(
 );
 
 decorate_task(
-  withMockNormandyApi(),
-  withStub(ClientEnvironment, "getClientClassification"),
-  async function testClientClassificationCache({
-    getClientClassificationStub,
-  }) {
-    getClientClassificationStub.returns(Promise.resolve(false));
-
-    await SpecialPowers.pushPrefEnv({
-      set: [["app.normandy.api_url", "https://example.com/selfsupport-dummy"]],
-    });
-
-    // When the experiment pref is false, eagerly call getClientClassification.
-    await SpecialPowers.pushPrefEnv({
-      set: [["app.normandy.experiments.lazy_classify", false]],
-    });
-    ok(
-      !getClientClassificationStub.called,
-      "getClientClassification hasn't been called"
-    );
-    await RecipeRunner.run();
-    ok(
-      getClientClassificationStub.called,
-      "getClientClassification was called eagerly"
-    );
-
-    // When the experiment pref is true, do not eagerly call getClientClassification.
-    await SpecialPowers.pushPrefEnv({
-      set: [["app.normandy.experiments.lazy_classify", true]],
-    });
-    getClientClassificationStub.reset();
-    ok(
-      !getClientClassificationStub.called,
-
-      "getClientClassification hasn't been called"
-    );
-    await RecipeRunner.run();
-    ok(
-      !getClientClassificationStub.called,
-
-      "getClientClassification was not called eagerly"
-    );
-  }
-);
-
-decorate_task(
   withStub(ActionsManager.prototype, "finalize"),
   NormandyTestUtils.withMockRecipeCollection([]),
   async function testRunEvents() {
@@ -263,179 +224,11 @@ decorate_task(
   }
 );
 
-decorate_task(
-  withStub(RecipeRunner, "getCapabilities"),
-  withStub(NormandyApi, "verifyObjectSignature"),
-  NormandyTestUtils.withMockRecipeCollection([{ id: 1 }]),
-  async function test_run_includesCapabilities({ getCapabilitiesStub }) {
-    getCapabilitiesStub.returns(new Set(["test-capability"]));
-    await RecipeRunner.run();
-    ok(getCapabilitiesStub.called, "getCapabilities should be called");
-  }
-);
-
-decorate_task(
-  withStub(NormandyApi, "verifyObjectSignature"),
-  withStub(ActionsManager.prototype, "processRecipe"),
-  withStub(ActionsManager.prototype, "finalize"),
-  async function testReadFromRemoteSettings({
-    verifyObjectSignatureStub,
-    processRecipeStub,
-  }) {
-    const matchRecipe = {
-      id: 1,
-      name: "match",
-      action: "matchAction",
-      filter_expression: "true",
-    };
-    const noMatchRecipe = {
-      id: 2,
-      name: "noMatch",
-      action: "noMatchAction",
-      filter_expression: "false",
-    };
-    const missingRecipe = {
-      id: 3,
-      name: "missing",
-      action: "missingAction",
-      filter_expression: "true",
-    };
-
-    const db = await RecipeRunner._remoteSettingsClientForTesting.db;
-    const fakeSig = { signature: "abc" };
-    await db.importChanges({}, Date.now(), [
-      { id: "match", recipe: matchRecipe, signature: fakeSig },
-      {
-        id: "noMatch",
-        recipe: noMatchRecipe,
-        signature: fakeSig,
-      },
-      {
-        id: "missing",
-        recipe: missingRecipe,
-        signature: fakeSig,
-      },
-    ]);
-
-    let recipesFromRS = (
-      await RecipeRunner._remoteSettingsClientForTesting.get()
-    ).map(({ recipe }) => recipe);
-    // Sort the records by id so that they match the order in the assertion
-    recipesFromRS.sort((a, b) => a.id - b.id);
-    Assert.deepEqual(
-      recipesFromRS,
-      [matchRecipe, noMatchRecipe, missingRecipe],
-      "The recipes should be accesible from Remote Settings"
-    );
-
-    await RecipeRunner.run();
-
-    Assert.deepEqual(
-      verifyObjectSignatureStub.args,
-      [
-        [matchRecipe, fakeSig, "recipe"],
-        [missingRecipe, fakeSig, "recipe"],
-        [noMatchRecipe, fakeSig, "recipe"],
-      ],
-      "all recipes should have their signature verified"
-    );
-    Assert.deepEqual(
-      processRecipeStub.args,
-      [
-        [matchRecipe, BaseAction.suitability.FILTER_MATCH],
-        [missingRecipe, BaseAction.suitability.FILTER_MATCH],
-        [noMatchRecipe, BaseAction.suitability.FILTER_MISMATCH],
-      ],
-      "Recipes should be reported with the correct suitabilities"
-    );
-  }
-);
-
-decorate_task(
-  withStub(NormandyApi, "verifyObjectSignature"),
-  withStub(ActionsManager.prototype, "processRecipe"),
-  withStub(RecipeRunner, "getCapabilities"),
-  async function testReadFromRemoteSettings({
-    processRecipeStub,
-    getCapabilitiesStub,
-  }) {
-    getCapabilitiesStub.returns(new Set(["compatible"]));
-    const compatibleRecipe = {
-      name: "match",
-      filter_expression: "true",
-      capabilities: ["compatible"],
-    };
-    const incompatibleRecipe = {
-      name: "noMatch",
-      filter_expression: "true",
-      capabilities: ["incompatible"],
-    };
-
-    const db = await RecipeRunner._remoteSettingsClientForTesting.db;
-    const fakeSig = { signature: "abc" };
-    await db.importChanges(
-      {},
-      Date.now(),
-      [
-        {
-          id: "match",
-          recipe: compatibleRecipe,
-          signature: fakeSig,
-        },
-        {
-          id: "noMatch",
-          recipe: incompatibleRecipe,
-          signature: fakeSig,
-        },
-      ],
-      {
-        clear: true,
-      }
-    );
-
-    await RecipeRunner.run();
-
-    Assert.deepEqual(
-      processRecipeStub.args,
-      [
-        [compatibleRecipe, BaseAction.suitability.FILTER_MATCH],
-        [incompatibleRecipe, BaseAction.suitability.CAPABILITIES_MISMATCH],
-      ],
-      "recipes should be marked if their capabilities aren't compatible"
-    );
-  }
-);
-
-decorate_task(
-  withStub(ActionsManager.prototype, "processRecipe"),
-  withStub(NormandyApi, "verifyObjectSignature"),
-  NormandyTestUtils.withMockRecipeCollection(),
-  async function testBadSignatureFromRemoteSettings({
-    processRecipeStub,
-    verifyObjectSignatureStub,
-    mockRecipeCollection,
-  }) {
-    verifyObjectSignatureStub.throws(new Error("fake signature error"));
-    const badSigRecipe = {
-      id: 1,
-      name: "badSig",
-      action: "matchAction",
-      filter_expression: "true",
-    };
-    await mockRecipeCollection.addRecipes([badSigRecipe]);
-
-    await RecipeRunner.run();
-
-    Assert.deepEqual(processRecipeStub.args, [
-      [badSigRecipe, BaseAction.suitability.SIGNATURE_ERROR],
-    ]);
-  }
-);
-
 // Test init() during normal operation
 decorate_task(
   withPrefEnv({
     set: [
+      ["app.normandy.api_url", "https://example.com/selfsupport-dummy"],
       ["app.normandy.dev_mode", false],
       ["app.normandy.first_run", false],
     ],
@@ -455,7 +248,10 @@ decorate_task(
 // test init() in dev mode
 decorate_task(
   withPrefEnv({
-    set: [["app.normandy.dev_mode", true]],
+    set: [
+      ["app.normandy.api_url", "https://example.com/selfsupport-dummy"],
+      ["app.normandy.dev_mode", true],
+    ],
   }),
   withStub(RecipeRunner, "run"),
   withStub(RecipeRunner, "registerTimer"),
@@ -479,6 +275,7 @@ decorate_task(
 decorate_task(
   withPrefEnv({
     set: [
+      ["app.normandy.api_url", "https://example.com/selfsupport-dummy"],
       ["app.normandy.dev_mode", false],
       ["app.normandy.first_run", true],
     ],
@@ -514,6 +311,7 @@ decorate_task(
 decorate_task(
   withPrefEnv({
     set: [
+      ["app.normandy.api_url", "https://example.com/selfsupport-dummy"],
       ["app.normandy.dev_mode", false],
       ["app.normandy.first_run", false],
       ["app.normandy.enabled", true],
@@ -657,21 +455,6 @@ decorate_task(
 );
 
 decorate_task(
-  withStub(RecipeRunner._remoteSettingsClientForTesting, "get"),
-  async function testRunCanRunOnlyOnce({ getStub }) {
-    getStub.returns(
-      // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
-      new Promise(resolve => setTimeout(() => resolve([]), 10))
-    );
-
-    // Run 2 in parallel.
-    await Promise.all([RecipeRunner.run(), RecipeRunner.run()]);
-
-    is(getStub.callCount, 1, "run() is no-op if already running");
-  }
-);
-
-decorate_task(
   withPrefEnv({
     set: [
       // Enable update timer logs.
@@ -760,15 +543,11 @@ decorate_task(async function testAutomaticCapabilities() {
 
   ok(
     capabilities.has("jexl.context.env.country"),
-    "context variables from Normandy's client context should be included"
+    "context variables from the client context should be included"
   );
   ok(
     capabilities.has("jexl.context.env.version"),
-    "context variables from the superclass context should be included"
-  );
-  ok(
-    !capabilities.has("jexl.context.env.getClientClassification"),
-    "non-getter functions should not be included"
+    "context variables from ClientEnvironmentBase should be included"
   );
   ok(
     !capabilities.has("jexl.context.env.prototype"),
@@ -817,20 +596,6 @@ decorate_task(
       finalizeSpy.args,
       [[{ noRecipes: true }]],
       "Action manager should know there were no recipes received"
-    );
-  }
-);
-
-// If some recipes are found on the server, the action manager should be informed of that
-decorate_task(
-  withSpy(ActionsManager.prototype, "finalize"),
-  NormandyTestUtils.withMockRecipeCollection([{ id: 1 }]),
-  async function testSomeRecipes({ finalizeSpy }) {
-    await RecipeRunner.run();
-    Assert.deepEqual(
-      finalizeSpy.args,
-      [[{ noRecipes: false }]],
-      "Action manager should know there were recipes received"
     );
   }
 );

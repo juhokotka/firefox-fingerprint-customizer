@@ -12,11 +12,12 @@
 #define xptinfo_h
 
 #include <stdint.h>
-#include "nsID.h"
-#include "mozilla/Assertions.h"
-#include "jsapi.h"
+
 #include "js/Symbol.h"
 #include "js/Value.h"
+#include "jsapi.h"
+#include "mozilla/Assertions.h"
+#include "nsID.h"
 #include "nsString.h"
 #include "nsTArray.h"
 

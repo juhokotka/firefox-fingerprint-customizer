@@ -5,11 +5,11 @@
 #ifndef mozilla_RustRegex_h
 #define mozilla_RustRegex_h
 
+#include "mozilla/Maybe.h"
+#include "mozilla/UniquePtr.h"
 #include "nsPrintfCString.h"
 #include "nsTArray.h"
 #include "rure.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 
@@ -615,6 +615,9 @@ class RustRegexSet final {
    * simultaneously.
    */
   template <typename Patterns>
+    requires requires {
+      std::string_view(*std::begin(std::declval<Patterns>()));
+    }
   explicit RustRegexSet(Patterns&& aPatterns,
                         const RustRegexOptions& aOptions = {}) {
 #ifdef DEBUG

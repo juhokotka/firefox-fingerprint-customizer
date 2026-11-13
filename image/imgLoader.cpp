@@ -8,8 +8,6 @@
 #include "nsIThreadRetargetableStreamListener.h"
 #undef LoadImage
 
-#include "imgLoader.h"
-
 #include <algorithm>
 #include <utility>
 
@@ -17,28 +15,29 @@
 #include "Image.h"
 #include "ImageLogging.h"
 #include "ReferrerInfo.h"
+#include "imgLoader.h"
 #include "imgRequestProxy.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/ChaosMode.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/LoadInfo.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProfilerLabels.h"
+#include "mozilla/SharedSubResourceCache.h"
 #include "mozilla/StaticPrefs_image.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/StoragePrincipalHelper.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/SharedSubResourceCache.h"
 #include "mozilla/dom/CacheExpirationTime.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/FetchPriority.h"
 #include "mozilla/dom/nsMixedContentBlocker.h"
 #ifdef NIGHTLY_BUILD
-#  include "mozilla/dom/PolicyContainer.h"
-#  include "mozilla/dom/IntegrityPolicyWAICT.h"
-#  include "mozilla/dom/WAICTUtils.h"
 #  include "mozilla/StaticPrefs_security.h"
+#  include "mozilla/dom/IntegrityPolicyWAICT.h"
+#  include "mozilla/dom/PolicyContainer.h"
+#  include "mozilla/dom/WAICTUtils.h"
 #  include "nsStringStream.h"
 static bool ShouldEnableWAICT(mozilla::dom::Document* aDoc);
 #endif
@@ -79,9 +78,8 @@ static bool ShouldEnableWAICT(mozilla::dom::Document* aDoc);
 // we want to explore making the document own the load group
 // so we can associate the document URI with the load group.
 // until this point, we have an evil hack:
-#include "nsIHttpChannelInternal.h"
-#include "nsILoadGroupChild.h"
 #include "nsIDocShell.h"
+#include "nsIHttpChannelInternal.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -133,11 +131,13 @@ class imgMemoryReporter final : public nsIMemoryReporter {
     for (uint32_t i = 0; i < mKnownLoaders.Length(); i++) {
       for (imgCacheEntry* entry : mKnownLoaders[i]->mCache.Values()) {
         RefPtr<imgRequest> req = entry->GetRequest();
-        RecordCounterForRequest(req, &content, !entry->HasNoProxies());
+        RecordCounterForRequest(req, &content, !entry->HasNoProxies(),
+                                aAnonymize);
       }
       MutexAutoLock lock(mKnownLoaders[i]->mUncachedImagesMutex);
       for (RefPtr<imgRequest> req : mKnownLoaders[i]->mUncachedImages) {
-        RecordCounterForRequest(req, &uncached, req->HasConsumers());
+        RecordCounterForRequest(req, &uncached, req->HasConsumers(),
+                                aAnonymize);
       }
     }
 
@@ -192,7 +192,8 @@ class imgMemoryReporter final : public nsIMemoryReporter {
         // tree -- so we use moz_malloc_size_of instead of ImagesMallocSizeOf to
         // prevent DMD from seeing it reported twice.
         SizeOfState state(moz_malloc_size_of);
-        ImageMemoryCounter counter(req, image, state, /* aIsUsed = */ true);
+        ImageMemoryCounter counter(req, image, state, /* aIsUsed = */ true,
+                                   /* aAnonymize = */ true);
 
         n += counter.Values().DecodedHeap();
         n += counter.Values().DecodedNonHeap();
@@ -265,12 +266,6 @@ class imgMemoryReporter final : public nsIMemoryReporter {
         counter.URI().Truncate();
         counter.URI().AppendPrintf("<anonymized-%u>", i);
       } else {
-        // The URI could be an extremely long data: URI. Truncate if needed.
-        static const size_t max = 256;
-        if (counter.URI().Length() > max) {
-          counter.URI().Truncate(max);
-          counter.URI().AppendLiteral(" (truncated)");
-        }
         counter.URI().ReplaceChar('/', '\\');
       }
 
@@ -450,11 +445,11 @@ class imgMemoryReporter final : public nsIMemoryReporter {
       const SVGImageContext& context = counter.Key().SVGContext();
       surfacePathPrefix.AppendLiteral(", svgContext:[ ");
       if (context.GetViewportSize()) {
-        const CSSIntSize& size = context.GetViewportSize().ref();
+        const CSSSize& size = context.GetViewportSize().ref();
         surfacePathPrefix.AppendLiteral("viewport=(");
-        surfacePathPrefix.AppendInt(size.width);
+        surfacePathPrefix.AppendFloat(size.width);
         surfacePathPrefix.AppendLiteral("x");
-        surfacePathPrefix.AppendInt(size.height);
+        surfacePathPrefix.AppendFloat(size.height);
         surfacePathPrefix.AppendLiteral(") ");
       }
       if (context.GetPreserveAspectRatio()) {
@@ -584,16 +579,16 @@ class imgMemoryReporter final : public nsIMemoryReporter {
 
   static void RecordCounterForRequest(imgRequest* aRequest,
                                       nsTArray<ImageMemoryCounter>* aArray,
-                                      bool aIsUsed) {
+                                      bool aIsUsed, bool aAnonymize) {
     SizeOfState state(ImagesMallocSizeOf);
     RefPtr<image::Image> image = aRequest->GetImage();
     if (image) {
-      ImageMemoryCounter counter(aRequest, image, state, aIsUsed);
+      ImageMemoryCounter counter(aRequest, image, state, aIsUsed, aAnonymize);
       aArray->AppendElement(std::move(counter));
     } else {
       // We can at least record some information about the image from the
       // request, and mark it as not knowing the image type yet.
-      ImageMemoryCounter counter(aRequest, state, aIsUsed);
+      ImageMemoryCounter counter(aRequest, state, aIsUsed, aAnonymize);
       aArray->AppendElement(std::move(counter));
     }
   }
@@ -1008,9 +1003,8 @@ static nsresult NewImageChannel(
   // least one base load group for scheduling/caching purposes.
 
   nsCOMPtr<nsILoadGroup> loadGroup = do_CreateInstance(NS_LOADGROUP_CONTRACTID);
-  nsCOMPtr<nsILoadGroupChild> childLoadGroup = do_QueryInterface(loadGroup);
-  if (childLoadGroup) {
-    childLoadGroup->SetParentLoadGroup(aLoadGroup);
+  if (loadGroup) {
+    loadGroup->SetParentLoadGroup(aLoadGroup);
   }
   (*aResult)->SetLoadGroup(loadGroup);
 
@@ -1799,7 +1793,7 @@ bool imgLoader::ValidateRequestWithNewChannel(
     nsContentPolicyType aLoadPolicyType, imgRequestProxy** aProxyRequest,
     nsIPrincipal* aTriggeringPrincipal, CORSMode aCORSMode, bool aLinkPreload,
     uint64_t aEarlyHintPreloaderId, FetchPriority aFetchPriority,
-    bool* aNewChannelCreated) {
+    const nsAString& aInitiatorType, bool* aNewChannelCreated) {
   // now we need to insert a new channel request object in between the real
   // request and the proxy that basically delays loading the image until it
   // gets a 304 or figures out that this needs to be a new request
@@ -1849,6 +1843,13 @@ bool imgLoader::ValidateRequestWithNewChannel(
                        aEarlyHintPreloaderId, aFetchPriority, aLinkPreload);
   if (NS_FAILED(rv)) {
     return false;
+  }
+
+  if (!aInitiatorType.IsEmpty()) {
+    if (nsCOMPtr<nsITimedChannel> timedChannel =
+            do_QueryInterface(newChannel)) {
+      timedChannel->SetInitiatorType(aInitiatorType);
+    }
   }
 
   if (aNewChannelCreated) {
@@ -1963,7 +1964,7 @@ bool imgLoader::ValidateEntry(
     bool aCanMakeNewChannel, bool* aNewChannelCreated,
     imgRequestProxy** aProxyRequest, nsIPrincipal* aTriggeringPrincipal,
     CORSMode aCORSMode, bool aLinkPreload, uint64_t aEarlyHintPreloaderId,
-    FetchPriority aFetchPriority) {
+    FetchPriority aFetchPriority, const nsAString& aInitiatorType) {
   LOG_SCOPE(gImgLog, "imgLoader::ValidateEntry");
 
   // If the expiration time is zero, then the request has not gotten far enough
@@ -2090,7 +2091,8 @@ bool imgLoader::ValidateEntry(
         request, aURI, aInitialDocumentURI, aReferrerInfo, aLoadGroup,
         aObserver, aLoadingDocument, innerWindowID, aLoadFlags, aLoadPolicyType,
         aProxyRequest, aTriggeringPrincipal, aCORSMode, aLinkPreload,
-        aEarlyHintPreloaderId, aFetchPriority, aNewChannelCreated);
+        aEarlyHintPreloaderId, aFetchPriority, aInitiatorType,
+        aNewChannelCreated);
   }
 
   if (!validateRequest) {
@@ -2466,7 +2468,7 @@ nsresult imgLoader::LoadImage(
                       aLoadGroup, aObserver, aLoadingDocument, requestFlags,
                       aContentPolicyType, true, &newChannelCreated, _retval,
                       aTriggeringPrincipal, corsmode, aLinkPreload,
-                      aEarlyHintPreloaderId, aFetchPriority)) {
+                      aEarlyHintPreloaderId, aFetchPriority, initiatorType)) {
       request = entry->GetRequest();
 
       // If this entry has no proxies, its request has no reference to the
@@ -2733,7 +2735,7 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
       if (ValidateEntry(entry, uri, nullptr, nullptr, nullptr, aObserver,
                         aLoadingDocument, requestFlags, policyType, false,
                         nullptr, nullptr, nullptr, corsMode, false, 0,
-                        FetchPriority::Auto)) {
+                        FetchPriority::Auto, u""_ns)) {
         request = entry->GetRequest();
       } else {
         nsCOMPtr<nsICacheInfoChannel> cacheChan(do_QueryInterface(channel));
@@ -2787,7 +2789,7 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
 #endif
 
   // Filter out any load flags not from nsIRequest
-  requestFlags &= nsIRequest::LOAD_INHERIT_MASK;
+  requestFlags &= nsIRequest::LOAD_REQUESTMASK;
 
   nsresult rv = NS_OK;
   if (request) {

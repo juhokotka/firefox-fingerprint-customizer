@@ -25,7 +25,7 @@ class BaseNodeHTTPServerCode {
   }
 }
 
-class ADB {
+export class ADB {
   static async stopForwarding(port) {
     return this.forwardPort(port, true);
   }
@@ -72,12 +72,41 @@ class ADB {
     return true;
   }
 
+  // Binds both loopback addresses; a wildcard can share its port on macOS and Windows.
+  static async listenOnLoopback(server, port) {
+    const net = require("net");
+    const { once } = require("events");
+    server.listen(port, "127.0.0.1"); // Not awaitable; once() rejects on `error`.
+    await once(server, "listening");
+    const ipv6 = net.createServer(socket => server.emit("connection", socket));
+    ipv6.listen(server.address().port, "::1");
+    try {
+      await once(ipv6, "listening");
+    } catch (e) {
+      if (e.code === "EADDRNOTAVAIL" || e.code === "EAFNOSUPPORT") {
+        return; // No IPv6 loopback.
+      }
+      await new Promise(resolve => server.close(resolve));
+      throw e;
+    }
+    server.once("close", () => ipv6.close());
+  }
+
   static async listenAndForwardPort(server, port) {
     let retryCount = 0;
     const maxRetries = 10;
 
     while (retryCount < maxRetries) {
-      await server.listen(port);
+      try {
+        await ADB.listenOnLoopback(server, port);
+      } catch (e) {
+        if (port || e.code !== "EADDRINUSE") {
+          throw e;
+        }
+        retryCount++;
+        console.log(`Port is taken on ::1 (${e}), retrying`);
+        continue;
+      }
       let serverPort = server.address().port;
       let res = await ADB.forwardPort(serverPort);
 
@@ -312,6 +341,37 @@ class CertGenCode {
   }
 }
 
+// UDP socket that never answers, to reserve a port number for UDP as well as TCP.
+class NodeNoResponseUdpCode {
+  static async bind(port) {
+    const dgram = require("dgram");
+    const { once } = require("events");
+    // Dual-stack, to reserve the port for IPv4 and IPv6 alike.
+    global.noResponseUdp = dgram.createSocket({
+      type: "udp6",
+      ipv6Only: false,
+    });
+    global.noResponseUdp.bind(port);
+    await once(global.noResponseUdp, "listening");
+    global.noResponseUdp.on("error", err => console.log(`udp error: ${err}`));
+  }
+}
+
+/// Runs start(), then claim() on the port start() got; if claim() fails,
+/// runs stop() and retries, so both end up on one port free for each.
+export async function startOnSharedPort(start, claim, stop, maxRetries = 20) {
+  for (let retry = 0; retry < maxRetries; retry++) {
+    await start();
+    try {
+      return await claim();
+    } catch (e) {
+      console.log(`Port is taken (${e}), retrying`);
+      await stop();
+    }
+  }
+  throw new Error("No port was free for both servers");
+}
+
 export class BaseNodeServer {
   protocol() {
     return this._protocol;
@@ -478,6 +538,19 @@ export class BaseNodeServer {
     );
   }
 
+  /// Starts the server on a port free for TCP and UDP alike, holding the UDP
+  /// side bound but never answering, so that nothing else can claim it.
+  async startWithNoResponseUdpPort(start = () => this.start()) {
+    return startOnSharedPort(
+      start,
+      async () => {
+        await this.execute(NodeNoResponseUdpCode);
+        return this.execute(`NodeNoResponseUdpCode.bind(${this.port()})`);
+      },
+      () => this.stop()
+    );
+  }
+
   /// Stops the server
   async stop() {
     if (this.processId) {
@@ -542,6 +615,105 @@ export class NodeTCPEchoServer extends BaseNodeServer {
 
     this._port = await this.execute(
       `NodeTCPEchoServerCode.startServer(${port})`
+    );
+  }
+}
+
+// Minimal SOCKS5 remote-DNS forwarding proxy for tests.
+//
+// Completes the SOCKS5 no-auth handshake, then transparently pipes the byte
+// stream (TLS etc. flow end-to-end) to 127.0.0.1 at the requested port. Any
+// requested hostname is "resolved" to loopback, emulating a remote-DNS SOCKS
+// proxy: the client is expected to send the hostname (ATYP=domain), never a
+// pre-resolved IP. The hostnames the proxy receives are recorded in
+// global.socksConns so a test can confirm remote DNS was actually used and
+// that no client-side resolution leaked out of the proxy.
+class NodeSocks5ForwardServerCode {
+  static async startServer(port) {
+    const net = require("net");
+
+    global.socksConns = [];
+    global.server = net.createServer(client => {
+      client.on("error", () => {});
+      // Greeting: VER(0x05) NMETHODS METHODS...
+      client.once("data", greeting => {
+        if (!greeting.length || greeting[0] !== 0x05) {
+          client.end();
+          return;
+        }
+        // Reply: VER=0x05 METHOD=0x00 (no authentication). Firefox only sends
+        // the request after receiving this, so greeting and request never
+        // coalesce into one chunk.
+        client.write(Buffer.from([0x05, 0x00]));
+        client.once("data", req => {
+          // Request: VER CMD RSV ATYP DST.ADDR DST.PORT ; CMD 0x01 = CONNECT.
+          if (req.length < 7 || req[0] !== 0x05 || req[1] !== 0x01) {
+            client.end();
+            return;
+          }
+          const atyp = req[3];
+          let offset = 4;
+          if (atyp === 0x01) {
+            offset = 8; // IPv4
+          } else if (atyp === 0x03) {
+            const len = req[4];
+            const name = req.slice(5, 5 + len).toString("ascii");
+            global.socksConns.push(name);
+            offset = 5 + len;
+          } else if (atyp === 0x04) {
+            offset = 4 + 16; // IPv6
+          } else {
+            client.end();
+            return;
+          }
+          const dstPort = req.readUInt16BE(offset);
+          const upstream = net.connect(dstPort, "127.0.0.1", () => {
+            // Success: VER REP RSV ATYP BND.ADDR(0.0.0.0) BND.PORT(0).
+            client.write(
+              Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+            );
+            client.pipe(upstream);
+            upstream.pipe(client);
+          });
+          upstream.on("error", () => {
+            try {
+              client.end();
+            } catch (e) {}
+          });
+          client.on("error", () => {
+            try {
+              upstream.end();
+            } catch (e) {}
+          });
+        });
+      });
+    });
+
+    const serverPort = await ADB.listenAndForwardPort(global.server, port);
+    return serverPort;
+  }
+}
+
+export class NodeSocks5ForwardServer extends BaseNodeServer {
+  _protocol = "socks";
+  _version = "socks5";
+
+  /// Starts the SOCKS5 forwarding proxy.
+  async start(port = 0) {
+    this.processId = await NodeServer.fork();
+
+    await this.execute(ADB);
+    await this.execute(NodeSocks5ForwardServerCode);
+
+    this._port = await this.execute(
+      `NodeSocks5ForwardServerCode.startServer(${port})`
+    );
+  }
+
+  /// Hostnames (ATYP=domain) the proxy has been asked to connect to.
+  async connectedHostnames() {
+    return JSON.parse(
+      await this.execute("JSON.stringify(global.socksConns || [])")
     );
   }
 }
@@ -798,13 +970,20 @@ class BaseProxyCode {
       return;
     }
     const net = require("net");
-    // Connect to an origin server
+    // Connect to an origin server. The test-only hostnames below have no DNS
+    // entry: Gecko resolves them via network.dns.native-is-localhost, but this
+    // process uses the OS resolver and would fail with ENOTFOUND.
     const { port, hostname } = new URL(`https://${req.url}`);
+    const localhostNames = [
+      "foo.example.com",
+      "alt1.example.com",
+      "alt2.example.com",
+    ];
     const serverSocket = net
       .connect(
         {
           port: port || 443,
-          host: hostname,
+          host: localhostNames.includes(hostname) ? "127.0.0.1" : hostname,
           family: 4, // Specifies to use IPv4
         },
         () => {
@@ -1504,9 +1683,9 @@ export class WebSocketConnection {
 
   static makeWebSocketChan(url) {
     let protocol = url.startsWith("wss:") ? "wss" : "ws";
-    let chan = Cc[
-      `@mozilla.org/network/protocol;1?name=${protocol}`
-    ].createInstance(Ci.nsIWebSocketChannel);
+    let chan = Cc[`@mozilla.org/network/protocol;1?name=${protocol}`]
+      .getService(Ci.nsIWebSocketProtocolHandler)
+      .newWebSocketChannel();
     chan.initLoadInfo(
       null, // aLoadingNode
       Services.scriptSecurityManager.getSystemPrincipal(),
@@ -1664,7 +1843,7 @@ export class NodeServer {
     let req = new XMLHttpRequest({ mozAnon: true, mozSystem: true });
     const serverIP =
       AppConstants.platform == "android" ? "10.0.2.2" : "127.0.0.1";
-    // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+    // eslint-disable-next-line sdl/no-insecure-url
     req.open("POST", `http://${serverIP}:${h2Port}${path}`);
     req.channel.QueryInterface(Ci.nsIHttpChannelInternal).bypassProxy = true;
     req.channel.loadFlags |= Ci.nsIChannel.LOAD_BYPASS_URL_CLASSIFIER;

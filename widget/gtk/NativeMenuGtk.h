@@ -5,10 +5,10 @@
 #ifndef mozilla_widget_NativeMenuGtk_h
 #define mozilla_widget_NativeMenuGtk_h
 
+#include "GRefPtr.h"
+#include "mozilla/EventForwards.h"
 #include "mozilla/RefCounted.h"
 #include "mozilla/widget/NativeMenu.h"
-#include "mozilla/EventForwards.h"
-#include "GRefPtr.h"
 
 struct org_kde_kwin_appmenu;
 
@@ -36,18 +36,12 @@ class NativeMenuGtk : public NativeMenu {
   MOZ_CAN_RUN_SCRIPT_BOUNDARY void ShowMenuAtPosition(
       nsIFrame* aClickedFrame, const CSSIntPoint& aPosition,
       bool aIsContextMenu) override;
-  bool Close() override;
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY bool Close() override;
   void ActivateItem(dom::Element* aItemElement, Modifiers aModifiers,
                     int16_t aButton, ErrorResult& aRv) override;
   void OpenSubmenu(dom::Element* aMenuElement) override;
   void CloseSubmenu(dom::Element* aMenuElement) override;
   RefPtr<dom::Element> Element() override;
-  void AddObserver(NativeMenu::Observer* aObserver) override {
-    mObservers.AppendElement(aObserver);
-  }
-  void RemoveObserver(NativeMenu::Observer* aObserver) override {
-    mObservers.RemoveElement(aObserver);
-  }
 
   MOZ_CAN_RUN_SCRIPT void OnUnmap();
 
@@ -56,10 +50,15 @@ class NativeMenuGtk : public NativeMenu {
 
   MOZ_CAN_RUN_SCRIPT void FireEvent(EventMessage);
 
+  // Fires the popuphiding / popuphidden events that OnUnmap() postponed.
+  // Returns false if none were pending.
+  MOZ_CAN_RUN_SCRIPT bool FinishClose();
+
   bool mPoppedUp = false;
+  // Whether OnUnmap() has run but FinishClose() has not yet.
+  bool mClosePending = false;
   RefPtr<GtkWidget> mNativeMenu;
   RefPtr<MenuModelGMenu> mMenuModel;
-  nsTArray<NativeMenu::Observer*> mObservers;
 };
 
 #ifdef MOZ_ENABLE_DBUS

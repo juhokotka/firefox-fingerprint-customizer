@@ -29,7 +29,7 @@
 }
 
 // Once a picture loads, the image replaces the fallback gradient.
-.picture-of-the-day.has-picture::before {
+.picture-of-the-day:has(.picture-of-the-day-image.loaded)::before {
   content: none;
 }
 
@@ -60,11 +60,24 @@
   min-inline-size: 0;
 }
 
-// In the populated state the toolbar (source line + "…" menu) reveals on
-// hover/focus. Legibility comes from the dark transparent overlay at the top of .picture-of-the-day-populated.
-.picture-of-the-day.has-picture .picture-of-the-day-toolbar {
-  opacity: 0;
-  transition: opacity 150ms;
+// The "…" menu sits in the toolbar over the photo's dark overlay, so force its
+// icon white like the caption — the ghost button's theme text color is dark in
+// light mode and the widget doesn't adapt to the photo. moz-button colors the icon
+// via --button-text-color-ghost, so override the token (a host `color` won't win).
+.picture-of-the-day-context-menu-button {
+  --button-text-color-ghost: var(--color-white);
+}
+
+// In the populated state the title, attribution, and "…" menu reveal on
+// hover/focus; the "New" badge stays visible so it isn't hidden with them.
+// Legibility comes from the dark transparent overlay at the top of .picture-of-the-day-populated.
+.picture-of-the-day.has-picture {
+  .picture-of-the-day-source,
+  .picture-of-the-day-attribution,
+  .picture-of-the-day-context-menu-wrapper {
+    opacity: 0;
+    transition: opacity 150ms;
+  }
 }
 
 // Eye button and empty-state message share a row at the bottom of the card.
@@ -128,7 +141,9 @@
 .picture-of-the-day:focus-within {
   .picture-of-the-day-message,
   .picture-of-the-day-description,
-  .picture-of-the-day-toolbar,
+  .picture-of-the-day-source,
+  .picture-of-the-day-attribution,
+  .picture-of-the-day-context-menu-wrapper,
   .picture-of-the-day-populated::before,
   .picture-of-the-day-populated::after {
     opacity: 1;
@@ -188,6 +203,44 @@
   block-size: 100%;
   object-fit: cover;
   z-index: 0;
+  opacity: 0;
+
+  &.loaded {
+    opacity: 1;
+  }
+}
+
+// The "New" badge sits inline before the title so the title makes room for it
+// instead of overlapping. The badge stays visible at rest; the title
+// hover-reveals (see the opacity rules above), so the badge isn't hidden with it.
+.picture-of-the-day-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-small);
+  min-inline-size: 0;
+}
+
+// The green "filled" fill only comes from moz-badge's type="new" variant, which
+// errors on the unregistered moz-badge-new2 string, so paint the pill on the host
+// instead and recolor the label/outline via the tokens the default badge reads.
+.picture-of-the-day-new-badge {
+  flex: none;
+  // Mirror the title's top padding without growing the pill (background is on the
+  // host, so padding here would fill green above the label).
+  margin-block-start: var(--space-small);
+  // The green filled look only exists on :host([type="new"]); reading the same
+  // moz-badge token onto the host reproduces it (and keeps the forced-colors
+  // override below working) without type="new"'s l10n error.
+  background-color: var(--badge-background-color-filled);
+  border-radius: var(--badge-border-radius);
+
+  --badge-padding-block: 1px;
+  --badge-padding-inline: var(--space-small);
+  --badge-background-color-filled: var(--color-green-40);
+  --badge-text-color: var(--badge-text-color-filled);
+  --badge-border-color: transparent;
+
+  text-transform: uppercase;
 }
 
 .picture-of-the-day-details {
@@ -272,14 +325,12 @@
 
 .picture-of-the-day-source {
   // The title; sits at the top-left of the card.
-  margin: 0;
+  padding-block-start: var(--space-small);
   min-inline-size: 0;
   overflow: hidden;
   // The caption always sits on the dark transparent overlay on the photo. It stays white in both light and dark mode.
   // stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens
   color: var(--color-white);
-  font-size: var(--font-size-small);
-  font-weight: var(--font-weight-bold);
   white-space: nowrap;
   text-overflow: ellipsis;
   // Legible over any image; a long localized string ellipsizes on one line.
@@ -294,6 +345,16 @@
   color: var(--color-white);
   font-size: var(--font-size-small);
   text-shadow: 0 1px 2px color-mix(in srgb, var(--color-black) 60%, transparent);
+}
+
+// Only the author ellipsizes, so the links after it always stay visible.
+.picture-of-the-day-attribution-author {
+  display: inline-block;
+  max-inline-size: 100%;
+  overflow: hidden;
+  vertical-align: bottom;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 // The source and license parts are links; underline to distinguish them from
@@ -379,21 +440,27 @@
 
   .picture-of-the-day-show-button {
     background-color: var(--button-background-color);
+    color: var(--button-text-color);
 
     &::before {
       // Masked icon: background-color is the icon fill, so it takes a foreground token.
-      // stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens
       background-color: var(--button-text-color-ghost);
     }
 
     &:hover {
       background-color: var(--button-background-color-hover);
+      color: var(--button-text-color-hover);
 
       &::before {
         // stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens
         background-color: var(--button-text-color-ghost-hover);
       }
     }
+  }
+
+  .picture-of-the-day-context-menu-button {
+    // Over the solid system canvas, let the icon use the system button color.
+    --button-text-color-ghost: revert;
   }
 
   .picture-of-the-day-source {
@@ -416,6 +483,11 @@
 
   .picture-of-the-day-details {
     color: var(--text-color);
+  }
+
+  .picture-of-the-day-new-badge {
+    // Use the system accent so the badge stays readable in High Contrast Mode.
+    --badge-background-color-filled: AccentColor;
   }
 
   .picture-of-the-day-populated::before,

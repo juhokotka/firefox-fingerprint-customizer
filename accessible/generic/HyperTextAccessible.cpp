@@ -2,42 +2,40 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "HyperTextAccessible-inl.h"
-
-#include "nsAccessibilityService.h"
-#include "nsIAccessibleTypes.h"
 #include "AccAttributes.h"
 #include "HTMLListAccessible.h"
+#include "HyperTextAccessible-inl.h"
 #include "LocalAccessible-inl.h"
 #include "Relation.h"
-#include "mozilla/a11y/Role.h"
 #include "States.h"
 #include "TextAttrs.h"
 #include "TextLeafRange.h"
 #include "TextRange.h"
 #include "TreeWalker.h"
-
-#include "nsCaret.h"
-#include "nsContentUtils.h"
-#include "nsDebug.h"
-#include "nsFocusManager.h"
-#include "nsIEditingSession.h"
-#include "nsContainerFrame.h"
-#include "nsFrameSelection.h"
-#include "nsILineIterator.h"
-#include "nsIMathMLFrame.h"
-#include "nsLayoutUtils.h"
-#include "nsRange.h"
+#include "gfxSkipChars.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/EditorBase.h"
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/ScrollContainerFrame.h"
 #include "mozilla/SelectionMovementUtils.h"
+#include "mozilla/a11y/Role.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLBRElement.h"
+#include "mozilla/dom/Range.h"
 #include "mozilla/dom/Selection.h"
-#include "gfxSkipChars.h"
+#include "nsAccessibilityService.h"
+#include "nsCaret.h"
+#include "nsContainerFrame.h"
+#include "nsContentUtils.h"
+#include "nsDebug.h"
+#include "nsFocusManager.h"
+#include "nsFrameSelection.h"
+#include "nsIAccessibleTypes.h"
+#include "nsIEditingSession.h"
+#include "nsILineIterator.h"
+#include "nsIMathMLFrame.h"
+#include "nsLayoutUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -74,6 +72,10 @@ uint64_t HyperTextAccessible::NativeState() const {
   }
 
   nsIFrame* frame = GetFrame();
+  if (!frame) {
+    frame = FindNearestAccessibleAncestorFrame();
+  }
+
   if ((states & states::EDITABLE) || (frame && frame->IsSelectable())) {
     // If the accessible is editable the layout selectable state only disables
     // mouse selection, but keyboard (shift+arrow) selection is still possible.
@@ -676,7 +678,7 @@ bool HyperTextAccessible::RemoveFromSelection(int32_t aSelectionNum) {
     return false;
   }
 
-  const RefPtr<nsRange> range{
+  const RefPtr<mozilla::dom::Range> range{
       domSel->GetRangeAt(static_cast<uint32_t>(aSelectionNum))};
   domSel->RemoveRangeAndUnselectFramesAndNotifyListeners(*range,
                                                          IgnoreErrors());
@@ -693,7 +695,7 @@ void HyperTextAccessible::ScrollSubstringToPoint(int32_t aStartOffset,
   LayoutDeviceIntPoint coords =
       nsAccUtils::ConvertToScreenCoords(aX, aY, aCoordinateType, this);
 
-  RefPtr<nsRange> domRange = nsRange::Create(mContent);
+  RefPtr<mozilla::dom::Range> domRange = mozilla::dom::Range::Create(mContent);
   TextRange range(this, this, aStartOffset, this, aEndOffset);
   if (!range.AssignDOMRange(domRange)) {
     return;

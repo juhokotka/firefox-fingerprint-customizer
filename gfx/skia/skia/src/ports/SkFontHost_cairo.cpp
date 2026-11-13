@@ -403,7 +403,19 @@ public:
         return result;
     }
 
-    void getPostScriptGlyphNames(SkString*) const override {}
+    void getPostScriptGlyphNames(SkString* dstArray) const override
+    {
+        mozilla_LockSharedFTFace(fFTFaceContext, nullptr);
+        if (FT_HAS_GLYPH_NAMES(fFTFace)) {
+            for (FT_Long gID = 0; gID < fFTFace->num_glyphs; ++gID) {
+                char glyphName[128];  // PS limit for names is 127 bytes.
+                if (!FT_Get_Glyph_Name(fFTFace, gID, glyphName, sizeof(glyphName))) {
+                    dstArray[gID] = glyphName;
+                }
+            }
+        }
+        mozilla_UnlockSharedFTFace(fFTFaceContext);
+    }
 
     void getGlyphToUnicodeMap(SkSpan<SkUnichar> dstArray) const override
     {
@@ -548,7 +560,19 @@ SkScalerContext_CairoFT::SkScalerContext_CairoFT(
     }
 
     if ((fRec.fFlags & SkScalerContext::kEmbeddedBitmapText_Flag) == 0) {
-        loadFlags |= FT_LOAD_NO_BITMAP;
+        // Freetype versions older than 2.14 fail to load a bitmap-only font w/
+        // FT_LOAD_NO_BITMAP, see bug 2058486 / freetype commit 4ef8eed11 [1].
+        // Newer freetype ignores this flag for those, so just avoid setting it.
+        //
+        // Note that usually we wouldn't even get here for a bitmap-only font
+        // (unless there's a fontconfig misconfiguration or so), but some SkPDF
+        // callers (like SkPDFStrike::Make) override it.
+        //
+        // [1]: https://gitlab.freedesktop.org/freetype/freetype/-/commit/4ef8eed11
+        const bool isBitmapOnly = fFTFace && !FT_IS_SCALABLE(fFTFace);
+        if (!isBitmapOnly) {
+            loadFlags |= FT_LOAD_NO_BITMAP;
+        }
     }
 
     // Always using FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH to get correct
@@ -701,7 +725,8 @@ SkScalerContext::GlyphMetrics SkScalerContext_CairoFT::generateMetrics(const SkG
 
         if (fFTFace->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA) {
             mx.maskFormat = SkMask::kARGB32_Format;
-        } else if (isLCD(fRec)) {
+        } else if (fFTFace->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_GRAY ||
+                   isLCD(fRec)) {
             mx.maskFormat = SkMask::kA8_Format;
         }
 

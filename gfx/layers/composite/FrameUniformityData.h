@@ -6,8 +6,8 @@
 #define mozilla_layers_FrameUniformityData_h_
 
 #include "ipc/IPCMessageUtils.h"
-#include "js/TypeDecls.h"
 #include "ipc/IPCMessageUtilsSpecializations.h"
+#include "js/TypeDecls.h"
 #include "nsTArray.h"
 
 namespace mozilla {

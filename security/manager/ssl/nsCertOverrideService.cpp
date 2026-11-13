@@ -6,12 +6,13 @@
 
 #include "NSSCertDBTrustDomain.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/Components.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/TaskQueue.h"
-#include "mozilla/glean/SecurityManagerSslMetrics.h"
 #include "mozilla/TextUtils.h"
 #include "mozilla/Tokenizer.h"
 #include "mozilla/dom/ToJSValue.h"
+#include "mozilla/glean/SecurityManagerSslMetrics.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsCRT.h"
 #include "nsILineInputStream.h"
@@ -24,13 +25,14 @@
 #ifdef ENABLE_WEBDRIVER
 #  include "nsIRemoteAgent.h"
 #endif
+#include "SSLTokensCache.h"
 #include "nsISafeOutputStream.h"
 #include "nsIX509Cert.h"
 #include "nsNSSCertificate.h"
-#include "nsNSSComponent.h"
 #include "nsNetUtil.h"
 #include "nsStreamUtils.h"
 #include "nsThreadUtils.h"
+#include "prenv.h"
 
 using namespace mozilla;
 using namespace mozilla::psm;
@@ -144,7 +146,7 @@ nsCertOverrideService::~nsCertOverrideService() = default;
 static nsCOMPtr<nsIAsyncShutdownClient> GetShutdownBarrier() {
   MOZ_ASSERT(NS_IsMainThread());
   nsCOMPtr<nsIAsyncShutdownService> svc =
-      mozilla::services::GetAsyncShutdownService();
+      mozilla::components::AsyncShutdown::Service();
   MOZ_RELEASE_ASSERT(svc);
 
   nsCOMPtr<nsIAsyncShutdownClient> barrier;
@@ -557,12 +559,7 @@ nsCertOverrideService::ClearValidityOverride(
     Write(lock);
   }
 
-  nsCOMPtr<nsINSSComponent> nss(do_GetService(PSM_COMPONENT_CONTRACTID));
-  if (nss) {
-    nss->ClearSSLExternalAndInternalSessionCache();
-  } else {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
+  mozilla::net::SSLTokensCache::ClearSessionCacheAndTokens();
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os) {
@@ -595,12 +592,7 @@ nsCertOverrideService::ClearAllOverrides() {
     Write(lock);
   }
 
-  nsCOMPtr<nsINSSComponent> nss(do_GetService(PSM_COMPONENT_CONTRACTID));
-  if (nss) {
-    nss->ClearSSLExternalAndInternalSessionCache();
-  } else {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
+  mozilla::net::SSLTokensCache::ClearSessionCacheAndTokens();
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os) {
@@ -654,17 +646,20 @@ nsCertOverrideService::
     return NS_ERROR_NOT_AVAILABLE;
   }
 
+  bool changed;
   {
     MutexAutoLock lock(mMutex);
+    changed = (mDisableAllSecurityCheck != aDisable);
     mDisableAllSecurityCheck = aDisable;
   }
 
-  nsCOMPtr<nsINSSComponent> nss(do_GetService(PSM_COMPONENT_CONTRACTID));
-  if (nss) {
-    nss->ClearSSLExternalAndInternalSessionCache();
-  } else {
-    return NS_ERROR_NOT_AVAILABLE;
+  // Only clear the TLS session cache when the disable-state actually changes;
+  // a redundant call with the same value must not evict live session tickets.
+  if (!changed) {
+    return NS_OK;
   }
+
+  mozilla::net::SSLTokensCache::ClearSessionCacheAndTokens();
 
   return NS_OK;
 }

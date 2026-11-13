@@ -110,10 +110,7 @@ export class BackupUIChild extends JSWindowActorChild {
         widget.dispatchEvent(evt);
       }
     } else if (event.type == "BackupUI:GetBackupFileInfo") {
-      let { backupFile } = event.detail;
-      this.sendAsyncMessage("GetBackupFileInfo", {
-        backupFile,
-      });
+      this.sendAsyncMessage("GetBackupFileInfo");
     } else if (event.type == "BackupUI:RestoreFromBackupFile") {
       let { backupPassword, restoreType, source } = event.detail;
       let result = await this.sendQuery("RestoreFromBackupFile", {
@@ -160,12 +157,9 @@ export class BackupUIChild extends JSWindowActorChild {
       this.sendAsyncMessage("FindBackupsInWellKnownLocations", event.detail);
     } else if (event.type == "BackupUI:ProbeDefaultBackupDir") {
       let targetNodeName = event.composedTarget.nodeName;
-      let parentDirPath = event.detail?.parentDirPath;
       let readAccessGranted = false;
       try {
-        ({ readAccessGranted } = await this.sendQuery("ProbeDefaultBackupDir", {
-          parentDirPath,
-        }));
+        ({ readAccessGranted } = await this.sendQuery("ProbeDefaultBackupDir"));
       } catch (e) {
         lazy.logConsole.error("ProbeDefaultBackupDir failed:", e);
       }

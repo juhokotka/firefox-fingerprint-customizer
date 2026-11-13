@@ -40,6 +40,7 @@ sys.path.append(
 WEBEXT_METRICS_PATH = Path("browser", "extensions", "newtab", "webext-glue", "metrics")
 sys.path.append(str(WEBEXT_METRICS_PATH.absolute()))
 import glean_utils
+from gen_runtime_metrics import fetch_version_yaml, get_new_metrics, get_new_pings
 from run_glean_parser import parse_with_options
 
 FIREFOX_L10N_REPO = "https://github.com/mozilla-l10n/firefox-l10n.git"
@@ -59,12 +60,12 @@ SUPPORTED_LOCALES_PATH = Path(WEBEXT_LOCALES_PATH, "supported-locales.json")
 # We query whattrainisitnow.com to get some key dates for both beta and
 # release in order to compute whether or not strings have been available on
 # the beta channel long enough to consider falling back (currently, that's
-# 3 weeks of time on the beta channel).
+# 2 weeks of time on the beta channel).
 BETA_SCHEDULE_QUERY = "https://whattrainisitnow.com/api/release/schedule/?version=beta"
 RELEASE_SCHEDULE_QUERY = (
     "https://whattrainisitnow.com/api/release/schedule/?version=release"
 )
-BETA_FALLBACK_THRESHOLD = timedelta(weeks=3)
+BETA_FALLBACK_THRESHOLD = timedelta(weeks=2)
 TASKCLUSTER_ROOT_URL = "https://firefox-ci-tc.services.mozilla.com"
 BEETMOVER_TASK_NAME = "beetmover-newtab"
 SIGNING_TASK_NAME = "release-signing-newtab"
@@ -402,8 +403,8 @@ def display_report(report, details=None):
 
     # These two dates will be used later on when we start calculating which
     # untranslated strings should be considered "pending" (we're still waiting
-    # for them to be on beta for at least 3 weeks), and which should be
-    # considered "missing" (they've been on beta for more than 3 weeks and
+    # for them to be on beta for at least 2 weeks), and which should be
+    # considered "missing" (they've been on beta for more than 2 weeks and
     # still aren't translated).
 
     meta = report["meta"]
@@ -584,17 +585,10 @@ def channel_metrics_diff(command_context, channel):
 
         output_filename = f"runtime-metrics-{firefox_version}.json"
 
-        # Base URL for fetching YAML files from GitHub
-        GITHUB_URL_TEMPLATE = "https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/{branch}/browser/components/newtab/{yaml}"
-
         main_metrics_yaml = yaml.safe_load(open(METRICS_LOCAL_YAML_PATH))
-        compare_metrics_yaml = fetch_yaml(
-            GITHUB_URL_TEMPLATE.format(branch=channel, yaml="metrics.yaml")
-        )
+        compare_metrics_yaml = fetch_version_yaml(firefox_version, "metrics.yaml")
         main_pings_yaml = yaml.safe_load(open(PINGS_LOCAL_YAML_PATH))
-        compare_pings_yaml = fetch_yaml(
-            GITHUB_URL_TEMPLATE.format(branch=channel, yaml="pings.yaml")
-        )
+        compare_pings_yaml = fetch_version_yaml(firefox_version, "pings.yaml")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir_path = Path(temp_dir)
@@ -623,29 +617,20 @@ def channel_metrics_diff(command_context, channel):
             glean_utils.output_file_with_key(all_objs, output_fd, options)
             Path(output_file_path).write_text(output_fd.getvalue())
 
-            # 7. Print warnings for any metrics with changed types or new extra_keys
-            changed_metrics = check_existing_metrics(
+            # 7. Print warnings for any metrics with changed types
+            changed_metrics = check_metric_type_changes(
                 main_metrics_yaml, compare_metrics_yaml
             )
             if changed_metrics:
                 print("\nWARNING: Found existing metrics with updated properties:")
                 for category, metrics in changed_metrics.items():
                     print(f"\nCategory: {category}")
-                    for metric, changes in metrics.items():
+                    for metric, change in metrics.items():
                         print(f"  Metric: {metric}")
-                        if "type_change" in changes:
-                            print(
-                                f"      Old type: {changes['type_change']['old_type']}"
-                            )
-                            print(
-                                f"      New type: {changes['type_change']['new_type']}"
-                            )
-                        if "new_extra_keys" in changes:
-                            print(
-                                f"    New extra keys: {', '.join(changes['new_extra_keys'])}"
-                            )
+                        print(f"      Old type: {change['old_type']}")
+                        print(f"      New type: {change['new_type']}")
                 print(
-                    "\nPlease review above warning carefully as existing metrics update cannot be dynamically registered"
+                    "\nPlease review above warning carefully as a type update to existing metrics cannot be dynamically registered"
                 )
 
     except requests.RequestException as e:
@@ -657,12 +642,6 @@ def channel_metrics_diff(command_context, channel):
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         return 1
-
-
-def fetch_yaml(url):
-    response = requests.get(url)
-    response.raise_for_status()
-    return yaml.safe_load(response.text)
 
 
 def process_yaml_file(main_yaml, compare_yaml, yaml_type: YamlType, temp_dir_path):
@@ -687,7 +666,6 @@ def process_yaml_file(main_yaml, compare_yaml, yaml_type: YamlType, temp_dir_pat
     # Remove $tags if present to avoid invalid tag lint error
     if "$tags" in new_yaml:
         del new_yaml["$tags"]
-    new_yaml["no_lint"] = ["COMMON_PREFIX"]
 
     yaml_content = yaml.dump(new_yaml, sort_keys=False)
     print(yaml_content)
@@ -700,64 +678,8 @@ def process_yaml_file(main_yaml, compare_yaml, yaml_type: YamlType, temp_dir_pat
     return file_path
 
 
-def get_new_metrics(main_yaml, compare_yaml):
-    """Compare main and comparison YAML files to find new metrics.
-
-    This function compares the metrics defined in the main branch against those in the comparison branch
-    (beta or release) and returns only the metrics that are new in the main branch.
-
-    Args:
-        main_yaml: The YAML content from the main branch containing metric definitions
-        compare_yaml: The YAML content from the comparison branch (beta/release) containing metric definitions
-
-    Returns:
-        dict: A dictionary containing only the metrics that are new in the main branch
-    """
-    new_metrics_yaml = {}
-    for category in main_yaml:
-        if category.startswith("$"):
-            new_metrics_yaml[category] = main_yaml[category]
-            continue
-        if category not in compare_yaml:
-            new_metrics_yaml[category] = main_yaml[category]
-            continue
-        new_metrics = {}
-        for metric in main_yaml[category]:
-            if metric not in compare_yaml[category]:
-                new_metrics[metric] = main_yaml[category][metric]
-        if new_metrics:
-            new_metrics_yaml[category] = new_metrics
-    return new_metrics_yaml
-
-
-def get_new_pings(main_yaml, compare_yaml):
-    """Compare main and comparison YAML files to find new pings.
-
-    This function compares the pings defined in the main branch against those in the comparison branch
-    (beta or release) and returns only the pings that are new in the main branch.
-
-    Args:
-        main_yaml: The YAML content from the main branch containing ping definitions
-        compare_yaml: The YAML content from the comparison branch (beta/release) containing ping definitions
-
-    Returns:
-        dict: A dictionary containing only the pings that are new in the main branch
-    """
-    new_pings_yaml = {}
-    for ping in main_yaml:
-        if ping.startswith("$"):
-            new_pings_yaml[ping] = main_yaml[ping]
-            continue
-        if ping not in compare_yaml:
-            new_pings_yaml[ping] = main_yaml[ping]
-            continue
-    return new_pings_yaml
-
-
-def check_existing_metrics(main_yaml, compare_yaml):
-    """Compare metrics that exist in both YAML files for:
-    1. Changes in type property values
-    2. New extra_keys added to event type metrics
+def check_metric_type_changes(main_yaml, compare_yaml):
+    """Compare metrics that exist in both YAML files for changes in type property values.
 
     Args:
         main_yaml: The main YAML file containing metrics
@@ -765,9 +687,7 @@ def check_existing_metrics(main_yaml, compare_yaml):
 
     Returns:
         A dictionary containing metrics with changes, organized by category.
-            Each entry contains either:
-            - type_change: old and new type values
-            - new_extra_keys: list of newly added extra keys for event metrics
+            Each entry contains old_type and new_type values
     """
     changed_metrics = {}
 
@@ -791,30 +711,12 @@ def check_existing_metrics(main_yaml, compare_yaml):
                 main_type = main_metric.get("type")
                 compare_type = compare_metric.get("type")
 
-                changes = {}
-
                 # If types are different, record the change
                 if main_type != compare_type:
-                    changes["type_change"] = {
+                    category_changes[metric] = {
                         "old_type": compare_type,
                         "new_type": main_type,
                     }
-
-                # Check for changes in extra_keys for event metrics
-                if main_type == "event" and "extra_keys" in main_metric:
-                    main_extra_keys = set(main_metric["extra_keys"].keys())
-                    compare_extra_keys = set(
-                        compare_metric.get("extra_keys", {}).keys()
-                    )
-
-                    # Find new extra keys
-                    new_extra_keys = main_extra_keys - compare_extra_keys
-                    if new_extra_keys:
-                        changes["new_extra_keys"] = list(new_extra_keys)
-
-                # Only add the metric if there were any changes
-                if changes:
-                    category_changes[metric] = changes
 
         # Only add the category if there were changes
         if category_changes:
@@ -827,8 +729,8 @@ def check_existing_metrics(main_yaml, compare_yaml):
     "newtab",
     "trainhop-recipe",
     description="""Generates the appropriate trainhop recipe for the Nimbus
-newtabTrainhopAddon feature, given a Taskcluster shipping task group URL from
-ship-it""",
+newtabTrainhopAddonDeployment feature, given a Taskcluster shipping task group
+URL from ship-it""",
 )
 @CommandArgument(
     "taskcluster_group_url", help="The shipping Taskcluster task group URL from ship-it"

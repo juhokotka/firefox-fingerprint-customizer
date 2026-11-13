@@ -10,7 +10,6 @@
 #include "TextEventDispatcher.h"
 #include "TextEvents.h"
 #include "TouchEvents.h"
-
 #include "mozilla/EventForwards.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/Maybe.h"
@@ -34,10 +33,10 @@
 #include "nsPrintfCString.h"
 
 #if defined(XP_WIN)
+#  include "WinUtils.h"
+#  include "npapi.h"
 #  include "windef.h"
 #  include "winnetwk.h"
-#  include "npapi.h"
-#  include "WinUtils.h"
 #endif  // #if defined (XP_WIN)
 
 #if defined(MOZ_WIDGET_GTK) || defined(XP_MACOSX)
@@ -56,7 +55,7 @@ const char* ToChar(EventMessage aEventMessage) {
   case aMessage:                   \
     return #aMessage;
 
-#include "mozilla/EventMessageList.h"
+#include "mozilla/EventMessageList.inc"
 
 #undef NS_EVENT_MESSAGE
     default:
@@ -112,7 +111,6 @@ bool IsForbiddenDispatchingToNonElementContent(EventMessage aMessage) {
     case eMouseLeave:
     case eMouseTouchDrag:
     case eMouseLongTap:
-    case eMouseExploreByTouch:
     // Pointer event target should be an Element node
     case ePointerClick:
     case ePointerAuxClick:
@@ -209,7 +207,6 @@ bool IsValidMessageForIPC(EventMessage aMessage, EventClassID aClassID) {
     case eMouseLeave:
     case eMouseTouchDrag:
     case eMouseLongTap:
-    case eMouseExploreByTouch:
       return aClassID == eMouseEventClass;
     case eWheel:
     case eWheelOperationStart:
@@ -563,7 +560,6 @@ bool WidgetEvent::CanBeSentToRemoteProcess() const {
     case eMouseDown:
     case eMouseUp:
     case eMouseMove:
-    case eMouseExploreByTouch:
     case eContextMenu:
     case eMouseEnterIntoWidget:
     case eMouseExitFromWidget:

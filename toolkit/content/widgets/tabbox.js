@@ -16,6 +16,7 @@
     DeferredTask: "resource://gre/modules/DeferredTask.sys.mjs",
     KeyboardLockUtils: "resource://gre/modules/KeyboardLockUtils.sys.mjs",
     ShortcutUtils: "resource://gre/modules/ShortcutUtils.sys.mjs",
+    XPCOMUtils: "resource://gre/modules/XPCOMUtils.sys.mjs",
   });
 
   const DIRECTION_BACKWARD = -1;
@@ -318,6 +319,9 @@
         () => this.updateSplitterAriaAttributes(),
         0
       );
+      // Only toolkit tabs implement this; tabbrowser uses the linkedPanel
+      // setter instead.
+      this.tabbox?.tabs?.updatePanelLabels?.();
     }
 
     disconnectedCallback() {
@@ -343,11 +347,37 @@
       Glean.splitview.resize.record({ width: widthPercentage });
     }
 
+    /**
+     * Reflect the column of the currently selected split view panel onto the
+     * root element, so that chrome outside of the tabbox (e.g. the sidebar
+     * splitters) can react to it without needing an expensive :has() selector.
+     */
+    #updateSelectedSplitViewColumn() {
+      const panel = this.selectedPanel;
+      const column =
+        this.hasAttribute("splitview") &&
+        panel?.classList.contains("split-view-panel")
+          ? panel.getAttribute("column")
+          : null;
+      const root = this.ownerDocument.documentElement;
+      if (column === null) {
+        root.removeAttribute("splitview-selected-column");
+      } else {
+        root.setAttribute("splitview-selected-column", column);
+      }
+    }
+
+    updateSelectedIndex(...args) {
+      super.updateSelectedIndex(...args);
+      this.#updateSelectedSplitViewColumn();
+    }
+
     handleEvent(e) {
-      const browser =
-        e.currentTarget.tagName === "browser"
-          ? e.currentTarget
-          : e.currentTarget.querySelector("browser");
+      const validBrowserTargetSelector =
+        "browser:not(.devtools-toolbox-iframe)";
+      const browser = e.currentTarget.matches(validBrowserTargetSelector)
+        ? e.currentTarget
+        : e.currentTarget.querySelector(validBrowserTargetSelector);
       let elToFocus = null;
       switch (e.type) {
         case "click":
@@ -457,7 +487,7 @@
     }
 
     /**
-     * nsIDOMXULRelatedElement
+     * Get the tab associated with the given panel.
      */
     getRelatedElement(aTabPanelElm) {
       if (!aTabPanelElm) {
@@ -505,7 +535,9 @@
         const panelEl = document.getElementById(panel);
         panelEl?.classList.add("split-view-panel");
         panelEl?.setAttribute("column", i);
-        const browser = panelEl?.querySelector("browser");
+        const browser = panelEl?.querySelector(
+          "browser:not(.devtools-toolbox-iframe)"
+        );
         const browserContainer = panelEl?.querySelector(".browserContainer");
         for (const eventType of MozTabpanels.#SPLIT_VIEW_PANEL_EVENTS) {
           browserContainer?.addEventListener(eventType, this);
@@ -532,7 +564,9 @@
         panelEl?.classList.remove("split-view-panel");
         panelEl?.classList.remove("split-view-panel-active");
         panelEl?.removeAttribute("column");
-        const browser = panelEl?.querySelector("browser");
+        const browser = panelEl?.querySelector(
+          "browser:not(.devtools-toolbox-iframe)"
+        );
         const browserContainer = panelEl?.querySelector(".browserContainer");
 
         for (const eventType of MozTabpanels.#SPLIT_VIEW_PANEL_EVENTS) {
@@ -604,14 +638,12 @@
       // Ensure that selected index stays up to date, in case the splitter
       // offsets it.
       this.selectedPanel = selectedPanel;
+      this.#updateSelectedSplitViewColumn();
       // Update aria attributes
       this.#splitterAriaUpdateTask.arm();
     }
   }
 
-  MozXULElement.implementCustomInterface(MozTabpanels, [
-    Ci.nsIDOMXULRelatedElement,
-  ]);
   customElements.define("tabpanels", MozTabpanels);
 
   MozElements.MozTab = class MozTab extends MozElements.BaseText {
@@ -794,6 +826,26 @@
 
     set linkedPanel(val) {
       this.setAttribute("linkedpanel", val);
+      // The panel might not be in the document yet; e.g. tabbrowser sets
+      // linkedPanel before inserting the panel. In that case, the panel must be
+      // inserted before the current task completes.
+      if (val && !this.#labelLinkedPanel()) {
+        queueMicrotask(() => this.#labelLinkedPanel());
+      }
+    }
+
+    /**
+     * Label the linked panel with this tab for accessibility.
+     *
+     * @returns {boolean} Whether the linked panel was found.
+     */
+    #labelLinkedPanel() {
+      let panel = this.ownerDocument.getElementById(this.linkedPanel);
+      if (!panel) {
+        return false;
+      }
+      panel.ariaLabelledByElements = [this];
+      return true;
     }
 
     get linkedPanel() {
@@ -809,19 +861,43 @@
   const ARIA_FOCUSED_CLASS_NAME = "tablist-keyboard-focus";
 
   class TabsBase extends MozElements.BaseControl {
+    #scrollHandler = event => {
+      if (event.detail > 0) {
+        this.advanceSelectedTab(DIRECTION_FORWARD, false, event);
+      } else {
+        this.advanceSelectedTab(DIRECTION_BACKWARD, false, event);
+      }
+      // Preventing the default action of the legacy event also prevents it for
+      // the wheel event it came from, so the tabs don't scroll as well.
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
     constructor() {
       super();
 
-      this.addEventListener("DOMMouseScroll", event => {
-        if (Services.prefs.getBoolPref("toolkit.tabbox.switchByScrolling")) {
-          if (event.detail > 0) {
-            this.advanceSelectedTab(DIRECTION_FORWARD, false, event);
-          } else {
-            this.advanceSelectedTab(DIRECTION_BACKWARD, false, event);
-          }
-          event.stopPropagation();
-        }
-      });
+      imports.XPCOMUtils.defineLazyPreferenceGetter(
+        this,
+        "switchByScrolling",
+        "toolkit.tabbox.switchByScrolling",
+        false,
+        () => this.updateWheelListeners()
+      );
+      this.updateWheelListeners();
+    }
+
+    /**
+     * Wheel-type listeners are registered only while switching tabs by scrolling
+     * is enabled, because they are APZ-aware: registering them unconditionally
+     * would make APZ wait for the main thread before it can scroll. A subclass
+     * that has wheel-type listeners of its own extends this.
+     */
+    updateWheelListeners() {
+      if (this.switchByScrolling) {
+        this.addEventListener("DOMMouseScroll", this.#scrollHandler);
+      } else {
+        this.removeEventListener("DOMMouseScroll", this.#scrollHandler);
+      }
     }
 
     // to be called from derived class connectedCallback
@@ -1010,7 +1086,7 @@
     }
 
     /**
-     * nsIDOMXULRelatedElement
+     * Get the panel associated with the given tab.
      */
     getRelatedElement(aTabElm) {
       if (!aTabElm) {
@@ -1228,12 +1304,13 @@
 
   MozXULElement.implementCustomInterface(TabsBase, [
     Ci.nsIDOMXULSelectControlElement,
-    Ci.nsIDOMXULRelatedElement,
   ]);
 
   MozElements.TabsBase = TabsBase;
 
   class MozTabs extends TabsBase {
+    #panelLabelsObserver = new MutationObserver(() => this.updatePanelLabels());
+
     connectedCallback() {
       if (this.delayConnectedCallback()) {
         return;
@@ -1250,6 +1327,38 @@
       this.insertBefore(end, null);
 
       this.baseConnect();
+      this.updatePanelLabels();
+    }
+
+    disconnectedCallback() {
+      this.#panelLabelsObserver.disconnect();
+    }
+
+    /**
+     * Label each panel with its associated tab for accessibility. This is
+     * needed for panels which are associated by index or by a linkedpanel
+     * attribute specified in markup, rather than via the linkedPanel setter.
+     * It is called again whenever tabs or panels are added or removed.
+     */
+    updatePanelLabels() {
+      if (!this.isConnectedAndReady) {
+        return;
+      }
+      // The tabpanels might have changed since the last call, so start observing
+      // afresh.
+      this.#panelLabelsObserver.disconnect();
+      this.#panelLabelsObserver.observe(this, { childList: true });
+      let tabpanels = this.tabbox?.tabpanels;
+      if (!tabpanels) {
+        return;
+      }
+      this.#panelLabelsObserver.observe(tabpanels, { childList: true });
+      for (let tab of this.allTabs) {
+        let panel = this.getRelatedElement(tab);
+        if (panel && panel.ariaLabelledByElements?.[0] != tab) {
+          panel.ariaLabelledByElements = [tab];
+        }
+      }
     }
 
     // Accessor for tabs.  This element has spacers as the first and

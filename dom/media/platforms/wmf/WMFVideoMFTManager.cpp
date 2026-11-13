@@ -325,9 +325,13 @@ MediaResult WMFVideoMFTManager::InitInternal() {
         uint32_t(media::MediaDecoderBackend::WMFSoftware));
   }
 
-  // Note that some HDR videos are 8bit, and end up decoding to NV12/YV12,
-  // rather than the more obvious P010, and the decoder won't let us force P010.
-  // See https://bugzilla.mozilla.org/show_bug.cgi?id=2008887
+  // Note that some HDR videos are 8bit, and end up decoding to NV12/YV12 rather
+  // than the more common HDR formats (P010/P012/P016 which are all identical
+  // layouts in memory) which is uncommon but fine, whether it is HDR is a
+  // decision we make based on transfer function rather than format.
+  //
+  // See https://bugzilla.mozilla.org/show_bug.cgi?id=2008887 for samples of
+  // this kind of video.
   const GUID& outputSubType = GetOutputSubtype();
   LOG("Created a video decoder, useDxva={}, streamType={}, outputSubType={}, "
       "isHDR={}",
@@ -705,11 +709,25 @@ WMFVideoMFTManager::CreateBasicVideoFrame(IMFSample* aSample,
     // Store YCbCr to 3 ID3D11Texture2Ds
     image = new IMFYCbCrImage(buffer, twoDBuffer, mKnowsCompositor,
                               mImageContainer);
-    VideoData::SetVideoDataToImage(image, mVideoInfo, b, pictureRegion, false);
+    if (MediaResult r = VideoData::SetVideoDataToImage(image, mVideoInfo, b,
+                                                       pictureRegion, false);
+        NS_FAILED(r)) {
+      LOG("CreateBasicVideoFrame: failed to set video data to image (D3D11 "
+          "texture path): {}",
+          r.Description().get());
+      return E_FAIL;
+    }
   } else {
     // Store YCbCr to shmem
     image = mImageContainer->CreatePlanarYCbCrImage();
-    VideoData::SetVideoDataToImage(image, mVideoInfo, b, pictureRegion, true);
+    if (MediaResult r = VideoData::SetVideoDataToImage(image, mVideoInfo, b,
+                                                       pictureRegion, true);
+        NS_FAILED(r)) {
+      LOG("CreateBasicVideoFrame: failed to set video data to image (shmem "
+          "path): {}",
+          r.Description().get());
+      return E_FAIL;
+    }
   }
 
   RefPtr<VideoData> v = VideoData::CreateFromImage(

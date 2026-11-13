@@ -5,10 +5,11 @@
 #ifndef WidgetUtilsGtk_h_
 #define WidgetUtilsGtk_h_
 
+#include <stdint.h>
+
+#include "mozilla/MozPromise.h"
 #include "nsString.h"
 #include "nsTArray.h"
-#include "mozilla/MozPromise.h"
-#include <stdint.h>
 
 typedef struct _GdkDisplay GdkDisplay;
 typedef struct _GdkDevice GdkDevice;
@@ -60,9 +61,11 @@ enum class PortalKind {
   FilePicker,
   MimeHandler,
   NativeMessaging,
+  NativeMessagingProxy,
   Settings,
   Location,
   OpenUri,
+  Notification,
 };
 bool ShouldUsePortal(PortalKind);
 

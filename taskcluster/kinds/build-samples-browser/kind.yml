@@ -35,6 +35,7 @@ task-defaults:
             - target.maven.zip
     include-coverage: true
     run:
+        clone-with: hg
         pre-gradlew:
             - ["cd", "mobile/android/android-components"]
         using: gradlew

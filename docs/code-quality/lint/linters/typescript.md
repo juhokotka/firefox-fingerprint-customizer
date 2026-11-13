@@ -1,4 +1,4 @@
-# TypeScript
+# TypeScript linter
 
 [TypeScript](https://www.typescriptlang.org/) is being used as a type checker for JavaScript.
 
@@ -30,6 +30,10 @@ See the [Usage guide] for more options.
 
 ## Common Issues and How To Solve Them
 
+### The TypeScript type information needs updating due to source code changes
+
+See [Updating Gecko Type Definitions](../../typescript/updatingTypes.md)
+
 ### This code should neither be linted nor formatted
 
 - If it is a third-party piece of code, please add it to {searchfox}`ThirdPartyPaths.txt <tools/rewriting/ThirdPartyPaths.txt>`.
@@ -58,5 +62,5 @@ possible. If uncertain check with the appropriate team.
 
 For test harness issues, file bugs in Developer Infrastructure :: Lint and Formatting.
 
-[this page]: ../../typescript/index.html
-[usage guide]: ../usage.html
+[this page]: ../../typescript/index.md
+[usage guide]: ../usage.md

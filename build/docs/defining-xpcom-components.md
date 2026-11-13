@@ -3,7 +3,7 @@
 # Defining XPCOM Components
 
 This document explains how to write a {code}`components.conf` file. For
-documentation on the idl format see {ref}`XPIDL`. For a tutorial on writing
+documentation on the idl format see {doc}`/xpcom/xpidl`. For a tutorial on writing
 a new XPCOM interface, see
 {ref}`writing-xpcom-interface`.
 
@@ -18,7 +18,7 @@ Manifest files are Python data files registered in `moz.build` files in a
 
 ```python
 XPCOM_MANIFESTS += [
-  'components.conf',
+    "components.conf",
 ]
 ```
 
@@ -27,10 +27,10 @@ The files may define any of the following special variables:
 ```python
 # Optional: A function to be called once, the first time any component
 # listed in this manifest is instantiated.
-InitFunc = 'nsInitFooModule'
+InitFunc = "nsInitFooModule"
 # Optional: A function to be called at shutdown if any component listed in
 # this manifest has been instantiated.
-UnloadFunc = 'nsUnloadFooModule'
+UnloadFunc = "nsUnloadFooModule"
 
 # Optional: A processing priority, to determine how early or late the
 # manifest is processed. Defaults to 50. In practice, this mainly affects
@@ -46,8 +46,8 @@ Priority = 10
 #
 # Any relative header path must be exported.
 Headers = [
-    '/foo/nsFooModule.h',
-    'nsFoo.h',
+    "/foo/nsFooModule.h",
+    "nsFoo.h",
 ]
 
 # A list of component classes provided by this module.
@@ -60,9 +60,9 @@ Classes = [
 
 # A list of category registrations
 Categories = {
-    'category': {
-        'name': 'value',
-        'other-name': ('value', ProcessSelector.MAIN_PROCESS_ONLY),
+    "category": {
+        "name": "value",
+        "other-name": ("value", ProcessSelector.MAIN_PROCESS_ONLY),
         # ...
     },
     # ...
@@ -217,7 +217,6 @@ depending on how old the code that uses them is:
 This simplest way to define a component is to include a header defining a
 concrete type, and let the component manager call that class's constructor:
 
-% rstcheck: ignore-languages=python
 
 ```python
 'type': 'mozilla::foo::Foo',
@@ -236,7 +235,6 @@ returns the same instance on subsequent calls. This requires declaring the
 constructor in an included header, and implementing it in a separate source
 file:
 
-% rstcheck: ignore-languages=python
 
 ```python
 'type': 'mozilla::foo::Foo',
@@ -266,7 +264,6 @@ already_AddRefed<Foo> Foo::GetSingleton() {
 For types whose headers can't easily be included, constructors can be defined
 using a template specialization on an incomplete type:
 
-% rstcheck: ignore-languages=python
 
 ```python
 'type': 'mozilla::foo::Foo',
@@ -291,7 +288,6 @@ reader.
 Classes which need define category entries with the same value as their
 contract ID may do so using the following:
 
-% rstcheck: ignore-languages=python
 
 ```python
 'contract_ids': ['@mozilla.org/foo;1'],
@@ -312,8 +308,8 @@ be specified by adding to a global `Categories` dictionary:
 
 ```python
 Categories = {
-    'update-timer': {
-        'nsUpdateService': '@mozilla.org/updates/update-service;1,getService,background-update-timer,app.update.interval,43200,86400',
+    "update-timer": {
+        "nsUpdateService": "@mozilla.org/updates/update-service;1,getService,background-update-timer,app.update.interval,43200,86400",
     }
 }
 ```
@@ -323,8 +319,8 @@ value:
 
 ```python
 Categories = {
-    '@mozilla.org/streamconv;1': {
-        '?from=gzip&to=uncompressed': ('', ProcessSelector.ALLOW_IN_SOCKET_PROCESS),
+    "@mozilla.org/streamconv;1": {
+        "?from=gzip&to=uncompressed": ("", ProcessSelector.ALLOW_IN_SOCKET_PROCESS),
     }
 }
 ```

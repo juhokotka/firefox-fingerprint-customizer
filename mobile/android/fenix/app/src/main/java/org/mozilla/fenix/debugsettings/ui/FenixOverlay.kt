@@ -29,11 +29,16 @@ import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.concept.integrity.IntegrityClient
 import mozilla.components.concept.storage.CreditCardsAddressesStorage
 import mozilla.components.concept.storage.LoginsStorage
+import mozilla.components.feature.ipprotection.store.IPProtectionStore
+import mozilla.components.feature.listentopage.ListenState
+import mozilla.components.feature.listentopage.ListenStore
+import mozilla.components.feature.listentopage.listenReducer
+import mozilla.components.feature.tabgroups.storage.data.TabGroup
+import mozilla.components.feature.tabgroups.storage.data.TabGroupData
+import mozilla.components.feature.tabgroups.storage.repository.TabGroupRepository
 import mozilla.telemetry.glean.Glean
 import org.mozilla.fenix.R
-import org.mozilla.fenix.components.AppStore
-import org.mozilla.fenix.components.ClientUUID
-import org.mozilla.fenix.components.appstate.AppAction
+import org.mozilla.fenix.components.ClientUuid
 import org.mozilla.fenix.components.components
 import org.mozilla.fenix.debugsettings.addresses.AddressesDebugRegionRepository
 import org.mozilla.fenix.debugsettings.addresses.AddressesTools
@@ -48,7 +53,8 @@ import org.mozilla.fenix.debugsettings.gleandebugtools.DefaultGleanDebugToolsSto
 import org.mozilla.fenix.debugsettings.gleandebugtools.GleanDebugToolsMiddleware
 import org.mozilla.fenix.debugsettings.gleandebugtools.GleanDebugToolsState
 import org.mozilla.fenix.debugsettings.gleandebugtools.GleanDebugToolsStore
-import org.mozilla.fenix.debugsettings.integrity.FakeClientUUID
+import org.mozilla.fenix.debugsettings.integrity.FakeClientUuid
+import org.mozilla.fenix.debugsettings.listentopage.ListenToPageTools
 import org.mozilla.fenix.debugsettings.logins.FakeLoginsStorage
 import org.mozilla.fenix.debugsettings.logins.LoginsTools
 import org.mozilla.fenix.debugsettings.navigation.DebugDrawerRoute
@@ -59,9 +65,6 @@ import org.mozilla.fenix.debugsettings.store.DebugDrawerTelemetryMiddleware
 import org.mozilla.fenix.debugsettings.store.DrawerStatus
 import org.mozilla.fenix.debugsettings.tabs.TabGroupTools
 import org.mozilla.fenix.ext.components
-import org.mozilla.fenix.tabgroups.storage.data.TabGroup
-import org.mozilla.fenix.tabgroups.storage.data.TabGroupData
-import org.mozilla.fenix.tabgroups.storage.repository.TabGroupRepository
 import org.mozilla.fenix.theme.DefaultThemeProvider
 import org.mozilla.fenix.theme.FirefoxTheme
 
@@ -72,6 +75,7 @@ import org.mozilla.fenix.theme.FirefoxTheme
  * @param loginsStorage [LoginsStorage] used to access logins for [LoginsTools].
  * @param inactiveTabsEnabled Whether the inactive tabs feature is enabled.
  * @param tabGroupRepository [TabGroupRepository] used to access and modify tab groups for [TabGroupTools].
+ * @param listenStore Store for [ListenToPageTools]
  */
 @Composable
 fun FenixOverlay(
@@ -79,48 +83,55 @@ fun FenixOverlay(
     loginsStorage: LoginsStorage,
     inactiveTabsEnabled: Boolean,
     tabGroupRepository: TabGroupRepository,
+    listenStore: ListenStore,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
     FenixOverlay(
         browserStore = browserStore,
-        appStore = context.components.appStore,
-        cfrToolsStore = CfrToolsStore(
-            middlewares = listOf(
-                CfrToolsPreferencesMiddleware(
-                    cfrPreferencesRepository = DefaultCfrPreferencesRepository(
-                        context = LocalContext.current,
-                        settings = components.settings,
-                        lifecycleOwner = lifecycleOwner,
-                        coroutineScope = lifecycleOwner.lifecycleScope,
+        cfrToolsStore =
+            CfrToolsStore(
+                middlewares =
+                    listOf(
+                        CfrToolsPreferencesMiddleware(
+                            cfrPreferencesRepository =
+                                DefaultCfrPreferencesRepository(
+                                    context = LocalContext.current,
+                                    settings = components.settings,
+                                    lifecycleOwner = lifecycleOwner,
+                                    coroutineScope = lifecycleOwner.lifecycleScope,
+                                ),
+                            coroutineScope = lifecycleOwner.lifecycleScope,
+                        )
+                    )
+            ),
+        gleanDebugToolsStore =
+            GleanDebugToolsStore(
+                initialState =
+                    GleanDebugToolsState(
+                        logPingsToConsoleEnabled = Glean.getLogPings(),
+                        debugViewTag = Glean.getDebugViewTag() ?: "",
                     ),
-                    coroutineScope = lifecycleOwner.lifecycleScope,
-                ),
+                middlewares =
+                    listOf(
+                        GleanDebugToolsMiddleware(
+                            gleanDebugToolsStorage = DefaultGleanDebugToolsStorage(context.components.settings),
+                            clipboardHandler = context.components.clipboardHandler,
+                            openDebugView = { debugViewLink ->
+                                val intent = Intent(Intent.ACTION_VIEW)
+                                intent.data = debugViewLink.toUri()
+                                context.startActivity(intent)
+                            },
+                            showToast =
+                                stringResource(R.string.glean_debug_tools_send_ping_toast_message).let { template ->
+                                    { pingType: String ->
+                                        Toast.makeText(context, template.format(pingType), Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                        )
+                    ),
             ),
-        ),
-        gleanDebugToolsStore = GleanDebugToolsStore(
-            initialState = GleanDebugToolsState(
-                logPingsToConsoleEnabled = Glean.getLogPings(),
-                debugViewTag = Glean.getDebugViewTag() ?: "",
-            ),
-            middlewares = listOf(
-                GleanDebugToolsMiddleware(
-                    gleanDebugToolsStorage = DefaultGleanDebugToolsStorage(),
-                    clipboardHandler = context.components.clipboardHandler,
-                    openDebugView = { debugViewLink ->
-                        val intent = Intent(Intent.ACTION_VIEW)
-                        intent.data = debugViewLink.toUri()
-                        context.startActivity(intent)
-                    },
-                    showToast = stringResource(R.string.glean_debug_tools_send_ping_toast_message).let { template ->
-                        { pingType: String ->
-                            Toast.makeText(context, template.format(pingType), Toast.LENGTH_LONG).show()
-                        }
-                    },
-                ),
-            ),
-        ),
         loginsStorage = loginsStorage,
         addressesDebugRegionRepository =
             context.components.strictMode.allowViolation(StrictMode::allowThreadDiskReads) {
@@ -131,13 +142,14 @@ fun FenixOverlay(
         clientUUID = context.components.clientUUID,
         integrityClient = context.components.integrityClient,
         tabGroupRepository = tabGroupRepository,
+        lazyIPProtectionStore = remember { lazy { context.components.ipProtection.store } },
+        listenStore = listenStore,
     )
 }
 
 /**
  * Overlay for presenting Fenix-wide debugging content.
  *
- * @param appStore [AppStore] used to dispatch [AppAction] actions.
  * @param browserStore [BrowserStore] used to access [BrowserState].
  * @param cfrToolsStore [CfrToolsStore] used to access [CfrToolsState].
  * @param gleanDebugToolsStore [GleanDebugToolsStore] used to access [GleanDebugToolsState].
@@ -148,34 +160,38 @@ fun FenixOverlay(
  * @param integrityClient used to test an [IntegrityClient].
  * @param tabGroupRepository [TabGroupRepository] used to access and modify tab groups for [TabGroupTools].
  * @param inactiveTabsEnabled Whether the inactive tabs feature is enabled.
+ * @param lazyIPProtectionStore [IPProtectionStore] used by the IP protection location debug tools.
+ * @param listenStore Store for [ListenToPageTools]
  */
 @Suppress("LongParameterList")
 @Composable
 private fun FenixOverlay(
-    appStore: AppStore,
     browserStore: BrowserStore,
     cfrToolsStore: CfrToolsStore,
     gleanDebugToolsStore: GleanDebugToolsStore,
     loginsStorage: LoginsStorage,
     addressesDebugRegionRepository: AddressesDebugRegionRepository,
     creditCardsAddressesStorage: CreditCardsAddressesStorage,
-    clientUUID: ClientUUID,
+    clientUUID: ClientUuid,
     integrityClient: IntegrityClient,
     tabGroupRepository: TabGroupRepository,
     inactiveTabsEnabled: Boolean,
+    lazyIPProtectionStore: Lazy<IPProtectionStore>,
+    listenStore: ListenStore,
 ) {
     val navController = rememberNavController()
     val coroutineScope = rememberCoroutineScope()
 
     val debugDrawerStore = remember {
         DebugDrawerStore(
-            middlewares = listOf(
-                DebugDrawerNavigationMiddleware(
-                    navController = navController,
-                    scope = coroutineScope,
-                ),
-                DebugDrawerTelemetryMiddleware(),
-            ),
+            middlewares =
+                listOf(
+                    DebugDrawerNavigationMiddleware(
+                        navController = navController,
+                        scope = coroutineScope,
+                    ),
+                    DebugDrawerTelemetryMiddleware(),
+                )
         )
     }
 
@@ -186,7 +202,6 @@ private fun FenixOverlay(
     val debugDrawerDestinations = remember {
         DebugDrawerRoute.generateDebugDrawerDestinations(
             debugDrawerStore = debugDrawerStore,
-            appStore = appStore,
             browserStore = browserStore,
             cfrToolsStore = cfrToolsStore,
             gleanDebugToolsStore = gleanDebugToolsStore,
@@ -197,11 +212,14 @@ private fun FenixOverlay(
             clientUUID = clientUUID,
             integrityClient = integrityClient,
             tabGroupRepository = tabGroupRepository,
+            lazyIPProtectionStore = lazyIPProtectionStore,
+            listenStore = listenStore,
         )
     }
     val drawerStatus by remember {
         debugDrawerStore.stateFlow.map { state -> state.drawerStatus }
-    }.collectAsState(initial = DrawerStatus.Closed)
+    }
+        .collectAsState(initial = DrawerStatus.Closed)
 
     FirefoxTheme(theme = DefaultThemeProvider.provideTheme()) {
         DebugOverlay(
@@ -227,51 +245,70 @@ private fun FenixOverlay(
 private fun FenixOverlayPreview() {
     val selectedTab = createTab("https://mozilla.org")
 
-    val mockTabGroupRepository = object : TabGroupRepository {
-        override val tabGroupDataFlow: Flow<TabGroupData>
-            get() = flowOf()
+    val mockTabGroupRepository =
+        object : TabGroupRepository {
+            override val tabGroupDataFlow: Flow<TabGroupData>
+                get() = flowOf()
 
-        override suspend fun createTabGroupWithTabs(tabGroup: TabGroup, tabIds: List<String>) {}
-        override suspend fun closeTabGroup(tabGroupId: String) {}
-        override suspend fun openTabGroup(tabGroupId: String) {}
-        override suspend fun closeAllTabGroups() {}
-        override suspend fun deleteTabGroupById(tabGroupId: String) {}
-        override suspend fun deleteTabGroupsById(ids: List<String>) {}
-        override suspend fun addTabGroupAssignment(tabId: String, tabGroupId: String) {}
-        override suspend fun addTabsToTabGroup(tabGroupId: String, tabIds: List<String>) {}
-        override suspend fun updateTabGroupAssignment(tabId: String, tabGroupId: String) {}
-        override suspend fun deleteTabGroupAssignmentById(tabId: String) {}
-        override suspend fun deleteTabGroupAssignmentsById(tabIds: List<String>) {}
-        override suspend fun deleteAllTabGroupAssignmentsForGroup(tabGroupId: String) {}
-        override suspend fun deleteAllTabGroupData() {}
-        override suspend fun addNewTabGroup(tabGroup: TabGroup) {}
-        override suspend fun updateTabGroup(tabGroup: TabGroup) {}
-    }
+            override suspend fun createTabGroupWithTabs(tabGroup: TabGroup) {}
+
+            override suspend fun closeTabGroup(tabGroupId: String) {}
+
+            override suspend fun openTabGroup(tabGroupId: String) {}
+
+            override suspend fun closeAllTabGroups() {}
+
+            override suspend fun deleteTabGroupById(tabGroupId: String) {}
+
+            override suspend fun deleteTabGroupsById(ids: List<String>) {}
+
+            override suspend fun ungroupTabGroup(tabGroupId: String) {}
+
+            override suspend fun addTabGroupAssignment(tabId: String, tabGroupId: String) {}
+
+            override suspend fun addTabsToTabGroup(tabGroupId: String, tabIds: List<String>) {}
+
+            override suspend fun updateTabGroupAssignment(tabId: String, tabGroupId: String) {}
+
+            override suspend fun deleteTabGroupAssignmentById(tabId: String) {}
+
+            override suspend fun deleteTabGroupAssignmentsById(tabIds: List<String>) {}
+
+            override suspend fun deleteAllTabGroupAssignmentsForGroup(tabGroupId: String) {}
+
+            override suspend fun deleteAllTabGroupData() {}
+
+            override suspend fun addNewTabGroup(tabGroup: TabGroup) {}
+
+            override suspend fun updateTabGroup(tabGroup: TabGroup) {}
+        }
 
     FenixOverlay(
-        browserStore = BrowserStore(
-            BrowserState(selectedTabId = selectedTab.id, tabs = listOf(selectedTab)),
-        ),
-        appStore = org.mozilla.fenix.components.AppStore(),
+        browserStore = BrowserStore(BrowserState(selectedTabId = selectedTab.id, tabs = listOf(selectedTab))),
         cfrToolsStore = CfrToolsStore(),
-        gleanDebugToolsStore = GleanDebugToolsStore(
-            initialState = GleanDebugToolsState(
-                logPingsToConsoleEnabled = false,
-                debugViewTag = "",
-                pingTypes = listOf(
-                    "metrics",
-                    "baseline",
-                    "ping type 3",
-                    "ping type 4",
-                ),
+        gleanDebugToolsStore =
+            GleanDebugToolsStore(
+                initialState =
+                    GleanDebugToolsState(
+                        logPingsToConsoleEnabled = false,
+                        debugViewTag = "",
+                        pingTypes =
+                            listOf(
+                                "metrics",
+                                "baseline",
+                                "ping type 3",
+                                "ping type 4",
+                            ),
+                    )
             ),
-        ),
         inactiveTabsEnabled = true,
         loginsStorage = FakeLoginsStorage(),
         addressesDebugRegionRepository = FakeAddressesDebugRegionRepository(),
         creditCardsAddressesStorage = FakeCreditCardsAddressesStorage(),
-        clientUUID = FakeClientUUID(),
+        clientUUID = FakeClientUuid(),
         integrityClient = IntegrityClient.testSuccess,
         tabGroupRepository = mockTabGroupRepository,
+        lazyIPProtectionStore = lazy { IPProtectionStore() },
+        listenStore = ListenStore(ListenState(), ::listenReducer),
     )
 }

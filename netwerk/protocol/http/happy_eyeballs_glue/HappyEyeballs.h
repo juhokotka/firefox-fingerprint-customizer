@@ -6,9 +6,10 @@
 #define HappyEyeballs_h_
 
 #include <cstdint>
+
+#include "mozilla/net/happy_eyeballs_glue.h"
 #include "nsError.h"
 #include "nsTArray.h"
-#include "mozilla/net/happy_eyeballs_glue.h"
 
 namespace mozilla {
 namespace net {

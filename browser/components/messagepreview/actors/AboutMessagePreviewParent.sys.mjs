@@ -8,7 +8,6 @@ const lazy = XPCOMUtils.declareLazy({
   AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
   ASRouter: "resource:///modules/asrouter/ASRouter.sys.mjs",
   BookmarksBarButton: "resource:///modules/asrouter/BookmarksBarButton.sys.mjs",
-  CFRPageActions: "resource:///modules/asrouter/CFRPageActions.sys.mjs",
   CustomizableUI:
     "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
   FeatureCalloutBroker:
@@ -16,6 +15,8 @@ const lazy = XPCOMUtils.declareLazy({
   InfoBar: "resource:///modules/asrouter/InfoBar.sys.mjs",
   JsonSchema: "resource://gre/modules/JsonSchema.sys.mjs",
   MessageLoaderUtils: "resource:///modules/asrouter/ASRouter.sys.mjs",
+  SidebarChatBotPromo:
+    "resource:///modules/asrouter/SidebarChatBotPromo.sys.mjs",
   SpecialMessageActions:
     "resource://messaging-system/lib/SpecialMessageActions.sys.mjs",
   Spotlight: "resource:///modules/asrouter/Spotlight.sys.mjs",
@@ -64,13 +65,6 @@ const MESSAGE_HANDLERS = Object.freeze({
 
   spotlight: (message, browser) =>
     lazy.Spotlight.showSpotlightDialog(browser, message, () => {}),
-
-  cfr_doorhanger: (message, browser) =>
-    lazy.CFRPageActions.forceRecommendation(
-      browser,
-      message,
-      dispatchCFRAction
-    ),
 
   feature_callout: async (message, browser) => {
     // Clear the Feature Tour prefs used by some callouts, to ensure
@@ -122,6 +116,9 @@ const MESSAGE_HANDLERS = Object.freeze({
 
   pb_newtab: (message, browser) =>
     lazy.ASRouter.forcePBWindow(browser, message),
+
+  sidebar_chatbot_promo: (message, browser) =>
+    lazy.SidebarChatBotPromo.showPromo(browser, message, true),
 });
 
 export class AboutMessagePreviewParent extends JSWindowActorParent {

@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate byteorder;
 extern crate pkcs11_bindings;
 
 pub mod cryptoki;
@@ -236,19 +235,20 @@ macro_rules! declare_pkcs11_session_functions {
         extern "C" fn C_Login(
             hSession: CK_SESSION_HANDLE,
             _userType: CK_USER_TYPE,
-            _pPin: CK_UTF8CHAR_PTR,
-            _ulPinLen: CK_ULONG,
+            pPin: CK_UTF8CHAR_PTR,
+            ulPinLen: CK_ULONG,
         ) -> CK_RV {
             let mut manager_guard = try_to_get_manager_guard!();
             let manager = manager_guard_to_manager!(manager_guard);
-            match manager.login(hSession) {
+            let pin = unsafe { rsclientcerts::cryptoki::char_ptr_to_slice(pPin, ulPinLen) };
+            match manager.login(hSession, pin) {
                 Ok(()) => {
                     log_with_thread_id!(debug, "C_Login: CKR_OK");
                     CKR_OK
                 }
                 Err(e) => {
                     log_with_thread_id!(error, "C_Login failed: {}", e);
-                    CKR_GENERAL_ERROR
+                    CKR_PIN_INCORRECT
                 }
             }
         }
@@ -273,51 +273,44 @@ macro_rules! declare_pkcs11_session_functions {
 #[macro_export]
 macro_rules! declare_pkcs11_find_functions {
     () => {
-        fn trace_attr(prefix: &str, attr: &CK_ATTRIBUTE) {
+        fn trace_attr(prefix: &str, attr: &CK_ATTRIBUTE, print_value: bool) {
             // Copying out the fields of `attr` avoids making a reference to an unaligned field.
             let typ = attr.type_;
             let typ = match typ {
                 CKA_CLASS => "CKA_CLASS".to_string(),
-                CKA_TOKEN => "CKA_TOKEN".to_string(),
-                CKA_LABEL => "CKA_LABEL".to_string(),
+                CKA_EC_PARAMS => "CKA_EC_PARAMS".to_string(),
                 CKA_ID => "CKA_ID".to_string(),
-                CKA_VALUE => "CKA_VALUE".to_string(),
                 CKA_ISSUER => "CKA_ISSUER".to_string(),
+                CKA_KEY_TYPE => "CKA_KEY_TYPE".to_string(),
+                CKA_HASH_OF_CERTIFICATE => "CKA_HASH_OF_CERTIFICATE".to_string(),
+                CKA_NAME_HASH_ALGORITHM => "CKA_NAME_HASH_ALGORITHM".to_string(),
+                CKA_LABEL => "CKA_LABEL".to_string(),
+                CKA_MODULUS => "CKA_MODULUS".to_string(),
+                CKA_PRIVATE => "CKA_PRIVATE".to_string(),
                 CKA_SERIAL_NUMBER => "CKA_SERIAL_NUMBER".to_string(),
                 CKA_SUBJECT => "CKA_SUBJECT".to_string(),
-                CKA_PRIVATE => "CKA_PRIVATE".to_string(),
-                CKA_KEY_TYPE => "CKA_KEY_TYPE".to_string(),
-                CKA_MODULUS => "CKA_MODULUS".to_string(),
-                CKA_EC_PARAMS => "CKA_EC_PARAMS".to_string(),
+                CKA_TOKEN => "CKA_TOKEN".to_string(),
+                CKA_VALUE => "CKA_VALUE".to_string(),
+                nss::CKA_PKCS_TRUST_CLIENT_AUTH => "CKA_TRUST_CLIENT_AUTH".to_string(),
+                nss::CKA_PKCS_TRUST_CODE_SIGNING => "CKA_TRUST_CODE_SIGNING".to_string(),
+                nss::CKA_PKCS_TRUST_EMAIL_PROTECTION => "CKA_TRUST_EMAIL_PROTECTION".to_string(),
+                nss::CKA_PKCS_TRUST_SERVER_AUTH => "CKA_TRUST_SERVER_AUTH".to_string(),
                 _ => format!("0x{:x}", typ),
             };
-            let value =
-                unsafe { std::slice::from_raw_parts(attr.pValue as *const u8, attr.ulValueLen as usize) };
-            let len = attr.ulValueLen;
-            log_with_thread_id!(
-                trace,
-                "{}CK_ATTRIBUTE {{ type: {}, pValue: {:?}, ulValueLen: {} }}",
-                prefix,
-                typ,
-                value,
-                len
-            );
+            if print_value {
+                let value =
+                    unsafe { std::slice::from_raw_parts(attr.pValue as *const u8, attr.ulValueLen as usize) };
+                let value_hex = value.into_iter().map(|b| format!("{b:02x}")).collect::<Vec<String>>().join("");
+                let len = attr.ulValueLen;
+                log_with_thread_id!(
+                    trace,
+                    "{prefix}CK_ATTRIBUTE {{ type: {typ}, pValue: {value_hex}, ulValueLen: {len} }}"
+                );
+            } else {
+                let len = attr.ulValueLen;
+                log_with_thread_id!(trace, "{prefix}CK_ATTRIBUTE {{ type: {typ}, ulValueLen: {len} }}");
+            }
         }
-
-        const RELEVANT_ATTRIBUTES: &[CK_ATTRIBUTE_TYPE] = &[
-            CKA_CLASS,
-            CKA_EC_PARAMS,
-            CKA_ID,
-            CKA_ISSUER,
-            CKA_KEY_TYPE,
-            CKA_LABEL,
-            CKA_MODULUS,
-            CKA_PRIVATE,
-            CKA_SERIAL_NUMBER,
-            CKA_SUBJECT,
-            CKA_TOKEN,
-            CKA_VALUE,
-        ];
 
         /// This gets called to initialize a search for objects matching a given list of attributes.
         extern "C" fn C_FindObjectsInit(
@@ -333,16 +326,9 @@ macro_rules! declare_pkcs11_find_functions {
             log_with_thread_id!(trace, "C_FindObjectsInit:");
             for i in 0..ulCount as usize {
                 let attr = unsafe { &*pTemplate.add(i) };
-                trace_attr("  ", attr);
+                trace_attr("  ", attr, true);
                 // Copy out the attribute type to avoid making a reference to an unaligned field.
                 let attr_type = attr.type_;
-                if !RELEVANT_ATTRIBUTES.contains(&attr_type) {
-                    log_with_thread_id!(
-                        debug,
-                        "C_FindObjectsInit: irrelevant attribute, returning CKR_ATTRIBUTE_TYPE_INVALID"
-                    );
-                    return CKR_ATTRIBUTE_TYPE_INVALID;
-                }
                 let slice = unsafe {
                     std::slice::from_raw_parts(attr.pValue as *const u8, attr.ulValueLen as usize)
                 };
@@ -433,8 +419,10 @@ macro_rules! declare_pkcs11_find_functions {
                 return CKR_ARGUMENTS_BAD;
             }
             let mut attr_types = Vec::with_capacity(ulCount as usize);
+            log_with_thread_id!(trace, "C_GetAttributeValue:");
             for i in 0..ulCount as usize {
                 let attr = unsafe { &*pTemplate.add(i) };
+                trace_attr("  ", attr, false);
                 attr_types.push(attr.type_);
             }
             let mut manager_guard = try_to_get_manager_guard!();
@@ -456,18 +444,17 @@ macro_rules! declare_pkcs11_find_functions {
             for (i, value) in values.iter().enumerate().take(ulCount as usize) {
                 let attr = unsafe { &mut *pTemplate.add(i) };
                 if let Some(attr_value) = value {
-                    if attr.pValue.is_null() {
-                        attr.ulValueLen = attr_value.len() as CK_ULONG;
-                    } else {
+                    if !attr.pValue.is_null() {
                         let ptr: *mut u8 = attr.pValue as *mut u8;
-                        if attr_value.len() != attr.ulValueLen as usize {
-                            log_with_thread_id!(error, "C_GetAttributeValue: incorrect attr size");
+                        if attr_value.len() > attr.ulValueLen as usize {
+                            log_with_thread_id!(error, "C_GetAttributeValue: insufficient attr size");
                             return CKR_ARGUMENTS_BAD;
                         }
                         unsafe {
                             std::ptr::copy_nonoverlapping(attr_value.as_ptr(), ptr, attr_value.len());
                         }
                     }
+                    attr.ulValueLen = attr_value.len() as CK_ULONG;
                 } else {
                     attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
                 }
@@ -580,6 +567,54 @@ macro_rules! declare_pkcs11_sign_functions {
 }
 
 #[macro_export]
+macro_rules! declare_pkcs11_pin_functions {
+    () => {
+        extern "C" fn C_InitPIN(
+            hSession: CK_SESSION_HANDLE,
+            pPin: CK_UTF8CHAR_PTR,
+            ulPinLen: CK_ULONG,
+        ) -> CK_RV {
+            let mut manager_guard = try_to_get_manager_guard!();
+            let manager = manager_guard_to_manager!(manager_guard);
+            let pin = unsafe { rsclientcerts::cryptoki::char_ptr_to_slice(pPin, ulPinLen) };
+            match manager.change_password(hSession, &[], pin) {
+                Ok(()) => {
+                    log_with_thread_id!(debug, "C_InitPIN: CKR_OK");
+                    CKR_OK
+                }
+                Err(e) => {
+                    log_with_thread_id!(error, "C_InitPIN failed: {}", e);
+                    CKR_GENERAL_ERROR
+                }
+            }
+        }
+
+        extern "C" fn C_SetPIN(
+            hSession: CK_SESSION_HANDLE,
+            pOldPin: CK_UTF8CHAR_PTR,
+            ulOldLen: CK_ULONG,
+            pNewPin: CK_UTF8CHAR_PTR,
+            ulNewLen: CK_ULONG,
+        ) -> CK_RV {
+            let mut manager_guard = try_to_get_manager_guard!();
+            let manager = manager_guard_to_manager!(manager_guard);
+            let from_pin = unsafe { rsclientcerts::cryptoki::char_ptr_to_slice(pOldPin, ulOldLen) };
+            let to_pin = unsafe { rsclientcerts::cryptoki::char_ptr_to_slice(pNewPin, ulNewLen) };
+            match manager.change_password(hSession, from_pin, to_pin) {
+                Ok(()) => {
+                    log_with_thread_id!(debug, "C_SetPIN: CKR_OK");
+                    CKR_OK
+                }
+                Err(e) => {
+                    log_with_thread_id!(error, "C_SetPIN failed: {}", e);
+                    CKR_PIN_INCORRECT
+                }
+            }
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! declare_unsupported_pkcs11_functions {
     () => {
         extern "C" fn C_GetMechanismInfo(
@@ -597,28 +632,8 @@ macro_rules! declare_unsupported_pkcs11_functions {
             _ulPinLen: CK_ULONG,
             _pLabel: CK_UTF8CHAR_PTR,
         ) -> CK_RV {
-            log_with_thread_id!(error, "C_InitToken: CKR_FUNCTION_NOT_SUPPORTED");
-            CKR_FUNCTION_NOT_SUPPORTED
-        }
-
-        extern "C" fn C_InitPIN(
-            _hSession: CK_SESSION_HANDLE,
-            _pPin: CK_UTF8CHAR_PTR,
-            _ulPinLen: CK_ULONG,
-        ) -> CK_RV {
-            log_with_thread_id!(error, "C_InitPIN: CKR_FUNCTION_NOT_SUPPORTED");
-            CKR_FUNCTION_NOT_SUPPORTED
-        }
-
-        extern "C" fn C_SetPIN(
-            _hSession: CK_SESSION_HANDLE,
-            _pOldPin: CK_UTF8CHAR_PTR,
-            _ulOldLen: CK_ULONG,
-            _pNewPin: CK_UTF8CHAR_PTR,
-            _ulNewLen: CK_ULONG,
-        ) -> CK_RV {
-            log_with_thread_id!(error, "C_SetPIN: CKR_FUNCTION_NOT_SUPPORTED");
-            CKR_FUNCTION_NOT_SUPPORTED
+            log_with_thread_id!(debug, "C_InitToken: CKR_OK");
+            CKR_OK
         }
 
         extern "C" fn C_GetOperationState(

@@ -8,6 +8,7 @@
 #include <array>
 #include <bitset>
 #include <cctype>
+#include <memory>
 
 #include "AccessCheck.h"
 #include "CompositableHost.h"
@@ -67,7 +68,6 @@
 #include "WebGLBuffer.h"
 #include "WebGLChild.h"
 #include "WebGLContextLossHandler.h"
-#include "WebGLContextUtils.h"
 #include "WebGLExtensions.h"
 #include "WebGLFormats.h"
 #include "WebGLFramebuffer.h"
@@ -242,14 +242,7 @@ void ClientWebGLContext::MarkCanvasDirty() {
 }
 
 void WebGLContext::OnMemoryPressure() {
-  bool shouldLoseContext = mLoseContextOnMemoryPressure;
-
-  if (!mCanLoseContextInForeground &&
-      ProcessPriorityManager::CurrentProcessIsForeground()) {
-    shouldLoseContext = false;
-  }
-
-  if (shouldLoseContext) LoseContext();
+  if (mLoseContextOnMemoryPressure) LoseContext();
 }
 
 // --
@@ -441,7 +434,7 @@ bool WebGLContext::CreateAndInitGL(
 
   const auto val = StaticPrefs::webgl_debug_incomplete_tex_color();
   if (val) {
-    mIncompleteTexOverride.reset(new gl::Texture(*gl));
+    mIncompleteTexOverride = std::make_unique<gl::Texture>(*gl);
     const gl::ScopedBindTexture autoBind(gl, mIncompleteTexOverride->name);
     const auto heapVal = std::make_unique<uint32_t>(val);
     gl->fTexImage2D(LOCAL_GL_TEXTURE_2D, 0, LOCAL_GL_RGBA, 1, 1, 0,
@@ -459,7 +452,6 @@ bool WebGLContext::EnsureDefaultFB() {
     return true;
   }
 
-  const bool depthStencil = mOptions.depth || mOptions.stencil;
   auto attemptSize = gfx::IntSize{mRequestedSize.x, mRequestedSize.y};
 
   while (attemptSize.width || attemptSize.height) {
@@ -469,14 +461,15 @@ bool WebGLContext::EnsureDefaultFB() {
     [&]() {
       if (mOptions.antialias) {
         MOZ_ASSERT(!mDefaultFB);
-        mDefaultFB = gl::MozFramebuffer::Create(gl, attemptSize, mMsaaSamples,
-                                                depthStencil);
+        mDefaultFB = gl::MozFramebuffer::Create(
+            gl, attemptSize, mMsaaSamples, mOptions.depth, mOptions.stencil);
         if (mDefaultFB) return;
         if (mOptionsFrozen) return;
       }
 
       MOZ_ASSERT(!mDefaultFB);
-      mDefaultFB = gl::MozFramebuffer::Create(gl, attemptSize, 0, depthStencil);
+      mDefaultFB = gl::MozFramebuffer::Create(gl, attemptSize, 0,
+                                              mOptions.depth, mOptions.stencil);
     }();
 
     if (mDefaultFB) break;
@@ -806,6 +799,7 @@ void WebGLContext::InitUploadableSdTypes() {
     types[layers::SurfaceDescriptor::TSurfaceDescriptorMacIOSurface] = true;
   }
   if (kIsAndroid) {
+    types[layers::SurfaceDescriptor::TAndroidImageReaderImageDescriptor] = true;
     types[layers::SurfaceDescriptor::TSurfaceTextureDescriptor] = true;
   }
   if (kIsLinux) {
@@ -1978,7 +1972,7 @@ const gl::MozFramebuffer* WebGLContext::GetDefaultFBForRead(
 
   if (!mResolvedDefaultFB) {
     mResolvedDefaultFB =
-        gl::MozFramebuffer::Create(gl, mDefaultFB->mSize, 0, false);
+        gl::MozFramebuffer::Create(gl, mDefaultFB->mSize, 0, false, false);
     if (!mResolvedDefaultFB) {
       gfxCriticalNote << FuncName() << ": Failed to create mResolvedDefaultFB.";
       return nullptr;
@@ -2154,21 +2148,21 @@ bool Intersect(const int32_t srcSize, const int32_t read0,
 
 // --
 
-uint64_t AvailGroups(const uint64_t totalAvailItems,
+uint64_t AvailGroups(const uint64_t totalAvailItemBytes,
                      const uint64_t firstItemOffset, const uint32_t groupSize,
                      const uint32_t groupStride) {
   MOZ_ASSERT(groupSize && groupStride);
-  MOZ_ASSERT(groupSize <= groupStride);
 
-  if (totalAvailItems <= firstItemOffset) return 0;
-  const size_t availItems = totalAvailItems - firstItemOffset;
-
-  size_t availGroups = availItems / groupStride;
-  const size_t tailItems = availItems % groupStride;
-  if (tailItems >= groupSize) {
-    availGroups += 1;
+  if (totalAvailItemBytes <= firstItemOffset) {
+    return 0;
   }
-  return availGroups;
+
+  const size_t availItemBytes = totalAvailItemBytes - firstItemOffset;
+  if (availItemBytes < groupSize) {
+    return 0;
+  }
+
+  return (availItemBytes - groupSize) / groupStride + 1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2450,7 +2444,7 @@ Maybe<webgl::IndexedName> webgl::ParseIndexed(const std::string& str) {
   const auto index =
       std::stoull(str.substr(firstDigit, closeBracket - firstDigit));
   std::string name = str.substr(0, openBracket);
-  return Some(webgl::IndexedName{name, index});
+  return Some(webgl::IndexedName{std::move(name), index});
 }
 
 // ExplodeName("foo.bar[3].x") -> ["foo", ".", "bar", "[", "3", "]", ".", "x"]
@@ -2546,7 +2540,7 @@ webgl::LinkActiveInfo GetLinkActiveInfo(
         const auto userName = fnUnmapName(mappedName);
 
         auto loc = gl.fGetAttribLocation(prog, mappedName.c_str());
-        if (mappedName.find("gl_") == 0) {
+        if (mappedName.starts_with("gl_")) {
           // Bug 1328559: Appears problematic on ANGLE and OSX, but not Linux or
           // Win+GL.
           loc = -1;
@@ -2820,7 +2814,7 @@ GLint WebGLContext::GetFragDataLocation(const WebGLProgram& prog,
 
   if (gl->WorkAroundDriverBugs() && gl->IsMesa()) {
     // Mesa incorrectly generates INVALID_OPERATION for gl_ prefixes here.
-    if (mappedName.find("gl_") == 0) {
+    if (mappedName.starts_with("gl_")) {
       return -1;
     }
   }

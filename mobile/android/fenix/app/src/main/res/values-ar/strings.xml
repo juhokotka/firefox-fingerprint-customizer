@@ -31,6 +31,8 @@
   <string name="history_search_hint">سجل البحث</string>
   <!-- Placeholder text shown in search bar when using bookmarks search -->
   <string name="bookmark_search_hint">بحث في العلامات</string>
+  <!-- Content description for the toolbar back button while searching bookmarks -->
+  <string name="bookmark_close_search_description">ارجع وأغلق البحث</string>
   <!-- Placeholder text shown in search bar when using tabs search -->
   <string name="tab_search_hint">بحث في التبويبات</string>
   <!-- Placeholder text shown in the search bar when using application search engines -->
@@ -75,7 +77,11 @@
   <string name="about_content" tools:ignore="BrandUsage">أنتج %1$s Mozilla.</string>
   <!-- Private Browsing -->
   <string name="private_browsing_common_myths">اعتقادات خاطئة شائعة حول التصفح الخاص</string>
-  <!-- Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active. -->
+  <!--
+    Private Browsing
+
+    Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active.
+  -->
   <string name="private_browsing_a11y_session_announcement">جلسة تصفح خاصة</string>
   <!--
     True Private Browsing Mode
@@ -104,14 +110,6 @@
   <string name="open_in_app_cfr_positive_button_text">الانتقال إلى الإعدادات</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">أهمِل</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
-  <!--
-    Address bar swipe "contextual feature recommendation" (CFR)
-
-    Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar.
-  -->
-  <string name="address_bar_swipe_cfr_message_2">اسحب شريط الأدوات لليمين أو اليسار للانتقال بين التبويبات.</string>
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">يُشترط الوصول إلى الكاميرا. افتح إعدادات أندرويد، وانقر \"الأذونات\" ثم انقر \"سماح\".</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -151,16 +149,8 @@
   <string name="home_screen_shortcut_passwords">كلمات المرور</string>
   <!-- Shortcut action to open uninstall survey -->
   <string name="home_screen_shortcut_uninstall_survey">إلغاء التثبيت، لمَ؟</string>
-  <!--
-    Recent Tabs
-
-    Header text for jumping back into the recent tab in the home screen
-  -->
-  <string name="recent_tabs_header">العودة إلى حيث كنت</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">أظهر الكل</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">زر ”عرض كل التبويبات الحديثة“</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">اطلع على كل التبويبات المزامنة</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -189,8 +179,10 @@
   <!--
     Browser Fragment
 
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
+    Label for popup button that appears when long-pressing the main menu. Tapping it allows the user to customize the main menu layout.
   -->
+  <string name="customize_menu">خصّص القائمة</string>
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">السابق</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">التالي</string>
@@ -313,18 +305,8 @@
   <string name="browser_menu_default_banner_title">تعيين %1$s كمتصفحك الافتراضي</string>
   <!-- Label text within the set as default banner -->
   <string name="browser_menu_default_banner_subtitle_2">سريع وخاص وصٌنع خصيصًا لك.</string>
-  <!-- Content description (not visible, for screen readers etc.) for the button that dismisses the set as default banner in the menu -->
-  <string name="browser_menu_default_banner_dismiss_promotion">أهمِل العرض الترويجي</string>
   <!-- Content description (not visible, for screen readers etc.) for recommended extensions in main menu -->
   <string name="browser_menu_recommended_extensions_content_description">المزيد من المعلومات</string>
-  <!--
-    Menu "contextual feature recommendation" (CFR)
-
-    Text for the title in the contextual feature recommendation popup promoting the menu feature.
-  -->
-  <string name="menu_cfr_title">جديد: قائمة انسيابية</string>
-  <!-- Text for the message in the contextual feature recommendation popup promoting the menu feature. -->
-  <string name="menu_cfr_body">وصول أسرع لكل ما تحتاجه، من التصفح الخاص إلى خيارات الحفظ.</string>
   <!--
     Extensions management fragment
 
@@ -555,8 +537,6 @@
   <string name="onboarding_marketing_body_1" tools:ignore="BrandUsage,UnusedResources">شارك معلومات حول كيفية اكتشافك واستخدامك لـ Firefox مع شركاء Mozilla التسويقيين. نحن لا نبيع هذه البيانات أبداً.</string>
   <!-- Marketing onboarding page button label variant. Button to confirm choice and start browsing. -->
   <string name="onboarding_marketing_positive_button_1" tools:ignore="UnusedResources">الموافقة وبدء التصفح</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
   <!-- "Continue" onboarding button. -->
   <string name="nova_onboarding_continue_button">متابعة</string>
   <!-- "Continue browsing" onboarding button. -->
@@ -626,7 +606,7 @@
   -->
   <string name="nova_onboarding_marketing_body" tools:ignore="BrandUsage,UnusedResources">شارك معلومات حول كيفية اكتشافك واستخدامك لـ Firefox مع شركاء Mozilla التسويقيين. نحن لا نبيع هذه البيانات أبداً. %1$s</string>
   <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
-  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage">شارك معلومات حول كيفية اكتشافك واستخدامك لـ Firefox مع شركاء Mozilla التسويقيين. نحن لا نبيع هذه البيانات أبدًا.</string>
+  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage,UnusedResources">شارك معلومات حول كيفية اكتشافك واستخدامك لـ Firefox مع شركاء Mozilla التسويقيين. نحن لا نبيع هذه البيانات أبدًا.</string>
   <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
   <string name="nova_onboarding_marketing_body_3" tools:ignore="BrandUsage,UnusedResources">يمكنك مساعدتنا في الوصول إلى المزيد من الأشخاص من خلال السماح لـ Mozilla بإبلاغ القنوات التي نروج فيها لمتصفح Firefox بأنك مستخدم لمتصفح Firefox.</string>
   <!--
@@ -659,8 +639,12 @@
   <string name="nova_onboarding_marketing_body_link_text_1">اطّلع على المزيد</string>
   <!-- Marketing onboarding primary button text. 'Firefox' is intentionally hardcoded. -->
   <string name="nova_onboarding_marketing_primary_button_text" tools:ignore="BrandUsage,UnusedResources">ساعد Firefox</string>
+  <!-- Marketing onboarding primary button text. -->
+  <string name="nova_onboarding_marketing_primary_button_text_3">نعم</string>
   <!-- Marketing onboarding secondary button text. -->
   <string name="nova_onboarding_marketing_secondary_button_text" tools:ignore="UnusedResources">لا، شكرًا</string>
+  <!-- Marketing onboarding secondary button text. -->
+  <string name="nova_onboarding_marketing_secondary_button_text_2">لا</string>
   <!-- Notifications onboarding title. 'Firefox' is intentionally hardcoded. -->
   <string name="nova_onboarding_notifications_title" tools:ignore="BrandUsage,UnusedResources">تساعدك الإشعارات على البقاء أكثر أماناً مع Firefox</string>
   <!-- Notifications onboarding subtitle. 'Firefox' is intentionally hardcoded. -->
@@ -696,8 +680,6 @@
   <string name="nova_onboarding_app_icon_prompt_title" tools:ignore="UnusedResources">اختر أيقونة مخصّصة للتطبيق</string>
   <!-- App icon onboarding body. -->
   <string name="nova_onboarding_app_icon_prompt_body" tools:ignore="UnusedResources">اعطِ الصفحة الرئيسية لمستك الخاصة.</string>
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Widget Picker
 
@@ -722,7 +704,11 @@
     Title for the settings page
   -->
   <string name="settings">الإعدادات</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">عام</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">عن</string>
@@ -785,40 +771,6 @@
   <string name="preferences_pbm_lock_screen_title">استخدم قفل الشاشة لإخفاء التبويبات في التصفح الخاص</string>
   <!-- Informs the user how to access the tabs when "Use screen lock to hide tabs in private browsing" is enabled -->
   <string name="preferences_pbm_lock_screen_summary_3">افتح التبويبات بالبصمة أو الرقم التعريفي الشخصي أو التعرف على الوجه. تفعيل هذه الميزة يمنع أيضًا تصوير الشاشة أو مشاركتها.</string>
-  <!-- Label for cookie banner section in quick settings panel. -->
-  <string name="cookie_banner_blocker">مانع لافتة ملفات تعريف الارتباط</string>
-  <!-- Preference for removing cookie/consent banners from sites automatically in private mode. See reduce_cookie_banner_summary for additional context. -->
-  <string name="preferences_cookie_banner_reduction_private_mode">مانع ملفات تعريف الارتباط في التصفح الخاص</string>
-  <!-- Text for indicating cookie banner handling is off this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_off_for_site">أوقف التشغيل لهذا الموقع</string>
-  <!-- Text for cancel button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_cancel_button">ألغِ</string>
-  <!-- Text for request support button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_request_support_button_2">أرسل الطلب</string>
-  <!-- Text for title indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_title_2">طلب الدعم لهذا الموقع؟</string>
-  <!-- Label for the snackBar, after the user reports with success a website where cookie banner reducer did not work -->
-  <string name="cookie_banner_handling_report_site_snack_bar_text_2">أُرسِل الطلب</string>
-  <!-- Text for indicating cookie banner handling is on this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_on_for_site">مفعّل لهذا الموقع</string>
-  <!-- Text for indicating that a request for unsupported site was sent to Nimbus (it's a Mozilla library for experiments), this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site_request_submitted_2">أُرسِل طلب الدعم</string>
-  <!-- Text for indicating cookie banner handling is currently not supported for this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site">الموقع غير مدعوم حاليا</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is on this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_on_for_site_1">أأشغل مانع لافتات ملفات تعريف الارتباط لـ%1$s؟</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is off this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_off_for_site_1">أأطفئ مانع لافتات ملفات تعريف الارتباط لـ%1$s؟</string>
-  <!-- Title text for a detail explanation indicating cookie banner reducer didn't work for the current site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_title_unsupported_site_request_2">لا يمكن لـ %1$s رفض طلبات ملفات تعريف الارتباط تلقائياً في هذا الموقع. يمكنك إرسال طلب لدعم هذا الموقع في المستقبل.</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is off for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_off_for_site_1">أوقف التشغيل ليقوم %1$s بمسح ملفات تعريف الارتباط وتحديث الموقع. قد يؤدي هذا إلى تسجيل خروجك أو حذف محتويات سلة التسوق.</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is on for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_on_for_site_3">عند التفعيل، سيحاول %1$s رفض جميع لافتات ملفات تعريف الارتباط تلقائياً على هذا الموقع.</string>
-  <!-- Title for the cookie banner re-engagement CFR, the placeholder is replaced with app name. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="cookie_banner_cfr_title">رفض %1$s ملفات تعريف الارتباط نيابةً عنك</string>
-  <!-- Message for the cookie banner re-engagement CFR -->
-  <string name="cookie_banner_cfr_message">تصفح بلا إزعاج، وتتبع أقل لملفات تعريف الارتباط في هذا الموقع.</string>
   <!-- Description of the preference to enable "HTTPS-Only" mode. -->
   <string name="preferences_https_only_summary">يحاول الاتصال بالمواقع تلقائيا باستعمال بروتوكول التعمية HTTPS لمزيد من الأمان.</string>
   <!-- Summary of https only preference if https only is set to off -->
@@ -863,6 +815,8 @@
   <string name="preferences_toolbar_shortcut">اختصار شريط الأدوات</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_toolbar_select_shortcut">حدّد اختصارًا</string>
+  <!-- Title of a menu option allowing to change the shortcut button shown in the toolbar -->
+  <string name="toolbar_shortcut_menu_edit_option">حرّر الاختصار</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_gestures">الإيماءات</string>
   <!-- Preference for settings related to visual options -->
@@ -971,6 +925,12 @@
   <string name="notifications_allowed_summary">مسموح بها</string>
   <!-- Summary for notification preference indicating notifications are not allowed -->
   <string name="notifications_not_allowed_summary">غير مسموح</string>
+  <!-- Preference for local network access / nearby devices in Android 17 -->
+  <string name="preferences_local_network_access">الوصول إلى الشبكة المحلية / الأجهزة القريبة</string>
+  <!-- Summary for local network access preference indicating access is allowed -->
+  <string name="local_network_access_allowed_summary">مسموح بها</string>
+  <!-- Summary for local network access preference indicating access is not allowed -->
+  <string name="local_network_access_not_allowed_summary">غير مسموح</string>
   <!--
     Add-on Permissions
 
@@ -1015,8 +975,6 @@
     Title for the customize home screen section with privacy report.
   -->
   <string name="customize_toggle_privacy_report">تقرير الخصوصية</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">عُد إلى حيث كنت</string>
   <!-- Title for the customize home screen section with bookmarks. -->
   <string name="customize_toggle_bookmarks">العلامات</string>
   <!--
@@ -1030,8 +988,6 @@
   <string name="customize_toggle_pocket_sponsored">قصص مموّلة</string>
   <!-- Title for the opening wallpaper settings screen -->
   <string name="customize_wallpapers">الخلفيات</string>
-  <!-- Label for the menu item that opens the wallpaper settings screen. -->
-  <string name="browser_menu_change_wallpaper">غيّر الخلفية</string>
   <!-- Title for the customize home screen section with sponsored shortcuts. -->
   <string name="customize_toggle_contile">الاختصارات المموّلة</string>
   <!--
@@ -1301,8 +1257,6 @@
   <string name="preference_simple_toolbar">بسيط</string>
   <!-- Preference for using expanded toolbar -->
   <string name="preference_expanded_toolbar">موسعة</string>
-  <!-- Preference description indicating the toolbar location preference is disabled when the tab strip is enabled -->
-  <string name="preference_toolbar_pref_disabled_explanation">يجب أن يكون شريط العنوان في الأعلى عند إظهار شريط علامة التبويب.</string>
   <!-- New tab shortcut in toolbar customization -->
   <string name="toolbar_customize_shortcut_new_tab">فتح تبويب جديد</string>
   <!-- Share shortcut in toolbar customization -->
@@ -1423,8 +1377,6 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">التبويبات</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">عرض التبويبات</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">قائمة</string>
   <!-- Option for a grid tab view -->
@@ -1469,14 +1421,16 @@
   <string name="opening_screen_last_tab_summary">فتح في التبويب الأخير</string>
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">فتح على الصفحة الرئيسية بعد أربع ساعات</string>
-  <!--
-    Inactive tabs
-
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
-  -->
-  <string name="preferences_inactive_tabs">انقل التبويبات القديمة إلى صفحة \"غير نشط\"</string>
-  <!-- Title of inactive tabs preference -->
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">ستُنقل التبويبات التي لم تعرضها منذ أسبوعين إلى قسم \"غير نشط\".</string>
+  <!--
+    Privacy report
+
+    Category header of a preference that allows a user to enable or disable the privacy report feature
+  -->
+  <string name="preferences_privacy_report">تقرير الخصوصية</string>
+  <!-- Title of the privacy report preference that allows a user to enable or disable the feature -->
+  <string name="preferences_privacy_report_title">فعّل تقرير الخصوصية</string>
   <!--
     Studies
 
@@ -1536,6 +1490,8 @@
   <string name="add_tab">إضافة تبويبًا</string>
   <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
   <string name="add_private_tab">إضافة تبويب خاص</string>
+  <!-- Content description (not visible, for screen readers etc.): Create tab group button. Opens the create tab group sheet when pressed -->
+  <string name="create_tab_group_content_description">أنشئ مجموعة لسان</string>
   <!-- Text for the tab search bar placeholder -->
   <string name="tab_manager_search_bar_placeholder">ابحث في تبويباتك</string>
   <!-- Text shown in the menu to view recently closed tabs -->
@@ -1666,19 +1622,6 @@
     <item quantity="many">أضف إلى مجموعة لسان %1$s، %2$d لسانًا، اللون %3$s</item>
     <item quantity="other">أضف إلى مجموعة لسان %1$s، %2$d لسان، اللون %3$s</item>
   </plurals>
-  <plurals name="share_tab_group_button_content_description">
-    <!--
-      Content Description for share tab group button.
-      %1$s is the name of the tab group.
-      %2$d is the number of tabs in a tab group.
-    -->
-    <item quantity="zero">لا مشاركة مجموعة ألسنة</item>
-    <item quantity="one">شارك مجموعة لسان %1$s مع لسان واحد</item>
-    <item quantity="two">شارك مجموعة لسان %1$s مع لسانين</item>
-    <item quantity="few">شارك مجموعة لسان %1$s مع %2$d ألسنة</item>
-    <item quantity="many">شارك مجموعة لسان %1$s مع %2$d لسانًا</item>
-    <item quantity="other">شارك مجموعة لسان %1$s مع %2$d لسان</item>
-  </plurals>
   <!-- Content description for the grabber/handle of the tab group bottom sheet. -->
   <string name="tab_group_sheet_dismiss_description">اعرض مجموعة اللسان، اطوِ مقبض السحب</string>
   <plurals name="expanded_tab_group_header_description">
@@ -1709,6 +1652,28 @@
   <string name="close_tab_and_delete_group_confirmation_dialog_confirm">احذف المجموعة</string>
   <!-- Text shown on the cancel button in the Close last tab and delete tab group confirmation dialog. -->
   <string name="close_tab_and_delete_group_confirmation_dialog_cancel">ألغِ</string>
+  <!-- Content description for the three dot button next to a tab group" -->
+  <string name="tab_group_three_dot_button_content_description">خيارات أكثر</string>
+  <!-- Text shown on the edit button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_edit">حرّر</string>
+  <!-- Text shown on the ungroup button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_ungroup">فك التجميع</string>
+  <!-- Text shown on the delete button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_delete">احذف</string>
+  <!-- Text shown on the share button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_share">شارِك</string>
+  <!-- Text shown on the close button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_close">أغلق</string>
+  <!-- Title for the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_title">فك تجميع الألسنة؟</string>
+  <!-- Text shown in the body of the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_body">ستبقى الألسنة مفتوحة على هذا الجهاز، ولكن ستُحذف المجموعة.</string>
+  <!-- Text shown on the Don't Ask Again checkbox button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_dont_ask_again">لا تسألني مجددًا</string>
+  <!-- Text shown on the confirm button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_confirm">فك التجميع</string>
+  <!-- Text shown on the cancel button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_cancel">ألغِ</string>
   <!--
     Color labels for tab groups, used for accessibility and selection UI.
 
@@ -1723,8 +1688,6 @@
   <string name="tab_group_color_pink">وردي</string>
   <!-- Tab group color: Purple -->
   <string name="tab_group_color_purple">أرجواني</string>
-  <!-- Tab group color: Violet -->
-  <string name="tab_group_color_violet">بنفسجي</string>
   <!-- Tab group color: Blue -->
   <string name="tab_group_color_blue">أزرق</string>
   <!-- Tab group color: Cyan -->
@@ -1741,8 +1704,6 @@
   <string name="history_search_1">أدخِل نصوص البحث</string>
   <!-- Text for the button to clear all history -->
   <string name="history_delete_all">احذف التأريخ</string>
-  <!-- Text for the snackbar to confirm that multiple browsing history items has been deleted -->
-  <string name="history_delete_multiple_items_snackbar">حُذف التأريخ</string>
   <!-- Text for the snackbar to confirm that a single browsing history item has been deleted. %1$s is the shortened URL of the deleted history item. -->
   <string name="history_delete_single_item_snackbar">حُذف %1$s</string>
   <!-- Context description text for the button to delete a single history item -->
@@ -1752,16 +1713,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">حدّدتَ %1$d</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">اليوم</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">الأمس</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">آخر 7 أيام</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">آخر 30 يومًا</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">أقدم</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">ما من تأريخ هنا</string>
   <!--
@@ -1904,7 +1855,7 @@
   <!-- Text for the header that groups the downloads older than other groups -->
   <string name="download_time_period_older">الأقدم</string>
   <!-- Description of an in progress download item, displayed in the downloads list when the download has just started. -->
-  <string name="download_item_in_progress_description_preparing">جارٍ تحضير التنزيل...</string>
+  <string name="download_item_in_progress_description_preparing">جارٍ تحضير التنزيل…</string>
   <!--
     Description of an in progress download item, displayed in the downloads list when the download time remaining is known.
     %1$s is the current file size that has been downloaded.
@@ -1988,34 +1939,20 @@
   <string name="webcompat_reporter_clear_reason_content_description">امحُ السبب المحدّد</string>
   <!-- The error message of the description when the user selects "Something else" as the reason, but left the description empty or too short. -->
   <string name="webcompat_reporter_description_error">يُرجى إدخال 10 أحرف على الأقل</string>
-  <!-- The label/title of a field in the Web Compat Reporter feature for explaining a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_label_whats_broken_2">ما الخلل؟</string>
-  <!-- The placeholder text for the dropdown where a user selects a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_2">اختر سببًا</string>
-  <!-- The error message of the dropdown, prompting the user to select a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_error">يُرجى اختيار سبب</string>
-  <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
-  <string name="webcompat_reporter_label_description">صِف المشكلة (اختياري)</string>
-  <!-- The button text for navigating away from the feature to provide more information on the broken site's bug report. -->
-  <string name="webcompat_reporter_add_more_info">إضافة المزيد من المعلومات</string>
+  <!-- The label/title of a mandatory field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_mandatory_description">صف المشكلة بالتفصيل لمساعدتنا في التحقيق فيها</string>
+  <!-- The label/title of a optional field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_optional_description">صف المشكلة بالتفصيل لمساعدتنا في التحقيق في الأمر (اختياري)</string>
   <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
   <string name="webcompat_reporter_cancel">إلغاء</string>
   <!-- The button text for the send button to submit the provided form data. -->
-  <string name="webcompat_reporter_send">إرسال</string>
+  <string name="webcompat_reporter_send_report">أرسل البلاغ</string>
   <!-- Text for a snackbar to confirm the successful submission of a WebCompat report. -->
   <string name="webcompat_reporter_success_snackbar_text_2">أُرسل التقرير</string>
-  <!-- Placeholder text for the description field to prompt the user on what they should type. -->
-  <string name="webcompat_reporter_problem_description_placeholder_text">ما الذي حدث؟ ما الذي كان ينبغي أن يحدث؟</string>
-  <!-- Label of the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. -->
-  <string name="webcompat_reporter_etp_checkbox_text">إرسال روابط المواقع التي حظرتها خاصية الحماية من التعقب</string>
-  <!-- Description text for the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. It informs the user when checked, the report will include the list of URLs that were blocked by Enhanced Tracking Protection on the current page. -->
-  <string name="webcompat_reporter_etp_checkbox_description">قد تمنع خاصية الحماية من التعقب بعض الروابط والبرمجيات النصية التي تحتاجها بعض المواقع لتعمل بشكل صحيح.</string>
   <!-- The button text for the preview report button to view a preview of the report. -->
   <string name="webcompat_reporter_preview_report">معاينة التقرير</string>
   <!-- The title shown at the top of the WebCompat Report preview panel. This appears after the user taps the “Preview” button before sending a report. -->
   <string name="webcompat_reporter_preview_bottom_sheet_header">معاينة التقرير</string>
-  <!-- Label for the “Send” button shown in the WebCompat Report preview panel, which the user taps to submit the report. -->
-  <string name="webcompat_reporter_preview_bottom_sheet_send">إرسال</string>
   <!-- Title for the Edit URL confirmation dialog in the WebCompatReporter -->
   <string name="webcompat_reporter_edit_url_dialog_title">حرّر URL الموقع</string>
   <!-- Text shown on the save button for the Edit URL confirmation dialog in the WebCompatReporter. -->
@@ -2044,8 +1981,6 @@
   <string name="webcompat_reporter_reason_notsupported_2">المتصفح غير مدعوم أو حُظِر</string>
   <!-- Broken site reason text for the site being deceptive -->
   <string name="webcompat_reporter_reason_site_is_deceptive">هذا الموقع مضلل</string>
-  <!-- Broken site reason text for browser isn’t supported or blocked -->
-  <string name="webcompat_reporter_reason_notsupported">المتصفح غير مدعوم أو تم حظره</string>
   <!-- Broken site reason text for something else -->
   <string name="webcompat_reporter_reason_other">سبب آخر</string>
   <!--
@@ -2207,18 +2142,16 @@
   <string name="bookmark_select_folder_new_folder_button_title">ملف جديد</string>
   <!-- Bookmark snackbar message for moving a single item. %1$s is the title of the item being moved and %2$s is the new parent folder of the bookmark -->
   <string name="bookmark_moved_single_item">تم نقل %1$s إلى %2$s</string>
+  <!-- Text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results">لا تطابقات.</string>
+  <!-- Additional text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results_additional_text">جرّب بحثًا آخر!</string>
   <!--
     Site Permissions
 
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">الانتقال إلى الإعدادات</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">صفحة الإعدادات السريعة</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">موصى به</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -2611,10 +2544,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">إعدادات الحماية</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">الحماية الموسّعة من التعقب</string>
   <!-- Preference summary for enhanced tracking protection settings on/off switch -->
   <string name="preference_enhanced_tracking_protection_summary">ندعم الآن ميزة الحماية الشاملة لملفات تعريف الارتباط، وهي أقوى حاجز حتى الآن ضد متعقّبات المواقع.</string>
@@ -2622,19 +2553,6 @@
   <string name="preference_enhanced_tracking_protection_explanation_2">تحميك %s من العديد من المتعقّبات المعروفة التي تتعقب أنشطتك على الإنترنت.</string>
   <!-- Text displayed that links to website about enhanced tracking protection -->
   <string name="preference_enhanced_tracking_protection_explanation_learn_more">اطّلع على المزيد</string>
-  <plurals name="trackers_blocked_count">
-    <!--
-      Trackers blocked card on homepage
-
-      Text shown on the trackers blocked card. %d is the number of trackers blocked.
-    -->
-    <item quantity="zero">حُظر %d متعقّب</item>
-    <item quantity="one">حُظر %d متعقّب</item>
-    <item quantity="two">حُظر متعقّبين</item>
-    <item quantity="few">حُظر %d متعقّبات</item>
-    <item quantity="many">حُظر %d متعقّبًا</item>
-    <item quantity="other">حُظر %d متعقّب</item>
-  </plurals>
   <!-- Text shown on the trackers blocked card when no trackers have been blocked yet -->
   <string name="trackers_blocked_empty">أنت محمي</string>
   <!-- Text shown below the trackers blocked card with typing animation -->
@@ -2707,12 +2625,8 @@
   <string name="preference_enhanced_tracking_protection_custom_cryptominers">المُعدّنات المعمّاة</string>
   <!-- Preference for enhanced tracking protection for the custom protection settings -->
   <string name="preference_enhanced_tracking_protection_custom_known_fingerprinters">مسجّلات البصمة المعروفة</string>
-  <!-- Button label for navigating to the Enhanced Tracking Protection details -->
-  <string name="enhanced_tracking_protection_details">التفاصيل</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">تم حجبها</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">مسموح بها</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">متعقبات مواقع التواصل الاجتماعي</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -2735,10 +2649,6 @@
   <string name="etp_tracking_content_title">المحتوى الذي يتعقّبك</string>
   <!-- Description of tracking content that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_description">توقيف تحميل الإعلانات والفيديوهات وغيرها من محتويات خارجية تحتوي على برمجيات تعقّب. قد يؤثّر هذا على سلوك بعض المواقع.</string>
-  <!-- Enhanced Tracking Protection message that protection is currently on for this site -->
-  <string name="etp_panel_on">تم تفعيل الحماية في هذا الموقع</string>
-  <!-- Enhanced Tracking Protection message that protection is currently off for this site -->
-  <string name="etp_panel_off">تم تعطيل الحماية في هذا الموقع</string>
   <!-- Header for exceptions list for which sites enhanced tracking protection is always off -->
   <string name="enhanced_tracking_protection_exceptions">تم تعطيل الحماية المحسّنة من التعقب لهذه المواقع</string>
   <!--
@@ -2763,13 +2673,6 @@
   <string name="etp_suspected_fingerprinters_description">تكمين الحماية من التبصيم لإيقاف مسجّلات البصمة المشبوهة.</string>
   <!-- Category of trackers (fingerprinters) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_known_fingerprinters_title">مسجّلات البصمة المعروفة</string>
-  <!--
-    Description of the SmartBlock Enhanced Tracking Protection feature. The * symbol is intentionally hardcoded here,
-    as we use it on the UI to indicate which trackers have been partially unblocked.
-  -->
-  <string name="preference_etp_smartblock_description">تم رفع الحظر جزئيًا عن بعض أدوات التعقب المبينة أدناه في هذه الصفحة لأنك تفاعلت معها *.</string>
-  <!-- Text displayed that links to website about enhanced tracking protection SmartBlock -->
-  <string name="preference_etp_smartblock_learn_more">اطّلع على المزيد</string>
   <!--
     Content description (not visible, for screen readers etc.):
     Enhanced tracking protection exception preference icon for ETP settings.
@@ -2899,12 +2802,8 @@
   <string name="add_to_homescreen_cancel">إلغاء</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">إضافة</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">تابِع نحو الموقع</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">اسم الاختصار</string>
-  <!-- Describes the add to homescreen functionality -->
-  <string name="add_to_homescreen_description_2">يمكنك إضافة هذا الموقع إلى شاشة البداية في الجهاز لتصل إليه بسرعة وتتصفحه كأي تطبيق آخر.</string>
   <!-- Preference for managing the settings for logins and passwords in Fenix -->
   <string name="preferences_passwords_logins_and_passwords_2">كلمات المرور</string>
   <!-- Preference for managing the saving of logins and passwords in Fenix -->
@@ -3045,13 +2944,11 @@
   <string name="preferences_ip_protection_title_2">VPN مدمج</string>
   <!-- Label for the BETA badge for the browser VPN entry in the settings list -->
   <string name="preferences_ip_protection_beta_badge_label">تجريبي</string>
-  <!-- Title for the browser VPN settings screen (displayed in the app bar) -->
-  <string name="ip_protection_title">VPN</string>
   <!-- Label for the browser VPN toggle on the settings screen -->
   <string name="ip_protection_toggle_label">VPN</string>
   <!-- Headline for the browser VPN promo card. %s is the name of the app (for example "Firefox"). -->
   <string name="ip_protection_promo_headline">شبكة VPN المدمجة في %s</string>
-  <!-- Body text for the browser VPN promo card . %s is a learn more link using ip_protection_learn_more as text. -->
+  <!-- Body text for the browser VPN settings header, shown when no promo is running. %s is a learn more link using ip_protection_learn_more as text. -->
   <string name="ip_protection_promo_body_2">تصفح الإنترنت بأمان إضافي عن طريق إخفاء موقعك، حتى على شبكات الواي فاي العامة. %s</string>
   <!-- Link text that opens additional information about the browser VPN -->
   <string name="ip_protection_learn_more">اطّلع على المزيد</string>
@@ -3072,8 +2969,6 @@
   <string name="ip_protection_location_section">الموقع</string>
   <!-- Label for the recommended automatic location option on the browser VPN settings screen -->
   <string name="ip_protection_location_recommended_label">يُنصح به</string>
-  <!-- Description for the recommended automatic location option on the browser VPN settings screen -->
-  <string name="ip_protection_location_recommended_description">يختار لك أسرع موقع VPN.</string>
   <!-- Badge label shown in the menu item when the browser VPN is active -->
   <string name="preferences_ip_protection_on">مفعّل</string>
   <!-- Badge label shown in the menu item when the browser VPN is off -->
@@ -3084,8 +2979,6 @@
   <string name="ip_protection_menu_paused">أُلبِث</string>
   <!-- Badge label shown in the menu item when the browser VPN has an error -->
   <string name="ip_protection_menu_error">خطأ</string>
-  <!-- Badge label shown in the menu item when the user is eligible to use the browser VPN but should authenticate or authorize it first. -->
-  <string name="ip_protection_menu_auth_required">جرّبه</string>
   <!-- Content description for the chevron button that opens the browser VPN settings screen -->
   <string name="ip_protection_navigate_settings">افتح إعدادات VPN</string>
   <!--
@@ -3125,8 +3018,14 @@
     %1$d is the total monthly allowance in GB (for example "50").
   -->
   <string name="ip_protection_data_limit_reached_snackbar">استُخدم %1$d ج.بايت من بيانات VPN. سيُصفّر الوصول الشهر المقبل.</string>
-  <!-- Snackbar (in-app pop-up notification) action button text that takes the user to the VPN settings screen. -->
-  <string name="ip_protection_data_limit_reached_snackbar_action">الإعدادات</string>
+  <!-- Title shown on the browser VPN settings screen for location selection section. -->
+  <string name="ip_protection_location_title" tools:ignore="UnusedResources">المكان</string>
+  <!-- Label for the Recommended server location option which is automatically selected by the browser. -->
+  <string name="ip_protection_recommended_location" tools:ignore="UnusedResources">يُنصح به</string>
+  <!-- Title for the card shown to the user when we are unable to fetch server locations -->
+  <string name="ip_protection_locations_unavailable_title">المواقع غير متاحة</string>
+  <!-- Content description for the browser VPN location selection screen top bar back button -->
+  <string name="ip_protection_locations_navigate_back_button_content_description">تصفّح للوراء</string>
   <!--
     Autofill
 
@@ -3279,8 +3178,6 @@
   <string name="addresses_save_button">حفظ</string>
   <!-- The text for the "Cancel" button for cancelling adding, updating or deleting an address -->
   <string name="addresses_cancel_button">إلغاء</string>
-  <!-- The text for the "Delete address" button for deleting an address -->
-  <string name="addressess_delete_address_button">حذف العنوان</string>
   <!-- The title for the "Delete address" confirmation dialog -->
   <string name="addressess_confirm_dialog_message_2">حذف هذا العنوان؟</string>
   <!-- The text for the positive button on "Delete address" dialog -->
@@ -3335,16 +3232,8 @@
   <string name="phone_feature_blocked_step_permissions"><![CDATA[2. انقر <b>الأذونات</b>]]></string>
   <!-- Third step for the allowing a permission (%1$s is the permission name, for example "Camera"). -->
   <string name="phone_feature_blocked_step_feature"><![CDATA[3. اضبط <b>%1$s</b> على ”مفعّل/مفعّلة“]]></string>
-  <!-- Label that indicates a site is using a secure connection -->
-  <string name="quick_settings_sheet_secure_connection_2">الاتصال آمن</string>
-  <!-- Label that indicates a site is using a insecure connection -->
-  <string name="quick_settings_sheet_insecure_connection_2">الاتصال غير آمن</string>
-  <!-- Label that indicates a site is displaying a local document -->
-  <string name="quick_settings_sheet_local_page">هذه الصفحة مخزنة على جهازك.</string>
   <!-- Label to clear site data -->
   <string name="clear_site_data">امسح ملفات تعريف الارتباط وبيانات المواقع</string>
-  <!-- Confirmation message for a dialog confirming if the user wants to delete all data for current site. %s is the domain of the site. -->
-  <string name="confirm_clear_site_data"><![CDATA[هل أنت متأكد أنك تريد مسح كل ملفات تعريف الارتباط وبيانات الموقع <b>%s</b>؟]]></string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for all sites -->
   <string name="confirm_clear_permissions_on_all_sites">هل أنت متأكد أنك تريد مسح كل الأذونات لكل المواقع؟</string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for a site -->
@@ -3357,11 +3246,6 @@
   <string name="browser_menu_add_to_shortcuts">الإضافة إلى الاختصارات</string>
   <!-- Browser menu button that removes a shortcut from the home fragment -->
   <string name="browser_menu_remove_from_shortcuts">الإزالة من الاختصارات</string>
-  <!--
-    text shown before the issuer name to indicate who its verified by, %1$s is the name of
-    the certificate authority that verified the ticket
-  -->
-  <string name="certificate_info_verified_by">تثبّت منها: %1$s</string>
   <!-- Message in delete confirmation dialog for password -->
   <string name="login_deletion_confirmation_2">هل أنت متأكد أنك تريد حذف كلمة المرور هذه؟</string>
   <!-- Positive action of a dialog asking to delete -->
@@ -3425,6 +3309,16 @@
     which navigates the user to a screen displaying all the shortcuts.
   -->
   <string name="homepage_shortcuts_show_all_content_description">عرض كل الاختصارات</string>
+  <!--
+    Label for the button in the shortcuts home screen section that expands the section to show
+    every shortcut.
+  -->
+  <string name="homepage_shortcuts_show_all">اعرض الكل</string>
+  <!--
+    Label for the button in the shortcuts home screen section that collapses the section back
+    to showing only the first shortcuts.
+  -->
+  <string name="homepage_shortcuts_show_less">اعرض أقل</string>
   <!-- Label for the "Add shortcut" button displayed as a tile. -->
   <string name="homepage_shortcuts_add_shortcut">أضِف اختصارًا</string>
   <!-- Title text for the "Enter a Website URL" dialog for adding a shortcut. -->
@@ -3552,8 +3446,6 @@
   <string name="a11y_action_label_expand">توسيع</string>
   <!-- Action label for links to a website containing documentation about a wallpaper collection. Talkback will append this to say "Double tap to open link to learn more about this collection". -->
   <string name="a11y_action_label_wallpaper_collection_learn_more">افتح الرابط للاطلاع على المزيد عن هذه المجموعة</string>
-  <!-- Translations feature -->
-
   <!--
     Translation request dialog
 
@@ -3818,8 +3710,6 @@
     %s is the name of the app (for example "Firefox").
   -->
   <string name="protection_panel_banner_protected_title">%s في حالة تأهب</string>
-  <!-- Description text for the protection panel banner when tracking protection is enabled. -->
-  <string name="protection_panel_banner_protected_description">أنت محمي. إذا لاحظنا أي شيء، سنُعلمك.</string>
   <!-- Label text for the Enhanced Tracking Protection toggle. -->
   <string name="protection_panel_etp_toggle_label">الحماية المحسّنة من التعقب</string>
   <!-- Toggle if Enhanced Tracking Protection is turned on -->
@@ -3835,25 +3725,12 @@
     %d is a placeholder for the number of trackers blocked.
   -->
   <string name="protection_panel_num_trackers_blocked">المتعقّبات المحجوبة: %d</string>
-  <!-- Text for when no trackers have been blocked. -->
-  <string name="protection_panel_no_trackers_blocked">لم يُعثر على أي متعقّبات</string>
   <!-- Text for when tracking protection is disabled and no trackers are blocked. -->
   <string name="protection_panel_etp_disabled_no_trackers_blocked">لا توجد أي متعقّبات محظورة</string>
   <!-- Link text to navigate to privacy and security settings from the protection panel. -->
   <string name="protection_panel_privacy_and_security_settings_2">إعدادات الخصوصية</string>
   <!-- Title text for the protection panel permissions section. -->
   <string name="protection_panel_permissions_title">الأذونات</string>
-  <!--
-    Text for displaying the total number of trackers blocked in the trackers blocked panel.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_total_num_trackers_blocked">المتعقّبات المحجوبة: %d</string>
-  <!--
-    Text for displaying the number of trackers blocked for a specific tracker category in the trackers blocked panel.
-    %s is a placeholder for the name of the tracker category.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_categorical_num_trackers_blocked">%s: %d</string>
   <!--
     Description text for a dialog confirming whether the user wants to delete all data for current site.
     %s is a placeholder for the base domain of website.
@@ -4006,17 +3883,17 @@
   -->
   <string name="microsurvey_uninstall_survey_title">رأيك يهمنا. لماذا تقوم بإلغاء التثبيت؟</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_1">مشاكل صفحة الوِب</string>
+  <string name="uninstall_survey_option_1_v2">إنه بطيء أو غير مضمون</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_2">مشاكل الفيديو والتنزيل</string>
+  <string name="uninstall_survey_option_2_v2">لم تعمل المواقع الإلكترونية بشكل صحيح</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_3">مشاكل أداء</string>
+  <string name="uninstall_survey_option_3_v2">يفتقر الميزات التي أحتاجها</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_4">مشاكل وظيفة وتصميم</string>
+  <string name="uninstall_survey_option_4_v2">لم تعمل مقاطع الفيديو أو التنزيلات أو الوسائط</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_5">قضايا متعلقة بالخصوصية</string>
+  <string name="uninstall_survey_option_5_v2">يصعب استخدامه أو تصميمه رديء</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_6">مشاكل الدفع والاشتراك</string>
+  <string name="uninstall_survey_option_6_v2">مخاوف تتعلق بالخصوصية أو الأمن</string>
   <!-- Button label shown at the bottom of the uninstall survey -->
   <string name="uninstall_survey_button_label">أرسل ملاحظاتك وألغِ التثبيت</string>
   <!--
@@ -4167,8 +4044,6 @@
   <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">يُرجى التحديث قبل 14 مارس للاستمرار في استخدام الإضافات والميزات الأخرى.</string>
   <!-- Push notification message about old Firefox version -->
   <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">ستتوقف بعض الميزات عن العمل غدًا.</string>
-  <!-- TextField Design System Component -->
-
   <!--
     Setup checklist feature
 
@@ -4327,8 +4202,6 @@
   <string name="settings_search_no_results_message">ربما جرب بحثًا مختلفًا؟</string>
   <!-- Content Description for the button to open Settings Search (to search through settings). -->
   <string name="settings_search_button_content_description">زر البحث في الإعدادات</string>
-  <!-- ==== Terms of use pop up prompt ==== -->
-
   <!-- Title for the pop up prompt -->
   <string name="terms_of_use_prompt_title">لدينا تحديث</string>
   <!--
@@ -4353,8 +4226,6 @@
   <string name="terms_of_use_prompt_accept">قبول</string>
   <!-- Label for a button to postpone accepting the terms of use -->
   <string name="terms_of_use_prompt_postpone">ذكّرني لاحقًا</string>
-  <!-- ==== Experiment strings. ==== -->
-
   <!-- A title for the popup prompt. -->
   <string name="terms_of_use_prompt_title_option_a" tools:ignore="UnusedResources">شروط الاستخدام</string>
   <!--
@@ -4370,38 +4241,6 @@
   <!-- Link text for terms_of_use_prompt_body_line_two_alternative that links to a site with more information about the Terms of Use -->
   <string name="terms_of_use_prompt_body_line_two_alternative_link" tools:ignore="UnusedResources">هنا</string>
   <!--
-    Sports widget
-
-    Title text shown at the top of the sports widget country selector, encouraging the user to pick a national team to follow.
-  -->
-  <string name="sports_widget_country_selector_title">تابع فريقك</string>
-  <!-- Section header for the North America region in the sports widget country selector. -->
-  <string name="sports_widget_confederation_north_america">أمريكا الشمالية</string>
-  <!-- Section header for the Africa confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_africa">أفريقيا</string>
-  <!-- Section header for the Asia confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_asia">آسيا</string>
-  <!-- Section header for the CONCACAF confederation group in the sports widget country selector. "CONCACAF" is the abbreviation for "Confederation of North, Central America and Caribbean Association Football". -->
-  <string name="sports_widget_confederation_concacaf">كونكاكاف</string>
-  <!-- Section header for the Europe confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_europe">أوروبا</string>
-  <!-- Section header for the Oceania confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_oceania">أوقيانوسيا</string>
-  <!-- Section header for the South America confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_south_america">أمريكا الجنوبية</string>
-  <!-- Country name for England in the sports widget. England cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_england">إنجلترا</string>
-  <!-- Country name for Scotland in the sports widget. Scotland cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_scotland">اسكتلندا</string>
-  <!-- Sports widget menu item to remove the widget from the homepage. -->
-  <string name="sports_widget_remove">أزِل</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget card. -->
-  <string name="sports_widget_close_content_description">أغلق</string>
-  <!-- Content description (for accessibility, not displayed) for the overflow (more options) menu button on the sports widget card. -->
-  <string name="sports_widget_more_options_content_description">خيارات إضافية</string>
-  <!-- ==== End of Terms of use popup prompt. ==== -->
-
-  <!--
     Privacy notice homepage banner
 
     A message we show the user on the homepage when there is a new version of the privacy notice. 'Firefox' is intentionally hardcoded.
@@ -4413,6 +4252,10 @@
   <string name="privacy_notice_updated_homepage_message_privacy_notice" tools:ignore="UnusedResources">تنويه الخصوصية</string>
   <!-- The second active link used in privacy_notice_updated_homepage_message -->
   <string name="privacy_notice_updated_homepage_message_learn_more" tools:ignore="UnusedResources">معرفة المزيد</string>
+  <!-- Message shown on the collections to tab groups migration card on the homepage. -->
+  <string name="collections_migration_homepage_card_message">هناك طريقة أبسط للحفاظ على تنظيم علامات التبويب الخاصة بك</string>
+  <!-- Link text shown on the collections to tab groups migration card that opens the tab groups page in the tab manager. -->
+  <string name="collections_migration_homepage_card_link">عرض مجموعات علامات التبويب الخاصة بي</string>
   <!-- Google Lens prototype related strings -->
   <string name="preferences_debug_settings_google_lens_integration">فعِّل تكامل Google Lens</string>
   <!-- Lens image search button content description -->
@@ -4425,10 +4268,22 @@
   <string name="context_menu_open_image_with_google_lens">ابحث باستخدام Google Lens</string>
   <!-- Toast shown when the user denies the camera permission requested by the Lens camera screen -->
   <string name="lens_camera_permission_denied">رُفض التصريح</string>
-  <!-- Title for the Google Lens AI feature toggle -->
-  <string name="ai_controls_google_lens_title">Google Lens</string>
-  <!-- Description for the Google Lens AI feature toggle -->
-  <string name="ai_controls_google_lens_description">يرسل الصور إلى جوجل للبحث المرئي.</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the photo they capture will be sent to Google Lens for a visual search.
+  -->
+  <string name="lens_camera_title_lens">Google Lens</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the camera is being used to scan a QR code.
+  -->
+  <string name="lens_camera_title_qr">رمز QR</string>
+  <!-- Title for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_title">فعّل خاصية Google Lens</string>
+  <!-- Description for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_description">يرسل الصور إلى جوجل للبحث المرئي.</string>
+  <!-- Caption shown under the Google Lens toggle clarifying when the feature is available -->
+  <string name="preferences_google_lens_availability_caption">متاح فقط عند تفعيل جوجل أعلاه ويكون محرك البحث النشط أثناء التصفح.</string>
   <!-- Content description for the Google Lens half of the camera mode toggle -->
   <string name="lens_camera_mode_lens">Google Lens</string>
   <!-- Content description for the QR scanner half of the camera mode toggle -->
@@ -4466,4 +4321,14 @@
   <string name="firefox_labs_feature_conflict">هذه الميزة غير متاحة للتجربة.</string>
   <!-- Text displayed on the Firefox Labs screen when there are no Labs experimental features present. -->
   <string name="firefox_labs_no_labs_available_description">لا توجد ميزات تجريبية متاحة للتجربة حاليًا</string>
+  <!-- Title of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_title" tools:ignore="UnusedResources">عزل الموقع</string>
+  <!-- Description of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_description" tools:ignore="UnusedResources">حاجز إضافي بين المواقع الإلكترونية يساعد على حماية بياناتك عبر علامات التبويب. قد يؤثر على الأداء والاستقرار وتوافق المواقع الإلكترونية وكيفية حفظ سجل التصفح.</string>
+  <!--
+    PDF viewer toolbar and buttons
+
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description_2">أضِف توقيعًا</string>
 </resources>

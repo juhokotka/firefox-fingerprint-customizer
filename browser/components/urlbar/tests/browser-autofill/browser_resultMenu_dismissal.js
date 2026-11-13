@@ -22,6 +22,7 @@ add_setup(async function () {
       ["browser.urlbar.autoFill.adaptiveHistory.enabled", true],
       ["browser.urlbar.autoFill.adaptiveHistory.minCharsThreshold", 0],
       ["browser.urlbar.autoFill.adaptiveHistory.useCountThreshold", 0],
+      ["browser.urlbar.autoFill.adaptiveHistory.urlMinPicks", 1],
       ["browser.urlbar.suggest.quicksuggest.sponsored", false],
       ["browser.urlbar.suggest.quicksuggest.nonsponsored", false],
     ],
@@ -209,6 +210,139 @@ add_task(async function adaptive_autofill_result_menu_dismiss_click() {
       (detailsAfter.result.autofill.type !== "adaptive_url" &&
         detailsAfter.result.autofill.type !== "adaptive_origin"),
     "Adaptive autofill should NOT appear after dismissal"
+  );
+
+  await UrlbarTestUtils.promisePopupClose(window);
+  await PlacesUtils.history.clear();
+});
+
+// When an origin is eligible, dismissing an adaptive page URL should re-query
+// and fall back to autofilling the origin, since only the page is blocked.
+add_task(async function dismiss_adaptive_url_falls_back_to_origin() {
+  await PlacesUtils.history.clear();
+  await addAdaptiveHistoryEntry(ORIGIN_URL, ADAPTIVE_INPUT);
+  await addAdaptiveHistoryEntry(ADAPTIVE_URL, ADAPTIVE_INPUT);
+
+  await UrlbarTestUtils.promiseAutocompleteResultPopup({
+    window,
+    value: SEARCH_STRING,
+    fireInputEvent: true,
+  });
+
+  let { result } = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
+  Assert.equal(
+    result.autofill?.type,
+    "adaptive_url",
+    "Should autofill the adaptive page URL before dismissal"
+  );
+
+  await UrlbarTestUtils.openResultMenuAndClickItem(window, "dismiss_autofill", {
+    resultIndex: 0,
+    openByMouse: true,
+  });
+
+  // Wait for the async onEngagement handler to finish writing to the DB. Only
+  // the page is blocked, the origin remains eligible for autofill.
+  let originId = await PlacesTestUtils.getDatabaseValue(
+    "moz_places",
+    "origin_id",
+    { url: ADAPTIVE_URL }
+  );
+  await TestUtils.waitForCondition(async () => {
+    let val = await PlacesTestUtils.getDatabaseValue(
+      "moz_origins",
+      "block_pages_until_ms",
+      { id: originId }
+    );
+    return val > Date.now();
+  }, "block_pages_until_ms should be set after dismiss");
+
+  Assert.equal(
+    await PlacesTestUtils.getDatabaseValue("moz_origins", "block_until_ms", {
+      id: originId,
+    }),
+    null,
+    "block_until_ms should not be set when only the page was dismissed"
+  );
+
+  // The query should now autofill the origin instead of the dismissed URL.
+  let detailsAfter = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
+  Assert.equal(
+    detailsAfter.result.autofill?.type,
+    "adaptive_origin",
+    "Requery after dismissing the page should autofill the origin"
+  );
+  Assert.equal(
+    detailsAfter.result.payload.url,
+    ORIGIN_URL,
+    "Autofilled URL should be the origin"
+  );
+
+  await UrlbarTestUtils.promisePopupClose(window);
+  await PlacesUtils.history.clear();
+});
+
+// When an adaptive page is eligible and an origin is dismissed, dismissing
+// should re-query and fall back to autofilling the page URL.
+add_task(async function dismiss_adaptive_origin_falls_back_to_url() {
+  await PlacesUtils.history.clear();
+  await addAdaptiveHistoryEntry(ADAPTIVE_URL, ADAPTIVE_INPUT);
+  await addAdaptiveHistoryEntry(ORIGIN_URL, ADAPTIVE_INPUT);
+
+  await UrlbarTestUtils.promiseAutocompleteResultPopup({
+    window,
+    value: SEARCH_STRING,
+    fireInputEvent: true,
+  });
+
+  let { result } = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
+  Assert.equal(
+    result.autofill?.type,
+    "adaptive_origin",
+    "Should autofill the adaptive origin before dismissal"
+  );
+
+  await UrlbarTestUtils.openResultMenuAndClickItem(window, "dismiss_autofill", {
+    resultIndex: 0,
+    openByMouse: true,
+  });
+
+  // Wait for the async onEngagement handler to finish writing to the DB. Only
+  // the origin is blocked; the page remains eligible for autofill.
+  let originId = await PlacesTestUtils.getDatabaseValue(
+    "moz_places",
+    "origin_id",
+    { url: ORIGIN_URL }
+  );
+  await TestUtils.waitForCondition(async () => {
+    let val = await PlacesTestUtils.getDatabaseValue(
+      "moz_origins",
+      "block_until_ms",
+      { id: originId }
+    );
+    return val > Date.now();
+  }, "block_until_ms should be set after dismiss");
+
+  Assert.equal(
+    await PlacesTestUtils.getDatabaseValue(
+      "moz_origins",
+      "block_pages_until_ms",
+      { id: originId }
+    ),
+    null,
+    "block_pages_until_ms should not be set when only the origin was dismissed"
+  );
+
+  let detailsAfter = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
+  Assert.equal(
+    detailsAfter.result.autofill?.type,
+    "adaptive_url",
+    "Requery after dismissing the origin should autofill the page URL"
+  );
+  Assert.equal(
+    detailsAfter.result.payload.url,
+    ADAPTIVE_URL,
+    "Autofilled URL should be the page URL"
   );
 
   await UrlbarTestUtils.promisePopupClose(window);

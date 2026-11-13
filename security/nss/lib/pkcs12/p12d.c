@@ -55,6 +55,11 @@ struct sec_PKCS12SafeContentsContextStr {
 
     /* if the safe contents is nested, the parent is pointed to here. */
     sec_PKCS12SafeContentsContext *nestedSafeContentsCtx;
+
+    /* nesting depth of this safe contents; the top-level authenticatedSafe
+     * is 0 and each nested safeContents increments it.
+     */
+    unsigned int nestingDepth;
 };
 
 /* opaque decoder context structure.  information for decoding a pkcs 12
@@ -141,7 +146,42 @@ struct SEC_PKCS12DecoderContextStr {
     sec_PKCS12SafeBag **keyList; /* used by ...IterateNext() */
     unsigned int iteration;
     SEC_PKCS12DecoderItem decitem;
+
+    /* limits applied to every decoder context created while decoding this
+     * PFX; each is only used once the caller has set it */
+    unsigned long maxInputSize;
+    PRBool maxInputSizeSet;
+    unsigned long maxElementLen;
+    PRBool maxElementLenSet;
 };
+
+/* apply the caller's limits to an inner ASN.1 decoder context.  The content
+ * an inner decoder sees is a substring of what was fed to the PFX decoder,
+ * so the caller's limits can be passed down unchanged. */
+static void
+sec_pkcs12_decoder_set_limits(SEC_PKCS12DecoderContext *p12dcx,
+                              SEC_ASN1DecoderContext *a1dcx)
+{
+    if (p12dcx->maxInputSizeSet) {
+        SEC_ASN1DecoderSetMaximumInputSize(a1dcx, p12dcx->maxInputSize);
+    }
+    if (p12dcx->maxElementLenSet) {
+        SEC_ASN1DecoderSetMaximumElementSize(a1dcx, p12dcx->maxElementLen);
+    }
+}
+
+/* apply the caller's limits to an inner PKCS#7 decoder context */
+static void
+sec_pkcs12_decoder_set_p7_limits(SEC_PKCS12DecoderContext *p12dcx,
+                                 SEC_PKCS7DecoderContext *p7dcx)
+{
+    if (p12dcx->maxInputSizeSet) {
+        SEC_PKCS7DecoderSetMaxInputSize(p7dcx, p12dcx->maxInputSize);
+    }
+    if (p12dcx->maxElementLenSet) {
+        SEC_PKCS7DecoderSetMaxElementLen(p7dcx, p12dcx->maxElementLen);
+    }
+}
 
 /* forward declarations of functions that are used when decoding
  * safeContents bags which are nested and when decoding the
@@ -500,6 +540,8 @@ sec_pkcs12_decoder_safe_contents_notify(void *arg, PRBool before,
             p12dcx->errorValue = PORT_GetError();
             goto loser;
         }
+        sec_pkcs12_decoder_set_limits(p12dcx,
+                                      safeContentsCtx->currentSafeBagA1Dcx);
 
         /* set the notify and filter procs so that the safe bag
          * data gets sent to the proper location when decoding.
@@ -590,6 +632,8 @@ sec_pkcs12_decoder_safe_contents_init_decode(SEC_PKCS12DecoderContext *p12dcx,
         p12dcx->errorValue = PORT_GetError();
         goto loser;
     }
+    sec_pkcs12_decoder_set_limits(p12dcx,
+                                  safeContentsCtx->safeContentsA1Dcx);
 
     /* set the safeContents notify procedure to look for
      * and start the decode of safeBags.
@@ -657,6 +701,14 @@ loser:
     }
 }
 
+/* Bound the number of nested safeContents that may be decoded.  Each level
+ * creates a new ASN.1 decoder context, so the SEC_ASN1D_MAX_DEPTH structural
+ * limit does not apply across levels; without this bound a crafted file can
+ * drive unbounded recursion and exhaust the stack.  No known producer nests
+ * safeContents more than one level deep, so a single level is permitted.
+ */
+#define SEC_PKCS12_MAX_NESTING_DEPTH 1
+
 /* whenever a new safeContentsSafeBag is encountered, we need
  * to init a safeContentsContext.
  */
@@ -670,12 +722,22 @@ sec_pkcs12_decoder_begin_nested_safe_contents(sec_PKCS12SafeContentsContext
         return SECFailure;
     }
 
+    if (safeContentsCtx->nestingDepth >= SEC_PKCS12_MAX_NESTING_DEPTH) {
+        PORT_SetError(SEC_ERROR_PKCS12_CORRUPT_PFX_STRUCTURE);
+        safeContentsCtx->p12dcx->error = PR_TRUE;
+        safeContentsCtx->p12dcx->errorValue =
+            SEC_ERROR_PKCS12_CORRUPT_PFX_STRUCTURE;
+        return SECFailure;
+    }
+
     safeContentsCtx->nestedSafeContentsCtx =
         sec_pkcs12_decoder_safe_contents_init_decode(safeContentsCtx->p12dcx,
                                                      PR_TRUE);
     if (!safeContentsCtx->nestedSafeContentsCtx) {
         return SECFailure;
     }
+    safeContentsCtx->nestedSafeContentsCtx->nestingDepth =
+        safeContentsCtx->nestingDepth + 1;
 
     /* set up new filter proc */
     SEC_ASN1DecoderSetNotifyProc(
@@ -809,6 +871,7 @@ sec_pkcs12_decoder_asafes_notify(void *arg, PRBool before, void *dest,
             p12dcx->errorValue = PORT_GetError();
             goto loser;
         }
+        sec_pkcs12_decoder_set_p7_limits(p12dcx, p12dcx->currentASafeP7Dcx);
         SEC_ASN1DecoderSetFilterProc(p12dcx->aSafeA1Dcx,
                                      sec_pkcs12_decoder_wrap_p7_update,
                                      p12dcx->currentASafeP7Dcx, PR_TRUE);
@@ -905,6 +968,7 @@ sec_pkcs12_decode_start_asafes_cinfo(SEC_PKCS12DecoderContext *p12dcx)
         p12dcx->errorValue = PORT_GetError();
         goto loser;
     }
+    sec_pkcs12_decoder_set_limits(p12dcx, p12dcx->aSafeA1Dcx);
 
     /* set the notify function */
     SEC_ASN1DecoderSetNotifyProc(p12dcx->aSafeA1Dcx,
@@ -918,6 +982,7 @@ sec_pkcs12_decode_start_asafes_cinfo(SEC_PKCS12DecoderContext *p12dcx)
         p12dcx->errorValue = PORT_GetError();
         goto loser;
     }
+    sec_pkcs12_decoder_set_p7_limits(p12dcx, p12dcx->aSafeP7Dcx);
 
     /* open the temp file for writing, if the digest functions were set */
     if (p12dcx->dOpen && (*p12dcx->dOpen)(p12dcx->dArg, PR_FALSE) != SECSuccess) {
@@ -1285,7 +1350,22 @@ SEC_PKCS12DecoderSetMaxElementLen(SEC_PKCS12DecoderContext *p12dcx,
     if (!p12dcx || p12dcx->error) {
         return SECFailure;
     }
+    p12dcx->maxElementLen = maxLen;
+    p12dcx->maxElementLenSet = PR_TRUE;
     SEC_ASN1DecoderSetMaximumElementSize(p12dcx->pfxA1Dcx, maxLen);
+    return SECSuccess;
+}
+
+SECStatus
+SEC_PKCS12DecoderSetMaxInputSize(SEC_PKCS12DecoderContext *p12dcx,
+                                 unsigned long maxInputSize)
+{
+    if (!p12dcx || p12dcx->error) {
+        return SECFailure;
+    }
+    p12dcx->maxInputSize = maxInputSize;
+    p12dcx->maxInputSizeSet = PR_TRUE;
+    SEC_ASN1DecoderSetMaximumInputSize(p12dcx->pfxA1Dcx, maxInputSize);
     return SECSuccess;
 }
 
@@ -1500,6 +1580,9 @@ SEC_PKCS12DecoderVerify(SEC_PKCS12DecoderContext *p12dcx)
     rv = SEC_ASN1DecoderFinish(p12dcx->pfxA1Dcx);
     p12dcx->pfxA1Dcx = NULL;
     if (rv != SECSuccess) {
+        /* The PFX is incomplete, so the bags are too. */
+        p12dcx->errorValue = PORT_GetError();
+        p12dcx->error = PR_TRUE;
         return rv;
     }
 #ifdef UNSAFE_FUZZER_MODE
@@ -2662,7 +2745,7 @@ SEC_PKCS12DecoderGetCerts(SEC_PKCS12DecoderContext *p12dcx)
     sec_PKCS12SafeBag **safeBags;
     int i;
 
-    if (!p12dcx || !p12dcx->safeBags || !p12dcx->safeBags[0]) {
+    if (!p12dcx || p12dcx->error || !p12dcx->safeBags || !p12dcx->safeBags[0]) {
         PORT_SetError(SEC_ERROR_INVALID_ARGS);
         return NULL;
     }
@@ -3254,411 +3337,4 @@ SEC_PKCS12DecoderIterateNext(SEC_PKCS12DecoderContext *p12dcx,
 
     PORT_SetError(0); /* end-of-list is SECFailure with no PORT error */
     return ((p12dcx->decitem.type == 0) ? SECFailure : SECSuccess);
-}
-
-static SECStatus
-sec_pkcs12_decoder_append_bag_to_context(SEC_PKCS12DecoderContext *p12dcx,
-                                         sec_PKCS12SafeBag *bag)
-{
-    if (!p12dcx || p12dcx->error) {
-        PORT_SetError(SEC_ERROR_INVALID_ARGS);
-        return SECFailure;
-    }
-
-    p12dcx->safeBags = !p12dcx->safeBagCount
-                           ? PORT_ArenaZNewArray(p12dcx->arena, sec_PKCS12SafeBag *, 2)
-                           : PORT_ArenaGrowArray(p12dcx->arena, p12dcx->safeBags,
-                                                 sec_PKCS12SafeBag *, p12dcx->safeBagCount + 1,
-                                                 p12dcx->safeBagCount + 2);
-
-    if (!p12dcx->safeBags) {
-        PORT_SetError(SEC_ERROR_NO_MEMORY);
-        return SECFailure;
-    }
-
-    p12dcx->safeBags[p12dcx->safeBagCount] = bag;
-    p12dcx->safeBags[p12dcx->safeBagCount + 1] = NULL;
-    p12dcx->safeBagCount++;
-
-    return SECSuccess;
-}
-
-static sec_PKCS12SafeBag *
-sec_pkcs12_decoder_convert_old_key(SEC_PKCS12DecoderContext *p12dcx,
-                                   void *key, PRBool isEspvk)
-{
-    sec_PKCS12SafeBag *keyBag;
-    SECOidData *oid;
-    SECOidTag keyTag;
-    SECItem *keyID, *nickName, *newNickName;
-
-    if (!p12dcx || p12dcx->error || !key) {
-        PORT_SetError(SEC_ERROR_INVALID_ARGS);
-        return NULL;
-    }
-
-    newNickName = PORT_ArenaZNew(p12dcx->arena, SECItem);
-    keyBag = PORT_ArenaZNew(p12dcx->arena, sec_PKCS12SafeBag);
-    if (!keyBag || !newNickName) {
-        return NULL;
-    }
-
-    keyBag->swapUnicodeBytes = p12dcx->swapUnicodeBytes;
-    keyBag->slot = p12dcx->slot;
-    keyBag->arena = p12dcx->arena;
-    keyBag->pwitem = p12dcx->pwitem;
-    keyBag->tokenCAs = p12dcx->tokenCAs;
-    keyBag->oldBagType = PR_TRUE;
-
-    keyTag = (isEspvk) ? SEC_OID_PKCS12_V1_PKCS8_SHROUDED_KEY_BAG_ID : SEC_OID_PKCS12_V1_KEY_BAG_ID;
-    oid = SECOID_FindOIDByTag(keyTag);
-    if (!oid) {
-        return NULL;
-    }
-
-    if (SECITEM_CopyItem(p12dcx->arena, &keyBag->safeBagType, &oid->oid) != SECSuccess) {
-        return NULL;
-    }
-
-    if (isEspvk) {
-        SEC_PKCS12ESPVKItem *espvk = (SEC_PKCS12ESPVKItem *)key;
-        keyBag->safeBagContent.pkcs8ShroudedKeyBag =
-            espvk->espvkCipherText.pkcs8KeyShroud;
-        nickName = &(espvk->espvkData.uniNickName);
-        if (!espvk->espvkData.assocCerts || !espvk->espvkData.assocCerts[0]) {
-            PORT_SetError(SEC_ERROR_PKCS12_CORRUPT_PFX_STRUCTURE);
-            return NULL;
-        }
-        keyID = &espvk->espvkData.assocCerts[0]->digest;
-    } else {
-        SEC_PKCS12PrivateKey *pk = (SEC_PKCS12PrivateKey *)key;
-        keyBag->safeBagContent.pkcs8KeyBag = &pk->pkcs8data;
-        nickName = &(pk->pvkData.uniNickName);
-        if (!pk->pvkData.assocCerts || !pk->pvkData.assocCerts[0]) {
-            PORT_SetError(SEC_ERROR_PKCS12_CORRUPT_PFX_STRUCTURE);
-            return NULL;
-        }
-        keyID = &pk->pvkData.assocCerts[0]->digest;
-    }
-
-    if (nickName->len) {
-        if (nickName->len >= 2) {
-            if (nickName->data[0] && nickName->data[1]) {
-                if (!sec_pkcs12_convert_item_to_unicode(p12dcx->arena, newNickName,
-                                                        nickName, PR_FALSE, PR_FALSE, PR_TRUE)) {
-                    return NULL;
-                }
-                nickName = newNickName;
-            } else if (nickName->data[0] && !nickName->data[1]) {
-                unsigned int j = 0;
-                unsigned char t;
-                for (j = 0; j < nickName->len; j += 2) {
-                    t = nickName->data[j + 1];
-                    nickName->data[j + 1] = nickName->data[j];
-                    nickName->data[j] = t;
-                }
-            }
-        } else {
-            if (!sec_pkcs12_convert_item_to_unicode(p12dcx->arena, newNickName,
-                                                    nickName, PR_FALSE, PR_FALSE, PR_TRUE)) {
-                return NULL;
-            }
-            nickName = newNickName;
-        }
-    }
-
-    if (sec_pkcs12_decoder_set_attribute_value(keyBag,
-                                               SEC_OID_PKCS9_FRIENDLY_NAME,
-                                               nickName) != SECSuccess) {
-        return NULL;
-    }
-
-    if (sec_pkcs12_decoder_set_attribute_value(keyBag, SEC_OID_PKCS9_LOCAL_KEY_ID,
-                                               keyID) != SECSuccess) {
-        return NULL;
-    }
-
-    return keyBag;
-}
-
-static sec_PKCS12SafeBag *
-sec_pkcs12_decoder_create_cert(SEC_PKCS12DecoderContext *p12dcx,
-                               SECItem *derCert)
-{
-    sec_PKCS12SafeBag *certBag;
-    SECOidData *oid;
-    SGNDigestInfo *digest;
-    SECItem *keyId;
-    SECStatus rv;
-
-    if (!p12dcx || p12dcx->error || !derCert) {
-        PORT_SetError(SEC_ERROR_INVALID_ARGS);
-        return NULL;
-    }
-
-    keyId = PORT_ArenaZNew(p12dcx->arena, SECItem);
-    if (!keyId) {
-        return NULL;
-    }
-
-    digest = sec_pkcs12_compute_thumbprint(derCert);
-    if (!digest) {
-        return NULL;
-    }
-
-    rv = SECITEM_CopyItem(p12dcx->arena, keyId, &digest->digest);
-    SGN_DestroyDigestInfo(digest);
-    if (rv != SECSuccess) {
-        PORT_SetError(SEC_ERROR_NO_MEMORY);
-        return NULL;
-    }
-
-    oid = SECOID_FindOIDByTag(SEC_OID_PKCS12_V1_CERT_BAG_ID);
-    certBag = PORT_ArenaZNew(p12dcx->arena, sec_PKCS12SafeBag);
-    if (!certBag || !oid || (SECITEM_CopyItem(p12dcx->arena, &certBag->safeBagType, &oid->oid) != SECSuccess)) {
-        return NULL;
-    }
-
-    certBag->slot = p12dcx->slot;
-    certBag->pwitem = p12dcx->pwitem;
-    certBag->swapUnicodeBytes = p12dcx->swapUnicodeBytes;
-    certBag->arena = p12dcx->arena;
-    certBag->tokenCAs = p12dcx->tokenCAs;
-
-    oid = SECOID_FindOIDByTag(SEC_OID_PKCS9_X509_CERT);
-    certBag->safeBagContent.certBag =
-        PORT_ArenaZNew(p12dcx->arena, sec_PKCS12CertBag);
-    if (!certBag->safeBagContent.certBag || !oid ||
-        (SECITEM_CopyItem(p12dcx->arena,
-                          &certBag->safeBagContent.certBag->bagID,
-                          &oid->oid) != SECSuccess)) {
-        return NULL;
-    }
-
-    if (SECITEM_CopyItem(p12dcx->arena,
-                         &(certBag->safeBagContent.certBag->value.x509Cert),
-                         derCert) != SECSuccess) {
-        return NULL;
-    }
-
-    if (sec_pkcs12_decoder_set_attribute_value(certBag, SEC_OID_PKCS9_LOCAL_KEY_ID,
-                                               keyId) != SECSuccess) {
-        return NULL;
-    }
-
-    return certBag;
-}
-
-static sec_PKCS12SafeBag **
-sec_pkcs12_decoder_convert_old_cert(SEC_PKCS12DecoderContext *p12dcx,
-                                    SEC_PKCS12CertAndCRL *oldCert)
-{
-    sec_PKCS12SafeBag **certList;
-    SECItem **derCertList;
-    int i, j;
-
-    if (!p12dcx || p12dcx->error || !oldCert) {
-        PORT_SetError(SEC_ERROR_INVALID_ARGS);
-        return NULL;
-    }
-
-    derCertList = SEC_PKCS7GetCertificateList(&oldCert->value.x509->certOrCRL);
-    if (!derCertList) {
-        return NULL;
-    }
-
-    i = 0;
-    while (derCertList[i])
-        i++;
-
-    certList = PORT_ArenaZNewArray(p12dcx->arena, sec_PKCS12SafeBag *, (i + 1));
-    if (!certList) {
-        return NULL;
-    }
-
-    for (j = 0; j < i; j++) {
-        certList[j] = sec_pkcs12_decoder_create_cert(p12dcx, derCertList[j]);
-        if (!certList[j]) {
-            return NULL;
-        }
-    }
-
-    return certList;
-}
-
-static SECStatus
-sec_pkcs12_decoder_convert_old_key_and_certs(SEC_PKCS12DecoderContext *p12dcx,
-                                             void *oldKey, PRBool isEspvk,
-                                             SEC_PKCS12SafeContents *safe,
-                                             SEC_PKCS12Baggage *baggage)
-{
-    sec_PKCS12SafeBag *key, **certList;
-    SEC_PKCS12CertAndCRL *oldCert;
-    SEC_PKCS12PVKSupportingData *pvkData;
-    int i;
-    SECItem *keyName;
-
-    if (!p12dcx || !oldKey) {
-        return SECFailure;
-    }
-
-    if (isEspvk) {
-        pvkData = &((SEC_PKCS12ESPVKItem *)(oldKey))->espvkData;
-    } else {
-        pvkData = &((SEC_PKCS12PrivateKey *)(oldKey))->pvkData;
-    }
-
-    if (!pvkData->assocCerts || !pvkData->assocCerts[0]) {
-        PORT_SetError(SEC_ERROR_PKCS12_CORRUPT_PFX_STRUCTURE);
-        return SECFailure;
-    }
-
-    oldCert = (SEC_PKCS12CertAndCRL *)sec_pkcs12_find_object(safe, baggage,
-                                                             SEC_OID_PKCS12_CERT_AND_CRL_BAG_ID, NULL,
-                                                             pvkData->assocCerts[0]);
-    if (!oldCert) {
-        PORT_SetError(SEC_ERROR_PKCS12_CORRUPT_PFX_STRUCTURE);
-        return SECFailure;
-    }
-
-    key = sec_pkcs12_decoder_convert_old_key(p12dcx, oldKey, isEspvk);
-    certList = sec_pkcs12_decoder_convert_old_cert(p12dcx, oldCert);
-    if (!key || !certList) {
-        return SECFailure;
-    }
-
-    if (sec_pkcs12_decoder_append_bag_to_context(p12dcx, key) != SECSuccess) {
-        return SECFailure;
-    }
-
-    keyName = sec_pkcs12_get_nickname(key);
-    if (!keyName) {
-        return SECFailure;
-    }
-
-    i = 0;
-    while (certList[i]) {
-        if (sec_pkcs12_decoder_append_bag_to_context(p12dcx, certList[i]) != SECSuccess) {
-            return SECFailure;
-        }
-        i++;
-    }
-
-    certList = sec_pkcs12_find_certs_for_key(p12dcx->safeBags, key);
-    if (!certList) {
-        return SECFailure;
-    }
-
-    i = 0;
-    while (certList[i] != 0) {
-        if (sec_pkcs12_set_nickname(certList[i], keyName) != SECSuccess) {
-            return SECFailure;
-        }
-        i++;
-    }
-
-    return SECSuccess;
-}
-
-static SECStatus
-sec_pkcs12_decoder_convert_old_safe_to_bags(SEC_PKCS12DecoderContext *p12dcx,
-                                            SEC_PKCS12SafeContents *safe,
-                                            SEC_PKCS12Baggage *baggage)
-{
-    SECStatus rv;
-
-    if (!p12dcx || p12dcx->error) {
-        PORT_SetError(SEC_ERROR_INVALID_ARGS);
-        return SECFailure;
-    }
-
-    if (safe && safe->contents) {
-        int i = 0;
-        while (safe->contents[i] != NULL) {
-            if (SECOID_FindOIDTag(&safe->contents[i]->safeBagType) == SEC_OID_PKCS12_KEY_BAG_ID) {
-                int j = 0;
-                SEC_PKCS12PrivateKeyBag *privBag =
-                    safe->contents[i]->safeContent.keyBag;
-
-                while (privBag->privateKeys[j] != NULL) {
-                    SEC_PKCS12PrivateKey *pk = privBag->privateKeys[j];
-                    rv = sec_pkcs12_decoder_convert_old_key_and_certs(p12dcx, pk,
-                                                                      PR_FALSE, safe, baggage);
-                    if (rv != SECSuccess) {
-                        goto loser;
-                    }
-                    j++;
-                }
-            }
-            i++;
-        }
-    }
-
-    if (baggage && baggage->bags) {
-        int i = 0;
-        while (baggage->bags[i] != NULL) {
-            SEC_PKCS12BaggageItem *bag = baggage->bags[i];
-            int j = 0;
-
-            if (!bag->espvks) {
-                i++;
-                continue;
-            }
-
-            while (bag->espvks[j] != NULL) {
-                SEC_PKCS12ESPVKItem *espvk = bag->espvks[j];
-                rv = sec_pkcs12_decoder_convert_old_key_and_certs(p12dcx, espvk,
-                                                                  PR_TRUE, safe, baggage);
-                if (rv != SECSuccess) {
-                    goto loser;
-                }
-                j++;
-            }
-            i++;
-        }
-    }
-
-    return SECSuccess;
-
-loser:
-    return SECFailure;
-}
-
-SEC_PKCS12DecoderContext *
-sec_PKCS12ConvertOldSafeToNew(PLArenaPool *arena, PK11SlotInfo *slot,
-                              PRBool swapUnicode, SECItem *pwitem,
-                              void *wincx, SEC_PKCS12SafeContents *safe,
-                              SEC_PKCS12Baggage *baggage)
-{
-    SEC_PKCS12DecoderContext *p12dcx;
-
-    if (!arena || !slot || !pwitem) {
-        PORT_SetError(SEC_ERROR_INVALID_ARGS);
-        return NULL;
-    }
-
-    if (!safe && !baggage) {
-        PORT_SetError(SEC_ERROR_INVALID_ARGS);
-        return NULL;
-    }
-
-    p12dcx = PORT_ArenaZNew(arena, SEC_PKCS12DecoderContext);
-    if (!p12dcx) {
-        return NULL;
-    }
-
-    p12dcx->arena = arena;
-    p12dcx->slot = PK11_ReferenceSlot(slot);
-    p12dcx->wincx = wincx;
-    p12dcx->error = PR_FALSE;
-    p12dcx->swapUnicodeBytes = swapUnicode;
-    p12dcx->pwitem = pwitem;
-    p12dcx->tokenCAs = SECPKCS12TargetTokenNoCAs;
-
-    if (sec_pkcs12_decoder_convert_old_safe_to_bags(p12dcx, safe, baggage) != SECSuccess) {
-        p12dcx->error = PR_TRUE;
-        return NULL;
-    }
-
-    return p12dcx;
 }

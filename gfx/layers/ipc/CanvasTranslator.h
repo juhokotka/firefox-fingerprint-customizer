@@ -10,21 +10,21 @@
 #include <memory>
 #include <unordered_map>
 
-#include "mozilla/dom/ipc/IdType.h"
-#include "mozilla/gfx/InlineTranslator.h"
-#include "mozilla/gfx/RecordedEvent.h"
 #include "CanvasChild.h"
-#include "mozilla/ipc/SharedMemoryHandle.h"
-#include "mozilla/layers/CanvasDrawEventRecorder.h"
-#include "mozilla/layers/LayersSurfaces.h"
-#include "mozilla/layers/PCanvasParent.h"
-#include "mozilla/layers/RemoteTextureMap.h"
-#include "mozilla/ipc/CrossProcessSemaphore.h"
-#include "mozilla/ipc/SharedMemoryMapping.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Variant.h"
 #include "mozilla/WeakPtr.h"
+#include "mozilla/dom/ipc/IdType.h"
+#include "mozilla/gfx/InlineTranslator.h"
+#include "mozilla/gfx/RecordedEvent.h"
+#include "mozilla/ipc/CrossProcessSemaphore.h"
+#include "mozilla/ipc/SharedMemoryHandle.h"
+#include "mozilla/ipc/SharedMemoryMapping.h"
+#include "mozilla/layers/CanvasDrawEventRecorder.h"
+#include "mozilla/layers/LayersSurfaces.h"
+#include "mozilla/layers/PCanvasParent.h"
+#include "mozilla/layers/RemoteTextureMap.h"
 
 namespace mozilla {
 
@@ -253,7 +253,7 @@ class CanvasTranslator final : public gfx::InlineTranslator,
       uint64_t aKey) final;
 
   already_AddRefed<gfx::SourceSurface> LookupSourceSurfaceFromSurfaceDescriptor(
-      const SurfaceDescriptor& aDesc) final;
+      gfx::DrawTarget* aDT, const SurfaceDescriptor& aDesc) final;
 
   /**
    * Gets the cached DataSourceSurface, if it exists, associated with a
@@ -473,6 +473,14 @@ class CanvasTranslator final : public gfx::InlineTranslator,
   MaybeRecycleDataSurfaceForSurfaceDescriptor(
       TextureHost* aTextureHost,
       const SurfaceDescriptorRemoteDecoder& aSurfaceDescriptor);
+
+#ifdef MOZ_WIDGET_GTK
+  // Imports a DMABuf video frame into the canvas GL context and converts it
+  // on the GPU, returning a directly samplable surface (no CPU download).
+  // Falls back to nullptr when GL import is unavailable.
+  already_AddRefed<gfx::SourceSurface> GetZeroCopySurfaceFromDMABuf(
+      gfx::DrawTarget* aDT, TextureHost* aTextureHost);
+#endif
 
   bool UsePendingCanvasTranslatorEvents();
   void PostCanvasTranslatorEvents(const MutexAutoLock& aProofOfLock);

@@ -84,8 +84,16 @@ HTMLImageElement::~HTMLImageElement() {
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLImageElement, nsGenericHTMLElement,
-                                   mResponsiveSelector)
+NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLImageElement)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLImageElement,
+                                                nsGenericHTMLElement)
+  tmp->ClearForm(true);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mResponsiveSelector)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLImageElement,
+                                                  nsGenericHTMLElement)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mForm, mResponsiveSelector)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(HTMLImageElement,
                                              nsGenericHTMLElement,
@@ -121,14 +129,16 @@ bool HTMLImageElement::Draggable() const {
                       nsGkAtoms::_false, eIgnoreCase);
 }
 
-bool HTMLImageElement::Complete() {
-  // It is still not clear what value should img.complete return in various
-  // cases, see https://github.com/whatwg/html/issues/4884
+// https://html.spec.whatwg.org/#dom-img-complete
+//
+// It is still not clear what value should img.complete return in various
+// cases, see https://github.com/whatwg/html/issues/4884
+bool HTMLImageElement::Complete() const {
   if (!HasAttr(nsGkAtoms::srcset) && !HasNonEmptyAttr(nsGkAtoms::src)) {
     return true;
   }
 
-  if (mPendingRequest || mPendingImageLoadTask) {
+  if (mPendingRequest || HasPendingAlwaysLoadImageTask()) {
     return false;
   }
 
@@ -194,6 +204,9 @@ bool HTMLImageElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
       ParseFetchPriority(aValue, aResult);
       return true;
     }
+    if (aAttribute == nsGkAtoms::referrerpolicy) {
+      return ParseReferrerAttribute(aValue, aResult);
+    }
     if (ParseImageAttribute(aAttribute, aValue, aResult)) {
       return true;
     }
@@ -226,8 +239,7 @@ nsChangeHint HTMLImageElement::GetAttributeChangeHint(
   return retval;
 }
 
-NS_IMETHODIMP_(bool)
-HTMLImageElement::IsAttributeMapped(const nsAtom* aAttribute) const {
+bool HTMLImageElement::IsNoNamespaceAttrMapped(const nsAtom* aAttribute) const {
   static const MappedAttributeEntry* const map[] = {
       sCommonAttributeMap, sImageMarginSizeAttributeMap,
       sImageBorderAttributeMap, sImageAlignAttributeMap};
@@ -436,6 +448,8 @@ bool HTMLImageElement::IsHTMLFocusable(IsFocusableFlags aFlags,
 }
 
 nsresult HTMLImageElement::BindToTree(BindContext& aContext, nsINode& aParent) {
+  const bool wasInPicture = IsInPicture();
+
   MOZ_TRY(nsGenericHTMLElement::BindToTree(aContext, aParent));
 
   nsImageLoadingContent::BindToTree(aContext, aParent);
@@ -443,13 +457,13 @@ nsresult HTMLImageElement::BindToTree(BindContext& aContext, nsINode& aParent) {
   UpdateFormOwner();
 
   UpdateAutoSizeObserver();
-  // Mark channel as urgent-start before load image if the image load is
-  // initiated by a user interaction.
-  if (IsInPicture()) {
+  if (IsInPicture() && !wasInPicture) {
     if (!mInDocResponsiveContent) {
       aContext.OwnerDoc().AddResponsiveContent(this);
       mInDocResponsiveContent = true;
     }
+    // Mark channel as urgent-start before load image if the image load is
+    // initiated by a user interaction.
     mUseUrgentStartForChannel = UserActivation::IsHandlingUserInput();
     UpdateSourceSyncAndQueueImageTask(false, /* aNotify = */ false);
   }
@@ -478,7 +492,12 @@ void HTMLImageElement::UnbindFromTree(UnbindContext& aContext) {
   nsImageLoadingContent::UnbindFromTree();
   nsGenericHTMLElement::UnbindFromTree(aContext);
 
-  UpdateAutoSizeObserver();
+  if (!aContext.IsMove()) {
+    // https://html.spec.whatwg.org/#the-img-element:html-element-removing-steps
+    // 2. Set removedNode's last auto-sizes width to null.
+    // (We also stop observing it for resizes at this point.)
+    UpdateAutoSizeObserver();
+  }
 
   if (wasInPicture != IsInPicture()) {
     MOZ_ASSERT(wasInPicture);
@@ -615,9 +634,6 @@ void HTMLImageElement::SetForm(HTMLFormElement* aForm) {
 }
 
 void HTMLImageElement::ClearForm(bool aRemoveFromForm) {
-  NS_ASSERTION((mForm != nullptr) == HasFlag(ADDED_TO_FORM),
-               "Form control should have had flag set correctly");
-
   if (!mForm) {
     return;
   }

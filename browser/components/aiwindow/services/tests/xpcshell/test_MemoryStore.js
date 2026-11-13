@@ -4,17 +4,155 @@
 
 "use strict";
 
+const { sinon } = ChromeUtils.importESModule(
+  "resource://testing-common/Sinon.sys.mjs"
+);
+const { EmbeddingsGenerator } = ChromeUtils.importESModule(
+  "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs"
+);
 const { MemoryStore, makeMemoryId, migrateMemoryStoreVersionOneToTwo } =
   ChromeUtils.importESModule(
     "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs"
   );
+
+const { MEMORY_FILTER_COMPARATOR } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/services/MemoryStoreConstants.sys.mjs"
+);
 const {
   MEMORY_TYPE_SHORT_TERM_MEMORY,
+  MEMORY_TYPE_DURABLE_MEMORY,
   MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE,
+  MEMORY_SENSITIVITY_CATEGORY_SENSITIVE,
   MEMORY_FRECENCY_MAX_DAYS,
 } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/memories/MemoriesConstants.sys.mjs"
 );
+
+const TEST_MESSAGE = "Remember I like coffee.";
+const TEST_MEMORIES = [
+  {
+    type: MEMORY_TYPE_DURABLE_MEMORY,
+    memory_summary: "Loves drinking coffee",
+    reasoning: "Frequeently orders coffee online for pickup",
+    tags: ["category:Food & Drink", "intent:Plan / Organize", "extra:tag"],
+    sources: ["history"],
+    sensitivity_category: MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE,
+    updated_at: 1000,
+    recent_accessed_counts: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 7 },
+  },
+  {
+    type: MEMORY_TYPE_SHORT_TERM_MEMORY,
+    memory_summary: "Buys dog food online",
+    reasoning: "Frequently buys dog food on websites like Chewy",
+    tags: ["category:Pets & Animals", "intent:Buy / Acquire"],
+    sources: ["session"],
+    sensitivity_category: MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE,
+    updated_at: 1,
+    recent_accessed_counts: { 0: 1, 1: 0, 2: 2, 3: 0, 4: 2, 5: 0, 6: 0 },
+  },
+  {
+    type: MEMORY_TYPE_DURABLE_MEMORY,
+    memory_summary: "Plays games online",
+    reasoning: "Visits a lot of gaming-related websites",
+    tags: ["category:Games", "intent:Entertain / Relax", "extra:tag"],
+    sources: ["user_request"],
+    sensitivity_category: MEMORY_SENSITIVITY_CATEGORY_SENSITIVE,
+    updated_at: 200,
+    recent_accessed_counts: { 0: 0, 1: 3, 2: 0, 3: 0, 4: 1, 5: 1, 6: 0 },
+  },
+];
+
+/**
+ * Helper function to delete all memories before and after a test
+ */
+async function deleteAllMemories() {
+  const memories = await MemoryStore.getMemories({ includeSoftDeleted: true });
+  for (const memory of memories) {
+    await MemoryStore.hardDeleteMemory(memory.id);
+  }
+}
+
+/**
+ * Helper function to bulk-add memories
+ */
+async function addMemories() {
+  await deleteAllMemories();
+  for (const memory of TEST_MEMORIES) {
+    await MemoryStore.addMemory(memory);
+  }
+}
+
+/**
+ * Helper function to return relevant memories with fake semantic embeddings
+ *
+ * @param {string} message
+ * @param {int} topK
+ * @param {float} threshold
+ */
+async function getFakeRelevantMemories(message, topK, threshold) {
+  // Mock the private embeddings generator in MemoriesManager
+  // We'll create a fake generator that returns predictable embeddings
+  const fakeGenerator = {
+    async embedMany(_texts) {
+      // Return fake embeddings: one for each memory
+      // Coffee memory gets [1, 0, 0], dog food gets [0, 1, 0], games gets [0, 0, 1]
+
+      const embeds = [];
+      for (const text of _texts) {
+        if (text.includes("coffee")) {
+          embeds.push([1, 0, 0]); //  "Loves drinking coffee" embedding
+        } else if (text.includes("dog food")) {
+          embeds.push([0, 1, 0]); //  "Buys dog food online" embedding (orthogonal)
+        } else {
+          embeds.push([0, 0, 1]); //  "Plays games online" embedding (orthogonal)
+        }
+      }
+      return { output: embeds };
+    },
+    async embed(_text) {
+      // Query about coffee should be similar to first memory
+      return {
+        output: [[0.9, 0.1, 0]], // Similar to coffee embedding
+      };
+    },
+  };
+
+  // Create a version that uses our fake generator
+  // Sort by id to ensure deterministic order
+  const memories = (
+    await MemoryStore.getMemories({ includeSoftDeleted: true })
+  ).sort((a, b) => a.id.localeCompare(b.id));
+  if (memories.length === 0) {
+    return [];
+  }
+
+  // Use fake embeddings
+  const memoryEmbeddings = (
+    await fakeGenerator.embedMany(
+      memories.map(m => `${m.memory_summary}. ${m.reasoning || ""}`)
+    )
+  ).output;
+
+  let queryEmbedding = (await fakeGenerator.embed(message)).output;
+  if (Array.isArray(queryEmbedding) && queryEmbedding.length === 1) {
+    queryEmbedding = queryEmbedding[0];
+  }
+
+  // Calculate cosine similarity manually
+  const { cosSim } = ChromeUtils.importESModule(
+    "chrome://global/content/ml/NLPUtils.sys.mjs"
+  );
+
+  const similarities = memoryEmbeddings.map((memEmb, idx) => ({
+    ...memories[idx],
+    similarity: cosSim(queryEmbedding, memEmb),
+  }));
+
+  return similarities
+    .filter(m => m.similarity >= (threshold ?? 0.3))
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, topK ?? 5);
+}
 
 add_task(async function test_init_empty_state() {
   // First init should succeed and not throw.
@@ -30,6 +168,16 @@ add_task(async function test_init_empty_state() {
     "Default last_history_memory_ts should be 0"
   );
   equal(meta.last_chat_memory_ts, 0, "Default last_chat_memory_ts should be 0");
+  equal(
+    meta.last_session_memory_ts,
+    0,
+    "Default last_session_memory_ts should be 0"
+  );
+  equal(
+    meta.last_generation_run_ts,
+    0,
+    "Default last_generation_run_ts should be 0"
+  );
 });
 
 add_task(async function test_addMemory() {
@@ -364,6 +512,18 @@ add_task(async function test_updateMeta_and_persistence_roundtrip() {
     "last_chat_memory_ts should be updated"
   );
 
+  const generationTime = now + 2000;
+  await MemoryStore.updateMeta({
+    last_generation_run_ts: generationTime,
+  });
+
+  meta = await MemoryStore.getMeta();
+  equal(
+    meta.last_generation_run_ts,
+    generationTime,
+    "updateMeta should update last_generation_run_ts"
+  );
+
   // Force a write to disk.
   await MemoryStore.testOnlyFlush();
 
@@ -386,6 +546,11 @@ add_task(async function test_updateMeta_and_persistence_roundtrip() {
     meta2.last_chat_memory_ts,
     chatTime,
     "last_chat_memory_ts should survive roundtrip to disk"
+  );
+  equal(
+    meta2.last_generation_run_ts,
+    generationTime,
+    "last_generation_run_ts should survive roundtrip to disk"
   );
 
   const memories = await FreshStore.getMemories();
@@ -637,3 +802,930 @@ add_task(async function test_migrate_memories_from_v1_to_v2() {
     "Migrated memory merge count should be 0 (never used)"
   );
 });
+
+add_task(
+  async function test_migrate_memories_from_v1_to_v2_missing_fields_fill_defaults() {
+    const now = Date.now();
+    const memoriesV1 = [
+      {
+        id: "mem.123",
+        memory_summary: "Likes dogs",
+        category: "Dogs",
+        intent: "Share / Communicate",
+        score: 1.0,
+        source: "history",
+        source_ids: {
+          history_source_ids: [1, 2, 3],
+          conversation_source_ids: [4, 5, 6],
+        },
+        updated_at: now,
+      },
+    ];
+
+    const memoriesV2 = migrateMemoryStoreVersionOneToTwo(memoriesV1);
+
+    Assert.equal(
+      memoriesV2[0].reasoning,
+      "",
+      "Missing reasoning should fill empty string"
+    );
+    Assert.equal(
+      memoriesV2[0].is_deleted,
+      false,
+      "Missing soft deletion flag should fill false"
+    );
+    Assert.greaterOrEqual(
+      memoriesV2[0].updated_at,
+      now,
+      "Missing updated_at should fill now"
+    );
+  }
+);
+
+add_task(
+  async function test_migrate_memories_from_v1_to_v2_missing_source_fills_from_source_ids() {
+    const memoriesV1FromSession = [
+      {
+        id: "mem.123",
+        memory_summary: "Likes dogs",
+        reasoning: "User researches dog facts, treats, and training advice",
+        category: "Dogs",
+        intent: "Share / Communicate",
+        score: 1.0,
+        source_ids: {
+          history_source_ids: [1, 2, 3],
+          conversation_source_ids: [4, 5, 6],
+        },
+        is_deleted: false,
+        updated_at: Date.now(),
+      },
+    ];
+    const memoriesV2Session = migrateMemoryStoreVersionOneToTwo(
+      memoriesV1FromSession
+    );
+    Assert.ok(!memoriesV2Session[0].source, "Source field should not exist");
+    Assert.deepEqual(
+      memoriesV2Session[0].sources,
+      ["session"],
+      "Should infer session from the source IDs when source doesn't exists"
+    );
+
+    const memoriesV1FromChat = [
+      {
+        id: "mem.123",
+        memory_summary: "Likes dogs",
+        reasoning: "User researches dog facts, treats, and training advice",
+        category: "Dogs",
+        intent: "Share / Communicate",
+        score: 1.0,
+        source_ids: {
+          history_source_ids: [],
+          conversation_source_ids: [4, 5, 6],
+        },
+        is_deleted: false,
+        updated_at: Date.now(),
+      },
+    ];
+    const memoriesV2Chat =
+      migrateMemoryStoreVersionOneToTwo(memoriesV1FromChat);
+    Assert.ok(!memoriesV2Chat[0].source, "Source field should not exist");
+    Assert.deepEqual(
+      memoriesV2Chat[0].sources,
+      ["conversation"],
+      "Should infer conversation from the source IDs when source doesn't exists"
+    );
+
+    const memoriesV1FromHistory = [
+      {
+        id: "mem.123",
+        memory_summary: "Likes dogs",
+        reasoning: "User researches dog facts, treats, and training advice",
+        category: "Dogs",
+        intent: "Share / Communicate",
+        score: 1.0,
+        source_ids: {
+          history_source_ids: [1, 2, 3],
+          conversation_source_ids: [],
+        },
+        is_deleted: false,
+        updated_at: Date.now(),
+      },
+    ];
+    const memoriesV2History = migrateMemoryStoreVersionOneToTwo(
+      memoriesV1FromHistory
+    );
+    Assert.ok(!memoriesV2History[0].source, "Source field should not exist");
+    Assert.deepEqual(
+      memoriesV2History[0].sources,
+      ["history"],
+      "Should infer history from the source IDs when source doesn't exists"
+    );
+
+    const memoriesV1SourceFallback = [
+      {
+        id: "mem.123",
+        memory_summary: "Likes dogs",
+        reasoning: "User researches dog facts, treats, and training advice",
+        category: "Dogs",
+        intent: "Share / Communicate",
+        score: 1.0,
+        source_ids: {
+          history_source_ids: [],
+          conversation_source_ids: [],
+        },
+        is_deleted: false,
+        updated_at: Date.now(),
+      },
+    ];
+    const memoriesV2SourceFallback = migrateMemoryStoreVersionOneToTwo(
+      memoriesV1SourceFallback
+    );
+    Assert.ok(
+      !memoriesV2SourceFallback[0].source,
+      "Source field should not exist"
+    );
+    Assert.deepEqual(
+      memoriesV2SourceFallback[0].sources,
+      ["history"],
+      "Should fill history when the source IDs are empty and source doesn't exists"
+    );
+
+    const memoriesV1SourceFallbackMissingSourceIDs = [
+      {
+        id: "mem.123",
+        memory_summary: "Likes dogs",
+        reasoning: "User researches dog facts, treats, and training advice",
+        category: "Dogs",
+        intent: "Share / Communicate",
+        score: 1.0,
+        is_deleted: false,
+        updated_at: Date.now(),
+      },
+    ];
+    const memoriesV2SourceFallbackkMissingSourceIDs =
+      migrateMemoryStoreVersionOneToTwo(
+        memoriesV1SourceFallbackMissingSourceIDs
+      );
+    Assert.ok(
+      !memoriesV2SourceFallbackkMissingSourceIDs[0].source,
+      "Source field should not exist"
+    );
+    Assert.deepEqual(
+      memoriesV2SourceFallbackkMissingSourceIDs[0].sources,
+      ["history"],
+      "Should fill history when the source IDs are empty and source doesn't exists"
+    );
+  }
+);
+
+/**
+ * Tests retrieving relevant memories for a user message using embeddings
+ */
+add_task(async function test_getRelevantMemories_happy_path() {
+  // Add memories so that we pass the existing memories check in the `getRelevantMemories` method
+  await addMemories();
+
+  const sb = sinon.createSandbox();
+  try {
+    // Mock the private embeddings generator in MemoriesManager
+    // We'll create a fake generator that returns predictable embeddings
+    const fakeGenerator = {
+      async embedMany(_texts) {
+        // Return fake embeddings: one for each memory
+        // Coffee memory gets [1, 0, 0], dog food gets [0, 1, 0], games gets [0, 0, 1]
+
+        const embeds = [];
+        for (const text of _texts) {
+          if (text.includes("coffee")) {
+            embeds.push([1, 0, 0]); //  "Loves drinking coffee" embedding
+          } else if (text.includes("dog food")) {
+            embeds.push([0, 1, 0]); //  "Buys dog food online" embedding (orthogonal)
+          } else {
+            embeds.push([0, 0, 1]); //  "Plays games online" embedding (orthogonal)
+          }
+        }
+        return { output: embeds };
+      },
+      async embed(_text) {
+        // Query about coffee should be similar to first memory
+        return {
+          output: [[0.9, 0.1, 0]], // Similar to coffee embedding
+        };
+      },
+    };
+
+    // Stub getRelevantMemories to use fake embeddings
+    let callCount = 0;
+
+    sb.stub(MemoryStore, "getRelevantMemories").callsFake(
+      async function (message, topK, threshold) {
+        // On first call, let it create the generator, then replace it
+        if (callCount === 0) {
+          callCount++;
+          // Create a version that uses our fake generator
+          // Sort by id to ensure deterministic order
+          const memories = (
+            await MemoryStore.getMemories({ includeSoftDeleted: true })
+          ).sort((a, b) => a.id.localeCompare(b.id));
+          if (memories.length === 0) {
+            return [];
+          }
+
+          // Use fake embeddings
+          const memoryEmbeddings = (
+            await fakeGenerator.embedMany(
+              memories.map(m => `${m.memory_summary}. ${m.reasoning || ""}`)
+            )
+          ).output;
+
+          let queryEmbedding = (await fakeGenerator.embed(message)).output;
+          if (Array.isArray(queryEmbedding) && queryEmbedding.length === 1) {
+            queryEmbedding = queryEmbedding[0];
+          }
+
+          // Calculate cosine similarity manually
+          const { cosSim } = ChromeUtils.importESModule(
+            "chrome://global/content/ml/NLPUtils.sys.mjs"
+          );
+
+          const similarities = memoryEmbeddings.map((memEmb, idx) => ({
+            ...memories[idx],
+            similarity: cosSim(queryEmbedding, memEmb),
+          }));
+
+          return similarities
+            .filter(m => m.similarity >= (threshold || 0.3))
+            .sort((a, b) => b.similarity - a.similarity)
+            .slice(0, topK || 5);
+        }
+        // Return empty array for subsequent calls
+        return [];
+      }
+    );
+
+    const relevantMemories =
+      await MemoryStore.getRelevantMemories(TEST_MESSAGE);
+
+    // Check that the correct relevant memory was returned
+    Assert.ok(Array.isArray(relevantMemories), "Result should be an array.");
+    Assert.greaterOrEqual(
+      relevantMemories.length,
+      1,
+      "Result should contain at least one relevant memory."
+    );
+
+    // The coffee memory should be ranked higher due to similarity
+    Assert.equal(
+      relevantMemories[0].memory_summary,
+      "Loves drinking coffee",
+      "Most relevant memory should be about coffee."
+    );
+
+    // Check that similarity score is present
+    Assert.ok(
+      "similarity" in relevantMemories[0],
+      "Result should include similarity score"
+    );
+    Assert.strictEqual(
+      typeof relevantMemories[0].similarity,
+      "number",
+      "Similarity should be a number"
+    );
+
+    // Delete memories after test
+    await deleteAllMemories();
+  } finally {
+    sb.restore();
+  }
+});
+
+/**
+ * Tests failed memories retrieval - no existing memories stored
+ *
+ * We don't mock an engine for this test case because getRelevantMemories should immediately return an empty array
+ * because there aren't any existing memories -> No need to call the LLM.
+ */
+add_task(
+  async function test_getRelevantMemories_sad_path_no_existing_memories() {
+    const relevantMemories =
+      await MemoryStore.getRelevantMemories(TEST_MESSAGE);
+
+    // Check that result is an empty array
+    Assert.ok(Array.isArray(relevantMemories), "Result should be an array.");
+    Assert.equal(
+      relevantMemories.length,
+      0,
+      "Result should be an empty array when there are no existing memories."
+    );
+  }
+);
+
+/**
+ * Tests failed memories retrieval - no memories meet similarity threshold
+ */
+add_task(
+  async function test_getRelevantMemories_sad_path_null_classification() {
+    // Add memories so that we pass the existing memories check
+    await addMemories();
+
+    const sb = sinon.createSandbox();
+    try {
+      // Mock getRelevantMemories to return empty array (no memories above threshold)
+      const stub = sb.stub(MemoryStore, "getRelevantMemories").resolves([]);
+
+      const relevantMemories =
+        await MemoryStore.getRelevantMemories(TEST_MESSAGE);
+
+      // Check that the stub was called
+      Assert.ok(stub.calledOnce, "getRelevantMemories should be called once");
+
+      // Check that result is an empty array
+      Assert.ok(Array.isArray(relevantMemories), "Result should be an array.");
+      Assert.equal(
+        relevantMemories.length,
+        0,
+        "Result should be an empty array when no memories meet similarity threshold."
+      );
+
+      // Delete memories after test
+      await deleteAllMemories();
+    } finally {
+      sb.restore();
+    }
+  }
+);
+
+/**
+ * Tests that getRelevantMemories properly invalidates cache when memories are updated.
+ * Cache should be reused when memories haven't changed, but invalidated when a
+ * memory's identity (id or summary) changes.
+ */
+add_task(async function test_getRelevantMemories_cache_invalidation() {
+  await deleteAllMemories();
+
+  // Clear the embeddings cache before this test
+  MemoryStore._clearEmbeddingsCache();
+
+  const sb = sinon.createSandbox();
+  try {
+    await addMemories();
+
+    let embedManyCallCount = 0;
+
+    const fakeGenerator = {
+      async embedMany(texts) {
+        embedManyCallCount++;
+        return {
+          output: texts.map((_, i) => [i === 0 ? 1 : 0, i === 1 ? 1 : 0, 0]),
+        };
+      },
+      async embed(_text) {
+        return { output: [[0.9, 0.1, 0]] };
+      },
+    };
+
+    sb.stub(EmbeddingsGenerator.prototype, "embedMany").callsFake(
+      fakeGenerator.embedMany
+    );
+    sb.stub(EmbeddingsGenerator.prototype, "embed").callsFake(
+      fakeGenerator.embed
+    );
+
+    await MemoryStore.getRelevantMemories("coffee");
+    Assert.equal(
+      embedManyCallCount,
+      1,
+      "embedMany should be called once on first call"
+    );
+
+    await MemoryStore.getRelevantMemories("coffee");
+    Assert.equal(
+      embedManyCallCount,
+      1,
+      "embedMany should NOT be called again when memories unchanged (cache hit)"
+    );
+
+    const memories = await MemoryStore.getMemories({
+      includeSoftDeleted: true,
+    });
+    await MemoryStore.updateMemory(memories[0].id, {
+      memory_summary: "Loves drinking coffee and tea",
+    });
+
+    await MemoryStore.getRelevantMemories("coffee");
+    Assert.equal(
+      embedManyCallCount,
+      2,
+      "embedMany should be called again after memory update (cache invalidated)"
+    );
+
+    await deleteAllMemories();
+  } finally {
+    sb.restore();
+    // Clear the cache after this test to avoid affecting other tests
+    MemoryStore._clearEmbeddingsCache();
+  }
+});
+
+add_task(async function test_getMemories_with_simple_filters() {
+  await addMemories();
+
+  // Filter by memory type
+  const memoriesByType = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "type",
+        value: [MEMORY_TYPE_DURABLE_MEMORY],
+        comparator: MEMORY_FILTER_COMPARATOR.IN,
+      },
+    ],
+  });
+  Assert.equal(
+    memoriesByType.length,
+    2,
+    `Should return 2 memories with the "${MEMORY_TYPE_DURABLE_MEMORY}" type`
+  );
+  Assert.deepEqual(
+    ["Loves drinking coffee", "Plays games online"].sort(),
+    memoriesByType.map(mem => mem.memory_summary).sort(),
+    `Filter by "${MEMORY_TYPE_DURABLE_MEMORY}" should return the expected summaries`
+  );
+
+  // Filter by memory source
+  const memoriesbySource = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "sources",
+        value: ["session"],
+        comparator: MEMORY_FILTER_COMPARATOR.SOME,
+      },
+    ],
+  });
+  Assert.equal(
+    memoriesbySource.length,
+    1,
+    'Filtering by "session" source should return 1 memory'
+  );
+  Assert.equal(
+    memoriesbySource[0].memory_summary,
+    "Buys dog food online",
+    'Filtering by "session" source should return the expected memory'
+  );
+
+  // Filter by exact sensitivity category
+  const memoriesBySensitivity = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "sensitivity_category",
+        value: MEMORY_SENSITIVITY_CATEGORY_SENSITIVE,
+        comparator: MEMORY_FILTER_COMPARATOR.EQUAL_TO,
+      },
+    ],
+  });
+  Assert.equal(
+    memoriesBySensitivity.length,
+    1,
+    `Filtering by exactly \"${MEMORY_SENSITIVITY_CATEGORY_SENSITIVE}\" should return exactly 1 memory`
+  );
+  Assert.equal(
+    memoriesBySensitivity[0].memory_summary,
+    "Plays games online",
+    `Filtering by exactly \"${MEMORY_SENSITIVITY_CATEGORY_SENSITIVE}\" should return the expected memory`
+  );
+
+  // Filter by tags, loose
+  const memoriesByTags = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "tags",
+        value: ["category:Food & Drink", "extra:tag"],
+        comparator: MEMORY_FILTER_COMPARATOR.SOME,
+      },
+    ],
+  });
+  Assert.equal(
+    memoriesByTags.length,
+    2,
+    "Filter loosely by tag should return 2 memories"
+  );
+  Assert.deepEqual(
+    ["Loves drinking coffee", "Plays games online"].sort(),
+    memoriesByTags.map(m => m.memory_summary).sort(),
+    "Filter loosely by tag should return the expected memories"
+  );
+
+  // Filter by tags, exact set match (order-independent)
+  const memoriesByTagsExact = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "tags",
+        value: ["extra:tag", "category:Food & Drink", "intent:Plan / Organize"],
+        comparator: MEMORY_FILTER_COMPARATOR.ALL,
+      },
+    ],
+  });
+  Assert.equal(
+    memoriesByTagsExact.length,
+    1,
+    "Filter by exact tag set should return 1 memory"
+  );
+  Assert.equal(
+    memoriesByTagsExact[0].memory_summary,
+    "Loves drinking coffee",
+    "Filter by exact tag set should return the expected memory"
+  );
+
+  // Exact set match must reject a strict subset of a memory's tags
+  const memoriesByTagsSubset = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "tags",
+        value: ["category:Food & Drink", "extra:tag"],
+        comparator: MEMORY_FILTER_COMPARATOR.ALL,
+      },
+    ],
+  });
+  Assert.equal(
+    memoriesByTagsSubset.length,
+    0,
+    "Filter by a strict subset of a memory's tags should return 0 memories"
+  );
+
+  // Filter by 1 tag
+  const memoriesBySingleTag = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "tags",
+        value: "intent:Entertain / Relax",
+        comparator: MEMORY_FILTER_COMPARATOR.INCLUDES,
+      },
+    ],
+  });
+  Assert.equal(
+    memoriesBySingleTag.length,
+    1,
+    "Filter by a single tag should return 1 memory"
+  );
+  Assert.equal(
+    memoriesBySingleTag[0].memory_summary,
+    "Plays games online",
+    "Filter by a single tag should return the expected memory"
+  );
+
+  // Filter by updated_at date
+  const memsByUpdateDate = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "updated_at",
+        value: 123,
+        comparator: MEMORY_FILTER_COMPARATOR.GREATER_THAN,
+      },
+    ],
+  });
+  Assert.equal(
+    memsByUpdateDate.length,
+    2,
+    "Filter by update date should return 2 memories"
+  );
+  Assert.deepEqual(
+    ["Loves drinking coffee", "Plays games online"].sort(),
+    memsByUpdateDate.map(mem => mem.memory_summary).sort(),
+    "Filter by update date should return the expected summaries"
+  );
+
+  await deleteAllMemories();
+});
+
+add_task(async function test_getMemories_with_multiple_filters() {
+  await addMemories();
+
+  const memsOneFilter = await MemoryStore.getMemories({
+    attributeFilters: [
+      { field: "tags", value: "extra:tag", comparator: "INCLUDES" },
+    ],
+  });
+  Assert.equal(
+    memsOneFilter.length,
+    2,
+    "Filtering only on tag should return 2 memories"
+  );
+
+  const memsTwoFilters = await MemoryStore.getMemories({
+    attributeFilters: [
+      { field: "tags", value: "extra:tag", comparator: "INCLUDES" },
+      {
+        field: "sensitivity_category",
+        value: MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE,
+        comparator: "EQUAL_TO",
+      },
+    ],
+  });
+  Assert.equal(
+    memsTwoFilters.length,
+    1,
+    "Adding type filter should return 1 memory"
+  );
+  Assert.equal(
+    memsTwoFilters[0].memory_summary,
+    "Loves drinking coffee",
+    "Adding type filter should return the expected memory"
+  );
+
+  await deleteAllMemories();
+});
+
+add_task(async function test_getMemories_with_day_range_filter() {
+  await addMemories();
+
+  const memUsedOnDay7 = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "recent_accessed_counts.[6]",
+        value: 5,
+        comparator: "GREATER_THAN",
+      },
+    ],
+  });
+  Assert.equal(
+    memUsedOnDay7.length,
+    1,
+    "Should return 1 memory used more than 5 times on the 7th day"
+  );
+  Assert.equal(
+    memUsedOnDay7[0].memory_summary,
+    "Loves drinking coffee",
+    "Should return the expected memory used more than 5 times on the 7th day"
+  );
+
+  const memsUsedBetweenDay1And3 = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "recent_accessed_counts.[0-2]",
+        value: 3,
+        comparator: "EQUAL_TO",
+      },
+    ],
+  });
+  Assert.equal(
+    memsUsedBetweenDay1And3.length,
+    2,
+    "Should return 2 memories used exactly 3 times between the 1st and 3rd day"
+  );
+  Assert.deepEqual(
+    ["Buys dog food online", "Plays games online"].sort(),
+    memsUsedBetweenDay1And3.map(mem => mem.memory_summary).sort(),
+    "Should return the expected memories used exactly 3 times between the 1st and 3rd day"
+  );
+
+  const memNotUsedOnDays5And7 = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "recent_accessed_counts.[4, 6]",
+        value: 2,
+        comparator: "LESS_THAN",
+      },
+    ],
+  });
+  Assert.equal(
+    memNotUsedOnDays5And7.length,
+    1,
+    "Should return 1 memory used fewer than 2 times total the 5th and 7th days"
+  );
+  Assert.equal(
+    memNotUsedOnDays5And7[0].memory_summary,
+    "Plays games online",
+    "Should return the expected memory used fewer than 2 times total the 5th and 7th days"
+  );
+
+  const memUsedOnDay5ButNotDay6 = await MemoryStore.getMemories({
+    attributeFilters: [
+      {
+        field: "recent_accessed_counts.[4]",
+        value: 0,
+        comparator: "GREATER_THAN",
+      },
+      { field: "recent_accessed_counts.[5]", value: 0, comparator: "EQUAL_TO" },
+    ],
+  });
+  Assert.equal(
+    memUsedOnDay5ButNotDay6.length,
+    1,
+    "Should return 1 memory used on the 5th day but no the 6th"
+  );
+  Assert.equal(
+    memUsedOnDay5ButNotDay6[0].memory_summary,
+    "Buys dog food online",
+    "Should return the expected memory used on the 5th day but no the 6th"
+  );
+
+  await deleteAllMemories();
+});
+
+add_task(async function test_getMemories_with_semantic_filter() {
+  await addMemories();
+
+  // Semantic filters
+  const sb = sinon.createSandbox();
+  try {
+    sb.stub(MemoryStore, "getRelevantMemories").callsFake(
+      getFakeRelevantMemories
+    );
+
+    const memsBySummaryWithDefaultParams = await MemoryStore.getMemories({
+      attributeFilters: [
+        {
+          field: "memory_summary",
+          value: "Loves drinking coffee",
+          comparator: MEMORY_FILTER_COMPARATOR.LIKE,
+        },
+      ],
+    });
+    Assert.equal(
+      memsBySummaryWithDefaultParams.length,
+      1,
+      "Sematic filter by memory summary should return 1 memory"
+    );
+    Assert.equal(
+      memsBySummaryWithDefaultParams[0].memory_summary,
+      "Loves drinking coffee",
+      "Semantic filter by memory should should return the expected summary"
+    );
+
+    const memsBySummaryWithTopKParam = await MemoryStore.getMemories({
+      attributeFilters: [
+        {
+          field: "memory_summary",
+          value: "Loves drinking coffee",
+          comparator: MEMORY_FILTER_COMPARATOR.LIKE,
+          options: {
+            topK: 0,
+          },
+        },
+      ],
+    });
+    Assert.equal(
+      memsBySummaryWithTopKParam.length,
+      0,
+      "Semantic filter by memory summary should return 0 memories with 0 topK passed in options"
+    );
+
+    const memsBySummaryWithSimilarityThresholdParam =
+      await MemoryStore.getMemories({
+        attributeFilters: [
+          {
+            field: "memory_summary",
+            value: "Loves drinking coffee",
+            comparator: MEMORY_FILTER_COMPARATOR.LIKE,
+            options: {
+              similarityThreshold: 0.0,
+            },
+          },
+        ],
+      });
+    Assert.equal(
+      memsBySummaryWithSimilarityThresholdParam.length,
+      3,
+      "Semantic filter by memory summary should return 3 memories (all of them) with 0.0 similarityThreshold passed in options"
+    );
+  } finally {
+    sb.restore();
+  }
+
+  await deleteAllMemories();
+});
+
+add_task(
+  async function test_getMemories_invalid_value_filter_returns_empty_array() {
+    await addMemories();
+
+    const invalidValueOnNumberFilter = await MemoryStore.getMemories({
+      attributeFilters: [
+        {
+          field: "created_at",
+          value: "not a number",
+          comparator: "GREATER_THAN",
+        },
+      ],
+    });
+    Assert.equal(
+      invalidValueOnNumberFilter.length,
+      0,
+      "Should return 0 memories when using a string filter value with a number comparator"
+    );
+
+    const invalidValueOnStringFilter = await MemoryStore.getMemories({
+      attributeFilters: [
+        {
+          field: "memory_summary",
+          value: 123,
+          comparator: "LIKE",
+        },
+      ],
+    });
+    Assert.equal(
+      invalidValueOnStringFilter.length,
+      0,
+      "Should return 0 memories when using a number filter value with a string comparator"
+    );
+
+    const invalidValueOnArrayFilter = await MemoryStore.getMemories({
+      attributeFilters: [
+        {
+          field: "tags",
+          value: 123,
+          comparator: "SOME",
+        },
+      ],
+    });
+    Assert.equal(
+      invalidValueOnArrayFilter.length,
+      0,
+      "Should return 0 memories when using a number filter value with an array comparator"
+    );
+
+    const invalidValueOnScalarFilter = await MemoryStore.getMemories({
+      attributeFilters: [
+        {
+          field: "type",
+          value: [],
+          comparator: "EQUAL_TO",
+        },
+      ],
+    });
+    Assert.equal(
+      invalidValueOnScalarFilter.length,
+      0,
+      "Should return 0 memories when using an array filter value with a scalar comparator"
+    );
+
+    await deleteAllMemories();
+  }
+);
+
+add_task(
+  async function test_getMemories_invalid_field_filter_returns_empty_array() {
+    await addMemories();
+
+    const invalidFieldOnNumberFilter = await MemoryStore.getMemories({
+      attributeFilters: [
+        {
+          field: "memory_summary",
+          value: 0,
+          comparator: "GREATER_THAN",
+        },
+      ],
+    });
+    Assert.equal(
+      invalidFieldOnNumberFilter.length,
+      0,
+      "Should return 0 memories when using a string field with a number comparator"
+    );
+
+    const invalidFieldOnLikeFilter = await MemoryStore.getMemories({
+      attributeFilters: [
+        {
+          field: "not_memory_summary",
+          value: "dog",
+          comparator: "LIKE",
+        },
+      ],
+    });
+    Assert.equal(
+      invalidFieldOnLikeFilter.length,
+      0,
+      "Should return 0 memories when using a field other than memory_summary with the LIKE comparator"
+    );
+
+    const invalidFieldOnArrayFilter = await MemoryStore.getMemories({
+      attributeFilters: [
+        {
+          field: "created_at",
+          value: ["dog"],
+          comparator: "SOME",
+        },
+      ],
+    });
+    Assert.equal(
+      invalidFieldOnArrayFilter.length,
+      0,
+      "Should return 0 memories when using a number field with an array comparator"
+    );
+
+    const invalidFieldOnScalarFilter = await MemoryStore.getMemories({
+      attributeFilters: [
+        {
+          field: "tags",
+          value: 123,
+          comparator: "EQUAL_TO",
+        },
+      ],
+    });
+    Assert.equal(
+      invalidFieldOnScalarFilter.length,
+      0,
+      "Should return 0 memories when using an array field with a scalar comparator"
+    );
+
+    await deleteAllMemories();
+  }
+);

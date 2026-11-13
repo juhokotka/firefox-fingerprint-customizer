@@ -5,13 +5,13 @@
 #ifndef mozilla_net_WebTransportStreamBase_h
 #define mozilla_net_WebTransportStreamBase_h
 
-#include "nsISupportsImpl.h"
-#include "mozilla/net/neqo_glue_ffi_generated.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Mutex.h"
+#include "mozilla/net/neqo_glue_ffi_generated.h"
 #include "nsCOMPtr.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
+#include "nsISupportsImpl.h"
 
 class nsIWebTransportSendStreamStats;
 class nsIWebTransportReceiveStreamStats;
@@ -45,9 +45,7 @@ class StreamId {
 
   constexpr uint64_t Index() const { return mId >> 2; }
 
-  constexpr bool operator==(const StreamId& aRhs) const {
-    return mId == aRhs.mId;
-  }
+  constexpr bool operator==(const StreamId& aRhs) const = default;
 
   static constexpr StreamId From(uint64_t aVal) { return StreamId(aVal); }
 
@@ -77,7 +75,7 @@ class WebTransportStreamBase : public nsIInputStreamCallback,
 
   virtual StreamId WebTransportStreamId() const = 0;
   virtual uint64_t GetStreamId() const = 0;
-  virtual void SendStopSending(uint8_t aErrorCode) = 0;
+  virtual void SendStopSending(uint64_t aErrorCode) = 0;
   virtual void SendFin() = 0;
   virtual void Reset(uint64_t aErrorCode) = 0;
   virtual already_AddRefed<nsIWebTransportSendStreamStats>
@@ -85,7 +83,8 @@ class WebTransportStreamBase : public nsIInputStreamCallback,
   virtual already_AddRefed<nsIWebTransportReceiveStreamStats>
   GetReceiveStreamStats() = 0;
   virtual bool RecvDone() const = 0;
-  virtual void SetSendOrder(Maybe<int64_t> aSendOrder) = 0;
+  virtual void SetSendOrder(int64_t aSendOrder) = 0;
+  virtual void SetSendGroup(uint64_t aSendGroupId) = 0;
   // Used only for testing.
   virtual SenderFlowControlBase* SenderFc() { return nullptr; }
   virtual ReceiverFlowControlBase* ReceiverFc() { return nullptr; }

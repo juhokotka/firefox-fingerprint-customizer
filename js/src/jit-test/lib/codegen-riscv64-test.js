@@ -8,9 +8,8 @@ const riscv64_arch = {
 
     // End of prologue
     prefix: `
-addi      sp, sp, -8
-sd        ra, 0\\(sp\\)
-addi      sp, sp, -8
+addi      sp, sp, -16
+sd        ra, 8\\(sp\\)
 sd        fp, 0\\(sp\\)
 mv        fp, sp(
 sd        s4, 16\\(fp\\))?
@@ -18,8 +17,8 @@ sd        s4, 16\\(fp\\))?
 
     // Start of epilogue
     suffix: `
-ld        fp, 0\\(sp\\)
 ld        ra, 8\\(sp\\)
+ld        fp, 0\\(sp\\)
 addi      sp, sp, 16
 `,
 

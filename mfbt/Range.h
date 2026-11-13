@@ -5,11 +5,12 @@
 #ifndef mozilla_Range_h
 #define mozilla_Range_h
 
+#include <stddef.h>
+
+#include <type_traits>
+
 #include "mozilla/RangedPtr.h"
 #include "mozilla/Span.h"
-
-#include <stddef.h>
-#include <type_traits>
 
 namespace mozilla {
 
@@ -17,7 +18,7 @@ namespace mozilla {
 template <typename T>
 class Range {
   template <typename U>
-  friend class Range;
+  friend class ::mozilla::Range;
 
   // Reassignment of RangedPtrs is so (subtly) restrictive that we just make
   // Range immutable.

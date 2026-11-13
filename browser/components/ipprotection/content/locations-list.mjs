@@ -13,6 +13,8 @@ export default class LocationsList extends MozLitElement {
   static properties = {
     locations: { type: Array },
     selectedLocation: { type: String, state: true },
+    focusedLocation: { type: String, state: true },
+    premium: { type: Boolean },
   };
 
   static defaultLocation = "REC";
@@ -20,17 +22,53 @@ export default class LocationsList extends MozLitElement {
   static collator = new Intl.Collator(undefined, { sensitivity: "base" });
 
   get #sortedLocations() {
-    return Array.from(this.locations ?? []).sort((a, b) => {
+    let locations = Array.from(this.locations ?? []);
+    if (!this.premium) {
+      locations = locations.filter(aLocation => !aLocation.locked);
+    }
+    return locations.sort((a, b) => {
       const nameA = countryName(a.code) ?? a.code;
       const nameB = countryName(b.code) ?? b.code;
       return LocationsList.collator.compare(nameA, nameB);
     });
   }
 
+  /**
+   * The full list of options in render order: the recommended option followed
+   * by the sorted, filtered locations.
+   */
+  get #renderedLocations() {
+    const recommendedLocation = {
+      code: LocationsList.defaultLocation,
+      available: true,
+    };
+    return [recommendedLocation, ...this.#sortedLocations];
+  }
+
+  /**
+   * The country code of the option that should be the list's single tab stop.
+   *
+   * Implements roving tabindex: the tab stop starts on the selected option
+   * every time the subview is shown, then follows whichever option the user
+   * focuses while the subview stays open.
+   *
+   * @returns {string}
+   */
+  #focusableLocation() {
+    const hasFocusedLocation = this.#renderedLocations.some(
+      aLocation => aLocation.code === this.focusedLocation
+    );
+    return hasFocusedLocation
+      ? this.focusedLocation
+      : this.getSelectedLocation();
+  }
+
   constructor() {
     super();
     this.selectedLocation = "";
+    this.focusedLocation = "";
     this.locations = [];
+    this.premium = false;
   }
 
   createRenderRoot() {
@@ -39,13 +77,22 @@ export default class LocationsList extends MozLitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    // PanelMultiView moves the subview between its view stacks, which reconnects
+    // this element every time the subview is shown. Clear the focused option so
+    // the roving tabindex resets to the selected option on each showing.
+    if (this.focusedLocation) {
+      this.focusedLocation = "";
+    }
   }
 
   getSelectedLocation() {
+    const selected = this.locations?.find(
+      l => l.code === this.selectedLocation
+    );
     if (
       !this.selectedLocation ||
-      (this.selectedLocation !== LocationsList.defaultLocation &&
-        !this.locations?.some(l => l.code === this.selectedLocation))
+      (this.selectedLocation !== LocationsList.defaultLocation && !selected) ||
+      (selected?.locked && !this.premium)
     ) {
       return LocationsList.defaultLocation;
     }
@@ -69,58 +116,70 @@ export default class LocationsList extends MozLitElement {
     );
   }
 
-  #locationRow(aLocation) {
+  #handleOptionKeydown(event, aLocation) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      this.handleSelectLocation(aLocation);
+    }
+  }
+
+  #handleOptionFocus(aLocation) {
+    this.focusedLocation = aLocation.code;
+  }
+
+  #locationRow(aLocation, tabStopCode) {
     const isSelected = aLocation.code === this.getSelectedLocation();
+    const isTabStop = aLocation.code === tabStopCode;
     // Use aria-disabled instead of the native disabled attribute so that unavailable locations can be reached by keyboard
-    // and announced by screen readers
+    // and announced by screen readers. Roving tabindex keeps the list a single tab stop: tabindex starts on the selected
+    // option each time the subview is shown and then follows the focused option. Arrow-key navigation between options is
+    // handled by the panel's locations key listener.
     return html`
-      <li role="presentation">
-        <button
-          class="location-item subviewbutton"
-          role="radio"
-          id="location-option-${aLocation.code}"
-          aria-checked=${isSelected ? "true" : "false"}
-          @click=${() => this.handleSelectLocation(aLocation)}
-          ?aria-disabled=${!aLocation.available}
-        >
-          <img
-            class="location-check"
-            src="chrome://global/skin/icons/check.svg"
-            aria-hidden="true"
-          />
-          <span class="location-label-group">
-            ${aLocation.code === LocationsList.defaultLocation
-              ? html`<span
-                    id="location-label-recommended"
-                    class="location-label"
-                    data-l10n-id="ipprotecion-locations-subview-recommended-label"
-                  ></span>
-                  <span
-                    class="location-description"
-                    data-l10n-id="ipprotection-locations-subview-recommended-description"
-                  ></span>`
-              : html`<span class="location-label"
-                  >${countryName(aLocation.code)}</span
-                >`}
-          </span>
-          ${!aLocation.available
-            ? html`
-                <span
-                  class="location-unavailable-label"
-                  data-l10n-id="ipprotection-locations-unavailable-label-1"
+      <li
+        class="location-item subviewbutton"
+        role="option"
+        id="location-option-${aLocation.code}"
+        aria-selected=${isSelected ? "true" : "false"}
+        tabindex=${isTabStop ? "0" : "-1"}
+        @click=${() => this.handleSelectLocation(aLocation)}
+        @keydown=${e => this.#handleOptionKeydown(e, aLocation)}
+        @focus=${() => this.#handleOptionFocus(aLocation)}
+        ?aria-disabled=${!aLocation.available}
+      >
+        <img
+          class="location-check"
+          src="chrome://global/skin/icons/check.svg"
+          aria-hidden="true"
+        />
+        <span class="location-label-group">
+          ${aLocation.code === LocationsList.defaultLocation
+            ? html`<span
+                  id="location-label-recommended"
+                  class="location-label"
+                  data-l10n-id="ipprotecion-locations-subview-recommended-label"
                 ></span>
-              `
-            : null}
-        </button>
+                <span
+                  class="location-description"
+                  data-l10n-id="ipprotection-locations-subview-recommended-description"
+                ></span>`
+            : html`<span class="location-label"
+                >${countryName(aLocation.code)}</span
+              >`}
+        </span>
+        ${!aLocation.available
+          ? html`
+              <span
+                class="location-unavailable-label"
+                data-l10n-id="ipprotection-locations-unavailable-label-1"
+              ></span>
+            `
+          : null}
       </li>
     `;
   }
 
   render() {
-    const recommendedLocation = {
-      code: LocationsList.defaultLocation,
-      available: true,
-    };
+    const tabStopCode = this.#focusableLocation();
 
     return html`
       <div id="locations-list-wrapper">
@@ -130,12 +189,11 @@ export default class LocationsList extends MozLitElement {
         ></span>
         <ul
           id="locations-list"
-          role="radiogroup"
+          role="listbox"
           aria-labelledby="locations-list-description"
         >
-          ${this.#locationRow(recommendedLocation)}
-          ${this.#sortedLocations.map(aLocation =>
-            this.#locationRow(aLocation)
+          ${this.#renderedLocations.map(aLocation =>
+            this.#locationRow(aLocation, tabStopCode)
           )}
         </ul>
       </div>

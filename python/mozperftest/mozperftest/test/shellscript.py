@@ -7,23 +7,22 @@ import pathlib
 import platform
 import shutil
 import signal
-import subprocess
 import sys
 import time
 
 import mozprocess
 
 from mozperftest.layers import Layer
-from mozperftest.utils import ON_TRY, archive_folder, install_package, temp_dir
+from mozperftest.utils import ON_TRY, archive_folder, temp_dir
 
-"""
-Python dependencies needed for mozperftest have to be installed when running
-via shellscript there is an issue with the way the shellscript runner does
-not have all of the environment variables and system settings
-"""
-INTERNAL_PYPI = "https://pypi.pub.build.mozilla.org/pub/"
-NUMPY_DEPENDENCY = "numpy<2"
-OPENCV_DEPENDENCY = "opencv-python==4.10.0.84"
+# How many lines of the script's output are kept to report the error it failed
+# with, and the markers used to find that error in them.
+OUTPUT_TAIL_SIZE = 50
+TRACEBACK_HEADER = "Traceback (most recent call last):"
+CHAINED_ERROR_MARKERS = (
+    "During handling of the above exception, another exception occurred:",
+    "The above exception was the direct cause of the following exception:",
+)
 
 
 class UnknownScriptError(Exception):
@@ -32,7 +31,21 @@ class UnknownScriptError(Exception):
     pass
 
 
+class ScriptFailedError(Exception):
+    """Triggered when the script exits with a non-zero return code."""
+
+    pass
+
+
+class ScriptTimeoutError(Exception):
+    """Triggered when the script hits the process or the output timeout."""
+
+    pass
+
+
 class ShellScriptData:
+    SUBMETRICS_SUFFIX = "_submetrics"
+
     def open_data(self, data):
         return {
             "name": "shellscript",
@@ -44,12 +57,33 @@ class ShellScriptData:
             "shouldAlert": data.get("shouldAlert", True),
             "unit": data.get("unit", "ms"),
             "lowerIsBetter": data.get("lowerIsBetter", True),
+            "alertSeverity": data.get("alertSeverity"),
         }
 
     def transform(self, data):
         return data
 
     merge = transform
+
+    def summary(self, suite):
+        """Use the primary submetric's value as the grouped suite summary.
+
+        Submetric suites are named `<primary>_submetrics` and gather a set of
+        related measurements as subtests, one of which (named `<primary>`) is
+        the representative value for the group. Reporting that subtest's value
+        as the suite summary keeps the grouped suite anchored to a single,
+        meaningful number. Returns None for regular suites so the default
+        summary (mean of the subtests) applies.
+
+        Only available in the Perfherder layer.
+        """
+        if not suite["name"].endswith(self.SUBMETRICS_SUFFIX):
+            return None
+        primary_name = suite["name"][: -len(self.SUBMETRICS_SUFFIX)]
+        for subtest in suite["subtests"]:
+            if subtest["name"] == primary_name:
+                return subtest["value"]
+        return None
 
 
 class ShellScriptRunner(Layer):
@@ -77,22 +111,7 @@ class ShellScriptRunner(Layer):
         self.metrics = []
         self.timed_out = False
         self.output_timed_out = False
-
-    def setup(self):
-        # Install numpy first so opencv-python's numpy>=1.17.0 dep is already
-        # satisfied, then install opencv-python, see similar fix in (bug 2033807)
-        install_package(self.mach_cmd.virtualenv_manager, NUMPY_DEPENDENCY)
-        subprocess.check_call([
-            self.mach_cmd.virtualenv_manager.python_path,
-            "-m",
-            "pip",
-            "install",
-            OPENCV_DEPENDENCY,
-            "--no-deps",
-            "--no-index",
-            "--find-links",
-            INTERNAL_PYPI,
-        ])
+        self.output_tail = []
 
     def kill(self, proc):
         if "win" in platform.system().lower():
@@ -120,6 +139,57 @@ class ShellScriptRunner(Layer):
 
         return parsed_metrics
 
+    def script_error(self):
+        """Returns the error the script failed with, from its output.
+
+        The complete traceback is returned when the script failed with one,
+        including any exception it was chained to. Otherwise, the tail of the
+        output is returned since the failure may come from the shell script
+        itself, or from any of the commands it ran, rather than from python.
+        """
+        lines = list(self.output_tail)
+        headers = [
+            ind for ind, line in enumerate(lines) if line.startswith(TRACEBACK_HEADER)
+        ]
+
+        start = 0
+        if headers:
+            start = headers[-1]
+            for header in reversed(headers[:-1]):
+                if not any(
+                    line.startswith(CHAINED_ERROR_MARKERS)
+                    for line in lines[header:start]
+                ):
+                    break
+                start = header
+
+        return "\n".join(lines[start:])
+
+    def script_summary(self):
+        """Returns a one line summary of the error the script failed with.
+
+        Log parsers only keep single lines, so the error the script died on
+        has to sit on the first line of the failure, otherwise it gets grouped
+        on a message that says nothing about what actually went wrong.
+        """
+        lines = list(self.output_tail)
+        headers = [
+            ind for ind, line in enumerate(lines) if line.startswith(TRACEBACK_HEADER)
+        ]
+
+        # The traceback is indented and the exception it ends on is not,
+        # the first unindented line after the last header is the error
+        if headers:
+            for line in lines[headers[-1] + 1 :]:
+                if line and not line.startswith((" ", "\t")):
+                    return line
+
+        for line in reversed(lines):
+            if line.strip():
+                return line
+
+        return "no output"
+
     def line_handler_wrapper(self):
         """This function is used to gather the perfMetrics logs."""
 
@@ -131,6 +201,8 @@ class ShellScriptRunner(Layer):
             line = line.decode("utf-8")
             if "perfMetrics" in line:
                 self.metrics.append(line)
+            self.output_tail.append(line.rstrip())
+            del self.output_tail[:-OUTPUT_TAIL_SIZE]
 
             # Bug 1900056 - Use a different logger in mozperftest because the current
             # one can't handle messages with curly braces or JSONs in them
@@ -186,7 +258,7 @@ class ShellScriptRunner(Layer):
                 )
             os.environ["PYTHON_PACKAGES"] = str(venv_site_packages)
 
-            mozprocess.run_and_wait(
+            proc = mozprocess.run_and_wait(
                 cmd,
                 output_line_handler=self.line_handler_wrapper(),
                 env=os.environ,
@@ -215,12 +287,41 @@ class ShellScriptRunner(Layer):
                     shutil.copytree(testing_dir, output_dir)
                     self.env.set_arg("output", output_dir)
 
-        metadata.add_result({
-            "name": test["name"],
-            "framework": {"name": "mozperftest"},
-            "transformer": "mozperftest.test.shellscript:ShellScriptData",
-            "shouldAlert": True,
-            "results": self.parse_metrics(),
-        })
+        if self.timed_out:
+            raise ScriptTimeoutError(
+                f"{test['name']} timed out after "
+                f"{self.get_arg('process-timeout')}s, last output was:\n"
+                f"{self.script_error()}"
+            )
+        if self.output_timed_out:
+            raise ScriptTimeoutError(
+                f"{test['name']} produced no output for "
+                f"{self.get_arg('output-timeout')}s, last output was:\n"
+                f"{self.script_error()}"
+            )
+        if proc.returncode != 0:
+            raise ScriptFailedError(
+                f"{test['name']} failed with return code {proc.returncode}: "
+                f"{self.script_summary()}\n{self.script_error()}"
+            )
+
+        # Route each metric to a suite based on its optional `suite` tag,
+        # defaulting to the test name. Grouping the submetrics and computing a
+        # suite summary value is left to the metrics layer (see ShellScriptData),
+        # keeping this layer focused on running the test and reporting raw data.
+        default_suite = test["name"]
+        suites = {}
+        for m in self.parse_metrics():
+            suite_name = m.pop("suite", default_suite)
+            suites.setdefault(suite_name, []).append(m)
+
+        for suite_name, suite_metrics in suites.items():
+            metadata.add_result({
+                "name": suite_name,
+                "framework": {"name": "mozperftest"},
+                "transformer": "mozperftest.test.shellscript:ShellScriptData",
+                "shouldAlert": True,
+                "results": suite_metrics,
+            })
 
         return metadata

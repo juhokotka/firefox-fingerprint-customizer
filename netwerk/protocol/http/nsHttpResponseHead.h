@@ -5,12 +5,12 @@
 #ifndef nsHttpResponseHead_h_
 #define nsHttpResponseHead_h_
 
-#include "nsHttpHeaderArray.h"
-#include "nsHttp.h"
-#include "nsISupportsImpl.h"
-#include "nsString.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/RecursiveMutex.h"
+#include "nsHttp.h"
+#include "nsHttpHeaderArray.h"
+#include "nsISupportsImpl.h"
+#include "nsString.h"
 
 #ifdef Status
 /* Xlib headers insist on this for some reason... Nuke it because
@@ -143,6 +143,9 @@ class nsHttpResponseHead {
   // automatically under one lock.
   [[nodiscard]] nsresult VisitHeaders(nsIHttpHeaderVisitor* visitor,
                                       nsHttpHeaderArray::VisitorFilter filter);
+  [[nodiscard]] nsresult VisitHeaders(
+      nsHttpHeaderArray::VisitorFilter aFilter,
+      nsHttpHeaderArray::VisitorCallback aCallback);
   [[nodiscard]] nsresult GetOriginalHeader(const nsHttpAtom& aHeader,
                                            nsIHttpHeaderVisitor* aVisitor);
 

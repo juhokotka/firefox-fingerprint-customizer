@@ -2,63 +2,62 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "gfxPlatform.h"
+
+#include "GfxDriverInfo.h"
+#include "VRProcessManager.h"
+#include "VRThread.h"
+#include "gfxBlur.h"
+#include "gfxConfig.h"
+#include "gfxCrashReporterUtils.h"
+#include "gfxEnv.h"
+#include "gfxPlatformWorker.h"
+#include "gfxTextRun.h"
+#include "gfxUserFontSet.h"
+#include "mozilla/Base64.h"
+#include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Components.h"
+#include "mozilla/EnumTypeTraits.h"
 #include "mozilla/FontPropertyTypes.h"
+#include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/Logging.h"
 #include "mozilla/RDDProcessManager.h"
+#include "mozilla/StaticPrefs_accessibility.h"
+#include "mozilla/StaticPrefs_apz.h"
+#include "mozilla/StaticPrefs_bidi.h"
+#include "mozilla/StaticPrefs_gfx.h"
+#include "mozilla/StaticPrefs_layers.h"
+#include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPrefs_media.h"
+#include "mozilla/StaticPrefs_privacy.h"
+#include "mozilla/StaticPrefs_webgl.h"
+#include "mozilla/StaticPrefs_widget.h"
+#include "mozilla/TimeStamp.h"
+#include "mozilla/VsyncDispatcher.h"
+#include "mozilla/gfx/BuildConstants.h"
+#include "mozilla/gfx/CanvasRenderThread.h"
+#include "mozilla/gfx/CanvasShutdownManager.h"
+#include "mozilla/gfx/GPUProcessManager.h"
+#include "mozilla/gfx/GraphicsMessages.h"
+#include "mozilla/gfx/gfxConfigManager.h"
+#include "mozilla/gfx/gfxVars.h"
+#include "mozilla/glean/GfxMetrics.h"
 #include "mozilla/image/ImageMemoryReporter.h"
+#include "mozilla/layers/CompositeProcessFencesHolderMap.h"
+#include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/CompositorManagerChild.h"
 #include "mozilla/layers/CompositorThread.h"
-#include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/ISurfaceAllocator.h"  // for GfxMemoryImageReporter
-#include "mozilla/layers/CompositorBridgeChild.h"
+#include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/RemoteTextureMap.h"
 #include "mozilla/layers/VideoBridgeParent.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/webrender/webrender_ffi.h"
-#include "mozilla/gfx/BuildConstants.h"
-#include "mozilla/gfx/gfxConfigManager.h"
-#include "mozilla/gfx/gfxVars.h"
-#include "mozilla/gfx/GPUProcessManager.h"
-#include "mozilla/gfx/GraphicsMessages.h"
-#include "mozilla/gfx/CanvasRenderThread.h"
-#include "mozilla/gfx/CanvasShutdownManager.h"
-#include "mozilla/ClearOnShutdown.h"
-#include "mozilla/EnumTypeTraits.h"
-#include "mozilla/StaticPrefs_accessibility.h"
-#include "mozilla/StaticPrefs_apz.h"
-#include "mozilla/StaticPrefs_bidi.h"
-#include "mozilla/StaticPrefs_gfx.h"
-#include "mozilla/StaticPrefs_layout.h"
-#include "mozilla/StaticPrefs_layers.h"
-#include "mozilla/StaticPrefs_media.h"
-#include "mozilla/StaticPrefs_privacy.h"
-#include "mozilla/StaticPrefs_webgl.h"
-#include "mozilla/StaticPrefs_widget.h"
-#include "mozilla/glean/GfxMetrics.h"
-#include "mozilla/TimeStamp.h"
-#include "mozilla/IntegerPrintfMacros.h"
-#include "mozilla/Base64.h"
-#include "mozilla/VsyncDispatcher.h"
-
-#include "mozilla/Logging.h"
-#include "mozilla/Components.h"
-#include "nsAppRunner.h"
 #include "nsAppDirectoryServiceDefs.h"
+#include "nsAppRunner.h"
 #include "nsCSSProps.h"
 #include "nsContentUtils.h"
-
-#include "gfxCrashReporterUtils.h"
-#include "gfxPlatform.h"
-#include "gfxPlatformWorker.h"
-
-#include "gfxBlur.h"
-#include "gfxEnv.h"
-#include "gfxTextRun.h"
-#include "gfxUserFontSet.h"
-#include "gfxConfig.h"
-#include "GfxDriverInfo.h"
-#include "VRProcessManager.h"
-#include "VRThread.h"
 
 #ifdef XP_WIN
 #  include <process.h>
@@ -67,21 +66,20 @@
 #  include <unistd.h>
 #endif
 
-#include "nsXULAppAPI.h"
-#include "nsIXULAppInfo.h"
-#include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
+#include "nsDirectoryServiceUtils.h"
+#include "nsIXULAppInfo.h"
+#include "nsXULAppAPI.h"
 
 #if defined(XP_WIN)
 #  include "gfxWindowsPlatform.h"
-#  include "mozilla/layers/CompositeProcessD3D11FencesHolderMap.h"
 #  include "mozilla/widget/WinWindowOcclusionTracker.h"
 #elif defined(XP_DARWIN)
 #  include "gfxPlatformMac.h"
 #  include "gfxQuartzSurface.h"
 #elif defined(MOZ_WIDGET_GTK)
-#  include "gfxPlatformGtk.h"
 #  include "DMABufFormats.h"
+#  include "gfxPlatformGtk.h"
 #elif defined(ANDROID)
 #  include "gfxAndroidPlatform.h"
 #endif
@@ -90,40 +88,35 @@
 #endif
 
 #ifdef XP_WIN
-#  include "mozilla/WindowsVersion.h"
 #  include "WinUtils.h"
+#  include "mozilla/WindowsVersion.h"
 #endif
 
-#include "gfxPlatformFontList.h"
-#include "gfxContext.h"
-#include "gfxImageSurface.h"
-#include "nsUnicodeProperties.h"
-#include "harfbuzz/hb.h"
-#include "gfxGraphiteShaper.h"
-#include "gfx2DGlue.h"
-#include "gfxGradientCache.h"
-#include "gfxUtils.h"  // for NextPowerOfTwo
-#include "gfxFontMissingGlyphs.h"
-
-#include "nsExceptionHandler.h"
-#include "nsServiceManagerUtils.h"
-#include "nsTArray.h"
-#include "nsIObserverService.h"
-#include "mozilla/widget/Screen.h"
-#include "mozilla/widget/ScreenManager.h"
-#include "MainThreadUtils.h"
-
-#include "nsWeakReference.h"
-
-#include "cairo.h"
-#include "qcms.h"
-
-#include "imgITools.h"
-
-#include "nsCRT.h"
 #include "GLContext.h"
 #include "GLContextProvider.h"
+#include "MainThreadUtils.h"
+#include "cairo.h"
+#include "gfx2DGlue.h"
+#include "gfxContext.h"
+#include "gfxFontMissingGlyphs.h"
+#include "gfxGradientCache.h"
+#include "gfxGraphiteShaper.h"
+#include "gfxImageSurface.h"
+#include "gfxPlatformFontList.h"
+#include "gfxUtils.h"  // for NextPowerOfTwo
+#include "harfbuzz/hb.h"
+#include "imgITools.h"
 #include "mozilla/gfx/Logging.h"
+#include "mozilla/widget/Screen.h"
+#include "mozilla/widget/ScreenManager.h"
+#include "nsCRT.h"
+#include "nsExceptionHandler.h"
+#include "nsIObserverService.h"
+#include "nsServiceManagerUtils.h"
+#include "nsTArray.h"
+#include "nsUnicodeProperties.h"
+#include "nsWeakReference.h"
+#include "qcms.h"
 
 #ifdef __GNUC__
 #  pragma GCC diagnostic push
@@ -139,28 +132,25 @@
 #endif
 static const uint32_t kDefaultGlyphCacheSize = -1;
 
-#include "mozilla/Preferences.h"
+#include "SoftwareVsyncSource.h"
+#include "VRManager.h"
+#include "VRManagerChild.h"
+#include "VsyncSource.h"
+#include "gfxVR.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Mutex.h"
-
-#include "nsIGfxInfo.h"
-#include "nsIXULRuntime.h"
-#include "VsyncSource.h"
-#include "SoftwareVsyncSource.h"
-#include "nscore.h"  // for NS_FREE_PERMANENT_DATA
+#include "mozilla/Preferences.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/TouchEvent.h"
-#include "gfxVR.h"
-#include "VRManager.h"
-#include "VRManagerChild.h"
-#include "mozilla/gfx/GPUParent.h"
-#include "prsystem.h"
-
 #include "mozilla/gfx/2D.h"
-#include "mozilla/gfx/SourceSurfaceCairo.h"
+#include "mozilla/gfx/GPUParent.h"
+#include "nsIGfxInfo.h"
+#include "nsIXULRuntime.h"
+#include "nscore.h"  // for NS_FREE_PERMANENT_DATA
+#include "prsystem.h"
 
 using namespace mozilla;
 using namespace mozilla::layers;
@@ -411,8 +401,6 @@ void CrashStatsLogForwarder::CrashAction(LogReason aReason) {
 #  define GFX_PREF_CORETEXT_SHAPING "gfx.font_rendering.coretext.enabled"
 #endif
 
-#define FONT_VARIATIONS_PREF "layout.css.font-variations.enabled"
-
 static const char* kObservedPrefs[] = {"gfx.downloadable_fonts.",
                                        "gfx.font_rendering.", nullptr};
 
@@ -572,12 +560,11 @@ static void WebRenderDebugPrefChangeCallback(const char* aPrefName, void*) {
                       wr::DebugFlags::EXTERNAL_COMPOSITE_BORDERS)
   GFX_WEBRENDER_DEBUG(".dl.dump-spatial-tree",
                       wr::DebugFlags::DUMP_SPATIAL_TREE)
+  GFX_WEBRENDER_DEBUG(".color-target-init", wr::DebugFlags::COLOR_TARGET_INIT)
 #undef GFX_WEBRENDER_DEBUG
   gfx::gfxVars::SetWebRenderDebugFlags(flags._0);
 
-  uint32_t threshold = Preferences::GetFloat(
-      StaticPrefs::GetPrefName_gfx_webrender_debug_slow_cpu_frame_threshold(),
-      10.0);
+  float threshold = StaticPrefs::gfx_webrender_debug_slow_cpu_frame_threshold();
   gfx::gfxVars::SetWebRenderSlowCpuFrameThreshold(threshold);
 }
 
@@ -586,25 +573,19 @@ static void WebRenderQualityPrefChangeCallback(const char* aPref, void*) {
 }
 
 static void WebRenderBatchingPrefChangeCallback(const char* aPrefName, void*) {
-  uint32_t count = Preferences::GetUint(
-      StaticPrefs::GetPrefName_gfx_webrender_batching_lookback(), 10);
-
+  uint32_t count = StaticPrefs::gfx_webrender_batching_lookback();
   gfx::gfxVars::SetWebRenderBatchingLookback(count);
 }
 
 static void WebRenderBlobTileSizePrefChangeCallback(const char* aPrefName,
                                                     void*) {
-  uint32_t tileSize = Preferences::GetUint(
-      StaticPrefs::GetPrefName_gfx_webrender_blob_tile_size(), 256);
+  uint32_t tileSize = StaticPrefs::gfx_webrender_blob_tile_size();
   gfx::gfxVars::SetWebRenderBlobTileSize(tileSize);
 }
 
 static void WebRenderUploadThresholdPrefChangeCallback(const char* aPrefName,
                                                        void*) {
-  int value = Preferences::GetInt(
-      StaticPrefs::GetPrefName_gfx_webrender_batched_upload_threshold(),
-      512 * 512);
-
+  int value = StaticPrefs::gfx_webrender_batched_upload_threshold();
   gfxVars::SetWebRenderBatchedUploadThreshold(value);
 }
 
@@ -713,6 +694,14 @@ static void FinishAsyncMemoryReport() {
   helper.Report(aReport.interning.data_stores.id, \
                 "interning/" #id "/data-stores");
 
+// Follower stores for types interned by the content display list builder
+// rather than by a scene builder interner. See
+// gfx/wr/webrender/doc/dl-builder-interning.md.
+#define REPORT_DL_STORE(id)                                      \
+  helper.Report(aReport.interning.dl_stores.id, "interning/" #id \
+                                                "/dl-"           \
+                                                "stores");
+
 NS_IMPL_ISUPPORTS(WebRenderMemoryReporter, nsIMemoryReporter)
 
 NS_IMETHODIMP
@@ -749,6 +738,7 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
 
         WEBRENDER_FOR_EACH_INTERNER(REPORT_INTERNER, );
         WEBRENDER_FOR_EACH_INTERNER(REPORT_DATA_STORE, );
+        WEBRENDER_FOR_EACH_INTERNER(REPORT_DL_STORE, );
 
         // GPU Memory.
         helper.ReportTexture(aReport.vertex_data_textures, "vertex-data");
@@ -777,6 +767,7 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
 
 #undef REPORT_INTERNER
 #undef REPORT_DATA_STORE
+#undef REPORT_DL_STORE
 
 std::atomic<int8_t> gfxPlatform::sHasVariationFontSupport = -1;
 
@@ -949,10 +940,15 @@ void gfxPlatform::Init() {
   if (XRE_IsParentProcess()) {
     // Monitor for sanity test changes.
     Preferences::RegisterCallbackAndCall(
-        VideoDecodingFailedChangedCallback,
+        HardwareVideoFailedChangedCallback,
         "media.hardware-video-decoding.failed");
+    Preferences::RegisterCallbackAndCall(
+        HardwareVideoFailedChangedCallback,
+        "media.hardware-video-encoding.failed");
     Preferences::RegisterCallbackAndCall(HWDRMFailedChangedCallback,
                                          "media.eme.hwdrm.failed");
+    Preferences::RegisterCallback(HWDRMFailedChangedCallback,
+                                  "media.wmf.media-engine.enabled");
   }
 
 #if defined(XP_WIN)
@@ -960,9 +956,7 @@ void gfxPlatform::Init() {
   // the (rare) cases where they're used. Note that the GPU process where
   // WebRender runs doesn't initialize gfxPlatform and performs explicit
   // initialization of the bits it needs.
-  if (XRE_IsParentProcess() && !gfxConfig::IsEnabled(Feature::GPU_PROCESS) &&
-      StaticPrefs::
-          gfx_webrender_enabled_no_gpu_process_with_angle_win_AtStartup()) {
+  if (XRE_IsParentProcess() && !gfxConfig::IsEnabled(Feature::GPU_PROCESS)) {
     gPlatform->EnsureDevicesInitialized();
   }
 #endif
@@ -1060,16 +1054,6 @@ void gfxPlatform::Init() {
 
   InitNullMetadata();
   InitOpenGLConfig();
-
-  if (XRE_IsParentProcess()) {
-    Preferences::Unlock(FONT_VARIATIONS_PREF);
-    if (!gfxPlatform::HasVariationFontSupport()) {
-      // Ensure variation fonts are disabled and the pref is locked.
-      Preferences::SetBool(FONT_VARIATIONS_PREF, false, PrefValueKind::Default);
-      Preferences::SetBool(FONT_VARIATIONS_PREF, false);
-      Preferences::Lock(FONT_VARIATIONS_PREF);
-    }
-  }
 
   if (XRE_IsParentProcess()) {
     ReportTelemetry();
@@ -1371,8 +1355,8 @@ void gfxPlatform::InitLayersIPC() {
     }
 #endif
     if (!gfxConfig::IsEnabled(Feature::GPU_PROCESS)) {
-#if defined(XP_WIN)
-      CompositeProcessD3D11FencesHolderMap::Init();
+#if defined(XP_WIN) || defined(XP_MACOSX)
+      CompositeProcessFencesHolderMap::Init();
 #endif
       RemoteTextureMap::Init();
       wr::RenderThread::Start(GPUProcessManager::Get()->AllocateNamespace());
@@ -1428,8 +1412,12 @@ void gfxPlatform::ShutdownLayersIPC() {
           nsDependentCString(
               StaticPrefs::GetPrefName_gfx_webrender_blob_tile_size()));
     }
+
+#if defined(XP_WIN) || defined(XP_MACOSX)
+    CompositeProcessFencesHolderMap::Shutdown();
+#endif
+
 #if defined(XP_WIN)
-    CompositeProcessD3D11FencesHolderMap::Shutdown();
     widget::WinWindowOcclusionTracker::ShutDown();
 #endif
   } else {
@@ -1476,184 +1464,6 @@ already_AddRefed<DrawTarget> gfxPlatform::CreateDrawTargetForSurface(
     return nullptr;
   }
   return drawTarget.forget();
-}
-
-cairo_user_data_key_t kSourceSurface;
-
-/**
- * Record the backend that was used to construct the SourceSurface.
- * When getting the cached SourceSurface for a gfxASurface/DrawTarget pair,
- * we check to make sure the DrawTarget's backend matches the backend
- * for the cached SourceSurface, and only use it if they match. This
- * can avoid expensive and unnecessary readbacks.
- */
-struct SourceSurfaceUserData {
-  RefPtr<SourceSurface> mSrcSurface;
-  BackendType mBackendType;
-};
-
-static void SourceBufferDestroy(void* srcSurfUD) {
-  delete static_cast<SourceSurfaceUserData*>(srcSurfUD);
-}
-
-UserDataKey kThebesSurface;
-
-struct DependentSourceSurfaceUserData {
-  RefPtr<gfxASurface> mSurface;
-};
-
-static void SourceSurfaceDestroyed(void* aData) {
-  delete static_cast<DependentSourceSurfaceUserData*>(aData);
-}
-
-void gfxPlatform::ClearSourceSurfaceForSurface(gfxASurface* aSurface) {
-  aSurface->SetData(&kSourceSurface, nullptr, nullptr);
-}
-
-/* static */
-already_AddRefed<SourceSurface> gfxPlatform::GetSourceSurfaceForSurface(
-    RefPtr<DrawTarget> aTarget, gfxASurface* aSurface, bool aIsPlugin) {
-  if (!aSurface->CairoSurface() || aSurface->CairoStatus()) {
-    return nullptr;
-  }
-
-  if (!aTarget) {
-    aTarget = gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget();
-  }
-
-  void* userData = aSurface->GetData(&kSourceSurface);
-
-  if (userData) {
-    SourceSurfaceUserData* surf = static_cast<SourceSurfaceUserData*>(userData);
-
-    if (surf->mSrcSurface->IsValid() &&
-        surf->mBackendType == aTarget->GetBackendType()) {
-      RefPtr<SourceSurface> srcSurface(surf->mSrcSurface);
-      return srcSurface.forget();
-    }
-    // We can just continue here as when setting new user data the destroy
-    // function will be called for the old user data.
-  }
-
-  SurfaceFormat format = aSurface->GetSurfaceFormat();
-
-  if (aTarget->GetBackendType() == BackendType::CAIRO) {
-    // If we're going to be used with a CAIRO DrawTarget, then just create a
-    // SourceSurfaceCairo since we don't know the underlying type of the CAIRO
-    // DrawTarget and can't pick a better surface type. Doing this also avoids
-    // readback of aSurface's surface into memory if, for example, aSurface
-    // wraps an xlib cairo surface (which can be important to avoid a major
-    // slowdown).
-    //
-    // We return here regardless of whether CreateSourceSurfaceFromNativeSurface
-    // succeeds or not since we don't expect to be able to do any better below
-    // if it fails.
-    //
-    // Note that the returned SourceSurfaceCairo holds a strong reference to
-    // the cairo_surface_t* that it wraps, which essencially means it holds a
-    // strong reference to aSurface since aSurface shares its
-    // cairo_surface_t*'s reference count variable. As a result we can't cache
-    // srcBuffer on aSurface (see below) since aSurface would then hold a
-    // strong reference back to srcBuffer, creating a reference loop and a
-    // memory leak. Not caching is fine since wrapping is cheap enough (no
-    // copying) so we can just wrap again next time we're called.
-    return Factory::CreateSourceSurfaceForCairoSurface(
-        aSurface->CairoSurface(), aSurface->GetSize(), format);
-  }
-
-  RefPtr<SourceSurface> srcBuffer;
-
-  // Currently no other DrawTarget types implement
-  // CreateSourceSurfaceFromNativeSurface
-
-  if (!srcBuffer) {
-    // If aSurface wraps data, we can create a SourceSurfaceRawData that wraps
-    // the same data, then optimize it for aTarget:
-    RefPtr<DataSourceSurface> surf = GetWrappedDataSourceSurface(aSurface);
-    if (surf) {
-      srcBuffer = aIsPlugin
-                      ? aTarget->OptimizeSourceSurfaceForUnknownAlpha(surf)
-                      : aTarget->OptimizeSourceSurface(surf);
-
-      if (srcBuffer == surf) {
-        // GetWrappedDataSourceSurface returns a SourceSurface that holds a
-        // strong reference to aSurface since it wraps aSurface's data and
-        // needs it to stay alive. As a result we can't cache srcBuffer on
-        // aSurface (below) since aSurface would then hold a strong reference
-        // back to srcBuffer, creating a reference loop and a memory leak. Not
-        // caching is fine since wrapping is cheap enough (no copying) so we
-        // can just wrap again next time we're called.
-        //
-        // Note that the check below doesn't catch this since srcBuffer will be
-        // a SourceSurfaceRawData object (even if aSurface is not a
-        // gfxImageSurface object), which is why we need this separate check.
-        return srcBuffer.forget();
-      }
-    }
-  }
-
-  if (!srcBuffer) {
-    MOZ_ASSERT(aTarget->GetBackendType() != BackendType::CAIRO,
-               "We already tried CreateSourceSurfaceFromNativeSurface with a "
-               "DrawTargetCairo above");
-    // We've run out of performant options. We now try creating a SourceSurface
-    // using a temporary DrawTargetCairo and then optimizing it to aTarget's
-    // actual type. The CreateSourceSurfaceFromNativeSurface() call will
-    // likely create a DataSourceSurface (possibly involving copying and/or
-    // readback), and the OptimizeSourceSurface may well copy again and upload
-    // to the GPU. So, while this code path is rarely hit, hitting it may be
-    // very slow.
-    srcBuffer = Factory::CreateSourceSurfaceForCairoSurface(
-        aSurface->CairoSurface(), aSurface->GetSize(), format);
-    if (srcBuffer) {
-      srcBuffer = aTarget->OptimizeSourceSurface(srcBuffer);
-    }
-  }
-
-  if (!srcBuffer) {
-    return nullptr;
-  }
-
-  if ((srcBuffer->GetType() == SurfaceType::CAIRO &&
-       static_cast<SourceSurfaceCairo*>(srcBuffer.get())->GetSurface() ==
-           aSurface->CairoSurface()) ||
-      (srcBuffer->GetType() == SurfaceType::CAIRO_IMAGE &&
-       static_cast<DataSourceSurfaceCairo*>(srcBuffer.get())->GetSurface() ==
-           aSurface->CairoSurface())) {
-    // See the "Note that the returned SourceSurfaceCairo..." comment above.
-    return srcBuffer.forget();
-  }
-
-  // Add user data to aSurface so we can cache lookups in the future.
-  auto* srcSurfUD = new SourceSurfaceUserData;
-  srcSurfUD->mBackendType = aTarget->GetBackendType();
-  srcSurfUD->mSrcSurface = srcBuffer;
-  aSurface->SetData(&kSourceSurface, srcSurfUD, SourceBufferDestroy);
-
-  return srcBuffer.forget();
-}
-
-already_AddRefed<DataSourceSurface> gfxPlatform::GetWrappedDataSourceSurface(
-    gfxASurface* aSurface) {
-  RefPtr<gfxImageSurface> image = aSurface->GetAsImageSurface();
-  if (!image) {
-    return nullptr;
-  }
-  RefPtr<DataSourceSurface> result = Factory::CreateWrappingDataSourceSurface(
-      image->Data(), image->Stride(), image->GetSize(),
-      ImageFormatToSurfaceFormat(image->Format()));
-
-  if (!result) {
-    return nullptr;
-  }
-
-  // If we wrapped the underlying data of aSurface, then we need to add user
-  // data to make sure aSurface stays alive until we are done with the data.
-  auto* srcSurfUD = new DependentSourceSurfaceUserData;
-  srcSurfUD->mSurface = aSurface;
-  result->AddUserData(&kThebesSurface, srcSurfUD, SourceSurfaceDestroyed);
-
-  return result.forget();
 }
 
 void gfxPlatform::PopulateScreenInfo() {
@@ -1912,15 +1722,6 @@ bool gfxPlatform::IsFontFormatSupported(
   if (!StaticPrefs::gfx_downloadable_fonts_keep_color_bitmaps()) {
     unsupportedTechnologies |= StyleFontFaceSourceTechFlags::COLOR_CBDT;
   }
-  if (!StaticPrefs::gfx_font_rendering_colr_v1_enabled()) {
-    unsupportedTechnologies |= StyleFontFaceSourceTechFlags::COLOR_COLRV1;
-  }
-  if (!StaticPrefs::layout_css_font_palette_enabled()) {
-    unsupportedTechnologies |= StyleFontFaceSourceTechFlags::PALETTES;
-  }
-  if (!StaticPrefs::layout_css_font_variations_enabled()) {
-    unsupportedTechnologies |= StyleFontFaceSourceTechFlags::VARIATIONS;
-  }
   if (aTechFlags & unsupportedTechnologies) {
     return false;
   }
@@ -1935,20 +1736,18 @@ bool gfxPlatform::IsKnownIconFontFamily(const nsAtom* aFamilyName) const {
 already_AddRefed<gfxFontEntry> gfxPlatform::LookupLocalFont(
     FontVisibilityProvider* aFontVisibilityProvider,
     const nsACString& aFontName, const WeightRange& aWeightForEntry,
-    const StretchRange& aStretchForEntry,
-    const SlantStyleRange& aStyleForEntry) {
+    const WidthRange& aWidthForEntry, const SlantStyleRange& aStyleForEntry) {
   return gfxPlatformFontList::PlatformFontList()->LookupLocalFont(
-      aFontVisibilityProvider, aFontName, aWeightForEntry, aStretchForEntry,
+      aFontVisibilityProvider, aFontName, aWeightForEntry, aWidthForEntry,
       aStyleForEntry);
 }
 
 already_AddRefed<gfxFontEntry> gfxPlatform::MakePlatformFont(
     const nsACString& aFontName, const WeightRange& aWeightForEntry,
-    const StretchRange& aStretchForEntry, const SlantStyleRange& aStyleForEntry,
-    const uint8_t* aFontData, uint32_t aLength) {
+    const WidthRange& aWidthForEntry, const SlantStyleRange& aStyleForEntry,
+    FontData* aFontData) {
   return gfxPlatformFontList::PlatformFontList()->MakePlatformFont(
-      aFontName, aWeightForEntry, aStretchForEntry, aStyleForEntry, aFontData,
-      aLength);
+      aFontName, aWeightForEntry, aWidthForEntry, aStyleForEntry, aFontData);
 }
 
 BackendPrefsData gfxPlatform::GetBackendPrefs() const {
@@ -2104,7 +1903,7 @@ DeviceColor gfxPlatform::TransformPixel(const sRGBColor& in,
 
 nsTArray<uint8_t> gfxPlatform::GetPrefCMSOutputProfileData() {
   const auto mirror = StaticPrefs::gfx_color_management_display_profile();
-  const auto fname = *mirror;
+  const auto& fname = *mirror;
   if (fname == "") {
     return nsTArray<uint8_t>();
   }
@@ -2153,13 +1952,19 @@ void gfxPlatform::InitializeCMS() {
   if (StaticPrefs::gfx_color_management_force_srgb() ||
       StaticPrefs::gfx_color_management_native_srgb()) {
     mCMSOutputProfile = mCMSsRGBProfile;
+    mCMSOutputProfileStatus = CMSOutputProfileStatus::ForcedSRGB;
   }
 
   if (!mCMSOutputProfile) {
     nsTArray<uint8_t> outputProfileData = GetPlatformCMSOutputProfileData();
-    if (!outputProfileData.IsEmpty()) {
+    if (outputProfileData.IsEmpty()) {
+      mCMSOutputProfileStatus = CMSOutputProfileStatus::NoProfileData;
+    } else {
       mCMSOutputProfile = qcms_profile_from_memory_curves_only(
           outputProfileData.Elements(), outputProfileData.Length());
+      mCMSOutputProfileStatus = mCMSOutputProfile
+                                    ? CMSOutputProfileStatus::Loaded
+                                    : CMSOutputProfileStatus::ParseFailed;
 
       /* Determine if the profile looks bogus. If so, close the profile
        * and use sRGB instead. See bug 460629, */
@@ -2168,6 +1973,7 @@ void gfxPlatform::InitializeCMS() {
         qcms_profile_release(mCMSOutputProfile);
         mCMSOutputProfile = nullptr;
         mCMSOutputProfileData.reset();
+        mCMSOutputProfileStatus = CMSOutputProfileStatus::Bogus;
       }
 
       // mCMSOutputProfileData is outputProfileData in the content process. In
@@ -2442,7 +2248,7 @@ gfxImageFormat gfxPlatform::OptimalFormatForContent(gfxContentType aContent) {
 static mozilla::Atomic<bool> sLayersAccelerationPrefsInitialized(false);
 
 /* static */
-void gfxPlatform::VideoDecodingFailedChangedCallback(const char* aPref, void*) {
+void gfxPlatform::HardwareVideoFailedChangedCallback(const char* aPref, void*) {
   MOZ_ASSERT(XRE_IsParentProcess());
   if (gPlatform) {
     gPlatform->InitHardwareVideoConfig();
@@ -2453,7 +2259,7 @@ void gfxPlatform::VideoDecodingFailedChangedCallback(const char* aPref, void*) {
 void gfxPlatform::HWDRMFailedChangedCallback(const char* aPref, void*) {
   MOZ_ASSERT(XRE_IsParentProcess());
   if (gPlatform) {
-    gPlatform->InitPlatformHardwarDRMConfig();
+    gPlatform->InitPlatformHardwareDRMConfig();
   }
 }
 
@@ -2543,7 +2349,8 @@ void gfxPlatform::InitGPUProcessPrefs() {
     return;
   }
 
-  if (IsHeadless()) {
+  if (IsHeadless() &&
+      !StaticPrefs::layers_gpu_process_allow_headless_AtStartup()) {
     gpuProc.ForceDisable(FeatureStatus::Blocked, "Headless mode is enabled",
                          "FEATURE_FAILURE_HEADLESS_MODE"_ns);
     return;
@@ -2651,11 +2458,9 @@ void gfxPlatform::InitWebRenderConfig() {
   }
 #endif
 
-#ifdef XP_WIN
   if (gfxConfig::IsEnabled(Feature::WEBRENDER_ANGLE)) {
     gfxVars::SetUseWebRenderANGLE(true);
   }
-#endif
 
   if (gfxConfig::IsEnabled(Feature::WEBRENDER_SHADER_CACHE)) {
     gfxVars::SetUseWebRenderProgramBinaryDisk(true);
@@ -2730,8 +2535,10 @@ void gfxPlatform::InitWebRenderConfig() {
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
-  gfxVars::SetUseAImageReaderVideoGpuProcessAndroid(
-      StaticPrefs::gfx_video_aimage_reader_gpu_process_android_AtStartup());
+  bool forceAImageReader =
+      gfx::gfxVars::UseWebRenderANGLE() ||
+      StaticPrefs::gfx_video_force_aimage_reader_android_AtStartup();
+  gfxVars::SetForceAImageReaderAndroid(forceAImageReader);
 #endif
 
 #ifdef XP_WIN
@@ -2876,53 +2683,14 @@ void gfxPlatform::InitWebRenderConfig() {
     gfxVars::SetHwDecodedVideoZeroCopy(true);
   }
 
-  bool reuseDecoderDevice = false;
-  if (StaticPrefs::gfx_direct3d11_reuse_decoder_device_AtStartup()) {
-    reuseDecoderDevice = true;
-
-    if (reuseDecoderDevice &&
-        !StaticPrefs::
-            gfx_direct3d11_reuse_decoder_device_force_enabled_AtStartup()) {
-      nsCString failureId;
-      int32_t status;
-      const nsCOMPtr<nsIGfxInfo> gfxInfo = components::GfxInfo::Service();
-      if (NS_FAILED(gfxInfo->GetFeatureStatus(
-              nsIGfxInfo::FEATURE_REUSE_DECODER_DEVICE, failureId, &status))) {
-        FeatureState& feature =
-            gfxConfig::GetFeature(Feature::REUSE_DECODER_DEVICE);
-        feature.DisableByDefault(FeatureStatus::BlockedNoGfxInfo,
-                                 "gfxInfo is broken",
-                                 "FEATURE_FAILURE_WR_NO_GFX_INFO"_ns);
-        reuseDecoderDevice = false;
-      } else {
-        if (status != nsIGfxInfo::FEATURE_STATUS_OK) {
-          FeatureState& feature =
-              gfxConfig::GetFeature(Feature::REUSE_DECODER_DEVICE);
-          feature.DisableByDefault(FeatureStatus::Blocked,
-                                   "Blocklisted by gfxInfo", failureId);
-          reuseDecoderDevice = false;
-        }
-      }
-    }
+  if (StaticPrefs::gfx_webrender_flip_sequential_AtStartup() &&
+      gfxVars::UseWebRenderANGLE()) {
+    gfxVars::SetUseWebRenderFlipSequentialWin(true);
   }
-
-  if (reuseDecoderDevice) {
-    FeatureState& feature =
-        gfxConfig::GetFeature(Feature::REUSE_DECODER_DEVICE);
-    feature.EnableByDefault();
-    gfxVars::SetReuseDecoderDevice(true);
-  }
-
-  if (Preferences::GetBool("gfx.webrender.flip-sequential", false)) {
-    if (gfxVars::UseWebRenderANGLE()) {
-      gfxVars::SetUseWebRenderFlipSequentialWin(true);
-    }
-  }
-  if (Preferences::GetBool("gfx.webrender.triple-buffering.enabled", false)) {
-    if (gfxVars::UseWebRenderDCompWin() ||
-        gfxVars::UseWebRenderFlipSequentialWin()) {
-      gfxVars::SetUseWebRenderTripleBufferingWin(true);
-    }
+  if (StaticPrefs::gfx_webrender_triple_buffering_enabled_AtStartup() &&
+      (gfxVars::UseWebRenderDCompWin() ||
+       gfxVars::UseWebRenderFlipSequentialWin())) {
+    gfxVars::SetUseWebRenderTripleBufferingWin(true);
   }
 
   if (StaticPrefs::
@@ -3022,6 +2790,45 @@ void gfxPlatform::InitHardwareVideoConfig() {
   // Collect the gfxVar updates into a single message.
   gfxVarsCollectUpdates collect;
 
+  nsCOMPtr<nsIGfxInfo> gfxInfo = components::GfxInfo::Service();
+  nsCString failureId;
+
+#ifdef MOZ_WIDGET_GTK
+  int32_t statusVulkan = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
+  FeatureState& featureVulkanDec =
+      gfxConfig::GetFeature(Feature::HARDWARE_VIDEO_DECODING_VULKAN);
+  featureVulkanDec.Reset();
+  featureVulkanDec.EnableByDefault();
+
+  if (!StaticPrefs::media_hardware_video_decoding_vulkan_enabled_AtStartup()) {
+    featureVulkanDec.UserDisable(
+        "User disabled via media.hardware-video-decoding-vulkan.enabled pref",
+        "FEATURE_HARDWARE_VIDEO_DECODING_VULKAN_PREF_DISABLED"_ns);
+  } else if (
+      StaticPrefs::
+          media_hardware_video_decoding_vulkan_force_enabled_AtStartup()) {
+    featureVulkanDec.UserForceEnable("Force enabled by pref");
+  }
+
+  if (NS_FAILED(gfxInfo->GetFeatureStatus(
+          nsIGfxInfo::FEATURE_HARDWARE_VIDEO_DECODING_VULKAN, failureId,
+          &statusVulkan))) {
+    featureVulkanDec.Disable(FeatureStatus::BlockedNoGfxInfo,
+                             "gfxInfo is broken",
+                             "FEATURE_FAILURE_NO_GFX_INFO"_ns);
+  } else if (statusVulkan != nsIGfxInfo::FEATURE_STATUS_OK) {
+    featureVulkanDec.Disable(FeatureStatus::Blocklisted,
+                             "Blocklisted by gfxInfo", failureId);
+  }
+
+  if (statusVulkan == nsIGfxInfo::FEATURE_BLOCKED_PLATFORM_TEST) {
+    featureVulkanDec.ForceDisable(FeatureStatus::Unavailable,
+                                  "Force disabled by gfxInfo", failureId);
+  }
+
+  gfxVars::SetCanUseVulkanHardwareVideoDecoding(featureVulkanDec.IsEnabled());
+#endif
+
   FeatureState& featureDec =
       gfxConfig::GetFeature(Feature::HARDWARE_VIDEO_DECODING);
   featureDec.Reset();
@@ -3045,15 +2852,20 @@ void gfxPlatform::InitHardwareVideoConfig() {
   }
 
   int32_t status = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
-  nsCOMPtr<nsIGfxInfo> gfxInfo = components::GfxInfo::Service();
-  nsCString failureId;
-  if (NS_FAILED(gfxInfo->GetFeatureStatus(
-          nsIGfxInfo::FEATURE_HARDWARE_VIDEO_DECODING, failureId, &status))) {
-    featureDec.Disable(FeatureStatus::BlockedNoGfxInfo, "gfxInfo is broken",
-                       "FEATURE_FAILURE_NO_GFX_INFO"_ns);
-  } else if (status != nsIGfxInfo::FEATURE_STATUS_OK) {
-    featureDec.Disable(FeatureStatus::Blocklisted, "Blocklisted by gfxInfo",
-                       failureId);
+  // If FEATURE_HARDWARE_VIDEO_DECODING_VULKAN is enabled,
+  // just mirror the state to FEATURE_HARDWARE_VIDEO_DECODING
+  // to have one single point of check for HW decoding status.
+  if (gfxVars::CanUseVulkanHardwareVideoDecoding()) {
+    status = nsIGfxInfo::FEATURE_STATUS_OK;
+  } else {
+    if (NS_FAILED(gfxInfo->GetFeatureStatus(
+            nsIGfxInfo::FEATURE_HARDWARE_VIDEO_DECODING, failureId, &status))) {
+      featureDec.Disable(FeatureStatus::BlockedNoGfxInfo, "gfxInfo is broken",
+                         "FEATURE_FAILURE_NO_GFX_INFO"_ns);
+    } else if (status != nsIGfxInfo::FEATURE_STATUS_OK) {
+      featureDec.Disable(FeatureStatus::Blocklisted, "Blocklisted by gfxInfo",
+                         failureId);
+    }
   }
 
   if (status == nsIGfxInfo::FEATURE_BLOCKED_PLATFORM_TEST) {
@@ -3079,13 +2891,13 @@ void gfxPlatform::InitHardwareVideoConfig() {
   featureEnc.EnableByDefault();
 
   if (!StaticPrefs::media_hardware_video_encoding_enabled_AtStartup()) {
-    featureDec.UserDisable(
+    featureEnc.UserDisable(
         "User disabled via media.hardware-video-encoding.enabled pref",
         "FEATURE_HARDWARE_VIDEO_ENCODING_PREF_1_DISABLED"_ns);
   }
 #ifdef XP_WIN
   else if (!StaticPrefs::media_wmf_dxva_d3d11_enabled()) {
-    featureDec.UserDisable(
+    featureEnc.UserDisable(
         "User disabled via media.wmf.dxva.d3d11.enabled pref",
         "FEATURE_HARDWARE_VIDEO_ENCODING_PREF_2_DISABLED"_ns);
   }
@@ -3110,9 +2922,16 @@ void gfxPlatform::InitHardwareVideoConfig() {
                             "Force disabled by gfxInfo", failureId);
   } else if (Preferences::GetBool("media.hardware-video-decoding.failed",
                                   false)) {
+    // Decoding is better exercised than encoding. If it is broken on this
+    // configuration, encoding is unlikely to be sane either.
     featureEnc.ForceDisable(FeatureStatus::Unavailable,
                             "Force disabled by failed sanity test",
                             "FEATURE_FAILURE_SANITY_TEST_FAILED"_ns);
+  } else if (Preferences::GetBool("media.hardware-video-encoding.failed",
+                                  false)) {
+    featureEnc.ForceDisable(FeatureStatus::Unavailable,
+                            "Force disabled by failed encode sanity test",
+                            "FEATURE_FAILURE_SANITY_TEST_ENCODE_FAILED"_ns);
   }
 #ifdef XP_MACOSX
   else if (isXpcshell) {
@@ -3136,39 +2955,10 @@ void gfxPlatform::InitHardwareVideoConfig() {
   gfxVars::SetVideoHDR(featureHdr.IsEnabled());
 
   InitPlatformHardwareVideoConfig();
-  InitPlatformHardwarDRMConfig();
-
-  FeatureState& featureVulkanDec =
-      gfxConfig::GetFeature(Feature::HARDWARE_VIDEO_DECODING_VULKAN);
-  featureVulkanDec.Reset();
-  featureVulkanDec.EnableByDefault();
-  if (!StaticPrefs::media_hardware_video_decoding_vulkan_enabled_AtStartup()) {
-    featureVulkanDec.UserDisable(
-        "User disabled via media.hardware-video-decoding-vulkan.enabled pref",
-        "FEATURE_HARDWARE_VIDEO_DECODING_VULKAN_PREF_DISABLED"_ns);
-  }
-#ifdef XP_MACOSX
-  if (isXpcshell) {
-    featureVulkanDec.ForceDisable(FeatureStatus::Unavailable,
-                                  "Force disabled in xpcshell due to signing",
-                                  "FEATURE_FAILURE_OSX_XPCSHELL_SIGNING"_ns);
-  }
-#endif
-
-  bool canUseVulkanDecode = false;
-  int32_t vulkanDecStatus = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
-  nsCString vulkanDecFailureId;
-  if (featureVulkanDec.IsEnabled() &&
-      NS_SUCCEEDED(gfxInfo->GetFeatureStatus(
-          nsIGfxInfo::FEATURE_HARDWARE_VIDEO_DECODING_VULKAN,
-          vulkanDecFailureId, &vulkanDecStatus)) &&
-      vulkanDecStatus == nsIGfxInfo::FEATURE_STATUS_OK) {
-    canUseVulkanDecode = true;
-  }
+  InitPlatformHardwareDRMConfig();
 
   nsCString message;
-  gfxVars::SetCanUseHardwareVideoDecoding(featureDec.IsEnabled() ||
-                                          canUseVulkanDecode);
+  gfxVars::SetCanUseHardwareVideoDecoding(featureDec.IsEnabled());
   gfxVars::SetCanUseHardwareVideoEncoding(featureEnc.IsEnabled());
 
 #ifdef MOZ_WIDGET_ANDROID
@@ -3186,7 +2976,7 @@ void gfxPlatform::InitHardwareVideoConfig() {
   FeatureState& featureDec##name =                                             \
       gfxConfig::GetFeature(Feature::name##_HW_DECODE);                        \
   featureDec##name.Reset();                                                    \
-  if (featureDec.IsEnabled() || canUseVulkanDecode) {                          \
+  if (featureDec.IsEnabled()) {                                                \
     CODEC_HW_FEATURE_SETUP_PLATFORM(name, Dec, false)                          \
     if (!IsGfxInfoStatusOkay(nsIGfxInfo::FEATURE_##name##_HW_DECODE, &message, \
                              failureId)) {                                     \
@@ -3832,6 +3622,37 @@ void gfxPlatform::GetFrameStats(mozilla::widget::InfoObject& aObj) {
 }
 
 void gfxPlatform::GetCMSSupportInfo(mozilla::widget::InfoObject& aObj) {
+  const char* inUse = [&] {
+    switch (mCMSOutputProfileStatus) {
+      case CMSOutputProfileStatus::Uninitialized:
+        return "not initialized";
+      case CMSOutputProfileStatus::ForcedSRGB:
+        return "sRGB (overridden by native_srgb/force_srgb)";
+      case CMSOutputProfileStatus::NoProfileData:
+        return "sRGB (no display profile)";
+      case CMSOutputProfileStatus::ParseFailed:
+        return "sRGB (display profile could not be parsed)";
+      case CMSOutputProfileStatus::Bogus:
+        return "sRGB (display profile rejected as bogus)";
+      case CMSOutputProfileStatus::Loaded:
+        return "display profile";
+    }
+    MOZ_ASSERT_UNREACHABLE("Unexpected CMSOutputProfileStatus");
+    return "unknown";
+  }();
+  aObj.DefineProperty("CMSOutputProfileInUse", inUse);
+
+  qcms_CIE_xyYTRIPLE primaries;
+  qcms_CIE_xyY white;
+  if (mCMSOutputProfileStatus == CMSOutputProfileStatus::Loaded &&
+      qcms_profile_get_primaries(mCMSOutputProfile, &primaries, &white)) {
+    nsPrintfCString msg("r %.4f,%.4f g %.4f,%.4f b %.4f,%.4f w %.4f,%.4f",
+                        primaries.red.x, primaries.red.y, primaries.green.x,
+                        primaries.green.y, primaries.blue.x, primaries.blue.y,
+                        white.x, white.y);
+    aObj.DefineProperty("CMSOutputProfilePrimaries", msg.get());
+  }
+
   nsTArray<uint8_t> outputProfileData =
       gfxPlatform::GetPlatform()->GetPlatformCMSOutputProfileData();
   if (outputProfileData.IsEmpty()) {
@@ -3844,7 +3665,8 @@ void gfxPlatform::GetCMSSupportInfo(mozilla::widget::InfoObject& aObj) {
   // by default in about:support. For now, we only accept less than 8kiB.
   const size_t kMaxProfileSize = 8192;
   if (outputProfileData.Length() >= kMaxProfileSize) {
-    nsPrintfCString msg("%zu bytes, too large", outputProfileData.Length());
+    nsPrintfCString msg("%zu bytes, too large to display base64 encoded here",
+                        outputProfileData.Length());
     aObj.DefineProperty("CMSOutputProfile", msg.get());
     return;
   }
@@ -3870,13 +3692,24 @@ void gfxPlatform::GetDisplayInfo(mozilla::widget::InfoObject& aObj) {
   size_t i = 0;
   for (auto& screen : screens) {
     const LayoutDeviceIntRect rect = screen->GetRect();
-    nsPrintfCString value(
-        "%dx%d@%dHz scales:%f|%f %s", rect.width, rect.height,
-        screen->GetRefreshRate(), screen->GetContentsScaleFactor(),
-        screen->GetDefaultCSSScaleFactor(), screen->GetIsHDR() ? "HDR" : "SDR");
+    if (screen->GetIsHDR()) {
+      nsPrintfCString value(
+          "%dx%d@%dHz scales:%f|%f HDR %.0f/%.0f nits", rect.width, rect.height,
+          screen->GetRefreshRate(), screen->GetContentsScaleFactor(),
+          screen->GetDefaultCSSScaleFactor(), screen->GetSDRContentBrightness(),
+          screen->GetHDRPeakBrightness());
 
-    aObj.DefineProperty(nsPrintfCString("Display%zu", i++).get(),
-                        NS_ConvertUTF8toUTF16(value));
+      aObj.DefineProperty(nsPrintfCString("Display%zu", i++).get(),
+                          NS_ConvertUTF8toUTF16(value));
+    } else {
+      nsPrintfCString value("%dx%d@%dHz scales:%f|%f SDR", rect.width,
+                            rect.height, screen->GetRefreshRate(),
+                            screen->GetContentsScaleFactor(),
+                            screen->GetDefaultCSSScaleFactor());
+
+      aObj.DefineProperty(nsPrintfCString("Display%zu", i++).get(),
+                          NS_ConvertUTF8toUTF16(value));
+    }
   }
 
   // Platform display info is only currently used for about:support and getting
@@ -4229,8 +4062,8 @@ void gfxPlatform::DisableGPUProcess() {
       "Disabled by fallback to GPU Process disabled",
       "FEATURE_FAILURE_DISABLED_BY_FALLBACK_GPU_PROCESS_DISABLED"_ns);
 
-#if defined(XP_WIN)
-  CompositeProcessD3D11FencesHolderMap::Init();
+#if defined(XP_WIN) || defined(XP_MACOSX)
+  CompositeProcessFencesHolderMap::Init();
 #endif
   RemoteTextureMap::Init();
   // We need to initialize the parent process to prepare for WebRender if we

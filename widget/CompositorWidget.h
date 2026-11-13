@@ -5,12 +5,12 @@
 #ifndef mozilla_widget_CompositorWidget_h_
 #define mozilla_widget_CompositorWidget_h_
 
-#include "nsISupports.h"
-#include "mozilla/RefPtr.h"
 #include "Units.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/layers/LayersTypes.h"
+#include "nsISupports.h"
 
 class nsIWidget;
 
@@ -48,6 +48,9 @@ class HeadlessCompositorWidget;
 
 class CompositorWidgetDelegate {
  public:
+  virtual void NotifyClientSizeChanged(const LayoutDeviceIntSize& aClientSize) {
+  }
+
   virtual PlatformCompositorWidgetDelegate* AsPlatformSpecificDelegate() {
     return nullptr;
   }

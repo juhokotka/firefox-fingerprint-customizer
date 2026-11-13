@@ -1122,6 +1122,9 @@ static void dealloc_raw_frame_buffers(VP8_COMP *cpi) {
   vp8_yv12_de_alloc_frame_buffer(&cpi->alt_ref_buffer);
 #endif
   vp8_lookahead_destroy(cpi->lookahead);
+#if CONFIG_TEMPORAL_DENOISING
+  vp8_denoiser_free(&cpi->denoiser);
+#endif
 }
 
 static int vp8_alloc_partition_data(VP8_COMP *cpi) {
@@ -2441,6 +2444,11 @@ int vp8_get_reference(VP8_COMP *cpi, enum vpx_ref_frame_type ref_frame_flag,
     return -1;
   }
 
+  if (cm->yv12_fb[ref_fb_idx].y_width != sd->y_width ||
+      cm->yv12_fb[ref_fb_idx].y_height != sd->y_height) {
+    return -1;
+  }
+
   vp8_yv12_copy_frame(&cm->yv12_fb[ref_fb_idx], sd);
 
   return 0;
@@ -2458,6 +2466,11 @@ int vp8_set_reference(VP8_COMP *cpi, enum vpx_ref_frame_type ref_frame_flag,
   } else if (ref_frame_flag == VP8_ALTR_FRAME) {
     ref_fb_idx = cm->alt_fb_idx;
   } else {
+    return -1;
+  }
+
+  if (cm->yv12_fb[ref_fb_idx].y_width != sd->y_width ||
+      cm->yv12_fb[ref_fb_idx].y_height != sd->y_height) {
     return -1;
   }
 
@@ -2977,8 +2990,15 @@ static void update_reference_frames(VP8_COMP *cpi) {
                             &cpi->denoiser.yv12_running_avg[GOLDEN_FRAME]);
       }
       if (cm->refresh_last_frame) {
-        vp8_yv12_copy_frame(&cpi->denoiser.yv12_running_avg[INTRA_FRAME],
-                            &cpi->denoiser.yv12_running_avg[LAST_FRAME]);
+        if (cpi->denoiser.denoiser_mode == kDenoiserOnYOnly) {
+          vp8_yv12_copy_frame(&cpi->denoiser.yv12_running_avg[INTRA_FRAME],
+                              &cpi->denoiser.yv12_running_avg[LAST_FRAME]);
+        } else {
+          YV12_BUFFER_CONFIG tmp = cpi->denoiser.yv12_running_avg[INTRA_FRAME];
+          cpi->denoiser.yv12_running_avg[INTRA_FRAME] =
+              cpi->denoiser.yv12_running_avg[LAST_FRAME];
+          cpi->denoiser.yv12_running_avg[LAST_FRAME] = tmp;
+        }
       }
     }
     if (cpi->oxcf.noise_sensitivity == 4)

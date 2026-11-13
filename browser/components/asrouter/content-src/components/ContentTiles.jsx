@@ -10,6 +10,7 @@ import { MobileDownloads } from "./MobileDownloads";
 import { MultiSelect } from "./MultiSelect";
 import { TextAreaTile } from "./TextAreaTile";
 import { EmbeddedMigrationWizard } from "./EmbeddedMigrationWizard";
+import { EmbeddedThemePicker } from "./EmbeddedThemePicker";
 import { EmbeddedFxBackupOptIn } from "./EmbeddedFxBackupOptIn";
 import { ActionChecklist } from "./ActionChecklist";
 import { EmbeddedBrowser } from "./EmbeddedBrowser";
@@ -19,6 +20,7 @@ import { EmbeddedBackupRestore } from "./EmbeddedBackupRestore";
 import { PinnableSitesList } from "./PinnableSitesList";
 import { ContentToggle } from "./ContentToggle";
 import { TextBoxTile } from "./TextBoxTile";
+import { LinkParagraph } from "./LinkParagraph";
 
 const HEADER_STYLES = [
   "backgroundColor",
@@ -30,6 +32,8 @@ const HEADER_STYLES = [
 ];
 
 const TILE_STYLES = [
+  "border",
+  "borderRadius",
   "marginBlock",
   "marginInline",
   "paddingBlock",
@@ -52,6 +56,24 @@ const CONTAINER_STYLES = [
   "alignItems",
   "gap",
 ];
+
+/**
+ * @param {object|object[]} tiles - The tiles of the screen being shown.
+ * @returns {object} Impression context, if any.
+ */
+export function getTileImpressionContext(tiles) {
+  const pinnableSites = (Array.isArray(tiles) ? tiles : [tiles]).find(
+    tile => tile?.type === "pinnable_sites" && Array.isArray(tile.data)
+  );
+  if (!pinnableSites) {
+    return {};
+  }
+  return {
+    total_sites: pinnableSites.data.length,
+    personalized_sites: pinnableSites.data.filter(item => item?.personalized)
+      .length,
+  };
+}
 
 export const ContentTiles = props => {
   const { content } = props;
@@ -250,7 +272,7 @@ export const ContentTiles = props => {
       >
         {header?.title && (
           <button
-            className="tile-header secondary"
+            className={`tile-header secondary${header.linkStyle ? " link-style" : ""}`}
             onClick={() => toggleTile(index, tile)}
             {...tileHeaderProps}
             style={MultiStageUtils.getValidStyle(header.style, HEADER_STYLES)}
@@ -315,6 +337,7 @@ export const ContentTiles = props => {
                   props.setActiveSingleSelectSelection
                 }
                 singleSelectId={`single-select-${index}`}
+                messageId={props.messageId}
               />
             )}
             {tile.type === "mobile_downloads" && tile.data && (
@@ -353,8 +376,18 @@ export const ContentTiles = props => {
                 content={{ tiles: tile }}
               />
             )}
+            {tile.type === "theme-picker" && (
+              <EmbeddedThemePicker
+                handleAction={props.handleAction}
+                installSource={tile.data?.installSource}
+              />
+            )}
             {tile.type === "action_checklist" && tile.data && (
-              <ActionChecklist content={content} message_id={props.messageId} />
+              <ActionChecklist
+                content={content}
+                message_id={props.messageId}
+                handleAction={props.handleAction}
+              />
             )}
             {tile.type === "embedded_browser" && tile.data?.url && (
               <EmbeddedBrowser url={tile.data.url} style={tile.data.style} />
@@ -393,6 +426,7 @@ export const ContentTiles = props => {
                 tile={tile}
                 messageId={props.messageId}
                 handleAction={props.handleAction}
+                setPinnedSite={props.setPinnedSite}
               />
             )}
             {tile.type === "content-toggle" && tile.data && (
@@ -406,6 +440,12 @@ export const ContentTiles = props => {
               <TextBoxTile
                 content={{ tiles: tile }}
                 contentToggled={props.contentToggleChecked}
+              />
+            )}
+            {tile.type === "text" && tile.text && (
+              <LinkParagraph
+                text_content={tile}
+                handleAction={props.handleAction}
               />
             )}
           </div>

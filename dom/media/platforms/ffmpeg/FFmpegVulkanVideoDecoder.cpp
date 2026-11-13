@@ -6,55 +6,51 @@
 
 #include "FFmpegLog.h"
 #include "FFmpegVideoDecoder.h"
+#include "H264.h"
 #include "mozilla/DataMutex.h"
 #include "mozilla/ScopeExit.h"
 #include "nsPrintfCString.h"
-#if LIBAVCODEC_VERSION_MAJOR >= 60 && !defined(FFVPX_VERSION)
-#  if defined(MOZ_USE_HWDECODE) && defined(MOZ_WIDGET_GTK)
-#    include <dlfcn.h>
-#    include <errno.h>
+
+#ifdef MOZ_USE_HWDECODE_VULKAN
+#  include <dlfcn.h>
+#  include <errno.h>
 // mozilla/widget/DMABufFormats.h (via FFmpegVideoDecoder.h -> DMABufDevice.h)
 // may define DRM_FORMAT_MOD_INVALID before libdrm; same pattern as
 // DMABufSurface.cpp / FFmpegVideoFramePool.cpp.
-#    ifdef DRM_FORMAT_MOD_INVALID
-#      undef DRM_FORMAT_MOD_INVALID
-#    endif
-#    include <libdrm/drm_fourcc.h>
-#    ifndef DRM_FORMAT_MOD_INVALID
-#      define DRM_FORMAT_MOD_INVALID ((1ULL << 56) - 1)
-#    endif
-#    include <string.h>
-#    include <sys/stat.h>
+#  ifdef DRM_FORMAT_MOD_INVALID
+#    undef DRM_FORMAT_MOD_INVALID
+#  endif
+#  include <libdrm/drm_fourcc.h>
+#  ifndef DRM_FORMAT_MOD_INVALID
+#    define DRM_FORMAT_MOD_INVALID ((1ULL << 56) - 1)
+#  endif
+#  include <stdio.h>
+#  include <string.h>
+#  include <sys/stat.h>
 
-#    include <algorithm>
-#    include <vector>
+#  include <algorithm>
+#  include <mutex>
+#  include <vector>
 
-#    include "libavutil/hwcontext.h"
-#    include "libavutil/hwcontext_vulkan.h"
-#    include "libavutil/macros.h"
-#    include "libavutil/pixfmt.h"
-#    include "libavutil/version.h"
-#    include "mozilla/StaticPrefs_media.h"
-#    ifdef __linux__
-#      include <sys/sysmacros.h>
-#    elif defined(XP_SOLARIS) || defined(__sun)
-#      include <sys/mkdev.h>  // major(), minor() for st_rdev
-#    elif defined(XP_FREEBSD) || defined(XP_OPENBSD) || defined(XP_NETBSD)
-#      include <sys/types.h>  // major(), minor() for st_rdev (BSD)
-#    endif
-#  endif  // MOZ_USE_HWDECODE && MOZ_WIDGET_GTK
-#endif    // LIBAVCODEC_VERSION_MAJOR >= 60 && !defined(FFVPX_VERSION)
+#  include "libavutil/hwcontext.h"
+#  include "libavutil/hwcontext_vulkan.h"
+#  include "libavutil/macros.h"
+#  include "libavutil/pixfmt.h"
+#  include "libavutil/version.h"
+#  include "mozilla/StaticMutex.h"
+#  include "mozilla/StaticPrefs_media.h"
+#  ifdef __linux__
+#    include <sys/sysmacros.h>
+#  elif defined(XP_SOLARIS) || defined(__sun)
+#    include <sys/mkdev.h>  // major(), minor() for st_rdev
+#  elif defined(XP_FREEBSD) || defined(XP_OPENBSD) || defined(XP_NETBSD)
+#    include <sys/types.h>  // major(), minor() for st_rdev (BSD)
+#  endif
 
 namespace mozilla {
 
-#if defined(MOZ_USE_HWDECODE) && defined(MOZ_WIDGET_GTK)
-#  if LIBAVCODEC_VERSION_MAJOR >= 60 && !defined(FFVPX_VERSION)
-
 FFmpegVideoDecoder<
     LIBAV_VER>::FFmpegVulkanVideoDecoder::~FFmpegVulkanVideoDecoder() {
-  if (!StaticPrefs::media_ffvpx_hw_enabled()) {
-    return;
-  }
   // Resources should already be cleaned up by ProcessShutdown()
   // If mDevice is not null here, it means ProcessShutdown wasn't called
   // and the device may already be destroyed - don't try to clean up
@@ -115,7 +111,6 @@ void FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::Cleanup() {
 
   mDevice = VK_NULL_HANDLE;
   mCopyQueueCount = 0;
-  mCopyQueueIsDedicatedTransfer = false;
   mCopyQueueRoundRobin = 0;
   mCopyQueue.Clear();
   mCopyCmdPool.Clear();
@@ -146,12 +141,17 @@ namespace {
 
 // Cached instance-level Vulkan function pointers, shared across all decoders
 // for the lifetime of the process as long as the VkInstance doesn't change.
+// Keyed by (VkInstance, generation): the shared VkInstance is destroyed
+// once no decoder references it, and VkInstance is loader-owned heap
+// memory a later-created instance could, in principle, reuse the address
+// of. Keying on the address alone risks serving stale pointers from the
+// old, freed instance. Unconfirmed in practice; see
+// VulkanDeviceHolder::Generation().
 struct InstanceFunctionCache {
   VkInstance mInstance = VK_NULL_HANDLE;
+  uint64_t mGeneration = 0;
   PFN_vkGetDeviceProcAddr mGetDeviceProcAddr = nullptr;
   PFN_vkGetPhysicalDeviceProperties mGetPhysicalDeviceProperties = nullptr;
-  PFN_vkGetPhysicalDeviceQueueFamilyProperties
-      mGetPhysicalDeviceQueueFamilyProperties = nullptr;
   PFN_vkGetPhysicalDeviceMemoryProperties mGetPhysicalDeviceMemoryProperties =
       nullptr;
   PFN_vkGetPhysicalDeviceFormatProperties2 mGetPhysicalDeviceFormatProperties2 =
@@ -160,6 +160,40 @@ struct InstanceFunctionCache {
       mGetPhysicalDeviceImageFormatProperties2 = nullptr;
   PFN_vkGetPhysicalDeviceExternalSemaphoreProperties
       mGetPhysicalDeviceExternalSemaphoreProperties = nullptr;
+  PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR
+      mGetPhysicalDeviceVideoCapabilitiesKHR = nullptr;
+  template <typename CodecCaps>
+  struct CachedVideoCaps {
+    bool mQueried = false;
+    bool mValid = false;
+    uint32_t mProfileIdc = 0;
+    uint32_t mLayout = 0;
+    uint32_t mExtra = 0;
+    uint8_t mBitDepth = 0;
+    uint8_t mChromaBitDepth = 0;
+    VkPhysicalDevice mPhysDev = VK_NULL_HANDLE;
+    VkVideoChromaSubsamplingFlagBitsKHR mChroma{};
+    VkVideoCapabilitiesKHR mCaps{};
+    VkVideoDecodeCapabilitiesKHR mDecodeCaps{};
+    CodecCaps mCodecCaps{};
+
+    bool Matches(VkPhysicalDevice aPhysDev, uint32_t aProfileIdc,
+                 uint32_t aLayout, uint32_t aExtra, uint8_t aBitDepth,
+                 uint8_t aChromaBitDepth,
+                 VkVideoChromaSubsamplingFlagBitsKHR aChroma) const {
+      return mQueried && mPhysDev == aPhysDev && mProfileIdc == aProfileIdc &&
+             mLayout == aLayout && mExtra == aExtra && mBitDepth == aBitDepth &&
+             mChromaBitDepth == aChromaBitDepth && mChroma == aChroma;
+    }
+  };
+  CachedVideoCaps<VkVideoDecodeH264CapabilitiesKHR> mH264;
+  CachedVideoCaps<VkVideoDecodeH265CapabilitiesKHR> mHevc;
+#  if LIBAVCODEC_VERSION_MAJOR >= 61
+  CachedVideoCaps<VkVideoDecodeAV1CapabilitiesKHR> mAv1;
+#  endif
+#  if LIBAVCODEC_VERSION_MAJOR >= 62
+  CachedVideoCaps<VkVideoDecodeVP9CapabilitiesKHR> mVp9;
+#  endif
   // Flat array of all the above pointers for use by IsLoaded().
   nsTArray<PFN_vkVoidFunction> mFnPtrs;
 };
@@ -171,13 +205,13 @@ constinit static StaticDataMutex<InstanceFunctionCache> sInstanceFnCache{
 
 void FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::
     LoadInstanceFunctions(PFN_vkGetInstanceProcAddr aGetProcAddr,
-                          VkInstance aInst, VkPhysicalDevice aPhysDev) {
+                          VkInstance aInst, VkPhysicalDevice aPhysDev,
+                          uint64_t aGeneration) {
   auto cache = sInstanceFnCache.Lock();
-  if (cache->mInstance == aInst && cache->mGetDeviceProcAddr) {
+  if (cache->mInstance == aInst && cache->mGeneration == aGeneration &&
+      cache->mGetDeviceProcAddr) {
     mGetDeviceProcAddr = cache->mGetDeviceProcAddr;
     mGetPhysicalDeviceProperties = cache->mGetPhysicalDeviceProperties;
-    mGetPhysicalDeviceQueueFamilyProperties =
-        cache->mGetPhysicalDeviceQueueFamilyProperties;
     mGetPhysicalDeviceMemoryProperties =
         cache->mGetPhysicalDeviceMemoryProperties;
     mGetPhysicalDeviceFormatProperties2 =
@@ -190,6 +224,11 @@ void FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::
     return;
   }
 
+  FFMPEGV_LOG(
+      "[VULKAN] (Re)loading instance functions for instance {} (gen {}, "
+      "previously cached: instance {} gen {})",
+      (void*)aInst, aGeneration, (void*)cache->mInstance, cache->mGeneration);
+
   mInstanceFunctions.Clear();
   auto load = [&]<typename T>(T& fn, const char* name) {
     fn = reinterpret_cast<T>(aGetProcAddr(aInst, name));
@@ -201,8 +240,6 @@ void FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::
 
   load(mGetDeviceProcAddr, "vkGetDeviceProcAddr");
   load(mGetPhysicalDeviceProperties, "vkGetPhysicalDeviceProperties");
-  load(mGetPhysicalDeviceQueueFamilyProperties,
-       "vkGetPhysicalDeviceQueueFamilyProperties");
   load(mGetPhysicalDeviceMemoryProperties,
        "vkGetPhysicalDeviceMemoryProperties");
   load(mGetPhysicalDeviceFormatProperties2,
@@ -213,10 +250,9 @@ void FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::
        "vkGetPhysicalDeviceExternalSemaphoreProperties");
 
   cache->mInstance = aInst;
+  cache->mGeneration = aGeneration;
   cache->mGetDeviceProcAddr = mGetDeviceProcAddr;
   cache->mGetPhysicalDeviceProperties = mGetPhysicalDeviceProperties;
-  cache->mGetPhysicalDeviceQueueFamilyProperties =
-      mGetPhysicalDeviceQueueFamilyProperties;
   cache->mGetPhysicalDeviceMemoryProperties =
       mGetPhysicalDeviceMemoryProperties;
   cache->mGetPhysicalDeviceFormatProperties2 =
@@ -225,7 +261,350 @@ void FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::
       mGetPhysicalDeviceImageFormatProperties2;
   cache->mGetPhysicalDeviceExternalSemaphoreProperties =
       mGetPhysicalDeviceExternalSemaphoreProperties;
+  cache->mGetPhysicalDeviceVideoCapabilitiesKHR =
+      reinterpret_cast<PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR>(
+          aGetProcAddr(aInst, "vkGetPhysicalDeviceVideoCapabilitiesKHR"));
   cache->mFnPtrs = mInstanceFunctions.Clone();
+  cache->mH264 = {};
+  cache->mHevc = {};
+#  if LIBAVCODEC_VERSION_MAJOR >= 61
+  cache->mAv1 = {};
+#  endif
+#  if LIBAVCODEC_VERSION_MAJOR >= 62
+  cache->mVp9 = {};
+#  endif
+}
+
+namespace {
+
+VkVideoComponentBitDepthFlagBitsKHR VkComponentBitDepth(uint8_t aDepth) {
+  switch (aDepth) {
+    case 8:
+      return VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR;
+    case 10:
+      return VK_VIDEO_COMPONENT_BIT_DEPTH_10_BIT_KHR;
+    case 12:
+      return VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR;
+    default:
+      return static_cast<VkVideoComponentBitDepthFlagBitsKHR>(0);
+  }
+}
+
+uint8_t ColorDepthToBits(gfx::ColorDepth aDepth) {
+  switch (aDepth) {
+    case gfx::ColorDepth::COLOR_10:
+      return 10;
+    case gfx::ColorDepth::COLOR_12:
+      return 12;
+    default:
+      return 8;
+  }
+}
+
+template <typename CodecCaps>
+bool QueryVideoCaps(PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR aGetCaps,
+                    VkPhysicalDevice aPhysDev,
+                    VkVideoCodecOperationFlagBitsKHR aOp,
+                    const void* aCodecProfile, VkStructureType aCodecCapsSType,
+                    VkVideoChromaSubsamplingFlagBitsKHR aChroma,
+                    VkVideoComponentBitDepthFlagBitsKHR aLumaBits,
+                    VkVideoComponentBitDepthFlagBitsKHR aChromaBits,
+                    InstanceFunctionCache::CachedVideoCaps<CodecCaps>* aOut) {
+  if (!aOut) {
+    return false;
+  }
+  *aOut = {};
+  if (!aGetCaps || aPhysDev == VK_NULL_HANDLE || !aCodecProfile || !aChroma ||
+      !aLumaBits) {
+    return false;
+  }
+  if (aChroma != VK_VIDEO_CHROMA_SUBSAMPLING_MONOCHROME_BIT_KHR &&
+      !aChromaBits) {
+    return false;
+  }
+
+  VkVideoDecodeUsageInfoKHR usage{};
+  usage.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_USAGE_INFO_KHR;
+  usage.pNext = aCodecProfile;
+  usage.videoUsageHints = VK_VIDEO_DECODE_USAGE_DEFAULT_KHR;
+
+  VkVideoProfileInfoKHR profile{};
+  profile.sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_INFO_KHR;
+  profile.pNext = &usage;
+  profile.videoCodecOperation = aOp;
+  profile.chromaSubsampling = aChroma;
+  profile.lumaBitDepth = aLumaBits;
+  profile.chromaBitDepth = aChromaBits;
+
+  aOut->mCodecCaps.sType = aCodecCapsSType;
+  aOut->mDecodeCaps.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_CAPABILITIES_KHR;
+  aOut->mDecodeCaps.pNext = &aOut->mCodecCaps;
+  aOut->mCaps.sType = VK_STRUCTURE_TYPE_VIDEO_CAPABILITIES_KHR;
+  aOut->mCaps.pNext = &aOut->mDecodeCaps;
+
+  const VkResult res = aGetCaps(aPhysDev, &profile, &aOut->mCaps);
+  if (res != VK_SUCCESS) {
+    FFMPEGV_LOG("vkGetPhysicalDeviceVideoCapabilitiesKHR failed ({}) op=0x{:x}",
+                (int)res, (unsigned)aOp);
+    *aOut = {};
+    return false;
+  }
+  return true;
+}
+
+template <typename CodecCaps>
+void EnsureVideoCapsSlot(
+    PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR aGetCaps,
+    VkPhysicalDevice aPhysDev, VkVideoCodecOperationFlagBitsKHR aOp,
+    const void* aCodecProfile, VkStructureType aCodecCapsSType,
+    VkVideoChromaSubsamplingFlagBitsKHR aChroma,
+    VkVideoComponentBitDepthFlagBitsKHR aLumaBits,
+    VkVideoComponentBitDepthFlagBitsKHR aChromaBits, uint32_t aProfileIdc,
+    uint32_t aLayout, uint32_t aExtra, uint8_t aBitDepth,
+    uint8_t aChromaBitDepth,
+    InstanceFunctionCache::CachedVideoCaps<CodecCaps>* aSlot) {
+  if (!aSlot || aSlot->Matches(aPhysDev, aProfileIdc, aLayout, aExtra,
+                               aBitDepth, aChromaBitDepth, aChroma)) {
+    return;
+  }
+  const bool valid =
+      QueryVideoCaps(aGetCaps, aPhysDev, aOp, aCodecProfile, aCodecCapsSType,
+                     aChroma, aLumaBits, aChromaBits, aSlot);
+  aSlot->mQueried = true;
+  aSlot->mValid = valid;
+  aSlot->mPhysDev = aPhysDev;
+  aSlot->mProfileIdc = aProfileIdc;
+  aSlot->mLayout = aLayout;
+  aSlot->mExtra = aExtra;
+  aSlot->mBitDepth = aBitDepth;
+  aSlot->mChromaBitDepth = aChromaBitDepth;
+  aSlot->mChroma = aChroma;
+}
+
+void EnsureVideoCaps(InstanceFunctionCache& aCache, VkPhysicalDevice aPhysDev,
+                     gfx::ColorDepth aColorDepth, gfx::ColorDepth aChromaDepth,
+                     VkVideoChromaSubsamplingFlagBitsKHR aChroma,
+                     AVCodecID aCodecID, uint32_t aProfileIdc,
+                     uint32_t aPictureLayout) {
+  const uint8_t bitDepth = ColorDepthToBits(aColorDepth);
+  const uint8_t chromaBitDepth = ColorDepthToBits(aChromaDepth);
+  const auto lumaBits = VkComponentBitDepth(bitDepth);
+  const auto chromaBits =
+      aChroma == VK_VIDEO_CHROMA_SUBSAMPLING_MONOCHROME_BIT_KHR
+          ? static_cast<VkVideoComponentBitDepthFlagBitsKHR>(0)
+          : VkComponentBitDepth(chromaBitDepth);
+  auto* getCaps = aCache.mGetPhysicalDeviceVideoCapabilitiesKHR;
+
+  switch (aCodecID) {
+    case AV_CODEC_ID_H264: {
+      VkVideoDecodeH264ProfileInfoKHR h264Profile{};
+      h264Profile.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR;
+      h264Profile.stdProfileIdc =
+          static_cast<StdVideoH264ProfileIdc>(aProfileIdc);
+      h264Profile.pictureLayout =
+          static_cast<VkVideoDecodeH264PictureLayoutFlagBitsKHR>(
+              aPictureLayout);
+      EnsureVideoCapsSlot(
+          getCaps, aPhysDev, VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR,
+          &h264Profile, VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_CAPABILITIES_KHR,
+          aChroma, lumaBits, chromaBits, h264Profile.stdProfileIdc,
+          h264Profile.pictureLayout, 0, bitDepth, chromaBitDepth,
+          &aCache.mH264);
+      break;
+    }
+    case AV_CODEC_ID_HEVC: {
+      VkVideoDecodeH265ProfileInfoKHR hevcProfile{};
+      hevcProfile.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PROFILE_INFO_KHR;
+      hevcProfile.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_MAIN;
+      EnsureVideoCapsSlot(
+          getCaps, aPhysDev, VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR,
+          &hevcProfile, VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_CAPABILITIES_KHR,
+          aChroma, lumaBits, chromaBits, hevcProfile.stdProfileIdc, 0, 0,
+          bitDepth, chromaBitDepth, &aCache.mHevc);
+      break;
+    }
+#  if LIBAVCODEC_VERSION_MAJOR >= 61
+    case AV_CODEC_ID_AV1: {
+      VkVideoDecodeAV1ProfileInfoKHR av1Profile{};
+      av1Profile.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_AV1_PROFILE_INFO_KHR;
+      av1Profile.stdProfile = STD_VIDEO_AV1_PROFILE_MAIN;
+      av1Profile.filmGrainSupport = VK_FALSE;
+      EnsureVideoCapsSlot(
+          getCaps, aPhysDev, VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR,
+          &av1Profile, VK_STRUCTURE_TYPE_VIDEO_DECODE_AV1_CAPABILITIES_KHR,
+          aChroma, lumaBits, chromaBits, av1Profile.stdProfile, 0,
+          av1Profile.filmGrainSupport, bitDepth, chromaBitDepth, &aCache.mAv1);
+      break;
+    }
+#  endif
+#  if LIBAVCODEC_VERSION_MAJOR >= 62
+    case AV_CODEC_ID_VP9: {
+      VkVideoDecodeVP9ProfileInfoKHR vp9Profile{};
+      vp9Profile.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_VP9_PROFILE_INFO_KHR;
+      vp9Profile.stdProfile = STD_VIDEO_VP9_PROFILE_0;
+      EnsureVideoCapsSlot(
+          getCaps, aPhysDev, VK_VIDEO_CODEC_OPERATION_DECODE_VP9_BIT_KHR,
+          &vp9Profile, VK_STRUCTURE_TYPE_VIDEO_DECODE_VP9_CAPABILITIES_KHR,
+          aChroma, lumaBits, chromaBits, vp9Profile.stdProfile, 0, 0, bitDepth,
+          chromaBitDepth, &aCache.mVp9);
+      break;
+    }
+#  endif
+    default:
+      break;
+  }
+}
+
+uint32_t MapH264VulkanProfileIdc(uint8_t aIdc) {
+  switch (aIdc) {
+    case STD_VIDEO_H264_PROFILE_IDC_BASELINE:
+    case STD_VIDEO_H264_PROFILE_IDC_MAIN:
+    case STD_VIDEO_H264_PROFILE_IDC_HIGH:
+    case STD_VIDEO_H264_PROFILE_IDC_HIGH_444_PREDICTIVE:
+      return aIdc;
+#  if LIBAVCODEC_VERSION_MAJOR >= 61
+    case AV_PROFILE_H264_HIGH_10:
+    case AV_PROFILE_H264_HIGH_422:
+    case AV_PROFILE_H264_HIGH_444:
+#  else
+    case FF_PROFILE_H264_HIGH_10:
+    case FF_PROFILE_H264_HIGH_422:
+    case FF_PROFILE_H264_HIGH_444:
+#  endif
+      return STD_VIDEO_H264_PROFILE_IDC_HIGH;
+    default:
+      return STD_VIDEO_H264_PROFILE_IDC_MAIN;
+  }
+}
+
+void VulkanProbeFormat(AVCodecID aCodecID, const MediaByteBuffer* aExtraData,
+                       gfx::ColorDepth aLumaDepth,
+                       gfx::ColorDepth* aChromaDepth,
+                       VkVideoChromaSubsamplingFlagBitsKHR* aChroma,
+                       uint32_t* aProfileIdc, uint32_t* aPictureLayout) {
+  *aChroma = VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR;
+  *aChromaDepth = aLumaDepth;
+  *aProfileIdc = 0;
+  *aPictureLayout = 0;
+  if (aCodecID == AV_CODEC_ID_H264) {
+    // Bug 2063809: skip COINCIDE without SEPARATE_REFERENCE_IMAGES on
+    // FFmpeg < n7.1. Parse this stream's SPS so the caps query matches
+    // the bitstream (profile, chroma, layout), not dummy Main 4:2:0.
+    *aProfileIdc = STD_VIDEO_H264_PROFILE_IDC_MAIN;
+    *aPictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR;
+    SPSData sps;
+    if (aExtraData && H264::DecodeSPSFromExtraData(aExtraData, sps)) {
+      *aProfileIdc = MapH264VulkanProfileIdc(sps.profile_idc);
+      *aPictureLayout =
+          sps.interlaced
+              ? VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_INTERLACED_INTERLEAVED_LINES_BIT_KHR
+              : VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR;
+      switch (sps.chroma_format_idc) {
+        case 0:
+          *aChroma = VK_VIDEO_CHROMA_SUBSAMPLING_MONOCHROME_BIT_KHR;
+          break;
+        case 2:
+          *aChroma = VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR;
+          break;
+        case 3:
+          *aChroma = VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR;
+          break;
+        default:
+          break;
+      }
+      *aChromaDepth =
+          sps.chroma_format_idc == 0
+              ? aLumaDepth
+              : gfx::ColorDepthForBitDepth(sps.bit_depth_chroma_minus8 + 8);
+    }
+  }
+}
+
+}  // namespace
+
+void FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::
+    CheckDecodeCapabilities(AVCodecID aCodecID,
+                            AVBufferRef* aVulkanDeviceContext,
+                            const MediaByteBuffer* aExtraData,
+                            gfx::ColorDepth aColorDepth) {
+  mDriverDistinctDpb = false;
+  if (!aVulkanDeviceContext) {
+    return;
+  }
+
+  const auto* devCtx =
+      reinterpret_cast<AVHWDeviceContext*>(aVulkanDeviceContext->data);
+  const auto* vkCtx = reinterpret_cast<AVVulkanDeviceContext*>(devCtx->hwctx);
+
+  gfx::ColorDepth chromaDepth;
+  VkVideoChromaSubsamplingFlagBitsKHR chroma;
+  uint32_t profileIdc;
+  uint32_t pictureLayout;
+  VulkanProbeFormat(aCodecID, aExtraData, aColorDepth, &chromaDepth, &chroma,
+                    &profileIdc, &pictureLayout);
+
+  auto cache = sInstanceFnCache.Lock();
+  EnsureVideoCaps(*cache, vkCtx->phys_dev, aColorDepth, chromaDepth, chroma,
+                  aCodecID, profileIdc, pictureLayout);
+
+  const VkVideoDecodeCapabilitiesKHR* decCaps = nullptr;
+  switch (aCodecID) {
+    case AV_CODEC_ID_H264:
+      if (cache->mH264.mValid) {
+        decCaps = &cache->mH264.mDecodeCaps;
+      }
+      break;
+    case AV_CODEC_ID_HEVC:
+      if (cache->mHevc.mValid) {
+        decCaps = &cache->mHevc.mDecodeCaps;
+      }
+      break;
+#  if LIBAVCODEC_VERSION_MAJOR >= 61
+    case AV_CODEC_ID_AV1:
+      if (cache->mAv1.mValid) {
+        decCaps = &cache->mAv1.mDecodeCaps;
+      }
+      break;
+#  endif
+#  if LIBAVCODEC_VERSION_MAJOR >= 62
+    case AV_CODEC_ID_VP9:
+      if (cache->mVp9.mValid) {
+        decCaps = &cache->mVp9.mDecodeCaps;
+      }
+      break;
+#  endif
+    default:
+      break;
+  }
+  mDriverDistinctDpb =
+      decCaps && (decCaps->flags &
+                  VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR);
+}
+
+bool FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::
+    VulkanCanDecodeFormat(AVCodecID aCodecID, unsigned aAvcodecVersion) const {
+  if (aCodecID != AV_CODEC_ID_H264 ||
+      aAvcodecVersion >= AV_VERSION_INT(61, 19, 100)) {
+    return true;
+  }
+
+  // FFmpeg < n7.1 (libavcodec < 61.19.100) mishandles COINCIDE without
+  // SEPARATE_REFERENCE_IMAGES and SIGSEGVs in ff_vk_exec_add_dep_frame.
+  auto cache = sInstanceFnCache.Lock();
+  if (cache->mH264.mValid) {
+    const bool coincide =
+        cache->mH264.mDecodeCaps.flags &
+        VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR;
+    const bool separate = cache->mH264.mCaps.flags &
+                          VK_VIDEO_CAPABILITY_SEPARATE_REFERENCE_IMAGES_BIT_KHR;
+    if (coincide && !separate) {
+      FFMPEGV_LOG(
+          "Vulkan H.264 skipped: FFmpeg < n7.1 and driver reports "
+          "COINCIDE without SEPARATE_REFERENCE_IMAGES");
+      return false;
+    }
+  }
+  return true;
 }
 
 void FFmpegVideoDecoder<
@@ -245,7 +624,7 @@ void FFmpegVideoDecoder<
   load(mFreeCommandBuffers, "vkFreeCommandBuffers");
   load(mBeginCommandBuffer, "vkBeginCommandBuffer");
   load(mEndCommandBuffer, "vkEndCommandBuffer");
-  load(mGetDeviceQueue, "vkGetDeviceQueue");
+  load(mGetDeviceQueue2, "vkGetDeviceQueue2");
   load(mQueueSubmit, "vkQueueSubmit");
   load(mCmdPipelineBarrier, "vkCmdPipelineBarrier");
   load(mCmdCopyImage, "vkCmdCopyImage");
@@ -286,9 +665,11 @@ bool FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::IsLoaded() const {
 
 void FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::InitDrmModifiers(
     VkPhysicalDevice aPhysDev, VkFormat aFormatForModifiers,
-    const nsTArray<uint64_t>* aCompositorMods, VkImageUsageFlags aImageUsages) {
+    const nsTArray<uint64_t>* aCompositorMods, VkImageUsageFlags aImageUsages,
+    AVCodecID aCodecID) {
   mDrmModifiers.clear();
   mExportRequiresDedicatedByModifier.Clear();
+  mForcedNvidiaBlockLinear = false;
 
   FFMPEGV_LOG("[VULKAN] Compositor {} modifier(s) for intersection",
               aCompositorMods ? aCompositorMods->Length() : 0);
@@ -432,19 +813,116 @@ void FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::InitDrmModifiers(
     FFMPEGV_LOG("[VULKAN] No suitable modifiers found, using LINEAR");
   }
 
-  // NVIDIA: query may not expose tiled modifiers, add known-working one if RDD
-  // and GPU share the same device (only when we had a real compositor list).
+  // NVIDIA: Vulkan may under-report / fail validation for tiled modifiers on
+  // older drivers. If negotiation left only LINEAR, force a known-working one
+  // when the compositor already advertises it
   if (aCompositorMods && mNegotiatedCompositorDecoderVendorID == 0x10de &&
-      mDecoderMatchesCompositor && mDrmModifiers[0] == DRM_FORMAT_MOD_LINEAR) {
-    mDrmModifiers[0] = DRM_FORMAT_MOD_NVIDIA_BLOCK_LINEAR_2D(0, 1, 2, 6, 4);
+      mDecoderMatchesCompositor && mDrmModifiers.size() == 1 &&
+      mDrmModifiers[0] == DRM_FORMAT_MOD_LINEAR) {
+    // TU102 (Turing) starts at deviceID 0x1E00; everything below is Fermi-Volta
+    // (including GV100). 0xfe is not a valid kind on Turing+.
+    const uint64_t nvidiaMod =
+        mNegotiatedCompositorDecoderDeviceID < 0x1E00
+            ? DRM_FORMAT_MOD_NVIDIA_BLOCK_LINEAR_2D(0, 1, 0, 0xfe, 1)
+            : DRM_FORMAT_MOD_NVIDIA_BLOCK_LINEAR_2D(0, 1, 2, 6, 1);
+    FFMPEGV_LOG(
+        "[VULKAN] ImageFormatProperties2 left only LINEAR; considering NVIDIA "
+        "BL override 0x{:x} (deviceID=0x{:x})",
+        (unsigned long long)nvidiaMod, mNegotiatedCompositorDecoderDeviceID);
+    if (aCompositorMods->Contains(nvidiaMod)) {
+      mDrmModifiers[0] = nvidiaMod;
+      // ImageFormatProperties2 failed for YCbCr tiled mods; keep BL for the
+      // copy path but do not attempt direct decode export.
+      mForcedNvidiaBlockLinear = true;
+      FFMPEGV_LOG("[VULKAN] Using forced NVIDIA BL modifier 0x{:x}",
+                  (unsigned long long)nvidiaMod);
+    }
+  }
+
+  // When codec is H264, on Blackwell with driver 610 or older, use DRM
+  // modifiers with height 1 to avoid corruption.
+  const uint32_t driverMajor = (mVulkanDriverVersion >> 22) & 0x3ff;
+  if (aCodecID == AV_CODEC_ID_H264 &&
+      mNegotiatedCompositorDecoderVendorID == 0x10de &&
+      mNegotiatedCompositorDecoderDeviceID >= 0x2B00 && driverMajor > 0 &&
+      driverMajor <= 610) {
+    auto keptEnd = std::stable_partition(
+        mDrmModifiers.begin(), mDrmModifiers.end(), [](uint64_t modifier) {
+          return (modifier >> 56) == DRM_FORMAT_MOD_VENDOR_NVIDIA &&
+                 (modifier & 0xf) == 1;
+        });
+    if (keptEnd != mDrmModifiers.begin()) {
+      mDrmModifiers.erase(keptEnd, mDrmModifiers.end());
+      FFMPEGV_LOG(
+          "[VULKAN] H264 + NVIDIA driver version <= 610 on Blackwell: Kept {} "
+          "modifier(s) with height parameter 1",
+          mDrmModifiers.size());
+    }
   }
 
   FFMPEGV_LOG("[VULKAN] Using {} modifiers, first=0x{:x}", mDrmModifiers.size(),
               (unsigned long long)mDrmModifiers[0]);
 }
 
-static void* sVulkanLib = nullptr;
+// Process-wide loader/instance for physical-device select. Created once;
+// never destroyed (VkPhysicalDevice handles die with the instance).
+// sMutex is per-LIBAV_VER so it cannot guard these; sSharedInstanceMutex
+// does, self-contained within this function.
+static StaticMutex sSharedInstanceMutex;
+static void* sVulkanLib MOZ_GUARDED_BY(sSharedInstanceMutex) = nullptr;
+static VkInstance sSharedInstance MOZ_GUARDED_BY(sSharedInstanceMutex) =
+    VK_NULL_HANDLE;
+static PFN_vkGetInstanceProcAddr sSharedGetInstanceProcAddr
+    MOZ_GUARDED_BY(sSharedInstanceMutex) = nullptr;
+
+static bool EnsureSharedVulkanInstance(
+    VkInstance* aOutInstance, PFN_vkGetInstanceProcAddr* aOutGetProcAddr) {
+  StaticMutexAutoLock lock(sSharedInstanceMutex);
+  if (!sSharedInstance || !sSharedGetInstanceProcAddr) {
+    if (!sVulkanLib) {
+      sVulkanLib = dlopen("libvulkan.so.1", RTLD_LAZY);
+      if (!sVulkanLib) {
+        return false;
+      }
+    }
+    auto getIPA = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+        dlsym(sVulkanLib, "vkGetInstanceProcAddr"));
+    if (!getIPA) {
+      return false;
+    }
+    auto vkCreateInstance = reinterpret_cast<PFN_vkCreateInstance>(
+        getIPA(nullptr, "vkCreateInstance"));
+    if (!vkCreateInstance) {
+      return false;
+    }
+    VkApplicationInfo appInfo = {};
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.apiVersion = VK_API_VERSION_1_3;
+    VkInstanceCreateInfo instInfo = {};
+    instInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    instInfo.pApplicationInfo = &appInfo;
+    VkInstance instance = VK_NULL_HANDLE;
+    if (vkCreateInstance(&instInfo, nullptr, &instance) != VK_SUCCESS) {
+      return false;
+    }
+    sSharedInstance = instance;
+    sSharedGetInstanceProcAddr = getIPA;
+  }
+  // Copy out under the lock: callers must not read MOZ_GUARDED_BY statics
+  // after this function returns.
+  *aOutInstance = sSharedInstance;
+  *aOutGetProcAddr = sSharedGetInstanceProcAddr;
+  return true;
+}
+
 static bool sVulkanEnumerated = false;
+static uint32_t sCachedRendererDrmMajor = 0;
+static uint32_t sCachedRendererDrmMinor = 0;
+static char sCachedVulkanDeviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = {};
+static uint32_t sCachedVulkanVendorID = 0;
+static uint32_t sCachedVulkanDeviceID = 0;
+static uint32_t sCachedVulkanDriverVersion = 0;
+static bool sCachedDecoderMatchesCompositor = false;
 
 static bool PhysicalDeviceHasVulkanVideoDecodeStack(
     PFN_vkEnumerateDeviceExtensionProperties aEnumerateExt,
@@ -480,11 +958,28 @@ static bool PhysicalDeviceHasVulkanVideoDecodeStack(
   return true;
 }
 
+#  ifdef XP_LINUX
+static bool NvidiaDrmModesetDisabled() {
+  static std::once_flag sOnce;
+  static bool sDisabled = true;
+  // Set disabled to false only if nvidia_drm is loaded and not set to N/n/0.
+  std::call_once(sOnce, [] {
+    FILE* f = fopen("/sys/module/nvidia_drm/parameters/modeset", "r");
+    if (f) {
+      const int c = fgetc(f);
+      fclose(f);
+      sDisabled = c == 'N' || c == 'n' || c == '0';
+    }
+  });
+  return sDisabled;
+}
+#  endif
+
 bool FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::
     SelectVulkanDecoderPhysicalDevice(const StaticMutexAutoLock& aProofOfLock,
                                       const nsCString& aRendererNode) {
   uint32_t rendererDrmMajor = 0, rendererDrmMinor = 0;
-#    if defined(MOZ_WIDGET_GTK)
+#  if defined(MOZ_WIDGET_GTK)
   if (!aRendererNode.IsEmpty()) {
     struct stat st = {};
     if (stat(aRendererNode.get(), &st) == 0) {
@@ -500,175 +995,173 @@ bool FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::
     // Empty when renderer is llvmpipe or glxtest failed to detect a DRM device
     FFMPEGV_LOG("Renderer device from GPU: empty (gfxVars::DrmRenderDevice)");
   }
-#    endif
+#  endif
 
-  const bool useCache = (rendererDrmMajor == 0 && rendererDrmMinor == 0);
-  if (!sVulkanEnumerated || !useCache) {
-    if (useCache) {
-      sVulkanEnumerated = true;
-    }
-
-    if (!sVulkanLib) {
-      sVulkanLib = dlopen("libvulkan.so.1", RTLD_LAZY);
-      if (!sVulkanLib) {
-        FFMPEGV_LOG("Failed to load libvulkan.so.1");
-        return false;
-      }
-    }
-
-    auto vkGetInstanceProcAddr =
-        (PFN_vkGetInstanceProcAddr)dlsym(sVulkanLib, "vkGetInstanceProcAddr");
-    if (!vkGetInstanceProcAddr) {
-      FFMPEGV_LOG("Failed to get vkGetInstanceProcAddr");
-      return false;
-    }
-
-    auto vkCreateInstance = (PFN_vkCreateInstance)vkGetInstanceProcAddr(
-        nullptr, "vkCreateInstance");
-    if (!vkCreateInstance) {
-      FFMPEGV_LOG("Failed to get vkCreateInstance");
-      return false;
-    }
-
-    VkApplicationInfo appInfo = {};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.apiVersion = VK_API_VERSION_1_3;
-
-    VkInstanceCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo = &appInfo;
-
-    VkInstance instance = VK_NULL_HANDLE;
-    if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS) {
-      FFMPEGV_LOG("Failed to create Vulkan instance");
-      return false;
-    }
-
-    auto vkDestroyInstance = (PFN_vkDestroyInstance)vkGetInstanceProcAddr(
-        instance, "vkDestroyInstance");
-    auto destroyInstance = MakeScopeExit([&] {
-      if (vkDestroyInstance && instance) {
-        vkDestroyInstance(instance, nullptr);
-      }
-    });
-
-    auto vkEnumeratePhysicalDevices =
-        (PFN_vkEnumeratePhysicalDevices)vkGetInstanceProcAddr(
-            instance, "vkEnumeratePhysicalDevices");
-    auto vkGetPhysicalDeviceProperties =
-        (PFN_vkGetPhysicalDeviceProperties)vkGetInstanceProcAddr(
-            instance, "vkGetPhysicalDeviceProperties");
-    auto vkGetPhysicalDeviceProperties2 =
-        (PFN_vkGetPhysicalDeviceProperties2)vkGetInstanceProcAddr(
-            instance, "vkGetPhysicalDeviceProperties2");
-    auto vkEnumerateDeviceExtensionProperties =
-        (PFN_vkEnumerateDeviceExtensionProperties)vkGetInstanceProcAddr(
-            instance, "vkEnumerateDeviceExtensionProperties");
-    if (!vkEnumeratePhysicalDevices || !vkGetPhysicalDeviceProperties ||
-        !vkEnumerateDeviceExtensionProperties) {
-      NS_WARNING("Failed to get Vulkan enumeration functions");
-      return false;
-    }
-
-    uint32_t count = 0;
-    vkEnumeratePhysicalDevices(instance, &count, nullptr);
-    if (count == 0) {
-      FFMPEGV_LOG("No Vulkan devices found");
-      return false;
-    }
-
-    std::vector<VkPhysicalDevice> devices(count);
-    vkEnumeratePhysicalDevices(instance, &count, devices.data());
-
-    // Collect valid devices (non-CPU, Vulkan 1.3+), sorted by type (discrete
-    // first).
-    std::vector<std::pair<VkPhysicalDeviceProperties, bool>> validDevices;
-    for (uint32_t i = 0; i < count; i++) {
-      VkPhysicalDeviceProperties p = {};
-      bool isDecoderMatchesRendererFound = false;
-      if (rendererDrmMajor && rendererDrmMinor &&
-          vkGetPhysicalDeviceProperties2) {
-        VkPhysicalDeviceDrmPropertiesEXT drmProps = {};
-        drmProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT;
-        VkPhysicalDeviceProperties2 props2 = {};
-        props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-        props2.pNext = &drmProps;
-        vkGetPhysicalDeviceProperties2(devices[i], &props2);
-        p = props2.properties;
-        isDecoderMatchesRendererFound =
-            (drmProps.hasRender && rendererDrmMajor == drmProps.renderMajor &&
-             rendererDrmMinor == drmProps.renderMinor) ||
-            (drmProps.hasPrimary && rendererDrmMajor == drmProps.primaryMajor &&
-             rendererDrmMinor == drmProps.primaryMinor);
-      } else {
-        vkGetPhysicalDeviceProperties(devices[i], &p);
-      }
-      if (p.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU) {
-        uint32_t major = VK_API_VERSION_MAJOR(p.apiVersion);
-        uint32_t minor = VK_API_VERSION_MINOR(p.apiVersion);
-        if (major > 1 || (major == 1 && minor >= 3)) {
-          if (!PhysicalDeviceHasVulkanVideoDecodeStack(
-                  vkEnumerateDeviceExtensionProperties, devices[i],
-                  p.deviceName)) {
-            continue;
-          }
-          validDevices.push_back(
-              std::make_pair(p, isDecoderMatchesRendererFound));
-        }
-      }
-    }
-
-    auto deviceTypePriority = [](VkPhysicalDeviceType t) -> int {
-      switch (t) {
-        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
-          return 3;
-        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
-          return 2;
-        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
-          return 1;
-        default:
-          return 0;
-      }
-    };
-    std::sort(
-        validDevices.begin(), validDevices.end(),
-        [&deviceTypePriority](const auto& p1, const auto& p2) {
-          if (p1.second != p2.second) {
-            return p1.second > p2.second;  // renderer-matching device first
-          }
-          return deviceTypePriority(p1.first.deviceType) >
-                 deviceTypePriority(p2.first.deviceType);  // discrete first
-        });
-
-    if (validDevices.empty()) {
-      FFMPEGV_LOG(
-          "No suitable Vulkan device found (need 1.3+, non-CPU, "
-          "VK_KHR_video_queue + VK_KHR_video_decode_queue)");
-      return false;
-    }
-
-    memcpy(mNegotiatedVulkanDeviceName, validDevices[0].first.deviceName,
+  // The compositor's GPU doesn't change mid-process, so once we've enumerated
+  // for a given renderer node, later selects for that same node can reuse the
+  // result instead of re-running vkEnumeratePhysicalDevices on the shared
+  // instance while another decoder may still be using libvulkan.
+  if (sVulkanEnumerated && rendererDrmMajor == sCachedRendererDrmMajor &&
+      rendererDrmMinor == sCachedRendererDrmMinor) {
+    memcpy(mNegotiatedVulkanDeviceName, sCachedVulkanDeviceName,
            VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
-    mNegotiatedCompositorDecoderVendorID = validDevices[0].first.vendorID;
-    mNegotiatedCompositorDecoderDeviceID = validDevices[0].first.deviceID;
-    mDecoderMatchesCompositor = validDevices[0].second;
+    mNegotiatedCompositorDecoderVendorID = sCachedVulkanVendorID;
+    mNegotiatedCompositorDecoderDeviceID = sCachedVulkanDeviceID;
+    mVulkanDriverVersion = sCachedVulkanDriverVersion;
+    mDecoderMatchesCompositor = sCachedDecoderMatchesCompositor;
     FFMPEGV_LOG(
-        "Selected Vulkan device for video decoding: {} (vendorID=0x{:x}, "
+        "Reusing cached Vulkan device for video decoding: {} (vendorID=0x{:x}, "
         "deviceID=0x{:x}), matches renderer: {}",
         mNegotiatedVulkanDeviceName, mNegotiatedCompositorDecoderVendorID,
         mNegotiatedCompositorDecoderDeviceID,
         mDecoderMatchesCompositor ? "true" : "false");
+    return true;
   }
+
+  PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = nullptr;
+  VkInstance instance = VK_NULL_HANDLE;
+  if (!EnsureSharedVulkanInstance(&instance, &vkGetInstanceProcAddr)) {
+    FFMPEGV_LOG("Failed to create shared Vulkan instance");
+    return false;
+  }
+
+  auto vkEnumeratePhysicalDevices =
+      (PFN_vkEnumeratePhysicalDevices)vkGetInstanceProcAddr(
+          instance, "vkEnumeratePhysicalDevices");
+  auto vkGetPhysicalDeviceProperties =
+      (PFN_vkGetPhysicalDeviceProperties)vkGetInstanceProcAddr(
+          instance, "vkGetPhysicalDeviceProperties");
+  auto vkGetPhysicalDeviceProperties2 =
+      (PFN_vkGetPhysicalDeviceProperties2)vkGetInstanceProcAddr(
+          instance, "vkGetPhysicalDeviceProperties2");
+  auto vkEnumerateDeviceExtensionProperties =
+      (PFN_vkEnumerateDeviceExtensionProperties)vkGetInstanceProcAddr(
+          instance, "vkEnumerateDeviceExtensionProperties");
+  if (!vkEnumeratePhysicalDevices || !vkGetPhysicalDeviceProperties ||
+      !vkEnumerateDeviceExtensionProperties) {
+    NS_WARNING("Failed to get Vulkan enumeration functions");
+    return false;
+  }
+
+  uint32_t count = 0;
+  vkEnumeratePhysicalDevices(instance, &count, nullptr);
+  if (count == 0) {
+    FFMPEGV_LOG("No Vulkan devices found");
+    return false;
+  }
+
+  std::vector<VkPhysicalDevice> devices(count);
+  vkEnumeratePhysicalDevices(instance, &count, devices.data());
+
+  // Collect valid devices (non-CPU, Vulkan 1.3+), sorted by type (discrete
+  // first).
+  std::vector<std::pair<VkPhysicalDeviceProperties, bool>> validDevices;
+  for (uint32_t i = 0; i < count; i++) {
+    VkPhysicalDeviceProperties p = {};
+    bool isDecoderMatchesRendererFound = false;
+    if (rendererDrmMajor && rendererDrmMinor &&
+        vkGetPhysicalDeviceProperties2) {
+      VkPhysicalDeviceDrmPropertiesEXT drmProps = {};
+      drmProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT;
+      VkPhysicalDeviceProperties2 props2 = {};
+      props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      props2.pNext = &drmProps;
+      vkGetPhysicalDeviceProperties2(devices[i], &props2);
+      p = props2.properties;
+      isDecoderMatchesRendererFound =
+          (drmProps.hasRender && rendererDrmMajor == drmProps.renderMajor &&
+           rendererDrmMinor == drmProps.renderMinor) ||
+          (drmProps.hasPrimary && rendererDrmMajor == drmProps.primaryMajor &&
+           rendererDrmMinor == drmProps.primaryMinor);
+    } else {
+      vkGetPhysicalDeviceProperties(devices[i], &p);
+    }
+    if (p.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU) {
+      uint32_t major = VK_API_VERSION_MAJOR(p.apiVersion);
+      uint32_t minor = VK_API_VERSION_MINOR(p.apiVersion);
+      if (major > 1 || (major == 1 && minor >= 3)) {
+        if (!PhysicalDeviceHasVulkanVideoDecodeStack(
+                vkEnumerateDeviceExtensionProperties, devices[i],
+                p.deviceName)) {
+          continue;
+        }
+#  ifdef XP_LINUX
+        if (p.vendorID == 0x10de) {
+          FFMPEGV_LOG("Checking {}: nvidia_drm modeset status", p.deviceName);
+          if (NvidiaDrmModesetDisabled()) {
+            FFMPEGV_LOG(
+                "Skipping {}: nvidia_drm modeset disabled or module not loaded",
+                p.deviceName);
+            continue;
+          }
+        }
+#  endif
+        validDevices.push_back(
+            std::make_pair(p, isDecoderMatchesRendererFound));
+      }
+    }
+  }
+
+  auto deviceTypePriority = [](VkPhysicalDeviceType t) -> int {
+    switch (t) {
+      case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+        return 3;
+      case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+        return 2;
+      case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+        return 1;
+      default:
+        return 0;
+    }
+  };
+  std::sort(validDevices.begin(), validDevices.end(),
+            [&deviceTypePriority](const auto& p1, const auto& p2) {
+              if (p1.second != p2.second) {
+                return p1.second > p2.second;  // renderer-matching device first
+              }
+              return deviceTypePriority(p1.first.deviceType) >
+                     deviceTypePriority(p2.first.deviceType);  // discrete first
+            });
+
+  if (validDevices.empty()) {
+    FFMPEGV_LOG(
+        "No suitable Vulkan device found (need 1.3+, non-CPU, "
+        "VK_KHR_video_queue + VK_KHR_video_decode_queue)");
+    return false;
+  }
+
+  memcpy(mNegotiatedVulkanDeviceName, validDevices[0].first.deviceName,
+         VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
+  mNegotiatedCompositorDecoderVendorID = validDevices[0].first.vendorID;
+  mNegotiatedCompositorDecoderDeviceID = validDevices[0].first.deviceID;
+  mVulkanDriverVersion = validDevices[0].first.driverVersion;
+  mDecoderMatchesCompositor = validDevices[0].second;
+  memcpy(sCachedVulkanDeviceName, mNegotiatedVulkanDeviceName,
+         VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
+  sCachedVulkanVendorID = mNegotiatedCompositorDecoderVendorID;
+  sCachedVulkanDeviceID = mNegotiatedCompositorDecoderDeviceID;
+  sCachedVulkanDriverVersion = mVulkanDriverVersion;
+  sCachedDecoderMatchesCompositor = mDecoderMatchesCompositor;
+  sCachedRendererDrmMajor = rendererDrmMajor;
+  sCachedRendererDrmMinor = rendererDrmMinor;
+  sVulkanEnumerated = true;
+  FFMPEGV_LOG(
+      "Selected Vulkan device for video decoding: {} (vendorID=0x{:x}, "
+      "deviceID=0x{:x}), matches renderer: {}",
+      mNegotiatedVulkanDeviceName, mNegotiatedCompositorDecoderVendorID,
+      mNegotiatedCompositorDecoderDeviceID,
+      mDecoderMatchesCompositor ? "true" : "false");
   return true;
 }
 
 bool FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::InitCtx(
     VkDevice aDevice, VkPhysicalDevice aPhysDev,
     PFN_vkGetInstanceProcAddr aGetProcAddr, VkInstance aInstance,
-    uint32_t aCopyQueueFamilyIndex) {
+    uint64_t aGeneration, uint32_t aCopyQueueFamilyIndex,
+    uint32_t aCopyQueueCount, VkDeviceQueueCreateFlags aQueueCreateFlags) {
   // Load instance-level functions once
   if (!mGetDeviceProcAddr) {
-    LoadInstanceFunctions(aGetProcAddr, aInstance, aPhysDev);
+    LoadInstanceFunctions(aGetProcAddr, aInstance, aPhysDev, aGeneration);
   }
 
   // Reload mDevice-level functions when mDevice changes
@@ -695,42 +1188,18 @@ bool FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::InitCtx(
     // the decoder queries supported modifiers from the compositor and uses
     // the intersection. This removes the need for a forceLinear flag.
 
-    uint32_t copyQueueFamilyIndex = aCopyQueueFamilyIndex;
-    uint32_t transferOnlyQueueCount = 0;
-    int32_t transferOnlyQueueFamilyIndex = -1;
-    if (mGetPhysicalDeviceQueueFamilyProperties) {
-      uint32_t queueFamilyCount = 0;
-      mGetPhysicalDeviceQueueFamilyProperties(aPhysDev, &queueFamilyCount,
-                                              nullptr);
-      AutoTArray<VkQueueFamilyProperties, 8> props;
-      if (queueFamilyCount > 0) {
-        props.SetLength(queueFamilyCount);
-        mGetPhysicalDeviceQueueFamilyProperties(aPhysDev, &queueFamilyCount,
-                                                props.Elements());
-        for (uint32_t i = 0; i < queueFamilyCount; i++) {
-          if (props[i].queueCount > 0 &&
-              (props[i].queueFlags &
-               (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) == 0 &&
-              (props[i].queueFlags & VK_QUEUE_TRANSFER_BIT)) {
-            copyQueueFamilyIndex = i;
-            transferOnlyQueueFamilyIndex = static_cast<int32_t>(i);
-            transferOnlyQueueCount = static_cast<uint32_t>(props[i].queueCount);
-            break;
-          }
-        }
-      }
-    }
-    if (transferOnlyQueueFamilyIndex >= 0) {
-      mQueueFamilyIndex = transferOnlyQueueFamilyIndex;
-      mCopyQueueCount = transferOnlyQueueCount;
-    } else {
-      mQueueFamilyIndex = copyQueueFamilyIndex;
-    }
-    mCopyQueueCount = std::max(1u, mCopyQueueCount);
+    mQueueFamilyIndex = aCopyQueueFamilyIndex;
+    mCopyQueueCount = std::max(1u, aCopyQueueCount);
     mCopyQueue.SetLength(mCopyQueueCount);
     mCopyCmdPool.SetLength(mCopyQueueCount);
     mCopyCmdBuf.SetLength(mCopyQueueCount);
     mCopyFence.SetLength(mCopyQueueCount);
+    for (uint32_t qi = 0; qi < mCopyQueueCount; qi++) {
+      mCopyQueue[qi] = VK_NULL_HANDLE;
+      mCopyCmdPool[qi] = VK_NULL_HANDLE;
+      mCopyCmdBuf[qi] = VK_NULL_HANDLE;
+      mCopyFence[qi] = VK_NULL_HANDLE;
+    }
     VkCommandPoolCreateInfo poolInfo = {};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -739,19 +1208,23 @@ bool FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::InitCtx(
     for (uint32_t qi = 0; qi < mCopyQueueCount; qi++) {
       VkResult poolRes =
           mCreateCommandPool(aDevice, &poolInfo, nullptr, &mCopyCmdPool[qi]);
-      if (poolRes != VK_SUCCESS &&
-          copyQueueFamilyIndex != aCopyQueueFamilyIndex) {
-        copyQueueFamilyIndex = aCopyQueueFamilyIndex;
-        mQueueFamilyIndex = copyQueueFamilyIndex;
-        poolInfo.queueFamilyIndex = mQueueFamilyIndex;
-        poolRes =
-            mCreateCommandPool(aDevice, &poolInfo, nullptr, &mCopyCmdPool[qi]);
-      }
       if (poolRes != VK_SUCCESS) {
         FFMPEGV_LOG("Failed to create Vulkan command pool for queue {}", qi);
         return false;
       }
-      mGetDeviceQueue(aDevice, mQueueFamilyIndex, qi, &mCopyQueue[qi]);
+      VkDeviceQueueInfo2 queueInfo = {};
+      queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2;
+      queueInfo.flags = aQueueCreateFlags;
+      queueInfo.queueFamilyIndex = mQueueFamilyIndex;
+      queueInfo.queueIndex = qi;
+      mGetDeviceQueue2(aDevice, &queueInfo, &mCopyQueue[qi]);
+      if (mCopyQueue[qi] == VK_NULL_HANDLE) {
+        FFMPEGV_LOG(
+            "vkGetDeviceQueue2 returned NULL (family={}, index={}, "
+            "flags=0x{:x})",
+            mQueueFamilyIndex, qi, static_cast<unsigned>(aQueueCreateFlags));
+        return false;
+      }
       VkCommandBufferAllocateInfo cmdAllocInfo = {};
       cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
       cmdAllocInfo.commandPool = mCopyCmdPool[qi];
@@ -820,12 +1293,25 @@ FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::InitCopyRingBuffer(
 
   bool useP010 =
       (aSwFormat == AV_PIX_FMT_P010) || (aSwFormat == AV_PIX_FMT_P016);
-#    if LIBAVCODEC_VERSION_MAJOR >= 60
+#  if LIBAVCODEC_VERSION_MAJOR >= 60
   useP010 = useP010 || (aSwFormat == AV_PIX_FMT_P012);
-#    endif
+#  endif
   const VkFormat vkFormat =
       useP010 ? VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16
               : VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+
+  // LINEAR often uses pitch==width. NVIDIA/AMD EGL PRIME needs 256B pitch
+  // (Mesa ISL). Pad when exporting LINEAR to another GPU; copies still use
+  // the real frame size.
+  uint32_t widthAligned = aWidth;
+  if (!mDecoderMatchesCompositor && !mDrmModifiers.empty() &&
+      mDrmModifiers[0] == DRM_FORMAT_MOD_LINEAR) {
+    constexpr uint32_t kPrimePitchAlign = 256;
+    const uint32_t bpp = useP010 ? 2u : 1u;
+    widthAligned =
+        (((aWidth * bpp) + kPrimePitchAlign - 1) & ~(kPrimePitchAlign - 1)) /
+        bpp;
+  }
 
   VkImageDrmFormatModifierListCreateInfoEXT drmModInfo = {};
   drmModInfo.sType =
@@ -866,7 +1352,7 @@ FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::InitCopyRingBuffer(
     imgInfo.pNext = &extImgInfo;
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
     imgInfo.format = vkFormat;
-    imgInfo.extent = {aWidth, aHeight, 1};
+    imgInfo.extent = {widthAligned, aHeight, 1};
     imgInfo.mipLevels = 1;
     imgInfo.arrayLayers = 1;
     imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -989,7 +1475,8 @@ FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::InitCopyRingBuffer(
       mDestroyImage(mDevice, mNv12Image[buf], nullptr);
       mNv12Mem[buf] = VK_NULL_HANDLE;
       mNv12Image[buf] = VK_NULL_HANDLE;
-      return MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+      // MediaFormatReader can drop this decoder and keep playback going.
+      return MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
                          RESULT_DETAIL("Failed to export NV12 FD"));
     }
 
@@ -1093,9 +1580,9 @@ FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::PrepareImageToDRM(
       (AVHWFramesContext*)aSrcFrame->hw_frames_ctx->data;
   if (framesCtx->sw_format != AV_PIX_FMT_NV12 &&
       framesCtx->sw_format != AV_PIX_FMT_P010 &&
-#    if LIBAVCODEC_VERSION_MAJOR >= 60
+#  if LIBAVCODEC_VERSION_MAJOR >= 60
       framesCtx->sw_format != AV_PIX_FMT_P012 &&
-#    endif
+#  endif
       framesCtx->sw_format != AV_PIX_FMT_P016) {
     return MediaResult(
         NS_ERROR_DOM_MEDIA_DECODE_ERR,
@@ -1316,15 +1803,15 @@ FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::PrepareImageToDRM(
 
   AVHWDeviceContext* devCtx = (AVHWDeviceContext*)aVulkanDevCtx->data;
   AVVulkanDeviceContext* vkCtx = (AVVulkanDeviceContext*)devCtx->hwctx;
-#    if !defined(FF_API_VULKAN_SYNC_QUEUES) || FF_API_VULKAN_SYNC_QUEUES
+#  if !defined(FF_API_VULKAN_SYNC_QUEUES) || FF_API_VULKAN_SYNC_QUEUES
   const uint32_t qf = static_cast<uint32_t>(mQueueFamilyIndex);
   vkCtx->lock_queue(devCtx, qf, copySlot);
-#    endif
+#  endif
   VkResult submitRes =
       mQueueSubmit(mCopyQueue[copySlot], 1, &submitInfo, mCopyFence[copySlot]);
-#    if !defined(FF_API_VULKAN_SYNC_QUEUES) || FF_API_VULKAN_SYNC_QUEUES
+#  if !defined(FF_API_VULKAN_SYNC_QUEUES) || FF_API_VULKAN_SYNC_QUEUES
   vkCtx->unlock_queue(devCtx, qf, copySlot);
-#    endif
+#  endif
 
   if (submitRes != VK_SUCCESS) {
     NS_WARNING(
@@ -1370,7 +1857,6 @@ FFmpegVideoDecoder<LIBAV_VER>::FFmpegVulkanVideoDecoder::PrepareImageToDRM(
   return NS_OK;
 }
 
-#  endif  // LIBAVCODEC_VERSION_MAJOR >= 60 && !defined(FFVPX_VERSION)
-#endif    // defined(MOZ_USE_HWDECODE) && defined(MOZ_WIDGET_GTK)
-
 }  // namespace mozilla
+
+#endif  // MOZ_ENABLE_VULKAN_VIDEO

@@ -1,12 +1,12 @@
 (inference-architecture)=
 
-# Architecture
+# Inference Architecture
 
 The Firefox AI Runtime supports multiple inference backends, including the ONNX runtime
-with the Transformers.js library, the wllama WebAssembly backend for Llama-based models,
-a native llama.cpp backend, and an OpenAI-compatible API backend. The translations
+with the Transformers.js library, a native llama.cpp backend for Llama-based models,
+and an OpenAI-compatible API backend. The translations
 inference engine lives in the inference process, but
-[has its own separate architecture](https://firefox-source-docs.mozilla.org/toolkit/components/translations)
+{doc}`has its own separate architecture </toolkit/components/translations/index>`
 that is not considered here.
 
 ```{mermaid}
@@ -46,7 +46,6 @@ flowchart LR
       direction LR
       B1["onnx (wasm)"]       --> T1[("DOM Worker ×N")]
       B2["onnx-native"]       --> T2[("onnx_worker threads ×N")]
-      B4["wllama"]            --> T4[("DOM Worker ×N")]
       B3["llama.cpp"]         --> T3[("llama.cpp threads ×N")]
       B5["openai"]            --> T5[("MLPA server endpoint<br/>(Or custom configurations)")]
       B6["static-embeddings"] --> T6[("Single Threaded")]
@@ -109,8 +108,6 @@ directory and use Docker for reproducibility:
 
 - **onnx (wasm)**: {searchfox}`toolkit/components/ml/vendor/transformers`
   — bundles onnxruntime-web and a patched Transformers.js; built with `./build.sh`.
-- **wllama**: {searchfox}`toolkit/components/ml/vendor/wllama`
-  — builds wllama from source with release mode and Firefox-specific patches; built with `bash build.sh`.
 
 ### Native Backends
 

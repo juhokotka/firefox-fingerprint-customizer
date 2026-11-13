@@ -3,11 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
-
 #include "nsHttpRequestHead.h"
-#include "nsIHttpHeaderVisitor.h"
+
+#include "HttpLog.h"
 #include "mozilla/net/Dictionary.h"
+#include "nsIHttpHeaderVisitor.h"
 
 //-----------------------------------------------------------------------------
 // nsHttpRequestHead

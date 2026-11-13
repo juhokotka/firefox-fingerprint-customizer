@@ -11,19 +11,14 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import mozilla.components.service.pocket.recommendations.db.ContentRecommendationsDatabase
-import java.util.concurrent.TimeUnit
 
-/**
- * Internal DAO for accessing [SponsoredContentEntity] and [SponsoredContentImpressionEntity]
- * instances.
- */
+/** Internal DAO for accessing [SponsoredContentEntity] and [SponsoredContentImpressionEntity] instances. */
 @Dao
 internal interface SponsoredContentsDao {
     @Transaction
     suspend fun cleanOldAndInsertNewSponsoredContents(sponsoredContents: List<SponsoredContentEntity>) {
         val newSponsoredContents = sponsoredContents.map { it.url }
-        val oldSponsoredContentsToDelete = getSponsoredContents()
-            .filterNot { newSponsoredContents.contains(it.url) }
+        val oldSponsoredContentsToDelete = getSponsoredContents().filterNot { newSponsoredContents.contains(it.url) }
 
         deleteSponsoredContents(oldSponsoredContentsToDelete)
         insertSponsoredContents(sponsoredContents)
@@ -40,15 +35,12 @@ internal interface SponsoredContentsDao {
     }
 
     /**
-     * INSERT OR IGNORE method needed to prevent against "FOREIGN KEY constraint failed" exceptions
-     * if clients try to insert new sponsored content impressions not existing anymore in the
-     * database in cases where a different list of sponsored contents were downloaded but the
-     * client operates with stale in-memory data.
+     * INSERT OR IGNORE method needed to prevent against "FOREIGN KEY constraint failed" exceptions if clients try to
+     * insert new sponsored content impressions not existing anymore in the database in cases where a different list of
+     * sponsored contents were downloaded but the client operates with stale in-memory data.
      *
      * @param targetUrl The url of the sponsored content.
-     * @param targetImpressionDateInSeconds The timestamp expressed in seconds from Epoch for this
-     * impression. Defaults to the current time expressed in seconds as get from
-     * `System.currentTimeMillis / 1000`.
+     * @param targetImpressionDateInSeconds The timestamp expressed in seconds from Epoch for this impression.
      */
     @Suppress("MaxLineLength")
     @Query(
@@ -58,18 +50,17 @@ internal interface SponsoredContentsDao {
             "INSERT INTO ${ContentRecommendationsDatabase.SPONSORED_CONTENT_IMPRESSION_TABLE}(url, impressionDateInSeconds) " +
             "SELECT impression.url, impression.impressionDateInSeconds " +
             "FROM newImpression impression " +
-            "WHERE EXISTS (SELECT 1 FROM ${ContentRecommendationsDatabase.SPONSORED_CONTENT_TABLE} spoc WHERE spoc.url = impression.url)",
+            "WHERE EXISTS (SELECT 1 FROM ${ContentRecommendationsDatabase.SPONSORED_CONTENT_TABLE} spoc WHERE spoc.url = impression.url)"
     )
     suspend fun recordImpression(
         targetUrl: String,
-        targetImpressionDateInSeconds: Long = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()),
+        targetImpressionDateInSeconds: Long,
     )
 
     @Query("DELETE FROM ${ContentRecommendationsDatabase.SPONSORED_CONTENT_TABLE}")
     suspend fun deleteAllSponsoredContents()
 
-    @Delete
-    suspend fun deleteSponsoredContents(sponsoredContents: List<SponsoredContentEntity>)
+    @Delete suspend fun deleteSponsoredContents(sponsoredContents: List<SponsoredContentEntity>)
 
     @Query("SELECT * FROM ${ContentRecommendationsDatabase.SPONSORED_CONTENT_TABLE}")
     suspend fun getSponsoredContents(): List<SponsoredContentEntity>

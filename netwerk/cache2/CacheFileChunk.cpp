@@ -2,14 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "CacheLog.h"
 #include "CacheFileChunk.h"
 
 #include "CacheCrypto.h"
 #include "CacheFile.h"
-#include "nsThreadUtils.h"
-
+#include "CacheLog.h"
 #include "mozilla/IntegerPrintfMacros.h"
+#include "nsThreadUtils.h"
 
 namespace mozilla::net {
 
@@ -499,7 +498,8 @@ void CacheFileChunk::CancelWait(CacheFileChunkListener* aCallback) {
 
   LOG(("CacheFileChunk::CancelWait() [this=%p, listener=%p]", this, aCallback));
 
-  MOZ_ASSERT(IsReady());
+  // The chunk may have failed while the listener was waiting.
+  MOZ_ASSERT(mState == READY || mState == WRITING);
 
   uint32_t i;
   for (i = 0; i < mUpdateListeners.Length(); i++) {

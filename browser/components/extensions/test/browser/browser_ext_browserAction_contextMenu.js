@@ -31,11 +31,14 @@ let extData = {
   },
 
   background: function () {
-    browser.contextMenus.create({
-      id: "clickme-page",
-      title: "Click me!",
-      contexts: ["all"],
-    });
+    browser.contextMenus.create(
+      {
+        id: "clickme-page",
+        title: "Click me!",
+        contexts: ["all"],
+      },
+      () => browser.test.sendMessage("menus-created")
+    );
   },
 };
 
@@ -73,6 +76,9 @@ add_setup(async function test_setup() {
         "extensions.abuseReport.amoFormURL",
         "https://example.org/%LOCALE%/firefox/feedback/addon/%addonID%/",
       ],
+      // Right-clicking text selects the word under the cursor on macOS, which
+      // adds a selection to the context menu this test checks.
+      ["ui.mouse.right_click.select_under_cursor", false],
     ],
   });
 });
@@ -80,6 +86,7 @@ add_setup(async function test_setup() {
 async function browseraction_popup_contextmenu_helper() {
   let extension = ExtensionTestUtils.loadExtension(extData);
   await extension.startup();
+  await extension.awaitMessage("menus-created");
 
   await clickBrowserAction(extension);
 
@@ -99,6 +106,7 @@ async function browseraction_popup_contextmenu_helper() {
 async function browseraction_popup_contextmenu_hidden_items_helper() {
   let extension = ExtensionTestUtils.loadExtension(extData);
   await extension.startup();
+  await extension.awaitMessage("menus-created");
 
   await clickBrowserAction(extension);
 
@@ -132,6 +140,7 @@ async function browseraction_popup_contextmenu_hidden_items_helper() {
 async function browseraction_popup_image_contextmenu_helper() {
   let extension = ExtensionTestUtils.loadExtension(extData);
   await extension.startup();
+  await extension.awaitMessage("menus-created");
 
   await clickBrowserAction(extension);
 
@@ -786,7 +795,8 @@ add_task(async function test_unified_extensions_item_no_pinning() {
     ".unified-extensions-context-menu-pin-to-toolbar"
   );
   Assert.ok(pinToToolbar.hidden, "Pin to Toolbar is hidden.");
-  menu.hidePopup();
+  await closeChromeContextMenu(UNIFIED_CONTEXT_MENU);
+  await closeExtensionsPanel();
 
   await extension.unload();
 });

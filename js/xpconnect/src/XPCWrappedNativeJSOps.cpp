@@ -4,19 +4,22 @@
 
 /* JavaScript JSClasses and JSOps for our Wrapped Native JS Objects. */
 
-#include "xpcprivate.h"
-#include "xpc_make_class.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Preferences.h"
+
+#include <string_view>
+
+#include "jsapi.h"
+#include "xpc_make_class.h"
+#include "xpcprivate.h"
+
 #include "js/CharacterEncoding.h"
 #include "js/Class.h"
 #include "js/Object.h"  // JS::GetClass
 #include "js/Printf.h"
 #include "js/PropertyAndElement.h"  // JS_DefineProperty, JS_DefinePropertyById, JS_GetProperty, JS_GetPropertyById
 #include "js/Symbol.h"
-
-#include <string_view>
 
 using namespace mozilla;
 using namespace JS;
@@ -542,20 +545,20 @@ bool XPC_WN_Shared_Enumerate(JSContext* cx, HandleObject obj) {
 
   uint16_t interface_count = set->GetInterfaceCount();
   XPCNativeInterface** interfaceArray = set->GetInterfaceArray();
+  RootedId name(cx);
   for (uint16_t i = 0; i < interface_count; i++) {
     XPCNativeInterface* iface = interfaceArray[i];
     uint16_t member_count = iface->GetMemberCount();
     for (uint16_t k = 0; k < member_count; k++) {
       XPCNativeMember* member = iface->GetMemberAt(k);
-      jsid name = member->GetName();
+      name = member->GetName();
 
       // Skip if this member is going to come from the proto.
       uint16_t index;
       if (protoSet && protoSet->FindMember(name, nullptr, &index) && index == i)
         continue;
 
-      JS_MarkCrossZoneId(cx, name);
-      if (!xpc_ForcePropertyResolve(cx, obj, name)) {
+      if (!JS_WrapId(cx, &name) || !xpc_ForcePropertyResolve(cx, obj, name)) {
         return false;
       }
     }
@@ -1034,14 +1037,14 @@ static bool XPC_WN_Proto_Enumerate(JSContext* cx, HandleObject obj) {
 
   uint16_t interface_count = set->GetInterfaceCount();
   XPCNativeInterface** interfaceArray = set->GetInterfaceArray();
+  RootedId name(cx);
   for (uint16_t i = 0; i < interface_count; i++) {
     XPCNativeInterface* iface = interfaceArray[i];
     uint16_t member_count = iface->GetMemberCount();
 
     for (uint16_t k = 0; k < member_count; k++) {
-      jsid name = iface->GetMemberAt(k)->GetName();
-      JS_MarkCrossZoneId(cx, name);
-      if (!xpc_ForcePropertyResolve(cx, obj, name)) {
+      name = iface->GetMemberAt(k)->GetName();
+      if (!JS_WrapId(cx, &name) || !xpc_ForcePropertyResolve(cx, obj, name)) {
         return false;
       }
     }
@@ -1153,10 +1156,10 @@ static bool XPC_WN_TearOff_Enumerate(JSContext* cx, HandleObject obj) {
   }
 
   uint16_t member_count = iface->GetMemberCount();
+  RootedId name(cx);
   for (uint16_t k = 0; k < member_count; k++) {
-    jsid name = iface->GetMemberAt(k)->GetName();
-    JS_MarkCrossZoneId(cx, name);
-    if (!xpc_ForcePropertyResolve(cx, obj, name)) {
+    name = iface->GetMemberAt(k)->GetName();
+    if (!JS_WrapId(cx, &name) || !xpc_ForcePropertyResolve(cx, obj, name)) {
       return false;
     }
   }

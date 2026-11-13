@@ -4,33 +4,32 @@
 
 #include "GfxInfo.h"
 
-#include "gfxConfig.h"
+#include <batclass.h>  // for BATTERY_*
+#include <devguid.h>   // for GUID_DEVCLASS_BATTERY
+#include <intrin.h>
+#include <setupapi.h>  // for SetupDi*
+#include <windows.h>
+#include <winioctl.h>  // for IOCTL_*
+
 #include "GfxDriverInfo.h"
+#include "gfxConfig.h"
 #include "gfxWindowsPlatform.h"
-#include "jsapi.h"
 #include "js/PropertyAndElement.h"  // JS_SetElement, JS_SetProperty
+#include "jsapi.h"
+#include "mozilla/Components.h"
+#include "mozilla/PodOperations.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/SSE.h"
+#include "mozilla/WindowsProcessMitigations.h"
+#include "mozilla/gfx/DeviceManagerDx.h"
+#include "mozilla/gfx/Logging.h"
+#include "mozilla/widget/WinRegistry.h"
 #include "nsExceptionHandler.h"
 #include "nsPrintfCString.h"
 #include "nsUnicharUtils.h"
 #include "prenv.h"
 #include "prprf.h"
 #include "xpcpublic.h"
-
-#include "mozilla/Components.h"
-#include "mozilla/PodOperations.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/gfx/DeviceManagerDx.h"
-#include "mozilla/gfx/Logging.h"
-#include "mozilla/SSE.h"
-#include "mozilla/widget/WinRegistry.h"
-#include "mozilla/WindowsProcessMitigations.h"
-
-#include <intrin.h>
-#include <windows.h>
-#include <devguid.h>   // for GUID_DEVCLASS_BATTERY
-#include <setupapi.h>  // for SetupDi*
-#include <winioctl.h>  // for IOCTL_*
-#include <batclass.h>  // for BATTERY_*
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -1508,11 +1507,37 @@ const nsTArray<RefPtr<GfxDriverInfo>>& GfxInfo::GetGfxDriverInfo() {
         nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION, DRIVER_EQUAL,
         V(9, 18, 13, 4052), "FEATURE_FAILURE_BUG_1203199_2");
 
+    /* Bug 2048390: Ivy Bridge and earlier crash in mfx_mft_h264ve_64.dll while
+     * activating the Quick Sync encoder MFT. It can be used even if another GPU
+     * is the primary GPU, so we disable hardware encoding if it is present. */
+    APPEND_TO_DRIVER_BLOCKLIST2_ADAPTER(
+        OperatingSystem::Windows, AdapterMatch::Any,
+        DeviceFamily::IntelHDGraphicsToIvyBridge,
+        nsIGfxInfo::FEATURE_HARDWARE_VIDEO_ENCODING,
+        nsIGfxInfo::FEATURE_BLOCKED_DEVICE, DRIVER_COMPARISON_IGNORED,
+        V(0, 0, 0, 0), "FEATURE_FAILURE_INTEL_ENC_IVB");
+
+    /* Bug 2048390: Same as above but for Bay Trail. */
+    APPEND_TO_DRIVER_BLOCKLIST2_ADAPTER(
+        OperatingSystem::Windows, AdapterMatch::Any,
+        DeviceFamily::IntelGen7Baytrail,
+        nsIGfxInfo::FEATURE_HARDWARE_VIDEO_ENCODING,
+        nsIGfxInfo::FEATURE_BLOCKED_DEVICE, DRIVER_COMPARISON_IGNORED,
+        V(0, 0, 0, 0), "FEATURE_FAILURE_INTEL_ENC_BAYTRAIL");
+
+    /* Bug 2048390: Legacy AMD drivers crash in amdh264enc64.dll during MFT
+     * teardown. */
+    APPEND_TO_DRIVER_BLOCKLIST2_ADAPTER(
+        OperatingSystem::Windows, AdapterMatch::Any, DeviceFamily::AtiAll,
+        nsIGfxInfo::FEATURE_HARDWARE_VIDEO_ENCODING,
+        nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION, DRIVER_LESS_THAN,
+        V(31, 0, 0, 0), "FEATURE_FAILURE_AMD_ENC_LEGACY");
+
     /* Bug 1137716: XXX this should really check for the matching Intel piece as
      * well. Unfortunately, we don't have the infrastructure to do that */
-    APPEND_TO_DRIVER_BLOCKLIST_RANGE_GPU2(
-        OperatingSystem::Windows7, DeviceFamily::Bug1137716,
-        GfxDriverInfo::optionalFeatures,
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE_ADAPTER(
+        OperatingSystem::Windows7, AdapterMatch::Secondary,
+        DeviceFamily::Bug1137716, GfxDriverInfo::optionalFeatures,
         nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION, DRIVER_BETWEEN_INCLUSIVE,
         V(8, 17, 12, 5730), V(8, 17, 12, 6901), "FEATURE_FAILURE_BUG_1137716",
         "Nvidia driver > 8.17.12.6901");

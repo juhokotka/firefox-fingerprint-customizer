@@ -14,6 +14,7 @@ add_setup(async function setup() {
   await SpecialPowers.pushPrefEnv({
     set: [["browser.search.suggest.enabled", false]],
   });
+  UrlbarTestUtils.registerZeroPrefixProvider();
   registerCleanupFunction(() => {
     Services.prefs.clearUserPref(
       "browser.urlbar.perplexity.hasBeenInSearchMode"
@@ -138,6 +139,11 @@ add_task(async function basic() {
   );
 
   info("Press on the bing menu button and enter search mode");
+  let viewOpened = false;
+  let observer = new MutationObserver(() => {
+    viewOpened ||= gURLBar.view.isOpen;
+  });
+  observer.observe(gURLBar, { attributeFilter: ["open"] });
   let popupHidden = UrlbarTestUtils.searchModeSwitcherPopupClosed(window);
   popup.querySelector("panel-item[data-engine-id=bing]").click();
   await popupHidden;
@@ -147,10 +153,16 @@ add_task(async function basic() {
     entry: "searchbutton",
     source: 3,
   });
+  await gURLBar.lastQueryContextPromise;
 
   info("Press the close button and escape search mode");
   gURLBar.querySelector(".searchmode-switcher-close").click();
   await UrlbarTestUtils.assertSearchMode(window, null);
+  observer.disconnect();
+  Assert.ok(
+    !viewOpened,
+    "The view never opened, since the engine had no results to show"
+  );
 });
 
 add_task(async function privileged_chicklet() {
@@ -270,16 +282,24 @@ async function setDefaultEngine(name) {
 }
 
 add_task(async function test_icon_new_window() {
-  let newWin = await BrowserTestUtils.openNewBrowserWindow();
-  let expectedIcon = await SearchService.defaultEngine.getIconURL();
+  // The switcher's initial icon needs the engine store populated before it
+  // first renders, which the message path can't do: the store's snapshot
+  // arrives from the parent, so the fallback icon shows until then
+  // (bug 2059513). An input picks its transport at construction, so setting the
+  // pref here applies to the window opened below.
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.urlbar.ipc.chromeMessagePassing", false]],
+  });
 
-  Assert.equal(
-    UrlbarTestUtils.getSearchModeSwitcherIcon(newWin),
-    expectedIcon,
+  let newWin = await BrowserTestUtils.openNewBrowserWindow();
+  await UrlbarTestUtils.assertSearchModeSwitcherIcon(
+    newWin,
+    await SearchService.defaultEngine.getIconURL(),
     "The search mode switcher should already have the engine favicon."
   );
 
   await BrowserTestUtils.closeWindow(newWin);
+  await SpecialPowers.popPrefEnv();
 });
 
 add_task(async function test_search_icon_change() {
@@ -288,7 +308,7 @@ add_task(async function test_search_icon_change() {
   });
 
   let newWin = await BrowserTestUtils.openNewBrowserWindow();
-  const globeIconUrl = UrlbarUtils.ICON.GLOBE;
+  const globeIconUrl = UrlbarShared.ICON.GLOBE;
 
   Assert.equal(
     UrlbarTestUtils.getSearchModeSwitcherIcon(newWin),
@@ -309,12 +329,10 @@ add_task(async function test_search_icon_change() {
   popup.querySelector(`panel-item[data-engine-id=${bing.id}]`).click();
   await popupHidden;
 
-  const bingSearchEngineIconUrl = await bing.getIconURL();
-
-  Assert.equal(
-    UrlbarTestUtils.getSearchModeSwitcherIcon(newWin),
-    bingSearchEngineIconUrl,
-    "The search mode switcher should have the bing icon url since we are in \
+  await UrlbarTestUtils.assertSearchModeSwitcherIcon(
+    newWin,
+    await bing.getIconURL(),
+    "The search mode switcher should have the bing icon since we are in \
      search mode"
   );
   await UrlbarTestUtils.assertSearchMode(newWin, {
@@ -446,7 +464,7 @@ add_task(async function test_searchWithPostEngine() {
     value: "a b c",
   });
 
-  let spy = sinon.spy(window, "openTrustedLinkIn");
+  let spy = sinon.spy(URILoadingHelper, "openTrustedLinkIn");
 
   let browserLoaded = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
   await UrlbarTestUtils.activateSearchModeSwitcherItem(
@@ -456,8 +474,8 @@ add_task(async function test_searchWithPostEngine() {
   EventUtils.synthesizeKey("KEY_Enter");
   await browserLoaded;
 
-  Assert.equal(spy.firstCall.args[0], "https://example.com/", "Correct URL");
-  let postData = spy.firstCall.args[2].postData;
+  Assert.equal(spy.firstCall.args[1], "https://example.com/", "Correct URL");
+  let postData = spy.firstCall.args[3].postData;
   Assert.equal(
     NetUtil.readInputStreamToString(postData, postData.available()),
     "q=a+b+c",
@@ -716,7 +734,7 @@ add_task(async function nimbusScotchBonnetEnableOverride() {
   info("Setup Numbus value");
   const cleanUpNimbusEnable = await UrlbarTestUtils.initNimbusFeature(
     { scotchBonnetEnableOverride: true },
-    "search"
+    { featureId: "search" }
   );
   await TestUtils.waitForCondition(() => {
     return BrowserTestUtils.isVisible(
@@ -779,13 +797,12 @@ add_task(async function test_readonly() {
 });
 
 add_task(async function test_search_service_fail() {
-  let newWin = await BrowserTestUtils.openNewBrowserWindow();
-
-  const stub = sinon
-    .stub(UrlbarSearchUtils, "init")
-    .rejects(new Error("Initialization failed"));
-
+  let stub = sinon
+    .stub(SearchService, "promiseInitialized")
+    .get(() => Promise.reject(new Error("Initialization failed")));
   SearchService.forceInitializationStatusForTests("failed");
+
+  let newWin = await BrowserTestUtils.openNewBrowserWindow();
 
   // Force updateSearchIcon to be triggered
   await SpecialPowers.pushPrefEnv({
@@ -799,7 +816,7 @@ add_task(async function test_search_service_fail() {
 
   Assert.equal(
     searchModeSwitcherIconUrl,
-    UrlbarUtils.ICON.GLOBE,
+    UrlbarShared.ICON.GLOBE,
     "The search mode switcher should have the globe icon url since the search service init failed."
   );
 
@@ -817,14 +834,65 @@ add_task(async function test_search_service_fail() {
   popup.querySelector(`.search-button-${localSearchModes[0]}`).click();
   await popupHidden;
 
-  stub.restore();
+  await UrlbarTestUtils.assertSearchMode(newWin, {
+    source: UrlbarShared.RESULT_SOURCE.BOOKMARKS,
+    entry: "searchbutton",
+  });
+  await UrlbarTestUtils.assertSearchModeSwitcherIcon(
+    newWin,
+    UrlbarShared.LOCAL_SEARCH_MODES.find(
+      m => m.source == UrlbarShared.RESULT_SOURCE.BOOKMARKS
+    ).icon,
+    "The search mode switcher should have the bookmarks icon."
+  );
 
+  info("Press the close button and exit search mode");
+  newWin.gURLBar.querySelector(".searchmode-switcher-close").click();
+  await UrlbarTestUtils.assertSearchMode(newWin, null);
+
+  await UrlbarTestUtils.assertSearchModeSwitcherIcon(
+    newWin,
+    UrlbarShared.ICON.GLOBE,
+    "The search mode switcher should have the globe icon again."
+  );
+
+  await SpecialPowers.popPrefEnv();
+  await TestUtils.waitForCondition(
+    () =>
+      UrlbarTestUtils.searchModeSwitcherIconIs(
+        newWin,
+        UrlbarShared.ICON.SEARCH_GLASS
+      ),
+    "Should have the search glass icon again."
+  );
+
+  stub.restore();
   SearchService.forceInitializationStatusForTests("success");
-  UrlbarSearchUtils.resetInitPromiseForTests();
-  await UrlbarSearchUtils.init();
 
   await BrowserTestUtils.closeWindow(newWin);
+});
+
+add_task(async function test_globe_does_not_wait_for_engine_store() {
+  let defaultEngineIcon = UrlbarTestUtils.getSearchModeSwitcherIcon(window);
+  let { promise, resolve } = Promise.withResolvers();
+  let stub = sinon
+    .stub(gURLBar.controller.engineStore, "init")
+    .returns(promise);
+
+  await SpecialPowers.pushPrefEnv({ set: [["keyword.enabled", false]] });
+  await TestUtils.waitForCondition(
+    () =>
+      UrlbarTestUtils.searchModeSwitcherIconIs(window, UrlbarShared.ICON.GLOBE),
+    "Globe is shown while the engine store is still initializing."
+  );
+
+  resolve();
+  stub.restore();
   await SpecialPowers.popPrefEnv();
+  await TestUtils.waitForCondition(
+    () => UrlbarTestUtils.searchModeSwitcherIconIs(window, defaultEngineIcon),
+    "Default engine icon is shown again."
+  );
 });
 
 add_task(async function test_search_mode_switcher_engine_no_icon() {
@@ -845,7 +913,7 @@ add_task(async function test_search_mode_switcher_engine_no_icon() {
 
   Assert.equal(
     UrlbarTestUtils.getSearchModeSwitcherIcon(window),
-    UrlbarUtils.ICON.SEARCH_GLASS,
+    UrlbarShared.ICON.SEARCH_GLASS,
     "The search mode switcher should display the default search glass icon when the engine has no icon."
   );
 
@@ -858,7 +926,12 @@ add_task(async function test_search_mode_switcher_engine_no_icon() {
 
 add_task(async function test_search_mode_switcher_private_engine_icon() {
   await SpecialPowers.pushPrefEnv({
-    set: [["browser.search.separatePrivateDefault.ui.enabled", true]],
+    set: [
+      ["browser.search.separatePrivateDefault.featureGate", true],
+      // This test also asserts the switcher's icon in a window it opens itself;
+      // see test_icon_new_window.
+      ["browser.urlbar.ipc.chromeMessagePassing", false],
+    ],
   });
 
   const testEngineName = "DefaultPrivateEngine";
@@ -899,8 +972,8 @@ add_task(async function test_search_mode_switcher_private_engine_icon() {
     "Default private engine is correct."
   );
 
-  Assert.equal(
-    UrlbarTestUtils.getSearchModeSwitcherIcon(window),
+  await UrlbarTestUtils.assertSearchModeSwitcherIcon(
+    window,
     defaultEngineIcon,
     "Is the icon of the default engine."
   );
@@ -916,8 +989,8 @@ add_task(async function test_search_mode_switcher_private_engine_icon() {
     value: "abc",
   });
 
-  Assert.equal(
-    UrlbarTestUtils.getSearchModeSwitcherIcon(privateWin),
+  await UrlbarTestUtils.assertSearchModeSwitcherIcon(
+    privateWin,
     defaultPrivateEngineIcon,
     "Is the icon of the default private engine."
   );
@@ -929,9 +1002,8 @@ add_task(async function test_search_mode_switcher_private_engine_icon() {
   );
 
   info("Waiting for the icon to be updated.");
-  await TestUtils.waitForCondition(
-    () =>
-      UrlbarTestUtils.getSearchModeSwitcherIcon(privateWin) == defaultEngineIcon
+  await TestUtils.waitForCondition(() =>
+    UrlbarTestUtils.searchModeSwitcherIconIs(privateWin, defaultEngineIcon)
   );
   Assert.ok(true, "The icon was updated.");
 
@@ -1167,4 +1239,28 @@ add_task(async function hideLocalSearchModes() {
   await popupHidden;
 
   await SpecialPowers.popPrefEnv();
+});
+
+add_task(async function test_local_search_mode_shortcuts() {
+  let popup = await UrlbarTestUtils.openSearchModeSwitcher(window);
+
+  let tabsItem = popup.querySelector("panel-item.search-button-tabs");
+  Assert.equal(
+    tabsItem.getAttribute("shortcut"),
+    ShortcutUtils.prettifyShortcut(document.getElementById("key_searchTabs")),
+    "The Tabs item shows the Search Tabs shortcut"
+  );
+
+  for (let item of popup.querySelectorAll(
+    "panel-item.searchmode-switcher-local:not(.search-button-tabs)"
+  )) {
+    Assert.ok(
+      !item.hasAttribute("shortcut"),
+      `${item.className} has no shortcut`
+    );
+  }
+
+  let popupHidden = UrlbarTestUtils.searchModeSwitcherPopupClosed(window);
+  popup.hide();
+  await popupHidden;
 });

@@ -36,7 +36,7 @@ migration-wizard-migrator-display-name-chromium-360se = 360 Secure Browser
 migration-wizard-migrator-display-name-chromium-edge = Microsoft Edge
 migration-wizard-migrator-display-name-chromium-edge-beta = Microsoft Edge Beta
 migration-wizard-migrator-display-name-edge-legacy = Microsoft Edge Legacy
-migration-wizard-migrator-display-name-firefox = Firefox
+migration-wizard-migrator-display-name-self = { -brand-product-name }
 migration-wizard-migrator-display-name-file-password-csv = Passwords from CSV file
 migration-wizard-migrator-display-name-file-bookmarks = Bookmarks from HTML file
 migration-wizard-migrator-display-name-ie = Microsoft Internet Explorer
@@ -54,7 +54,7 @@ migration-imported-edge-reading-list = Reading List (From Edge)
 
 ## These strings are shown if the selected browser data directory is unreadable.
 ## In practice, this tends to only occur on Linux when Firefox
-## is installed as a Snap.
+## is installed as a Snap, and on macOS 27 and later.
 
 migration-no-permissions-message = { -brand-short-name } does not have access to other browsers’ profiles installed on this device.
 
@@ -63,11 +63,16 @@ migration-no-permissions-instructions = To continue importing data from another 
 migration-no-permissions-instructions-step1 = Select “Continue”
 
 # The second step in getting permissions to read data for the selected
-# browser type.
+# browser type. On macOS, the file picker already opens in the folder that
+# needs to be selected.
 #
 # Variables:
 #  $permissionsPath (String): the file system path that the user will need to grant read permission to.
-migration-no-permissions-instructions-step2 = In the file picker, navigate to <code>{ $permissionsPath }</code> and choose “Select”
+migration-no-permissions-instructions-step2-2 =
+  { PLATFORM() ->
+      [macos] In the file picker, choose “Open”
+     *[other] In the file picker, navigate to <code>{ $permissionsPath }</code> and choose “Select”
+  }
 
 ## These strings will be displayed based on how many resources are selected to import
 
@@ -214,11 +219,22 @@ migration-wizard-progress-icon-completed =
   .aria-label = Completed
 
 migration-safari-password-import-header = Import passwords from Safari
+migration-safari-password-import-post-sequoia-step1 = Open the <a data-l10n-name="macos-passwords-app">Passwords app</a> on your Mac
+migration-safari-password-import-post-sequoia-step2 = From the menu bar at the top of the screen, choose File > Export All Passwords to File…
+migration-safari-password-import-post-sequoia-step3 = Save the file
+migration-safari-password-import-post-sequoia-step4 = Select the file you saved
+
+## These instructions only appear and are applicable on versions of macOS before
+## Sequoia (macOS 15). They can be removed once importing on pre-Sequoia macOS
+## is no longer supported.
+
 migration-safari-password-import-steps-header = To import Safari passwords:
 migration-safari-password-import-step1 = In Safari, open “Safari” menu and go to Preferences > Passwords
 migration-safari-password-import-step2 = Select the <img data-l10n-name="safari-icon-3dots"/> button and choose “Export All Passwords”
 migration-safari-password-import-step3 = Save the passwords file
 migration-safari-password-import-step4 = Use “Select file” below to choose the passwords file you saved
+
+##
 
 migration-chrome-windows-password-import-header = How to import passwords from Chrome
 migration-chrome-windows-password-import-steps-header = In Chrome:
@@ -228,6 +244,7 @@ migration-chrome-windows-password-import-step3 = Choose “Download file” and 
 migration-chrome-windows-password-import-step4 = Return here and “Select file” to finish import.
 
 migration-manual-password-import-skip-button = Skip
+migration-manual-password-import-cancel-button = Cancel
 migration-manual-password-import-select-button = Select file
 
 # Shown in the migration wizard after importing bookmarks from another

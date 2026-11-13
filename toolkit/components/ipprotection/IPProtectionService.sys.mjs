@@ -9,8 +9,6 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   IPPAuthProvider:
     "moz-src:///toolkit/components/ipprotection/IPPAuthProvider.sys.mjs",
-  IPPNimbusHelper:
-    "moz-src:///toolkit/components/ipprotection/IPPNimbusHelper.sys.mjs",
   IPPStartupCache:
     "moz-src:///toolkit/components/ipprotection/IPPStartupCache.sys.mjs",
 });
@@ -45,6 +43,9 @@ export const IPProtectionStates = Object.freeze({
  * @fires IPProtectionServiceSingleton#"IPProtectionService:StateChanged"
  *  When the proxy state machine changes state. Check the `state` attribute to
  *  know the current state.
+ * @fires IPProtectionServiceSingleton#"IPProtectionService:StartupCompleted"
+ *  Once startup is done and the state reflects it rather than the one cached
+ *  from the previous session.
  */
 class IPProtectionServiceSingleton extends EventTarget {
   #state = IPProtectionStates.UNINITIALIZED;
@@ -126,6 +127,16 @@ class IPProtectionServiceSingleton extends EventTarget {
     await Promise.allSettled(
       this.#helpers.map(helper => helper.initOnStartupCompleted?.())
     );
+
+    this.dispatchEvent(
+      new CustomEvent("IPProtectionService:StartupCompleted", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          state: this.#state,
+        },
+      })
+    );
   }
 
   /**
@@ -152,8 +163,13 @@ class IPProtectionServiceSingleton extends EventTarget {
       return lazy.IPPStartupCache.state;
     }
 
-    // If the device is not eligible no UI is shown.
-    if (!lazy.IPPNimbusHelper.isEligible) {
+    // Any registered helper may veto exposing the feature. Every helper is
+    // evaluated (no short-circuit) so vetoes with side effects, like the Nimbus
+    // exposure event, always run.
+    const vetoed = this.#helpers.map(
+      helper => helper.hidesFeature?.() ?? false
+    );
+    if (vetoed.some(Boolean)) {
       return IPProtectionStates.UNAVAILABLE;
     }
 

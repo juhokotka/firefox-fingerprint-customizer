@@ -7,11 +7,13 @@ ChromeUtils.defineESModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.sys.mjs",
   FileTestUtils: "resource://testing-common/FileTestUtils.sys.mjs",
   TaskbarTabsRegistry:
-    "resource:///modules/taskbartabs/TaskbarTabsRegistry.sys.mjs",
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsRegistry.sys.mjs",
   TaskbarTabsWindowManager:
-    "resource:///modules/taskbartabs/TaskbarTabsWindowManager.sys.mjs",
-  TaskbarTabsPin: "resource:///modules/taskbartabs/TaskbarTabsPin.sys.mjs",
-  TaskbarTabsUtils: "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs",
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsWindowManager.sys.mjs",
+  TaskbarTabsPin:
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsPin.sys.mjs",
+  TaskbarTabsUtils:
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsUtils.sys.mjs",
   ShellService: "moz-src:///browser/components/shell/ShellService.sys.mjs",
   sinon: "resource://testing-common/Sinon.sys.mjs",
   MockRegistrar: "resource://testing-common/MockRegistrar.sys.mjs",
@@ -63,7 +65,7 @@ registerCleanupFunction(() => {
 
 // Don't use the normal TaskbarTabs module, since we don't want it to pin
 // automatically.
-const gRegistry = new TaskbarTabsRegistry();
+const gRegistry = createInMemoryRegistry();
 const gWindowManager = new TaskbarTabsWindowManager();
 
 const BASE_URL = "https://example.org";
@@ -93,7 +95,6 @@ async function testPinMetricCustom(aPinResult, aPinMessage = null) {
 
   await TaskbarTabsPin.pinTaskbarTab(
     taskbarTab,
-    gRegistry,
     await TaskbarTabsUtils.getDefaultIcon()
   );
 
@@ -141,7 +142,7 @@ async function testUnpinMetricCustom(
     shortcutRelativePath: "whatever",
   });
 
-  await TaskbarTabsPin.unpinTaskbarTab(taskbarTab, gRegistry);
+  await TaskbarTabsPin.unpinTaskbarTab(taskbarTab);
   snapshot = Glean.webApp.unpin.testGetValue();
   is(snapshot.length, 1, "A single unpin event was recorded");
   Assert.strictEqual(
@@ -227,10 +228,10 @@ add_task(async function testMoveToTaskbarHighLevelMetric() {
   // moveTabIntoTaskbarTab is implemented in the TaskbarTabs module itself, so
   // we need to stub out system interaction.
   const sandbox = sinon.createSandbox();
-  sandbox.stub(TaskbarTabsPin, "pinTaskbarTab");
+  sandbox.stub(TaskbarTabsPin, "pinTaskbarTab").resolves({});
   sandbox.stub(TaskbarTabsPin, "unpinTaskbarTab");
   const { TaskbarTabs } = ChromeUtils.importESModule(
-    "resource:///modules/taskbartabs/TaskbarTabs.sys.mjs"
+    "moz-src:///browser/components/taskbartabs/TaskbarTabs.sys.mjs"
   );
 
   Services.fog.testResetFOG();

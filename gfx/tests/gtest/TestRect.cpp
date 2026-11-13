@@ -3,16 +3,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include <limits>
 
-#include "gtest/gtest.h"
-
-#include "gfxTypes.h"
-#include "nsRect.h"
-#include "nsRectAbsolute.h"
 #include "gfxRect.h"
+#include "gfxTypes.h"
+#include "gtest/gtest.h"
+#include "mozilla/WritingModes.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/gfx/RectAbsolute.h"
-#include "mozilla/WritingModes.h"
+#include "nsRect.h"
+#include "nsRectAbsolute.h"
 #ifdef XP_WIN
 #  include <windows.h>
 #endif
@@ -656,6 +655,27 @@ TEST(Gfx, nsRectAbsolute)
 TEST(Gfx, IntRectAbsolute)
 {
   TestUnionEmptyRects<IntRectAbsolute>();
+}
+
+TEST(Gfx, RectArea)
+{
+  // Area() must compute width * height in 64-bit for integer rects so it does
+  // not overflow: 100000 * 100000 = 1e10, which exceeds INT32_MAX (~2.1e9).
+  const int64_t big = int64_t(100000) * 100000;
+  EXPECT_EQ(nsRect(0, 0, 100000, 100000).Area(), big);
+  EXPECT_EQ(IntRect(0, 0, 100000, 100000).Area(), big);
+  EXPECT_EQ(nsRectAbsolute(0, 0, 100000, 100000).Area(), big);
+  EXPECT_EQ(IntRectAbsolute(0, 0, 100000, 100000).Area(), big);
+
+  // Small rects are unaffected.
+  EXPECT_EQ(nsRect(0, 0, 3, 4).Area(), 12);
+
+  // Integer rects widen the area to 64-bit; floating-point rects keep their
+  // coordinate type.
+  static_assert(std::is_same_v<decltype(nsRect().Area()), int64_t>);
+  static_assert(std::is_same_v<decltype(IntRect().Area()), int64_t>);
+  static_assert(std::is_same_v<decltype(gfxRect().Area()), double>);
+  EXPECT_DOUBLE_EQ(gfxRect(0, 0, 100000.0, 100000.0).Area(), 1e10);
 }
 
 static void TestMoveInsideAndClamp(IntRect aSrc, IntRect aTarget,

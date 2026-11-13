@@ -23,17 +23,16 @@
 #include <string>
 #include <vector>
 
-#include "content_decryption_module.h"
-#include "content_decryption_module_ext.h"
-#include "nss.h"
-
 #include "ClearKeyCDM.h"
 #include "ClearKeySessionManager.h"
+#include "content_decryption_module.h"
+#include "content_decryption_module_ext.h"
 #include "mozilla/dom/KeySystemNames.h"
+#include "nss.h"
 
 #ifndef XP_WIN
-#  include <sys/types.h>
 #  include <sys/stat.h>
+#  include <sys/types.h>
 #  include <unistd.h>
 #endif
 
@@ -46,7 +45,9 @@ extern "C" {
 CDM_API
 void INITIALIZE_CDM_MODULE() {}
 
+#ifdef MOZILLA_OFFICIAL
 static bool sCanReadHostVerificationFiles = false;
+#endif
 
 CDM_API
 void* CreateCdmInstance(int cdm_interface_version, const char* key_system,
@@ -165,7 +166,9 @@ bool VerifyCdmHost_0(const cdm::HostFile* aHostFiles, uint32_t aNumFiles) {
       ClosePlatformFile(hostFile.sig_file);
     }
   }
+#ifdef MOZILLA_OFFICIAL
   sCanReadHostVerificationFiles = rv;
+#endif
   return rv;
 }
 

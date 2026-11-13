@@ -52,6 +52,11 @@ class nsAnimationManager final
                                     mozilla::dom::CSSAnimation* aAnimation);
 
   void UpdateDeferredTimelineChanges();
+  /* Update animations referring to named timelines, when some element
+   * starts/stops providing timeline of that name. Note that we only
+   * care about the name, because we cannot early-reject name changes
+   * based on the cascade level of the scoped name; we need to do the
+   * actual lookup. */
   void UpdateNamedTimelineAnimations(
       const nsTArray<RefPtr<const nsAtom>>& aChanged);
   void UpdateAllNamedTimelineAnimations();

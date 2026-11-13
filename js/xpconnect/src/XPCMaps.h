@@ -8,8 +8,10 @@
 #define xpcmaps_h_
 
 #include "mozilla/AllocPolicy.h"
-#include "mozilla/MemoryReporting.h"
 #include "mozilla/HashTable.h"
+#include "mozilla/MemoryReporting.h"
+
+#include "xpcprivate.h"
 
 #include "js/GCHashTable.h"
 
@@ -100,7 +102,7 @@ class Native2WrappedNativeMap {
                                mozilla::MallocAllocPolicy>;
 
  public:
-  Native2WrappedNativeMap();
+  Native2WrappedNativeMap() = default;
 
   XPCWrappedNative* Find(nsISupports* obj) const {
     MOZ_ASSERT(obj, "bad param");
@@ -132,7 +134,7 @@ class Native2WrappedNativeMap {
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
  private:
-  Map mMap;
+  Map mMap{XPC_NATIVE_MAP_LENGTH};
 };
 
 /*************************/
@@ -157,7 +159,7 @@ class IID2NativeInterfaceMap {
                                mozilla::MallocAllocPolicy>;
 
  public:
-  IID2NativeInterfaceMap();
+  IID2NativeInterfaceMap() = default;
 
   XPCNativeInterface* Find(REFNSIID iid) const {
     Map::Ptr ptr = mMap.lookup(&iid);
@@ -182,7 +184,7 @@ class IID2NativeInterfaceMap {
   void Trace(JSTracer* trc);
 
  private:
-  Map mMap;
+  Map mMap{XPC_NATIVE_INTERFACE_MAP_LENGTH};
 };
 
 /*************************/
@@ -193,7 +195,7 @@ class ClassInfo2NativeSetMap {
                                mozilla::MallocAllocPolicy>;
 
  public:
-  ClassInfo2NativeSetMap();
+  ClassInfo2NativeSetMap() = default;
 
   XPCNativeSet* Find(nsIClassInfo* info) const {
     auto ptr = mMap.lookup(info);
@@ -226,7 +228,7 @@ class ClassInfo2NativeSetMap {
   size_t ShallowSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
  private:
-  Map mMap;
+  Map mMap{XPC_NATIVE_SET_MAP_LENGTH};
 };
 
 /*************************/
@@ -237,7 +239,7 @@ class ClassInfo2WrappedNativeProtoMap {
                                mozilla::MallocAllocPolicy>;
 
  public:
-  ClassInfo2WrappedNativeProtoMap();
+  ClassInfo2WrappedNativeProtoMap() = default;
 
   XPCWrappedNativeProto* Find(nsIClassInfo* info) const {
     auto ptr = mMap.lookup(info);
@@ -266,7 +268,7 @@ class ClassInfo2WrappedNativeProtoMap {
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
  private:
-  Map mMap;
+  Map mMap{XPC_NATIVE_PROTO_MAP_LENGTH};
 };
 
 /*************************/
@@ -284,7 +286,7 @@ class NativeSetMap {
                                mozilla::MallocAllocPolicy>;
 
  public:
-  NativeSetMap();
+  NativeSetMap() = default;
 
   XPCNativeSet* Find(const XPCNativeSetKey* key) const {
     auto ptr = mSet.lookup(key);
@@ -331,7 +333,7 @@ class NativeSetMap {
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
  private:
-  Set mSet;
+  Set mSet{XPC_NATIVE_SET_MAP_LENGTH};
 };
 
 /***************************************************************************/

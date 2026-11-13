@@ -3,39 +3,39 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SocketProcessParent.h"
-#include "SocketProcessLogging.h"
 
 #include "AltServiceParent.h"
-#include "SSLTokensCache.h"
 #include "HttpTransactionParent.h"
+#include "SSLTokensCache.h"
 #include "SocketProcessHost.h"
+#include "SocketProcessLogging.h"
 #include "TLSClientAuthCertSelection.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Components.h"
-#include "mozilla/dom/MemoryReportRequest.h"
 #include "mozilla/FOGIPC.h"
-#include "mozilla/glean/NetwerkMetrics.h"
 #include "mozilla/GeckoTrace.h"
-#include "mozilla/net/DNSRequestParent.h"
-#include "mozilla/net/ProxyConfigLookupParent.h"
-#include "mozilla/net/SocketProcessBackgroundParent.h"
 #include "mozilla/RemoteLazyInputStreamParent.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TelemetryIPC.h"
+#include "mozilla/dom/MemoryReportRequest.h"
+#include "mozilla/glean/NetwerkMetrics.h"
+#include "mozilla/net/DNSRequestParent.h"
+#include "mozilla/net/ProxyConfigLookupParent.h"
+#include "mozilla/net/SocketProcessBackgroundParent.h"
+#include "mozilla/net/neqo_glue_ffi_generated.h"
+#include "nsHttpConnectionInfo.h"
+#include "nsHttpHandler.h"
 #include "nsIConsoleService.h"
 #include "nsIHttpActivityObserver.h"
+#include "nsIOService.h"
 #include "nsIObserverService.h"
 #include "nsNSSCertificate.h"
 #include "nsNSSComponent.h"
-#include "nsIOService.h"
-#include "mozilla/net/neqo_glue_ffi_generated.h"
 #include "nsSocketTransportService2.h"
-#include "nsHttpHandler.h"
-#include "nsHttpConnectionInfo.h"
 #include "secerr.h"
 #ifdef MOZ_WEBRTC
-#  include "mozilla/dom/ContentProcessManager.h"
 #  include "mozilla/dom/BrowserParent.h"
+#  include "mozilla/dom/ContentProcessManager.h"
 #  include "mozilla/net/WebrtcTCPSocketParent.h"
 #endif
 #if defined(MOZ_WIDGET_ANDROID)
@@ -88,12 +88,14 @@ void SocketProcessParent::ActorDestroy(ActorDestroyReason aWhy) {
 #endif  // defined(MOZ_WIDGET_ANDROID)
 
   if (aWhy == AbnormalShutdown) {
-    GenerateCrashReport();
-    MaybeTerminateProcess();
+    nsAutoString dumpID;
+    GenerateCrashReport(&dumpID);
+    MaybeTerminateProcess(dumpID);
   }
 
   if (mHost) {
     mHost->OnChannelClosed();
+    mHost = nullptr;
   }
 }
 
@@ -187,24 +189,13 @@ mozilla::ipc::IPCResult SocketProcessParent::RecvRecordDiscardedData(
   return IPC_OK();
 }
 
-PWebrtcTCPSocketParent* SocketProcessParent::AllocPWebrtcTCPSocketParent(
-    const Maybe<TabId>& aTabId) {
+already_AddRefed<PWebrtcTCPSocketParent>
+SocketProcessParent::AllocPWebrtcTCPSocketParent(const Maybe<TabId>& aTabId) {
 #ifdef MOZ_WEBRTC
-  WebrtcTCPSocketParent* parent = new WebrtcTCPSocketParent(aTabId);
-  parent->AddRef();
-  return parent;
+  return do_AddRef(new WebrtcTCPSocketParent(aTabId));
 #else
   return nullptr;
 #endif
-}
-
-bool SocketProcessParent::DeallocPWebrtcTCPSocketParent(
-    PWebrtcTCPSocketParent* aActor) {
-#ifdef MOZ_WEBRTC
-  WebrtcTCPSocketParent* parent = static_cast<WebrtcTCPSocketParent*>(aActor);
-  parent->Release();
-#endif
-  return true;
 }
 
 already_AddRefed<PDNSRequestParent> SocketProcessParent::AllocPDNSRequestParent(
@@ -221,7 +212,8 @@ mozilla::ipc::IPCResult SocketProcessParent::RecvPDNSRequestConstructor(
     const nsACString& aTrrServer, const int32_t& port, const uint16_t& aType,
     const OriginAttributes& aOriginAttributes,
     const nsIDNSService::DNSFlags& aFlags) {
-  RefPtr<DNSRequestParent> actor = static_cast<DNSRequestParent*>(aActor);
+  RefPtr<DNSRequestParent> actor =
+      mozilla::ipc::ActorCast<DNSRequestParent>(aActor);
   RefPtr<DNSRequestHandler> handler =
       actor->GetDNSRequest()->AsDNSRequestHandler();
   handler->DoAsyncResolve(aHost, aTrrServer, port, aType, aOriginAttributes,
@@ -273,16 +265,17 @@ SocketProcessParent::AllocPAltServiceParent() {
 
 already_AddRefed<PProxyConfigLookupParent>
 SocketProcessParent::AllocPProxyConfigLookupParent(
-    nsIURI* aURI, const uint32_t& aProxyResolveFlags) {
-  RefPtr<ProxyConfigLookupParent> actor =
-      new ProxyConfigLookupParent(aURI, aProxyResolveFlags);
+    nsIURI* aURI, const uint32_t& aProxyResolveFlags,
+    const bool& aIsTRRServiceChannel) {
+  RefPtr<ProxyConfigLookupParent> actor = new ProxyConfigLookupParent(
+      aURI, aProxyResolveFlags, aIsTRRServiceChannel);
   return actor.forget();
 }
 
 mozilla::ipc::IPCResult SocketProcessParent::RecvPProxyConfigLookupConstructor(
     PProxyConfigLookupParent* aActor, nsIURI* aURI,
-    const uint32_t& aProxyResolveFlags) {
-  static_cast<ProxyConfigLookupParent*>(aActor)->DoProxyLookup();
+    const uint32_t& aProxyResolveFlags, const bool& aIsTRRServiceChannel) {
+  mozilla::ipc::ActorCast<ProxyConfigLookupParent>(aActor)->DoProxyLookup();
   return IPC_OK();
 }
 
@@ -365,17 +358,17 @@ mozilla::ipc::IPCResult SocketProcessParent::RecvGeckoTraceExport(
 }
 
 mozilla::ipc::IPCResult SocketProcessParent::RecvSSLTokensCacheData(
-    ByteBuf&& aBuf) {
-  SSLTokensCache::DeserializeFromIPCAsync(std::move(aBuf));
+    nsTArray<SSLTokensCacheRecordInfo>&& aRecords) {
+  SSLTokensCache::ReplaceAllRecords(std::move(aRecords));
   return IPC_OK();
 }
 
 #if defined(XP_WIN)
 mozilla::ipc::IPCResult SocketProcessParent::RecvGetModulesTrust(
-    ModulePaths&& aModPaths, bool aRunAtNormalPriority,
+    ModuleIdentifiers&& aModIdents, bool aRunAtNormalPriority,
     GetModulesTrustResolver&& aResolver) {
   RefPtr<DllServices> dllSvc(DllServices::Get());
-  dllSvc->GetModulesTrust(std::move(aModPaths), aRunAtNormalPriority)
+  dllSvc->GetModulesTrust(std::move(aModIdents), aRunAtNormalPriority)
       ->Then(
           GetMainThreadSerialEventTarget(), __func__,
           [aResolver](ModulesMapResult&& aResult) {

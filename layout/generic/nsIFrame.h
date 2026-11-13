@@ -39,18 +39,15 @@
 #  define MAX_REFLOW_DEPTH 1026
 #endif
 
-/* nsIFrame is in the process of being deCOMtaminated, i.e., this file is
-   eventually going to be eliminated, and all callers will use nsFrame instead.
-   At the moment we're midway through this process, so you will see inlined
-   functions and member variables in this file.  -dwh */
-
 #include <stdio.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "FrameProperties.h"
 #include "LayoutConstants.h"
 #include "Visibility.h"
+#include "fmt/ostream.h"
 #include "mozilla/AspectRatio.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Baseline.h"
@@ -371,6 +368,9 @@ class nsReflowStatus final {
 // Convert nsReflowStatus to a human-readable string.
 std::ostream& operator<<(std::ostream& aStream, const nsReflowStatus& aStatus);
 
+template <>
+struct fmt::formatter<nsReflowStatus> : fmt::ostream_formatter {};
+
 namespace mozilla {
 
 // Loosely: https://drafts.csswg.org/css-align-3/#shared-alignment-context
@@ -425,7 +425,6 @@ struct IntrinsicSize {
   }
 
   bool operator==(const IntrinsicSize&) const = default;
-  bool operator!=(const IntrinsicSize&) const = default;
 };
 
 // Pseudo bidi embedding level indicating nonexistence.
@@ -574,7 +573,7 @@ static void ReleaseValue(T* aPropertyValue) {
 
 //----------------------------------------------------------------------
 
-// Frame allocation boilerplate macros. Every subclass of nsFrame must
+// Frame allocation boilerplate macros. Every subclass of nsIFrame must
 // either use NS_{DECL,IMPL}_FRAMEARENA_HELPERS pair for allocating
 // memory correctly, or use NS_DECL_ABSTRACT_FRAME to declare a frame
 // class abstract and stop it from being instantiated. If a frame class
@@ -867,7 +866,7 @@ class nsIFrame : public nsQueryFrame {
   void operator delete(void* aPtr, size_t sz);
 
  private:
-  // Left undefined; nsFrame objects are never allocated from the heap.
+  // Left undefined; nsIFrame objects are never allocated from the heap.
   void* operator new(size_t sz) noexcept(true);
 
   // Returns true if this frame has any kind of CSS animations.
@@ -1349,7 +1348,31 @@ class nsIFrame : public nsQueryFrame {
     return aChild->GetPosition();
   }
 
+  /**
+   * Return this frame's position relative to its parent. If this frame is the
+   * scrolled frame of a scroll container, return the position as if that scroll
+   * container were at its initial scroll position [1].
+   *
+   * Note that if this frame is sticky positioned, the sticky offset is
+   * preserved. It is part of the frame's used position, which is what
+   * offsetTop/offsetLeft report. Use GetPositionIgnoringScrollingAndSticky() to
+   * ignore it as well.
+   *
+   * [1] https://drafts.csswg.org/css-overflow-3/#initial-scroll-position
+   */
   nsPoint GetPositionIgnoringScrolling() const;
+
+  /**
+   * Just like GetPositionIgnoringScrolling(). In addition, if this frame is
+   * sticky positioned, return the position as if its scroll container were at
+   * its initial scroll position. That is, the returned position doesn't change
+   * as its scroll container scrolls.
+   *
+   * Anchor positioning needs this to resolve anchor() against a
+   * scroll-invariant anchor position, and to compensate by how far the anchor
+   * has actually moved.
+   */
+  nsPoint GetPositionIgnoringScrollingAndSticky() const;
 
 #define NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(prop, type, dtor)              \
   static const mozilla::FramePropertyDescriptor<type>* prop() {            \
@@ -1818,9 +1841,7 @@ class nsIFrame : public nsQueryFrame {
    * which return a baseline from GetBaseline which is not useful for
    * caret positioning.
    */
-  virtual nscoord GetCaretBaseline() const {
-    return GetLogicalBaseline(GetWritingMode());
-  }
+  virtual nscoord GetCaretBaseline() const;
 
   // Gets a caret baseline suitable for the frame if the frame doesn't have one.
   nscoord GetFontMetricsDerivedCaretBaseline() const;
@@ -2264,6 +2285,17 @@ class nsIFrame : public nsQueryFrame {
    * @see     WidgetGUIEvent
    * @see     nsEventStatus
    */
+  /**
+   * Select the word or the link at aContextMenuEvent's point, so that the
+   * context menu can act on it. Called from HandleEvent(), after the event
+   * has been dispatched to the page and before the system group listeners
+   * open the context menu, and only if the page did not cancel the event.
+   *
+   * @param aContextMenuEvent       Its message must be eContextMenu.
+   */
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY void HandleContextMenuEventToSelectWordOrLink(
+      const mozilla::WidgetMouseEvent& aContextMenuEvent);
+
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                mozilla::WidgetGUIEvent* aEvent,
@@ -2333,6 +2365,38 @@ class nsIFrame : public nsQueryFrame {
       mozilla::WidgetMouseEvent& aSecondaryButtonEvent,
       const nsIContent& aContentAtEventPoint,
       int32_t aOffsetAtEventPoint) const;
+
+  /**
+   * Check whether aContextMenuEvent should select what it points at instead of
+   * leaving the selection alone.
+   *
+   * @param aFrameSelection         The nsFrameSelection which owns the
+   *                                selection to compare the event point with.
+   * @param aContextMenuEvent       Its message must be eContextMenu.
+   * @param aPoint                  The event point, relative to this frame.
+   * @param aContentAtEventPoint    The content node at the event point.
+   * @param aOffsetAtEventPoint     The offset in aContentAtEventPoint which
+   *                                aContextMenuEvent points at.
+   */
+  [[nodiscard]] bool SelectingWordOrLinkAtEventPointAllowed(
+      const nsFrameSelection& aFrameSelection,
+      const mozilla::WidgetMouseEvent& aContextMenuEvent, const nsPoint& aPoint,
+      const nsIContent& aContentAtEventPoint,
+      int32_t aOffsetAtEventPoint) const;
+
+  /**
+   * Select the whole text of the link containing aContentAtEventPoint, or the
+   * word at aPoint when it is not in a link.  A link is selected as a whole
+   * because the context menu acts on the link rather than on one of its words.
+   * Blink does the same in
+   * SelectionController::SelectClosestWordOrLinkFromMouseEvent() and WebKit in
+   * EventHandler::selectClosestContextualWordOrLinkFromHitTestResult().
+   *
+   * @param aPoint                  The event point, relative to this frame.
+   * @param aContentAtEventPoint    The content node at aPoint.
+   */
+  MOZ_CAN_RUN_SCRIPT nsresult SelectWordOrLinkAtPoint(
+      const nsPoint& aPoint, const nsIContent& aContentAtEventPoint);
 
   MOZ_CAN_RUN_SCRIPT_BOUNDARY NS_IMETHOD HandleMultiplePress(
       nsPresContext* aPresContext, mozilla::WidgetGUIEvent* aEvent,
@@ -2620,6 +2684,18 @@ class nsIFrame : public nsQueryFrame {
    * Return true if this frame is the primary frame for mContent.
    */
   bool IsPrimaryFrame() const { return mIsPrimaryFrame; }
+
+  /**
+   * Return true if this frame is in a fixed-pos subtree that is replicated
+   * across pages (see nsCSSFrameConstructor::ReplicateFixedFrames), either as
+   * the original or as one of the copies.
+   */
+  bool IsInReplicatedFixedPosTree() const;
+  /**
+   * Returns true whether this frame hosts any potentially replicated fixed-pos
+   * elements that would escape `this`s subtree.
+   */
+  bool ContainsReplicatedFixedPosPlaceholders() const;
 
   void SetIsPrimaryFrame(bool aIsPrimary) {
     if (mIsPrimaryFrame == aIsPrimary) {
@@ -3034,7 +3110,8 @@ class nsIFrame : public nsQueryFrame {
       const mozilla::StyleSize& aStyleBSize,
       const mozilla::StyleSize& aStyleMinBSize,
       const mozilla::StyleMaxSize& aStyleMaxBSize, nscoord aCBBSize,
-      nscoord aContentEdgeToBoxSizingBSize);
+      nscoord aContentEdgeToBoxSizingBSize, nscoord aMargin,
+      nscoord aBorderPadding);
 
  protected:
   /**
@@ -3268,7 +3345,7 @@ class nsIFrame : public nsQueryFrame {
    */
   bool ComputeOverflowClipRectRelativeToSelf(
       const mozilla::PhysicalAxes aClipAxes, nsRect& aOutRect,
-      nsRectCornerRadii& aOutRadii) const;
+      nsRectCornerRadii& aOutRadii, nsMargin& aOutInset) const;
 
   // Returns the applicable overflow-clip-margin values relative to our
   // border-box. If aAllowNegative is false, prevents us from returning margins
@@ -3391,10 +3468,25 @@ class nsIFrame : public nsQueryFrame {
   nsPoint GetOffsetToRootFrame() const;
 
   /**
-   * Just like GetOffsetTo, but treats all scrollframes as scrolled to
-   * their origin.
+   * Just like GetOffsetTo(), but treats all scroll containers as being at their
+   * initial scroll position. See GetPositionIgnoringScrolling().
    */
   nsPoint GetOffsetToIgnoringScrolling(const nsIFrame* aOther) const;
+
+  /**
+   * Just like GetOffsetToIgnoringScrolling(), but also treating a sticky
+   * element's offset as if its scroll container were at its initial scroll
+   * position. That is, the result does not change regardless of the scroll
+   * positions between |this| and aOther. See
+   * GetPositionIgnoringScrollingAndSticky().
+   */
+  nsPoint GetOffsetToIgnoringScrollingAndSticky(const nsIFrame* aOther) const;
+
+  /**
+   * Return how far |this| has shifted relative to aOther due to scrolling. The
+   * shift applied to a sticky positioned frame counts as scrolling too.
+   */
+  nsPoint GetScrollOffsetTo(const nsIFrame* aOther) const;
 
   /**
    * Get the offset between the coordinate systems of |this| and aOther
@@ -3658,14 +3750,9 @@ class nsIFrame : public nsQueryFrame {
    *   RelativeTo{this, aViewportType} into points in aOutAncestor's
    *   coordinate space.
    */
-  enum {
-    IN_CSS_UNITS = 1 << 0,
-    STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT = 1 << 1
-  };
-  Matrix4x4Flagged GetTransformMatrix(mozilla::ViewportType aViewportType,
-                                      mozilla::RelativeTo aStopAtAncestor,
-                                      nsIFrame** aOutAncestor,
-                                      uint32_t aFlags = 0) const;
+  Matrix4x4Flagged GetTransformMatrix(
+      mozilla::ViewportType aViewportType, mozilla::RelativeTo aStopAtAncestor,
+      nsIFrame** aOutAncestor, mozilla::TransformMatrixFlags aFlags = {}) const;
 
   /**
    * Return true if this frame's preferred size property or max size property
@@ -4495,6 +4582,21 @@ class nsIFrame : public nsQueryFrame {
   }
 
   /**
+   * Return a generated content root frame, i.e., a frame for a generated child
+   * of the first non-generated content ancestor.
+   */
+  const nsIFrame* GetGeneratedRootFrame() const;
+
+  /**
+   * Return a generated content root frame, i.e., a frame for a generated child
+   * of the first non-generated content ancestor.
+   */
+  nsIFrame* GetGeneratedRootFrame() {
+    return const_cast<nsIFrame*>(
+        const_cast<const nsIFrame*>(this)->GetGeneratedRootFrame());
+  }
+
+  /**
    * IsPseudoFrame returns whether a frame is a pseudo frame (eg an
    * anonymous table-row frame created for a CSS table-cell without an
    * enclosing table-row.
@@ -4582,7 +4684,7 @@ class nsIFrame : public nsQueryFrame {
       MOZ_ASSERT(prop, "this property should only store non-null values");
       return prop;
     }
-    prop = new DataType{aParams...};
+    prop = new DataType{std::forward<Params>(aParams)...};
     NS_ADDREF(prop);
     AddProperty(aProperty, prop);
     return prop;
@@ -4604,10 +4706,10 @@ class nsIFrame : public nsQueryFrame {
     using DataType = std::remove_pointer_t<FrameProperties::PropertyType<T>>;
     DataType* storedValue = GetProperty(aProperty, &found);
     if (!found) {
-      storedValue = new DataType{aParams...};
+      storedValue = new DataType{std::forward<Params>(aParams)...};
       AddProperty(aProperty, storedValue);
     } else {
-      *storedValue = DataType{aParams...};
+      *storedValue = DataType{std::forward<Params>(aParams)...};
     }
     return storedValue;
   }
@@ -4712,11 +4814,14 @@ class nsIFrame : public nsQueryFrame {
    * @param  [in] aStart
    *         true  for getting the first possible caret position
    *         false for getting the last possible caret position
+   * @param  [in] aFlags
+   *         Flags supported by SelfIsSelectable(). E.g.,
+   *         IGNORE_NATIVE_ANONYMOUS_SUBTREE and SKIP_HIDDEN.
    * @return The caret position in a CaretPosition.
    *         the returned value is a 'best effort' in case errors
    *         are encountered rummaging through the frame.
    */
-  CaretPosition GetExtremeCaretPosition(bool aStart);
+  CaretPosition GetExtremeCaretPosition(bool aStart, uint32_t aFlags);
 
   /**
    * Query whether this frame supports getting a line iterator.
@@ -5075,9 +5180,8 @@ class nsIFrame : public nsQueryFrame {
   };
   ISizeComputationResult ComputeISizeValue(
       gfxContext* aRenderingContext, const mozilla::WritingMode aWM,
-      const mozilla::LogicalSize& aCBSize,
-      const mozilla::LogicalSize& aContentEdgeToBoxSizing,
-      nscoord aBoxSizingToMarginEdge, ExtremumLength aSize,
+      const mozilla::LogicalSize& aCBSize, const mozilla::LogicalSize& aMargin,
+      const mozilla::LogicalSize& aBorderPadding, ExtremumLength aSize,
       Maybe<nscoord> aAvailableISizeOverride,
       const mozilla::StyleSize& aStyleBSize,
       const mozilla::AspectRatio& aAspectRatio,
@@ -5098,6 +5202,10 @@ class nsIFrame : public nsQueryFrame {
    * This method doesn't handle 'auto' when aSize is of type StyleSize,
    * nor does it handle 'none' when aSize is of type StyleMaxSize.
    *
+   * @param aMargin the frame's margin, in both axes.
+   *
+   * @param aBorderPadding the frame's border and padding, in both axes.
+   *
    * @param aStyleBSize the style block size of the frame, used to compute
    * intrinsic inline size with aAspectRatio.
    *
@@ -5106,14 +5214,17 @@ class nsIFrame : public nsQueryFrame {
   template <typename SizeOrMaxSize>
   ISizeComputationResult ComputeISizeValue(
       gfxContext* aRenderingContext, const mozilla::WritingMode aWM,
-      const mozilla::LogicalSize& aCBSize,
-      const mozilla::LogicalSize& aContentEdgeToBoxSizing,
-      nscoord aBoxSizingToMarginEdge, const SizeOrMaxSize& aSize,
+      const mozilla::LogicalSize& aCBSize, const mozilla::LogicalSize& aMargin,
+      const mozilla::LogicalSize& aBorderPadding, const SizeOrMaxSize& aSize,
       const mozilla::StyleSize& aStyleBSize,
       const mozilla::AspectRatio& aAspectRatio,
       mozilla::ComputeSizeFlags aFlags = {}) {
     if (aSize.IsLengthPercentage()) {
-      return {ComputeISizeValue(aWM, aCBSize, aContentEdgeToBoxSizing,
+      const auto contentEdgeToBoxSizing =
+          StylePosition()->mBoxSizing == mozilla::StyleBoxSizing::BorderBox
+              ? aBorderPadding
+              : mozilla::LogicalSize(aWM);
+      return {ComputeISizeValue(aWM, aCBSize, contentEdgeToBoxSizing,
                                 aSize.AsLengthPercentage())};
     }
     auto length = ToExtremumLength(aSize);
@@ -5124,9 +5235,9 @@ class nsIFrame : public nsQueryFrame {
           aSize.AsFitContentFunction().Resolve(aCBSize.ISize(aWM)));
     }
     return ComputeISizeValue(
-        aRenderingContext, aWM, aCBSize, aContentEdgeToBoxSizing,
-        aBoxSizingToMarginEdge, length.valueOr(ExtremumLength::MinContent),
-        availbleISizeOverride, aStyleBSize, aAspectRatio, aFlags);
+        aRenderingContext, aWM, aCBSize, aMargin, aBorderPadding,
+        length.valueOr(ExtremumLength::MinContent), availbleISizeOverride,
+        aStyleBSize, aAspectRatio, aFlags);
   }
 
   DisplayItemArray& DisplayItems() { return mDisplayItems; }
@@ -5344,7 +5455,6 @@ class nsIFrame : public nsQueryFrame {
     uint8_t mRight;
     uint8_t mBottom;
     bool operator==(const InkOverflowDeltas& aOther) const = default;
-    bool operator!=(const InkOverflowDeltas& aOther) const = default;
   };
   enum class OverflowStorageType : uint32_t {
     // No overflow area; code relies on this being an all-zero value.
@@ -5886,13 +5996,15 @@ inline do_QueryFrameHelper<nsIFrame> do_QueryFrame(AutoWeakFrame& s) {
 /**
  * @see AutoWeakFrame
  */
-class MOZ_HEAP_CLASS WeakFrame {
+class MOZ_HEAP_CLASS MOZ_NON_MEMMOVABLE WeakFrame {
  public:
   WeakFrame() : mFrame(nullptr) {}
 
   WeakFrame(const WeakFrame& aOther) : mFrame(nullptr) {
     Init(aOther.GetFrame());
   }
+
+  WeakFrame(WeakFrame&& aOther) : mFrame(nullptr) { *this = std::move(aOther); }
 
   MOZ_IMPLICIT WeakFrame(const AutoWeakFrame& aOther) : mFrame(nullptr) {
     Init(aOther.GetFrame());
@@ -5905,6 +6017,13 @@ class MOZ_HEAP_CLASS WeakFrame {
   }
 
   WeakFrame& operator=(WeakFrame& aOther) {
+    Init(aOther.GetFrame());
+    return *this;
+  }
+
+  WeakFrame& operator=(WeakFrame&& aOther);
+
+  WeakFrame& operator=(const AutoWeakFrame& aOther) {
     Init(aOther.GetFrame());
     return *this;
   }
@@ -5929,6 +6048,9 @@ class MOZ_HEAP_CLASS WeakFrame {
 
   nsIFrame* mFrame;
 };
+
+// The PresShell tracks WeakFrames by address, so they can't be memmoved.
+MOZ_DECLARE_RELOCATE_USING_MOVE_CONSTRUCTOR(WeakFrame)
 
 // Use nsIFrame's fast-path to avoid QueryFrame:
 inline do_QueryFrameHelper<nsIFrame> do_QueryFrame(WeakFrame& s) {

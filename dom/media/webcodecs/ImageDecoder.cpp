@@ -10,6 +10,7 @@
 #include "ImageContainer.h"
 #include "ImageDecoderReadRequest.h"
 #include "MediaResult.h"
+#include "jsapi.h"
 #include "mozilla/Logging.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/dom/ImageTrack.h"
@@ -79,6 +80,8 @@ class ImageDecoder::SelectTrackMessage final
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_CLASS(ImageDecoder)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ImageDecoder)
+  // Do not cancel mReadRequest here: cancellation synchronously invokes the
+  // page's UnderlyingSource.cancel() callback
   tmp->CloseWithoutRef(
       MediaResult(NS_ERROR_DOM_ABORT_ERR, "Cycle-collected decoder"_ns));
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mParent)
@@ -119,6 +122,7 @@ ImageDecoder::ImageDecoder(nsCOMPtr<nsIGlobalObject>&& aParent,
 ImageDecoder::~ImageDecoder() {
   MOZ_LOG_FMT(gWebCodecsLog, LogLevel::Debug, "ImageDecoder {} ~ImageDecoder",
               fmt::ptr(this));
+  // Similar to CYCLE_COLLECTION_UNLINK_BEGIN above
   CloseWithoutRef(MediaResult(NS_ERROR_DOM_ABORT_ERR, "Destroyed decoder"_ns));
 }
 
@@ -238,12 +242,19 @@ MessageProcessedResult ImageDecoder::ProcessConfigureMessage(
   mMessageQueueBlocked = true;
 
   NS_DispatchToCurrentThread(NS_NewCancelableRunnableFunction(
-      "ImageDecoder::ProcessConfigureMessage", [self = RefPtr{this}] {
+      "ImageDecoder::ProcessConfigureMessage",
+      [self = RefPtr{this}]() MOZ_CAN_RUN_SCRIPT_BOUNDARY_LAMBDA {
         // 5. Enqueue the following steps to the [[codec work queue]]:
         // 5.1. Configure [[codec implementation]] in accordance with the values
         //      given for colorSpaceConversion, desiredWidth, and desiredHeight.
         // 5.2. Assign false to [[message queue blocked]].
         // 5.3. Queue a task to Process the control message queue.
+        //
+        // This lambda is only ever reached via NS_DispatchToCurrentThread, at
+        // a fresh, safe-to-run-script stack frame -- never from
+        // cycle-collection Unlink, ~ImageDecoder, or OnShutdown. Unlike
+        // ImageDecoderReadRequest::Cancel()'s prior boundary (removed above),
+        // this one is not reachable from any unsafe teardown path.
         self->ResumeControlMessageQueue();
       }));
 
@@ -267,9 +278,10 @@ MessageProcessedResult ImageDecoder::ProcessDecodeMetadataMessage(
       [self = RefPtr{this}](const image::DecodeMetadataResult& aMetadata) {
         self->OnMetadataSuccess(aMetadata);
       },
-      [self = RefPtr{this}](const nsresult& aErr) {
-        self->OnMetadataFailed(aErr);
-      });
+      [self = RefPtr{this}](const nsresult& aErr)
+          MOZ_CAN_RUN_SCRIPT_FOR_DEFINITION -> void {
+            self->OnMetadataFailed(aErr);
+          });
   return MessageProcessedResult::Processed;
 }
 
@@ -390,7 +402,11 @@ void ImageDecoder::CheckOutstandingDecodes() {
   for (const auto& i : resolved) {
     if (!mClosed) {
       ImageDecodeResult result;
-      result.mImage = track->GetDecodedFrame(i.mFrameIndex);
+      if (auto* videoFrame = track->GetDecodedFrame(i.mFrameIndex)) {
+        result.mImage = MakeRefPtr<VideoFrame>(*videoFrame);
+      } else {
+        MOZ_ASSERT_UNREACHABLE("Should have frame if not closed");
+      }
       // TODO(aosmond): progressive images
       result.mComplete = true;
       i.mPromise->MaybeResolve(result);
@@ -528,6 +544,11 @@ void ImageDecoder::CheckOutstandingDecodes() {
   // 10.2.2.19.1. Perform DetachArrayBuffer on transferable
   for (const auto& buffer : aInit.mTransfer) {
     JS::Rooted<JSObject*> obj(aGlobal.Context(), buffer.Obj());
+    if (!JS_WrapObject(aGlobal.Context(), &obj)) {
+      aRv.MightThrowJSException();
+      aRv.StealExceptionFromJSContext(aGlobal.Context());
+      return nullptr;
+    }
     JS::DetachArrayBuffer(aGlobal.Context(), obj);
   }
 
@@ -589,6 +610,7 @@ void ImageDecoder::Initialize(const GlobalObject& aGlobal,
   mSourceBuffer = MakeRefPtr<image::SourceBuffer>();
 
   bool transferOwnership = false;
+  bool isBufferSource = false;
   const auto fnSourceBufferFromSpan = [&](const Span<uint8_t>& aData) {
     if (transferOwnership) {
       // 10.2.2.18.2.1 Let [[encoded data]] reference bytes in data
@@ -628,11 +650,6 @@ void ImageDecoder::Initialize(const GlobalObject& aGlobal,
         return;
       }
     }
-    mSourceBuffer->Complete(NS_OK);
-
-    // 10.2.2.18.4. Assign true to [[complete]].
-    // 10.2.2.18.5. Resolve [[completed promise]].
-    OnCompleteSuccess();
   };
 
   if (aInit.mData.IsReadableStream()) {
@@ -645,16 +662,19 @@ void ImageDecoder::Initialize(const GlobalObject& aGlobal,
     // 10.2.2.17.5. Let reader be the result of getting a reader for data.
     // 10.2.2.17.6. In parallel, perform the Fetch Stream Data Loop on d with
     //              reader.
-    mReadRequest = MakeAndAddRef<ImageDecoderReadRequest>(mSourceBuffer);
-    if (NS_WARN_IF(!mReadRequest->Initialize(aGlobal, this, stream))) {
+    RefPtr<ImageDecoderReadRequest> readRequest =
+        MakeAndAddRef<ImageDecoderReadRequest>(mSourceBuffer);
+    if (NS_WARN_IF(!readRequest->Initialize(aGlobal, this, stream))) {
       MOZ_LOG_FMT(gWebCodecsLog, LogLevel::Error,
                   "ImageDecoder {} Initialize -- create read request failed",
                   fmt::ptr(this));
       aRv.ThrowInvalidStateError("Could not create reader for ReadableStream");
       return;
     }
+    mReadRequest = std::move(readRequest);
   } else if (aInit.mData.IsArrayBufferView()) {
     // 10.2.2.18.3.1. Assert that init.data is of type BufferSource.
+    isBufferSource = true;
     const auto& view = aInit.mData.GetAsArrayBufferView();
     bool isShared;
     JS::Rooted<JSObject*> viewObj(aGlobal.Context(), view.Obj());
@@ -678,6 +698,16 @@ void ImageDecoder::Initialize(const GlobalObject& aGlobal,
     if (transferOwnership) {
       JS::Rooted<JSObject*> bufferObj(aGlobal.Context(), arrayBuffer);
       void* data = JS::StealArrayBufferContents(aGlobal.Context(), bufferObj);
+      if (!data) {
+        // Stealing failed: either the buffer can't be detached (eg backed by
+        // WebAssembly.Memory/asm.js) or copying its contents hit OOM. Fail
+        // construction. StealExceptionFromJSContext propagates the pending
+        // exception if there is one, and otherwise throws an uncatchable
+        // exception.
+        aRv.MightThrowJSException();
+        aRv.StealExceptionFromJSContext(aGlobal.Context());
+        return;
+      }
       fnSourceBufferFromSpan(Span(static_cast<uint8_t*>(data), length));
     } else {
       view.ProcessFixedData(fnSourceBufferFromSpan);
@@ -687,6 +717,7 @@ void ImageDecoder::Initialize(const GlobalObject& aGlobal,
     }
   } else if (aInit.mData.IsArrayBuffer()) {
     // 10.2.2.18.3.1. Assert that init.data is of type BufferSource.
+    isBufferSource = true;
     const auto& buffer = aInit.mData.GetAsArrayBuffer();
     for (const auto& transferBuffer : aInit.mTransfer) {
       if (buffer.Obj() == transferBuffer.Obj()) {
@@ -697,7 +728,22 @@ void ImageDecoder::Initialize(const GlobalObject& aGlobal,
     if (transferOwnership) {
       JS::Rooted<JSObject*> bufferObj(aGlobal.Context(), buffer.Obj());
       size_t length = JS::GetArrayBufferByteLength(bufferObj);
+      if (!JS_WrapObject(aGlobal.Context(), &bufferObj)) {
+        aRv.MightThrowJSException();
+        aRv.StealExceptionFromJSContext(aGlobal.Context());
+        return;
+      }
       void* data = JS::StealArrayBufferContents(aGlobal.Context(), bufferObj);
+      if (!data) {
+        // Stealing failed: either the buffer can't be detached (eg backed by
+        // WebAssembly.Memory/asm.js) or copying its contents hit OOM. Fail
+        // construction. StealExceptionFromJSContext propagates the pending
+        // exception if there is one, and otherwise throws an uncatchable
+        // exception.
+        aRv.MightThrowJSException();
+        aRv.StealExceptionFromJSContext(aGlobal.Context());
+        return;
+      }
       fnSourceBufferFromSpan(Span(static_cast<uint8_t*>(data), length));
     } else {
       buffer.ProcessFixedData(fnSourceBufferFromSpan);
@@ -709,6 +755,21 @@ void ImageDecoder::Initialize(const GlobalObject& aGlobal,
     MOZ_ASSERT_UNREACHABLE("Unsupported data type!");
     aRv.ThrowNotSupportedError("Unsupported data type");
     return;
+  }
+
+  // For a BufferSource, the data has now been buffered and we are outside any
+  // pinned-length region established by ProcessFixedData. Resolve the promise
+  // here rather than from within the processor lambda, since resolving a
+  // promise can run script (e.g. a `then` accessor on the resolution value's
+  // prototype chain).
+  //
+  // The ReadableStream path (!isBufferSource) completes asynchronously via
+  // ImageDecoderReadRequest and is intentionally skipped.
+  if (isBufferSource) {
+    // 10.2.2.18.4. Assign true to [[complete]].
+    // 10.2.2.18.5. Resolve [[completed promise]].
+    mSourceBuffer->Complete(NS_OK);
+    OnCompleteSuccess();
   }
 
   Maybe<gfx::IntSize> desiredSize;
@@ -856,9 +917,10 @@ void ImageDecoder::RequestFrameCount(uint32_t aKnownFrameCount) {
           [self = RefPtr{this}](const image::DecodeFrameCountResult& aResult) {
             self->OnFrameCountSuccess(aResult);
           },
-          [self = RefPtr{this}](const nsresult& aErr) {
-            self->OnFrameCountFailed(aErr);
-          });
+          [self = RefPtr{this}](const nsresult& aErr)
+              MOZ_CAN_RUN_SCRIPT_FOR_DEFINITION -> void {
+                self->OnFrameCountFailed(aErr);
+              });
 }
 
 void ImageDecoder::RequestDecodeFrames(uint32_t aFramesToDecode) {
@@ -1046,12 +1108,32 @@ void ImageDecoder::ResetWithoutRef(const MediaResult& aResult) {
 
 void ImageDecoder::Close(const MediaResult& aResult) {
   RefPtr<ImageDecoder> kungFuDeathGrip(this);
-  CloseWithoutRef(aResult);
+  CloseAndCancelWithoutRef(aResult);
 }
 
 void ImageDecoder::CloseWithoutRef(const MediaResult& aResult) {
+  if (RefPtr<ImageDecoderReadRequest> readRequest = CloseCommon(aResult)) {
+    readRequest->Destroy();
+  }
+}
+
+void ImageDecoder::CloseAndCancelWithoutRef(const MediaResult& aResult) {
+  if (RefPtr<ImageDecoderReadRequest> readRequest = CloseCommon(aResult)) {
+    // Runs script (the page's UnderlyingSource.cancel() callback). By this
+    // point every other piece of internal state has already been torn down
+    // above, so reentrant calls into this ImageDecoder see mClosed == true
+    // and no-op. This must only be reached from contexts that are already
+    // safe to run script in -- never from cycle-collection Unlink,
+    // ~ImageDecoder, or OnShutdown, which all go through CloseWithoutRef
+    // instead.
+    readRequest->DestroyAndCancel();
+  }
+}
+
+already_AddRefed<ImageDecoderReadRequest> ImageDecoder::CloseCommon(
+    const MediaResult& aResult) {
   if (mClosed) {
-    return;
+    return nullptr;
   }
 
   MOZ_LOG_FMT(gWebCodecsLog, LogLevel::Debug, "ImageDecoder {} Close '{}'",
@@ -1069,10 +1151,7 @@ void ImageDecoder::CloseWithoutRef(const MediaResult& aResult) {
     mDecoder->Destroy();
   }
 
-  if (mReadRequest) {
-    mReadRequest->Destroy(/* aCancel */ true);
-    mReadRequest = nullptr;
-  }
+  RefPtr<ImageDecoderReadRequest> readRequest = std::move(mReadRequest);
 
   mSourceBuffer = nullptr;
   mDecoder = nullptr;
@@ -1096,6 +1175,8 @@ void ImageDecoder::CloseWithoutRef(const MediaResult& aResult) {
     mShutdownWatcher->Destroy();
     mShutdownWatcher = nullptr;
   }
+
+  return readRequest.forget();
 }
 
 void ImageDecoder::Reset() {
@@ -1108,7 +1189,11 @@ void ImageDecoder::Close() {
 }
 
 void ImageDecoder::OnShutdown() {
-  Close(MediaResult(NS_ERROR_DOM_ABORT_ERR, "Shutdown"_ns));
+  // Global shutdown notifications (xpcom-will-shutdown, worker shutdown) are
+  // not a safe context to run script from either, so use the non-cancelling
+  // path, same as cycle-collection Unlink and ~ImageDecoder.
+  RefPtr<ImageDecoder> kungFuDeathGrip(this);
+  CloseWithoutRef(MediaResult(NS_ERROR_DOM_ABORT_ERR, "Shutdown"_ns));
 }
 
 }  // namespace mozilla::dom

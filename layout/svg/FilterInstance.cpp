@@ -279,8 +279,8 @@ WrFiltersStatus FilterInstance::BuildWebRenderFiltersImpl(
 
       const Size& stdDev = blur.mStdDeviation;
       if (stdDev.width != 0.0 || stdDev.height != 0.0) {
-        aWrFilters.filters.AppendElement(
-            wr::FilterOp::Blur(stdDev.width, stdDev.height));
+        aWrFilters.filters.AppendElement(wr::FilterOp::Blur(
+            stdDev.width, stdDev.height, /* should_inflate */ true));
       } else {
         filterIsNoop = true;
       }
@@ -383,11 +383,10 @@ WrFiltersStatus FilterInstance::BuildWebRenderFiltersImpl(
     }
 
     if (!filterIsNoop) {
-      if (finalClip.isNothing()) {
+      if (!finalClip) {
         finalClip = Some(primitive.PrimitiveSubregion());
       } else {
-        finalClip =
-            Some(primitive.PrimitiveSubregion().Intersect(finalClip.value()));
+        finalClip = Some(primitive.PrimitiveSubregion().Intersect(*finalClip));
       }
     }
   }
@@ -398,7 +397,7 @@ WrFiltersStatus FilterInstance::BuildWebRenderFiltersImpl(
 
   if (finalClip) {
     aWrFilters.post_filters_clip =
-        Some(instance.FilterSpaceToFrameSpace(finalClip.value()));
+        Some(instance.FilterSpaceToFrameSpace(*finalClip));
   }
   return WrFiltersStatus::CHAIN;
 }
@@ -914,7 +913,7 @@ static WrFiltersStatus WrFilterOpSVGFEDisplacementMap(
     return WrFiltersStatus::BLOB_FALLBACK;
   }
   aWrFilters.filters.AppendElement(wr::FilterOp::SVGFEDisplacementMap(
-      aGraphNode, aAttributes.mScale,
+      aGraphNode, aAttributes.mScale.Width(), aAttributes.mScale.Height(),
       static_cast<uint32_t>(aAttributes.mXChannel),
       static_cast<uint32_t>(aAttributes.mYChannel)));
   return WrFiltersStatus::SVGFE;
@@ -1207,6 +1206,9 @@ WrFiltersStatus FilterInstance::BuildWebRenderSVGFiltersImpl(
     nsIFrame* aFilteredFrame, Span<const StyleFilter> aFilters,
     StyleFilterType aStyleFilterType, WrFiltersHolder& aWrFilters,
     const nsPoint& aOffsetForSVGFilters) {
+  MOZ_ASSERT(!aFilters.IsEmpty(),
+             "a filter graph is only built for a non-empty filter chain");
+
   // If we return without making a valid filter graph, we need to restore
   // aInitialized before the fallback code is run.
   aWrFilters.filters.Clear();
@@ -1314,6 +1316,13 @@ WrFiltersStatus FilterInstance::BuildWebRenderSVGFiltersImpl(
   auto sourceAlphaNode = (int16_t)aWrFilters.filters.Length();
   aWrFilters.filters.AppendElement(wr::FilterOp::SVGFESourceAlpha(sourceNode));
 
+  // filterRegion comes from the last SVG filter element in the chain, so it
+  // only bounds the primitives that element contributed. A CSS filter function
+  // after it - `filter: url(#f) drop-shadow(...)` - has its own extent and must
+  // not be clipped to that region.
+  const bool clampOutputToFilterRegion =
+      aFilters[aFilters.Length() - 1].IsUrl();
+
   // We have some failure modes that can occur when processing the graph.
   WrFiltersStatus status = WrFiltersStatus::SVGFE;
 
@@ -1337,7 +1346,8 @@ WrFiltersStatus FilterInstance::BuildWebRenderSVGFiltersImpl(
     // We need to clip the final output node by the filterRegion, as it could
     // be non-integer (whereas the subregions were computed by SVGFilterInstance
     // code as integer only).
-    if (i == instance.mFilterDescription.mPrimitives.Length() - 1) {
+    if (clampOutputToFilterRegion &&
+        i == instance.mFilterDescription.mPrimitives.Length() - 1) {
       if (graphNode.subregion.min.x < filterRegion.min.x) {
         graphNode.subregion.min.x = filterRegion.min.x;
       }
@@ -1563,8 +1573,7 @@ FilterInstance::FilterInstance(
       filterToUserSpace * GetUserSpaceToFrameSpaceInCSSPxTransform();
   // mFilterSpaceToFrameSpaceInCSSPxTransform is always invertible
   mFrameSpaceInCSSPxToFilterSpaceTransform =
-      mFilterSpaceToFrameSpaceInCSSPxTransform;
-  mFrameSpaceInCSSPxToFilterSpaceTransform.Invert();
+      mFilterSpaceToFrameSpaceInCSSPxTransform.Inverse();
 
   nsIntRect targetBounds;
   if (aPreFilterInkOverflowRectOverride) {
@@ -1818,9 +1827,8 @@ void FilterInstance::BuildSourceImage(DrawTarget* aDest,
   // code more complex while being hard to get right without introducing
   // subtle bugs, and in practice it probably makes no real difference.)
   gfxContext ctx(offscreenDT);
-  gfxMatrix devPxToCssPxTM = SVGUtils::GetCSSPxToDevPxMatrix(mTargetFrame);
-  DebugOnly<bool> invertible = devPxToCssPxTM.Invert();
-  MOZ_ASSERT(invertible);
+  gfxMatrix devPxToCssPxTM =
+      SVGUtils::GetCSSPxToDevPxMatrix(mTargetFrame).Inverse();
   ctx.SetMatrixDouble(devPxToCssPxTM * mPaintTransform *
                       gfxMatrix::Translation(-neededRect.TopLeft()));
 
@@ -2004,8 +2012,9 @@ gfxMatrix FilterInstance::GetUserSpaceToFrameSpaceInCSSPxTransform() const {
   if (!mTargetFrame) {
     return gfxMatrix();
   }
-  return gfxMatrix::Translation(
-      -SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(mTargetFrame));
+  CSSPoint toUserSpace =
+      SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(mTargetFrame);
+  return gfxMatrix::Translation(-toUserSpace.x, -toUserSpace.y);
 }
 
 }  // namespace mozilla

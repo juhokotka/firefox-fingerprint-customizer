@@ -5,7 +5,6 @@
 import {
   AboutAddonsElementMixin,
   formatUTMParams,
-  getScreenshotUrlForAddon,
 } from "../aboutaddons-utils.mjs";
 import { gViewController } from "../view-controller.mjs";
 import { AddonCard } from "./addon-card.mjs";
@@ -147,27 +146,15 @@ class RecommendedAddonCard extends HTMLElement {
    */
   setCardContent(card, addon) {
     // Set the icon.
+    let iconEl = card.querySelector(".addon-icon");
     if (addon.type == "theme") {
-      card.querySelector(".addon-icon").hidden = true;
+      iconEl.hidden = true;
     } else {
-      card.querySelector(".addon-icon").src = AddonManager.getPreferredIconURL(
-        addon,
-        32,
-        window
-      );
+      iconEl.hidden = false;
+      iconEl.src = AddonManager.getPreferredIconURL(addon, 32, window);
     }
 
-    // Set the theme preview.
-    let preview = card.querySelector(".card-heading-image");
-    if (addon.type == "theme") {
-      let screenshotUrl = getScreenshotUrlForAddon(addon);
-      if (screenshotUrl) {
-        preview.src = screenshotUrl;
-        preview.hidden = false;
-      }
-    } else {
-      preview.hidden = true;
-    }
+    card.querySelector("theme-preview").addon = addon;
 
     // Set the name.
     card.querySelector(".disco-addon-name").textContent = addon.name;
@@ -240,11 +227,13 @@ class RecommendedAddonCard extends HTMLElement {
     let addon = this.discoAddon;
     let url = addon.sourceURI.spec;
     let install = await AddonManager.getInstallForURL(url, {
+      id: addon.id,
       name: addon.name,
       telemetryInfo: {
         source: "disco",
         taarRecommended: addon.taarRecommended,
       },
+      type: addon.type,
     });
     // We are hosted in a <browser> in about:addons, but we can just use the
     // main tab's browser since all of it is using the system principal.

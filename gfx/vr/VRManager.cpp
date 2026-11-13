@@ -4,41 +4,43 @@
 
 #include "VRManager.h"
 
+#include <cstring>
+#include <memory>
+
 #include "GeckoProfiler.h"
 #include "VRManagerParent.h"
 #include "VRShMem.h"
 #include "VRThread.h"
 #include "gfxVR.h"
+#include "ipc/VRLayerParent.h"
 #include "mozilla/ClearOnShutdown.h"
-#include "mozilla/dom/VRDisplay.h"
-#include "mozilla/dom/GamepadEventTypes.h"
-#include "mozilla/layers/TextureHost.h"
-#include "mozilla/layers/CompositorThread.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/dom/GamepadEventTypes.h"
+#include "mozilla/dom/VRDisplay.h"
+#include "mozilla/layers/CompositorThread.h"
+#include "mozilla/layers/TextureHost.h"
 #include "nsIObserverService.h"
-
-#include "gfxVR.h"
-#include <cstring>
-
-#include "ipc/VRLayerParent.h"
 #if !defined(MOZ_WIDGET_ANDROID)
 #  include "VRServiceHost.h"
 #endif
 
 #ifdef XP_WIN
+#  include <d3d11.h>
+
 #  include "CompositorD3D11.h"
 #  include "TextureD3D11.h"
-#  include <d3d11.h>
 #  include "gfxWindowsPlatform.h"
 #  include "mozilla/gfx/DeviceManagerDx.h"
 #elif defined(XP_MACOSX)
-#  include "mozilla/gfx/MacIOSurface.h"
 #  include <errno.h>
+
+#  include "mozilla/gfx/MacIOSurface.h"
 #elif defined(MOZ_WIDGET_ANDROID)
-#  include <string.h>
 #  include <pthread.h>
+#  include <string.h>
+
 #  include "GeckoVRManager.h"
 #  include "mozilla/java/GeckoSurfaceTextureWrappers.h"
 #  include "mozilla/layers/CompositorThread.h"
@@ -925,11 +927,10 @@ void VRManager::VibrateHaptic(GamepadHandle aGamepadHandle,
   mHapticPulseRemaining[bestSlotIndex] = aDuration;
   MOZ_ASSERT(bestSlotIndex <= mHapticPromises.Length());
   if (bestSlotIndex == mHapticPromises.Length()) {
-    mHapticPromises.AppendElement(
-        UniquePtr<VRManagerPromise>(new VRManagerPromise(aPromise)));
+    mHapticPromises.AppendElement(std::make_unique<VRManagerPromise>(aPromise));
   } else {
     mHapticPromises[bestSlotIndex] =
-        UniquePtr<VRManagerPromise>(new VRManagerPromise(aPromise));
+        std::make_unique<VRManagerPromise>(aPromise);
   }
   PushState();
 }

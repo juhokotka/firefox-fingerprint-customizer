@@ -10,11 +10,9 @@ const {
   constructRealTimeInfoInjectionMessage,
   getLocalIsoTime,
   getCurrentTabMetadata,
-  constructRelevantMemoriesContextMessage,
   parseContentWithTokens,
   detectTokens,
   sanitizeUntrustedContent,
-  expandUrlTokens,
   expandUrlTokensInToolParams,
   replaceUrlsWithTokens,
   resolveMentionUrls,
@@ -25,46 +23,9 @@ const {
 const { ChatConversation } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/ui/modules/ChatConversation.sys.mjs"
 );
-const { MemoriesManager } = ChromeUtils.importESModule(
-  "moz-src:///browser/components/aiwindow/models/memories/MemoriesManager.sys.mjs"
-);
-const { MemoryStore } = ChromeUtils.importESModule(
-  "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs"
-);
 const { sinon } = ChromeUtils.importESModule(
   "resource://testing-common/Sinon.sys.mjs"
 );
-
-/**
- * Constants for test memories
- */
-const TEST_MEMORIES = [
-  {
-    memory_summary: "Loves drinking coffee",
-    category: "Food & Drink",
-    intent: "Plan / Organize",
-    score: 3,
-  },
-  {
-    memory_summary: "Buys dog food online",
-    category: "Pets & Animals",
-    intent: "Buy / Acquire",
-    score: 4,
-  },
-];
-
-/**
- * Helper function bulk-add memories
- */
-async function clearAndAddMemories() {
-  const memories = await MemoryStore.getMemories();
-  for (const memory of memories) {
-    await MemoryStore.hardDeleteMemory(memory.id);
-  }
-  for (const memory of TEST_MEMORIES) {
-    await MemoryStore.addMemory(memory);
-  }
-}
 
 /**
  * Constants for preference keys and test values
@@ -147,8 +108,30 @@ add_task(
     Assert.equal(result.url, "", "Should return empty URL");
     Assert.equal(result.title, "", "Should return empty title");
     Assert.equal(result.description, "", "Should return empty description");
+    Assert.equal(result.pageSlug, "", "Should return empty page slug");
   }
 );
+
+add_task(async function test_getCurrentTabMetadata_page_slug() {
+  const metadataFor = url =>
+    getCurrentTabMetadata([{ type: "currentTab", url, label: "Page" }]);
+
+  Assert.equal(
+    (await metadataFor("about:smartpage?page=heat-pump-quotes")).pageSlug,
+    "heat-pump-quotes",
+    "A smart page URL yields its slug"
+  );
+  Assert.equal(
+    (await metadataFor("https://example.com/?page=heat-pump-quotes")).pageSlug,
+    "",
+    "A web page URL has no slug"
+  );
+  Assert.equal(
+    (await metadataFor("about:smartpage?page=not%20valid")).pageSlug,
+    "",
+    "An invalid smart page name has no slug"
+  );
+});
 
 add_task(
   async function test_getCurrentTabMetadata_constructRealTimeInfoInjectionMessage() {
@@ -213,91 +196,6 @@ add_task(
       Assert.ok(mapping.todayDate, "Should still include date");
     } finally {
       clock.restore();
-      sb.restore();
-    }
-  }
-);
-
-add_task(async function test_constructRelevantMemoriesContextMessage() {
-  await clearAndAddMemories();
-  MemoriesManager._clearEmbeddingsCache();
-
-  const sb = sinon.createSandbox();
-  try {
-    // Mock getRelevantMemories to return coffee memory
-    const stub = sb.stub(MemoriesManager, "getRelevantMemories").resolves([
-      {
-        id: "food_drink.16ec1838",
-        memory_summary: "Loves drinking coffee",
-        category: "Food & Drink",
-        intent: "Plan / Organize",
-        score: 3,
-        similarity: 0.95,
-      },
-    ]);
-
-    const relevantMemoriesContextMessage =
-      await constructRelevantMemoriesContextMessage(
-        "I love drinking coffee",
-        {}
-      );
-    Assert.ok(stub.calledOnce, "getRelevantMemories should be called once");
-
-    // Check relevantMemoriesContextMessage's top level structure
-    Assert.strictEqual(
-      typeof relevantMemoriesContextMessage,
-      "object",
-      "Should return an object"
-    );
-    Assert.equal(
-      Object.keys(relevantMemoriesContextMessage).length,
-      2,
-      "Should have 2 keys"
-    );
-
-    // Check specific fields
-    Assert.equal(
-      relevantMemoriesContextMessage.role,
-      "system",
-      "Should have role 'system'"
-    );
-    Assert.ok(
-      relevantMemoriesContextMessage.content.includes("# Existing Memories"),
-      "Should include prompt template text"
-    );
-    Assert.ok(
-      relevantMemoriesContextMessage.content.includes("Loves drinking coffee"),
-      "Should include memory content about coffee"
-    );
-  } finally {
-    sb.restore();
-  }
-});
-
-add_task(
-  async function test_constructRelevantMemoriesContextMessage_no_relevant_memories() {
-    await clearAndAddMemories();
-    MemoriesManager._clearEmbeddingsCache();
-
-    const sb = sinon.createSandbox();
-    try {
-      // Mock getRelevantMemories to return empty array (no matches)
-      const stub = sb.stub(MemoriesManager, "getRelevantMemories").resolves([]);
-
-      const relevantMemoriesContextMessage =
-        await constructRelevantMemoriesContextMessage(
-          "I love drinking coffee",
-          {}
-        );
-      Assert.ok(stub.calledOnce, "getRelevantMemories should be called once");
-
-      // No relevant memories, so returned value should be null
-      Assert.equal(
-        relevantMemoriesContextMessage,
-        null,
-        "Should return null when there are no relevant memories"
-      );
-    } finally {
       sb.restore();
     }
   }
@@ -472,138 +370,6 @@ add_task(function test_detectTokens_custom_key() {
   Assert.ok(
     !result[0].hasOwnProperty("query"),
     "Result should not have default 'query' property"
-  );
-});
-
-// expandUrlTokens tests
-
-add_task(function test_expandUrlTokens_bare_token() {
-  const mapping = new Map([["GITHUB_COM_1", "https://github.com/foo"]]);
-  const result = expandUrlTokens(
-    "Check out §url_token: GITHUB_COM_1§ for details.",
-    mapping
-  );
-  Assert.equal(
-    result,
-    "Check out https://github.com/foo for details.",
-    "Bare token should be replaced with full URL"
-  );
-});
-
-add_task(function test_expandUrlTokens_bracketed_id_in_href_resolved() {
-  const mapping = new Map([["GITHUB_COM_1", "https://github.com/foo"]]);
-  const result = expandUrlTokens(
-    "[Click here](§url_token: GITHUB_COM_1§)",
-    mapping
-  );
-  Assert.equal(
-    result,
-    "[Click here](https://github.com/foo)",
-    "Bracketed ID in href should be expanded to full URL"
-  );
-});
-
-add_task(function test_expandUrlTokens_same_domain() {
-  const mapping = new Map([
-    ["GITHUB_COM_1", "https://github.com/foo"],
-    ["GITHUB_COM_2", "https://github.com/foo/bar"],
-  ]);
-  const result = expandUrlTokens(
-    "[Click here](§url_token: GITHUB_COM_2§)",
-    mapping
-  );
-  Assert.equal(
-    result,
-    "[Click here](https://github.com/foo/bar)",
-    "Bracketed ID in href should be expanded to longer URL"
-  );
-});
-
-add_task(function test_expandUrlTokens_no_space() {
-  const mapping = new Map([["GITHUB_COM_1", "https://github.com/foo"]]);
-  const result = expandUrlTokens(
-    "[Click here](§url_token:GITHUB_COM_1§)",
-    mapping
-  );
-  Assert.equal(
-    result,
-    "[Click here](https://github.com/foo)",
-    "Should handle missing space after token type and still expand to correct URL"
-  );
-});
-
-add_task(function test_expandUrlTokens_no_mapping() {
-  const mapping = new Map();
-  const result = expandUrlTokens(
-    "[Click here](§url_token: GITHUB_COM_2§)",
-    mapping
-  );
-  Assert.equal(
-    result,
-    "[Click here](§url_token: GITHUB_COM_2§)",
-    "ID should remain unchanged if not in mapping"
-  );
-});
-
-add_task(function test_expandUrlTokens_lowercase() {
-  const mapping = new Map([["github_com_1", "https://github.com/foo"]]);
-  const result = expandUrlTokens(
-    "[Click here](§url_token: github_com_1§)",
-    mapping
-  );
-  Assert.equal(
-    result,
-    "[Click here](§url_token: github_com_1§)",
-    "Shouldn't match lowercase ID"
-  );
-});
-
-add_task(function test_expandUrlTokens_no_digits() {
-  const mapping = new Map([["GITHUB_COM", "https://github.com/foo"]]);
-  const result = expandUrlTokens(
-    "[Click here](§url_token: GITHUB_COM§)",
-    mapping
-  );
-  Assert.equal(
-    result,
-    "[Click here](§url_token: GITHUB_COM§)",
-    "Shouldn't match tags missing digits"
-  );
-});
-
-add_task(function test_expandUrlTokens_special_characters() {
-  const mapping = new Map([["GITHUB_COM$_1", "https://github.com/foo"]]);
-  const result = expandUrlTokens(
-    "[Click here](§url_token: GITHUB_COM$_1§)",
-    mapping
-  );
-  Assert.equal(
-    result,
-    "[Click here](§url_token: GITHUB_COM$_1§)",
-    "Shouldn't match tags with special characters"
-  );
-});
-
-add_task(function test_expandUrlTokens_missing_separator() {
-  const mapping = new Map([["GITHUB_COM_1", "https://github.com/foo"]]);
-  const result = expandUrlTokens(
-    "[Click here](url_token: GITHUB_COM_1)",
-    mapping
-  );
-  Assert.equal(
-    result,
-    "[Click here](url_token: GITHUB_COM_1)",
-    "Shouldn't match missing § separators"
-  );
-});
-
-add_task(function test_expandUrlTokens_wrong_tag_name() {
-  const mapping = new Map([["GITHUB_COM_1", "https://github.com/foo"]]);
-  const result = expandUrlTokens("[Click here](§url: GITHUB_COM_1§)", mapping);
-  Assert.equal(
-    result,
-    "[Click here](§url: GITHUB_COM_1§)",
-    "Shouldn't match wrong tag name"
   );
 });
 

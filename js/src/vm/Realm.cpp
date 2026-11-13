@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "js/shadow/Realm.h"  // JS::shadow::Realm
-#include "vm/Realm-inl.h"
 
 #include "mozilla/MemoryReporting.h"
 
@@ -30,8 +29,10 @@
 #include "wasm/WasmInstance.h"
 
 #include "gc/Marking-inl.h"
+#include "gc/StableCellHasher-inl.h"
 #include "gc/WeakMap-inl.h"
 #include "vm/JSObject-inl.h"
+#include "vm/Realm-inl.h"
 
 using namespace js;
 
@@ -304,7 +305,7 @@ void Realm::traceRoots(JSTracer* trc,
   }
 
   objects_.trace(trc);
-  baselineCompileQueue_.trace(trc);
+  jitRealm_.trace(trc);
 }
 
 void ObjectRealm::finishRoots() {
@@ -338,6 +339,19 @@ void Realm::sweepAfterMinorGC(JSTracer* trc) {
   objects_.sweepAfterMinorGC(trc);
 }
 
+#ifdef JSGC_HASH_TABLE_CHECKS
+void Realm::checkModuleScriptSourcesAfterMovingGC() {
+  objects_.checkModuleScriptSourcesAfterMovingGC(zone_);
+}
+
+void ObjectRealm::checkModuleScriptSourcesAfterMovingGC(JS::Zone* zone) {
+  gc::CheckTableAfterMovingGC(moduleScriptSources, [zone](const auto& entry) {
+    gc::CheckGCThingAfterMovingGC(entry, zone);
+    return entry.unbarrieredGet();
+  });
+}
+#endif
+
 void Realm::traceWeakSavedStacks(JSTracer* trc) { savedStacks_.traceWeak(trc); }
 
 void Realm::traceWeakGlobalEdge(JSTracer* trc) {
@@ -365,11 +379,8 @@ void Realm::purge() {
   newProxyCache.purge();
   newPlainObjectWithPropsCache.purge();
   plainObjectAssignCache.purge();
+  plainObjectSpreadCache.purge();
   objects_.iteratorCache.clearAndCompact();
-}
-
-void Realm::removeFromCompileQueue(JSScript* script) {
-  baselineCompileQueue_.remove(script);
 }
 
 // Check to see if this individual realm is recording allocations. Debuggers or
@@ -390,8 +401,8 @@ void Realm::setAllocationMetadataBuilder(
     }
   }
 
-  for (wasm::Instance* instance : wasm.instances()) {
-    instance->setAllocationMetadataBuilder(builder);
+  for (auto iter = wasm.instances().iter(); !iter.done(); iter.next()) {
+    iter.get()->setAllocationMetadataBuilder(builder);
   }
   allocationMetadataBuilder_ = builder;
 }
@@ -410,8 +421,8 @@ void Realm::forgetAllocationMetadataBuilder() {
 
   zone()->decNumRealmsWithAllocMetadataBuilder();
 
-  for (wasm::Instance* instance : wasm.instances()) {
-    instance->setAllocationMetadataBuilder(nullptr);
+  for (auto iter = wasm.instances().iter(); !iter.done(); iter.next()) {
+    iter.get()->setAllocationMetadataBuilder(nullptr);
   }
   allocationMetadataBuilder_ = nullptr;
 }
@@ -629,7 +640,8 @@ void Realm::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                    size_t* innerViewsArg,
                                    size_t* objectMetadataTablesArg,
                                    size_t* savedStacksSet,
-                                   size_t* nonSyntacticLexicalEnvironmentsArg) {
+                                   size_t* nonSyntacticLexicalEnvironmentsArg,
+                                   size_t* cacheIRStubs) {
   *realmObject += mallocSizeOf(this);
   wasm.addSizeOfExcludingThis(mallocSizeOf, realmTables);
 
@@ -638,6 +650,8 @@ void Realm::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                   nonSyntacticLexicalEnvironmentsArg);
 
   *savedStacksSet += savedStacks_.sizeOfExcludingThis(mallocSizeOf);
+
+  jitRealm_.addSizeOfExcludingThis(mallocSizeOf, cacheIRStubs);
 }
 
 bool Realm::shouldCaptureStackForThrow() {
@@ -811,6 +825,16 @@ JS_PUBLIC_API JSObject* JS::GetRealmErrorPrototype(JSContext* cx) {
 JS_PUBLIC_API JSObject* JS::GetRealmIteratorPrototype(JSContext* cx) {
   CHECK_THREAD(cx);
   return GlobalObject::getOrCreateIteratorPrototype(cx, cx->global());
+}
+
+JS_PUBLIC_API JSObject* JS::GetRealmMapIteratorPrototype(JSContext* cx) {
+  CHECK_THREAD(cx);
+  return GlobalObject::getOrCreateMapIteratorPrototype(cx, cx->global());
+}
+
+JS_PUBLIC_API JSObject* JS::GetRealmSetIteratorPrototype(JSContext* cx) {
+  CHECK_THREAD(cx);
+  return GlobalObject::getOrCreateSetIteratorPrototype(cx, cx->global());
 }
 
 JS_PUBLIC_API JSObject* JS::GetRealmAsyncIteratorPrototype(JSContext* cx) {

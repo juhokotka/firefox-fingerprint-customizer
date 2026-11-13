@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CompositableTransactionParent.h"
+
 #include "CompositableHost.h"        // for CompositableParent, etc
 #include "CompositorBridgeParent.h"  // for CompositorBridgeParent
 #include "mozilla/Assertions.h"      // for MOZ_ASSERT, etc

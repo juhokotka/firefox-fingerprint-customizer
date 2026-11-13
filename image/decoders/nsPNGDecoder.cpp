@@ -3,25 +3,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "ImageLogging.h"  // Must appear first
 #include "nsPNGDecoder.h"
 
 #include <algorithm>
 #include <cstdint>
 
 #include "EXIF.h"
+#include "ImageLogging.h"  // Must appear first
+#include "RasterImage.h"
+#include "SurfaceCache.h"
+#include "SurfacePipeFactory.h"
 #include "gfxColor.h"
 #include "gfxPlatform.h"
 #include "imgFrame.h"
+#include "mozilla/DebugOnly.h"
 #include "nsColor.h"
 #include "nsRect.h"
 #include "nspr.h"
 #include "png.h"
-
-#include "RasterImage.h"
-#include "SurfaceCache.h"
-#include "SurfacePipeFactory.h"
-#include "mozilla/DebugOnly.h"
 
 using namespace mozilla::gfx;
 
@@ -1085,8 +1084,11 @@ void nsPNGDecoder::error_callback(png_structp png_ptr,
   nsPNGDecoder* decoder =
       static_cast<nsPNGDecoder*>(png_get_progressive_ptr(png_ptr));
 
+  // A bad CRC on a critical chunk is recoverable: other browsers keep the rows
+  // they decoded before the bad chunk instead of failing the whole image.
   if (strstr(error_msg, "invalid chunk type") ||
-      strstr(error_msg, "bad header (invalid type)")) {
+      strstr(error_msg, "bad header (invalid type)") ||
+      strstr(error_msg, "CRC error")) {
     decoder->mErrorIsRecoverable = true;
   } else {
     decoder->mErrorIsRecoverable = false;

@@ -192,8 +192,11 @@ function startClient(port, beConservative, expectSuccess) {
 
       // Only check telemetry if network process is disabled.
       if (!mozinfo.socketprocess_networking) {
-        // 98 is SSL_ERROR_PROTOCOL_VERSION_ALERT (see sslerr.h)
-        HandshakeTelemetryHelpers.checkEntry(flavors, 98, 1);
+        HandshakeTelemetryHelpers.checkEntry(
+          flavors,
+          "SSL_ERROR_PROTOCOL_VERSION_ALERT",
+          1
+        );
         HandshakeTelemetryHelpers.checkEmpty(nonflavors);
       }
 
@@ -208,7 +211,7 @@ add_task(async function () {
   Services.prefs.setIntPref("security.tls.version.max", 4);
   Services.prefs.setCharPref("network.dns.localDomains", hostname);
   Services.prefs.setIntPref("network.http.speculative-parallel-limit", 0);
-  let cert = getTestServerCertificate();
+  let cert = await getTestServerCertificate();
 
   // First run a server that accepts TLS 1.2 and 1.3. A conservative client
   // should succeed in connecting.

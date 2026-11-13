@@ -6,18 +6,19 @@
  * nsWinGesture - Touch input handling for tablet displays.
  */
 
-#include "nscore.h"
 #include "nsWinGesture.h"
+
+#include <uxtheme.h>
+
+#include <numbers>
+
 #include "mozilla/Logging.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/dom/SimpleGestureEventBinding.h"
 #include "mozilla/dom/WheelEventBinding.h"
-
-#include <uxtheme.h>
-
-#include <numbers>
+#include "nscore.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;

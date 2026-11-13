@@ -29,7 +29,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,6 +44,8 @@ import org.mozilla.focus.ui.menu.MenuItem
 import org.mozilla.focus.ui.theme.focusColors
 import org.mozilla.focus.ui.theme.focusDimensions
 
+const val TOP_SITES_ROW_TEST_TAG = "topSitesRow"
+
 /**
  * A list of top sites.
  *
@@ -49,7 +54,6 @@ import org.mozilla.focus.ui.theme.focusDimensions
  * @param onRemoveTopSiteClicked Invoked when the user clicked 'Remove' item from drop down menu
  * @param onRenameTopSiteClicked Invoked when the user clicked 'Rename' item from drop down menu
  */
-
 @Composable
 fun TopSites(
     topSites: List<TopSite>,
@@ -58,25 +62,28 @@ fun TopSites(
     onRenameTopSiteClicked: (TopSite) -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .padding(horizontal = focusDimensions.paddingText)
-            .size(width = 324.dp, height = 86.dp),
+        modifier =
+            Modifier.semantics { testTagsAsResourceId = true }
+                .testTag(TOP_SITES_ROW_TEST_TAG)
+                .padding(horizontal = focusDimensions.paddingText)
+                .size(width = 324.dp, height = 86.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(28.dp),
     ) {
         topSites.forEach { topSite ->
             TopSiteItem(
                 topSite = topSite,
-                menuItems = listOfNotNull(
-                    MenuItem(
-                        title = stringResource(R.string.rename_top_site_item),
-                        onClick = { onRenameTopSiteClicked(topSite) },
+                menuItems =
+                    listOfNotNull(
+                        MenuItem(
+                            title = stringResource(R.string.rename_top_site_item),
+                            onClick = { onRenameTopSiteClicked(topSite) },
+                        ),
+                        MenuItem(
+                            title = stringResource(R.string.remove_top_site),
+                            onClick = { onRemoveTopSiteClicked(topSite) },
+                        ),
                     ),
-                    MenuItem(
-                        title = stringResource(R.string.remove_top_site),
-                        onClick = { onRemoveTopSiteClicked(topSite) },
-                    ),
-                ),
                 onTopSiteClick = { item -> onTopSiteClicked(item) },
             )
         }
@@ -100,15 +107,15 @@ private fun TopSiteItem(
 
     Box {
         Column(
-            modifier = Modifier
-                .combinedClickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = { onTopSiteClick(topSite) },
-                    onLongClick = { menuExpanded = true },
-                )
-                .width(60.dp)
-                .fillMaxHeight(),
+            modifier =
+                Modifier.combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onTopSiteClick(topSite) },
+                        onLongClick = { menuExpanded = true },
+                    )
+                    .width(60.dp)
+                    .fillMaxHeight(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             TopSiteFaviconCard(topSite = topSite)
@@ -142,9 +149,7 @@ private fun TopSiteFaviconCard(topSite: TopSite) {
     Card(
         modifier = Modifier.size(60.dp),
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = focusColors.topSiteBackground,
-        ),
+        colors = CardDefaults.cardColors(containerColor = focusColors.topSiteBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Box(
@@ -162,11 +167,12 @@ private fun TopSiteFaviconCard(topSite: TopSite) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = if (topSite.title.isNullOrEmpty()) {
-                            topSite.url.getRepresentativeCharacter()
-                        } else {
-                            topSite.title?.get(0).toString()
-                        },
+                        text =
+                            if (topSite.title.isNullOrEmpty()) {
+                                topSite.url.getRepresentativeCharacter()
+                            } else {
+                                topSite.title?.get(0).toString()
+                            },
                         color = focusColors.topSiteFaviconText,
                         fontSize = 20.sp,
                     )

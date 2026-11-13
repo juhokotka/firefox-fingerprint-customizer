@@ -12,12 +12,6 @@ const TEST_BLOB_CONTENTS = `I'm a disk-backed test blob! Hooray!`;
 add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
     set: [
-      // Set preferences so that opening a page with the origin "example.org"
-      // will result in a remoteType of "privilegedmozilla" for both the
-      // page and the ServiceWorker.
-      ["browser.tabs.remote.separatePrivilegedMozillaWebContentProcess", true],
-      ["browser.tabs.remote.separatedMozillaDomains", "example.org"],
-      ["dom.ipc.processCount.privilegedmozilla", 1],
       ["dom.ipc.processPrelaunch.enabled", false],
       ["dom.serviceWorkers.enabled", true],
       ["dom.serviceWorkers.testing.enabled", true],
@@ -306,87 +300,65 @@ async function makeFileBlob(blobContents) {
 }
 
 function getSWTelemetrySums() {
-  let telemetry = Cc["@mozilla.org/base/telemetry;1"].getService(
-    Ci.nsITelemetry
-  );
-  let keyedhistograms = telemetry.getSnapshotForKeyedHistograms(
-    "main",
-    false
-  ).parent;
-  let keyedscalars = telemetry.getSnapshotForKeyedScalars("main", false).parent;
-  // We're not looking at the distribution of the histograms, just that they changed
+  // We're not looking at the distribution of the metrics, just that they changed
   return {
-    SERVICE_WORKER_RUNNING_All: keyedhistograms.SERVICE_WORKER_RUNNING
-      ? keyedhistograms.SERVICE_WORKER_RUNNING.All.sum
-      : 0,
-    SERVICE_WORKER_RUNNING_Fetch: keyedhistograms.SERVICE_WORKER_RUNNING
-      ? keyedhistograms.SERVICE_WORKER_RUNNING.Fetch.sum
-      : 0,
+    runningAll: Glean.serviceWorker.running.All.testGetValue()?.sum ?? 0,
+    runningFetch: Glean.serviceWorker.running.Fetch.testGetValue()?.sum ?? 0,
   };
 }
 
 add_task(async function test() {
-  // Can't test telemetry without this since we may not be on the nightly channel
-  let oldCanRecord = Services.telemetry.canRecordExtended;
-  Services.telemetry.canRecordExtended = true;
-  registerCleanupFunction(() => {
-    Services.telemetry.canRecordExtended = oldCanRecord;
-  });
-
   let initialSums = getSWTelemetrySums();
 
-  // ## Isolated Privileged Process
-  // Trigger a straightforward intercepted navigation with no request body that
-  // returns a synthetic response.
-  await do_test_sw("example.org", "privilegedmozilla", "synthetic", null);
-
-  // Trigger an intercepted navigation with FormData containing an
-  // <input type="file"> which will result in the request body containing a
-  // RemoteLazyInputStream which will be consumed in the content process by the
-  // ServiceWorker while generating the synthetic response.
   const fileBlob = await makeFileBlob(TEST_BLOB_CONTENTS);
-  await do_test_sw("example.org", "privilegedmozilla", "synthetic", fileBlob);
-
-  // Trigger an intercepted navigation with FormData containing an
-  // <input type="file"> which will result in the request body containing a
-  // RemoteLazyInputStream which will be relayed back to the parent process
-  // via direct invocation of fetch() on the event.request but without any
-  // cloning.
-  await do_test_sw("example.org", "privilegedmozilla", "fetch", fileBlob);
-
-  // Same as the above but cloning the request before fetching it.
-  await do_test_sw("example.org", "privilegedmozilla", "clone", fileBlob);
 
   // ## Fission Isolation
   if (Services.appinfo.fissionAutostart) {
     // ## ServiceWorker isolation
     const isolateUrl = "example.com";
     const isolateRemoteType = `webServiceWorker=https://` + isolateUrl;
+    // Trigger a straightforward intercepted navigation with no request body
+    // that returns a synthetic response.
     await do_test_sw(isolateUrl, isolateRemoteType, "synthetic", null);
+
+    // Trigger an intercepted navigation with FormData containing an
+    // <input type="file"> which will result in the request body containing a
+    // RemoteLazyInputStream which will be consumed in the content process by
+    // the ServiceWorker while generating the synthetic response.
     await do_test_sw(isolateUrl, isolateRemoteType, "synthetic", fileBlob);
+
+    // Trigger an intercepted navigation with FormData containing an
+    // <input type="file"> which will result in the request body containing a
+    // RemoteLazyInputStream which will be relayed back to the parent process
+    // via direct invocation of fetch() on the event.request but without any
+    // cloning.
+    await do_test_sw(isolateUrl, isolateRemoteType, "fetch", fileBlob);
+
+    // Same as the above but cloning the request before fetching it.
+    await do_test_sw(isolateUrl, isolateRemoteType, "clone", fileBlob);
   }
   let telemetrySums = getSWTelemetrySums();
   info(JSON.stringify(telemetrySums));
   info(
     "Initial Running All: " +
-      initialSums.SERVICE_WORKER_RUNNING_All +
+      initialSums.runningAll +
       ", Fetch: " +
-      initialSums.SERVICE_WORKER_RUNNING_Fetch
+      initialSums.runningFetch
   );
   info(
     "Running All: " +
-      telemetrySums.SERVICE_WORKER_RUNNING_All +
+      telemetrySums.runningAll +
       ", Fetch: " +
-      telemetrySums.SERVICE_WORKER_RUNNING_Fetch
+      telemetrySums.runningFetch
   );
   Assert.greater(
-    telemetrySums.SERVICE_WORKER_RUNNING_All,
-    initialSums.SERVICE_WORKER_RUNNING_All,
+    telemetrySums.runningAll,
+    initialSums.runningAll,
     "ServiceWorker running count changed"
   );
   Assert.greater(
-    telemetrySums.SERVICE_WORKER_RUNNING_Fetch,
-    initialSums.SERVICE_WORKER_RUNNING_Fetch,
+    telemetrySums.runningFetch,
+    initialSums.runningFetch,
     "ServiceWorker running count changed"
   );
 });

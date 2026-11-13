@@ -6,26 +6,23 @@ package mozilla.components.support.locale
 
 import java.util.Locale
 
-fun String.toLocale(): Locale {
-    val index: Int = if (contains('-')) {
-        indexOf('-')
-    } else {
-        indexOf('_')
-    }
-    return if (index != -1) {
-        val langCode = substring(0, index)
-        val countryCode = substring(index + 1)
-        Locale.Builder().setLanguage(langCode).setRegion(countryCode).build()
-    } else {
-        Locale.forLanguageTag(this)
-    }
-}
+/**
+ * Converts a locale string into a [Locale].
+ *
+ * Locale identifiers may be provided either in legacy Java format (for example, "en_US") or as BCP-47 language tags
+ * (for example, "en-US", "zh-Hant-TW", or "fa-IR-u-nu-latn").
+ *
+ * Underscores are normalized to hyphens before parsing to support legacy locale formats while delegating locale parsing
+ * to the platform implementation.
+ *
+ * Using [Locale.forLanguageTag] ensures that language tags containing scripts, variants, or Unicode extensions are
+ * handled correctly.
+ */
+fun String.toLocale(): Locale = if (isBlank()) Locale.ROOT else Locale.forLanguageTag(replace('_', '-'))
 
 /**
- * Gets a gecko-compatible locale string (e.g. "es-ES" instead of Java [Locale]
- * "es_ES") for the default locale.
- * If the locale can't be determined on the system, the value is "und",
- * to indicate "undetermined".
+ * Gets a gecko-compatible locale string (e.g. "es-ES" instead of Java [Locale] "es_ES") for the default locale. If the
+ * locale can't be determined on the system, the value is "und", to indicate "undetermined".
  *
  * This method approximates the API21 method [Locale.toLanguageTag].
  *
@@ -41,12 +38,13 @@ fun Locale.getLocaleTag(): String {
 
     // `locale.language` can, but should never be, an empty string.
     // Modernize certain language codes.
-    val language = when (this.language) {
-        "iw" -> "he"
-        "in" -> "id"
-        "ji" -> "yi"
-        else -> this.language
-    }
+    val language =
+        when (this.language) {
+            "iw" -> "he"
+            "in" -> "id"
+            "ji" -> "yi"
+            else -> this.language
+        }
     val country = this.country // Can be an empty string.
 
     return when {

@@ -29,6 +29,7 @@
 #include "pc/test/mock_peer_connection_observers.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/thread.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/run_loop.h"
@@ -81,17 +82,15 @@ class QuitOnSuccessSetObserver : public SetLocalDescriptionObserverInterface {
 class PeerConnectionAudioOptionsTest : public ::testing::Test {
  public:
   PeerConnectionAudioOptionsTest()
-      : worker_thread_(Thread::Create()),
-        network_thread_(Thread::CreateWithSocketServer()) {
+      : network_thread_(Thread::CreateWithSocketServer()) {
     network_thread_->Start();
-    worker_thread_->Start();
 
     PeerConnectionFactoryDependencies dependencies;
     dependencies.network_thread = network_thread_.get();
-    dependencies.worker_thread = worker_thread_.get();
     dependencies.signaling_thread = Thread::Current();
 
     EnableFakeMedia(dependencies, std::make_unique<FakeMediaEngine>());
+    dependencies.env = CreateTestEnvironment();
 
     pc_factory_ = CreateModularPeerConnectionFactory(std::move(dependencies));
   }
@@ -117,9 +116,7 @@ class PeerConnectionAudioOptionsTest : public ::testing::Test {
             pc_.get());
     return static_cast<PeerConnection*>(proxy->internal());
   }
-
   RunLoop loop_;
-  std::unique_ptr<Thread> worker_thread_;
   std::unique_ptr<Thread> network_thread_;
   scoped_refptr<PeerConnectionFactoryInterface> pc_factory_;
   scoped_refptr<PeerConnectionInterface> pc_;

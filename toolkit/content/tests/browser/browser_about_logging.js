@@ -17,10 +17,10 @@ function clearLoggingPrefs() {
 
   // Clear devtools.performance.recording preferences that may be set by about:logging
   const devtoolsPrefs = [
-    "devtools.performance.recording.preset",
-    "devtools.performance.recording.entries",
-    "devtools.performance.recording.threads",
-    "devtools.performance.recording.features",
+    "devtools.performance.recording.preset.aboutlogging",
+    "devtools.performance.recording.entries.aboutlogging",
+    "devtools.performance.recording.threads.aboutlogging",
+    "devtools.performance.recording.features.aboutlogging",
     "devtools.performance.popup.intro-displayed",
   ];
 
@@ -29,13 +29,15 @@ function clearLoggingPrefs() {
   }
 }
 
-function clearUploadedProfilesDB(content) {
-  return new Promise(resolve => {
-    const deleteRequest = content.indexedDB.deleteDatabase(
-      "aboutLoggingProfiles"
+async function clearUploadedProfilesDB() {
+  const { deleteUploadedProfile, getAllUploadedProfiles } =
+    ChromeUtils.importESModule(
+      "chrome://global/content/aboutLogging/profileStorage.mjs"
     );
-    deleteRequest.onsuccess = deleteRequest.onerror = resolve;
-  });
+
+  for (let profile of await getAllUploadedProfiles()) {
+    await deleteUploadedProfile(profile.id);
+  }
 }
 
 /**
@@ -79,10 +81,6 @@ async function getElementFromDocumentByText(document, text) {
 // Before running, save any MOZ_LOG environment variable that might be preset,
 // and restore them at the end of this test.
 add_setup(async function saveRestoreLogModules() {
-  await SpecialPowers.pushPrefEnv({
-    set: [["test.wait300msAfterTabSwitch", true]],
-  });
-
   let savedLogModules = Services.env.get("MOZ_LOG");
   Services.env.set("MOZ_LOG", "");
   registerCleanupFunction(() => {
@@ -281,6 +279,80 @@ add_task(async function testURLParameters() {
   clearLoggingPrefs();
 });
 
+// A URL can carry both an explicit module list and a logging preset. The
+// module list switches the dropdown to "custom", but the preset must still be
+// honoured, because the profiler threads to record are taken from it.
+add_task(async function testPresetAndModulesInURL() {
+  const modules =
+    "timestamp,sync,nsHttp:5,nsWebSocket:5,nsSocketTransport:5,nsHostResolver:5";
+  const url =
+    PAGE +
+    "?modules=" +
+    encodeURIComponent(modules) +
+    "&preset=websocket&output=profiler";
+
+  await BrowserTestUtils.withNewTab(url, async browser => {
+    await SpecialPowers.spawn(browser, [modules], async modulesInURL => {
+      let $ = content.document.querySelector.bind(content.document);
+      Assert.equal(
+        content.settings().loggingPreset,
+        "websocket",
+        "When both modules and a preset are passed via URL params, the preset is kept in the logging manager settings."
+      );
+      Assert.equal(
+        $("#log-modules").value,
+        modulesInURL,
+        "The explicit module list from the URL params takes precedence over the preset's module list."
+      );
+    });
+
+    let profilerOpenedPromise = BrowserTestUtils.waitForNewTab(
+      gBrowser,
+      "https://example.com/",
+      false
+    );
+    SpecialPowers.spawn(browser, [], async () => {
+      let $ = content.document.querySelector.bind(content.document);
+      // Override the URL the profiler uses to avoid hitting external
+      // resources (and crash).
+      await SpecialPowers.pushPrefEnv({
+        set: [
+          ["devtools.performance.recording.ui-base-url", "https://example.com"],
+          ["devtools.performance.recording.ui-base-url-path", "/"],
+        ],
+      });
+      $("#toggle-logging-button").click();
+      // Wait for the profiler to start. This can be very slow.
+      await content.profilerPromise();
+      // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+      await new Promise(resolve => content.setTimeout(resolve, 200));
+      $("#toggle-logging-button").click();
+    });
+    let tab = await profilerOpenedPromise;
+    await BrowserTestUtils.removeTab(tab);
+  });
+
+  Assert.equal(
+    Services.prefs.getCharPref(
+      "devtools.performance.recording.preset.aboutlogging"
+    ),
+    "networking",
+    "The profiler preset associated with the logging preset from the URL params is used."
+  );
+  const threads = JSON.parse(
+    Services.prefs.getCharPref(
+      "devtools.performance.recording.threads.aboutlogging"
+    )
+  );
+  for (const thread of ["Socket Thread", "DNS Resolver", "Cache2 I/O"]) {
+    Assert.ok(
+      threads.includes(thread),
+      `The threads of the profiler preset are recorded (${thread}).`
+    );
+  }
+  clearLoggingPrefs();
+});
+
 // Test various things related to presets: that it's populated correctly, that
 // setting presets work in terms of UI, but also that it sets the logging.*
 // prefs correctly.
@@ -384,6 +456,77 @@ add_task(async function testAboutLoggingPresets() {
   clearLoggingPrefs();
 });
 
+// Test that a preset flagged with `javascriptTracing` checks the JavaScript
+// tracing checkbox without persisting it, so that selecting another preset
+// goes back to the preference the user set.
+add_task(async function testPresetChecksJavascriptTracing() {
+  await BrowserTestUtils.withNewTab(PAGE, async browser => {
+    await SpecialPowers.spawn(browser, [], async () => {
+      let $ = content.document.querySelector.bind(content.document);
+      const checkbox = $("#with-javascript-tracing-checkbox");
+      const presetsDropdown = $("#logging-preset-dropdown");
+      // Selecting a preset happens in "onchange", asynchronously.
+      const selectPreset = async preset => {
+        presetsDropdown.value = preset;
+        presetsDropdown.dispatchEvent(new content.Event("change"));
+        // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+        await new Promise(resolve => content.setTimeout(resolve, 0));
+      };
+
+      Assert.ok(
+        !checkbox.checked,
+        "The JavaScript tracing checkbox isn't checked at load time."
+      );
+      Assert.ok(
+        content.presets().vpn.javascriptTracing,
+        "The vpn preset is flagged to enable JavaScript tracing."
+      );
+
+      await selectPreset("vpn");
+      Assert.ok(
+        checkbox.checked,
+        "Selecting the vpn preset checks the JavaScript tracing checkbox."
+      );
+      Assert.ok(
+        !Services.prefs.getBoolPref("logging.config.javascriptTracing", false),
+        "Selecting the vpn preset doesn't set the JavaScript tracing preference."
+      );
+
+      await selectPreset("networking");
+      Assert.ok(
+        !checkbox.checked,
+        "Selecting another preset unchecks the JavaScript tracing checkbox."
+      );
+
+      Services.prefs.setBoolPref("logging.config.javascriptTracing", true);
+      await selectPreset("vpn");
+      await selectPreset("networking");
+      Assert.ok(
+        checkbox.checked,
+        "A preset switch keeps the JavaScript tracing preference the user set."
+      );
+    });
+  });
+  clearLoggingPrefs();
+});
+
+// Test that a preset persisted from a previous session is reflected in the
+// JavaScript tracing checkbox at load time, even though the preset dropdown
+// itself is not restored from the preference.
+add_task(async function testPersistedPresetChecksJavascriptTracing() {
+  Services.prefs.setCharPref("logging.config.preset", "vpn");
+  await BrowserTestUtils.withNewTab(PAGE, async browser => {
+    await SpecialPowers.spawn(browser, [], async () => {
+      Assert.ok(
+        content.document.querySelector("#with-javascript-tracing-checkbox")
+          .checked,
+        "A persisted preset checks the JavaScript tracing checkbox at load time."
+      );
+    });
+  });
+  clearLoggingPrefs();
+});
+
 // Test various things around the profiler stacks feature
 add_task(async function testProfilerStacks() {
   // Check the initial state before changing anything.
@@ -468,6 +611,67 @@ add_task(async function testProfilerOpens() {
   clearLoggingPrefs();
 });
 
+// Test that starting and stopping log collection via about:logging doesn't
+// clobber the recording settings used for normal profiling (the profiler
+// popup, about:profiling), since they're stored under different prefs.
+add_task(async function testProfilerPrefsIsolation() {
+  // Simulate a preset already configured for normal, day to day profiling.
+  Services.prefs.setCharPref("devtools.performance.recording.preset", "media");
+  Services.prefs.setIntPref("devtools.performance.recording.entries", 12345);
+
+  await BrowserTestUtils.withNewTab(PAGE, async browser => {
+    let profilerOpenedPromise = BrowserTestUtils.waitForNewTab(
+      gBrowser,
+      "https://example.com/",
+      false
+    );
+    SpecialPowers.spawn(browser, [], async () => {
+      let $ = content.document.querySelector.bind(content.document);
+      // Override the URL the profiler uses to avoid hitting external
+      // resources (and crash).
+      await SpecialPowers.pushPrefEnv({
+        set: [
+          ["devtools.performance.recording.ui-base-url", "https://example.com"],
+          ["devtools.performance.recording.ui-base-url-path", "/"],
+        ],
+      });
+      $("#logging-preset-dropdown").value = "networking";
+      $("#logging-preset-dropdown").dispatchEvent(new content.Event("change"));
+      $("#set-log-modules-button").click();
+      $("#toggle-logging-button").click();
+      // Wait for the profiler to start. This can be very slow.
+      await content.profilerPromise();
+      // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+      await new Promise(resolve => content.setTimeout(resolve, 200));
+      $("#toggle-logging-button").click();
+    });
+    let tab = await profilerOpenedPromise;
+    await BrowserTestUtils.removeTab(tab);
+  });
+
+  Assert.equal(
+    Services.prefs.getCharPref("devtools.performance.recording.preset"),
+    "media",
+    "Using about:logging must not change the profiler popup's preset."
+  );
+  Assert.equal(
+    Services.prefs.getIntPref("devtools.performance.recording.entries"),
+    12345,
+    "Using about:logging must not change the profiler popup's entries pref."
+  );
+  Assert.equal(
+    Services.prefs.getCharPref(
+      "devtools.performance.recording.preset.aboutlogging"
+    ),
+    "networking",
+    "about:logging uses its own, separate preset pref."
+  );
+
+  Services.prefs.clearUserPref("devtools.performance.recording.preset");
+  Services.prefs.clearUserPref("devtools.performance.recording.entries");
+  clearLoggingPrefs();
+});
+
 // Same test, outputing to a file, with network logging, while opening and
 // closing a tab. We only check that the file exists and has a non-zero size.
 add_task(async function testLogFileFound() {
@@ -527,6 +731,8 @@ add_task(async function testLogFileFound() {
 
 // Roughly test the Android-specific UI
 add_task(async function testAndroidUI() {
+  await clearUploadedProfilesDB();
+
   await SpecialPowers.pushPrefEnv({
     set: [
       ["toolkit.aboutLogging.uploadProfileToCloud", true],
@@ -649,7 +855,7 @@ add_task(async function testAndroidUI() {
       "The error is output to the user."
     );
 
-    await clearUploadedProfilesDB(content);
+    await clearUploadedProfilesDB();
   });
 });
 
@@ -703,6 +909,8 @@ add_task(async function testCopyToClipboard() {
 
 // Test the uploaded profiles functionality.
 add_task(async function testUploadedProfilesFeatures() {
+  await clearUploadedProfilesDB();
+
   await SpecialPowers.pushPrefEnv({
     set: [
       ["toolkit.aboutLogging.uploadProfileToCloud", true],
@@ -718,7 +926,6 @@ add_task(async function testUploadedProfilesFeatures() {
   });
 
   await BrowserTestUtils.withNewTab(PAGE, async browser => {
-    await clearUploadedProfilesDB(content);
     const document = browser.contentDocument;
     const window = browser.contentWindow;
 
@@ -730,6 +937,11 @@ add_task(async function testUploadedProfilesFeatures() {
         () => $("#uploaded-profiles-section"),
         "Uploaded profiles section should be present"
       );
+      await ContentTaskUtils.waitForCondition(
+        () => content.gUploadedProfilesManager,
+        "Uploaded profiles manager should be initialized"
+      );
+      await content.gUploadedProfilesManager.refresh();
 
       const section = $("#uploaded-profiles-section");
       Assert.ok(section, "Uploaded profiles section should exist");
@@ -984,6 +1196,6 @@ add_task(async function testUploadedProfilesFeatures() {
       }
     );
 
-    await clearUploadedProfilesDB(content);
+    await clearUploadedProfilesDB();
   });
 });

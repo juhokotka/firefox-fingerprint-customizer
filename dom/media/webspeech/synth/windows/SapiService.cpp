@@ -35,7 +35,7 @@ class SapiCallback final : public nsISpeechTaskCallback {
     mStartingTime = TimeStamp::Now();
   }
 
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS_FINAL
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(SapiCallback, nsISpeechTaskCallback)
 
   NS_DECL_NSISPEECHTASKCALLBACK
@@ -46,7 +46,7 @@ class SapiCallback final : public nsISpeechTaskCallback {
   void OnSpeechEvent(const SPEVENT& speechEvent);
 
  private:
-  ~SapiCallback() {}
+  ~SapiCallback() = default;
 
   float GetTimeDurationFromStart() const {
     TimeDuration duration = TimeStamp::Now() - mStartingTime;
@@ -83,7 +83,7 @@ SapiCallback::OnPause() {
     return NS_ERROR_FAILURE;
   }
   if (!mTask) {
-    // When calling pause() on child porcess, it may not receive end event
+    // When calling pause() on child process, it may not receive end event
     // from chrome process yet.
     return NS_ERROR_FAILURE;
   }
@@ -97,7 +97,7 @@ SapiCallback::OnResume() {
     return NS_ERROR_FAILURE;
   }
   if (!mTask) {
-    // When calling resume() on child porcess, it may not receive end event
+    // When calling resume() on child process, it may not receive end event
     // from chrome process yet.
     return NS_ERROR_FAILURE;
   }
@@ -189,7 +189,7 @@ NS_IMPL_RELEASE(SapiService)
 
 SapiService::SapiService() : mInitialized(false) {}
 
-SapiService::~SapiService() {}
+SapiService::~SapiService() = default;
 
 bool SapiService::Init() {
   AUTO_PROFILER_LABEL("SapiService::Init", OTHER);

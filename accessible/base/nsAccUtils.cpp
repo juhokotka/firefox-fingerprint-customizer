@@ -4,26 +4,25 @@
 
 #include "nsAccUtils.h"
 
-#include "AccAttributes.h"
 #include "ARIAMap.h"
-#include "nsCoreUtils.h"
-#include "nsGenericHTMLElement.h"
+#include "AccAttributes.h"
 #include "DocAccessible.h"
 #include "DocAccessibleParent.h"
 #include "HyperTextAccessible.h"
-#include "nsIAccessibleTypes.h"
-#include "mozilla/a11y/Role.h"
 #include "States.h"
 #include "TextLeafAccessible.h"
-
-#include "nsIBaseWindow.h"
-#include "nsIDocShellTreeOwner.h"
-#include "nsIDOMXULContainerElement.h"
 #include "mozilla/a11y/RemoteAccessible.h"
+#include "mozilla/a11y/Role.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInternals.h"
 #include "nsAccessibilityService.h"
+#include "nsCoreUtils.h"
+#include "nsGenericHTMLElement.h"
+#include "nsIAccessibleTypes.h"
+#include "nsIBaseWindow.h"
+#include "nsIDOMXULContainerElement.h"
+#include "nsIDocShellTreeOwner.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -416,10 +415,7 @@ uint32_t nsAccUtils::TextLength(Accessible* aAccessible) {
     return remoteAcc->GetCachedTextLength();
   }
 
-  // For list bullets (or anything other accessible which would compute its own
-  // text. They don't have their own frame.
-  // XXX In the future, list bullets may have frame and anon content, so
-  // we should be able to remove this at that point
+  // For any other accessible which computes its own text; e.g. <br>.
   nsAutoString text;
   aAccessible->AppendTextTo(text);  // Get all the text
   return text.Length();
@@ -655,6 +651,15 @@ bool nsAccUtils::IsEditableARIACombobox(const LocalAccessible* aAccessible) {
 
   return aAccessible->IsTextField() ||
          aAccessible->Elm()->State().HasState(dom::ElementState::READWRITE);
+}
+
+bool nsAccUtils::ShouldFireValueChangeForDescendantChanges(
+    const LocalAccessible* aAccessible) {
+  if (aAccessible->IsCombobox() || aAccessible->IsPassword()) {
+    return true;
+  }
+  role accRole = aAccessible->Role();
+  return accRole == roles::ENTRY || accRole == roles::SPINBUTTON;
 }
 
 bool nsAccUtils::IsValidDetailsTargetForAnchor(const Accessible* aTarget,

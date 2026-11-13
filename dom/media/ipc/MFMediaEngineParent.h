@@ -49,7 +49,7 @@ class MFMediaEngineParent final : public PMFMediaEngineParent {
 
   using TrackType = TrackInfo::TrackType;
 
-  static MFMediaEngineParent* GetMediaEngineById(uint64_t aId);
+  static already_AddRefed<MFMediaEngineParent> GetMediaEngineById(uint64_t aId);
 
   MFMediaEngineStreamWrapper* GetMediaEngineStream(
       TrackType aType, const CreateDecoderParams& aParam);
@@ -68,6 +68,8 @@ class MFMediaEngineParent final : public PMFMediaEngineParent {
   mozilla::ipc::IPCResult RecvSetLooping(bool aLooping);
   mozilla::ipc::IPCResult RecvNotifyEndOfStream(TrackInfo::TrackType aType);
   mozilla::ipc::IPCResult RecvShutdown();
+
+  void ActorDestroy(ActorDestroyReason aWhy) override;
 
  private:
   ~MFMediaEngineParent();
@@ -144,6 +146,8 @@ class MFMediaEngineParent final : public PMFMediaEngineParent {
   MediaEventListener mMediaEngineEventListener;
   MediaEventListener mRequestSampleListener;
   bool mIsCreatedMediaEngine = false;
+  // True once InitMediaEngine has run; initialization happens once per actor.
+  bool mIsMediaEngineInitialized = false;
   // Set to true when EnableWindowlessSwapchainMode succeeds during media source
   // setup. Guards DComp surface handle creation in EnsureDcompSurfaceHandle:
   // if false (e.g. when a CDM incompatible with windowless swap chain is

@@ -24,31 +24,27 @@ import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.navigateWithBreadcrumb
 import org.mozilla.fenix.ext.showToolbar
 import org.mozilla.fenix.home.pocket.ContentRecommendationsFeatureHelper
-import org.mozilla.fenix.home.sports.hasWorldCupEnded
 import org.mozilla.fenix.utils.Settings
 import org.mozilla.fenix.utils.view.addToRadioGroup
 
 /**
  * A [PreferenceFragmentCompat] that displays settings for customizing the Firefox home screen.
  *
- * User interactions with these preferences are persisted in [Settings] and may trigger
- * telemetry events via [CustomizeHome] metrics.
+ * User interactions with these preferences are persisted in [Settings] and may trigger telemetry events via
+ * [CustomizeHome] metrics.
  */
 class HomeSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragment {
 
     private val args by navArgs<HomeSettingsFragmentArgs>()
 
-    @VisibleForTesting
-    internal var customizeHomeMetrics: CustomizeHome = CustomizeHome
+    @VisibleForTesting internal var customizeHomeMetrics: CustomizeHome = CustomizeHome
 
     @VisibleForTesting
     internal var contentRecommendationsHelper: ContentRecommendationsFeatureHelper = ContentRecommendationsFeatureHelper
 
-    @VisibleForTesting
-    internal lateinit var fenixSettings: Settings
+    @VisibleForTesting internal lateinit var fenixSettings: Settings
 
-    @VisibleForTesting
-    internal lateinit var fenixComponents: Components
+    @VisibleForTesting internal lateinit var fenixComponents: Components
 
     override fun onAttach(context: Context) {
         super.onAttach(context)
@@ -87,10 +83,11 @@ class HomeSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
         requirePreference<SwitchPreferenceCompat>(R.string.pref_key_privacy_report).apply {
             if (fenixSettings.longfoxEnabled) title = resources.getString(R.string.help_catch_trackers)
             isChecked = fenixSettings.showPrivacyReportFeature
-            onPreferenceChangeListener = createMetricPreferenceChangeListener(
-                metricKey = getString(R.string.pref_key_privacy_report_metric),
-                recordEventsToggle = true,
-            )
+            onPreferenceChangeListener =
+                createMetricPreferenceChangeListener(
+                    metricKey = getString(R.string.pref_key_privacy_report_metric),
+                    recordEventsToggle = true,
+                )
         }
 
         requirePreference<SwitchPreferenceCompat>(R.string.pref_key_recent_tabs).apply {
@@ -126,8 +123,8 @@ class HomeSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
 
                         fenixComponents.appStore.dispatch(
                             AppAction.ContentRecommendationsAction.SponsoredContentsChange(
-                                sponsoredContents = emptyList(),
-                            ),
+                                sponsoredContents = emptyList()
+                            )
                         )
                     }
                 }
@@ -145,18 +142,21 @@ class HomeSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
 
         requirePreference<Preference>(R.string.pref_key_wallpapers).apply {
             setOnPreferenceClickListener {
-                view?.findNavController()?.navigateWithBreadcrumb(
-                    directions = HomeSettingsFragmentDirections.actionHomeSettingsFragmentToWallpaperSettingsFragment(),
-                    navigateFrom = "HomeSettingsFragment",
-                    navigateTo = "ActionHomeSettingsFragmentToWallpaperSettingsFragment",
-                    crashReporter = fenixComponents.analytics.crashReporter,
-                )
+                view
+                    ?.findNavController()
+                    ?.navigateWithBreadcrumb(
+                        directions =
+                            HomeSettingsFragmentDirections.actionHomeSettingsFragmentToWallpaperSettingsFragment(),
+                        navigateFrom = "HomeSettingsFragment",
+                        navigateTo = "ActionHomeSettingsFragmentToWallpaperSettingsFragment",
+                        crashReporter = fenixComponents.analytics.crashReporter,
+                    )
                 true
             }
         }
 
         setupOpeningScreenPreferences()
-        setupSportsWidgetPreferences()
+        setupWeatherPreference()
     }
 
     private fun createMetricPreferenceChangeListener(
@@ -170,7 +170,7 @@ class HomeSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
                 CustomizeHome.PreferenceToggledExtra(
                     newBooleanValue,
                     metricKey,
-                ),
+                )
             )
 
             if (recordEventsToggle) {
@@ -178,7 +178,7 @@ class HomeSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
                     Events.PreferenceToggledExtra(
                         newBooleanValue,
                         metricKey,
-                    ),
+                    )
                 )
             }
 
@@ -209,30 +209,11 @@ class HomeSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
         )
     }
 
-    private fun setupSportsWidgetPreferences() {
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_show_homepage_sports_widget).apply {
-            // Once the World Cup is over the widget is retired: hide the toggle. The widget itself
-            // is hidden by the hasWorldCupEnded() gate on SportsWidgetState.isShown, so we leave the
-            // user's saved preference untouched rather than mutating it off a transient clock reading.
-            isVisible = fenixSettings.enableHomepageSportsWidget && !hasWorldCupEnded()
-            isChecked = fenixSettings.showHomepageSportsWidget
-            onPreferenceChangeListener = Preference.OnPreferenceChangeListener { preference, newValue ->
-                val newBooleanValue = newValue as? Boolean ?: return@OnPreferenceChangeListener false
-
-                customizeHomeMetrics.preferenceToggled.record(
-                    CustomizeHome.PreferenceToggledExtra(
-                        enabled = newBooleanValue,
-                        preferenceKey = "world_cup",
-                    ),
-                )
-
-                fenixComponents.appStore.dispatch(
-                    AppAction.SportsWidgetAction.VisibilityChanged(isVisible = newBooleanValue),
-                )
-
-                fenixSettings.preferences.edit { putBoolean(preference.key, newBooleanValue) }
-                true
-            }
+    private fun setupWeatherPreference() {
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_show_homepage_weather_widget).apply {
+            isVisible = fenixSettings.enableHomepageWeatherWidget
+            isChecked = fenixSettings.showHomepageWeatherWidget
+            onPreferenceChangeListener = createMetricPreferenceChangeListener("weather")
         }
     }
 }

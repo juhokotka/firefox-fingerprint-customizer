@@ -5,16 +5,15 @@
 #include <algorithm>
 #include <vector>
 
-#include "gtest/gtest.h"
-
-#include "mozilla/gfx/2D.h"
-#include "mozilla/Maybe.h"
 #include "Common.h"
 #include "Decoder.h"
 #include "DecoderFactory.h"
 #include "SourceBuffer.h"
 #include "SurfaceFilters.h"
 #include "SurfacePipe.h"
+#include "gtest/gtest.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/gfx/2D.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -24,7 +23,7 @@ using std::generate;
 using std::vector;
 
 template <typename Func>
-void WithADAM7InterpolatingFilter(const IntSize& aSize, Func aFunc) {
+void WithADAM7InterpolatingFilter(const IntSize& aSize, Func&& aFunc) {
   RefPtr<image::Decoder> decoder = CreateTrivialDecoder();
   ASSERT_TRUE(bool(decoder));
 

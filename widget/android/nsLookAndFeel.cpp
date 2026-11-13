@@ -2,20 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsStyleConsts.h"
-#include "nsXULAppAPI.h"
 #include "nsLookAndFeel.h"
+
 #include "Theme.h"
+#include "ThemeColors.h"
 #include "gfxFont.h"
 #include "gfxFontConstants.h"
 #include "mozilla/FontPropertyTypes.h"
-#include "mozilla/gfx/2D.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPrefs_widget.h"
+#include "mozilla/gfx/2D.h"
 #include "mozilla/java/GeckoAppShellWrappers.h"
 #include "mozilla/java/GeckoRuntimeWrappers.h"
 #include "mozilla/java/GeckoSystemStateListenerWrappers.h"
-#include "ThemeColors.h"
+#include "nsStyleConsts.h"
+#include "nsXULAppAPI.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -301,7 +302,7 @@ nsresult nsLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
       break;
 
     case IntID::CaretBlinkTime:
-      aResult = 500;
+      aResult = java::GeckoAppShell::GetTextCursorBlinkIntervalMillis();
       break;
 
     case IntID::CaretBlinkCount:
@@ -435,7 +436,7 @@ bool nsLookAndFeel::NativeGetFont(FontID aID, nsString& aFontName,
   aFontName.AssignLiteral("Roboto");
   aFontStyle.style = FontSlantStyle::NORMAL;
   aFontStyle.weight = FontWeight::NORMAL;
-  aFontStyle.stretch = FontStretch::NORMAL;
+  aFontStyle.width = FontWidth::NORMAL;
   aFontStyle.size = 9.0 * 96.0f / 72.0f;
   aFontStyle.systemFont = true;
   return true;

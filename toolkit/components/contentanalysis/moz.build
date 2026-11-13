@@ -8,12 +8,19 @@ with Files("**"):
 UNIFIED_SOURCES += [
     "content_analysis/sdk/analysis.pb.cc",
     "ContentAnalysis.cpp",
+    "ContentAnalysisBackend.cpp",
     "ContentAnalysisBackendFactory.cpp",
+    "ContentAnalysisRuleParser.cpp",
     "ExternalAgentBackend.cpp",
+    "WasmModuleBackend.cpp",
 ]
 
 EXTRA_JS_MODULES += [
+    "content-analysis-wasm-sandbox.js",
     "ContentAnalysisUtils.sys.mjs",
+    "ContentAnalysisWasmChild.sys.mjs",
+    "ContentAnalysisWasmParent.sys.mjs",
+    "ContentAnalysisWasmRunner.sys.mjs",
 ]
 
 UNIFIED_SOURCES += [
@@ -64,3 +71,11 @@ DEFINES["GOOGLE_PROTOBUF_NO_STATIC_INITIALIZER"] = True
 FINAL_LIBRARY = "xul"
 
 TEST_DIRS += ["tests"]
+
+SOURCE_HEADERS += [
+    "ContentAnalysisBackend.h",
+    "ContentAnalysisRuleParser.h",
+    "ContentAnalysisShared.h",
+    "ExternalAgentBackend.h",
+    "WasmModuleBackend.h",
+]

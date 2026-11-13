@@ -24,6 +24,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -35,41 +39,46 @@ import androidx.compose.ui.window.DialogProperties
 import mozilla.components.compose.base.button.FilledButton
 import mozilla.components.compose.base.button.IconButton
 import mozilla.components.compose.base.button.OutlinedButton
+import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.onboarding.view.Action
 import org.mozilla.fenix.onboarding.view.OnboardingPageState
 import org.mozilla.fenix.theme.FirefoxTheme
-import mozilla.components.ui.icons.R as iconsR
 
 val maxCardWidth = 360.dp
 
 /**
  * A screen for displaying continuous onboarding.
+ *
+ * @param pageState The state of the onboarding page.
+ * @param onCloseButtonClicked Executes when the close button is clicked.
+ * @param removeDialogView Removes the dialog's view from the window.
  */
 @Composable
 fun ContinuousOnboardingScreen(
     pageState: OnboardingPageState,
-    onDismissRequest: () -> Unit,
     onCloseButtonClicked: () -> Unit,
+    removeDialogView: () -> Unit,
 ) {
     Dialog(
-        onDismissRequest = onDismissRequest,
-        properties = DialogProperties(
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false,
-            usePlatformDefaultWidth = true,
-        ),
+        onDismissRequest = {
+            // Intentionally unused. The dialog can only be dismissed via the close button or page actions.
+        },
+        properties =
+            DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = true,
+            ),
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .systemBarsPadding(),
+            modifier = Modifier.fillMaxWidth().systemBarsPadding(),
             contentAlignment = Alignment.Center,
         ) {
             CardContent(
                 pageState = pageState,
-                onDismissRequest = onDismissRequest,
                 onCloseButtonClicked = onCloseButtonClicked,
+                removeDialogView = removeDialogView,
             )
         }
 
@@ -82,9 +91,12 @@ fun ContinuousOnboardingScreen(
 @Composable
 private fun CardContent(
     pageState: OnboardingPageState,
-    onDismissRequest: () -> Unit,
     onCloseButtonClicked: () -> Unit,
+    removeDialogView: () -> Unit,
 ) {
+    // Disables the buttons after the first click, so a rapid double-tap can't trigger them twice.
+    var isDismissed by remember { mutableStateOf(false) }
+
     @Composable
     fun Content() {
         Column(
@@ -97,14 +109,12 @@ private fun CardContent(
             )
 
             Box(
-                modifier = Modifier
-                    .height(150.dp)
-                    .fillMaxWidth(),
+                modifier = Modifier.height(150.dp).fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
                     painter = painterResource(pageState.imageRes),
-                    contentDescription = null,
+                    contentDescription = null, // Decorative only.
                 )
             }
 
@@ -117,32 +127,27 @@ private fun CardContent(
     }
 
     Card(
-        modifier = Modifier
-            .widthIn(max = maxCardWidth)
-            .fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
+        modifier = Modifier.widthIn(max = maxCardWidth).fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceBright),
     ) {
         IconButton(
             onClick = {
+                isDismissed = true
                 onCloseButtonClicked()
-                onDismissRequest()
+                removeDialogView()
             },
+            enabled = !isDismissed,
             contentDescription = stringResource(R.string.onboarding_home_content_description_close_button),
             modifier = Modifier.align(Alignment.End),
         ) {
             Icon(
                 painter = painterResource(id = iconsR.drawable.mozac_ic_cross_24),
-                contentDescription = null,
+                contentDescription = null, // Uses the parent content description.
             )
         }
 
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
+            modifier = Modifier.fillMaxWidth().padding(16.dp).verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Content()
@@ -152,9 +157,11 @@ private fun CardContent(
             FilledButton(
                 modifier = Modifier.width(FirefoxTheme.layout.size.maxWidth.small),
                 text = pageState.primaryButton.text,
+                enabled = !isDismissed,
                 onClick = {
+                    isDismissed = true
                     pageState.primaryButton.onClick()
-                    onDismissRequest()
+                    removeDialogView()
                 },
             )
 
@@ -162,9 +169,11 @@ private fun CardContent(
                 OutlinedButton(
                     modifier = Modifier.width(FirefoxTheme.layout.size.maxWidth.small),
                     text = it.text,
+                    enabled = !isDismissed,
                     onClick = {
+                        isDismissed = true
                         it.onClick()
-                        onDismissRequest()
+                        removeDialogView()
                     },
                 )
             }
@@ -176,24 +185,32 @@ private fun CardContent(
 @Composable
 private fun ContinuousOnboardingScreenNotificationPreview() {
     FirefoxTheme {
-        ContinuousOnboardingScreen(
-            pageState = OnboardingPageState(
-                imageRes = R.drawable.nova_onboarding_notifications,
-                title = stringResource(R.string.nova_onboarding_notifications_title),
-                description = stringResource(R.string.nova_onboarding_notifications_subtitle),
-                primaryButton = Action(
-                    text = stringResource(R.string.nova_onboarding_notifications_button),
-                    onClick = { },
-                ),
-                secondaryButton = Action(
-                    text = stringResource(R.string.nova_onboarding_negative_button),
-                    onClick = { },
-                ),
-                onRecordImpressionEvent = { },
-            ),
-            onDismissRequest = { },
-            onCloseButtonClicked = { },
-        )
+        Box(
+            modifier = Modifier.fillMaxWidth().systemBarsPadding(),
+            contentAlignment = Alignment.Center,
+        ) {
+            CardContent(
+                pageState =
+                    OnboardingPageState(
+                        imageRes = R.drawable.nova_onboarding_notifications,
+                        title = stringResource(R.string.nova_onboarding_notifications_title),
+                        description = stringResource(R.string.nova_onboarding_notifications_subtitle),
+                        primaryButton =
+                            Action(
+                                text = stringResource(R.string.nova_onboarding_notifications_button),
+                                onClick = {},
+                            ),
+                        secondaryButton =
+                            Action(
+                                text = stringResource(R.string.nova_onboarding_negative_button),
+                                onClick = {},
+                            ),
+                        onRecordImpressionEvent = {},
+                    ),
+                onCloseButtonClicked = {},
+                removeDialogView = {},
+            )
+        }
     }
 }
 
@@ -201,23 +218,31 @@ private fun ContinuousOnboardingScreenNotificationPreview() {
 @Composable
 private fun ContinuousOnboardingScreenSyncPreview() {
     FirefoxTheme {
-        ContinuousOnboardingScreen(
-            pageState = OnboardingPageState(
-                imageRes = R.drawable.nova_onboarding_sync,
-                title = stringResource(R.string.nova_onboarding_sync_title),
-                description = stringResource(R.string.nova_onboarding_sync_subtitle),
-                primaryButton = Action(
-                    text = stringResource(R.string.nova_onboarding_sync_button),
-                    onClick = { },
-                ),
-                secondaryButton = Action(
-                    text = stringResource(R.string.nova_onboarding_continue_button),
-                    onClick = { },
-                ),
-                onRecordImpressionEvent = { },
-            ),
-            onDismissRequest = { },
-            onCloseButtonClicked = { },
-        )
+        Box(
+            modifier = Modifier.fillMaxWidth().systemBarsPadding(),
+            contentAlignment = Alignment.Center,
+        ) {
+            CardContent(
+                pageState =
+                    OnboardingPageState(
+                        imageRes = R.drawable.nova_onboarding_sync,
+                        title = stringResource(R.string.nova_onboarding_sync_title),
+                        description = stringResource(R.string.nova_onboarding_sync_subtitle),
+                        primaryButton =
+                            Action(
+                                text = stringResource(R.string.nova_onboarding_sync_button),
+                                onClick = {},
+                            ),
+                        secondaryButton =
+                            Action(
+                                text = stringResource(R.string.nova_onboarding_continue_button),
+                                onClick = {},
+                            ),
+                        onRecordImpressionEvent = {},
+                    ),
+                onCloseButtonClicked = {},
+                removeDialogView = {},
+            )
+        }
     }
 }

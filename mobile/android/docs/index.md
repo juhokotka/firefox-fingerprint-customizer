@@ -17,11 +17,11 @@ To contribute to any of the three, you will need to get set up as a contributor 
 
 To set up Mozilla Central, you can follow the general instructions provided in the Mozilla Source Docs:
 
-- {ref}`Getting Set Up To Work On The Firefox Codebase <Getting Set Up To Work On The Firefox Codebase>`
+- {doc}`Getting Set Up To Work On The Firefox Codebase </setup/index>`
 
-Additionally, to set up specifically for mozilla-central, you can refer to the following guide:
+Additionally, for writing, submitting and updating a patch with git, you can refer to the following guide:
 
-- {ref}`Quick Start Guide for Git Users <contribute-with-git>`
+- {ref}`Firefox Contributors' Quick Reference <firefox-contributors-quick-reference>`
 
 ## Bootstrap
 
@@ -139,7 +139,7 @@ native code. [Bug
 making Android Studio and Gradle do this automatically.
 
 If you want set up code formatting for Kotlin, please reference
-[IntelliJ IDEA configuration](https://pinterest.github.io/ktlint/rules/configuration-intellij-idea/).
+[IntelliJ IDEA configuration](https://github.com/Kotlin/ktfmt#intellij-android-studio-and-other-jetbrains-ides).
 
 ## Mobile Devices and Emulators
 
@@ -256,10 +256,61 @@ MOZCONFIG=debug.mozconfig ./mach build
 
 Now that you're prepared and set up, you can access specific project instructions below:
 
-- GeckoView: {ref}`Contributing to GeckoView <Contributing to GeckoView>`
+- GeckoView: {doc}`Contributing to GeckoView <geckoview/contributor/index>`
 - Android Components: [Mozilla Android Components](https://mozac.org/)
-- Frontend: {ref}`Building Firefox for Android <Building Firefox for Android>`
+- Frontend: {doc}`Building Firefox for Android <fenix>`
 
 ## Android Request For Comment (RFC) Process
 
 See {doc}`Android RFC Process <rfcs/0015-android-rfc-process>`.
+
+```{toctree}
+:hidden:
+:caption: Firefox for Android
+
+fenix
+```
+
+```{toctree}
+:hidden:
+:caption: Android Development Guides
+
+shared/android/android_guide
+shared/android/kotlin_guide
+shared/android/accessibility_guide
+shared/android/configure_java
+shared/android/docker_guide
+shared/android/CONTRIBUTING
+shared/android/CONTRIBUTING_code
+shared/android/sprint_process
+shared/git_guide
+shared/sentry_guide
+shared/uplift_guide
+shared/versioning
+```
+
+```{toctree}
+:hidden:
+:caption: Testing and Automation
+
+shared/android/testing
+shared/android/ui-testing
+shared/android/device_testing
+shared/android/automation
+shared/android/taskcluster_guide
+shared/android/writing_lint_rules
+shared/android/fretboard
+shared/android/workmanager_faq
+```
+
+```{toctree}
+:hidden:
+:caption: Decision Records
+
+adrs/0000-template
+adrs/0001-kotlin-test
+adrs/0002-global-organized-tab-data
+rfcs/0000-template
+rfcs/0015-android-rfc-process
+shared/rfc/wallpapers_v2_network_improvements
+```

@@ -2,10 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/** @import MozBoxItem from 'moz-src:///toolkit/content/widgets/moz-box-item/moz-box-item.mjs';*/
+/** @import { MozBoxItem } from 'moz-src:///toolkit/content/widgets/moz-box-item/moz-box-item.mjs';*/
 /** @import { MozOption } from 'moz-src:///toolkit/content/widgets/moz-select/moz-select.mjs';*/
-/** @import MozSelect from 'moz-src:///toolkit/content/widgets/moz-select/moz-select.mjs';*/
-/** @import MozBoxGroup from 'chrome://global/content/elements/moz-box-group.mjs'; */
+/** @import { MozSelect } from 'moz-src:///toolkit/content/widgets/moz-select/moz-select.mjs';*/
+/** @import { MozBoxGroup } from 'chrome://global/content/elements/moz-box-group.mjs'; */
 /** @import { AsyncSettingHandler } from 'chrome://global/content/preferences/AsyncSetting.mjs'; */
 /** @import { HandlerInfoWrapper, ApplicationListItem } from './config/downloads.mjs';*/
 
@@ -19,47 +19,56 @@
  * @import { Setting } from "chrome://global/content/preferences/Setting.mjs"
  */
 
-const { Multilingual } = ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/config/languages.mjs",
-  { global: "current" }
+/**
+ * Imports a module into this window's global.
+ *
+ * These imports spin the event loop until the module graph has been fetched, so
+ * the tab can be closed while one of them is in flight. Once that has happened
+ * there is nothing left to set up, and evaluating the top level code of another
+ * module against the torn down window only produces errors, so stop importing.
+ *
+ * @param {string} uri
+ * @returns {object}
+ */
+function importIntoWindow(uri) {
+  if (window.closed) {
+    return {};
+  }
+  return ChromeUtils.importESModule(uri, { global: "current" });
+}
+
+const { Multilingual } = importIntoWindow(
+  "chrome://browser/content/preferences/config/languages.mjs"
 );
 
-const { DefaultBrowserHelper } = ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/DefaultBrowserHelper.mjs",
-  { global: "current" }
+const { DefaultBrowserHelper } = importIntoWindow(
+  "chrome://browser/content/preferences/DefaultBrowserHelper.mjs"
 );
 
 ChromeUtils.defineESModuleGetters(this, {
   BackgroundUpdate: "resource://gre/modules/BackgroundUpdate.sys.mjs",
   UpdateListener: "resource://gre/modules/UpdateListener.sys.mjs",
   LinkPreview: "moz-src:///browser/components/genai/LinkPreview.sys.mjs",
-  MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
+  MigrationUtils:
+    "moz-src:///browser/components/migration/MigrationUtils.sys.mjs",
   TranslationsParent: "resource://gre/actors/TranslationsParent.sys.mjs",
   TranslationsUtils:
     "chrome://global/content/translations/TranslationsUtils.mjs",
-  WindowsLaunchOnLogin: "resource://gre/modules/WindowsLaunchOnLogin.sys.mjs",
+  LaunchOnLogin: "resource://gre/modules/LaunchOnLogin.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   FormAutofillPreferences:
     "resource://autofill/FormAutofillPreferences.sys.mjs",
 });
 
-ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/config/accessibility.mjs",
-  { global: "current" }
+importIntoWindow(
+  "chrome://browser/content/preferences/config/accessibility.mjs"
 );
-ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/config/about-firefox.mjs",
-  { global: "current" }
+importIntoWindow(
+  "chrome://browser/content/preferences/config/about-firefox.mjs"
 );
-
-ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/config/appearance.mjs",
-  { global: "current" }
-);
-
-ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/config/tabs-browsing.mjs",
-  { global: "current" }
+importIntoWindow("chrome://browser/content/preferences/config/appearance.mjs");
+importIntoWindow(
+  "chrome://browser/content/preferences/config/tabs-browsing.mjs"
 );
 
 // Constants & Enumeration Values
@@ -99,6 +108,7 @@ function canShowAiFeature(featureSetting, defaultSetting) {
 Preferences.addAll([
   // Startup
   { id: "browser.startup.page", type: "int" },
+  { id: "browser.sessionstore.newTabOnRestore", type: "bool" },
   { id: "browser.startup.windowsLaunchOnLogin.enabled", type: "bool" },
   { id: "browser.privatebrowsing.autostart", type: "bool" },
 
@@ -109,8 +119,10 @@ Preferences.addAll([
   { id: "browser.ai.control.pdfjsAltText", type: "string" },
   { id: "browser.ai.control.smartTabGroups", type: "string" },
   { id: "browser.ai.control.linkPreviewKeyPoints", type: "string" },
+  { id: "browser.ai.control.speechRecognition", type: "string" },
   { id: "browser.ai.control.sidebarChatbot", type: "string" },
   { id: "browser.ai.control.smartWindow", type: "string" },
+  { id: "browser.ml.chat.provider", type: "string" },
 
   // Update
   { id: "browser.preferences.advanced.selectedTabIndex", type: "int" },
@@ -125,7 +137,6 @@ Preferences.addAll([
 if (AppConstants.HAVE_SHELL_SERVICE) {
   Preferences.addAll([
     { id: "browser.shell.checkDefaultBrowser", type: "bool" },
-    { id: "pref.general.disable_button.default_browser", type: "bool" },
   ]);
 }
 
@@ -148,17 +159,11 @@ Preferences.addSetting(
     // but it is not possible to change it back to enabled as the disabled value is just a random
     // hexadecimal number
     setup() {
-      if (AppConstants.platform !== "win") {
-        /**
-         * WindowsLaunchOnLogin isnt available if not on windows
-         * but this setup function still fires, so must prevent
-         * WindowsLaunchOnLogin.getLaunchOnLoginApproved
-         * below from executing unnecessarily.
-         */
+      if (!LaunchOnLogin.isSupported()) {
         return;
       }
       // @ts-ignore bug 1996860
-      WindowsLaunchOnLogin.getLaunchOnLoginApproved().then(val => {
+      LaunchOnLogin.isAllowed().then(val => {
         this._getLaunchOnLoginApprovedCachedValue = val;
       });
     },
@@ -171,53 +176,29 @@ Preferences.addSetting({
 });
 
 Preferences.addSetting(
-  /** @type {{_getLaunchOnLoginEnabledValue: boolean, startWithLastProfile: boolean} & SettingConfig} */ ({
+  /** @type {{_getLaunchOnLoginEnabledValue: boolean} & SettingConfig} */ ({
     id: "windowsLaunchOnLogin",
     deps: ["launchOnLoginApproved", "windowsLaunchOnLoginEnabled"],
     _getLaunchOnLoginEnabledValue: false,
-    get startWithLastProfile() {
-      return Cc["@mozilla.org/toolkit/profile-service;1"].getService(
-        Ci.nsIToolkitProfileService
-      ).startWithLastProfile;
-    },
     get() {
       return this._getLaunchOnLoginEnabledValue;
     },
     setup(emitChange) {
-      if (AppConstants.platform !== "win") {
-        /**
-         * WindowsLaunchOnLogin isnt available if not on windows
-         * but this setup function still fires, so must prevent
-         * WindowsLaunchOnLogin.getLaunchOnLoginEnabled
-         * below from executing unnecessarily.
-         */
+      if (!LaunchOnLogin.isSupported()) {
         return;
       }
 
-      /** @type {boolean} */
-      let getLaunchOnLoginEnabledValue;
-      let maybeEmitChange = () => {
-        if (
-          getLaunchOnLoginEnabledValue !== this._getLaunchOnLoginEnabledValue
-        ) {
-          this._getLaunchOnLoginEnabledValue = getLaunchOnLoginEnabledValue;
+      // @ts-ignore bug 1996860
+      LaunchOnLogin.isEnabled().then(val => {
+        if (val !== this._getLaunchOnLoginEnabledValue) {
+          this._getLaunchOnLoginEnabledValue = val;
           emitChange();
         }
-      };
-      if (!this.startWithLastProfile) {
-        getLaunchOnLoginEnabledValue = false;
-        maybeEmitChange();
-      } else {
-        // @ts-ignore bug 1996860
-        WindowsLaunchOnLogin.getLaunchOnLoginEnabled().then(val => {
-          getLaunchOnLoginEnabledValue = val;
-          maybeEmitChange();
-        });
-      }
+      });
     },
     visible: ({ windowsLaunchOnLoginEnabled }) => {
       let isVisible =
-        AppConstants.platform === "win" && windowsLaunchOnLoginEnabled.value;
+        LaunchOnLogin.isSupported() && windowsLaunchOnLoginEnabled.value;
       if (isVisible) {
         // @ts-ignore bug 1996860
         NimbusFeatures.windowsLaunchOnLogin.recordExposureEvent({
@@ -227,7 +208,7 @@ Preferences.addSetting(
       return isVisible;
     },
     disabled({ launchOnLoginApproved }) {
-      return !this.startWithLastProfile || !launchOnLoginApproved.value;
+      return !launchOnLoginApproved.value;
     },
     onUserChange(checked) {
       Glean.launchOnLogin.userToggle.record({ enabled: checked });
@@ -238,51 +219,24 @@ Preferences.addSetting(
         // registry fails. As such we pass an arbitrary AUMID for the purpose
         // of testing.
         // @ts-ignore bug 1996860
-        WindowsLaunchOnLogin.createLaunchOnLogin();
-        Services.prefs.setBoolPref(
-          "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
-          true
-        );
+        LaunchOnLogin.enable();
       } else {
         // windowsLaunchOnLogin has been unchecked: delete registry key and shortcut
         // @ts-ignore bug 1996860
-        WindowsLaunchOnLogin.removeLaunchOnLogin();
+        LaunchOnLogin.disable();
       }
     },
   })
 );
 
 Preferences.addSetting({
-  id: "windowsLaunchOnLoginDisabledProfileBox",
-  deps: ["windowsLaunchOnLoginEnabled"],
-  visible: ({ windowsLaunchOnLoginEnabled }) => {
-    if (AppConstants.platform !== "win") {
-      return false;
-    }
-    let startWithLastProfile = Cc[
-      "@mozilla.org/toolkit/profile-service;1"
-    ].getService(Ci.nsIToolkitProfileService).startWithLastProfile;
-
-    return !startWithLastProfile && windowsLaunchOnLoginEnabled.value;
-  },
-});
-
-Preferences.addSetting({
   id: "windowsLaunchOnLoginDisabledBox",
   deps: ["launchOnLoginApproved", "windowsLaunchOnLoginEnabled"],
   visible: ({ launchOnLoginApproved, windowsLaunchOnLoginEnabled }) => {
-    if (AppConstants.platform !== "win") {
+    if (!LaunchOnLogin.isSupported()) {
       return false;
     }
-    let startWithLastProfile = Cc[
-      "@mozilla.org/toolkit/profile-service;1"
-    ].getService(Ci.nsIToolkitProfileService).startWithLastProfile;
-
-    return (
-      startWithLastProfile &&
-      !launchOnLoginApproved.value &&
-      windowsLaunchOnLoginEnabled.value
-    );
+    return !launchOnLoginApproved.value && windowsLaunchOnLoginEnabled.value;
   },
 });
 
@@ -333,10 +287,22 @@ Preferences.addSetting({
 });
 
 Preferences.addSetting({
+  id: "sessionRestoreNewTab",
+  pref: "browser.sessionstore.newTabOnRestore",
+  deps: ["browserRestoreSession"],
+  visible: () =>
+    Services.prefs.getBoolPref(
+      "browser.sessionstore.newTabOnRestore.showSetting",
+      false
+    ),
+  disabled: deps => !deps.browserRestoreSession.value,
+});
+
+Preferences.addSetting({
   id: "containersPane",
   onUserClick(e) {
     e.preventDefault();
-    gotoPref("containers");
+    gotoPref("paneContainers2");
   },
 });
 Preferences.addSetting({ id: "containersPlaceholder" });
@@ -382,14 +348,20 @@ Preferences.addSetting({
   id: "isDefaultPane",
   deps: ["alwaysCheckDefault"],
   visible: () =>
-    DefaultBrowserHelper.canCheck && DefaultBrowserHelper.isBrowserDefault,
+    DefaultBrowserHelper.canCheck &&
+    DefaultBrowserHelper.isBrowserDefault &&
+    Services.policies.isAllowed("setDefaultBrowser") &&
+    !Services.prefs.prefIsLocked("pref.general.disable_button.default_browser"),
 });
 
 Preferences.addSetting({
   id: "isNotDefaultPane",
   deps: ["alwaysCheckDefault"],
   visible: () =>
-    DefaultBrowserHelper.canCheck && !DefaultBrowserHelper.isBrowserDefault,
+    DefaultBrowserHelper.canCheck &&
+    !DefaultBrowserHelper.isBrowserDefault &&
+    Services.policies.isAllowed("setDefaultBrowser") &&
+    !Services.prefs.prefIsLocked("pref.general.disable_button.default_browser"),
   onUserClick: (e, { alwaysCheckDefault }) => {
     if (!DefaultBrowserHelper.canCheck) {
       return;
@@ -443,6 +415,10 @@ Preferences.addSetting({
 Preferences.addSetting({
   id: "aiControlSmartWindow",
   pref: "browser.ai.control.smartWindow",
+});
+Preferences.addSetting({
+  id: "chatbotProvider",
+  pref: "browser.ml.chat.provider",
 });
 
 function createDefaultBrowserConfig({
@@ -504,6 +480,12 @@ function createStartupConfig(hidden = false) {
       {
         id: "browserRestoreSession",
         l10nId: "startup-restore-windows-and-tabs",
+        items: [
+          {
+            id: "sessionRestoreNewTab",
+            l10nId: "windows-launch-on-login-open-new-tab",
+          },
+        ],
       },
       {
         id: "windowsLaunchOnLogin",
@@ -534,14 +516,6 @@ function createStartupConfig(hidden = false) {
         ],
       },
       {
-        id: "windowsLaunchOnLoginDisabledProfileBox",
-        control: "moz-message-bar",
-        l10nId: "startup-windows-launch-on-login-profile-disabled",
-        controlAttrs: {
-          role: "status",
-        },
-      },
-      {
         id: "alwaysCheckDefault",
         l10nId: "always-check-default",
       },
@@ -562,7 +536,14 @@ SettingGroupManager.registerGroups({
 function initSettingGroup(id) {
   /** @type {SettingGroup[]} */
   let groups = document.querySelectorAll(`setting-group[groupid=${id}]`);
-  const config = SettingGroupManager.get(id);
+  let config;
+  try {
+    config = SettingGroupManager.get(id);
+  } catch (e) {
+    // Downstream browsers (e.g. Tor) may exclude extensions that
+    // register some setting groups. Treat missing as no-op, not error.
+    config = null;
+  }
   for (let group of groups) {
     if (group && config) {
       let sectionEnabled = srdSectionEnabled(id);
@@ -749,8 +730,10 @@ var gMainPane = {
     if (!(await FxAccounts.canConnectAccount())) {
       return;
     }
-    let url =
-      await FxAccounts.config.promiseConnectAccountURI("dev-edition-setup");
+    let url = await FxAccounts.config.promiseConnectAccountURI(
+      "sync",
+      "dev-edition-setup"
+    );
     let accountsTab = win.gBrowser.addWebTab(url);
     win.gBrowser.selectedTab = accountsTab;
   },
@@ -1271,7 +1254,7 @@ var gMainPane = {
 
   /* Show the confirmation message bar to allow a restart into the new locales. */
   async showConfirmLanguageChangeMessageBar(locales) {
-    let messageBar = document.getElementById("confirmBrowserLanguage");
+    let messageBarContainer = document.getElementById("confirmBrowserLanguage");
 
     // Get the bundle for the new locale.
     let newBundle = getBundleForLocales(locales);
@@ -1294,51 +1277,38 @@ var gMainPane = {
       buttonLabels.pop();
     }
 
-    let contentContainer = messageBar.querySelector(
-      ".message-bar-content-container"
-    );
-    contentContainer.textContent = "";
+    messageBarContainer.textContent = "";
 
     for (let i = 0; i < messages.length; i++) {
-      let messageContainer = document.createXULElement("hbox");
-      messageContainer.classList.add("message-bar-content");
-      messageContainer.style.flex = "1 50%";
-      messageContainer.setAttribute("align", "center");
-
-      let description = document.createXULElement("description");
-      description.classList.add("message-bar-description");
-
+      let messageBar = document.createElement("moz-message-bar");
+      messageBar.setAttribute("type", "info");
+      messageBar.setAttribute("data-l10n-attrs", "message");
+      messageBar.setAttribute("message", messages[i]);
       if (i == 0 && Services.intl.getScriptDirection(locales[0]) === "rtl") {
-        description.classList.add("rtl-locale");
+        messageBar.setAttribute("dir", "rtl");
       }
-      description.setAttribute("flex", "1");
-      description.textContent = messages[i];
-      messageContainer.appendChild(description);
 
       let button = document.createXULElement("button");
       button.addEventListener(
         "command",
         gMainPane.confirmBrowserLanguageChange
       );
-      button.classList.add("message-bar-button");
       button.setAttribute("locales", locales.join(","));
       button.setAttribute("label", buttonLabels[i]);
-      messageContainer.appendChild(button);
+      button.setAttribute("slot", "actions");
+      messageBar.appendChild(button);
 
-      contentContainer.appendChild(messageContainer);
+      messageBarContainer.appendChild(messageBar);
     }
 
-    messageBar.hidden = false;
+    messageBarContainer.hidden = false;
     gMainPane.selectedLocalesForRestart = locales;
   },
 
   hideConfirmLanguageChangeMessageBar() {
-    let messageBar = document.getElementById("confirmBrowserLanguage");
-    messageBar.hidden = true;
-    let contentContainer = messageBar.querySelector(
-      ".message-bar-content-container"
-    );
-    contentContainer.textContent = "";
+    let messageBarContainer = document.getElementById("confirmBrowserLanguage");
+    messageBarContainer.hidden = true;
+    messageBarContainer.textContent = "";
     gMainPane.requestingLocales = null;
   },
 
@@ -1404,7 +1374,7 @@ var gMainPane = {
     win.toOpenWindowByType(
       "about:profilemanager",
       "about:profilemanager",
-      "chrome,extrachrome,menubar,resizable,scrollbars,status,toolbar,centerscreen"
+      "chrome,resizable,toolbar,centerscreen"
     );
   },
 
@@ -1451,25 +1421,9 @@ var gMainPane = {
     // The next time the dialog is opened, a new gBrowserLanguagesDialog is created.
     let { selected } = this.gBrowserLanguagesDialog;
 
-    this.gBrowserLanguagesDialog.recordTelemetry(
-      selected ? "accept" : "cancel"
-    );
-
     if (!selected) {
       // No locales were selected. Cancel the operation.
       return;
-    }
-
-    // Track how often locale fallback order is changed.
-    // Drop the first locale and filter to only include the overlapping set
-    const prevLocales = Services.locale.requestedLocales.filter(
-      lc => selected.indexOf(lc) > 0
-    );
-    const newLocales = selected.filter(
-      (lc, i) => i > 0 && prevLocales.includes(lc)
-    );
-    if (prevLocales.some((lc, i) => newLocales[i] != lc)) {
-      this.gBrowserLanguagesDialog.recordTelemetry("setFallback");
     }
 
     switch (Multilingual.getTransitionType(selected)) {
@@ -1758,7 +1712,7 @@ class HandlerListItem {
         actionIconClass ? null : this.handlerInfoWrapper.actionIconSrcset,
       ],
     ]);
-    const selectedItem = this.node.querySelector("[selected=true]");
+    const selectedItem = this.node.querySelector("[selected]");
     if (!selectedItem) {
       console.error("No selected item for " + this.handlerInfoWrapper.type);
       return;
@@ -2092,9 +2046,7 @@ let AppFileHandler = (function () {
      * @return {MozBoxItem}
      */
     _buildHeader() {
-      const headerElement = /** @type {MozBoxItem} */ (
-        document.createElement("moz-box-item")
-      );
+      const headerElement = document.createElement("moz-box-item");
       headerElement.slot = "header";
       this.typeColumn = document.createElement("label");
       this.typeColumn.setAttribute("data-l10n-id", "applications-type-heading");

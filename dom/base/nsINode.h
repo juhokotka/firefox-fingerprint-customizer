@@ -41,6 +41,7 @@ class nsIAnimationObserver;
 class nsIContent;
 class nsIContentSecurityPolicy;
 class nsIFrame;
+class nsIGlobalObject;
 class nsIFormControl;
 class nsMultiMutationObserver;
 class nsINode;
@@ -49,7 +50,6 @@ class nsIPrincipal;
 class nsIURI;
 class nsNodeSupportsWeakRefTearoff;
 class nsDOMMutationObserver;
-class nsRange;
 class nsWindowSizes;
 
 namespace mozilla {
@@ -64,6 +64,7 @@ class PresShell;
 class TextEditor;
 class WidgetEvent;
 namespace dom {
+class Range;
 class NodeList;
 class HTMLCollection;
 
@@ -664,6 +665,13 @@ class nsINode : public mozilla::dom::EventTarget {
   virtual bool IsSelectedContentElement() const { return false; }
   virtual bool IsGenericHTMLFormControlElementWithState() const {
     return false;
+  }
+
+  /**
+   * Return true if the concrete class inherits ScriptElement.
+   */
+  [[nodiscard]] bool IsScriptElement() const {
+    return IsHTMLElement(nsGkAtoms::script) || IsSVGElement(nsGkAtoms::script);
   }
 
   // Returns non-null if this element subclasses `LinkStyle`.
@@ -1588,6 +1596,7 @@ class nsINode : public mozilla::dom::EventTarget {
                    "Observer already in the list");
 
       s->mMutationObservers.pushBack(aMutationObserver);
+      ForgetObserverChain();
     }
   }
 
@@ -1605,6 +1614,7 @@ class nsINode : public mozilla::dom::EventTarget {
     if (aMutationObserver &&
         !s->mMutationObservers.contains(aMutationObserver)) {
       s->mMutationObservers.pushBack(aMutationObserver);
+      ForgetObserverChain();
     }
   }
 
@@ -1629,8 +1639,39 @@ class nsINode : public mozilla::dom::EventTarget {
    * Removes a mutation observer.
    */
   void RemoveMutationObserver(nsIMutationObserver* aMutationObserver) {
+    // We do not need to invalidate the observer chain cache here. The cache
+    // points to the lowest ancestor that had an observer. If an observer is
+    // removed, the cached skip-to node might become overly conservative, but
+    // it will never skip over new observers, so correctness is preserved.
     if (nsSlots* s = GetExistingSlots()) {
       s->mMutationObservers.remove(aMutationObserver);
+    }
+  }
+
+  /**
+   * Memoizes one ForEachAncestorObserver walk's start node and the lowest
+   * ancestor holding an observer, so repeated mutations against the same node
+   * skip the stretch between them. Only picks where a walk starts, never what
+   * it returns, so a stale skip costs iteration and memory accesses rather than
+   * correctness.
+   */
+  static bool IsObserverChainStart(const nsINode* aNode) {
+    return aNode == sObserverChainStart;
+  }
+  static nsINode* ObserverChainSkipTo(const nsINode* aNode) {
+    return aNode == sObserverChainStart ? sObserverChainSkipTo : nullptr;
+  }
+  static void NoteObserverChain(const nsINode* aStart, nsINode* aSkipTo) {
+    sObserverChainStart = aStart;
+    sObserverChainSkipTo = aSkipTo;
+  }
+  static void ForgetObserverChain() {
+    sObserverChainStart = nullptr;
+    sObserverChainSkipTo = nullptr;
+  }
+  static void ForgetObserverChainIfCached(const nsINode* aNode) {
+    if (aNode == sObserverChainStart || aNode == sObserverChainSkipTo) {
+      ForgetObserverChain();
     }
   }
 
@@ -1684,6 +1725,8 @@ class nsINode : public mozilla::dom::EventTarget {
    *                aParent's children. May be null. If not null then aNode
    *                must be an nsIContent.
    * @param aError The error, if any.
+   * @param aFallbackRegistry A custom element registry to fallback to if
+   *                          aNode's registry is null.
    *
    * @return If aClone is true then the cloned node will be returned,
    *          unless an error occurred.  In error conditions, null
@@ -1692,7 +1735,8 @@ class nsINode : public mozilla::dom::EventTarget {
   static already_AddRefed<nsINode> CloneAndAdopt(
       nsINode* aNode, bool aClone, bool aDeep,
       nsNodeInfoManager* aNewNodeInfoManager, nsIGlobalObject* aNewScope,
-      nsINode* aParent, mozilla::ErrorResult& aError);
+      nsINode* aParent, mozilla::ErrorResult& aError,
+      mozilla::dom::CustomElementRegistry* aFallbackRegistry = nullptr);
 
  public:
   /**
@@ -1720,12 +1764,15 @@ class nsINode : public mozilla::dom::EventTarget {
    *                            descendants. May be null if the nodeinfos
    *                            shouldn't be changed.
    * @param aError The error, if any.
+   * @param aFallbackRegistry A custom element registry to fallback to if
+   *                          aNode's registry is null.
    *
    * @return The newly created node.  Null in error conditions.
    */
-  already_AddRefed<nsINode> Clone(bool aDeep,
-                                  nsNodeInfoManager* aNewNodeInfoManager,
-                                  mozilla::ErrorResult& aError);
+  already_AddRefed<nsINode> Clone(
+      bool aDeep, nsNodeInfoManager* aNewNodeInfoManager,
+      mozilla::ErrorResult& aError,
+      mozilla::dom::CustomElementRegistry* aFallbackRegistry = nullptr);
 
   /**
    * Clones this node. This needs to be overriden by all node classes. aNodeInfo
@@ -1772,6 +1819,14 @@ class nsINode : public mozilla::dom::EventTarget {
      * A list of mutation observers
      */
     mozilla::SafeDoublyLinkedList<nsIMutationObserver> mMutationObservers;
+
+    /**
+     * The node's event listener manager.  Nodes without slots keep it in
+     * nsINode::mSlotsOrListenerManager, documents in
+     * Document::mListenerManager.  Handled by nsINode::Traverse and
+     * DropNodeListenerManager, which cover the inline case too.
+     */
+    RefPtr<mozilla::EventListenerManager> mListenerManager;
 
     /**
      * An object implementing NodeList for this content (childNodes)
@@ -2080,12 +2135,12 @@ class nsINode : public mozilla::dom::EventTarget {
 
   /**
    * Return true if any part of (this, aStartOffset) .. (this, aEndOffset)
-   * overlaps any nsRange in
+   * overlaps any Range in
    * GetClosestCommonInclusiveAncestorForRangeInSelection ranges (i.e.
    * where this is a descendant of a range's common inclusive ancestor node).
-   * If a nsRange starts in (this, aEndOffset) or if it ends in
+   * If a Range starts in (this, aEndOffset) or if it ends in
    * (this, aStartOffset) then it is non-overlapping and the result is false
-   * for that nsRange.  Collapsed ranges always counts as non-overlapping.
+   * for that Range.  Collapsed ranges always counts as non-overlapping.
    *
    * @param aStartOffset has to be less or equal to aEndOffset.
    * @param aCache A cache which contains all fully selected nodes for each
@@ -3065,17 +3120,25 @@ class nsINode : public mozilla::dom::EventTarget {
   // Must not return null.
   virtual nsINode::nsSlots* CreateSlots();
 
-  bool HasSlots() const { return mSlots != nullptr; }
+  bool HasSlots() const {
+    return !(mSlotsOrListenerManager & kListenerManagerBit);
+  }
 
-  nsSlots* GetExistingSlots() const { return mSlots; }
+  nsSlots* GetExistingSlots() const {
+    return HasSlots() ? reinterpret_cast<nsSlots*>(mSlotsOrListenerManager)
+                      : nullptr;
+  }
 
   nsSlots* Slots() {
     if (!HasSlots()) {
-      mSlots = CreateSlots();
-      MOZ_ASSERT(mSlots);
+      SetSlots(CreateSlots());
     }
     return GetExistingSlots();
   }
+
+  // Takes ownership of aSlots, moving any inline listener manager into it.
+  // There must be no slots yet.
+  void SetSlots(nsSlots* aSlots);
 
   /**
    * Invalidate cached child array inside mChildNodes
@@ -3184,8 +3247,33 @@ class nsINode : public mozilla::dom::EventTarget {
   // Pointer to our primary frame.  Might be null.
   nsIFrame* mPrimaryFrame = nullptr;
 
-  // Storage for more members that are usually not needed; allocated lazily.
-  nsSlots* mSlots;
+ private:
+  // The bit marks the listener manager, so that the very hot GetExistingSlots
+  // needs no masking.
+  static constexpr uintptr_t kListenerManagerBit = 1;
+
+  // The inline listener manager, null if there is none.  Requires no slots.
+  mozilla::EventListenerManager* GetInlineListenerManager() const {
+    MOZ_ASSERT(!HasSlots());
+    return reinterpret_cast<mozilla::EventListenerManager*>(
+        mSlotsOrListenerManager & ~kListenerManagerBit);
+  }
+
+  // The manager the node itself stores, ignoring Document::mListenerManager.
+  mozilla::EventListenerManager* GetNodeListenerManager() const;
+
+  // Disconnects the manager the node stores, if any, and clears
+  // NODE_HAS_LISTENERMANAGER.
+  void DropNodeListenerManager();
+
+  // Tagged union: with kListenerManagerBit set, a manually refcounted
+  // EventListenerManager*, which is null for most nodes; otherwise a non-null
+  // nsSlots*, which then owns the manager.  See SetSlots.
+  uintptr_t mSlotsOrListenerManager = kListenerManagerBit;
+
+  // See ObserverChainSkipTo.
+  static const nsINode* sObserverChainStart;
+  static nsINode* sObserverChainSkipTo;
 };
 
 NON_VIRTUAL_ADDREF_RELEASE(nsINode)

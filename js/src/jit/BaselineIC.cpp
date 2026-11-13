@@ -69,6 +69,7 @@ class MOZ_RAII FallbackICCodeCompiler final {
   [[nodiscard]] bool emitCall(bool isSpread, bool isConstructing);
   [[nodiscard]] bool emitGetElem(bool hasReceiver);
   [[nodiscard]] bool emitGetProp(bool hasReceiver);
+  void emitBailoutStub(BailoutReturnKind kind);
 
  public:
   FallbackICCodeCompiler(JSContext* cx, BaselineICFallbackCode& code,
@@ -475,21 +476,24 @@ static void MaybeTransition(JSContext* cx, BaselineFrame* frame,
       MOZ_LIKELY(cx->runtime()->hasJitRuntime()) &&
       cx->runtime()->jitRuntime()->hasJitHintsMap()) {
     JitHintsMap* hints = cx->runtime()->jitRuntime()->getJitHintsMap();
-    if (hints->shouldTransitionMegamorphic(frame->script(), frame->icScript(),
-                                           stub)) {
-      ICEntry* icEntry = frame->icScript()->icEntryForStub(stub);
+    ICScript* icScript = frame->icScript();
+    if (hints->shouldTransitionMegamorphic(frame->script(), icScript, stub)) {
+      gc::AutoMarkingLock lock(cx->zone(), icScript->markingLock());
+      ICEntry* icEntry = icScript->icEntryForStub(stub);
       stub->state().forceTransition();
-      stub->discardStubs(cx->zone(), icEntry);
+      stub->discardStubs(cx->zone(), icEntry, lock);
       return;
     }
   }
 
   if (stub->state().shouldTransition()) {
-    if (!TryFoldingStubs(cx, stub, frame->script(), frame->icScript())) {
+    ICScript* icScript = frame->icScript();
+    if (!TryFoldingStubs(cx, stub, frame->script(), icScript)) {
       cx->recoverFromOutOfMemory();
     }
     if (stub->state().maybeTransition()) {
-      ICEntry* icEntry = frame->icScript()->icEntryForStub(stub);
+      gc::AutoMarkingLock lock(cx->zone(), icScript->markingLock());
+      ICEntry* icEntry = icScript->icEntryForStub(stub);
 #ifdef JS_CACHEIR_SPEW
       if (cx->spewer().enabled(cx, frame->script(),
                                SpewChannel::CacheIRHealthReport)) {
@@ -499,7 +503,7 @@ static void MaybeTransition(JSContext* cx, BaselineFrame* frame,
                               SpewContext::Transition);
       }
 #endif
-      stub->discardStubs(cx->zone(), icEntry);
+      stub->discardStubs(cx->zone(), icEntry, lock);
     }
   }
 }
@@ -576,7 +580,8 @@ void ICFallbackStub::unlinkStubUnbarriered(ICEntry* icEntry,
 #endif
 }
 
-void ICFallbackStub::discardStubs(Zone* zone, ICEntry* icEntry) {
+void ICFallbackStub::discardStubs(Zone* zone, ICEntry* icEntry,
+                                  const gc::AutoMarkingLock& lock) {
   ICStub* stub = icEntry->firstStub();
   while (stub != this) {
     unlinkStub(zone, icEntry, /* prev = */ nullptr, stub->toCacheIRStub());
@@ -640,6 +645,14 @@ void FallbackICCodeCompiler::enterStubFrame(MacroAssembler& masm,
 #ifdef DEBUG
   entersStubFrame_ = true;
 #endif
+}
+
+void FallbackICCodeCompiler::emitBailoutStub(BailoutReturnKind kind) {
+  code.initBailoutStubOffset(kind, masm.currentOffset());
+  // The bailoutTail jumps here when performing bailout stack
+  // reconstruction. The BaselineStub frame has been rebuilt.
+  // Only the return address remains to be pushed.
+  masm.call(BailoutStubHandlerReg);
 }
 
 void FallbackICCodeCompiler::assumeStubFrame() {
@@ -826,11 +839,9 @@ bool FallbackICCodeCompiler::emitGetElem(bool hasReceiver) {
   // will point here.
   assumeStubFrame();
   if (hasReceiver) {
-    code.initBailoutReturnOffset(BailoutReturnKind::GetElemSuper,
-                                 masm.currentOffset());
+    emitBailoutStub(BailoutReturnKind::GetElemSuper);
   } else {
-    code.initBailoutReturnOffset(BailoutReturnKind::GetElem,
-                                 masm.currentOffset());
+    emitBailoutStub(BailoutReturnKind::GetElem);
   }
 
   leaveStubFrame(masm);
@@ -1003,9 +1014,8 @@ bool FallbackICCodeCompiler::emit_SetElem() {
   // (pushed for the decompiler) with the rhs.
   masm.computeEffectiveAddress(
       Address(masm.getStackPointer(), 3 * sizeof(Value)), R0.scratchReg());
-  masm.push(R0.scratchReg());
 
-  masm.push(ICStubReg);
+  masm.pushRegs(R0.scratchReg(), ICStubReg);
   pushStubPayload(masm, R0.scratchReg());
 
   using Fn = bool (*)(JSContext*, BaselineFrame*, ICFallbackStub*, Value*,
@@ -1189,8 +1199,7 @@ bool FallbackICCodeCompiler::emit_GetName() {
 
   EmitRestoreTailCallReg(masm);
 
-  masm.push(R0.scratchReg());
-  masm.push(ICStubReg);
+  masm.pushRegs(R0.scratchReg(), ICStubReg);
   pushStubPayload(masm, R0.scratchReg());
 
   using Fn = bool (*)(JSContext*, BaselineFrame*, ICFallbackStub*, HandleObject,
@@ -1239,8 +1248,7 @@ bool FallbackICCodeCompiler::emit_BindName() {
 
   EmitRestoreTailCallReg(masm);
 
-  masm.push(R0.scratchReg());
-  masm.push(ICStubReg);
+  masm.pushRegs(R0.scratchReg(), ICStubReg);
   pushStubPayload(masm, R0.scratchReg());
 
   using Fn = bool (*)(JSContext*, BaselineFrame*, ICFallbackStub*, HandleObject,
@@ -1412,11 +1420,9 @@ bool FallbackICCodeCompiler::emitGetProp(bool hasReceiver) {
   // will point here.
   assumeStubFrame();
   if (hasReceiver) {
-    code.initBailoutReturnOffset(BailoutReturnKind::GetPropSuper,
-                                 masm.currentOffset());
+    emitBailoutStub(BailoutReturnKind::GetPropSuper);
   } else {
-    code.initBailoutReturnOffset(BailoutReturnKind::GetProp,
-                                 masm.currentOffset());
+    emitBailoutStub(BailoutReturnKind::GetProp);
   }
 
   leaveStubFrame(masm);
@@ -1600,9 +1606,8 @@ bool FallbackICCodeCompiler::emit_SetProp() {
   // (pushed for the decompiler) with the RHS.
   masm.computeEffectiveAddress(
       Address(masm.getStackPointer(), 2 * sizeof(Value)), R0.scratchReg());
-  masm.push(R0.scratchReg());
 
-  masm.push(ICStubReg);
+  masm.pushRegs(R0.scratchReg(), ICStubReg);
   pushStubPayload(masm, R0.scratchReg());
 
   using Fn = bool (*)(JSContext*, BaselineFrame*, ICFallbackStub*, Value*,
@@ -1615,8 +1620,7 @@ bool FallbackICCodeCompiler::emit_SetProp() {
   // Ion inlined frames. The return address pushed onto reconstructed stack
   // will point here.
   assumeStubFrame();
-  code.initBailoutReturnOffset(BailoutReturnKind::SetProp,
-                               masm.currentOffset());
+  emitBailoutStub(BailoutReturnKind::SetProp);
 
   leaveStubFrame(masm);
   EmitReturnFromIC(masm);
@@ -1743,10 +1747,15 @@ bool DoSpreadCallFallback(JSContext* cx, BaselineFrame* frame,
   // Transition stub state to megamorphic or generic if warranted.
   MaybeTransition(cx, frame, stub);
 
+  // The array is required to be packed, but may have indexed properties
+  // if its length exceeds MAX_DENSE_ELEMENTS_COUNT. Don't optimize in
+  // that case.
+  bool isIndexed = arr.toObject().as<NativeObject>().isIndexed();
+
   // Try attaching a call stub.
   bool handled = false;
   if (op != JSOp::SpreadEval && op != JSOp::StrictSpreadEval &&
-      stub->state().canAttachStub()) {
+      stub->state().canAttachStub() && !isIndexed) {
     // Try CacheIR first:
     Rooted<ArrayObject*> aobj(cx, &arr.toObject().as<ArrayObject>());
     MOZ_ASSERT(IsPackedArray(aobj));
@@ -1886,8 +1895,7 @@ bool FallbackICCodeCompiler::emitCall(bool isSpread, bool isConstructing) {
   pushCallArguments(masm, regs, R0.scratchReg(), isConstructing);
 
   masm.push(masm.getStackPointer());
-  masm.push(R0.scratchReg());
-  masm.push(ICStubReg);
+  masm.pushRegs(R0.scratchReg(), ICStubReg);
 
   PushStubPayload(masm, R0.scratchReg());
 
@@ -1908,9 +1916,9 @@ bool FallbackICCodeCompiler::emitCall(bool isSpread, bool isConstructing) {
   MOZ_ASSERT(!isSpread);
 
   if (isConstructing) {
-    code.initBailoutReturnOffset(BailoutReturnKind::New, masm.currentOffset());
+    emitBailoutStub(BailoutReturnKind::New);
   } else {
-    code.initBailoutReturnOffset(BailoutReturnKind::Call, masm.currentOffset());
+    emitBailoutStub(BailoutReturnKind::Call);
   }
 
   // Load passed-in ThisV into R1 just in case it's needed.  Need to do this
@@ -2640,8 +2648,7 @@ bool DoCloseIterFallback(JSContext* cx, BaselineFrame* frame,
 bool FallbackICCodeCompiler::emit_CloseIter() {
   EmitRestoreTailCallReg(masm);
 
-  masm.push(R0.scratchReg());
-  masm.push(ICStubReg);
+  masm.pushRegs(R0.scratchReg(), ICStubReg);
   pushStubPayload(masm, R0.scratchReg());
 
   using Fn =

@@ -154,7 +154,12 @@ class LIRGeneratorShared {
 
   // Like useRegisterOrInt32Constant, but uses a constant only if
   // |int32val * Scalar::byteSize(type)| doesn't overflow int32.
-  LAllocation useRegisterOrIndexConstant(MDefinition* mir, Scalar::Type type);
+  LAllocation useRegisterOrIndexConstant(MDefinition* mir, Scalar::Type type,
+                                         bool useAtStart = false);
+  LAllocation useRegisterOrIndexConstantAtStart(MDefinition* mir,
+                                                Scalar::Type type) {
+    return useRegisterOrIndexConstant(mir, type, /* useAtStart= */ true);
+  }
 
   inline LUse useRegisterForTypedLoad(MDefinition* mir, MIRType type);
 
@@ -163,11 +168,6 @@ class LIRGeneratorShared {
   inline LUse usePayload(MDefinition* mir, LUse::Policy policy);
   inline LUse usePayloadAtStart(MDefinition* mir, LUse::Policy policy);
   inline LUse usePayloadInRegisterAtStart(MDefinition* mir);
-
-  // Adds a box input to an instruction, setting operand |n| to the type and
-  // |n+1| to the payload. Does not modify the operands, instead expecting a
-  // policy to already be set.
-  inline void fillBoxUses(LInstruction* lir, size_t n, MDefinition* mir);
 #endif
 
   // Test whether mir1 and mir2 may give rise to different LIR nodes even if
@@ -188,7 +188,7 @@ class LIRGeneratorShared {
   inline LBoxDefinition tempBox();
   inline LDefinition tempFloat32();
   inline LDefinition tempDouble();
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
   inline LDefinition tempSimd128();
 #endif
   inline LDefinition tempCopy(MDefinition* input, uint32_t reusedInput);
@@ -266,6 +266,8 @@ class LIRGeneratorShared {
                                            bool useAtStart = false);
   inline LInt64Allocation useInt64RegisterOrConstant(MDefinition* mir,
                                                      bool useAtStart = false);
+  inline LInt64Allocation useInt64RegisterOrZero(MDefinition* mir,
+                                                 bool useAtStart = false);
   inline LInt64Allocation useInt64Fixed(MDefinition* mir, Register64 regs,
                                         bool useAtStart = false);
   inline LInt64Allocation useInt64FixedAtStart(MDefinition* mir,
@@ -368,6 +370,14 @@ class LIRGeneratorShared {
 
   inline void lowerConstantDouble(double d, MInstruction* mir);
   inline void lowerConstantFloat32(float f, MInstruction* mir);
+
+  // Lower the Int32 |op| as a single instruction that shifts one operand by a
+  // constant, if that operand is a shift deferred by lowerForShift. Returns
+  // false if |mir| still needs lowering.
+  bool lowerForALUWithShiftedOperand(JSOp op, MBinaryInstruction* mir,
+                                     MDefinition* lhs, MDefinition* rhs) {
+    return false;
+  }
 
   bool canSpecializeWasmCompareAndSelect(MCompare::CompareType compTy,
                                          MIRType insTy);

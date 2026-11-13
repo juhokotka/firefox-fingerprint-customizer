@@ -25,6 +25,15 @@ const BAD_PROTOCOL_LISTS = [
   ['\u8AA4'],
   ['test', 'test'],
   ['a'.repeat(513)],
+  // Control characters are not valid in HTTP header fields and cannot appear
+  // in Structured Fields strings (RFC 8941).
+  ['\r'],
+  ['\n'],
+  ['a\rb'],
+  ['a\nb'],
+  ['\x00'],
+  ['\x01'],
+  ['\x7f'],
 ];
 
 for (const protocols of BAD_PROTOCOL_LISTS) {
@@ -46,7 +55,9 @@ const OPTIONS = [
   { protocols: ["test"] },
   { protocols: ["a", "b", "c"] },
   { allowPooling: true, requireUnreliable: true, congestionControl: "low-latency" },
-  // XXX Need to test serverCertificateHashes
+  // XXX Need to test non-empty serverCertificateHashes (requires a server
+  // cert hash); the empty list and the rejected forms are covered by
+  // constructor-certificate-hashes.https.sub.any.js
 ];
 
 for (const options of OPTIONS) {

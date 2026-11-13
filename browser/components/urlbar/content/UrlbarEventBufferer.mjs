@@ -3,6 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { UrlbarShared } from "chrome://browser/content/urlbar/UrlbarShared.mjs";
+import UrlbarPrefs from "chrome://browser/content/urlbar/UrlbarContentPrefs.mjs";
+import { UrlbarContentUtils } from "chrome://browser/content/urlbar/UrlbarContentUtils.mjs";
 
 /**
  * Array of keyCodes to defer.
@@ -49,11 +51,10 @@ export class UrlbarEventBufferer {
     return this.#logger;
   }
 
-  // Maximum time events can be deferred for. In automation providers can be
-  // quite slow, thus we need a longer timeout to avoid intermittent failures.
-  // Note: to avoid handling events too early, this timer should be larger than
-  // ProvidersManager.chunkResultsDelayMs.
-  static DEFERRING_TIMEOUT_MS = Cu.isInAutomation ? 1500 : 300;
+  // Maximum time events can be deferred for.
+  static get DEFERRING_TIMEOUT_MS() {
+    return UrlbarPrefs.get("eventBufferer.deferringTimeoutMs");
+  }
 
   /**
    * Initialises the class.
@@ -68,8 +69,8 @@ export class UrlbarEventBufferer {
     this.#lastQuery = {
       // The time at which the current or last search was started. This is used
       // to check how much time passed while deferring the user's actions. Must
-      // be set using the monotonic ChromeUtils.now() helper.
-      startDate: ChromeUtils.now(),
+      // be set using the monotonic performance.now() helper.
+      startDate: performance.now(),
       // Status of the query; one of QUERY_STATUS.*
       status: QUERY_STATUS.UKNOWN,
       // The query context.
@@ -80,16 +81,18 @@ export class UrlbarEventBufferer {
     this.input.controller.addListener(this);
   }
 
-  // UrlbarChildController listener methods.
-
   /**
-   * Handles when a query is started.
+   * Arms the bufferer to defer subsequent events until results arrive. Called by
+   * the controller as it starts a query, before the query is dispatched --
+   * unlike the QUERY_STARTED notification, which the bufferer would otherwise
+   * observe a round-trip late over the actor message path, after a just-typed
+   * Enter had already been handled.
    *
    * @param {UrlbarQueryContext} queryContext
    */
-  onQueryStarted(queryContext) {
+  queryStarting(queryContext) {
     this.#lastQuery = {
-      startDate: ChromeUtils.now(),
+      startDate: performance.now(),
       status: QUERY_STATUS.RUNNING,
       context: queryContext,
     };
@@ -98,6 +101,8 @@ export class UrlbarEventBufferer {
       this.#deferringTimeout = null;
     }
   }
+
+  // UrlbarParentController listener methods.
 
   onQueryCancelled() {
     this.#lastQuery.status = QUERY_STATUS.COMPLETE;
@@ -117,10 +122,14 @@ export class UrlbarEventBufferer {
       return;
     }
     this.#lastQuery.status = QUERY_STATUS.RUNNING_GOT_ALL_HEURISTIC_RESULTS;
+    // Refresh the stored context with the results-bearing one: queryStarting
+    // armed the bufferer with the pre-query context, whose results are
+    // populated on the parent's own copy over the message path.
+    this.#lastQuery.context = queryContext;
     // Ensure this runs after other results handling code.
-    Services.tm.dispatchToMainThread(() => {
+    setTimeout(() => {
       this.replayDeferredEvents(true);
-    });
+    }, 0);
   }
 
   /**
@@ -184,7 +193,7 @@ export class UrlbarEventBufferer {
     });
 
     if (!this.#deferringTimeout) {
-      let elapsed = ChromeUtils.now() - this.#lastQuery.startDate;
+      let elapsed = performance.now() - this.#lastQuery.startDate;
       let remaining = UrlbarEventBufferer.DEFERRING_TIMEOUT_MS - elapsed;
       this.#deferringTimeout = setTimeout(
         () => {
@@ -223,9 +232,9 @@ export class UrlbarEventBufferer {
     if (searchString == this.#lastQuery.context.searchString) {
       callback();
     }
-    Services.tm.dispatchToMainThread(() => {
+    setTimeout(() => {
       this.replayDeferredEvents(onlyIfSafe);
-    });
+    }, 0);
   }
 
   /**
@@ -245,7 +254,7 @@ export class UrlbarEventBufferer {
     // At this point, no events have been deferred for this search; we must
     // figure out if this event should be deferred.
     let isMacNavigation =
-      this.input.controller.platform == "macosx" &&
+      UrlbarContentUtils.getPlatform() == "macosx" &&
       event.ctrlKey &&
       this.input.view.isOpen &&
       (event.key === "n" || event.key === "p");
@@ -255,7 +264,7 @@ export class UrlbarEventBufferer {
 
     if (DEFERRED_KEY_CODES.has(event.keyCode)) {
       // Defer while the user is composing.
-      if (this.input.editor.composing) {
+      if (this.input.isComposing) {
         return true;
       }
       if (this.input.controller.keyEventMovesCaret(event)) {
@@ -267,7 +276,7 @@ export class UrlbarEventBufferer {
     // start of the search, we don't want to block the user's workflow anymore.
     if (
       this.#lastQuery.startDate + UrlbarEventBufferer.DEFERRING_TIMEOUT_MS <=
-      ChromeUtils.now()
+      performance.now()
     ) {
       return false;
     }
@@ -349,7 +358,7 @@ export class UrlbarEventBufferer {
     }
 
     let isMacDownNavigation =
-      this.input.controller.platform == "macosx" &&
+      UrlbarContentUtils.getPlatform() == "macosx" &&
       event.ctrlKey &&
       this.input.view.isOpen &&
       event.key === "n";

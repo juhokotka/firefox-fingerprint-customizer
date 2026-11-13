@@ -2,6 +2,11 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 "use strict";
 
+// The two tasks that verify the preferences UI each load about:preferences,
+// which costs around ten seconds on a debug build. Test verification runs the
+// file ten times.
+requestLongerTimeout(2);
+
 registerCleanupFunction(function restore_pref_values() {
   // These two prefs are set as user prefs in case the "Locked"
   // option from this policy was not used. In this case, it won't
@@ -17,7 +22,7 @@ add_task(async function homepage_test_simple() {
       },
     },
   });
-  await check_homepage({ expectedURL: "http://example1.com/" });
+  await check_homepage({ expectedURL: "http://example1.com/", checkUI: true });
 });
 
 add_task(async function homepage_test_repeat_same_policy_value() {
@@ -86,6 +91,36 @@ add_task(async function homepage_test_multiple_additional() {
   });
 });
 
+// Administrators still pipe-separate several homepages in URL, the way
+// browser.startup.homepage stores them, instead of using Additional.
+add_task(async function homepage_test_pipe_separated_url() {
+  await setupPolicyEngineWithJson({
+    policies: {
+      Homepage: {
+        URL: "http://example1.com|http://example2.com",
+      },
+    },
+  });
+  await check_homepage({
+    expectedURL: "http://example1.com/|http://example2.com/",
+  });
+});
+
+add_task(async function homepage_test_pipe_separated_url_and_additional() {
+  await setupPolicyEngineWithJson({
+    policies: {
+      Homepage: {
+        URL: "http://example1.com/|http://example2.com/",
+        Additional: ["http://example3.com/"],
+      },
+    },
+  });
+  await check_homepage({
+    expectedURL:
+      "http://example1.com/|http://example2.com/|http://example3.com/",
+  });
+});
+
 add_task(async function homepage_test_locked() {
   await setupPolicyEngineWithJson({
     policies: {
@@ -112,4 +147,54 @@ add_task(async function homepage_test_anchor_link() {
     },
   });
   await check_homepage({ expectedURL: "http://example1.com/#test" });
+});
+
+add_task(async function homepage_test_newTabOnRestore_true() {
+  await setupPolicyEngineWithJson({
+    policies: {
+      Homepage: {
+        URL: "http://example1.com/",
+        NewTabOnRestore: true,
+      },
+    },
+  });
+
+  Assert.equal(
+    Services.prefs.getBoolPref("browser.sessionstore.newTabOnRestore", false),
+    true,
+    "newTabOnRestore default pref set to true"
+  );
+  Assert.equal(
+    Services.prefs.getBoolPref(
+      "browser.sessionstore.newTabOnRestore.showSetting",
+      false
+    ),
+    true,
+    "showSetting forced to true when NewTabOnRestore is set"
+  );
+});
+
+add_task(async function homepage_test_newTabOnRestore_false() {
+  await setupPolicyEngineWithJson({
+    policies: {
+      Homepage: {
+        URL: "http://example1.com/",
+        NewTabOnRestore: false,
+      },
+    },
+  });
+
+  Assert.equal(
+    Services.prefs.getBoolPref("browser.sessionstore.newTabOnRestore", true),
+    false,
+    "newTabOnRestore default pref set to false"
+  );
+  Assert.equal(
+    Services.prefs.getBoolPref(
+      "browser.sessionstore.newTabOnRestore.showSetting",
+      false
+    ),
+    true,
+    "showSetting forced to true when NewTabOnRestore is set"
+  );
 });

@@ -20,7 +20,7 @@ addAccessibleTask(
     info("Replace src URL for the IFRAME with one with different origin.");
     const onDocLoad = waitForEvent(
       EVENT_DOCUMENT_LOAD_COMPLETE,
-      DEFAULT_IFRAME_DOC_BODY_ID
+      DEFAULT_IFRAME_DOC_ID
     );
 
     await SpecialPowers.spawn(
@@ -30,7 +30,7 @@ addAccessibleTask(
         const { src } = content.document.getElementById(id);
         content.document.getElementById(id).src = src.replace(
           olddir,
-          // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+          // eslint-disable-next-line sdl/no-insecure-url
           "http://example.net/browser/accessible/tests/browser/"
         );
       }

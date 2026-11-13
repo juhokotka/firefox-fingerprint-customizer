@@ -6,8 +6,8 @@
 
 #include "ScopedNSSTypes.h"
 #include "mozilla/ArrayAlgorithm.h"
-#include "mozilla/Components.h"
 #include "mozilla/Casting.h"
+#include "mozilla/Components.h"
 #include "mozilla/Logging.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/StaticPrefs_network.h"
@@ -25,9 +25,11 @@
 #include "secoidt.h"
 
 #ifdef XP_WIN
+// clang-format off
 #  include <windows.h>
 #  include <softpub.h>
 #  include <wintrust.h>
+// clang-format on
 #endif  // XP_WIN
 
 namespace mozilla {
@@ -850,9 +852,6 @@ nsresult BackgroundFileSaver::ExtractSignatureInfo(const nsAString& filePath) {
 NS_IMPL_ISUPPORTS(BackgroundFileSaverOutputStream, nsIBackgroundFileSaver,
                   nsIOutputStream, nsIAsyncOutputStream,
                   nsIOutputStreamCallback)
-
-BackgroundFileSaverOutputStream::BackgroundFileSaverOutputStream()
-    : mAsyncWaitCallback(nullptr) {}
 
 bool BackgroundFileSaverOutputStream::HasInfiniteBuffer() { return false; }
 

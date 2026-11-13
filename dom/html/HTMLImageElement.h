@@ -61,7 +61,7 @@ class HTMLImageElement final : public nsGenericHTMLElement,
                       nsAttrValue& aResult) override;
   nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                       AttrModType aModType) const override;
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
+  bool IsNoNamespaceAttrMapped(const nsAtom* aAttribute) const override;
   nsMapRuleToAttributesFunc GetAttributeMappingFunction() const override;
 
   void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
@@ -94,7 +94,7 @@ class HTMLImageElement final : public nsGenericHTMLElement,
   uint32_t NaturalHeight() { return NaturalSize().height; }
   uint32_t NaturalWidth() { return NaturalSize().width; }
 
-  bool Complete();
+  bool Complete() const;
   uint32_t Hspace() {
     return GetDimensionAttrAsUnsignedInt(nsGkAtoms::hspace, 0);
   }
@@ -354,9 +354,9 @@ class HTMLImageElement final : public nsGenericHTMLElement,
   // Created when we're tracking responsive image state
   RefPtr<ResponsiveImageSelector> mResponsiveSelector;
 
-  // This is a weak reference that this element and the HTMLFormElement
+  // This is a strong reference that this element and the HTMLFormElement
   // cooperate in maintaining.
-  HTMLFormElement* mForm = nullptr;
+  RefPtr<HTMLFormElement> mForm;
 
  private:
   bool SourceElementMatches(Element* aSourceElement);
@@ -389,8 +389,7 @@ class HTMLImageElement final : public nsGenericHTMLElement,
   void SetLazyLoading();
 
   bool IsInPicture() const {
-    return GetParentElement() &&
-           GetParentElement()->IsHTMLElement(nsGkAtoms::picture);
+    return mParent && mParent->IsHTMLElement(nsGkAtoms::picture);
   }
 
   void InvalidateAttributeMapping();

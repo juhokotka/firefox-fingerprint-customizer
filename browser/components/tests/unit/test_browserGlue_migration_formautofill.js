@@ -3,11 +3,11 @@ http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
-const TOPIC_BROWSERGLUE_TEST = "browser-glue-test";
-const TOPICDATA_BROWSERGLUE_TEST = "force-ui-migration";
-
-const gBrowserGlue = Cc["@mozilla.org/browser/browserglue;1"].getService(
-  Ci.nsIObserver
+const { AppConstants } = ChromeUtils.importESModule(
+  "resource://gre/modules/AppConstants.sys.mjs"
+);
+const { ProfileDataUpgrader } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/ProfileDataUpgrader.sys.mjs"
 );
 const UI_VERSION = 124;
 
@@ -38,38 +38,31 @@ add_task(async function setup() {
 });
 
 add_task(async function test_check_form_autofill_module_detect() {
-  Services.prefs.setIntPref("browser.migration.version", UI_VERSION - 1);
   Services.prefs.setCharPref("extensions.formautofill.available", "detect");
   // Simulate a migration.
-  gBrowserGlue.observe(
-    null,
-    TOPIC_BROWSERGLUE_TEST,
-    TOPICDATA_BROWSERGLUE_TEST
-  );
+  ProfileDataUpgrader.upgrade(UI_VERSION - 1, UI_VERSION);
   // old credit card available should migrate to "detect" due to
   // "extensions.formautofill.available" being "on".
   Assert.equal(
     Services.prefs.getCharPref("extensions.formautofill.creditCards.supported"),
     "on"
   );
-  // old address available pref follows the main module pref
+  // "detect" is not migrated, so this reads the default from all.js, which
+  // only enables the all-regions rollout on pre-release channels.
   Assert.equal(
     Services.prefs.getCharPref("extensions.formautofill.addresses.supported"),
-    "on"
+    ["release", "esr"].includes(AppConstants.MOZ_UPDATE_CHANNEL)
+      ? "detect"
+      : "on"
   );
   ensureOldPrefsAreCleared();
 });
 
 add_task(async function test_check_old_form_autofill_module_off() {
-  Services.prefs.setIntPref("browser.migration.version", UI_VERSION - 1);
   Services.prefs.setCharPref("extensions.formautofill.available", "off");
 
   // Simulate a migration.
-  gBrowserGlue.observe(
-    null,
-    TOPIC_BROWSERGLUE_TEST,
-    TOPICDATA_BROWSERGLUE_TEST
-  );
+  ProfileDataUpgrader.upgrade(UI_VERSION - 1, UI_VERSION);
 
   // old credit card available should migrate to off due to
   // "extensions.formautofill.available" being off.
@@ -86,7 +79,6 @@ add_task(async function test_check_old_form_autofill_module_off() {
 });
 
 add_task(async function test_check_old_form_autofill_module_on_cc_on() {
-  Services.prefs.setIntPref("browser.migration.version", UI_VERSION - 1);
   Services.prefs.setCharPref("extensions.formautofill.available", "on");
   Services.prefs.setBoolPref(
     "extensions.formautofill.creditCards.available",
@@ -94,11 +86,7 @@ add_task(async function test_check_old_form_autofill_module_on_cc_on() {
   );
 
   // Simulate a migration.
-  gBrowserGlue.observe(
-    null,
-    TOPIC_BROWSERGLUE_TEST,
-    TOPICDATA_BROWSERGLUE_TEST
-  );
+  ProfileDataUpgrader.upgrade(UI_VERSION - 1, UI_VERSION);
 
   // old credit card available should migrate to "on" due to
   // "extensions.formautofill.available" being on and
@@ -116,7 +104,6 @@ add_task(async function test_check_old_form_autofill_module_on_cc_on() {
 });
 
 add_task(async function test_check_old_form_autofill_module_on_cc_off() {
-  Services.prefs.setIntPref("browser.migration.version", UI_VERSION - 1);
   Services.prefs.setCharPref("extensions.formautofill.available", "on");
   Services.prefs.setBoolPref(
     "extensions.formautofill.creditCards.available",
@@ -124,11 +111,7 @@ add_task(async function test_check_old_form_autofill_module_on_cc_off() {
   );
 
   // Simulate a migration.
-  gBrowserGlue.observe(
-    null,
-    TOPIC_BROWSERGLUE_TEST,
-    TOPICDATA_BROWSERGLUE_TEST
-  );
+  ProfileDataUpgrader.upgrade(UI_VERSION - 1, UI_VERSION);
 
   // old credit card available should migrate to "off" due to
   // "extensions.formautofill.available" being on and

@@ -2,18 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "HttpLog.h"
-
 #include "AlternateServices.h"
+
 #include <algorithm>
+
+#include "HttpLog.h"
 #include "mozilla/Atomics.h"
-#include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/SyncRunnable.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/dom/PContent.h"
+#include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
 #include "mozilla/net/AltSvcTransactionChild.h"
 #include "mozilla/net/AltSvcTransactionParent.h"
-#include "mozilla/SyncRunnable.h"
 #include "nsEscape.h"
 #include "nsHttpConnectionInfo.h"
 #include "nsHttpHandler.h"
@@ -85,8 +86,9 @@ void AltSvcMapping::ProcessHeader(
         NS_NewRunnableFunction(
             "AltSvcMapping::ProcessHeader",
             [buf(buf), originScheme(originScheme), originHost(originHost),
-             originPort, userName, privateBrowsing, cb, info, caps,
-             originAttributes, connInfo, aDontValidate]() {
+             originPort, userName = std::move(userName), privateBrowsing,
+             cb = std::move(cb), info = std::move(info), caps, originAttributes,
+             connInfo = std::move(connInfo), aDontValidate]() {
               AltSvcMapping::ProcessHeader(
                   buf, originScheme, originHost, originPort, userName,
                   privateBrowsing, cb, info, caps, originAttributes, connInfo,
@@ -227,9 +229,27 @@ void AltSvcMapping::ProcessHeader(
         RefPtr<nsHttpConnectionInfo> ci;
         aMapping->GetConnectionInfo(getter_AddRefs(ci), proxyInfo,
                                     originAttributes);
-        if (ci->HashKey().Equals(aTransConnInfo->HashKey())) {
-          LOG(("The transaction's conninfo is the same, no need to validate"));
+        // Skip only when the transaction already reached the alternate (e.g.
+        // via HTTPS RR). Under Happy Eyeballs BuildHashKey drops the routed
+        // host/NPN token, so hash keys collide and this would skip every
+        // ordinary Alt-Svc header (bug 2051272). For h3 we want real validation
+        // (to warm the h3 connection), so additionally require the routed
+        // endpoint to match; under non-HE those fields are in the hash key, so
+        // this is a no-op. For h2, AltSvcTransaction validation can't complete
+        // under HE (bug 2051272 #2), so keep skipping on a hash-key match.
+        bool sameHashKey = ci->HashKey().Equals(aTransConnInfo->HashKey());
+        if (ci->IsHttp3()) {
+          if (sameHashKey &&
+              ci->GetRoutedHost().Equals(aTransConnInfo->GetRoutedHost()) &&
+              ci->RoutedPort() == aTransConnInfo->RoutedPort() &&
+              ci->GetNPNToken().Equals(aTransConnInfo->GetNPNToken())) {
+            aDontValidate = true;
+          }
+        } else if (sameHashKey) {
           aDontValidate = true;
+        }
+        if (aDontValidate) {
+          LOG(("The transaction's conninfo is the same, no need to validate"));
         }
       }
     }
@@ -435,13 +455,12 @@ void AltSvcMapping::GetConnectionInfo(
 
   // http:// without the mixed-scheme attribute needs to be segmented in the
   // connection manager connection information hash with this attribute
-  if (!mHttps && !mMixedScheme) {
-    ci->SetInsecureScheme(true);
-  }
-  if (StaticPrefs::network_http_happy_eyeballs_enabled() && !pi) {
-    ci->SetHappyEyeballsEnabled(true);
-  }
-  ci->SetPrivate(mPrivate);
+  ci = ci->Mutate()
+           .SetInsecureScheme(!mHttps && !mMixedScheme)
+           .SetHappyEyeballsEnabled(
+               StaticPrefs::network_http_happy_eyeballs_enabled() && !pi)
+           .SetPrivate(mPrivate)
+           .Finalize();
   ci.forget(outCI);
 }
 
@@ -793,8 +812,13 @@ already_AddRefed<AltSvcMapping> AltSvcCache::LookupMapping(
     return nullptr;
   }
 
-  if (mapping->TTL() <= 0) {
+  int32_t ttl = mapping->TTL();
+  if (ttl <= 0) {
     LOG(("AltSvcCache::LookupMapping %p expired hit - MISS\n", this));
+    if (mapping->IsHttp3() && mapping->NPNToken() == "h3"_ns) {
+      glean::http::altsvc_h3_expired_staleness.AccumulateRawDuration(
+          TimeDuration::FromSeconds(-ttl));
+    }
     (void)mStorage->Remove(key, mapping->Private()
                                     ? nsIDataStorage::DataType::Private
                                     : nsIDataStorage::DataType::Persistent);
@@ -905,8 +929,19 @@ void AltSvcCache::UpdateAltServiceMapping(
   caps |= ci->GetAnonymous() ? NS_HTTP_LOAD_ANONYMOUS : 0;
   caps |= NS_HTTP_ERROR_SOFTLY;
 
-  if (StaticPrefs::network_http_happy_eyeballs_enabled()) {
-    ci->SetHappyEyeballsEnabled(true);
+  // Only enable Happy Eyeballs when there is no proxy (!pi), matching
+  // AltSvcMapping::GetConnectionInfo and Http3FirstAltSvcMapping. Otherwise
+  // validation would resolve the host client-side and leak it outside a SOCKS
+  // remote-DNS proxy. TODO: handle this in the Happy Eyeballs code once it
+  // supports establishing proxy connections.
+  if (StaticPrefs::network_http_happy_eyeballs_enabled() && !pi) {
+    // Validating an h3 alternate must establish an h3 connection; don't let
+    // Happy Eyeballs race h1/h2 and settle on a non-h3 connection.
+    ci = ci->Mutate()
+             .SetHappyEyeballsEnabled(true)
+             .SetHttp3Policy(map->IsHttp3() ? Http3Policy::Only
+                                            : ci->GetHttp3Policy())
+             .Finalize();
   }
 
   MOZ_ASSERT(map->HTTPS());
@@ -1067,6 +1102,34 @@ void AltSvcCache::ClearAltServiceMappings() {
   }
 }
 
+void AltSvcCache::ClearAltServiceMappingsMatchingOA(
+    const OriginAttributes& aOriginAttributes) {
+  MOZ_ASSERT(NS_IsMainThread());
+  if (!mStorage) {
+    return;
+  }
+  nsTArray<RefPtr<nsIDataStorageItem>> items;
+  if (NS_FAILED(mStorage->GetAll(items))) {
+    return;
+  }
+
+  for (const auto& item : items) {
+    nsAutoCString key;
+    nsAutoCString val;
+    if (NS_FAILED(item->GetKey(key)) || NS_FAILED(item->GetValue(val))) {
+      continue;
+    }
+    RefPtr<AltSvcMapping> mapping =
+        new AltSvcMapping(mStorage, mStorageEpoch, val);
+
+    if (mapping->GetOriginAttributes() == aOriginAttributes) {
+      (void)mStorage->Remove(key, mapping->Private()
+                                      ? nsIDataStorage::DataType::Private
+                                      : nsIDataStorage::DataType::Persistent);
+    }
+  }
+}
+
 nsresult AltSvcCache::GetAltSvcCacheKeys(nsTArray<nsCString>& value) {
   MOZ_ASSERT(NS_IsMainThread());
   if (gHttpHandler->AllowAltSvc() && mStorage) {
@@ -1146,10 +1209,11 @@ void Http3FirstAltSvcMapping::GetConnectionInfo(
   RefPtr<nsHttpConnectionInfo> ci = new nsHttpConnectionInfo(
       mOriginHost, mOriginPort, mNPNToken, mUsername, pi, originAttributes,
       mAlternateHost, mAlternatePort, mIsHttp3, false);
-  if (StaticPrefs::network_http_happy_eyeballs_enabled() && !pi) {
-    ci->SetHappyEyeballsEnabled(true);
-  }
-  ci->SetPrivate(mPrivate);
+  ci = ci->Mutate()
+           .SetHappyEyeballsEnabled(
+               StaticPrefs::network_http_happy_eyeballs_enabled() && !pi)
+           .SetPrivate(mPrivate)
+           .Finalize();
   ci.forget(outCI);
 }
 

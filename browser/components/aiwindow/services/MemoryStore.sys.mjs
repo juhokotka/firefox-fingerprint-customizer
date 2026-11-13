@@ -8,6 +8,12 @@
 
 import { JSONFile } from "resource://gre/modules/JSONFile.sys.mjs";
 import {
+  MEMORY_FILTER_COMPARATOR,
+  MEMORY_FILTER_PREDICATES,
+  MEMORY_FILTER_VALIDATORS,
+  AGGREGATE_FIELD_REGEX,
+} from "moz-src:///browser/components/aiwindow/services/MemoryStoreConstants.sys.mjs";
+import {
   HISTORY,
   CONVERSATION,
   SESSION,
@@ -16,11 +22,15 @@ import {
   MEMORY_TYPE_SHORT_TERM_MEMORY,
   MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE,
   MEMORY_FRECENCY_MAX_DAYS,
+  DEFAULT_RELEVANT_MEMORIES_TOP_K,
+  DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD,
 } from "moz-src:///browser/components/aiwindow/models/memories/MemoriesConstants.sys.mjs";
 import {
   computeMemoryFrecency,
   computeMemoryStrength,
 } from "moz-src:///browser/components/aiwindow/models/memories/Memories.sys.mjs";
+import { embeddingsGeneratorFactory } from "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs";
+import { cosSim } from "chrome://global/content/ml/NLPUtils.sys.mjs";
 
 /**
  * MemoryStore
@@ -33,6 +43,8 @@ import {
  *   "meta": {
  *     "last_history_memory_ts": 0,
  *     "last_chat_memory_ts": 0,
+ *     "last_session_memory_ts": 0,
+ *     "last_generation_run_ts": 0,
  *   },
  *   "version": 1
  * }
@@ -51,6 +63,7 @@ let gState = {
     last_history_memory_ts: 0,
     last_chat_memory_ts: 0,
     last_session_memory_ts: 0,
+    last_generation_run_ts: 0,
   },
   version: MEMORY_STORE_VERSION,
 };
@@ -98,6 +111,25 @@ function unionSourceIds(a, b) {
   };
 }
 
+/**
+ * Whether a value is a well-formed list of component summaries.
+ *
+ * @param {*} v
+ * @returns {boolean}
+ */
+function isComponentSummaries(v) {
+  return (
+    Array.isArray(v) &&
+    v.every(
+      component =>
+        !!component &&
+        typeof component === "object" &&
+        typeof component.memory_summary === "string" &&
+        typeof component.reasoning === "string"
+    )
+  );
+}
+
 // Whether we've finished initial load
 let gInitialized = false;
 let lazy = {};
@@ -130,19 +162,42 @@ export function migrateMemoryStoreVersionOneToTwo(memories) {
     if (!m.type) {
       m.type = MEMORY_TYPE_SHORT_TERM_MEMORY;
     }
-    // Move source into sources array
-    if (m.source) {
-      m.sources = [m.source];
-      delete m.source;
-    }
+
     // Normalize source_ids
     m.source_ids = normalizeSourceIds(m.source_ids);
+    // Create sources array if it's missing and move source into it
+    if (!m.sources) {
+      // Fill source if available, otherwise infer from source_ids
+      // Fall back to "history" if source_ids don't exist
+      if (m.source) {
+        m.sources = [m.source];
+      } else if (
+        m.source_ids.history_source_ids.length &&
+        m.source_ids.conversation_source_ids.length
+      ) {
+        m.sources = [SESSION];
+      } else if (m.source_ids.conversation_source_ids.length) {
+        m.sources = [CONVERSATION];
+      } else {
+        m.sources = [HISTORY];
+      }
+    }
+    // Delete source
+    delete m.source;
     // Add sensitivity category, assume not sensitive
     if (!m.sensitivity_category) {
       m.sensitivity_category = MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE;
     }
+    // Make sure soft deletion flag exists
+    if (typeof m.is_deleted !== "boolean") {
+      m.is_deleted = false;
+    }
 
     /** Descriptive fields */
+    // Backfill empty reasoning if it doesn't exist
+    if (!m.reasoning) {
+      m.reasoning = "";
+    }
     // Add tags
     if (!m.tags) {
       m.tags = [];
@@ -159,25 +214,25 @@ export function migrateMemoryStoreVersionOneToTwo(memories) {
       }
     }
     // Delete category and intent
-    if (m.category) {
-      delete m.category;
-    }
-    if (m.intent) {
-      delete m.intent;
-    }
+    delete m.category;
+    delete m.intent;
     // Rename entities to keywords if it exists, otherwise add the keywords array
-    if (m.entities) {
+    if (Array.isArray(m.entities)) {
       m.keywords = m.entities;
-      delete m.entities;
     } else {
       m.keywords = [];
     }
+    delete m.entities;
     // Add component summaries
     if (!m.component_summaries) {
       m.component_summaries = [];
     }
 
     /** Tracker fields */
+    // Make sure updated_at exists
+    if (!m.updated_at) {
+      m.updated_at = Date.now();
+    }
     // If created_at doesn't exist, set it to updated_at
     // By this point, we've lost the actual created_at timestamp
     if (!m.created_at) {
@@ -201,10 +256,9 @@ export function migrateMemoryStoreVersionOneToTwo(memories) {
       }
     }
 
-    // Delete score
-    if (m.score) {
-      delete m.score;
-    }
+    // Delete score if it exists
+    // Score is not a v2 field
+    delete m.score;
 
     // Add frecency & strength last
     m.frecency = computeMemoryFrecency(m);
@@ -281,12 +335,21 @@ async function loadMemories() {
       memories = [];
     }
 
+    // Add extra v2 schema fields
+    memories.map(mem => {
+      if (!mem.merge_count) {
+        mem.merge_count = 0;
+      }
+      return mem;
+    });
+
     gState = {
       memories,
       meta: {
         last_history_memory_ts: data.meta?.last_history_memory_ts || 0,
         last_chat_memory_ts: data.meta?.last_chat_memory_ts || 0,
         last_session_memory_ts: data.meta?.last_session_memory_ts || 0,
+        last_generation_run_ts: data.meta?.last_generation_run_ts || 0,
       },
       version:
         typeof data.version === "number" ? data.version : MEMORY_STORE_VERSION,
@@ -309,6 +372,11 @@ export const MemoryStore = {
   // Observer notification topic
   MEMORY_STORE_CHANGED,
 
+  // Embeddings cache for semantic memory search
+  embeddingsGenerator: null,
+  memoryEmbeddingsCache: null,
+  memoryCacheKey: null,
+
   /**
    * Initialize the store: set up JSONFile and load from disk.
    *
@@ -324,6 +392,14 @@ export const MemoryStore = {
     }
 
     await gInitPromise;
+  },
+
+  /**
+   * Request a debounced write of the current in-memory state to disk.
+   */
+  async requestSave() {
+    await this.ensureInitialized();
+    gJSONFile?.saveSoon();
   },
 
   /**
@@ -351,14 +427,16 @@ export const MemoryStore = {
    * @property {string} reasoning - Explanation of why this memory was created.
    * @property {Array[string]} tags - List of tags for the memory.
    * @property {Array[string]} keywords - List of keywords for the memory.
-   * @property {Array[string]} component_summaries - List of summaries from the memories merged to create this one.
+   * @property {Array[object]} component_summaries - List of {memory_summary, reasoning} pairs from the memories merged to create this one.
    * @property {number} created_at - When the memory was created in milliseconds since Unix epoch.
-   * @property {number} updated_at - Last-updated time in milliseconds since Unix epoch.
+   * @property {number} updated_at - When the memory was last aged by memory maintenance, in milliseconds since Unix epoch. This doubles as the memory's maintenance clock.
    * @property {number} last_accessed - Last-accessed time in milliseconds since Unix epoch.
    * @property {object} recent_accessed_counts - Rolling 7-day count of how often the memory was used.
    * @property {number} lifetime_accessed_count - Total number of times the memory was used across its life
    * @property {number} frecency - Computed frecency for the memory.
-   * @property {number} merge_count - How many memories were merged to create thie one.
+   * @property {number} strength - Computed strength for the memory, driving its type tier and decay.
+   * @property {number} last_merged - When the memory was last merged with others.
+   * @property {number} merge_count - How many merge operations contributed to this memory.
    */
   /**
    * @typedef {object} MemoryPartial
@@ -372,14 +450,16 @@ export const MemoryStore = {
    * @property {string} reasoning - Explanation of why this memory was created.
    * @property {Array[string]} tags - List of tags for the memory.
    * @property {Array[string]} keywords - List of keywords for the memory.
-   * @property {Array[string]} component_summaries - List of summaries from the memories merged to create this one.
+   * @property {Array[object]} component_summaries - List of {memory_summary, reasoning} pairs from the memories merged to create this one.
    * @property {number} created_at - When the memory was created in milliseconds since Unix epoch.
-   * @property {number} updated_at - Last-updated time in milliseconds since Unix epoch.
+   * @property {number} updated_at - When the memory was last aged by memory maintenance, in milliseconds since Unix epoch. This doubles as the memory's maintenance clock.
    * @property {number} last_accessed - Last-accessed time in milliseconds since Unix epoch.
    * @property {object} recent_accessed_counts - Rolling 7-day count of how often the memory was used.
    * @property {number} lifetime_accessed_count - Total number of times the memory was used across its life
    * @property {number} frecency - Computed frecency for the memory.
-   * @property {number} merge_count - How many memories were merged to create thie one.
+   * @property {number} strength - Computed strength for the memory, driving its type tier and decay.
+   * @property {number} last_merged - When the memory was last merged with others.
+   * @property {number} merge_count - How many merge operations contributed to this memory.
    */
   /**
    * Add a new memory, or update an existing one with the same id.
@@ -450,6 +530,8 @@ export const MemoryStore = {
           ),
         lifetime_accessed_count: memoryPartial.lifetime_accessed_count || 0,
         frecency: memoryPartial.frecency || 0,
+        strength: memoryPartial.strength || 0,
+        last_merged: memoryPartial.last_merged || null,
         merge_count: memoryPartial.merge_count || 0,
       };
 
@@ -505,10 +587,6 @@ export const MemoryStore = {
         "keywords",
         v => Array.isArray(v) && v.every(i => typeof i === "string"),
       ],
-      [
-        "component_summaries",
-        v => Array.isArray(v) && v.every(i => typeof i === "string"),
-      ],
 
       // Tracker fields
       ["created_at", v => Number.isFinite(v)],
@@ -523,6 +601,8 @@ export const MemoryStore = {
       ],
       ["lifetime_accessed_count", v => Number.isFinite(v)],
       ["frecency", v => Number.isFinite(v)],
+      ["strength", v => Number.isFinite(v)],
+      ["last_merged", v => Number.isFinite(v)],
       ["merge_count", v => Number.isFinite(v)],
     ];
 
@@ -543,7 +623,18 @@ export const MemoryStore = {
       memory.source_ids = unionSourceIds(memory.source_ids, updates.source_ids);
     }
 
-    memory.updated_at = updates.updated_at || Date.now();
+    if (isComponentSummaries(updates.component_summaries)) {
+      // Component summaries are objects, so they dedupe on their summary
+      memory.component_summaries = [
+        ...new Map(
+          [...memory.component_summaries, ...updates.component_summaries].map(
+            component => [component.memory_summary, component]
+          )
+        ).values(),
+      ];
+    }
+
+    memory.updated_at ||= updates.updated_at || Date.now();
 
     gJSONFile?.saveSoon();
     Services.obs.notifyObservers(null, MEMORY_STORE_CHANGED);
@@ -592,6 +683,162 @@ export const MemoryStore = {
   },
 
   /**
+   * Computes a hash of memories for cache invalidation.
+   * Uses incremental FNV-1a hashing to avoid allocating large concatenated strings
+   * based on https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash
+   *
+   * @param {Array} memories  Array of memory objects with id and memory_summary fields
+   * @returns {number}        32-bit hash representing the memories state
+   */
+  computeMemoriesHash(memories) {
+    // FNV-1a offset basis (32-bit)
+    let hash = 0x811c9dc5;
+
+    for (const m of memories) {
+      const str = `${m.id}-${m.memory_summary}`;
+      for (let i = 0; i < str.length; i++) {
+        hash ^= str.charCodeAt(i);
+        // FNV prime, keep 32-bit
+        hash = (hash * 0x01000193) >>> 0;
+      }
+    }
+
+    return hash;
+  },
+
+  /**
+   * Clears the embeddings cache. Used for testing.
+   */
+  _clearEmbeddingsCache() {
+    this.memoryEmbeddingsCache = null;
+    this.memoryCacheKey = null;
+  },
+
+  /**
+   * Fetches relevant memories for a given user message using semantic similarity.
+   * Uses embeddings and cosine similarity for fast, accurate memory retrieval.
+   *
+   * @param {string} message                  User message to find relevant memories for
+   * @param {number} topK                     Number of top relevant memories to return
+   *                                          (default: {@link DEFAULT_RELEVANT_MEMORIES_TOP_K})
+   * @param {number} similarityThreshold      Minimum similarity score (0-1) to include
+   *                                          (default: {@link DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD})
+   * @returns {Promise<Array<object>>}        List of relevant memories sorted by similarity
+   */
+  async getRelevantMemories(
+    message,
+    topK = DEFAULT_RELEVANT_MEMORIES_TOP_K,
+    similarityThreshold = DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD
+  ) {
+    const memories = await this.getMemories({ includeSoftDeleted: false });
+
+    if (memories.length === 0) {
+      return [];
+    }
+
+    // Lazy initialize embeddings generator
+    if (!this.embeddingsGenerator) {
+      this.embeddingsGenerator = embeddingsGeneratorFactory.forGeneral();
+    }
+
+    // Re-embed memories only if cache is invalid
+    const currentCacheKey = this.computeMemoriesHash(memories);
+    if (
+      !this.memoryEmbeddingsCache ||
+      this.memoryCacheKey !== currentCacheKey
+    ) {
+      const memoryTexts = memories.map(m => {
+        const summary = m.memory_summary?.toLowerCase() || "";
+        const reasoning = m.reasoning?.toLowerCase() || "";
+        const tags = m.tags?.join(" ").toLowerCase() || "";
+        return [tags, summary, reasoning]
+          .filter(part => part?.trim())
+          .join(". ")
+          .toLowerCase();
+      });
+      const result = await this.embeddingsGenerator.embedMany(memoryTexts);
+      this.memoryEmbeddingsCache = result.output || result;
+      this.memoryCacheKey = currentCacheKey;
+    }
+
+    const queryResult = await this.embeddingsGenerator.embed(
+      message.toLowerCase()
+    );
+    let queryEmbedding = queryResult.output || queryResult;
+
+    if (Array.isArray(queryEmbedding) && queryEmbedding.length === 1) {
+      queryEmbedding = queryEmbedding[0];
+    }
+
+    // Calculate cosine similarity
+    const similarities = this.memoryEmbeddingsCache.map((memEmb, idx) => ({
+      ...memories[idx],
+      similarity: cosSim(queryEmbedding, memEmb),
+    }));
+
+    // Filter by threshold, sort by similarity, and return top K
+    return similarities
+      .filter(m => m.similarity >= similarityThreshold)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, topK);
+  },
+
+  /**
+   * Expands a day list like "0-2,4" into a deduped array of day indices, dropping
+   * any out of the [0, MEMORY_FRECENCY_MAX_DAYS) window. An empty list yields an empty array.
+   * Used for the recent_accessed_counts attribute.
+   *
+   * @param {string} dayList  // String list of day indices (i.e. [1], [1,2], [1-3,5])
+   * @returns {number[]}      // Parsed integer list of indicies
+   */
+  parseAggregateDays(dayList) {
+    const days = new Set();
+    for (const token of dayList.split(",")) {
+      const trimmed = token.trim();
+      if (!trimmed) {
+        continue;
+      }
+      const range = trimmed.match(/^(\d+)-(\d+)$/);
+      if (range) {
+        for (let day = Number(range[1]); day <= Number(range[2]); day++) {
+          days.add(day);
+        }
+      } else {
+        days.add(Number(trimmed));
+      }
+    }
+    return [...days].filter(day => day >= 0 && day < MEMORY_FRECENCY_MAX_DAYS);
+  },
+
+  /**
+   * Resolves a filter field against a memory.
+   * Plain fields return `memory[field]` directly. Aggregate fields (i.e. recent_accessed_counts)
+   * sum the requested components (i.e. days) of the referenced count map into a single number
+   * to filter against.
+   *
+   * @param {object} memory   // Memory object from which to retrieve field value
+   * @param {string} field    // Memory attribute
+   * @returns {*}             // Resolved memory attribute value
+   */
+  resolveFilterField(memory, field) {
+    // Check if the field needs to be aggregated
+    const match = field.match(AGGREGATE_FIELD_REGEX);
+
+    // Return directly if not
+    if (!match) {
+      return memory[field];
+    }
+
+    // Otherwise, aggregate the field's value and return
+    const [, mapField, dayList] = match;
+    const map = memory[mapField] ?? {};
+    return this.parseAggregateDays(dayList).reduce(
+      (sum, day) => sum + (map[day] ?? 0),
+      0
+    );
+  },
+
+  /**
    * Get all memories (optionally filtered and sorted).
    *
    * @param {object} [options]
@@ -604,6 +851,36 @@ export const MemoryStore = {
    *   Whether to include soft-deleted memories.
    * @param {Set<string>} [options.memoryIds=new Set()]
    *   Optional set of memory IDs; will return all if set is empty
+   * @param {Array<object>} [options.attributeFilters]
+   *   Optional set of filter objects for filtering on specific memory attributes, each containing:
+   *    1. field: The memory field (attribute) on which the filter should be applied.
+   *       A field may also address into a day-keyed count map and sum a window
+   *       of days, e.g. "recent_accessed_counts.[0]" (today) or
+   *       "recent_accessed_counts.[0-2,4]" (days 0, 1, 2 and 4 summed).
+   *    2. value: The value to filter against
+   *    3. comparator: The comparator to filter field against value.
+   *    4. options: Optional comparator-specific options. For the LIKE comparator, these are
+   *       forwarded to getRelevantMemories: `{ topK, similarityThreshold }`. Either may be
+   *       omitted to fall back to the getRelevantMemories defaults.
+   *
+   *
+   *    Valid comparators are:
+   *
+   *    ** Arrays against individual values **
+   *    - INCLUDES: Memory field is an array and includes the filter value
+   *    - IN: Filter value is an array and includes the memory field
+   *
+   *    ** Individual values against individual values **
+   *    - GREATER_THAN: Memory field is greater than the filter value
+   *    - LESS_THAN: Memory field is less than the filter value
+   *    - GREATER_THAN_OR_EQUAL_TO: Memory field is greater than or equal to the filter value
+   *    - LESS_THAN_OR_EQUAL_TO: Memory field is less than or equal to the filter value
+   *    - EQUAL_TO: Memory field is exactly the same as the filter value
+   *    - LIKE: Memory field is semantically similar to the filter value (only memory_summary supported)
+   *
+   *    ** Arrays against arrays **
+   *    - SOME: Both the memory field and value are **arrays** and the memory field array includes some of the filter value array
+   *    - ALL: Both the memory field and value are **arrays** and the memory field array is the same as the filter value array
    * @returns {Promise<Memory[]>}
    */
   async getMemories({
@@ -611,19 +888,68 @@ export const MemoryStore = {
     sortDir = "desc",
     includeSoftDeleted = false,
     memoryIds = new Set(),
+    attributeFilters = [],
   } = {}) {
     await this.ensureInitialized();
 
     let res = gState.memories;
 
+    // Filter soft deletion first
     if (!includeSoftDeleted) {
       res = res.filter(i => !i.is_deleted);
     }
 
+    // Then by specific memory IDs
     if (memoryIds.size) {
       res = res.filter(i => memoryIds.has(i.id));
     }
 
+    // Next, filter by attribute filters
+    for (const { field, comparator, value, options } of attributeFilters) {
+      // Validate filters first
+      // Invalid comparator
+      if (!Object.values(MEMORY_FILTER_COMPARATOR).includes(comparator)) {
+        lazy.console.error(`Invalid filtering comparator: "${comparator}"`);
+        return [];
+      }
+      const validators = MEMORY_FILTER_VALIDATORS[comparator];
+      // Invalid filter field
+      if (!validators.field(field)) {
+        lazy.console.error(
+          `Invalid field for comparator "${comparator}": "${field}"`
+        );
+        return [];
+      }
+      // Invalid filter value
+      if (!validators.value(value)) {
+        lazy.console.error(
+          `Invalid value for comparator "${comparator}": "${value}"`
+        );
+        return [];
+      }
+
+      // Apply filters
+      // Special case for semantic filters
+      if (comparator === MEMORY_FILTER_COMPARATOR.LIKE) {
+        const { topK, similarityThreshold } = options ?? {};
+        const semanticMatches = new Set(
+          (
+            await this.getRelevantMemories(value, topK, similarityThreshold)
+          ).map(mem => mem[field])
+        );
+        res = res.filter(memory => semanticMatches.has(memory[field]));
+        continue;
+      }
+      // Other non-semantic filters
+      const predicate = MEMORY_FILTER_PREDICATES[comparator];
+      if (predicate) {
+        res = res.filter(memory =>
+          predicate(this.resolveFilterField(memory, field), value)
+        );
+      }
+    }
+
+    // Sort the results
     if (sortBy) {
       res = [...res].sort((a, b) => {
         const av = a[sortBy] ?? 0;
@@ -667,6 +993,7 @@ export const MemoryStore = {
       ["last_history_memory_ts", v => Number.isFinite(v)],
       ["last_chat_memory_ts", v => Number.isFinite(v)],
       ["last_session_memory_ts", v => Number.isFinite(v)],
+      ["last_generation_run_ts", v => Number.isFinite(v)],
     ];
 
     for (const [prop, validator] of validatedProps) {

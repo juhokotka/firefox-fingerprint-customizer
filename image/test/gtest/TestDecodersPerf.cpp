@@ -2,16 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gtest/gtest.h"
-#include "gtest/MozGTestBench.h"
-
 #include "Common.h"
 #include "Decoder.h"
 #include "DecoderFactory.h"
 #include "IDecodingTask.h"
-#include "mozilla/RefPtr.h"
 #include "ProgressTracker.h"
 #include "SourceBuffer.h"
+#include "gtest/MozGTestBench.h"
+#include "gtest/gtest.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/RefPtr.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -162,5 +162,53 @@ IMAGE_GTEST_BENCH_F(JXL, RgbLossy)
 IMAGE_GTEST_BENCH_ALPHA_F(JXL, RgbAlphaLossless)
 IMAGE_GTEST_BENCH_ALPHA_F(JXL, RgbAlphaLossy)
 #endif
+
+static void CheckDownscaleDct(const ImageTestCase& aTestCase,
+                              SourceBuffer* aSourceBuffer, bool aEnabled) {
+  bool oldValue = true;
+  Preferences::GetBool("image.jpeg.dct-scaling.enabled", &oldValue);
+  Preferences::SetBool("image.jpeg.dct-scaling.enabled", aEnabled);
+  IntSize outputSize(100, 100);
+  WithSingleChunkDecode(aTestCase, aSourceBuffer, Some(outputSize),
+                        [&](image::Decoder* aDecoder) {
+                          CheckDecoderState(aTestCase, aDecoder, outputSize);
+                        });
+  Preferences::SetBool("image.jpeg.dct-scaling.enabled", oldValue);
+}
+
+MOZ_GTEST_BENCH_F(ImageDecodersPerf_JPG_YCbCr, DownscaleDctOff, [this] {
+  CheckDownscaleDct(mTestCase, mSourceBuffer, false);
+});
+
+MOZ_GTEST_BENCH_F(ImageDecodersPerf_JPG_YCbCr, DownscaleDctOn, [this] {
+  CheckDownscaleDct(mTestCase, mSourceBuffer, true);
+});
+
+static void CheckDownscaleWebPScaling(const ImageTestCase& aTestCase,
+                                      SourceBuffer* aSourceBuffer,
+                                      bool aEnabled) {
+  bool oldValue = false;
+  Preferences::GetBool("image.webp.scaled-decoding.enabled", &oldValue);
+  Preferences::SetBool("image.webp.scaled-decoding.enabled", aEnabled);
+  IntSize outputSize(100, 100);
+  WithSingleChunkDecode(aTestCase, aSourceBuffer, Some(outputSize),
+                        [&](image::Decoder* aDecoder) {
+                          CheckDecoderState(aTestCase, aDecoder, outputSize);
+                        });
+  Preferences::SetBool("image.webp.scaled-decoding.enabled", oldValue);
+}
+
+#define IMAGE_GTEST_WEBP_SCALING_BENCH_F(test_fixture)          \
+  MOZ_GTEST_BENCH_F(test_fixture, DownscaleScalingOff, [this] { \
+    CheckDownscaleWebPScaling(mTestCase, mSourceBuffer, false); \
+  });                                                           \
+  MOZ_GTEST_BENCH_F(test_fixture, DownscaleScalingOn, [this] {  \
+    CheckDownscaleWebPScaling(mTestCase, mSourceBuffer, true);  \
+  });
+
+IMAGE_GTEST_WEBP_SCALING_BENCH_F(ImageDecodersPerf_WebP_RgbLossy)
+IMAGE_GTEST_WEBP_SCALING_BENCH_F(ImageDecodersPerf_WebP_RgbLossless)
+IMAGE_GTEST_WEBP_SCALING_BENCH_F(ImageDecodersPerf_WebP_RgbAlphaLossy)
+IMAGE_GTEST_WEBP_SCALING_BENCH_F(ImageDecodersPerf_WebP_RgbAlphaLossless)
 
 }  // namespace

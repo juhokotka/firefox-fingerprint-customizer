@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/CheckedInt.h"
 #include "mozilla/layers/NativeLayerRootRemoteMacParent.h"
+#include "mozilla/CheckedInt.h"
 #include "xpcpublic.h"
 
 namespace mozilla {
@@ -67,8 +67,11 @@ NativeLayerRootRemoteMacParent::RecvCommitNativeLayerCommands(
 
       case NativeLayerCommand::TCommandChangedSurface: {
         auto& changedSurface = command.get_CommandChangedSurface();
+        auto& transfer = changedSurface.Transfer();
+        MOZ_ASSERT(transfer.type() == SurfaceTransfer::TSurfaceTransferMacOS);
+        auto& transferMacOS = transfer.get_SurfaceTransferMacOS();
         HandleChangedSurface(changedSurface.ID(),
-                             std::move(changedSurface.Surface()),
+                             std::move(transferMacOS.Surface()),
                              changedSurface.IsDRM(), changedSurface.IsHDR(),
                              changedSurface.Size());
         break;

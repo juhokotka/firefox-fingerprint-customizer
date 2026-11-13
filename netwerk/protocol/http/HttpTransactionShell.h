@@ -10,14 +10,14 @@
 #include "TimingStruct.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
+#include "nsHttpRequestHead.h"
 #include "nsIClassOfService.h"
 #include "nsIEarlyHintObserver.h"
 #include "nsILoadInfo.h"
 #include "nsISupports.h"
+#include "nsITRRSkipReason.h"
 #include "nsITransportSecurityInfo.h"
 #include "nsInputStreamPump.h"
-#include "nsHttpRequestHead.h"
-#include "nsITRRSkipReason.h"
 
 class nsIEventTraget;
 class nsIInputStream;
@@ -179,6 +179,11 @@ class HttpTransactionShell : public nsISupports {
   virtual bool GetSupportsHTTP3() = 0;
 
   virtual void SetIsForWebTransport(bool aIsForWebTransport) = 0;
+
+  // Marks the transaction as uploading a non-replayable streaming body
+  // (e.g. a JS ReadableStream). Such a body has no length known up front,
+  // and retry or restart logic must not attempt to re-send it.
+  virtual void SetRequestBodyIsStreaming(bool aIsStreaming) = 0;
 
   virtual TimeStamp GetOnStartRequestStartTime() const { return TimeStamp(); }
   virtual TimeStamp GetDataAvailableStartTime() const { return TimeStamp(); }

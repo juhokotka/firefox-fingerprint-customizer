@@ -11,11 +11,12 @@ import androidx.annotation.Px
 import androidx.annotation.VisibleForTesting
 import androidx.recyclerview.widget.RecyclerView
 import mozilla.components.browser.menu.R
+import mozilla.components.support.ktx.android.view.pixelSizeFor
 
-/**
- * [RecyclerView] with automatically set width between widthMin / widthMax xml attributes.
- */
-class DynamicWidthRecyclerView @JvmOverloads constructor(
+/** [RecyclerView] with automatically set width between widthMin / widthMax xml attributes. */
+class DynamicWidthRecyclerView
+@JvmOverloads
+constructor(
     context: Context,
     attrs: AttributeSet? = null,
 ) : RecyclerView(context, attrs) {
@@ -54,22 +55,22 @@ class DynamicWidthRecyclerView @JvmOverloads constructor(
         desiredWidth: Int,
         desiredHeight: Int,
     ) {
-        val minimumTapArea = resources.getDimensionPixelSize(R.dimen.mozac_browser_menu_material_min_tap_area)
-        val minimumItemWidth = resources.getDimensionPixelSize(R.dimen.mozac_browser_menu_material_min_item_width)
+        val minimumTapArea = pixelSizeFor(R.dimen.mozac_browser_menu_material_min_tap_area)
+        val minimumItemWidth = pixelSizeFor(R.dimen.mozac_browser_menu_material_min_item_width)
 
-        val reconciledWidth = desiredWidth
-            .coerceAtLeast(minWidth)
-            // Follow material guidelines where the minimum width is 112dp.
-            .coerceAtLeast(minimumItemWidth)
-            .coerceAtMost(maxWidth)
-            // Leave at least 48dp as a tappable “exit area” available whenever the menu is open.
-            .coerceAtMost(getScreenWidth() - minimumTapArea)
+        val reconciledWidth =
+            desiredWidth
+                .coerceAtLeast(minWidth)
+                // Follow material guidelines where the minimum width is 112dp.
+                .coerceAtLeast(minimumItemWidth)
+                .coerceAtMost(maxWidth)
+                // Leave at least 48dp as a tappable “exit area” available whenever the menu is open.
+                .coerceAtMost(getScreenWidth() - minimumTapArea)
 
         callSetMeasuredDimension(reconciledWidth, desiredHeight)
     }
 
-    @VisibleForTesting
-    internal fun getScreenWidth(): Int = resources.displayMetrics.widthPixels
+    @VisibleForTesting internal fun getScreenWidth(): Int = resources.displayMetrics.widthPixels
 
     @SuppressLint("WrongCall")
     @VisibleForTesting

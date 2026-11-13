@@ -119,13 +119,31 @@ add_task(async function toolbar_icon_status() {
     button.classList.contains("ipprotection-on"),
     "Toolbar icon should now show connected status"
   );
-  // Regression guard for bug 2034698: the on/off icons must come from a
-  // single shared sprite so swapping states doesn't trigger a fresh image
-  // decode (which used to cause a one-frame blank toolbar button).
-  let onImage = getComputedStyle(button).listStyleImage;
+  // Regression guard for bug 2034698: state changes must not swap the toolbar
+  // icon's image (which triggered a one-frame blank). Instead every state's
+  // artwork is an always-painted overlay layer toggled via opacity, so the
+  // "on" layer is revealed while the base (off) icon is hidden.
+  let onLayer = button.querySelector(
+    ".ipprotection-icon-layer[data-state='on']"
+  );
+  let baseIcon = button.querySelector(
+    ".ipprotection-icon-stack > .toolbarbutton-icon"
+  );
+  let iconStack = button.querySelector(".ipprotection-icon-stack");
   Assert.ok(
-    onImage.includes("ipprotection-states.svg#on"),
-    `On state should reference the sprite fragment, got: ${onImage}`
+    iconStack.classList.contains("toolbarbutton-badge-stack"),
+    "Icon stack should have the toolbarbutton-badge-stack class for positioning and hover state"
+  );
+  Assert.ok(onLayer, "On-state overlay layer should exist");
+  Assert.equal(
+    getComputedStyle(onLayer).opacity,
+    "1",
+    "On layer should be revealed when connected"
+  );
+  Assert.equal(
+    getComputedStyle(baseIcon).opacity,
+    "0",
+    "Base (off) icon should be hidden when connected"
   );
   let vpnOffPromise = BrowserTestUtils.waitForEvent(
     lazy.IPPProxyManager,
@@ -141,10 +159,15 @@ add_task(async function toolbar_icon_status() {
     !button.classList.contains("ipprotection-on"),
     "Toolbar icon should now show disconnected status"
   );
-  let offImage = getComputedStyle(button).listStyleImage;
-  Assert.ok(
-    offImage.includes("ipprotection-states.svg#off"),
-    `Off state should reference the sprite fragment, got: ${offImage}`
+  Assert.equal(
+    getComputedStyle(onLayer).opacity,
+    "0",
+    "On layer should be hidden when disconnected"
+  );
+  Assert.equal(
+    getComputedStyle(baseIcon).opacity,
+    "1",
+    "Base (off) icon should be shown when disconnected"
   );
 
   cleanupService();
@@ -192,6 +215,40 @@ add_task(async function toolbar_keyboard_activation() {
 
     button.removeAttribute("tabindex");
   }
+});
+
+/**
+ * Tests that a connection kept up for the sites that always use the VPN does
+ * not show the icon as on for a site without an inclusion.
+ */
+add_task(async function toolbar_icon_status_inclusion_mode() {
+  setupService({
+    isReady: true,
+  });
+  IPProtectionService.updateState();
+  await putServerInRemoteSettings();
+
+  let button = document.getElementById(IPProtectionWidget.WIDGET_ID);
+  let { started } = await IPPProxyManager.start(
+    false,
+    false,
+    undefined,
+    IPPMode.MODE_INCLUSION
+  );
+  Assert.ok(started, "Proxy should start in inclusion mode");
+  Assert.ok(
+    !button.classList.contains("ipprotection-on"),
+    "Toolbar icon should not show connected status in inclusion mode"
+  );
+
+  IPPProxyManager.setMode(IPPMode.MODE_FULL);
+  Assert.ok(
+    button.classList.contains("ipprotection-on"),
+    "Toolbar icon should show connected status once widened to full mode"
+  );
+
+  await IPPProxyManager.stop(false);
+  cleanupService();
 });
 
 /**
@@ -336,34 +393,6 @@ add_task(async function toolbar_placement_customized() {
     start.area,
     start.position
   );
-});
-
-/**
- * Tests that the toolbar button badge reflects the openedPanelWithLocation pref.
- */
-add_task(async function toolbar_badge_opened_with_location() {
-  const OPENED_WITH_LOCATION_PREF =
-    "browser.ipProtection.openedPanelWithLocation";
-  let button = document.getElementById(IPProtectionWidget.WIDGET_ID);
-
-  await SpecialPowers.pushPrefEnv({
-    set: [[OPENED_WITH_LOCATION_PREF, false]],
-  });
-  Assert.ok(
-    button.hasAttribute("badged"),
-    "Toolbar button should be badged when user has not yet opened the panel with location"
-  );
-
-  await SpecialPowers.pushPrefEnv({ set: [[OPENED_WITH_LOCATION_PREF, true]] });
-  Assert.ok(
-    !button.hasAttribute("badged"),
-    "Toolbar button badge should be removed once the user has opened the panel with location"
-  );
-
-  // Each popPrefEnv unwraps one layer from the stack, restoring the
-  // pref to the value it had before that push
-  await SpecialPowers.popPrefEnv();
-  await SpecialPowers.popPrefEnv();
 });
 
 /**

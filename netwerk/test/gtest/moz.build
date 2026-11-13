@@ -3,6 +3,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 UNIFIED_SOURCES += [
+    "TestAuthModuleInitAsync.cpp",
     "TestBase64Stream.cpp",
     "TestBind.cpp",
     "TestBufferedInputStream.cpp",
@@ -18,10 +19,11 @@ UNIFIED_SOURCES += [
     "TestHostRecordQueue.cpp",
     "TestHttp2WebTransport.cpp",
     "TestHttp3ConnectUDPStream.cpp",
-    "TestHttpAtom.cpp",
+    "TestHttp3WebTransportSession.cpp",
     "TestHttpAuthUtils.cpp",
     "TestHttpChannel.cpp",
     "TestHttpResponseHead.cpp",
+    "TestHttpTransactionRestart.cpp",
     "TestIDNA.cpp",
     "TestInputStreamTransport.cpp",
     "TestIsValidIp.cpp",
@@ -35,12 +37,14 @@ UNIFIED_SOURCES += [
     "TestPollableEvent.cpp",
     "TestProtocolProxyService.cpp",
     "TestReadStreamToString.cpp",
+    "TestSanitizedSpec.cpp",
     "TestServerTimingHeader.cpp",
     "TestSFV.cpp",
     "TestSocketTransportService.cpp",
     "TestSSLTokensCache.cpp",
     "TestStandardURL.cpp",
     "TestStorageAccessHeader.cpp",
+    "TestSyncStreamListener.cpp",
     "TestUDPSocket.cpp",
     "TestURIMutator.cpp",
     "TestUriTemplate.cpp",
@@ -58,6 +62,9 @@ SOURCES += [
     "TestCacheCrypto.cpp",
     "TestCacheEntryWriterHang.cpp",
     "TestHappyEyeballsConnectionAttempt.cpp",
+    "TestHappyEyeballsNetAddrArray.cpp",
+    "TestHttpAtom.cpp",
+    "TestSOCKSProxyLookup.cpp",
 ]
 
 if CONFIG["OS_TARGET"] == "WINNT":
@@ -97,8 +104,16 @@ if CONFIG["OS_TARGET"] == "WINNT":
 if CONFIG["TARGET_OS"] == "OSX":
     LOCAL_INCLUDES += ["/netwerk/system/mac"]
 
+# android includes only
+if CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
+    LOCAL_INCLUDES += ["/netwerk/system/android"]
+
 include("/ipc/chromium/chromium-config.mozbuild")
 
 FINAL_LIBRARY = "xul-gtest"
 
 LOCAL_INCLUDES += ["!/xpcom", "/xpcom/components"]
+
+SOURCE_HEADERS += [
+    "TestCommon.h",
+]

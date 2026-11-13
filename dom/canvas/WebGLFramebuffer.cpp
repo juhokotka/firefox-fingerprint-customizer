@@ -12,7 +12,6 @@
 #include "GLScreenBuffer.h"
 #include "MozFramebuffer.h"
 #include "WebGLContext.h"
-#include "WebGLContextUtils.h"
 #include "WebGLExtensions.h"
 #include "WebGLFormats.h"
 #include "WebGLRenderbuffer.h"
@@ -890,6 +889,11 @@ void WebGLFramebuffer::ResolveAttachmentData() const {
             const uint32_t drawBuffer =
                 cur->mAttachmentPoint - LOCAL_GL_COLOR_ATTACHMENT0;
             MOZ_ASSERT(drawBuffer <= 100);
+            std::vector<GLenum> drawBuffersForClear(drawBuffer + 1,
+                                                    LOCAL_GL_NONE);
+            drawBuffersForClear[drawBuffer] = cur->mAttachmentPoint;
+            gl->fDrawBuffers(drawBuffersForClear.size(),
+                             drawBuffersForClear.data());
             switch (format->componentType) {
               case webgl::ComponentType::Int:
                 gl->fClearBufferiv(LOCAL_GL_COLOR, drawBuffer, iZeros);
@@ -921,6 +925,7 @@ void WebGLFramebuffer::ResolveAttachmentData() const {
       }
       imageInfo->mUninitializedSlices.reset();
     }
+    RefreshDrawBuffers();
     return;
   }
 
@@ -1614,8 +1619,8 @@ void WebGLFramebuffer::BlitFramebuffer(WebGLContext* webgl, GLint _srcX0,
 
     // src -Blit-> fbB -DrawBlit-> fbC -Blit-> dst
 
-    const auto fbB = gl::MozFramebuffer::Create(gl, {1, 1}, 0, false);
-    const auto fbC = gl::MozFramebuffer::Create(gl, {1, 1}, 0, false);
+    const auto fbB = gl::MozFramebuffer::Create(gl, {1, 1}, 0, false, false);
+    const auto fbC = gl::MozFramebuffer::Create(gl, {1, 1}, 0, false, false);
 
     // -
 

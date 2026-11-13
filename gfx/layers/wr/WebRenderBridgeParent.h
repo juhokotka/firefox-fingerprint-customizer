@@ -9,16 +9,16 @@
 
 #include "CompositableHost.h"  // for CompositableHost, ImageCompositeNotificationInfo
 #include "GLContextProvider.h"
+#include "WindowRenderer.h"
 #include "mozilla/DataMutex.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/layers/CompositableTransactionParent.h"
 #include "mozilla/layers/CompositorVsyncSchedulerOwner.h"
 #include "mozilla/layers/PWebRenderBridgeParent.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/UniquePtr.h"
-#include "mozilla/webrender/WebRenderTypes.h"
 #include "mozilla/webrender/WebRenderAPI.h"
+#include "mozilla/webrender/WebRenderTypes.h"
 #include "nsTArrayForwardDeclare.h"
-#include "WindowRenderer.h"
 
 namespace mozilla {
 
@@ -238,6 +238,10 @@ class WebRenderBridgeParent final : public PWebRenderBridgeParent,
   void RetrySkippedComposite();
 
   TextureFactoryIdentifier GetTextureFactoryIdentifier();
+  // Returns Nothing if we were destroyed, or if we are a root bridge which has
+  // not finished initializing. Content bridges are always initialized when
+  // created.
+  Maybe<TextureFactoryIdentifier> MaybeGetTextureFactoryIdentifier();
 
   void ExtractImageCompositeNotifications(
       nsTArray<ImageCompositeNotificationInfo>* aNotifications);
@@ -264,9 +268,25 @@ class WebRenderBridgeParent final : public PWebRenderBridgeParent,
     return aFontKey.mNamespace == mLateInit->mIdNamespace;
   }
 
+  // Returns the bridge whose namespace is aNamespace, if it is this bridge or
+  // another bridge of the same content process and the same WebRender window.
+  // Otherwise returns null. A snapshot image can only be adopted
+  // (OpAdoptSnapshotImage) from such a bridge.
+  already_AddRefed<WebRenderBridgeParent> FindSnapshotSourceBridge(
+      const wr::IdNamespace& aNamespace);
+
   bool OwnsExternalImageId(const wr::ExternalImageId& aId) const {
     return static_cast<uint32_t>(wr::AsUint64(aId) >> 32) ==
            mLateInit->mIdNamespace.mHandle;
+  }
+
+  /**
+   * AnimationHelper::GetNextCompositorAnimationsId() encodes the child
+   * process PID in the upper 32 bits of the id, verify that this is as
+   * expected.
+   */
+  bool OwnsCompositorAnimationsId(uint64_t aId) const {
+    return (aId >> 32) == (uint64_t)OtherPid();
   }
 
   void FlushRendering(wr::RenderReasons aReasons, bool aBlocking);
@@ -311,6 +331,10 @@ class WebRenderBridgeParent final : public PWebRenderBridgeParent,
   void RemoveEpochDataPriorTo(const wr::Epoch& aRenderedEpoch);
 
   bool IsRootWebRenderBridgeParent() const;
+
+  // Sends this bridge's embed policy to WebRender, for when the set of layer
+  // trees it embeds changes.
+  void RefreshEmbedPolicy();
   LayersId GetLayersId() const;
 
   void BeginRecording(const TimeStamp& aRecordingStart);
@@ -353,8 +377,16 @@ class WebRenderBridgeParent final : public PWebRenderBridgeParent,
                               bool aValidTransaction, bool aRenderOffscreen,
                               const VsyncId& aVsyncId);
 
+  void SanitizeScrollData(WebRenderScrollData& aScrollData);
+
+  // The namespaces of the pipelines this bridge's display lists may embed:
+  // those of its process's async image pipelines and of the layer trees it
+  // embeds. Nothing() if they may embed any pipeline.
+  Maybe<nsTArray<uint32_t>> ComputeEmbedPolicy() const;
+
   bool SetDisplayList(const LayoutDeviceRect& aRect, ipc::ByteBuf&& aDLItems,
                       ipc::ByteBuf&& aSpatialTreeDL,
+                      ipc::ByteBuf&& aInternerDelta,
                       const wr::BuiltDisplayListDescriptor& aDLDesc,
                       const nsTArray<OpUpdateResource>& aResourceUpdates,
                       const nsTArray<RefCountedShmem>& aSmallShmems,

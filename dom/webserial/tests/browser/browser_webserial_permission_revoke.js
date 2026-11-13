@@ -49,8 +49,9 @@ add_task(async function testPermissionRevocation() {
     gBrowser.selectedBrowser
   );
 
-  gSerialDeviceObserver.resetBrowserCount(gBrowser.selectedBrowser);
-  gBrowser.updateBrowserSharing(gBrowser.selectedBrowser, { serial: false });
+  // Unlike the permission panel's revoke button, don't reset the sharing
+  // count here: the icon must be hidden purely by the parent process
+  // observing the port close that forget() triggers.
 
   // Give time for observer to be registered (it happens async)
   await new Promise(resolve => setTimeout(resolve, 0));
@@ -91,9 +92,11 @@ add_task(async function testPermissionRevocation() {
     is(ports.length, 0, "getPorts() should return empty after revocation");
   });
 
-  let serialIcon = document.getElementById("serial-sharing-icon");
-  ok(
-    !BrowserTestUtils.isVisible(serialIcon),
+  await TestUtils.waitForCondition(
+    () =>
+      !BrowserTestUtils.isVisible(
+        document.getElementById("serial-sharing-icon")
+      ),
     "Serial sharing icon should not be visible after permission revocation"
   );
 

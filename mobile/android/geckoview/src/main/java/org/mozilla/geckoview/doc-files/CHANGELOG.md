@@ -13,6 +13,64 @@ exclude: true
 
 ⚠️  breaking change and deprecation notices
 
+## v160
+- The `content-disposition` header of the [`WebResponse`][65.15] passed to
+    [`ContentDelegate.onExternalResponse`][160.1] now contains a filename validated with the same
+    rules desktop applies when saving a download, instead of the header sent by the server.
+    ([bug 1822968]({{bugzilla}}1822968))
+- Added [`GeckoSessionSettings.Builder.pictureInPictureToken`][160.2] so the session created for a picture-in-picture request is opened in the browsing context group and content process of the video it clones. ([bug 2065579]({{bugzilla}}2065579))
+- Added experimental [`PictureInPictureController.SessionPictureInPicture.Delegate`][160.3], registered with [`GeckoSession.setPictureInPictureDelegate`][160.4], which is notified via [`onEnterPictureInPicture`][160.5] when Gecko wants a picture-in-picture window opened for a video. Added [`GeckoSession.getSessionPictureInPicture`][160.7], whose [`request`][160.6] asks Gecko for a window for the video the session last started playing. ([bug 2065581]({{bugzilla}}2065581))
+- Added experimental [`onExitPictureInPicture`][160.8] so the application is told when the picture-in-picture window it opened should be closed. ([bug 2065581]({{bugzilla}}2065581))
+- Added experimental [`setKeepActive`][160.9] so the application can keep a session active while a picture-in-picture window shows one of its videos. ([bug 2065581]({{bugzilla}}2065581))
+- ⚠️ Removed `IPProtectionController.SERVICE_STATE_OPTED_OUT`. Gecko does not report an opted-out IP Protection service state. ([bug 2082578]({{bugzilla}}2082578))
+
+[160.1]: {{javadoc_uri}}/GeckoSession.ContentDelegate.html#onExternalResponse(org.mozilla.geckoview.GeckoSession,org.mozilla.geckoview.WebResponse)
+[160.2]: {{javadoc_uri}}/GeckoSessionSettings.Builder.html#pictureInPictureToken(java.lang.String)
+[160.3]: {{javadoc_uri}}/PictureInPictureController.SessionPictureInPicture.Delegate.html
+[160.4]: {{javadoc_uri}}/GeckoSession.html#setPictureInPictureDelegate(org.mozilla.geckoview.PictureInPictureController.SessionPictureInPicture.Delegate)
+[160.5]: {{javadoc_uri}}/PictureInPictureController.SessionPictureInPicture.Delegate.html#onEnterPictureInPicture(org.mozilla.geckoview.GeckoSession,java.lang.String)
+[160.6]: {{javadoc_uri}}/PictureInPictureController.SessionPictureInPicture.html#request()
+[160.7]: {{javadoc_uri}}/GeckoSession.html#getSessionPictureInPicture()
+[160.8]: {{javadoc_uri}}/PictureInPictureController.SessionPictureInPicture.Delegate.html#onExitPictureInPicture(org.mozilla.geckoview.GeckoSession)
+[160.9]: {{javadoc_uri}}/PictureInPictureController.SessionPictureInPicture.html#setKeepActive(boolean)
+
+## v157
+- Added [`GeckoSession.getPdfViewerEditor`][157.1] and
+    [`PdfViewerController.SessionEditor.addSignature`][157.2] to place a signature on the PDF the
+    session is displaying. The PDF viewer side is a stub until bug 2069045.
+    ([bug 2069043]({{bugzilla}}2069043))
+- Added [`GeckoView.captureFullPage()`][157.3] and [`GeckoDisplay.captureFullPage`][157.4] to take screenshot of the full web page. Returns a [`GeckoResult`][65.25] that completes to a [`Bitmap`][67.17] containing a full scrollable screenshot of a web page.
+
+[157.1]: {{javadoc_uri}}/GeckoSession.html#getPdfViewerEditor()
+[157.2]: {{javadoc_uri}}/PdfViewerController.SessionEditor.html#addSignature(java.lang.String)
+[157.3]: {{javadoc_uri}}/GeckoView.html#captureFullPage()
+[157.4]: {{javadoc_uri}}/GeckoDisplay.html#capturePixels()
+
+## v156
+- Updated [`GeckoSession.saveAsPdf`][156.1] to identify if the currently displayed browser item is a PDF JS page, if so, then save using PDF JS machinery. Otherwise, save the PDF through the Gecko print framework. ([bug 2064162]({{bugzilla}}2064162))
+- ⚠️ Added [`ContentParams.useSimpleText`][156.2] to request plain prose from
+    [`SessionPageExtractor.getPageContent`][156.3] instead of markdown-annotated text. This adds a
+    parameter to the [`ContentParams`][156.4] constructor.
+- ⚠️ Added [`PageMetadata.isGated`][156.5] to report whether a page declares its content to be gated,
+    for example behind a paywall or a registration wall. This adds a parameter to the
+    [`PageMetadata`][156.6] constructor.
+
+[156.1]: {{javadoc_uri}}/GeckoSession.html#saveAsPdf()
+[156.2]: {{javadoc_uri}}/PageExtractionController.ContentParams.html#useSimpleText
+[156.3]: {{javadoc_uri}}/PageExtractionController.SessionPageExtractor.html#getPageContent(org.mozilla.geckoview.PageExtractionController.ContentParams)
+[156.4]: {{javadoc_uri}}/PageExtractionController.ContentParams.html#ContentParams(boolean,boolean)
+[156.5]: {{javadoc_uri}}/PageExtractionController.PageMetadata.html#isGated
+[156.6]: {{javadoc_uri}}/PageExtractionController.PageMetadata.html#PageMetadata(java.lang.String[],int,java.lang.String,boolean,boolean)
+
+## v155
+- Added [WebRequestError.ERROR_LOCAL_NETWORK_ACCESS_DENIED] to indicate that a load failed because the user denied the local network access permission on Android 17+.
+- Added the [`IPProxyException.ERROR_CATASTROPHIC`][155.1] and [`IPProxyException.ERROR_VPN_UNAVAILABLE`][155.2]
+  error codes for the [`IPProtectioController.activate`][155.3].
+
+[155.1]: {{javadoc_uri}}/IPProtectionController.IPProxyException.html#ERROR_CATASTROPHIC
+[155.2]: {{javadoc_uri}}/IPProtectionController.IPProxyException.html#ERROR_VPN_UNAVAILABLE
+[155.3]: {{javadoc_uri}}/IPProtectionController.html#activate(boolean,boolean,java.lang.String)
+
 ## v154
 - Added [`Autofill.Node.getDatalist`][154.1] to expose predefined values by [`datalist`][154.2] elements for input fields.
 - Added experimental [`ContentPermission.notifyShown`][154.3] so embedders can signal that a permission prompt UI has been displayed to the user, enabling per-prompt telemetry on the Gecko side (e.g. for local network access). ([bug 2009145]({{bugzilla}}2009145))
@@ -23,6 +81,28 @@ exclude: true
 - ⚠️ Made [`ScrollPositionUpdate`][154.10] immutable: its fields are now `final` and instances are constructed via `ScrollPositionUpdate(float, float, float, int)` instead of the previous no-argument constructor with mutable fields. ([bug 1994863]({{bugzilla}}1994863))
 - Added [`GeckoSession.getBrokenSiteReport`][154.11] that returns a `GeckoResult<JSONObject>` containing information for a broken site report. ([bug 2049050]({{bugzilla}}2049050)).
 - Changed [`GeckoSession.setHistoryDelegate`][154.12], [`setContentBlockingDelegate`][154.13], [`setMediaDelegate`][154.14], [`setMediaSessionDelegate`][154.15], [`setTranslationsSessionDelegate`][154.16], [`setPrintDelegate`][154.17], and [`setExperimentDelegate`][154.18] from `@AnyThread` to `@UiThread`, reflecting that they must be called on the UI thread.
+- Added [`MediaSession.notifySystemAudioFocusChange`][154.19] so embedders can route a system audio-focus change to the tab's W3C Audio Session interrupt, suspending and resuming the tab's audible media elements, Web Audio, and Web Speech. ([bug 2048732]({{bugzilla}}2048732))
+- Added [`GeckoSession.sendGleanBrokenSiteReport`][154.20] which sends a broken site report using Glean. ([bug 2054543]({{bugzilla}}2054543)).
+- Added [`GeckoSession.HistoryDelegate.hasVisitedHostSince`][154.21] so embedders can report whether a host was visited within a time window, used to derive first-daily-load pageload telemetry. ([bug 2058980]({{bugzilla}}2058980))
+- Added experimental [`GeckoRuntimeSettings.setIpProtectionAuthProvider`][154.22] and [`getIpProtectionAuthProvider`][154.23] to select the IP Protection authentication provider (`"fxa"` or `"gpi"`) on Android. ([bug 2054901]({{bugzilla}}2054901))
+- ⚠️ Removed the Cookie Banner Handling API. The underlying Gecko feature no longer exists and
+  there is no replacement. The following members were removed:
+  `ContentBlocking.CookieBannerMode` and `ContentBlocking.CBCookieBannerMode`;
+  `ContentBlocking.Settings.setCookieBannerMode`, `getCookieBannerMode`,
+  `setCookieBannerModePrivateBrowsing`, `getCookieBannerModePrivateBrowsing`,
+  `setCookieBannerDetectOnlyMode`, `getCookieBannerDetectOnlyMode`,
+  `setCookieBannerGlobalRulesEnabled`, `getCookieBannerGlobalRulesEnabled`,
+  `setCookieBannerGlobalRulesSubFramesEnabled` and
+  `getCookieBannerGlobalRulesSubFramesEnabled`;
+  `ContentBlocking.Settings.Builder.cookieBannerHandlingMode`,
+  `cookieBannerHandlingModePrivateBrowsing`, `cookieBannerHandlingDetectOnlyMode`,
+  `cookieBannerGlobalRulesEnabled` and `cookieBannerGlobalRulesSubFramesEnabled`;
+  `GeckoSession.ContentDelegate.onCookieBannerDetected` and `onCookieBannerHandled`;
+  `GeckoSession.hasCookieBannerRuleForBrowsingContextTree`;
+  `StorageController.setCookieBannerModeForDomain`,
+  `setCookieBannerModeAndPersistInPrivateBrowsingForDomain`,
+  `removeCookieBannerModeForDomain` and `getCookieBannerModeForDomain`.
+  ([bug 2058143]({{bugzilla}}2058143))
 
 [154.1]: {{javadoc_uri}}/Autofill.Node.html#getDatalist()
 [154.2]: https://developer.mozilla.org/en/docs/Web/HTML/Reference/Elements/datalist
@@ -41,6 +121,10 @@ exclude: true
 [154.16]: {{javadoc_uri}}/GeckoSession.html#setTranslationsSessionDelegate(org.mozilla.geckoview.TranslationsController.SessionTranslation.Delegate)
 [154.17]: {{javadoc_uri}}/GeckoSession.html#setPrintDelegate(org.mozilla.geckoview.GeckoSession.PrintDelegate)
 [154.18]: {{javadoc_uri}}/GeckoSession.html#setExperimentDelegate(org.mozilla.geckoview.GeckoSession.ExperimentDelegate)
+[154.19]: {{javadoc_uri}}/MediaSession.html#notifySystemAudioFocusChange(int)
+[154.21]: {{javadoc_uri}}/GeckoSession.HistoryDelegate.html#hasVisitedHostSince(org.mozilla.geckoview.GeckoSession,java.lang.String,long,long)
+[154.22]: {{javadoc_uri}}/GeckoRuntimeSettings.html#setIpProtectionAuthProvider(java.lang.String)
+[154.23]: {{javadoc_uri}}/GeckoRuntimeSettings.html#getIpProtectionAuthProvider()
 
 ## v153
 - Added [`SourceType`][153.1] annotation to [`ScrollPositionUpdate.source`][153.2]
@@ -64,6 +148,7 @@ exclude: true
 - Added [`WebAuthnRelatedOriginPrompt`][152.10] and [`onWebAuthnRelatedOriginPrompt`][152.11] to `GeckoSession.PromptDelegate` for confirming WebAuthn related origin requests.
     ([bug 2010193]({{bugzilla}}2010193))
 - Added [`IPProtectionController.enroll`][152.12] and [`IPProtectionController.EnrollResult`][152.13] to trigger enrollment via the active auth provider. ([bug 2037352]({{bugzilla}}2037352))
+- Added [`IPProtectionController.GpiProvider`][152.14], [`setGpiProvider`][152.15] / [`getGpiProvider`][152.16] so embedders can supply Google Play Integrity tokens to the IP Protection service. ([bug 2037184]({{bugzilla}}2037184))
 
 [152.1]: {{javadoc_uri}}/WebExtensionController.html#INSTALLATION_METHOD_RTAMO
 [152.2]: {{javadoc_uri}}/IPProtectionController.AuthProvider.html
@@ -78,6 +163,9 @@ exclude: true
 [152.11]: {{javadoc_uri}}/GeckoSession.PromptDelegate.html#onWebAuthnRelatedOriginPrompt(org.mozilla.geckoview.GeckoSession,org.mozilla.geckoview.GeckoSession.PromptDelegate.WebAuthnRelatedOriginPrompt)
 [152.12]: {{javadoc_uri}}/IPProtectionController.html#enroll()
 [152.13]: {{javadoc_uri}}/IPProtectionController.EnrollResult.html
+[152.14]: {{javadoc_uri}}/IPProtectionController.GpiProvider.html
+[152.15]: {{javadoc_uri}}/IPProtectionController.html#setGpiProvider(org.mozilla.geckoview.IPProtectionController.GpiProvider)
+[152.16]: {{javadoc_uri}}/IPProtectionController.html#getGpiProvider()
 
 ## v151
 - Added `isBlocked` to `AIFeature` on [`AIFeaturesController`][150.3].
@@ -2018,4 +2106,4 @@ to allow adding gecko profiler markers.
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport(android.content.Context,android.os.Bundle,java.lang.String)
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: 6f0139ff02e6b63b6548b24c75ed3cd6b7f003f9
+[api-version]: a2a30400e084298e8b1eb6a7570971d3f03979fc

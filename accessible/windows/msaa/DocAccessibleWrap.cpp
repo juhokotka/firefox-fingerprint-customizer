@@ -5,13 +5,13 @@
 #include "DocAccessibleWrap.h"
 
 #include "Compatibility.h"
+#include "DocAccessibleChild.h"
+#include "RootAccessible.h"
+#include "Statistics.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/Document.h"
-#include "DocAccessibleChild.h"
 #include "nsWinUtils.h"
-#include "RootAccessible.h"
-#include "Statistics.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -23,8 +23,6 @@ using namespace mozilla::a11y;
 DocAccessibleWrap::DocAccessibleWrap(dom::Document* aDocument,
                                      PresShell* aPresShell)
     : DocAccessible(aDocument, aPresShell), mHWND(nullptr) {}
-
-DocAccessibleWrap::~DocAccessibleWrap() {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // LocalAccessible

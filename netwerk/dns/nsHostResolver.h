@@ -5,27 +5,27 @@
 #ifndef nsHostResolver_h_
 #define nsHostResolver_h_
 
-#include "nscore.h"
-#include "prnetdb.h"
-#include "PLDHashTable.h"
-#include "mozilla/CondVar.h"
-#include "mozilla/DataMutex.h"
-#include "mozilla/RWLock.h"
-#include "nsISupportsImpl.h"
-#include "nsIDNSListener.h"
-#include "nsTArray.h"
 #include "GetAddrInfo.h"
 #include "HostRecordQueue.h"
-#include "mozilla/net/DNS.h"
-#include "mozilla/net/DashboardTypes.h"
+#include "PLDHashTable.h"
 #include "mozilla/Atomics.h"
-#include "mozilla/TimeStamp.h"
-#include "nsHostRecord.h"
-#include "nsRefPtrHashtable.h"
-#include "nsIThreadPool.h"
-#include "mozilla/net/NetworkConnectivityService.h"
-#include "mozilla/net/DNSByTypeRecord.h"
+#include "mozilla/CondVar.h"
+#include "mozilla/DataMutex.h"
+#include "mozilla/Mutex.h"
 #include "mozilla/StaticPrefs_network.h"
+#include "mozilla/TimeStamp.h"
+#include "mozilla/net/DNS.h"
+#include "mozilla/net/DNSByTypeRecord.h"
+#include "mozilla/net/DashboardTypes.h"
+#include "mozilla/net/NetworkConnectivityService.h"
+#include "nsHostRecord.h"
+#include "nsIDNSListener.h"
+#include "nsISupportsImpl.h"
+#include "nsIThreadPool.h"
+#include "nsRefPtrHashtable.h"
+#include "nsTArray.h"
+#include "nscore.h"
+#include "prnetdb.h"
 
 namespace mozilla {
 namespace net {
@@ -269,7 +269,8 @@ class nsHostResolver : public nsISupports, public AHostResolver {
   // Resolve the host from the DNS cache.
   already_AddRefed<nsHostRecord> FromCache(nsHostRecord* aRec,
                                            const nsACString& aHost,
-                                           uint16_t aType, nsresult& aStatus)
+                                           uint16_t aType, nsresult& aStatus,
+                                           bool& aFromStaleCache)
       MOZ_REQUIRES(mDBLock) MOZ_REQUIRES(mQueue.mLock);
   // Called when the host name is an IP address and has been passed.
   already_AddRefed<nsHostRecord> FromCachedIPLiteral(nsHostRecord* aRec);
@@ -280,8 +281,8 @@ class nsHostResolver : public nsISupports, public AHostResolver {
   already_AddRefed<nsHostRecord> FromUnspecEntry(
       nsHostRecord* aRec, const nsACString& aHost, const nsACString& aTrrServer,
       const nsACString& aOriginSuffix, uint16_t aType,
-      nsIDNSService::DNSFlags aFlags, uint16_t af, bool aPb, nsresult& aStatus)
-      MOZ_REQUIRES(mDBLock) MOZ_REQUIRES(mQueue.mLock);
+      nsIDNSService::DNSFlags aFlags, uint16_t af, bool aPb, nsresult& aStatus,
+      bool& aFromStaleCache) MOZ_REQUIRES(mDBLock) MOZ_REQUIRES(mQueue.mLock);
 
   bool OtherFamilyHasUsablePositiveResult(const nsHostKey& aKey, uint16_t aAf,
                                           const mozilla::TimeStamp& aNow,
@@ -301,7 +302,7 @@ class nsHostResolver : public nsISupports, public AHostResolver {
   // mutable so SizeOfIncludingThis can be const
   // Protects mRecordDB. When held together with mQueue.mLock, always acquire
   // mDBLock first.
-  mutable mozilla::RWLock mDBLock{"nsHostResolver.mDBLock"};
+  mutable Mutex mDBLock{"nsHostResolver.mDBLock"};
   mozilla::net::HostRecordQueue mQueue;
   nsRefPtrHashtable<nsGenericHashKey<nsHostKey>, nsHostRecord> mRecordDB
       MOZ_GUARDED_BY(mDBLock);

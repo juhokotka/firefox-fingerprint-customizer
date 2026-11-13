@@ -25,18 +25,19 @@ const lazy = XPCOMUtils.declareLazy({
     "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
   ChatStore:
     "moz-src:///browser/components/aiwindow/ui/modules/ChatStore.sys.mjs",
-  GenAI: "resource:///modules/GenAI.sys.mjs",
+  GenAI: "moz-src:///browser/components/genai/GenAI.sys.mjs",
   MemoryStore:
     "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs",
   getCachedModelsData:
+    "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs",
+  getModelDisplayOrder:
     "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs",
 });
 
 let previousAssistantModel = "No model";
 
 Preferences.addAll([
-  // browser.ai.control.* prefs defined in main.js
-  { id: "browser.ml.chat.provider", type: "string" },
+  // browser.ai.control.* and browser.ml.chat.provider prefs defined in main.js
   { id: "browser.ml.chat.shortcuts.smartwindow", type: "bool" },
   { id: "browser.smartwindow.apiKey", type: "string" },
   { id: "browser.smartwindow.enabled", type: "bool" },
@@ -198,6 +199,9 @@ class BlockAiConfirmationDialog extends MozLitElement {
           data-l10n-id="preferences-ai-controls-block-confirmation-translations"
         ></li>
         <li
+          data-l10n-id="preferences-ai-controls-block-confirmation-speech-recognition"
+        ></li>
+        <li
           data-l10n-id="preferences-ai-controls-block-confirmation-pdfjs"
         ></li>
         <li
@@ -304,10 +308,72 @@ const AI_CONTROL_OPTIONS = [
   },
 ];
 
+/**
+ * @param {string} key - Model choice ID (e.g., "1", "2", "3")
+ */
 const modelL10nArgs = key => ({
+  shortName: lazy.getCachedModelsData()[key].shortName,
   model: lazy.getCachedModelsData()[key].model,
   ownerName: lazy.getCachedModelsData()[key].ownerName,
 });
+
+// TODO Bug 2053495: remove with mistral release pref
+const MISTRAL_RELEASE_PREF = "browser.smartwindow.mistralRelease";
+
+const isMistralRelease = () =>
+  Services.prefs.getBoolPref(MISTRAL_RELEASE_PREF, false);
+
+/**
+ * Keyed by choice ID; entry order here does not matter. Radio display order is
+ * controlled by getModelDisplayOrder().
+ *
+ * TODO Bug 2053495
+ * When the mistral release pref is removed, delete MODEL_CHOICE_STRINGS and
+ * make MODEL_CHOICE_STRINGS_V2 the only set.
+ */
+/** @type {Record<string, {l10nId: string, descriptionL10nId?: string}>} */
+const MODEL_CHOICE_STRINGS = {
+  1: { l10nId: "smart-window-model-fast" },
+  2: { l10nId: "smart-window-model-flexible" },
+  3: { l10nId: "smart-window-model-personal" },
+};
+
+/** @type {Record<string, {l10nId: string, descriptionL10nId?: string}>} */
+const MODEL_CHOICE_STRINGS_V2 = {
+  1: {
+    l10nId: "smart-window-model-fast-v2",
+  },
+  2: {
+    l10nId: "smart-window-model-flexible-v2",
+  },
+  3: {
+    l10nId: "smart-window-model-personal-v2",
+  },
+};
+
+/**
+ * Builds the preset (non-custom) model radio options. Ordering comes from
+ * getModelDisplayOrder(); label and description string IDs come from the static
+ * maps above; l10n args (display values) come from the cached model data.
+ *
+ * @returns {object[]}
+ */
+const buildPresetModelOptions = () => {
+  const strings = isMistralRelease()
+    ? MODEL_CHOICE_STRINGS_V2
+    : MODEL_CHOICE_STRINGS;
+  return lazy.getModelDisplayOrder().map(choiceId => {
+    const { l10nId } = strings[choiceId];
+    const option = /** @type {Record<string, any>} */ ({
+      value: choiceId,
+      l10nId,
+      get l10nArgs() {
+        return modelL10nArgs(choiceId);
+      },
+    });
+    return option;
+  });
+};
 
 /**
  * Validates that a URL is trustworthy (HTTPS or localhost).
@@ -376,6 +442,8 @@ function makeAiControlSetting({
   feature,
   getControlConfig,
   onBeforeBlock,
+  setup,
+  visible,
 }) {
   function recordTelemetry(selection) {
     Glean.browser.aiControlChanged.record({ feature, selection });
@@ -397,11 +465,14 @@ function makeAiControlSetting({
         }
       };
       Services.obs.addObserver(featureChange, "OnDeviceModelManagerChange");
-      return () =>
+      const teardownSetup = setup?.(emitChange);
+      return () => {
         Services.obs.removeObserver(
           featureChange,
           "OnDeviceModelManagerChange"
         );
+        teardownSetup?.();
+      };
     },
     get(prefVal, deps) {
       const aiControlState = OnDeviceModelManager.getAiControlState(feature);
@@ -451,6 +522,9 @@ function makeAiControlSetting({
       return OnDeviceModelManager.isManagedByPolicy(feature);
     },
     visible(deps) {
+      if (visible && !visible(deps)) {
+        return false;
+      }
       return (
         OnDeviceModelManager.isAllowed(feature) ||
         deps.aiControlsShowUnavailable.value
@@ -497,19 +571,39 @@ makeAiControlSetting({
   id: "aiControlSmartTabGroupsSelect",
   pref: "browser.ai.control.smartTabGroups",
   feature: OnDeviceModelManager.features.TabGroups,
+  setup(emitChange) {
+    const onTabGroupsEnabledChange = (_, __, changedPref) => {
+      if (changedPref == "browser.tabs.groups.enabled") {
+        emitChange();
+      }
+    };
+    Services.prefs.addObserver(
+      "browser.tabs.groups.enabled",
+      onTabGroupsEnabledChange
+    );
+    return () =>
+      Services.prefs.removeObserver(
+        "browser.tabs.groups.enabled",
+        onTabGroupsEnabledChange
+      );
+  },
+  visible() {
+    return Services.prefs.getBoolPref("browser.tabs.groups.enabled", true);
+  },
 });
 makeAiControlSetting({
   id: "aiControlLinkPreviewKeyPointsSelect",
   pref: "browser.ai.control.linkPreviewKeyPoints",
   feature: OnDeviceModelManager.features.KeyPoints,
 });
+makeAiControlSetting({
+  id: "aiControlSpeechRecognitionSelect",
+  pref: "browser.ai.control.speechRecognition",
+  feature: OnDeviceModelManager.features.SpeechRecognition,
+});
 
 // sidebar chatbot
 Preferences.addSetting({ id: "chatbotProviderItem" });
-Preferences.addSetting({
-  id: "chatbotProvider",
-  pref: "browser.ml.chat.provider",
-});
 Preferences.addSetting(
   /** @type {{ feature: OnDeviceModelFeaturesEnum } & SettingConfig } */ ({
     id: "aiControlSidebarChatbotSelect",
@@ -690,7 +784,7 @@ Preferences.addSetting({
   onUserClick(e) {
     e.preventDefault();
     const browser = window.browsingContext.embedderElement;
-    lazy.AIWindow.launchWindow(browser, true);
+    lazy.AIWindow.launchWindow(browser, true, "settings");
   },
 });
 
@@ -751,6 +845,20 @@ Preferences.addSetting({
       "smartWindowFirstRunModelChoice",
       "smartWindowCustomEndpoint",
     ],
+    // TODO Bug 2053495: remove with mistral release pref.
+    setup(emitChange) {
+      const observer = () => emitChange();
+      Services.prefs.addObserver(MISTRAL_RELEASE_PREF, observer);
+      return () =>
+        Services.prefs.removeObserver(MISTRAL_RELEASE_PREF, observer);
+    },
+    getControlConfig(config) {
+      const customOption = config.options.find(option => option.value === "0");
+      return {
+        ...config,
+        options: [...buildPresetModelOptions(), customOption],
+      };
+    },
     get(_, deps) {
       if (customRadioSelected) {
         return "0";
@@ -1259,8 +1367,8 @@ SettingGroupManager.registerGroups({
             id: "aiControlDefaultToggle",
             l10nId: "preferences-ai-controls-block-ai",
             control: "moz-toggle",
+            headingLevel: 3,
             controlAttrs: {
-              headinglevel: 3,
               inputlayout: "inline-end",
             },
             options: [
@@ -1296,8 +1404,8 @@ SettingGroupManager.registerGroups({
         l10nId: "preferences-ai-controls-on-device-group",
         supportPage: "on-device-models",
         control: "moz-fieldset",
+        headingLevel: 2,
         controlAttrs: {
-          headinglevel: 2,
           iconsrc: "chrome://browser/skin/device-desktop.svg",
         },
         items: [
@@ -1329,6 +1437,22 @@ SettingGroupManager.registerGroups({
                         },
                       },
                     ],
+                  },
+                ],
+              },
+              {
+                control: "moz-box-item",
+                items: [
+                  {
+                    id: "aiControlSpeechRecognitionSelect",
+                    l10nId:
+                      "preferences-ai-controls-speech-recognition-control",
+                    control: "moz-select",
+                    controlAttrs: {
+                      inputlayout: "inline-end",
+                    },
+                    supportPage: "speech-recognition-firefox",
+                    options: [...AI_CONTROL_OPTIONS],
                   },
                 ],
               },
@@ -1387,9 +1511,9 @@ SettingGroupManager.registerGroups({
         l10nId: "ai-window-features-group",
         control: "moz-fieldset",
         supportPage: "smart-window",
+        headingLevel: 2,
         controlAttrs: {
-          headinglevel: 2,
-          iconsrc: "chrome://browser/skin/smart-window-mono.svg",
+          iconsrc: "chrome://browser/skin/smart-window-mono-32.svg",
           badge: "beta",
         },
         items: [
@@ -1430,10 +1554,10 @@ SettingGroupManager.registerGroups({
       {
         id: "sidebarChatbotFieldset",
         control: "moz-fieldset",
-        l10nId: "preferences-ai-controls-sidebar-chatbot-group",
+        l10nId: "preferences-ai-controls-sidebar-chatbot-group-3",
         supportPage: "ai-chatbot",
+        headingLevel: 2,
         controlAttrs: {
-          headinglevel: 2,
           iconsrc: "chrome://browser/skin/sidebar-collapsed.svg",
         },
         items: [
@@ -1495,28 +1619,9 @@ SettingGroupManager.registerGroups({
       {
         id: "modelSelection",
         control: "moz-radio-group",
+        l10nId: "smart-window-model-radio-group",
         options: [
-          {
-            value: "1",
-            l10nId: "smart-window-model-fast",
-            get l10nArgs() {
-              return modelL10nArgs("1");
-            },
-          },
-          {
-            value: "2",
-            l10nId: "smart-window-model-flexible",
-            get l10nArgs() {
-              return modelL10nArgs("2");
-            },
-          },
-          {
-            value: "3",
-            l10nId: "smart-window-model-personal",
-            get l10nArgs() {
-              return modelL10nArgs("3");
-            },
-          },
+          ...buildPresetModelOptions(),
           {
             value: "0",
             l10nId: "smart-window-model-custom",

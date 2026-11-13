@@ -764,6 +764,8 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
       new Pref<Boolean>("signon.autofillForms", true);
   /* package */ final PrefWithoutDefault<String> mFirefoxRelay =
       new PrefWithoutDefault<>("signon.firefoxRelay.feature");
+  /* package */ final PrefWithoutDefault<String> mIpProtectionAuthProvider =
+      new PrefWithoutDefault<>("toolkit.ipProtection.android.authProvider");
   /* package */ final Pref<Boolean> mAutomaticallyOfferPopup =
       new Pref<Boolean>("browser.translations.automaticallyPopup", true);
   /* package */ final Pref<Boolean> mHttpsOnly =
@@ -800,8 +802,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
       new Pref<Boolean>("privacy.globalprivacycontrol.enabled", false);
   /* package */ final Pref<Boolean> mGlobalPrivacyControlEnabledPrivateMode =
       new Pref<Boolean>("privacy.globalprivacycontrol.pbmode.enabled", true);
-  /* package */ final Pref<Boolean> mGlobalPrivacyControlFunctionalityEnabled =
-      new Pref<Boolean>("privacy.globalprivacycontrol.functionality.enabled", true);
   /* package */ final PrefWithoutDefault<Boolean> mFingerprintingProtection =
       new PrefWithoutDefault<Boolean>("privacy.fingerprintingProtection");
   /* package */ final PrefWithoutDefault<Boolean> mFingerprintingProtectionPrivateMode =
@@ -982,7 +982,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     mGlobalPrivacyControlEnabled.commit(enabled);
     // Global Privacy Control Feature is enabled by default in private browsing.
     mGlobalPrivacyControlEnabledPrivateMode.commit(true);
-    mGlobalPrivacyControlFunctionalityEnabled.commit(true);
     return this;
   }
 
@@ -2065,6 +2064,46 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
   public @NonNull GeckoRuntimeSettings setFirefoxRelay(
       @NonNull final @FirefoxRelayMode String state) {
     mFirefoxRelay.commit(state);
+    return this;
+  }
+
+  /** IP Protection auth provider definitions. */
+  @Retention(RetentionPolicy.SOURCE)
+  @StringDef(value = {IP_PROTECTION_AUTH_PROVIDER_FXA, IP_PROTECTION_AUTH_PROVIDER_GPI})
+  public @interface IpProtectionAuthProvider {}
+
+  /** IP Protection authenticates via a Mozilla account (Firefox Accounts). */
+  public static final String IP_PROTECTION_AUTH_PROVIDER_FXA = "fxa";
+
+  /** IP Protection authenticates via Google Play Integrity (GPI). */
+  public static final String IP_PROTECTION_AUTH_PROVIDER_GPI = "gpi";
+
+  /**
+   * Get the IP Protection auth provider.
+   *
+   * <p>This API is experimental because it relies on an exposed pref and will be removed once IP
+   * Protection auth selection no longer depends on it.
+   *
+   * @return The IP Protection auth provider, or null if undefined.
+   */
+  @ExperimentalGeckoViewApi
+  public @Nullable @IpProtectionAuthProvider String getIpProtectionAuthProvider() {
+    return mIpProtectionAuthProvider.get();
+  }
+
+  /**
+   * Set the IP Protection auth provider.
+   *
+   * <p>This API is experimental because it relies on an exposed pref and will be removed once IP
+   * Protection auth selection no longer depends on it.
+   *
+   * @param provider The IP Protection auth provider.
+   * @return This GeckoRuntimeSettings instance.
+   */
+  @ExperimentalGeckoViewApi
+  public @NonNull GeckoRuntimeSettings setIpProtectionAuthProvider(
+      @NonNull final @IpProtectionAuthProvider String provider) {
+    mIpProtectionAuthProvider.commit(provider);
     return this;
   }
 

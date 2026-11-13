@@ -1,17 +1,41 @@
 /* stylelint-disable max-nesting-depth */
 
+// Shared positioning for the floating devtools toggle. Applies to both the
+// legacy plain <button> and the Nova moz-button icon button.
 .discoverystream-admin-toggle {
   position: fixed;
   // Adjust spacing for DevTools wrench icon to avoid overlapping the customize button
   inset-block-end: calc(var(--button-size-icon) + var(--space-xxlarge) + var(--space-small));
   inset-inline-end: var(--space-xlarge);
+  // Sit below the admin panel (z-index 3) so the open panel covers the wrench.
+  z-index: 2;
+
+  &:dir(rtl) {
+    transform: scaleX(-1);
+  }
+}
+
+// Dismiss button for the open admin panel (top-inline-end corner).
+.discoverystream-admin-close {
+  position: fixed;
+  inset-block-start: var(--space-xlarge);
+  inset-inline-end: var(--space-xlarge);
+  z-index: 4;
+}
+
+// Legacy (non-Nova) plain-button styling, isolated via the classic-enabled
+// helper class. The Nova path uses a moz-button icon button, which brings its
+// own Acorn styling.
+// @nova-cleanup(remove-conditional): Delete this entire .classic-enabled block;
+// the Nova moz-button icon button styles itself.
+.discoverystream-admin-toggle.classic-enabled {
   appearance: none;
   border: 0;
   border-radius: var(--border-radius-small);
   background-color: var(--button-background-color, rgba(21, 20, 26, 7%));
+  color: var(--button-text-color);
   box-shadow: 0 0.8px 1.6px 0 rgba(58, 57, 68, 20%);
   padding: calc(5 * var(--space-xxsmall));
-  z-index: 4;
   display: flex;
   align-items: center;
 
@@ -36,10 +60,6 @@
     @include ds-focus;
 
     background-color: var(--newtab-button-static-active-background);
-  }
-
-  &:dir(rtl) {
-    transform: scaleX(-1);
   }
 
   > div {
@@ -117,6 +137,14 @@
   .toggle-wrapper {
     margin-block: var(--space-large);
     width: 200px;
+  }
+
+  .admin-button-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-medium);
+    margin-block: var(--space-large);
   }
 
   .inferred-personalization-overrides {
@@ -231,6 +259,60 @@
     }
   }
 
+  // A textarea is inline-block, so without this the buttons flow up beside it.
+  .spaces-config-input {
+    display: block;
+    inline-size: 100%;
+    margin-block-end: var(--space-small);
+    font-family: monospace;
+  }
+
+  .layout-variants {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-small);
+    margin-block: var(--space-small);
+
+    // align-items: start so the radio lines up with the name rather than centring
+    // against the whole name + description block.
+    .layout-variant {
+      display: flex;
+      align-items: start;
+      gap: var(--space-small);
+    }
+
+    .layout-variant-text {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-xxsmall);
+    }
+
+    .layout-variant-name {
+      display: flex;
+      align-items: baseline;
+      gap: var(--space-small);
+      flex-wrap: wrap;
+    }
+
+    .layout-variant-value {
+      color: var(--text-color-deemphasized);
+      font-size: var(--font-size-small);
+    }
+
+    .layout-variant-description {
+      color: var(--text-color-deemphasized);
+      font-size: var(--font-size-small);
+    }
+  }
+
+  .layout-status {
+    color: var(--text-color-deemphasized);
+
+    &.layout-status-warning {
+      color: var(--text-color-error);
+    }
+  }
+
   table {
     border-collapse: collapse;
     width: 100%;
@@ -271,6 +353,25 @@
   .large-data-container {
     max-height: 500px;
     overflow-y: scroll;
+  }
+
+  .trainhop-info {
+    margin-block-start: var(--space-large);
+  }
+
+  .trainhop-empty {
+    margin-block-start: var(--space-large);
+    padding: var(--space-large);
+    border-radius: var(--border-radius-medium);
+    background-color: var(--background-color-warning);
+  }
+
+  .trainhop-config {
+    margin-block-start: var(--space-large);
+    font-family: monospace;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
   .message-item {

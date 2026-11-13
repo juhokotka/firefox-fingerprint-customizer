@@ -4,6 +4,8 @@
 
 #include "AudioContext.h"
 
+#include <memory>
+
 #include "AudioBuffer.h"
 #include "AudioBufferSourceNode.h"
 #include "AudioChannelService.h"
@@ -56,6 +58,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ConvolverNodeBinding.h"
 #include "mozilla/dom/DelayNodeBinding.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/DynamicsCompressorNodeBinding.h"
 #include "mozilla/dom/GainNodeBinding.h"
 #include "mozilla/dom/HTMLMediaElement.h"
@@ -700,8 +703,8 @@ already_AddRefed<Promise> AudioContext::DecodeAudioData(
   if (aSuccessCallback.WasPassed()) {
     successCallback = &aSuccessCallback.Value();
   }
-  UniquePtr<WebAudioDecodeJob> job(
-      new WebAudioDecodeJob(this, promise, successCallback, failureCallback));
+  auto job = std::make_unique<WebAudioDecodeJob>(this, promise, successCallback,
+                                                 failureCallback);
   AsyncDecodeWebAudio(contentType.get(), data, length, *job);
   // Transfer the ownership to mDecodeJobs
   mDecodeJobs.AppendElement(std::move(job));
@@ -780,13 +783,6 @@ double AudioContext::CurrentTime() {
       rawTime, GetRandomTimelineSeed(), mRTPCallerType);
 }
 
-nsISerialEventTarget* AudioContext::GetMainThread() const {
-  if (nsIGlobalObject* global = GetRelevantGlobal()) {
-    return global->SerialEventTarget();
-  }
-  return GetCurrentSerialEventTarget();
-}
-
 void AudioContext::DisconnectFromOwner() {
   mIsDisconnecting = true;
   MaybeClearPageAwakeRequest();
@@ -840,14 +836,13 @@ class OnStateChangeTask final : public Runnable {
   explicit OnStateChangeTask(AudioContext* aAudioContext)
       : Runnable("dom::OnStateChangeTask"), mAudioContext(aAudioContext) {}
 
-  NS_IMETHODIMP
-  Run() override {
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY NS_IMETHODIMP Run() override {
     nsGlobalWindowInner* win = mAudioContext->GetOwnerWindow();
     if (!win) {
       return NS_ERROR_FAILURE;
     }
 
-    Document* doc = win->GetExtantDoc();
+    const RefPtr<Document> doc = win->GetExtantDoc();
     if (!doc) {
       return NS_ERROR_FAILURE;
     }
@@ -857,7 +852,7 @@ class OnStateChangeTask final : public Runnable {
   }
 
  private:
-  RefPtr<AudioContext> mAudioContext;
+  MOZ_KNOWN_LIVE const RefPtr<AudioContext> mAudioContext;
 };
 
 void AudioContext::Dispatch(already_AddRefed<nsIRunnable> aRunnable) {
@@ -1041,18 +1036,18 @@ void AudioContext::SuspendFromMediaControl() {
   MEDIA_CONTROL_LOG("AudioContext {} SuspendFromMediaControl", fmt::ptr(this));
   // Track this as an interruption-owned suspend. The shared "stay suspended"
   // reads (ResumeInternal's guard and the autoplay implicit-start guard) test
-  // this flag too, so a media-control suspend sticks without overloading
-  // mSuspendedByContent, which now means "the page called suspend()" only.
+  // this flag too, so a media-control suspend sticks until it is resumed, or
+  // handed to the page by TransferSuspendToContent.
   mSuspendedByMediaControl = true;
   SuspendInternal(nullptr, AudioContextOperationFlags::SendStateChange);
 }
 
-void AudioContext::ResumeFromMediaControl() {
+bool AudioContext::ResumeFromMediaControl() {
   // Offline contexts never register a media-control listener, so this should
   // not be reachable for them.
   MOZ_DIAGNOSTIC_ASSERT(!mIsOffline);
   if (mIsShutDown || mCloseCalled) {
-    return;
+    return false;
   }
   // Only auto-resume a suspend that the interruption itself started. If the
   // page called suspend() (or resume()) while interrupted, it has taken over
@@ -1062,11 +1057,28 @@ void AudioContext::ResumeFromMediaControl() {
     MEDIA_CONTROL_LOG(
         "AudioContext {} ResumeFromMediaControl skipped: page owns the suspend",
         fmt::ptr(this));
-    return;
+    return false;
   }
   MEDIA_CONTROL_LOG("AudioContext {} ResumeFromMediaControl", fmt::ptr(this));
   mSuspendedByMediaControl = false;
   ResumeInternal();
+  return true;
+}
+
+void AudioContext::TransferSuspendToContent() {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_DIAGNOSTIC_ASSERT(!mIsOffline);
+  if (mIsShutDown || mCloseCalled) {
+    return;
+  }
+  MEDIA_CONTROL_LOG("AudioContext {} TransferSuspendToContent, transfer={}",
+                    fmt::ptr(this), mSuspendedByMediaControl);
+  if (!mSuspendedByMediaControl) {
+    return;
+  }
+  // The page now owns the suspend, so a window thaw does not restart it.
+  mSuspendedByMediaControl = false;
+  mSuspendedByContent = true;
 }
 
 void AudioContext::SuspendInternal(void* aPromise,
@@ -1087,13 +1099,20 @@ void AudioContext::SuspendInternal(void* aPromise,
   auto promise = Graph()->ApplyAudioContextOperation(
       DestinationTrack(), std::move(tracks), AudioContextOperation::Suspend);
   if ((aFlags & AudioContextOperationFlags::SendStateChange)) {
-    promise->Then(
-        GetMainThread(), "AudioContext::OnStateChanged",
-        [self = RefPtr<AudioContext>(this),
-         aPromise](AudioContextState aNewState) {
-          self->OnStateChanged(aPromise, aNewState);
-        },
-        [] { MOZ_CRASH("Unexpected rejection"); });
+    promise
+        // The graph requires us to handle the promise on a tail-dispatchable
+        // thread, but tail-dispatched tasks are not interleaved with
+        // microtask checkpoints or stable state (bug 2072929), so relay as a
+        // regular task to make JS behave as expected in the event callback.
+        ->Map(AbstractThread::MainThread(),
+              "AudioContext::OnStateChanged tail-dispatch",
+              [](AudioContextState aValue) { return aValue; })
+        ->Then(
+            GetMainThreadSerialEventTarget(), "AudioContext::OnStateChanged",
+            [self = RefPtr(this), aPromise](AudioContextState aNewState) {
+              self->OnStateChanged(aPromise, aNewState);
+            },
+            [] { MOZ_CRASH("Unexpected rejection"); });
   }
 }
 
@@ -1134,7 +1153,7 @@ already_AddRefed<Promise> AudioContext::Resume(ErrorResult& aRv) {
 
   // IsAllowedToPlay() is false while the platform has interrupted the tab's
   // audio, so a resume() requested during the interruption is not started here;
-  // its promise stays parked above and is settled when the interruption ends.
+  // its promise stays parked above until the context next runs or is closed.
   const bool isAllowedToPlay = media::AutoplayPolicy::IsAllowedToPlay(*this);
   AUTOPLAY_LOG("Trying to resume AudioContext {}, IsAllowedToPlay={}",
                fmt::ptr(this), isAllowedToPlay);
@@ -1174,9 +1193,16 @@ void AudioContext::ResumeInternal() {
   Graph()
       ->ApplyAudioContextOperation(DestinationTrack(), std::move(tracks),
                                    AudioContextOperation::Resume)
+      // The graph requires us to handle the promise on a tail-dispatchable
+      // thread, but tail-dispatched tasks are not interleaved with
+      // microtask checkpoints or stable state (bug 2072929), so relay as a
+      // regular task to make JS behave as expected in the event callback.
+      ->Map(AbstractThread::MainThread(),
+            "AudioContext::OnStateChanged tail-dispatch",
+            [](AudioContextState aValue) { return aValue; })
       ->Then(
-          GetMainThread(), "AudioContext::OnStateChanged",
-          [self = RefPtr<AudioContext>(this)](AudioContextState aNewState) {
+          GetMainThreadSerialEventTarget(), "AudioContext::OnStateChanged",
+          [self = RefPtr(this)](AudioContextState aNewState) {
             self->OnStateChanged(nullptr, aNewState);
           },
           [] {});  // Promise may be rejected after graph shutdown.
@@ -1192,13 +1218,14 @@ void AudioContext::ReportBlocked() {
   }
 
   RefPtr<nsIRunnable> r = NS_NewRunnableFunction(
-      "AudioContext::AutoplayBlocked", [self = RefPtr{this}]() {
+      "AudioContext::AutoplayBlocked",
+      [self = RefPtr{this}]() MOZ_CAN_RUN_SCRIPT_BOUNDARY_LAMBDA {
         nsGlobalWindowInner* win = self->GetOwnerWindow();
         if (!win) {
           return;
         }
 
-        Document* doc = win->GetExtantDoc();
+        const RefPtr<Document> doc = win->GetExtantDoc();
         if (!doc) {
           return;
         }
@@ -1269,13 +1296,20 @@ void AudioContext::CloseInternal(void* aPromise,
     auto promise = Graph()->ApplyAudioContextOperation(
         ds, std::move(tracks), AudioContextOperation::Close);
     if ((aFlags & AudioContextOperationFlags::SendStateChange)) {
-      promise->Then(
-          GetMainThread(), "AudioContext::OnStateChanged",
-          [self = RefPtr<AudioContext>(this),
-           aPromise](AudioContextState aNewState) {
-            self->OnStateChanged(aPromise, aNewState);
-          },
-          [] {});  // Promise may be rejected after graph shutdown.
+      promise
+          // The graph requires us to handle the promise on a tail-dispatchable
+          // thread, but tail-dispatched tasks are not interleaved with
+          // microtask checkpoints or stable state (bug 2072929), so relay as a
+          // regular task to make JS behave as expected in the event callback.
+          ->Map(AbstractThread::MainThread(),
+                "AudioContext::OnStateChanged tail-dispatch",
+                [](AudioContextState aValue) { return aValue; })
+          ->Then(
+              GetMainThreadSerialEventTarget(), "AudioContext::OnStateChanged",
+              [self = RefPtr(this), aPromise](AudioContextState aNewState) {
+                self->OnStateChanged(aPromise, aNewState);
+              },
+              [] {});  // Promise may be rejected after graph shutdown.
     }
   }
   mCloseCalled = true;

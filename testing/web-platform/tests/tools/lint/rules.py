@@ -178,6 +178,15 @@ class MissingTestharnessReport(Rule):
     """
 
 
+class TestharnessReportWithoutTestharness(Rule):
+    name = "TESTHARNESSREPORT-WITHOUT-TESTHARNESS"
+    description = "File contains <script src='/resources/testharnessreport.js'> but not `testharness.js`"
+    to_fix = """
+        ensure each test file contains `<script
+        src='/resources/testharness.js'>`
+    """
+
+
 class MultipleTestharnessReport(Rule):
     name = "MULTIPLE-TESTHARNESSREPORT"
     description = "More than one `<script src='/resources/testharnessreport.js'>`"
@@ -255,6 +264,11 @@ class MissingTestdriverVendor(Rule):
 class MultipleTestdriverVendor(Rule):
     name = "MULTIPLE-TESTDRIVER-VENDOR"
     description = "More than one `<script src='/resources/testdriver-vendor.js'>`"
+
+
+class TestdriverVendorWithoutTestdriver(Rule):
+    name = "TESTDRIVER-VENDOR-WITHOUT-TESTDRIVER"
+    description = "File contains `<script src='/resources/testdriver-vendor.js'>` but not `testdriver.js`"
 
 
 class TestharnessPath(Rule):
@@ -377,13 +391,6 @@ class MissingTestInWebFeaturesFile(Rule):
     """)
 
 
-class UnnecessaryExclusionInWebFeaturesFile(Rule):
-    name = "UNNECESSARY-EXCLUSION-IN-WEB-FEATURES-FILE"
-    description = collapse("""
-        The WEB_FEATURES.yml file contains a redundant or inoperable exclusion pattern: %s
-    """)
-
-
 class WebFeaturesFileInNonTestDirectory(Rule):
     name = "WEB-FEATURES-FILE-IN-NON-TEST-DIRECTORY"
     description = collapse("""
@@ -394,7 +401,7 @@ class WebFeaturesFileInNonTestDirectory(Rule):
 class NonTestFileInWebFeaturesFile(Rule):
     name = "NON-TEST-FILE-IN-WEB-FEATURES-FILE"
     description = collapse("""
-        The WEB_FEATURES.yml file references a non-test file: '%s' in feature '%s'
+        The WEB_FEATURES.yml file references a non-test file: '%s' in rule '%s'
     """)
 
 

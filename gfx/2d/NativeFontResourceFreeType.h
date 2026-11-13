@@ -5,24 +5,20 @@
 #ifndef mozilla_gfx_NativeFontResourceFreeType_h
 #define mozilla_gfx_NativeFontResourceFreeType_h
 
-#include "2D.h"
-
 #include <cairo-ft.h>
-#include "mozilla/UniquePtr.h"
+
+#include "2D.h"
 
 namespace mozilla {
 namespace gfx {
 
-class NativeFontResourceFreeType
-    : public NativeFontResource,
-      public SharedFTFaceRefCountedData<NativeFontResourceFreeType> {
+class NativeFontResourceFreeType : public NativeFontResource {
  public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(NativeFontResourceFreeType, override)
 
 #ifdef MOZ_WIDGET_ANDROID
   static already_AddRefed<NativeFontResourceFreeType> Create(
-      const uint8_t* aFontData, uint32_t aDataLength,
-      FT_Library aFTLibrary = nullptr);
+      const uint8_t* aFontData, uint32_t aDataLength);
 
   already_AddRefed<UnscaledFont> CreateUnscaledFont(
       uint32_t aIndex, const uint8_t* aInstanceData,
@@ -31,21 +27,16 @@ class NativeFontResourceFreeType
 
   ~NativeFontResourceFreeType();
 
-  already_AddRefed<SharedFTFace> CloneFace(int aFaceIndex = 0) override;
+  already_AddRefed<SharedFTFace> CloneFace(int aFaceIndex = 0);
 
  protected:
-  NativeFontResourceFreeType(UniquePtr<uint8_t[]>&& aFontData,
-                             uint32_t aDataLength,
-                             FT_Library aFTLibrary = nullptr);
+  NativeFontResourceFreeType(const uint8_t*&& aFontData, uint32_t aDataLength);
 
   template <class T>
   static already_AddRefed<T> CreateInternal(const uint8_t* aFontData,
-                                            uint32_t aDataLength,
-                                            FT_Library aFTLibrary);
+                                            uint32_t aDataLength);
 
-  UniquePtr<uint8_t[]> mFontData;
-  uint32_t mDataLength;
-  FT_Library mFTLibrary;
+  RefPtr<FontData> mFontData;
 };
 
 #ifdef MOZ_WIDGET_GTK
@@ -55,8 +46,7 @@ class NativeFontResourceFontconfig final : public NativeFontResourceFreeType {
                                           override)
 
   static already_AddRefed<NativeFontResourceFontconfig> Create(
-      const uint8_t* aFontData, uint32_t aDataLength,
-      FT_Library aFTLibrary = nullptr);
+      const uint8_t* aFontData, uint32_t aDataLength);
 
   already_AddRefed<UnscaledFont> CreateUnscaledFont(
       uint32_t aIndex, const uint8_t* aInstanceData,
@@ -65,9 +55,8 @@ class NativeFontResourceFontconfig final : public NativeFontResourceFreeType {
  private:
   friend class NativeFontResourceFreeType;
 
-  NativeFontResourceFontconfig(UniquePtr<uint8_t[]>&& aFontData,
-                               uint32_t aDataLength,
-                               FT_Library aFTLibrary = nullptr);
+  NativeFontResourceFontconfig(const uint8_t*&& aFontData,
+                               uint32_t aDataLength);
 };
 #endif
 

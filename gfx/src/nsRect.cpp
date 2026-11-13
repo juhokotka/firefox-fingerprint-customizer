@@ -3,19 +3,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsRect.h"
-#include "mozilla/gfx/Types.h"   // for eSideBottom, etc
+
 #include "mozilla/CheckedInt.h"  // for CheckedInt
+#include "mozilla/gfx/Types.h"   // for eSideBottom, etc
 #include "nsDeviceContext.h"     // for nsDeviceContext
-#include "nsString.h"            // for nsAutoString, etc
 #include "nsMargin.h"            // for nsMargin
+#include "nsString.h"            // for nsAutoString, etc
 
 #ifdef USE_NEON
-#  include "nsRectIntersectGeneric.h"
 #  include "mozilla/arm.h"
-#endif
-#if defined(USE_SSE42)
 #  include "nsRectIntersectGeneric.h"
+#endif
+#if defined(USE_SSE4_2)
 #  include "mozilla/SSE.h"
+#  include "nsRectIntersectGeneric.h"
 #endif
 
 static_assert(
@@ -42,7 +43,7 @@ bool nsRect::Overflows() const {
     return mozilla::IntersectEngine<xsimd::neon64>::Intersect(&aRect, this);
   }
 #endif
-#ifdef USE_SSE42
+#ifdef USE_SSE4_2
   if (mozilla::supports_sse4_2()) {
     return mozilla::IntersectEngine<xsimd::sse4_2>::Intersect(&aRect, this);
   }
@@ -70,10 +71,10 @@ bool nsRect::IntersectRect(const nsRect& aRect1, const nsRect& aRect2) {
         &aRect1, &aRect2, this);
   }
 #endif
-#ifdef USE_SSE42
+#ifdef USE_SSE4_2
   if (mozilla::supports_sse4_2()) {
-    return mozilla::IntersectEngine<xsimd::sse4_2>::Intersect(&aRect1, &aRect2,
-                                                              this);
+    return mozilla::IntersectEngine<xsimd::sse4_2>::IntersectRect(
+        &aRect1, &aRect2, this);
   }
 #endif
 

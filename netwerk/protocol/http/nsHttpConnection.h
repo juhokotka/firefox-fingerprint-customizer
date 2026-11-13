@@ -6,19 +6,17 @@
 #define nsHttpConnection_h_
 
 #include <functional>
+
+#include "ARefBase.h"
 #include "HttpConnectionBase.h"
-#include "nsHttpConnectionInfo.h"
-#include "nsHttpResponseHead.h"
+#include "HttpTrafficAnalyzer.h"
+#include "TimingStruct.h"
+#include "TlsHandshaker.h"
+#include "mozilla/Mutex.h"
 #include "nsAHttpTransaction.h"
 #include "nsCOMPtr.h"
-#include "nsProxyRelease.h"
-#include "prinrval.h"
-#include "mozilla/Mutex.h"
-#include "ARefBase.h"
-#include "TimingStruct.h"
-#include "HttpTrafficAnalyzer.h"
-#include "TlsHandshaker.h"
-
+#include "nsHttpConnectionInfo.h"
+#include "nsHttpResponseHead.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
 #include "nsIInterfaceRequestor.h"
@@ -27,6 +25,8 @@
 #include "nsISupportsPriority.h"
 #include "nsITimer.h"
 #include "nsITlsHandshakeListener.h"
+#include "nsProxyRelease.h"
+#include "prinrval.h"
 
 class nsISocketTransport;
 class nsITLSSocketControl;

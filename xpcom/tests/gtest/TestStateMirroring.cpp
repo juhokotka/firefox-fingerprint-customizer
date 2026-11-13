@@ -2,15 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include "VideoUtils.h"
 #include "gtest/gtest.h"
-#include "mozilla/gtest/WaitFor.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/StateMirroring.h"
 #include "mozilla/SynchronizedEventQueue.h"
 #include "mozilla/TaskQueue.h"
+#include "mozilla/gtest/WaitFor.h"
 #include "nsISupportsImpl.h"
 #include "nsThreadUtils.h"
-#include "VideoUtils.h"
 
 namespace TestStateMirroring {
 
@@ -22,10 +22,9 @@ class StateMirroringTest : public ::testing::Test {
   using Promise = MozPromise<ValueType, bool, /*IsExclusive =*/true>;
 
   StateMirroringTest()
-      : mTarget(
-            TaskQueue::Create(GetMediaThreadPool(MediaThreadType::SUPERVISOR),
-                              "TestStateMirroring",
-                              /*aSupportsTailDispatch =*/true)),
+      : mTarget(TaskQueue::Create(
+            GetMediaThreadPool(MediaThreadType::SUPERVISOR),
+            "TestStateMirroring", TailDispatchPolicy::ConsistentOrdering)),
         mCanonical(AbstractThread::GetCurrent(), 0, "TestCanonical"),
         mMirror(mTarget, 0, "TestMirror") {}
 

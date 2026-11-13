@@ -5,17 +5,16 @@
 #include "ApplicationAccessible.h"
 
 #include "LocalAccessible-inl.h"
-#include "nsAccessibilityService.h"
 #include "Relation.h"
-#include "mozilla/a11y/Role.h"
 #include "States.h"
-
-#include "nsServiceManagerUtils.h"
-#include "mozilla/dom/Document.h"
 #include "mozilla/Components.h"
+#include "mozilla/a11y/Role.h"
+#include "mozilla/dom/Document.h"
+#include "nsAccessibilityService.h"
 #include "nsGlobalWindowOuter.h"
 #include "nsIStringBundle.h"
 #include "nsPIDOMWindowInlines.h"
+#include "nsServiceManagerUtils.h"
 
 using namespace mozilla::a11y;
 
@@ -74,7 +73,7 @@ already_AddRefed<AccAttributes> ApplicationAccessible::NativeAttributes() {
 GroupPos ApplicationAccessible::GroupPosition() { return GroupPos(); }
 
 LocalAccessible* ApplicationAccessible::LocalChildAtPoint(
-    int32_t aX, int32_t aY, EWhichChildAtPoint aWhichChild) {
+    int32_t /*aX*/, int32_t /*aY*/, EWhichChildAtPoint /*aWhichChild*/) {
   return nullptr;
 }
 
@@ -88,7 +87,7 @@ Accessible* ApplicationAccessible::FocusedChild() {
 }
 
 Relation ApplicationAccessible::RelationByType(
-    RelationType aRelationType) const {
+    RelationType /*aRelationType*/) const {
   return Relation();
 }
 
@@ -135,7 +134,7 @@ void ApplicationAccessible::CreateInitialDocs() {
 }
 
 LocalAccessible* ApplicationAccessible::GetSiblingAtOffset(
-    int32_t aOffset, nsresult* aError) const {
+    int32_t /*aOffset*/, nsresult* aError) const {
   if (aError) *aError = NS_OK;  // fail peacefully
 
   return nullptr;

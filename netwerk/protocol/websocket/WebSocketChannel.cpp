@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <algorithm>
-
 #include "WebSocketChannel.h"
+
+#include <algorithm>
 
 #include "WebSocketConnectionBase.h"
 #include "WebSocketFrame.h"
@@ -18,9 +18,9 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPrefs_privacy.h"
-#include "mozilla/glean/NetwerkProtocolWebsocketMetrics.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Utf8.h"
+#include "mozilla/glean/NetwerkProtocolWebsocketMetrics.h"
 #include "mozilla/net/WebSocketEventService.h"
 #include "nsCRT.h"
 #include "nsCharSeparatedTokenizer.h"
@@ -42,7 +42,6 @@
 #include "nsINode.h"
 #include "nsIObserverService.h"
 #include "nsIPrefBranch.h"
-#include "nsIProtocolHandler.h"
 #include "nsIProtocolProxyService.h"
 #include "nsIProxiedChannel.h"
 #include "nsIProxyInfo.h"
@@ -76,11 +75,11 @@ using namespace mozilla::net;
 namespace mozilla::net {
 
 NS_IMPL_ISUPPORTS(WebSocketChannel, nsIWebSocketChannel, nsIHttpUpgradeListener,
-                  nsIRequestObserver, nsIStreamListener, nsIProtocolHandler,
-                  nsIInputStreamCallback, nsIOutputStreamCallback,
-                  nsITimerCallback, nsIDNSListener, nsIProtocolProxyCallback,
-                  nsIInterfaceRequestor, nsIChannelEventSink,
-                  nsIThreadRetargetableRequest, nsIObserver, nsINamed)
+                  nsIRequestObserver, nsIStreamListener, nsIInputStreamCallback,
+                  nsIOutputStreamCallback, nsITimerCallback, nsIDNSListener,
+                  nsIProtocolProxyCallback, nsIInterfaceRequestor,
+                  nsIChannelEventSink, nsIThreadRetargetableRequest,
+                  nsIObserver, nsINamed)
 
 // We implement RFC 6455, which uses Sec-WebSocket-Version: 13 on the wire.
 #define SEC_WEBSOCKET_VERSION "13"
@@ -1147,8 +1146,8 @@ class OutboundMessage {
     }
 
     mDeflated = true;
-    mMsg.as<pString>().mOrigValue = mMsg.as<pString>().mValue;
-    mMsg.as<pString>().mValue = temp;
+    mMsg.as<pString>().mOrigValue = std::move(mMsg.as<pString>().mValue);
+    mMsg.as<pString>().mValue = std::move(temp);
     return true;
   }
 
@@ -1741,7 +1740,8 @@ nsresult WebSocketChannel::ProcessInput(uint8_t* buffer, uint32_t count) {
             finBit, rsvBit1, rsvBit2, rsvBit3, opcode, maskBit, mask, utf8Data);
 
         if (frame) {
-          mService->FrameReceived(mSerial, mInnerWindowID, frame.forget());
+          mService->FrameReceived(mSerial, mInnerWindowID, mHttpChannelId,
+                                  frame.forget());
         }
 
         if (nsCOMPtr<nsIEventTarget> target = GetTargetThread()) {
@@ -1804,7 +1804,8 @@ nsresult WebSocketChannel::ProcessInput(uint8_t* buffer, uint32_t count) {
         if (frame) {
           // We send the frame immediately becuase we want to have it dispatched
           // before the CallOnServerClose.
-          mService->FrameReceived(mSerial, mInnerWindowID, frame.forget());
+          mService->FrameReceived(mSerial, mInnerWindowID, mHttpChannelId,
+                                  frame.forget());
           frame = nullptr;
         }
 
@@ -1848,7 +1849,8 @@ nsresult WebSocketChannel::ProcessInput(uint8_t* buffer, uint32_t count) {
       }
 
       if (frame) {
-        mService->FrameReceived(mSerial, mInnerWindowID, frame.forget());
+        mService->FrameReceived(mSerial, mInnerWindowID, mHttpChannelId,
+                                frame.forget());
       }
     } else if (opcode == nsIWebSocketFrame::OPCODE_BINARY) {
       if (RefPtr<BaseWebSocketChannel::ListenerAndContextContainer> listener =
@@ -1882,7 +1884,8 @@ nsresult WebSocketChannel::ProcessInput(uint8_t* buffer, uint32_t count) {
             mService->CreateFrameIfNeeded(finBit, rsvBit1, rsvBit2, rsvBit3,
                                           opcode, maskBit, mask, binaryData);
         if (frame) {
-          mService->FrameReceived(mSerial, mInnerWindowID, frame.forget());
+          mService->FrameReceived(mSerial, mInnerWindowID, mHttpChannelId,
+                                  frame.forget());
         }
 
         if (nsCOMPtr<nsIEventTarget> target = GetTargetThread()) {
@@ -2243,7 +2246,8 @@ void WebSocketChannel::PrimeNewOutgoingMessage() {
       mCurrentOut->OrigLength());
 
   if (frame) {
-    mService->FrameSent(mSerial, mInnerWindowID, frame.forget());
+    mService->FrameSent(mSerial, mInnerWindowID, mHttpChannelId,
+                        frame.forget());
   }
 
   if (mask) {
@@ -2913,7 +2917,7 @@ nsresult WebSocketChannel::DoAdmissionDNS() {
   nsCString path;
   rv = mURI->GetFilePath(path);
   NS_ENSURE_SUCCESS(rv, rv);
-  mPath = path;
+  mPath = std::move(path);
   rv = mURI->GetPort(&mPort);
   NS_ENSURE_SUCCESS(rv, rv);
   if (mPort == -1) mPort = (mEncrypted ? kDefaultWSSPort : kDefaultWSPort);
@@ -3590,21 +3594,12 @@ WebSocketChannel::AsyncOpenNative(nsIURI* aURI, const nsACString& aOrigin,
     return rv;
   }
 
-  // Ideally we'd call newChannelFromURIWithLoadInfo here, but that doesn't
-  // allow setting proxy uri/flags
-  rv = ioService->NewChannelFromURIWithProxyFlags(
+  rv = ioService->NewChannelFromURIWithProxyFlagsAndLoadInfo(
       localURI, mURI,
       nsIProtocolProxyService::RESOLVE_PREFER_SOCKS_PROXY |
           nsIProtocolProxyService::RESOLVE_PREFER_HTTPS_PROXY |
           nsIProtocolProxyService::RESOLVE_ALWAYS_TUNNEL,
-      mLoadInfo->LoadingNode(), mLoadInfo->GetLoadingPrincipal(),
-      mLoadInfo->TriggeringPrincipal(), mLoadInfo->GetSecurityFlags(),
-      mLoadInfo->InternalContentPolicyType(), getter_AddRefs(localChannel));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Please note that we still call SetLoadInfo on the channel because
-  // we want the same instance of the loadInfo to be set on the channel.
-  rv = localChannel->SetLoadInfo(mLoadInfo);
+      mLoadInfo, getter_AddRefs(localChannel));
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Pass most GetInterface() requests through to our instantiator, but handle
@@ -3921,7 +3916,11 @@ nsresult WebSocketChannel::OnTransportAvailableInternal() {
 
 NS_IMETHODIMP
 WebSocketChannel::OnUpgradeFailed(nsresult aErrorCode) {
-  // When socket process is enabled, this could be called on background thread.
+  if (!NS_IsMainThread()) {
+    return NS_DispatchToMainThread(NewRunnableMethod<nsresult>(
+        "net::WebSocketChannel::OnUpgradeFailed", this,
+        &WebSocketChannel::OnUpgradeFailed, aErrorCode));
+  }
 
   LOG(("WebSocketChannel::OnUpgradeFailed() %p [aErrorCode %" PRIx32 "]", this,
        static_cast<uint32_t>(aErrorCode)));
@@ -4086,7 +4085,7 @@ WebSocketChannel::OnStartRequest(nsIRequest* aRequest) {
       if (NS_SUCCEEDED(rv)) {
         LOG(("WebsocketChannel::OnStartRequest: subprotocol %s confirmed",
              respProtocol.get()));
-        mProtocol = respProtocol;
+        mProtocol = std::move(respProtocol);
       } else {
         LOG(
             ("WebsocketChannel::OnStartRequest: "

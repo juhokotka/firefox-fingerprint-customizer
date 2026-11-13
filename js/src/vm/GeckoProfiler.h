@@ -174,15 +174,7 @@ class GeckoProfilerRuntime {
   size_t stringsCount();
   void stringsReset();
 
-  bool insertScriptSource(ScriptSource* scriptSource) {
-    MOZ_ASSERT(scriptSource);
-    auto guard = scriptSources_.writeLock();
-    if (!enabled_) {
-      return true;
-    }
-
-    return guard->put(scriptSource);
-  }
+  bool insertScriptSource(ScriptSource* scriptSource);
 
   js::ProfilerJSSources getProfilerScriptSources(bool gatherSourceText);
 
@@ -279,21 +271,6 @@ class MOZ_RAII GeckoProfilerBaselineOSRMarker {
  private:
   GeckoProfilerThread* profiler;
   mozilla::DebugOnly<uint32_t> spBefore_ = 0;
-};
-
-/*
- * This class is used to suppress profiler sampling during
- * critical sections where stack state is not valid.
- */
-class MOZ_RAII AutoSuppressProfilerSampling {
- public:
-  explicit AutoSuppressProfilerSampling(JSContext* cx);
-
-  ~AutoSuppressProfilerSampling();
-
- private:
-  JSContext* cx_;
-  bool previouslyEnabled_;
 };
 
 } /* namespace js */

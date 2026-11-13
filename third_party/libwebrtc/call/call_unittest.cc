@@ -34,7 +34,6 @@
 #include "api/video_codecs/sdp_video_format.h"
 #include "audio/audio_send_stream.h"
 #include "call/adaptation/test/fake_resource.h"
-#include "call/adaptation/test/mock_resource_listener.h"
 #include "call/audio_receive_stream.h"
 #include "call/audio_send_stream.h"
 #include "call/audio_state.h"
@@ -68,10 +67,8 @@ using test::MockAudioDeviceModule;
 using test::MockAudioMixer;
 using test::MockAudioProcessing;
 using test::RunLoop;
-using ::testing::_;
 using ::testing::MockFunction;
 using ::testing::NiceMock;
-using ::testing::StrictMock;
 
 struct CallHelper {
   explicit CallHelper(bool use_null_audio_processing) {
@@ -83,7 +80,8 @@ struct CallHelper {
             : make_ref_counted<NiceMock<MockAudioProcessing>>();
     audio_state_config.audio_device_module =
         make_ref_counted<MockAudioDeviceModule>();
-    CallConfig config(CreateTestEnvironment({.event_log = &log_}));
+    CallConfig config = CallConfig::CreateSingleThreaded(
+        CreateTestEnvironment({.event_log = &log_}));
     config.audio_state = AudioState::Create(audio_state_config);
     call_ = Call::Create(std::move(config));
   }
@@ -137,7 +135,7 @@ TEST(CallTest, CreateDestroy_AudioReceiveStream) {
     config.rtcp_send_transport = &rtcp_send_transport;
     config.decoder_factory = make_ref_counted<MockAudioDecoderFactory>();
     AudioReceiveStreamInterface* stream =
-        call->CreateAudioReceiveStream(config);
+        call->CreateAudioReceiveStream(std::move(config));
     EXPECT_NE(stream, nullptr);
     call->DestroyAudioReceiveStream(stream);
   }
@@ -171,16 +169,17 @@ TEST(CallTest, CreateDestroy_AudioSendStreams) {
 TEST(CallTest, CreateDestroy_AudioReceiveStreams) {
   for (bool use_null_audio_processing : {false, true}) {
     CallHelper call(use_null_audio_processing);
-    AudioReceiveStreamInterface::Config config;
     MockTransport rtcp_send_transport;
-    config.rtcp_send_transport = &rtcp_send_transport;
-    config.decoder_factory = make_ref_counted<MockAudioDecoderFactory>();
+    auto decoder_factory = make_ref_counted<MockAudioDecoderFactory>();
     std::list<AudioReceiveStreamInterface*> streams;
     for (int i = 0; i < 2; ++i) {
       for (uint32_t ssrc = 0; ssrc < 1234567; ssrc += 34567) {
+        AudioReceiveStreamInterface::Config config;
+        config.rtcp_send_transport = &rtcp_send_transport;
+        config.decoder_factory = decoder_factory;
         config.rtp.remote_ssrc = ssrc;
         AudioReceiveStreamInterface* stream =
-            call->CreateAudioReceiveStream(config);
+            call->CreateAudioReceiveStream(std::move(config));
         EXPECT_NE(stream, nullptr);
         if (ssrc & 1) {
           streams.push_back(stream);
@@ -369,37 +368,12 @@ TEST(CallTest, AddAdaptationResourceAfterCreatingVideoSendStream) {
   auto fake_resource = FakeResource::Create("FakeResource");
   call->AddAdaptationResource(fake_resource);
   // An adapter resource mirroring the `fake_resource` should now be present on
-  // both streams.
-  auto injected_resource1 = FindResourceWhoseNameContains(
-      stream1->GetAdaptationResources(), fake_resource->Name());
-  EXPECT_TRUE(injected_resource1);
-  auto injected_resource2 = FindResourceWhoseNameContains(
-      stream2->GetAdaptationResources(), fake_resource->Name());
-  EXPECT_TRUE(injected_resource2);
-  // Overwrite the real resource listeners with mock ones to verify the signal
-  // gets through.
-  injected_resource1->SetResourceListener(nullptr);
-  StrictMock<MockResourceListener> resource_listener1;
-  EXPECT_CALL(resource_listener1, OnResourceUsageStateMeasured(_, _))
-      .Times(1)
-      .WillOnce([injected_resource1](scoped_refptr<Resource> resource,
-                                     ResourceUsageState usage_state) {
-        EXPECT_EQ(injected_resource1, resource);
-        EXPECT_EQ(ResourceUsageState::kOveruse, usage_state);
-      });
-  injected_resource1->SetResourceListener(&resource_listener1);
-  injected_resource2->SetResourceListener(nullptr);
-  StrictMock<MockResourceListener> resource_listener2;
-  EXPECT_CALL(resource_listener2, OnResourceUsageStateMeasured(_, _))
-      .Times(1)
-      .WillOnce([injected_resource2](scoped_refptr<Resource> resource,
-                                     ResourceUsageState usage_state) {
-        EXPECT_EQ(injected_resource2, resource);
-        EXPECT_EQ(ResourceUsageState::kOveruse, usage_state);
-      });
-  injected_resource2->SetResourceListener(&resource_listener2);
-  // The kOveruse signal should get to our resource listeners.
-  fake_resource->SetUsageState(ResourceUsageState::kOveruse);
+  // both streams. That the adapters forward usage measurements is covered by
+  // BroadcastResourceListenerTest.
+  EXPECT_TRUE(FindResourceWhoseNameContains(stream1->GetAdaptationResources(),
+                                            fake_resource->Name()));
+  EXPECT_TRUE(FindResourceWhoseNameContains(stream2->GetAdaptationResources(),
+                                            fake_resource->Name()));
   call->DestroyVideoSendStream(stream1);
   call->DestroyVideoSendStream(stream2);
 }
@@ -432,37 +406,12 @@ TEST(CallTest, AddAdaptationResourceBeforeCreatingVideoSendStream) {
       call->CreateVideoSendStream(config.Copy(), encoder_config.Copy());
   EXPECT_NE(stream2, nullptr);
   // An adapter resource mirroring the `fake_resource` should be present on both
-  // streams.
-  auto injected_resource1 = FindResourceWhoseNameContains(
-      stream1->GetAdaptationResources(), fake_resource->Name());
-  EXPECT_TRUE(injected_resource1);
-  auto injected_resource2 = FindResourceWhoseNameContains(
-      stream2->GetAdaptationResources(), fake_resource->Name());
-  EXPECT_TRUE(injected_resource2);
-  // Overwrite the real resource listeners with mock ones to verify the signal
-  // gets through.
-  injected_resource1->SetResourceListener(nullptr);
-  StrictMock<MockResourceListener> resource_listener1;
-  EXPECT_CALL(resource_listener1, OnResourceUsageStateMeasured(_, _))
-      .Times(1)
-      .WillOnce([injected_resource1](scoped_refptr<Resource> resource,
-                                     ResourceUsageState usage_state) {
-        EXPECT_EQ(injected_resource1, resource);
-        EXPECT_EQ(ResourceUsageState::kUnderuse, usage_state);
-      });
-  injected_resource1->SetResourceListener(&resource_listener1);
-  injected_resource2->SetResourceListener(nullptr);
-  StrictMock<MockResourceListener> resource_listener2;
-  EXPECT_CALL(resource_listener2, OnResourceUsageStateMeasured(_, _))
-      .Times(1)
-      .WillOnce([injected_resource2](scoped_refptr<Resource> resource,
-                                     ResourceUsageState usage_state) {
-        EXPECT_EQ(injected_resource2, resource);
-        EXPECT_EQ(ResourceUsageState::kUnderuse, usage_state);
-      });
-  injected_resource2->SetResourceListener(&resource_listener2);
-  // The kUnderuse signal should get to our resource listeners.
-  fake_resource->SetUsageState(ResourceUsageState::kUnderuse);
+  // streams. That the adapters forward usage measurements is covered by
+  // BroadcastResourceListenerTest.
+  EXPECT_TRUE(FindResourceWhoseNameContains(stream1->GetAdaptationResources(),
+                                            fake_resource->Name()));
+  EXPECT_TRUE(FindResourceWhoseNameContains(stream2->GetAdaptationResources(),
+                                            fake_resource->Name()));
   call->DestroyVideoSendStream(stream1);
   call->DestroyVideoSendStream(stream2);
 }
@@ -502,7 +451,7 @@ class CallRtcEventLogTest : public ::testing::Test {
     // Needed for DCHECKs.
     audio_config.rtcp_send_transport = &transport_;
     audio_config.decoder_factory = audio_decoder_factory_;
-    audio_stream_ = call_->CreateAudioReceiveStream(audio_config);
+    audio_stream_ = call_->CreateAudioReceiveStream(std::move(audio_config));
 
     // Video.
     VideoReceiveStreamInterface::Config video_config(&transport_);
@@ -626,7 +575,7 @@ TEST(CallTest, HandlesAudioSyncGroupUpdate) {
   audio_state_config.audio_mixer = make_ref_counted<MockAudioMixer>();
   audio_state_config.audio_device_module =
       make_ref_counted<MockAudioDeviceModule>();
-  CallConfig config(env);
+  CallConfig config = CallConfig::CreateSingleThreaded(env);
   config.audio_state = AudioState::Create(audio_state_config);
   std::unique_ptr<Call> call(Call::Create(std::move(config)));
 
@@ -637,7 +586,7 @@ TEST(CallTest, HandlesAudioSyncGroupUpdate) {
   audio_config.decoder_factory = make_ref_counted<MockAudioDecoderFactory>();
   audio_config.sync_group = "group1";
   AudioReceiveStreamInterface* audio_stream =
-      call->CreateAudioReceiveStream(audio_config);
+      call->CreateAudioReceiveStream(std::move(audio_config));
   ASSERT_NE(audio_stream, nullptr);
 
   MockTransport video_rtcp_transport;

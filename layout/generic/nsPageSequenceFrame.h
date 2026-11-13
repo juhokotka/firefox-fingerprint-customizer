@@ -9,14 +9,10 @@
 
 namespace mozilla {
 
+class MozPrintCallbackRunner;
 class PresShell;
 class PrintedSheetFrame;
 
-namespace dom {
-
-class HTMLCanvasElement;
-
-}  // namespace dom
 }  // namespace mozilla
 
 //-----------------------------------------------
@@ -75,6 +71,16 @@ class nsSharedPageData {
   // frames that overflowed.  It's 1.0 if none overflowed horizontally.
   float mShrinkToFitRatio = 1.0f;
 
+  // Maximum zoom ratio for scaling pages when accounting for CSS page size.
+  // This should only be set to anything other than 1.0 when all of the
+  // following are true:
+  //  * Pages per sheet is 1
+  //  * The documeing being printed is a PDF
+  //  * The scale set in the print dialog is above 100%
+  // In which case we will scale the page containing the PDF up inside the
+  // printed sheet.
+  float mMaxPageZoomRatio = 1.0f;
+
  private:
   const nsPagesPerSheetInfo* mPagesPerSheetInfo = nullptr;
 };
@@ -113,9 +119,12 @@ class nsPageSequenceFrame final : public nsContainerFrame {
   nsresult StartPrint(nsPresContext* aPresContext,
                       nsIPrintSettings* aPrintSettings,
                       const nsAString& aDocTitle, const nsAString& aDocURL);
-  nsresult PrePrintNextSheet(nsITimerCallback* aCallback, bool* aDone);
+  // Prepares the current sheet for printing by dispatching the mozPrintCallback
+  // of the canvases in it.
+  nsresult PrePrintNextSheet(nsITimerCallback* aCallback,
+                             mozilla::MozPrintCallbackRunner& aRunner,
+                             bool* aDone);
   nsresult PrintNextSheet();
-  void ResetPrintCanvasList();
 
   uint32_t GetCurrentSheetIdx() const { return mCurrentSheetIdx; }
 
@@ -130,6 +139,11 @@ class nsPageSequenceFrame final : public nsContainerFrame {
 #ifdef DEBUG_FRAME_DUMP
   nsresult GetFrameName(nsAString& aResult) const override;
 #endif
+
+  void SetMaxPageZoomRatio(float ratio) {
+    MOZ_ASSERT(ratio >= 1.0f);
+    mPageData.mMaxPageZoomRatio = ratio;
+  }
 
  protected:
   nsPageSequenceFrame(ComputedStyle*, nsPresContext*);
@@ -177,11 +191,7 @@ class nsPageSequenceFrame final : public nsContainerFrame {
   // This is an index into our PrincipalChildList, effectively.
   uint32_t mCurrentSheetIdx = 0;
 
-  nsTArray<RefPtr<mozilla::dom::HTMLCanvasElement>> mCurrentCanvasList;
-
   bool mCalledBeginPage;
-
-  bool mCurrentCanvasListSetup;
 };
 
 #endif /* nsPageSequenceFrame_h_ */

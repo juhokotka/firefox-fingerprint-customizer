@@ -2,39 +2,41 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <limits>
-#include "CacheLog.h"
 #include "CacheFileIOManager.h"
 
-#include "CacheHashUtils.h"
-#include "CacheStorageService.h"
-#include "CacheIndex.h"
-#include "CacheFileUtils.h"
-#include "nsError.h"
-#include "nsThreadUtils.h"
+#include <limits>
+
 #include "CacheFile.h"
-#include "CacheObserver.h"
-#include "nsIFile.h"
 #include "CacheFileContextEvictor.h"
-#include "nsITimer.h"
-#include "nsIDirectoryEnumerator.h"
-#include "nsEffectiveTLDService.h"
-#include "nsIObserverService.h"
-#include "mozilla/net/MozURL.h"
-#include "mozilla/glean/NetwerkCache2Metrics.h"
+#include "CacheFileUtils.h"
+#include "CacheHashUtils.h"
+#include "CacheIndex.h"
+#include "CacheLog.h"
+#include "CacheObserver.h"
+#include "CacheStorageService.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/FileUtils.h"
+#include "mozilla/IOUtils.h"
+#include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/SpinEventLoopUntil.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/StoragePrincipalHelper.h"
-#include "nsDirectoryServiceUtils.h"
-#include "nsAppDirectoryServiceDefs.h"
-#include "private/pprio.h"
-#include "mozilla/IntegerPrintfMacros.h"
-#include "mozilla/Preferences.h"
-#include "nsNetUtil.h"
+#include "mozilla/glean/NetwerkCache2Metrics.h"
 #include "mozilla/glean/NetwerkMetrics.h"
-#include "mozilla/FileUtils.h"
+#include "mozilla/net/MozURL.h"
+#include "nsAppDirectoryServiceDefs.h"
+#include "nsDirectoryServiceUtils.h"
+#include "nsEffectiveTLDService.h"
+#include "nsError.h"
+#include "nsIDirectoryEnumerator.h"
+#include "nsIFile.h"
+#include "nsIObserverService.h"
+#include "nsITimer.h"
+#include "nsNetUtil.h"
+#include "nsThreadUtils.h"
+#include "private/pprio.h"
 
 #ifdef MOZ_BACKGROUNDTASKS
 #  include "mozilla/BackgroundTasksRunner.h"
@@ -223,6 +225,10 @@ CacheFileHandle::~CacheFileHandle() {
 }
 
 void CacheFileHandle::Log() {
+  if (!LOG_ENABLED()) {
+    return;
+  }
+
   nsAutoCString leafName;
   if (mFile) {
     mFile->GetNativeLeafName(leafName);
@@ -1293,7 +1299,11 @@ void CacheFileIOManager::ShutdownInternal() {
     // Invalid files don't have metadata and thus won't load anyway
     // (hashes won't match).
 
-    if (!h->IsSpecialFile() && !h->mIsDoomed && !h->mFileExists) {
+    // Past the shutdown I/O lag the index is no longer written to disk, so
+    // this bookkeeping would be thrown away. The next startup rescans the
+    // entries directory and drops the stale entries anyway.
+    if (!h->IsSpecialFile() && !h->mIsDoomed && !h->mFileExists &&
+        !CacheObserver::IsPastShutdownIOLag()) {
       CacheIndex::RemoveEntry(h->Hash(), h->Key());
     }
 
@@ -1504,8 +1514,14 @@ nsresult CacheFileIOManager::OnIdleDaily() {
               }
               if (leafName.Find(kPurgeExtension) != kNotFound) {
                 mozilla::glean::networking::residual_cache_folder_count.Add(1);
-                rv = subdir->Remove(true);
-                if (NS_SUCCEEDED(rv)) {
+                // A read-only entry anywhere in the folder makes both
+                // DeleteFileW and RemoveDirectoryW fail with ACCESS_DENIED, so
+                // clear the attribute and retry rather than leaving the folder
+                // behind forever (bug 1882163).
+                if (IOUtils::RemoveSync(subdir, /* aIgnoreAbsent */ true,
+                                        /* aRecursive */ true,
+                                        /* aRetryReadonly */ true)
+                        .isOk()) {
                   mozilla::glean::networking::residual_cache_folder_removal
                       .Get("success"_ns)
                       .Add(1);
@@ -2285,7 +2301,8 @@ nsresult CacheFileIOManager::WriteInternal(CacheFileHandle* aHandle,
     } else {
       freeSpace >>= 10;  // bytes to kilobytes
       uint32_t limit = CacheObserver::DiskFreeSpaceHardLimit();
-      if (freeSpace - aOffset - aCount + aHandle->mFileSize < limit) {
+      // Convert to KiB for comparison
+      if (freeSpace - ((aOffset + aCount - aHandle->mFileSize) >> 10) < limit) {
         LOG(
             ("CacheFileIOManager::WriteInternal() - Low free space, refusing "
              "to write! [freeSpace=%" PRId64 "kB, limit=%ukB]",
@@ -2860,7 +2877,8 @@ nsresult CacheFileIOManager::TruncateSeekSetEOFInternal(
     } else {
       freeSpace >>= 10;  // bytes to kilobytes
       uint32_t limit = CacheObserver::DiskFreeSpaceHardLimit();
-      if (freeSpace - aEOFPos + aHandle->mFileSize < limit) {
+      // Convert to KiB for comparison
+      if (freeSpace - ((aEOFPos - aHandle->mFileSize) >> 10) < limit) {
         LOG(
             ("CacheFileIOManager::TruncateSeekSetEOFInternal() - Low free space"
              ", refusing to write! [freeSpace=%" PRId64 "kB, limit=%ukB]",

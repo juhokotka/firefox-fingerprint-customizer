@@ -32,15 +32,35 @@ export function setup(config) {
 
 export function getSelectors() {
   return {
+    /**
+     * Returns the first h1 heading in the document.
+     *
+     * @returns {HTMLHeadingElement | null}
+     */
     getH1() {
       return content.document.querySelector("h1");
     },
+    /**
+     * Returns the first h1 heading's title attribute.
+     *
+     * @returns {string | null | undefined}
+     */
     getH1Title() {
       return content.document.querySelector("h1")?.getAttribute("title");
     },
+    /**
+     * Returns the first h1 heading's aria-label attribute.
+     *
+     * @returns {string | null | undefined}
+     */
     getH1AriaLabel() {
       return content.document.querySelector("h1")?.getAttribute("aria-label");
     },
+    /**
+     * Returns the first PDF page's text span once the text layer is ready.
+     *
+     * @returns {Promise<HTMLSpanElement | null>}
+     */
     getPdfSpan() {
       return waitForCondition(
         () =>
@@ -54,55 +74,141 @@ export function getSelectors() {
         )
       );
     },
+    /**
+     * Returns the first header in the document.
+     *
+     * @returns {HTMLElement | null}
+     */
     getHeader() {
       return content.document.querySelector("header");
     },
+    /**
+     * Returns the final paragraph in document order.
+     *
+     * @returns {HTMLParagraphElement | null}
+     */
     getFinalParagraph() {
+      const paragraphs = content.document.querySelectorAll("p");
+
+      return paragraphs.item(paragraphs.length - 1);
+    },
+    /**
+     * Returns the document's final paragraph's title attribute.
+     *
+     * @returns {string | null | undefined}
+     */
+    getFinalParagraphTitle() {
+      return getSelectors().getFinalParagraph()?.getAttribute("title");
+    },
+    /**
+     * Returns the document's final paragraph's aria-label attribute.
+     *
+     * @returns {string | null | undefined}
+     */
+    getFinalParagraphAriaLabel() {
+      return getSelectors().getFinalParagraph()?.getAttribute("aria-label");
+    },
+    /**
+     * Returns the first paragraph that is last of its type among its siblings.
+     *
+     * @returns {HTMLParagraphElement | null}
+     */
+    getLastOfTypeParagraph() {
       return content.document.querySelector("p:last-of-type");
     },
-    getFinalParagraphTitle() {
-      return content.document
-        .querySelector("p:last-of-type")
-        ?.getAttribute("title");
-    },
-    getFinalParagraphAriaLabel() {
-      return content.document
-        .querySelector("p:last-of-type")
-        ?.getAttribute("aria-label");
-    },
+    /**
+     * Returns the French section on the Select Translations test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getFrenchSection() {
       return content.document.getElementById("french-section");
     },
+    /**
+     * Returns the English section on the Select Translations test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getEnglishSection() {
       return content.document.getElementById("english-section");
     },
+    /**
+     * Returns the Spanish section on the Select Translations test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getSpanishSection() {
       return content.document.getElementById("spanish-section");
     },
+    /**
+     * Returns the designated French sentence on the Select Translations test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getFrenchSentence() {
       return content.document.getElementById("french-sentence");
     },
+    /**
+     * Returns the designated English sentence on the Select Translations test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getEnglishSentence() {
       return content.document.getElementById("english-sentence");
     },
+    /**
+     * Returns the designated Spanish sentence on the Select Translations test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getSpanishSentence() {
       return content.document.getElementById("spanish-sentence");
     },
+    /**
+     * Returns the English hyperlink on the Select Translations test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getEnglishHyperlink() {
       return content.document.getElementById("english-hyperlink");
     },
+    /**
+     * Returns the French hyperlink on the Select Translations test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getFrenchHyperlink() {
       return content.document.getElementById("french-hyperlink");
     },
+    /**
+     * Returns the Spanish hyperlink on the Select Translations test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getSpanishHyperlink() {
       return content.document.getElementById("spanish-hyperlink");
     },
+    /**
+     * Returns the hyperlink with URL text on the Select Translations test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getURLHyperlink() {
       return content.document.getElementById("url-hyperlink");
     },
+    /**
+     * Returns the whitespace sample on the Translations text-cleaning test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getTextCleaningWhitespace() {
       return content.document.getElementById("clean-whitespace");
     },
+    /**
+     * Returns the soft-hyphen sample on the Translations text-cleaning test page.
+     *
+     * @returns {HTMLElement | null}
+     */
     getTextCleaningSoftHyphens() {
       return content.document.getElementById("clean-soft-hyphens");
     },
@@ -126,6 +232,33 @@ export function waitForCondition(callback, message) {
     interval,
     maxTries
   );
+}
+
+/**
+ * Collects the translated documents for the current page and any translated descendant frames.
+ *
+ * @param {WindowGlobalChild} [windowGlobalChild=content.windowGlobalChild]
+ * @returns {TranslationsDocument[]}
+ */
+export function collectTranslatedDocs(
+  windowGlobalChild = content.windowGlobalChild
+) {
+  const translatedDocs = [];
+
+  const translationsChild = windowGlobalChild.getExistingActor("Translations");
+  if (translationsChild?.translatedDoc) {
+    translatedDocs.push(translationsChild.translatedDoc);
+  }
+
+  for (const childBrowsingContext of windowGlobalChild.browsingContext
+    .children) {
+    const childWindowGlobal = childBrowsingContext.currentWindowGlobal;
+    if (childWindowGlobal) {
+      translatedDocs.push(...collectTranslatedDocs(childWindowGlobal));
+    }
+  }
+
+  return translatedDocs;
 }
 
 /**
@@ -172,6 +305,59 @@ export async function assertTranslationResult(
   }
 
   is(translation, getText(), message);
+}
+
+/**
+ * Assert that a node's HTML matches expected markup, ignoring whitespace between tags.
+ * This mirrors the helper in shared-head.js's because this file cannot import it directly.
+ *
+ * @param {Element | null} node
+ * @param {string} expectedHtml
+ * @param {string} [message="HTML matches expected markup."]
+ *
+ * @returns {Promise<void>}
+ */
+export async function assertHtmlMatches(
+  node,
+  expectedHtml,
+  message = "HTML matches expected markup."
+) {
+  // All characters that will need to be escaped with a backslash in the
+  // final regex if they are contained within the HTML string.
+  const escapableCharacters = /[.*+?^${}()|[\]\\]/g;
+  const expected = new RegExp(
+    `^${expectedHtml
+      // Escape each character that needs it with a backslash.
+      .replaceAll(escapableCharacters, "\\$&")
+      // Add a 0+ blank space matcher \s* before each opening angle bracket <
+      .replaceAll(/\s*</g, "\\s*<")
+      // Add a 0+ blank space matcher \s* after each closing angle bracket >
+      .replaceAll(/>\s*/g, ">\\s*")
+      // Collapse more than one blank space into a 1+ matcher.
+      .replaceAll(/\s\s+/g, "\\s+")
+      // Replace a 1+ blank space matcher at the beginning with a 0+ matcher.
+      .replace(/^\\s\+/, "\\s*")
+      // Replace a 1+ blank space matcher at the end with a 0+ matcher.
+      .replace(/\\s\+$/, "\\s*")}$`,
+    "su"
+  );
+  if (node) {
+    try {
+      await waitForCondition(
+        () => expected.test(node.outerHTML),
+        "Waiting for HTML to match."
+      );
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  const actualHtml = node?.outerHTML ?? "";
+
+  ok(
+    expected.test(actualHtml),
+    `${message}\n\nExpected HTML:\n\n${expectedHtml}\n\nActual HTML:\n\n${actualHtml}`
+  );
 }
 
 /**

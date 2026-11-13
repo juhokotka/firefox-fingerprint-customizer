@@ -51,8 +51,6 @@ class nsListControlFrame final : public mozilla::ScrollContainerFrame {
   void Init(nsIContent* aContent, nsContainerFrame* aParent,
             nsIFrame* aPrevInFlow) final;
 
-  bool ReflowFinished() final;
-
   mozilla::dom::HTMLOptionElement* GetCurrentOption() const;
 
 #ifdef DEBUG_FRAME_DUMP
@@ -76,13 +74,6 @@ class nsListControlFrame final : public mozilla::ScrollContainerFrame {
   nscoord GetBSizeOfARow();
 
   MOZ_CAN_RUN_SCRIPT_BOUNDARY void OnSelectionReset();
-  void OptionsAdded();
-
-  /**
-   * Scrolls the given option (or index) into view. Might destroy the frame,
-   * pres shell and other objects.
-   */
-  MOZ_CAN_RUN_SCRIPT void ScrollToIndex(int32_t aIndex);
 
   /**
    * Returns the HTMLOptionElement for a given index in mContent's collection.
@@ -93,7 +84,7 @@ class nsListControlFrame final : public mozilla::ScrollContainerFrame {
   bool IsFocused() const;
 
   /**
-   * Function to paint the focus rect when our nsSelectsAreaFrame is painting.
+   * Function to paint the focus rect when our scrolled frame is painting.
    * @param aPt the offset of this frame, relative to the rendering reference
    * frame
    */
@@ -137,23 +128,8 @@ class nsListControlFrame final : public mozilla::ScrollContainerFrame {
 
  protected:
   mozilla::dom::HTMLSelectElement& Select() const;
-
-  /**
-   * @return true if the <option> at aIndex is selectable by the user.
-   */
-  bool IsOptionInteractivelySelectable(int32_t aIndex) const;
-  /**
-   * @return true if aOption in aSelect is selectable by the user.
-   */
-  static bool IsOptionInteractivelySelectable(
-      mozilla::dom::HTMLSelectElement* aSelect,
-      mozilla::dom::HTMLOptionElement* aOption);
-
   MOZ_CAN_RUN_SCRIPT void ScrollToFrame(HTMLOptionElement& aOptElement);
-
- protected:
-  explicit nsListControlFrame(ComputedStyle* aStyle,
-                              nsPresContext* aPresContext);
+  nsListControlFrame(ComputedStyle*, nsPresContext*);
   virtual ~nsListControlFrame();
 
   bool CheckIfAllFramesHere();
@@ -169,10 +145,6 @@ class nsListControlFrame final : public mozilla::ScrollContainerFrame {
   // Dropped down stuff
   void SetComboboxItem(int32_t aIndex);
 
- public:
-  static constexpr int32_t kNothingSelected = -1;
-
- protected:
   nscoord BSizeOfARow() const { return mBSizeOfARow; }
 
   /**
@@ -184,15 +156,9 @@ class nsListControlFrame final : public mozilla::ScrollContainerFrame {
   uint32_t mNumDisplayRows = 0;
   nscoord mBSizeOfARow = -1;
 
-  bool mNeedToReset : 1;
-  bool mPostChildrenLoadedReset : 1;
-
   // True if we're in the middle of a reflow and might need a second
   // pass.  This only happens for auto heights.
-  bool mMightNeedSecondPass : 1;
-
-  // True if our reflow got interrupted.
-  bool mReflowWasInterrupted : 1;
+  bool mMightNeedSecondPass : 1 = false;
 };
 
 #endif /* nsListControlFrame_h_ */

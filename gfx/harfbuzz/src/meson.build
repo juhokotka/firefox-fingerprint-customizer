@@ -81,6 +81,7 @@ hb_base_sources = files(
   'hb-object.hh',
   'hb-open-file.hh',
   'hb-open-type.hh',
+  'hb-ot-dual.hh',
   'hb-ot-cff-common.hh',
   'hb-ot-cff1-std-str.hh',
   'hb-ot-cff1-table.cc',
@@ -92,6 +93,7 @@ hb_base_sources = files(
   'hb-ot-face-table-list.hh',
   'hb-ot-face.cc',
   'hb-ot-face.hh',
+  'hb-ot-fetch.cc',
   'hb-ot-font.cc',
   'hb-ot-gasp-table.hh',
   'hb-ot-glyf-table.hh',
@@ -121,7 +123,6 @@ hb_base_sources = files(
   'OT/glyf/SimpleGlyph.hh',
   'OT/glyf/CompositeGlyph.hh',
   'OT/glyf/SubsetGlyph.hh',
-  'OT/Layout/types.hh',
   'OT/Layout/Common/Coverage.hh',
   'OT/Layout/Common/CoverageFormat1.hh',
   'OT/Layout/Common/CoverageFormat2.hh',
@@ -313,6 +314,7 @@ hb_base_headers = files(
   'hb-map.h',
   'hb-ot-color.h',
   'hb-ot-deprecated.h',
+  'hb-ot-fetch.h',
   'hb-ot-font.h',
   'hb-ot-layout.h',
   'hb-ot-math.h',
@@ -386,17 +388,19 @@ hb_icu_headers = files('hb-icu.h')
 
 # Sources for libharfbuzz-subset
 hb_subset_sources = files(
+  'OT/Var/VARC/VARC.cc',
+  'OT/Var/VARC/VARC-subset.hh',
   'hb-number.cc',
   'hb-number.hh',
   'hb-ot-cff1-table.cc',
   'hb-ot-cff2-table.cc',
+  'hb-result.hh',
   'hb-static.cc',
   'hb-subset-accelerator.hh',
   'hb-subset-cff-common.cc',
   'hb-subset-cff-common.hh',
   'hb-subset-cff1.cc',
   'hb-subset-cff2.cc',
-  'hb-subset-cff2-to-cff1.cc',
   'hb-subset-cff2-to-cff1.hh',
   'hb-subset-input.cc',
   'hb-subset-input.hh',
@@ -416,6 +420,7 @@ hb_subset_sources = files(
   'hb-subset-table-cff.cc',
   'hb-subset-table-color.cc',
   'hb-subset-table-other.cc',
+  'graph/graph-result.hh',
   'graph/gsubgpos-context.cc',
   'graph/gsubgpos-context.hh',
   'graph/gsubgpos-graph.hh',
@@ -426,11 +431,15 @@ hb_subset_sources = files(
   'graph/split-helpers.hh',
   'hb-subset.cc',
   'hb-subset.hh',
+  'hb-depend.cc',
+  'hb-depend.hh',
+  'hb-depend-data.hh',
 )
 
 hb_subset_headers = files(
   'hb-subset.h',
-  'hb-subset-serialize.h'
+  'hb-subset-serialize.h',
+  'hb-subset-depend.h',
 )
 
 hb_gobject_sources = files(
@@ -539,8 +548,6 @@ if conf.get('HAVE_DIRECTWRITE', 0) == 1
   hb_sources += hb_directwrite_sources
   hb_headers += hb_directwrite_headers
   harfbuzz_deps += directwrite_dep
-  # hb-directwrite needs a C++ linker
-  libharfbuzz_link_language = 'cpp'
 endif
 
 if conf.get('HAVE_CORETEXT', 0) == 1
@@ -626,7 +633,6 @@ gen_def_cmd = [gen_def, '@OUTPUT@', '@INPUT@']
 if get_option('experimental_api')
   gen_def_cmd += '--experimental-api'
 endif
-
 # harfbuzz
 harfbuzz_def = custom_target('harfbuzz.def',
     command: gen_def_cmd,
@@ -644,6 +650,10 @@ if cpp_is_microsoft_compiler
   hb_so_version = ''
 else
   hb_so_version = '0'
+endif
+
+if host_machine.system() == 'aix'
+  version = '0'
 endif
 
 if get_option('fuzzer_ldflags') != ''
@@ -710,7 +720,6 @@ if not get_option('subset').disabled()
 endif
 
 hb_raster_sources = files(
-  'hb-raster.cc',
   'hb-raster-image.cc',
   'hb-raster-image.hh',
   'hb-raster.hh',
@@ -986,6 +995,7 @@ if get_option('tests').enabled()
     'test-bimap': ['test-bimap.cc', 'hb-static.cc'],
     'test-cff': ['test-cff.cc', 'hb-static.cc'],
     'test-classdef-graph': ['graph/test-classdef-graph.cc', 'hb-static.cc', 'graph/gsubgpos-context.cc'],
+    'test-result': ['test-result.cc', 'hb-static.cc'],
     'test-decycler': ['test-decycler.cc', 'hb-static.cc'],
     'test-iter': ['test-iter.cc', 'hb-static.cc'],
     'test-geometry': ['test-geometry.cc', 'hb-static.cc'],
@@ -994,6 +1004,7 @@ if get_option('tests').enabled()
     'test-multimap': ['test-multimap.cc', 'hb-static.cc'],
     'test-number': ['test-number.cc', 'hb-number.cc'],
     'test-ot-tag': ['hb-ot-tag.cc'],
+    'test-paint-extents': ['test-paint-extents.cc', 'hb-paint-extents.cc', 'hb-static.cc'],
     'test-set': ['test-set.cc', 'hb-static.cc'],
     'test-serialize': ['test-serialize.cc', 'hb-static.cc'],
     'test-vector': ['test-vector.cc', 'hb-static.cc'],
@@ -1002,6 +1013,7 @@ if get_option('tests').enabled()
     'test-priority-queue': ['test-priority-queue.cc', 'hb-static.cc'],
     'test-tuple-varstore': ['test-tuple-varstore.cc', 'hb-subset-instancer-solver.cc', 'hb-subset-instancer-iup.cc', 'hb-static.cc'],
     'test-item-varstore': ['test-item-varstore.cc', 'hb-subset-instancer-solver.cc', 'hb-subset-instancer-iup.cc', 'hb-static.cc'],
+    'test-jstf': ['test-jstf.cc', 'hb-static.cc'],
     'test-unicode-ranges': ['test-unicode-ranges.cc'],
   }
   foreach name, source : compiled_tests
@@ -1111,6 +1123,16 @@ if fs.is_absolute(cmake_install_libdir)
   endif
 endif
 
+cmake_install_bindir = get_option('bindir')
+
+if fs.is_absolute(cmake_install_bindir)
+  if meson.version().version_compare('>=1.3.0')
+    cmake_install_bindir = fs.relative_to(cmake_install_bindir, get_option('prefix'))
+  else
+    cmake_install_bindir = run_command(relative_to, cmake_install_bindir, get_option('prefix'), check: true).stdout().strip()
+  endif
+endif
+
 cmake_config.set('PACKAGE_INIT', '''
 get_filename_component(PACKAGE_PREFIX_DIR "@0@" ABSOLUTE)
 
@@ -1134,21 +1156,41 @@ endmacro()
 
 cmake_config.set('PACKAGE_CMAKE_INSTALL_INCLUDEDIR', '${PACKAGE_PREFIX_DIR}/@0@'.format(cmake_install_includedir))
 cmake_config.set('PACKAGE_CMAKE_INSTALL_LIBDIR', '${PACKAGE_PREFIX_DIR}/@0@'.format(cmake_install_libdir))
+cmake_config.set('PACKAGE_CMAKE_INSTALL_BINDIR', '${PACKAGE_PREFIX_DIR}/@0@'.format(cmake_install_bindir))
 cmake_config.set('PACKAGE_INCLUDE_INSTALL_DIR', '${PACKAGE_PREFIX_DIR}/@0@/@1@'.format(cmake_install_includedir, meson.project_name()))
 cmake_config.set('HARFBUZZ_VERSION', meson.project_version())
 cmake_config.set('HB_HAVE_GOBJECT', have_gobject ? 'YES' : 'NO')
 cmake_config.set('HB_LIBRARY_TYPE', get_option('default_library') == 'static' ? 'STATIC' : 'SHARED')
+cmake_config.set('HB_HAS_IMPORT_LIBRARY', 'NO')
+cmake_config.set('HB_IMPLIB_PREFIX', '')
+cmake_config.set('HB_IMPLIB_SUFFIX', '')
 
 if get_option('default_library') == 'static'
+  cmake_config.set('HB_LIB_DIR', '${PACKAGE_PREFIX_DIR}/@0@'.format(cmake_install_libdir))
   cmake_config.set('HB_LIB_PREFIX', '${CMAKE_STATIC_LIBRARY_PREFIX}')
   cmake_config.set('HB_LIB_SUFFIX', '${CMAKE_STATIC_LIBRARY_SUFFIX}')
 elif host_machine.system() == 'darwin'
+  cmake_config.set('HB_LIB_DIR', '${PACKAGE_PREFIX_DIR}/@0@'.format(cmake_install_libdir))
   cmake_config.set('HB_LIB_PREFIX', '${CMAKE_SHARED_LIBRARY_PREFIX}')
   cmake_config.set('HB_LIB_SUFFIX', '.@0@${CMAKE_SHARED_LIBRARY_SUFFIX}'.format(hb_so_version))
 elif host_machine.system() == 'windows'
-  cmake_config.set('HB_LIB_PREFIX', '${CMAKE_IMPORT_LIBRARY_PREFIX}')
-  cmake_config.set('HB_LIB_SUFFIX', '${CMAKE_IMPORT_LIBRARY_SUFFIX}')
+  cmake_config.set('HB_HAS_IMPORT_LIBRARY', 'YES')
+  cmake_config.set('HB_LIB_DIR', '${PACKAGE_PREFIX_DIR}/@0@'.format(cmake_install_bindir))
+  cmake_config.set('HB_LIB_PREFIX', '${CMAKE_SHARED_LIBRARY_PREFIX}')
+  if hb_so_version == ''
+    cmake_config.set('HB_LIB_SUFFIX', '${CMAKE_SHARED_LIBRARY_SUFFIX}')
+  else
+    cmake_config.set('HB_LIB_SUFFIX', '-@0@${CMAKE_SHARED_LIBRARY_SUFFIX}'.format(hb_so_version))
+  endif
+  cmake_config.set('HB_IMPLIB_PREFIX', '${CMAKE_IMPORT_LIBRARY_PREFIX}')
+  cmake_config.set('HB_IMPLIB_SUFFIX', '${CMAKE_IMPORT_LIBRARY_SUFFIX}')
+elif host_machine.system() == 'android'
+  # Meson does not version shared libraries on Android.
+  cmake_config.set('HB_LIB_DIR', '${PACKAGE_PREFIX_DIR}/@0@'.format(cmake_install_libdir))
+  cmake_config.set('HB_LIB_PREFIX', '${CMAKE_SHARED_LIBRARY_PREFIX}')
+  cmake_config.set('HB_LIB_SUFFIX', '${CMAKE_SHARED_LIBRARY_SUFFIX}')
 else
+  cmake_config.set('HB_LIB_DIR', '${PACKAGE_PREFIX_DIR}/@0@'.format(cmake_install_libdir))
   cmake_config.set('HB_LIB_PREFIX', '${CMAKE_SHARED_LIBRARY_PREFIX}')
   cmake_config.set('HB_LIB_SUFFIX', '${CMAKE_SHARED_LIBRARY_SUFFIX}.@0@'.format(version))
 endif

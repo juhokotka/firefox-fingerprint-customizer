@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "api/field_trials.h"
+#include "api/environment/environment.h"
 #include "api/make_ref_counted.h"
 #include "api/rtp_header_extension_id.h"
 #include "api/transport/ecn_marking.h"
@@ -39,12 +39,15 @@
 #include "rtc_base/copy_on_write_buffer.h"
 #include "rtc_base/rtc_certificate.h"
 #include "rtc_base/ssl_identity.h"
-#include "test/create_test_field_trials.h"
+#include "test/create_test_environment.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/run_loop.h"
 
 namespace webrtc {
 namespace {
+
+using ::testing::ElementsAre;
 
 constexpr int kRtpAuthTagLen = 10;
 
@@ -65,8 +68,8 @@ class DtlsSrtpTransportTest : public ::testing::Test {
       FakeDtlsTransport* rtp_dtls,
       FakeDtlsTransport* rtcp_dtls,
       bool rtcp_mux_enabled) {
-    auto dtls_srtp_transport =
-        std::make_unique<DtlsSrtpTransport>(rtcp_mux_enabled, field_trials_);
+    auto dtls_srtp_transport = std::make_unique<DtlsSrtpTransport>(
+        rtcp_mux_enabled, env_.field_trials());
 
     dtls_srtp_transport->SetDtlsTransports(rtp_dtls, rtcp_dtls);
 
@@ -264,22 +267,23 @@ class DtlsSrtpTransportTest : public ::testing::Test {
     SendRecvRtcpPackets();
   }
 
+  std::unique_ptr<FakeDtlsTransport> CreateFakeDtlsTransport(
+      absl::string_view name,
+      int component) {
+    return std::make_unique<FakeDtlsTransport>(
+        make_ref_counted<FakeIceTransport>(
+            std::make_unique<FakeIceTransportInternal>(env_, name, component)));
+  }
+
   test::RunLoop main_thread_;
+  const Environment env_ = CreateTestEnvironment();
   std::unique_ptr<DtlsSrtpTransport> dtls_srtp_transport1_;
   std::unique_ptr<DtlsSrtpTransport> dtls_srtp_transport2_;
   TransportObserver transport_observer1_;
   TransportObserver transport_observer2_;
 
   int sequence_number_ = 0;
-  FieldTrials field_trials_ = CreateTestFieldTrials();
 };
-
-std::unique_ptr<FakeDtlsTransport> CreateFakeDtlsTransport(
-    absl::string_view name,
-    int component) {
-  return std::make_unique<FakeDtlsTransport>(make_ref_counted<FakeIceTransport>(
-      std::make_unique<FakeIceTransportInternal>(name, component)));
-}
 
 // Tests that if RTCP muxing is enabled and transports are set after RTP
 // transport finished the handshake, SRTP is set up.
@@ -401,11 +405,11 @@ TEST_F(DtlsSrtpTransportTest, DtlsSrtpResetAfterDtlsTransportChange) {
   EXPECT_TRUE(dtls_srtp_transport2_->IsSrtpActive());
 
   auto rtp_ice3 = std::make_unique<FakeIceTransportInternal>(
-      "audio", ICE_CANDIDATE_COMPONENT_RTP);
+      env_, "audio", ICE_CANDIDATE_COMPONENT_RTP);
   auto rtp_dtls3 = std::make_unique<FakeDtlsTransport>(
       make_ref_counted<FakeIceTransport>(std::move(rtp_ice3)));
   auto rtp_ice4 = std::make_unique<FakeIceTransportInternal>(
-      "audio", ICE_CANDIDATE_COMPONENT_RTP);
+      env_, "audio", ICE_CANDIDATE_COMPONENT_RTP);
   auto rtp_dtls4 = std::make_unique<FakeDtlsTransport>(
       make_ref_counted<FakeIceTransport>(std::move(rtp_ice4)));
 
@@ -472,6 +476,67 @@ TEST_F(DtlsSrtpTransportTest, EncryptedHeaderExtensionIdUpdated) {
       encrypted_headers);
   dtls_srtp_transport2_->UpdateRecvEncryptedHeaderExtensionIds(
       encrypted_headers);
+}
+
+TEST_F(DtlsSrtpTransportTest, WritableStateChangesAfterSrtpActivation) {
+  std::unique_ptr<FakeDtlsTransport> rtp_dtls1 =
+      CreateFakeDtlsTransport("video", ICE_CANDIDATE_COMPONENT_RTP);
+  std::unique_ptr<FakeDtlsTransport> rtp_dtls2 =
+      CreateFakeDtlsTransport("video", ICE_CANDIDATE_COMPONENT_RTP);
+  MakeDtlsSrtpTransports(rtp_dtls1.get(), nullptr, rtp_dtls2.get(), nullptr,
+                         /*rtcp_mux_enabled=*/true);
+  std::vector<bool> writable_states;
+  dtls_srtp_transport1_->SubscribeWritableState(
+      &writable_states,
+      [&](bool writable) { writable_states.push_back(writable); });
+
+  CompleteDtlsHandshake(rtp_dtls1.get(), rtp_dtls2.get());
+  EXPECT_THAT(writable_states, ElementsAre(true));
+  rtp_dtls1->SetWritable(false);
+  EXPECT_TRUE(dtls_srtp_transport1_->IsSrtpActive());
+  EXPECT_FALSE(dtls_srtp_transport1_->IsWritable(/*rtcp=*/false));
+  EXPECT_THAT(writable_states, ElementsAre(true, false));
+
+  // A media channel attached during the outage must see the recovery edge.
+  std::vector<bool> late_subscriber_states;
+  dtls_srtp_transport1_->SubscribeWritableState(
+      &late_subscriber_states,
+      [&](bool writable) { late_subscriber_states.push_back(writable); });
+  rtp_dtls1->SetWritable(true);
+  EXPECT_THAT(writable_states, ElementsAre(true, false, true));
+  EXPECT_THAT(late_subscriber_states, ElementsAre(true));
+  SendRecvPackets();
+  dtls_srtp_transport1_->UnsubscribeWritableState(&late_subscriber_states);
+  dtls_srtp_transport1_->UnsubscribeWritableState(&writable_states);
+}
+
+TEST_F(DtlsSrtpTransportTest, WritableStateRequiresRtpAndRtcpRecovery) {
+  std::unique_ptr<FakeDtlsTransport> rtp_dtls1 =
+      CreateFakeDtlsTransport("video", ICE_CANDIDATE_COMPONENT_RTP);
+  std::unique_ptr<FakeDtlsTransport> rtp_dtls2 =
+      CreateFakeDtlsTransport("video", ICE_CANDIDATE_COMPONENT_RTP);
+  std::unique_ptr<FakeDtlsTransport> rtcp_dtls1 =
+      CreateFakeDtlsTransport("video", ICE_CANDIDATE_COMPONENT_RTCP);
+  std::unique_ptr<FakeDtlsTransport> rtcp_dtls2 =
+      CreateFakeDtlsTransport("video", ICE_CANDIDATE_COMPONENT_RTCP);
+  MakeDtlsSrtpTransports(rtp_dtls1.get(), rtcp_dtls1.get(), rtp_dtls2.get(),
+                         rtcp_dtls2.get(), /*rtcp_mux_enabled=*/false);
+  CompleteDtlsHandshake(rtp_dtls1.get(), rtp_dtls2.get());
+  CompleteDtlsHandshake(rtcp_dtls1.get(), rtcp_dtls2.get());
+  std::vector<bool> writable_states;
+  dtls_srtp_transport1_->SubscribeWritableState(
+      &writable_states,
+      [&](bool writable) { writable_states.push_back(writable); });
+
+  rtp_dtls1->SetWritable(false);
+  rtcp_dtls1->SetWritable(false);
+  EXPECT_THAT(writable_states, ElementsAre(false));
+  rtp_dtls1->SetWritable(true);
+  EXPECT_THAT(writable_states, ElementsAre(false));
+  rtcp_dtls1->SetWritable(true);
+  EXPECT_THAT(writable_states, ElementsAre(false, true));
+  SendRecvPackets();
+  dtls_srtp_transport1_->UnsubscribeWritableState(&writable_states);
 }
 
 // Tests if RTCP muxing is enabled. DtlsSrtpTransport is ready to send once the

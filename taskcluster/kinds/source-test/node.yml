@@ -11,7 +11,6 @@ task-defaults:
     treeherder:
         kind: test
         tier: 1
-    run-on-repo-type: [hg]
     run:
         using: run-task
         cwd: '{checkout}'
@@ -21,17 +20,7 @@ newtab-unit-tests:
     description: newtab unit tests
     treeherder:
         symbol: node(newtab)
-    require-build:
-        by-project:
-            autoland:
-                linux2404-64/opt: build-linux64/opt
-            try:
-                linux2404-64/opt: build-linux64/opt
-            default:
-                linux2404-64/opt: build-linux64-shippable/opt
     fetches:
-        build:
-            - target.tar.xz
         toolchain:
             - linux64-node
             - node-modules
@@ -42,7 +31,7 @@ newtab-unit-tests:
             cp -r $MOZ_FETCHES_DIR/node_modules node_modules &&
             cd /builds/worker/checkouts/gecko/browser/extensions/newtab &&
             cp -r $MOZ_FETCHES_DIR/newtab/node_modules node_modules &&
-            FIREFOX_BIN=$MOZ_FETCHES_DIR/firefox/firefox PATH=$PATH:$MOZ_FETCHES_DIR/node/bin node bin/try-runner.js
+            PATH=$PATH:$MOZ_FETCHES_DIR/node/bin node bin/try-runner.js
     when:
         files-changed:
             - "browser/extensions/newtab/**"
@@ -58,15 +47,7 @@ newtab-unit-tests-ccov:
             - name: public/code-coverage-grcov.zip
               path: /builds/worker/checkouts/gecko/browser/extensions/newtab/logs/coverage/code-coverage-grcov.zip
               type: file
-    require-build:
-        by-project:
-            try:
-                linux2404-64/opt: build-linux64/opt
-            default:
-                linux2404-64/opt: build-linux64-shippable/opt
     fetches:
-        build:
-            - target.tar.xz
         toolchain:
             - linux64-node
             - node-modules
@@ -77,7 +58,7 @@ newtab-unit-tests-ccov:
             cp -r $MOZ_FETCHES_DIR/node_modules node_modules &&
             cd /builds/worker/checkouts/gecko/browser/extensions/newtab &&
             cp -r $MOZ_FETCHES_DIR/newtab/node_modules node_modules &&
-            FIREFOX_BIN=$MOZ_FETCHES_DIR/firefox/firefox PATH=$PATH:$MOZ_FETCHES_DIR/node/bin node bin/try-runner.js
+            PATH=$PATH:$MOZ_FETCHES_DIR/node/bin node bin/try-runner.js
     # This should only run on mozilla-central, as the bot will only parse mozilla-central
     # coverage anyways.
     run-on-projects: ["mozilla-central"]
@@ -200,7 +181,7 @@ devtools-verify-bundle:
     run:
         command: >
             cd devtools/client/debugger &&
-            yarn &&
+            npm ci &&
             $MOZ_FETCHES_DIR/node/bin/node bin/bundle.js &&
             cd ../../.. &&
             ./mach python taskcluster/scripts/misc/verify-devtools-bundle.py --output /builds/worker/issues.json
@@ -219,6 +200,7 @@ eslint-plugin-mozilla:
         docker-image: {in-tree: "lint"}
     run:
         command: >
+            cp -r $MOZ_FETCHES_DIR/node_modules node_modules &&
             cp -r $MOZ_FETCHES_DIR/eslint-plugin-mozilla/node_modules tools/lint/eslint/eslint-plugin-mozilla/node_modules &&
             ./mach configure --disable-compile-environment &&
             PATH=$PATH:$MOZ_FETCHES_DIR/node/bin ./mach npm test --prefix tools/lint/eslint/eslint-plugin-mozilla
@@ -228,6 +210,7 @@ eslint-plugin-mozilla:
     fetches:
         toolchain:
             - linux64-node
+            - node-modules
             - eslint-plugin-mozilla
 
 stylelint-plugin-mozilla:

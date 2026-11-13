@@ -2,11 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ScriptPreloader.h"
-#include "ScriptPreloader-inl.h"
 #include "mozilla/loader/ScriptCacheActors.h"
 
 #include "mozilla/dom/ContentParent.h"
+#include "mozilla/ScriptPreloader.h"
+
+#include "ScriptPreloader-inl.h"
 
 namespace mozilla {
 namespace loader {

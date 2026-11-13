@@ -343,6 +343,11 @@ MediaResult VideoData::SetVideoDataToImage(PlanarYCbCrImage* aVideoImage,
                                            bool aCopyData) {
   MOZ_ASSERT(aVideoImage);
 
+  if (MediaResult r = ValidateBufferAndPicture(aBuffer, aPicture);
+      NS_FAILED(r)) {
+    return r;
+  }
+
   PlanarYCbCrData data = ConstructPlanarYCbCrData(aInfo, aBuffer, aPicture);
 
   if (aCopyData) {

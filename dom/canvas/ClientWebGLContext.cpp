@@ -26,6 +26,7 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/StaticPrefs_webgl.h"
 #include "mozilla/dom/BufferSourceBinding.h"
+#include "mozilla/dom/CanvasRenderingContextHelper.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/GeneratePlaceholderCanvasData.h"
 #include "mozilla/dom/WindowGlobalChild.h"
@@ -263,16 +264,17 @@ bool ClientWebGLContext::DispatchEvent(const nsAString& eventName) const {
   bool useDefaultHandler = true;
 
   if (mCanvasElement) {
-    nsContentUtils::DispatchTrustedEvent(mCanvasElement->OwnerDoc(),
-                                         mCanvasElement, eventName, kCanBubble,
+    const RefPtr<dom::HTMLCanvasElement> canvasElement = mCanvasElement;
+    nsContentUtils::DispatchTrustedEvent(canvasElement, eventName, kCanBubble,
                                          kIsCancelable, &useDefaultHandler);
   } else if (mOffscreenCanvas) {
     // OffscreenCanvas case
-    RefPtr<dom::Event> event =
+    const RefPtr<dom::Event> event =
         new dom::Event(mOffscreenCanvas, nullptr, nullptr);
     event->InitEvent(eventName, kCanBubble, kIsCancelable);
     event->SetTrusted(true);
-    useDefaultHandler = mOffscreenCanvas->DispatchEvent(
+    const RefPtr<dom::OffscreenCanvas> offscreenCanvas = mOffscreenCanvas;
+    useDefaultHandler = offscreenCanvas->DispatchEvent(
         *event, dom::CallerType::System, IgnoreErrors());
   }
   return useDefaultHandler;
@@ -321,7 +323,7 @@ void ClientWebGLContext::OnContextLoss(
   }
 
   const auto weak = WeakPtr<const ClientWebGLContext>(this);
-  const auto fnRun = [weak]() {
+  const auto fnRun = [weak]() MOZ_CAN_RUN_SCRIPT_BOUNDARY_LAMBDA {
     const auto strong = RefPtr<const ClientWebGLContext>(weak);
     if (!strong) return;
     strong->Event_webglcontextlost();
@@ -359,7 +361,7 @@ void ClientWebGLContext::RestoreContext(
   mAwaitingRestore = true;
 
   const auto weak = WeakPtr<const ClientWebGLContext>(this);
-  const auto fnRun = [weak]() {
+  const auto fnRun = [weak]() MOZ_CAN_RUN_SCRIPT_BOUNDARY {
     const auto strong = RefPtr<const ClientWebGLContext>(weak);
     if (!strong) return;
     strong->Event_webglcontextrestored();
@@ -396,6 +398,7 @@ void ClientWebGLContext::Event_webglcontextrestored() const {
       this);  // TODO: Make context loss non-mutable.
   if (!mutThis->CreateHostContext(requestSize)) {
     mLossStatus = webgl::LossStatus::LostForever;
+    mutThis->MaybeThrowContextCreationError();
     return;
   }
 
@@ -430,6 +433,15 @@ void ClientWebGLContext::ThrowEvent_WebGLContextCreationError(
   event->SetTrusted(true);
 
   target->DispatchEvent(*event);
+}
+
+NS_IMETHODIMP
+ClientWebGLContext::MaybeThrowContextCreationError() {
+  if (!mDeferContextCreationError.empty()) {
+    std::string error = std::move(mDeferContextCreationError);
+    ThrowEvent_WebGLContextCreationError(error);
+  }
+  return NS_OK;
 }
 
 // -------------------------------------------------------------------------
@@ -486,7 +498,13 @@ void ClientWebGLContext::EndComposition() {
 layers::TextureType ClientWebGLContext::GetTexTypeForSwapChain() const {
   const RefPtr<layers::ImageBridgeChild> imageBridge =
       layers::ImageBridgeChild::GetSingleton();
-  const bool isOutOfProcess = mNotLost && mNotLost->outOfProcess != nullptr;
+
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return layers::TexTypeForWebgl(imageBridge, false);
+  }
+
+  const bool isOutOfProcess = notLost->outOfProcess != nullptr;
   return layers::TexTypeForWebgl(imageBridge, isOutOfProcess);
 }
 
@@ -509,8 +527,14 @@ webgl::SwapChainOptions ClientWebGLContext::PrepareAsyncSwapChainOptions(
   if (fb || webvr) {
     return options;
   }
-  if (!IsContextLost() && (options.forceAsyncPresent ||
-                           StaticPrefs::webgl_out_of_process_async_present())) {
+
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return options;
+  }
+
+  if (options.forceAsyncPresent ||
+      StaticPrefs::webgl_out_of_process_async_present()) {
     if (!mRemoteTextureOwnerId) {
       mRemoteTextureOwnerId = Some(layers::RemoteTextureOwnerId::GetNext());
     }
@@ -556,9 +580,12 @@ void ClientWebGLContext::EndOfFrame() {
 Maybe<layers::SurfaceDescriptor> ClientWebGLContext::GetFrontBuffer(
     WebGLFramebufferJS* const fb, bool vr) {
   const FuncScope funcScope(*this, "<GetFrontBuffer>");
-  if (IsContextLost()) return {};
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return {};
+  }
 
-  const auto& child = mNotLost->outOfProcess;
+  const auto& child = notLost->outOfProcess;
   child->FlushPendingCmds();
 
   // Always synchronously get the front buffer if not using a remote texture.
@@ -633,18 +660,23 @@ void ClientWebGLContext::ClearVRSwapChain() { Run<RPROC(ClearVRSwapChain)>(); }
 
 bool ClientWebGLContext::UpdateWebRenderCanvasData(
     nsDisplayListBuilder* aBuilder, WebRenderCanvasData* aCanvasData) {
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
+
   CanvasRenderer* renderer = aCanvasData->GetCanvasRenderer();
 
-  if (!IsContextLost() && !mResetLayer && renderer) {
+  if (!mResetLayer && renderer) {
     return true;
   }
 
   const auto& size = DrawingBufferSize();
 
-  if (!IsContextLost() && !renderer && mNotLost->mCanvasRenderer &&
-      mNotLost->mCanvasRenderer->GetSize() == gfx::IntSize(size.x, size.y) &&
-      aCanvasData->SetCanvasRenderer(mNotLost->mCanvasRenderer)) {
-    mNotLost->mCanvasRenderer->SetDirty();
+  if (!renderer && notLost->mCanvasRenderer &&
+      notLost->mCanvasRenderer->GetSize() == gfx::IntSize(size.x, size.y) &&
+      aCanvasData->SetCanvasRenderer(notLost->mCanvasRenderer)) {
+    notLost->mCanvasRenderer->SetDirty();
     mResetLayer = false;
     return true;
   }
@@ -656,7 +688,7 @@ bool ClientWebGLContext::UpdateWebRenderCanvasData(
     return false;
   }
 
-  mNotLost->mCanvasRenderer = renderer;
+  notLost->mCanvasRenderer = renderer;
 
   MOZ_ASSERT(renderer);
   mResetLayer = false;
@@ -667,7 +699,10 @@ bool ClientWebGLContext::UpdateWebRenderCanvasData(
 bool ClientWebGLContext::InitializeCanvasRenderer(
     nsDisplayListBuilder* aBuilder, CanvasRenderer* aRenderer) {
   const FuncScope funcScope(*this, "<InitializeCanvasRenderer>");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   layers::CanvasRendererData data;
   data.mContext = this;
@@ -675,8 +710,6 @@ bool ClientWebGLContext::InitializeCanvasRenderer(
 
   const auto& options = *mInitialOptions;
   const auto& size = DrawingBufferSize();
-
-  if (IsContextLost()) return false;
 
   data.mIsOpaque = !options.alpha;
   data.mIsAlphaPremult = !options.alpha || options.premultipliedAlpha;
@@ -766,11 +799,14 @@ void ClientWebGLContext::GetContextAttributes(
     dom::Nullable<dom::WebGLContextAttributes>& retval) {
   retval.SetNull();
   const FuncScope funcScope(*this, "getContextAttributes");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
 
   dom::WebGLContextAttributes& result = retval.SetValue();
 
-  const auto& options = mNotLost->info.options;
+  const auto& options = notLost->info.options;
 
   result.mAlpha.Construct(options.alpha);
   result.mDepth = options.depth;
@@ -790,6 +826,7 @@ ClientWebGLContext::SetDimensions(const int32_t signedWidth,
                                   const int32_t signedHeight) {
   const FuncScope funcScope(*this, "<SetDimensions>");
   MOZ_ASSERT(mInitialOptions);
+  MOZ_ASSERT(mDeferContextCreationError.empty());
 
   if (mLossStatus != webgl::LossStatus::Ready) {
     // Attempted resize of a lost context.
@@ -842,6 +879,8 @@ void ClientWebGLContext::ResetBitmap() {
 }
 
 bool ClientWebGLContext::CreateHostContext(const uvec2& requestedSize) {
+  MOZ_ASSERT(mDeferContextCreationError.empty());
+
   const auto pNotLost = MakeRefPtr<webgl::NotLostData>(*this);
   auto& notLost = *pNotLost;
 
@@ -920,7 +959,7 @@ bool ClientWebGLContext::CreateHostContext(const uvec2& requestedSize) {
     notLost.info.error = str;
   }
   if (!notLost.info.error->empty()) {
-    ThrowEvent_WebGLContextCreationError(notLost.info.error);
+    mDeferContextCreationError = notLost.info.error;
     return false;
   }
   mNotLost = pNotLost;
@@ -997,8 +1036,11 @@ std::unordered_map<GLenum, bool> webgl::MakeIsEnabledMap(const bool webgl2) {
 // -------
 
 uvec2 ClientWebGLContext::DrawingBufferSize() {
-  if (IsContextLost()) return {};
   RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return {};
+  }
+
   auto& state = State();
   auto& size = state.mDrawingBufferSize;
 
@@ -1026,16 +1068,12 @@ void ClientWebGLContext::OnMemoryPressure() {
 }
 
 NS_IMETHODIMP
-ClientWebGLContext::SetContextOptions(JSContext* cx,
-                                      JS::Handle<JS::Value> options,
-                                      ErrorResult& aRvForDictionaryInit) {
-  if (mInitialOptions && options.isNullOrUndefined()) return NS_OK;
-
-  dom::WebGLContextAttributes attributes;
-  if (!attributes.Init(cx, options)) {
-    aRvForDictionaryInit.Throw(NS_ERROR_UNEXPECTED);
+ClientWebGLContext::SetContextOptions(
+    const dom::CanvasRenderingContextOptions& aOptions) {
+  if (!aOptions.is<dom::WebGLContextAttributes>()) {
     return NS_ERROR_UNEXPECTED;
   }
+  const auto& attributes = aOptions.as<dom::WebGLContextAttributes>();
 
   WebGLContextOptions newOpts;
 
@@ -1125,6 +1163,14 @@ already_AddRefed<gfx::SourceSurface> ClientWebGLContext::GetSurfaceSnapshot(
   }
 
   return ret.forget();
+}
+
+bool ClientWebGLContext::SupportAsyncSnapshot() { return GetChild(); };
+
+RefPtr<dom::HTMLCanvasElement::SurfaceSnapshotPromise>
+ClientWebGLContext::GetSurfaceSnapshotAsync() {
+  MOZ_ASSERT(GetChild());
+  return BackBufferSnapshotAsync();
 }
 
 mozilla::ipc::IProtocol* ClientWebGLContext::SupportsSnapshotExternalCanvas()
@@ -1272,6 +1318,45 @@ RefPtr<gfx::DataSourceSurface> ClientWebGLContext::BackBufferSnapshot() {
   }
 
   return surf;
+}
+
+RefPtr<dom::HTMLCanvasElement::SurfaceSnapshotPromise>
+ClientWebGLContext::BackBufferSnapshotAsync() {
+  MOZ_ASSERT(GetChild());
+
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost || !GetChild()) {
+    return dom::HTMLCanvasElement::SurfaceSnapshotPromise::CreateAndReject(
+        NS_ERROR_NOT_AVAILABLE, __func__);
+  }
+
+  const auto& state = State();
+
+  const auto drawFbWas = state.mBoundDrawFb;
+  const auto readFbWas = state.mBoundReadFb;
+  const auto pboWas =
+      Find(state.mBoundBufferByTarget, LOCAL_GL_PIXEL_PACK_BUFFER);
+
+  // -
+
+  BindFramebuffer(LOCAL_GL_FRAMEBUFFER, nullptr);
+  if (pboWas) {
+    BindBuffer(LOCAL_GL_PIXEL_PACK_BUFFER, nullptr);
+  }
+
+  auto reset = MakeScopeExit([&] {
+    if (drawFbWas == readFbWas) {
+      BindFramebuffer(LOCAL_GL_FRAMEBUFFER, drawFbWas);
+    } else {
+      BindFramebuffer(LOCAL_GL_DRAW_FRAMEBUFFER, drawFbWas);
+      BindFramebuffer(LOCAL_GL_READ_FRAMEBUFFER, readFbWas);
+    }
+    if (pboWas) {
+      BindBuffer(LOCAL_GL_PIXEL_PACK_BUFFER, pboWas);
+    }
+  });
+
+  return DoReadPixelsAsync();
 }
 
 UniquePtr<uint8_t[]> ClientWebGLContext::GetImageBuffer(
@@ -1502,7 +1587,11 @@ static bool ValidateOrSkipForDelete(const ClientWebGLContext& context,
 
 void ClientWebGLContext::DeleteBuffer(WebGLBufferJS* const obj) {
   const FuncScope funcScope(*this, "deleteBuffer");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateOrSkipForDelete(*this, obj)) return;
   auto& state = State();
 
@@ -1564,7 +1653,11 @@ void ClientWebGLContext::DeleteBuffer(WebGLBufferJS* const obj) {
 void ClientWebGLContext::DeleteFramebuffer(WebGLFramebufferJS* const obj,
                                            bool canDeleteOpaque) {
   const FuncScope funcScope(*this, "deleteFramebuffer");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateOrSkipForDelete(*this, obj)) return;
   if (!canDeleteOpaque && obj->mOpaque) {
     EnqueueError(
@@ -1594,7 +1687,11 @@ void ClientWebGLContext::DeleteFramebuffer(WebGLFramebufferJS* const obj,
 
 void ClientWebGLContext::DeleteProgram(WebGLProgramJS* const obj) const {
   const FuncScope funcScope(*this, "deleteProgram");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateOrSkipForDelete(*this, obj)) return;
 
   // Don't unbind
@@ -1618,7 +1715,11 @@ static GLenum QuerySlotTarget(const GLenum specificTarget);
 
 void ClientWebGLContext::DeleteQuery(WebGLQueryJS* const obj) {
   const FuncScope funcScope(*this, "deleteQuery");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateOrSkipForDelete(*this, obj)) return;
   const auto& state = State();
 
@@ -1642,7 +1743,11 @@ void ClientWebGLContext::DeleteQuery(WebGLQueryJS* const obj) {
 
 void ClientWebGLContext::DeleteRenderbuffer(WebGLRenderbufferJS* const obj) {
   const FuncScope funcScope(*this, "deleteRenderbuffer");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateOrSkipForDelete(*this, obj)) return;
   const auto& state = State();
 
@@ -1675,7 +1780,11 @@ void ClientWebGLContext::DeleteRenderbuffer(WebGLRenderbufferJS* const obj) {
 
 void ClientWebGLContext::DeleteSampler(WebGLSamplerJS* const obj) {
   const FuncScope funcScope(*this, "deleteSampler");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateOrSkipForDelete(*this, obj)) return;
   const auto& state = State();
 
@@ -1692,7 +1801,11 @@ void ClientWebGLContext::DeleteSampler(WebGLSamplerJS* const obj) {
 
 void ClientWebGLContext::DeleteShader(WebGLShaderJS* const obj) const {
   const FuncScope funcScope(*this, "deleteShader");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateOrSkipForDelete(*this, obj)) return;
 
   // Don't unbind
@@ -1713,7 +1826,11 @@ void ClientWebGLContext::DoDeleteShader(const WebGLShaderJS& obj) const {
 
 void ClientWebGLContext::DeleteSync(WebGLSyncJS* const obj) const {
   const FuncScope funcScope(*this, "deleteSync");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateOrSkipForDelete(*this, obj)) return;
 
   // Nothing to unbind
@@ -1724,7 +1841,11 @@ void ClientWebGLContext::DeleteSync(WebGLSyncJS* const obj) const {
 
 void ClientWebGLContext::DeleteTexture(WebGLTextureJS* const obj) {
   const FuncScope funcScope(*this, "deleteTexture");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateOrSkipForDelete(*this, obj)) return;
   auto& state = State();
 
@@ -1772,7 +1893,11 @@ void ClientWebGLContext::DeleteTexture(WebGLTextureJS* const obj) {
 void ClientWebGLContext::DeleteTransformFeedback(
     WebGLTransformFeedbackJS* const obj) {
   const FuncScope funcScope(*this, "deleteTransformFeedback");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateOrSkipForDelete(*this, obj)) return;
   const auto& state = State();
 
@@ -1793,7 +1918,11 @@ void ClientWebGLContext::DeleteTransformFeedback(
 
 void ClientWebGLContext::DeleteVertexArray(WebGLVertexArrayJS* const obj) {
   const FuncScope funcScope(*this, "deleteVertexArray");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateOrSkipForDelete(*this, obj)) return;
   const auto& state = State();
 
@@ -1810,7 +1939,10 @@ void ClientWebGLContext::DeleteVertexArray(WebGLVertexArrayJS* const obj) {
 
 bool ClientWebGLContext::IsBuffer(const WebGLBufferJS* const obj) const {
   const FuncScope funcScope(*this, "isBuffer");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   return obj && obj->IsUsable(*this) &&
          obj->mKind != webgl::BufferKind::Undefined;
@@ -1819,21 +1951,30 @@ bool ClientWebGLContext::IsBuffer(const WebGLBufferJS* const obj) const {
 bool ClientWebGLContext::IsFramebuffer(
     const WebGLFramebufferJS* const obj) const {
   const FuncScope funcScope(*this, "isFramebuffer");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   return obj && obj->IsUsable(*this) && obj->mHasBeenBound;
 }
 
 bool ClientWebGLContext::IsProgram(const WebGLProgramJS* const obj) const {
   const FuncScope funcScope(*this, "isProgram");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   return obj && obj->IsUsable(*this);
 }
 
 bool ClientWebGLContext::IsQuery(const WebGLQueryJS* const obj) const {
   const FuncScope funcScope(*this, "isQuery");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   return obj && obj->IsUsable(*this) && obj->mTarget;
 }
@@ -1841,35 +1982,50 @@ bool ClientWebGLContext::IsQuery(const WebGLQueryJS* const obj) const {
 bool ClientWebGLContext::IsRenderbuffer(
     const WebGLRenderbufferJS* const obj) const {
   const FuncScope funcScope(*this, "isRenderbuffer");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   return obj && obj->IsUsable(*this) && obj->mHasBeenBound;
 }
 
 bool ClientWebGLContext::IsSampler(const WebGLSamplerJS* const obj) const {
   const FuncScope funcScope(*this, "isSampler");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   return obj && obj->IsUsable(*this);
 }
 
 bool ClientWebGLContext::IsShader(const WebGLShaderJS* const obj) const {
   const FuncScope funcScope(*this, "isShader");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   return obj && obj->IsUsable(*this);
 }
 
 bool ClientWebGLContext::IsSync(const WebGLSyncJS* const obj) const {
   const FuncScope funcScope(*this, "isSync");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   return obj && obj->IsUsable(*this);
 }
 
 bool ClientWebGLContext::IsTexture(const WebGLTextureJS* const obj) const {
   const FuncScope funcScope(*this, "isTexture");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   return obj && obj->IsUsable(*this) && obj->mTarget;
 }
@@ -1877,7 +2033,10 @@ bool ClientWebGLContext::IsTexture(const WebGLTextureJS* const obj) const {
 bool ClientWebGLContext::IsTransformFeedback(
     const WebGLTransformFeedbackJS* const obj) const {
   const FuncScope funcScope(*this, "isTransformFeedback");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   return obj && obj->IsUsable(*this) && obj->mHasBeenBound;
 }
@@ -1885,7 +2044,10 @@ bool ClientWebGLContext::IsTransformFeedback(
 bool ClientWebGLContext::IsVertexArray(
     const WebGLVertexArrayJS* const obj) const {
   const FuncScope funcScope(*this, "isVertexArray");
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   return obj && obj->IsUsable(*this) && obj->mHasBeenBound;
 }
@@ -1944,7 +2106,7 @@ void ClientWebGLContext::GetInternalformatParameter(
     JSContext* cx, GLenum target, GLenum internalformat, GLenum pname,
     JS::MutableHandle<JS::Value> retval, ErrorResult& rv) {
   const FuncScope funcScope(*this, "getInternalformatParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -1979,7 +2141,7 @@ template <typename T>
 bool ToJSValueOrNull(JSContext* const cx, const RefPtr<T>& ptr,
                      JS::MutableHandle<JS::Value> retval) {
   if (!ptr) {
-    retval.set(JS::NullValue());
+    retval.setNull();
     return true;
   }
   return dom::ToJSValue(cx, ptr, retval);
@@ -2021,7 +2183,7 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
                                       JS::MutableHandle<JS::Value> retval,
                                       ErrorResult& rv, const bool debug) {
   const FuncScope funcScope(*this, "getParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -2084,50 +2246,50 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
     }
 
     case LOCAL_GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS:
-      retval.set(JS_NumberValue(limits.maxTexUnits));
+      retval.setNumber(limits.maxTexUnits);
       return;
     case LOCAL_GL_MAX_TEXTURE_SIZE:
-      retval.set(JS_NumberValue(limits.maxTex2dSize));
+      retval.setNumber(limits.maxTex2dSize);
       return;
     case LOCAL_GL_MAX_CUBE_MAP_TEXTURE_SIZE:
-      retval.set(JS_NumberValue(limits.maxTexCubeSize));
+      retval.setNumber(limits.maxTexCubeSize);
       return;
     case LOCAL_GL_MAX_VERTEX_ATTRIBS:
-      retval.set(JS_NumberValue(limits.maxVertexAttribs));
+      retval.setNumber(limits.maxVertexAttribs);
       return;
 
     case LOCAL_GL_MAX_VIEWS_OVR:
       if (IsExtensionEnabled(WebGLExtensionID::OVR_multiview2)) {
-        retval.set(JS_NumberValue(limits.maxMultiviewLayers));
+        retval.setNumber(limits.maxMultiviewLayers);
         return;
       }
       break;
 
     case LOCAL_GL_PACK_ALIGNMENT:
-      retval.set(JS_NumberValue(state.mPixelPackState.alignmentInTypeElems));
+      retval.setNumber(state.mPixelPackState.alignmentInTypeElems);
       return;
     case LOCAL_GL_UNPACK_ALIGNMENT:
-      retval.set(JS_NumberValue(state.mPixelUnpackState.alignmentInTypeElems));
+      retval.setNumber(state.mPixelUnpackState.alignmentInTypeElems);
       return;
 
     case dom::WebGLRenderingContext_Binding::UNPACK_FLIP_Y_WEBGL:
-      retval.set(JS::BooleanValue(state.mPixelUnpackState.flipY));
+      retval.setBoolean(state.mPixelUnpackState.flipY);
       return;
     case dom::WebGLRenderingContext_Binding::UNPACK_PREMULTIPLY_ALPHA_WEBGL:
-      retval.set(JS::BooleanValue(state.mPixelUnpackState.premultiplyAlpha));
+      retval.setBoolean(state.mPixelUnpackState.premultiplyAlpha);
       return;
     case dom::WebGLRenderingContext_Binding::UNPACK_COLORSPACE_CONVERSION_WEBGL:
-      retval.set(JS_NumberValue(state.mPixelUnpackState.colorspaceConversion));
+      retval.setNumber(state.mPixelUnpackState.colorspaceConversion);
       return;
 
     case dom::WEBGL_provoking_vertex_Binding::PROVOKING_VERTEX_WEBGL:
       if (!IsExtensionEnabled(WebGLExtensionID::WEBGL_provoking_vertex)) break;
-      retval.set(JS_NumberValue(UnderlyingValue(state.mProvokingVertex)));
+      retval.setNumber(UnderlyingValue(state.mProvokingVertex));
       return;
 
     case LOCAL_GL_DEPTH_CLAMP:
       if (!IsExtensionEnabled(WebGLExtensionID::EXT_depth_clamp)) break;
-      retval.set(JS::BooleanValue(state.mIsEnabledMap[LOCAL_GL_DEPTH_CLAMP]));
+      retval.setBoolean(state.mIsEnabledMap[LOCAL_GL_DEPTH_CLAMP]);
       return;
 
     // -
@@ -2196,7 +2358,7 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
         return;
 
       case LOCAL_GL_MAX_CLIENT_WAIT_TIMEOUT_WEBGL:
-        retval.set(JS_NumberValue(webgl::kMaxClientWaitSyncTimeoutNS));
+        retval.setNumber(webgl::kMaxClientWaitSyncTimeoutNS);
         return;
 
       case LOCAL_GL_PIXEL_PACK_BUFFER_BINDING:
@@ -2243,45 +2405,45 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
         return;
 
       case LOCAL_GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS:
-        retval.set(JS_NumberValue(webgl::kMaxTransformFeedbackSeparateAttribs));
+        retval.setNumber(webgl::kMaxTransformFeedbackSeparateAttribs);
         return;
       case LOCAL_GL_MAX_UNIFORM_BUFFER_BINDINGS:
-        retval.set(JS_NumberValue(limits.maxUniformBufferBindings));
+        retval.setNumber(limits.maxUniformBufferBindings);
         return;
       case LOCAL_GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT:
-        retval.set(JS_NumberValue(limits.uniformBufferOffsetAlignment));
+        retval.setNumber(limits.uniformBufferOffsetAlignment);
         return;
       case LOCAL_GL_MAX_3D_TEXTURE_SIZE:
-        retval.set(JS_NumberValue(limits.maxTex3dSize));
+        retval.setNumber(limits.maxTex3dSize);
         return;
       case LOCAL_GL_MAX_ARRAY_TEXTURE_LAYERS:
-        retval.set(JS_NumberValue(limits.maxTexArrayLayers));
+        retval.setNumber(limits.maxTexArrayLayers);
         return;
 
       case LOCAL_GL_PACK_ROW_LENGTH:
-        retval.set(JS_NumberValue(state.mPixelPackState.rowLength));
+        retval.setNumber(state.mPixelPackState.rowLength);
         return;
       case LOCAL_GL_PACK_SKIP_PIXELS:
-        retval.set(JS_NumberValue(state.mPixelPackState.skipPixels));
+        retval.setNumber(state.mPixelPackState.skipPixels);
         return;
       case LOCAL_GL_PACK_SKIP_ROWS:
-        retval.set(JS_NumberValue(state.mPixelPackState.skipRows));
+        retval.setNumber(state.mPixelPackState.skipRows);
         return;
 
       case LOCAL_GL_UNPACK_IMAGE_HEIGHT:
-        retval.set(JS_NumberValue(state.mPixelUnpackState.imageHeight));
+        retval.setNumber(state.mPixelUnpackState.imageHeight);
         return;
       case LOCAL_GL_UNPACK_ROW_LENGTH:
-        retval.set(JS_NumberValue(state.mPixelUnpackState.rowLength));
+        retval.setNumber(state.mPixelUnpackState.rowLength);
         return;
       case LOCAL_GL_UNPACK_SKIP_IMAGES:
-        retval.set(JS_NumberValue(state.mPixelUnpackState.skipImages));
+        retval.setNumber(state.mPixelUnpackState.skipImages);
         return;
       case LOCAL_GL_UNPACK_SKIP_PIXELS:
-        retval.set(JS_NumberValue(state.mPixelUnpackState.skipPixels));
+        retval.setNumber(state.mPixelUnpackState.skipPixels);
         return;
       case LOCAL_GL_UNPACK_SKIP_ROWS:
-        retval.set(JS_NumberValue(state.mPixelUnpackState.skipRows));
+        retval.setNumber(state.mPixelUnpackState.skipRows);
         return;
     }  // switch pname
   }  // if webgl2
@@ -2292,8 +2454,8 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
     // profileMode: fetch Profile device for WebGL string spoofing. When a
     // Profile is available, the RFP masking targets (WebGLRenderInfo etc.)
     // are bypassed so the Profile's webglVendor/webglRenderer take effect.
-    const FingerprintDeviceArgs* profileDevice = nullptr;
-    ProfileArgs profileStorage;
+    const dom::FingerprintDeviceArgs* profileDevice = nullptr;
+    dom::ProfileArgs profileStorage;
     // Fallback: when the profile IPC hasn't arrived yet, derive target OS
     // from the BrowsingContext's customUserAgent (a synced field available
     // immediately) and use OS-appropriate WebGL strings.
@@ -2306,7 +2468,7 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
     // profile/fallback is applied even when mCanvasElement is null.
     dom::BrowsingContext* bc = nullptr;
     if (mCanvasElement) {
-      if (Document* doc = mCanvasElement->OwnerDoc()) {
+      if (dom::Document* doc = mCanvasElement->OwnerDoc()) {
         bc = doc->GetBrowsingContext();
       }
     } else if (mOffscreenCanvas) {
@@ -2318,7 +2480,7 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
     if (bc) {
       uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
       if (userContextId != 0) {
-        if (WindowGlobalChild::GetProfileForUserContextId(
+        if (dom::WindowGlobalChild::GetProfileForUserContextId(
                 userContextId, &profileStorage) &&
             profileStorage.device().isSome()) {
           profileDevice = &profileStorage.device().ref();
@@ -2327,9 +2489,8 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
         // BrowsingContext's customUserAgent (synced field) to infer
         // the target OS and provide matching WebGL strings.
         if (!profileDevice) {
-          nsAutoString customUA;
-          bc->GetCustomUserAgent(customUA);
-          NS_ConvertUTF16toUTF8 ua8(customUA);
+          nsAutoCString ua8;
+          bc->GetCustomUserAgent(ua8);
           if (ua8.Find("Macintosh") != kNotFound) {
             fallbackVendor.AssignLiteral("Google Inc. (Apple)");
             fallbackRenderer.AssignLiteral("Apple GPU");
@@ -2566,7 +2727,7 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
         case LOCAL_GL_RASTERIZER_DISCARD:
         case LOCAL_GL_TRANSFORM_FEEDBACK_ACTIVE:
         case LOCAL_GL_TRANSFORM_FEEDBACK_PAUSED:
-          retval.set(JS::BooleanValue(*maybe));
+          retval.setBoolean(*maybe);
           return;
 
         // 4 bools
@@ -2588,12 +2749,12 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
           if (readType == LOCAL_GL_HALF_FLOAT && !mIsWebGL2) {
             readType = LOCAL_GL_HALF_FLOAT_OES;
           }
-          retval.set(JS_NumberValue(readType));
+          retval.setNumber(readType);
           return;
         }
 
         default:
-          retval.set(JS_NumberValue(*maybe));
+          retval.setNumber(*maybe);
           return;
       }
     }
@@ -2603,7 +2764,7 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
 void ClientWebGLContext::GetBufferParameter(
     JSContext* cx, GLenum target, GLenum pname,
     JS::MutableHandle<JS::Value> retval) const {
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -2619,7 +2780,7 @@ void ClientWebGLContext::GetBufferParameter(
     return ret;
   }();
   if (maybe) {
-    retval.set(JS_NumberValue(*maybe));
+    retval.setNumber(*maybe);
   }
 }
 
@@ -2642,7 +2803,7 @@ void ClientWebGLContext::GetFramebufferAttachmentParameter(
     const GLenum pname, JS::MutableHandle<JS::Value> retval,
     ErrorResult& rv) const {
   const FuncScope funcScope(*this, "getFramebufferAttachmentParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -2712,7 +2873,7 @@ void ClientWebGLContext::GetFramebufferAttachmentParameter(
 
   const auto maybe = fnGet(pname);
   if (maybe) {
-    retval.set(JS_NumberValue(*maybe));
+    retval.setNumber(*maybe);
   }
 }
 
@@ -2720,7 +2881,7 @@ void ClientWebGLContext::GetRenderbufferParameter(
     JSContext* cx, GLenum target, GLenum pname,
     JS::MutableHandle<JS::Value> retval) const {
   const FuncScope funcScope(*this, "getRenderbufferParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -2744,7 +2905,7 @@ void ClientWebGLContext::GetRenderbufferParameter(
     return ret;
   }();
   if (maybe) {
-    retval.set(JS_NumberValue(*maybe));
+    retval.setNumber(*maybe);
   }
 }
 
@@ -2752,7 +2913,7 @@ void ClientWebGLContext::GetIndexedParameter(
     JSContext* cx, GLenum target, GLuint index,
     JS::MutableHandle<JS::Value> retval, ErrorResult& rv) const {
   const FuncScope funcScope(*this, "getIndexedParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -2808,7 +2969,7 @@ void ClientWebGLContext::GetIndexedParameter(
       }
 
       default:
-        retval.set(JS_NumberValue(*maybe));
+        retval.setNumber(*maybe);
         return;
     }
   }
@@ -2819,7 +2980,7 @@ void ClientWebGLContext::GetUniform(JSContext* const cx,
                                     const WebGLUniformLocationJS& loc,
                                     JS::MutableHandle<JS::Value> retval) {
   const FuncScope funcScope(*this, "getUniform");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -2857,7 +3018,7 @@ void ClientWebGLContext::GetUniform(JSContext* const cx,
 
   switch (res.type) {
     case LOCAL_GL_BOOL:
-      retval.set(JS::BooleanValue(res.data[0]));
+      retval.setBoolean(res.data[0]);
       return;
 
     case LOCAL_GL_FLOAT: {
@@ -2958,13 +3119,11 @@ void ClientWebGLContext::GetUniform(JSContext* const cx,
 already_AddRefed<WebGLShaderPrecisionFormatJS>
 ClientWebGLContext::GetShaderPrecisionFormat(const GLenum shadertype,
                                              const GLenum precisiontype) {
+  const FuncScope funcScope(*this, "getShaderPrecisionFormat");
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return nullptr;
   }
-
-  const FuncScope funcScope(*this, "getShaderPrecisionFormat");
-  if (IsContextLost()) return nullptr;
 
   const auto& shaderPrecisions = *notLost->info.shaderPrecisions;
   const auto args =
@@ -2983,7 +3142,11 @@ ClientWebGLContext::GetShaderPrecisionFormat(const GLenum shadertype,
 void ClientWebGLContext::BlendColor(GLclampf r, GLclampf g, GLclampf b,
                                     GLclampf a) {
   const FuncScope funcScope(*this, "blendColor");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
 
   const bool unclamped =
@@ -3046,7 +3209,11 @@ void ClientWebGLContext::ClearBufferTv(const GLenum buffer,
                                        JS::AutoCheckCannotGC&& nogc,
                                        const Span<const uint8_t>& view,
                                        const GLuint srcElemOffset) {
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    nogc.reset();
+    return;
+  }
 
   const auto byteOffset = CheckedInt<size_t>(srcElemOffset) * sizeof(float);
   if (!byteOffset.isValid() || byteOffset.value() > view.Length()) {
@@ -3102,7 +3269,11 @@ void ClientWebGLContext::ClearBufferfi(GLenum buffer, GLint drawBuffer,
 void ClientWebGLContext::ClearColor(GLclampf r, GLclampf g, GLclampf b,
                                     GLclampf a) {
   const FuncScope funcScope(*this, "clearColor");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
 
   auto& cache = state.mClearColor;
@@ -3118,10 +3289,17 @@ void ClientWebGLContext::ClearDepth(GLclampf v) { Run<RPROC(ClearDepth)>(v); }
 
 void ClientWebGLContext::ClearStencil(GLint v) { Run<RPROC(ClearStencil)>(v); }
 
+void ClientWebGLContext::ClipControlEXT(GLenum origin, GLenum depth) {
+  Run<RPROC(ClipControlEXT)>(origin, depth);
+}
+
 void ClientWebGLContext::ColorMaskI(Maybe<GLuint> i, bool r, bool g, bool b,
                                     bool a) const {
   const FuncScope funcScope(*this, "colorMask");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
 
   const uint8_t mask =
       uint8_t(r << 0) | uint8_t(g << 1) | uint8_t(b << 2) | uint8_t(a << 3);
@@ -3136,7 +3314,11 @@ void ClientWebGLContext::DepthMask(WebGLboolean b) { Run<RPROC(DepthMask)>(b); }
 
 void ClientWebGLContext::DepthRange(GLclampf zNear, GLclampf zFar) {
   const FuncScope funcScope(*this, "depthRange");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
 
   state.mDepthRange = {zNear, zFar};
@@ -3209,7 +3391,11 @@ Maybe<webgl::ErrorInfo> SetPixelUnpack(
 
 void ClientWebGLContext::PixelStorei(const GLenum pname, const GLint iparam) {
   const FuncScope funcScope(*this, "pixelStorei");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!ValidateNonNegative("param", iparam)) return;
   const auto param = static_cast<uint32_t>(iparam);
 
@@ -3270,6 +3456,11 @@ void ClientWebGLContext::PolygonOffset(GLfloat factor, GLfloat units) {
   Run<RPROC(PolygonOffset)>(factor, units);
 }
 
+void ClientWebGLContext::PolygonOffsetClampEXT(GLfloat factor, GLfloat units,
+                                               GLfloat clamp) {
+  Run<RPROC(PolygonOffsetClampEXT)>(factor, units, clamp);
+}
+
 void ClientWebGLContext::SampleCoverage(GLclampf value, WebGLboolean invert) {
   Run<RPROC(SampleCoverage)>(value, invert);
 }
@@ -3277,7 +3468,11 @@ void ClientWebGLContext::SampleCoverage(GLclampf value, WebGLboolean invert) {
 void ClientWebGLContext::Scissor(GLint x, GLint y, GLsizei width,
                                  GLsizei height) {
   const FuncScope funcScope(*this, "scissor");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
 
   if (!ValidateNonNegative("width", width) ||
@@ -3307,7 +3502,11 @@ void ClientWebGLContext::StencilOpSeparate(GLenum face, GLenum sfail,
 void ClientWebGLContext::Viewport(GLint x, GLint y, GLsizei width,
                                   GLsizei height) {
   const FuncScope funcScope(*this, "viewport");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
 
   if (!ValidateNonNegative("width", width) ||
@@ -3407,6 +3606,21 @@ Maybe<webgl::ErrorInfo> CheckBindBufferRange(
     }
   }
 
+  // The driver rejects a range that does not fit GLintptr/GLsizeiptr and keeps
+  // its previous binding, so we must not record such a range as bound.
+  if (isBuffer) {
+    if (!CheckedInt<GLintptr>(offset).isValid()) {
+      const auto info = nsPrintfCString(
+          "`offset` (%" PRIu64 ") must fit in GLintptr.", offset);
+      return fnSome(LOCAL_GL_INVALID_VALUE, info);
+    }
+    if (!CheckedInt<GLsizeiptr>(size).isValid()) {
+      const auto info =
+          nsPrintfCString("`size` (%" PRIu64 ") must fit in GLsizeiptr.", size);
+      return fnSome(LOCAL_GL_INVALID_VALUE, info);
+    }
+  }
+
   return {};
 }
 
@@ -3415,7 +3629,11 @@ Maybe<webgl::ErrorInfo> CheckBindBufferRange(
 void ClientWebGLContext::BindBuffer(const GLenum target,
                                     WebGLBufferJS* const buffer) {
   const FuncScope funcScope(*this, "bindBuffer");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (buffer && !buffer->ValidateUsable(*this, "buffer")) return;
 
   // -
@@ -3566,12 +3784,14 @@ void ClientWebGLContext::GetBufferSubData(GLenum target, GLintptr srcByteOffset,
                                           GLuint dstElemOffset,
                                           GLuint dstElemCountOverride) {
   const FuncScope funcScope(*this, "getBufferSubData");
-  if (IsContextLost()) return;
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
   }
-  if (!ValidateNonNegative("srcByteOffset", srcByteOffset)) return;
+
+  if (!ValidateNonNegative("srcByteOffset", srcByteOffset)) {
+    return;
+  }
 
   size_t elemSize = SizeOfViewElem(dstData);
   dstData.ProcessFixedData<true>([&](const Span<uint8_t>& aData) {
@@ -3739,7 +3959,11 @@ void ClientWebGLContext::CopyBufferSubData(GLenum readTarget,
 void ClientWebGLContext::BindFramebuffer(const GLenum target,
                                          WebGLFramebufferJS* const fb) {
   const FuncScope funcScope(*this, "bindFramebuffer");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (fb && !fb->ValidateUsable(*this, "fb")) return;
 
   if (!IsFramebufferTarget(mIsWebGL2, target)) {
@@ -3784,7 +4008,10 @@ void ClientWebGLContext::FramebufferTexture2D(GLenum target, GLenum attachSlot,
                                               WebGLTextureJS* const tex,
                                               GLint mipLevel) const {
   const FuncScope funcScope(*this, "framebufferTexture2D");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
 
   const auto bindTexTarget = ImageToTexTarget(bindImageTarget);
   uint32_t zLayer = 0;
@@ -4036,7 +4263,11 @@ void ClientWebGLContext::ReadBuffer(GLenum mode) {
 void ClientWebGLContext::BindRenderbuffer(const GLenum target,
                                           WebGLRenderbufferJS* const rb) {
   const FuncScope funcScope(*this, "bindRenderbuffer");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (rb && !rb->ValidateUsable(*this, "rb")) return;
   auto& state = State();
 
@@ -4057,7 +4288,10 @@ void ClientWebGLContext::RenderbufferStorageMultisample(GLenum target,
                                                         GLsizei width,
                                                         GLsizei height) const {
   const FuncScope funcScope(*this, "renderbufferStorageMultisample");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
 
   if (target != LOCAL_GL_RENDERBUFFER) {
     EnqueueError_ArgEnum("target", target);
@@ -4095,7 +4329,10 @@ void ClientWebGLContext::RenderbufferStorageMultisample(GLenum target,
 
 void ClientWebGLContext::ActiveTexture(const GLenum texUnitEnum) {
   const FuncScope funcScope(*this, "activeTexture");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
 
   if (texUnitEnum < LOCAL_GL_TEXTURE0) {
     EnqueueError(LOCAL_GL_INVALID_VALUE,
@@ -4138,7 +4375,11 @@ static bool IsTexTarget(const GLenum texTarget, const bool webgl2) {
 void ClientWebGLContext::BindTexture(const GLenum texTarget,
                                      WebGLTextureJS* const tex) {
   const FuncScope funcScope(*this, "bindTexture");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (tex && !tex->ValidateUsable(*this, "tex")) return;
 
   if (!IsTexTarget(texTarget, mIsWebGL2)) {
@@ -4174,7 +4415,7 @@ void ClientWebGLContext::GetTexParameter(
     JSContext* cx, GLenum texTarget, GLenum pname,
     JS::MutableHandle<JS::Value> retval) const {
   const FuncScope funcScope(*this, "getTexParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -4208,11 +4449,11 @@ void ClientWebGLContext::GetTexParameter(
   if (maybe) {
     switch (pname) {
       case LOCAL_GL_TEXTURE_IMMUTABLE_FORMAT:
-        retval.set(JS::BooleanValue(*maybe));
+        retval.setBoolean(*maybe);
         break;
 
       default:
-        retval.set(JS_NumberValue(*maybe));
+        retval.setNumber(*maybe);
         break;
     }
   }
@@ -4295,10 +4536,10 @@ static inline uvec3 CastUvec3(const ivec3& val) {
 }
 
 template <typename T>
-Range<T> SubRange(const Range<T>& full, const size_t offset,
-                  const size_t length) {
+mozilla::Range<T> SubRange(const mozilla::Range<T>& full, const size_t offset,
+                           const size_t length) {
   const auto newBegin = full.begin() + offset;
-  return Range<T>{newBegin, newBegin + length};
+  return mozilla::Range<T>{newBegin, newBegin + length};
 }
 
 Maybe<Span<const uint8_t>> GetRangeFromData(const Span<uint8_t>& data,
@@ -4336,7 +4577,11 @@ void ClientWebGLContext::TexStorage(uint8_t funcDims, GLenum texTarget,
                                     GLsizei levels, GLenum internalFormat,
                                     const ivec3& size) const {
   const FuncScope funcScope(*this, "texStorage[23]D");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!IsTexTargetForDims(texTarget, mIsWebGL2, funcDims)) {
     EnqueueError_ArgEnum("texTarget", texTarget);
     return;
@@ -4622,18 +4867,6 @@ void ClientWebGLContext::TexImage(uint8_t funcDims, GLenum imageTarget,
                 std::string{"SurfaceDescriptorBuffer data is not Shmem."});
           }
         } break;
-        case layers::SurfaceDescriptor::TSurfaceDescriptorD3D10: {
-          MOZ_ASSERT(desc->image);
-          keepAliveImage = desc->image;
-        } break;
-        case layers::SurfaceDescriptor::TSurfaceDescriptorDXGIYCbCr: {
-          MOZ_ASSERT(desc->image);
-          keepAliveImage = desc->image;
-        } break;
-        case layers::SurfaceDescriptor::TSurfaceDescriptorMacIOSurface: {
-          MOZ_ASSERT(desc->image);
-          keepAliveImage = desc->image;
-        } break;
         case layers::SurfaceDescriptor::TSurfaceDescriptorGPUVideo: {
           MOZ_ASSERT(desc->image);
           keepAliveImage = desc->image;
@@ -4644,12 +4877,16 @@ void ClientWebGLContext::TexImage(uint8_t funcDims, GLenum imageTarget,
                 "SurfaceDescriptorGPUVideo does not contain RemoteDecoder."});
           }
           const auto& sdrd = sdv.get_SurfaceDescriptorRemoteDecoder();
-          const auto& subdesc = sdrd.subdesc();
-          if (subdesc.type() !=
-              layers::RemoteDecoderVideoSubDescriptor::Tnull_t) {
+          if (sdrd.videoType() == layers::RemoteDecoderVideoType::TypeNone) {
             return Some(
-                std::string{"SurfaceDescriptorGPUVideo does not contain "
-                            "RemoteDecoder null subdesc."});
+                std::string{"SurfaceDescriptorRemoteDecoder type is none."});
+          }
+          if (sdrd.videoType() == layers::RemoteDecoderVideoType::D3D10 ||
+              sdrd.videoType() == layers::RemoteDecoderVideoType::DXGIYCbCr ||
+              sdrd.videoType() ==
+                  layers::RemoteDecoderVideoType::MacIOSurface) {
+            MOZ_ASSERT(desc->image);
+            keepAliveImage = desc->image;
           }
         } break;
         case layers::SurfaceDescriptor::TSurfaceDescriptorExternalImage: {
@@ -4774,7 +5011,11 @@ void ClientWebGLContext::CompressedTexImage(bool sub, uint8_t funcDims,
                                             const TexImageSource& src,
                                             GLsizei pboImageSize) const {
   const FuncScope funcScope(*this, "compressedTex(Sub)Image[23]D");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!IsTexTargetForDims(ImageToTexTarget(imageTarget), mIsWebGL2, funcDims)) {
     EnqueueError_ArgEnum("imageTarget", imageTarget);
     return;
@@ -4826,7 +5067,11 @@ void ClientWebGLContext::CopyTexImage(uint8_t funcDims, GLenum imageTarget,
                                       const ivec2& srcOffset, const ivec2& size,
                                       GLint border) const {
   const FuncScope funcScope(*this, "copy(Sub)Image[23]D");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!IsTexTargetForDims(ImageToTexTarget(imageTarget), mIsWebGL2, funcDims)) {
     EnqueueError_ArgEnum("imageTarget", imageTarget);
     return;
@@ -4844,7 +5089,11 @@ void ClientWebGLContext::CopyTexImage(uint8_t funcDims, GLenum imageTarget,
 
 void ClientWebGLContext::UseProgram(WebGLProgramJS* const prog) {
   const FuncScope funcScope(*this, "useProgram");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (prog && !prog->ValidateUsable(*this, "prog")) return;
 
   auto& state = State();
@@ -4914,7 +5163,7 @@ void ClientWebGLContext::GetVertexAttrib(JSContext* cx, GLuint index,
                                          JS::MutableHandle<JS::Value> retval,
                                          ErrorResult& rv) {
   const FuncScope funcScope(*this, "getVertexAttrib");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -4980,11 +5229,11 @@ void ClientWebGLContext::GetVertexAttrib(JSContext* cx, GLuint index,
       case LOCAL_GL_VERTEX_ATTRIB_ARRAY_ENABLED:
       case LOCAL_GL_VERTEX_ATTRIB_ARRAY_NORMALIZED:
       case LOCAL_GL_VERTEX_ATTRIB_ARRAY_INTEGER:
-        retval.set(JS::BooleanValue(*maybe));
+        retval.setBoolean(*maybe);
         break;
 
       default:
-        retval.set(JS_NumberValue(*maybe));
+        retval.setNumber(*maybe);
         break;
     }
   }
@@ -4993,7 +5242,7 @@ void ClientWebGLContext::GetVertexAttrib(JSContext* cx, GLuint index,
 void ClientWebGLContext::UniformData(const GLenum funcElemType,
                                      const WebGLUniformLocationJS* const loc,
                                      bool transpose,
-                                     const Range<const uint8_t>& bytes,
+                                     const mozilla::Range<const uint8_t>& bytes,
                                      JS::AutoCheckCannotGC&& nogc,
                                      GLuint elemOffset,
                                      GLuint elemCountOverride) const {
@@ -5001,7 +5250,8 @@ void ClientWebGLContext::UniformData(const GLenum funcElemType,
   // statements need to `nogc.reset()` up until the `nogc` is consumed by
   // `RunWithGCData`.
   const FuncScope funcScope(*this, "uniform setter");
-  if (IsContextLost()) {
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
     nogc.reset();
     return;
   }
@@ -5097,7 +5347,11 @@ void ClientWebGLContext::UniformData(const GLenum funcElemType,
 
 void ClientWebGLContext::BindVertexArray(WebGLVertexArrayJS* const vao) {
   const FuncScope funcScope(*this, "bindVertexArray");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (vao && !vao->ValidateUsable(*this, "vao")) return;
   auto& state = State();
 
@@ -5122,7 +5376,10 @@ void ClientWebGLContext::DisableVertexAttribArray(GLuint index) {
 WebGLsizeiptr ClientWebGLContext::GetVertexAttribOffset(GLuint index,
                                                         GLenum pname) {
   const FuncScope funcScope(*this, "getVertexAttribOffset");
-  if (IsContextLost()) return 0;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return 0;
+  }
 
   if (pname != LOCAL_GL_VERTEX_ATTRIB_ARRAY_POINTER) {
     EnqueueError_ArgEnum("pname", pname);
@@ -5134,10 +5391,15 @@ WebGLsizeiptr ClientWebGLContext::GetVertexAttribOffset(GLuint index,
   return *maybe;
 }
 
-void ClientWebGLContext::VertexAttrib4Tv(GLuint index, webgl::AttribBaseType t,
-                                         const Range<const uint8_t>& src) {
+void ClientWebGLContext::VertexAttrib4Tv(
+    GLuint index, webgl::AttribBaseType t,
+    const mozilla::Range<const uint8_t>& src) {
   const FuncScope funcScope(*this, "vertexAttrib[1234]u?[fi]{v}");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
 
   if (src.length() / sizeof(float) < 4) {
@@ -5173,7 +5435,11 @@ void ClientWebGLContext::VertexAttribPointerImpl(bool isFuncInt, GLuint index,
                                                  GLsizei rawByteStrideOrZero,
                                                  WebGLintptr rawByteOffset) {
   const FuncScope funcScope(*this, "vertexAttribI?Pointer");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
 
   const auto channels = MaybeAs<uint8_t>(rawChannels);
@@ -5388,10 +5654,163 @@ bool ClientWebGLContext::DoReadPixels(const webgl::ReadPixelsDesc& desc,
   return true;
 }
 
+RefPtr<dom::HTMLCanvasElement::SurfaceSnapshotPromise>
+ClientWebGLContext::DoReadPixelsAsync() {
+  MOZ_ASSERT(GetChild());
+
+  RefPtr<dom::HTMLCanvasElement::SurfaceSnapshotPromise::Private> promise =
+      new dom::HTMLCanvasElement::SurfaceSnapshotPromise::Private(__func__);
+
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    promise->Reject(NS_ERROR_NOT_AVAILABLE, __func__);
+    return promise;
+  }
+
+  const auto& child = notLost->outOfProcess;
+  if (!child || !child->CanSend()) {
+    promise->Reject(NS_ERROR_NOT_AVAILABLE, __func__);
+    return promise;
+  }
+
+  const auto& options = notLost->info.options;
+  const auto size = DrawingBufferSize();
+  const auto surfaceFormat = options.alpha ? gfx::SurfaceFormat::B8G8R8A8
+                                           : gfx::SurfaceFormat::B8G8R8X8;
+
+  child->FlushPendingCmds();
+
+  CheckedInt<size_t> checkedStride = CheckedInt<size_t>(size.x) * 4;
+  CheckedInt<size_t> checkedByteSize = checkedStride * size.y;
+  if (!checkedByteSize.isValid()) {
+    promise->Reject(NS_ERROR_NOT_AVAILABLE, __func__);
+    return promise;
+  }
+
+  const size_t expectedSize = checkedByteSize.value();
+  const auto desc = webgl::ReadPixelsDesc{{0, 0}, size};
+
+  RefPtr<dom::PWebGLChild::ReadPixelsAsyncPromise> ipcPromise =
+      child->SendReadPixelsAsync(desc, static_cast<uint64_t>(expectedSize));
+  if (!ipcPromise) {
+    promise->Reject(NS_ERROR_FAILURE, __func__);
+    return promise;
+  }
+
+  ipcPromise->Then(
+      GetCurrentSerialEventTarget(), __func__,
+      [self = RefPtr{this}, promise, child, desc, size, surfaceFormat,
+       expectedSize](webgl::ReadPixelsResultIpc&& aReply) mutable {
+        if (!aReply.byteStride || !aReply.shmem) {
+          promise->Reject(NS_ERROR_FAILURE, __func__);
+          return;
+        }
+
+        // Move shmem to RAII
+        webgl::RaiiShmem shmem{
+            child,
+            aReply.shmem.ref(),
+        };
+
+        if (!shmem) {
+          self->EnqueueError(LOCAL_GL_OUT_OF_MEMORY,
+                             "Failed to map in back buffer.");
+          promise->Reject(NS_ERROR_OUT_OF_MEMORY, __func__);
+          return;
+        }
+
+        const auto shmemBytes = shmem.ByteRange();
+
+        if (shmemBytes.length() < expectedSize) {
+          promise->Reject(NS_ERROR_UNEXPECTED, __func__);
+          return;
+        }
+
+        const auto stride = size.x * 4;
+        RefPtr<gfx::DataSourceSurface> sourceSurface =
+            gfx::Factory::CreateDataSourceSurfaceWithStride(
+                {size.x, size.y}, surfaceFormat, stride, /*zero=*/true);
+        if (NS_WARN_IF(!sourceSurface)) {
+          // Was this an OOM or alloc-limit? (500MB is our default resource size
+          // limit)
+          promise->Reject(NS_ERROR_OUT_OF_MEMORY, __func__);
+          return;
+        }
+
+        {
+          const gfx::DataSourceSurface::ScopedMap map(
+              sourceSurface, gfx::DataSourceSurface::READ_WRITE);
+          if (!map.IsMapped()) {
+            MOZ_ASSERT(false);
+            promise->Reject(NS_ERROR_UNEXPECTED, __func__);
+            return;
+          }
+          MOZ_ASSERT(static_cast<uint32_t>(map.GetStride()) == stride);
+
+          const auto pixels = Span<uint8_t>(map.GetData(), stride * size.y);
+          const auto& shmemBytes = Span{shmem.ByteRange()};
+
+          const auto pii = webgl::PackingInfoInfo::For(desc.pi);
+          if (!pii) {
+            gfxCriticalError() << "ReadPixels: Bad " << desc.pi;
+            promise->Reject(NS_ERROR_UNEXPECTED, __func__);
+            return;
+          }
+
+          const auto bpp = pii->BytesPerPixel();
+          const auto& byteStride = aReply.byteStride;
+          const auto& subrect = aReply.subrect;
+
+          const auto& packing = desc.packState;
+          auto packRect = *uvec2::From(subrect.x, subrect.y);
+          packRect.x += packing.skipPixels;
+          packRect.y += packing.skipRows;
+
+          const auto xByteSize = bpp * static_cast<uint32_t>(subrect.width);
+          const ptrdiff_t byteOffset =
+              packRect.y * byteStride + packRect.x * bpp;
+
+          const auto srcSubrect = shmemBytes.subspan(byteOffset);
+          const auto destSubrect = pixels.subspan(byteOffset);
+
+          for (const auto i : IntegerRange(subrect.height)) {
+            const auto srcRow = srcSubrect.subspan(i * byteStride, xByteSize);
+            const auto destRow = destSubrect.subspan(i * byteStride, xByteSize);
+            Memcpy(&destRow, srcRow);
+          }
+
+          // RGBA->BGRA and flip-y.
+          MOZ_RELEASE_ASSERT(gfx::SwizzleYFlipData(
+              pixels.data(), stride, gfx::SurfaceFormat::R8G8B8A8,
+              pixels.data(), stride, gfx::SurfaceFormat::B8G8R8A8,
+              {size.x, size.y}));
+        }
+
+        promise->Resolve(std::move(sourceSurface), __func__);
+      },
+
+      [promise](const mozilla::ipc::ResponseRejectReason aReason) {
+        switch (aReason) {
+          case mozilla::ipc::ResponseRejectReason::ActorDestroyed:
+            promise->Reject(NS_ERROR_NOT_AVAILABLE, __func__);
+            break;
+
+          default:
+            promise->Reject(NS_ERROR_FAILURE, __func__);
+            break;
+        }
+      });
+
+  return promise;
+}
+
 bool ClientWebGLContext::ReadPixels_SharedPrecheck(
     GLenum* const inout_readType, dom::CallerType aCallerType,
     ErrorResult& out_error) const {
-  if (IsContextLost()) return false;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return false;
+  }
 
   GLenum validHalfFloatType = LOCAL_GL_HALF_FLOAT;
   GLenum forbiddenHalfFloatType = LOCAL_GL_HALF_FLOAT_OES;
@@ -5434,7 +5853,7 @@ void ClientWebGLContext::GetQuery(JSContext* cx, GLenum specificTarget,
                                   GLenum pname,
                                   JS::MutableHandle<JS::Value> retval) const {
   const FuncScope funcScope(*this, "getQuery");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -5446,11 +5865,11 @@ void ClientWebGLContext::GetQuery(JSContext* cx, GLenum specificTarget,
     if (pname == LOCAL_GL_QUERY_COUNTER_BITS) {
       switch (specificTarget) {
         case LOCAL_GL_TIME_ELAPSED_EXT:
-          retval.set(JS_NumberValue(limits.queryCounterBitsTimeElapsed));
+          retval.setNumber(limits.queryCounterBitsTimeElapsed);
           return;
 
         case LOCAL_GL_TIMESTAMP_EXT:
-          retval.set(JS_NumberValue(limits.queryCounterBitsTimestamp));
+          retval.setNumber(limits.queryCounterBitsTimestamp);
           return;
 
         default:
@@ -5484,7 +5903,7 @@ void ClientWebGLContext::GetQueryParameter(
     JSContext*, WebGLQueryJS& query, const GLenum pname,
     JS::MutableHandle<JS::Value> retval) const {
   const FuncScope funcScope(*this, "getQueryParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -5514,11 +5933,11 @@ void ClientWebGLContext::GetQueryParameter(
 
   switch (pname) {
     case LOCAL_GL_QUERY_RESULT_AVAILABLE:
-      retval.set(JS::BooleanValue(*maybe));
+      retval.setBoolean(*maybe);
       break;
 
     default:
-      retval.set(JS_NumberValue(*maybe));
+      retval.setNumber(*maybe);
       break;
   }
 }
@@ -5526,7 +5945,11 @@ void ClientWebGLContext::GetQueryParameter(
 void ClientWebGLContext::BeginQuery(const GLenum specificTarget,
                                     WebGLQueryJS& query) {
   const FuncScope funcScope(*this, "beginQuery");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!query.ValidateUsable(*this, "query")) return;
   auto& state = State();
 
@@ -5561,7 +5984,11 @@ void ClientWebGLContext::BeginQuery(const GLenum specificTarget,
 
 void ClientWebGLContext::EndQuery(const GLenum specificTarget) {
   const FuncScope funcScope(*this, "endQuery");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
 
   const auto slotTarget = QuerySlotTarget(specificTarget);
@@ -5589,7 +6016,11 @@ void ClientWebGLContext::EndQuery(const GLenum specificTarget) {
 void ClientWebGLContext::QueryCounter(WebGLQueryJS& query,
                                       const GLenum target) const {
   const FuncScope funcScope(*this, "queryCounter");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!query.ValidateUsable(*this, "query")) return;
 
   if (target != LOCAL_GL_TIMESTAMP) {
@@ -5616,7 +6047,7 @@ void ClientWebGLContext::GetSamplerParameter(
     JSContext* cx, const WebGLSamplerJS& sampler, const GLenum pname,
     JS::MutableHandle<JS::Value> retval) const {
   const FuncScope funcScope(*this, "getSamplerParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -5633,14 +6064,18 @@ void ClientWebGLContext::GetSamplerParameter(
     return ret;
   }();
   if (maybe) {
-    retval.set(JS_NumberValue(*maybe));
+    retval.setNumber(*maybe);
   }
 }
 
 void ClientWebGLContext::BindSampler(const GLuint unit,
                                      WebGLSamplerJS* const sampler) {
   const FuncScope funcScope(*this, "bindSampler");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (sampler && !sampler->ValidateUsable(*this, "sampler")) return;
   auto& state = State();
 
@@ -5662,7 +6097,11 @@ void ClientWebGLContext::SamplerParameteri(WebGLSamplerJS& sampler,
                                            const GLenum pname,
                                            const GLint param) const {
   const FuncScope funcScope(*this, "samplerParameteri");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!sampler.ValidateUsable(*this, "sampler")) return;
 
   Run<RPROC(SamplerParameteri)>(sampler.mId, pname, param);
@@ -5672,7 +6111,11 @@ void ClientWebGLContext::SamplerParameterf(WebGLSamplerJS& sampler,
                                            const GLenum pname,
                                            const GLfloat param) const {
   const FuncScope funcScope(*this, "samplerParameterf");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!sampler.ValidateUsable(*this, "sampler")) return;
 
   Run<RPROC(SamplerParameterf)>(sampler.mId, pname, param);
@@ -5684,7 +6127,7 @@ void ClientWebGLContext::GetSyncParameter(
     JSContext* const cx, WebGLSyncJS& sync, const GLenum pname,
     JS::MutableHandle<JS::Value> retval) const {
   const FuncScope funcScope(*this, "getSyncParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -5694,17 +6137,17 @@ void ClientWebGLContext::GetSyncParameter(
   retval.set([&]() -> JS::Value {
     switch (pname) {
       case LOCAL_GL_OBJECT_TYPE:
-        return JS_NumberValue(LOCAL_GL_SYNC_FENCE);
+        return JS::NumberValue(LOCAL_GL_SYNC_FENCE);
       case LOCAL_GL_SYNC_CONDITION:
-        return JS_NumberValue(LOCAL_GL_SYNC_GPU_COMMANDS_COMPLETE);
+        return JS::NumberValue(LOCAL_GL_SYNC_GPU_COMMANDS_COMPLETE);
       case LOCAL_GL_SYNC_FLAGS:
-        return JS_NumberValue(0);
+        return JS::NumberValue(0);
       case LOCAL_GL_SYNC_STATUS: {
         const auto res = ClientWaitSync(sync, 0, 0);
         const auto signaled = (res == LOCAL_GL_ALREADY_SIGNALED ||
                                res == LOCAL_GL_CONDITION_SATISFIED);
-        return JS_NumberValue(signaled ? LOCAL_GL_SIGNALED
-                                       : LOCAL_GL_UNSIGNALED);
+        return JS::NumberValue(signaled ? LOCAL_GL_SIGNALED
+                                        : LOCAL_GL_UNSIGNALED);
       }
       default:
         EnqueueError_ArgEnum("pname", pname);
@@ -5806,7 +6249,11 @@ void ClientWebGLContext::WaitSync(const WebGLSyncJS& sync,
                                   const GLbitfield flags,
                                   const GLint64 timeout) const {
   const FuncScope funcScope(*this, "waitSync");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!sync.ValidateUsable(*this, "sync")) return;
 
   if (flags != 0) {
@@ -5826,7 +6273,11 @@ void ClientWebGLContext::WaitSync(const WebGLSyncJS& sync,
 void ClientWebGLContext::BindTransformFeedback(
     const GLenum target, WebGLTransformFeedbackJS* const tf) {
   const FuncScope funcScope(*this, "bindTransformFeedback");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (tf && !tf->ValidateUsable(*this, "tf")) return;
   auto& state = State();
 
@@ -5852,7 +6303,11 @@ void ClientWebGLContext::BindTransformFeedback(
 
 void ClientWebGLContext::BeginTransformFeedback(const GLenum primMode) {
   const FuncScope funcScope(*this, "beginTransformFeedback");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
   auto& tfo = *(state.mBoundTfo);
 
@@ -5919,7 +6374,11 @@ void ClientWebGLContext::BeginTransformFeedback(const GLenum primMode) {
 
 void ClientWebGLContext::EndTransformFeedback() {
   const FuncScope funcScope(*this, "endTransformFeedback");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
   auto& tfo = *(state.mBoundTfo);
 
@@ -5939,7 +6398,11 @@ void ClientWebGLContext::EndTransformFeedback() {
 
 void ClientWebGLContext::PauseTransformFeedback() {
   const FuncScope funcScope(*this, "pauseTransformFeedback");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
   auto& tfo = *(state.mBoundTfo);
 
@@ -5960,7 +6423,11 @@ void ClientWebGLContext::PauseTransformFeedback() {
 
 void ClientWebGLContext::ResumeTransformFeedback() {
   const FuncScope funcScope(*this, "resumeTransformFeedback");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   auto& state = State();
   auto& tfo = *(state.mBoundTfo);
 
@@ -6001,7 +6468,11 @@ void ClientWebGLContext::DrawBuffers(const dom::Sequence<GLenum>& buffers) {
 
 void ClientWebGLContext::EnqueueErrorImpl(const GLenum error,
                                           const nsACString& text) const {
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   AutoEnqueueFlush();
   Run<RPROC(GenerateError)>(error, ToString(text));
 }
@@ -6051,7 +6522,10 @@ void ClientWebGLContext::GetSupportedExtensions(
     dom::Nullable<nsTArray<nsString>>& retval,
     const dom::CallerType callerType) const {
   retval.SetNull();
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
 
   auto& retarr = retval.SetValue();
   for (const auto i : MakeEnumeratedRange(WebGLExtensionID::Max)) {
@@ -6067,7 +6541,11 @@ void ClientWebGLContext::GetSupportedExtensions(
 void ClientWebGLContext::GetSupportedProfilesASTC(
     dom::Nullable<nsTArray<nsString>>& retval) const {
   retval.SetNull();
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   const auto& limits = Limits();
 
   auto& retarr = retval.SetValue();
@@ -6079,7 +6557,10 @@ void ClientWebGLContext::GetSupportedProfilesASTC(
 
 void ClientWebGLContext::ProvokingVertex(const GLenum rawMode) const {
   const FuncScope funcScope(*this, "provokingVertex");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
 
   const auto mode = static_cast<webgl::ProvokingVertex>(rawMode);
   switch (mode) {
@@ -6125,7 +6606,11 @@ void ClientWebGLContext::EnqueueError_ArgEnum(const char* const argName,
 void ClientWebGLContext::AttachShader(WebGLProgramJS& prog,
                                       WebGLShaderJS& shader) const {
   const FuncScope funcScope(*this, "attachShader");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return;
   if (!shader.ValidateUsable(*this, "shader")) return;
 
@@ -6149,7 +6634,11 @@ void ClientWebGLContext::BindAttribLocation(WebGLProgramJS& prog,
                                             const GLuint location,
                                             const nsAString& name) const {
   const FuncScope funcScope(*this, "bindAttribLocation");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return;
 
   const auto& nameU8 = ToString(NS_ConvertUTF16toUTF8(name));
@@ -6159,7 +6648,11 @@ void ClientWebGLContext::BindAttribLocation(WebGLProgramJS& prog,
 void ClientWebGLContext::DetachShader(WebGLProgramJS& prog,
                                       const WebGLShaderJS& shader) const {
   const FuncScope funcScope(*this, "detachShader");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return;
   if (!shader.ValidateUsable(*this, "shader")) return;
 
@@ -6178,7 +6671,11 @@ void ClientWebGLContext::GetAttachedShaders(
     const WebGLProgramJS& prog,
     dom::Nullable<nsTArray<RefPtr<WebGLShaderJS>>>& retval) const {
   const FuncScope funcScope(*this, "getAttachedShaders");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return;
 
   auto& arr = retval.SetValue();
@@ -6191,7 +6688,11 @@ void ClientWebGLContext::GetAttachedShaders(
 
 void ClientWebGLContext::LinkProgram(WebGLProgramJS& prog) const {
   const FuncScope funcScope(*this, "linkProgram");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return;
 
   if (!prog.mActiveTfos.empty()) {
@@ -6211,7 +6712,11 @@ void ClientWebGLContext::TransformFeedbackVaryings(
     WebGLProgramJS& prog, const dom::Sequence<nsString>& varyings,
     const GLenum bufferMode) const {
   const FuncScope funcScope(*this, "transformFeedbackVaryings");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return;
 
   std::vector<std::string> varyingsU8;
@@ -6228,7 +6733,11 @@ void ClientWebGLContext::UniformBlockBinding(WebGLProgramJS& prog,
                                              const GLuint blockIndex,
                                              const GLuint blockBinding) const {
   const FuncScope funcScope(*this, "uniformBlockBinding");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return;
   const auto& state = State();
 
@@ -6258,7 +6767,11 @@ void ClientWebGLContext::UniformBlockBinding(WebGLProgramJS& prog,
 already_AddRefed<WebGLActiveInfoJS> ClientWebGLContext::GetActiveAttrib(
     const WebGLProgramJS& prog, const GLuint index) {
   const FuncScope funcScope(*this, "getActiveAttrib");
-  if (IsContextLost()) return nullptr;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return nullptr;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return nullptr;
 
   const auto& res = GetLinkResult(prog);
@@ -6275,7 +6788,11 @@ already_AddRefed<WebGLActiveInfoJS> ClientWebGLContext::GetActiveAttrib(
 already_AddRefed<WebGLActiveInfoJS> ClientWebGLContext::GetActiveUniform(
     const WebGLProgramJS& prog, const GLuint index) {
   const FuncScope funcScope(*this, "getActiveUniform");
-  if (IsContextLost()) return nullptr;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return nullptr;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return nullptr;
 
   const auto& res = GetLinkResult(prog);
@@ -6294,7 +6811,11 @@ void ClientWebGLContext::GetActiveUniformBlockName(const WebGLProgramJS& prog,
                                                    nsAString& retval) const {
   retval.SetIsVoid(true);
   const FuncScope funcScope(*this, "getActiveUniformBlockName");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return;
 
   const auto& res = GetLinkResult(prog);
@@ -6317,7 +6838,7 @@ void ClientWebGLContext::GetActiveUniformBlockParameter(
     JSContext* const cx, const WebGLProgramJS& prog, const GLuint index,
     const GLenum pname, JS::MutableHandle<JS::Value> retval, ErrorResult& rv) {
   const FuncScope funcScope(*this, "getActiveUniformBlockParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -6335,13 +6856,13 @@ void ClientWebGLContext::GetActiveUniformBlockParameter(
   retval.set([&]() -> JS::Value {
     switch (pname) {
       case LOCAL_GL_UNIFORM_BLOCK_BINDING:
-        return JS_NumberValue(prog.mUniformBlockBindings[index]);
+        return JS::NumberValue(prog.mUniformBlockBindings[index]);
 
       case LOCAL_GL_UNIFORM_BLOCK_DATA_SIZE:
-        return JS_NumberValue(block.dataSize);
+        return JS::NumberValue(block.dataSize);
 
       case LOCAL_GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS:
-        return JS_NumberValue(block.activeUniformIndices.size());
+        return JS::NumberValue(block.activeUniformIndices.size());
 
       case LOCAL_GL_UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES: {
         const auto& indices = block.activeUniformIndices;
@@ -6366,7 +6887,7 @@ void ClientWebGLContext::GetActiveUniforms(
     const dom::Sequence<GLuint>& uniformIndices, const GLenum pname,
     JS::MutableHandle<JS::Value> retval) const {
   const FuncScope funcScope(*this, "getActiveUniforms");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -6392,27 +6913,27 @@ void ClientWebGLContext::GetActiveUniforms(
     JS::Rooted<JS::Value> value(cx);
     switch (pname) {
       case LOCAL_GL_UNIFORM_TYPE:
-        value = JS_NumberValue(uniform.elemType);
+        value = JS::NumberValue(uniform.elemType);
         break;
 
       case LOCAL_GL_UNIFORM_SIZE:
-        value = JS_NumberValue(uniform.elemCount);
+        value = JS::NumberValue(uniform.elemCount);
         break;
 
       case LOCAL_GL_UNIFORM_BLOCK_INDEX:
-        value = JS_NumberValue(uniform.block_index);
+        value = JS::NumberValue(uniform.block_index);
         break;
 
       case LOCAL_GL_UNIFORM_OFFSET:
-        value = JS_NumberValue(uniform.block_offset);
+        value = JS::NumberValue(uniform.block_offset);
         break;
 
       case LOCAL_GL_UNIFORM_ARRAY_STRIDE:
-        value = JS_NumberValue(uniform.block_arrayStride);
+        value = JS::NumberValue(uniform.block_arrayStride);
         break;
 
       case LOCAL_GL_UNIFORM_MATRIX_STRIDE:
-        value = JS_NumberValue(uniform.block_matrixStride);
+        value = JS::NumberValue(uniform.block_matrixStride);
         break;
 
       case LOCAL_GL_UNIFORM_IS_ROW_MAJOR:
@@ -6433,7 +6954,11 @@ already_AddRefed<WebGLActiveInfoJS>
 ClientWebGLContext::GetTransformFeedbackVarying(const WebGLProgramJS& prog,
                                                 const GLuint index) {
   const FuncScope funcScope(*this, "getTransformFeedbackVarying");
-  if (IsContextLost()) return nullptr;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return nullptr;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return nullptr;
 
   const auto& res = GetLinkResult(prog);
@@ -6450,7 +6975,11 @@ ClientWebGLContext::GetTransformFeedbackVarying(const WebGLProgramJS& prog,
 GLint ClientWebGLContext::GetAttribLocation(const WebGLProgramJS& prog,
                                             const nsAString& name) const {
   const FuncScope funcScope(*this, "getAttribLocation");
-  if (IsContextLost()) return -1;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return -1;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return -1;
 
   const auto nameU8 = ToString(NS_ConvertUTF16toUTF8(name));
@@ -6497,7 +7026,11 @@ GLint ClientWebGLContext::GetFragDataLocation(const WebGLProgramJS& prog,
 GLuint ClientWebGLContext::GetUniformBlockIndex(
     const WebGLProgramJS& prog, const nsAString& blockName) const {
   const FuncScope funcScope(*this, "getUniformBlockIndex");
-  if (IsContextLost()) return LOCAL_GL_INVALID_INDEX;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return LOCAL_GL_INVALID_INDEX;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return LOCAL_GL_INVALID_INDEX;
 
   const auto nameU8 = ToString(NS_ConvertUTF16toUTF8(blockName));
@@ -6517,7 +7050,11 @@ void ClientWebGLContext::GetUniformIndices(
     const WebGLProgramJS& prog, const dom::Sequence<nsString>& uniformNames,
     dom::Nullable<nsTArray<GLuint>>& retval) const {
   const FuncScope funcScope(*this, "getUniformIndices");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return;
 
   const auto& res = GetLinkResult(prog);
@@ -6546,7 +7083,11 @@ void ClientWebGLContext::GetUniformIndices(
 already_AddRefed<WebGLUniformLocationJS> ClientWebGLContext::GetUniformLocation(
     const WebGLProgramJS& prog, const nsAString& name) const {
   const FuncScope funcScope(*this, "getUniformLocation");
-  if (IsContextLost()) return nullptr;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return nullptr;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return nullptr;
 
   const auto& res = GetLinkResult(prog);
@@ -6659,7 +7200,11 @@ void ClientWebGLContext::GetProgramInfoLog(const WebGLProgramJS& prog,
                                            nsAString& retval) const {
   retval.SetIsVoid(true);
   const FuncScope funcScope(*this, "getProgramInfoLog");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!prog.ValidateUsable(*this, "program")) return;
 
   const auto& res = GetLinkResult(prog);
@@ -6670,7 +7215,7 @@ void ClientWebGLContext::GetProgramParameter(
     JSContext* const js, const WebGLProgramJS& prog, const GLenum pname,
     JS::MutableHandle<JS::Value> retval) const {
   const FuncScope funcScope(*this, "getProgramParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -6692,7 +7237,7 @@ void ClientWebGLContext::GetProgramParameter(
             shaders += 1;
           }
         }
-        return JS_NumberValue(shaders);
+        return JS::NumberValue(shaders);
       }
       default:
         break;
@@ -6705,22 +7250,22 @@ void ClientWebGLContext::GetProgramParameter(
         return JS::BooleanValue(res.success);
 
       case LOCAL_GL_ACTIVE_ATTRIBUTES:
-        return JS_NumberValue(res.active.activeAttribs.size());
+        return JS::NumberValue(res.active.activeAttribs.size());
 
       case LOCAL_GL_ACTIVE_UNIFORMS:
-        return JS_NumberValue(res.active.activeUniforms.size());
+        return JS::NumberValue(res.active.activeUniforms.size());
 
       case LOCAL_GL_TRANSFORM_FEEDBACK_BUFFER_MODE:
         if (!mIsWebGL2) break;
-        return JS_NumberValue(res.tfBufferMode);
+        return JS::NumberValue(res.tfBufferMode);
 
       case LOCAL_GL_TRANSFORM_FEEDBACK_VARYINGS:
         if (!mIsWebGL2) break;
-        return JS_NumberValue(res.active.activeTfVaryings.size());
+        return JS::NumberValue(res.active.activeTfVaryings.size());
 
       case LOCAL_GL_ACTIVE_UNIFORM_BLOCKS:
         if (!mIsWebGL2) break;
-        return JS_NumberValue(res.active.activeUniformBlocks.size());
+        return JS::NumberValue(res.active.activeUniformBlocks.size());
 
       default:
         break;
@@ -6735,7 +7280,11 @@ void ClientWebGLContext::GetProgramParameter(
 
 void ClientWebGLContext::CompileShader(WebGLShaderJS& shader) const {
   const FuncScope funcScope(*this, "compileShader");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!shader.ValidateUsable(*this, "shader")) return;
 
   shader.mResult = {};
@@ -6746,7 +7295,11 @@ void ClientWebGLContext::GetShaderInfoLog(const WebGLShaderJS& shader,
                                           nsAString& retval) const {
   retval.SetIsVoid(true);
   const FuncScope funcScope(*this, "getShaderInfoLog");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!shader.ValidateUsable(*this, "shader")) return;
 
   const auto& result = GetCompileResult(shader);
@@ -6757,7 +7310,7 @@ void ClientWebGLContext::GetShaderParameter(
     JSContext* const cx, const WebGLShaderJS& shader, const GLenum pname,
     JS::MutableHandle<JS::Value> retval) const {
   const FuncScope funcScope(*this, "getShaderParameter");
-  retval.set(JS::NullValue());
+  retval.setNull();
   RefPtr<webgl::NotLostData> notLost(mNotLost);
   if (!notLost) {
     return;
@@ -6767,7 +7320,7 @@ void ClientWebGLContext::GetShaderParameter(
   retval.set([&]() -> JS::Value {
     switch (pname) {
       case LOCAL_GL_SHADER_TYPE:
-        return JS_NumberValue(shader.mType);
+        return JS::NumberValue(shader.mType);
 
       case LOCAL_GL_DELETE_STATUS:  // "Is flagged for deletion?"
         return JS::BooleanValue(!shader.mKeepAlive);
@@ -6788,7 +7341,11 @@ void ClientWebGLContext::GetShaderSource(const WebGLShaderJS& shader,
                                          nsAString& retval) const {
   retval.SetIsVoid(true);
   const FuncScope funcScope(*this, "getShaderSource");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!shader.ValidateUsable(*this, "shader")) return;
 
   CopyUTF8toUTF16(shader.mSource, retval);
@@ -6798,7 +7355,11 @@ void ClientWebGLContext::GetTranslatedShaderSource(const WebGLShaderJS& shader,
                                                    nsAString& retval) const {
   retval.SetIsVoid(true);
   const FuncScope funcScope(*this, "getTranslatedShaderSource");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!shader.ValidateUsable(*this, "shader")) return;
 
   const auto& result = GetCompileResult(shader);
@@ -6808,7 +7369,11 @@ void ClientWebGLContext::GetTranslatedShaderSource(const WebGLShaderJS& shader,
 void ClientWebGLContext::ShaderSource(WebGLShaderJS& shader,
                                       const nsAString& sourceU16) const {
   const FuncScope funcScope(*this, "shaderSource");
-  if (IsContextLost()) return;
+  RefPtr<webgl::NotLostData> notLost(mNotLost);
+  if (!notLost) {
+    return;
+  }
+
   if (!shader.ValidateUsable(*this, "shader")) return;
 
   shader.mSource = ToString(NS_ConvertUTF16toUTF8(sourceU16));

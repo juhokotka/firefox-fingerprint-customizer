@@ -5,8 +5,8 @@
 #ifndef GFX_VR_PARENT_H
 #define GFX_VR_PARENT_H
 
-#include "mozilla/gfx/PVRParent.h"
 #include "VRGPUParent.h"
+#include "mozilla/gfx/PVRParent.h"
 
 namespace mozilla {
 namespace gfx {
@@ -20,7 +20,7 @@ class VRParent final : public PVRParent {
   friend class PVRParent;
 
  public:
-  explicit VRParent();
+  explicit VRParent() = default;
 
   bool Init(mozilla::ipc::UntypedEndpoint&& aEndpoint,
             const char* aParentBuildID);
@@ -52,7 +52,7 @@ class VRParent final : public PVRParent {
  private:
   nsCString mOpenVRControllerAction;
   nsTHashMap<nsUint32HashKey, nsCString> mOpenVRControllerManifest;
-  RefPtr<VRGPUParent> mVRGPUParent;
+  RefPtr<VRGPUParent> mVRGPUParent{nullptr};
   DISALLOW_COPY_AND_ASSIGN(VRParent);
 };
 

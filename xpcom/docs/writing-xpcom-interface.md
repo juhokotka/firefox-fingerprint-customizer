@@ -6,7 +6,7 @@
 
 In order to write code that works in native code (C++, Rust), and JavaScript contexts, it's necessary to have a mechanism to do so. For chrome privileged contexts, this is the XPCOM Interface Class.
 
-This mechanism starts with an {ref}`XPIDL` file to define the shape of the interface. In the {searchfox}`build system <xpcom/idl-parser/xpidl>`, this file is processed, and {searchfox}`Rust <__GENERATED__/dist/xpcrs/rt>` and {searchfox}`C++ <__GENERATED__/dist/include>` code is automatically generated.
+This mechanism starts with an {doc}`xpidl` file to define the shape of the interface. In the {searchfox}`build system <xpcom/idl-parser/xpidl>`, this file is processed, and {searchfox}`Rust <__GENERATED__/dist/xpcrs/rt>` and {searchfox}`C++ <__GENERATED__/dist/include>` code is automatically generated.
 
 Next, the interface's methods and attributes must be implemented. This can be done through either a JSM module, or through a C++ interface class. Once these steps are done, the new files must be added to the appropriate {code}`moz.build` files to ensure the build system knows how to find them and process them.
 
@@ -33,7 +33,7 @@ First decide on a name. Conventionally the interfaces are prefixed with {code}`n
 
 This tutorial assumes the component is located at {code}`path/to` with the name {code}`ComponentName`. The interface name will be {code}`nsIComponentName`, while the implementation will be {code}`mozilla::ComponentName`.
 
-To start, create an {ref}`XPIDL` file:
+To start, create an {doc}`xpidl` file:
 
 ```bash
 touch path/to/nsIComponentName.idl
@@ -83,7 +83,7 @@ interface nsIComponentName : nsISupports {
 };
 ```
 
-This definition only includes one attribute, {code}`isAlive`, which will demonstrate that we've done our work correctly at the end. For a more comprehensive guide for this syntax, see the {ref}`XPIDL` docs.
+This definition only includes one attribute, {code}`isAlive`, which will demonstrate that we've done our work correctly at the end. For a more comprehensive guide for this syntax, see the {doc}`xpidl` docs.
 
 Once {code}`./mach build` is run, the XPIDL parser will read this file, and give any warnings if the syntax is wrong. It will then auto-generate the C++ (or Rust) code for us. For this example the generated {code}`nsIComponentName` class will be located in:
 
@@ -212,9 +212,8 @@ Classes = [
         # This CID is the ID for component entries, and needs a separate UUID from
         # the .idl file. Replace the Xs with a uuid from `mach gen-uuid`,
         # `uuidgen`, or https://mozilla.pettay.fi/uuidgen.html
-        'cid': '{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}',
-        'interfaces': ['nsIComponentName'],
-
+        "cid": "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}",
+        "interfaces": ["nsIComponentName"],
         # A contract ID is a human-readable identifier for an _implementation_ of
         # an XPCOM interface.
         #
@@ -229,18 +228,15 @@ Classes = [
         # This design goes back to a time when XPCOM was intended to be a generalized
         # solution for the Gecko Runtime Environment (GRE). At this point most (if
         # not all) of mozilla-central has an @mozilla domain.
-        'contract_ids': ['@mozilla.org/component-name;1'],
-
+        "contract_ids": ["@mozilla.org/component-name;1"],
         # This is the name of the C++ type that implements the interface.
-        'type': 'mozilla::ComponentName',
-
+        "type": "mozilla::ComponentName",
         # The header file to pull in for the implementation of the interface.
-        'headers': ['path/to/ComponentName.h'],
-
+        "headers": ["path/to/ComponentName.h"],
         # In order to hook up this interface to the `Services` object, we can
         # provide the "js_name" parameter. This is an ergonomic way to access
         # the component.
-        'js_name': 'componentName',
+        "js_name": "componentName",
     },
 ]
 ```

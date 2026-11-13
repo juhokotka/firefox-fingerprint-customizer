@@ -107,6 +107,8 @@ enum BrowserPromptType<'a> {
         result: BioEnrollmentResult,
     },
     UnknownError,
+    /// No devices found during initial enumeration.
+    NoDevicesFound,
 }
 
 #[derive(Debug)]
@@ -610,6 +612,18 @@ fn status_callback(
                     origin,
                     browsing_context_id,
                 )?;
+            }
+            Ok(StatusUpdate::NoDevicesFound) => {
+                debug!("STATUS: No devices found.");
+                send_prompt(
+                    BrowserPromptType::NoDevicesFound,
+                    tid,
+                    origin,
+                    browsing_context_id,
+                )?;
+            }
+            Ok(StatusUpdate::RequestLogging(_, _)) => {
+                // TODO: https://bugzilla.mozilla.org/show_bug.cgi?id=1868975
             }
             Err(RecvError) => {
                 debug!("STATUS: end");
@@ -1446,6 +1460,12 @@ impl AuthrsService {
             .map(nsCString::from)
     }
 
+    xpcom_method!(has_virtual_authenticator => HasVirtualAuthenticator(authenticatorId: *const nsACString) -> bool);
+    fn has_virtual_authenticator(&self, authenticator_id: &nsACString) -> Result<bool, nsresult> {
+        self.test_token_manager
+            .has_virtual_authenticator(&authenticator_id.to_utf8())
+    }
+
     xpcom_method!(remove_virtual_authenticator => RemoveVirtualAuthenticator(authenticatorId: *const nsACString));
     fn remove_virtual_authenticator(&self, authenticator_id: &nsACString) -> Result<(), nsresult> {
         self.test_token_manager
@@ -1612,11 +1632,10 @@ impl AuthrsService {
         .dispatch_background_task()
         .inspect_err(|_| self.discard_transaction())?;
         if static_prefs::pref!("security.webauth.webauthn_enable_usbtoken") {
-            self.usb_token_manager.lock().unwrap().manage(
-                60 * 1000,
-                status_tx,
-                state_callback,
-            );
+            self.usb_token_manager
+                .lock()
+                .unwrap()
+                .manage(60 * 1000, status_tx, state_callback);
         } else if static_prefs::pref!("security.webauth.webauthn_enable_softtoken") {
             // We don't yet support softtoken
         } else {

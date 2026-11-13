@@ -25,6 +25,7 @@
 #include "mozilla/intl/Segmenter.h"
 #include "mozilla/intl/UnicodeProperties.h"
 #include "nsCRT.h"
+#include "nsCharSeparatedTokenizer.h"
 #include "nsComputedDOMStyle.h"
 #include "nsContentUtils.h"
 #include "nsDebug.h"
@@ -1477,7 +1478,7 @@ void nsPlainTextSerializer::CurrentLine::CreateQuotesAndIndent(
          with the following one, so the empty line may be lost completely.) */
       quotes.Append(char16_t(' '));
     }
-    aResult = quotes;
+    aResult = std::move(quotes);
   }
 
   // Indent if necessary

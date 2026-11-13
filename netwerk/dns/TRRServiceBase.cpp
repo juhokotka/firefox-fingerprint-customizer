@@ -4,18 +4,18 @@
 
 #include "TRRServiceBase.h"
 
-#include "TRRService.h"
-#include "mozilla/Preferences.h"
-#include "nsHostResolver.h"
-#include "nsNetUtil.h"
-#include "nsIOService.h"
-#include "nsIDNSService.h"
-#include "nsIProxyInfo.h"
-#include "nsHttpConnectionInfo.h"
-#include "nsHttpHandler.h"
-#include "mozilla/StaticPrefs_network.h"
 #include "AlternateServices.h"
 #include "ProxyConfigLookup.h"
+#include "TRRService.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs_network.h"
+#include "nsHostResolver.h"
+#include "nsHttpConnectionInfo.h"
+#include "nsHttpHandler.h"
+#include "nsIDNSService.h"
+#include "nsIOService.h"
+#include "nsIProxyInfo.h"
+#include "nsNetUtil.h"
 // Put DNSLogging.h at the end to avoid LOG being overwritten by other headers.
 #include "DNSLogging.h"
 
@@ -83,7 +83,7 @@ void TRRServiceBase::ProcessURITemplate(nsACString& aURI) {
     }
   } while (true);
 
-  aURI = uri;
+  aURI = std::move(uri);
 }
 
 void TRRServiceBase::CheckURIPrefs() {
@@ -312,7 +312,7 @@ void TRRServiceBase::AsyncCreateTRRConnectionInfoInternal(
           self->RegisterProxyChangeListener();
         }
       },
-      dnsURI, 0, nullptr);
+      dnsURI, 0, /* aIsTRRServiceChannel */ true, nullptr);
 
   // mDefaultTRRConnectionInfo is set to nullptr at the beginning of this
   // method, so we don't really care aobut the |rv| here. If it's failed,

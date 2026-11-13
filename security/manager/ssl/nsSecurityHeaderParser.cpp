@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsSecurityHeaderParser.h"
+
 #include "mozilla/Logging.h"
 
 // The character classes in this file are informed by [RFC2616], Section 2.2.
@@ -160,7 +161,10 @@ void nsSecurityHeaderParser::DirectiveValue() {
   }
 }
 
-void nsSecurityHeaderParser::Token() { while (Accept(IsTokenSymbol)); }
+void nsSecurityHeaderParser::Token() {
+  while (Accept(IsTokenSymbol)) {
+  }
+}
 
 void nsSecurityHeaderParser::QuotedString() {
   while (true) {

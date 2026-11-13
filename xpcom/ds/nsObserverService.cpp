@@ -2,26 +2,28 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Logging.h"
-#include "nsComponentManagerUtils.h"
-#include "nsContentUtils.h"
-#include "nsIConsoleService.h"
-#include "nsIObserverService.h"
-#include "nsIObserver.h"
-#include "nsIScriptError.h"
 #include "nsObserverService.h"
-#include "nsObserverList.h"
-#include "nsServiceManagerUtils.h"
-#include "nsThreadUtils.h"
-#include "nsEnumeratorUtils.h"
-#include "xpcpublic.h"
+
+#include "MainThreadUtils.h"
 #include "mozilla/AppShutdown.h"
-#include "mozilla/net/NeckoCommon.h"
+#include "mozilla/Logging.h"
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Try.h"
+#include "mozilla/net/NeckoCommon.h"
+#include "nsComponentManagerUtils.h"
+#include "nsContentUtils.h"
+#include "nsEnumeratorUtils.h"
+#include "nsIConsoleService.h"
+#include "nsIObserver.h"
+#include "nsIObserverService.h"
+#include "nsIScriptError.h"
+#include "nsObserverList.h"
+#include "nsServiceManagerUtils.h"
 #include "nsString.h"
+#include "nsThreadUtils.h"
+#include "xpcpublic.h"
 
 // Log module for nsObserverService logging...
 //
@@ -40,6 +42,8 @@ using namespace mozilla;
 NS_IMETHODIMP
 nsObserverService::CollectReports(nsIHandleReportCallback* aHandleReport,
                                   nsISupports* aData, bool aAnonymize) {
+  AssertIsOnMainThread();
+
   struct SuspectObserver {
     SuspectObserver(const char* aTopic, size_t aReferentCount)
         : mTopic(aTopic), mReferentCount(aReferentCount) {}
@@ -130,13 +134,13 @@ nsObserverService::CollectReports(nsIHandleReportCallback* aHandleReport,
 NS_IMPL_ISUPPORTS(nsObserverService, nsIObserverService, nsObserverService,
                   nsIMemoryReporter)
 
-nsObserverService::nsObserverService() : mShuttingDown(false) {}
-
-nsObserverService::~nsObserverService(void) { Shutdown(); }
+nsObserverService::~nsObserverService() { Shutdown(); }
 
 void nsObserverService::RegisterReporter() { RegisterWeakMemoryReporter(this); }
 
 void nsObserverService::Shutdown() {
+  AssertIsOnMainThread();
+
   if (mShuttingDown) {
     return;
   }
@@ -149,7 +153,8 @@ void nsObserverService::Shutdown() {
 nsresult nsObserverService::Create(const nsIID& aIID, void** aInstancePtr) {
   LOG(("nsObserverService::Create()"));
 
-  RefPtr os = MakeRefPtr<nsObserverService>();
+  ReleaseAssertIsOnMainThread();
+  RefPtr<nsObserverService> os = new nsObserverService();
 
   // The memory reporter can not be immediately registered here because
   // the nsMemoryReporterManager may attempt to get the nsObserverService
@@ -162,10 +167,7 @@ nsresult nsObserverService::Create(const nsIID& aIID, void** aInstancePtr) {
 }
 
 nsresult nsObserverService::EnsureValidCall() const {
-  if (!NS_IsMainThread()) {
-    MOZ_CRASH("Using observer service off the main thread!");
-    return NS_ERROR_UNEXPECTED;
-  }
+  ReleaseAssertIsOnMainThread();
 
   if (mShuttingDown) {
     NS_ERROR("Using observer service after XPCOM shutdown!");
@@ -225,12 +227,12 @@ NS_IMETHODIMP
 nsObserverService::RemoveObserver(nsIObserver* aObserver, const char* aTopic) {
   LOG(("nsObserverService::RemoveObserver(%p: %s)", (void*)aObserver, aTopic));
 
+  ReleaseAssertIsOnMainThread();
   if (mShuttingDown) {
     // The service is shutting down. Let's ignore this call.
     return NS_OK;
   }
 
-  MOZ_TRY(EnsureValidCall());
   if (NS_WARN_IF(!aObserver) || NS_WARN_IF(!aTopic)) {
     return NS_ERROR_INVALID_ARG;
   }
@@ -308,6 +310,7 @@ nsObserverService::UnmarkGrayStrongObservers() {
 }
 
 bool nsObserverService::HasObservers(const char* aTopic) {
+  AssertIsOnMainThread();
   return mObserverTopicTable.Contains(aTopic);
 }
 

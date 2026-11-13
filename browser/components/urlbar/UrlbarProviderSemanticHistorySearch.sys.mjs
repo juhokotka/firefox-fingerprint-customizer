@@ -12,10 +12,9 @@ import {
   UrlbarProvider,
   UrlbarUtils,
 } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   EnrollmentType: "resource://nimbus/ExperimentAPI.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
@@ -24,30 +23,27 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/urlbar/UrlbarProviderOpenTabs.sys.mjs",
   UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
   UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
-});
-
-ChromeUtils.defineLazyGetter(lazy, "logger", function () {
-  return lazy.UrlbarShared.getLogger({ prefix: "SemanticHistorySearch" });
-});
-
-/**
- * Lazily creates (on first call) and returns the
- * {@link PlacesSemanticHistoryManager} instance backing this provider.
- */
-ChromeUtils.defineLazyGetter(lazy, "semanticManager", function () {
-  let { getPlacesSemanticHistoryManager } = ChromeUtils.importESModule(
-    "resource://gre/modules/PlacesSemanticHistoryManager.sys.mjs"
-  );
-  const distanceThreshold = Services.prefs.getFloatPref(
-    "places.semanticHistory.distanceThreshold",
-    0.6
-  );
-  return getPlacesSemanticHistoryManager({
-    rowLimit: 10000,
-    samplingAttrib: "frecency",
-    changeThresholdCount: 3,
-    distanceThreshold,
-  });
+  logger: () =>
+    lazy.UrlbarShared.getLogger({ prefix: "SemanticHistorySearch" }),
+  /**
+   * Lazily creates (on first call) and returns the
+   * {@link PlacesSemanticHistoryManager} instance backing this provider.
+   */
+  semanticManager: () => {
+    let { getPlacesSemanticHistoryManager } = ChromeUtils.importESModule(
+      "resource://gre/modules/PlacesSemanticHistoryManager.sys.mjs"
+    );
+    const distanceThreshold = Services.prefs.getFloatPref(
+      "places.semanticHistory.distanceThreshold",
+      0.6
+    );
+    return getPlacesSemanticHistoryManager({
+      rowLimit: 10000,
+      samplingAttrib: "frecency",
+      changeThresholdCount: 3,
+      distanceThreshold,
+    });
+  },
 });
 
 /**
@@ -80,10 +76,10 @@ export class UrlbarProviderSemanticHistorySearch extends UrlbarProvider {
   }
 
   /**
-   * @returns {Values<typeof UrlbarUtils.PROVIDER_TYPE>}
+   * @returns {Values<typeof lazy.UrlbarShared.PROVIDER_TYPE>}
    */
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.PROFILE;
+    return lazy.UrlbarShared.PROVIDER_TYPE.PROFILE;
   }
 
   /**
@@ -154,7 +150,7 @@ export class UrlbarProviderSemanticHistorySearch extends UrlbarProvider {
           payload: {
             title: res.title,
             url: res.url,
-            icon: UrlbarUtils.getIconForUrl(res.url),
+            icon: lazy.UrlbarShared.getIconForUrl(res.url),
             isBlockable: true,
             blockL10n: { id: "urlbar-result-menu-remove-from-history2" },
             helpUrl:
@@ -187,11 +183,10 @@ export class UrlbarProviderSemanticHistorySearch extends UrlbarProvider {
       return false;
     }
 
-    let userContextId =
-      lazy.UrlbarProviderOpenTabs.getUserContextIdForOpenPagesTable(
-        queryContext.userContextId,
-        queryContext.isPrivate
-      );
+    let userContextId = lazy.UrlbarShared.getUserContextIdForOpenPagesTable(
+      queryContext.userContextId,
+      queryContext.isPrivate
+    );
 
     let added = false;
     for (let [tabUserContextId, tabGroupId] of openTabs) {
@@ -209,8 +204,8 @@ export class UrlbarProviderSemanticHistorySearch extends UrlbarProvider {
         payload: {
           url: res.url,
           title: res.title,
-          icon: UrlbarUtils.getIconForUrl(res.url),
-          userContextId: tabUserContextId,
+          icon: lazy.UrlbarShared.getIconForUrl(res.url),
+          userContext: UrlbarUtils.getUserContextData(tabUserContextId),
           tabGroup: tabGroupId,
           lastVisit: res.lastVisit,
           action: lazy.UrlbarPrefs.get("secondaryActions.switchToTab")
@@ -271,6 +266,11 @@ export class UrlbarProviderSemanticHistorySearch extends UrlbarProvider {
     return 0;
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   */
   onEngagement(queryContext, controller, details) {
     let { result } = details;
     if (details.selType == "dismiss") {

@@ -5,19 +5,25 @@
 
 #include "nsImageModule.h"
 
-#include "mozilla/ModuleUtils.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/StaticPrefs_image.h"
-
 #include "DecodePool.h"
 #include "ImageFactory.h"
-#include "nsICategoryManager.h"
-#include "nsServiceManagerUtils.h"
 #include "ShutdownTracker.h"
 #include "SurfaceCache.h"
 #include "imgLoader.h"
+#include "mozilla/ModuleUtils.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs_image.h"
+#include "nsICategoryManager.h"
+#include "nsServiceManagerUtils.h"
 
 using namespace mozilla::image;
+
+#ifdef MOZ_JXL
+namespace mozilla::image {
+// Defined in image/decoders/JxlDecodePool.cpp.
+void ClearJxlDecodePoolOnShutdown();
+}  // namespace mozilla::image
+#endif
 
 struct ImageEnablementCookie {
   bool (*mIsEnabled)();
@@ -62,6 +68,7 @@ nsresult mozilla::image::EnsureModuleInitialized() {
       mozilla::StaticPrefs::image_jxl_enabled, "image/jxl"_ns};
   Preferences::RegisterCallbackAndCall(UpdateDocumentViewerRegistration,
                                        "image.jxl.enabled", &kJXLCookie);
+  ClearJxlDecodePoolOnShutdown();
 #endif
 
   mozilla::image::ShutdownTracker::Initialize();

@@ -7,12 +7,14 @@
  * global actions for a query.
  */
 
-import {
-  UrlbarProvider,
-  UrlbarUtils,
-} from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { UrlbarProvider } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
+const lazy = XPCOMUtils.declareLazy({
+  UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
+  UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
+  UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
+});
 
 // Default icon shown for actions if no custom one is provided.
 const DEFAULT_ICON = "chrome://global/skin/icons/settings.svg";
@@ -31,12 +33,6 @@ const MAX_ACTIONS_PREF = "secondaryActions.maxActionsShown";
 const TIMES_TO_SHOW_PREF = "quickactions.timesToShowOnboardingLabel";
 const TIMES_SHOWN_PREF = "quickactions.timesShownOnboardingLabel";
 
-ChromeUtils.defineESModuleGetters(lazy, {
-  UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
-  UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
-  UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
-});
-
 import { ActionsProviderQuickActions } from "moz-src:///browser/components/urlbar/ActionsProviderQuickActions.sys.mjs";
 import { ActionsProviderContextualSearch } from "moz-src:///browser/components/urlbar/ActionsProviderContextualSearch.sys.mjs";
 import { ActionsProviderTabGroups } from "moz-src:///browser/components/urlbar/ActionsProviderTabGroups.sys.mjs";
@@ -52,10 +48,10 @@ let globalActionsProviders = [
  */
 export class UrlbarProviderGlobalActions extends UrlbarProvider {
   /**
-   * @returns {Values<typeof UrlbarUtils.PROVIDER_TYPE>}
+   * @returns {Values<typeof lazy.UrlbarShared.PROVIDER_TYPE>}
    */
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.PROFILE;
+    return lazy.UrlbarShared.PROVIDER_TYPE.PROFILE;
   }
 
   /**
@@ -80,14 +76,15 @@ export class UrlbarProviderGlobalActions extends UrlbarProvider {
    * @param {UrlbarQueryContext} queryContext
    * @param {(provider: UrlbarProvider, result: UrlbarResult) => void} addCallback
    *   Callback invoked by the provider to add a new result.
+   * @param {UrlbarParentController} controller
    */
-  async startQuery(queryContext, addCallback) {
+  async startQuery(queryContext, addCallback, controller) {
     let actionsResults = [];
 
     for (let provider of globalActionsProviders) {
-      if (provider.isActive(queryContext)) {
+      if (provider.isActive(queryContext, controller)) {
         actionsResults.push(
-          ...((await provider.queryActions(queryContext)) || [])
+          ...((await provider.queryActions(queryContext, controller)) || [])
         );
       }
     }
@@ -129,16 +126,25 @@ export class UrlbarProviderGlobalActions extends UrlbarProvider {
     addCallback(this, result);
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   */
   async onEngagement(queryContext, controller, details) {
-    let key = details.element.dataset.action;
+    let key = details.pickedActionKey;
     let action = details.result.payload.actionsResults.find(a => a.key == key);
     let provider = globalActionsProviders.find(
       p => p.name == action.providerName
     );
-    provider.onPick(queryContext, controller, action);
-    controller.view.close();
+    provider.onPick(queryContext, controller, action, details);
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   */
   onSearchSessionEnd(queryContext, controller, details) {
     let showOnboardingLabel = queryContext.results?.find(
       r => r.providerName == this.name
@@ -150,7 +156,9 @@ export class UrlbarProviderGlobalActions extends UrlbarProvider {
       );
     }
     for (let provider of globalActionsProviders) {
-      provider.onSearchSessionEnd?.(queryContext, controller, details);
+      if ("onSearchSessionEnd" in provider) {
+        provider.onSearchSessionEnd(queryContext, controller, details);
+      }
     }
   }
 
@@ -180,12 +188,8 @@ export class UrlbarProviderGlobalActions extends UrlbarProvider {
         ],
       };
 
-      if (action.dataset?.style) {
-        let style = "";
-        for (let [prop, val] of Object.entries(action.dataset.style)) {
-          style += `${prop}: ${val};`;
-        }
-        btn.attributes.style = style;
+      if (action.style) {
+        btn.style = action.style;
       }
 
       if (action.dataset?.providesSearchMode) {

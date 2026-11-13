@@ -3,24 +3,24 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DMABUFTextureHostOGL.h"
-#include "mozilla/widget/DMABufSurface.h"
-#include "mozilla/widget/DMABufFormats.h"
+
+#include "GLContextEGL.h"
 #include "mozilla/webrender/RenderDMABUFTextureHost.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/webrender/WebRenderAPI.h"
-#include "GLContextEGL.h"
+#include "mozilla/widget/DMABufFormats.h"
+#include "mozilla/widget/DMABufSurface.h"
 
 namespace mozilla::layers {
 
 DMABUFTextureHostOGL::DMABUFTextureHostOGL(TextureFlags aFlags,
-                                           const SurfaceDescriptor& aDesc)
-    : TextureHost(TextureHostType::DMABUF, aFlags) {
+                                           const SurfaceDescriptorDMABuf& aDesc)
+    : TextureHost(TextureHostType::DMABUF, aFlags), mDescriptor(aDesc) {
   MOZ_COUNT_CTOR(DMABUFTextureHostOGL);
 
   // DMABufSurface::CreateDMABufSurface() can fail, for instance when we're run
   // out of file descriptors.
-  mSurface =
-      DMABufSurface::CreateDMABufSurface(aDesc.get_SurfaceDescriptorDMABuf());
+  mSurface = DMABufSurface::CreateDMABufSurface(aDesc);
 }
 
 DMABUFTextureHostOGL::~DMABUFTextureHostOGL() {
@@ -32,6 +32,15 @@ gfx::SurfaceFormat DMABUFTextureHostOGL::GetFormat() const {
     return gfx::SurfaceFormat::UNKNOWN;
   }
   return mSurface->GetFormat();
+}
+
+already_AddRefed<gfx::DataSourceSurface> DMABUFTextureHostOGL::GetAsSurface(
+    gfx::DataSourceSurface* aSurface) {
+  if (!mSurface) {
+    return nullptr;
+  }
+  // DMABufSurface reads back through a blit, so it cannot reuse aSurface.
+  return mSurface->GetAsSourceSurface();
 }
 
 gfx::YUVColorSpace DMABUFTextureHostOGL::GetYUVColorSpace() const {
@@ -248,6 +257,10 @@ void DMABUFTextureHostOGL::PushDisplayItems(
       MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     }
   }
+}
+
+SurfaceDescriptor DMABUFTextureHostOGL::GetSurfaceDescriptor() {
+  return mDescriptor;
 }
 
 }  // namespace mozilla::layers

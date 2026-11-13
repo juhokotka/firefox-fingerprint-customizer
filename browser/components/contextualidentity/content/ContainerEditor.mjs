@@ -91,80 +91,97 @@ export class ContainerEditor {
     let section = doc.createElementNS(HTML_NS, "div");
     section.className = "fingerprint-section";
 
-    let header = doc.createElementNS(HTML_NS, "h3");
+    let header = doc.createElementNS(HTML_NS, "h2");
+    header.className = "fingerprint-heading";
     doc.l10n.setAttributes(header, "containers-fingerprint-header");
-    header.textContent = "Fingerprint Settings";
     section.append(header);
 
-    // Device type selector (MacBook/Linux/Windows)
-    let deviceRow = doc.createElementNS(HTML_NS, "div");
-    deviceRow.className = "fingerprint-row";
-    let deviceLabel = doc.createElementNS(HTML_NS, "label");
-    doc.l10n.setAttributes(deviceLabel, "containers-fingerprint-device");
-    deviceLabel.textContent = "Device";
-    this._deviceSelect = doc.createElementNS(HTML_NS, "select");
-    this._deviceSelect.setAttribute("name", "fingerprint-device");
-    let randomDeviceOption = doc.createElementNS(HTML_NS, "option");
-    randomDeviceOption.value = "";
-    randomDeviceOption.textContent = "Random";
-    this._deviceSelect.append(randomDeviceOption);
-    for (let devType of lazy.FingerprintProfileStore.getAvailableDeviceTypes()) {
-      let opt = doc.createElementNS(HTML_NS, "option");
-      opt.value = devType;
-      opt.textContent = devType;
-      this._deviceSelect.append(opt);
-    }
-    deviceRow.append(deviceLabel, this._deviceSelect);
-    section.append(deviceRow);
+    let rows = doc.createElementNS(HTML_NS, "div");
+    rows.className = "fingerprint-rows";
 
-    // Country selector
-    let countryRow = doc.createElementNS(HTML_NS, "div");
-    countryRow.className = "fingerprint-row";
-    let countryLabel = doc.createElementNS(HTML_NS, "label");
-    doc.l10n.setAttributes(countryLabel, "containers-fingerprint-country");
-    countryLabel.textContent = "Location";
-    this._countrySelect = doc.createElementNS(HTML_NS, "select");
-    this._countrySelect.setAttribute("name", "fingerprint-country");
-    let randomCountryOption = doc.createElementNS(HTML_NS, "option");
-    randomCountryOption.value = "";
-    randomCountryOption.textContent = "Random";
-    this._countrySelect.append(randomCountryOption);
-    for (let loc of lazy.FingerprintProfileStore.getAvailableCountries()) {
-      let opt = doc.createElementNS(HTML_NS, "option");
-      opt.value = loc.country;
-      opt.textContent = `${loc.country} (${loc.language})`;
-      this._countrySelect.append(opt);
-    }
-    countryRow.append(countryLabel, this._countrySelect);
-    section.append(countryRow);
+    this._deviceSelect = this._createSelect(
+      "fingerprint-device",
+      "containers-fingerprint-device",
+      lazy.FingerprintProfileStore.getAvailableDeviceTypes().map(type => ({
+        value: type,
+        label: type,
+      }))
+    );
+    this._countrySelect = this._createSelect(
+      "fingerprint-country",
+      "containers-fingerprint-country",
+      lazy.FingerprintProfileStore.getAvailableCountries().map(loc => ({
+        value: loc.country,
+        label: `${loc.country} (${loc.language})`,
+      }))
+    );
 
-    // Generate button
-    // Button row: Regenerate Fingerprint + Detailed Edit
-    let buttonRow = doc.createElementNS(HTML_NS, "div");
-    buttonRow.className = "fingerprint-button-row";
+    rows.append(this._deviceSelect, this._countrySelect);
+    section.append(rows);
 
-    this._generateBtn = doc.createElementNS(HTML_NS, "button");
-    this._generateBtn.type = "button";
-    this._generateBtn.className = "fingerprint-generate-btn";
-    this._generateBtn.textContent = "Regenerate Fingerprint";
+    let actions = doc.createElementNS(HTML_NS, "moz-button-group");
+    actions.className = "fingerprint-actions";
+
+    this._generateBtn = doc.createElementNS(HTML_NS, "moz-button");
+    this._generateBtn.setAttribute("type", "primary");
+    this._generateBtn.setAttribute(
+      "data-l10n-id",
+      "containers-fingerprint-regenerate"
+    );
     this._generateBtn.addEventListener("click", () => this._regenerateProfile());
-    buttonRow.append(this._generateBtn);
+    actions.append(this._generateBtn);
 
-    this._detailedEditBtn = doc.createElementNS(HTML_NS, "button");
-    this._detailedEditBtn.type = "button";
-    this._detailedEditBtn.className = "fingerprint-detailed-edit-btn";
-    this._detailedEditBtn.textContent = "Detailed Edit";
-    this._detailedEditBtn.addEventListener("click", () => this._openDetailedEditor());
-    buttonRow.append(this._detailedEditBtn);
+    this._detailedEditBtn = doc.createElementNS(HTML_NS, "moz-button");
+    this._detailedEditBtn.setAttribute(
+      "data-l10n-id",
+      "containers-fingerprint-detailed"
+    );
+    this._detailedEditBtn.addEventListener("click", () =>
+      this._openDetailedEditor()
+    );
+    actions.append(this._detailedEditBtn);
 
-    section.append(buttonRow);
+    section.append(actions);
 
-    // Summary
     this._profileSummary = doc.createElementNS(HTML_NS, "div");
     this._profileSummary.className = "fingerprint-summary";
     section.append(this._profileSummary);
 
     this.form.append(section);
+  }
+
+  /**
+   * Builds a moz-select listing a leading "Random" choice followed by the given
+   * choices. The field name is preserved so the control still answers to the
+   * same lookups as the native select it replaces.
+   *
+   * @param {string} name
+   *   The form field name.
+   * @param {string} l10nId
+   *   The Fluent id carrying the label.
+   * @param {Array<{ value: string, label: string }>} choices
+   *   The choices to append after the Random entry.
+   * @returns {Element}
+   */
+  _createSelect(name, l10nId, choices) {
+    let doc = this.document;
+    let select = doc.createElementNS(HTML_NS, "moz-select");
+    select.setAttribute("name", name);
+    doc.l10n.setAttributes(select, l10nId);
+
+    let random = doc.createElementNS(HTML_NS, "moz-option");
+    random.setAttribute("value", "");
+    random.setAttribute("data-l10n-id", "containers-fingerprint-random");
+    select.append(random);
+
+    for (let { value, label } of choices) {
+      let option = doc.createElementNS(HTML_NS, "moz-option");
+      option.setAttribute("value", value);
+      option.setAttribute("label", label);
+      select.append(option);
+    }
+
+    return select;
   }
 
   _initProfile() {

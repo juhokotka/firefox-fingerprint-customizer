@@ -142,7 +142,20 @@ interface nsIIOService : nsISupports
                                                       in unsigned long aSecurityFlags,
                                                       in nsContentPolicyType aContentPolicyType,
                                                       in unsigned long aSandboxFlags,
+                                                      in unsigned long long aAssociatedBrowsingContextID,
                                                       out nsIChannel aResult);
+
+    /**
+     * Equivalent to newChannelFromURIWithLoadInfo(aURI, aLoadInfo), but also
+     * allows setting the proxy uri/flags (like newChannelFromURIWithProxyFlags).
+     * This lets callers such as the WebSocket handshake reuse a loadInfo that
+     * Init() can consult (e.g. for the associated BrowsingContext) while still
+     * resolving a proxy.
+     */
+    nsIChannel newChannelFromURIWithProxyFlagsAndLoadInfo(in nsIURI aURI,
+                                                          in nsIURI aProxyURI,
+                                                          in unsigned long aProxyFlags,
+                                                          in nsILoadInfo aLoadInfo);
 
     /**
      * Equivalent to newChannelFromURI(aURI, aLoadingNode, ...)
@@ -216,6 +229,20 @@ interface nsIIOService : nsISupports
      * @see nsIProtocolHandler::allowPort
      */
     boolean allowPort(in long aPort, in string aScheme);
+
+    /**
+     * Prevents connections to aPort on the local machine, i.e. to loopback,
+     * unspecified, or any of this machine's own addresses. Unlike
+     * network.security.ports.banned, this cannot be overridden and does not
+     * affect remote hosts. Connections that are already established are not
+     * affected. Only available in the parent process.
+     */
+    void addBlockedLocalPort(in long aPort);
+
+    /**
+     * Removes a port previously added with addBlockedLocalPort.
+     */
+    void removeBlockedLocalPort(in long aPort);
 
     /**
      * Utility to extract the scheme from a URL string, consistently and

@@ -6,26 +6,25 @@
 #ifndef mozilla_image_imgLoader_h
 #define mozilla_image_imgLoader_h
 
+#include "ImageCacheKey.h"
+#include "imgICache.h"
+#include "imgILoader.h"
+#include "imgIRequest.h"
+#include "imgRequest.h"
 #include "mozilla/CORSMode.h"
+#include "mozilla/EnumSet.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Mutex.h"
-#include "mozilla/EnumSet.h"
 #include "mozilla/UniquePtr.h"
-
-#include "imgILoader.h"
-#include "imgICache.h"
-#include "nsWeakReference.h"
+#include "mozilla/dom/CacheExpirationTime.h"
+#include "nsExpirationTracker.h"
+#include "nsIChannel.h"
 #include "nsIContentSniffer.h"
+#include "nsIProgressEventSink.h"
+#include "nsIThreadRetargetableStreamListener.h"
 #include "nsRefPtrHashtable.h"
 #include "nsTHashSet.h"
-#include "nsExpirationTracker.h"
-#include "ImageCacheKey.h"
-#include "imgRequest.h"
-#include "nsIProgressEventSink.h"
-#include "nsIChannel.h"
-#include "nsIThreadRetargetableStreamListener.h"
-#include "imgIRequest.h"
-#include "mozilla/dom/CacheExpirationTime.h"
+#include "nsWeakReference.h"
 #ifdef NIGHTLY_BUILD
 #  include "mozilla/dom/IntegrityPolicyWAICT.h"
 #  include "mozilla/dom/ResourceHasher.h"
@@ -410,7 +409,8 @@ class imgLoader final : public imgILoader,
                      imgRequestProxy** aProxyRequest,
                      nsIPrincipal* aTriggeringPrincipal, mozilla::CORSMode,
                      bool aLinkPreload, uint64_t aEarlyHintPreloaderId,
-                     mozilla::dom::FetchPriority aFetchPriority);
+                     mozilla::dom::FetchPriority aFetchPriority,
+                     const nsAString& aInitiatorType);
 
   bool ValidateRequestWithNewChannel(
       imgRequest* request, nsIURI* aURI, nsIURI* aInitialDocumentURI,
@@ -420,7 +420,8 @@ class imgLoader final : public imgILoader,
       nsLoadFlags aLoadFlags, nsContentPolicyType aContentPolicyType,
       imgRequestProxy** aProxyRequest, nsIPrincipal* aLoadingPrincipal,
       mozilla::CORSMode, bool aLinkPreload, uint64_t aEarlyHintPreloaderId,
-      mozilla::dom::FetchPriority aFetchPriority, bool* aNewChannelCreated);
+      mozilla::dom::FetchPriority aFetchPriority,
+      const nsAString& aInitiatorType, bool* aNewChannelCreated);
 
   void NotifyObserversForCachedImage(
       imgCacheEntry* aEntry, imgRequest* request, nsIURI* aURI,

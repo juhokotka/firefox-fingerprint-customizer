@@ -5,15 +5,16 @@
 // This is a standalone server that offers TLS 1.3 Encrypted
 // Client Hello support.
 
+#include <pk11pub.h>
 #include <stdio.h>
 
-#include "nspr.h"
+#include <vector>
+
 #include "ScopedNSSTypes.h"
+#include "TLSServer.h"
+#include "nspr.h"
 #include "ssl.h"
 #include "sslexp.h"
-#include "TLSServer.h"
-#include <pk11pub.h>
-#include <vector>
 
 using namespace mozilla;
 using namespace mozilla::test;
@@ -52,7 +53,7 @@ int32_t DoSNISocketConfigBySubjectCN(PRFileDesc* aFd,
 }
 
 int32_t DoSNISocketConfig(PRFileDesc* aFd, const SECItem* aSrvNameArr,
-                          uint32_t aSrvNameArrSize, void* aArg) {
+                          uint32_t aSrvNameArrSize, void* /*aArg*/) {
   const EchHost* host = GetHostForSNI(aSrvNameArr, aSrvNameArrSize, sEchHosts);
   if (!host) {
     PrintPRError("No cert found for hostname");

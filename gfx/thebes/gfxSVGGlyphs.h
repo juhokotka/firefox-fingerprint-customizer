@@ -6,15 +6,15 @@
 #define GFX_SVG_GLYPHS_WRAPPER_H
 
 #include "gfxFontUtils.h"
-#include "mozilla/gfx/2D.h"
-#include "nsString.h"
-#include "nsClassHashtable.h"
-#include "nsBaseHashtable.h"
-#include "nsHashKeys.h"
 #include "gfxPattern.h"
-#include "mozilla/gfx/UserData.h"
 #include "mozilla/SVGContextPaint.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/UserData.h"
+#include "nsBaseHashtable.h"
+#include "nsClassHashtable.h"
+#include "nsHashKeys.h"
 #include "nsRefreshObservers.h"
+#include "nsString.h"
 
 class nsIDocumentViewer;
 class gfxSVGGlyphs;
@@ -40,12 +40,13 @@ class gfxSVGGlyphsDocument final : public nsAPostRefreshObserver {
   typedef mozilla::dom::Element Element;
 
  public:
-  gfxSVGGlyphsDocument(const uint8_t* aBuffer, uint32_t aBufLen,
-                       gfxSVGGlyphs* aSVGGlyphs);
+  MOZ_CAN_RUN_SCRIPT gfxSVGGlyphsDocument(const uint8_t* aBuffer,
+                                          uint32_t aBufLen,
+                                          gfxSVGGlyphs* aSVGGlyphs);
 
   Element* GetGlyphElement(uint32_t aGlyphId);
 
-  ~gfxSVGGlyphsDocument();
+  MOZ_CAN_RUN_SCRIPT ~gfxSVGGlyphsDocument();
 
   void DidRefresh() override;
 
@@ -54,7 +55,7 @@ class gfxSVGGlyphsDocument final : public nsAPostRefreshObserver {
  private:
   nsresult ParseDocument(const uint8_t* aBuffer, uint32_t aBufLen);
 
-  nsresult SetupPresentation();
+  MOZ_CAN_RUN_SCRIPT nsresult SetupPresentation();
 
   void FindGlyphElements(Element* aElement);
 

@@ -51,8 +51,8 @@ class ServoStyleSet;
 
 /**
  * Some invariants:
- * -- The overflow out-of-flows list contains the out-of-
- * flow frames whose placeholders are in the overflow list.
+ * -- The overflow floats list contains the float frames
+ * whose placeholders are in the overflow list.
  * -- A given piece of content has at most one placeholder
  * frame in a block's normal child list.
  * -- While a block is being reflowed, and from then until
@@ -557,14 +557,19 @@ class nsBlockFrame : public nsContainerFrame {
 
   /** Returns the effective align-content of this frame */
   mozilla::StyleAlignFlags EffectiveAlignContent() const {
-    if (IsButtonLike()) {
-      return mozilla::StyleAlignFlags::CENTER;
+    auto alignContent = StylePosition()->mAlignContent.primary;
+    if (alignContent == mozilla::StyleAlignFlags::NORMAL ||
+        !mozilla::StaticPrefs::
+            layout_forms_button_input_align_content_block_enabled()) {
+      if (IsButtonLike()) {
+        return mozilla::StyleAlignFlags::CENTER;
+      }
+      if (IsSingleLineTextInput()) {
+        return mozilla::StyleAlignFlags::CENTER |
+               mozilla::StyleAlignFlags::UNSAFE;
+      }
     }
-    if (IsSingleLineTextInput()) {
-      return mozilla::StyleAlignFlags::CENTER |
-             mozilla::StyleAlignFlags::UNSAFE;
-    }
-    return StylePosition()->mAlignContent.primary;
+    return alignContent;
   }
 
   bool IsContentAligned() const {
@@ -702,7 +707,7 @@ class nsBlockFrame : public nsContainerFrame {
    * Clears any -webkit-line-clamp ellipsis on a line in this block or one
    * of its descendants.
    */
-  void ClearLineClampEllipsis();
+  bool ClearLineClampEllipsis();
 
   /**
    * Returns whether this block is in a -webkit-line-clamp context. That is,
@@ -711,11 +716,14 @@ class nsBlockFrame : public nsContainerFrame {
    */
   bool IsInLineClampContext() const { return !!GetLineClampRoot(); }
 
+  const mozilla::StyleBlockEllipsis* GetLineClampBlockEllipsis() const;
+
   /**
    * @return false iff this block does not have a float on any child list.
    * This function is O(1).
    */
-  bool MaybeHasFloats() const;
+  bool HasAnyFloats() const;
+
   /**
    * This indicates that exactly one line in this block has the
    * LineClampEllipsis flag set, and that such a line must be found
@@ -740,8 +748,85 @@ class nsBlockFrame : public nsContainerFrame {
   }
 
  protected:
+  struct LineClampTarget {
+    nsBlockFrame* targetFrame;
+    nsLineBox* targetLine;
+    nscoord clampedBSize;
+
+    bool IsFullyClampedOut(nsBlockFrame* aRootFrame, nsBlockFrame* aThisFrame) {
+      MOZ_ASSERT(aRootFrame);
+      if (aThisFrame != aRootFrame) {
+        return false;
+      }
+      return !clampedBSize && !targetFrame && !targetLine;
+    }
+  };
   nsBlockFrame* GetLineClampRoot() const;
-  nscoord ApplyLineClamp(nscoord aContentBlockEndEdge);
+  Maybe<LineClampTarget> FindLineClampAutoTarget(
+      nscoord aContentBlockEndEdge, const ReflowInput& aReflowInput,
+      nscoord aCollapsingBEndMargin, nsBlockFrame* aLineClampRoot);
+  Maybe<LineClampTarget> FindLineClampNumberedTarget(
+      nscoord aContentBlockEndEdge, nscoord aCollapsingBEndMargin,
+      nsBlockFrame* aLineClampRoot) const;
+  void ApplyLineClamp(LineClampTarget aLineClampTarget,
+                      nsBlockFrame* aLineClampRoot);
+  // Helper for calling ApplyLineClamp with automatic and line-based sizing.
+  Maybe<nscoord> ApplySmallestLineClamp(
+      Maybe<nsBlockFrame::LineClampTarget> aLineClampAutoTarget,
+      Maybe<nsBlockFrame::LineClampTarget> aLineClampNumberedTarget,
+      nsBlockFrame* aLineClampRoot);
+
+  struct LineClampAutoInfo {
+    Maybe<nscoord> lineClampRootMaxHeight = Nothing();
+    bool blockIsFullyClampedOut = false;
+  };
+
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(LineClampAutoData, LineClampAutoInfo);
+  void SetLineClampAutoClampedToZero() {
+    GetOrCreateDeletableProperty(LineClampAutoData())->blockIsFullyClampedOut =
+        true;
+  }
+  bool LineClampIsClampedToZero() {
+    bool found = false;
+    const LineClampAutoInfo* prop = GetProperty(LineClampAutoData(), &found);
+    return found && prop->blockIsFullyClampedOut;
+  }
+  void ClearLineClampAutoClampedToZero() {
+    bool found = false;
+    LineClampAutoInfo* currentInfo = GetProperty(LineClampAutoData(), &found);
+    if (!found) {
+      return;
+    }
+    if (!currentInfo->lineClampRootMaxHeight) {
+      RemoveProperty(LineClampAutoData());
+      return;
+    }
+    currentInfo->blockIsFullyClampedOut = false;
+  }
+  void SetLineClampRootMaxHeight(nscoord aHeight) {
+    GetOrCreateDeletableProperty(LineClampAutoData())->lineClampRootMaxHeight =
+        mozilla::Some(aHeight);
+  }
+  Maybe<nscoord> GetLineClampRootMaxHeight() {
+    bool found = false;
+    LineClampAutoInfo* prop = GetProperty(LineClampAutoData(), &found);
+    if (!found) {
+      return Nothing();
+    }
+    return prop->lineClampRootMaxHeight;
+  }
+  void ClearLineClampRootMaxHeight() {
+    bool found = false;
+    LineClampAutoInfo* info = GetProperty(LineClampAutoData(), &found);
+    if (!found) {
+      return;
+    }
+    if (!info->blockIsFullyClampedOut) {
+      RemoveProperty(LineClampAutoData());
+      return;
+    }
+    info->lineClampRootMaxHeight = Nothing();
+  }
 
   /** grab overflow lines from this block's prevInFlow, and make them
    * part of this block's mLines list.
@@ -834,7 +919,7 @@ class nsBlockFrame : public nsContainerFrame {
 
   void CollectFloats(nsIFrame* aFrame, nsFrameList& aList,
                      bool aCollectFromSiblings) {
-    if (MaybeHasFloats()) {
+    if (HasAnyFloats()) {
       DoCollectFloats(aFrame, aList, aCollectFromSiblings);
     }
   }
@@ -1045,34 +1130,36 @@ class nsBlockFrame : public nsContainerFrame {
   void DestroyOverflowLines();
 
   /**
-   * This class is useful for efficiently modifying the out of flow
-   * overflow list. It gives the client direct writable access to
-   * the frame list temporarily but ensures that property is only
-   * written back if absolutely necessary.
+   * This class is useful for efficiently modifying the overflow floats list. It
+   * gives the client direct writable access to the frame list temporarily but
+   * ensures that property is only written back if absolutely necessary.
    */
-  struct nsAutoOOFFrameList {
+  struct AutoOverflowFloatsList {
     nsFrameList mList;
 
-    explicit nsAutoOOFFrameList(nsBlockFrame* aBlock)
-        : mPropValue(aBlock->GetOverflowOutOfFlows()), mBlock(aBlock) {
+    explicit AutoOverflowFloatsList(nsBlockFrame* aBlock)
+        : mPropValue(aBlock->GetOverflowFloats()), mBlock(aBlock) {
       if (mPropValue) {
         mList = std::move(*mPropValue);
       }
     }
-    ~nsAutoOOFFrameList() {
-      mBlock->SetOverflowOutOfFlows(std::move(mList), mPropValue);
+    ~AutoOverflowFloatsList() {
+      mBlock->SetOverflowFloats(std::move(mList), mPropValue);
     }
 
    protected:
     nsFrameList* const mPropValue;
     nsBlockFrame* const mBlock;
   };
-  friend struct nsAutoOOFFrameList;
+  friend struct AutoOverflowFloatsList;
 
-  nsFrameList* GetOverflowOutOfFlows() const;
+  // Return true if this frame has overflow floats.
+  bool HasOverflowFloats() const;
+
+  nsFrameList* GetOverflowFloats() const;
 
   // This takes ownership of the frames in aList.
-  void SetOverflowOutOfFlows(nsFrameList&& aList, nsFrameList* aPropValue);
+  void SetOverflowFloats(nsFrameList&& aList, nsFrameList* aPropValue);
 
   // Return the ::marker frame or nullptr if we don't have one.
   nsIFrame* GetMarker() const {

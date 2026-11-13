@@ -20,12 +20,14 @@ dependencies {
     implementation platform(libs.androidx.compose.bom)
     implementation libs.androidx.compose.foundation
     implementation libs.androidx.compose.ui
+    implementation libs.androidx.lifecycle.compose
     implementation libs.lottie.compose
 
     testImplementation libs.androidx.compose.ui.test
     testImplementation libs.androidx.compose.ui.test.manifest
     testImplementation libs.androidx.test.core
     testImplementation libs.androidx.test.junit
+    testImplementation libs.kotlin.test
     testImplementation libs.robolectric
 }
 

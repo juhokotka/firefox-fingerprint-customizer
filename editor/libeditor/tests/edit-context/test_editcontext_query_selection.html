@@ -5,6 +5,7 @@
   <title>Test that EditContext selectiopn bounds and text are correctly reported for QuerySelectedText content event</title>
   <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <script src="/tests/SimpleTest/EventUtils.js"></script>
+  <script src="common.js"></script>
   <link rel="stylesheet" href="/tests/SimpleTest/test.css"/>
 </head>
 <body>
@@ -21,10 +22,6 @@ const editContext = new EditContext({
 });
 const selectionBounds = new DOMRect(123, 456, 789, 10);
 editContext.updateSelectionBounds(selectionBounds);
-
-function stringifyRect(r) {
-  return `{left: ${r.left}, top: ${r.top}, width: ${r.width}, height: ${r.height}}`;
-}
 
 // Add information about active EditContext to assertion message
 function formatMessage(message) {
@@ -50,17 +47,17 @@ function checkSelectedText(expectedText, expectedOffset, expectedReversed) {
                                            Math.abs(selectionEnd - selectionStart));
   ok(textRect.succeeded,
      formatMessage('QueryTextRect should succeed.'));
-  is(stringifyRect(textRect), stringifyRect(selectionBounds),
-     formatMessage('QueryTextRect should return selection bounds if queried range is selection.'));
+  checkRect(textRect, selectionBounds,
+            formatMessage('QueryTextRect should return selection bounds if queried range is selection.'));
   if (selectionStart === selectionEnd) {
     const textRectArray = synthesizeQueryTextRectArray(selectionStart, 0);
     ok(textRectArray.succeeded,
        formatMessage('QueryTextRectArray should succeed.'));
     const left = {}, top = {}, width = {}, height = {};
     textRectArray.getCharacterRect(0, left, top, width, height);
-    is(stringifyRect({left: left.value, top: top.value, width: width.value, height: height.value}),
-       stringifyRect(selectionBounds),
-       formatMessage('QueryTextRectArray should return selection bounds if queried range is caret.'));
+    checkRect({left: left.value, top: top.value, width: width.value, height: height.value},
+              selectionBounds,
+              formatMessage('QueryTextRectArray should return selection bounds if queried range is caret.'));
   }
 }
 

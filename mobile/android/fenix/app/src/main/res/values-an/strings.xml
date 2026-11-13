@@ -43,8 +43,6 @@
   <string name="open_in_app_cfr_positive_button_text">Ir ta los achustes</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">Descartar</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">La camara precisa acceso. Ves ta los achustes d\'Android, toca \"permisos\" y toca \"permitir\".</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -80,16 +78,8 @@
   <string name="home_screen_shortcut_open_new_tab_2">Nueva pestanya</string>
   <!-- Shortcut action to open new private tab -->
   <string name="home_screen_shortcut_open_new_private_tab_2">Nueva pestanya privada</string>
-  <!--
-    Recent Tabs
-
-    Header text for jumping back into the recent tab in the home screen
-  -->
-  <string name="recent_tabs_header">Tornar ta la pestanya</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">Amostrar-lo tot</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">Amostrar lo botón de totas as pestanyas recients</string>
   <!--
     Text for the menu button to remove a grouped highlight from the user's browsing history
     in the Recently visited section
@@ -109,11 +99,7 @@
   <string name="recently_visited_menu_item_remove">Borrar</string>
   <!-- Content description for the button which navigates the user to show all of their history. -->
   <string name="past_explorations_show_all_content_description_2">Amostrar totas las exploracions pasadas</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Dezaga</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Siguient</string>
@@ -181,10 +167,6 @@
   <string name="search_engine_suggestions_title">Mirar %s</string>
   <!-- Search engine suggestion description text -->
   <string name="search_engine_suggestions_description">Mirar directament d’a barra d’adrezas</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Search Widget
 
@@ -203,7 +185,11 @@
     Title for the settings page
   -->
   <string name="settings">Achustes</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">Cheneral</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Sobre</string>
@@ -286,8 +272,6 @@
   <string name="customize_addon_collection_hint">Nombre d’a colección</string>
   <!-- Hint displayed on input field for custom collection user ID -->
   <string name="customize_addon_collection_user_hint">Propietario d’a colección (ID d’usuario)</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">Tornar ta la pestanya</string>
   <!--
     Title for the customize home screen section with recently visited. Recently visited is
     a section where users see a list of tabs that they have visited in the past few days
@@ -437,8 +421,6 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">Pestanyas</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">Vista de pestanyas</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">Lista</string>
   <!-- Option for a grid tab view -->
@@ -469,7 +451,7 @@
   <string name="close_tabs_after_one_week_summary">Tancar dimpués d’una semana</string>
   <!-- Summary for tabs preference when auto closing tabs setting is set to auto close tabs after one month -->
   <string name="close_tabs_after_one_month_summary">Tancar dimpués d’un mes</string>
-  <!-- Title of inactive tabs preference -->
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">Las pestanyas que no has visto dende fa dos semanas se mueven ta la sección inactiva.</string>
   <!--
     Studies
@@ -529,8 +511,6 @@
   <string name="history_search_1">Escribe los termens de busqueda</string>
   <!-- Text for the button to clear all history -->
   <string name="history_delete_all">Borrar historial</string>
-  <!-- Text for the snackbar to confirm that multiple browsing history items has been deleted -->
-  <string name="history_delete_multiple_items_snackbar">Historial borrau</string>
   <!-- Text for the snackbar to confirm that a single browsing history item has been deleted. %1$s is the shortened URL of the deleted history item. -->
   <string name="history_delete_single_item_snackbar">S’ha borrau %1$s</string>
   <!-- Context description text for the button to delete a single history item -->
@@ -540,16 +520,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d triau(s)</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">Hue</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">Ahiere</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Zaguers 7 días</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Zaguers 30 días</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Mas antigo</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">No i hai garra historial</string>
   <!--
@@ -609,12 +579,6 @@
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">Ir a Achustes</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">Fuella d’achustes rapidos</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">Recomendada</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -867,10 +831,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">Achustes de protección</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">Protección contra seguimiento amillorada</string>
   <!-- Text displayed that links to website about enhanced tracking protection -->
   <string name="preference_enhanced_tracking_protection_explanation_learn_more">Leyer mas</string>
@@ -912,8 +874,6 @@
   <string name="preference_enhanced_tracking_protection_custom_cryptominers">Criptominers</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">Blocau</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">Permitiu</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">Elementos de seguimiento de retz socials</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -930,10 +890,6 @@
   <string name="etp_tracking_content_title">Conteniu de seguimiento</string>
   <!-- Description of tracking content that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_description">Bloca la carga de anuncios externos, vídeos y conteniu que contienga codigo de seguimiento. Puede afectar a la funcionalidat d’o puesto web.</string>
-  <!-- Enhanced Tracking Protection message that protection is currently on for this site -->
-  <string name="etp_panel_on">Las proteccions son activadas pa este puesto</string>
-  <!-- Enhanced Tracking Protection message that protection is currently off for this site -->
-  <string name="etp_panel_off">Las proteccions son desactivadas pa este puesto</string>
   <!-- Header for exceptions list for which sites enhanced tracking protection is always off -->
   <string name="enhanced_tracking_protection_exceptions">La protección contra seguimiento amillorada ye desactivada pa estes puestos</string>
   <!--
@@ -984,8 +940,6 @@
   <string name="add_to_homescreen_cancel">Cancelar</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">Anyadir</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">Continar a lo puesto web</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">Nombre d’acceso directo</string>
   <!-- Preference option for asking to save passwords in Fenix -->
@@ -1068,11 +1022,6 @@
   <string name="confirm_clear_permission_site">Seguro que quiers eliminar este permiso pa este puesto?</string>
   <!-- label shown when there are not site exceptions to show in the site exception settings -->
   <string name="no_site_exceptions">Sin excepcions pa lo puesto</string>
-  <!--
-    text shown before the issuer name to indicate who its verified by, %1$s is the name of
-    the certificate authority that verified the ticket
-  -->
-  <string name="certificate_info_verified_by">Verificau per: %1$s</string>
   <!-- Positive action of a dialog asking to delete -->
   <string name="dialog_delete_positive">Borrar</string>
   <!-- Voice search button content description -->
@@ -1101,13 +1050,4 @@
   <string name="synced_tabs_no_open_tabs">No i hai garra pestanya ubierta</string>
   <!-- Confirmation dialog button text when top sites limit is reached. -->
   <string name="top_sites_max_limit_confirmation_button">Vale, entendiu</string>
-  <!-- Translations feature -->
-
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

@@ -2,25 +2,24 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-#include "gtest/gtest.h"
-#include "gmock/gmock.h"
-
-#include "mozilla/gfx/2D.h"
-#include "mozilla/gfx/Tools.h"
-#include "mozilla/layers/BufferTexture.h"
-#include "mozilla/layers/ImageBridgeChild.h"  // for ImageBridgeChild
-#include "mozilla/layers/TextureClient.h"
-#include "mozilla/layers/TextureHost.h"
-#include "mozilla/RefPtr.h"
+#include "ImageContainer.h"
 #include "gfx2DGlue.h"
 #include "gfxImageSurface.h"
 #include "gfxPlatform.h"
 #include "gfxTypes.h"
-#include "ImageContainer.h"
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/Tools.h"
 #include "mozilla/gtest/MozHelpers.h"
+#include "mozilla/ipc/Shmem.h"
+#include "mozilla/layers/BufferTexture.h"
+#include "mozilla/layers/ImageBridgeChild.h"  // for ImageBridgeChild
 #include "mozilla/layers/ImageDataSerializer.h"
 #include "mozilla/layers/LayersSurfaces.h"
-#include "mozilla/ipc/Shmem.h"
+#include "mozilla/layers/TextureClient.h"
+#include "mozilla/layers/TextureHost.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -142,8 +141,9 @@ void TestTextureClientSurface(TextureClient* texture,
   ASSERT_TRUE(texture->Lock(OpenMode::OPEN_READ_WRITE));
   // client painting
   RefPtr<DrawTarget> dt = texture->BorrowDrawTarget();
-  RefPtr<SourceSurface> source =
-      gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(dt, surface);
+  RefPtr<SourceSurface> source = Factory::CreateWrappingDataSourceSurface(
+      surface->Data(), surface->Stride(), surface->GetSize(),
+      surface->Format());
   dt->CopySurface(source, IntRect(IntPoint(), source->GetSize()), IntPoint());
 
   RefPtr<SourceSurface> snapshot = dt->Snapshot();
@@ -182,8 +182,10 @@ void TestTextureClientYCbCr(TextureClient* client, PlanarYCbCrData& ycbcrData) {
   auto bufferDesc = descriptor.get_SurfaceDescriptorBuffer();
   ASSERT_EQ(bufferDesc.desc().type(), BufferDescriptor::TYCbCrDescriptor);
   auto ycbcrDesc = bufferDesc.desc().get_YCbCrDescriptor();
-  ASSERT_EQ(ycbcrDesc.ySize(), ycbcrData.YDataSize());
-  ASSERT_EQ(ycbcrDesc.cbCrSize(), ycbcrData.CbCrDataSize());
+  const auto sizes = ycbcrData.GetPlaneSizes();
+  ASSERT_TRUE(sizes);
+  ASSERT_EQ(ycbcrDesc.ySize(), sizes->mY);
+  ASSERT_EQ(ycbcrDesc.cbCrSize(), sizes->mCbCr);
   ASSERT_EQ(ycbcrDesc.stereoMode(), ycbcrData.mStereoMode);
 
   // host deserialization
@@ -245,9 +247,14 @@ void TestYCbCrDescriptorTransferFunction(
   clientData.mCbSkip = 0;
   clientData.mCrSkip = 0;
 
+  const auto clientSizes = clientData.GetPlaneSizes();
+  ASSERT_TRUE(clientSizes);
+  ASSERT_EQ(clientSizes->mY, ySurface->GetSize());
+  ASSERT_EQ(clientSizes->mCbCr, cbSurface->GetSize());
+
   RefPtr<TextureClient> client = TextureClient::CreateForYCbCr(
-      aImageBridge, clientData.mPictureRect, clientData.YDataSize(),
-      clientData.mYStride, clientData.CbCrDataSize(), clientData.mCbCrStride,
+      aImageBridge, clientData.mPictureRect, ySurface->GetSize(),
+      clientData.mYStride, cbSurface->GetSize(), clientData.mCbCrStride,
       StereoMode::MONO, ColorDepth::COLOR_8, YUVColorSpace::BT2020,
       ColorRange::LIMITED, aTF, clientData.mChromaSubsampling,
       TextureFlags::DEALLOCATE_CLIENT, aHDRMetadata);
@@ -341,6 +348,12 @@ TEST(Layers, TextureYCbCrSerialization)
   clientData.mCrSkip = 0;
   clientData.mCrSkip = 0;
 
+  const auto clientSizes = clientData.GetPlaneSizes();
+  ASSERT_TRUE(clientSizes);
+  ASSERT_EQ(clientSizes->mY, ySurface->GetSize());
+  ASSERT_EQ(clientSizes->mCbCr, cbSurface->GetSize());
+
+  gfxPlatform::GetPlatform();
   uint32_t namespaceId = 1;
   ImageBridgeChild::InitSameProcess(namespaceId);
 
@@ -363,8 +376,8 @@ TEST(Layers, TextureYCbCrSerialization)
   }
 
   RefPtr<TextureClient> client = TextureClient::CreateForYCbCr(
-      imageBridge, clientData.mPictureRect, clientData.YDataSize(),
-      clientData.mYStride, clientData.CbCrDataSize(), clientData.mCbCrStride,
+      imageBridge, clientData.mPictureRect, ySurface->GetSize(),
+      clientData.mYStride, cbSurface->GetSize(), clientData.mCbCrStride,
       StereoMode::MONO, ColorDepth::COLOR_8, YUVColorSpace::BT601,
       ColorRange::LIMITED, TransferFunction::BT709,
       clientData.mChromaSubsampling, TextureFlags::DEALLOCATE_CLIENT);

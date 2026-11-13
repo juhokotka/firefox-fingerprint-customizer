@@ -2,19 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsLocalFile.h"  // includes platform-specific headers
+#include "nsLocalFileCommon.h"
 
 #include "mozilla/Try.h"
 #include "mozilla/Utf16.h"
-#include "nsString.h"
-#include "nsCOMPtr.h"
-#include "nsReadableUtils.h"
-#include "nsPrintfCString.h"
-#include "nsCRT.h"
-#include "nsNativeCharsetUtils.h"
-#include "nsUTF8Utils.h"
 #include "nsArray.h"
-#include "nsLocalFileCommon.h"
+#include "nsCOMPtr.h"
+#include "nsCRT.h"
+#include "nsLocalFile.h"  // includes platform-specific headers
+#include "nsNativeCharsetUtils.h"
+#include "nsPrintfCString.h"
+#include "nsReadableUtils.h"
+#include "nsString.h"
+#include "nsUTF8Utils.h"
 
 #ifdef XP_WIN
 #  include <string.h>
@@ -42,6 +42,7 @@ const char* const sExecutableExts[] = {
   ".afploc",      // Apple Filing Protocol Location
   ".air",         // Adobe AIR installer
   ".app",         // executable application
+  ".appcontent-ms",
   ".application", // from bug 348763
   ".appref-ms",   // ClickOnce link
   ".appx",
@@ -117,7 +118,8 @@ const char* const sExecutableExts[] = {
   ".scf",         // Windows explorer command
   ".scr",
   ".sct",
-  ".search-ms",  // Windows Saved Search
+  ".search-ms",           // Windows Saved Search
+  ".searchConnector-ms",  // Windows Search Connector
   ".settingcontent-ms",
   ".shb",
   ".shs",

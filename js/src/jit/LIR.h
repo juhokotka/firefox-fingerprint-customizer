@@ -176,13 +176,7 @@ class LAllocation {
                                               ~(KIND_MASK << KIND_SHIFT));
   }
 
-  bool operator==(const LAllocation& other) const {
-    return bits_ == other.bits_;
-  }
-
-  bool operator!=(const LAllocation& other) const {
-    return bits_ != other.bits_;
-  }
+  bool operator==(const LAllocation& other) const = default;
 
   HashNumber hash() const { return bits_; }
 
@@ -200,7 +194,7 @@ class LUse : public LAllocation {
   static const uint32_t POLICY_BITS = 3;
   static const uint32_t POLICY_SHIFT = 0;
   static const uint32_t POLICY_MASK = (1 << POLICY_BITS) - 1;
-#ifdef JS_CODEGEN_ARM64
+#if defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_LOONG64)
   static const uint32_t REG_BITS = 7;
 #else
   static const uint32_t REG_BITS = 6;
@@ -590,7 +584,7 @@ class LDefinition {
     static_assert(MAX_VIRTUAL_REGISTERS <= VREG_MASK);
     bits_ =
         (index << VREG_SHIFT) | (policy << POLICY_SHIFT) | (type << TYPE_SHIFT);
-#ifndef ENABLE_WASM_SIMD
+#ifndef ENABLE_JIT_SIMD
     MOZ_ASSERT(this->type() != SIMD128);
 #endif
   }
@@ -1714,6 +1708,13 @@ class LSafepoint : public TempObject {
   // Wasm only: with what kind of instruction is this LSafepoint associated?
   WasmSafepointKind wasmSafepointKind_;
 
+#ifdef DEBUG
+  // Set once this safepoint has been recorded in the codegen safepoint index.
+  // Used by CodeGeneratorShared::markSafepointAt to detect the "many-to-one"
+  // case (a single LSafepoint recorded at more than one offset) in O(1).
+  bool recordedInSafepointIndices_ = false;
+#endif
+
   // Wasm only: what is the value of masm.framePushed() that corresponds to
   // the lowest-addressed word covered by the StackMap that we will generate
   // from this LSafepoint?  This depends on the instruction:
@@ -1764,6 +1765,13 @@ class LSafepoint : public TempObject {
     assertInvariants();
   }
   const LiveRegisterSet& liveRegs() const { return liveRegs_; }
+#ifdef DEBUG
+  bool recordedInSafepointIndices() const {
+    return recordedInSafepointIndices_;
+  }
+  // A safepoint can be recorded at more than one index.
+  void setRecordedInSafepointIndices() { recordedInSafepointIndices_ = true; }
+#endif
 #ifdef CHECK_OSIPOINT_REGISTERS
   void addClobberedRegister(AnyRegister reg) {
     clobberedRegs_.addUnchecked(reg);
@@ -1773,7 +1781,7 @@ class LSafepoint : public TempObject {
 #endif
   LiveGeneralRegisterSet gcRegs() const { return gcRegs_; }
   [[nodiscard]] bool addGcSlot(bool stack, uint32_t slot) {
-    bool result = gcSlots_.append(SlotEntry(stack, slot));
+    bool result = gcSlots_.emplaceBack(stack, slot);
     if (result) {
       assertInvariants();
     }
@@ -1786,7 +1794,7 @@ class LSafepoint : public TempObject {
     return slotsOrElementsRegs_;
   }
   [[nodiscard]] bool addSlotsOrElementsSlot(bool stack, uint32_t slot) {
-    bool result = slotsOrElementsSlots_.append(SlotEntry(stack, slot));
+    bool result = slotsOrElementsSlots_.emplaceBack(stack, slot);
     if (result) {
       assertInvariants();
     }
@@ -1807,7 +1815,7 @@ class LSafepoint : public TempObject {
     return wasmStructDataRegs_;
   }
   [[nodiscard]] bool addWasmStructDataSlot(bool stack, uint32_t slot) {
-    bool result = wasmStructDataSlots_.append(SlotEntry(stack, slot));
+    bool result = wasmStructDataSlots_.emplaceBack(stack, slot);
     if (result) {
       assertInvariants();
     }
@@ -1828,7 +1836,7 @@ class LSafepoint : public TempObject {
     return wasmArrayDataRegs_;
   }
   [[nodiscard]] bool addWasmArrayDataSlot(bool stack, uint32_t slot) {
-    bool result = wasmArrayDataSlots_.append(SlotEntry(stack, slot));
+    bool result = wasmArrayDataSlots_.emplaceBack(stack, slot);
     if (result) {
       assertInvariants();
     }
@@ -1885,7 +1893,7 @@ class LSafepoint : public TempObject {
   LiveGeneralRegisterSet wasmAnyRefRegs() const { return wasmAnyRefRegs_; }
 
   [[nodiscard]] bool addWasmAnyRefSlot(bool stack, uint32_t slot) {
-    bool result = wasmAnyRefSlots_.append(SlotEntry(stack, slot));
+    bool result = wasmAnyRefSlots_.emplaceBack(stack, slot);
     if (result) {
       assertInvariants();
     }
@@ -1953,7 +1961,7 @@ class LSafepoint : public TempObject {
 
 #elif JS_PUNBOX64
   [[nodiscard]] bool addValueSlot(bool stack, uint32_t slot) {
-    bool result = valueSlots_.append(SlotEntry(stack, slot));
+    bool result = valueSlots_.emplaceBack(stack, slot);
     if (result) {
       assertInvariants();
     }
@@ -2313,11 +2321,11 @@ namespace jit {
 
 #define LIROP(name)                           \
   L##name* LNode::to##name() {                \
-    MOZ_ASSERT(is##name());                   \
+    MOZ_RELEASE_ASSERT(is##name());           \
     return static_cast<L##name*>(this);       \
   }                                           \
   const L##name* LNode::to##name() const {    \
-    MOZ_ASSERT(is##name());                   \
+    MOZ_RELEASE_ASSERT(is##name());           \
     return static_cast<const L##name*>(this); \
   }
 LIR_OPCODE_LIST(LIROP)
@@ -2325,12 +2333,12 @@ LIR_OPCODE_LIST(LIROP)
 
 #define LALLOC_CAST(type)               \
   L##type* LAllocation::to##type() {    \
-    MOZ_ASSERT(is##type());             \
+    MOZ_RELEASE_ASSERT(is##type());     \
     return static_cast<L##type*>(this); \
   }
 #define LALLOC_CONST_CAST(type)                  \
   const L##type* LAllocation::to##type() const { \
-    MOZ_ASSERT(is##type());                      \
+    MOZ_RELEASE_ASSERT(is##type());              \
     return static_cast<const L##type*>(this);    \
   }
 

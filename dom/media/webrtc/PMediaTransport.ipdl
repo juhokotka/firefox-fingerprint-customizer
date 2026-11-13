@@ -4,6 +4,9 @@
 
 include protocol PBackground;
 
+include "mozilla/dom/MediaTransportChild.h";
+include "mozilla/dom/MediaTransportParent.h";
+
 #ifdef MOZ_WEBRTC
 include WebrtcProxyConfig;
 
@@ -40,9 +43,17 @@ struct RTCErrorParams {
   RTCErrorInit errorInit;
   string message;
 };
+
+struct IceCandidateAttributePair {
+  // |candidate:...|-form attribute strings (no leading "a=")
+  // Used by OnConnectionStateChange to pass the currently selected candidate
+  // pair, if one exists.
+  nsCString local;
+  nsCString remote;
+};
 #endif // MOZ_WEBRTC
 
-[ParentProc=Socket, ChildProc=Content]
+[ParentProc=Socket, ChildProc=Content, ParentImpl="mozilla::MediaTransportParent", ChildImpl="mozilla::MediaTransportChild"]
 async protocol PMediaTransport {
 #ifdef MOZ_WEBRTC
 parent:
@@ -93,7 +104,7 @@ parent:
   async AddIceCandidate(string transportId,
                         string candidate,
                         string ufrag,
-                        string obfuscatedAddr);
+                        string resolvedAddress);
 
   async UpdateNetworkState(bool online);
 
@@ -104,7 +115,8 @@ child:
   async OnCandidateError(IceCandidateErrorInfo errorInfo);
   async OnAlpnNegotiated(string alpn);
   async OnGatheringStateChange(string transportId, RTCIceGathererState state);
-  async OnConnectionStateChange(string transportId, RTCIceTransportState state);
+  async OnConnectionStateChange(string transportId, RTCIceTransportState state,
+                                IceCandidateAttributePair? selectedPair);
   async OnPacketReceived(string transportId, MediaPacket packet);
   async OnEncryptedSending(string transportId, MediaPacket packet);
   async OnStateChange(string transportId, TransportLayerState state,

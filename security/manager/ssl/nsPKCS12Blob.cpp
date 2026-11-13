@@ -4,6 +4,7 @@
 
 #include "nsPKCS12Blob.h"
 
+#include "ScopedNSSTypes.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/EndianUtils.h"
 #include "mozilla/Logging.h"
@@ -13,14 +14,13 @@
 #include "nsIFile.h"
 #include "nsIInputStream.h"
 #include "nsIX509CertDB.h"
-#include "nsNetUtil.h"
 #include "nsNSSCertHelper.h"
 #include "nsNSSCertificate.h"
+#include "nsNetUtil.h"
 #include "nsReadableUtils.h"
 #include "nsTArray.h"
 #include "nsThreadUtils.h"
 #include "p12plcy.h"
-#include "ScopedNSSTypes.h"
 #include "secerr.h"
 
 using namespace mozilla;

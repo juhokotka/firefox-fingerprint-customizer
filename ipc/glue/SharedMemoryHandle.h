@@ -23,6 +23,8 @@ struct CommandLineArg;
 
 namespace mozilla::ipc {
 
+struct SharedMemoryInternalTest;  // For gtests.
+
 namespace shared_memory {
 
 enum class Type {
@@ -87,6 +89,9 @@ class HandleBase {
   friend struct mozilla::geckoargs::CommandLineArg<
       mozilla::ipc::shared_memory::ReadOnlyHandle>;
 
+  HandleBase(const HandleBase&) = delete;
+  HandleBase& operator=(const HandleBase&) = delete;
+
  protected:
   HandleBase();
   MOZ_IMPLICIT HandleBase(std::nullptr_t) {}
@@ -97,9 +102,6 @@ class HandleBase {
         mSize(std::exchange(aOther.mSize, 0)) {}
 
   HandleBase& operator=(HandleBase&& aOther);
-
-  HandleBase(const HandleBase&) = delete;
-  HandleBase& operator=(const HandleBase&) = delete;
 
   HandleBase Clone() const;
 
@@ -129,6 +131,8 @@ class HandleBase {
 
   PlatformHandle mHandle = nullptr;
   uint64_t mSize = 0;
+
+  friend SharedMemoryInternalTest;
 };
 
 /**

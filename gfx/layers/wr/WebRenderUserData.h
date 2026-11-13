@@ -6,18 +6,19 @@
 #define GFX_WEBRENDERUSERDATA_H
 
 #include <vector>
+
+#include "DisplayItemClip.h"
+#include "ImageTypes.h"
+#include "ImgDrawResult.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/gfx/DrawEventRecorderTypes.h"
-#include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/image/WebRenderImageProvider.h"
 #include "mozilla/layers/AnimationInfo.h"
 #include "mozilla/layers/LayersTypes.h"
-#include "mozilla/UniquePtr.h"
+#include "mozilla/webrender/WebRenderAPI.h"
 #include "nsIFrame.h"
 #include "nsRefPtrHashtable.h"
 #include "nsTHashSet.h"
-#include "ImageTypes.h"
-#include "ImgDrawResult.h"
-#include "DisplayItemClip.h"
 
 namespace mozilla {
 
@@ -123,9 +124,7 @@ struct WebRenderUserDataKey {
                        WebRenderUserData::UserDataType aType)
       : mFrameKey(aFrameKey), mType(aType) {}
 
-  bool operator==(const WebRenderUserDataKey& other) const {
-    return mFrameKey == other.mFrameKey && mType == other.mType;
-  }
+  bool operator==(const WebRenderUserDataKey& other) const = default;
   PLDHashNumber Hash() const {
     return HashGeneric(
         mFrameKey, static_cast<std::underlying_type_t<decltype(mType)>>(mType));
@@ -332,6 +331,9 @@ class WebRenderMaskData : public WebRenderUserData {
   std::vector<RefPtr<gfx::ScaledFont>> mFonts;
   gfx::DrawEventRecorderPrivate_ExternalSurfacesHolder mExternalSurfaces;
   LayerIntRect mItemRect;
+  // Sub-pixel offset of the item's bounds from mItemRect, which the recorded
+  // alpha is rasterized against.
+  gfx::Point mResidual;
   nsPoint mMaskOffset;
   nsStyleImageLayers mMaskStyle;
   gfx::MatrixScales mScale;

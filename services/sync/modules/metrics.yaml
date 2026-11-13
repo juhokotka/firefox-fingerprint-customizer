@@ -34,8 +34,6 @@ synced_tabs:
           was there a filter enabled
         type: string
     telemetry_mirror: Synced_tabs_Click_FxaAvatarMenu
-    no_lint:
-      - COMMON_PREFIX
 
   click_fxa_app_menu:
     type: event
@@ -49,8 +47,6 @@ synced_tabs:
     expires: never
     extra_keys: *synced_tabs_click_extra
     telemetry_mirror: Synced_tabs_Click_FxaAppMenu
-    no_lint:
-      - COMMON_PREFIX
 
   click_synced_tabs_sidebar:
     type: event
@@ -64,8 +60,6 @@ synced_tabs:
     expires: never
     extra_keys: *synced_tabs_click_extra
     telemetry_mirror: Synced_tabs_Click_SyncedTabsSidebar
-    no_lint:
-      - COMMON_PREFIX
 
 fxa_avatar_menu:
   click_account_settings:
@@ -112,8 +106,6 @@ fxa_avatar_menu:
           "manage_devices" (opened device management).
         type: string
     telemetry_mirror: Fxa_avatar_menu_Click_AccountSettings
-    no_lint:
-      - COMMON_PREFIX
 
   click_cad:
     type: event
@@ -128,8 +120,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_Cad
-    no_lint:
-      - COMMON_PREFIX
 
   click_login:
     type: event
@@ -144,8 +134,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_Login
-    no_lint:
-      - COMMON_PREFIX
 
   click_send_tab:
     type: event
@@ -182,8 +170,6 @@ fxa_avatar_menu:
           "all_devices" (sent to all devices), or "manage_devices" (opened device management).
         type: string
     telemetry_mirror: Fxa_avatar_menu_Click_SendTab
-    no_lint:
-      - COMMON_PREFIX
 
   send_tab_exposed:
     type: event
@@ -214,8 +200,6 @@ fxa_avatar_menu:
         description: >
           Number of connected devices available to send tabs to
         type: string
-    no_lint:
-      - COMMON_PREFIX
 
   send_tab_opened:
     type: event
@@ -227,8 +211,41 @@ fxa_avatar_menu:
     notification_emails: *fxa_avatar_menu_send_tab_emails
     expires: never
     extra_keys: *fxa_avatar_menu_send_tab_extra
-    no_lint:
-      - COMMON_PREFIX
+
+  synced_device_submenu:
+    type: event
+    description: >
+      Recorded when the user opens a submenu for a specific connected device
+      in the FxA avatar menu to open recent tabs and management options.
+    bugs:
+      - https://bugzil.la/2051648
+    data_reviews:
+      - https://bugzil.la/2051648
+    notification_emails:
+      - sync-dev@mozilla.org
+    expires: never
+    extra_keys:
+      fxa_status:
+        description: >
+          The current state of the user. Possible states are "not_configured", "unverified", "signedin" and "login_failed".
+        type: string
+      fxa_avatar:
+        description: >
+          Boolean for whether or not account has set an avatar
+        type: string
+      fxa_sync_on:
+        description: >
+          Boolean for whether or not sync was configured at the time the event fired.
+        type: string
+      device_count:
+        description: >
+          Number of connected devices available to send tabs to
+        type: string
+      device_type:
+        description: >
+          The type of the device whose submenu was opened. Possible values are
+          "mobile" and "desktop".
+        type: string
 
   click_sync_now:
     type: event
@@ -243,8 +260,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_SyncNow
-    no_lint:
-      - COMMON_PREFIX
 
   click_sync_settings:
     type: event
@@ -259,8 +274,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_SyncSettings
-    no_lint:
-      - COMMON_PREFIX
 
   click_sync_tabs:
     type: event
@@ -275,8 +288,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_SyncTabs
-    no_lint:
-      - COMMON_PREFIX
 
   click_sync_tabs_sidebar:
     type: event
@@ -291,8 +302,22 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_SyncTabsSidebar
-    no_lint:
-      - COMMON_PREFIX
+
+  click_view_all_synced_tabs:
+    type: event
+    description: >
+      Recorded when viewing all synced tabs for a device in the avatar menu.
+    bugs:
+      - https://bugzil.la/2040501
+    data_reviews:
+      - https://bugzil.la/2040501
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - asafko@mozilla.com
+      - kpatenio@mozilla.com
+    expires: never
+    extra_keys: *fxa_avatar_menu_click_extra
 
   click_toolbar_icon:
     type: event
@@ -307,8 +332,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_ToolbarIcon
-    no_lint:
-      - COMMON_PREFIX
 
   click_unver_sync_settings:
     type: event
@@ -323,8 +346,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_UnverSyncSettings
-    no_lint:
-      - COMMON_PREFIX
 
   click_open_monitor:
     type: event
@@ -339,8 +360,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_OpenMonitor
-    no_lint:
-      - COMMON_PREFIX
 
   click_open_send:
     type: event
@@ -355,8 +374,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_OpenSend
-    no_lint:
-      - COMMON_PREFIX
 
   click_monitor_cta:
     type: event
@@ -371,8 +388,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_MonitorCta
-    no_lint:
-      - COMMON_PREFIX
 
   click_relay_cta:
     type: event
@@ -387,8 +402,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_RelayCta
-    no_lint:
-      - COMMON_PREFIX
 
   click_vpn_cta:
     type: event
@@ -403,8 +416,6 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_VpnCta
-    no_lint:
-      - COMMON_PREFIX
 
   click_sync_cta:
     type: event
@@ -419,8 +430,172 @@ fxa_avatar_menu:
     expires: never
     extra_keys: *fxa_avatar_menu_click_extra
     telemetry_mirror: Fxa_avatar_menu_Click_SyncCta
-    no_lint:
-      - COMMON_PREFIX
+
+  create_new_profile_submenu:
+    type: event
+    description: >
+      Recorded when a user clicks the Create new profile label in the avatar menu.
+      Label is shown when there are no user created profiles.
+    bugs: &fxa_avatar_menu_profiles_bugs
+      - https://bugzil.la/2051632
+    data_reviews: &fxa_avatar_menu_profiles_data_reviews
+      - https://bugzil.la/2051632
+    notification_emails: &fxa_avatar_menu_profiles_emails
+      - asafko@mozilla.com
+      - kpatenio@mozilla.com
+    expires: never
+    extra_keys: &fxa_avatar_menu_profiles_extra
+      fxa_status:
+        description: >
+          The current state of the user. Possible states are "not_configured", "unverified", "signedin" and "login_failed".
+        type: string
+      fxa_avatar:
+        description: >
+          Boolean for whether or not account has set an avatar
+        type: string
+      fxa_sync_on:
+        description: >
+          Boolean for whether or not sync was configured at the time the event fired.
+        type: string
+
+  sync_your_data_cta:
+    type: event
+    description: >
+      Recorded when a user clicks on the Sync your data label that leads to Sign in and Sync flow.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_extra
+
+  get_firefox_for_mobile_cta:
+    type: event
+    description: >
+      Recorded when a user clicks on the Get Firefox for mobile label in the avatar menu.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_extra
+
+  create_new_profile_cta_button:
+    type: event
+    description: >
+      Recorded when a user clicks on the Create new profile button in the profile submenu.
+      Button is shown when there are no user created profiles.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: &fxa_avatar_menu_profiles_count_extra
+      <<: *fxa_avatar_menu_profiles_extra
+      profile_count:
+        description: >
+          Number of profiles the user has when the event is recorded. This is
+          0 for a user who has not created a profile group yet, which is
+          distinct from a user who has a single profile.
+        type: quantity
+
+  what_are_profiles:
+    type: event
+    description: >
+      Recorded when a user clicks on the What are profiles label in the profile submenu.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_count_extra
+
+  manage_primary_profile:
+    type: event
+    description: >
+      Recorded when a user clicks on the primary profile to manage it in the avatar menu.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_extra
+
+  launch_secondary_profile:
+    type: event
+    description: >
+      Recorded when a user launches a secondary profile from the avatar menu.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_extra
+
+  edit_primary_profile:
+    type: event
+    description: >
+      Recorded when a user clicks the Edit this profile label in the profile submenu.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_count_extra
+
+  copy_primary_profile:
+    type: event
+    description: >
+      Recorded when a user clicks on Copy this profile label in the profile submenu.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_count_extra
+
+  manage_profiles:
+    type: event
+    description: >
+      Recorded when a user clicks on the Manage profiles label in the profile submenu.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_count_extra
+
+  create_new_profile_cta_label:
+    type: event
+    description: >
+      Recorded when a user clicks on the Create new profile label in the profile submenu.
+      Label is shown when there is at least one user created profile.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_count_extra
+
+  view_all_profiles:
+    type: event
+    description: >
+      Recorded when a user clicks the All profiles label in the avatar menu.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_count_extra
+
+  manage_all_profiles:
+    type: event
+    description: >
+      Recorded when a user clicks the Manage profiles label in the all profiles submenu.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_count_extra
+
+  launch_secondary_profile_all_profiles:
+    type: event
+    description: >
+      Recorded when a user clicks a secondary profile in the all profiles submenu.
+    bugs: *fxa_avatar_menu_profiles_bugs
+    data_reviews: *fxa_avatar_menu_profiles_data_reviews
+    notification_emails: *fxa_avatar_menu_profiles_emails
+    expires: never
+    extra_keys: *fxa_avatar_menu_profiles_count_extra
 
 fxa_app_menu:
   click_account_settings:
@@ -465,8 +640,6 @@ fxa_app_menu:
           "manage_devices" (opened device management).
         type: string
     telemetry_mirror: Fxa_app_menu_Click_AccountSettings
-    no_lint:
-      - COMMON_PREFIX
 
   click_cad:
     type: event
@@ -481,8 +654,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_Cad
-    no_lint:
-      - COMMON_PREFIX
 
   click_login:
     type: event
@@ -497,8 +668,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_Login
-    no_lint:
-      - COMMON_PREFIX
 
   click_send_tab:
     type: event
@@ -535,8 +704,6 @@ fxa_app_menu:
           "all_devices" (sent to all devices), or "manage_devices" (opened device management).
         type: string
     telemetry_mirror: Fxa_app_menu_Click_SendTab
-    no_lint:
-      - COMMON_PREFIX
 
   send_tab_exposed:
     type: event
@@ -567,8 +734,6 @@ fxa_app_menu:
         description: >
           Number of connected devices available to send tabs to
         type: string
-    no_lint:
-      - COMMON_PREFIX
 
   send_tab_opened:
     type: event
@@ -580,8 +745,6 @@ fxa_app_menu:
     notification_emails: *fxa_app_menu_send_tab_emails
     expires: never
     extra_keys: *fxa_app_menu_send_tab_extra
-    no_lint:
-      - COMMON_PREFIX
 
   click_sync_now:
     type: event
@@ -596,8 +759,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_SyncNow
-    no_lint:
-      - COMMON_PREFIX
 
   click_sync_settings:
     type: event
@@ -612,8 +773,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_SyncSettings
-    no_lint:
-      - COMMON_PREFIX
 
   click_sync_tabs:
     type: event
@@ -628,8 +787,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_SyncTabs
-    no_lint:
-      - COMMON_PREFIX
 
   click_sync_tabs_sidebar:
     type: event
@@ -644,8 +801,22 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_SyncTabsSidebar
-    no_lint:
-      - COMMON_PREFIX
+
+  click_view_all_synced_tabs:
+    type: event
+    description: >
+      Recorded when viewing all synced tabs for a device in the app menu.
+    bugs:
+      - https://bugzil.la/2040501
+    data_reviews:
+      - https://bugzil.la/2040501
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - asafko@mozilla.com
+      - kpatenio@mozilla.com
+    expires: never
+    extra_keys: *fxa_app_menu_click_extra
 
   click_toolbar_icon:
     type: event
@@ -660,8 +831,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_ToolbarIcon
-    no_lint:
-      - COMMON_PREFIX
 
   click_unver_sync_settings:
     type: event
@@ -676,8 +845,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_UnverSyncSettings
-    no_lint:
-      - COMMON_PREFIX
 
   click_open_monitor:
     type: event
@@ -692,8 +859,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_OpenMonitor
-    no_lint:
-      - COMMON_PREFIX
 
   click_open_send:
     type: event
@@ -708,8 +873,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_OpenSend
-    no_lint:
-      - COMMON_PREFIX
 
   click_monitor_cta:
     type: event
@@ -724,8 +887,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_MonitorCta
-    no_lint:
-      - COMMON_PREFIX
 
   click_relay_cta:
     type: event
@@ -740,8 +901,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_RelayCta
-    no_lint:
-      - COMMON_PREFIX
 
   click_vpn_cta:
     type: event
@@ -756,8 +915,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_VpnCta
-    no_lint:
-      - COMMON_PREFIX
 
   click_sync_cta:
     type: event
@@ -772,8 +929,6 @@ fxa_app_menu:
     expires: never
     extra_keys: *fxa_app_menu_click_extra
     telemetry_mirror: Fxa_app_menu_Click_SyncCta
-    no_lint:
-      - COMMON_PREFIX
 
 tab_context_menu:
   send_tab_exposed:
@@ -793,8 +948,6 @@ tab_context_menu:
         description: >
           Number of connected devices available to send tabs to
         type: string
-    no_lint:
-      - COMMON_PREFIX
 
   send_tab_opened:
     type: event
@@ -806,8 +959,6 @@ tab_context_menu:
     notification_emails: *tab_context_menu_send_tab_emails
     expires: never
     extra_keys: *tab_context_menu_send_tab_extra
-    no_lint:
-      - COMMON_PREFIX
 
   click_send_tab:
     type: event
@@ -829,8 +980,6 @@ tab_context_menu:
           The action selected by the user. Possible values are "device" (sent to specific device),
           "all_devices" (sent to all devices), or "manage_devices" (opened device management).
         type: string
-    no_lint:
-      - COMMON_PREFIX
 
 page_context_menu:
   send_tab_exposed:
@@ -854,8 +1003,6 @@ page_context_menu:
         description: >
           The type of content being sent. Possible values are "link" or "page".
         type: string
-    no_lint:
-      - COMMON_PREFIX
 
   send_tab_opened:
     type: event
@@ -867,8 +1014,6 @@ page_context_menu:
     notification_emails: *page_context_menu_send_tab_emails
     expires: never
     extra_keys: *page_context_menu_send_tab_extra
-    no_lint:
-      - COMMON_PREFIX
 
   click_send_tab:
     type: event
@@ -894,8 +1039,6 @@ page_context_menu:
           The action selected by the user. Possible values are "device" (sent to specific device),
           "all_devices" (sent to all devices), or "manage_devices" (opened device management).
         type: string
-    no_lint:
-      - COMMON_PREFIX
 
 send_tab_toolbar:
   send_tab_opened:
@@ -957,8 +1100,6 @@ firefoxview:
         description: >
           Number of connected devices available to send tabs to
         type: string
-    no_lint:
-      - COMMON_PREFIX
 
   send_tab_opened:
     type: event
@@ -970,8 +1111,6 @@ firefoxview:
     notification_emails: *firefoxview_send_tab_emails
     expires: never
     extra_keys: *firefoxview_send_tab_extra
-    no_lint:
-      - COMMON_PREFIX
 
   click_send_tab:
     type: event
@@ -993,8 +1132,6 @@ firefoxview:
           The action selected by the user. Possible values are "device" (sent to specific device),
           "all_devices" (sent to all devices), or "manage_devices" (opened device management).
         type: string
-    no_lint:
-      - COMMON_PREFIX
 
 deletion.request:
   sync_device_id:
@@ -1062,8 +1199,6 @@ sync:
       - sync-dev@mozilla.org
     expires: never
     telemetry_mirror: WEAVE_DEVICE_COUNT_DESKTOP
-    no_lint:
-      - COMMON_PREFIX
 
   device_count_mobile:
     type: custom_distribution
@@ -1085,8 +1220,6 @@ sync:
       - sync-dev@mozilla.org
     expires: never
     telemetry_mirror: WEAVE_DEVICE_COUNT_MOBILE
-    no_lint:
-      - COMMON_PREFIX
 
   maintenance_fix_bookmarks:
     type: event

@@ -39,6 +39,8 @@ skip-if = [
 
 ["browser_aboutprofiling-threads.js"]
 
+["browser_devtools-close.js"]
+
 ["browser_devtools-interrupted.js"]
 
 ["browser_devtools-onboarding.js"]

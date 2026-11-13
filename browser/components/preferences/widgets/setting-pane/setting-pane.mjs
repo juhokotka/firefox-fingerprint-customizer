@@ -5,6 +5,7 @@
 import { html } from "chrome://global/content/vendor/lit.all.mjs";
 import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
 import { SettingPaneManager } from "chrome://browser/content/preferences/config/SettingPaneManager.mjs";
+import { SettingGroupManager } from "chrome://browser/content/preferences/config/SettingGroupManager.mjs";
 
 /**
  * @import { MozPageHeader } from "chrome://global/content/elements/moz-page-header.mjs"
@@ -12,17 +13,19 @@ import { SettingPaneManager } from "chrome://browser/content/preferences/config/
 
 /**
  * Whether the sub-pane back arrow should call `history.back()` (and let
- * the browser restore the parent pane's saved scroll position) instead of
- * doing a fresh navigation. True when the previous history entry is the
- * current sub-pane's parent; false when the sub-pane was loaded directly
- * (e.g. via the URL bar).
+ * the browser restore the previous entry's saved scroll position and
+ * search state) instead of doing a fresh navigation. True when the
+ * previous history entry is the sub-pane's parent, or when it's the
+ * search-results view the user drilled in from. False when the sub-pane
+ * was loaded directly (e.g. via the URL bar).
  *
  * @param {Window} win
  * @param {string} parentCategory The friendly id of this sub-pane's parent.
  * @returns {boolean}
  */
 function shouldGoBackToParent(win, parentCategory) {
-  if (win.history.state?.previousCategory !== parentCategory) {
+  let prev = win.history.state?.previousCategory;
+  if (prev !== parentCategory && prev !== "searchResults") {
     return false;
   }
   // Defense in depth: confirm with the Navigation API where available. If
@@ -41,7 +44,6 @@ function shouldGoBackToParent(win, parentCategory) {
  * @property {"beta" | "new"} [badge] Badge type to display in the page header.
  * @property {() => boolean} [visible] If this pane is visible.
  * @property {string} [replaces] ID of legacy pane getting replaced by new pane.
- * @property {boolean} [showRedesignPromo] Whether the settings redesign promo should show.
  *
  * @typedef {string} SettingPaneId
  * @typedef {SettingPaneConfig & { id: SettingPaneId }} SettingPaneFullConfig
@@ -52,7 +54,6 @@ export class SettingPane extends MozLitElement {
     name: { type: String },
     isSubPane: { type: Boolean },
     config: { type: Object },
-    showRedesignPromo: { type: Boolean, attribute: false },
     onSearchPane: { type: Boolean, reflect: true },
     initialized: { type: Boolean, state: true },
   };
@@ -74,8 +75,6 @@ export class SettingPane extends MozLitElement {
     this.isSubPane = false;
     /** @type {SettingPaneFullConfig} */
     this.config = undefined;
-    /** @type {boolean} */
-    this.showRedesignPromo = false;
     /**
      * True while this pane is rendered as part of a search result. When set,
      * the pane's heading is rendered one level deeper so the "Search results"
@@ -123,24 +122,12 @@ export class SettingPane extends MozLitElement {
     }
   }
 
-  /**
-   * When any of the setting redesign promos (across all setting panes) is dismissed.
-   */
-  #onAnySettingsRedesignPromoDismissClick = () => {
-    this.showRedesignPromo = false;
-  };
-
   connectedCallback() {
     super.connectedCallback();
 
     this.handleVisibility();
 
     document.addEventListener("paneshown", this.handlePaneShown);
-
-    document.addEventListener(
-      "settings-redesign-promo-dismiss",
-      this.#onAnySettingsRedesignPromoDismissClick
-    );
 
     this.setAttribute("data-category", this.name);
     this.hidden = true;
@@ -154,10 +141,6 @@ export class SettingPane extends MozLitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener("paneshown", this.handlePaneShown);
-    document.removeEventListener(
-      "settings-redesign-promo-dismiss",
-      this.#onAnySettingsRedesignPromoDismissClick
-    );
   }
 
   /**
@@ -197,8 +180,12 @@ export class SettingPane extends MozLitElement {
       `${this.config.id}-pane-loaded`
     );
 
+    // Skip groups not yet registered, like the Home groups. A setting-group
+    // initializes itself only when its config is registered (bug 2051119).
     for (let groupId of this.config.groupIds) {
-      window.initSettingGroup(groupId);
+      if (SettingGroupManager.has(groupId)) {
+        window.initSettingGroup(groupId);
+      }
     }
   }
 
@@ -234,43 +221,11 @@ export class SettingPane extends MozLitElement {
     </moz-breadcrumb-group>`;
   }
 
-  onDismiss() {
-    const event = new CustomEvent("settings-redesign-promo-dismiss", {
-      bubbles: true,
-      composed: true,
-    });
-    this.dispatchEvent(event);
-  }
-
-  /**
-   * Shows the settings redesign promo if user hasn't dismissed it.
-   * Suppressed while the pane is displayed as a search result so the
-   * promo doesn't repeat above every matching pane.
-   */
-  settingsRedesignPromoTemplate() {
-    if (!this.showRedesignPromo || this.onSearchPane) {
-      return "";
-    }
-
-    return html`<moz-promo
-      data-l10n-id="settings-redesign-promo"
-      class="settings-redesign-promo"
-    >
-      <moz-button
-        slot="actions"
-        data-l10n-id="settings-redesign-promo-dismiss-button"
-        type="primary"
-        @click=${this.onDismiss}
-      ></moz-button>
-    </moz-promo>`;
-  }
-
   render() {
     if (!this.initialized) {
       return "";
     }
     return html`
-      ${this.settingsRedesignPromoTemplate()}
       <section>
         <moz-page-header
           data-l10n-id=${this.config.l10nId}

@@ -4,20 +4,19 @@
 
 //! Generic types for CSS values related to length.
 
+use crate::Zero;
 use crate::derives::*;
 use crate::logical_geometry::PhysicalSide;
 use crate::parser::{Parse, ParserContext};
+use crate::values::DashedIdent;
 use crate::values::computed::position::TryTacticAdjustment;
+use crate::values::generics::Optional;
 use crate::values::generics::box_::PositionProperty;
 use crate::values::generics::position::TreeScoped;
-use crate::values::generics::Optional;
-use crate::values::DashedIdent;
-use crate::Zero;
 use cssparser::Parser;
 use std::fmt::Write;
 use style_derive::Animate;
 use style_traits::ParseError;
-use style_traits::StyleParseErrorKind;
 use style_traits::ToCss;
 use style_traits::{CssWriter, SpecifiedValueInfo};
 
@@ -64,14 +63,11 @@ impl<LengthPercentage> LengthPercentageOrAuto<LengthPercentage> {
     }
 
     /// A helper function to parse this with quirks or not and so forth.
-    pub fn parse_with<'i, 't>(
+    pub fn parse_with(
         context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-        parser: impl FnOnce(
-            &ParserContext,
-            &mut Parser<'i, 't>,
-        ) -> Result<LengthPercentage, ParseError<'i>>,
-    ) -> Result<Self, ParseError<'i>> {
+        input: &mut Parser,
+        parser: impl FnOnce(&ParserContext, &mut Parser) -> Result<LengthPercentage, ParseError>,
+    ) -> Result<Self, ParseError> {
         if input.try_parse(|i| i.expect_ident_matching("auto")).is_ok() {
             return Ok(LengthPercentageOrAuto::Auto);
         }
@@ -129,10 +125,7 @@ impl<LengthPercentage: Zero> Zero for LengthPercentageOrAuto<LengthPercentage> {
 }
 
 impl<LengthPercentage: Parse> Parse for LengthPercentageOrAuto<LengthPercentage> {
-    fn parse<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
+    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ParseError> {
         Self::parse_with(context, input, LengthPercentage::parse)
     }
 }
@@ -189,18 +182,23 @@ where
 {
     fn collect_completion_keywords(f: style_traits::KeywordsCollectFn) {
         LengthPercent::collect_completion_keywords(f);
-        f(&["auto", "fit-content", "max-content", "min-content"]);
+        f(&[
+            "auto",
+            "fit-content",
+            "max-content",
+            "min-content",
+        ]);
+        if crate::pref!("layout.css.anchor-positioning.enabled", gecko = true) {
+            f(&["anchor-size"]);
+        }
         if cfg!(feature = "gecko") {
             f(&["-moz-available"]);
         }
-        if static_prefs::pref!("layout.css.stretch-size-keyword.enabled") {
+        if crate::pref!("layout.css.stretch-size-keyword.enabled") {
             f(&["stretch"]);
         }
-        if static_prefs::pref!("layout.css.webkit-fill-available.enabled") {
+        if crate::pref!("layout.css.webkit-fill-available.enabled") {
             f(&["-webkit-fill-available"]);
-        }
-        if static_prefs::pref!("layout.css.anchor-positioning.enabled") {
-            f(&["anchor-size"]);
         }
     }
 }
@@ -268,18 +266,21 @@ where
 {
     fn collect_completion_keywords(f: style_traits::KeywordsCollectFn) {
         LP::collect_completion_keywords(f);
-        f(&["none", "fit-content", "max-content", "min-content"]);
+        f(&[
+            "none",
+            "fit-content",
+            "max-content",
+            "min-content",
+            "anchor-size",
+        ]);
         if cfg!(feature = "gecko") {
             f(&["-moz-available"]);
         }
-        if static_prefs::pref!("layout.css.stretch-size-keyword.enabled") {
+        if crate::pref!("layout.css.stretch-size-keyword.enabled") {
             f(&["stretch"]);
         }
-        if static_prefs::pref!("layout.css.webkit-fill-available.enabled") {
+        if crate::pref!("layout.css.webkit-fill-available.enabled") {
             f(&["-webkit-fill-available"]);
-        }
-        if static_prefs::pref!("layout.css.anchor-positioning.enabled") {
-            f(&["anchor-size"]);
         }
     }
 }
@@ -366,6 +367,43 @@ pub enum GenericLengthPercentageOrNormal<LengthPercent> {
 }
 
 pub use self::GenericLengthPercentageOrNormal as LengthPercentageOrNormal;
+
+/// A generic `normal | <length-percentage> | infinite` value, as used by `fit-tolerance`.
+#[derive(
+    Animate,
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    MallocSizeOf,
+    Parse,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToAnimatedValue,
+    ToAnimatedZero,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
+    ToTyped,
+)]
+#[repr(C, u8)]
+#[allow(missing_docs)]
+pub enum GenericFitTolerance<LengthPercent> {
+    Normal,
+    LengthPercentage(LengthPercent),
+    Infinite,
+}
+
+pub use self::GenericFitTolerance as FitTolerance;
+
+impl<LengthPercent> FitTolerance<LengthPercent> {
+    /// Returns the normal value.
+    #[inline]
+    pub fn normal() -> Self {
+        FitTolerance::Normal
+    }
+}
 
 impl<LengthPercent> LengthPercentageOrNormal<LengthPercent> {
     /// Returns the normal value.
@@ -454,13 +492,7 @@ impl<Fallback> Parse for GenericAnchorSizeFunction<Fallback>
 where
     Fallback: Parse,
 {
-    fn parse<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
-        if !static_prefs::pref!("layout.css.anchor-positioning.enabled") {
-            return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
-        }
+    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ParseError> {
         input.expect_function_matching("anchor-size")?;
         Self::parse_inner(context, input, |i| Fallback::parse(context, i))
     }
@@ -494,13 +526,13 @@ impl<'a, LengthPercentage> AnchorResolutionResult<'a, LengthPercentage> {
 
 impl<LengthPercentage> GenericAnchorSizeFunction<LengthPercentage> {
     /// Parse the inner part of `anchor-size()`, after the parser has consumed "anchor-size(".
-    pub fn parse_inner<'i, 't, F>(
+    pub fn parse_inner<F>(
         context: &ParserContext,
-        input: &mut Parser<'i, 't>,
+        input: &mut Parser,
         f: F,
-    ) -> Result<Self, ParseError<'i>>
+    ) -> Result<Self, ParseError>
     where
-        F: FnOnce(&mut Parser<'i, '_>) -> Result<LengthPercentage, ParseError<'i>>,
+        F: FnOnce(&mut Parser) -> Result<LengthPercentage, ParseError>,
     {
         input.parse_nested_block(|i| {
             let mut target_element = i
@@ -525,7 +557,7 @@ impl<LengthPercentage> GenericAnchorSizeFunction<LengthPercentage> {
                 .ok();
             Ok(GenericAnchorSizeFunction {
                 target_element: TreeScoped::with_default_level(target_element),
-                size: size.into(),
+                size,
                 fallback: fallback.into(),
             })
         })
@@ -636,7 +668,7 @@ where
     fn collect_completion_keywords(f: style_traits::KeywordsCollectFn) {
         LP::collect_completion_keywords(f);
         f(&["auto"]);
-        if static_prefs::pref!("layout.css.anchor-positioning.enabled") {
+        if crate::pref!("layout.css.anchor-positioning.enabled", gecko = true) {
             f(&["anchor-size"]);
         }
     }

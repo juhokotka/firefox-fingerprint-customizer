@@ -737,6 +737,7 @@ fn sanity_check_sdp_session(session: &SdpSession) -> Result<(), SdpParserError> 
                         ));
                     }
                 }
+                SdpFormatList::Unknown(_) => {} // Unknown formats are unparsed
             }
         }
 
@@ -896,7 +897,7 @@ pub fn parse_sdp(sdp: &str, fail_on_warning: bool) -> Result<SdpSession, SdpPars
     session.warnings = warnings;
 
     for warning in &session.warnings {
-        warn!("Warning: {}", &warning);
+        warn!("Warning: {}", warning);
     }
 
     Ok(session)

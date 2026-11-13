@@ -12,9 +12,9 @@
 
 #include <stddef.h>  // for size_t
 
+#include <algorithm>
 #include <new>  // for placement new
 #include <utility>
-#include <algorithm>
 
 #include "mozilla/Assertions.h"
 #include "mozilla/OperatorNewExtensions.h"
@@ -145,7 +145,6 @@ class MOZ_NON_PARAM MaybeOneOf {
     return std::forward<Func>(aFunc)(as<T2>());
   }
 
- private:
   MaybeOneOf(const MaybeOneOf& aOther) = delete;
   const MaybeOneOf& operator=(const MaybeOneOf& aOther) = delete;
 };

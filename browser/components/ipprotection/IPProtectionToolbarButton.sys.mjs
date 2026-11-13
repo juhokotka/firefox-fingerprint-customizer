@@ -9,10 +9,10 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   CustomizableUI:
     "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
-  IPPExceptionsManager:
-    "moz-src:///toolkit/components/ipprotection/IPPExceptionsManager.sys.mjs",
   IPPPrincipalRules:
-    "moz-src:///toolkit/components/ipprotection/IPPExceptionsManager.sys.mjs",
+    "moz-src:///toolkit/components/ipprotection/IPPSiteRuleManager.sys.mjs",
+  IPPSiteRuleManager:
+    "moz-src:///toolkit/components/ipprotection/IPPSiteRuleManager.sys.mjs",
   IPPProxyManager:
     "moz-src:///toolkit/components/ipprotection/IPPProxyManager.sys.mjs",
   IPProtectionService:
@@ -22,8 +22,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ERRORS: "moz-src:///toolkit/components/ipprotection/IPPProxyManager.sys.mjs",
 });
 
-const OPENED_WITH_LOCATION_PREF =
-  "browser.ipProtection.openedPanelWithLocation";
+import { getSitePrincipal } from "chrome://browser/content/ipprotection/ipprotection-utils.mjs";
 
 XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
@@ -34,9 +33,9 @@ XPCOMUtils.defineLazyPreferenceGetter(
 
 XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
-  "siteExceptionsHintsPref",
-  "browser.ipProtection.siteExceptionsHintsEnabled",
-  true
+  "siteInclusionsFeaturePref",
+  "browser.ipProtection.features.siteInclusions",
+  false
 );
 
 /**
@@ -54,11 +53,29 @@ export class IPProtectionToolbarButton {
   #progressListener = null;
   #widgetId = null;
   #previousIsExcluded = null;
-  #prefObserver = null;
+  #previousIsIncluded = null;
   #visitedExcludedSites = new Set();
+  #visitedIncludedSites = new Set();
+  // Origin of an included site navigated to while the proxy was activating,
+  // so the hint can be shown once the connection is active.
+  #pendingIncludedSiteOrigin = null;
 
-  static CONFIRMATION_HINT_MESSAGE_ID =
+  static EXCLUDED_CONFIRMATION_HINT_MESSAGE_ID =
     "confirmation-hint-ipprotection-navigated-to-excluded-site";
+  static INCLUDED_CONFIRMATION_HINT_MESSAGE_ID =
+    "confirmation-hint-ipprotection-navigated-to-included-site";
+
+  // Non-default icon states rendered as always-painted overlay layers in the
+  // toolbar so switching states never triggers a fresh image decode
+  // (bug 2034698). The default "off" state is the base .toolbarbutton-icon.
+  static ICON_LAYER_STATES = [
+    "on",
+    "network-error",
+    "error",
+    "excluded",
+    "included",
+    "paused",
+  ];
 
   /**
    * Gets the gBrowser from the weak reference to the window.
@@ -84,13 +101,13 @@ export class IPProtectionToolbarButton {
 
   /**
    * Gets the value of the pref
-   * browser.ipProtection.siteExceptionsHintsEnabled.
+   * browser.ipProtection.features.siteInclusions.
    *
    * @returns {boolean}
-   *  True if confirmation hints for site exceptions are enabled, false otherwise.
+   *  True if site inclusions support is enabled, false otherwise.
    */
-  get isExceptionsHintsEnabled() {
-    return lazy.siteExceptionsHintsPref;
+  get isInclusionsFeatureEnabled() {
+    return lazy.siteInclusionsFeaturePref;
   }
 
   /**
@@ -122,17 +139,18 @@ export class IPProtectionToolbarButton {
       "IPPProxyManager:StateChanged",
       this.handleEvent
     );
-    lazy.IPPExceptionsManager.addEventListener(
-      "IPPExceptionsManager:ExclusionChanged",
+    lazy.IPPProxyManager.addEventListener(
+      "IPPProxyManager:ModeChanged",
+      this.handleEvent
+    );
+    lazy.IPPSiteRuleManager.addEventListener(
+      "SiteRuleManager:RuleChanged",
       this.handleEvent
     );
 
     if (this.gBrowser?.tabContainer) {
       this.gBrowser.tabContainer.addEventListener("TabSelect", this);
     }
-
-    this.#prefObserver = { observe: () => this.#updateBadge() };
-    Services.prefs.addObserver(OPENED_WITH_LOCATION_PREF, this.#prefObserver);
 
     if (toolbaritem) {
       toolbaritem.classList.add("subviewbutton-nav"); // adds the right arrow in overflow menu
@@ -172,7 +190,10 @@ export class IPProtectionToolbarButton {
         const isReload =
           aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_RELOAD;
 
-        this.updateState(null, { showConfirmationHint: !isReload });
+        this.updateState(null, {
+          showConfirmationHint: !isReload,
+          isNavigation: true,
+        });
       },
     };
 
@@ -189,23 +210,27 @@ export class IPProtectionToolbarButton {
     if (
       event.type !== "IPProtectionService:StateChanged" &&
       event.type !== "IPPProxyManager:StateChanged" &&
-      event.type !== "IPPExceptionsManager:ExclusionChanged" &&
+      event.type !== "IPPProxyManager:ModeChanged" &&
+      event.type !== "SiteRuleManager:RuleChanged" &&
       event.type !== "TabSelect"
     ) {
       return;
     }
 
-    let exclusionChanged =
-      event.type === "IPPExceptionsManager:ExclusionChanged";
+    let ruleChanged = event.type === "SiteRuleManager:RuleChanged";
 
     if (
       event.type === "IPPProxyManager:StateChanged" &&
       lazy.IPPProxyManager.state !== lazy.IPPProxyStates.ACTIVE
     ) {
       this.#visitedExcludedSites.clear();
+      this.#visitedIncludedSites.clear();
     }
 
-    this.updateState(null, { showConfirmationHint: !exclusionChanged });
+    this.updateState(null, {
+      showConfirmationHint: !ruleChanged,
+      isNavigation: event.type === "TabSelect",
+    });
   }
 
   /**
@@ -228,7 +253,10 @@ export class IPProtectionToolbarButton {
    * @param {object} [options]
    *  Optional options object
    * @param {boolean} [options.showConfirmationHint=true]
-   *  Whether to show confirmation hints for navigation to excluded sites
+   *  Whether to show confirmation hints for navigation to excluded or
+   *  included sites
+   * @param {boolean} [options.isNavigation=false]
+   *  Whether the update is caused by a location change or tab switch
    * @param {string} [options.error=undefined]
    *  Error type to show.
    */
@@ -247,16 +275,25 @@ export class IPProtectionToolbarButton {
       return;
     }
 
-    let principal = this.gBrowser?.contentPrincipal;
+    let principal = getSitePrincipal(this.gBrowser);
     // Only surface an exclusion for pages the user can manage (normal content
-    // pages), matching the panel: about:/system pages are never shown excluded.
+    // pages), matching the panel: about:/chrome:/system pages are never shown
+    // excluded.
     let isExcluded =
       !!principal &&
-      lazy.IPPExceptionsManager.canManage(principal) &&
-      lazy.IPPExceptionsManager.getPrincipalRule(principal) ===
+      lazy.IPPSiteRuleManager.canManage(principal) &&
+      lazy.IPPSiteRuleManager.getRule(principal) ===
         lazy.IPPPrincipalRules.EXCLUDED;
-
-    let isActive = lazy.IPPProxyManager.state === lazy.IPPProxyStates.ACTIVE;
+    let isIncluded =
+      !!principal &&
+      lazy.IPPSiteRuleManager.canManage(principal) &&
+      lazy.IPPSiteRuleManager.getRule(principal) ===
+        lazy.IPPPrincipalRules.INCLUDED;
+    let isActive = lazy.IPPProxyManager.isDefaultModeActive;
+    let isProxyActive =
+      lazy.IPPProxyManager.state === lazy.IPPProxyStates.ACTIVE;
+    let isProxyActivating =
+      lazy.IPPProxyManager.state === lazy.IPPProxyStates.ACTIVATING;
     let isPaused = lazy.IPPProxyManager.state === lazy.IPPProxyStates.PAUSED;
 
     // Show error icon when proxy manager is in ERROR state.
@@ -273,8 +310,12 @@ export class IPProtectionToolbarButton {
     if (showConfirmationHint) {
       this.updateConfirmationHint(win.ConfirmationHint, toolbaritem, {
         isActive,
+        isProxyActive,
+        isProxyActivating,
+        isNavigation: !!options.isNavigation,
         isError,
         isExcluded,
+        isIncluded,
       });
     }
 
@@ -283,6 +324,7 @@ export class IPProtectionToolbarButton {
     // the previous state if not a null principal.
     if (principal && !principal.isNullPrincipal) {
       this.#previousIsExcluded = isExcluded;
+      this.#previousIsIncluded = isIncluded;
     }
 
     this.updateIconStatus(toolbaritem, {
@@ -290,6 +332,7 @@ export class IPProtectionToolbarButton {
       isError,
       isNetworkError,
       isExcluded,
+      isIncluded,
       isPaused,
     });
 
@@ -310,16 +353,14 @@ export class IPProtectionToolbarButton {
       return;
     }
 
-    let everOpenedPanel = Services.prefs.getBoolPref(
-      OPENED_WITH_LOCATION_PREF,
-      false
-    );
+    // Disabling notification until there is a new feature- Bug 2057313
+    let newFeatureRelease = false;
 
     let inPalette = !lazy.CustomizableUI.getPlacementOfWidget(this.#widgetId);
 
     let badge = toolbaritem.querySelector(".toolbarbutton-badge");
 
-    if (everOpenedPanel || inPalette) {
+    if (!newFeatureRelease || inPalette) {
       toolbaritem.removeAttribute("badged");
       badge?.classList.remove("feature-callout");
     } else {
@@ -329,11 +370,14 @@ export class IPProtectionToolbarButton {
   }
 
   /**
-   * Shows a confirmation hint after navigating from a
-   * protected site to an excluded site while the VPN is on.
-   * Ignore the message if there is an error, if the VPN is off,
-   * or if we already showed the message for a site during the
-   * VPN session.
+   * Shows a confirmation hint after navigating to a site with a site rule:
+   * - from a protected site to an excluded site while the VPN is on.
+   * - from an unprotected site to an included site while the VPN is off
+   *   and the proxy is connected for included sites only. If the proxy is
+   *   still activating during a navigation, the hint is deferred until it is
+   *   active.
+   * Ignore the message if there is an error, or if we already showed the
+   * message for a site during the VPN session.
    *
    * @param {object} confirmationHint
    *  The current window's confirmation hint instance
@@ -345,40 +389,70 @@ export class IPProtectionToolbarButton {
   updateConfirmationHint(
     confirmationHint,
     toolbaritem,
-    status = { isActive: false, isError: false, isExcluded: false }
+    status = {
+      isActive: false,
+      isProxyActive: false,
+      isProxyActivating: false,
+      isNavigation: false,
+      isError: false,
+      isExcluded: false,
+      isIncluded: false,
+    }
   ) {
-    if (!confirmationHint) {
+    let siteOrigin = getSitePrincipal(this.gBrowser)?.origin;
+    let isPendingIncludedSite =
+      !!siteOrigin && this.#pendingIncludedSiteOrigin === siteOrigin;
+    this.#pendingIncludedSiteOrigin = null;
+
+    if (!confirmationHint || status.isError || !siteOrigin) {
       return;
     }
 
-    let exceptionsPrefsEnabled =
-      this.isExceptionsFeatureEnabled && this.isExceptionsHintsEnabled;
-
-    const canShowConfirmationHint =
-      exceptionsPrefsEnabled &&
-      !status.isError &&
+    let messageId;
+    let visitedSites;
+    let hideCheckmark;
+    if (
+      this.isExceptionsFeatureEnabled &&
       status.isActive &&
       status.isExcluded &&
-      !this.#previousIsExcluded;
-
-    if (!canShowConfirmationHint) {
-      return;
-    }
-
-    let siteOrigin = this.gBrowser?.contentPrincipal?.origin;
-    if (!siteOrigin || this.#visitedExcludedSites.has(siteOrigin)) {
-      return;
-    }
-
-    this.#visitedExcludedSites.add(siteOrigin);
-    confirmationHint.show(
-      toolbaritem,
-      IPProtectionToolbarButton.CONFIRMATION_HINT_MESSAGE_ID,
-      {
-        position: "bottomright topright", // panel anchor, message anchor
-        hideCheckmark: true,
+      !this.#previousIsExcluded
+    ) {
+      messageId =
+        IPProtectionToolbarButton.EXCLUDED_CONFIRMATION_HINT_MESSAGE_ID;
+      visitedSites = this.#visitedExcludedSites;
+      hideCheckmark = true;
+    } else if (
+      this.isInclusionsFeatureEnabled &&
+      !status.isActive &&
+      status.isIncluded &&
+      (!this.#previousIsIncluded || isPendingIncludedSite)
+    ) {
+      if (status.isProxyActivating) {
+        if (status.isNavigation || isPendingIncludedSite) {
+          this.#pendingIncludedSiteOrigin = siteOrigin;
+        }
+        return;
       }
-    );
+      if (!status.isProxyActive) {
+        return;
+      }
+      messageId =
+        IPProtectionToolbarButton.INCLUDED_CONFIRMATION_HINT_MESSAGE_ID;
+      visitedSites = this.#visitedIncludedSites;
+      hideCheckmark = false;
+    } else {
+      return;
+    }
+
+    if (visitedSites.has(siteOrigin)) {
+      return;
+    }
+
+    visitedSites.add(siteOrigin);
+    confirmationHint.show(toolbaritem, messageId, {
+      position: "bottomright topright", // panel anchor, message anchor
+      hideCheckmark,
+    });
   }
 
   /**
@@ -395,6 +469,7 @@ export class IPProtectionToolbarButton {
       isActive: false,
       isError: false,
       isExcluded: false,
+      isIncluded: false,
       isPaused: false,
       isNetworkError: false,
     }
@@ -403,10 +478,13 @@ export class IPProtectionToolbarButton {
       return;
     }
 
+    this.#buildIconLayers(toolbaritem);
+
     let isActive = status.isActive;
     let isNetworkError = status.isNetworkError;
     let isError = status.isError && !isNetworkError;
     let isExcluded = status.isExcluded && this.isExceptionsFeatureEnabled;
+    let isIncluded = status.isIncluded && this.isInclusionsFeatureEnabled;
     let isPaused = status.isPaused;
     let l10nId =
       isError || isNetworkError
@@ -418,6 +496,7 @@ export class IPProtectionToolbarButton {
       "ipprotection-network-error",
       "ipprotection-error",
       "ipprotection-excluded",
+      "ipprotection-included",
       "ipprotection-paused"
     );
 
@@ -429,11 +508,52 @@ export class IPProtectionToolbarButton {
       toolbaritem.classList.add("ipprotection-paused");
     } else if (isExcluded && isActive) {
       toolbaritem.classList.add("ipprotection-excluded");
+    } else if (isIncluded && !isActive) {
+      toolbaritem.classList.add("ipprotection-included");
     } else if (isActive) {
       toolbaritem.classList.add("ipprotection-on");
     }
 
     toolbaritem.setAttribute("data-l10n-id", l10nId);
+  }
+
+  /**
+   * Wraps the toolbar button's icon in a <stack> and renders one overlay
+   * <image> layer per non-default icon state on top of it. Keeps every
+   * state's artwork painted and updates opacity via CSS.
+   * This approach prevents flickers between initial state changes since
+   * there is no fresh image decode - Bug 2034698.
+   *
+   * @param {XULElement} toolbaritem
+   *  The toolbaritem to add the icon layers to.
+   */
+  #buildIconLayers(toolbaritem) {
+    if (toolbaritem.querySelector(".ipprotection-icon-stack")) {
+      return;
+    }
+
+    let icon = toolbaritem.querySelector(".toolbarbutton-icon");
+    if (!icon) {
+      // The button hasn't rendered its DOM yet; try again on the next update.
+      return;
+    }
+
+    let doc = toolbaritem.ownerDocument;
+    let stack = doc.createXULElement("stack");
+    stack.classList.add("ipprotection-icon-stack", "toolbarbutton-badge-stack");
+
+    // Move the existing icon into the stack as the base (off) layer, then
+    // stack the remaining states on top of it.
+    icon.replaceWith(stack);
+    stack.appendChild(icon);
+    for (let state of IPProtectionToolbarButton.ICON_LAYER_STATES) {
+      let layer = doc.createXULElement("image");
+      layer.classList.add("ipprotection-icon-layer");
+      layer.setAttribute("data-state", state);
+      // Purely presentational; the button itself carries the accessible name.
+      layer.setAttribute("aria-hidden", "true");
+      stack.appendChild(layer);
+    }
   }
 
   /**
@@ -444,12 +564,6 @@ export class IPProtectionToolbarButton {
       this.gBrowser.removeTabsProgressListener(this.#progressListener);
     }
     this.#progressListener = null;
-
-    Services.prefs.removeObserver(
-      OPENED_WITH_LOCATION_PREF,
-      this.#prefObserver
-    );
-    this.#prefObserver = null;
 
     if (this.gBrowser?.tabContainer) {
       this.gBrowser.tabContainer.removeEventListener("TabSelect", this);
@@ -463,8 +577,12 @@ export class IPProtectionToolbarButton {
       "IPPProxyManager:StateChanged",
       this.handleEvent
     );
-    lazy.IPPExceptionsManager.removeEventListener(
-      "IPPExceptionsManager:ExclusionChanged",
+    lazy.IPPProxyManager.removeEventListener(
+      "IPPProxyManager:ModeChanged",
+      this.handleEvent
+    );
+    lazy.IPPSiteRuleManager.removeEventListener(
+      "SiteRuleManager:RuleChanged",
       this.handleEvent
     );
   }

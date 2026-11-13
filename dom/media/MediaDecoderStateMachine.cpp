@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "AudioSegment.h"
@@ -1729,7 +1730,7 @@ class MediaDecoderStateMachine::SeekingState
       // Don't stop playback for a video-only seek since we want to keep playing
       // audio and we don't need to stop playback while leaving dormant for the
       // playback should has been stopped.
-      mMaster->StopPlayback();
+      mMaster->StopPlayback(MediaSink::StopReason::Seeking);
       mMaster->UpdatePlaybackPositionInternal(mSeekJob.mTarget->GetTime());
       mMaster->mOnPlaybackEvent.Notify(MediaPlaybackEvent::SeekStarted);
       mMaster->mOnNextFrameStatus.Notify(
@@ -1917,7 +1918,13 @@ class MediaDecoderStateMachine::AccurateSeekingState
 
     // Resetting decode should be called after stopping media sink, which can
     // ensure that we have an empty media queue before seeking the demuxer.
-    mMaster->StopMediaSink();
+    // Only observable seeks paused playback for reuse, so only they stop as a
+    // seek; a suppressed seek keeps playing and stops normally.
+    if (mVisibility == EventVisibility::Observable) {
+      mMaster->StopMediaSink(MediaSink::StopReason::Seeking);
+    } else {
+      mMaster->StopMediaSink();
+    }
     mMaster->ResetDecode();
 
     DemuxerSeek();
@@ -2306,7 +2313,13 @@ class MediaDecoderStateMachine::NextFrameSeekingState
   }
 
   void DoSeek() override {
-    mMaster->StopMediaSink();
+    // Only observable seeks paused playback for reuse, so only they stop as a
+    // seek; a suppressed seek keeps playing and stops normally.
+    if (mVisibility == EventVisibility::Observable) {
+      mMaster->StopMediaSink(MediaSink::StopReason::Seeking);
+    } else {
+      mMaster->StopMediaSink();
+    }
 
     auto currentTime = mCurrentTime;
     DiscardFrames(VideoQueue(), [currentTime](int64_t aSampleTime) {
@@ -3521,8 +3534,8 @@ already_AddRefed<MediaSink> MediaDecoderStateMachine::CreateAudioSink() {
 
   auto audioSinkCreator = [s = RefPtr<MediaDecoderStateMachine>(this), this]() {
     MOZ_ASSERT(OnTaskQueue());
-    UniquePtr<AudioSink> audioSink{new AudioSink(
-        mTaskQueue, mAudioQueue, Info().mAudio, mShouldResistFingerprinting)};
+    auto audioSink = std::make_unique<AudioSink>(
+        mTaskQueue, mAudioQueue, Info().mAudio, mShouldResistFingerprinting);
     mAudibleListener.DisconnectIfExists();
     mAudibleListener = audioSink->AudibleEvent().Connect(
         mTaskQueue, this, &MediaDecoderStateMachine::AudioAudibleChanged);
@@ -3664,14 +3677,14 @@ nsresult MediaDecoderStateMachine::Init(MediaDecoder* aDecoder) {
   return NS_OK;
 }
 
-void MediaDecoderStateMachine::StopPlayback() {
+void MediaDecoderStateMachine::StopPlayback(MediaSink::StopReason aReason) {
   MOZ_ASSERT(OnTaskQueue());
-  LOG("StopPlayback()");
+  LOG("StopPlayback(reason={})", MediaSink::EnumValueToString(aReason));
 
   if (IsPlaying()) {
     mOnPlaybackEvent.Notify(MediaPlaybackEvent{
         MediaPlaybackEvent::PlaybackStopped, mPlaybackOffset});
-    mMediaSink->SetPlaying(false);
+    mMediaSink->SetPlaying(false, aReason);
     MOZ_ASSERT(!IsPlaying());
   }
 }
@@ -3883,11 +3896,16 @@ void MediaDecoderStateMachine::BufferedRangeUpdated() {
                       MEDIA_PLAYBACK);
   MOZ_ASSERT(OnTaskQueue());
 
-  // While playing an unseekable stream of unknown duration, mDuration
-  // is updated as we play. But if data is being downloaded
-  // faster than played, mDuration won't reflect the end of playable data
-  // since we haven't played the frame at the end of buffered data. So update
-  // mDuration here as new data is downloaded to prevent such a lag.
+  // Buffered data doesn't establish a duration for an unbounded resource.
+  if (!mIsMSE && IsLiveStream() &&
+      (mDuration.Ref().isNothing() || mDuration.Ref()->IsInfinite())) {
+    return;
+  }
+
+  // A duration estimate updated during playback can lag behind the end of
+  // playable data when downloading is faster than playback. Update mDuration
+  // as new data is downloaded so it includes buffered frames that haven't
+  // been played yet.
   if (mBuffered.Ref().IsInvalid()) {
     return;
   }
@@ -3939,11 +3957,11 @@ RefPtr<MediaDecoder::SeekPromise> MediaDecoderStateMachine::Seek(
   return mStateObj->HandleSeek(aTarget);
 }
 
-void MediaDecoderStateMachine::StopMediaSink() {
+void MediaDecoderStateMachine::StopMediaSink(MediaSink::StopReason aReason) {
   MOZ_ASSERT(OnTaskQueue());
   if (mMediaSink->IsStarted()) {
-    LOG("Stop MediaSink");
-    mMediaSink->Stop();
+    LOG("Stop MediaSink (reason={})", MediaSink::EnumValueToString(aReason));
+    mMediaSink->Stop(aReason);
     mMediaSinkAudioEndedPromise.DisconnectIfExists();
     mMediaSinkVideoEndedPromise.DisconnectIfExists();
   }
@@ -4247,7 +4265,7 @@ void MediaDecoderStateMachine::EnqueueFirstFrameLoadedEvent() {
   MediaDecoderEventVisibility visibility =
       firstFrameBeenLoaded ? MediaDecoderEventVisibility::Suppressed
                            : MediaDecoderEventVisibility::Observable;
-  mFirstFrameLoadedEvent.Notify(UniquePtr<MediaInfo>(new MediaInfo(Info())),
+  mFirstFrameLoadedEvent.Notify(std::make_unique<MediaInfo>(Info()),
                                 visibility);
 }
 

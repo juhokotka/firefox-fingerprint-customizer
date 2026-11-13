@@ -41,3 +41,34 @@ add_task(async function test_ensureCurrentSyncID() {
     "last sync should be reset"
   );
 }).skip(isRustBackend);
+
+// Regression test for bug 2056155. Since LoginManagerStorage.create() is
+// asynchronous, _storage stays null between construction and the resolution of
+// initializationPromise. The synchronous uiBusy/isLoggedIn getters must
+// tolerate that window instead of throwing (which previously left HTTP auth
+// prompts stuck open).
+add_task(async function test_sync_getters_before_storage_init() {
+  let loginManager = new LoginManager();
+  Assert.strictEqual(
+    loginManager._storage,
+    null,
+    "Storage is not initialized synchronously after construction"
+  );
+  Assert.strictEqual(
+    loginManager.uiBusy,
+    false,
+    "uiBusy returns false before storage is initialized"
+  );
+  Assert.strictEqual(
+    loginManager.isLoggedIn,
+    false,
+    "isLoggedIn returns false before storage is initialized"
+  );
+
+  await loginManager.initializationPromise;
+  Assert.strictEqual(
+    loginManager.uiBusy,
+    false,
+    "uiBusy still returns false once storage is initialized and idle"
+  );
+});

@@ -15,9 +15,11 @@ import mozilla.components.browser.storage.sync.PlacesHistoryStorage
 import mozilla.components.concept.engine.prompt.ShareData
 import mozilla.components.feature.tabs.TabsUseCases
 import mozilla.telemetry.glean.private.NoExtras
+import org.mozilla.fenix.GleanMetrics.History as GleanHistory
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.AppAction
+import org.mozilla.fenix.components.share.ShareSheetChooserAction
 import org.mozilla.fenix.components.share.ShareSource
 import org.mozilla.fenix.components.usecases.FenixBrowserUseCases
 import org.mozilla.fenix.components.usecases.ShareUseCases
@@ -29,11 +31,9 @@ import org.mozilla.fenix.library.historymetadata.HistoryMetadataGroupFragmentAct
 import org.mozilla.fenix.library.historymetadata.HistoryMetadataGroupFragmentDirections
 import org.mozilla.fenix.library.historymetadata.HistoryMetadataGroupFragmentStore
 import org.mozilla.fenix.utils.Settings
-import org.mozilla.fenix.GleanMetrics.History as GleanHistory
 
 /**
- * An interface that handles the view manipulation of the history metadata group in the History
- * metadata group screen.
+ * An interface that handles the view manipulation of the history metadata group in the History metadata group screen.
  */
 interface HistoryMetadataGroupController {
 
@@ -72,25 +72,17 @@ interface HistoryMetadataGroupController {
      */
     fun handleShare(items: Set<History.Metadata>)
 
-    /**
-     * Deletes the given history metadata [items] from storage.
-     */
+    /** Deletes the given history metadata [items] from storage. */
     fun handleDelete(items: Set<History.Metadata>)
 
-    /**
-     * Displays a [DeleteAllConfirmationDialogFragment] prompt.
-     */
+    /** Displays a [DeleteAllConfirmationDialogFragment] prompt. */
     fun handleDeleteAll()
 
-    /**
-     * Deletes history metadata items in this group.
-     */
+    /** Deletes history metadata items in this group. */
     fun handleDeleteAllConfirmed()
 }
 
-/**
- * The default implementation of [HistoryMetadataGroupController].
- */
+/** The default implementation of [HistoryMetadataGroupController]. */
 @Suppress("LongParameterList")
 class DefaultHistoryMetadataGroupController(
     private val historyStorage: PlacesHistoryStorage,
@@ -104,11 +96,12 @@ class DefaultHistoryMetadataGroupController(
     private val shareUseCases: ShareUseCases,
     private val scope: CoroutineScope,
     private val searchTerm: String,
-    private val deleteSnackbar: (
-        items: Set<History.Metadata>,
-        undo: suspend (Set<History.Metadata>) -> Unit,
-        delete: (Set<History.Metadata>) -> suspend (context: Context) -> Unit,
-    ) -> Unit,
+    private val deleteSnackbar:
+        (
+            items: Set<History.Metadata>,
+            undo: suspend (Set<History.Metadata>) -> Unit,
+            delete: (Set<History.Metadata>) -> suspend (context: Context) -> Unit,
+        ) -> Unit,
     private val promptDeleteAll: () -> Unit,
     private val allDeletedSnackbar: () -> Unit,
 ) : HistoryMetadataGroupController {
@@ -146,16 +139,22 @@ class DefaultHistoryMetadataGroupController(
     }
 
     override fun handleShare(items: Set<History.Metadata>) {
-        val shareData = items.map { ShareData(url = it.url, title = it.title) }
+        val shareData = items.map {
+            ShareData(url = it.url, title = it.title, private = appStore.state.mode.isPrivate)
+        }
 
         shareUseCases.shareItems(
             items = shareData,
             source = ShareSource.HISTORY_METADATA_GROUP,
+            chooserActions =
+                if (items.size == 1) {
+                    listOf(ShareSheetChooserAction.SEND_TO_DEVICES, ShareSheetChooserAction.QR_CODE)
+                } else {
+                    listOf(ShareSheetChooserAction.SEND_TO_DEVICES)
+                },
             navigateToShareFragment = {
                 navController.navigate(
-                    HistoryMetadataGroupFragmentDirections.actionGlobalShareFragment(
-                        data = shareData.toTypedArray(),
-                    ),
+                    HistoryMetadataGroupFragmentDirections.actionGlobalShareFragment(data = shareData.toTypedArray())
                 )
             },
         )
@@ -185,7 +184,7 @@ class DefaultHistoryMetadataGroupController(
                 // In case all items have been deleted, we have to disband the search group.
                 if (isDeletingLastItem) {
                     context.components.core.store.dispatch(
-                        HistoryMetadataAction.DisbandSearchGroupAction(searchTerm = searchTerm),
+                        HistoryMetadataAction.DisbandSearchGroupAction(searchTerm = searchTerm)
                     )
                 }
             }
@@ -202,9 +201,7 @@ class DefaultHistoryMetadataGroupController(
                 historyStorage.deleteVisitsFor(it.url)
             }
             store.dispatch(HistoryMetadataGroupFragmentAction.DeleteAll)
-            browserStore.dispatch(
-                HistoryMetadataAction.DisbandSearchGroupAction(searchTerm = searchTerm),
-            )
+            browserStore.dispatch(HistoryMetadataAction.DisbandSearchGroupAction(searchTerm = searchTerm))
             GleanHistory.searchTermGroupRemoveAll.record(NoExtras())
             allDeletedSnackbar.invoke()
             launch(Main) {

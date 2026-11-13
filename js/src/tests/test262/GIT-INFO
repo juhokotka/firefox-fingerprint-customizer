@@ -1,5 +1,13 @@
-commit fc32f3e82cb9ec08885fdd306756b65116e8547a
-Author: Chengzhong Wu <cwu631@bloomberg.net>
-Date:   Mon Jun 8 10:18:03 2026 -0400
+commit 3655e7464de3d52643ecddd4b5f9f4f3e7f62398
+Author: Philip Chimento <pchimento@igalia.com>
+Date:   Mon Aug 3 14:35:30 2026 -0700
 
-    NewExpression does not allow member access in ImportCall
+    CI: Run tests of tools only when the tools are changed
+    
+    This was what I intended from the start, but I used a wrong JSON
+    key ("files" instead of "paths"). But this would never have worked as
+    intended anyway, because jobs that are skipped apparently cannot be
+    required for PRs to pass, and we would like the tools tests to be
+    required.
+    
+    LLM disclosure: The diff was drafted using a bot.

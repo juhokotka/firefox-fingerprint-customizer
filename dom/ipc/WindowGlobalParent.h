@@ -8,6 +8,7 @@
 #include "mozilla/ContentBlockingLog.h"
 #include "mozilla/ContentBlockingNotifier.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/PrincipalHashKey.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
@@ -15,6 +16,7 @@
 #include "mozilla/dom/ClientInfo.h"
 #include "mozilla/dom/DOMRect.h"
 #include "mozilla/dom/PWindowGlobalParent.h"
+#include "mozilla/dom/PrefetchMatchWaiter.h"
 #include "mozilla/dom/WindowContext.h"
 #include "mozilla/dom/WindowGlobalActor.h"
 #include "mozilla/dom/WindowGlobalActorsBinding.h"
@@ -34,6 +36,11 @@ class nsFrameLoader;
 
 namespace mozilla {
 
+namespace a11y {
+class DocAccessibleParent;
+class PDocAccessibleParent;
+}  // namespace a11y
+
 namespace gfx {
 class CrossProcessPaint;
 }  // namespace gfx
@@ -41,6 +48,7 @@ class CrossProcessPaint;
 namespace dom {
 
 class BrowserParent;
+class PrefetchRecordParent;
 class WindowGlobalChild;
 class JSWindowActorParent;
 class JSActorMessageMeta;
@@ -82,15 +90,16 @@ class WindowGlobalParent final : public WindowContext,
     return GetByInnerWindowId(aInnerWindowId);
   }
 
+  static WindowGlobalParent* Cast(WindowContext* aContext);
+
   // The same as the corresponding methods on `WindowContext`, except that the
   // return types are already cast to their parent-process type variants, such
   // as `WindowGlobalParent` or `CanonicalBrowsingContext`.
   WindowGlobalParent* GetParentWindowContext() {
-    return static_cast<WindowGlobalParent*>(
-        WindowContext::GetParentWindowContext());
+    return Cast(WindowContext::GetParentWindowContext());
   }
   WindowGlobalParent* TopWindowContext() {
-    return static_cast<WindowGlobalParent*>(WindowContext::TopWindowContext());
+    return Cast(WindowContext::TopWindowContext());
   }
   CanonicalBrowsingContext* GetBrowsingContext() const {
     return CanonicalBrowsingContext::Cast(WindowContext::GetBrowsingContext());
@@ -112,18 +121,25 @@ class WindowGlobalParent final : public WindowContext,
   already_AddRefed<JSWindowActorParent> GetExistingActor(
       const nsACString& aName);
 
-  // Get this actor's manager if it is not an in-process actor. Returns
-  // |nullptr| if the actor has been torn down, or is in-process.
+  // Get this actor's manager if it is not an in-process actor.
+  // Returns |nullptr| if the actor is in-process.
   BrowserParent* GetBrowserParent() const;
 
-  ContentParent* GetContentParent();
+  ContentParent* GetContentParent() const;
 
   // The principal of this WindowGlobal. This value will not change over the
   // lifetime of the WindowGlobal object, even to reflect changes in
   // |document.domain|.
   nsIPrincipal* DocumentPrincipal() { return mDocumentPrincipal; }
 
-  nsIPrincipal* DocumentStoragePrincipal() { return mDocumentStoragePrincipal; }
+  nsIPrincipal* DocumentPartitionedPrincipal() {
+    return mDocumentPartitionedPrincipal;
+  }
+
+  nsIPrincipal* DocumentStoragePrincipal() {
+    return mPartitionStoragePrincipal ? DocumentPartitionedPrincipal()
+                                      : DocumentPrincipal();
+  }
 
   // The BrowsingContext which this WindowGlobal has been loaded into.
   // FIXME: It's quite awkward that this method has a slightly different name
@@ -188,7 +204,11 @@ class WindowGlobalParent final : public WindowContext,
 
   already_AddRefed<mozilla::dom::Promise> DrawSnapshot(
       const DOMRect* aRect, double aScale, const nsACString& aBackgroundColor,
-      bool aResetScrollPosition, mozilla::ErrorResult& aRv);
+      const DrawSnapshotOptions& aOptions, mozilla::ErrorResult& aRv);
+
+  already_AddRefed<mozilla::dom::Promise> RequestDocumentLanguageMetadata(
+      const DocumentLanguageMetadataRequestOptions& aOptions,
+      mozilla::ErrorResult& aRv);
 
   static already_AddRefed<WindowGlobalParent> CreateDisconnected(
       const WindowGlobalInit& aInit, ContentParent* aForProcess);
@@ -196,6 +216,14 @@ class WindowGlobalParent final : public WindowContext,
   // Initialize the mFrameLoader fields for a created WindowGlobalParent. Must
   // be called after setting the Manager actor.
   void Init() final;
+
+  // `Init` for a WindowGlobalParent whose initializer `aSource` authored. The
+  // object must have been constructed with the fields this process derived
+  // (see `ComputeInitialFields`); `aRequested` are the fields `aSource` sent.
+  // Reconciles the two and corrects `aSource` where its values were refused.
+  // Must be called after binding to `aSource`.
+  void InitFromContentProcess(const FieldValues& aRequested,
+                              ContentParent* aSource);
 
   nsIGlobalObject* GetParentObject();
   JSObject* WrapObject(JSContext* aCx,
@@ -237,6 +265,10 @@ class WindowGlobalParent final : public WindowContext,
 
   bool DocumentHasLoaded() { return mDocumentHasLoaded; }
 
+  bool MayHaveViewTransitionOptIn() const {
+    return mMayHaveViewTransitionOptIn;
+  }
+
   bool DocumentHasUserInteracted() { return mDocumentHasUserInteracted; }
 
   uint32_t SandboxFlags() { return mSandboxFlags; }
@@ -249,10 +281,10 @@ class WindowGlobalParent final : public WindowContext,
 
   uint32_t HttpsOnlyStatus() { return mHttpsOnlyStatus; }
 
-  void AddSecurityState(uint32_t aStateFlags);
+  void ApplySecurityStateToTop(uint32_t aStateFlags);
   uint32_t GetSecurityFlags() { return mSecurityState; }
 
-  const nsACString& GetRemoteType() const override;
+  const RemoteType& GetRemoteType() const override;
   void GetRemoteType(nsACString& aRemoteType) const;
 
   void NotifySessionStoreUpdatesComplete(Element* aEmbedder);
@@ -278,7 +310,11 @@ class WindowGlobalParent final : public WindowContext,
   // loaded, if known.
   already_AddRefed<nsIChannel> GetFailedChannel();
 
-  dom::NoCorsMediaRequestState NoCorsMediaRequestState(nsIURI* aURI) const;
+  // The LoadingSessionHistoryInfo::mLoadId of the parent process load which
+  // produced this document, or 0 if there was none.
+  uint64_t DocumentHistoryLoadId() const { return mDocumentHistoryLoadId; }
+
+  dom::NoCorsMediaRequestState NoCorsMediaRequestState(nsIURI* aURI);
 
   void RecordSubsequentNoCorsRequestState(nsIURI* aURI);
 
@@ -303,15 +339,20 @@ class WindowGlobalParent final : public WindowContext,
   mozilla::ipc::IProtocol* AsNativeActor() override { return this; }
 
   // IPC messages
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvLoadURI(
       const MaybeDiscarded<dom::BrowsingContext>& aTargetBC,
       nsDocShellLoadState* aLoadState, bool aSetNavigating);
   mozilla::ipc::IPCResult RecvInternalLoad(nsDocShellLoadState* aLoadState);
+  mozilla::ipc::IPCResult RecvAddSecurityState(uint32_t aStateFlags);
   mozilla::ipc::IPCResult RecvUpdateDocumentURI(NotNull<nsIURI*> aURI);
   mozilla::ipc::IPCResult RecvUpdateDocumentPrincipal(
       nsIPrincipal* aNewDocumentPrincipal,
-      nsIPrincipal* aNewDocumentStoragePrincipal);
+      nsIPrincipal* aNewDocumentPartitionedPrincipal);
+  mozilla::ipc::IPCResult RecvUpdatePrincipalPartitioning(
+      bool aPartitionStoragePrincipal);
   mozilla::ipc::IPCResult RecvUpdateDocumentHasLoaded(bool aDocumentHasLoaded);
+  mozilla::ipc::IPCResult RecvSetMayHaveViewTransitionOptIn(bool aMayHave);
   mozilla::ipc::IPCResult RecvUpdateDocumentHasUserInteracted(
       bool aDocumentHasUserInteracted);
   mozilla::ipc::IPCResult RecvUpdateSandboxFlags(uint32_t aSandboxFlags);
@@ -392,6 +433,7 @@ class WindowGlobalParent final : public WindowContext,
   mozilla::ipc::IPCResult RecvAddCertException(
       bool aTemporary, AddCertExceptionResolver&& aResolver);
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvReloadWithHttpsOnlyException();
 
   mozilla::ipc::IPCResult RecvGetStorageAccessPermission(
@@ -423,6 +465,54 @@ class WindowGlobalParent final : public WindowContext,
   already_AddRefed<dom::PDigitalCredentialParent>
   AllocPDigitalCredentialParent();
 
+#ifdef ACCESSIBILITY
+  already_AddRefed<a11y::PDocAccessibleParent> AllocPDocAccessibleParent(
+      const uint64_t&, const bool&);
+  mozilla::ipc::IPCResult RecvPDocAccessibleConstructor(
+      a11y::PDocAccessibleParent* aDoc, const uint64_t& aParentID,
+      const bool& aIsPrintDoc) override;
+#endif
+
+  // Spec: https://wicg.github.io/nav-speculation/prefetch.html#prefetch-record
+  already_AddRefed<dom::PPrefetchRecordParent> AllocPPrefetchRecordParent(
+      const dom::SpeculativePrefetchArgs& aArgs);
+
+  // Called when a prefetch record's state changes (complete or canceled).
+  // Wakes PrefetchMatchWaiters registered via WaitForMatchingPrefetchRecord.
+  // Spec:
+  // https://wicg.github.io/nav-speculation/prefetch.html#wait-for-a-matching-prefetch-record
+  void NotifyPrefetchStateChanged(dom::PrefetchRecordParent* aRec);
+  void DedupePrefetchRecords(dom::PrefetchRecordParent* aJustCompleted);
+
+  // "Find a matching complete prefetch record": synchronous lookup of a
+  // completed prefetch record for navigation.
+  // Spec:
+  // https://wicg.github.io/nav-speculation/prefetch.html#find-a-matching-complete-prefetch-record
+  dom::PrefetchRecordParent* FindMatchingPrefetchRecord(nsIURI* aURI);
+
+  // "Wait for a matching prefetch record": returns null if no ongoing
+  // prefetch could match aURI, otherwise a promise that resolves when a match
+  // completes (or with nullptr when none can, or when
+  // dom.speculation_rules.wait_timeout_ms expires).
+  // Spec:
+  // https://wicg.github.io/nav-speculation/prefetch.html#wait-for-a-matching-prefetch-record
+  RefPtr<PrefetchMatchPromise> WaitForMatchingPrefetchRecord(nsIURI* aURI);
+
+  // Whether some ongoing prefetch record could still become a matching
+  // prefetch record for aURI once it completes. Used by
+  // WaitForMatchingPrefetchRecord and by PrefetchMatchWaiter to decide
+  // whether to keep waiting or give up early.
+  // Spec:
+  // https://wicg.github.io/nav-speculation/prefetch.html#wait-for-a-matching-prefetch-record
+  bool HasPotentialPrefetchMatch(nsIURI* aURI);
+
+  // Whether a prefetch candidate covered aURI, whether or not it was fetched.
+  // Branch-symmetric, so the experiment can compare prefetched navigations
+  // against ones that would have been prefetched.
+  bool HasMatchingPrefetchCandidate(nsIURI* aURI);
+
+  void RemoveWaiter(PrefetchMatchWaiter* aWaiter);
+
   void UpdateFullscreenKeyboardLockStatus(FullscreenKeyboardLock aStatus);
 
  private:
@@ -441,16 +531,28 @@ class WindowGlobalParent final : public WindowContext,
   using PageUseCounterResult = EnumSet<PageUseCounterResultBits>;
   PageUseCounterResult FinishAccumulatingPageUseCounters();
 
-  // Returns failure if the new storage principal cannot be validated
-  // against the current document principle.
-  nsresult SetDocumentStoragePrincipal(
-      nsIPrincipal* aNewDocumentStoragePrincipal);
+  struct KnownAllowedSubsequentRequests : public SupportsWeakPtr {
+    NS_INLINE_DECL_REFCOUNTING(KnownAllowedSubsequentRequests);
+    nsTHashtable<nsCStringHashKey> mNoCorsMediaRequestURIs;
+    nsCOMPtr<nsIPrincipal> mPrincipal;
 
-  // NOTE: Neither this document principal nor the document storage
-  // principal doesn't reflect possible |document.domain| mutations
-  // which may have been made in the actual document.
+   private:
+    ~KnownAllowedSubsequentRequests();
+  };
+
+  using AllKnownAllowedSubsequentRequests =
+      nsTHashMap<PrincipalHashKey, WeakPtr<KnownAllowedSubsequentRequests>>;
+
+  static AllKnownAllowedSubsequentRequests&
+  GetAllKnownAllowedSubsequentRequests();
+
+  KnownAllowedSubsequentRequests* EnsureKnownAllowedSubsequentRequests();
+
+  // NOTE: Neither this document principal nor the partitioned principal reflect
+  // possible |document.domain| mutations which may have been made in the actual
+  // document.
   nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
-  nsCOMPtr<nsIPrincipal> mDocumentStoragePrincipal;
+  nsCOMPtr<nsIPrincipal> mDocumentPartitionedPrincipal;
 
   // The principal to use for the content blocking allow list.
   nsCOMPtr<nsIPrincipal> mDocContentBlockingAllowListPrincipal;
@@ -486,6 +588,8 @@ class WindowGlobalParent final : public WindowContext,
   // May not match the channel in the content process in some cases.
   nsCOMPtr<nsIChannel> mFailedChannel;
 
+  uint64_t mDocumentHistoryLoadId = 0;
+
   uint32_t mSandboxFlags;
 
   struct OriginCounter {
@@ -503,9 +607,11 @@ class WindowGlobalParent final : public WindowContext,
 
   bool mDocumentHasLoaded;
   bool mDocumentHasUserInteracted;
+  bool mMayHaveViewTransitionOptIn = false;
   bool mDocumentTreeWouldPreloadResources = false;
   bool mBlockAllMixedContent;
   bool mUpgradeInsecureRequests;
+  bool mPartitionStoragePrincipal;
 
   // HTTPS-Only Mode flags
   uint32_t mHttpsOnlyStatus;
@@ -514,6 +620,7 @@ class WindowGlobalParent final : public WindowContext,
   // counters will contribute to.  (If we are a top-level document, this
   // will point to ourselves.)
   RefPtr<WindowGlobalParent> mPageUseCountersWindow;
+  nsTArray<RefPtr<PrefetchMatchWaiter>> mPrefetchWaiters;
 
   // Our page use counters, if we are a top-level document.
   UniquePtr<PageUseCounters> mPageUseCounters;
@@ -545,10 +652,14 @@ class WindowGlobalParent final : public WindowContext,
 
   bool mShouldReportHasBlockedOpaqueResponse = false;
 
-  // URIs of media resources for which an initial no-cors media request has
-  // passed the Opaque Response Blocking media checks in this window. Used to
-  // recognise subsequent (range) requests for the same resource.
-  nsTHashtable<nsCStringHashKey> mNoCorsMediaRequestURIs;
+  // The per-principal set of media resources for which an initial no-cors media
+  // request has passed the Opaque Response Blocking media checks, shared
+  // between all windows with this window's principal. Used to recognise
+  // subsequent (range) requests for the same resource.
+  RefPtr<KnownAllowedSubsequentRequests> mKnownAllowedSubsequentRequests;
+
+  static StaticAutoPtr<AllKnownAllowedSubsequentRequests>
+      sAllKnownSubsequentRequests;
 };
 
 nsCString BFCacheStatusToString(uint32_t aFlags);

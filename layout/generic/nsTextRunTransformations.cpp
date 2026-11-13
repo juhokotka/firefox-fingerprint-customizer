@@ -177,8 +177,8 @@ void MergeCharactersInTextRun(gfxTextRun* aDest, gfxTextRun* aSrc,
           anyMissing = true;
           glyphs.Clear();
         }
-        if (g.GetGlyphCount() > 0) {
-          glyphs.AppendElements(aSrc->GetDetailedGlyphs(k), g.GetGlyphCount());
+        if (uint32_t count = g.GetGlyphCount()) {
+          glyphs.AppendElements(aSrc->GetDetailedGlyphs(k, count), count);
         }
       }
 
@@ -386,10 +386,10 @@ bool nsCaseTransformTextRunFactory::TransformString(
 
     // Skip case transform if we're masking current character.
     if (!maskPassword) {
-      switch ((style & StyleTextTransform::CASE_TRANSFORMS)._0) {
-        case StyleTextTransform::NONE._0:
+      switch (Servo_TextTransform_Case(style)) {
+        case StyleTextTransformCase::None:
           break;
-        case StyleTextTransform::LOWERCASE._0:
+        case StyleTextTransformCase::Lowercase:
           if (languageSpecificCasing == eLSCB_Turkish) {
             if (ch == 'I') {
               ch = LATIN_SMALL_LETTER_DOTLESS_I;
@@ -554,7 +554,7 @@ bool nsCaseTransformTextRunFactory::TransformString(
           ch = ToLowerCase(ch);
           break;
 
-        case StyleTextTransform::UPPERCASE._0:
+        case StyleTextTransformCase::Uppercase:
           if (languageSpecificCasing == eLSCB_Turkish && ch == 'i') {
             ch = LATIN_CAPITAL_LETTER_I_WITH_DOT_ABOVE;
             break;
@@ -688,7 +688,7 @@ bool nsCaseTransformTextRunFactory::TransformString(
           ch = ToUpperCase(ch);
           break;
 
-        case StyleTextTransform::CAPITALIZE._0: {
+        case StyleTextTransformCase::Capitalize: {
           if (capitalizeDutchIJ && ch == 'j') {
             ch = 'J';
             capitalizeDutchIJ = false;
@@ -753,7 +753,7 @@ bool nsCaseTransformTextRunFactory::TransformString(
           break;
         }
 
-        case StyleTextTransform::MATH_AUTO._0:
+        case StyleTextTransformCase::MathAuto:
           // text-transform: math-auto is used for automatic italicization of
           // single-char <mi> elements. However, some legacy cases (italic style
           // fallback and <mi> with leading/trailing whitespace) are still

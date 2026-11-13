@@ -7,10 +7,10 @@
 #ifndef mozilla_ThreadBound_h
 #define mozilla_ThreadBound_h
 
+#include <type_traits>
+
 #include "mozilla/Atomics.h"
 #include "prthread.h"
-
-#include <type_traits>
 
 namespace mozilla {
 
@@ -26,7 +26,7 @@ struct AddConstIf {
 
 template <typename T>
 struct AddConstIf<true, T> {
-  using type = typename std::add_const<T>::type;
+  using type = std::add_const_t<T>;
 };
 
 }  // namespace detail

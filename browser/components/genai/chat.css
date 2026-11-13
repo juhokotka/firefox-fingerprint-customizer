@@ -23,20 +23,29 @@ browser {
 
 #header {
   align-items: center;
-  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   background-color: var(--sidebar-background-color);
+  color: var(--sidebar-text-color);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   flex-direction: row;
   padding-inline: var(--space-large);
+  /* Leave room for the buttons' focus outlines so they aren't clipped by the
+     header edges. */
+  padding-block: var(--space-xsmall);
 
-  ::part(button),
+  ::part(button) {
+    margin: 0;
+  }
+
+  /* The provider switcher is a <select> styled like a button; the moz-buttons
+     keep their default (design-system) radius so the close button matches the
+     close buttons in other sidebar panels (notably with nova enabled). */
   select {
     border-radius: var(--border-radius-small);
     margin: 0;
   }
 
-  moz-button:first-of-type {
+  #header-more {
     margin-inline-end: var(--space-xsmall);
   }
 
@@ -68,14 +77,13 @@ browser {
 #header-close {
   position: relative;
   z-index: 1;
+  /* The close button is ordered early in the DOM (for keyboard focus order) but
+     should stay visually last in the default single-row header. */
+  order: 1;
 
-  @media not -moz-pref("sidebar.revamp") {
+  @media (not -moz-pref("sidebar.revamp")) or -moz-pref("sidebar.visibility", "hide-launcher") {
     display: none;
   }
-}
-
-#message-container {
-  padding: var(--space-xsmall);
 }
 
 #multi-stage-message-root {
@@ -85,6 +93,7 @@ browser {
   inset: 0;
   overflow: auto;
   position: absolute;
+  z-index: 2;
 
   .onboardingContainer {
     height: unset;
@@ -165,6 +174,7 @@ browser {
       background-color: var(--button-background-color-hover);
     }
 
+    /* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
     &:has(.selected) {
       background-color: var(--background-color-canvas);
       border: var(--focus-outline);
@@ -208,6 +218,9 @@ browser {
     &.lechat {
       background-image: url(assets/brands/lechat.svg);
     }
+    &.scout {
+      background-image: url(assets/brands/scout.svg);
+    }
   }
 
   .text {
@@ -229,20 +242,55 @@ browser {
   }
 }
 
-#summarize-btn-container {
+#footer {
   border-top: 1px solid var(--border-color);
-  padding: var(--space-large);
+
+  &.promo-active {
+    --promo-background: linear-gradient(
+      180deg,
+      light-dark(color-mix(in srgb, var(--color-violet-10) 20%, transparent), color-mix(in srgb, var(--color-violet-70) 20%, transparent)) 0%,
+      light-dark(color-mix(in srgb, var(--color-orange-10) 20%, transparent), color-mix(in srgb, var(--color-orange-70) 20%, transparent)) 100%
+    );
+    --promo-mask:
+      linear-gradient(to right, transparent 0%, black 45%, black 55%, transparent 100%),
+      linear-gradient(to bottom, transparent 0%, black 45%, black 55%, transparent 100%);
+    overflow: hidden;
+    padding: var(--space-large);
+    position: relative;
+
+    &::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      background: var(--promo-background);
+      mask-image: var(--promo-mask);
+      pointer-events: none;
+    }
+
+    #summarize-btn-container {
+      padding: 0;
+      padding-block-start: var(--space-large);
+
+      .badge {
+        inset-inline-start: -5px;
+      }
+    }
+  }
+}
+
+#summarize-btn-container {
   position: relative;
+  padding: var(--space-large);
 
   .badge {
     --badge-background-color-new: var(--color-green-40);
 
-    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
     background: var(--badge-background-color-new);
     border-radius: var(--border-radius-small);
     color: var(--button-text-color-primary-hover);
     font-size: var(--font-size-small);
-    left: 10px;
+    inset-inline-start: 10px;
     padding: var(--space-xxsmall) var(--space-small);
     position: absolute;
     text-align: center;

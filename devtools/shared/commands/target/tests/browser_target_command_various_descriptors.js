@@ -14,6 +14,8 @@ const DESCRIPTOR_TYPES = require("resource://devtools/client/fronts/descriptors/
 add_task(async function () {
   // Enabled fission prefs
   await pushPref("devtools.browsertoolbox.scope", "everything");
+  // We use a commands object for the main process
+  await pushPref("devtools.chrome.enabled", true);
   // Disable the preloaded process as it gets created lazily and may interfere
   // with process count assertions
   await pushPref("dom.ipc.processPrelaunch.enabled", false);
@@ -227,7 +229,7 @@ function getNextWorkerDebuggerId() {
   return new Promise(resolve => {
     const wdm = Cc[
       "@mozilla.org/dom/workers/workerdebuggermanager;1"
-    ].createInstance(Ci.nsIWorkerDebuggerManager);
+    ].getService(Ci.nsIWorkerDebuggerManager);
     const listener = {
       onRegister(dbg) {
         wdm.removeListener(listener);
@@ -283,3 +285,26 @@ async function testWorker() {
   await commands.destroy();
   worker.terminate();
 }
+
+add_task(async function test_remote_tab_blocked_system_principal() {
+  // lockPref locks the default value, so set the default rather than the user
+  // value.
+  const defaultBranch = Services.prefs.getDefaultBranch("");
+  const defaultValue = defaultBranch.getBoolPref("devtools.chrome.enabled");
+  defaultBranch.setBoolPref("devtools.chrome.enabled", false);
+  Services.prefs.lockPref("devtools.chrome.enabled");
+  registerCleanupFunction(() => {
+    Services.prefs.unlockPref("devtools.chrome.enabled");
+    defaultBranch.setBoolPref("devtools.chrome.enabled", defaultValue);
+  });
+
+  const tab = await addTab("about:preferences");
+  const client = await createLocalClientForTests();
+  await Assert.rejects(
+    CommandsFactory.forRemoteTab(tab.linkedBrowser.browserId, { client }),
+    /chromeDebuggingDisabled/,
+    "Commands can't be created for a system principal tab"
+  );
+  await client.close();
+  BrowserTestUtils.removeTab(tab);
+});

@@ -6,9 +6,17 @@
 
 // Wrap in a block to prevent leaking to window scope.
 {
-  const isTab = element => gBrowser.isTab(element);
-  const isTabGroupLabel = element => gBrowser.isTabGroupLabel(element);
-  const isSplitViewWrapper = element => gBrowser.isSplitViewWrapper(element);
+  const lazy = {};
+
+  ChromeUtils.defineESModuleGetters(lazy, {
+    OpenInTabsUtils:
+      "moz-src:///browser/components/tabbrowser/OpenInTabsUtils.sys.mjs",
+  });
+
+  const { Tabbrowser } = ChromeUtils.importESModule(
+    "moz-src:///browser/components/tabbrowser/Tabbrowser.sys.mjs"
+  );
+  const { isTab, isTabGroupLabel, isSplitViewWrapper } = Tabbrowser;
 
   /**
    * The elements in the tab strip from `this.dragAndDropElements` that contain
@@ -26,7 +34,7 @@
    * - <tab-split-view-wrapper>
    *
    * When working with tab strip items, if you need logical information, you
-   * can get it directly, e.g. `element.elementIndex` or `element._tPos`. If
+   * can get it directly, e.g. `element.elementIndex` or `element.index`. If
    * you need spatial information like position or dimensions, then you should
    * call this function. For example, `elementToMove(element).getBoundingClientRect()`
    * or `elementToMove(element).style.top`.
@@ -44,9 +52,15 @@
     throw new Error(`Element "${element.tagName}" is not expected to move`);
   };
 
+  // How often to verify that moving-tab mode still has a drag session backing
+  // it.
+  const STALE_DRAG_CHECK_INTERVAL_MS = 1000;
+
   window.TabDragAndDrop = class {
     #dragTime = 0;
     #pinnedDropIndicatorTimeout = null;
+    #staleDragCheckTimer = null;
+    #dropAnimationFrame = 0;
 
     constructor(tabbrowserTabs) {
       this._tabbrowserTabs = tabbrowserTabs;
@@ -77,6 +91,11 @@
       }
       if (tab.splitview) {
         tab = tab.splitview;
+      }
+
+      // Don't start a drag on a split view whose tabs are hidden.
+      if (isSplitViewWrapper(tab) && !tab.visible) {
+        return;
       }
 
       this._tabbrowserTabs.previewPanel?.deactivate(null, { force: true });
@@ -137,6 +156,7 @@
           draggedTab._dragData.expandGroupOnDrop &&
           !draggedTab.group.collapsed
         ) {
+          draggedTab.group.collapsedByDrag = true;
           draggedTab.group.collapsed = true;
         }
 
@@ -283,7 +303,13 @@
       let overPinnedDropIndicator =
         this._pinnedDropIndicator.hasAttribute("visible") &&
         this._pinnedDropIndicator.hasAttribute("interactive");
-      this._resetTabsAfterDrop(draggedTab?.ownerDocument);
+      let rectsBeforeDrop =
+        !gReduceMotion &&
+        dropEffect != "copy" &&
+        draggedTab?.container == this._tabbrowserTabs
+          ? this.#getItemRects()
+          : null;
+      this._resetTabsAfterDrop(draggedTab);
 
       this._tabDropIndicator.hidden = true;
       event.stopPropagation();
@@ -306,61 +332,12 @@
           this._tabbrowserTabs.selectedItem = duplicatedDraggedTab;
         }
       } else if (draggedTab && draggedTab.container == this._tabbrowserTabs) {
-        let oldTranslateX = Math.round(draggedTab._dragData.translateX);
-        let oldTranslateY = Math.round(draggedTab._dragData.translateY);
-        let tabWidth = Math.round(draggedTab._dragData.tabWidth);
-        let tabHeight = Math.round(draggedTab._dragData.tabHeight);
-        let translateOffsetX = oldTranslateX % tabWidth;
-        let translateOffsetY = oldTranslateY % tabHeight;
-        let newTranslateX = oldTranslateX - translateOffsetX;
-        let newTranslateY = oldTranslateY - translateOffsetY;
         let isPinned = draggedTab.pinned;
         let numPinned = gBrowser.pinnedTabCount;
         let tabs = this._tabbrowserTabs.dragAndDropElements.slice(
           isPinned ? 0 : numPinned,
           isPinned ? numPinned : undefined
         );
-
-        if (this._tabbrowserTabs.isContainerVerticalPinnedGrid(draggedTab)) {
-          // Update both translate axis for pinned vertical expanded tabs
-          if (oldTranslateX > 0 && translateOffsetX > tabWidth / 2) {
-            newTranslateX += tabWidth;
-          } else if (oldTranslateX < 0 && -translateOffsetX > tabWidth / 2) {
-            newTranslateX -= tabWidth;
-          }
-          if (oldTranslateY > 0 && translateOffsetY > tabHeight / 2) {
-            newTranslateY += tabHeight;
-          } else if (oldTranslateY < 0 && -translateOffsetY > tabHeight / 2) {
-            newTranslateY -= tabHeight;
-          }
-        } else {
-          let size = this._tabbrowserTabs.verticalMode ? "height" : "width";
-          let screenAxis = this._tabbrowserTabs.verticalMode
-            ? "screenY"
-            : "screenX";
-          let tabSize = this._tabbrowserTabs.verticalMode
-            ? tabHeight
-            : tabWidth;
-          let firstTab = tabs[0];
-          let lastTab = tabs.at(-1);
-          let lastMovingTabScreen = movingTabs.at(-1)[screenAxis];
-          let firstMovingTabScreen = movingTabs[0][screenAxis];
-          let startBound = firstTab[screenAxis] - firstMovingTabScreen;
-          let endBound =
-            lastTab[screenAxis] +
-            window.windowUtils.getBoundsWithoutFlushing(lastTab)[size] -
-            (lastMovingTabScreen + tabSize);
-          if (this._tabbrowserTabs.verticalMode) {
-            newTranslateY = Math.min(
-              Math.max(oldTranslateY, startBound),
-              endBound
-            );
-          } else {
-            newTranslateX = RTL_UI
-              ? Math.min(Math.max(oldTranslateX, endBound), startBound)
-              : Math.min(Math.max(oldTranslateX, startBound), endBound);
-          }
-        }
 
         let {
           dropElement,
@@ -403,25 +380,60 @@
           draggedTab.pinned &&
           this._tabbrowserTabs.arrowScrollbox.contains(event.target);
 
-        let shouldTranslate =
-          !gReduceMotion &&
+        let shouldAnimate =
+          rectsBeforeDrop &&
+          !fromTabList &&
           !shouldCreateGroupOnDrop &&
           !shouldDropIntoCollapsedTabGroup &&
           !isTabGroupLabel(draggedTab) &&
-          !isSplitViewWrapper(draggedTab) &&
           !shouldPin &&
           !shouldUnpin;
-        if (this._tabbrowserTabs.isContainerVerticalPinnedGrid(draggedTab)) {
-          shouldTranslate &&=
-            (oldTranslateX && oldTranslateX != newTranslateX) ||
-            (oldTranslateY && oldTranslateY != newTranslateY);
-        } else if (this._tabbrowserTabs.verticalMode) {
-          shouldTranslate &&= oldTranslateY && oldTranslateY != newTranslateY;
-        } else {
-          shouldTranslate &&= oldTranslateX && oldTranslateX != newTranslateX;
+
+        if (shouldPin || shouldUnpin) {
+          for (let item of movingTabs) {
+            if (shouldPin && isTab(item)) {
+              gBrowser.pinTab(item, {
+                metricsContext: gBrowser.TabMetrics.userTriggeredContext(
+                  gBrowser.TabMetrics.METRIC_SOURCE.DRAG_AND_DROP
+                ),
+              });
+            } else if (shouldUnpin) {
+              gBrowser.unpinTab(item, {
+                metricsContext: gBrowser.TabMetrics.userTriggeredContext(
+                  gBrowser.TabMetrics.METRIC_SOURCE.DRAG_AND_DROP
+                ),
+              });
+            }
+          }
         }
 
-        let moveTabs = () => {
+        this.finishAnimateTabMove();
+        if (shouldCreateGroupOnDrop) {
+          // This makes the tab group contents reflect the visual order of
+          // the tabs right before dropping.
+          let tabsInGroup = dropBefore
+            ? [...movingTabs, dropElement]
+            : [dropElement, ...movingTabs];
+          gBrowser.addTabGroup(tabsInGroup, {
+            insertBefore: dropElement,
+            color: draggedTab._dragData.tabGroupCreationColor,
+            metricsContext: gBrowser.TabMetrics.userTriggeredContext(
+              gBrowser.TabMetrics.METRIC_SOURCE.DRAG_AND_DROP
+            ),
+          });
+        } else if (
+          shouldDropIntoCollapsedTabGroup &&
+          isTabGroupLabel(dropElement) &&
+          (isTab(draggedTab) || isSplitViewWrapper(draggedTab))
+        ) {
+          // If the dragged tab is the active tab in a collapsed tab group
+          // and the user dropped it onto the label of its tab group, leave
+          // the dragged tab where it was. Otherwise, drop it into the target
+          // tab group.
+          if (dropElement.group != draggedTab.group) {
+            dropElement.group.addTabs(movingTabs, dropMetricsContext);
+          }
+        } else {
           if (dropIndex !== undefined) {
             for (let tab of movingTabs) {
               if (fromTabList && isSplitViewWrapper(tab)) {
@@ -449,96 +461,31 @@
               metricsContext: dropMetricsContext,
             });
           }
-
-          if (isTabGroupLabel(draggedTab)) {
-            this._setIsDraggingTabGroup(draggedTab.group, false);
-            this._expandGroupOnDrop(draggedTab);
-          }
-        };
-
-        if (shouldPin || shouldUnpin) {
-          for (let item of movingTabs) {
-            if (shouldPin && isTab(item)) {
-              gBrowser.pinTab(item, {
-                metricsContext: gBrowser.TabMetrics.userTriggeredContext(
-                  gBrowser.TabMetrics.METRIC_SOURCE.DRAG_AND_DROP
-                ),
-              });
-            } else if (shouldUnpin) {
-              gBrowser.unpinTab(item, {
-                metricsContext: gBrowser.TabMetrics.userTriggeredContext(
-                  gBrowser.TabMetrics.METRIC_SOURCE.DRAG_AND_DROP
-                ),
-              });
-            }
+          if (!shouldAnimate) {
+            this._tabbrowserTabs._notifyBackgroundTab(movingTabs.at(-1));
           }
         }
 
-        if (shouldTranslate) {
-          let translationPromises = [];
-          for (let item of movingTabs) {
-            item = elementToMove(item);
-            let translationPromise = new Promise(resolve => {
-              item.toggleAttribute("tabdrop-samewindow", true);
-              item.style.transform = `translate(${newTranslateX}px, ${newTranslateY}px)`;
-              let postTransitionCleanup = () => {
-                item.removeAttribute("tabdrop-samewindow");
-                resolve();
-              };
-              if (gReduceMotion) {
-                postTransitionCleanup();
-              } else {
-                let onTransitionEnd = transitionendEvent => {
-                  if (
-                    transitionendEvent.propertyName != "transform" ||
-                    transitionendEvent.originalTarget != item
-                  ) {
-                    return;
-                  }
-                  item.removeEventListener("transitionend", onTransitionEnd);
-
-                  postTransitionCleanup();
-                };
-                item.addEventListener("transitionend", onTransitionEnd);
-              }
-            });
-            translationPromises.push(translationPromise);
-          }
-          Promise.all(translationPromises).then(() => {
-            this.finishAnimateTabMove();
-            moveTabs();
-          });
-        } else {
-          this.finishAnimateTabMove();
-          if (shouldCreateGroupOnDrop) {
-            // This makes the tab group contents reflect the visual order of
-            // the tabs right before dropping.
-            let tabsInGroup = dropBefore
-              ? [...movingTabs, dropElement]
-              : [dropElement, ...movingTabs];
-            gBrowser.addTabGroup(tabsInGroup, {
-              insertBefore: dropElement,
-              color: draggedTab._dragData.tabGroupCreationColor,
-              metricsContext: gBrowser.TabMetrics.userTriggeredContext(
-                gBrowser.TabMetrics.METRIC_SOURCE.DRAG_AND_DROP
-              ),
-            });
-          } else if (
-            shouldDropIntoCollapsedTabGroup &&
-            isTabGroupLabel(dropElement) &&
-            (isTab(draggedTab) || isSplitViewWrapper(draggedTab))
-          ) {
-            // If the dragged tab is the active tab in a collapsed tab group
-            // and the user dropped it onto the label of its tab group, leave
-            // the dragged tab where it was. Otherwise, drop it into the target
-            // tab group.
-            if (dropElement.group != draggedTab.group) {
-              dropElement.group.addTabs(movingTabs, dropMetricsContext);
+        if (shouldAnimate) {
+          // Scroll the dropped tabs into view before #animateDrop measures
+          // them, so that they also slide by the distance scrolled. This waits
+          // for the animation frame in which the moves scroll the selected tab
+          // into view (see ensureElementIsVisible), which has to see it
+          // untransformed.
+          this.#dropAnimationFrame = requestAnimationFrame(() => {
+            this.#dropAnimationFrame = 0;
+            for (let tab of [movingTabs.at(-1), gBrowser.selectedTab]) {
+              tab.scrollIntoView({ block: "nearest", behavior: "instant" });
             }
-          } else {
-            moveTabs();
-            this._tabbrowserTabs._notifyBackgroundTab(movingTabs.at(-1));
-          }
+            this.#animateDrop(rectsBeforeDrop);
+          });
+        }
+
+        // Every branch above has to end the tab group drag, including the ones
+        // that don't move anything.
+        if (isTabGroupLabel(draggedTab)) {
+          this._setIsDraggingTabGroup(draggedTab.group, false);
+          this._expandGroupOnDrop(draggedTab);
         }
       } else if (isTabGroupLabel(draggedTab)) {
         const dropIndex = this._getDropIndex(event);
@@ -548,6 +495,14 @@
             ? gBrowser.pinnedTabCount
             : dropIndex,
         });
+
+        // The group's tabs leave the window along with the group, so there is
+        // no _expandGroupOnDrop to release the space _resetTabsAfterDrop keeps
+        // reserved for them.
+        let periphery = draggedTab.ownerDocument.getElementById(
+          "tabbrowser-arrowscrollbox-periphery"
+        );
+        this.#releaseSpaceInScrolledContent(periphery);
       } else if (draggedTab) {
         // Move the tabs into this window. To avoid multiple tab-switches in
         // the original window, the selected tab should be adopted last.
@@ -669,14 +624,24 @@
             Services.prefs.getIntPref("browser.tabs.maxOpenBeforeWarn")
           ) {
             // Sync dialog cannot be used inside drop event handler.
-            let answer =
-              await gBrowser.OpenInTabsUtils.promiseConfirmOpenInTabs(
-                urls.length,
-                window
-              );
+            let answer = await lazy.OpenInTabsUtils.promiseConfirmOpenInTabs(
+              urls.length,
+              window
+            );
             if (!answer) {
               return;
             }
+          }
+
+          // This load could replace the current session history entry in the
+          // target tab, which may not have had user interaction before. We
+          // consider the drag onto the tab as being user interaction so this
+          // entry is still accessible via the back-button.
+          let activeEntry =
+            targetTab?.linkedBrowser?.browsingContext
+              ?.activeSessionHistoryEntry;
+          if (activeEntry) {
+            activeEntry.hasUserInteraction = true;
           }
 
           let nextItem = this._tabbrowserTabs.dragAndDropElements[newIndex];
@@ -708,20 +673,13 @@
       var dt = event.dataTransfer;
       var draggedTab = dt.mozGetDataAt(TAB_DROP_TYPE, 0);
 
-      // Prevent this code from running if a tabdrop animation is
-      // running since calling finishAnimateTabMove would clear
-      // any CSS transition that is running.
-      if (draggedTab.hasAttribute("tabdrop-samewindow")) {
-        return;
-      }
-
       this.finishMoveTogetherSelectedTabs(draggedTab);
       this.finishAnimateTabMove();
       if (isTabGroupLabel(draggedTab)) {
         this._setIsDraggingTabGroup(draggedTab.group, false);
         this._expandGroupOnDrop(draggedTab);
       }
-      this._resetTabsAfterDrop(draggedTab.ownerDocument);
+      this._resetTabsAfterDrop(draggedTab);
 
       if (
         dt.mozUserCancelled ||
@@ -849,19 +807,27 @@
         window.moveTo(left, top);
         window.focus();
       } else {
-        // We're opening a new window in a new screen, so make sure to use sizes
-        // relative to the new screen.
-        winWidth /= screenCssToDesktopScale;
-        winHeight /= screenCssToDesktopScale;
-
         let props = {
-          screenX: left,
-          screenY: top,
           suppressanimation: 1,
           metricsContext: gBrowser.TabMetrics.userTriggeredContext(
             gBrowser.TabMetrics.METRIC_SOURCE.DRAG_AND_DROP
           ),
         };
+        if (window.fullScreen && AppConstants.platform == "macosx") {
+          // `left` and `top` above leave room for a window as large as this
+          // one, and a fullscreen window covers the screen, so they collapse
+          // onto the corner of it. The new window doesn't take our size
+          // either, so there is no drop position to compute for it and it is
+          // better off opening where any other new window would.
+          //
+          // The flag below keeps macOS from adopting the new window into its
+          // own fullscreen space during its initial show, which can hang on a
+          // synchronous transition to the Dock (bug 2051071).
+          props.suppressinitialfullscreen = 1;
+        } else {
+          props.screenX = left;
+          props.screenY = top;
+        }
         gBrowser.replaceTabsWithWindow(draggedTab, props);
       }
       event.stopPropagation();
@@ -892,6 +858,87 @@
     #setMovingTabMode(movingTab) {
       this._tabbrowserTabs.toggleAttribute("movingtab", movingTab);
       gNavToolbox.toggleAttribute("movingtab", movingTab);
+
+      if (movingTab) {
+        this.#startStaleDragCheck();
+      } else {
+        this.#stopStaleDragCheck();
+      }
+    }
+
+    get #dragSession() {
+      return Cc["@mozilla.org/widget/dragservice;1"]
+        .getService(Ci.nsIDragService)
+        .getCurrentSession(window);
+    }
+
+    /**
+     * Moving-tab mode is only ever left by finishAnimateTabMove, which runs off
+     * the drop and dragend events. Platforms don't reliably deliver those, and
+     * a drag session that outlives its drag leaves the tab strip overlapping
+     * the toolbar and #nav-bar with pointer-events: none, i.e. an unusable
+     * window. Watch for that state and recover from it.
+     */
+    #startStaleDragCheck() {
+      if (this.#staleDragCheckTimer) {
+        return;
+      }
+      this.#staleDragCheckTimer = setInterval(() => {
+        if (!this.#dragSession) {
+          this.#recoverFromStaleDrag();
+        }
+      }, STALE_DRAG_CHECK_INTERVAL_MS);
+      window.addEventListener("mousedown", this.#onMouseDown, {
+        capture: true,
+      });
+    }
+
+    #stopStaleDragCheck() {
+      if (!this.#staleDragCheckTimer) {
+        return;
+      }
+      clearInterval(this.#staleDragCheckTimer);
+      this.#staleDragCheckTimer = null;
+      window.removeEventListener("mousedown", this.#onMouseDown, {
+        capture: true,
+      });
+    }
+
+    #onMouseDown = event => {
+      // Pressing the primary button requires having released it first, which
+      // can't happen while the platform is running a drag loop. So this proves
+      // that the drag is over even when the drag session claims otherwise.
+      if (event.button == 0) {
+        this.#recoverFromStaleDrag();
+      }
+    };
+
+    #recoverFromStaleDrag() {
+      let session = this.#dragSession;
+      Glean.tab.staleDragRecovery[
+        session ? "session_live" : "session_ended"
+      ].add(1);
+
+      // Ending the session as an incomplete drag skips dragend at the source,
+      // which would otherwise take handle_dragend's detach path and tear the
+      // tab into a new window positioned from stale coordinates.
+      session?.endDragSession(false);
+
+      let draggedItem = this._tabbrowserTabs.dragAndDropElements.find(
+        item => item._dragData
+      );
+      if (draggedItem) {
+        this.finishMoveTogetherSelectedTabs(draggedItem);
+        if (isTabGroupLabel(draggedItem)) {
+          this._setIsDraggingTabGroup(draggedItem.group, false);
+          this._expandGroupOnDrop(draggedItem);
+        }
+      }
+      this.finishAnimateTabMove();
+      this._resetTabsAfterDrop(draggedItem);
+      if (draggedItem) {
+        delete draggedItem._dragData;
+      }
     }
 
     _getDropIndex(event) {
@@ -1033,13 +1080,35 @@
       this._tabbrowserTabs._invalidateCachedVisibleTabs();
     }
 
+    /**
+     * Undoes the collapse a drag applied to a tab group. Safe to call from
+     * every way out of a drag: it does nothing for a group the user collapsed
+     * themselves, and nothing once the group is already on its way back.
+     *
+     * @param {MozTabbrowserTab|typeof MozTabbrowserTabGroup.labelElement} [draggedTab]
+     */
     _expandGroupOnDrop(draggedTab) {
-      if (
-        isTabGroupLabel(draggedTab) &&
-        draggedTab._dragData?.expandGroupOnDrop
-      ) {
-        draggedTab.group.collapsed = false;
+      if (!isTabGroupLabel(draggedTab)) {
+        return;
       }
+      let group = draggedTab.group;
+      if (!group.collapsedByDrag || !group.collapsed) {
+        return;
+      }
+      let periphery = draggedTab.ownerDocument.getElementById(
+        "tabbrowser-arrowscrollbox-periphery"
+      );
+      // The group's tabs animate back to their full size, so hold on to the
+      // space reserved for them until they get there.
+      group.addEventListener(
+        "TabGroupAnimationComplete",
+        () => {
+          group.collapsedByDrag = false;
+          this.#releaseSpaceInScrolledContent(periphery);
+        },
+        { once: true }
+      );
+      group.collapsed = false;
     }
 
     /**
@@ -1095,6 +1164,7 @@
     // Drag start
 
     startTabDrag(event, tab, { fromTabList = false } = {}) {
+      this.#finishDropAnimation();
       if (this.expandOnHover) {
         // Temporarily disable MousePosTracker while dragging
         MousePosTracker.removeListener(document.defaultView.SidebarController);
@@ -1322,6 +1392,52 @@
       }
     }
 
+    /**
+     * Pads the end of the tab strip so that its scrolled content doesn't shrink
+     * while items are missing from it.
+     *
+     * @param {Element} periphery
+     * @param {number} space
+     */
+    #reserveSpaceInScrolledContent(periphery, space) {
+      if (this._tabbrowserTabs.verticalMode) {
+        periphery.style.marginBlockStart = space + "px";
+      } else {
+        periphery.style.marginInlineStart = space + "px";
+      }
+    }
+
+    /**
+     * @param {Element} periphery
+     */
+    #releaseSpaceInScrolledContent(periphery) {
+      periphery.style.marginBlockStart = "";
+      periphery.style.marginInlineStart = "";
+    }
+
+    /**
+     * @param {Element} element
+     * @returns {number}
+     *   The space the element takes up along the tab strip's axis, margins
+     *   included.
+     */
+    #marginBoxExtent(element) {
+      let rect = window.windowUtils.getBoundsWithoutFlushing(element);
+      let style = window.getComputedStyle(element);
+      if (this._tabbrowserTabs.verticalMode) {
+        return (
+          rect.height +
+          parseFloat(style.marginBlockStart) +
+          parseFloat(style.marginBlockEnd)
+        );
+      }
+      return (
+        rect.width +
+        parseFloat(style.marginInlineStart) +
+        parseFloat(style.marginInlineEnd)
+      );
+    }
+
     /* In order to to drag tabs between both the pinned arrowscrollbox (pinned tab container)
       and unpinned arrowscrollbox (tabbrowser-arrowscrollbox), the dragged tabs need to be
       positioned absolutely. This results in a shift in the layout, filling the empty space.
@@ -1462,11 +1578,18 @@
         !isPinned &&
         this._tabbrowserTabs.arrowScrollbox.hasAttribute("overflowing")
       ) {
-        if (this._tabbrowserTabs.verticalMode) {
-          periphery.style.marginBlockStart = rect.height + "px";
-        } else {
-          periphery.style.marginInlineStart = rect.width + "px";
+        // The dragged element is taken out of the layout below, and the tabs of
+        // a group that is about to collapse shrink to nothing. Letting the
+        // scrolled content shrink along with them would clamp the scroll
+        // position, and could even stop the tab strip from overflowing, either
+        // of which shifts the items that stay put.
+        let missingSpace = this.#marginBoxExtent(tabStripItemElement);
+        if (expandGroupOnDrop) {
+          for (let groupItem of tab.group.tabsAndSplitViews) {
+            missingSpace += this.#marginBoxExtent(groupItem);
+          }
         }
+        this.#reserveSpaceInScrolledContent(periphery, missingSpace);
       } else if (
         isPinned &&
         this._tabbrowserTabs.pinnedTabsContainer.hasAttribute("overflowing")
@@ -1803,8 +1926,6 @@
         draggedTab.getBoundingClientRect();
       let shiftSizeX = tabWidth;
       let shiftSizeY = tabHeight;
-      dragData.tabWidth = tabWidth;
-      dragData.tabHeight = tabHeight;
 
       // Move the dragged tab based on the mouse position.
       let periphery = document.getElementById(
@@ -1838,9 +1959,6 @@
       for (let tab of movingTabs) {
         tab.style.transform = `translate(${translateX}px, ${translateY}px)`;
       }
-
-      dragData.translateX = translateX;
-      dragData.translateY = translateY;
 
       // Determine what tab we're dragging over.
       // * Single tab dragging: Point of reference is the center of the dragged tab. If that
@@ -2000,8 +2118,6 @@
       let translateAxis = this._tabbrowserTabs.verticalMode
         ? "translateY"
         : "translateX";
-      let translateX = event.screenX - dragData.screenX;
-      let translateY = event.screenY - dragData.screenY;
 
       // Move the dragged tab based on the mouse position.
       let periphery = document.getElementById(
@@ -2015,10 +2131,6 @@
       );
       let tabSize = this._tabbrowserTabs.verticalMode ? tabHeight : tabWidth;
       let shiftSize = tabSize;
-      dragData.tabWidth = tabWidth;
-      dragData.tabHeight = tabHeight;
-      dragData.translateX = translateX;
-      dragData.translateY = translateY;
       let translate = screen - dragData[screenAxis];
 
       // Constrain the range over which the moving tabs can move between the edge of the tabstrip and periphery.
@@ -2302,7 +2414,7 @@
           dropElementSize
         );
 
-        moveOverThreshold = gBrowser._tabGroupsEnabled
+        moveOverThreshold = Tabbrowser.prefs.tabGroupsEnabled
           ? Services.prefs.getIntPref(
               "browser.tabs.dragDrop.moveOverThresholdPercent"
             ) / 100
@@ -2375,7 +2487,7 @@
       }
 
       if (
-        gBrowser._tabGroupsEnabled &&
+        Tabbrowser.prefs.tabGroupsEnabled &&
         (isTab(draggedTab) || isSplitViewWrapper(draggedTab)) &&
         !isPinned &&
         (!numPinned || newDropElementIndex >= numPinned)
@@ -2589,10 +2701,123 @@
       this.#resetPinnedDropIndicator();
     }
 
+    /**
+     * @returns {Map<Element, DOMRect>}
+     *   Where each tab strip item currently appears, transforms included.
+     */
+    #getItemRects() {
+      return new Map(
+        this._tabbrowserTabs.dragAndDropElements.map(item => {
+          item = elementToMove(item);
+          return [item, item.getBoundingClientRect()];
+        })
+      );
+    }
+
+    /**
+     * Slides tab strip items from where they appeared before a drop to where
+     * the drop put them.
+     *
+     * @param {Map<Element, DOMRect>} rectsBeforeDrop
+     *   What #getItemRects returned before the drop.
+     */
+    #animateDrop(rectsBeforeDrop) {
+      let offsets = [];
+      for (let [item, before] of rectsBeforeDrop) {
+        let after = item.getBoundingClientRect();
+        let x = before.x - after.x;
+        let y = before.y - after.y;
+        if (x || y) {
+          offsets.push({ item, x, y });
+        }
+      }
+      if (!offsets.length) {
+        return;
+      }
+
+      for (let { item, x, y } of offsets) {
+        item.style.transform = `translate(${x}px, ${y}px)`;
+      }
+      // Flush styles so that the offsets are where the transitions start.
+      offsets[0].item.getBoundingClientRect();
+
+      for (let { item } of offsets) {
+        let onTransitionDone = event => {
+          if (
+            event.originalTarget != item ||
+            event.propertyName != "transform"
+          ) {
+            return;
+          }
+          item.removeEventListener("transitionend", onTransitionDone);
+          item.removeEventListener("transitioncancel", onTransitionDone);
+          item.removeAttribute("tabdrop-samewindow");
+        };
+        item.addEventListener("transitionend", onTransitionDone);
+        item.addEventListener("transitioncancel", onTransitionDone);
+        item.toggleAttribute("tabdrop-samewindow", true);
+        item.style.transform = "";
+      }
+    }
+
+    /**
+     * Whether tab strip items are sliding into place after a drop.
+     *
+     * @type {boolean}
+     */
+    get isAnimatingDrop() {
+      return !!this._tabbrowserTabs.querySelector("[tabdrop-samewindow]");
+    }
+
+    /**
+     * Scrolls the selected tab into view where the drop animation leaves it.
+     */
+    scrollSelectedTabIntoViewAfterDrop() {
+      let selectedTab = gBrowser.selectedTab;
+      if (selectedTab.pinned) {
+        return;
+      }
+      let item = elementToMove(selectedTab);
+      let { arrowScrollbox, verticalMode } = this._tabbrowserTabs;
+      let [start, end] = arrowScrollbox.startEndProps;
+      let transform = new DOMMatrix(getComputedStyle(item).transform);
+      let offset = verticalMode ? transform.m42 : transform.m41;
+      let itemRect = item.getBoundingClientRect();
+      let scrollRect = arrowScrollbox.scrollClientRect;
+      let hiddenAtStart = scrollRect[start] - (itemRect[start] - offset);
+      let hiddenAtEnd = itemRect[end] - offset - scrollRect[end];
+      if (hiddenAtStart > 0) {
+        arrowScrollbox.scrollByPixels(-hiddenAtStart, true);
+      } else if (hiddenAtEnd > 0) {
+        arrowScrollbox.scrollByPixels(hiddenAtEnd, true);
+      }
+    }
+
+    #finishDropAnimation() {
+      cancelAnimationFrame(this.#dropAnimationFrame);
+      this.#dropAnimationFrame = 0;
+      let animatingItems = this._tabbrowserTabs.dragAndDropElements
+        .map(elementToMove)
+        .filter(item => item.hasAttribute("tabdrop-samewindow"));
+      if (!animatingItems.length) {
+        return;
+      }
+      for (let item of animatingItems) {
+        item.removeAttribute("tabdrop-samewindow");
+      }
+      // Drag code measures items without flushing, so settle them first.
+      animatingItems[0].getBoundingClientRect();
+    }
+
     // Drop
 
-    // If the tab is dropped in another window, we need to pass in the original window document
-    _resetTabsAfterDrop(draggedTabDocument = document) {
+    /**
+     * @param {MozTabbrowserTab|typeof MozTabbrowserTabGroup.labelElement} [draggedTab]
+     *   The dragged item, which still belongs to the window the drag started in
+     *   even if it was dropped in another one.
+     */
+    _resetTabsAfterDrop(draggedTab) {
+      let draggedTabDocument = draggedTab?.ownerDocument ?? document;
       if (this._tabbrowserTabs.expandOnHover) {
         // Re-enable MousePosTracker after dropping
         MousePosTracker.addListener(document.defaultView.SidebarController);
@@ -2636,10 +2861,13 @@
       let periphery = draggedTabDocument.getElementById(
         "tabbrowser-arrowscrollbox-periphery"
       );
-      periphery.style.marginBlockStart = "";
-      periphery.style.marginInlineStart = "";
       periphery.style.left = "";
       periphery.style.top = "";
+      // Space reserved for the tabs of a collapsed tab group is released by
+      // _expandGroupOnDrop once they are back to their full size.
+      if (!isTabGroupLabel(draggedTab) || !draggedTab.group.collapsedByDrag) {
+        this.#releaseSpaceInScrolledContent(periphery);
+      }
       let pinnedTabsContainer = draggedTabDocument.getElementById(
         "pinned-tabs-container"
       );

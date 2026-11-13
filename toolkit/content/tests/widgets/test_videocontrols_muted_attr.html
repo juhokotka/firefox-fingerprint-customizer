@@ -23,6 +23,12 @@
         );
       }
 
+      add_setup(async function () {
+        await SpecialPowers.pushPrefEnv({
+          set: [["dom.media.muted-state.enabled", true]],
+        });
+      });
+
       add_task(async function muted_content_attribute_updates_mute_button() {
         const video = document.getElementById("video");
         await waitForMetadata(video);

@@ -2,13 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { UrlbarUtils } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+
 import { RealtimeSuggestProvider } from "moz-src:///browser/components/urlbar/private/RealtimeSuggestProvider.sys.mjs";
 
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   ObjectUtils: "resource://gre/modules/ObjectUtils.sys.mjs",
-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
+  UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
 });
 
 /**
@@ -136,7 +138,7 @@ export class SportsSuggestions extends RealtimeSuggestProvider {
     ];
   }
 
-  getViewUpdateForPayloadItem(item, index) {
+  getViewUpdateForPayloadItem(item, index, controller) {
     let topUpdate =
       stringifiedScore(item.home_team.score) &&
       stringifiedScore(item.away_team.score)
@@ -145,7 +147,7 @@ export class SportsSuggestions extends RealtimeSuggestProvider {
 
     return {
       ...topUpdate,
-      ...this.#viewUpdateImageAndBottom(item, index),
+      ...this.#viewUpdateImageAndBottom(item, index, controller),
       [`item_${index}`]: {
         attributes: {
           "sport-category": item.sport_category,
@@ -186,23 +188,24 @@ export class SportsSuggestions extends RealtimeSuggestProvider {
     };
   }
 
-  #viewUpdateImageAndBottom(item, i) {
+  #viewUpdateImageAndBottom(item, i, controller) {
     // Format the date.
     let date = new Date(item.date);
     let {
       formattedDate,
       formattedTime,
-      parseDateResult: { daysUntil, zonedNow },
-    } = lazy.UrlbarUtils.formatDate(date, {
+      parseDateResult: { daysAgo, zonedNow },
+    } = lazy.UrlbarShared.formatDate(date, {
       // If the item has an icon, the date chiclet won't be shown, so show the
       // absolute date in the bottom part of the row.
-      forceAbsoluteDate: !!item.home_team?.icon || !!item.away_team?.icon,
+      forceMonthAndDayWhenAbsolute:
+        !!item.home_team?.icon || !!item.away_team?.icon,
       includeTimeZone: true,
       capitalizeRelativeDate: true,
     });
 
     // Compute the date chiclet components.
-    let partsArray = new Intl.DateTimeFormat(undefined, {
+    let partsArray = new Intl.DateTimeFormat(lazy.UrlbarShared.locale(), {
       month: "short",
       day: "numeric",
       timeZone: zonedNow.timeZoneId,
@@ -214,16 +217,25 @@ export class SportsSuggestions extends RealtimeSuggestProvider {
     // Create the image update. Start by creating each team's update.
     let imageUpdatesByTeam = ["home", "away"].reduce((memo, team) => {
       let itemKey = `${team}_team`;
-      let icon = item[itemKey]?.icon;
+
+      let iconUrl;
+      if (item[itemKey]?.icon) {
+        iconUrl = UrlbarUtils.getRemoteImageUrl({
+          controller,
+          url: item[itemKey].icon,
+          size: lazy.UrlbarShared.TOP_PICK_ICON_SIZE,
+        });
+      }
+
       memo[team] = {
         [`image-container-${i}`]: {
           attributes: {
-            "has-team-icon": icon ? "" : null,
+            "has-team-icon": iconUrl ? "" : null,
           },
         },
         [`image-${i}`]: {
           attributes: {
-            src: icon ?? null,
+            src: iconUrl ?? null,
           },
         },
         [`date-chiclet-day-${i}`]: {
@@ -294,7 +306,7 @@ export class SportsSuggestions extends RealtimeSuggestProvider {
           },
         },
       };
-    } else if (daysUntil == 0 && item.status_type == "past") {
+    } else if (daysAgo == 0 && item.status_type == "past") {
       statusUpdate = {
         [`status-${i}`]: {
           l10n: {

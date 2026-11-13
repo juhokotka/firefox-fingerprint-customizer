@@ -8,8 +8,8 @@
 #define NETWERK_BASE_HTTP_SFV_SFV_H_
 
 #include "mozilla/net/http_sfv_ffi_generated.h"
-#include "nsStringFwd.h"
 #include "nsError.h"
+#include "nsStringFwd.h"
 #include "nsTArray.h"
 
 namespace mozilla {
@@ -111,6 +111,9 @@ class InnerListResult {
 
   size_t Length() const;
   ItemResult GetItemAt(size_t aIndex) const;
+
+  template <typename T>
+  nsresult GetParam(const nsACString& aKey, nsACString& aOutput) const;
 
   bool IsValid() const { return mInnerList != nullptr; }
 

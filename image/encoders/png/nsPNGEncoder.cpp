@@ -2,17 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "ImageLogging.h"
-#include "nsCRT.h"
 #include "nsPNGEncoder.h"
-#include "nsStreamUtils.h"
-#include "nsString.h"
-#include "prprf.h"
-#include "mozilla/CheckedInt.h"
-#include "mozilla/UniquePtrExtensions.h"
 
 #include <bit>
 #include <cstring>
+
+#include "ImageLogging.h"
+#include "mozilla/CheckedInt.h"
+#include "mozilla/UniquePtrExtensions.h"
+#include "nsCRT.h"
+#include "nsStreamUtils.h"
+#include "nsString.h"
+#include "prprf.h"
 
 using namespace mozilla;
 
@@ -421,8 +422,11 @@ nsPNGEncoder::AddImageFrame(const uint8_t* aData,
     // Scale 10-bit color [0,1023] to 16-bit [0,65535] and 2-bit alpha [0,3]
     // to 16-bit [0,65535].
     uint32_t channels = useTransparency ? 4 : 3;
-    uint32_t rowBytes = aWidth * channels * 2;
-    UniquePtr<uint8_t[]> row = MakeUniqueFallible<uint8_t[]>(rowBytes);
+    CheckedInt<uint32_t> rowBytes = CheckedInt<uint32_t>(aWidth) * channels * 2;
+    if (!rowBytes.isValid()) {
+      return NS_ERROR_INVALID_ARG;
+    }
+    UniquePtr<uint8_t[]> row = MakeUniqueFallible<uint8_t[]>(rowBytes.value());
     if (NS_WARN_IF(!row)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }

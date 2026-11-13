@@ -85,10 +85,11 @@ class MediaTransportParent::Impl : public sigslot::has_slots<> {
         mParent->SendOnGatheringStateChange(aTransportId, aState));
   }
 
-  void OnConnectionStateChange(const std::string& aTransportId,
-                               dom::RTCIceTransportState aState) {
-    NS_ENSURE_TRUE_VOID(
-        mParent->SendOnConnectionStateChange(aTransportId, aState));
+  void OnConnectionStateChange(
+      const std::string& aTransportId, dom::RTCIceTransportState aState,
+      const Maybe<dom::IceCandidateAttributePair>& aSelectedPair) {
+    NS_ENSURE_TRUE_VOID(mParent->SendOnConnectionStateChange(
+        aTransportId, aState, aSelectedPair));
   }
 
   void OnPacketReceived(const std::string& aTransportId,
@@ -251,9 +252,9 @@ mozilla::ipc::IPCResult MediaTransportParent::RecvSendPacket(
 
 mozilla::ipc::IPCResult MediaTransportParent::RecvAddIceCandidate(
     const string& transportId, const string& candidate, const string& ufrag,
-    const string& obfuscatedAddr) {
+    const string& resolvedAddress) {
   mImpl->mHandler->AddIceCandidate(transportId, candidate, ufrag,
-                                   obfuscatedAddr);
+                                   resolvedAddress);
   return ipc::IPCResult::Ok();
 }
 

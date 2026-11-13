@@ -4,19 +4,18 @@
 
 package mozilla.components.concept.integrity
 
-/**
- * A value type describing an Integrity Token returned by an [IntegrityClient]
- */
-@JvmInline
-value class IntegrityToken(val value: String)
+/** A value type describing an Integrity Token returned by an [IntegrityClient] */
+@JvmInline value class IntegrityToken(val value: String)
 
-/**
- * Interface used to fetch an integrity token
- */
+/** Interface used to fetch an integrity token */
 fun interface IntegrityClient {
     /**
-     * Requests an [IntegrityToken]
+     * Warms up the [IntegrityClient]. Implementations that require custom warm-up work should override this. The
+     * default is a no-op that reports success.
      */
+    suspend fun warmUp(): Boolean = true
+
+    /** Requests an [IntegrityToken] */
     suspend fun request(): Result<IntegrityToken>
 
     companion object {

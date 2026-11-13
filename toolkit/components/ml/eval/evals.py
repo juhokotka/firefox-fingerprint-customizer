@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import json
 import os
 from abc import ABC, abstractmethod
@@ -40,7 +42,7 @@ class _LlmJudge(_Evaluation):
 
     def __init__(self, log: Callable[[str], None], config: dict[str, Any]) -> None:
         super().__init__(log, config)
-        self.mlpa_url = "https://mlpa-nonprod-stage-mozilla.global.ssl.fastly.net"
+        self.mlpa_url = "https://mlpa-nonprod-stage-mozilla.freetls.fastly.net"
         self.model = config.get("model", "vertex_ai/mistral-small-2503")
         self.fxa_token = os.environ.get("MOZ_FXA_BEARER_TOKEN")
         self.mlpa_token = os.environ.get("MOZ_MLPA_AUTHORIZATION_TOKEN")

@@ -7,9 +7,9 @@
 #include "WebCustomFormatUtils.h"
 
 #include "js/JSON.h"
-#include "mozilla/Logging.h"
 #include "mozilla/JSONStringWriteFuncs.h"
 #include "mozilla/JSONWriter.h"
+#include "mozilla/Logging.h"
 
 static mozilla::LazyLogModule gWebCustomFormatLog("WebCustomFormat");
 

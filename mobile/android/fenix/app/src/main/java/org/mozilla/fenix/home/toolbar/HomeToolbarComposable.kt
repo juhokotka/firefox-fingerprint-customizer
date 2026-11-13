@@ -15,11 +15,14 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -41,22 +44,21 @@ import mozilla.components.compose.browser.toolbar.store.ToolbarGravity.Bottom
 import mozilla.components.compose.browser.toolbar.store.ToolbarGravity.Top
 import mozilla.components.compose.browser.toolbar.ui.BrowserToolbarQuery
 import mozilla.components.lib.state.ext.observeAsComposableState
+import mozilla.components.support.ktx.util.URLStringUtils
 import org.mozilla.fenix.R
-import org.mozilla.fenix.browser.browsingmode.BrowsingMode
 import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchEnded
 import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchStarted
 import org.mozilla.fenix.components.appstate.VoiceSearchAction.VoiceInputRequested
 import org.mozilla.fenix.components.metrics.MetricsUtils
-import org.mozilla.fenix.components.toolbar.ToolbarPosition.BOTTOM
+import org.mozilla.fenix.components.toolbar.TopDividerColumn
 import org.mozilla.fenix.theme.FirefoxTheme
 import org.mozilla.fenix.utils.Settings
-import org.mozilla.fenix.wallpapers.Wallpaper
+import org.mozilla.fenix.wallpapers.WallpaperTheme
 
 // Speculative delay for putting the toolbar in edit mode after an initial voice search request.
-@VisibleForTesting
-internal const val EDIT_TOOLBAR_DELAY_AFTER_VOICE_REQUEST = 1_000L
+@VisibleForTesting internal const val EDIT_TOOLBAR_DELAY_AFTER_VOICE_REQUEST = 1_000L
 
 /**
  * A wrapper over the [BrowserToolbar] composable to allow for extra customisation.
@@ -66,14 +68,14 @@ internal const val EDIT_TOOLBAR_DELAY_AFTER_VOICE_REQUEST = 1_000L
  * @param toolbarStore [BrowserToolbarStore] containing the composable toolbar state.
  * @param appStore [AppStore] to sync from.
  * @param browserStore [BrowserStore] to sync from.
- * @param browsingModeManager [BrowsingModeManager] Manager holding current state of whether
- * the browser is in private mode or not.
+ * @param browsingModeManager [BrowsingModeManager] Manager holding current state of whether the browser is in private
+ *   mode or not.
  * @param settings [Settings] for querying various application settings.
  * @param directToSearchConfig [DirectToSearchConfig] configuration for starting with the toolbar in search mode.
  * @param coroutineScope Coroutine scope used for delaying actions.
  * @param tabStripContent [Composable] as the tab strip content to be displayed together with this toolbar.
- * @param searchSuggestionsContent [Composable] as the search suggestions content to be displayed
- * together with this toolbar.
+ * @param searchSuggestionsContent [Composable] as the search suggestions content to be displayed together with this
+ *   toolbar.
  * @param navigationBarContent [Composable] content for the navigation bar.
  */
 @Suppress("LongParameterList")
@@ -96,24 +98,27 @@ internal class HomeToolbarComposable(
     init {
         // Reset the toolbar visibility & position whenever coming back to the home screen
         // like after changing the toolbar position in settings.
-        toolbarStore.dispatch(
-            ToolbarGravityUpdated(
-                buildToolbarGravityConfig(),
-            ),
-        )
+        toolbarStore.dispatch(ToolbarGravityUpdated(buildToolbarGravityConfig()))
     }
 
     @Composable
     private fun DefaultToolbar() {
         val isSearching = toolbarStore.observeAsComposableState { it.isEditMode() }.value
-        val queryWasPrefilled = toolbarStore.observeAsComposableState {
-            it.editState.queryWasPrefilled
-        }.value
+        val queryWasPrefilled =
+            toolbarStore
+                .observeAsComposableState {
+                    it.editState.queryWasPrefilled
+                }
+                .value
         val currentQuery = toolbarStore.observeAsComposableState { it.editState.query.current }.value
-        val currentWallpaperName = appStore.observeAsComposableState { it.wallpaperState.currentWallpaper.name }
-        val isEdgeToEdgeBackgroundEnabled =
-            settings.enableHomepageEdgeToEdgeBackgroundFeature &&
-                currentWallpaperName.value == Wallpaper.EDGE_TO_EDGE
+        val isPrivateMode = browsingModeManager.mode.isPrivate
+        val isUniversalEdgeToEdge = settings.enableUniversalEdgeToEdgeWallpapers
+        val hasWallpaperBackground =
+            hasWallpaperBackground(appStore = appStore, settings = settings, isPrivateMode = isPrivateMode)
+        // Tint the browser action icons outside the address bar (tab counter, menu) with the
+        // wallpaper's text color. The page actions inside the address bar (e.g. voice search) keep
+        // the default color so they stay legible on the address bar background. Universal only.
+        val wallpaperTextColor = WallpaperTheme.onWallpaper.takeIf { isUniversalEdgeToEdge && hasWallpaperBackground }
 
         BackInvokedHandler(isSearching) {
             val sourceTabId = appStore.state.searchState.sourceTabId
@@ -126,66 +131,101 @@ internal class HomeToolbarComposable(
 
         FirefoxTheme {
             MaterialTheme(
-                colorScheme = homepageToolbarColors(
-                    isPrivateMode = browsingModeManager.mode == BrowsingMode.Private,
-                    shouldUseEdgeToEdgeColors = isEdgeToEdgeBackgroundEnabled &&
-                        (!isSearching || (currentQuery.isEmpty() && !queryWasPrefilled)),
-                ),
+                colorScheme =
+                    homepageToolbarColors(
+                        isPrivateMode = isPrivateMode,
+                        shouldUseEdgeToEdgeColors =
+                            hasWallpaperBackground &&
+                                if (settings.enableHomepageTrendingRecentSearch) {
+                                    !isSearching
+                                } else {
+                                    !isSearching || (currentQuery.isEmpty() && !queryWasPrefilled)
+                                },
+                    )
             ) {
-                ToolbarContent()
+                ToolbarContent(wallpaperTextColor = wallpaperTextColor)
             }
         }
     }
 
     @Composable
-    private fun ToolbarContent() {
-        val shouldShowTabStrip: Boolean = remember { settings.isTabStripEnabled }
-        val isAddressBarVisible = remember { addressBarVisibility }
+    private fun ToolbarContent(wallpaperTextColor: Color?) {
+        val shouldUseBottomToolbar = remember { settings.shouldUseBottomToolbar }
+        val shouldShowTabStrip = remember {
+            if (shouldUseBottomToolbar) {
+                settings.shouldShowTabStripAtBottom
+            } else {
+                settings.shouldShowTabStripAtTop
+            }
+        }
+        val isTabStripAtBottom = remember { shouldUseBottomToolbar && settings.shouldShowTabStripAtBottom }
 
         Column(
-            modifier = Modifier.semantics {
-                testTagsAsResourceId = true
-                testTag = context.resources.getResourceName(R.id.composable_toolbar)
-            },
+            modifier =
+                Modifier.semantics {
+                    testTagsAsResourceId = true
+                    testTag = context.resources.getResourceName(R.id.composable_toolbar)
+                }
         ) {
-            if (shouldShowTabStrip) {
-                tabStripContent()
-            }
-
-            if (settings.shouldUseBottomToolbar) {
+            if (shouldUseBottomToolbar) {
                 searchSuggestionsContent(Modifier.weight(1f))
             }
 
-            Box {
-                if (settings.enableHomepageSearchBar) {
-                    BrowserSimpleToolbar(toolbarStore, appStore)
+            TopDividerColumn(showDivider = isTabStripAtBottom, modifier = Modifier.fillMaxWidth()) {
+                if (shouldShowTabStrip) {
+                    tabStripContent()
                 }
 
-                this@Column.AnimatedVisibility(
-                    visible = isAddressBarVisible.value || appStore.state.searchState.isSearchActive,
-                    enter = fadeIn(
-                        animationSpec = tween(
-                            durationMillis = 250,
-                            easing = Easing { fraction -> fraction * fraction },
-                        ),
-                    ),
-                    exit = fadeOut(
-                        animationSpec = tween(
-                            durationMillis = 250,
-                            easing = Easing { fraction -> 1f - (1f - fraction) * (1f - fraction) },
-                        ),
-                    ),
-                ) {
-                    BrowserToolbar(store = toolbarStore)
+                AddressBar(wallpaperTextColor = wallpaperTextColor)
+
+                if (shouldUseBottomToolbar) {
+                    navigationBarContent?.invoke()
                 }
             }
 
-            if (settings.toolbarPosition == BOTTOM) {
-                navigationBarContent?.invoke()
-            }
-
-            if (!settings.shouldUseBottomToolbar) {
+            if (!shouldUseBottomToolbar) {
                 searchSuggestionsContent(Modifier.weight(1f))
+            }
+        }
+    }
+
+    @Composable
+    private fun ColumnScope.AddressBar(wallpaperTextColor: Color?) {
+        val isAddressBarVisible = remember { addressBarVisibility }
+        val hasBottomStrip = remember {
+            settings.shouldUseBottomToolbar &&
+                (settings.shouldShowTabStripAtBottom || settings.shouldShowTabGroupsStrip)
+        }
+
+        Box {
+            if (settings.enableHomepageSearchBar) {
+                BrowserSimpleToolbar(toolbarStore, appStore)
+            }
+
+            this@AddressBar.AnimatedVisibility(
+                visible = isAddressBarVisible.value || appStore.state.searchState.isSearchActive,
+                enter =
+                    fadeIn(
+                        animationSpec =
+                            tween(
+                                durationMillis = 250,
+                                easing = Easing { fraction -> fraction * fraction },
+                            )
+                    ),
+                exit =
+                    fadeOut(
+                        animationSpec =
+                            tween(
+                                durationMillis = 250,
+                                easing = Easing { fraction -> 1f - (1f - fraction) * (1f - fraction) },
+                            )
+                    ),
+            ) {
+                BrowserToolbar(
+                    store = toolbarStore,
+                    browserActionsColor = wallpaperTextColor,
+                    showDivider = !hasBottomStrip,
+                )
             }
         }
     }
@@ -204,10 +244,11 @@ internal class HomeToolbarComposable(
         addressBarVisibility.value = isVisible
     }
 
-    private fun buildToolbarGravityConfig(): ToolbarGravity = when (settings.shouldUseBottomToolbar) {
-        true -> Bottom
-        false -> Top
-    }
+    private fun buildToolbarGravityConfig(): ToolbarGravity =
+        when (settings.shouldUseBottomToolbar) {
+            true -> Bottom
+            false -> Top
+        }
 
     private fun configureStartingInSearchMode() {
         if (shouldStartToVoiceSearch()) {
@@ -237,13 +278,13 @@ internal class HomeToolbarComposable(
     private fun handleTypedSearchRequest() {
         handleStartingSearch(directToSearchConfig)
 
-        if (directToSearchConfig.sessionId != null) {
+        if (directToSearchConfig.sessionId != null && !settings.showAddressBarInFocusMode) {
             browserStore.state.findTab(directToSearchConfig.sessionId)?.let {
                 toolbarStore.dispatch(
                     SearchQueryUpdated(
-                        query = BrowserToolbarQuery(it.getUrl() ?: ""),
+                        query = BrowserToolbarQuery(URLStringUtils.toLosslessEditableUrl(it.getUrl().orEmpty())),
                         isQueryPrefilled = true,
-                    ),
+                    )
                 )
             }
         }
@@ -254,28 +295,24 @@ internal class HomeToolbarComposable(
             SearchStarted(
                 tabId = directToSearchConfig.sessionId,
                 source = directToSearchConfig.source,
-            ),
+            )
         )
     }
 
-    private fun shouldStartToVoiceSearch() =
-        directToSearchConfig.startVoiceSearch && isSpeechRecognitionAvailable()
+    private fun shouldStartToVoiceSearch() = directToSearchConfig.startVoiceSearch && isSpeechRecognitionAvailable()
 
     private fun isSpeechRecognitionAvailable() =
-        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .resolveActivity(context.packageManager) != null
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).resolveActivity(context.packageManager) != null
 
-    /**
-     * Static configuration and properties of [HomeToolbarComposable].
-     */
+    /** Static configuration and properties of [HomeToolbarComposable]. */
     companion object {
         /**
          * Configuration for starting with the toolbar in search mode.
          *
          * @property startSearch Whether to start in search mode. Defaults to `false`.
          * @property startVoiceSearch Whether to start in voice search mode. Defaults to `false`.
-         * @property sessionId The session ID of the current session with details of which to start search.
-         * Defaults to `null`.
+         * @property sessionId The session ID of the current session with details of which to start search. Defaults to
+         *   `null`.
          * @property source The application feature from where a new search was started.
          */
         data class DirectToSearchConfig(

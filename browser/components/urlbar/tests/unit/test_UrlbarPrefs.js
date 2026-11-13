@@ -37,6 +37,14 @@ add_task(function test() {
     parseFloat(UrlbarPrefs.get("intentThreshold").toFixed(2)),
     0.75
   );
+
+  UrlbarPrefs.set("placeholderName", "百度");
+  Assert.equal(
+    UrlbarPrefs.get("placeholderName"),
+    "百度",
+    "UTF-8 prefs are read corrently"
+  );
+  Services.prefs.clearUserPref("browser.urlbar.placeholderName");
 });
 
 const EXPECTED_SUGGESTIONS_FIRST_GROUPS = {
@@ -45,24 +53,24 @@ const EXPECTED_SUGGESTIONS_FIRST_GROUPS = {
     {
       maxResultCount: 1,
       children: [
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_EXTENSION },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_SEARCH_TIP },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_OMNIBOX },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_ENGINE_ALIAS },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_BOOKMARK_KEYWORD },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_AUTOFILL },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_EXTENSION },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_SEARCH_TIP },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_OMNIBOX },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_ENGINE_ALIAS },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_BOOKMARK_KEYWORD },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_AUTOFILL },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE },
         {
-          group: UrlbarUtils.RESULT_GROUP.HEURISTIC_RESTRICT_KEYWORD_AUTOFILL,
+          group: UrlbarShared.RESULT_GROUP.HEURISTIC_RESTRICT_KEYWORD_AUTOFILL,
         },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_HISTORY_URL },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_FALLBACK },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_HISTORY_URL },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_FALLBACK },
       ],
     },
     // extensions using the omnibox API
     {
-      group: UrlbarUtils.RESULT_GROUP.OMNIBOX,
+      group: UrlbarShared.RESULT_GROUP.OMNIBOX,
     },
     // main group
     {
@@ -77,56 +85,56 @@ const EXPECTED_SUGGESTIONS_FIRST_GROUPS = {
               children: [
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.FORM_HISTORY,
+                  group: UrlbarShared.RESULT_GROUP.FORM_HISTORY,
                 },
                 {
                   flex: 99,
-                  group: UrlbarUtils.RESULT_GROUP.RECENT_SEARCH,
+                  group: UrlbarShared.RESULT_GROUP.RECENT_SEARCH,
                 },
                 {
                   flex: 4,
-                  group: UrlbarUtils.RESULT_GROUP.REMOTE_SUGGESTION,
+                  group: UrlbarShared.RESULT_GROUP.REMOTE_SUGGESTION,
                 },
               ],
             },
             {
-              group: UrlbarUtils.RESULT_GROUP.TAIL_SUGGESTION,
+              group: UrlbarShared.RESULT_GROUP.TAIL_SUGGESTION,
             },
           ],
         },
         // general
         {
-          group: UrlbarUtils.RESULT_GROUP.GENERAL_PARENT,
+          group: UrlbarShared.RESULT_GROUP.GENERAL_PARENT,
           flex: 1,
           children: [
             {
               availableSpan: 3,
-              group: UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+              group: UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
             },
             {
               flexChildren: true,
               children: [
                 {
                   flex: 1,
-                  group: UrlbarUtils.RESULT_GROUP.REMOTE_TAB,
+                  group: UrlbarShared.RESULT_GROUP.REMOTE_TAB,
                 },
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.GENERAL,
+                  group: UrlbarShared.RESULT_GROUP.GENERAL,
                   orderBy: "frecency",
                 },
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.ABOUT_PAGES,
+                  group: UrlbarShared.RESULT_GROUP.ABOUT_PAGES,
                 },
                 {
                   flex: 99,
-                  group: UrlbarUtils.RESULT_GROUP.RESTRICT_SEARCH_KEYWORD,
+                  group: UrlbarShared.RESULT_GROUP.RESTRICT_SEARCH_KEYWORD,
                 },
               ],
             },
             {
-              group: UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+              group: UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
             },
           ],
         },
@@ -141,24 +149,24 @@ const EXPECTED_NOT_SUGGESTIONS_FIRST_GROUPS = {
     {
       maxResultCount: 1,
       children: [
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_EXTENSION },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_SEARCH_TIP },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_OMNIBOX },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_ENGINE_ALIAS },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_BOOKMARK_KEYWORD },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_AUTOFILL },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_EXTENSION },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_SEARCH_TIP },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_OMNIBOX },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_ENGINE_ALIAS },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_BOOKMARK_KEYWORD },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_AUTOFILL },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE },
         {
-          group: UrlbarUtils.RESULT_GROUP.HEURISTIC_RESTRICT_KEYWORD_AUTOFILL,
+          group: UrlbarShared.RESULT_GROUP.HEURISTIC_RESTRICT_KEYWORD_AUTOFILL,
         },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_HISTORY_URL },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_FALLBACK },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_HISTORY_URL },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_FALLBACK },
       ],
     },
     // extensions using the omnibox API
     {
-      group: UrlbarUtils.RESULT_GROUP.OMNIBOX,
+      group: UrlbarShared.RESULT_GROUP.OMNIBOX,
     },
     // main group
     {
@@ -166,37 +174,37 @@ const EXPECTED_NOT_SUGGESTIONS_FIRST_GROUPS = {
       children: [
         // general
         {
-          group: UrlbarUtils.RESULT_GROUP.GENERAL_PARENT,
+          group: UrlbarShared.RESULT_GROUP.GENERAL_PARENT,
           flex: 2,
           children: [
             {
               availableSpan: 3,
-              group: UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+              group: UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
             },
             {
               flexChildren: true,
               children: [
                 {
                   flex: 1,
-                  group: UrlbarUtils.RESULT_GROUP.REMOTE_TAB,
+                  group: UrlbarShared.RESULT_GROUP.REMOTE_TAB,
                 },
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.GENERAL,
+                  group: UrlbarShared.RESULT_GROUP.GENERAL,
                   orderBy: "frecency",
                 },
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.ABOUT_PAGES,
+                  group: UrlbarShared.RESULT_GROUP.ABOUT_PAGES,
                 },
                 {
                   flex: 99,
-                  group: UrlbarUtils.RESULT_GROUP.RESTRICT_SEARCH_KEYWORD,
+                  group: UrlbarShared.RESULT_GROUP.RESTRICT_SEARCH_KEYWORD,
                 },
               ],
             },
             {
-              group: UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+              group: UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
             },
           ],
         },
@@ -209,20 +217,20 @@ const EXPECTED_NOT_SUGGESTIONS_FIRST_GROUPS = {
               children: [
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.FORM_HISTORY,
+                  group: UrlbarShared.RESULT_GROUP.FORM_HISTORY,
                 },
                 {
                   flex: 99,
-                  group: UrlbarUtils.RESULT_GROUP.RECENT_SEARCH,
+                  group: UrlbarShared.RESULT_GROUP.RECENT_SEARCH,
                 },
                 {
                   flex: 4,
-                  group: UrlbarUtils.RESULT_GROUP.REMOTE_SUGGESTION,
+                  group: UrlbarShared.RESULT_GROUP.REMOTE_SUGGESTION,
                 },
               ],
             },
             {
-              group: UrlbarUtils.RESULT_GROUP.TAIL_SUGGESTION,
+              group: UrlbarShared.RESULT_GROUP.TAIL_SUGGESTION,
             },
           ],
         },
@@ -237,11 +245,11 @@ const EXPECTED_SMARTBAR_SUGGESTIONS_FIRST_GROUPS = {
     {
       maxResultCount: 1,
       children: [
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_AUTOFILL },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_HISTORY_URL },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_AI_CHAT },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_FALLBACK },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_AUTOFILL },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_HISTORY_URL },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_AI_CHAT },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_FALLBACK },
       ],
     },
     // main group
@@ -254,59 +262,59 @@ const EXPECTED_SMARTBAR_SUGGESTIONS_FIRST_GROUPS = {
           children: [
             {
               availableSpan: 2,
-              group: UrlbarUtils.RESULT_GROUP.AI,
+              group: UrlbarShared.RESULT_GROUP.AI,
             },
             {
               flexChildren: true,
               children: [
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.FORM_HISTORY,
+                  group: UrlbarShared.RESULT_GROUP.FORM_HISTORY,
                 },
                 {
                   flex: 99,
-                  group: UrlbarUtils.RESULT_GROUP.RECENT_SEARCH,
+                  group: UrlbarShared.RESULT_GROUP.RECENT_SEARCH,
                 },
                 {
                   flex: 4,
-                  group: UrlbarUtils.RESULT_GROUP.REMOTE_SUGGESTION,
+                  group: UrlbarShared.RESULT_GROUP.REMOTE_SUGGESTION,
                 },
               ],
             },
             {
-              group: UrlbarUtils.RESULT_GROUP.TAIL_SUGGESTION,
+              group: UrlbarShared.RESULT_GROUP.TAIL_SUGGESTION,
             },
           ],
         },
         // general
         {
           flex: 1,
-          group: UrlbarUtils.RESULT_GROUP.GENERAL_PARENT,
+          group: UrlbarShared.RESULT_GROUP.GENERAL_PARENT,
           children: [
             {
               availableSpan: 3,
-              group: UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+              group: UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
             },
             {
               flexChildren: true,
               children: [
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.GENERAL,
+                  group: UrlbarShared.RESULT_GROUP.GENERAL,
                   orderBy: "frecency",
                 },
                 {
                   flex: 1,
-                  group: UrlbarUtils.RESULT_GROUP.REMOTE_TAB,
+                  group: UrlbarShared.RESULT_GROUP.REMOTE_TAB,
                 },
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.ABOUT_PAGES,
+                  group: UrlbarShared.RESULT_GROUP.ABOUT_PAGES,
                 },
               ],
             },
             {
-              group: UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+              group: UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
             },
           ],
         },
@@ -321,11 +329,11 @@ const EXPECTED_SMARTBAR_NOT_SUGGESTIONS_FIRST_GROUPS = {
     {
       maxResultCount: 1,
       children: [
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_AUTOFILL },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_HISTORY_URL },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_AI_CHAT },
-        { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_FALLBACK },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_AUTOFILL },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_HISTORY_URL },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_AI_CHAT },
+        { group: UrlbarShared.RESULT_GROUP.HEURISTIC_FALLBACK },
       ],
     },
     // main group
@@ -334,63 +342,63 @@ const EXPECTED_SMARTBAR_NOT_SUGGESTIONS_FIRST_GROUPS = {
       children: [
         // general
         {
-          flex: 2,
-          group: UrlbarUtils.RESULT_GROUP.GENERAL_PARENT,
+          flex: 1,
+          group: UrlbarShared.RESULT_GROUP.GENERAL_PARENT,
           children: [
             {
               availableSpan: 3,
-              group: UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+              group: UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
             },
             {
               flexChildren: true,
               children: [
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.GENERAL,
+                  group: UrlbarShared.RESULT_GROUP.GENERAL,
                   orderBy: "frecency",
                 },
                 {
                   flex: 1,
-                  group: UrlbarUtils.RESULT_GROUP.REMOTE_TAB,
+                  group: UrlbarShared.RESULT_GROUP.REMOTE_TAB,
                 },
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.ABOUT_PAGES,
+                  group: UrlbarShared.RESULT_GROUP.ABOUT_PAGES,
                 },
               ],
             },
             {
-              group: UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+              group: UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
             },
           ],
         },
         // suggestions
         {
-          flex: 1,
+          flex: 2,
           children: [
             {
               availableSpan: 2,
-              group: UrlbarUtils.RESULT_GROUP.AI,
+              group: UrlbarShared.RESULT_GROUP.AI,
             },
             {
               flexChildren: true,
               children: [
                 {
                   flex: 2,
-                  group: UrlbarUtils.RESULT_GROUP.FORM_HISTORY,
+                  group: UrlbarShared.RESULT_GROUP.FORM_HISTORY,
                 },
                 {
                   flex: 99,
-                  group: UrlbarUtils.RESULT_GROUP.RECENT_SEARCH,
+                  group: UrlbarShared.RESULT_GROUP.RECENT_SEARCH,
                 },
                 {
                   flex: 4,
-                  group: UrlbarUtils.RESULT_GROUP.REMOTE_SUGGESTION,
+                  group: UrlbarShared.RESULT_GROUP.REMOTE_SUGGESTION,
                 },
               ],
             },
             {
-              group: UrlbarUtils.RESULT_GROUP.TAIL_SUGGESTION,
+              group: UrlbarShared.RESULT_GROUP.TAIL_SUGGESTION,
             },
           ],
         },
@@ -459,19 +467,29 @@ add_task(function showSearchSuggestionsFirst_resultGroups() {
   );
 });
 
-// Tests interaction between showSearchSuggestionsFirst and smartbar resultGroups.
+// Tests interaction between showSearchSuggestionsFirst,
+// smartbar.showSearchSuggestionsFirst and smartbar resultGroups.
 add_task(function showSearchSuggestionsFirst_smartbar_resultGroups() {
   Assert.equal(
-    UrlbarPrefs.get("showSearchSuggestionsFirst"),
-    true,
-    "showSearchSuggestionsFirst is true initially"
+    UrlbarPrefs.get("smartbar.showSearchSuggestionsFirst"),
+    false,
+    "smartbar.showSearchSuggestionsFirst is false by default"
   );
   Assert.deepEqual(
     UrlbarPrefs.getResultGroups({
       context: { sapName: "smartbar", searchString: "test" },
     }),
+    EXPECTED_SMARTBAR_NOT_SUGGESTIONS_FIRST_GROUPS,
+    "smartbar resultGroups has general results first"
+  );
+
+  UrlbarPrefs.set("smartbar.showSearchSuggestionsFirst", true);
+  Assert.deepEqual(
+    UrlbarPrefs.getResultGroups({
+      context: { sapName: "smartbar", searchString: "test" },
+    }),
     EXPECTED_SMARTBAR_SUGGESTIONS_FIRST_GROUPS,
-    "smartbar resultGroups has suggestions first when showSearchSuggestionsFirst is true"
+    "smartbar resultGroups has suggestions first when smartbar.showSearchSuggestionsFirst is true"
   );
 
   UrlbarPrefs.set("showSearchSuggestionsFirst", false);
@@ -479,23 +497,31 @@ add_task(function showSearchSuggestionsFirst_smartbar_resultGroups() {
     UrlbarPrefs.getResultGroups({
       context: { sapName: "smartbar", searchString: "test" },
     }),
-    EXPECTED_SMARTBAR_NOT_SUGGESTIONS_FIRST_GROUPS,
-    "smartbar resultGroups is updated after setting showSearchSuggestionsFirst = false"
+    EXPECTED_SMARTBAR_SUGGESTIONS_FIRST_GROUPS,
+    "smartbar resultGroups is unaffected by the pref showSearchSuggestionsFirst"
   );
 
-  // Clear showSearchSuggestionsFirst.
+  // Clear showSearchSuggestionsFirst prefs.
   Services.prefs.clearUserPref("browser.urlbar.showSearchSuggestionsFirst");
+  Services.prefs.clearUserPref(
+    "browser.urlbar.smartbar.showSearchSuggestionsFirst"
+  );
   Assert.deepEqual(
     UrlbarPrefs.getResultGroups({
       context: { sapName: "smartbar", searchString: "test" },
     }),
-    EXPECTED_SMARTBAR_SUGGESTIONS_FIRST_GROUPS,
-    "smartbar resultGroups is updated immediately after clearing showSearchSuggestionsFirst"
+    EXPECTED_SMARTBAR_NOT_SUGGESTIONS_FIRST_GROUPS,
+    "smartbar resultGroups is updated immediately after clearing prefs"
   );
   Assert.equal(
     UrlbarPrefs.get("showSearchSuggestionsFirst"),
     true,
     "showSearchSuggestionsFirst defaults to true after clearing it"
+  );
+  Assert.equal(
+    UrlbarPrefs.get("smartbar.showSearchSuggestionsFirst"),
+    false,
+    "smartbar.showSearchSuggestionsFirst defaults to false after clearing it"
   );
 });
 

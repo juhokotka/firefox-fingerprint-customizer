@@ -61,7 +61,7 @@ add_task(async function opt_in() {
     let target = element.row.querySelector(".urlbarView-button-0");
     EventUtils.synthesizeMouseAtCenter(target, {});
 
-    assertEngagementTelemetry([
+    await assertEngagementTelemetry([
       {
         engagement_type: "opt_in",
         selected_result: "rust_market_opt_in",
@@ -84,7 +84,7 @@ add_task(async function not_now_and_dismiss() {
     let target = element.row.querySelector(".urlbarView-button-1");
     EventUtils.synthesizeMouseAtCenter(target, {});
 
-    assertEngagementTelemetry([
+    await assertEngagementTelemetry([
       {
         engagement_type: "not_now",
         selected_result: "rust_market_opt_in",
@@ -114,7 +114,7 @@ add_task(async function not_now_and_dismiss() {
     target = element.row.querySelector(".urlbarView-button-1");
     EventUtils.synthesizeMouseAtCenter(target, {});
 
-    assertEngagementTelemetry([
+    await assertEngagementTelemetry([
       {
         engagement_type: "dismiss",
         selected_result: "rust_market_opt_in",
@@ -150,7 +150,7 @@ add_task(async function not_interested() {
     EventUtils.synthesizeMouseAtCenter(targetMenuItem, {});
     await onPopupHidden;
 
-    assertEngagementTelemetry([
+    await assertEngagementTelemetry([
       {
         engagement_type: "not_interested",
         selected_result: "rust_market_opt_in",

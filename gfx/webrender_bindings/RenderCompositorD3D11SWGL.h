@@ -6,9 +6,9 @@
 #define MOZILLA_GFX_RENDERCOMPOSITOR_D3D11_H
 
 #include "mozilla/gfx/2D.h"
+#include "mozilla/layers/CompositorD3D11.h"
 #include "mozilla/layers/ScreenshotGrabber.h"
 #include "mozilla/layers/TextureD3D11.h"
-#include "mozilla/layers/CompositorD3D11.h"
 #include "mozilla/webrender/RenderCompositorLayersSWGL.h"
 
 namespace mozilla {
@@ -71,7 +71,7 @@ class RenderCompositorD3D11SWGL : public RenderCompositorLayersSWGL {
               ID3D11Texture2D* aStagingTexture,
               gfx::DataSourceSurface* aDataSourceSurface, Surface* aOwner,
               RenderCompositorD3D11SWGL* aRenderCompositor);
-    virtual ~TileD3D11() {}
+    virtual ~TileD3D11() = default;
 
     bool Map(wr::DeviceIntRect aDirtyRect, wr::DeviceIntRect aValidRect,
              void** aData, int32_t* aStride) override;
@@ -103,7 +103,7 @@ class RenderCompositorD3D11SWGL : public RenderCompositorLayersSWGL {
 class SurfaceD3D11SWGL : public RenderCompositorLayersSWGL::Surface {
  public:
   SurfaceD3D11SWGL(wr::DeviceIntSize aTileSize, bool aIsOpaque);
-  virtual ~SurfaceD3D11SWGL() {}
+  virtual ~SurfaceD3D11SWGL() = default;
 
   SurfaceD3D11SWGL* AsSurfaceD3D11SWGL() override { return this; }
 

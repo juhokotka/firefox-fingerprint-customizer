@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <span>
 
 #include "api/audio/echo_canceller3_config.h"
@@ -49,11 +50,23 @@ class ResidualEchoEstimator {
       std::span<std::array<float, kFftLengthBy2Plus1>> R2,
       std::span<std::array<float, kFftLengthBy2Plus1>> R2_unbounded);
 
-  // Returns true if ML-REE is active.
-  bool IsMlReeActive() const { return is_ml_ree_active_; }
+  // Returns true if output from neural residual echo estimation is actively
+  // used.
+  bool IsMlReeActive() const { return ml_ree_state_ == MlReeState::kActive; }
 
  private:
   enum class ReverbType { kLinear, kNonLinear };
+
+  // State of neural residual echo estimation.
+  enum class MlReeState {
+    // Neural estimator is either not present or not initialized.
+    // Once we leave this state, we never return to it.
+    kUninitialized,
+    // Neural estimator is initialized but not used.
+    kInitialized,
+    // Neural estimator is initialized and actively used for estimation.
+    kActive
+  };
 
   // Resets the state.
   void Reset();
@@ -87,7 +100,9 @@ class ResidualEchoEstimator {
   std::array<int, kFftLengthBy2Plus1> X2_noise_floor_counter_;
   ReverbModel echo_reverb_;
   NeuralResidualEchoEstimator* neural_residual_echo_estimator_;
-  bool is_ml_ree_active_ = false;
+  MlReeState ml_ree_state_ = MlReeState::kUninitialized;
+  bool has_logged_neural_echo_estimator_status_ = false;
+  int64_t linear_mode_blocks_until_neural_estimator_init_ = 0;
 };
 
 }  // namespace webrtc

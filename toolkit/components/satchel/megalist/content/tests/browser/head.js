@@ -8,7 +8,11 @@ const { LoginTestUtils } = ChromeUtils.importESModule(
 );
 
 const { LoginBreaches } = ChromeUtils.importESModule(
-  "resource:///modules/LoginBreaches.sys.mjs"
+  "moz-src:///browser/components/aboutlogins/LoginBreaches.sys.mjs"
+);
+
+const { BreachAlertsData } = ChromeUtils.importESModule(
+  "moz-src:///toolkit/components/passwordmgr/BreachAlertsData.sys.mjs"
 );
 
 const { RemoteSettings } = ChromeUtils.importESModule(
@@ -34,7 +38,8 @@ const gBrowserGlue = Cc["@mozilla.org/browser/browserglue;1"].getService(
 );
 
 ChromeUtils.defineESModuleGetters(this, {
-  LoginBreaches: "resource:///modules/LoginBreaches.sys.mjs",
+  LoginBreaches:
+    "moz-src:///browser/components/aboutlogins/LoginBreaches.sys.mjs",
 });
 
 const BREACH_EXAMPLE = {
@@ -113,14 +118,14 @@ async function addMockPasswords() {
 async function addBreach() {
   info("Adding breach");
   async function emitSync() {
-    await RemoteSettings(LoginBreaches.REMOTE_SETTINGS_COLLECTION).emit(
+    await RemoteSettings(BreachAlertsData.REMOTE_SETTINGS_COLLECTION).emit(
       "sync",
       { data: { current: [BREACH_EXAMPLE] } }
     );
   }
 
   gBrowserGlue.observe(null, "browser-glue-test", "add-breaches-sync-handler");
-  const db = RemoteSettings(LoginBreaches.REMOTE_SETTINGS_COLLECTION).db;
+  const db = RemoteSettings(BreachAlertsData.REMOTE_SETTINGS_COLLECTION).db;
   await db.importChanges({}, Date.now(), [BREACH_EXAMPLE]);
   await emitSync();
 }
@@ -151,11 +156,11 @@ async function checkAllLoginsRendered(megalist) {
   ok(true, `${logins.length} password cards are rendered.`);
 }
 
-async function addLocalOriginLogin() {
+async function addNavigableOriginLogin() {
   LoginTestUtils.addLogin({
     username: "john",
     password: "pass4",
-    origin: "about:preferences#privacy",
+    origin: "https://example.com",
   });
 }
 
@@ -222,8 +227,8 @@ async function checkNotificationInteractionTelemetry(
 function setInputValue(loginForm, fieldElement, value) {
   info(`Filling ${fieldElement} with value '${value}'.`);
   const field = loginForm.shadowRoot.querySelector(fieldElement);
-  field.input.value = value;
-  field.input.dispatchEvent(
+  field.inputEl.value = value;
+  field.inputEl.dispatchEvent(
     new InputEvent("input", {
       composed: true,
       bubbles: true,

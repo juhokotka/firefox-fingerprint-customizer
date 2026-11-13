@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(test)]
+use std::num::NonZeroUsize;
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
@@ -17,8 +19,9 @@ use neqo_common::{
 };
 use neqo_qpack as qpack;
 use neqo_transport::{
-    AppError, CloseReason, Connection, DatagramTracking, State, StreamId, StreamType, ZeroRttState,
-    streams::SendOrder,
+    AppError, CloseReason, Connection, DatagramQueueOutcome, DatagramTracking, State, StreamId,
+    StreamType, ZeroRttState,
+    streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use strum::Display;
@@ -34,11 +37,12 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+            TransportPrerequisites,
+            send_group::Generator as SendGroupGenerator,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
     },
     frames::HFrame,
-    push_controller::PushController,
     qpack_decoder_receiver::DecoderRecvStream,
     qpack_encoder_receiver::EncoderRecvStream,
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -60,6 +64,8 @@ pub struct RequestDescription<'b, T: RequestTarget> {
 #[derive(Display)]
 pub enum SessionAcceptAction {
     Accept,
+    /// Accept the session and include additional headers in the 200 response.
+    AcceptWith(Vec<Header>),
     Reject(Vec<Header>),
 }
 
@@ -133,7 +139,6 @@ impl Http3State {
 ///   is [`NewStreamHeadReader`].
 /// - [`Http3StreamType::Http`]: [`SendMessage`] and [`RecvMessage`] handlers are responsible for
 ///   this type of streams.
-/// - [`Http3StreamType::Push`]: [`RecvMessage`] is responsible for this type of streams.
 /// - [`Http3StreamType::ExtendedConnect`]: [`extended_connect::session::Session`] is responsible
 ///   sender and receiver handler.
 /// - [`Http3StreamType::WebTransport`]: [`WebTransportSendStream`] and [`WebTransportRecvStream`]
@@ -297,6 +302,7 @@ pub struct Http3Connection {
     recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
+    send_group_generator: SendGroupGenerator,
 }
 
 impl Display for Http3Connection {
@@ -320,17 +326,20 @@ impl Http3Connection {
             ))),
             webtransport: ExtendedConnectFeature::new(
                 ExtendedConnectType::WebTransport,
-                conn_params.get_webtransport(),
+                role,
+                conn_params.webtransport_enabled(),
             ),
             connect_udp: ExtendedConnectFeature::new(
                 ExtendedConnectType::ConnectUdp,
-                conn_params.get_connect(),
+                role,
+                conn_params.connect_enabled(),
             ),
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
             streams_with_pending_data: HashSet::default(),
             send_streams: HashMap::default(),
             recv_streams: HashMap::default(),
+            send_group_generator: SendGroupGenerator::default(),
             role,
         }
     }
@@ -374,10 +383,10 @@ impl Http3Connection {
         qdebug!("[{self}] create_qpack_streams");
         self.qpack_encoder
             .borrow_mut()
-            .add_send_stream(conn.stream_create(StreamType::UniDi)?);
+            .add_send_stream(conn.stream_create(StreamType::UniDi)?)?;
         self.qpack_decoder
             .borrow_mut()
-            .add_send_stream(conn.stream_create(StreamType::UniDi)?);
+            .add_send_stream(conn.stream_create(StreamType::UniDi)?)?;
         Ok(())
     }
 
@@ -514,9 +523,8 @@ impl Http3Connection {
     /// This function handles reading from all streams, i.e. control, qpack, request/response
     /// stream and unidi stream that still do not have a type.
     /// The function cannot handle:
-    /// 1) a `Push(_)`, `Http` or `WebTransportStream(_)` stream
-    /// 2) frames `MaxPushId`, `PriorityUpdateRequest`, `PriorityUpdateRequestPush` or `Goaway` must
-    ///    be handled by `Http3Client`/`Server`.
+    /// 1) a `Http` or `WebTransportStream(_)` stream
+    /// 2) frames `PriorityUpdateRequest` or `Goaway` must be handled by `Http3Client`/`Server`.
     ///
     /// The function returns `ReceiveOutput`.
     pub(crate) fn handle_stream_readable(
@@ -539,16 +547,14 @@ impl Http3Connection {
             ReceiveOutput::ControlFrames(control_frames) => {
                 let mut rest = Vec::new();
                 for cf in control_frames {
-                    if let Some(not_handled) = self.handle_control_frame(cf)? {
+                    if let Some(not_handled) = self.handle_control_frame(conn, cf)? {
                         rest.push(not_handled);
                     }
                 }
                 Ok(ReceiveOutput::ControlFrames(rest))
             }
             ReceiveOutput::NewStream(
-                NewStreamType::Push(_)
-                | NewStreamType::Http(_)
-                | NewStreamType::WebTransportStream(_),
+                NewStreamType::Http(_) | NewStreamType::WebTransportStream(_),
             )
             | ReceiveOutput::NoOutput => Ok(output),
             ReceiveOutput::NewStream(_) => {
@@ -652,6 +658,10 @@ impl Http3Connection {
             self.settings_state = Http3RemoteSettingsState::NotReceived;
             self.streams_with_pending_data.clear();
             // TODO: investigate whether this code can automatically retry failed transactions.
+            // No extended-CONNECT session can be among these, so there is no
+            // per-session datagram queue on the `Connection` to drop: neither
+            // feature is negotiated in 0-RTT (`set_0rtt_settings` never enables
+            // them), and creating a session fails with `Unavailable` until one is.
             self.send_streams.clear();
             self.recv_streams.clear();
             Ok(())
@@ -678,9 +688,7 @@ impl Http3Connection {
             return;
         };
 
-        stream
-            .borrow_mut()
-            .datagram(Bytes::new(datagram, varint_len));
+        stream.borrow().datagram(Bytes::new(datagram, varint_len));
     }
 
     fn check_stream_exists(&self, stream_type: Http3StreamType) -> Res<()> {
@@ -697,7 +705,7 @@ impl Http3Connection {
 
     /// If the new stream is a control or QPACK stream, this function creates a proper handler
     /// and perform a read.
-    /// if the new stream is a `Push(_)`, `Http` or `WebTransportStream(_)` stream, the function
+    /// if the new stream is a `Http` or `WebTransportStream(_)` stream, the function
     /// returns `ReceiveOutput::NewStream(_)` and the caller will handle it.
     /// If the stream is of a unknown type the stream will be closed.
     fn handle_new_stream(
@@ -714,9 +722,6 @@ impl Http3Connection {
                     .insert(stream_id, Box::new(ControlStreamRemote::new(stream_id)));
             }
 
-            NewStreamType::Push(push_id) => {
-                qinfo!("[{self}] A new push stream {stream_id} push_id:{push_id}");
-            }
             NewStreamType::Decoder => {
                 qdebug!("[{self}] A new remote qpack encoder stream {stream_id}");
                 self.check_stream_exists(Http3StreamType::Decoder)?;
@@ -725,7 +730,7 @@ impl Http3Connection {
                     Box::new(DecoderRecvStream::new(
                         stream_id,
                         Rc::clone(&self.qpack_decoder),
-                    )),
+                    )?),
                 );
             }
             NewStreamType::Encoder => {
@@ -736,7 +741,7 @@ impl Http3Connection {
                     Box::new(EncoderRecvStream::new(
                         stream_id,
                         Rc::clone(&self.qpack_encoder),
-                    )),
+                    )?),
                 );
             }
             NewStreamType::Http(_) => {
@@ -768,9 +773,9 @@ impl Http3Connection {
             NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
                 self.stream_receive(conn, stream_id, now)
             }
-            NewStreamType::Push(_)
-            | NewStreamType::Http(_)
-            | NewStreamType::WebTransportStream(_) => Ok(ReceiveOutput::NewStream(stream_type)),
+            NewStreamType::Http(_) | NewStreamType::WebTransportStream(_) => {
+                Ok(ReceiveOutput::NewStream(stream_type))
+            }
             NewStreamType::Unknown => Ok(ReceiveOutput::NoOutput),
         }
     }
@@ -780,7 +785,7 @@ impl Http3Connection {
         qdebug!("[{self}] Close connection error {error:?}");
         self.state = Http3State::Closing(CloseReason::Application(error));
         if (!self.send_streams.is_empty() || !self.recv_streams.is_empty()) && (error == 0) {
-            qwarn!("close(0) called when streams still active");
+            qdebug!("close(0) called when streams still active");
         }
         self.send_streams.clear();
         self.recv_streams.clear();
@@ -889,7 +894,6 @@ impl Http3Connection {
         conn: &mut Connection,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn HttpRecvStreamEvents>,
-        push_handler: Option<Rc<RefCell<PushController>>>,
         request: &RequestDescription<T>,
         now: Instant,
     ) -> Res<StreamId>
@@ -902,15 +906,7 @@ impl Http3Connection {
             request.target,
         );
         let id = self.create_bidi_transport_stream(conn)?;
-        self.request_with_stream(
-            id,
-            conn,
-            send_events,
-            recv_events,
-            push_handler,
-            request,
-            now,
-        )?;
+        self.request_with_stream(id, conn, send_events, recv_events, request, now)?;
         Ok(id)
     }
 
@@ -925,21 +921,17 @@ impl Http3Connection {
             _ => {}
         }
 
-        let id = conn
-            .stream_create(StreamType::BiDi)
-            .map_err(|e| Error::map_stream_create_errors(&e))?;
+        let id = conn.stream_create(StreamType::BiDi)?;
         conn.stream_keep_alive(id, true)?;
         Ok(id)
     }
 
-    #[expect(clippy::too_many_arguments, reason = "Yes, but they are needed.")]
     fn request_with_stream<T>(
         &mut self,
         stream_id: StreamId,
         conn: &mut Connection,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn HttpRecvStreamEvents>,
-        push_handler: Option<Rc<RefCell<PushController>>>,
         request: &RequestDescription<T>,
         now: Instant,
     ) -> Res<()>
@@ -979,8 +971,7 @@ impl Http3Connection {
                 },
                 Rc::clone(&self.qpack_decoder),
                 recv_events,
-                push_handler,
-                PriorityHandler::new(false, request.priority),
+                PriorityHandler::new(request.priority),
             )),
         );
 
@@ -1025,7 +1016,7 @@ impl Http3Connection {
         stream_id: StreamId,
         error: AppError,
     ) -> Res<()> {
-        qinfo!("[{self}] Reset sending side of stream {stream_id} error={error}");
+        qdebug!("[{self}] Reset sending side of stream {stream_id} error={error}");
 
         if self.send_stream_is_critical(stream_id) {
             return Err(Error::InvalidStreamId);
@@ -1036,13 +1027,35 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// Commit to reliably delivering the stream data buffered so far. If the stream is
+    /// subsequently reset, that prefix is delivered using `RESET_STREAM_AT`, if possible.
+    /// See [`neqo_transport::Connection::stream_commit`].
+    ///
+    /// # Errors
+    /// `InvalidStreamId` if the stream does not exist, or a transport error when the commitment
+    /// is rejected (e.g. the peer did not enable reliable reset).
+    pub fn stream_commit(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        now: Instant,
+    ) -> Res<()> {
+        qtrace!("[{self}] Commit reliable size on stream {stream_id}");
+        // The request is routed through the send stream so that any data still buffered in the
+        // HTTP/3 layer is flushed to the transport before the commitment is made.
+        self.send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .commit(conn, now)
+    }
+
     pub fn stream_stop_sending(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
         error: AppError,
     ) -> Res<()> {
-        qinfo!("[{self}] Send stop sending for stream {stream_id} error={error}");
+        qdebug!("[{self}] Send stop sending for stream {stream_id} error={error}");
         if self.recv_stream_is_critical(stream_id) {
             return Err(Error::InvalidStreamId);
         }
@@ -1066,6 +1079,35 @@ impl Http3Connection {
     ) -> Res<()> {
         conn.stream_sendorder(stream_id, sendorder)
             .map_err(|_| Error::InvalidStreamId)
+    }
+
+    /// Set the stream [`SendGroupId`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidStreamId`] if the stream id doesn't exist,
+    /// [`Error::Unavailable`] if the stream doesn't support send groups, or
+    /// [`Error::InvalidState`] if the group is not registered with the session.
+    pub fn stream_set_sendgroup(&mut self, stream_id: StreamId, sendgroup: SendGroupId) -> Res<()> {
+        let send_stream = self
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?;
+        send_stream.set_send_group(sendgroup)
+    }
+
+    /// Clear the stream [`SendGroupId`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidStreamId`] if the stream id doesn't exist, or
+    /// [`Error::Unavailable`] if the stream doesn't support send groups.
+    pub fn stream_clear_sendgroup(&mut self, stream_id: StreamId) -> Res<()> {
+        let send_stream = self
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?;
+        send_stream.clear_send_group()
     }
 
     /// Set the stream Fairness.   Fair streams will share bandwidth with other
@@ -1108,9 +1150,7 @@ impl Http3Connection {
             (None, Some(s)) => {
                 if !matches!(
                     s.stream_type(),
-                    Http3StreamType::Http
-                        | Http3StreamType::Push
-                        | Http3StreamType::ExtendedConnect
+                    Http3StreamType::Http | Http3StreamType::ExtendedConnect
                 ) {
                     return Err(Error::InvalidStreamId);
                 }
@@ -1159,52 +1199,6 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn webtransport_create_session<T>(
-        &mut self,
-        conn: &mut Connection,
-        events: Box<dyn ExtendedConnectEvents>,
-        target: T,
-        headers: &[Header],
-    ) -> Res<StreamId>
-    where
-        T: RequestTarget,
-    {
-        qinfo!("[{self}] Create WebTransport");
-        if !self.webtransport_enabled() {
-            return Err(Error::Unavailable);
-        }
-        self.extended_connect_create_session(
-            conn,
-            events,
-            target,
-            headers,
-            ExtendedConnectType::WebTransport,
-        )
-    }
-
-    pub fn connect_udp_create_session<T>(
-        &mut self,
-        conn: &mut Connection,
-        events: Box<dyn ExtendedConnectEvents>,
-        target: T,
-        headers: &[Header],
-    ) -> Res<StreamId>
-    where
-        T: RequestTarget,
-    {
-        qinfo!("[{self}] Create ConnectUdp");
-        if !self.connect_udp_enabled() {
-            return Err(Error::Unavailable);
-        }
-        self.extended_connect_create_session(
-            conn,
-            events,
-            target,
-            headers,
-            ExtendedConnectType::ConnectUdp,
-        )
-    }
-
     pub fn extended_connect_create_session<T>(
         &mut self,
         conn: &mut Connection,
@@ -1246,51 +1240,7 @@ impl Http3Connection {
         Ok(id)
     }
 
-    pub(crate) fn webtransport_session_accept(
-        &mut self,
-        conn: &mut Connection,
-        stream_id: StreamId,
-        events: Box<dyn ExtendedConnectEvents>,
-        accept_res: &SessionAcceptAction,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("Respond to WebTransport session with accept={accept_res}");
-        if !self.webtransport_enabled() {
-            return Err(Error::Unavailable);
-        }
-        self.extended_connect_session_accept(
-            conn,
-            stream_id,
-            events,
-            accept_res,
-            ExtendedConnectType::WebTransport,
-            now,
-        )
-    }
-
-    pub(crate) fn connect_udp_session_accept(
-        &mut self,
-        conn: &mut Connection,
-        stream_id: StreamId,
-        events: Box<dyn ExtendedConnectEvents>,
-        accept_res: &SessionAcceptAction,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("Respond to ConnectUdp session with accept={accept_res}");
-        if !self.connect_udp_enabled() {
-            return Err(Error::Unavailable);
-        }
-        self.extended_connect_session_accept(
-            conn,
-            stream_id,
-            events,
-            accept_res,
-            ExtendedConnectType::ConnectUdp,
-            now,
-        )
-    }
-
-    fn extended_connect_session_accept(
+    pub(crate) fn extended_connect_session_accept(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
@@ -1334,78 +1284,177 @@ impl Http3Connection {
                 }
                 Ok(())
             }
-            (Some(s), Some(_r), SessionAcceptAction::Accept) => {
-                let mut response_headers = vec![Header::new(":status", "200")];
-                if connect_type == ExtendedConnectType::ConnectUdp {
-                    response_headers.push(Header::new("capsule-protocol", "?1"));
-                }
-
-                if s.http_stream()
-                    .ok_or(Error::InvalidStreamId)?
-                    .send_headers(&response_headers, conn)
-                    .is_ok()
-                {
-                    let extended_conn = Rc::new(RefCell::new(
-                        extended_connect::session::Session::new_with_http_streams(
-                            stream_id,
-                            events,
-                            self.role,
-                            self.recv_streams
-                                .remove(&stream_id)
-                                .ok_or(Error::Internal)?,
-                            self.send_streams
-                                .remove(&stream_id)
-                                .ok_or(Error::Internal)?,
-                            connect_type,
-                        )?,
-                    ));
-                    self.add_streams(
-                        stream_id,
-                        Box::new(Rc::clone(&extended_conn)),
-                        Box::new(extended_conn),
-                    );
-                    self.streams_with_pending_data.insert(stream_id);
-                } else {
-                    self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
-                    return Err(Error::InvalidStreamId);
-                }
-                Ok(())
+            (Some(_), Some(_), SessionAcceptAction::Accept) => {
+                self.do_accept_extended_connect(conn, stream_id, events, connect_type, &[])
+            }
+            (Some(_), Some(_), SessionAcceptAction::AcceptWith(extra)) => {
+                self.do_accept_extended_connect(conn, stream_id, events, connect_type, extra)
             }
         }
     }
 
-    pub(crate) fn webtransport_close_session(
+    fn do_accept_extended_connect(
         &mut self,
         conn: &mut Connection,
-        session_id: StreamId,
-        error: u32,
-        message: &str,
-        now: Instant,
+        stream_id: StreamId,
+        events: Box<dyn ExtendedConnectEvents>,
+        connect_type: ExtendedConnectType,
+        extra_headers: &[Header],
     ) -> Res<()> {
-        qtrace!("Close WebTransport session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
+        let mut response_headers = vec![Header::new(":status", "200")];
+        if connect_type == ExtendedConnectType::ConnectUdp {
+            response_headers.push(Header::new("capsule-protocol", "?1"));
+        }
+        response_headers.extend_from_slice(extra_headers);
+
+        if self
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .http_stream()
+            .ok_or(Error::InvalidStreamId)?
+            .send_headers(&response_headers, conn)
+            .is_ok()
+        {
+            let extended_conn = Rc::new(RefCell::new(
+                extended_connect::session::Session::new_with_http_streams(
+                    stream_id,
+                    events,
+                    self.role,
+                    self.recv_streams
+                        .remove(&stream_id)
+                        .ok_or(Error::Internal)?,
+                    self.send_streams
+                        .remove(&stream_id)
+                        .ok_or(Error::Internal)?,
+                    connect_type,
+                )?,
+            ));
+            self.add_streams(
+                stream_id,
+                Box::new(Rc::clone(&extended_conn)),
+                Box::new(extended_conn),
+            );
+            self.streams_with_pending_data.insert(stream_id);
+        } else {
+            self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
+            return Err(Error::InvalidStreamId);
+        }
+        Ok(())
     }
 
-    pub(crate) fn connect_udp_close_session(
-        &mut self,
-        conn: &mut Connection,
-        session_id: StreamId,
-        error: u32,
-        message: &str,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("Close ConnectUdp session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
+    /// Invoked when GOAWAY is received. It flags all open WebTransport
+    /// sessions as draining and returns any sessions that were newly
+    /// marked as draining
+    pub(crate) fn drain_webtransport_sessions(&self) -> impl Iterator<Item = StreamId> + use<'_> {
+        self.recv_streams.iter().filter_map(|(id, s)| {
+            let sess = s.extended_connect_session()?;
+            let mut s = sess.borrow_mut();
+            (s.connect_type() == ExtendedConnectType::WebTransport && s.set_draining())
+                .then_some(*id)
+        })
     }
 
-    fn extended_connect_close_session(
+    /// Get the negotiated protocol for a WebTransport session.
+    ///
+    /// Returns `Ok(None)` if no protocol was negotiated.
+    /// Returns an error if the session does not exist or is not an extended CONNECT session.
+    pub(crate) fn webtransport_session_protocol(
+        &self,
+        session_id: StreamId,
+    ) -> Res<Option<String>> {
+        let stream = self
+            .send_streams
+            .get(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .ok_or(Error::InvalidStreamId)?;
+        Ok(stream.session_protocol())
+    }
+
+    /// Mint a connection-unique send-group ID and register it with a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_create_send_group(
+        &mut self,
+        session_id: StreamId,
+    ) -> Res<SendGroupId> {
+        let group_id = self.send_group_generator.next_id();
+        self.recv_streams
+            .get_mut(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .ok_or(Error::InvalidStreamId)?
+            .register_send_group(group_id)?;
+        Ok(group_id)
+    }
+
+    /// Validate that a send group belongs to the specified WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_validate_send_group(
+        &self,
+        session_id: StreamId,
+        group_id: SendGroupId,
+    ) -> Res<bool> {
+        self.recv_streams
+            .get(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .map(|s| s.validate_send_group(group_id))
+            .ok_or(Error::InvalidStreamId)
+    }
+
+    /// Look up a `WebTransport` session by its CONNECT stream ID.
+    ///
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session doesn't exist or is not a `WebTransport`
+    /// session. Extended CONNECT sessions of other protocols (connect-udp) share the same
+    /// stream tables, so every `webtransport_*` entry point must filter on the type.
+    pub(crate) fn webtransport_session(
+        &self,
+        session_id: StreamId,
+    ) -> Res<Rc<RefCell<extended_connect::session::Session>>> {
+        let session = self.get_extended_connect_session(session_id)?;
+        let is_webtransport = session.borrow().connect_type() == ExtendedConnectType::WebTransport;
+        if is_webtransport {
+            Ok(session)
+        } else {
+            Err(Error::InvalidStreamId)
+        }
+    }
+
+    /// Get statistics for a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_session_stats(
+        &self,
+        session_id: StreamId,
+    ) -> Res<extended_connect::stats::SessionStats> {
+        let Some(stats) = self.webtransport_session(session_id)?.borrow().stats() else {
+            debug_assert!(false, "a WebTransport session should always have stats");
+            return Err(Error::InvalidStreamId);
+        };
+        Ok(stats)
+    }
+
+    pub(crate) fn extended_connect_close_session(
         &mut self,
         conn: &mut Connection,
         session_id: StreamId,
+        connect_type: ExtendedConnectType,
         error: u32,
         message: &str,
         now: Instant,
     ) -> Res<()> {
+        if self
+            .get_extended_connect_session(session_id)?
+            .borrow()
+            .connect_type()
+            != connect_type
+        {
+            return Err(Error::InvalidStreamId);
+        }
         let send_stream = self
             .send_streams
             .get_mut(&session_id)
@@ -1421,6 +1470,28 @@ impl Http3Connection {
         Ok(())
     }
 
+    fn get_extended_connect_session(
+        &self,
+        session_id: StreamId,
+    ) -> Res<Rc<RefCell<extended_connect::session::Session>>> {
+        self.recv_streams
+            .get(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .extended_connect_session()
+            .ok_or(Error::InvalidStreamId)
+    }
+
+    pub(crate) fn validate_extended_connect_session(
+        &self,
+        session_id: StreamId,
+    ) -> Res<Rc<RefCell<extended_connect::session::Session>>> {
+        let wt = self.get_extended_connect_session(session_id)?;
+        if !wt.borrow().is_active() {
+            return Err(Error::InvalidStreamId);
+        }
+        Ok(wt)
+    }
+
     pub(crate) fn webtransport_create_stream_local(
         &mut self,
         conn: &mut Connection,
@@ -1429,31 +1500,52 @@ impl Http3Connection {
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
     ) -> Res<StreamId> {
-        qtrace!("Create new WebTransport stream session={session_id} type={stream_type:?}");
+        self.webtransport_create_stream_local_with_send_group(
+            conn,
+            session_id,
+            stream_type,
+            send_events,
+            recv_events,
+            None,
+        )
+    }
 
-        let wt = self
-            .recv_streams
-            .get(&session_id)
-            .ok_or(Error::InvalidStreamId)?
-            .extended_connect_session()
-            .ok_or(Error::InvalidStreamId)?;
-        if !wt.borrow().is_active() {
-            return Err(Error::InvalidStreamId);
+    pub(crate) fn webtransport_create_stream_local_with_send_group(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        stream_type: StreamType,
+        send_events: Box<dyn SendStreamEvents>,
+        recv_events: Box<dyn RecvStreamEvents>,
+        send_group: Option<SendGroupId>,
+    ) -> Res<StreamId> {
+        qtrace!(
+            "Create new WebTransport stream session={session_id} type={stream_type:?} send_group={send_group:?}"
+        );
+
+        let wt = self.validate_extended_connect_session(session_id)?;
+
+        if let Some(group_id) = send_group
+            && !self.webtransport_validate_send_group(session_id, group_id)?
+        {
+            return Err(Error::InvalidState);
         }
 
-        let stream_id = conn
-            .stream_create(stream_type)
-            .map_err(|e| Error::map_stream_create_errors(&e))?;
+        let stream_id = conn.stream_create(stream_type)?;
         // Set outgoing WebTransport streams to be fair (share bandwidth)
         conn.stream_fairness(stream_id, true)?;
+        // Register the stream with its send group in the transport scheduler so that
+        // sendOrder is evaluated per-group and groups get fair bandwidth allocation.
+        if let Some(group_id) = send_group {
+            conn.stream_sendgroup(stream_id, Some(group_id))?;
+        }
 
         self.webtransport_create_stream_internal(
             wt,
             stream_id,
-            session_id,
-            send_events,
-            recv_events,
+            (send_events, recv_events),
             true,
+            send_group,
         )?;
         Ok(stream_id)
     }
@@ -1467,20 +1559,14 @@ impl Http3Connection {
     ) -> Res<()> {
         qtrace!("Create new WebTransport stream session={session_id} stream_id={stream_id}");
 
-        let wt = self
-            .recv_streams
-            .get(&session_id)
-            .ok_or(Error::InvalidStreamId)?
-            .extended_connect_session()
-            .ok_or(Error::InvalidStreamId)?;
+        let wt = self.get_extended_connect_session(session_id)?;
 
         self.webtransport_create_stream_internal(
             wt,
             stream_id,
-            session_id,
-            send_events,
-            recv_events,
+            (send_events, recv_events),
             false,
+            None,
         )?;
         Ok(())
     }
@@ -1489,11 +1575,14 @@ impl Http3Connection {
         &mut self,
         webtransport_session: Rc<RefCell<extended_connect::session::Session>>,
         stream_id: StreamId,
-        session_id: StreamId,
-        send_events: Box<dyn SendStreamEvents>,
-        recv_events: Box<dyn RecvStreamEvents>,
+        events: (Box<dyn SendStreamEvents>, Box<dyn RecvStreamEvents>),
         local: bool,
+        send_group: Option<SendGroupId>,
     ) -> Res<()> {
+        if webtransport_session.borrow().connect_type() != ExtendedConnectType::WebTransport {
+            return Err(Error::InvalidStreamId);
+        }
+        let (send_events, recv_events) = events;
         webtransport_session.borrow_mut().add_stream(stream_id)?;
         if stream_id.stream_type() == StreamType::UniDi {
             if local {
@@ -1501,10 +1590,10 @@ impl Http3Connection {
                     stream_id,
                     Box::new(WebTransportSendStream::new(
                         stream_id,
-                        session_id,
                         send_events,
                         webtransport_session,
                         true,
+                        send_group,
                     )),
                 );
             } else {
@@ -1512,7 +1601,6 @@ impl Http3Connection {
                     stream_id,
                     Box::new(WebTransportRecvStream::new(
                         stream_id,
-                        session_id,
                         recv_events,
                         webtransport_session,
                     )),
@@ -1523,14 +1611,13 @@ impl Http3Connection {
                 stream_id,
                 Box::new(WebTransportSendStream::new(
                     stream_id,
-                    session_id,
                     send_events,
                     Rc::clone(&webtransport_session),
                     local,
+                    send_group,
                 )),
                 Box::new(WebTransportRecvStream::new(
                     stream_id,
-                    session_id,
                     recv_events,
                     webtransport_session,
                 )),
@@ -1539,49 +1626,61 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors send_datagram's own params plus session_id/conn"
+    )]
+    pub(crate) fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
+        &self,
         session_id: StreamId,
         conn: &mut Connection,
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
-    }
-
-    pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
-        session_id: StreamId,
-        conn: &mut Connection,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
-    }
-
-    fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
-        session_id: StreamId,
-        conn: &mut Connection,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        self.recv_streams
-            .get_mut(&session_id)
-            .ok_or(Error::InvalidStreamId)?
-            .extended_connect_session()
-            .ok_or(Error::InvalidStreamId)?
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome> {
+        self.validate_extended_connect_session(session_id)?
             .borrow_mut()
-            .send_datagram(conn, buf, id, now)
+            .send_datagram(conn, buf, id, now, send_group_id, send_order)
     }
 
-    /// If the control stream has received frames `MaxPushId`, `Goaway`, `PriorityUpdateRequest` or
-    /// `PriorityUpdateRequestPush` which handling is specific to the client and server, we must
-    /// give them to the specific client/server handler.
-    fn handle_control_frame(&mut self, f: HFrame) -> Res<Option<HFrame>> {
+    /// Test-only: not yet exposed to a production caller.
+    #[cfg(test)]
+    pub(crate) fn extended_connect_set_max_buffered_datagrams(
+        &self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        mark: Option<NonZeroUsize>,
+    ) -> Res<()> {
+        self.validate_extended_connect_session(session_id)?
+            .borrow()
+            .set_max_buffered_datagrams(conn, mark);
+        Ok(())
+    }
+
+    /// Expire stale outgoing datagrams on every active extended-CONNECT
+    /// session's queue and count them per session. Called once per
+    /// `process_http3` tick. The transport counts expiries on the queue
+    /// itself, whether its own timer sweep or this one sheds them, so this
+    /// sweep picks up the right number regardless of whether it runs before
+    /// or after `Connection::process_output` within a tick.
+    ///
+    /// Returns the total number of datagrams expired, for the caller to fold
+    /// into a stats counter.
+    pub(crate) fn expire_datagram_queues(&self, conn: &mut Connection, now: Instant) -> u64 {
+        self.recv_streams
+            .values()
+            .filter_map(|s| s.extended_connect_session())
+            .filter(|s| s.borrow().is_active())
+            .map(|s| s.borrow_mut().expire_datagrams(conn, now))
+            .sum()
+    }
+
+    /// Frames whose handling is specific to the client and server (`Goaway`,
+    /// `PriorityUpdateRequest`, and the unsupported server-push control frames) are given to the
+    /// specific client/server handler.
+    fn handle_control_frame(&mut self, conn: &Connection, f: HFrame) -> Res<Option<HFrame>> {
         qdebug!("[{self}] Handle a control frame {f:?}");
         if !matches!(f, HFrame::Settings { .. })
             && !matches!(
@@ -1593,14 +1692,14 @@ impl Http3Connection {
         }
         match f {
             HFrame::Settings { settings } => {
-                self.handle_settings(settings)?;
+                self.handle_settings(conn, settings)?;
                 Ok(None)
             }
             HFrame::Goaway { .. }
-            | HFrame::MaxPushId { .. }
-            | HFrame::CancelPush { .. }
             | HFrame::PriorityUpdateRequest { .. }
-            | HFrame::PriorityUpdatePush { .. } => Ok(Some(f)),
+            | HFrame::CancelPush
+            | HFrame::MaxPushId
+            | HFrame::PriorityUpdatePush => Ok(Some(f)),
             _ => Err(Error::HttpFrameUnexpected),
         }
     }
@@ -1612,24 +1711,37 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn handle_settings(&mut self, new_settings: HSettings) -> Res<()> {
+    fn handle_settings(&mut self, conn: &Connection, new_settings: HSettings) -> Res<()> {
         qdebug!("[{self}] Handle SETTINGS frame");
+        let prereqs = TransportPrerequisites::new(
+            conn.remote_datagram_size() > 0,
+            conn.peer_supports_reliable_stream_reset(),
+        );
         match &self.settings_state {
             Http3RemoteSettingsState::NotReceived => {
                 self.set_qpack_settings(&new_settings)?;
-                self.webtransport.handle_settings(&new_settings);
-                self.connect_udp.handle_settings(&new_settings);
+                self.webtransport.handle_settings(&new_settings, &prereqs);
+                self.connect_udp.handle_settings(&new_settings, &prereqs);
                 self.settings_state = Http3RemoteSettingsState::Received(new_settings);
                 Ok(())
             }
             Http3RemoteSettingsState::ZeroRtt(settings) => {
-                self.webtransport.handle_settings(&new_settings);
-                self.connect_udp.handle_settings(&new_settings);
+                self.webtransport.handle_settings(&new_settings, &prereqs);
+                self.connect_udp.handle_settings(&new_settings, &prereqs);
                 let mut qpack_changed = false;
                 for st in &[
                     HSettingType::MaxHeaderListSize,
                     HSettingType::MaxTableCapacity,
                     HSettingType::BlockedStreams,
+                    HSettingType::EnableConnect,
+                    // [RFC 9297, Section 2.1.1](https://www.rfc-editor.org/rfc/rfc9297.html#section-2.1.1)
+                    // requires a client that stored SETTINGS_H3_DATAGRAM with its
+                    // 0-RTT state to terminate the connection with H3_SETTINGS_ERROR
+                    // if the server's new value is smaller than the stored one.
+                    // [draft-ietf-webtrans-http3, Section 3.2](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3#section-3.2)
+                    // states the same rule for the WebTransport setting.
+                    HSettingType::EnableWebTransport,
+                    HSettingType::EnableH3Datagram,
                 ] {
                     let zero_rtt_value = settings.get(*st);
                     let new_value = new_settings.get(*st);
@@ -1679,15 +1791,6 @@ impl Http3Connection {
             self.streams_with_pending_data.insert(stream_id);
         }
         self.send_streams.insert(stream_id, send_stream);
-        self.recv_streams.insert(stream_id, recv_stream);
-    }
-
-    /// Add a new recv stream. This is used for push streams.
-    pub(crate) fn add_recv_stream(
-        &mut self,
-        stream_id: StreamId,
-        recv_stream: Box<dyn RecvStream>,
-    ) {
         self.recv_streams.insert(stream_id, recv_stream);
     }
 

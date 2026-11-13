@@ -4,10 +4,10 @@
 #ifndef nsDeviceContextAndroid_h_
 #define nsDeviceContextAndroid_h_
 
-#include "nsIDeviceContextSpec.h"
-#include "nsCOMPtr.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/gfx/PrintPromise.h"
+#include "nsCOMPtr.h"
+#include "nsIDeviceContextSpec.h"
 
 class nsDeviceContextSpecAndroid final : public nsIDeviceContextSpec {
  private:
@@ -23,11 +23,9 @@ class nsDeviceContextSpecAndroid final : public nsIDeviceContextSpec {
   NS_IMETHOD Init(nsIPrintSettings* aPS, bool aIsPrintPreview) override;
   NS_IMETHOD BeginDocument(const nsAString& aTitle,
                            const nsAString& aPrintToFileName,
-                           uint64_t aBrowsingContextId, int32_t aStartPage,
+                           mozilla::dom::WindowContext*, int32_t aStartPage,
                            int32_t aEndPage) override;
   RefPtr<mozilla::gfx::PrintEndDocumentPromise> EndDocument() override;
-  NS_IMETHOD BeginPage(const IntSize& aSizeInPoints) override { return NS_OK; }
-  NS_IMETHOD EndPage() override { return NS_OK; }
 
  private:
   nsresult DoEndDocument();

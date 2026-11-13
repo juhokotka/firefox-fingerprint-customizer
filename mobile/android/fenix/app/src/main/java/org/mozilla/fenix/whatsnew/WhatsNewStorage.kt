@@ -12,15 +12,18 @@ import java.util.concurrent.TimeUnit
 
 // This file is a modified port from Focus Android
 
-/**
- * Interface to abstract where the cached version and session counter is stored
- */
+/** Interface to abstract where the cached version and session counter is stored */
 interface WhatsNewStorage {
     fun getVersion(): WhatsNewVersion?
+
     fun setVersion(version: WhatsNewVersion)
+
     fun getWhatsNewHasBeenCleared(): Boolean
+
     fun setWhatsNewHasBeenCleared(cleared: Boolean)
+
     fun getDaysSinceUpdate(): Long
+
     fun setDateOfUpdate(day: Long)
 
     companion object {
@@ -30,8 +33,10 @@ interface WhatsNewStorage {
     }
 }
 
-class SharedPreferenceWhatsNewStorage(private val sharedPreference: SharedPreferences) :
-    WhatsNewStorage {
+class SharedPreferenceWhatsNewStorage(
+    private val sharedPreference: SharedPreferences,
+    private val currentTimeMillis: () -> Long = { System.currentTimeMillis() },
+) : WhatsNewStorage {
 
     constructor(context: Context) : this(PreferenceManager.getDefaultSharedPreferences(context))
 
@@ -55,7 +60,7 @@ class SharedPreferenceWhatsNewStorage(private val sharedPreference: SharedPrefer
 
     override fun getDaysSinceUpdate(): Long {
         val updateDay = sharedPreference.getLong(WhatsNewStorage.PREFERENCE_KEY_UPDATE_DAY, 0)
-        return TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - updateDay)
+        return TimeUnit.MILLISECONDS.toDays(currentTimeMillis() - updateDay)
     }
 
     override fun setDateOfUpdate(day: Long) {

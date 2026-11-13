@@ -5,15 +5,10 @@
 #ifndef SHARED_SURFACE_EGL_H_
 #define SHARED_SURFACE_EGL_H_
 
-#include "mozilla/Attributes.h"
-#include "mozilla/Mutex.h"
 #include "CompositorTypes.h"
 #include "SharedSurface.h"
-
-#ifdef MOZ_WIDGET_ANDROID
-#  include "AndroidNativeWindow.h"
-#  include "GLLibraryEGL.h"
-#endif
+#include "mozilla/Attributes.h"
+#include "mozilla/Mutex.h"
 
 namespace mozilla {
 namespace gl {
@@ -69,60 +64,6 @@ class SurfaceFactory_EGLImage final : public SurfaceFactory {
     return SharedSurface_EGLImage::Create(desc);
   }
 };
-
-// -
-// SurfaceTexture
-
-#ifdef MOZ_WIDGET_ANDROID
-
-class SharedSurface_SurfaceTexture final : public SharedSurface {
-  const java::GeckoSurface::GlobalRef mSurface;
-  const EGLSurface mEglSurface;
-  const std::weak_ptr<EglDisplay> mEglDisplay;
-  EGLSurface mOrigEglSurface = 0;
-
- public:
-  static UniquePtr<SharedSurface_SurfaceTexture> Create(
-      const SharedSurfaceDesc&);
-
-  java::GeckoSurface::Param JavaSurface() { return mSurface; }
-
- protected:
-  SharedSurface_SurfaceTexture(const SharedSurfaceDesc&,
-                               java::GeckoSurface::Param surface, EGLSurface);
-
- public:
-  virtual ~SharedSurface_SurfaceTexture();
-
-  virtual void LockProdImpl() override;
-  virtual void UnlockProdImpl() override;
-
-  virtual void ProducerAcquireImpl() override {}
-  virtual void ProducerReleaseImpl() override {}
-  virtual void ProducerReadReleaseImpl() override;
-
-  Maybe<layers::SurfaceDescriptor> ToSurfaceDescriptor() override;
-
-  virtual void Commit() override;
-
-  virtual void WaitForBufferOwnership() override;
-
-  virtual bool IsBufferAvailable() const override;
-
-  bool IsValid() const override;
-};
-
-class SurfaceFactory_SurfaceTexture final : public SurfaceFactory {
- public:
-  explicit SurfaceFactory_SurfaceTexture(GLContext&);
-
-  virtual UniquePtr<SharedSurface> CreateSharedImpl(
-      const SharedSurfaceDesc& desc) override {
-    return SharedSurface_SurfaceTexture::Create(desc);
-  }
-};
-
-#endif  // MOZ_WIDGET_ANDROID
 
 }  // namespace gl
 

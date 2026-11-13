@@ -14,7 +14,6 @@ const TEST_PAGE = `data:text/html,
 add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["test.wait300msAfterTabSwitch", true],
       // Enable restriction feature.
       ["places.history.floodingPrevention.enabled", true],
       // Restrict from the second visit.
@@ -92,7 +91,7 @@ add_task(async function basic() {
       });
 
       info("Check other");
-      // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+      // eslint-disable-next-line sdl/no-insecure-url
       await assertLinkVisitedStatus(browser, "http://example.com/", {
         visitCount: 0,
         isVisited: false,

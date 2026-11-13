@@ -6,28 +6,29 @@
 #define nsNetUtil_h_
 
 #include <functional>
+
 #include "mozilla/Maybe.h"
+#include "mozilla/NotNull.h"
 #include "mozilla/ResultExtensions.h"
+#include "mozilla/Services.h"
+#include "mozilla/net/MozURL_ffi.h"
+#include "mozilla/net/idna_glue.h"
 #include "nsAttrValue.h"
 #include "nsCOMPtr.h"
+#include "nsIIOService.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsILoadGroup.h"
+#include "nsILoadInfo.h"
 #include "nsINestedURI.h"
 #include "nsINetUtil.h"
 #include "nsIRequest.h"
-#include "nsILoadInfo.h"
-#include "nsIIOService.h"
 #include "nsIURI.h"
-#include "mozilla/NotNull.h"
-#include "mozilla/Services.h"
 #include "nsNetCID.h"
 #include "nsReadableUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
 #include "nsTArray.h"
-#include "mozilla/net/idna_glue.h"
-#include "mozilla/net/MozURL_ffi.h"
 
 class nsIPrincipal;
 class nsIAsyncStreamCopier;
@@ -35,6 +36,7 @@ class nsIAuthPrompt;
 class nsIAuthPrompt2;
 class nsIChannel;
 class nsIChannelPolicy;
+class nsIConsoleReportCollector;
 class nsICookieJarSettings;
 class nsIDownloadObserver;
 class nsIEventTarget;
@@ -136,6 +138,12 @@ nsresult NS_GetURIWithoutRef(nsIURI* aInput, nsIURI** aOutput);
 nsresult NS_GetSanitizedURIStringFromURI(nsIURI* aUri,
                                          nsACString& aSanitizedSpec);
 
+// Assigns to aSanitizedSpec the spec safe to expose for aSpec: aSpec itself
+// when it carries no password, a password-hidden form when it does, and an
+// empty string if a password is present but cannot be hidden.
+void NS_GetSanitizedSpecFromSpec(const nsACString& aSpec,
+                                 nsACString& aSanitizedSpec);
+
 /*
  * How to create a new Channel, using NS_NewChannel,
  * NS_NewChannelWithTriggeringPrincipal,
@@ -189,7 +197,8 @@ nsresult NS_NewChannelInternal(
     nsILoadGroup* aLoadGroup = nullptr,
     nsIInterfaceRequestor* aCallbacks = nullptr,
     nsLoadFlags aLoadFlags = nsIRequest::LOAD_NORMAL,
-    nsIIOService* aIoService = nullptr, uint32_t aSandboxFlags = 0);
+    nsIIOService* aIoService = nullptr, uint32_t aSandboxFlags = 0,
+    uint64_t aAssociatedBrowsingContextID = 0);
 
 // See NS_NewChannelInternal for usage and argument description
 nsresult NS_NewChannelInternal(
@@ -270,7 +279,8 @@ nsresult NS_NewChannel(
     nsILoadGroup* aLoadGroup = nullptr,
     nsIInterfaceRequestor* aCallbacks = nullptr,
     nsLoadFlags aLoadFlags = nsIRequest::LOAD_NORMAL,
-    nsIIOService* aIoService = nullptr, uint32_t aSandboxFlags = 0);
+    nsIIOService* aIoService = nullptr, uint32_t aSandboxFlags = 0,
+    uint64_t aAssociatedBrowsingContextID = 0);
 
 nsresult NS_GetIsDocumentChannel(nsIChannel* aChannel, bool* aIsDocument);
 
@@ -1014,17 +1024,28 @@ constexpr bool NS_IsHTTPWhitespace(Char aChar) {
  * result will be sent back through the callback and |aWillCallback| will be
  * true. Otherwiew, the result will be set to |aShouldUpgrade| and
  * |aWillCallback| is false.
+ * A console message describing an HSTS upgrade is added to |aReportCollector|,
+ * which is flushed to the web console once the loading document is known.
  */
 nsresult NS_ShouldSecureUpgrade(
-    nsIURI* aURI, nsILoadInfo* aLoadInfo, nsIPrincipal* aChannelResultPrincipal,
-    bool aAllowSTS, const mozilla::OriginAttributes& aOriginAttributes,
-    bool& aShouldUpgrade, std::function<void(bool, nsresult)>&& aResultCallback,
-    bool& aWillCallback);
+    nsIURI* aURI, nsILoadInfo* aLoadInfo,
+    nsIConsoleReportCollector* aReportCollector,
+    nsIPrincipal* aChannelResultPrincipal, bool aAllowSTS,
+    const mozilla::OriginAttributes& aOriginAttributes, bool& aShouldUpgrade,
+    std::function<void(bool, nsresult)>&& aResultCallback, bool& aWillCallback);
 
 /**
  * Returns an https URI for channels that need to go through secure upgrades.
  */
 nsresult NS_GetSecureUpgradedURI(nsIURI* aURI, nsIURI** aUpgradedURI);
+
+/**
+ * Adds a "|aMechanism|: Upgrading insecure request [URL] ..." warning to
+ * |aReportCollector| under the console category |aMechanism|.
+ */
+void NS_LogSecureUpgradeToConsole(nsIURI* aURI, nsILoadInfo* aLoadInfo,
+                                  nsIConsoleReportCollector* aReportCollector,
+                                  const nsACString& aMechanism);
 
 nsresult NS_CompareLoadInfoAndLoadContext(nsIChannel* aChannel);
 
@@ -1087,9 +1108,10 @@ nsresult GetParameterHTTP(const nsACString& aHeaderVal, const char* aParamName,
 bool ChannelIsPost(nsIChannel* aChannel);
 
 /**
- * Convenience function for verifying nsIURI scheme is either HTTP or HTTPS.
+ * Convenience functions for checking whether the scheme is HTTP or HTTPS.
  */
 bool SchemeIsHttpOrHttps(nsIURI* aURI);
+bool SchemeIsHttpOrHttps(nsIPrincipal* aPrincipal);
 
 // Helper functions for SetProtocol methods to follow
 // step 2.1 in https://url.spec.whatwg.org/#scheme-state
@@ -1194,6 +1216,10 @@ void ParseSimpleURISchemes(const nsACString& schemeList);
 
 nsresult AddExtraHeaders(nsIHttpChannel* aHttpChannel,
                          const nsACString& aExtraHeaders, bool aMerge = true);
+
+// Returns the IP address space the load is initiated from, which is what a
+// Local Network Access check compares the target address space against.
+nsILoadInfo::IPAddressSpace GetParentIPAddressSpace(nsILoadInfo* aLoadInfo);
 
 bool IsLocalOrPrivateNetworkAccess(
     nsILoadInfo::IPAddressSpace aParentIPAddressSpace,

@@ -11,10 +11,8 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
-import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.Dispatchers.Main
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import mozilla.components.feature.addons.Addon
 import mozilla.components.feature.addons.ui.showInformationDialog
 import mozilla.components.feature.addons.ui.translateName
@@ -26,13 +24,9 @@ import org.mozilla.fenix.ext.openToBrowser
 import org.mozilla.fenix.ext.requireComponents
 import org.mozilla.fenix.ext.showToolbar
 
-/**
- * A fragment to show the details of an add-on.
- */
+/** A fragment to show the details of an add-on. */
 class AddonDetailsFragment :
-    Fragment(R.layout.fragment_add_on_details),
-    AddonDetailsInteractor,
-    SystemInsetsPaddedFragment {
+    Fragment(R.layout.fragment_add_on_details), AddonDetailsInteractor, SystemInsetsPaddedFragment {
 
     private val updateAttemptStorage by lazy { UpdateAttemptStorage(requireContext()) }
     private val args by navArgs<AddonDetailsFragmentArgs>()
@@ -60,9 +54,7 @@ class AddonDetailsFragment :
 
     override fun showUpdaterDialog(addon: Addon) {
         viewLifecycleOwner.lifecycleScope.launch(Main) {
-            val updateAttempt = withContext(IO) {
-                updateAttemptStorage.findUpdateAttemptBy(addon.id)
-            }
+            val updateAttempt = updateAttemptStorage.findUpdateAttemptBy(addon.id)
             updateAttempt?.showInformationDialog(requireContext())
         }
     }

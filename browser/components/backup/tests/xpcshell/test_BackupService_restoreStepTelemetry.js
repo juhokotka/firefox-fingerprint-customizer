@@ -4,7 +4,7 @@ https://creativecommons.org/publicdomain/zero/1.0/ */
 "use strict";
 
 ChromeUtils.defineESModuleGetters(this, {
-  BackupError: "resource:///modules/backup/BackupError.mjs",
+  BackupError: "moz-src:///browser/components/backup/BackupError.mjs",
   ERRORS: "chrome://browser/content/backup/backup-constants.mjs",
   RESTORE_STEPS: "chrome://browser/content/backup/backup-constants.mjs",
 });
@@ -62,7 +62,7 @@ add_task(async function test_decompress_failure_step() {
         new BackupError("Decompression failed", ERRORS.DECOMPRESSION_FAILED)
       );
 
-    await bs.getBackupFileInfo(testBackupPath);
+    await bs.loadBackupFileInfo(testBackupPath);
     const restoreID = bs.state.restoreID;
 
     await Assert.rejects(
@@ -147,7 +147,7 @@ add_task(async function test_read_manifest_failure_step() {
       );
     });
 
-    await bs.getBackupFileInfo(testBackupPath);
+    await bs.loadBackupFileInfo(testBackupPath);
     const restoreID = bs.state.restoreID;
 
     await Assert.rejects(
@@ -228,7 +228,7 @@ add_task(async function test_profile_creation_failure_step() {
       .stub(bs, "recoverFromSnapshotFolderIntoSelectableProfile")
       .rejects(err);
 
-    await bs.getBackupFileInfo(testBackupPath);
+    await bs.loadBackupFileInfo(testBackupPath);
     const restoreID = bs.state.restoreID;
 
     await Assert.rejects(
@@ -290,7 +290,7 @@ add_task(async function test_non_backup_error_detail() {
       .stub(bs, "recoverFromSnapshotFolderIntoSelectableProfile")
       .rejects(genericError);
 
-    await bs.getBackupFileInfo(testBackupPath);
+    await bs.loadBackupFileInfo(testBackupPath);
 
     await Assert.rejects(
       bs.recoverFromBackupArchive(

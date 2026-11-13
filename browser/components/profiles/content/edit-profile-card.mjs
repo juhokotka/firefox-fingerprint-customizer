@@ -55,7 +55,11 @@ import "chrome://global/content/elements/moz-button.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://global/content/elements/moz-button-group.mjs";
 // eslint-disable-next-line import/no-unassigned-import
+import "chrome://global/content/elements/moz-segmented-control.mjs";
+// eslint-disable-next-line import/no-unassigned-import
 import "chrome://global/content/elements/moz-visual-picker.mjs";
+// eslint-disable-next-line import/no-unassigned-import
+import "chrome://global/content/elements/moz-fieldset.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://browser/content/profiles/avatar.mjs";
 // eslint-disable-next-line import/no-unassigned-import
@@ -66,6 +70,10 @@ import "chrome://browser/content/profiles/profile-avatar-selector.mjs";
 import "chrome://global/content/elements/moz-toggle.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://global/content/elements/moz-support-link.mjs";
+// eslint-disable-next-line import/no-unassigned-import
+import "chrome://global/content/elements/theme-picker.mjs";
+// eslint-disable-next-line import/no-unassigned-import
+import "chrome://global/content/elements/moz-checkbox.mjs";
 
 const SAVE_NAME_TIMEOUT = 2000;
 const SAVED_MESSAGE_TIMEOUT = 5000;
@@ -85,7 +93,7 @@ export class EditProfileCard extends MozLitElement {
 
   static queries = {
     avatarSelector: "profile-avatar-selector",
-    avatarSelectorLink: "#profile-avatar-selector-link",
+    avatarSelectorButton: "#profile-avatar-selector-button",
     deleteButton: "#delete-button",
     doneButton: "#done-button",
     errorMessage: "#error-message",
@@ -100,8 +108,12 @@ export class EditProfileCard extends MozLitElement {
 
   updateNameDebouncer = null;
   clearSavedMessageTimer = null;
+  hasRecordedThemePickerShown = false;
 
   get themeCards() {
+    if (this.novaEnabled) {
+      return this.themesPicker.pickerEl.childElements;
+    }
     return this.themesPicker.childElements;
   }
 
@@ -126,8 +138,25 @@ export class EditProfileCard extends MozLitElement {
     window.addEventListener("pagehide", this);
     document.addEventListener("Profiles:CustomAvatarUpload", this);
     document.addEventListener("Profiles:AvatarSelected", this);
+    window.addEventListener("ThemePickerThemeUpdated", this);
+    window.addEventListener("ThemePickerDeviceAppearanceUpdated", this);
+    document.addEventListener("visibilitychange", this);
+    this.addEventListener("ThemePickerInitialState", this);
 
     this.init().then(() => (this.initialized = true));
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+
+    window.removeEventListener("beforeunload", this);
+    window.removeEventListener("pagehide", this);
+    document.removeEventListener("Profiles:CustomAvatarUpload", this);
+    document.removeEventListener("Profiles:AvatarSelected", this);
+    window.removeEventListener("ThemePickerThemeUpdated", this);
+    window.removeEventListener("ThemePickerDeviceAppearanceUpdated", this);
+    document.removeEventListener("visibilitychange", this);
+    this.removeEventListener("ThemePickerInitialState", this);
   }
 
   async init() {
@@ -150,6 +179,7 @@ export class EditProfileCard extends MozLitElement {
       platform,
       profiles,
       themes,
+      novaEnabled,
     } = await RPMSendQuery("Profiles:GetEditProfileContent");
 
     if (isInAutomation) {
@@ -161,8 +191,39 @@ export class EditProfileCard extends MozLitElement {
     this.profiles = profiles;
     this.setProfile(currentProfile);
     this.themes = themes;
+    this.novaEnabled = novaEnabled;
 
     await this.setInitialInput();
+  }
+
+  #shouldRecordThemePickerShown() {
+    return (
+      this.isConnected && !this.hasRecordedThemePickerShown && !document.hidden
+    );
+  }
+
+  async maybeRecordThemePickerShown() {
+    if (!this.novaEnabled || !this.#shouldRecordThemePickerShown()) {
+      return;
+    }
+
+    await this.getUpdateComplete();
+
+    const themePicker = this.themesPicker;
+    if (!themePicker?.themes.length) {
+      return;
+    }
+
+    await themePicker.updateComplete;
+
+    if (!this.#shouldRecordThemePickerShown()) {
+      return;
+    }
+
+    this.hasRecordedThemePickerShown = true;
+    themePicker.shown();
+    document.removeEventListener("visibilitychange", this);
+    this.removeEventListener("ThemePickerInitialState", this);
   }
 
   async setInitialInput() {
@@ -247,6 +308,11 @@ export class EditProfileCard extends MozLitElement {
         RPMSendAsyncMessage("Profiles:PageHide");
         break;
       }
+      case "ThemePickerInitialState":
+      case "visibilitychange": {
+        this.maybeRecordThemePickerShown();
+        break;
+      }
       case "Profiles:CustomAvatarUpload": {
         let { file } = event.detail;
         this.updateAvatar(file);
@@ -257,7 +323,27 @@ export class EditProfileCard extends MozLitElement {
         this.updateAvatar(avatar);
         break;
       }
+      case "ThemePickerThemeUpdated": {
+        RPMSendAsyncMessage(
+          "Profiles:RecordThemeTelemetry",
+          this.profile?.themeId
+        );
+        this.refreshProfile();
+        break;
+      }
+      case "ThemePickerDeviceAppearanceUpdated": {
+        this.refreshProfile();
+        break;
+      }
     }
+  }
+
+  async refreshProfile() {
+    let { currentProfile } = await RPMSendQuery(
+      "Profiles:GetEditProfileContent"
+    );
+    this.setProfile(currentProfile);
+    this.requestUpdate();
   }
 
   updated() {
@@ -432,6 +518,19 @@ export class EditProfileCard extends MozLitElement {
   }
 
   themesTemplate() {
+    if (this.novaEnabled) {
+      return html`<moz-fieldset
+        id="theme-group"
+        data-l10n-id="edit-profile-page-theme-header-2"
+      >
+        <theme-picker id="themes" installsource="profiles"></theme-picker>
+      </moz-fieldset>`;
+    }
+
+    return this.legacyThemesTemplate();
+  }
+
+  legacyThemesTemplate() {
     if (!this.themes) {
       return null;
     }
@@ -469,13 +568,9 @@ export class EditProfileCard extends MozLitElement {
     }
 
     return html`<div id="desktop-shortcut-section">
-      <label
-        for="desktop-shortcut-toggle"
-        data-l10n-id="edit-profile-page-desktop-shortcut-header"
-      ></label>
       <moz-toggle
         id="desktop-shortcut-toggle"
-        data-l10n-id="edit-profile-page-desktop-shortcut-toggle"
+        data-l10n-id="edit-profile-page-desktop-shortcut-toggle-2"
         ?pressed=${this.hasDesktopShortcut}
         @click=${this.handleDesktopShortcutToggle}
       ></moz-toggle>
@@ -500,21 +595,23 @@ export class EditProfileCard extends MozLitElement {
 
   headerAvatarTemplate() {
     return html`<div class="avatar-header-content">
-      <img
-        id="header-avatar"
-        data-l10n-id=${this.profile.avatarL10nId}
-        src=${this.profile.avatarURLs.url80}
-      />
-      <a
-        id="profile-avatar-selector-link"
-        tabindex="0"
-        @click=${this.toggleAvatarSelectorCard}
-        @keydown=${this.handleAvatarSelectorKeyDown}
-        data-l10n-id="edit-profile-page-avatar-selector-opener-link"
-      ></a>
+      <div class="avatar-image-container">
+        <img
+          id="header-avatar"
+          data-l10n-id=${this.profile.avatarL10nId}
+          src=${this.profile.avatarURLs.url80}
+        />
+        <moz-button
+          id="profile-avatar-selector-button"
+          size="small"
+          type="primary"
+          iconsrc="chrome://global/skin/icons/edit-outline.svg"
+          @click=${this.toggleAvatarSelectorCard}
+          data-l10n-id="edit-profile-page-avatar-selector-opener-button"
+        ></moz-button>
+      </div>
       <div class="avatar-selector-parent">
         <profile-avatar-selector
-          hidden
           value=${this.profile.avatar}
         ></profile-avatar-selector>
       </div>
@@ -524,13 +621,6 @@ export class EditProfileCard extends MozLitElement {
   toggleAvatarSelectorCard(event) {
     event.stopPropagation();
     this.avatarSelector.toggleHidden();
-  }
-
-  handleAvatarSelectorKeyDown(event) {
-    if (event.code === "Enter" || event.code === "Space") {
-      event.preventDefault();
-      this.toggleAvatarSelectorCard(event);
-    }
   }
 
   onDeleteClick() {
@@ -564,11 +654,13 @@ export class EditProfileCard extends MozLitElement {
   buttonsTemplate() {
     return html`<moz-button
         id="delete-button"
+        size="large"
         data-l10n-id="edit-profile-page-delete-button"
         @click=${this.onDeleteClick}
       ></moz-button>
       <moz-button
         id="done-button"
+        size="large"
         data-l10n-id="new-profile-page-done-button"
         @click=${this.onDoneClick}
         type="primary"

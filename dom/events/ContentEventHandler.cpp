@@ -26,6 +26,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLBRElement.h"
 #include "mozilla/dom/HTMLUnknownElement.h"
+#include "mozilla/dom/Range.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/StaticRange.h"
 #include "mozilla/dom/Text.h"
@@ -42,7 +43,6 @@
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
 #include "nsQueryObject.h"
-#include "nsRange.h"
 #include "nsTextFrame.h"
 
 // Work around conflicting define in rpcndr.h
@@ -195,7 +195,7 @@ ContentEventHandler::SimpleRangeBase<NodeType, RangeBoundaryType>::SetEndAfter(
 
 template <typename NodeType, typename RangeBoundaryType>
 void ContentEventHandler::SimpleRangeBase<
-    NodeType, RangeBoundaryType>::SetStartAndEnd(const nsRange* aRange) {
+    NodeType, RangeBoundaryType>::SetStartAndEnd(const dom::Range* aRange) {
   DebugOnly<nsresult> rv =
       SetStartAndEnd(aRange->StartRef().AsRaw(), aRange->EndRef().AsRaw());
   MOZ_ASSERT(!aRange->IsPositioned() || NS_SUCCEEDED(rv));
@@ -341,7 +341,7 @@ nsresult ContentEventHandler::InitBasic(bool aRequireFlush) {
   return NS_OK;
 }
 
-Result<nsRange*, nsresult> ContentEventHandler::InitRootContent(
+Result<dom::Range*, nsresult> ContentEventHandler::InitRootContent(
     const Selection& aNormalSelection) {
   // Root content should be computed with normal selection because normal
   // selection is typically has at least one range but the other selections
@@ -349,7 +349,41 @@ Result<nsRange*, nsresult> ContentEventHandler::InitRootContent(
   // there are no ranges, we need to use ancestor limit instead.
   MOZ_ASSERT(aNormalSelection.Type() == SelectionType::eNormal);
 
-  const auto SetRootElementWithNoRanges = [&]() -> Result<nsRange*, nsresult> {
+  EditContext* editContext = mDocument->GetActiveEditContext();
+
+  auto getRangeInRootElement = [&]() MOZ_NEVER_INLINE_DEBUG -> dom::Range* {
+    nsFrameSelection* const fs = aNormalSelection.GetFrameSelection();
+    if (NS_WARN_IF(!fs)) {
+      return nullptr;
+    }
+    for (const uint32_t i : IntegerRange(aNormalSelection.RangeCount())) {
+      dom::Range* const range = aNormalSelection.GetRangeAt(i);
+      MOZ_ASSERT(range);
+      if (fs->RangeInLimiters(*range)) {
+        return range;
+      }
+      // For EditContext, it's acceptable to have the selection outside the
+      // host element.
+      if (!editContext) {
+        NS_WARNING(fmt::format("{} (index: {}) is not in the limiters {}",
+                               RefPtr{range}, i, fs->LimitersRef())
+                       .c_str());
+      }
+    }
+    return nullptr;
+  };
+
+  // Always use the active EditContext if there is one, regardless of the
+  // selection.
+  if (editContext) {
+    MOZ_ASSERT(editContext->GetAssociatedElement(),
+               "Should always have an associated element if active.");
+    mRootElement = editContext->GetAssociatedElement();
+    return getRangeInRootElement();
+  }
+
+  const auto SetRootElementWithNoRanges =
+      [&]() -> Result<dom::Range*, nsresult> {
     // If there is no selection range, we should compute the selection root
     // from ancestor limiter or root content of the document.
     mRootElement = aNormalSelection.GetAncestorLimiter();
@@ -376,23 +410,7 @@ Result<nsRange*, nsresult> ContentEventHandler::InitRootContent(
 
   // See bug 2046677. The range may be outside the ancestor limiter if it was
   // removed from the DOM. Therefore, we should ignore "invalid" ranges.
-  nsRange* const rangeInRootElement = [&]() MOZ_NEVER_INLINE_DEBUG -> nsRange* {
-    nsFrameSelection* const fs = aNormalSelection.GetFrameSelection();
-    if (NS_WARN_IF(!fs)) {
-      return nullptr;
-    }
-    for (const uint32_t i : IntegerRange(aNormalSelection.RangeCount())) {
-      nsRange* const range = aNormalSelection.GetRangeAt(i);
-      MOZ_ASSERT(range);
-      if (fs->RangeInLimiters(*range)) {
-        return range;
-      }
-      NS_WARNING(fmt::format("{} (index: {}) is not in the limiters {}",
-                             RefPtr{range}, i, fs->LimitersRef())
-                     .c_str());
-    }
-    return nullptr;
-  }();
+  dom::Range* const rangeInRootElement = getRangeInRootElement();
   if (!rangeInRootElement) {
     return SetRootElementWithNoRanges();
   }
@@ -461,7 +479,7 @@ nsresult ContentEventHandler::InitCommon(EventMessage aEventMessage,
     MOZ_ASSERT(normalSelection);
   }
 
-  Result<RefPtr<nsRange>, nsresult> firstRangeOrError =
+  Result<RefPtr<dom::Range>, nsresult> firstRangeOrError =
       InitRootContent(*normalSelection);
   if (NS_WARN_IF(firstRangeOrError.isErr())) {
     return firstRangeOrError.unwrapErr();
@@ -758,7 +776,7 @@ nsresult ContentEventHandler::GenerateFlatTextContent(const Element* aElement,
   return GenerateFlatTextContent(rawRange, aString);
 }
 
-nsresult ContentEventHandler::GenerateFlatTextContent(const nsRange* aRange,
+nsresult ContentEventHandler::GenerateFlatTextContent(const dom::Range* aRange,
                                                       nsString& aString) {
   MOZ_ASSERT(aString.IsEmpty());
 
@@ -1064,7 +1082,7 @@ nsresult ContentEventHandler::ExpandToClusterBoundary(
   return NS_OK;
 }
 
-already_AddRefed<nsRange> ContentEventHandler::GetRangeFromFlatTextOffset(
+already_AddRefed<dom::Range> ContentEventHandler::GetRangeFromFlatTextOffset(
     WidgetContentCommandEvent* aEvent, uint32_t aOffset, uint32_t aLength) {
   nsresult rv = InitCommon(aEvent->mMessage);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -1080,8 +1098,9 @@ already_AddRefed<nsRange> ContentEventHandler::GetRangeFromFlatTextOffset(
   DOMRangeAndAdjustedOffsetInFlattenedText domRangeAndAdjustOffset =
       result.unwrap();
 
-  return nsRange::Create(domRangeAndAdjustOffset.mRange.Start(),
-                         domRangeAndAdjustOffset.mRange.End(), IgnoreErrors());
+  return dom::Range::Create(domRangeAndAdjustOffset.mRange.Start(),
+                            domRangeAndAdjustOffset.mRange.End(),
+                            IgnoreErrors());
 }
 
 template <typename RangeType, typename TextNodeType>
@@ -2007,7 +2026,7 @@ nsresult ContentEventHandler::OnQueryTextRectArray(
   uint32_t offset = aEvent->mInput.mOffset;
   const uint32_t kEndOffset = aEvent->mInput.EndOffset();
   bool wasLineBreaker = false;
-  if (RefPtr<EditContext> editContext = GetEditContext()) {
+  if (EditContext* editContext = GetEditContext()) {
     MOZ_ASSERT(offset <= kEndOffset);
     // Let's not overflow if somehow offset > kEndOffset
     const uint32_t endOffset = std::max(kEndOffset, offset);
@@ -2023,8 +2042,7 @@ nsresult ContentEventHandler::OnQueryTextRectArray(
       MOZ_ASSERT(aEvent->Succeeded());
       return NS_OK;
     }
-    rv = editContext->FireCharacterBoundsUpdateAndGetRects(offset, endOffset,
-                                                           rects);
+    rv = editContext->GetCharacterBounds(offset, endOffset, rects);
     if (NS_SUCCEEDED(rv) && !rects.IsEmpty()) {
       LayoutDeviceIntRect lastRect = rects.LastElement();
       // If a range that goes past the end of the text content was requested,
@@ -2458,7 +2476,7 @@ nsresult ContentEventHandler::OnQueryTextRect(WidgetQueryContentEvent* aEvent) {
   }
 
   MOZ_ASSERT(aEvent->mReply->mOffsetAndData.isNothing());
-  RefPtr<EditContext> editContext = GetEditContext();
+  EditContext* editContext = GetEditContext();
   if (editContext) {
     // Get rectangle using EditContext character bounds
     const uint32_t start = aEvent->mInput.mOffset;
@@ -2478,7 +2496,7 @@ nsresult ContentEventHandler::OnQueryTextRect(WidgetQueryContentEvent* aEvent) {
       MOZ_ASSERT(aEvent->Succeeded());
       return NS_OK;
     }
-    rv = editContext->FireCharacterBoundsUpdateAndGetRects(start, end, rects);
+    rv = editContext->GetCharacterBounds(start, end, rects);
     // rects will be empty if start >= TextLength()
     if (NS_SUCCEEDED(rv) && !rects.IsEmpty()) {
       // Return union of the character rects.
@@ -2638,10 +2656,6 @@ nsresult ContentEventHandler::OnQueryTextRect(WidgetQueryContentEvent* aEvent) {
   // queried range.
   if (firstFrame->IsTextFrame()) {
     rect.SetRect(nsPoint(0, 0), firstFrame->GetRect().Size());
-    rv = ConvertToRootRelativeOffset(firstFrame, rect);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
     frameRect = rect;
     // Exclude the rect before start point of the queried range.
     firstFrame->GetPointFromOffset(firstFrame.mOffsetInNode, &ptOffset);
@@ -2651,6 +2665,18 @@ nsresult ContentEventHandler::OnQueryTextRect(WidgetQueryContentEvent* aEvent) {
     } else {
       rect.x += ptOffset.x;
       rect.width -= ptOffset.x;
+    }
+    // The character offset is relative to the untransformed text frame, so
+    // clip the frame before converting it through CSS transforms.  Mixing a
+    // transformed frame rect with an untransformed offset shifts ranges in
+    // scaled text and gives them the wrong width.
+    rv = ConvertToRootRelativeOffset(firstFrame, rect);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+    rv = ConvertToRootRelativeOffset(firstFrame, frameRect);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
     }
   }
   // If first frame causes a line breaker but it's not a <br> frame, we cannot
@@ -2778,33 +2804,29 @@ nsresult ContentEventHandler::OnQueryTextRect(WidgetQueryContentEvent* aEvent) {
     }
   }
 
-  // Get the ending frame rect.
-  // FYI: If first frame and last frame are same, frameRect is already set
-  //      to the rect excluding the text before the query range.
-  if (firstFrame.mFrame != lastFrame.mFrame) {
-    frameRect.SetRect(nsPoint(0, 0), lastFrame->GetRect().Size());
-    rv = ConvertToRootRelativeOffset(lastFrame, frameRect);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-  }
-
   // Shrink the last frame for cutting off the text after the query range.
   if (lastFrame->IsTextFrame()) {
+    nsRect lastFrameRect(nsPoint(0, 0), lastFrame->GetRect().Size());
     lastFrame->GetPointFromOffset(lastFrame.mOffsetInNode, &ptOffset);
     if (lastFrame->GetWritingMode().IsVertical()) {
-      frameRect.height -= lastFrame->GetRect().height - ptOffset.y;
+      lastFrameRect.height -= lastFrame->GetRect().height - ptOffset.y;
     } else {
-      frameRect.width -= lastFrame->GetRect().width - ptOffset.x;
+      lastFrameRect.width -= lastFrame->GetRect().width - ptOffset.x;
     }
     // UnionRect() requires non-empty rect.  So, let's make sure to get
     // non-empty rect from the last frame.
-    EnsureNonEmptyRect(frameRect);
+    EnsureNonEmptyRect(lastFrameRect);
+    // As with the start offset above, apply the end offset in frame-local
+    // coordinates before converting through CSS transforms.
+    rv = ConvertToRootRelativeOffset(lastFrame, lastFrameRect);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
 
     if (firstFrame.mFrame == lastFrame.mFrame) {
-      rect.IntersectRect(rect, frameRect);
+      rect.IntersectRect(rect, lastFrameRect);
     } else {
-      rect.UnionRect(rect, frameRect);
+      rect.UnionRect(rect, lastFrameRect);
     }
   }
 
@@ -2976,19 +2998,26 @@ nsresult ContentEventHandler::OnQueryCharacterAtPoint(
   MOZ_ASSERT(aEvent->mReply->mOffsetAndData.isNothing());
   MOZ_ASSERT(aEvent->mReply->mTentativeCaretOffset.isNothing());
 
-  if (RefPtr<EditContext> editContext = GetEditContext()) {
+  if (EditContext* editContext = GetEditContext()) {
     AutoTArray<LayoutDeviceIntRect, 8> rects;
-    // XXX: Getting all the rects is not ideal. Maybe do some kind of binary
-    //      search and fallback to this if it fails?
-    rv = editContext->FireCharacterBoundsUpdateAndGetRects(
-        0, editContext->TextLength(), rects);
+    // The character bounds offset/length can be set to anything,
+    // so we have to be careful and clamp to the text length.
+    const uint32_t start = std::min(editContext->TextLength(),
+                                    editContext->CharacterBoundsRangeStart());
+    const CheckedUint32 checkedEnd =
+        CheckedUint32(start) + editContext->CharacterBoundsLength();
+    const uint32_t end =
+        std::min(checkedEnd.isValid() ? checkedEnd.value() : UINT32_MAX,
+                 editContext->TextLength());
+    rv = editContext->GetCharacterBounds(start, end, rects);
     if (NS_SUCCEEDED(rv)) {
-      for (size_t i : IntegerRange(0u, rects.Length())) {
-        if (rects[i].Contains(aEvent->mRefPoint)) {
+      for (uint32_t i : IntegerRange(start, end)) {
+        const LayoutDeviceIntRect rect = rects[i - start];
+        if (rect.Contains(aEvent->mRefPoint)) {
           nsAutoString string;
           editContext->GetTextSubstring(i, i + 1, string);
           aEvent->mReply->mOffsetAndData.emplace(i, string);
-          aEvent->mReply->mRect = rects[i];
+          aEvent->mReply->mRect = rect;
           // XXX: Should we adjust this based on where in the rect the point is
           //      and the directionality of the text?
           aEvent->mReply->mTentativeCaretOffset = Some(i);
@@ -3041,10 +3070,16 @@ nsresult ContentEventHandler::OnQueryCharacterAtPoint(
     MOZ_ASSERT(aEvent->Succeeded());
     return NS_OK;
   }
-  nsPoint ptInTarget = ptInRoot + rootFrame->GetOffsetToCrossDoc(targetFrame);
-  int32_t rootAPD = rootFrame->PresContext()->AppUnitsPerDevPixel();
-  int32_t targetAPD = targetFrame->PresContext()->AppUnitsPerDevPixel();
-  ptInTarget = ptInTarget.ScaleToOtherAppUnits(rootAPD, targetAPD);
+  // GetFrameForPoint() takes CSS transforms into account when choosing the
+  // target frame. Convert the point through the same transform chain before
+  // asking that frame for a character offset.
+  nsPoint ptInTarget = ptInRoot;
+  if (NS_WARN_IF(nsLayoutUtils::TransformPoint(
+                     RelativeTo{rootFrame}, RelativeTo{targetFrame},
+                     ptInTarget) != nsLayoutUtils::TRANSFORM_SUCCEEDED)) {
+    MOZ_ASSERT(aEvent->Succeeded());
+    return NS_OK;
+  }
 
   nsIFrame::ContentOffsets tentativeCaretOffsets =
       targetFrame->GetContentOffsetsFromPoint(ptInTarget);
@@ -3463,6 +3498,12 @@ nsresult ContentEventHandler::OnSelectionEvent(WidgetSelectionEvent* aEvent) {
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
+  if (RefPtr<EditContext> editContext = GetEditContext()) {
+    editContext->DoSetSelection(*aEvent);
+    aEvent->mSucceeded = true;
+    return NS_OK;
+  }
+
   // Get range from offset and length
   nsINode* startNode = nullptr;
   nsINode* endNode = nullptr;
@@ -3473,7 +3514,7 @@ nsresult ContentEventHandler::OnSelectionEvent(WidgetSelectionEvent* aEvent) {
         domRangeAndAdjustedOffsetOrError =
             ConvertFlatTextOffsetToUnsafeDOMRange(
                 aEvent->mOffset, aEvent->mLength,
-                aEvent->mExpandToClusterBoundary);
+                aEvent->ShouldExpandToClusterBoundary());
     if (MOZ_UNLIKELY(domRangeAndAdjustedOffsetOrError.isErr())) {
       NS_WARNING(
           "ContentEventHandler::ConvertFlatTextOffsetToDOMRangeBase() failed");
@@ -3494,7 +3535,7 @@ nsresult ContentEventHandler::OnSelectionEvent(WidgetSelectionEvent* aEvent) {
     }
   }
 
-  if (aEvent->mReversed) {
+  if (aEvent->IsReversed()) {
     nsCOMPtr<nsINode> startNodeStrong(startNode);
     nsCOMPtr<nsINode> endNodeStrong(endNode);
     ErrorResult error;

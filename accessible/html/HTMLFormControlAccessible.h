@@ -5,13 +5,13 @@
 #ifndef MOZILLA_A11Y_HTMLFormControlAccessible_H_
 #define MOZILLA_A11Y_HTMLFormControlAccessible_H_
 
+#include "AccAttributes.h"
 #include "FormControlAccessible.h"
 #include "HyperTextAccessible.h"
+#include "Relation.h"
 #include "mozilla/a11y/AccTypes.h"
 #include "mozilla/dom/Element.h"
-#include "AccAttributes.h"
 #include "nsAccUtils.h"
-#include "Relation.h"
 
 namespace mozilla {
 class EditorBase;
@@ -144,6 +144,7 @@ class HTMLSpinnerAccessible final : public HTMLTextFieldAccessible {
  public:
   HTMLSpinnerAccessible(nsIContent* aContent, DocAccessible* aDoc)
       : HTMLTextFieldAccessible(aContent, aDoc) {
+    mType = eHTMLSpinnerType;
     mGenericTypes |= eNumericValue;
   }
 
@@ -165,6 +166,7 @@ class HTMLRangeAccessible : public LeafAccessible {
  public:
   HTMLRangeAccessible(nsIContent* aContent, DocAccessible* aDoc)
       : LeafAccessible(aContent, aDoc) {
+    mType = eHTMLRangeType;
     mGenericTypes |= eNumericValue;
   }
 

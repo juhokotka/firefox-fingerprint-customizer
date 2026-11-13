@@ -6,7 +6,8 @@
 
 #include "APZUtils.h"
 #include "AsyncPanZoomController.h"  // for AsyncPanZoomController
-
+#include "OverscrollHandoffState.h"
+#include "QueuedInput.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/StaticPrefs_apz.h"
 #include "mozilla/StaticPrefs_browser.h"
@@ -16,8 +17,6 @@
 #include "mozilla/ToString.h"
 #include "mozilla/layers/APZEventState.h"
 #include "mozilla/layers/IAPZCTreeManager.h"  // for AllowedTouchBehavior
-#include "OverscrollHandoffState.h"
-#include "QueuedInput.h"
 
 static mozilla::LazyLogModule sApzIbsLog("apz.inputstate");
 #define TBS_LOG(...) MOZ_LOG(sApzIbsLog, LogLevel::Debug, (__VA_ARGS__))
@@ -163,13 +162,17 @@ bool InputBlockState::IsDownchainOf(AsyncPanZoomController* aA,
   return false;
 }
 
-void InputBlockState::SetScrolledApzc(AsyncPanZoomController* aApzc) {
+void InputBlockState::SetScrolledApzc(
+    AsyncPanZoomController* aApzc,
+    const OverscrollHandoffState& aOverscrollHandoffState) {
   // An input block should only have one scrolled APZC.
   MOZ_ASSERT(!mScrolledApzc || (StaticPrefs::apz_allow_immediate_handoff()
                                     ? IsDownchainOf(mScrolledApzc, aApzc)
                                     : mScrolledApzc == aApzc));
-
   mScrolledApzc = aApzc;
+  if (aOverscrollHandoffState.IsScrolledByHandedOffGesture()) {
+    mScrolledApzc->SetScrolledByHandedOffGesture(true);
+  }
 }
 
 AsyncPanZoomController* InputBlockState::GetScrolledApzc() const {
@@ -289,8 +292,8 @@ WheelBlockState::WheelBlockState(
     // content should have found a scrollable apzc, so we don't need to handle
     // that case.
     RefPtr<AsyncPanZoomController> apzc =
-        mOverscrollHandoffChain->FindFirstScrollable(aInitialEvent,
-                                                     &mAllowedScrollDirections);
+        mOverscrollHandoffChain->FindScrollTarget(aInitialEvent,
+                                                  &mAllowedScrollDirections);
 
     if (apzc) {
       if (apzc != GetTargetApzc()) {
@@ -325,8 +328,8 @@ bool WheelBlockState::SetConfirmedTargetApzc(
   RefPtr<AsyncPanZoomController> apzc = aTargetApzc;
   if (apzc && aFirstInput) {
     auto handoffChain = apzc->BuildOverscrollHandoffChain();
-    apzc = handoffChain->FindFirstScrollable(*aFirstInput->Input(),
-                                             &mAllowedScrollDirections);
+    apzc = handoffChain->FindScrollTarget(*aFirstInput->Input(),
+                                          &mAllowedScrollDirections);
 
     // If the first event in the input block cannot scroll any APZC,
     // iterate through the input queue and try subsequent events in the block.
@@ -338,8 +341,8 @@ bool WheelBlockState::SetConfirmedTargetApzc(
       if (aFirstInput->Block() != this) {
         continue;
       }
-      apzc = handoffChain->FindFirstScrollable(*aFirstInput->Input(),
-                                               &mAllowedScrollDirections);
+      apzc = handoffChain->FindScrollTarget(*aFirstInput->Input(),
+                                            &mAllowedScrollDirections);
     }
   }
 
@@ -529,8 +532,8 @@ PanGestureBlockState::PanGestureBlockState(
     // content should have found a scrollable apzc, so we don't need to handle
     // that case.
     RefPtr<AsyncPanZoomController> apzc =
-        mOverscrollHandoffChain->FindFirstScrollable(aInitialEvent,
-                                                     &mAllowedScrollDirections);
+        mOverscrollHandoffChain->FindScrollTarget(aInitialEvent,
+                                                  &mAllowedScrollDirections);
 
     if (apzc && apzc != GetTargetApzc()) {
       UpdateTargetApzc(apzc);
@@ -548,7 +551,7 @@ bool PanGestureBlockState::SetConfirmedTargetApzc(
   RefPtr<AsyncPanZoomController> apzc = aTargetApzc;
   if (apzc && aFirstInput) {
     RefPtr<AsyncPanZoomController> scrollableApzc =
-        apzc->BuildOverscrollHandoffChain()->FindFirstScrollable(
+        apzc->BuildOverscrollHandoffChain()->FindScrollTarget(
             *aFirstInput->Input(), &mAllowedScrollDirections);
     if (scrollableApzc) {
       apzc = scrollableApzc;

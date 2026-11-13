@@ -2,24 +2,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "GLContextProvider.h"
-#include "GLContextCGL.h"
-#include "GLLibraryLoader.h"
-#include "nsDebug.h"
-#include "nsIWidget.h"
 #include <OpenGL/gl.h>
+#include "GLContextCGL.h"
+#include "GLContextProvider.h"
+#include "GLLibraryLoader.h"
+#include "MozFramebuffer.h"
+#include "ScopedGLHelpers.h"
 #include "gfxFailure.h"
 #include "mozilla/IntegerRange.h"
+#include "mozilla/ProfilerLabels.h"
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/StaticPrefs_gl.h"
 #include "mozilla/StaticPrefs_layout.h"
-#include "prenv.h"
-#include "prlink.h"
-#include "mozilla/ProfilerLabels.h"
-#include "MozFramebuffer.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/widget/CompositorWidget.h"
-#include "ScopedGLHelpers.h"
+#include "nsDebug.h"
+#include "nsIWidget.h"
+#include "prenv.h"
+#include "prlink.h"
 
 #include <OpenGL/OpenGL.h>
 

@@ -3,21 +3,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "ImageLogging.h"  // Must appear first
-
 #include "nsAVIFDecoder.h"
 
 #include <aom/aomdx.h>
 
 #include "DAV1DDecoder.h"
-#include "gfxPlatform.h"
-#include "YCbCrUtils.h"
-#include "libyuv.h"
-
+#include "ImageLogging.h"  // Must appear first
 #include "SurfacePipeFactory.h"
-
-#include "mozilla/glean/ImageDecodersMetrics.h"
+#include "YCbCrUtils.h"
+#include "gfxPlatform.h"
+#include "libyuv.h"
 #include "mozilla/UniquePtrExtensions.h"
+#include "mozilla/glean/ImageDecodersMetrics.h"
+#include "nsThreadUtils.h"
 
 using namespace mozilla::gfx;
 
@@ -504,6 +502,19 @@ void AVIFDecodedData::SetCicpValues(
   mMatrixCoefficients = mc;
 }
 
+// dav1d's default of one worker thread per logical CPU is too much overhead.
+// Scale with image size the same way the AV1 video path does at
+// https://searchfox.org/firefox-main/rev/7d5b291d2351f7d04c504b03fa22ec3dcdf81b54/dom/media/platforms/agnostic/DAV1DDecoder.cpp#86
+static int GetDav1dThreadCount(int32_t aWidth) {
+  size_t decoderThreads = 2;
+  if (aWidth >= 2048) {
+    decoderThreads = 8;
+  } else if (aWidth >= 1024) {
+    decoderThreads = 4;
+  }
+  return static_cast<int>(std::min(decoderThreads, GetNumberOfProcessors()));
+}
+
 class Dav1dDecoder final : AVIFDecoderInterface {
  public:
   ~Dav1dDecoder() {
@@ -521,9 +532,9 @@ class Dav1dDecoder final : AVIFDecoderInterface {
   }
 
   static DecodeResult Create(UniquePtr<AVIFDecoderInterface>& aDecoder,
-                             bool aHasAlpha) {
+                             bool aHasAlpha, int32_t aWidth) {
     UniquePtr<Dav1dDecoder> d(new Dav1dDecoder());
-    Dav1dResult r = d->Init(aHasAlpha);
+    Dav1dResult r = d->Init(aHasAlpha, aWidth);
     if (r == 0) {
       aDecoder.reset(d.release());
     }
@@ -584,7 +595,7 @@ class Dav1dDecoder final : AVIFDecoderInterface {
     MOZ_LOG(sAVIFLog, LogLevel::Verbose, ("Create Dav1dDecoder=%p", this));
   }
 
-  Dav1dResult Init(bool aHasAlpha) {
+  Dav1dResult Init(bool aHasAlpha, int32_t aWidth) {
     MOZ_ASSERT(!mColorContext);
     MOZ_ASSERT(!mAlphaContext);
 
@@ -592,7 +603,7 @@ class Dav1dDecoder final : AVIFDecoderInterface {
     dav1d_default_settings(&settings);
     settings.all_layers = 0;
     settings.max_frame_delay = 1;
-    // TODO: tune settings a la DAV1DDecoder for AV1 (Bug 1681816)
+    settings.n_threads = GetDav1dThreadCount(aWidth);
 
     Dav1dResult r = dav1d_open(&mColorContext, &settings);
     if (r != 0) {
@@ -1017,7 +1028,6 @@ UniquePtr<AVIFDecodedData> Dav1dDecoder::Dav1dPictureToDecodedData(
 
   data->mYChannel = static_cast<uint8_t*>(aPicture->data[0]);
   data->mYStride = aPicture->stride[0];
-  data->mYSkip = aPicture->stride[0] - aPicture->p.w;
   data->mCbChannel = static_cast<uint8_t*>(aPicture->data[1]);
   data->mCrChannel = static_cast<uint8_t*>(aPicture->data[2]);
   data->mCbCrStride = aPicture->stride[1];
@@ -1037,8 +1047,6 @@ UniquePtr<AVIFDecodedData> Dav1dDecoder::Dav1dPictureToDecodedData(
       MOZ_ASSERT_UNREACHABLE("Unknown pixel layout");
   }
 
-  data->mCbSkip = aPicture->stride[1] - aPicture->p.w;
-  data->mCrSkip = aPicture->stride[1] - aPicture->p.w;
   data->mPictureRect = IntRect(0, 0, aPicture->p.w, aPicture->p.h);
   data->mStereoMode = StereoMode::MONO;
   data->mColorDepth = ColorDepthForBitDepth(aPicture->p.bpc);
@@ -1124,15 +1132,9 @@ UniquePtr<AVIFDecodedData> AOMDecoder::AOMImageToToDecodedData(
 
   data->mYChannel = colorImage->planes[AOM_PLANE_Y];
   data->mYStride = colorImage->stride[AOM_PLANE_Y];
-  data->mYSkip = colorImage->stride[AOM_PLANE_Y] -
-                 aom_img_plane_width(colorImage, AOM_PLANE_Y);
   data->mCbChannel = colorImage->planes[AOM_PLANE_U];
   data->mCrChannel = colorImage->planes[AOM_PLANE_V];
   data->mCbCrStride = colorImage->stride[AOM_PLANE_U];
-  data->mCbSkip = colorImage->stride[AOM_PLANE_U] -
-                  aom_img_plane_width(colorImage, AOM_PLANE_U);
-  data->mCrSkip = colorImage->stride[AOM_PLANE_V] -
-                  aom_img_plane_width(colorImage, AOM_PLANE_V);
   data->mPictureRect = gfx::IntRect(0, 0, colorImage->d_w, colorImage->d_h);
   data->mStereoMode = StereoMode::MONO;
   data->mColorDepth = ColorDepthForBitDepth(colorImage->bit_depth);
@@ -1291,8 +1293,12 @@ Mp4parseStatus nsAVIFDecoder::CreateParser() {
 
 nsAVIFDecoder::DecodeResult nsAVIFDecoder::CreateDecoder() {
   if (!mDecoder) {
+    // The parser may not have been able to determine the image size in rare
+    // cases (telemetry suggests 0.03% of all avifs) fall back to the minimum
+    // thread count.
+    int32_t width = HasSize() ? Size().width : 0;
     DecodeResult r = StaticPrefs::image_avif_use_dav1d()
-                         ? Dav1dDecoder::Create(mDecoder, mHasAlpha)
+                         ? Dav1dDecoder::Create(mDecoder, mHasAlpha, width)
                          : AOMDecoder::Create(mDecoder, mHasAlpha);
 
     MOZ_LOG(sAVIFLog, LogLevel::Debug,
@@ -1640,9 +1646,13 @@ nsAVIFDecoder::DecodeResult nsAVIFDecoder::DoDecodeInternal(
           ("[this=%p] decodedData.mColorRange: %hhd", this,
            static_cast<uint8_t>(decodedData->mColorRange)));
 
+  const auto sizes = decodedData->GetPlaneSizes();
+  if (!sizes) {
+    return AsVariant(NonDecoderResult::SizeOverflow);
+  }
+
   // Technically it's valid but we don't handle it now (Bug 1682318).
-  if (decodedData->mAlpha &&
-      decodedData->mAlpha->mSize != decodedData->YDataSize()) {
+  if (decodedData->mAlpha && decodedData->mAlpha->mSize != sizes->mY) {
     return AsVariant(NonDecoderResult::AlphaYSizeMismatch);
   }
 

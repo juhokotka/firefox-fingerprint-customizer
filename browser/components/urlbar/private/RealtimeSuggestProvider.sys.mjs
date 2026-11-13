@@ -45,7 +45,7 @@ export class RealtimeSuggestProvider extends SuggestProvider {
     throw new Error("Trying to access the base class, must be overridden");
   }
 
-  getViewUpdateForPayloadItem(_item, _index) {
+  getViewUpdateForPayloadItem(_item, _index, _controller) {
     throw new Error("Trying to access the base class, must be overridden");
   }
 
@@ -444,6 +444,11 @@ export class RealtimeSuggestProvider extends SuggestProvider {
         role: hasMultipleItems ? "group" : "option",
       },
       classList: ["urlbarView-realtime-root"],
+      dataset: {
+        // This `url` or `query` is used when there's only one item.
+        url: items[0].url,
+        query: items[0].query,
+      },
       children: items.map((item, i) => ({
         name: `item_${i}`,
         tag: "span",
@@ -451,6 +456,11 @@ export class RealtimeSuggestProvider extends SuggestProvider {
         attributes: {
           selectable: !hasMultipleItems ? null : "",
           role: hasMultipleItems ? "option" : "presentation",
+        },
+        dataset: {
+          // These `url`s or `query`s are used when there are multiple items.
+          url: item.url,
+          query: item.query,
         },
         children: [
           ...this.getViewTemplateForImageContainer(item, i),
@@ -509,31 +519,22 @@ export class RealtimeSuggestProvider extends SuggestProvider {
     ];
   }
 
-  getViewUpdate(result) {
+  getViewUpdate(result, controller) {
     let { items } = result.payload;
     let hasMultipleItems = items.length > 1;
 
     let update = {
       root: {
-        dataset: {
-          // This `url` or `query` will be used when there's only one item.
-          url: items[0].url,
-          query: items[0].query,
-        },
         l10n: hasMultipleItems ? this.ariaGroupL10n : null,
       },
     };
 
     for (let i = 0; i < items.length; i++) {
       let item = items[i];
-      Object.assign(update, this.getViewUpdateForPayloadItem(item, i));
-
-      // These `url` or `query`s will be used when there are multiple items.
-      let itemName = `item_${i}`;
-      update[itemName] ??= {};
-      update[itemName].dataset ??= {};
-      update[itemName].dataset.url ??= item.url;
-      update[itemName].dataset.query ??= item.query;
+      Object.assign(
+        update,
+        this.getViewUpdateForPayloadItem(item, i, controller)
+      );
     }
 
     return update;
@@ -580,6 +581,12 @@ export class RealtimeSuggestProvider extends SuggestProvider {
     return commands;
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   * @param {string} searchString
+   */
   onEngagement(queryContext, controller, details, searchString) {
     switch (details.result.payload.source) {
       case "merino":
@@ -607,16 +614,13 @@ export class RealtimeSuggestProvider extends SuggestProvider {
       }
       case "not_interested": {
         lazy.UrlbarPrefs.set(this.suggestPref, false);
-        result.acknowledgeDismissalL10n = this.acknowledgeDismissalL10n;
-        controller.removeResult(result);
+        controller.removeResult(result, {
+          acknowledgeDismissalL10n: this.acknowledgeDismissalL10n,
+        });
         break;
       }
       case "show_less_frequently": {
-        controller.view.acknowledgeFeedback(result);
-        this.incrementShowLessFrequentlyCount();
-        if (!this.canShowLessFrequently) {
-          controller.view.invalidateResultMenuCommands();
-        }
+        this.handleShowLessFrequently(controller, result);
         lazy.UrlbarPrefs.set(
           this.minKeywordLengthPref,
           searchString.length + 1
@@ -649,16 +653,18 @@ export class RealtimeSuggestProvider extends SuggestProvider {
           "quicksuggest.realtimeOptIn.dismissTypes",
           this.realtimeType
         );
-        details.result.acknowledgeDismissalL10n = this.acknowledgeDismissalL10n;
-        controller.removeResult(details.result);
+        controller.removeResult(details.result, {
+          acknowledgeDismissalL10n: this.acknowledgeDismissalL10n,
+        });
         break;
       }
       case "not_interested": {
         lazy.UrlbarPrefs.set("suggest.realtimeOptIn", false);
-        details.result.acknowledgeDismissalL10n = {
-          id: "urlbar-result-dismissal-acknowledgment-all",
-        };
-        controller.removeResult(details.result);
+        controller.removeResult(details.result, {
+          acknowledgeDismissalL10n: {
+            id: "urlbar-result-dismissal-acknowledgment-all",
+          },
+        });
         break;
       }
     }

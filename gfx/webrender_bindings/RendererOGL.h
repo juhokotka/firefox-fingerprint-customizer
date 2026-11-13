@@ -5,12 +5,12 @@
 #ifndef MOZILLA_LAYERS_RENDEREROGL_H
 #define MOZILLA_LAYERS_RENDEREROGL_H
 
-#include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/gfx/Point.h"
+#include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/webrender/RenderThread.h"
+#include "mozilla/webrender/RendererScreenshotGrabber.h"
 #include "mozilla/webrender/WebRenderTypes.h"
 #include "mozilla/webrender/webrender_ffi.h"
-#include "mozilla/webrender/RendererScreenshotGrabber.h"
 
 namespace mozilla {
 
@@ -71,7 +71,7 @@ class RendererOGL {
   void WaitForGPU();
 
   /// This can be called on the render thread only.
-  RefPtr<layers::Fence> GetAndResetReleaseFence();
+  RefPtr<layers::Fence> GetAndResetReadFence();
 
   /// This can be called on the render thread only.
   RenderedFrameId GetLastCompletedFrameId();
@@ -170,6 +170,10 @@ class RendererOGL {
   layers::CompositorBridgeParent* mBridge;
   wr::WindowId mWindowId;
   TimeStamp mFrameStartTime;
+  // RenderCompositor::IsPaused() describes platform surface state and remains
+  // false for normal GTK windows. Track the higher-level Pause/Resume lifecycle
+  // separately so paused-window resource trimming is platform-independent.
+  bool mPausedForResourceTrimming = false;
 
 #ifdef MOZ_WIDGET_ANDROID
   struct ScreenPixelsRequest {

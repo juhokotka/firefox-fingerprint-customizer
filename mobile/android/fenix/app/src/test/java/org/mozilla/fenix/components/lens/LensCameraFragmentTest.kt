@@ -5,13 +5,16 @@
 package org.mozilla.fenix.components.lens
 
 import android.content.Context
+import android.graphics.ImageFormat
 import android.graphics.Insets
-import android.graphics.Matrix
 import android.graphics.Point
 import android.graphics.Rect
+import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraAccessException
+import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
 import android.media.Image
 import android.media.ImageReader
 import android.net.Uri
@@ -22,18 +25,23 @@ import android.os.HandlerThread
 import android.util.Size
 import android.view.Display
 import android.view.Surface
+import android.view.TextureView
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.WindowMetrics
 import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.fragment.app.FragmentManager
 import io.mockk.Runs
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
-import io.mockk.slot
 import io.mockk.spyk
 import io.mockk.verify
+import java.io.File
+import java.nio.ByteBuffer
+import java.util.concurrent.ExecutorService
+import kotlin.test.assertNotNull
 import mozilla.components.feature.qr.QrAnalyzer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -46,10 +54,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper
-import java.io.File
-import java.nio.ByteBuffer
-import java.util.concurrent.ExecutorService
-import kotlin.test.assertNotNull
 
 @RunWith(RobolectricTestRunner::class)
 class LensCameraFragmentTest {
@@ -79,7 +83,7 @@ class LensCameraFragmentTest {
     @Test
     fun `GIVEN textureView is available WHEN startCamera is called THEN tryOpenCamera is invoked`() {
         val fragment = spyk(LensCameraFragment())
-        val textureView: AutoFitTextureView = mockk(relaxed = true)
+        val textureView: TextureView = mockk(relaxed = true)
         every { textureView.isAvailable } returns true
         every { textureView.width } returns 1920
         every { textureView.height } returns 1080
@@ -97,7 +101,7 @@ class LensCameraFragmentTest {
     @Test
     fun `GIVEN textureView is unavailable WHEN startCamera is called THEN surfaceTextureListener is set`() {
         val fragment = spyk(LensCameraFragment())
-        val textureView: AutoFitTextureView = mockk(relaxed = true)
+        val textureView: TextureView = mockk(relaxed = true)
         every { textureView.isAvailable } returns false
         fragment.textureView = textureView
         every { fragment.maybeStartBackgroundThread() } just Runs
@@ -220,7 +224,7 @@ class LensCameraFragmentTest {
         val fragment = spyk(LensCameraFragment())
         fragment.cameraDevice = mockk(relaxed = true)
 
-        val textureView: AutoFitTextureView = mockk(relaxed = true)
+        val textureView: TextureView = mockk(relaxed = true)
         every { textureView.surfaceTexture } returns mockk(relaxed = true)
         fragment.textureView = textureView
         fragment.previewSize = null
@@ -237,7 +241,7 @@ class LensCameraFragmentTest {
         every { imageReader.surface } returns null
         fragment.imageReader = imageReader
 
-        val textureView: AutoFitTextureView = mockk(relaxed = true)
+        val textureView: TextureView = mockk(relaxed = true)
         every { textureView.surfaceTexture } returns mockk(relaxed = true)
         fragment.textureView = textureView
 
@@ -250,6 +254,70 @@ class LensCameraFragmentTest {
         }
     }
 
+    // --- onSessionConfigureFailed tests ---
+
+    @Test
+    fun `GIVEN the capture session fails to configure WHEN onSessionConfigureFailed is called THEN showCameraError is true`() {
+        val fragment = LensCameraFragment()
+        assertFalse(fragment.showCameraError.value)
+
+        fragment.onSessionConfigureFailed()
+        ShadowLooper.idleMainLooper()
+
+        assertTrue(fragment.showCameraError.value)
+    }
+
+    // --- onSessionConfigured tests ---
+
+    @Test
+    fun `GIVEN cameraDevice is null WHEN onSessionConfigured is called THEN the session is closed and setRepeatingRequest is not called`() {
+        val fragment = LensCameraFragment()
+        fragment.cameraDevice = null
+
+        val session: CameraCaptureSession = mockk(relaxed = true)
+        val request: CaptureRequest = mockk(relaxed = true)
+        val captureCallback = object : CameraCaptureSession.CaptureCallback() {}
+
+        fragment.onSessionConfigured(session, request, captureCallback)
+
+        verify { session.close() }
+        verify(exactly = 0) { session.setRepeatingRequest(any(), any(), any<Handler>()) }
+        assertNull(fragment.captureSession)
+    }
+
+    @Test
+    fun `GIVEN cameraDevice exists WHEN onSessionConfigured is called THEN setRepeatingRequest is called and captureSession is assigned`() {
+        val fragment = LensCameraFragment()
+        fragment.cameraDevice = mockk(relaxed = true)
+
+        val session: CameraCaptureSession = mockk(relaxed = true)
+        val request: CaptureRequest = mockk(relaxed = true)
+        val captureCallback = object : CameraCaptureSession.CaptureCallback() {}
+
+        fragment.onSessionConfigured(session, request, captureCallback)
+
+        assertSame(session, fragment.captureSession)
+        verify { session.setRepeatingRequest(request, captureCallback, any<Handler>()) }
+    }
+
+    @Test
+    fun `GIVEN setRepeatingRequest throws IllegalArgumentException WHEN onSessionConfigured is called THEN it does not crash`() {
+        val fragment = LensCameraFragment()
+        fragment.cameraDevice = mockk(relaxed = true)
+
+        val session: CameraCaptureSession = mockk(relaxed = true)
+        every { session.setRepeatingRequest(any(), any(), any<Handler>()) } throws
+            IllegalArgumentException("CaptureRequest contains unconfigured Input/Output Surface!")
+        val request: CaptureRequest = mockk(relaxed = true)
+        val captureCallback = object : CameraCaptureSession.CaptureCallback() {}
+
+        try {
+            fragment.onSessionConfigured(session, request, captureCallback)
+        } catch (e: IllegalArgumentException) {
+            fail("IllegalArgumentException should have been caught, not propagated.")
+        }
+    }
+
     // --- chooseOptimalSize tests ---
 
     @Test(expected = IllegalArgumentException::class)
@@ -259,14 +327,15 @@ class LensCameraFragmentTest {
 
     @Test
     fun `GIVEN big-enough sizes with matching aspect ratio WHEN chooseOptimalSize is called THEN smallest matching size is returned`() {
-        val size = LensCameraFragment.chooseOptimalSize(
-            arrayOf(Size(640, 480), Size(1024, 768)),
-            640,
-            480,
-            1920,
-            1080,
-            Size(4, 3),
-        )
+        val size =
+            LensCameraFragment.chooseOptimalSize(
+                arrayOf(Size(640, 480), Size(1024, 768)),
+                640,
+                480,
+                1920,
+                1080,
+                Size(4, 3),
+            )
 
         assertEquals(640, size.width)
         assertEquals(480, size.height)
@@ -274,84 +343,223 @@ class LensCameraFragmentTest {
 
     @Test
     fun `GIVEN no big-enough sizes WHEN chooseOptimalSize is called THEN largest not-big-enough size is returned`() {
-        val size = LensCameraFragment.chooseOptimalSize(
-            arrayOf(Size(320, 240), Size(640, 480)),
-            1024,
-            768,
-            1920,
-            1080,
-            Size(4, 3),
-        )
+        val size =
+            LensCameraFragment.chooseOptimalSize(
+                arrayOf(Size(320, 240), Size(640, 480)),
+                1024,
+                768,
+                1920,
+                1080,
+                Size(4, 3),
+            )
 
         assertEquals(640, size.width)
         assertEquals(480, size.height)
     }
 
     @Test
-    fun `GIVEN no aspect ratio match WHEN chooseOptimalSize is called THEN first choice is returned`() {
-        val size = LensCameraFragment.chooseOptimalSize(
-            arrayOf(Size(1024, 768), Size(786, 480)),
-            2048,
-            1024,
-            1920,
-            1080,
-            Size(16, 9),
-        )
+    fun `GIVEN no exact aspect ratio match WHEN chooseOptimalSize is called THEN closest available ratio is returned`() {
+        val size =
+            LensCameraFragment.chooseOptimalSize(
+                arrayOf(Size(1024, 768), Size(786, 480)),
+                2048,
+                1024,
+                1920,
+                1080,
+                Size(16, 9),
+            )
 
+        assertEquals(786, size.width)
+        assertEquals(480, size.height)
+    }
+
+    @Test
+    fun `GIVEN a capture size that is only approximately 4-3 WHEN chooseOptimalSize is called THEN the largest 4-3 preview size is returned`() {
+        val size =
+            LensCameraFragment.chooseOptimalSize(
+                arrayOf(Size(320, 240), Size(640, 480), Size(1280, 960), Size(1440, 1080)),
+                2400,
+                1080,
+                1920,
+                1080,
+                // Pixel 7 rear camera reports 4080x3072, a ratio of 1.328 rather than 1.333.
+                Size(4080, 3072),
+            )
+
+        assertEquals(1440, size.width)
+        assertEquals(1080, size.height)
+    }
+
+    @Test
+    fun `GIVEN a Samsung style capture size WHEN chooseOptimalSize is called THEN the largest 4-3 preview size is returned`() {
+        val size =
+            LensCameraFragment.chooseOptimalSize(
+                arrayOf(Size(640, 480), Size(1440, 1080)),
+                2400,
+                1080,
+                1920,
+                1080,
+                Size(4624, 3472),
+            )
+
+        assertEquals(1440, size.width)
+        assertEquals(1080, size.height)
+    }
+
+    @Test
+    fun `GIVEN a size just outside the ratio tolerance WHEN chooseOptimalSize is called THEN it is not treated as matching`() {
+        // 1600x1080 is 1.481, which is 0.148 away from the closest candidate's ratio and well outside the tolerance.
+        val size =
+            LensCameraFragment.chooseOptimalSize(
+                arrayOf(Size(1440, 1080), Size(1600, 1080)),
+                2400,
+                1080,
+                1920,
+                1080,
+                Size(4, 3),
+            )
+
+        assertEquals(1440, size.width)
+        assertEquals(1080, size.height)
+    }
+
+    @Test
+    fun `GIVEN sizes exceeding max dimensions WHEN chooseOptimalSize is called THEN oversized entries are filtered out`() {
+        val size =
+            LensCameraFragment.chooseOptimalSize(
+                arrayOf(Size(2560, 1920), Size(1024, 768), Size(640, 480)),
+                640,
+                480,
+                1920,
+                1080,
+                Size(4, 3),
+            )
+
+        assertEquals(640, size.width)
+        assertEquals(480, size.height)
+    }
+
+    @Test
+    fun `GIVEN no size fits the preview bounds WHEN chooseOptimalSize is called THEN the smallest size is returned`() {
+        // Never the largest: an oversized preview stream can fail the whole capture session on LEGACY devices.
+        val size =
+            LensCameraFragment.chooseOptimalSize(
+                arrayOf(Size(4608, 3456), Size(2560, 1920)),
+                640,
+                480,
+                1920,
+                1080,
+                Size(4, 3),
+            )
+
+        assertEquals(2560, size.width)
+        assertEquals(1920, size.height)
+    }
+
+    // --- chooseCaptureSize tests ---
+
+    @Test
+    fun `GIVEN several JPEG sizes WHEN chooseCaptureSize is called THEN the sensor maximum is returned`() {
+        val size = LensCameraFragment.chooseCaptureSize(arrayOf(Size(1920, 1080), Size(4608, 3456), Size(640, 480)))
+
+        assertEquals(4608, size.width)
+        assertEquals(3456, size.height)
+    }
+
+    @Test
+    fun `GIVEN a maximum above the old dimension cap WHEN chooseCaptureSize is called THEN it is still returned`() {
+        // Capping the capture size takes the three-stream request outside camera2's guaranteed combinations.
+        val size = LensCameraFragment.chooseCaptureSize(arrayOf(Size(4608, 3456), Size(3840, 2160)))
+
+        assertEquals(4608, size.width)
+        assertEquals(3456, size.height)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `GIVEN empty size array WHEN chooseCaptureSize is called THEN IllegalArgumentException is thrown`() {
+        LensCameraFragment.chooseCaptureSize(emptyArray())
+    }
+
+    // --- chooseQrSize tests ---
+
+    @Test
+    fun `GIVEN supported YUV sizes WHEN chooseQrSize is called THEN the one closest to the analyzer target is returned`() {
+        val size =
+            LensCameraFragment.chooseQrSize(
+                arrayOf(Size(1440, 1080), Size(800, 600), Size(176, 144)),
+                1920,
+                1080,
+                Size(1440, 1080),
+            )
+
+        // 800x600 is nearest QrAnalyzer's 786x786 target area.
+        assertEquals(800, size.width)
+        assertEquals(600, size.height)
+    }
+
+    @Test
+    fun `GIVEN YUV sizes above the preview bounds WHEN chooseQrSize is called THEN an in-bounds size is returned`() {
+        val size =
+            LensCameraFragment.chooseQrSize(
+                arrayOf(Size(4608, 3456), Size(640, 480)),
+                1920,
+                1080,
+                Size(1440, 1080),
+            )
+
+        assertEquals(640, size.width)
+        assertEquals(480, size.height)
+    }
+
+    @Test
+    fun `GIVEN no YUV size fits the preview bounds WHEN chooseQrSize is called THEN the smallest size is returned`() {
+        val size =
+            LensCameraFragment.chooseQrSize(
+                arrayOf(Size(4608, 3456), Size(2560, 1920)),
+                1920,
+                1080,
+                Size(1440, 1080),
+            )
+
+        assertEquals(2560, size.width)
+        assertEquals(1920, size.height)
+    }
+
+    @Test
+    fun `GIVEN a closer size of the wrong ratio WHEN chooseQrSize is called THEN the one matching the preview is returned`() {
+        val size =
+            LensCameraFragment.chooseQrSize(
+                arrayOf(Size(800, 800), Size(1024, 768)),
+                1920,
+                1080,
+                Size(1440, 1080),
+            )
+
+        // 800x800 is 640000 px, far nearer the 617796 px target than 1024x768's 786432, but it is not 4:3.
         assertEquals(1024, size.width)
         assertEquals(768, size.height)
     }
 
     @Test
-    fun `GIVEN sizes exceeding max dimensions WHEN chooseOptimalSize is called THEN oversized entries are filtered out`() {
-        val size = LensCameraFragment.chooseOptimalSize(
-            arrayOf(Size(2560, 1920), Size(1024, 768), Size(640, 480)),
-            640,
-            480,
-            1920,
-            1080,
-            Size(4, 3),
-        )
+    fun `GIVEN a 16-9 preview WHEN chooseQrSize is called THEN a 16-9 YUV size is returned`() {
+        val size =
+            LensCameraFragment.chooseQrSize(
+                arrayOf(Size(1024, 768), Size(1280, 720)),
+                1920,
+                1080,
+                Size(1920, 1080),
+            )
 
-        assertEquals(640, size.width)
-        assertEquals(480, size.height)
-    }
-
-    // --- chooseCaptureSizeFromList tests ---
-
-    @Test
-    fun `GIVEN sizes within MAX_CAPTURE_DIMENSION WHEN chooseCaptureSizeFromList is called THEN largest valid size is returned`() {
-        val size = LensCameraFragment.chooseCaptureSizeFromList(
-            arrayOf(Size(3264, 2448), Size(1920, 1080), Size(640, 480)),
-        )
-
-        assertEquals(3264, size.width)
-        assertEquals(2448, size.height)
+        assertEquals(1280, size.width)
+        assertEquals(720, size.height)
     }
 
     @Test
-    fun `GIVEN sizes exceeding MAX_CAPTURE_DIMENSION WHEN chooseCaptureSizeFromList is called THEN oversized entries are filtered out`() {
-        val size = LensCameraFragment.chooseCaptureSizeFromList(
-            arrayOf(Size(5000, 4000), Size(3264, 2448)),
-        )
+    fun `GIVEN the camera reports no YUV sizes WHEN chooseQrSize is called THEN the analyzer default is returned`() {
+        val size = LensCameraFragment.chooseQrSize(null, 1920, 1080, Size(1440, 1080))
 
-        assertEquals(3264, size.width)
-        assertEquals(2448, size.height)
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun `GIVEN empty size array WHEN chooseCaptureSizeFromList is called THEN IllegalArgumentException is thrown`() {
-        LensCameraFragment.chooseCaptureSizeFromList(emptyArray())
-    }
-
-    @Test
-    fun `GIVEN all sizes exceed MAX_CAPTURE_DIMENSION WHEN chooseCaptureSizeFromList is called THEN first element is returned as fallback`() {
-        val size = LensCameraFragment.chooseCaptureSizeFromList(
-            arrayOf(Size(5000, 5000), Size(4500, 4500)),
-        )
-
-        assertEquals(5000, size.width)
-        assertEquals(5000, size.height)
+        assertEquals(QrAnalyzer.YUV_WIDTH, size.width)
+        assertEquals(QrAnalyzer.YUV_HEIGHT, size.height)
     }
 
     // --- getDisplaySize tests ---
@@ -383,7 +591,7 @@ class LensCameraFragmentTest {
         val mockWindowInsets: WindowInsets = mockk()
         every {
             mockWindowInsets.getInsetsIgnoringVisibility(
-                WindowInsetsCompat.Type.navigationBars() or WindowInsetsCompat.Type.displayCutout(),
+                WindowInsetsCompat.Type.navigationBars() or WindowInsetsCompat.Type.displayCutout()
             )
         } returns insets
 
@@ -436,58 +644,28 @@ class LensCameraFragmentTest {
     // --- configureTransform tests ---
 
     @Test
-    fun `GIVEN textureView and previewSize are set WHEN configureTransform is called THEN getScreenRotation is invoked`() {
+    fun `GIVEN previewSize is set WHEN configureTransform is called THEN the transform is applied to the textureView`() {
         val fragment = spyk(LensCameraFragment())
-        val textureView: AutoFitTextureView = mockk(relaxed = true)
-        fragment.textureView = textureView
-        fragment.previewSize = Size(4, 4)
-
-        fragment.configureTransform(4, 4)
-
-        verify { fragment.getScreenRotation() }
-    }
-
-    @Test
-    fun `GIVEN portrait rotation and QR mode WHEN configureTransform is called THEN matrix uses center-crop scale`() {
-        val fragment = spyk(LensCameraFragment())
-        val textureView: AutoFitTextureView = mockk(relaxed = true)
-        val matrixSlot = slot<Matrix>()
-        every { textureView.setTransform(capture(matrixSlot)) } just Runs
-        every { fragment.getScreenRotation() } returns Surface.ROTATION_0
-        fragment.textureView = textureView
-        // Landscape camera buffer mapped into a portrait view.
-        fragment.previewSize = Size(1920, 1080)
-        fragment.cameraMode.value = CameraMode.QR
-
-        fragment.configureTransform(viewWidth = 1080, viewHeight = 2400)
-
-        // QR mode picks max(scaleX, scaleY) so the buffer is cropped to fill the viewfinder.
-        // Effective scale = max(1080 / 1080, 2400 / 1920) = 1.25.
-        // postScale args = (1.25 * 1080/1080, 1.25 * 1920/2400) = (1.25, 1.0).
-        val values = FloatArray(9).also { matrixSlot.captured.getValues(it) }
-        assertEquals(1.25f, values[Matrix.MSCALE_X], 0.001f)
-        assertEquals(1.0f, values[Matrix.MSCALE_Y], 0.001f)
-    }
-
-    @Test
-    fun `GIVEN portrait rotation and LENS mode WHEN configureTransform is called THEN matrix uses letterbox scale`() {
-        val fragment = spyk(LensCameraFragment())
-        val textureView: AutoFitTextureView = mockk(relaxed = true)
-        val matrixSlot = slot<Matrix>()
-        every { textureView.setTransform(capture(matrixSlot)) } just Runs
+        val textureView: TextureView = mockk(relaxed = true)
         every { fragment.getScreenRotation() } returns Surface.ROTATION_0
         fragment.textureView = textureView
         fragment.previewSize = Size(1920, 1080)
-        fragment.cameraMode.value = CameraMode.LENS
 
         fragment.configureTransform(viewWidth = 1080, viewHeight = 2400)
 
-        // LENS mode picks min(scaleX, scaleY) so the buffer fits inside the view, leaving
-        // letterbox bands. Effective scale = min(1.0, 1.25) = 1.0.
-        // postScale args = (1.0 * 1080/1080, 1.0 * 1920/2400) = (1.0, 0.8).
-        val values = FloatArray(9).also { matrixSlot.captured.getValues(it) }
-        assertEquals(1.0f, values[Matrix.MSCALE_X], 0.001f)
-        assertEquals(0.8f, values[Matrix.MSCALE_Y], 0.001f)
+        verify { textureView.setTransform(any()) }
+    }
+
+    @Test
+    fun `GIVEN previewSize is null WHEN configureTransform is called THEN no transform is applied`() {
+        val fragment = spyk(LensCameraFragment())
+        val textureView: TextureView = mockk(relaxed = true)
+        fragment.textureView = textureView
+        fragment.previewSize = null
+
+        fragment.configureTransform(viewWidth = 1080, viewHeight = 2400)
+
+        verify(exactly = 0) { textureView.setTransform(any()) }
     }
 
     // --- Background thread and executor tests ---
@@ -658,6 +836,45 @@ class LensCameraFragmentTest {
         tempDir.deleteRecursively()
     }
 
+    @Test
+    fun `GIVEN a fixed clock WHEN processImage writes the capture THEN the filename contains the timestamp`() {
+        val fragment = spyk(LensCameraFragment(now = { 1234567890L }))
+        every { fragment.handleResult(any()) } just Runs
+
+        val tempDir = File(System.getProperty("java.io.tmpdir"), "lens_test_${System.nanoTime()}")
+        tempDir.mkdirs()
+
+        var capturedFile: File? = null
+        fragment.getUriForFile = { _, _, file ->
+            capturedFile = file
+            mockk()
+        }
+
+        val mockContext: Context = mockk()
+        every { mockContext.applicationContext } returns mockContext
+        every { mockContext.cacheDir } returns tempDir
+        every { mockContext.packageName } returns "org.mozilla.fenix"
+        every { fragment.context } returns mockContext
+
+        val buffer = ByteBuffer.wrap(byteArrayOf(1, 2, 3))
+        val mockPlane: Image.Plane = mockk()
+        every { mockPlane.buffer } returns buffer
+
+        val mockImage: Image = mockk()
+        every { mockImage.planes } returns arrayOf(mockPlane)
+        every { mockImage.close() } just Runs
+
+        val mockReader: ImageReader = mockk()
+        every { mockReader.acquireLatestImage() } returns mockImage
+
+        fragment.processImage(mockReader)
+        ShadowLooper.idleMainLooper()
+
+        assertEquals("lens_capture_1234567890.jpg", capturedFile?.name)
+
+        tempDir.deleteRecursively()
+    }
+
     // --- cameraMode and QR scanning tests ---
 
     @Test
@@ -774,6 +991,85 @@ class LensCameraFragmentTest {
         assertFalse(fragment.qrResultSent)
     }
 
+    // --- previewTargets / updatePreviewRequest tests ---
+
+    @Test
+    fun `GIVEN cameraMode is LENS WHEN previewTargets is called THEN only the preview surface is targeted`() {
+        val fragment = LensCameraFragment()
+        fragment.cameraMode.value = CameraMode.LENS
+        val previewSurface = Surface(SurfaceTexture(0))
+        val qrSurface = Surface(SurfaceTexture(1))
+
+        assertEquals(listOf(previewSurface), fragment.previewTargets(previewSurface, qrSurface))
+    }
+
+    @Test
+    fun `GIVEN cameraMode is QR WHEN previewTargets is called THEN the QR surface is also targeted`() {
+        val fragment = LensCameraFragment()
+        fragment.cameraMode.value = CameraMode.QR
+        val previewSurface = Surface(SurfaceTexture(0))
+        val qrSurface = Surface(SurfaceTexture(1))
+
+        assertEquals(listOf(previewSurface, qrSurface), fragment.previewTargets(previewSurface, qrSurface))
+    }
+
+    @Test
+    fun `GIVEN no capture session WHEN updatePreviewRequest is called THEN nothing happens`() {
+        val fragment = LensCameraFragment()
+        fragment.captureSession = null
+        fragment.cameraDevice = mockk(relaxed = true)
+
+        fragment.updatePreviewRequest()
+    }
+
+    @Test
+    fun `GIVEN a live session WHEN updatePreviewRequest is called THEN the repeating request is replaced`() {
+        val request: CaptureRequest = mockk(relaxed = true)
+        val fragment = spyk(LensCameraFragment())
+        every { fragment.buildPreviewRequest(any(), any(), any()) } returns request
+
+        val session: CameraCaptureSession = mockk(relaxed = true)
+        fragment.captureSession = session
+        fragment.cameraDevice = mockk(relaxed = true)
+        fragment.surface = Surface(SurfaceTexture(0))
+        fragment.qrImageReader = ImageReader.newInstance(64, 64, ImageFormat.YUV_420_888, 2)
+
+        fragment.updatePreviewRequest()
+
+        verify { session.setRepeatingRequest(request, null, any()) }
+    }
+
+    @Test
+    fun `GIVEN setRepeatingRequest throws IllegalArgumentException WHEN updatePreviewRequest is called THEN it does not crash`() {
+        val fragment = spyk(LensCameraFragment())
+        every { fragment.buildPreviewRequest(any(), any(), any()) } returns mockk(relaxed = true)
+
+        val session: CameraCaptureSession = mockk(relaxed = true)
+        every { session.setRepeatingRequest(any(), any(), any<Handler>()) } throws
+            IllegalArgumentException("CaptureRequest contains unconfigured Input/Output Surface!")
+        fragment.captureSession = session
+        fragment.cameraDevice = mockk(relaxed = true)
+        fragment.surface = Surface(SurfaceTexture(0))
+        fragment.qrImageReader = ImageReader.newInstance(64, 64, ImageFormat.YUV_420_888, 2)
+
+        try {
+            fragment.updatePreviewRequest()
+        } catch (e: IllegalArgumentException) {
+            fail("IllegalArgumentException should have been caught, not propagated.")
+        }
+    }
+
+    @Test
+    fun `GIVEN a mode change WHEN handleModeChanged is called THEN the repeating request is rebuilt`() {
+        val fragment = spyk(LensCameraFragment())
+        every { fragment.updatePreviewRequest() } just Runs
+        fragment.cameraMode.value = CameraMode.LENS
+
+        fragment.handleModeChanged(CameraMode.QR)
+
+        verify { fragment.updatePreviewRequest() }
+    }
+
     // --- handleModeChanged tests ---
 
     @Test
@@ -818,6 +1114,38 @@ class LensCameraFragmentTest {
         verify(exactly = 0) { analyzer.reset() }
     }
 
+    @Test
+    fun `GIVEN the fragment is added WHEN handleModeChanged switches the mode THEN the new mode is reported as a fragment result`() {
+        val fragment = spyk(LensCameraFragment())
+        val fragmentManager: FragmentManager = mockk(relaxed = true)
+        every { fragment.isAdded } returns true
+        every { fragment.parentFragmentManager } returns fragmentManager
+        every { fragment.updatePreviewRequest() } just Runs
+        fragment.cameraMode.value = CameraMode.LENS
+
+        fragment.handleModeChanged(CameraMode.QR)
+
+        verify {
+            fragmentManager.setFragmentResult(
+                LensCameraFragment.MODE_CHANGED_REQUEST_KEY,
+                match { it.getString(LensCameraFragment.RESULT_CAMERA_MODE) == "QR" },
+            )
+        }
+    }
+
+    @Test
+    fun `GIVEN the fragment is added WHEN handleModeChanged keeps the same mode THEN no fragment result is reported`() {
+        val fragment = spyk(LensCameraFragment())
+        val fragmentManager: FragmentManager = mockk(relaxed = true)
+        every { fragment.isAdded } returns true
+        every { fragment.parentFragmentManager } returns fragmentManager
+        fragment.cameraMode.value = CameraMode.QR
+
+        fragment.handleModeChanged(CameraMode.QR)
+
+        verify(exactly = 0) { fragmentManager.setFragmentResult(any(), any()) }
+    }
+
     // --- onSaveInstanceState / onCreate tests ---
 
     @Test
@@ -846,6 +1174,37 @@ class LensCameraFragmentTest {
         val fragment = LensCameraFragment()
 
         fragment.restoreFromState(null)
+
+        assertEquals(CameraMode.LENS, fragment.cameraMode.value)
+    }
+
+    @Test
+    fun `GIVEN savedInstanceState is null AND an initial mode argument of QR WHEN restoreFromState is called THEN cameraMode is QR`() {
+        val fragment = LensCameraFragment()
+        fragment.arguments = Bundle().apply { putString(LensCameraFragment.ARG_INITIAL_MODE, "QR") }
+
+        fragment.restoreFromState(null)
+
+        assertEquals(CameraMode.QR, fragment.cameraMode.value)
+    }
+
+    @Test
+    fun `GIVEN savedInstanceState is null AND an unknown initial mode argument WHEN restoreFromState is called THEN cameraMode stays at LENS default`() {
+        val fragment = LensCameraFragment()
+        fragment.arguments = Bundle().apply { putString(LensCameraFragment.ARG_INITIAL_MODE, "UNKNOWN") }
+
+        fragment.restoreFromState(null)
+
+        assertEquals(CameraMode.LENS, fragment.cameraMode.value)
+    }
+
+    @Test
+    fun `GIVEN savedInstanceState contains LENS AND an initial mode argument of QR WHEN restoreFromState is called THEN the saved mode wins`() {
+        val fragment = LensCameraFragment()
+        fragment.arguments = Bundle().apply { putString(LensCameraFragment.ARG_INITIAL_MODE, "QR") }
+        val savedState = Bundle().apply { putString("camera_mode", "LENS") }
+
+        fragment.restoreFromState(savedState)
 
         assertEquals(CameraMode.LENS, fragment.cameraMode.value)
     }

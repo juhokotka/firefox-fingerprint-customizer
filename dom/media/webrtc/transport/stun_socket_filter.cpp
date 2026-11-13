@@ -15,6 +15,7 @@
 
 #include "logging.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/IceServerParser.h"
 #include "mozilla/net/DNS.h"
 #include "nr_socket_prsock.h"
 #include "stun.h"
@@ -217,6 +218,20 @@ bool STUNUDPSocketFilter::filter_incoming_packet(
 bool STUNUDPSocketFilter::filter_outgoing_packet(
     const mozilla::net::NetAddr* remote_addr, const uint8_t* data,
     uint32_t len) {
+  // Reject destination ports that are not allowed for webrtc, before the white
+  // list check; an address can only get white listed through a STUN exchange
+  // that had to pass this check first. NrUdpSocketIpc applies the same
+  // restriction in the sending process, so reaching this point means that
+  // process bypassed it.
+  if (!mozilla::IsWebrtcPortAllowed(GetPortInfallible(*remote_addr))) {
+    MOZ_MTLOG(ML_ERROR, __func__ << this
+                                 << " Disallowing packet to a port that is not "
+                                    "allowed for webrtc: "
+                                 << remote_addr->ToString() << ":"
+                                 << GetPortInfallible(*remote_addr));
+    return false;
+  }
+
   // Check white list
   if (white_list_.find(*remote_addr) != white_list_.end()) {
     MOZ_MTLOG(ML_DEBUG, __func__ << this << " Address in whitelist: "

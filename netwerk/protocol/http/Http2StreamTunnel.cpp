@@ -11,14 +11,14 @@
 #undef LOG_ENABLED
 #define LOG_ENABLED() LOG5_ENABLED()
 
-#include "nsHttpHandler.h"
-#include "nsHttpConnectionMgr.h"
-#include "Http2StreamTunnel.h"
-#include "nsHttpConnectionInfo.h"
-#include "nsQueryObject.h"
-#include "nsProxyRelease.h"
-#include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
 #include "Http2Session.h"
+#include "Http2StreamTunnel.h"
+#include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
+#include "nsHttpConnectionInfo.h"
+#include "nsHttpConnectionMgr.h"
+#include "nsHttpHandler.h"
+#include "nsProxyRelease.h"
+#include "nsQueryObject.h"
 
 namespace mozilla::net {
 
@@ -435,7 +435,7 @@ OutputStreamTunnel::AsyncWait(nsIOutputStreamCallback* callback, uint32_t flags,
 
   RefPtr<OutputStreamTunnel> self(this);
   if (NS_FAILED(mCondition)) {
-    (void)NS_DispatchToCurrentThread(NS_NewRunnableFunction(
+    (void)DispatchToCurrent(NS_NewRunnableFunction(
         "OutputStreamTunnel::CallOnSocketReady",
         [self{std::move(self)}]() { self->OnSocketReady(NS_OK); }));
   } else if (callback) {
@@ -568,7 +568,7 @@ InputStreamTunnel::AsyncWait(nsIInputStreamCallback* callback, uint32_t flags,
 
   RefPtr<InputStreamTunnel> self(this);
   if (NS_FAILED(mCondition)) {
-    (void)NS_DispatchToCurrentThread(NS_NewRunnableFunction(
+    (void)DispatchToCurrent(NS_NewRunnableFunction(
         "InputStreamTunnel::CallOnSocketReady",
         [self{std::move(self)}]() { self->OnSocketReady(NS_OK); }));
   } else if (callback) {

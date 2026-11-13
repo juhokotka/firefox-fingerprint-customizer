@@ -120,15 +120,21 @@ def executor_kwargs(logger, test_type, test_environment, run_info_data, subsuite
     chrome_options["args"].append("--use-fake-ui-for-media-stream")
     # Use a fake UI for FedCM to allow testing it.
     chrome_options["args"].append("--use-fake-ui-for-fedcm")
-    # This is needed until https://github.com/web-platform-tests/wpt/pull/40709
-    # is merged.
-    chrome_options["args"].append("--enable-features=FedCmWithoutWellKnownEnforcement")
-    # Use a fake UI for digital identity to allow testing it.
-    chrome_options["args"].append("--use-fake-ui-for-digital-identity")
+    # Auto-grant permission for Email Verification Protocol to bypass user gesture.
+    chrome_options["args"].append("--auto-grant-email-verification-permission-for-testing")
     # Shorten delay for Reporting <https://w3c.github.io/reporting/>.
     chrome_options["args"].append("--short-reporting-delay")
-    # Point all .test domains to localhost for Chrome
-    chrome_options["args"].append("--host-resolver-rules=MAP nonexistent.*.test ^NOTFOUND, MAP *.test 127.0.0.1, MAP *.test. 127.0.0.1")
+    # Point all .test domains to localhost for Chrome. Also make payment
+    # method manifest fetches for the Apple Pay method (which many
+    # payment-request tests use, as it is the only method Safari supports)
+    # fail fast and deterministically instead of hitting the live apple.com
+    # servers, whose response timing made those tests flaky.
+    chrome_options["args"].append("--host-resolver-rules="
+                                  "MAP nonexistent.*.test ^NOTFOUND, "
+                                  "MAP *.test 127.0.0.1, "
+                                  "MAP *.test. 127.0.0.1, "
+                                  "MAP apple.com ^NOTFOUND, "
+                                  "MAP *.apple.com ^NOTFOUND")
     # Enable Secure Payment Confirmation for Chrome. This is normally disabled
     # on Linux as it hasn't shipped there yet, but in WPT we enable virtual
     # authenticator devices anyway for testing and so SPC works.
@@ -188,8 +194,15 @@ def executor_kwargs(logger, test_type, test_environment, run_info_data, subsuite
         chrome_options["args"].append(
             "--ip-address-space-overrides=" + address_space_overrides_arg)
 
-    # Disable overlay scrollbar animations to prevent flaky wpt screenshots based on timing.
-    chrome_options["args"].append("--disable-features=ScrollbarAnimations")
+    chrome_options["args"].append("--disable-features=" + ",".join([
+        # Disable overlay scrollbar animations to prevent flaky wpt screenshots based on timing.
+        "ScrollbarAnimations",
+        # Compression dictionaries are only used over certificates that chain to a
+        # known root (or on localhost), which the wpt test CA never does, so every
+        # fetch/compression-dictionary/ test that expects Available-Dictionary fails.
+        # Keep both in one flag: a later --disable-features would replace this one.
+        "CompressionDictionaryTransportRequireKnownRootCert",
+    ]))
 
     # Always enable ViewTransitions long callback timeout to avoid erroneous
     # failures due to implicit timeout within the API.
@@ -333,7 +346,7 @@ class ChromeBrowser(WebDriverBrowser):
         self._is_extension_test = (
             (test.testdriver_features is not None and
              "extensions" in test.testdriver_features) or
-            (test.path is not None and "web-extensions/" in test.path))
+            (test.url is not None and "web-extensions/" in test.url))
         self._require_webdriver_bidi = (
             (test.testdriver_features is not None and
              ("bidi" in test.testdriver_features or

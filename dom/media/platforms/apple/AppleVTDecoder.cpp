@@ -11,6 +11,7 @@
 
 #include "AOMDecoder.h"
 #include "AppleDecoderModule.h"
+#include "AppleVTColorSpace.h"
 #include "CallbackThreadRegistry.h"
 #include "H264.h"
 #include "H265.h"
@@ -92,6 +93,24 @@ AppleVTDecoder::~AppleVTDecoder() { MOZ_COUNT_DTOR(AppleVTDecoder); }
 
 RefPtr<MediaDataDecoder::InitPromise> AppleVTDecoder::Init() {
   AUTO_PROFILER_LABEL("AppleVTDecoder::Init", MEDIA_PLAYBACK);
+  if (mSession) {
+    MOZ_ASSERT_UNREACHABLE(
+        "Cannot initialize decoder again without shutting down");
+    return InitPromise::CreateAndReject(
+        MediaResult(NS_ERROR_ALREADY_INITIALIZED,
+                    RESULT_DETAIL("Decoder initialization already attempted")),
+        __func__);
+  }
+
+  if (mFormat) {
+    MOZ_ASSERT_UNREACHABLE(
+        "Cannot initialize decoder again after previous initialization failed");
+    return InitPromise::CreateAndReject(
+        MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                    RESULT_DETAIL("Previous decoder initialization failed")),
+        __func__);
+  }
+
   MediaResult rv = InitializeSession();
 
   if (NS_SUCCEEDED(rv)) {
@@ -176,7 +195,7 @@ void AppleVTDecoder::ProcessDecode(MediaRawData* aSample) {
 
   if (mIsFlushing) {
     MonitorAutoLock mon(mMonitor);
-    mPromise.Reject(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
+    mPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
     return;
   }
 
@@ -225,7 +244,7 @@ void AppleVTDecoder::ProcessDecode(MediaRawData* aSample) {
   if (rv != noErr) {
     NS_ERROR("Couldn't create CMBlockBuffer");
     MonitorAutoLock mon(mMonitor);
-    mPromise.Reject(
+    mPromise.RejectIfExists(
         MediaResult(NS_ERROR_OUT_OF_MEMORY,
                     RESULT_DETAIL("CMBlockBufferCreateWithMemoryBlock:%x", rv)),
         __func__);
@@ -239,9 +258,10 @@ void AppleVTDecoder::ProcessDecode(MediaRawData* aSample) {
   if (rv != noErr) {
     NS_ERROR("Couldn't create CMSampleBuffer");
     MonitorAutoLock mon(mMonitor);
-    mPromise.Reject(MediaResult(NS_ERROR_OUT_OF_MEMORY,
-                                RESULT_DETAIL("CMSampleBufferCreate:%x", rv)),
-                    __func__);
+    mPromise.RejectIfExists(
+        MediaResult(NS_ERROR_OUT_OF_MEMORY,
+                    RESULT_DETAIL("CMSampleBufferCreate:%x", rv)),
+        __func__);
     return;
   }
 
@@ -414,6 +434,40 @@ nsCString AppleVTDecoder::GetCodecName() const {
   return nsCString(EnumValueToString(mStreamType));
 }
 
+CFStringRef CGColorSpaceNameForFrame(gfx::TransferFunction aTransferFunction,
+                                     gfx::ColorSpace2 aColorPrimaries) {
+  if (__builtin_available(macOS 11.0, *)) {
+    if (aTransferFunction == gfx::TransferFunction::PQ) {
+      return kCGColorSpaceITUR_2100_PQ;
+    }
+    if (aTransferFunction == gfx::TransferFunction::HLG) {
+      return kCGColorSpaceITUR_2100_HLG;
+    }
+  }
+  if (aColorPrimaries == gfx::ColorSpace2::BT2020) {
+    return kCGColorSpaceITUR_2020;
+  }
+  return nullptr;
+}
+
+bool MaybeAttachCGColorSpace(CVImageBufferRef aImage,
+                             gfx::TransferFunction aTransferFunction,
+                             gfx::ColorSpace2 aColorPrimaries) {
+  CFStringRef colorSpaceName =
+      CGColorSpaceNameForFrame(aTransferFunction, aColorPrimaries);
+  if (!colorSpaceName) {
+    return false;
+  }
+  AutoCFTypeRef<CGColorSpaceRef> colorSpace(
+      CGColorSpaceCreateWithName(colorSpaceName));
+  if (!colorSpace) {
+    return false;
+  }
+  CVBufferSetAttachment(aImage, kCVImageBufferCGColorSpaceKey, colorSpace,
+                        kCVAttachmentMode_ShouldPropagate);
+  return true;
+}
+
 // Copy and return a decoded frame.
 void AppleVTDecoder::OutputFrame(CVPixelBufferRef aImage,
                                  AppleVTDecoder::AppleFrameRef aFrameRef) {
@@ -476,7 +530,7 @@ void AppleVTDecoder::OutputFrame(CVPixelBufferRef aImage,
     if (rv != kCVReturnSuccess) {
       NS_ERROR("error locking pixel data");
       MonitorAutoLock mon(mMonitor);
-      mPromise.Reject(
+      mPromise.RejectIfExists(
           MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
                       RESULT_DETAIL("CVPixelBufferLockBaseAddress:%x", rv)),
           __func__);
@@ -581,6 +635,13 @@ void AppleVTDecoder::OutputFrame(CVPixelBufferRef aImage,
       }
     }
 
+    // Attach a CGColorSpace built from the relevant color information, for the
+    // wide gamut and HDR cases where the buffer may otherwise have a
+    // non-matching colorspace. BT.709 buffers keep the colorspace VideoToolbox
+    // gave them: forcing kCGColorSpaceITUR_709 on those replaces the EOTF the
+    // frame already had and shifts the gamma of ordinary SDR video.
+    MaybeAttachCGColorSpace(aImage, mTransferFunction, mColorPrimaries);
+
     CFTypeRefPtr<IOSurfaceRef> surface =
         CFTypeRefPtr<IOSurfaceRef>::WrapUnderGetRule(
             CVPixelBufferGetIOSurface(aImage));
@@ -603,7 +664,8 @@ void AppleVTDecoder::OutputFrame(CVPixelBufferRef aImage,
   if (!data) {
     NS_ERROR("Couldn't create VideoData for frame");
     MonitorAutoLock mon(mMonitor);
-    mPromise.Reject(MediaResult(NS_ERROR_OUT_OF_MEMORY, __func__), __func__);
+    mPromise.RejectIfExists(MediaResult(NS_ERROR_OUT_OF_MEMORY, __func__),
+                            __func__);
     return;
   }
 

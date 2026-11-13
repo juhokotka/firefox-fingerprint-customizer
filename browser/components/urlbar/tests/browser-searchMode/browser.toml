@@ -9,6 +9,8 @@ prefs = [
   "browser.urlbar.trending.featureGate=false",
 ]
 
+["browser_addonsShortcutMoved.js"]
+
 ["browser_alias_replacement.js"]
 support-files = [
   "../browser/searchSuggestionEngine.xml",
@@ -64,12 +66,16 @@ tags = "persisted-search"
 
 ["browser_searchModeSwitcher_basic.js"]
 
+["browser_searchModeSwitcher_bounds.js"]
+
 ["browser_searchModeSwitcher_dynamicUnifiedSearchButton.js"]
 support-files = ["has-a-link.html"]
 
 ["browser_searchModeSwitcher_emptyInput.js"]
 
 ["browser_searchModeSwitcher_keyNavigation.js"]
+
+["browser_searchModeSwitcher_newBadge.js"]
 
 ["browser_searchModeSwitcher_opensearchInstall.js"]
 
@@ -82,6 +88,12 @@ https_first_disabled = true
 
 ["browser_setURI.js"]
 https_first_disabled = true
+
+["browser_spaceToEnterSearchMode.js"]
+support-files = [
+  "../browser/searchSuggestionEngine.xml",
+  "../browser/searchSuggestionEngine.sjs",
+]
 
 ["browser_suggestions.js"]
 support-files = [

@@ -5,14 +5,14 @@
 #ifndef nsPrinterBase_h_
 #define nsPrinterBase_h_
 
-#include "mozilla/gfx/Rect.h"
-#include "nsIPrinter.h"
-#include "nsTArray.h"
-#include "nsCycleCollectionParticipant.h"
-#include "nsISupportsImpl.h"
-#include "nsPrintSettingsImpl.h"
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/Result.h"
+#include "mozilla/gfx/Rect.h"
+#include "nsCycleCollectionParticipant.h"
+#include "nsIPrinter.h"
+#include "nsISupportsImpl.h"
+#include "nsPrintSettingsImpl.h"
+#include "nsTArray.h"
 
 namespace mozilla {
 
@@ -84,10 +84,10 @@ class nsPrinterBase : public nsIPrinter {
   using BackgroundTask = Result (nsPrinterBase::*)(Args...) const;
 
   // Resolves an async attribute via a background task.
-  template <typename T, typename... Args>
+  template <typename T, typename... TArgs, typename... Args>
   nsresult AsyncPromiseAttributeGetter(JSContext*, Promise**, AsyncAttribute,
-                                       BackgroundTask<T, Args...>,
-                                       Args... aArgs);
+                                       BackgroundTask<T, TArgs...>,
+                                       Args&&... aArgs);
 
  protected:
   nsPrinterBase(const mozilla::CommonPaperInfoArray* aPaperInfoArray,

@@ -10,7 +10,7 @@
   const lazy = {};
 
   ChromeUtils.defineESModuleGetters(lazy, {
-    AutoCompleteParent: "resource://gre/actors/AutoCompleteParent.sys.mjs",
+    AutoCompleteParent: "moz-src:///toolkit/actors/AutoCompleteParent.sys.mjs",
   });
 
   if (!customElements.get("autocomplete-row-item")) {
@@ -41,6 +41,7 @@
       this.mPopupOpen = false;
       this._currentIndex = 0;
       this._disabledItemClicked = false;
+      this._secondaryActionFocused = false;
 
       this.setListeners();
     }
@@ -109,9 +110,15 @@
 
                 let item = event.target.closest("richlistbox,richlistitem");
 
-                // If we hit the richlistbox and not a richlistitem, we ignore
-                // the event.
+                // The pointer is over the richlistbox but not a row (the gap
+                // between rows), so clear pointer selection. Otherwise
+                // it stays selected while nothing is visually highlighted.
                 if (item.localName == "richlistbox") {
+                  if (this.richlistbox.hasAttribute("pointerselected")) {
+                    lazy.AutoCompleteParent.getCurrentActor()?.clearAutoCompletePreview();
+                    this.mousedOverIndex = -1;
+                    this._setSelectedIndex(-1, false, true);
+                  }
                   return;
                 }
 
@@ -120,16 +127,21 @@
                 this.mousedOverIndex = index;
 
                 if (item.selectedByMouseOver) {
-                  const prevKeyboardSelected = this.richlistbox.querySelector(
-                    "autocomplete-row-item[selected]"
-                  );
-                  if (prevKeyboardSelected) {
-                    prevKeyboardSelected.selected = false;
-                  }
-                  this.richlistbox.selectedIndex = index;
+                  this._setSelectedIndex(index, true);
                 }
 
                 this.mLastMoveTime = Date.now();
+                break;
+              }
+              case "mouseout": {
+                if (
+                  this.richlistbox.hasAttribute("pointerselected") &&
+                  !this.richlistbox.contains(event.relatedTarget)
+                ) {
+                  lazy.AutoCompleteParent.getCurrentActor()?.clearAutoCompletePreview();
+                  this.mousedOverIndex = -1;
+                  this._setSelectedIndex(-1, false, true);
+                }
                 break;
               }
             }
@@ -139,6 +151,7 @@
       this.richlistbox.addEventListener("mousedown", this.listEvents);
       this.richlistbox.addEventListener("mouseup", this.listEvents);
       this.richlistbox.addEventListener("mousemove", this.listEvents);
+      this.richlistbox.addEventListener("mouseout", this.listEvents);
     }
 
     get richlistbox() {
@@ -174,9 +187,17 @@
     }
 
     set selectedIndex(val) {
-      if (val != this.richlistbox.selectedIndex) {
+      this._setSelectedIndex(val, false);
+    }
+
+    _setSelectedIndex(val, pointer, clearedByPointerLeave = false) {
+      const changed = val != this.richlistbox.selectedIndex;
+      if (changed) {
         this._previousSelectedIndex = this.richlistbox.selectedIndex;
       }
+
+      this.richlistbox.toggleAttribute("pointerselected", pointer);
+
       this.richlistbox.selectedIndex = val;
 
       const prevSelectedItem = this.richlistbox.children[
@@ -188,13 +209,25 @@
 
       if (prevSelectedItem) {
         prevSelectedItem.selected = false;
+        prevSelectedItem.pointerselected = false;
       }
 
       if (selectedItem) {
         selectedItem.selected = true;
+        selectedItem.pointerselected = pointer;
       }
 
-      if (selectedItem || prevSelectedItem) {
+      if (changed) {
+        this._secondaryActionFocused = false;
+        if (prevSelectedItem) {
+          prevSelectedItem.subfocused = false;
+        }
+        if (selectedItem) {
+          selectedItem.subfocused = false;
+        }
+      }
+
+      if (changed && (selectedItem || prevSelectedItem)) {
         lazy.AutoCompleteParent.getCurrentActor()?.previewAutoCompleteEntry();
       }
 
@@ -205,9 +238,11 @@
       // maximum number of rows we show at once, without a scrollbar.
       if (this.mPopupOpen && this.maxResults > this.maxRows) {
         // when clearing the selection (val == -1, so selectedItem will be
-        // null), we want to scroll back to the top.  see bug #406194
+        // null), we want to scroll back to the top (bug 406194). Except when
+        // the pointer just leaves the panel, keep the scroll position (bug 2057175).
         this.richlistbox.ensureElementIsVisible(
-          this.richlistbox.selectedItem || this.richlistbox.firstElementChild
+          this.richlistbox.selectedItem ||
+            (clearedByPointerLeave ? null : this.richlistbox.firstElementChild)
         );
       }
     }
@@ -313,6 +348,10 @@
         aInput.popup.hidden = false;
 
         this.mInput = aInput;
+        // The content path sets these from the input the popup drops out of;
+        // a chrome input takes them from the chrome document.
+        this.style.direction = "";
+        this.style.colorScheme = "";
         // clear any previous selection, see bugs 400671 and 488357
         this.selectedIndex = -1;
 
@@ -335,6 +374,8 @@
     _invalidate() {
       // collapsed if no matches
       this.richlistbox.collapsed = this.matchCount == 0;
+
+      this._setSecondaryActionFocused(false);
 
       // Update the richlistbox height.
       if (this._adjustHeightRAFToken) {
@@ -451,6 +492,14 @@
       row.description = line2?.textContent ?? null;
     }
 
+    _closeSecondaryActionMenus() {
+      for (const rowItem of this.richlistbox.querySelectorAll(
+        "autocomplete-row-item"
+      )) {
+        rowItem.closeActionsMenu();
+      }
+    }
+
     _appendAutocompleteResults() {
       const controller = this.mInput.controller;
       const matchCount = this.matchCount;
@@ -493,18 +542,46 @@
           row.icon = parsedComment?.icon ?? image;
           row.value = value;
           const secondaryAction = parsedComment?.secondaryAction;
-          row.actions = {
-            primary: () => {},
-            secondary: secondaryAction
-              ? {
-                  type: secondaryAction.type,
-                  action: () =>
-                    lazy.AutoCompleteParent.getCurrentActor()?.selectAutoCompleteEntry(
-                      true
-                    ),
-                }
-              : null,
-          };
+          let secondary = null;
+          if (secondaryAction) {
+            secondary = {
+              type: secondaryAction.type,
+              label: secondaryAction.label,
+              tooltip: secondaryAction.tooltip,
+            };
+            // Route each secondary action back to its provider through the
+            // parent actor, identifying a menu action by its index (a single
+            // action omits it).
+            const activateAction = actionIndex => () =>
+              lazy.AutoCompleteParent.getCurrentActor()?.selectAutoCompleteEntry(
+                true,
+                actionIndex
+              );
+            if (secondaryAction.actions) {
+              secondary.actions = secondaryAction.actions.map(
+                ({ label }, index) => ({
+                  label,
+                  action: activateAction(index),
+                })
+              );
+            } else {
+              secondary.action = activateAction();
+            }
+          }
+          row.actions = { primary: () => {}, secondary };
+          // Rows are reused between searches, so close any actions menu left
+          // open by the entry that previously occupied this row.
+          row.closeActionsMenu();
+
+          row.type = parsedComment?.type ?? null;
+          row.sources = parsedComment?.sources ?? [];
+          row.sourcesLabel = parsedComment?.sourcesLabel ?? null;
+          row.sourcesPillsLabel = parsedComment?.sourcesPillsLabel ?? null;
+          row.sourcesPillsLabelHover =
+            parsedComment?.sourcesPillsLabelHover ?? null;
+          row.loading = parsedComment?.loading ?? false;
+          row.loadingLabel = parsedComment?.loadingLabel ?? null;
+          row.emptySourcesLabel = parsedComment?.emptySourcesLabel ?? null;
         }
 
         item.setAttribute("dir", this.style.direction);
@@ -559,17 +636,94 @@
       }
     }
 
+    get _selectedRowItem() {
+      return this.richlistbox.selectedItem?.querySelector(
+        "autocomplete-row-item"
+      );
+    }
+
+    _setSecondaryActionFocused(focused) {
+      this._secondaryActionFocused = focused;
+      const rowItem = this._selectedRowItem;
+      if (focused) {
+        if (rowItem) {
+          rowItem.subfocused = true;
+        }
+      } else {
+        for (const item of this.richlistbox.querySelectorAll(
+          "autocomplete-row-item"
+        )) {
+          item.subfocused = false;
+        }
+      }
+      if (focused && this.mPopupOpen && this.richlistbox.selectedItem) {
+        this.richlistbox.ensureElementIsVisible(this.richlistbox.selectedItem);
+        const label = rowItem?.actions?.secondary?.label;
+        if (label) {
+          window.A11yUtils?.announce({ raw: label });
+        }
+      }
+    }
+
+    navigateSecondaryAction(reverse) {
+      if (!this._selectedRowItem?.actions?.secondary) {
+        return false;
+      }
+
+      if (reverse) {
+        if (this._secondaryActionFocused) {
+          this._setSecondaryActionFocused(false);
+          return true;
+        }
+        return false;
+      }
+
+      if (this._secondaryActionFocused) {
+        this._setSecondaryActionFocused(false);
+        return false;
+      }
+      this._setSecondaryActionFocused(true);
+      return true;
+    }
+
+    maybeActivateSecondaryAction() {
+      if (!this._secondaryActionFocused) {
+        return false;
+      }
+      const rowItem = this._selectedRowItem;
+      if (!rowItem?.activateSecondaryAction()) {
+        this._setSecondaryActionFocused(false);
+      }
+      return true;
+    }
+
+    maybeLeaveSecondaryAction() {
+      if (!this._secondaryActionFocused) {
+        return false;
+      }
+      this._setSecondaryActionFocused(false);
+      return true;
+    }
+
     disconnectedCallback() {
       if (this.listEvents) {
         this.richlistbox.removeEventListener("mousedown", this.listEvents);
         this.richlistbox.removeEventListener("mouseup", this.listEvents);
         this.richlistbox.removeEventListener("mousemove", this.listEvents);
+        this.richlistbox.removeEventListener("mouseout", this.listEvents);
         delete this.listEvents;
       }
     }
 
     setListeners() {
-      this.addEventListener("popupshowing", () => {
+      // Popups nested inside this panel (such as a row's secondary action menu)
+      // bubble their own popup events up to here, so only react to our own.
+      const isOwnEvent = event => event.target == this;
+
+      this.addEventListener("popupshowing", event => {
+        if (!isOwnEvent(event)) {
+          return;
+        }
         // If normalMaxRows wasn't already set by the input, then set it here
         // so that we restore the correct number when the popup is hidden.
 
@@ -581,14 +735,23 @@
         this.mPopupOpen = true;
       });
 
-      this.addEventListener("popupshown", () => {
+      this.addEventListener("popupshown", event => {
+        if (!isOwnEvent(event)) {
+          return;
+        }
         if (this._adjustHeightOnPopupShown) {
           this._adjustHeightOnPopupShown = false;
           this.adjustHeight();
         }
       });
 
-      this.addEventListener("popuphiding", () => {
+      this.addEventListener("popuphiding", event => {
+        if (!isOwnEvent(event)) {
+          this._setSecondaryActionFocused(false);
+          return;
+        }
+
+        this._closeSecondaryActionMenus();
         var isListActive = true;
         if (this.selectedIndex == -1) {
           isListActive = false;
@@ -596,6 +759,7 @@
         this.input.controller.stopSearch();
 
         this.mPopupOpen = false;
+        this._setSecondaryActionFocused(false);
 
         // Reset the maxRows property to the cached "normal" value (if there's
         // any), and reset normalMaxRows so that we can detect whether it was set

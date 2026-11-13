@@ -9,8 +9,19 @@ import {
   AIWindow,
 } from "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs";
 
+const lazy = {};
+
+ChromeUtils.defineESModuleGetters(lazy, {
+  AutoTabGrouping:
+    "moz-src:///browser/components/aiwindow/ui/modules/AutoTabGrouping.sys.mjs",
+  MonitorPanel:
+    "moz-src:///browser/components/aiwindow/ui/modules/MonitorPanel.sys.mjs",
+  URILoadingHelper: "resource:///modules/URILoadingHelper.sys.mjs",
+});
+
 const gFadingWindows = new WeakSet();
 const gSidebarAnimations = new WeakMap();
+const gSidebarWidthHandlers = new WeakMap();
 
 /**
  * @typedef {import("../components/ai-window/ai-window.mjs").SmartbarInputState} SmartbarInputState
@@ -42,6 +53,46 @@ export const AIWindowUI = {
       return null;
     }
     return { chromeDoc, box, splitter };
+  },
+
+  /**
+   * Sets a max width for the draggable sidebar.
+   *
+   * @param {Window} win
+   */
+  updateSidebarMaxWidth(win) {
+    const nodes = this._getSidebarElements(win);
+    if (!nodes) {
+      return;
+    }
+    const maxWidthRatio = parseFloat(
+      win
+        .getComputedStyle(win.document.documentElement)
+        .getPropertyValue("--ai-window-sidebar-max-width-ratio")
+    );
+    nodes.box.style.setProperty(
+      "--ai-window-sidebar-max-width",
+      `${Math.round(win.innerWidth * maxWidthRatio)}px`
+    );
+
+    if (!gSidebarWidthHandlers.has(win)) {
+      const sidebarResizeHandler = () => this.updateSidebarMaxWidth(win);
+      gSidebarWidthHandlers.set(win, sidebarResizeHandler);
+      win.addEventListener("resize", sidebarResizeHandler);
+    }
+  },
+
+  /**
+   * Stop tracking the sidebar width for a window.
+   *
+   * @param {Window} win
+   */
+  _removeSidebarWidthHandler(win) {
+    const handler = gSidebarWidthHandlers.get(win);
+    if (handler) {
+      win.removeEventListener("resize", handler);
+      gSidebarWidthHandlers.delete(win);
+    }
   },
 
   /**
@@ -111,18 +162,35 @@ export const AIWindowUI = {
    * layout flips once, when the slide finishes. See the "Animating the content area"
    * performance best practice.
    *
+   * The slide is reserved for explicit user toggles (the Ask/Close button, which
+   * animate); every other path (tab switch, session restore, mode changes) passes
+   * `animate: false` so the sidebar doesn't slide on navigation.
+   *
    * @param {Window} win
    * @param {Element} box
    * @param {Element} splitter
    * @param {boolean} collapse
+   * @param {object} [options]
+   * @param {boolean} [options.animate=true] Whether to slide instead of committing instantly.
    */
-  _setSidebarCollapsed(win, box, splitter, collapse) {
+  _setSidebarCollapsed(win, box, splitter, collapse, { animate = true } = {}) {
     box._aiWindowOpen = !collapse;
+
+    // Give the content area its minimum width while the sidebar is open.
+    win.document
+      .getElementById("tabbrowser-tabbox")
+      .toggleAttribute("ai-window-open", !collapse);
+
+    if (!collapse) {
+      this.updateSidebarMaxWidth(win);
+    } else {
+      this._removeSidebarWidthHandler(win);
+    }
 
     const reduceMotion = win.matchMedia(
       "(prefers-reduced-motion: reduce)"
     ).matches;
-    if (reduceMotion) {
+    if (!animate || reduceMotion) {
       this._cancelSidebarAnimation(box);
       this._commitSidebarCollapsed(box, splitter, collapse);
       return;
@@ -258,7 +326,34 @@ export const AIWindowUI = {
   },
 
   /**
+   * Reopens a conversation in a tab: loads the page it was last about (or the
+   * new tab page) and restores the conversation there once the browser exists.
+   *
+   * @param {Window} win
+   * @param {ChatConversation} conversation
+   * @param {string} [where="tab"] Destination, as for openTrustedLinkIn.
+   */
+  reopenConversationInTab(win, conversation, where = "tab") {
+    const mostRecentPage = conversation.getMostRecentPageVisited();
+    const url = mostRecentPage?.href ?? win.BROWSER_NEW_TAB_URL;
+    lazy.URILoadingHelper.openTrustedLinkIn(win, url, where, {
+      resolveOnContentBrowserCreated: async targetBrowser => {
+        if (url === win.BROWSER_NEW_TAB_URL) {
+          this.openInFullWindow(targetBrowser, conversation);
+        } else {
+          AIWindow.restoreTabConversation(targetBrowser, conversation);
+          this.openSidebar(targetBrowser.documentGlobal, conversation);
+        }
+      },
+    });
+  },
+
+  /**
    * Open the AI Window sidebar
+   *
+   * The slide is reserved for the Ask button, which opens via toggleSidebar; every
+   * other opener (tab switch, restore, menus, mode changes) routes through here and
+   * commits instantly.
    *
    * @param {Window} win
    * @param {ChatConversation} conversation The conversation to open in the sidebar
@@ -273,7 +368,7 @@ export const AIWindowUI = {
     const aiBrowser = this.ensureBrowserIsAppended(win.document, box);
 
     if (!this.isSidebarOpen(win)) {
-      this._setSidebarCollapsed(win, box, splitter, false);
+      this._setSidebarCollapsed(win, box, splitter, false, { animate: false });
       this._updateAskButtonChecked(win, true);
     }
 
@@ -359,6 +454,9 @@ export const AIWindowUI = {
   /**
    * Close the AI Window sidebar.
    *
+   * Only the Close button animates the slide; it is the sole caller that passes
+   * `source === "toggle"`. Tab switches and mode changes close instantly.
+   *
    * @param {Window} win
    * @param {string} source
    */
@@ -368,7 +466,9 @@ export const AIWindowUI = {
     }
     const { box, splitter } = this._getSidebarElements(win);
 
-    this._setSidebarCollapsed(win, box, splitter, true);
+    this._setSidebarCollapsed(win, box, splitter, true, {
+      animate: source === "toggle",
+    });
     this._updateAskButtonChecked(win, false);
 
     // Dispatch event to notify tab state manager that sidebar was toggled
@@ -387,6 +487,35 @@ export const AIWindowUI = {
       chat_id: chatId,
       message_seq: messageSeq,
     });
+  },
+
+  /**
+   * Toggle the "Organize Tabs" panel anchored to its toolbar button.
+   *
+   * @param {Window} win
+   * @param {object} [options] - Passed through to AutoTabGrouping, which uses
+   *   options.source to record what asked for the panel.
+   */
+  toggleGroupTabsPanel(win, options) {
+    lazy.AutoTabGrouping.toggleGroupTabsPanel(win, options);
+  },
+
+  /**
+   * Toggle the monitor creation panel anchored to its toolbar button.
+   *
+   * @param {Window} win
+   */
+  toggleMonitorPanel(win) {
+    lazy.MonitorPanel.toggleMonitorPanel(win);
+  },
+
+  /**
+   * Open the monitor panel straight to the create form.
+   *
+   * @param {Window} win
+   */
+  showMonitorCreateForm(win) {
+    lazy.MonitorPanel.showCreateForm(win);
   },
 
   /**
@@ -537,6 +666,31 @@ export const AIWindowUI = {
     }
 
     aiWindowEl.restoreModelChoiceOverride(modelChoiceId);
+  },
+
+  /**
+   * Restores the per-tab context chips on the sidebar ai-window.
+   *
+   * @param {Window} win
+   * @param {ContextWebsite[]} [contextChips] - The user-added chips to restore.
+   * @param {boolean} [removedImplicitContextChip] - Restored dismissal of the
+   *   implicit current-tab chip.
+   */
+  updateSidebarContextChips(
+    win,
+    contextChips = [],
+    removedImplicitContextChip = false
+  ) {
+    if (!this.isSidebarOpen(win)) {
+      return;
+    }
+
+    const aiWindowEl = this._getSidebarAiWindow(win);
+    if (!aiWindowEl?.restoreContextChips) {
+      return;
+    }
+
+    aiWindowEl.restoreContextChips(contextChips, removedImplicitContextChip);
   },
 
   /**

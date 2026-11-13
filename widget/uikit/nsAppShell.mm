@@ -6,29 +6,29 @@
 #import <UIKit/UIScreen.h>
 #import <UIKit/UIWindow.h>
 
+#include "HeadlessScreenHelper.h"
+#include "ScreenHelperUIKit.h"
+#include "gfxPlatform.h"
 #include "mozilla/Components.h"
+#include "mozilla/Hal.h"
 #include "mozilla/Services.h"
 #include "mozilla/dom/Document.h"
-#include "nsIObserverService.h"
-#include "gfxPlatform.h"
+#include "mozilla/widget/EventDispatcher.h"
+#include "mozilla/widget/ScreenManager.h"
 #include "nsAppRunner.h"
 #include "nsAppShell.h"
 #include "nsCOMPtr.h"
 #include "nsComponentManager.h"
 #include "nsDirectoryServiceDefs.h"
-#include "nsObjCExceptions.h"
-#include "nsString.h"
 #include "nsIAppStartup.h"
+#include "nsIObserverService.h"
 #include "nsIRollupListener.h"
 #include "nsIWidget.h"
-#include "nsThreadUtils.h"
 #include "nsMemoryPressure.h"
+#include "nsObjCExceptions.h"
 #include "nsServiceManagerUtils.h"
-#include "mozilla/widget/EventDispatcher.h"
-#include "mozilla/widget/ScreenManager.h"
-#include "ScreenHelperUIKit.h"
-#include "mozilla/Hal.h"
-#include "HeadlessScreenHelper.h"
+#include "nsString.h"
+#include "nsThreadUtils.h"
 #include "nsWindow.h"
 #include "nsXREDirProvider.h"
 
@@ -323,8 +323,7 @@ static void ApplicationWillTerminate(bool aCallExit) {
   if (nsCOMPtr<nsIAppStartup> appStartup = components::AppStartup::Service()) {
     // Ensure quit notifications have fired to start the shutdown process, and
     // notify listeners.
-    bool userAllowedQuit;
-    appStartup->Quit(nsIAppStartup::eForceQuit, 0, &userAllowedQuit);
+    appStartup->Quit(nsIAppStartup::eForceQuit, 0);
 
     appStartup->DestroyHiddenWindow();
   }

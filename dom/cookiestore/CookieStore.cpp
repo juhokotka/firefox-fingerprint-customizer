@@ -254,6 +254,10 @@ bool ValidateCookiePath(nsIURI* aURI, const nsAString& aPath,
       directory.Truncate(directory.Length() - 1);
     }
 
+    if (directory.IsEmpty()) {
+      directory.AssignLiteral("/");
+    }
+
     CopyUTF8toUTF16(directory, aRetPath);
   }
 
@@ -317,11 +321,13 @@ bool ValidateCookieNamePrefix(const nsAString& aName, const nsAString& aValue,
   return true;
 }
 
-void CookieStructToList(const nsTArray<CookieStruct>& aData,
-                        nsTArray<CookieListItem>& aResult) {
-  for (const CookieStruct& data : aData) {
+void CookieStoreGetItemsToList(const nsTArray<CookieStoreGetItem>& aData,
+                               nsTArray<CookieListItem>& aResult) {
+  aResult.SetCapacity(aData.Length());
+  for (const CookieStoreGetItem& data : aData) {
     CookieListItem* item = aResult.AppendElement();
-    CookieStore::CookieStructToItem(data, item);
+    item->mName.Construct(data.name());
+    item->mValue.Construct(data.value());
   }
 }
 
@@ -416,6 +422,11 @@ CookieStore::CookieStore(nsIGlobalObject* aGlobal)
 
 CookieStore::~CookieStore() { Shutdown(); }
 
+void CookieStore::DisconnectFromOwner() {
+  Shutdown();
+  DOMEventTargetHelper::DisconnectFromOwner();
+}
+
 JSObject* CookieStore::WrapObject(JSContext* aCx,
                                   JS::Handle<JSObject*> aGivenProto) {
   return CookieStore_Binding::Wrap(aCx, this, aGivenProto);
@@ -488,6 +499,10 @@ already_AddRefed<Promise> CookieStore::Set(const CookieInit& aOptions,
   NS_DispatchToCurrentThread(NS_NewRunnableFunction(
       __func__, [self = RefPtr(this), promise = RefPtr(promise), aOptions,
                  cookiePrincipal = RefPtr(cookiePrincipal.get())]() {
+        if (promise->GetParentObject()->IsDying()) {
+          return;
+        }
+
         nsCOMPtr<nsIURI> cookieURI = cookiePrincipal->GetURI();
 
         nsString name(TrimTabAndSpace(aOptions.mName));
@@ -631,6 +646,10 @@ already_AddRefed<Promise> CookieStore::Delete(
   NS_DispatchToCurrentThread(NS_NewRunnableFunction(
       __func__, [self = RefPtr(this), promise = RefPtr(promise), aOptions,
                  cookiePrincipal = RefPtr(cookiePrincipal.get())]() {
+        if (promise->GetParentObject()->IsDying()) {
+          return;
+        }
+
         nsCOMPtr<nsIURI> cookieURI = cookiePrincipal->GetURI();
         nsString name(TrimTabAndSpace(aOptions.mName));
 
@@ -774,6 +793,10 @@ already_AddRefed<Promise> CookieStore::GetInternal(
        cookiePrincipal = RefPtr(cookiePrincipal.get()),
        partitionedCookiePrincipal = RefPtr(partitionedCookiePrincipal.get()),
        aOnlyTheFirstMatch]() {
+        if (promise->GetParentObject()->IsDying()) {
+          return;
+        }
+
         nsAutoString name;
         if (aOptions.mName.WasPassed()) {
           name = TrimTabAndSpace(aOptions.mName.Value());
@@ -899,13 +922,17 @@ already_AddRefed<Promise> CookieStore::GetInternal(
             [promise = RefPtr<dom::Promise>(promise), aOnlyTheFirstMatch](
                 const CookieStoreChild::GetRequestPromise::ResolveOrRejectValue&
                     aResult) {
+              if (promise->GetParentObject()->IsDying()) {
+                return;
+              }
+
               if (!aResult.IsResolve()) {
                 promise->MaybeResolveWithUndefined();
                 return;
               }
 
               nsTArray<CookieListItem> list;
-              CookieStructToList(aResult.ResolveValue(), list);
+              CookieStoreGetItemsToList(aResult.ResolveValue(), list);
 
               if (!aOnlyTheFirstMatch) {
                 promise->MaybeResolve(list);

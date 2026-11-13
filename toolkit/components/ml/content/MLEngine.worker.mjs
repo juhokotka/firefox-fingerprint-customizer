@@ -79,6 +79,15 @@ export class MLEngineWorker {
   }
 
   /**
+   * Returns true if the native ONNX runtime is available, otherwise false.
+   *
+   * @returns {boolean}
+   */
+  isNativeOnnxRuntimeAvailable() {
+    return globalThis.InferenceSession?.isAvailable() ?? false;
+  }
+
+  /**
    * @param {ArrayBuffer} wasm
    * @param {object} options received as an object, converted to a PipelineOptions instance
    */
@@ -115,6 +124,16 @@ export class MLEngineWorker {
         ? data => self.callMainThread("onInferenceProgress", [data])
         : null
     );
+  }
+
+  /**
+   * End a run early, resolving once the backend is ready for the next one.
+   * Backends that cannot do this leave the run to finish on its own.
+   *
+   * @param {string} requestId - The identifier of the run to cancel.
+   */
+  async cancel(requestId) {
+    await this.#pipeline?.cancel?.(requestId);
   }
 
   /**

@@ -31,6 +31,8 @@
   <string name="history_search_hint">Etsi historiasta</string>
   <!-- Placeholder text shown in search bar when using bookmarks search -->
   <string name="bookmark_search_hint">Etsi kirjanmerkeistä</string>
+  <!-- Content description for the toolbar back button while searching bookmarks -->
+  <string name="bookmark_close_search_description">Palaa takaisin ja sulje haku</string>
   <!-- Placeholder text shown in search bar when using tabs search -->
   <string name="tab_search_hint">Etsi välilehdistä</string>
   <!-- Placeholder text shown in the search bar when using application search engines -->
@@ -75,7 +77,11 @@
   <string name="about_content" tools:ignore="BrandUsage">%1$s on Mozillan tuote.</string>
   <!-- Private Browsing -->
   <string name="private_browsing_common_myths">Yleiset myytit yksityisestä selaamisesta</string>
-  <!-- Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active. -->
+  <!--
+    Private Browsing
+
+    Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active.
+  -->
   <string name="private_browsing_a11y_session_announcement">Yksityinen selausistunto</string>
   <!--
     True Private Browsing Mode
@@ -104,14 +110,6 @@
   <string name="open_in_app_cfr_positive_button_text">Siirry asetuksiin</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">Hylkää</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
-  <!--
-    Address bar swipe "contextual feature recommendation" (CFR)
-
-    Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar.
-  -->
-  <string name="address_bar_swipe_cfr_message_2">Vaihda välilehtiä pyyhkäisemällä työkalupalkkia vasemmalle tai oikealle.</string>
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">Kameran käyttöoikeus vaaditaan. Siirry Androidin asetuksiin, napauta käyttöoikeudet ja napauta salli.</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -154,13 +152,11 @@
   <!--
     Recent Tabs
 
-    Header text for jumping back into the recent tab in the home screen
+    Header text on the homescreen for continuing to browse the most recent browser tab
   -->
-  <string name="recent_tabs_header">Palaa takaisin</string>
+  <string name="recent_tabs_header_2">Jatka</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">Näytä kaikki</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">Näytä kaikki viimeisimmät välilehdet -painike</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">Näytä kaikki synkronoidut välilehdet</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -189,8 +185,10 @@
   <!--
     Browser Fragment
 
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
+    Label for popup button that appears when long-pressing the main menu. Tapping it allows the user to customize the main menu layout.
   -->
+  <string name="customize_menu">Mukauta valikkoa</string>
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Taaksepäin</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Eteenpäin</string>
@@ -281,6 +279,10 @@
   <string name="browser_main_menu_content_description_navigation_header">Navigointi</string>
   <!-- Content description (not visible, for screen readers etc.) for bottom sheet handlebar custom tab menu. -->
   <string name="browser_custom_tab_menu_handlebar_content_description">Sulje mukautetun välilehden valikko</string>
+  <!-- URL bar indicator shown on a cached version of the website, when the tab is reloading, but the content is not live yet -->
+  <string name="browser_toolbar_cached_page_indicator">Välimuistissa</string>
+  <!-- Message shown when a cached website has finished reloading and the tab is now showing the live version of the page -->
+  <string name="browser_toolbar_live_page_toast">Ajantasainen sivu</string>
   <!-- Browser menu label that bookmarks the currently visited page -->
   <string name="browser_menu_bookmark_this_page_2">Lisää sivu kirjanmerkkeihin</string>
   <!-- Browser menu label that navigates to the edit bookmark screen for the current bookmarked page -->
@@ -295,8 +297,12 @@
   <string name="browser_menu_summarize_page">Tee yhteenveto sivusta</string>
   <!-- Browser menu badge text for summarization feature -->
   <string name="browser_menu_summarize_page_badge">Uusi</string>
+  <!-- Browser menu badge text for new, highlighted feature -->
+  <string name="browser_menu_page_badge_text">Uutta</string>
   <!-- Browser menu label for navigating to the Web Compat Reporter feature, which provides users the ability to send bug reports for broken sites. -->
   <string name="browser_menu_webcompat_reporter_2">Ilmoita rikkinäisestä sivustosta</string>
+  <!-- Browser menu label for adding a tab to a tab group -->
+  <string name="browser_menu_add_to_tab_group">Lisää ryhmään</string>
   <!-- Browser menu label that is displayed when the current page has been translated by the translation feature. -->
   <string name="browser_menu_translated">Käännetty</string>
   <!-- Browser menu label for the print feature -->
@@ -313,18 +319,8 @@
   <string name="browser_menu_default_banner_title">Aseta %1$s oletukseksi</string>
   <!-- Label text within the set as default banner -->
   <string name="browser_menu_default_banner_subtitle_2">Nopea, yksityinen ja sinua varten tehty.</string>
-  <!-- Content description (not visible, for screen readers etc.) for the button that dismisses the set as default banner in the menu -->
-  <string name="browser_menu_default_banner_dismiss_promotion">Hylkää mainos</string>
   <!-- Content description (not visible, for screen readers etc.) for recommended extensions in main menu -->
   <string name="browser_menu_recommended_extensions_content_description">Lisätietoja</string>
-  <!--
-    Menu "contextual feature recommendation" (CFR)
-
-    Text for the title in the contextual feature recommendation popup promoting the menu feature.
-  -->
-  <string name="menu_cfr_title">Uutta: virtaviivaistettu valikko</string>
-  <!-- Text for the message in the contextual feature recommendation popup promoting the menu feature. -->
-  <string name="menu_cfr_body">Löydä tarvitsemasi nopeammin aina yksityisestä selaamisesta toimintojen tallentamiseen.</string>
   <!--
     Extensions management fragment
 
@@ -555,8 +551,6 @@
   <string name="onboarding_marketing_body_1" tools:ignore="BrandUsage,UnusedResources">Jaa Mozillan markkinointikumppaneiden kanssa, miten löysit Firefoxin ja kuinka käytät sitä. Näitä tietoja ei koskaan myydä.</string>
   <!-- Marketing onboarding page button label variant. Button to confirm choice and start browsing. -->
   <string name="onboarding_marketing_positive_button_1" tools:ignore="UnusedResources">Hyväksy ja aloita selaaminen</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
   <!-- "Continue" onboarding button. -->
   <string name="nova_onboarding_continue_button">Jatka</string>
   <!-- "Continue browsing" onboarding button. -->
@@ -626,7 +620,7 @@
   -->
   <string name="nova_onboarding_marketing_body" tools:ignore="BrandUsage,UnusedResources">Jaa Mozillan markkinointikumppaneiden kanssa, miten löysit Firefoxin ja kuinka käytät sitä. Näitä tietoja ei koskaan myydä. %1$s</string>
   <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
-  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage">Jaa Mozillan markkinointikumppaneiden kanssa, miten löysit Firefoxin ja kuinka käytät sitä. Näitä tietoja ei koskaan myydä.</string>
+  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage,UnusedResources">Jaa Mozillan markkinointikumppaneiden kanssa, miten löysit Firefoxin ja kuinka käytät sitä. Näitä tietoja ei koskaan myydä.</string>
   <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
   <string name="nova_onboarding_marketing_body_3" tools:ignore="BrandUsage,UnusedResources">Voit auttaa meitä tavoittamaan enemmän ihmisiä sallimalla Mozillan ilmoittaa kanaville, joilla mainostamme Firefoxia, että olet Firefoxin käyttäjä.</string>
   <!--
@@ -665,9 +659,11 @@
   <!-- Marketing onboarding primary button text. 'Firefox' is intentionally hardcoded. -->
   <string name="nova_onboarding_marketing_primary_button_text" tools:ignore="BrandUsage,UnusedResources">Auta Firefoxia</string>
   <!-- Marketing onboarding primary button text. -->
-  <string name="nova_onboarding_marketing_primary_button_text_2">Salli ja jatka</string>
+  <string name="nova_onboarding_marketing_primary_button_text_3">Kyllä</string>
   <!-- Marketing onboarding secondary button text. -->
   <string name="nova_onboarding_marketing_secondary_button_text" tools:ignore="UnusedResources">Ei kiitos</string>
+  <!-- Marketing onboarding secondary button text. -->
+  <string name="nova_onboarding_marketing_secondary_button_text_2">Ei</string>
   <!-- Notifications onboarding title. 'Firefox' is intentionally hardcoded. -->
   <string name="nova_onboarding_notifications_title" tools:ignore="BrandUsage,UnusedResources">Ilmoitukset auttavat sinua pysymään paremmassa turvassa Firefoxilla</string>
   <!-- Notifications onboarding subtitle. 'Firefox' is intentionally hardcoded. -->
@@ -699,8 +695,6 @@
   <string name="nova_onboarding_app_icon_prompt_title" tools:ignore="UnusedResources">Valitse mukautettu sovelluskuvake</string>
   <!-- App icon onboarding body. -->
   <string name="nova_onboarding_app_icon_prompt_body" tools:ignore="UnusedResources">Anna aloitusnäytöllesi henkilökohtainen vivahde.</string>
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Widget Picker
 
@@ -719,13 +713,25 @@
   <string name="search_widget_text_long">Hae verkosta</string>
   <!-- Content description (not visible, for screen readers etc.): Voice search -->
   <string name="search_widget_voice">Äänihaku</string>
+  <!-- Content description (not visible, for screen readers etc.): Button in the search widget that starts a search in a private tab -->
+  <string name="search_widget_private_search">Yksityinen haku</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for private search and for voice search -->
+  <string name="search_bar_widget_description">Hakupalkki yksityisellä haulla ja äänihaulla</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for image search, private search and voice search -->
+  <string name="search_bar_with_lens_widget_description">Hakupalkki kuva-, yksityis- ja äänihaulla</string>
+  <!-- Widget description in the widget picker screen for the compact search bar widget -->
+  <string name="compact_search_bar_widget_description">Kompakti hakupalkki</string>
   <!--
     Preferences
 
     Title for the settings page
   -->
   <string name="settings">Asetukset</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">Yleiset</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Tietoja</string>
@@ -788,40 +794,6 @@
   <string name="preferences_pbm_lock_screen_title">Käytä näytön lukitusta piilottaaksesi välilehdet yksityisessä selailussa</string>
   <!-- Informs the user how to access the tabs when "Use screen lock to hide tabs in private browsing" is enabled -->
   <string name="preferences_pbm_lock_screen_summary_3">Näytä välilehdet sormenjäljellä, PIN-koodilla tai kasvojentunnistuksella. Tämän ottaminen käyttöön estää myös kuvakaappausten ottamisen ja jakamisen.</string>
-  <!-- Label for cookie banner section in quick settings panel. -->
-  <string name="cookie_banner_blocker">Evästeilmoitusten esto</string>
-  <!-- Preference for removing cookie/consent banners from sites automatically in private mode. See reduce_cookie_banner_summary for additional context. -->
-  <string name="preferences_cookie_banner_reduction_private_mode">Evästeilmoitusten esto yksityisessä selaamisessa</string>
-  <!-- Text for indicating cookie banner handling is off this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_off_for_site">Ei käytössä tällä sivustolla</string>
-  <!-- Text for cancel button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_cancel_button">Peruuta</string>
-  <!-- Text for request support button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_request_support_button_2">Lähetä pyyntö</string>
-  <!-- Text for title indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_title_2">Haluatko pyytää tukea tälle sivustolle?</string>
-  <!-- Label for the snackBar, after the user reports with success a website where cookie banner reducer did not work -->
-  <string name="cookie_banner_handling_report_site_snack_bar_text_2">Pyyntö lähetetty</string>
-  <!-- Text for indicating cookie banner handling is on this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_on_for_site">Käytössä tällä sivustolla</string>
-  <!-- Text for indicating that a request for unsupported site was sent to Nimbus (it's a Mozilla library for experiments), this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site_request_submitted_2">Tukipyyntö lähetetty</string>
-  <!-- Text for indicating cookie banner handling is currently not supported for this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site">Sivusto ei ole tuettu tällä hetkellä</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is on this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_on_for_site_1">Haluatko ottaa evästeilmoitusten eston käyttöön sivustolla %1$s?</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is off this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_off_for_site_1">Haluatko poistaa evästeilmoitusten eston käytöstä sivustolla %1$s?</string>
-  <!-- Title text for a detail explanation indicating cookie banner reducer didn't work for the current site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_title_unsupported_site_request_2">%1$s ei voi automaattisesti hylätä tämän sivuston evästepyyntöjä. Voit lähettää pyynnön ja pyytää tukea tälle sivustolle tulevaisuudessa.</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is off for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_off_for_site_1">Poista käytöstä ja %1$s poistaa evästeet sekä lataa tämän sivuston uudelleen. Tämä voi kirjata sinut ulos tai tyhjentää ostoskorin.</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is on for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_on_for_site_3">Ota käyttöön ja %1$s yrittää automaattisesti hylätä evästeilmoitukset tällä sivustolla.</string>
-  <!-- Title for the cookie banner re-engagement CFR, the placeholder is replaced with app name. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="cookie_banner_cfr_title">%1$s kieltäytyi juuri evästeistä</string>
-  <!-- Message for the cookie banner re-engagement CFR -->
-  <string name="cookie_banner_cfr_message">Vähemmän häiriötekijöitä, vähemmän sinua tällä sivustolla seuraavia evästeitä.</string>
   <!-- Description of the preference to enable "HTTPS-Only" mode. -->
   <string name="preferences_https_only_summary">Yrittää muodostaa automaattisesti yhteyden sivustoihin käyttämällä salattua HTTPS-protokollaa turvallisuuden parantamiseksi.</string>
   <!-- Summary of https only preference if https only is set to off -->
@@ -850,6 +822,8 @@
   <string name="preferences_override_sync_tokenserver">Mukautettu synkronointipalvelin</string>
   <!-- Preference category for account information -->
   <string name="preferences_category_account">Tili</string>
+  <!-- Preference category for sync controls. Sync can be translated, it's just short for ”Synchronization” in English. -->
+  <string name="preferences_category_sync_controls">Synkronointi</string>
   <!-- Preference for changing where the AddressBar is positioned -->
   <string name="preferences_toolbar_2">Osoitepalkin sijainti</string>
   <!-- Preference for changing toolbar layout -->
@@ -866,6 +840,8 @@
   <string name="preferences_toolbar_shortcut">Työkalupalkin pikavalinta</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_toolbar_select_shortcut">Valitse pikavalinta</string>
+  <!-- Title of a menu option allowing to change the shortcut button shown in the toolbar -->
+  <string name="toolbar_shortcut_menu_edit_option">Muokkaa oikotietä</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_gestures">Eleet</string>
   <!-- Preference for settings related to visual options -->
@@ -904,6 +880,8 @@
   <string name="preferences_search_synced_tabs">Etsi synkronoiduista välilehdistä</string>
   <!-- Preference for account settings -->
   <string name="preferences_account_settings">Tilin asetukset</string>
+  <!-- Preference for account and sync settings -->
+  <string name="preferences_account_and_sync_settings">Tili ja synkronointi</string>
   <!-- Preference for enabling url autocomplete -->
   <string name="preferences_enable_autocomplete_urls">Täydennä osoitteet automaattisesti</string>
   <!-- Preference title for switch preference to show sponsored Firefox Suggest search suggestions -->
@@ -940,6 +918,10 @@
   <string name="preferences_open_links_in_apps_ask">Kysy ennen avaamista</string>
   <!-- Preference for open links in third party apps never open in apps option -->
   <string name="preferences_open_links_in_apps_never">Ei koskaan</string>
+  <!-- Preference category header for media related open links in apps settings -->
+  <string name="preferences_media_category">Media</string>
+  <!-- Preference label for choosing whether links open in the YouTube app -->
+  <string name="preferences_open_links_in_youtube">Avaa linkit YouTube-sovelluksessa</string>
   <!-- Preference category for file storage. -->
   <string name="preferences_category_file_storage">Tiedostojen tallennustila</string>
   <!-- Preference title for downloads default location. -->
@@ -951,6 +933,8 @@
   <string name="preference_downloads_folder_permission_lost" tools:ignore="UnusedResources">Sinulla ei ole oikeutta käyttää tätä kansiota. Kokeile valita toinen kansio.</string>
   <!-- Preference title for choosing an app to handle downloads -->
   <string name="preferences_choose_app_for_downloads">Hallitse latauksia toisella sovelluksella</string>
+  <!-- Message shown when no app is available to let the user pick a download folder. -->
+  <string name="preferences_downloads_no_folder_picker_available">Kansiovalitsimen avaaminen tällä laitteella epäonnistui.</string>
   <!-- Preference category for deleting or removing downloads -->
   <string name="preferences_category_delete_or_remove_downloads">Latausten poistaminen</string>
   <string name="preferences_downloads_delete_from_device">Poista laitteelta</string>
@@ -974,6 +958,12 @@
   <string name="notifications_allowed_summary">Sallittu</string>
   <!-- Summary for notification preference indicating notifications are not allowed -->
   <string name="notifications_not_allowed_summary">Ei sallittu</string>
+  <!-- Preference for local network access / nearby devices in Android 17 -->
+  <string name="preferences_local_network_access">Lähiverkon käyttö / Lähellä olevat laitteet</string>
+  <!-- Summary for local network access preference indicating access is allowed -->
+  <string name="local_network_access_allowed_summary">Sallittu</string>
+  <!-- Summary for local network access preference indicating access is not allowed -->
+  <string name="local_network_access_not_allowed_summary">Ei sallittu</string>
   <!--
     Add-on Permissions
 
@@ -1018,8 +1008,8 @@
     Title for the customize home screen section with privacy report.
   -->
   <string name="customize_toggle_privacy_report">Tietosuojaraportti</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">Palaa takaisin</string>
+  <!-- Title for a customize home screen section. Continue is a section that displays the most recent browser tab, so users can continue browsing where they left off. -->
+  <string name="customize_toggle_continue">Jatka</string>
   <!-- Title for the customize home screen section with bookmarks. -->
   <string name="customize_toggle_bookmarks">Kirjanmerkit</string>
   <!--
@@ -1033,12 +1023,10 @@
   <string name="customize_toggle_pocket_sponsored">Sponsoroidut tarinat</string>
   <!-- Title for the opening wallpaper settings screen -->
   <string name="customize_wallpapers">Taustakuvat</string>
-  <!-- Label for the menu item that opens the wallpaper settings screen. -->
-  <string name="browser_menu_change_wallpaper">Vaihda taustakuva</string>
+  <!-- Label for the menu item that opens the customize homepage settings screen. -->
+  <string name="browser_menu_customize_homepage">Mukauta kotisivua</string>
   <!-- Title for the customize home screen section with sponsored shortcuts. -->
   <string name="customize_toggle_contile">Sponsoroidut pikavalinnat</string>
-  <!-- Title for the customize home screen section that toggles the Homepage sports widget. -->
-  <string name="customize_toggle_world_cup">Jalkapallon MM-kisat</string>
   <!--
     Wallpapers
 
@@ -1163,6 +1151,8 @@
   <string name="extension_process_crash_dialog_retry_button_text" tools:ignore="UnusedResources">Yritä käynnistää laajennukset uudelleen</string>
   <!-- Button text on the extension crash dialog to prompt the user to continue with all extensions disabled. -->
   <string name="extension_process_crash_dialog_disable_extensions_button_text">Jatka pitäen laajennukset pois käytöstä</string>
+  <!-- Text shown in the snackbar action button that lets the user retry an add-on operation that just failed. -->
+  <string name="addon_failure_retry_action">Yritä uudestaan</string>
   <!--
     Account Preferences
 
@@ -1175,6 +1165,12 @@
   <string name="preferences_sync_now">Synkronoi nyt</string>
   <!-- Preference category for sync -->
   <string name="preferences_sync_category">Valitse mitä synkronoidaan</string>
+  <!-- Preference category for sync controls -->
+  <string name="preferences_category_sync">Synkronoidut tiedot</string>
+  <!-- Summary for the sync preference category. -->
+  <string name="preferences_sync_category_summary">Hallitse mitä kaikille yhdistetyille laitteillesi synkronoidaan</string>
+  <!-- Summary for the sync preference category, when user has disabled all synchronisation items. -->
+  <string name="preferences_sync_category_no_engine_selected_summary">Mitään ei synkronoida. Valitse, mitä haluat synkronoida laitteidesi välillä.</string>
   <!-- Preference for syncing history -->
   <string name="preferences_sync_history">Historia</string>
   <!-- Preference for syncing bookmarks -->
@@ -1187,6 +1183,10 @@
   <string name="preferences_sign_out">Kirjaudu ulos</string>
   <!-- Preference displays and allows changing current FxA device name -->
   <string name="preferences_sync_device_name">Laitteen nimi</string>
+  <!-- Preference category for Device name -->
+  <string name="preferences_device_name_category">Laitteen nimi</string>
+  <!-- Label for the Preference that displays and allows changing current device name on Mozilla Account -->
+  <string name="preferences_sync_change_device_name">Muuta laitteen nimi</string>
   <!-- Text shown when user enters empty device name -->
   <string name="empty_device_name_error">Laitteen nimi ei voi olla tyhjä.</string>
   <!-- Label indicating that sync is in progress -->
@@ -1306,8 +1306,12 @@
   <string name="preference_simple_toolbar">Yksinkertainen</string>
   <!-- Preference for using expanded toolbar -->
   <string name="preference_expanded_toolbar">Laajennuttu</string>
-  <!-- Preference description indicating the toolbar location preference is disabled when the tab strip is enabled -->
-  <string name="preference_toolbar_pref_disabled_explanation">Osoitepalkin on oltava ylhäällä, kun välilehtipalkki on näkyvissä.</string>
+  <!-- Preference for changing where the search bar is positioned on the homepage, shown when the user has set the address bar to be displayed at the top of the screen -->
+  <string name="preferences_homepage_search_location">Etusivun haun sijainti</string>
+  <!-- Preference for showing the homepage search bar in the middle of the homepage -->
+  <string name="preference_homepage_search_location_middle">Keskellä</string>
+  <!-- Preference for showing the homepage search bar at the top of the homepage (combined with the address bar, already displayed at the top) -->
+  <string name="preference_homepage_search_location_top">Ylhäällä</string>
   <!-- New tab shortcut in toolbar customization -->
   <string name="toolbar_customize_shortcut_new_tab">Avaa uusi välilehti</string>
   <!-- Share shortcut in toolbar customization -->
@@ -1336,6 +1340,11 @@
   <string name="preference_light_theme">Vaalea</string>
   <!-- Preference for using dark theme -->
   <string name="preference_dark_theme">Tumma</string>
+  <!--
+    Preference for using the OLED theme. For localization, this can be translated as "True Black", "Maximum Darkness",
+    or "Full dark" if needed.
+  -->
+  <string name="preference_oled_theme">Tummin</string>
   <!-- Preference for using using dark or light theme automatically set by battery -->
   <string name="preference_auto_battery_theme">Asetettu virransäästön toimesta</string>
   <!-- Preference for using following device theme -->
@@ -1346,6 +1355,12 @@
     Preferences for showing tab strip
   -->
   <string name="preference_tab_strip_show">Näytä välilehtipalkki</string>
+  <!-- Preference for tab bar placement (top or bottom of the screen) -->
+  <string name="preference_tab_strip_location_header">Välilehtipalkin sijainti</string>
+  <!-- Preference for using top tab strip -->
+  <string name="preference_top_tab_strip">Ylhäällä</string>
+  <!-- Preference for using bottom tab strip -->
+  <string name="preference_bottom_tab_strip">Alhaalla</string>
   <!--
     Gestures Preferences
 
@@ -1378,6 +1393,8 @@
   <string name="library_desktop_bookmarks_unfiled">Muut kirjanmerkit</string>
   <!-- Option in Library to open History page -->
   <string name="library_history">Historia</string>
+  <!-- Content description (not visible, for screen readers etc.) for the check mark that replaces a site's icon in History and Recently closed tabs when the item is selected -->
+  <string name="library_item_selected_content_description">Valittu</string>
   <!-- Settings Page Title -->
   <string name="settings_title">Asetukset</string>
   <!-- Content description (not visible, for screen readers etc.): "Close button for library settings" -->
@@ -1428,8 +1445,8 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">Välilehdet</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">Välilehtinäkymä</string>
+  <!-- Title of preference that allows a user to specify the tab layout -->
+  <string name="preferences_tab_layout">Välilehtien asettelu</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">Lista</string>
   <!-- Option for a grid tab view -->
@@ -1448,6 +1465,8 @@
   <string name="preference_auto_close_tabs" tools:ignore="UnusedResources">Sulje automaattisesti avoimet välilehdet</string>
   <!-- Content description (not visible, for screen readers etc.): Close tab button -->
   <string name="tab_manager_close_tabs">Sulje</string>
+  <!-- Content description for the media playback indicator in the tabs tray. -->
+  <string name="tab_indicator_media_playing">Mediaa toistetaan</string>
   <!--
     Opening screen
 
@@ -1475,13 +1494,27 @@
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">Avaa etusivu neljän tunnin kuluttua</string>
   <!--
-    Inactive tabs
+    Tab organization
 
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
+    Category header for the preferences that control how tabs are organized
   -->
-  <string name="preferences_inactive_tabs">Siirrä vanhat välilehdet passiivisiksi</string>
-  <!-- Title of inactive tabs preference -->
+  <string name="preferences_tab_organization">Välilehtien järjestely</string>
+  <!-- Title of the preference that allows a user to enable or disable the inactive tabs feature -->
+  <string name="preferences_inactive_tabs_toggle_title">Passiiviset välilehdet</string>
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">Välilehdet, joita et ole katsonut kahteen viikkoon, siirretään passiivisten osioon.</string>
+  <!-- Title of the preference that allows a user to enable or disable the tab groups feature -->
+  <string name="preferences_tab_groups_title">Välilehtiryhmät</string>
+  <!-- Summary of the preference that allows a user to enable or disable the tab groups feature -->
+  <string name="preferences_tab_groups_description">Järjestä välilehdet ryhmiin, jotka voit nimetä ja tallentaa.</string>
+  <!--
+    Privacy report
+
+    Category header of a preference that allows a user to enable or disable the privacy report feature
+  -->
+  <string name="preferences_privacy_report">Tietosuojaraportti</string>
+  <!-- Title of the privacy report preference that allows a user to enable or disable the feature -->
+  <string name="preferences_privacy_report_title">Ota käyttöön tietosuojaraportti</string>
   <!--
     Studies
 
@@ -1537,6 +1570,8 @@
   <string name="add_tab">Lisää välilehti</string>
   <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
   <string name="add_private_tab">Lisää yksityinen välilehti</string>
+  <!-- Content description (not visible, for screen readers etc.): Create tab group button. Opens the create tab group sheet when pressed -->
+  <string name="create_tab_group_content_description">Luo välilehtiryhmä</string>
   <!-- Text for the tab search bar placeholder -->
   <string name="tab_manager_search_bar_placeholder">Hae välilehdistä</string>
   <!-- Text shown in the menu to view recently closed tabs -->
@@ -1659,15 +1694,6 @@
     <item quantity="one">Lisää välilehtiryhmään %1$s, %2$d välilehti, väri %3$s</item>
     <item quantity="other">Lisää välilehtiryhmään %1$s, %2$d välilehteä, väri %3$s</item>
   </plurals>
-  <plurals name="share_tab_group_button_content_description">
-    <!--
-      Content Description for share tab group button.
-      %1$s is the name of the tab group.
-      %2$d is the number of tabs in a tab group.
-    -->
-    <item quantity="one">Jaa välilehtiryhmä %1$s, jossa on %2$d välilehti.</item>
-    <item quantity="other">Jaa välilehtiryhmä %1$s, jossa on %2$d välilehteä.</item>
-  </plurals>
   <!-- Content description for the grabber/handle of the tab group bottom sheet. -->
   <string name="tab_group_sheet_dismiss_description">Näytä välilehtiryhmä, supista vetämällä kahvasta</string>
   <plurals name="expanded_tab_group_header_description">
@@ -1694,6 +1720,41 @@
   <string name="close_tab_and_delete_group_confirmation_dialog_confirm">Poista ryhmä</string>
   <!-- Text shown on the cancel button in the Close last tab and delete tab group confirmation dialog. -->
   <string name="close_tab_and_delete_group_confirmation_dialog_cancel">Peruuta</string>
+  <!-- Content description for the three dot button next to a tab group" -->
+  <string name="tab_group_three_dot_button_content_description">Lisää valintoja</string>
+  <!--
+    Content description for the Expand button on the contracted menu for a tab group:
+    when tapped, tabs are displayed in an expanded grid or list view, taking up the full screen.
+  -->
+  <string name="tab_groups_strip_expand_group_content_description">Laajenna nähdäksesi välilehdet koko näytön näkymässä</string>
+  <!-- Text shown on the edit button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_edit">Muokkaa</string>
+  <!-- Text shown on the ungroup button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_ungroup">Pura ryhmittely</string>
+  <!-- Text shown on the delete button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_delete">Poista</string>
+  <!-- Text shown on the share button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_share">Jaa</string>
+  <!-- Text shown on the close button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_close">Sulje</string>
+  <!-- Title for the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_title">Puretaanko välilehtiryhmän ryhmittely?</string>
+  <!-- Text shown in the body of the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_body">Välilehdet pysyvät auki tällä laitteella, mutta ryhmä poistetaan.</string>
+  <!-- Text shown on the Don't Ask Again checkbox button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_dont_ask_again">Älä kysy uudestaan</string>
+  <!-- Text shown on the confirm button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_confirm">Pura ryhmittely</string>
+  <!-- Text shown on the cancel button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_cancel">Peruuta</string>
+  <!-- Custom accessibility action to reorder a tab up rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_up">Siirrä välilehti ylös</string>
+  <!-- Custom accessibility action to reorder a tab left rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_left">Siirrä välilehti vasemmalle</string>
+  <!-- Custom accessibility action to reorder a tab right rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_right">Siirrä välilehti oikealle</string>
+  <!-- Custom accessibility action to reorder a tab down rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_down">Siirrä välilehti alas</string>
   <!--
     Color labels for tab groups, used for accessibility and selection UI.
 
@@ -1708,8 +1769,6 @@
   <string name="tab_group_color_pink">Pinkki</string>
   <!-- Tab group color: Purple -->
   <string name="tab_group_color_purple">Liila</string>
-  <!-- Tab group color: Violet -->
-  <string name="tab_group_color_violet">Violetti</string>
   <!-- Tab group color: Blue -->
   <string name="tab_group_color_blue">Sininen</string>
   <!-- Tab group color: Cyan -->
@@ -1726,8 +1785,6 @@
   <string name="history_search_1">Kirjoita hakuehdot</string>
   <!-- Text for the button to clear all history -->
   <string name="history_delete_all">Poista historia</string>
-  <!-- Text for the snackbar to confirm that multiple browsing history items has been deleted -->
-  <string name="history_delete_multiple_items_snackbar">Historia poistettu</string>
   <!-- Text for the snackbar to confirm that a single browsing history item has been deleted. %1$s is the shortened URL of the deleted history item. -->
   <string name="history_delete_single_item_snackbar">%1$s poistettu</string>
   <!-- Context description text for the button to delete a single history item -->
@@ -1737,16 +1794,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d valittu</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">Tänään</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">Eilen</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Viimeiset 7 päivää</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Viimeiset 30 päivää</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Vanhemmat</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">Ei historiaa täällä</string>
   <!--
@@ -1925,6 +1972,8 @@
   <string name="download_search_no_results_found">Tuloksia ei löytynyt</string>
   <!-- Text for the "Select all" button, which selects all downloaded items in the downloads list. -->
   <string name="download_select_all_items">Valitse kaikki</string>
+  <!-- Shown in the downloads list in place of a website name when a file came from a data: or blob: URL that has no website address. "data" refers to the data: URL scheme. -->
+  <string name="download_item_source_data">(data)</string>
   <!--
     Downloads Content Type Filters
 
@@ -1969,40 +2018,24 @@
   <string name="webcompat_reporter_clear_reason_content_description">Tyhjennä valittu syy</string>
   <!-- The error message of the description when the user selects "Something else" as the reason, but left the description empty or too short. -->
   <string name="webcompat_reporter_description_error">Syötä vähintään 10 merkkiä</string>
-  <!-- The label/title of a field in the Web Compat Reporter feature for explaining a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_label_whats_broken_2">Mikä on rikki?</string>
-  <!-- The placeholder text for the dropdown where a user selects a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_2">Valitse syy</string>
-  <!-- The error message of the dropdown, prompting the user to select a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_error">Valitse syy</string>
-  <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
-  <string name="webcompat_reporter_label_description_2">Kuvaile ongelmaa yksityiskohtaisesti, jotta voimme tutkia sitä (valinnainen)</string>
-  <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
-  <string name="webcompat_reporter_label_description">Kuvaa ongelma (valinnainen)</string>
-  <!-- The button text for navigating away from the feature to provide more information on the broken site's bug report. -->
-  <string name="webcompat_reporter_add_more_info">Lisää lisätietoja</string>
+  <!-- The label/title of a mandatory field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_mandatory_description">Kuvaile ongelmaa yksityiskohtaisesti, jotta voimme tutkia sitä</string>
+  <!-- The label/title of a optional field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_optional_description">Kuvaile ongelmaa yksityiskohtaisesti, jotta voimme tutkia sitä (valinnainen)</string>
   <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
   <string name="webcompat_reporter_cancel">Peruuta</string>
   <!-- The button text for the send button to submit the provided form data. -->
-  <string name="webcompat_reporter_send">Lähetä</string>
+  <string name="webcompat_reporter_send_report">Lähetä raportti</string>
   <!-- Text for a snackbar to confirm the successful submission of a WebCompat report. -->
   <string name="webcompat_reporter_success_snackbar_text_2">Ilmoitus lähetetty</string>
   <!-- Placeholder text for the description field to prompt the user on what they should type. -->
   <string name="webcompat_reporter_problem_description_placeholder_text_2">Mitä tapahtui? Mitä odotit tapahtuvan? Kerrothan vaiheet ongelman toistamiseksi.</string>
-  <!-- Placeholder text for the description field to prompt the user on what they should type. -->
-  <string name="webcompat_reporter_problem_description_placeholder_text">Mitä tapahtui? Mitä olisi pitänyt tapahtua?</string>
   <!-- Label of the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. -->
   <string name="webcompat_reporter_etp_checkbox_text_2">Lähetä seurannansuojauksen estämien kohteiden luettelo</string>
-  <!-- Label of the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. -->
-  <string name="webcompat_reporter_etp_checkbox_text">Lähetä seurannan suojauksen estämät URL-osoitteet</string>
-  <!-- Description text for the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. It informs the user when checked, the report will include the list of URLs that were blocked by Enhanced Tracking Protection on the current page. -->
-  <string name="webcompat_reporter_etp_checkbox_description">Tehostettu seurannan suojaus saattaa estää seuraimia ja komentosarjoja, joita jotkin verkkosivustot tarvitsevat toimiakseen oikein.</string>
   <!-- The button text for the preview report button to view a preview of the report. -->
   <string name="webcompat_reporter_preview_report">Esikatsele raportti</string>
   <!-- The title shown at the top of the WebCompat Report preview panel. This appears after the user taps the “Preview” button before sending a report. -->
   <string name="webcompat_reporter_preview_bottom_sheet_header">Raportin esikatselu</string>
-  <!-- Label for the “Send” button shown in the WebCompat Report preview panel, which the user taps to submit the report. -->
-  <string name="webcompat_reporter_preview_bottom_sheet_send">Lähetä</string>
   <!-- Title for the Edit URL confirmation dialog in the WebCompatReporter -->
   <string name="webcompat_reporter_edit_url_dialog_title">Muokkaa verkkosivuston osoitetta</string>
   <!-- Text shown on the save button for the Edit URL confirmation dialog in the WebCompatReporter. -->
@@ -2031,8 +2064,6 @@
   <string name="webcompat_reporter_reason_notsupported_2">Selain ei ole tuettu tai se on estetty</string>
   <!-- Broken site reason text for the site being deceptive -->
   <string name="webcompat_reporter_reason_site_is_deceptive">Tämä sivusto on petollinen</string>
-  <!-- Broken site reason text for browser isn’t supported or blocked -->
-  <string name="webcompat_reporter_reason_notsupported">Selain ei ole tuettu tai se on estetty</string>
   <!-- Broken site reason text for something else -->
   <string name="webcompat_reporter_reason_other">Jotain muuta</string>
   <!--
@@ -2194,18 +2225,16 @@
   <string name="bookmark_select_folder_new_folder_button_title">Uusi kansio</string>
   <!-- Bookmark snackbar message for moving a single item. %1$s is the title of the item being moved and %2$s is the new parent folder of the bookmark -->
   <string name="bookmark_moved_single_item">Siirretty %1$s kansioon %2$s</string>
+  <!-- Text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results">Ei hakutuloksia.</string>
+  <!-- Additional text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results_additional_text">Kokeile muita hakuehtoja!</string>
   <!--
     Site Permissions
 
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">Siirry asetuksiin</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">Pika-asetuslomake</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">Suositeltu</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -2397,6 +2426,10 @@
   <string name="sync_send_to_all">Lähetä kaikkiin laitteisiin</string>
   <!-- An option from the share dialog to reconnect to sync -->
   <string name="sync_reconnect">Yhdistä uudelleen Synciin</string>
+  <!-- Label for the button in the share dialog that sends the tab to the selected sync devices -->
+  <string name="sync_send_to_selected_devices">Lähetä</string>
+  <!-- Content description announced when a device is selected in the share dialog -->
+  <string name="send_to_devices_device_selected_content_description">Valittu</string>
   <!-- Text displayed when sync is offline and cannot be accessed -->
   <string name="sync_offline">Ei yhteydessä</string>
   <!-- An option to connect additional devices -->
@@ -2419,6 +2452,24 @@
   <string name="sent_from_firefox_template" tools:ignore="UnusedResources">%1$s\n\nLähetetty %2$sista 🦊 Kokeile mobiiliselainta: %3$s</string>
   <!-- A short message template for the shared link with a footer. %1$s is the shared link, %2$s is the app name (e.g. Firefox) and %3$s is a download link for the app. -->
   <string name="sent_from_firefox_template_short" tools:ignore="UnusedResources">%1$s\n\nLähetetty %2$sista 🦊 %3$s</string>
+  <!-- Send tab to synced devices: Authentication error title - Message asking the user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_title">Kirjaudu takaisin sisään lähettääksesi välilehtiä laitteiden välillä</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_button">Kirjaudu sisään</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to remove the currently connected account -->
+  <string name="sync_send_tab_error_auth_remove_account">Poista tili</string>
+  <!-- Send tab to synced devices: Empty state title - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_title">Ei yhdistettyjä laitteita</string>
+  <!-- Send tab to synced devices: Empty state message - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_description" tools:ignore="BrandUsage">Lähetä välilehti kirjautumalla Firefoxiin vähintään yhdellä muulla laitteella.</string>
+  <!-- Send tab to synced devices: Empty state link - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_link">Opi yhdistämään laite</string>
+  <!-- Send tab to synced devices: Connectivity Error title -->
+  <string name="sync_send_tab_error_connection_title">Tarkista Internet-yhteytesi</string>
+  <!-- Send tab to synced devices: Connectivity Error message - Suggested user action after internet connection has been established -->
+  <string name="sync_send_tab_error_connection_text">Yritä sitten lähettää välilehti uudelleen.</string>
+  <!-- Send tab to synced devices: Connectivity Error button - When tapped, refreshes the list of connected devices. -->
+  <string name="sync_send_tab_error_connection_button">Yritä uudelleen</string>
   <!--
     Notifications
 
@@ -2440,6 +2491,18 @@
     The app name is in the text, due to limitations with localizing Nimbus experiments
   -->
   <string name="nimbus_notification_default_browser_text" tools:ignore="BrandUsage,UnusedResources">Aseta Firefox oletusselaimeksi</string>
+  <!--
+    Privacy report notification
+
+    Name of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app.
+  -->
+  <string name="notification_privacy_report_channel_name">Tietosuojaraportti</string>
+  <!-- Description of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_channel_description">%1$s näyttää, kuinka monta seurainta estettiin selaamisen aikana.</string>
+  <!-- Body text for the weekly privacy report notification for when trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_body_has_trackers">Jatka selaamista. %1$s jatkaa seurainten estämistä.</string>
+  <!-- Headline text of the weekly privacy report notification for when no trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_headline_no_trackers">%1$s estää seuraimia selatessasi. Näet estetyt seuraimet tässä.</string>
   <!--
     Survey
 
@@ -2589,6 +2652,12 @@
   <string name="sign_in_create_account_text" tools:ignore="BrandUsage"><![CDATA[Vailla tiliä? <u>Luo tili</u> synkronoidaksesi Firefox laitteiden välillä.]]></string>
   <!-- Text shown in confirmation dialog to sign out of account. %s is the name of the app (for example "Firefox"). -->
   <string name="sign_out_confirmation_message_2">%s lopettaa synkronoinnin tilisi kanssa, mutta ei poista selaustietojasi tältä laitteelta.</string>
+  <!-- Title of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_title">Haluatko kirjautua ulos tililtäsi?</string>
+  <!-- Body of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_message">Synkronoidut tiedot pysyvät tallennettuna tilillesi.</string>
+  <!-- Text for the primary action button of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_confirm_button">Kirjaudu ulos</string>
   <!-- Option to continue signing out of account shown in confirmation dialog to sign out of account -->
   <string name="sign_out_disconnect">Katkaise yhteys</string>
   <!-- Option to cancel signing out shown in confirmation dialog to sign out of account -->
@@ -2598,10 +2667,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">Suojauksen asetukset</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">Tehostettu seurannan suojaus</string>
   <!-- Preference summary for enhanced tracking protection settings on/off switch -->
   <string name="preference_enhanced_tracking_protection_summary">Sisältää nyt täydellisen evästesuojauksen, joka on toistaiseksi tehokkain esteemme sivustojen välistä seurantaa vastaan.</string>
@@ -2610,15 +2677,6 @@
   <!-- Text displayed that links to website about enhanced tracking protection -->
   <string name="preference_enhanced_tracking_protection_explanation_learn_more">Lue lisää</string>
   <plurals name="trackers_blocked_count_2">
-    <!--
-      Trackers blocked card on homepage
-
-      Text shown on the trackers blocked card. %d is the number of trackers blocked.
-    -->
-    <item quantity="one">%d seurain estetty</item>
-    <item quantity="other">%d seurainta estetty</item>
-  </plurals>
-  <plurals name="trackers_blocked_count">
     <!--
       Trackers blocked card on homepage
 
@@ -2699,12 +2757,8 @@
   <string name="preference_enhanced_tracking_protection_custom_cryptominers">Kryptolouhijat</string>
   <!-- Preference for enhanced tracking protection for the custom protection settings -->
   <string name="preference_enhanced_tracking_protection_custom_known_fingerprinters">Tunnetut yksilöijät</string>
-  <!-- Button label for navigating to the Enhanced Tracking Protection details -->
-  <string name="enhanced_tracking_protection_details">Yksityiskohdat</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">Estetty</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">Sallittu</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">Sosiaalisen median seuraimet</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -2727,10 +2781,6 @@
   <string name="etp_tracking_content_title">Seurantaan tarkoitettu sisältö</string>
   <!-- Description of tracking content that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_description">Estää lataamasta ulkopuolisia mainoksia, videoita ja muuta sisältöä, joka sisältää seurantakoodin. Voi vaikuttaa joidenkin verkkosivustojen toimimiseen.</string>
-  <!-- Enhanced Tracking Protection message that protection is currently on for this site -->
-  <string name="etp_panel_on">Suojaukset ovat PÄÄLLÄ tällä sivustolla</string>
-  <!-- Enhanced Tracking Protection message that protection is currently off for this site -->
-  <string name="etp_panel_off">Suojaukset ovat POIS PÄÄLTÄ tällä sivustolla</string>
   <!-- Header for exceptions list for which sites enhanced tracking protection is always off -->
   <string name="enhanced_tracking_protection_exceptions">Tehostettu seurannan suojaus ei ole käytössä näillä sivustoilla</string>
   <!--
@@ -2755,13 +2805,6 @@
   <string name="etp_suspected_fingerprinters_description">Ottaa käyttöön suojauksen yksilöijiltä, jotta epäillyt yksilöijät estetään.</string>
   <!-- Category of trackers (fingerprinters) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_known_fingerprinters_title">Tunnetut yksilöijät</string>
-  <!--
-    Description of the SmartBlock Enhanced Tracking Protection feature. The * symbol is intentionally hardcoded here,
-    as we use it on the UI to indicate which trackers have been partially unblocked.
-  -->
-  <string name="preference_etp_smartblock_description">Jotkin alapuolella näytettävät seuraimet ovat osittain estämättä tällä sivulla, koska olit vuorovaikutuksessa niiden kanssa *.</string>
-  <!-- Text displayed that links to website about enhanced tracking protection SmartBlock -->
-  <string name="preference_etp_smartblock_learn_more">Lue lisää</string>
   <!--
     Content description (not visible, for screen readers etc.):
     Enhanced tracking protection exception preference icon for ETP settings.
@@ -2891,12 +2934,8 @@
   <string name="add_to_homescreen_cancel">Peruuta</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">Lisää</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">Jatka sivustolle</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">Pikavalinnan nimi</string>
-  <!-- Describes the add to homescreen functionality -->
-  <string name="add_to_homescreen_description_2">Voit lisätä tämän sivuston laitteesi aloitusnäytölle, jolloin sivuston käyttö onnistuu nopeasti ja tarjoaa sovelluksen kaltaisen kokemuksen.</string>
   <!-- Preference for managing the settings for logins and passwords in Fenix -->
   <string name="preferences_passwords_logins_and_passwords_2">Salasanat</string>
   <!-- Preference for managing the saving of logins and passwords in Fenix -->
@@ -3038,14 +3077,14 @@
   <!-- Label for the BETA badge for the browser VPN entry in the settings list -->
   <string name="preferences_ip_protection_beta_badge_label">BEETA</string>
   <!-- Title for the browser VPN settings screen (displayed in the app bar) -->
-  <string name="ip_protection_title">VPN</string>
+  <string name="ip_protection_settings_title">Sisäänrakennettu VPN</string>
   <!-- Label for the browser VPN toggle on the settings screen -->
   <string name="ip_protection_toggle_label">VPN</string>
   <!-- Content description for the browser VPN settings screen top bar back button -->
   <string name="ip_protection_navigate_back_button_content_description">Siirry taaksepäin</string>
   <!-- Headline for the browser VPN promo card. %s is the name of the app (for example "Firefox"). -->
   <string name="ip_protection_promo_headline">%sin sisäänrakennettu VPN</string>
-  <!-- Body text for the browser VPN promo card . %s is a learn more link using ip_protection_learn_more as text. -->
+  <!-- Body text for the browser VPN settings header, shown when no promo is running. %s is a learn more link using ip_protection_learn_more as text. -->
   <string name="ip_protection_promo_body_2">Selaa lisäsuojauksella piilottamalla sijaintisi jopa julkisissa Wi-Fi-verkoissa. %s</string>
   <!-- Link text that opens additional information about the browser VPN -->
   <string name="ip_protection_learn_more">Lue lisää</string>
@@ -3066,8 +3105,6 @@
   <string name="ip_protection_location_section">Sijainti</string>
   <!-- Label for the recommended automatic location option on the browser VPN settings screen -->
   <string name="ip_protection_location_recommended_label">Suositeltu</string>
-  <!-- Description for the recommended automatic location option on the browser VPN settings screen -->
-  <string name="ip_protection_location_recommended_description">Valitsee sinulle nopeimman VPN-sijainnin.</string>
   <!-- Badge label shown in the menu item when the browser VPN is active -->
   <string name="preferences_ip_protection_on">Päällä</string>
   <!-- Badge label shown in the menu item when the browser VPN is off -->
@@ -3078,8 +3115,8 @@
   <string name="ip_protection_menu_paused">Keskeytetty</string>
   <!-- Badge label shown in the menu item when the browser VPN has an error -->
   <string name="ip_protection_menu_error">Virhe</string>
-  <!-- Badge label shown in the menu item when the user is eligible to use the browser VPN but should authenticate or authorize it first. -->
-  <string name="ip_protection_menu_auth_required">Kokeile</string>
+  <!-- Badge label shown in the VPN menu item when the user is eligible for the feature but needs to authenticate / authorize to enable it -->
+  <string name="ip_protection_menu_try_vpn_cta">Kokeile ilmaiseksi</string>
   <!-- Content description for the chevron button that opens the browser VPN settings screen -->
   <string name="ip_protection_navigate_settings">Avaa VPN-asetukset</string>
   <!--
@@ -3096,6 +3133,10 @@
   <string name="ip_protection_toolbar_pill_label">VPN päällä</string>
   <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has been activated -->
   <string name="ip_protection_toolbar_pill_description">VPN on aktiivinen.</string>
+  <!-- Label shown next to the browser protection icon in the address bar when the browser VPN turns off -->
+  <string name="ip_protection_toolbar_pill_label_off">VPN pois päältä</string>
+  <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has turned off -->
+  <string name="ip_protection_toolbar_pill_description_off">VPN on pois päältä.</string>
   <!-- Label for the button that starts the browser VPN authentication or authorization flow on the settings screen -->
   <string name="ip_protection_get_started">Aloitetaan</string>
   <!-- Label for the "connecting" state of the button that starts the browser VPN authentication or authorization flow on the settings screen -->
@@ -3122,13 +3163,45 @@
   <string name="ip_protection_onboarding_not_now_button">Ei nyt</string>
   <!-- Snackbar (in-app pop-up notification) text to signal the browser VPN connection error -->
   <string name="ip_protection_connection_error_snackbar">VPN-yhteyden muodostaminen epäonnistui. Yritä uudelleen muutaman minuutin kuluttua.</string>
+  <!-- Snackbar (in-app pop-up notification) text to signal the VPN location has been reset due to the previously selected VPN location being no longer available. -->
+  <string name="ip_protection_location_selection_reset_snackbar">Valittu VPN-sijainti ei ole käytettävissä. Vaihdettu suositeltuun sijaintiin.</string>
   <!--
     Snackbar (in-app pop-up notification) text to signal the browser VPN has reached the monthly data limit.
     %1$d is the total monthly allowance in GB (for example "50").
   -->
   <string name="ip_protection_data_limit_reached_snackbar">%1$d Gt VPN-dataa käytetty. Käyttöoikeus nollataan ensi kuussa.</string>
   <!-- Snackbar (in-app pop-up notification) action button text that takes the user to the VPN settings screen. -->
-  <string name="ip_protection_data_limit_reached_snackbar_action">Asetukset</string>
+  <string name="ip_protection_open_settings_snackbar_action">Asetukset</string>
+  <!-- Description shown on the browser VPN settings screen prompting the user to turn the VPN on. -->
+  <string name="ip_protection_settings_description" tools:ignore="UnusedResources">Ota VPN käyttöön tehdäksesi selaamisestasi yksityisempää ja vaikeampaa jäljittää.</string>
+  <!-- Title shown on the browser VPN settings screen for location selection section. -->
+  <string name="ip_protection_location_title" tools:ignore="UnusedResources">Sijainti</string>
+  <!-- Label for the Recommended server location option which is automatically selected by the browser. -->
+  <string name="ip_protection_recommended_location" tools:ignore="UnusedResources">Suositeltu</string>
+  <!-- Headline for the card that promotes the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_headline" tools:ignore="UnusedResources,BrandUsage">Suojaa enemmän Mozilla VPN:llä</string>
+  <!-- Body for the card that promotes the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_body" tools:ignore="UnusedResources">Valitse yli 300 sijainnista ja suojaa kaikki sovelluksesi jopa viidellä laitteella.</string>
+  <!-- Label for the button that takes the user to get the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_button" tools:ignore="UnusedResources,BrandUsage">Hanki Mozilla VPN</string>
+  <!-- Title for the browser VPN location picker screen. -->
+  <string name="ip_protection_location_picker_title" tools:ignore="UnusedResources">Valitse VPN-sijainti</string>
+  <!-- Description for what it means to use the Recommended setting and let the app automatically pick the best server location. -->
+  <string name="ip_protection_location_fastest_description" tools:ignore="BrandUsage">Firefox löytää nopeimman sijainnin</string>
+  <!-- Description for an unavailable VPN location in the location list. -->
+  <string name="ip_protection_location_unavailable_description">Ei saatavilla</string>
+  <!-- Error message shown when the selected browser VPN location is unavailable. -->
+  <string name="ip_protection_location_unavailable" tools:ignore="UnusedResources">Sijainti ei ole käytettävissä. Valitse toinen sijainti.</string>
+  <!-- Snackbar (in-app pop-up notification) text shown when the previously selected browser VPN location is unavailable and the recommended location was used instead. -->
+  <string name="ip_protection_location_unavailable_recommended_snackbar" tools:ignore="UnusedResources">Valittu VPN-sijainti ei ole käytettävissä. Yhdistetty suositeltuun sijaintiin.</string>
+  <!-- Title for the card shown to the user when we are unable to fetch server locations -->
+  <string name="ip_protection_locations_unavailable_title">Sijainnit eivät ole saatavilla</string>
+  <!-- Description for the card shown to the user when we are unable to fetch server locations -->
+  <string name="ip_protection_locations_unavailable_description">Vaihdettu suositeltuun sijaintiin.</string>
+  <!-- Title for the browser VPN location selection screen (displayed in the app bar) -->
+  <string name="ip_protection_locations_title">Valitse VPN-sijainti</string>
+  <!-- Content description for the browser VPN location selection screen top bar back button -->
+  <string name="ip_protection_locations_navigate_back_button_content_description">Siirry taaksepäin</string>
   <!--
     Autofill
 
@@ -3209,6 +3282,14 @@
   <string name="credit_cards_warning_dialog_set_up_now">Aseta nyt</string>
   <!-- Negative button to ignore warning dialog if users have no device authentication set up -->
   <string name="credit_cards_warning_dialog_later">Myöhemmin</string>
+  <!-- Title of the dialog shown on Android Automotive OS (in cars) when users have no device authentication set up and try to access their saved passwords, payment methods, or sign in to their account -->
+  <string name="automotive_authentication_setup_dialog_title">Suojaa arkaluonteiset tietosi</string>
+  <!-- Message of the dialog shown on Android Automotive OS (in cars) when users have no device authentication set up and try to access their saved passwords, payment methods, or sign in to their account -->
+  <string name="automotive_authentication_setup_dialog_message">Määritä laitteen lukituskuvio, PIN-koodi tai salasana suojataksesi tallennettuja arkaluonteisia tietojasi käytöltä, jos joku muu ajaa autoasi.</string>
+  <!-- Primary button on the dialog shown on Android Automotive OS (in cars). Tapping it directs users to the device settings to set up a device lock -->
+  <string name="automotive_authentication_setup_dialog_set_up_now">Määritä nyt</string>
+  <!-- Secondary button of the dialog shown on Android Automotive OS (in cars). Tapping closes the dialogue and cancels the action that triggered the dialogue. -->
+  <string name="automotive_authentication_setup_dialog_cancel">Peruuta</string>
   <!-- Title of PIN verification dialog to direct users to re-enter their device credentials to access their credit cards -->
   <string name="credit_cards_biometric_prompt_message_pin">Avaa laitteen lukitus</string>
   <!-- Message displayed in biometric prompt for authentication, before allowing users to use their stored payment method information -->
@@ -3281,8 +3362,6 @@
   <string name="addresses_save_button">Tallenna</string>
   <!-- The text for the "Cancel" button for cancelling adding, updating or deleting an address -->
   <string name="addresses_cancel_button">Peruuta</string>
-  <!-- The text for the "Delete address" button for deleting an address -->
-  <string name="addressess_delete_address_button">Poista osoite</string>
   <!-- The title for the "Delete address" confirmation dialog -->
   <string name="addressess_confirm_dialog_message_2">Poistetaanko tämä osoite?</string>
   <!-- The text for the positive button on "Delete address" dialog -->
@@ -3337,16 +3416,8 @@
   <string name="phone_feature_blocked_step_permissions"><![CDATA[2. Napauta <b>Käyttöoikeudet</b>]]></string>
   <!-- Third step for the allowing a permission (%1$s is the permission name, for example "Camera"). -->
   <string name="phone_feature_blocked_step_feature"><![CDATA[3. Aseta <b>%1$s</b> PÄÄLLÄ-asentoon]]></string>
-  <!-- Label that indicates a site is using a secure connection -->
-  <string name="quick_settings_sheet_secure_connection_2">Yhteys on suojattu</string>
-  <!-- Label that indicates a site is using a insecure connection -->
-  <string name="quick_settings_sheet_insecure_connection_2">Yhteys ei ole suojattu</string>
-  <!-- Label that indicates a site is displaying a local document -->
-  <string name="quick_settings_sheet_local_page">Tämä sivu on tallennettu laitteellesi.</string>
   <!-- Label to clear site data -->
   <string name="clear_site_data">Tyhjennä evästeet ja sivustotiedot</string>
-  <!-- Confirmation message for a dialog confirming if the user wants to delete all data for current site. %s is the domain of the site. -->
-  <string name="confirm_clear_site_data"><![CDATA[Haluatko varmasti poistaa kaikki evästeet ja tyhjentää tiedot sivuston <b>%s</b> osalta?]]></string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for all sites -->
   <string name="confirm_clear_permissions_on_all_sites">Haluatko varmasti tyhjentää kaikki oikeudet kaikkien sivustojen osalta?</string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for a site -->
@@ -3359,11 +3430,6 @@
   <string name="browser_menu_add_to_shortcuts">Lisää pikavalintoihin</string>
   <!-- Browser menu button that removes a shortcut from the home fragment -->
   <string name="browser_menu_remove_from_shortcuts">Poista pikavalinnoista</string>
-  <!--
-    text shown before the issuer name to indicate who its verified by, %1$s is the name of
-    the certificate authority that verified the ticket
-  -->
-  <string name="certificate_info_verified_by">Varmentanut: %1$s</string>
   <!-- Message in delete confirmation dialog for password -->
   <string name="login_deletion_confirmation_2">Haluatko varmasti poistaa tämän salasanan?</string>
   <!-- Positive action of a dialog asking to delete -->
@@ -3427,6 +3493,16 @@
     which navigates the user to a screen displaying all the shortcuts.
   -->
   <string name="homepage_shortcuts_show_all_content_description">Näytä kaikki oikotiet</string>
+  <!--
+    Label for the button in the shortcuts home screen section that expands the section to show
+    every shortcut.
+  -->
+  <string name="homepage_shortcuts_show_all">Näytä kaikki</string>
+  <!--
+    Label for the button in the shortcuts home screen section that collapses the section back
+    to showing only the first shortcuts.
+  -->
+  <string name="homepage_shortcuts_show_less">Näytä vähemmän</string>
   <!-- Label for the "Add shortcut" button displayed as a tile. -->
   <string name="homepage_shortcuts_add_shortcut">Lisää oikotie</string>
   <!-- Title for the "Add to homepage" bottom sheet. -->
@@ -3558,8 +3634,6 @@
   <string name="a11y_action_label_expand">laajenna</string>
   <!-- Action label for links to a website containing documentation about a wallpaper collection. Talkback will append this to say "Double tap to open link to learn more about this collection". -->
   <string name="a11y_action_label_wallpaper_collection_learn_more">avataksesi linkin, josta saat lisätietoja tästä kokoelmasta</string>
-  <!-- Translations feature -->
-
   <!--
     Translation request dialog
 
@@ -3837,8 +3911,6 @@
     and there are no trackers blocked.
   -->
   <string name="protection_panel_banner_protected_no_blocked_trackers_description">Olet suojattu.</string>
-  <!-- Description text for the protection panel banner when tracking protection is enabled. -->
-  <string name="protection_panel_banner_protected_description">Olet suojattu. Jos havaitsemme jotain, ilmoitamme sinulle.</string>
   <!-- Label text for the Enhanced Tracking Protection toggle. -->
   <string name="protection_panel_etp_toggle_label">Tehostettu seurannan suojaus</string>
   <!-- Toggle if Enhanced Tracking Protection is turned on -->
@@ -3854,8 +3926,6 @@
     %d is a placeholder for the number of trackers blocked.
   -->
   <string name="protection_panel_num_trackers_blocked">Seuraimia estetty: %d</string>
-  <!-- Text for when no trackers have been blocked. -->
-  <string name="protection_panel_no_trackers_blocked">Seuraimia ei löytynyt</string>
   <!-- Text for when tracking protection is disabled and no trackers are blocked. -->
   <string name="protection_panel_etp_disabled_no_trackers_blocked">Seuraimia ei ole estetty</string>
   <!-- Link text to navigate to privacy and security settings from the protection panel. -->
@@ -3918,17 +3988,6 @@
     <item quantity="one">%1$d seurain estetty tällä viikolla</item>
     <item quantity="other">%1$d seurainta estetty tällä viikolla</item>
   </plurals>
-  <!--
-    Text for displaying the total number of trackers blocked in the trackers blocked panel.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_total_num_trackers_blocked">Seuraimia estetty: %d</string>
-  <!--
-    Text for displaying the number of trackers blocked for a specific tracker category in the trackers blocked panel.
-    %s is a placeholder for the name of the tracker category.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_categorical_num_trackers_blocked">%s: %d</string>
   <!--
     Description text for a dialog confirming whether the user wants to delete all data for current site.
     %s is a placeholder for the base domain of website.
@@ -4081,17 +4140,17 @@
   -->
   <string name="microsurvey_uninstall_survey_title">Palautteesi on tärkeä. Miksi poistat asennuksen?</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_1">Verkkosivuongelmat</string>
+  <string name="uninstall_survey_option_1_v2">Se on hidas tai epäluotettava</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_2">Video- ja latausongelmat</string>
+  <string name="uninstall_survey_option_2_v2">Verkkosivustot eivät toimineet kunnolla</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_3">Suorituskykyongelmat</string>
+  <string name="uninstall_survey_option_3_v2">Ominaisuuksia, joita tarvitsen, puuttuu</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_4">Toiminnalliset ja suunnitteluun liittyvät ongelmat</string>
+  <string name="uninstall_survey_option_4_v2">Videot, lataukset tai media eivät toimineet</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_5">Tietosuojaan liittyvät ongelmat</string>
+  <string name="uninstall_survey_option_5_v2">Sitä on vaikea käyttää tai se on huonosti suunniteltu</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_6">Maksu- ja tilausongelmat</string>
+  <string name="uninstall_survey_option_6_v2">Tietosuoja- tai turvallisuuhuolet</string>
   <!-- Button label shown at the bottom of the uninstall survey -->
   <string name="uninstall_survey_button_label">Lähetä palautetta ja poista sovellus</string>
   <!--
@@ -4242,8 +4301,6 @@
   <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">Päivitä ennen 14. maaliskuuta, jotta voit jatkaa lisäosien ja muiden ominaisuuksien käyttöä.</string>
   <!-- Push notification message about old Firefox version -->
   <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">Jotkut ominaisuudet lakkaavat toimimasta huomenna.</string>
-  <!-- TextField Design System Component -->
-
   <!--
     Setup checklist feature
 
@@ -4402,8 +4459,6 @@
   <string name="settings_search_no_results_message">Kokeile eri hakuehtoja</string>
   <!-- Content Description for the button to open Settings Search (to search through settings). -->
   <string name="settings_search_button_content_description">Asetusten haun painike</string>
-  <!-- ==== Terms of use pop up prompt ==== -->
-
   <!-- Title for the pop up prompt -->
   <string name="terms_of_use_prompt_title">Meillä on päivitys</string>
   <!--
@@ -4428,8 +4483,6 @@
   <string name="terms_of_use_prompt_accept">Hyväksy</string>
   <!-- Label for a button to postpone accepting the terms of use -->
   <string name="terms_of_use_prompt_postpone">Muistuta myöhemmin</string>
-  <!-- ==== Experiment strings. ==== -->
-
   <!-- A title for the popup prompt. -->
   <string name="terms_of_use_prompt_title_option_a" tools:ignore="UnusedResources">Käyttöehdot</string>
   <!--
@@ -4445,223 +4498,6 @@
   <!-- Link text for terms_of_use_prompt_body_line_two_alternative that links to a site with more information about the Terms of Use -->
   <string name="terms_of_use_prompt_body_line_two_alternative_link" tools:ignore="UnusedResources">täältä</string>
   <!--
-    Sports widget
-
-    Title text shown at the top of the sports widget country selector, encouraging the user to pick a national team to follow.
-  -->
-  <string name="sports_widget_country_selector_title">Seuraa joukkuettasi</string>
-  <!-- Section header for the North America region in the sports widget country selector. -->
-  <string name="sports_widget_confederation_north_america">Pohjois-Amerikka</string>
-  <!-- Section header for the Africa confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_africa">Afrikka</string>
-  <!-- Section header for the Asia confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_asia">Aasia</string>
-  <!-- Section header for the CONCACAF confederation group in the sports widget country selector. "CONCACAF" is the abbreviation for "Confederation of North, Central America and Caribbean Association Football". -->
-  <string name="sports_widget_confederation_concacaf">CONCACAF</string>
-  <!-- Section header for the Europe confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_europe">Eurooppa</string>
-  <!-- Section header for the Oceania confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_oceania">Oseania</string>
-  <!-- Section header for the South America confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_south_america">Etelä-Amerikka</string>
-  <!-- Country name for England in the sports widget. England cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_england">Englanti</string>
-  <!-- Country name for Scotland in the sports widget. Scotland cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_scotland">Skotlanti</string>
-  <!-- Label shown on the sports widget scoreboard when a match is currently being played live. -->
-  <string name="sports_widget_match_live">SUORA</string>
-  <!-- Title shown on the sports widget champion scoreboard row celebrating the soccer tournament winner. -->
-  <string name="sports_widget_champions_title">Vuoden 2026 MM-kilpailujen mestarit</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament runners-up. Runners-up means second place. -->
-  <string name="sports_widget_runner_up_title" tools:ignore="UnusedResources">Toinen sija</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament third place winners. -->
-  <string name="sports_widget_third_place_title">Kolmas sija</string>
-  <!-- Round name shown on the sports widget for the Round of 32 stage in the soccer tournament. -->
-  <string name="sports_widget_round_of_32">32 parasta</string>
-  <!-- Round name shown on the sports widget for the Round of 16 stage in the soccer tournament. -->
-  <string name="sports_widget_round_of_16">16 parasta</string>
-  <!-- Round name shown on the sports widget for the quarter-finals stage in the soccer tournament. -->
-  <string name="sports_widget_quarter_final">Puolivälierät</string>
-  <!-- Round name shown on the sports widget for the semi-finals stage in the soccer tournament. -->
-  <string name="sports_widget_semi_final">Välierät</string>
-  <!-- Round name shown on the sports widget for the final stage in the soccer tournament. -->
-  <string name="sports_widget_final">Loppuottelu</string>
-  <!-- Round name shown on the sports widget for the bronze final stage in the soccer tournament. -->
-  <string name="sports_widget_bronze_final">Pronssiottelu</string>
-  <!-- Sports widget error card message shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed" tools:ignore="UnusedResources">Ottelutietoja ei ole saatavilla juuri nyt. Yritä päivittää muutaman minuutin kuluttua.</string>
-  <!-- Sports widget error card message shown when the network connection is interrupted and live updates pause. -->
-  <string name="sports_widget_error_connection_interrupted" tools:ignore="UnusedResources">Yhteys katkennut — reaaliaikaiset päivitykset keskeytetty.</string>
-  <!-- Sports widget action label to refresh match data after an error. -->
-  <string name="sports_widget_error_refresh">Päivitä</string>
-  <!-- Sports widget group stage label for group A in the soccer tournament. -->
-  <string name="sports_widget_group_a">Lohko A</string>
-  <!-- Sports widget group stage label for group B in the soccer tournament. -->
-  <string name="sports_widget_group_b">Lohko B</string>
-  <!-- Sports widget group stage label for group C in the soccer tournament. -->
-  <string name="sports_widget_group_c">Lohko C</string>
-  <!-- Sports widget group stage label for group D in the soccer tournament. -->
-  <string name="sports_widget_group_d">Lohko D</string>
-  <!-- Sports widget group stage label for group E in the soccer tournament. -->
-  <string name="sports_widget_group_e">Lohko E</string>
-  <!-- Sports widget group stage label for group F in the soccer tournament. -->
-  <string name="sports_widget_group_f">Lohko F</string>
-  <!-- Sports widget group stage label for group G in the soccer tournament. -->
-  <string name="sports_widget_group_g">Lohko G</string>
-  <!-- Sports widget group stage label for group H in the soccer tournament. -->
-  <string name="sports_widget_group_h">Lohko H</string>
-  <!-- Sports widget group stage label for group I in the soccer tournament. -->
-  <string name="sports_widget_group_i">Lohko I</string>
-  <!-- Sports widget group stage label for group J in the soccer tournament. -->
-  <string name="sports_widget_group_j">Lohko J</string>
-  <!-- Sports widget group stage label for group K in the soccer tournament. -->
-  <string name="sports_widget_group_k">Lohko K</string>
-  <!-- Sports widget group stage label for group L in the soccer tournament. -->
-  <string name="sports_widget_group_l">Lohko L</string>
-  <!-- Sports widget button label to see match results. -->
-  <string name="sports_widget_see_results" tools:ignore="UnusedResources">Näytä tulokset</string>
-  <!-- Sports widget button label to view details of a soccer match results. -->
-  <string name="sports_widget_view_match_details" tools:ignore="UnusedResources">Näytä ottelun tiedot</string>
-  <!-- Sports widget section header for related soccer matches in the same group. -->
-  <string name="sports_widget_related_matches" tools:ignore="UnusedResources">Aiheeseen liittyvät ottelut</string>
-  <!-- Sports widget section header for a list of upcoming soccer matches that have not yet started. -->
-  <string name="sports_widget_upcoming" tools:ignore="UnusedResources">Tulossa</string>
-  <!-- Sports widget match status suffix appended to match scores (e.g., "3 - 2 (Full time)") to indicate the match has been completed. -->
-  <string name="sports_widget_match_full_time_suffix">(Täysi aika)</string>
-  <!-- Sports widget match status to indicate the match has been completed. -->
-  <string name="sports_widget_match_full_time_2">Täysi aika</string>
-  <!--
-    Sports widget card title encouraging the user to follow the soccer tournament. “Keep tabs on” is an informal expression
-    meaning to stay updated on or regularly follow something (in this case, World Cup matches and updates).
-    It’s playfully related to Firefox in that “tabs” are a browser feature.
-    It suggests ongoing awareness rather than active monitoring or control. Not to be translated literally as physical “tabs”
-    or tracking in a technical sense; the meaning is about staying informed.
-  -->
-  <string name="sports_widget_card_title">Pidä silmällä MM-kisoja</string>
-  <!-- Sports widget card description shown below the title on the homepage entry point. -->
-  <string name="sports_widget_card_description">Saat reaaliaikaiset päivitykset otteluista ja paljon muuta.</string>
-  <!-- Sports widget menu item to change the selected team. -->
-  <string name="sports_widget_change_team">Vaihda joukkuetta</string>
-  <!-- Sports widget menu item to get a custom wallpaper for the widget. -->
-  <string name="sports_widget_get_custom_wallpaper">Hanki mukautettu taustakuva</string>
-  <!-- Sports widget menu item to remove the widget from the homepage. -->
-  <string name="sports_widget_remove">Poista</string>
-  <!-- Sports widget card title shown after a team is eliminated, asking if the user still wants to continue following the soccer tournament. -->
-  <string name="sports_widget_still_want_to_follow">Haluatko silti jatkaa seuraamista?</string>
-  <!-- Sports widget card description shown after a team is eliminated, suggesting to choose another team. -->
-  <string name="sports_widget_choose_another_team">Valitse toinen joukkue pysyäksesi ajan tasalla MM-kisojen suhteen.</string>
-  <!-- Sports widget button label to follow another team after the current team is eliminated. -->
-  <string name="sports_widget_follow_another_team">Seuraa toista joukkuetta</string>
-  <!-- Sports widget card title shown before the soccer tournament begins on top of a timer that is counting down. -->
-  <string name="sports_widget_countdown_to_world_cup">Lähtölaskenta MM-kisoihin</string>
-  <!-- Sports widget button label that navigates the user to the full soccer tournament match schedule. -->
-  <string name="sports_widget_view_schedule">Näytä aikataulu</string>
-  <!-- Sports widget button label that dismisses the step of choosing a team to follow. -->
-  <string name="sports_widget_skip">Ohita</string>
-  <!-- Sports widget match status label shown during halftime of a match. -->
-  <string name="sports_widget_halftime" tools:ignore="UnusedResources">Puoliaika</string>
-  <!-- Sports widget match status label shown during extra time of a match. -->
-  <string name="sports_widget_extra_time">Jatkoaika</string>
-  <!-- Sports widget match status label shown during penalties of a match. -->
-  <string name="sports_widget_penalties">Rangaistuspotkut</string>
-  <!--
-    Sports widget countdown label for days. D is short for Day. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that (e.g. T for German).
-    Your translation will be automatically truncated at 2 characters to avoid layout issues.
-  -->
-  <string name="sports_widget_countdown_days">pv</string>
-  <!--
-    Sports widget countdown pill abbreviated label for hours. H is short for Hour. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that (e.g. S for German).
-    Your translation will be automatically truncated at 2 characters to avoid layout issues.
-  -->
-  <string name="sports_widget_countdown_hours">t</string>
-  <!--
-    Sports widget countdown pill abbreviated label for minutes. M is short for Minute. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that.
-    Your translation will be automatically truncated at 2 characters to avoid layout issues
-  -->
-  <string name="sports_widget_countdown_minutes">mn</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget team / country selector. -->
-  <string name="sports_widget_close_team_selection_sheet_content_description">Sulje joukkueen valintataulukko</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget card. -->
-  <string name="sports_widget_close_content_description">Sulje</string>
-  <!-- Content description (for accessibility, not displayed) for the overflow (more options) menu button on the sports widget card. -->
-  <string name="sports_widget_more_options_content_description">Lisää valintoja</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing the time remaining until the soccer tournament kickoff.
-    %1$d is the number of days, %2$d is the number of hours, and %3$d is the number of minutes.
-  -->
-  <string name="sports_widget_countdown_remaining_content_description">Jäljellä oleva aika. Päivät: %1$d. Tunnit: %2$d. Minuutit: %3$d.</string>
-  <!-- Content description (for accessibility, not displayed)  for the action that navigates to the World Cup website. -->
-  <string name="sports_widget_go_to_world_cup_site_content_description" tools:ignore="UnusedResources">Siirry MM-kisojen sivustolle</string>
-  <!--
-    Content description (for accessibility, not displayed)  announcing an upcoming soccer match.
-    %1$s is the home team name, %2$s is the away team name, %3$s is the match date, %4$s is the kickoff time.
-  -->
-  <string name="sports_widget_upcoming_match_content_description">Tulossa: %1$s vastaan %2$s, %3$s klo %4$s</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing a soccer match.
-    %1$s is the home team name, %2$s is the away team name, %3$s is trailing context
-    (e.g. formatted score "1 - 2 (Full time)", upcoming match info "Jun 19 5:00 PM",
-    or a match status like "Full time").
-  -->
-  <string name="sports_widget_match_content_description">%1$s vastaan %2$s, %3$s</string>
-  <!--
-    Content description (for accessibility, not displayed)  used for the sports widget card header announcing a live match for a group or stage.
-    %s is the soccer tournament group name or stage (e.g. Group A represented by sports_widget_group_a, Round of 32 represented by sports_widget_round_of_32,
-    or Final represented by sports_widget_final).
-  -->
-  <string name="sports_widget_live_game_content_description">%s, suora ottelu</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing a live score.
-    %1$s is the home team name, %2$d is the home team score, %3$s is the away team name, %4$d is the away team score,
-    and %5$s is the match elapsed time (e.g. 72 minutes).
-  -->
-  <string name="sports_widget_live_score_content_description">%1$s %2$d, %3$s %4$d, %5$s, suora</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing the elapsed minutes of a live match.
-    %1$s is the clock value, which may be a plain number (e.g. "72") or include extra time (e.g. "90+3").
-  -->
-  <string name="sports_widget_match_elapsed_minutes">Kulunut aika minuutteina: %1$s</string>
-  <!--
-    Content description (for accessibility, not displayed) for a paginated item.
-    %1$s is the soccer tournament group name or stage (e.g. Group A represented by sports_widget_group_a, Round of 32 represented by sports_widget_round_of_32),
-    %2$d is the current page number, and %3$d is the total number of pages.
-  -->
-  <string name="sports_widget_page_position_content_description">%1$s, sivu %2$d/%3$d</string>
-  <!--
-    Content description (for accessibility, not displayed) for a page within the World Cup final results carousel.
-    %1$d is the current page number, and %2$d is the total number of pages.
-  -->
-  <string name="sports_widget_final_results_page_content_description" tools:ignore="UnusedResources">MM-kisojen lopputulokset, sivu %1$d/%2$d</string>
-  <!-- Content description (for accessibility, not displayed) for the World Cup final results page. -->
-  <string name="sports_widget_final_results_content_description">MM-kisojen lopputulokset</string>
-  <!-- Content description (for accessibility, not displayed) for the remove button that removes the sports widget from the homepage. -->
-  <string name="sports_widget_remove_content_description" tools:ignore="UnusedResources">Poista MM-kisat kotinäkymästä</string>
-  <!-- Title shown on the sports widget immediately after the user has followed a team. %s is the selected team (e.g., "USA"). -->
-  <string name="sports_widget_team_followed_title">Seurataan: \n%s</string>
-  <!-- Description shown on the sports widget immediately after the user has followed a team -->
-  <string name="sports_widget_team_followed_description">Tarkista ottelutiedot turnauksen lähestyessä.</string>
-  <!-- Sports widget match status label shown during first half of a match. -->
-  <string name="sports_widget_first_half" tools:ignore="UnusedResources">Ensimmäinen puoliaika</string>
-  <!-- Sports widget match status label shown during second half of a match. -->
-  <string name="sports_widget_second_half" tools:ignore="UnusedResources">Toinen puoliaika</string>
-  <!-- Sports widget error card title shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_title">Vaikuttaa siltä, että olet yhteydettömässä tilassa.</string>
-  <!-- Sports widget error card description shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_description">Tarkista Internet-yhteytesi ja yritä uudelleen.</string>
-  <!-- Sports widget general group stage label in the soccer tournament. -->
-  <string name="sports_widget_group_stage">Lohkovaihe</string>
-  <!-- Sports widget error card title shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed_title">Ottelutietoja ei ole tällä hetkellä saatavilla.</string>
-  <!-- Sports widget error card description shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed_description">Kokeile päivittää muutaman minuutin kuluttua.</string>
-  <!-- Content description (for accessibility, not displayed) for teams which have not yet been determined in the match schedule. -->
-  <string name="sports_widget_team_to_be_determined">Joukkue määritetään myöhemmin</string>
-  <!-- ==== End of Terms of use popup prompt. ==== -->
-
-  <!--
     Privacy notice homepage banner
 
     A message we show the user on the homepage when there is a new version of the privacy notice. 'Firefox' is intentionally hardcoded.
@@ -4673,6 +4509,16 @@
   <string name="privacy_notice_updated_homepage_message_privacy_notice" tools:ignore="UnusedResources">tietosuojakäytännön</string>
   <!-- The second active link used in privacy_notice_updated_homepage_message -->
   <string name="privacy_notice_updated_homepage_message_learn_more" tools:ignore="UnusedResources">Lue lisää</string>
+  <!--
+    Collections migration homepage card
+
+    Title shown on the collections to tab groups migration card on the homepage.
+  -->
+  <string name="collections_migration_homepage_banner_title">Kokoelmat ovat nyt ryhmiä</string>
+  <!-- Message shown on the collections to tab groups migration card on the homepage. -->
+  <string name="collections_migration_homepage_card_message">Välilehtien järjestelyyn on yksinkertaisempi tapa</string>
+  <!-- Link text shown on the collections to tab groups migration card that opens the tab groups page in the tab manager. -->
+  <string name="collections_migration_homepage_card_link">Näytä omat välilehtiryhmät</string>
   <!-- Google Lens prototype related strings -->
   <string name="preferences_debug_settings_google_lens_integration">Ota käyttöön Google Lens -integraatio</string>
   <!-- Lens image search button content description -->
@@ -4685,16 +4531,50 @@
   <string name="context_menu_open_image_with_google_lens">Hae Google Lensillä</string>
   <!-- Toast shown when the user denies the camera permission requested by the Lens camera screen -->
   <string name="lens_camera_permission_denied">Pääsy estetty</string>
-  <!-- Title for the Google Lens AI feature toggle -->
-  <string name="ai_controls_google_lens_title">Google Lens</string>
-  <!-- Description for the Google Lens AI feature toggle -->
-  <string name="ai_controls_google_lens_description">Lähettää kuvia ja valokuvia Googlelle visuaalista hakua varten.</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the photo they capture will be sent to Google Lens for a visual search.
+  -->
+  <string name="lens_camera_title_lens">Google Lens</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the camera is being used to scan a QR code.
+  -->
+  <string name="lens_camera_title_qr">QR-koodi</string>
+  <!-- Title for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_title">Ota käyttöön Google Lens -haku</string>
+  <!-- Description for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_description">Lähettää kuvia ja valokuvia Googlelle visuaalista hakua varten.</string>
+  <!-- Caption shown under the Google Lens toggle clarifying when the feature is available -->
+  <string name="preferences_google_lens_availability_caption">Käytettävissä vain, kun Google on otettu käyttöön yllä ja se on aktiivinen hakukone selaamisen aikana.</string>
   <!-- Content description for the Google Lens half of the camera mode toggle -->
   <string name="lens_camera_mode_lens">Google Lens</string>
   <!-- Content description for the QR scanner half of the camera mode toggle -->
   <string name="lens_camera_mode_qr">QR-skanneri</string>
   <!-- Toast shown when the user picks an image from the gallery in QR mode but no QR code is found in it -->
   <string name="lens_camera_qr_no_code_found">Kuvasta ei löytynyt QR-koodia</string>
+  <!-- Status shown under an image picked from the gallery or taken with the camera while it is being sent to Google Lens for a visual search -->
+  <string name="lens_camera_loading_status">Etsitään tätä</string>
+  <!-- Button shown under an image picked from the gallery or taken with the camera while it is being sent to Google Lens. Tapping it stops the search and returns to the camera. -->
+  <string name="lens_camera_loading_cancel_button">Peruuta</string>
+  <!-- Snackbar message shown when an image picked from the gallery or taken with the camera could not be opened or read, so it was never sent to Google Lens. Shown after returning to the camera. -->
+  <string name="lens_camera_image_load_failed_v2">Tätä kuvaa ei voitu ladata.</string>
+  <!-- Snackbar message shown when an image picked from the gallery could not be opened or read, so it was never sent to Google Lens. Shown after returning to the camera. -->
+  <string name="lens_camera_image_load_failed">Kuvan lataaminen epäonnistui. Kokeile toista kuvaa.</string>
+  <!-- Snackbar message shown when an image picked from the gallery or taken with the camera could not be searched because of a network problem or an error from Google Lens. Shown after returning to the camera, next to the lens_camera_upload_failed_retry_button action. -->
+  <string name="lens_camera_upload_failed">Google Lensistä ei saatu tuloksia</string>
+  <!-- Action in the snackbar shown when an image picked from the gallery or taken with the camera could not be searched with Google Lens. Tapping it searches the same image again. -->
+  <string name="lens_camera_upload_failed_retry_button">Yritä uudestaan</string>
+  <!-- Title of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
+  <string name="lens_opt_out_title">Löydä se Google Lensillä</string>
+  <!-- Description of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
+  <string name="lens_opt_out_description">Valitse kuva tai käytä kameraasi saadaksesi tuloksia Google Lensillä.</string>
+  <!-- Text of the link in the first-run Google Lens bottom sheet that opens the Search settings page -->
+  <string name="lens_opt_out_settings_link">Google Lensin asetukset</string>
+  <!-- Button in the first-run Google Lens bottom sheet that dismisses it and starts the camera -->
+  <string name="lens_opt_out_try_it_now_button">Kokeile nyt</string>
+  <!-- Button in the first-run Google Lens bottom sheet that leaves Google Lens without using it -->
+  <string name="lens_opt_out_not_now_button">Ei nyt</string>
   <!--
     Firefox Labs
 
@@ -4735,4 +4615,60 @@
   <string name="firefox_labs_feature_conflict">Ominaisuus ei ole kokeiltavissa.</string>
   <!-- Text displayed on the Firefox Labs screen when there are no Labs experimental features present. -->
   <string name="firefox_labs_no_labs_available_description">Ei kokeellisia ominaisuuksia kokeiltavaksi juuri nyt</string>
+  <!-- Title of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_title" tools:ignore="UnusedResources">Verkkosivuston eristäminen</string>
+  <!-- Description of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_description" tools:ignore="UnusedResources">Lisäeste verkkosivustojen välillä, joka auttaa suojaamaan tietojasi eri välilehdillä. Saattaa vaikuttaa suorituskykyyn, vakauteen, verkkosivustojen yhteensopivuuteen ja selaushistorian tallentamiseen.</string>
+  <!--
+    PDF viewer toolbar and buttons
+
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description_2">Lisää allekirjoitus</string>
+  <!--
+    PDF viewer toolbar and buttons
+
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description">Allekirjoita PDF</string>
+  <!-- Content description for accessibility (used by screen readers): Description of the button that downloads the PDF displayed on the screen to the user's device. -->
+  <string name="pdf_tools_download_content_description">Lataa PDF</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the printing dialogue window for the PDF displayed on the screen. -->
+  <string name="pdf_tools_print_content_description">Tulosta PDF</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the sharing options for the PDF being displayed on the screen. -->
+  <string name="pdf_tools_share_content_description">Jaa PDF</string>
+  <!--
+    PDF viewer add a signature dialog
+
+    The title of the dialog for adding a signature to a PDF.
+  -->
+  <string name="pdf_tools_signature_title">Lisää allekirjoitus</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that closes the dialog for adding a signature to a PDF. -->
+  <string name="pdf_tools_signature_close_content_description">Sulje PDF-allekirjoituspaneeli</string>
+  <!-- The placeholder text shown in the empty text input field where users can enter the signature they wish to add to a PDF. -->
+  <string name="pdf_tools_signature_placeholder">Kirjoita allekirjoitus</string>
+  <!-- The text for the button that erases the text the user entered in the "add a signature" field. -->
+  <string name="pdf_tools_signature_clear_button">Tyhjennä</string>
+  <!-- The text for the button that adds the signature the user has typed to the PDF. -->
+  <string name="pdf_tools_signature_add_button">Lisää</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the loading indicator when a signature is in the process of being added to a PDF. -->
+  <string name="pdf_tools_signature_adding_content_description">Lisätään allekirjoitusta</string>
+  <!--
+    Listen to page
+
+    Content description for the reader view panel: a group of buttons floating over the content, which allow customizing the reader view or activating the Listen to Page feature
+  -->
+  <string name="reader_mode_panel_content_description_2">Lukunäkymän asetukset</string>
+  <!--
+    Listen to page
+
+    Content description for the reader mode panel: a group of buttons floating over the content
+  -->
+  <string name="reader_mode_panel_content_description">Lukutilan valinnat</string>
+  <!-- Content description for the button in the reader view panel that turns on the Listen to Page feature (playback of content begins when button is pressed) -->
+  <string name="reader_mode_panel_listen_content_description">Lue ääneen</string>
+  <!-- Content description for media player displayed in Reader view when the Listen to Page (Read Aloud) feature is selected -->
+  <string name="reader_mode_panel_media_player_content_description">Mediasoitin</string>
+  <!-- Content description for the reader view button Reader view facilitates readability and has a Listen to Page feature. Button icon is a document with headphones, and is displayed next to the page URL when the feature is available. -->
+  <string name="browser_menu_read_or_listen">Lukunäkymä, lue tai kuuntele sivu</string>
 </resources>

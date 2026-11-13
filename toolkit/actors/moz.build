@@ -6,7 +6,7 @@ with Files("**"):
     BUG_COMPONENT = ("Toolkit", "General")
 
 with Files("AboutPDF*.sys.mjs"):
-    BUG_COMPONENT = ("Core", "PDF Viewer")
+    BUG_COMPONENT = ("Firefox", "PDF Viewer")
 
 with Files("AutoScroll*.sys.mjs"):
     BUG_COMPONENT = ("Core", "Panning and Zooming")
@@ -29,7 +29,7 @@ TESTING_JS_MODULES += [
     "TestWindowParent.sys.mjs",
 ]
 
-FINAL_TARGET_FILES.actors += [
+MOZ_SRC_FILES += [
     "AboutHttpsOnlyErrorChild.sys.mjs",
     "AboutHttpsOnlyErrorParent.sys.mjs",
     "AboutPDFChild.sys.mjs",
@@ -81,9 +81,13 @@ FINAL_TARGET_FILES.actors += [
     "ViewSourceChild.sys.mjs",
     "ViewSourcePageChild.sys.mjs",
     "ViewSourcePageParent.sys.mjs",
-    "WebChannelChild.sys.mjs",
-    "WebChannelParent.sys.mjs",
 ]
+
+if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
+    MOZ_SRC_FILES += [
+        "WebChannelChild.sys.mjs",
+        "WebChannelParent.sys.mjs",
+    ]
 
 MOZ_SRC_FILES += [
     "ColorPickerChild.sys.mjs",

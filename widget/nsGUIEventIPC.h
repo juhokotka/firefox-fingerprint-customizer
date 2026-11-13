@@ -7,14 +7,12 @@
 
 #include <fmt/format.h>
 
+#include "InputData.h"
 #include "ipc/EnumSerializer.h"
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ContentCache.h"
 #include "mozilla/GfxMessageUtils.h"
-#include "mozilla/dom/Touch.h"
-#include "mozilla/ipc/URIUtils.h"  // for ParamTraits<nsIURI*>
-#include "mozilla/layers/LayersMessageUtils.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MouseEvents.h"
@@ -22,7 +20,9 @@
 #include "mozilla/TouchEvents.h"
 #include "mozilla/WheelHandlingHelper.h"  // for WheelDeltaAdjustmentStrategy
 #include "mozilla/dom/Selection.h"
-#include "InputData.h"
+#include "mozilla/dom/Touch.h"
+#include "mozilla/ipc/URIUtils.h"  // for ParamTraits<nsIURI*>
+#include "mozilla/layers/LayersMessageUtils.h"
 
 namespace IPC {
 
@@ -528,6 +528,7 @@ struct ParamTraits<mozilla::WidgetKeyboardEvent> {
     WriteParam(aWriter, aParam.mUniqueId);
     WriteParam(aWriter, aParam.mIsSynthesizedByTIP);
     WriteParam(aWriter, aParam.mMaybeSkippableInRemoteProcess);
+    WriteParam(aWriter, aParam.mRelevantCommand);
 
     // An OS-specific native event might be attached in |mNativeKeyEvent|,  but
     // that cannot be copied across process boundaries.
@@ -556,6 +557,7 @@ struct ParamTraits<mozilla::WidgetKeyboardEvent> {
         ReadParam(aReader, &aResult->mUniqueId) &&
         ReadParam(aReader, &aResult->mIsSynthesizedByTIP) &&
         ReadParam(aReader, &aResult->mMaybeSkippableInRemoteProcess) &&
+        ReadParam(aReader, &aResult->mRelevantCommand) &&
         ReadParam(aReader, &aResult->mEditCommandsForSingleLineEditor) &&
         ReadParam(aReader, &aResult->mEditCommandsForMultiLineEditor) &&
         ReadParam(aReader, &aResult->mEditCommandsForRichTextEditor) &&
@@ -646,6 +648,19 @@ DEFINE_IPC_SERIALIZER_WITH_FIELDS(mozilla::FontRange, mStartOffset, mFontName,
                                   mFontSize);
 
 template <>
+struct ParamTraits<mozilla::RangeDirection>
+    : ContiguousEnumSerializerInclusive<mozilla::RangeDirection,
+                                        mozilla::RangeDirection::Normal,
+                                        mozilla::RangeDirection::Reversed> {};
+
+template <>
+struct ParamTraits<mozilla::ExpandToClusterBoundary>
+    : ContiguousEnumSerializerInclusive<mozilla::ExpandToClusterBoundary,
+                                        mozilla::ExpandToClusterBoundary::No,
+                                        mozilla::ExpandToClusterBoundary::Yes> {
+};
+
+template <>
 struct ParamTraits<mozilla::WidgetSelectionEvent> {
   using paramType = mozilla::WidgetSelectionEvent;
   using baseParamTraits = ParamTraits<mozilla::WidgetGUIEvent>;
@@ -660,7 +675,7 @@ struct ParamTraits<mozilla::WidgetSelectionEvent> {
     baseParamTraits::WriteForDerivedClass(aWriter, aParam);
     WriteParam(aWriter, aParam.mOffset);
     WriteParam(aWriter, aParam.mLength);
-    WriteParam(aWriter, aParam.mReversed);
+    WriteParam(aWriter, aParam.mDirection);
     WriteParam(aWriter, aParam.mExpandToClusterBoundary);
     WriteParam(aWriter, aParam.mSucceeded);
   }
@@ -670,11 +685,17 @@ struct ParamTraits<mozilla::WidgetSelectionEvent> {
                aReader, mozilla::eSelectionEventClass, aResult) &&
            ReadParam(aReader, &aResult->mOffset) &&
            ReadParam(aReader, &aResult->mLength) &&
-           ReadParam(aReader, &aResult->mReversed) &&
+           ReadParam(aReader, &aResult->mDirection) &&
            ReadParam(aReader, &aResult->mExpandToClusterBoundary) &&
            ReadParam(aReader, &aResult->mSucceeded);
   }
 };
+
+template <>
+struct ParamTraits<mozilla::PreventSetSelection>
+    : ContiguousEnumSerializerInclusive<mozilla::PreventSetSelection,
+                                        mozilla::PreventSetSelection::No,
+                                        mozilla::PreventSetSelection::Yes> {};
 
 DEFINE_IPC_SERIALIZER_WITH_FIELDS(mozilla::widget::NativeIMEContext,
                                   mRawNativeIMEContext, mOriginProcessID);
@@ -889,7 +910,7 @@ DEFINE_IPC_SERIALIZER_WITH_FIELDS(mozilla::SingleTouchData::HistoricalTouchData,
 DEFINE_IPC_SERIALIZER_WITH_FIELDS(mozilla::SingleTouchData, mHistoricalData,
                                   mIdentifier, mScreenPoint, mLocalScreenPoint,
                                   mRadius, mRotationAngle, mForce, mTiltX,
-                                  mTiltY, mTwist);
+                                  mTiltY, mTwist, mAngle);
 
 template <>
 struct ParamTraits<mozilla::MultiTouchInput::MultiTouchType>

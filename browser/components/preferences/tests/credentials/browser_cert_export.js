@@ -45,10 +45,9 @@ var exportButton;
 var expectedCert;
 
 async function setupTest() {
-  await openPreferencesViaOpenPreferencesAPI(
-    SRD_PREF_VALUE ? "paneConnectionSecurity" : "privacy",
-    { leaveOpen: true }
-  );
+  await openPreferencesViaOpenPreferencesAPI("paneConnectionSecurity", {
+    leaveOpen: true,
+  });
   let certButton = gBrowser.selectedBrowser.contentDocument.getElementById(
     "viewCertificatesButton"
   );
@@ -61,6 +60,10 @@ async function setupTest() {
   let doc = dialogWin.document;
   doc.getElementById("certmanagertabs").selectedTab =
     doc.getElementById("ca_tab");
+  await TestUtils.waitForCondition(
+    () => !!doc.getElementById("ca-tree").view.rowCount,
+    "ca list populated"
+  );
   let treeView = doc.getElementById("ca-tree").view;
   // Select any which cert. Ignore parent rows (ie rows without certs):
   for (let i = 0; i < treeView.rowCount; i++) {

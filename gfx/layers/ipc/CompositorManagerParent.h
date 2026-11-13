@@ -5,11 +5,13 @@
 #ifndef MOZILLA_GFX_COMPOSITORMANAGERPARENT_H
 #define MOZILLA_GFX_COMPOSITORMANAGERPARENT_H
 
+#include <stdint.h>  // for uint32_t
+
 #include <map>
-#include <stdint.h>                 // for uint32_t
-#include "mozilla/StaticPtr.h"      // for StaticRefPtr
-#include "mozilla/StaticMonitor.h"  // for StaticMonitor
+
 #include "mozilla/RefPtr.h"         // for already_AddRefed
+#include "mozilla/StaticMonitor.h"  // for StaticMonitor
+#include "mozilla/StaticPtr.h"      // for StaticRefPtr
 #include "mozilla/dom/ipc/IdType.h"
 #include "mozilla/layers/PCompositorManagerParent.h"
 #include "nsTArray.h"  // for AutoTArray
@@ -35,7 +37,7 @@ class CompositorManagerParent final : public PCompositorManagerParent {
       uint32_t aNamespace);
   static bool Create(Endpoint<PCompositorManagerParent>&& aEndpoint,
                      dom::ContentParentId aContentId, uint32_t aNamespace,
-                     bool aIsRoot);
+                     uint32_t aContentBridgeNamespace, bool aIsRoot);
   static void Shutdown();
 
   static already_AddRefed<CompositorBridgeParent>
@@ -91,7 +93,8 @@ class CompositorManagerParent final : public PCompositorManagerParent {
 
   static void ShutdownInternal();
 
-  CompositorManagerParent(dom::ContentParentId aContentId, uint32_t aNamespace);
+  CompositorManagerParent(dom::ContentParentId aContentId, uint32_t aNamespace,
+                          uint32_t aContentBridgeNamespace);
   virtual ~CompositorManagerParent();
 
   void Bind(Endpoint<PCompositorManagerParent>&& aEndpoint, bool aIsRoot);
@@ -103,6 +106,9 @@ class CompositorManagerParent final : public PCompositorManagerParent {
   AutoTArray<RefPtr<CompositorBridgeParent>, 1> mPendingCompositorBridges;
   const dom::ContentParentId mContentId;
   const uint32_t mNamespace;
+  // The id namespace the UI process assigned for this (content) child's
+  // compositor bridge; 0 when the child may not create content compositors.
+  const uint32_t mContentBridgeNamespace;
   uint32_t mLastSharedSurfaceResourceId MOZ_GUARDED_BY(sMonitor) = 0;
   RefPtr<RemoteTextureTxnScheduler> mRemoteTextureTxnScheduler;
 };

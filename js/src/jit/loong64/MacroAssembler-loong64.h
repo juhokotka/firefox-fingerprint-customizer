@@ -5,9 +5,14 @@
 #ifndef jit_loong64_MacroAssembler_loong64_h
 #define jit_loong64_MacroAssembler_loong64_h
 
+#include <type_traits>
+
 #include "jit/loong64/Assembler-loong64.h"
 #include "jit/MoveResolver.h"
 #include "wasm/WasmBuiltins.h"
+
+using js::wasm::FaultingCodeRange;
+using js::wasm::FaultingCodeRangePair;
 
 namespace js {
 namespace jit {
@@ -107,31 +112,33 @@ class MacroAssemblerLOONG64 : public Assembler {
                             FPConditionBit fcc = FCC0);
 
  public:
+  void ma_move(Register dest, Register src);
+
   void ma_li(Register dest, CodeLabel* label);
   void ma_li(Register dest, ImmWord imm);
   void ma_liPatchable(Register dest, ImmPtr imm);
   void ma_liPatchable(Register dest, ImmWord imm, LiFlags flags = Li48);
 
   // load
-  FaultingCodeOffset ma_ld_b(Register dest, Address address);
-  FaultingCodeOffset ma_ld_h(Register dest, Address address);
-  FaultingCodeOffset ma_ld_w(Register dest, Address address);
-  FaultingCodeOffset ma_ld_d(Register dest, Address address);
-  FaultingCodeOffset ma_ld_bu(Register dest, Address address);
-  FaultingCodeOffset ma_ld_hu(Register dest, Address address);
-  FaultingCodeOffset ma_ld_wu(Register dest, Address address);
-  FaultingCodeOffset ma_load(Register dest, Address address,
-                             LoadStoreSize size = SizeWord,
-                             LoadStoreExtension extension = SignExtend);
+  FaultingCodeRange ma_ld_b(Register dest, Address address);
+  FaultingCodeRange ma_ld_h(Register dest, Address address);
+  FaultingCodeRange ma_ld_w(Register dest, Address address);
+  FaultingCodeRange ma_ld_d(Register dest, Address address);
+  FaultingCodeRange ma_ld_bu(Register dest, Address address);
+  FaultingCodeRange ma_ld_hu(Register dest, Address address);
+  FaultingCodeRange ma_ld_wu(Register dest, Address address);
+  FaultingCodeRange ma_load(Register dest, Address address,
+                            LoadStoreSize size = SizeWord,
+                            LoadStoreExtension extension = SignExtend);
 
   // store
-  FaultingCodeOffset ma_st_b(Register src, Address address);
-  FaultingCodeOffset ma_st_h(Register src, Address address);
-  FaultingCodeOffset ma_st_w(Register src, Address address);
-  FaultingCodeOffset ma_st_d(Register src, Address address);
-  FaultingCodeOffset ma_store(Register data, Address address,
-                              LoadStoreSize size = SizeWord,
-                              LoadStoreExtension extension = SignExtend);
+  FaultingCodeRange ma_st_b(Register src, Address address);
+  FaultingCodeRange ma_st_h(Register src, Address address);
+  FaultingCodeRange ma_st_w(Register src, Address address);
+  FaultingCodeRange ma_st_d(Register src, Address address);
+  FaultingCodeRange ma_store(Register data, Address address,
+                             LoadStoreSize size = SizeWord,
+                             LoadStoreExtension extension = SignExtend);
 
   // arithmetic based ops
   // add
@@ -203,16 +210,21 @@ class MacroAssemblerLOONG64 : public Assembler {
 
   void ma_bl(Label* l);
 
+  void ma_jump36(int32_t offset, Register scratch);
+  void ma_call36(int32_t offset, Register scratch);
+
   // fp instructions
   void ma_lid(FloatRegister dest, double value);
 
   void ma_mv(FloatRegister src, ValueOperand dest);
   void ma_mv(ValueOperand src, FloatRegister dest);
 
-  FaultingCodeOffset ma_fld_s(FloatRegister ft, Address address);
-  FaultingCodeOffset ma_fld_d(FloatRegister ft, Address address);
-  FaultingCodeOffset ma_fst_d(FloatRegister ft, Address address);
-  FaultingCodeOffset ma_fst_s(FloatRegister ft, Address address);
+  FaultingCodeRange ma_fld_s(FloatRegister ft, Address address);
+  FaultingCodeRange ma_fld_d(FloatRegister ft, Address address);
+  FaultingCodeRange ma_fst_d(FloatRegister ft, Address address);
+  FaultingCodeRange ma_fst_s(FloatRegister ft, Address address);
+  FaultingCodeRange ma_vld(FloatRegister vd, Address address);
+  FaultingCodeRange ma_vst(FloatRegister vd, Address address);
 
   void ma_pop(FloatRegister f);
   void ma_push(FloatRegister f);
@@ -224,22 +236,10 @@ class MacroAssemblerLOONG64 : public Assembler {
   void ma_cmp_set(Register dst, Address address, Imm32 imm, Condition c);
   void ma_cmp_set(Register dst, Address address, ImmWord imm, Condition c);
 
-  void moveIfZero(Register dst, Register src, Register cond) {
-    UseScratchRegisterScope temps(*this);
-    Register scratch = temps.Acquire();
-    MOZ_ASSERT(dst != scratch && cond != scratch);
-    as_masknez(scratch, src, cond);
-    as_maskeqz(dst, dst, cond);
-    as_or(dst, dst, scratch);
-  }
-  void moveIfNotZero(Register dst, Register src, Register cond) {
-    UseScratchRegisterScope temps(*this);
-    Register scratch = temps.Acquire();
-    MOZ_ASSERT(dst != scratch && cond != scratch);
-    as_maskeqz(scratch, src, cond);
-    as_masknez(dst, dst, cond);
-    as_or(dst, dst, scratch);
-  }
+  void ma_cselz(Register rd, Register rs1, Register rs2, Register rc,
+                Register rtmp);
+  void ma_cselnz(Register rd, Register rs1, Register rs2, Register rc,
+                 Register rtmp);
 
   // These functions abstract the access to high part of the double precision
   // float register. They are intended to work on both 32 bit and 64 bit
@@ -277,15 +277,17 @@ class MacroAssemblerLOONG64 : public Assembler {
 
   void ma_xor(Register rd, Register rj, Imm32 imm);
 
+  void ma_nor(Register rd, Register rj, Imm32 imm);
+
   // load
-  FaultingCodeOffset ma_load(Register dest, const BaseIndex& src,
-                             LoadStoreSize size = SizeWord,
-                             LoadStoreExtension extension = SignExtend);
+  FaultingCodeRange ma_load(Register dest, const BaseIndex& src,
+                            LoadStoreSize size = SizeWord,
+                            LoadStoreExtension extension = SignExtend);
 
   // store
-  FaultingCodeOffset ma_store(Register data, const BaseIndex& dest,
-                              LoadStoreSize size = SizeWord,
-                              LoadStoreExtension extension = SignExtend);
+  FaultingCodeRange ma_store(Register data, const BaseIndex& dest,
+                             LoadStoreSize size = SizeWord,
+                             LoadStoreExtension extension = SignExtend);
   void ma_store(Imm32 imm, const BaseIndex& dest, LoadStoreSize size = SizeWord,
                 LoadStoreExtension extension = SignExtend);
 
@@ -310,12 +312,6 @@ class MacroAssemblerLOONG64 : public Assembler {
   void ma_mul32TestOverflow(Register rd, Register rj, Imm32 imm,
                             Label* overflow);
 
-  // fast mod, uses scratch registers, and thus needs to be in the assembler
-  // implicitly assumes that we can overwrite dest at the beginning of the
-  // sequence
-  void ma_mod_mask(Register src, Register dest, Register hold, Register remain,
-                   int32_t shift, Label* negZero = nullptr);
-
   // branches when done from within la-specific code
   void ma_b(Register lhs, Register rhs, Label* l, Condition c,
             JumpKind jumpKind = LongJump,
@@ -338,11 +334,11 @@ class MacroAssemblerLOONG64 : public Assembler {
   // fp instructions
   void ma_lis(FloatRegister dest, float value);
 
-  FaultingCodeOffset ma_fst_d(FloatRegister src, BaseIndex address);
-  FaultingCodeOffset ma_fst_s(FloatRegister src, BaseIndex address);
+  FaultingCodeRange ma_fst_d(FloatRegister src, BaseIndex address);
+  FaultingCodeRange ma_fst_s(FloatRegister src, BaseIndex address);
 
-  FaultingCodeOffset ma_fld_d(FloatRegister dest, const BaseIndex& src);
-  FaultingCodeOffset ma_fld_s(FloatRegister dest, const BaseIndex& src);
+  FaultingCodeRange ma_fld_d(FloatRegister dest, const BaseIndex& src);
+  FaultingCodeRange ma_fld_s(FloatRegister dest, const BaseIndex& src);
 
   // FP branches
   void ma_bc_s(FloatRegister lhs, FloatRegister rhs, Label* label,
@@ -360,8 +356,12 @@ class MacroAssemblerLOONG64 : public Assembler {
   void ma_cmp_set(Register dst, Register lhs, Imm32 imm, Condition c);
   void ma_cmp_set_double(Register dst, FloatRegister lhs, FloatRegister rhs,
                          DoubleCondition c);
+  void ma_cmp_set_double(FPConditionBit fcc, FloatRegister lhs,
+                         FloatRegister rhs, DoubleCondition c);
   void ma_cmp_set_float32(Register dst, FloatRegister lhs, FloatRegister rhs,
                           DoubleCondition c);
+  void ma_cmp_set_float32(FPConditionBit fcc, FloatRegister lhs,
+                          FloatRegister rhs, DoubleCondition c);
 
   void moveToFloat32(Register src, FloatRegister dest) {
     as_movgr2fr_w(dest, src);
@@ -374,41 +374,96 @@ class MacroAssemblerLOONG64 : public Assembler {
   void minMaxPtr(Register lhs, ImmWord rhs, Register dest, bool isMax);
 
   // Evaluate srcDest = minmax<isMax>{Float32,Double}(srcDest, other).
-  // Handle NaN specially if handleNaN is true.
+  // Handle NaN specially if handleNaN is true. Handle zeroes specially if
+  // handleZero is true.
   void minMaxDouble(FloatRegister srcDest, FloatRegister other, bool handleNaN,
-                    bool isMax);
+                    bool handleZero, bool isMax);
   void minMaxFloat32(FloatRegister srcDest, FloatRegister other, bool handleNaN,
-                     bool isMax);
+                     bool handleZero, bool isMax);
 
-  FaultingCodeOffset loadDouble(const Address& addr, FloatRegister dest);
-  FaultingCodeOffset loadDouble(const BaseIndex& src, FloatRegister dest);
+  FaultingCodeRange loadDouble(const Address& addr, FloatRegister dest);
+  FaultingCodeRange loadDouble(const BaseIndex& src, FloatRegister dest);
 
-  FaultingCodeOffset loadFloat32(const Address& addr, FloatRegister dest);
-  FaultingCodeOffset loadFloat32(const BaseIndex& src, FloatRegister dest);
+  FaultingCodeRange loadFloat32(const Address& addr, FloatRegister dest);
+  FaultingCodeRange loadFloat32(const BaseIndex& src, FloatRegister dest);
 
-  FaultingCodeOffset loadFloat16(const Address& addr, FloatRegister dest,
-                                 Register) {
+  FaultingCodeRange loadFloat16(const Address& addr, FloatRegister dest,
+                                Register) {
     MOZ_CRASH("Not supported for this target");
   }
-  FaultingCodeOffset loadFloat16(const BaseIndex& src, FloatRegister dest,
-                                 Register) {
+  FaultingCodeRange loadFloat16(const BaseIndex& src, FloatRegister dest,
+                                Register) {
     MOZ_CRASH("Not supported for this target");
   }
 
   void outOfLineWasmTruncateToInt32Check(
       FloatRegister input, Register output, MIRType fromType, TruncFlags flags,
-      Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc);
+      Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc,
+      wasm::StackMap* stackMapForTraps,
+      wasm::StackMapRegistry* stackMapRegistry);
   void outOfLineWasmTruncateToInt64Check(
       FloatRegister input, Register64 output, MIRType fromType,
-      TruncFlags flags, Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc);
+      TruncFlags flags, Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc,
+      wasm::StackMap* stackMapForTraps,
+      wasm::StackMapRegistry* stackMapRegistry);
+
+  // The complete address is in `address`, and `access` is used for its type
+  // attributes only; its `offset` is ignored.
+  void wasmLoadAbsolute(const wasm::MemoryAccessDesc& access,
+                        Register memoryBase, uint64_t address,
+                        AnyRegister output) {
+    wasmLoadAbsoluteImpl(access, memoryBase, address, output);
+  }
+  void wasmLoadAbsoluteI64(const wasm::MemoryAccessDesc& access,
+                           Register memoryBase, uint64_t address,
+                           Register64 output) {
+    wasmLoadAbsoluteImpl(access, memoryBase, address, AnyRegister(output.reg));
+  }
+  void wasmStoreAbsolute(const wasm::MemoryAccessDesc& access,
+                         AnyRegister value, Register memoryBase,
+                         uint64_t address) {
+    wasmStoreAbsoluteImpl(access, value, memoryBase, address);
+  }
+  void wasmStoreAbsoluteI64(const wasm::MemoryAccessDesc& access,
+                            Register64 value, Register memoryBase,
+                            uint64_t address) {
+    wasmStoreAbsoluteImpl(access, AnyRegister(value.reg), memoryBase, address);
+  }
+
+  FaultingCodeRange wasmStoreLane(const wasm::MemoryAccessDesc& access,
+                                  FloatRegister src, Register memoryBase,
+                                  Register ptr, uint32_t laneSize,
+                                  uint32_t laneIndex);
 
  protected:
-  void wasmLoadImpl(const wasm::MemoryAccessDesc& access, Register memoryBase,
-                    Register ptr, Register ptrScratch, AnyRegister output,
-                    Register tmp);
-  void wasmStoreImpl(const wasm::MemoryAccessDesc& access, AnyRegister value,
-                     Register memoryBase, Register ptr, Register ptrScratch,
-                     Register tmp);
+  void wasmLoadAbsoluteImpl(const wasm::MemoryAccessDesc& access,
+                            Register memoryBase, uint64_t address,
+                            AnyRegister output);
+  void wasmStoreAbsoluteImpl(const wasm::MemoryAccessDesc& access,
+                             AnyRegister value, Register memoryBase,
+                             uint64_t address);
+
+  FaultingCodeRange wasmLoadImpl(const wasm::MemoryAccessDesc& access,
+                                 Register memoryBase, Register ptr,
+                                 AnyRegister output);
+  FaultingCodeRange wasmLoadImpl(const wasm::MemoryAccessDesc& access,
+                                 Address address, AnyRegister output);
+  FaultingCodeRange wasmLoadImpl(const wasm::MemoryAccessDesc& access,
+                                 Register memoryBase, Register ptr,
+                                 Register ptrScratch, AnyRegister output,
+                                 Register tmp);
+  FaultingCodeRange wasmStoreImpl(const wasm::MemoryAccessDesc& access,
+                                  AnyRegister value, Register memoryBase,
+                                  Register ptr);
+  FaultingCodeRange wasmStoreImpl(const wasm::MemoryAccessDesc& access,
+                                  AnyRegister value, Address address);
+  FaultingCodeRange wasmStoreImpl(const wasm::MemoryAccessDesc& access,
+                                  AnyRegister value, Register memoryBase,
+                                  Register ptr, Register ptrScratch,
+                                  Register tmp);
+
+  template <typename T>
+  void RoundHelper(RoundingMode mode, FloatRegister src, FloatRegister dest);
 };
 
 class MacroAssembler;
@@ -432,11 +487,8 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
   };
   void convertInt32ToDouble(const BaseIndex& src, FloatRegister dest) {
     UseScratchRegisterScope temps(*this);
-    Register scratch = temps.Acquire();
-    MOZ_ASSERT(scratch != src.base);
-    MOZ_ASSERT(scratch != src.index);
-    computeScaledAddress(src, scratch);
-    convertInt32ToDouble(Address(scratch, src.offset), dest);
+    Address address = computeScaledAddress(src, temps);
+    convertInt32ToDouble(address, dest);
   };
   void convertUInt32ToDouble(Register src, FloatRegister dest);
   void convertUInt32ToFloat32(Register src, FloatRegister dest);
@@ -493,9 +545,12 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
     }
   }
 
+  Address computeScaledAddress(const BaseIndex& address,
+                               UseScratchRegisterScope& temps);
+
   void j(Label* dest) { ma_b(dest); }
 
-  void mov(Register src, Register dest) { as_ori(dest, src, 0); }
+  void mov(Register src, Register dest) { ma_move(dest, src); }
   void mov(ImmWord imm, Register dest) { ma_li(dest, imm); }
   void mov(ImmPtr imm, Register dest) {
     mov(ImmWord(uintptr_t(imm.value)), dest);
@@ -521,7 +576,7 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
     Register scratch = temps.Acquire();
     BufferOffset bo = m_buffer.nextOffset();
     addPendingJump(bo, ImmPtr(c->raw()), RelocationKind::JITCODE);
-    ma_liPatchable(scratch, ImmPtr(c->raw()));
+    as_pcaddu18i(scratch, 0);
     as_jirl(zero, scratch, BOffImm16(0));
   }
   void branch(const Register reg) { as_jirl(zero, reg, BOffImm16(0)); }
@@ -560,18 +615,51 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
   void pop(Register reg) { ma_pop(reg); }
   void pop(FloatRegister reg) { ma_pop(reg); }
 
+  template <typename... Regs>
+  void pushRegs(const Regs&... regs) {
+    static_assert((std::is_convertible_v<Regs, Register> && ...));
+    static_assert(sizeof...(Regs) > 0);
+
+    if (((static_cast<Register>(regs) == StackPointer) || ...)) {
+      (ma_push(regs), ...);
+      return;
+    }
+
+    int32_t offset = int32_t(sizeof...(Regs) * sizeof(intptr_t));
+    ma_sub_d(StackPointer, StackPointer, Imm32(offset));
+    (storePtr(regs, Address(StackPointer, offset -= int32_t(sizeof(intptr_t)))),
+     ...);
+  }
+
+  template <typename... Regs>
+  void popRegs(const Regs&... regs) {
+    static_assert((std::is_convertible_v<Regs, Register> && ...));
+    static_assert(sizeof...(Regs) > 0);
+
+    if (((static_cast<Register>(regs) == StackPointer) || ...)) {
+      (ma_pop(regs), ...);
+      return;
+    }
+
+    int32_t offset = -int32_t(sizeof(intptr_t));
+    (loadPtr(Address(StackPointer, offset += int32_t(sizeof(intptr_t))), regs),
+     ...);
+    ma_add_d(StackPointer, StackPointer,
+             Imm32(int32_t(sizeof...(Regs) * sizeof(intptr_t))));
+  }
+
   // Emit a branch that can be toggled to a non-operation. On LOONG64 we use
   // "andi" instruction to toggle the branch.
   // See ToggleToJmp(), ToggleToCmp().
   CodeOffset toggledJump(Label* label);
 
-  // Emit a "jalr" or "nop" instruction. ToggleCall can be used to patch
-  // this instruction.
+  // Emit a "jalr" or "bne $zero, $zero, ..." instruction. ToggleCall can be
+  // used to patch this instruction.
   CodeOffset toggledCall(JitCode* target, bool enabled);
 
   static size_t ToggledCallSize(uint8_t* code) {
-    // Four instructions used in: MacroAssemblerLOONG64Compat::toggledCall
-    return 4 * sizeof(uint32_t);
+    // Two instructions used in: MacroAssemblerLOONG64Compat::toggledCall
+    return 2 * sizeof(uint32_t);
   }
 
   CodeOffset pushWithPatch(ImmWord imm) {
@@ -876,30 +964,30 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
   void movePtr(wasm::SymbolicAddress imm, Register dest);
   void movePtr(ImmGCPtr imm, Register dest);
 
-  FaultingCodeOffset load8SignExtend(const Address& address, Register dest);
-  FaultingCodeOffset load8SignExtend(const BaseIndex& src, Register dest);
+  FaultingCodeRange load8SignExtend(const Address& address, Register dest);
+  FaultingCodeRange load8SignExtend(const BaseIndex& src, Register dest);
 
-  FaultingCodeOffset load8ZeroExtend(const Address& address, Register dest);
-  FaultingCodeOffset load8ZeroExtend(const BaseIndex& src, Register dest);
+  FaultingCodeRange load8ZeroExtend(const Address& address, Register dest);
+  FaultingCodeRange load8ZeroExtend(const BaseIndex& src, Register dest);
 
-  FaultingCodeOffset load16SignExtend(const Address& address, Register dest);
-  FaultingCodeOffset load16SignExtend(const BaseIndex& src, Register dest);
+  FaultingCodeRange load16SignExtend(const Address& address, Register dest);
+  FaultingCodeRange load16SignExtend(const BaseIndex& src, Register dest);
 
   template <typename S>
   void load16UnalignedSignExtend(const S& src, Register dest) {
     load16SignExtend(src, dest);
   }
 
-  FaultingCodeOffset load16ZeroExtend(const Address& address, Register dest);
-  FaultingCodeOffset load16ZeroExtend(const BaseIndex& src, Register dest);
+  FaultingCodeRange load16ZeroExtend(const Address& address, Register dest);
+  FaultingCodeRange load16ZeroExtend(const BaseIndex& src, Register dest);
 
   template <typename S>
   void load16UnalignedZeroExtend(const S& src, Register dest) {
     load16ZeroExtend(src, dest);
   }
 
-  FaultingCodeOffset load32(const Address& address, Register dest);
-  FaultingCodeOffset load32(const BaseIndex& address, Register dest);
+  FaultingCodeRange load32(const Address& address, Register dest);
+  FaultingCodeRange load32(const BaseIndex& address, Register dest);
   void load32(AbsoluteAddress address, Register dest);
   void load32(wasm::SymbolicAddress address, Register dest);
 
@@ -908,10 +996,10 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
     load32(src, dest);
   }
 
-  FaultingCodeOffset load64(const Address& address, Register64 dest) {
+  FaultingCodeRange load64(const Address& address, Register64 dest) {
     return loadPtr(address, dest.reg);
   }
-  FaultingCodeOffset load64(const BaseIndex& address, Register64 dest) {
+  FaultingCodeRange load64(const BaseIndex& address, Register64 dest) {
     return loadPtr(address, dest.reg);
   }
 
@@ -920,20 +1008,20 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
     load64(src, dest);
   }
 
-  FaultingCodeOffset loadPtr(const Address& address, Register dest);
-  FaultingCodeOffset loadPtr(const BaseIndex& src, Register dest);
+  FaultingCodeRange loadPtr(const Address& address, Register dest);
+  FaultingCodeRange loadPtr(const BaseIndex& src, Register dest);
   void loadPtr(AbsoluteAddress address, Register dest);
   void loadPtr(wasm::SymbolicAddress address, Register dest);
 
   void loadPrivate(const Address& address, Register dest);
 
-  FaultingCodeOffset store8(Register src, const Address& address);
-  FaultingCodeOffset store8(Register src, const BaseIndex& address);
+  FaultingCodeRange store8(Register src, const Address& address);
+  FaultingCodeRange store8(Register src, const BaseIndex& address);
   void store8(Imm32 imm, const Address& address);
   void store8(Imm32 imm, const BaseIndex& address);
 
-  FaultingCodeOffset store16(Register src, const Address& address);
-  FaultingCodeOffset store16(Register src, const BaseIndex& address);
+  FaultingCodeRange store16(Register src, const Address& address);
+  FaultingCodeRange store16(Register src, const BaseIndex& address);
   void store16(Imm32 imm, const Address& address);
   void store16(Imm32 imm, const BaseIndex& address);
 
@@ -942,8 +1030,8 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
     store16(src, dest);
   }
 
-  FaultingCodeOffset store32(Register src, const Address& address);
-  FaultingCodeOffset store32(Register src, const BaseIndex& address);
+  FaultingCodeRange store32(Register src, const Address& address);
+  FaultingCodeRange store32(Register src, const BaseIndex& address);
   void store32(Register src, AbsoluteAddress address);
   void store32(Imm32 src, const Address& address);
   void store32(Imm32 src, const BaseIndex& address);
@@ -960,11 +1048,11 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
     storePtr(ImmWord(imm.value), address);
   }
 
-  FaultingCodeOffset store64(Register64 src, Address address) {
+  FaultingCodeRange store64(Register64 src, Address address) {
     return storePtr(src.reg, address);
   }
 
-  FaultingCodeOffset store64(Register64 src, const BaseIndex& address) {
+  FaultingCodeRange store64(Register64 src, const BaseIndex& address) {
     return storePtr(src.reg, address);
   }
 
@@ -974,14 +1062,14 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
   }
 
   template <typename T>
-  FaultingCodeOffset storePtr(ImmWord imm, T address);
+  FaultingCodeRange storePtr(ImmWord imm, T address);
   template <typename T>
   void storePtr(ImmPtr imm, T address);
   template <typename T>
   void storePtr(ImmGCPtr imm, T address);
   void storePtr(Register src, AbsoluteAddress dest);
-  FaultingCodeOffset storePtr(Register src, const Address& address);
-  FaultingCodeOffset storePtr(Register src, const BaseIndex& address);
+  FaultingCodeRange storePtr(Register src, const Address& address);
+  FaultingCodeRange storePtr(Register src, const BaseIndex& address);
 
   void moveDouble(FloatRegister src, FloatRegister dest) {
     as_fmov_d(dest, src);
@@ -1020,12 +1108,14 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
  protected:
   bool buildOOLFakeExitFrame(void* fakeReturnAddr);
 
-  void wasmLoadI64Impl(const wasm::MemoryAccessDesc& access,
-                       Register memoryBase, Register ptr, Register ptrScratch,
-                       Register64 output, Register tmp);
-  void wasmStoreI64Impl(const wasm::MemoryAccessDesc& access, Register64 value,
-                        Register memoryBase, Register ptr, Register ptrScratch,
-                        Register tmp);
+  FaultingCodeRange wasmLoadI64Impl(const wasm::MemoryAccessDesc& access,
+                                    Register memoryBase, Register ptr,
+                                    Register ptrScratch, Register64 output,
+                                    Register tmp);
+  FaultingCodeRange wasmStoreI64Impl(const wasm::MemoryAccessDesc& access,
+                                     Register64 value, Register memoryBase,
+                                     Register ptr, Register ptrScratch,
+                                     Register tmp);
 
  public:
   void lea(Operand addr, Register dest) {

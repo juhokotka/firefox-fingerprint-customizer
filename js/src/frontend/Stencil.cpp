@@ -68,7 +68,7 @@
 #include "vm/StencilEnums.h"  // ImmutableScriptFlagsEnum
 #include "vm/StringType.h"    // JSAtom, js::CopyChars
 
-#include "jit/JitHints-inl.h"          // JitHints::mightHaveEagerBaselineHint
+#include "jit/JitHints-inl.h"  // JitHints::mightHaveEagerBaselineHint, JitHints::mightHaveEagerBaselineInterpreterHint
 #include "jit/JitScript-inl.h"         // AutoKeepJitScripts constructor
 #include "vm/EnvironmentObject-inl.h"  // JSObject::enclosingEnvironment
 #include "vm/JSFunction-inl.h"         // JSFunction::create
@@ -935,11 +935,9 @@ bool ScopeContext::cacheEnclosingScopeBindingForEval(
             break;
           }
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
           // TODO: Optimize cache population for `using` bindings. (Bug 1899502)
           case BindingKind::Using:
             break;
-#endif
           case BindingKind::Const: {
             InputName binding(scope_ref, bi.name());
             if (!addToEnclosingLexicalBindingCache(
@@ -2714,7 +2712,8 @@ static bool MaybeDoEagerBaselineCompilations(JSContext* cx,
   jit::AutoKeepJitScripts keepJitScript(cx);
   RootedScript script(cx);
   Rooted<JSFunction*> fn(cx);
-  jit::BaselineCompileQueue& queue = cx->realm()->baselineCompileQueue();
+  jit::BaselineCompileQueue& queue =
+      cx->realm()->jitRealm().baselineCompileQueue();
 
   for (auto item :
        CompilationStencil::functionScriptStencils(stencil, gcOutput)) {
@@ -2729,6 +2728,15 @@ static bool MaybeDoEagerBaselineCompilations(JSContext* cx,
     // strategy is set.
     if (!doAggressive) {
       if (!jitHints->mightHaveEagerBaselineHint(script)) {
+        if (!jitHints->mightHaveEagerBaselineInterpreterHint(script)) {
+          continue;
+        }
+        if (!jit::CanBaselineInterpretScript(script)) {
+          continue;
+        }
+        if (!script->ensureHasJitScript(cx, keepJitScript)) {
+          return false;
+        }
         continue;
       }
     }
@@ -3161,6 +3169,8 @@ bool CompilationStencil::delazifySelfHostedFunction(
         return false;
       }
       if (!jitCache.put(jitCacheKey, baselineScript)) {
+        jit::BaselineScript::Destroy(cx->gcContext(), baselineScript);
+        ReportOutOfMemory(cx);
         return false;
       }
     } else {
@@ -4693,6 +4703,10 @@ static void DumpModuleEntryVectorItems(
       DumpTaggedParserAtomIndex(json, entry.importName, stencil);
       json.endObject();
     }
+    if (entry.importNameValueType != js::ImportNameValueType::String) {
+      json.property("importNameValueType",
+                    static_cast<uint32_t>(entry.importNameValueType));
+    }
     if (entry.exportName) {
       json.beginObjectProperty("exportName");
       DumpTaggedParserAtomIndex(json, entry.exportName, stencil);
@@ -6172,21 +6186,23 @@ JS::InstantiationStorage::~InstantiationStorage() {
 bool JS::IsStencilCacheable(JS::Stencil* stencil) { return true; }
 
 JS_PUBLIC_API size_t JS::GetScriptSourceLength(JS::Stencil* stencil) {
-  const ScriptSource* source = stencil->getInitial()->source;
-  if (!source->hasSourceText()) {
+  ScriptSource* source = stencil->getInitial()->source;
+  ScriptSource::DataReader reader(source);
+  if (!reader.hasSourceText()) {
     return 0;
   }
-  return source->length();
+  return reader->length();
 }
 
 JS_PUBLIC_API bool JS::GetScriptSourceText(
     JSContext* cx, JS::Stencil* stencil, JS::MutableHandle<JS::Value> result) {
   ScriptSource* source = stencil->getInitial()->source;
-  if (!source->hasSourceText()) {
+  ScriptSource::DataReader reader(source);
+  if (!reader.hasSourceText()) {
     result.setUndefined();
     return true;
   }
-  JSLinearString* s = source->substring(cx, 0, source->length());
+  JSLinearString* s = reader->substring(cx, 0, reader->length());
   if (!s) {
     return false;
   }

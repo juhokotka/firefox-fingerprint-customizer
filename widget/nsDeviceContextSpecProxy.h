@@ -5,11 +5,11 @@
 #ifndef nsDeviceContextSpecProxy_h
 #define nsDeviceContextSpecProxy_h
 
-#include "nsIDeviceContextSpec.h"
-#include "nsCOMPtr.h"
-#include "nsString.h"
-#include "mozilla/layout/printing/DrawEventRecorder.h"
 #include "mozilla/gfx/PrintPromise.h"
+#include "mozilla/layout/printing/DrawEventRecorder.h"
+#include "nsCOMPtr.h"
+#include "nsIDeviceContextSpec.h"
+#include "nsString.h"
 
 class nsIFile;
 class nsIUUIDGenerator;
@@ -38,14 +38,13 @@ class nsDeviceContextSpecProxy final : public nsIDeviceContextSpec {
 
   NS_IMETHOD BeginDocument(const nsAString& aTitle,
                            const nsAString& aPrintToFileName,
-                           uint64_t aBrowsingContextId, int32_t aStartPage,
+                           mozilla::dom::WindowContext*, int32_t aStartPage,
                            int32_t aEndPage) final;
 
   RefPtr<mozilla::gfx::PrintEndDocumentPromise> EndDocument() final;
 
-  NS_IMETHOD BeginPage(const IntSize& aSizeInPoints) final;
-
-  NS_IMETHOD EndPage() final;
+  nsresult BeginPage(const IntSize& aSizeInPoints) final;
+  nsresult EndPage() final;
 
  private:
   ~nsDeviceContextSpecProxy();

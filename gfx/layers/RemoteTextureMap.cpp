@@ -9,8 +9,11 @@
 
 #include "CompositableHost.h"
 #include "ImageDataSerializer.h"
-#include "mozilla/ipc/ProtocolUtils.h"
+#include "SharedSurface.h"
+#include "mozilla/StaticPrefs_gfx.h"
+#include "mozilla/StaticPrefs_webgl.h"
 #include "mozilla/gfx/gfxVars.h"
+#include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/layers/AsyncImagePipelineManager.h"
 #include "mozilla/layers/BufferTexture.h"
 #include "mozilla/layers/CompositorThread.h"
@@ -18,24 +21,25 @@
 #include "mozilla/layers/RemoteTextureHostWrapper.h"
 #include "mozilla/layers/TextureClientSharedSurface.h"
 #include "mozilla/layers/WebRenderTextureHost.h"
-#include "mozilla/StaticPrefs_gfx.h"
-#include "mozilla/StaticPrefs_webgl.h"
 #include "mozilla/webgpu/SharedTexture.h"
 #include "mozilla/webrender/RenderThread.h"
-#include "SharedSurface.h"
 
 namespace mozilla::layers {
+
+void SharedResourceWrapper::ClearTextureHost() {
+  if (mTag == Tag::SharedSurface) {
+    mSharedSurface->ClearTextureHost();
+  } else if (mTag == Tag::SharedTexture) {
+    mSharedTexture->ClearTextureHost();
+  }
+}
 
 RemoteTextureRecycleBin::RemoteTextureRecycleBin(bool aIsShared)
     : mIsShared(aIsShared) {}
 
-RemoteTextureRecycleBin::~RemoteTextureRecycleBin() = default;
-
 RemoteTextureOwnerClient::RemoteTextureOwnerClient(
     const base::ProcessId aForPid)
     : mForPid(aForPid) {}
-
-RemoteTextureOwnerClient::~RemoteTextureOwnerClient() = default;
 
 bool RemoteTextureOwnerClient::IsRegistered(
     const RemoteTextureOwnerId aOwnerId) {
@@ -157,8 +161,26 @@ void RemoteTextureOwnerClient::PushTexture(
 
   UniquePtr<TextureData> textureData =
       MakeUnique<SharedSurfaceTextureData>(aDesc, aFormat, aSize);
-  RefPtr<TextureHost> textureHost = RemoteTextureMap::CreateRemoteTexture(
-      textureData.get(), TextureFlags::DEFAULT);
+
+  RefPtr<layers::TextureHost> textureHost =
+      [&]() -> already_AddRefed<TextureHost> {
+    RefPtr<layers::TextureHost> textureHost = aSharedSurface->GetTextureHost();
+    if (textureHost) {
+      return textureHost.forget();
+    }
+    textureHost = RemoteTextureMap::CreateRemoteTexture(textureData.get(),
+                                                        TextureFlags::DEFAULT);
+    if (textureHost) {
+      if (aDesc.type() == SurfaceDescriptor::TSurfaceDescriptorD3D10 ||
+          aDesc.type() == SurfaceDescriptor::TSurfaceDescriptorMacIOSurface ||
+          aDesc.type() == layers::SurfaceDescriptor::
+                              TSurfaceDescriptorAndroidHardwareBuffer) {
+        aSharedSurface->SetTextureHost(textureHost);
+      }
+    }
+    return textureHost.forget();
+  }();
+
   if (!textureHost) {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     return;
@@ -178,8 +200,26 @@ void RemoteTextureOwnerClient::PushTexture(
 
   UniquePtr<TextureData> textureData =
       MakeUnique<SharedSurfaceTextureData>(aDesc, aFormat, aSize);
-  RefPtr<TextureHost> textureHost = RemoteTextureMap::CreateRemoteTexture(
-      textureData.get(), TextureFlags::DEFAULT);
+
+  RefPtr<layers::TextureHost> textureHost =
+      [&]() -> already_AddRefed<TextureHost> {
+    RefPtr<layers::TextureHost> textureHost = aSharedTexture->GetTextureHost();
+    if (textureHost) {
+      return textureHost.forget();
+    }
+    textureHost = RemoteTextureMap::CreateRemoteTexture(textureData.get(),
+                                                        TextureFlags::DEFAULT);
+    if (textureHost) {
+      if (aDesc.type() == SurfaceDescriptor::TSurfaceDescriptorD3D10 ||
+          aDesc.type() == SurfaceDescriptor::TSurfaceDescriptorMacIOSurface ||
+          aDesc.type() == layers::SurfaceDescriptor::
+                              TSurfaceDescriptorAndroidHardwareBuffer) {
+        aSharedTexture->SetTextureHost(textureHost);
+      }
+    }
+    return textureHost.forget();
+  }();
+
   if (!textureHost) {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     return;
@@ -294,10 +334,6 @@ void RemoteTextureMap::Shutdown() {
     sInstance = nullptr;
   }
 }
-
-RemoteTextureMap::RemoteTextureMap() : mMonitor("RemoteTextureMap::mMonitor") {}
-
-RemoteTextureMap::~RemoteTextureMap() = default;
 
 bool RemoteTextureMap::RecycleTexture(
     const RefPtr<RemoteTextureRecycleBin>& aRecycleBin,
@@ -620,6 +656,11 @@ void RemoteTextureMap::KeepTextureDataAliveForTextureHostIfNecessary(
     // SharedResourceWrapper/TextureData alive while the TextureHost is alive.
     if (holder->mTextureHost &&
         holder->mTextureHost->NumCompositableRefs() > 0) {
+      // Clear TextureHost before calling TextureHost::SetDestroyedCallback().
+      if (holder->mResourceWrapper) {
+        holder->mResourceWrapper->ClearTextureHost();
+      }
+
       RefPtr<nsISerialEventTarget> eventTarget = GetCurrentSerialEventTarget();
       RefPtr<Runnable> runnable = NS_NewRunnableFunction(
           "RemoteTextureMap::UnregisterTextureOwner::Runnable",
@@ -770,12 +811,17 @@ RemoteTextureMap::RegisterTxnScheduler(base::ProcessId aForPid,
   const auto key = std::pair(aForPid, aType);
   auto it = mTxnSchedulers.find(key);
   if (it != mTxnSchedulers.end()) {
-    return do_AddRef(it->second);
+    RefPtr<RemoteTextureTxnScheduler> scheduler(it->second);
+    if (scheduler) {
+      return scheduler.forget();
+    }
+    mTxnSchedulers.erase(it);
   }
 
   RefPtr<RemoteTextureTxnScheduler> scheduler(
       new RemoteTextureTxnScheduler(aForPid, aType));
-  mTxnSchedulers.emplace(key, scheduler.get());
+  mTxnSchedulers.emplace(
+      key, ThreadSafeWeakPtr<RemoteTextureTxnScheduler>(scheduler));
   return scheduler.forget();
 }
 
@@ -1086,7 +1132,7 @@ void RemoteTextureMap::GetRemoteTexture(
       if (it != mRemoteTextureHostWrapperHolders.end() &&
           !it->second->mRemoteTextureHost) {
         it->second->mRemoteTextureHost = owner->mLatestTextureHost;
-      } else {
+      } else if (it != mRemoteTextureHostWrapperHolders.end()) {
         MOZ_ASSERT(it->second->mRemoteTextureHost == owner->mLatestTextureHost);
       }
     }
@@ -1125,34 +1171,38 @@ bool RemoteTextureMap::WaitForTxn(const RemoteTextureOwnerId aOwnerId,
                                   RemoteTextureTxnType aTxnType,
                                   RemoteTextureTxnId aTxnId) {
   MonitorAutoLock lock(mMonitor);
-  if (auto* owner = GetTextureOwner(lock, aOwnerId, aForPid)) {
-    if (owner->mDeferUnregister) {
-      MOZ_ASSERT_UNREACHABLE(
-          "Texture owner must wait for txn before unregistering.");
-      return false;
-    }
-    if (owner->mWaitForTxn) {
-      MOZ_ASSERT_UNREACHABLE("Texture owner already waiting for txn.");
-      return false;
-    }
-    const auto key = std::pair(aForPid, aTxnType);
-    auto it = mTxnSchedulers.find(key);
-    if (it == mTxnSchedulers.end()) {
-      // During shutdown, different toplevel protocols may go away in
-      // disadvantageous orders, causing us to sometimes be processing
-      // waits even though the source of transactions upon which the
-      // wait depends shut down. This is generally harmless to ignore,
-      // as it means no further transactions will be generated of that
-      // type and all such transactions have been processed before it
-      // unregistered.
-      NS_WARNING("Could not find scheduler for txn type.");
-      return false;
-    }
-    if (it->second->WaitForTxn(lock, aOwnerId, aTxnId)) {
-      owner->mWaitForTxn = true;
-    }
-    return true;
+  auto* owner = GetTextureOwner(lock, aOwnerId, aForPid);
+  if (!owner) {
+    return false;
   }
+  if (owner->mDeferUnregister) {
+    MOZ_ASSERT_UNREACHABLE(
+        "Texture owner must wait for txn before unregistering.");
+    return false;
+  }
+  if (owner->mWaitForTxn) {
+    MOZ_ASSERT_UNREACHABLE("Texture owner already waiting for txn.");
+    return false;
+  }
+  const auto key = std::pair(aForPid, aTxnType);
+  auto it = mTxnSchedulers.find(key);
+  if (it != mTxnSchedulers.end()) {
+    RefPtr<RemoteTextureTxnScheduler> scheduler(it->second);
+    if (scheduler) {
+      if (scheduler->WaitForTxn(lock, aOwnerId, aTxnId)) {
+        owner->mWaitForTxn = true;
+      }
+      return true;
+    }
+  }
+  // During shutdown, different toplevel protocols may go away in
+  // disadvantageous orders, causing us to sometimes be processing
+  // waits even though the source of transactions upon which the
+  // wait depends shut down. This is generally harmless to ignore,
+  // as it means no further transactions will be generated of that
+  // type and all such transactions have been processed before it
+  // unregistered.
+  NS_WARNING("Could not find scheduler for txn type.");
   return false;
 }
 

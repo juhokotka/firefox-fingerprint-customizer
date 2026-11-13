@@ -7,8 +7,16 @@ const { MockEngineManager } = ChromeUtils.importESModule(
   "resource://testing-common/AIWindowTestUtils.sys.mjs"
 );
 
-const { UI_TYPES } = ChromeUtils.importESModule(
+const { UI_TYPES, ToolUI } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/ui/modules/ToolUI.sys.mjs"
+);
+
+const { tabManagementService } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/ui/modules/TabManagementService.sys.mjs"
+);
+
+const { TabStateFlusher } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs"
 );
 
 // Import toolFns to stub the manageTabs function
@@ -17,7 +25,12 @@ const { toolFns } = ChromeUtils.importESModule(
 );
 
 /**
- * Test suite for manage_tabs tool functionality in AI Window
+ * Test suite for manage_tabs tool functionality in AI Window.
+ *
+ * The telemetry funnel tests for this tool live in
+ * browser_smartwindow_manage_tabs_tool_telemetry.js; the file was split in
+ * bug 2070425 to keep each browser-chrome file's peak memory down and avoid an
+ * intermittent OOM.
  */
 add_setup(async function () {
   await Services.fog.testFlushAllChildren();
@@ -394,5 +407,348 @@ add_task(async function test_retry_after_cancellation() {
     mockEngineMan.cleanupMocks();
     await BrowserTestUtils.closeWindow(win);
     Services.fog.testResetFOG();
+  }
+});
+
+/**
+ * A tab in a non-interacting window is closed from another window.
+ */
+add_task(async function test_close_tab_in_non_interacting_window() {
+  const interactingWindow = await openAIWindow();
+  const otherWindow = await openAIWindow();
+
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    otherWindow.gBrowser,
+    "https://example.com/"
+  );
+  const tokenToKey = new Map([["token-a", tab.permanentKey]]);
+  const selectedTabs = [{ token: "token-a", url: "https://example.com/" }];
+
+  try {
+    Assert.ok(
+      otherWindow.gBrowser.tabs.includes(tab),
+      "Target tab starts open in the non-interacting window"
+    );
+
+    const result = await ToolUI.closeSelectedTabs(
+      selectedTabs,
+      tokenToKey,
+      interactingWindow
+    );
+
+    Assert.ok(result, "closeSelectedTabs should report a result");
+    Assert.equal(
+      result.operationIds.length,
+      1,
+      "Should surface an undo operationId"
+    );
+    Assert.equal(
+      result.requestedCount,
+      1,
+      "Should have requested closing one tab"
+    );
+
+    await TestUtils.waitForCondition(
+      () => !otherWindow.gBrowser.tabs.includes(tab),
+      "Tab in the non-interacting window should be closed"
+    );
+    Assert.ok(
+      !otherWindow.gBrowser.tabs.includes(tab),
+      "Target tab is closed in its owning window"
+    );
+  } finally {
+    await BrowserTestUtils.closeWindow(otherWindow);
+    await BrowserTestUtils.closeWindow(interactingWindow);
+  }
+});
+
+/**
+ * A tab selection spanning multiple windows closes each tab in its own window.
+ */
+add_task(async function test_close_tabs_spanning_multiple_windows() {
+  const windowA = await openAIWindow();
+  const windowB = await openAIWindow();
+
+  const tabA = await BrowserTestUtils.openNewForegroundTab(
+    windowA.gBrowser,
+    "https://example.com/"
+  );
+  const tabB = await BrowserTestUtils.openNewForegroundTab(
+    windowB.gBrowser,
+    "https://example.org/"
+  );
+
+  const tokenToKey = new Map([
+    ["token-a", tabA.permanentKey],
+    ["token-b", tabB.permanentKey],
+  ]);
+  const selectedTabs = [
+    { token: "token-a", url: "https://example.com/" },
+    { token: "token-b", url: "https://example.org/" },
+  ];
+
+  try {
+    const result = await ToolUI.closeSelectedTabs(
+      selectedTabs,
+      tokenToKey,
+      windowA
+    );
+
+    Assert.equal(
+      result.requestedCount,
+      2,
+      "Should have requested closing both tabs"
+    );
+    Assert.ok(
+      !windowA.gBrowser.tabs.includes(tabA),
+      "Tab in window A is closed"
+    );
+    Assert.ok(
+      !windowB.gBrowser.tabs.includes(tabB),
+      "Tab in window B is closed"
+    );
+  } finally {
+    await BrowserTestUtils.closeWindow(windowA);
+    await BrowserTestUtils.closeWindow(windowB);
+  }
+});
+
+/**
+ * Undoing a cross-window close restores the tabs in the owning windows.
+ */
+add_task(async function test_undo_close_tabs_spanning_multiple_windows() {
+  const windowA = await openAIWindow();
+  const windowB = await openAIWindow();
+
+  const tabA = await BrowserTestUtils.openNewForegroundTab(
+    windowA.gBrowser,
+    "https://example.com/"
+  );
+  const tabB = await BrowserTestUtils.openNewForegroundTab(
+    windowB.gBrowser,
+    "https://example.org/"
+  );
+
+  // Flush tab state so SessionStore records the loaded URL for each tab
+  await TabStateFlusher.flush(tabA.linkedBrowser);
+  await TabStateFlusher.flush(tabB.linkedBrowser);
+
+  const tokenToKey = new Map([
+    ["token-a", tabA.permanentKey],
+    ["token-b", tabB.permanentKey],
+  ]);
+  const selectedTabs = [
+    { token: "token-a", url: "https://example.com/" },
+    { token: "token-b", url: "https://example.org/" },
+  ];
+
+  try {
+    const closeResult = await ToolUI.closeSelectedTabs(
+      selectedTabs,
+      tokenToKey,
+      windowA
+    );
+
+    Assert.equal(
+      closeResult.operationIds.length,
+      2,
+      "Should produce one operationId per owning window"
+    );
+
+    const tabCountA = windowA.gBrowser.tabs.length;
+    const tabCountB = windowB.gBrowser.tabs.length;
+
+    // Undo restores each operation in its own window
+    for (const operationId of closeResult.operationIds) {
+      const restoreResult = await tabManagementService.restoreTabs({
+        operationId,
+      });
+      Assert.equal(
+        restoreResult.restoredCount,
+        1,
+        `Operation ${operationId} restores its tab`
+      );
+      Assert.equal(
+        restoreResult.failedTabs.length,
+        0,
+        `Operation ${operationId} has no restore failures`
+      );
+    }
+
+    await TestUtils.waitForCondition(
+      () =>
+        windowA.gBrowser.tabs.length === tabCountA + 1 &&
+        windowB.gBrowser.tabs.length === tabCountB + 1,
+      "Both windows should have their restored tab"
+    );
+  } finally {
+    await BrowserTestUtils.closeWindow(windowA);
+    await BrowserTestUtils.closeWindow(windowB);
+  }
+});
+
+/**
+ * Closing the last tab of a non-interacting window keeps that window open
+ * instead of closing the window, so the tab stays restorable.
+ */
+add_task(async function test_close_last_tab_keeps_window_open() {
+  const interactingWindow = await openAIWindow();
+  const otherWindow = await openAIWindow();
+
+  const tab = otherWindow.gBrowser.selectedTab;
+  BrowserTestUtils.startLoadingURIString(
+    tab.linkedBrowser,
+    "https://example.com/"
+  );
+  await BrowserTestUtils.browserLoaded(
+    tab.linkedBrowser,
+    false,
+    "https://example.com/"
+  );
+  // Flush tab state so SessionStore records the loaded URL
+  await TabStateFlusher.flush(tab.linkedBrowser);
+
+  Assert.equal(
+    otherWindow.gBrowser.tabs.length,
+    1,
+    "Non-interacting window starts with a single tab"
+  );
+
+  const tokenToKey = new Map([["token-a", tab.permanentKey]]);
+  const selectedTabs = [{ token: "token-a", url: "https://example.com/" }];
+
+  try {
+    const result = await ToolUI.closeSelectedTabs(
+      selectedTabs,
+      tokenToKey,
+      interactingWindow
+    );
+
+    Assert.equal(
+      result.operationIds.length,
+      1,
+      "Should close the last tab and surface an undo operationId"
+    );
+
+    Assert.ok(!otherWindow.closed, "Non-interacting window stays open");
+    Assert.equal(
+      otherWindow.gBrowser.tabs.length,
+      1,
+      "The closed tab was replaced"
+    );
+    Assert.ok(
+      !otherWindow.gBrowser.tabs.includes(tab),
+      "The original tab is closed"
+    );
+
+    const restoreResult = await tabManagementService.restoreTabs({
+      operationId: result.operationIds[0],
+    });
+    Assert.equal(
+      restoreResult.restoredCount,
+      1,
+      "The last tab can still be undone in its owning window"
+    );
+  } finally {
+    await BrowserTestUtils.closeWindow(otherWindow);
+    await BrowserTestUtils.closeWindow(interactingWindow);
+  }
+});
+
+// These two tests go through ai-window instead of calling ToolUI.handleUpdate
+// directly. ai-window is what works out which tab the chat is in, so a test
+// that passes the tab in itself would not check that part at all.
+
+add_task(async function test_open_tabs_groups_the_fullpage_chat_tab() {
+  const win = await openAIWindow();
+  const urls = ["https://example.com/origin-a", "https://example.com/origin-b"];
+
+  try {
+    const chatTab = win.gBrowser.selectedTab;
+    const aiWindow =
+      win.gBrowser.selectedBrowser.contentDocument.querySelector("ai-window");
+    const toolCallId = "origin-tab-fullpage";
+    const message = aiWindow.conversation.addAssistantMessage(
+      "text",
+      "Confirm?"
+    );
+    message.toolUIData = {
+      toolCallId,
+      uiType: UI_TYPES.TAB_GROUP_CONFIRMATION,
+      properties: { actionType: "open_tabs" },
+    };
+
+    await aiWindow.handleToolUIUpdate({
+      messageId: message.id,
+      toolCallId,
+      updateType: "confirm-open-and-group-tabs-selection",
+      updateData: {
+        selectedTabs: urls.map((url, index) => ({ token: String(index), url })),
+        tabGroupLabel: "Origin",
+      },
+    });
+
+    await TestUtils.waitForCondition(
+      () => chatTab.group,
+      "The fullpage chat tab should join the group it created"
+    );
+    Assert.ok(
+      chatTab.group.tabs.includes(chatTab),
+      "The created group holds the chat tab"
+    );
+    Assert.equal(
+      chatTab.group.label,
+      "Origin",
+      "The group carries the requested label"
+    );
+  } finally {
+    await BrowserTestUtils.closeWindow(win);
+  }
+});
+
+add_task(async function test_open_tabs_from_sidebar_leaves_active_tab_out() {
+  const { win, sidebarBrowser } = await openAIWindowWithSidebar(
+    "https://example.com/sidebar-origin"
+  );
+  const urls = [
+    "https://example.com/sidebar-a",
+    "https://example.com/sidebar-b",
+  ];
+
+  try {
+    const activeTab = win.gBrowser.selectedTab;
+    const aiWindow = sidebarBrowser.contentDocument.querySelector("ai-window");
+    const toolCallId = "origin-tab-sidebar";
+    const message = aiWindow.conversation.addAssistantMessage(
+      "text",
+      "Confirm?"
+    );
+    message.toolUIData = {
+      toolCallId,
+      uiType: UI_TYPES.TAB_GROUP_CONFIRMATION,
+      properties: { actionType: "open_tabs" },
+    };
+
+    await aiWindow.handleToolUIUpdate({
+      messageId: message.id,
+      toolCallId,
+      updateType: "confirm-open-and-group-tabs-selection",
+      updateData: {
+        selectedTabs: urls.map((url, index) => ({ token: String(index), url })),
+        tabGroupLabel: "Origin",
+      },
+    });
+
+    // Wait for the group so the assertion below is not racing its creation.
+    await TestUtils.waitForCondition(
+      () => win.gBrowser.tabGroups.length,
+      "A group should be created for the opened tabs"
+    );
+    Assert.ok(
+      !activeTab.group,
+      "A sidebar conversation must not pull the active web page into the group"
+    );
+  } finally {
+    await BrowserTestUtils.closeWindow(win);
   }
 });

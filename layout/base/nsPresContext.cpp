@@ -37,6 +37,7 @@
 #include "mozilla/PresShellInlines.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/SMILAnimationController.h"
+#include "mozilla/ScrollContainerFrame.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StaticPrefs_bidi.h"
@@ -900,6 +901,21 @@ void nsPresContext::SetLinkParametersOverride(
   RebuildAllStyleData(nsChangeHint(0), RestyleHint::RecascadeSubtree());
 }
 
+void nsPresContext::SetEmbedderScrollbarInset(const nsMargin& aInset) {
+  if (mEmbedderScrollbarInset == aInset) {
+    return;
+  }
+  mEmbedderScrollbarInset = aInset;
+
+  // Read directly by nsScrollbarFrame::Reflow for the viewport scroll frame,
+  // so nothing needs re-cascading; just reflow the scrollbars.
+  if (mozilla::PresShell* presShell = GetPresShell()) {
+    if (ScrollContainerFrame* sf = presShell->GetRootScrollContainerFrame()) {
+      sf->MarkScrollbarsDirtyForReflow();
+    }
+  }
+}
+
 void nsPresContext::UpdateAnimationsPlayBackRateMultiplier(double aMultiplier) {
   if (mAnimationsPlayBackRateMultiplier == aMultiplier) {
     return;
@@ -926,7 +942,11 @@ void nsPresContext::RecomputeBrowsingContextDependentData() {
     auto systemZoom = LookAndFeel::SystemZoomSettings();
     SetFullZoom(browsingContext->FullZoom() * systemZoom.mFullZoom);
     SetTextZoom(browsingContext->TextZoom() * systemZoom.mTextZoom);
-    SetOverrideDPPX(browsingContext->OverrideDPPX());
+    if (doc->ShouldResistFingerprinting(RFPTarget::WindowDevicePixelRatio)) {
+      SetOverrideDPPX(nsRFPService::GetDevicePixelRatioAtZoom(GetFullZoom()));
+    } else {
+      SetOverrideDPPX(browsingContext->OverrideDPPX());
+    }
   }
 
   auto* top = browsingContext->Top();
@@ -938,6 +958,9 @@ void nsPresContext::RecomputeBrowsingContextDependentData() {
     }
     return browsingContext->GetEmbedderColorSchemes().mPreferred;
   }());
+
+  SetEmbedderScrollbarInset(LayoutDevicePixel::ToAppUnits(
+      browsingContext->GetEmbedderScrollbarInset(), AppUnitsPerDevPixel()));
 
   UpdateForcedColors();
 
@@ -1383,9 +1406,11 @@ void nsPresContext::SetInRDMPane(bool aInRDMPane) {
   mInRDMPane = aInRDMPane;
   RecomputeTheme();
   if (mPresShell) {
-    nsContentUtils::AddScriptRunner(NewRunnableMethod<bool>(
-        "PresShell::MaybeRecreateMobileViewportManager", mPresShell,
-        &PresShell::MaybeRecreateMobileViewportManager, true));
+    nsContentUtils::AddScriptRunner(
+        NewRunnableMethod<PresShell::MobileViewportManagerUpdate>(
+            "PresShell::MaybeRecreateMobileViewportManager", mPresShell,
+            &PresShell::MaybeRecreateMobileViewportManager,
+            PresShell::MobileViewportManagerUpdate::ManagerTypeMayChange));
   }
 }
 
@@ -1844,10 +1869,11 @@ void nsPresContext::ThemeChangedInternal() {
       MediaFeatureChangePropagation::All);
 
   if (Document()->IsInChromeDocShell()) {
-    if (RefPtr<nsPIDOMWindowInner> win = Document()->GetInnerWindow()) {
+    if (const RefPtr<nsGlobalWindowInner> win =
+            nsGlobalWindowInner::Cast(Document()->GetInnerWindow())) {
       nsContentUtils::DispatchEventOnlyToChrome(
-          Document(), nsGlobalWindowInner::Cast(win), u"nativethemechange"_ns,
-          CanBubble::eYes, Cancelable::eYes, nullptr);
+          win, win, u"nativethemechange"_ns, CanBubble::eYes, Cancelable::eYes,
+          nullptr);
     }
   }
 }
@@ -2052,8 +2078,13 @@ bool nsPresContext::FlushPendingMediaFeatureValuesChanged() {
 
   // MediumFeaturesChanged updates the applied rules, so it always gets called.
   if (mPresShell) {
-    change.mRestyleHint |=
+    const RestyleHint rulesHint =
         mPresShell->StyleSet()->MediumFeaturesChanged(change.mReason);
+    change.mRestyleHint |= rulesHint;
+    // A @view-transition rule in a @media rule can start or stop matching.
+    if (rulesHint) {
+      mDocument->OutboundViewTransitionRulesChanged();
+    }
   }
 
   const bool changedStyle = change.mRestyleHint || change.mChangeHint;
@@ -2809,13 +2840,13 @@ uint64_t nsPresContext::GetUndisplayedRestyleGeneration() const {
   return mRestyleManager->GetUndisplayedRestyleGeneration();
 }
 
-mozilla::intl::Bidi& nsPresContext::BidiEngine() {
+UniquePtr<intl::Bidi> nsPresContext::GetBidiEngine() {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (!mBidiEngine) {
-    mBidiEngine = MakeUnique<mozilla::intl::Bidi>();
+  if (mBidiEngine) {
+    return std::move(mBidiEngine);
   }
-  return *mBidiEngine;
+  return MakeUnique<mozilla::intl::Bidi>();
 }
 
 void nsPresContext::FlushFontFeatureValues() {
@@ -2845,20 +2876,9 @@ void nsPresContext::FlushFontPaletteValues() {
   mFontPaletteValueSet = styleSet->BuildFontPaletteValueSet();
   mFontPaletteValuesDirty = false;
 
-  if (mFontPaletteCache) {
-    mFontPaletteCache->SetPaletteValueSet(mFontPaletteValueSet);
-  }
-
   // Even if we're not reflowing anything, a change to the palette means we
   // need to repaint in order to show the new colors.
   InvalidatePaintedLayers();
-}
-
-gfx::PaletteCache& nsPresContext::FontPaletteCache() {
-  if (!mFontPaletteCache) {
-    mFontPaletteCache = MakeUnique<gfx::PaletteCache>(mFontPaletteValueSet);
-  }
-  return *mFontPaletteCache.get();
 }
 
 void nsPresContext::SetVisibleArea(const nsRect& aRect) {
@@ -2949,9 +2969,7 @@ void nsPresContext::UpdateDynamicToolbarOffset(ScreenIntCoord aOffset) {
     return;
   }
 
-  dom::InteractiveWidget interactiveWidget = mDocument->InteractiveWidget();
-  if (interactiveWidget == InteractiveWidget::OverlaysContent &&
-      GetKeyboardHeight() > 0) {
+  if (IsKeyboardVisibleOnOverlaysContent()) {
     // On overlays-content mode, the toolbar offset change should NOT affect
     // the visual viewport while the software keyboard is being shown since
     // the toolbar will be positioned somewhere in the middle of the visual
@@ -3001,9 +3019,9 @@ ScreenIntCoord nsPresContext::GetKeyboardHeight() const {
   return mvm ? mvm->GetKeyboardHeight() : ScreenIntCoord(0);
 }
 
-bool nsPresContext::IsKeyboardHiddenOrResizesContentMode() const {
-  return GetKeyboardHeight() == 0 ||
-         mDocument->InteractiveWidget() == InteractiveWidget::ResizesContent;
+bool nsPresContext::IsKeyboardVisibleOnOverlaysContent() const {
+  return GetKeyboardHeight() > 0 &&
+         mDocument->InteractiveWidget() == InteractiveWidget::OverlaysContent;
 }
 
 DynamicToolbarState nsPresContext::GetDynamicToolbarState() const {
@@ -3145,9 +3163,8 @@ bool nsPresContext::IsFontAllowedByProfile(const nsACString& aFamilyName) const 
   // WorkerPrivate) applies the same policy.
   nsCString targetPlatform;
   if (dom::BrowsingContext* top = bc->Top()) {
-    nsAutoString customUA;
-    top->GetCustomUserAgent(customUA);
-    NS_ConvertUTF16toUTF8 ua8(customUA);
+    nsAutoCString ua8;
+    top->GetCustomUserAgent(ua8);
     if (ua8.Find("Macintosh") != kNotFound) {
       targetPlatform.AssignLiteral("MacIntel");
     } else if (ua8.Find("Windows NT") != kNotFound) {

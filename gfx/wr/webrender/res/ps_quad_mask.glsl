@@ -21,7 +21,10 @@ flat varying highp vec4 vClipPlane_A;
 flat varying highp vec4 vClipPlane_B;
 flat varying highp vec4 vClipPlane_C;
 
+#ifdef WR_FEATURE_SUPERELLIPSE
 flat varying highp vec4 vClipShape;
+flat varying highp vec4 vClipClampedInset;
+#endif
 
 #endif
 flat varying highp vec2 vClipMode;
@@ -41,7 +44,10 @@ struct Clip {
     vec4 radii_top;
     vec4 radii_bottom;
 
+#ifdef WR_FEATURE_SUPERELLIPSE
     vec4 shape;
+    vec4 inset;
+#endif
 #endif
     float mode;
     int space;
@@ -58,26 +64,41 @@ Clip fetch_clip(int index) {
     clip.radii = texels[1];
     clip.mode = texels[2].x;
 #else
-    vec4 texels[5] = fetch_from_gpu_buffer_5f(index);
+#ifdef WR_FEATURE_SUPERELLIPSE
+    vec4 texels[6] = fetch_from_gpu_buffer_6f(index);
+#else
+    vec4 texels[4] = fetch_from_gpu_buffer_4f(index);
+#endif
     clip.rect = RectWithEndpoint(texels[0].xy, texels[0].zw);
     clip.radii_top = texels[1];
     clip.radii_bottom = texels[2];
     clip.mode = texels[3].x;
+#ifdef WR_FEATURE_SUPERELLIPSE
     clip.shape = texels[4];
+    clip.inset = texels[5];
+#endif
 #endif
 
     return clip;
 }
 
-vec4 precalc_corner(vec2 center, vec2 radii, float k) {
+#ifdef WR_FEATURE_SUPERELLIPSE
+vec4 precalc_corner(vec2 center, vec2 radii, vec2 inset, vec2 clip_sign, float k) {
     if (k == 1.0) {
         // round/ellipse corner, precalc the ellipse parameters
         return vec4(center, inverse_radii_squared(radii));
     } else {
         // superellipse, precalc the superellipse parameters
+        if (k < 1.0) {
+            vec2 reference_radii = (radii == vec2(0.0)) ? vec2(0.0) : radii + inset;
+            vec4 offset_radii = compute_contoured_superellipse(reference_radii, k, inset);
+            center += offset_radii.xy * clip_sign;
+            radii = offset_radii.zw;
+        }
         return vec4(center, inverse_radii(radii));
     }
 }
+#endif
 
 void pattern_vertex(PrimitiveInfo prim_info) {
 
@@ -91,8 +112,8 @@ void pattern_vertex(PrimitiveInfo prim_info) {
         vTransformBounds = vec4(clip.rect.p0, clip.rect.p1);
     } else {
         RectWithEndpoint xf_bounds = RectWithEndpoint(
-            max(clip.rect.p0, prim_info.local_clip_rect.p0),
-            min(clip.rect.p1, prim_info.local_clip_rect.p1)
+            max(clip.rect.p0, prim_info.bounds.p0),
+            min(clip.rect.p1, prim_info.bounds.p1)
         );
         vTransformBounds = vec4(xf_bounds.p0, xf_bounds.p1);
     }
@@ -114,23 +135,47 @@ void pattern_vertex(PrimitiveInfo prim_info) {
     vec2 r_br = clip.radii_bottom.zw;
     vec2 r_bl = clip.radii_bottom.xy;
 
+#ifdef WR_FEATURE_SUPERELLIPSE
     vClipCenter_Radius_TL = precalc_corner(clip.rect.p0 + r_tl,
                                            r_tl,
+                                           clip.inset.wx,
+                                           vec2(-1.0, -1.0),
                                            clip.shape.x);
 
     vClipCenter_Radius_TR = precalc_corner(vec2(clip.rect.p1.x - r_tr.x,
                                                 clip.rect.p0.y + r_tr.y),
                                            r_tr,
+                                           clip.inset.yx,
+                                           vec2(1.0, -1.0),
                                            clip.shape.y);
 
     vClipCenter_Radius_BR = precalc_corner(clip.rect.p1 - r_br,
                                            r_br,
+                                           clip.inset.yz,
+                                           vec2(1.0, 1.0),
                                            clip.shape.z);
 
     vClipCenter_Radius_BL = precalc_corner(vec2(clip.rect.p0.x + r_bl.x,
                                                 clip.rect.p1.y - r_bl.y),
                                            r_bl,
+                                           clip.inset.wz,
+                                           vec2(-1.0, 1.0),
                                            clip.shape.w);
+#else
+    vClipCenter_Radius_TL = vec4(clip.rect.p0 + r_tl,
+                                 inverse_radii_squared(r_tl));
+
+    vClipCenter_Radius_TR = vec4(clip.rect.p1.x - r_tr.x,
+                                 clip.rect.p0.y + r_tr.y,
+                                 inverse_radii_squared(r_tr));
+
+    vClipCenter_Radius_BR = vec4(clip.rect.p1 - r_br,
+                                 inverse_radii_squared(r_br));
+
+    vClipCenter_Radius_BL = vec4(clip.rect.p0.x + r_bl.x,
+                                 clip.rect.p1.y - r_bl.y,
+                                 inverse_radii_squared(r_bl));
+#endif
 
     // We need to know the half-spaces of the corners separate from the center
     // and radius. We compute a point that falls on the diagonal (which is just
@@ -155,7 +200,10 @@ void pattern_vertex(PrimitiveInfo prim_info) {
     vClipPlane_B = vec4(tr.y, tr.z, br.x, br.y);
     vClipPlane_C = vec4(br.z, bl.x, bl.y, bl.z);
 
+#ifdef WR_FEATURE_SUPERELLIPSE
     vClipShape = clip.shape;
+    vClipClampedInset = min(clip.inset, 0.0);
+#endif
 #endif
 
 }
@@ -189,7 +237,9 @@ vec4 pattern_fragment(vec4 _base_color) {
     vec3 plane_bl = vec3(vClipPlane_C.y, vClipPlane_C.z, vClipPlane_C.w);
 
     float dist;
+#ifdef WR_FEATURE_SUPERELLIPSE
     if (vClipShape == vec4(1.0)) {
+#endif
         dist = distance_to_rounded_rect(
             clip_local_pos,
             plane_tl,
@@ -202,6 +252,7 @@ vec4 pattern_fragment(vec4 _base_color) {
             vClipCenter_Radius_BL,
             vTransformBounds
         );
+#ifdef WR_FEATURE_SUPERELLIPSE
     } else {
         dist = distance_to_shaped_rect(
             clip_local_pos,
@@ -210,9 +261,11 @@ vec4 pattern_fragment(vec4 _base_color) {
             vClipCenter_Radius_BR,
             vClipCenter_Radius_BL,
             vTransformBounds,
-            vClipShape
+            vClipShape,
+            vClipClampedInset
         );
     }
+#endif
 #endif
 
     // Compute AA for the given dist and range.
@@ -267,8 +320,26 @@ void swgl_drawSpanR8() {
     vec4 clip_dist =
         mix(clip_rect, clip_rect.zwxy, lessThan(local_step, vec2(0.0)).xyxy)
             - local_pos0.xyxy;
+
+    // Half-width, in local units, of the band around an edge over which
+    // distance_aa() produces partial coverage.
+    float aa_band = 0.5 * recip(aa_range);
+    // An axis the span does not step along has the same distance to its two
+    // edges for every pixel of the span, so the inside/outside test below
+    // cannot resolve an edge that runs parallel to the span and coverage ends
+    // up quantized to whole spans. Grow the rect by the AA band so that a span
+    // landing inside the band counts as inside, which leaves the corner
+    // selection below unchanged, and remember that the span is only partially
+    // covered so the opaque run can be dropped further down.
+    // `inset` is the distance from the span to the nearer of an axis' two
+    // edges, positive when the span is between them.
+    vec2 inset = min(-clip_dist.xy, clip_dist.zw);
+    bvec2 flat_axis = equal(local_step, vec2(0.0));
+    bvec2 partial = lessThan(inset, vec2(aa_band));
+    bool aa_span = (flat_axis.x && partial.x) || (flat_axis.y && partial.y);
+
     clip_dist =
-        mix(1.0e6 * step(0.0, clip_dist),
+        mix(1.0e6 * step(0.0, clip_dist - vec4(aa_band, aa_band, -aa_band, -aa_band)),
             clip_dist * recip(local_step).xyxy,
             notEqual(local_step, vec2(0.0)).xyxy);
 
@@ -323,9 +394,9 @@ void swgl_drawSpanR8() {
     #else
         // The span fast path only handles elliptical corners. For superellipse
         // shapes, bail out and let SWGL fall back to the fragment shader.
-        if (vClipShape != vec4(1.0)) {
+        #ifdef WR_FEATURE_SUPERELLIPSE
             return;
-        }
+        #endif
 
         // Unpack the corner half-spaces packed into vClipPlane_A/B/C.
         vec3 plane_tl = vec3(vClipPlane_A.x, vClipPlane_A.y, vClipPlane_A.z);
@@ -352,6 +423,12 @@ void swgl_drawSpanR8() {
     aa_margin = max(aa_margin - max(aa_start - aa_end, 0.0), 0.0);
     aa_start -= aa_margin;
     aa_end += aa_margin;
+
+    if (aa_span) {
+        // No pixel of the span is fully covered, so collapse the opaque run and
+        // let the anti-aliased runs on either side of it cover the whole span.
+        opaque_end = min(opaque_end, opaque_start);
+    }
 
     ivec4 steps = ivec4(clamp(
         swgl_SpanLength -

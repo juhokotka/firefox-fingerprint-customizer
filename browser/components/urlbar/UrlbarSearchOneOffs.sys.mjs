@@ -9,7 +9,6 @@ const lazy = XPCOMUtils.declareLazy({
   SearchService: "moz-src:///toolkit/components/search/SearchService.sys.mjs",
   UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
   UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
 });
 
 /**
@@ -238,14 +237,15 @@ export class UrlbarSearchOneOffs extends SearchOneOffs {
         // setSearchMode.
         searchMode.isPreview = false;
 
-        let newTab = this.input.window.gBrowser.addTrustedTab("about:newtab");
+        let newTab =
+          this.input.browserWindow.gBrowser.addTrustedTab("about:newtab");
         this.input.setSearchMode(searchMode, newTab.linkedBrowser);
         if (userTypedSearchString) {
           // Set the search string for the new tab.
           newTab.linkedBrowser.userTypedValue = this.input.value;
         }
         if (!params?.inBackground) {
-          this.input.window.gBrowser.selectedTab = newTab;
+          this.input.browserWindow.gBrowser.selectedTab = newTab;
           newTab.documentGlobal.gURLBar.startQuery(startQueryParams);
         }
         break;
@@ -286,7 +286,7 @@ export class UrlbarSearchOneOffs extends SearchOneOffs {
 
   /**
    * Overrides the willHide method in the superclass to account for the local
-   * search mode buttons.
+   * search mode buttons and the pref that disables the one-offs altogether.
    *
    * @returns {Promise<boolean>}
    *   True if we will hide the one-offs when they are requested.
@@ -295,8 +295,11 @@ export class UrlbarSearchOneOffs extends SearchOneOffs {
     // We need to call super.willHide() even when we return false below because
     // it has the necessary side effect of creating this._engineInfo.
     let superWillHide = await super.willHide();
+    if (lazy.UrlbarPrefs.getScotchBonnetPref("scotchBonnet.disableOneOffs")) {
+      return true;
+    }
     if (
-      lazy.UrlbarUtils.LOCAL_SEARCH_MODES.some(m =>
+      lazy.UrlbarShared.LOCAL_SEARCH_MODES.some(m =>
         lazy.UrlbarPrefs.get(m.pref)
       )
     ) {
@@ -313,12 +316,14 @@ export class UrlbarSearchOneOffs extends SearchOneOffs {
    *   that branch.
    */
   onPrefChanged(changedPref) {
-    // Invalidate the engine cache when the local-one-offs-related prefs change
+    // Invalidate the engine cache when the prefs that willHide() reads change
     // so that the one-offs rebuild themselves the next time the view opens.
     if (
-      [...lazy.UrlbarUtils.LOCAL_SEARCH_MODES.map(m => m.pref)].includes(
-        changedPref
-      )
+      [
+        ...lazy.UrlbarShared.LOCAL_SEARCH_MODES.map(m => m.pref),
+        "scotchBonnet.enableOverride",
+        "scotchBonnet.disableOneOffs",
+      ].includes(changedPref)
     ) {
       this.invalidateCache();
     }
@@ -341,12 +346,12 @@ export class UrlbarSearchOneOffs extends SearchOneOffs {
       history: "search-one-offs-history",
       tabs: "search-one-offs-tabs",
     };
-    for (let { source, pref, restrict } of lazy.UrlbarUtils
+    for (let { source, pref, restrict } of lazy.UrlbarShared
       .LOCAL_SEARCH_MODES) {
       if (!lazy.UrlbarPrefs.get(pref)) {
         continue;
       }
-      let name = lazy.UrlbarUtils.getResultSourceName(source);
+      let name = lazy.UrlbarShared.getResultSourceName(source);
       let button = this.document.createXULElement("button");
       button.id = `urlbar-engine-one-off-item-${name}`;
       button.setAttribute("class", "searchbar-engine-one-off-item");

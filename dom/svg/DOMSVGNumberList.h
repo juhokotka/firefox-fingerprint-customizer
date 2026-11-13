@@ -99,12 +99,12 @@ class DOMSVGNumberList final : public nsISupports, public nsWrapperCache {
 
   /**
    * This will normally be the same as InternalList().Length(), except if we've
-   * hit OOM in which case our length will be zero.
+   * hit OOM in which case our length will be zero or we've hit the maximum
+   * list length for the DOM list at some point in which case it may be smaller.
    */
   uint32_t LengthNoFlush() const {
-    MOZ_ASSERT(
-        mItems.Length() == 0 || mItems.Length() == InternalList().Length(),
-        "DOM wrapper's list length is out of sync");
+    MOZ_ASSERT(mItems.IsEmpty() || mItems.Length() <= InternalList().Length(),
+               "DOM wrapper's list length is out of sync");
     return mItems.Length();
   }
 
@@ -123,12 +123,6 @@ class DOMSVGNumberList final : public nsISupports, public nsWrapperCache {
     return mAList->mAnimVal && !mAList->IsAnimating();
   }
 
-  uint32_t NumberOfItems() const {
-    if (IsAnimValList()) {
-      Element()->FlushAnimations();
-    }
-    return LengthNoFlush();
-  }
   void Clear(ErrorResult& aRv);
   already_AddRefed<DOMSVGNumber> Initialize(DOMSVGNumber& aItem,
                                             ErrorResult& aRv);
@@ -145,7 +139,14 @@ class DOMSVGNumberList final : public nsISupports, public nsWrapperCache {
                                             ErrorResult& aRv) {
     return InsertItemBefore(newItem, LengthNoFlush(), aRv);
   }
-  uint32_t Length() const { return NumberOfItems(); }
+  void IndexedSetter(uint32_t aIndex, DOMSVGNumber& aNewValue,
+                     ErrorResult& aRv);
+  uint32_t Length() const {
+    if (IsAnimValList()) {
+      Element()->FlushAnimations();
+    }
+    return LengthNoFlush();
+  }
 
  private:
   dom::SVGElement* Element() const { return mAList->mElement; }
@@ -172,7 +173,7 @@ class DOMSVGNumberList final : public nsISupports, public nsWrapperCache {
   /// Returns the DOMSVGNumber at aIndex, creating it if necessary.
   already_AddRefed<DOMSVGNumber> GetItemAt(uint32_t aIndex);
 
-  void MaybeInsertNullInAnimValListAt(uint32_t aIndex);
+  bool MaybeInsertNullInAnimValListAt(uint32_t aIndex);
   void MaybeRemoveItemFromAnimValListAt(uint32_t aIndex);
 
   // Weak refs to our DOMSVGNumber items. The items are friends and take care

@@ -33,6 +33,7 @@
 #include "mozilla/SVGObserverUtils.h"
 #include "mozilla/SVGOuterSVGFrame.h"
 #include "mozilla/SVGTextFrame.h"
+#include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/StaticPrefs_svg.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/SVGClipPathElement.h"
@@ -406,6 +407,19 @@ SVGUtils::MaskUsage SVGUtils::DetermineMaskUsage(const nsIFrame* aFrame,
       if (clipPathFrame) {
         if (clipPathFrame->IsTrivial()) {
           usage.mShouldApplyClipPath = true;
+          // clipPathUnits="objectBoundingBox" resolves against the union of a
+          // fragmented box's fragments, which a single clip shape positioned
+          // relative to one fragment cannot describe.
+          const bool fragmented =
+              firstFrame != aFrame ||
+              nsLayoutUtils::GetNextContinuationOrIBSplitSibling(aFrame);
+          if (StaticPrefs::gfx_webrender_svg_simple_clips() &&
+              !usage.mShouldGenerateMaskLayer && !fragmented) {
+            CSSRect rect;
+            CSSSize radii;
+            usage.mIsSimpleClipShape = clipPathFrame->GetSimpleClipShape(
+                const_cast<nsIFrame*>(aFrame), &rect, &radii);
+          }
         } else {
           usage.mShouldGenerateClipMaskLayer = true;
         }
@@ -652,8 +666,7 @@ void SVGUtils::PaintFrameWithEffects(nsIFrame* aFrame, gfxContext& aContext,
     if (shouldPushMask) {
       // We want the mask to be untransformed so use the inverse of the
       // current transform as the maskTransform to compensate.
-      Matrix maskTransform = aContext.CurrentMatrix();
-      maskTransform.Invert();
+      Matrix maskTransform = aContext.CurrentMatrix().Inverse();
       target->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA,
                                     maskFrame ? 1.0f : maskUsage.Opacity(),
                                     maskSurface, maskTransform);
@@ -683,8 +696,8 @@ void SVGUtils::PaintFrameWithEffects(nsIFrame* aFrame, gfxContext& aContext,
     // pixels (SVG user space units). But PaintFilteredFrame expects it to be
     // scaled in such a way that its user space units are device pixels. So we
     // have to adjust the scale.
-    gfxMatrix reverseScaleMatrix = SVGUtils::GetCSSPxToDevPxMatrix(aFrame);
-    DebugOnly<bool> invertible = reverseScaleMatrix.Invert();
+    gfxMatrix reverseScaleMatrix =
+        SVGUtils::GetCSSPxToDevPxMatrix(aFrame).Inverse();
     target->SetMatrixDouble(reverseScaleMatrix * aTransform *
                             target->CurrentMatrixDouble());
 
@@ -763,8 +776,7 @@ bool SVGUtils::HitTestRect(const gfx::Matrix& aMatrix, float aRX, float aRY,
   if (rect.IsEmpty() || aMatrix.IsSingular()) {
     return false;
   }
-  gfx::Matrix toRectSpace = aMatrix;
-  toRectSpace.Invert();
+  gfx::Matrix toRectSpace = aMatrix.Inverse();
   gfx::Point p = toRectSpace.TransformPoint(gfx::Point(aX, aY));
   return rect.x <= p.x && p.x <= rect.XMost() && rect.y <= p.y &&
          p.y <= rect.YMost();
@@ -814,7 +826,8 @@ gfxRect SVGUtils::GetBBox(nsIFrame* aFrame, SVGBBoxFlags aFlags,
     aFrame = aFrame->GetParent();
   }
 
-  if (aFrame->IsInSVGTextSubtree()) {
+  if (aFrame->IsInSVGTextSubtree() &&
+      !aFlags.contains(SVGBBoxFlag::TextContentBounds)) {
     // It is possible to apply a gradient, pattern, clipping path, mask or
     // filter to text. When one of these facilities is applied to text
     // the bounding box is the entire text element in all cases.
@@ -824,10 +837,23 @@ gfxRect SVGUtils::GetBBox(nsIFrame* aFrame, SVGBBoxFlags aFlags,
 
   ISVGDisplayableFrame* svg = do_QueryFrame(aFrame);
   const bool hasSVGLayout = aFrame->HasAnyStateBits(NS_FRAME_SVG_LAYOUT);
-  if (hasSVGLayout && !svg) {
-    // An SVG frame, but not one that can be displayed directly (for
-    // example, nsGradientFrame). These can't contribute to the bbox.
-    return gfxRect();
+  if (!svg) {
+    if (hasSVGLayout) {
+      // An SVG frame, but not one that can be displayed directly (for
+      // example, nsGradientFrame). These can't contribute to the bbox.
+      return gfxRect();
+    }
+    if (aFrame->IsInSVGTextSubtree()) {
+      SVGTextFrame* text =
+          static_cast<SVGTextFrame*>(nsLayoutUtils::GetClosestFrameOfType(
+              aFrame->GetParent(), LayoutFrameType::SVGText));
+
+      if (text->HasAnyStateBits(NS_FRAME_IS_NONDISPLAY)) {
+        return gfxRect();
+      }
+
+      return ThebesRect(text->GetSubtreeBBox(aFrame, {}, aFlags));
+    }
   }
 
   const bool isOuterSVG = svg && !hasSVGLayout;
@@ -962,18 +988,16 @@ gfxRect SVGUtils::GetBBox(nsIFrame* aFrame, SVGBBoxFlags aFlags,
   return bbox;
 }
 
-gfxPoint SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(const nsIFrame* aFrame) {
+CSSPoint SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(const nsIFrame* aFrame) {
   if (!aFrame->HasAnyStateBits(NS_FRAME_SVG_LAYOUT)) {
     // The user space for non-SVG frames is defined as the bounding box of the
     // frame's border-box rects over all continuations.
-    return gfxPoint();
+    return {};
   }
 
   // Leaf frames apply their own offset inside their user space.
   if (FrameDoesNotIncludePositionInTM(aFrame)) {
-    return nsLayoutUtils::RectToGfxRect(aFrame->GetRect(),
-                                        AppUnitsPerCSSPixel())
-        .TopLeft();
+    return CSSRect::FromAppUnits(aFrame->GetRect()).TopLeft();
   }
 
   // For foreignObject frames, SVGUtils::GetBBox applies their local
@@ -983,10 +1007,11 @@ gfxPoint SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(const nsIFrame* aFrame) {
                               ->ChildToUserSpaceTransform();
     NS_ASSERTION(!transform.HasNonTranslation(),
                  "we're relying on this being an offset-only transform");
-    return transform.GetTranslation();
+    auto translation = transform.GetTranslation();
+    return CSSPoint(translation.x, translation.y);
   }
 
-  return gfxPoint();
+  return {};
 }
 
 static gfxRect GetBoundingBoxRelativeRect(const SVGAnimatedLength* aXYWH,
@@ -1071,23 +1096,25 @@ gfxMatrix SVGUtils::AdjustMatrixForUnits(const gfxMatrix& aMatrix,
   return aMatrix;
 }
 
-bool SVGUtils::GetNonScalingStrokeTransform(const nsIFrame* aFrame,
-                                            gfxMatrix* aUserToOuterSVG) {
+Maybe<gfxMatrix> SVGUtils::GetNonScalingStrokeTransform(
+    const nsIFrame* aFrame) {
   if (aFrame->GetContent()->IsText()) {
     aFrame = aFrame->GetParent();
   }
 
   if (!aFrame->StyleSVGReset()->HasNonScalingStroke()) {
-    return false;
+    return Nothing();
   }
 
   MOZ_ASSERT(aFrame->GetContent()->IsSVGElement(), "should be an SVG element");
 
   SVGElement* content = static_cast<SVGElement*>(aFrame->GetContent());
-  *aUserToOuterSVG =
+  gfxMatrix userToOuterSVG =
       ThebesMatrix(SVGContentUtils::GetNonScalingStrokeCTM(content));
 
-  return aUserToOuterSVG->HasNonTranslation() && !aUserToOuterSVG->IsSingular();
+  return userToOuterSVG.HasNonTranslation() && !userToOuterSVG.IsSingular()
+             ? Some(userToOuterSVG)
+             : Nothing();
 }
 
 void SVGUtils::UpdateNonScalingStrokeStateBit(nsIFrame* aFrame) {
@@ -1115,10 +1142,9 @@ static gfxRect PathExtentsToMaxStrokeExtents(const gfxRect& aPathExtents,
 
   gfxMatrix matrix = aMatrix;
 
-  gfxMatrix outerSVGToUser;
-  if (SVGUtils::GetNonScalingStrokeTransform(aFrame, &outerSVGToUser)) {
-    outerSVGToUser.Invert();
-    matrix.PreMultiply(outerSVGToUser);
+  if (Maybe<gfxMatrix> userToOuterSVG =
+          SVGUtils::GetNonScalingStrokeTransform(aFrame)) {
+    matrix.PreMultiply(userToOuterSVG->Inverse());
   }
 
   double dx = style_expansion * (std::abs(matrix._11) + std::abs(matrix._21));
@@ -1553,7 +1579,7 @@ gfxMatrix SVGUtils::GetTransformMatrixInUserSpace(const nsIFrame* aFrame) {
     trans = nsStyleTransformMatrix::ReadTransforms(
         properties.mTranslate, properties.mRotate, properties.mScale,
         properties.mMotion.ptrOr(nullptr), properties.mTransform, refBox,
-        AppUnitsPerCSSPixel(), aFrame->Style()->EffectiveZoom());
+        AppUnitsPerCSSPixel(), nsStyleTransformMatrix::Zoomed::Yes);
   }
 
   trans.ChangeBasis(svgTransformOrigin);

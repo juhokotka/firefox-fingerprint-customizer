@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- This Source Code Form is subject to the terms of the Mozilla Public
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Link text to learn more about downloading Gemini Nano -->
     <string name="mozac_summarize_learn_more_link">Learn more</string>
 
@@ -68,6 +68,9 @@
     <!-- Title for the error screen when page is too long to summarize -->
     <string name="mozac_summarize_content_too_long_error_title">Page too long to summarize</string>
 
+    <!-- Title for the error screen when the page content is behind a paywall -->
+    <string name="mozac_summarize_paywalled_content_error_title">Can’t summarize paywalled content</string>
+
     <!-- Title for the info error screen -->
     <string name="mozac_summarize_info_error_title">Can’t summarize right now</string>
 
@@ -125,6 +128,21 @@
     <!-- Disclaimer message -->
     <string name="mozac_feature_summarize_disclaimer_message">AI can make mistakes</string>
 
+    <!-- Content description for the thumbs up button used to rate a generated summary as helpful -->
+    <string name="mozac_feature_summarize_feedback_good_content_description">Good summary</string>
+
+    <!-- Accessibility label for the action of the thumbs up button. This will be interpolated into a longer message, equivalent to "Double tap to [rate summary as good]" in English. Structure and phrasing vary by target language: using an infinitive/dictionary form of the verb is recommended. -->
+    <string name="mozac_feature_summarize_feedback_good_click_label">rate summary as good</string>
+
+    <!-- Content description for the thumbs down button used to rate a generated summary as unhelpful -->
+    <string name="mozac_feature_summarize_feedback_bad_content_description">Bad summary</string>
+
+    <!-- Accessibility label for the action of the thumbs down button. This will be interpolated into a longer message, equivalent to "Double tap to [rate summary as bad]" in English. Structure and phrasing vary by target language: using an infinitive/dictionary form of the verb is recommended. -->
+    <string name="mozac_feature_summarize_feedback_bad_click_label">rate summary as bad</string>
+
+    <!-- Accessibility state of the thumbs up or thumbs down button the user picked, announced when the rating is submitted and whenever that button is focused afterwards. Buttons the user did not pick have no state. -->
+    <string name="mozac_feature_summarize_feedback_state_submitted">Rating submitted</string>
+
     <!-- Title for the page summary AI controllable feature -->
     <string name="mozac_ai_controls_page_summary_title">Page summaries</string>
 
@@ -133,4 +151,13 @@
 
     <!-- Button text for the Error dismiss button on Shake to Summarize -->
     <string name="mozac_summarize_error_dissmiss">Dismiss</string>
+
+    <!-- Title for the Mozilla account sign-in screen, shown when summarization results in a connection failure. -->
+    <string name="mozac_summarize_fxa_sign_in_title">Sign in to summarize</string>
+
+    <!-- Message on the sign-in screen, inviting the user to continue with an existing Mozilla account or create a new one -->
+    <string name="mozac_summarize_fxa_sign_in_message" tools:ignore="BrandUsage">Use your Mozilla account to continue or create one to get started.</string>
+
+    <!-- Label for the button that starts the sign-in flow -->
+    <string name="mozac_summarize_fxa_sign_in_button_positive">Sign in</string>
 </resources>

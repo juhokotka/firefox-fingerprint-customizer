@@ -4,8 +4,10 @@
 
 package mozilla.components.browser.errorpages
 
+import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import mozilla.components.browser.errorpages.ErrorPages.createUrlEncodedErrorPage
+import mozilla.components.concept.engine.request.ErrorType
 import mozilla.components.support.ktx.kotlin.urlEncode
 import mozilla.components.support.test.robolectric.testContext
 import org.junit.Assert.assertEquals
@@ -19,22 +21,24 @@ class ErrorPagesTest {
 
     @Test
     fun `createUrlEncodedErrorPage adds isPrivate query parameter`() {
-        val privatePage = createUrlEncodedErrorPage(
-            testContext,
-            ErrorType.ERROR_HTTPS_ONLY,
-            "https://localhost/",
-            isPrivate = true,
-        )
+        val privatePage =
+            createUrlEncodedErrorPage(
+                testContext,
+                ErrorType.ERROR_HTTPS_ONLY,
+                "https://localhost/",
+                isPrivate = true,
+            )
 
         assertFalse(privatePage.contains("isPrivate=false"))
         assertTrue(privatePage.contains("isPrivate=true"))
 
-        val nonPrivatePage = createUrlEncodedErrorPage(
-            testContext,
-            ErrorType.ERROR_HTTPS_ONLY,
-            "https://localhost/",
-            isPrivate = false,
-        )
+        val nonPrivatePage =
+            createUrlEncodedErrorPage(
+                testContext,
+                ErrorType.ERROR_HTTPS_ONLY,
+                "https://localhost/",
+                isPrivate = false,
+            )
 
         assertFalse(nonPrivatePage.contains("isPrivate=true"))
         assertTrue(nonPrivatePage.contains("isPrivate=false"))
@@ -48,6 +52,7 @@ class ErrorPagesTest {
         assertUrlEncodingIsValid(ErrorType.ERROR_NET_INTERRUPT)
         assertUrlEncodingIsValid(ErrorType.ERROR_NET_TIMEOUT)
         assertUrlEncodingIsValid(ErrorType.ERROR_CONNECTION_REFUSED)
+        assertUrlEncodingIsValid(ErrorType.ERROR_LOCAL_NETWORK_ACCESS_DENIED)
         assertUrlEncodingIsValid(ErrorType.ERROR_UNKNOWN_SOCKET_TYPE)
         assertUrlEncodingIsValid(ErrorType.ERROR_REDIRECT_LOOP)
         assertUrlEncodingIsValid(ErrorType.ERROR_OFFLINE)
@@ -75,31 +80,135 @@ class ErrorPagesTest {
 
     @Test
     fun `createUrlEncodedErrorPage allows overriding title and description`() {
-        val errorPage = createUrlEncodedErrorPage(
-            testContext,
-            ErrorType.ERROR_HTTPS_ONLY,
-            "https://localhost/",
-        )
+        val errorPage =
+            createUrlEncodedErrorPage(
+                testContext,
+                ErrorType.ERROR_HTTPS_ONLY,
+                "https://localhost/",
+            )
 
         assertFalse(errorPage.contains("radio"))
         assertFalse(errorPage.contains("spider"))
 
-        val customErrorPage = createUrlEncodedErrorPage(
-            testContext,
-            ErrorType.ERROR_HTTPS_ONLY,
-            "https://localhost/",
-            titleOverride = { errorType ->
-                assertEquals(ErrorType.ERROR_HTTPS_ONLY, errorType)
-                "radio"
-            },
-            descriptionOverride = { errorType ->
-                assertEquals(ErrorType.ERROR_HTTPS_ONLY, errorType)
-                "spider"
-            },
-        )
+        val customErrorPage =
+            createUrlEncodedErrorPage(
+                testContext,
+                ErrorType.ERROR_HTTPS_ONLY,
+                "https://localhost/",
+                errorStringsProvider =
+                    object : DefaultErrorStringsProvider() {
+                        override fun errorStringsFor(
+                            context: Context,
+                            errorType: ErrorType,
+                            uri: String?,
+                        ): ErrorStrings {
+                            assertEquals(ErrorType.ERROR_HTTPS_ONLY, errorType)
+                            return super.errorStringsFor(context, errorType, uri)
+                                .copy(title = "radio", message = "spider")
+                        }
+                    },
+            )
 
         assertTrue(customErrorPage.contains("radio"))
         assertTrue(customErrorPage.contains("spider"))
+    }
+
+    @Test
+    fun `archiveUrlFor strips user info, query and fragment but keeps the port for archivable error types`() {
+        assertEquals(
+            "https://example.com:81/path",
+            ErrorPages.archiveUrlFor(
+                ErrorType.ERROR_UNKNOWN_HOST,
+                "https://user:pass@example.com:81/path?session=abc#frag",
+            ),
+        )
+    }
+
+    @Test
+    fun `archiveUrlFor normalizes an empty path to a trailing slash`() {
+        assertEquals(
+            "https://example.com/",
+            ErrorPages.archiveUrlFor(ErrorType.ERROR_UNKNOWN_HOST, "https://example.com"),
+        )
+        assertEquals(
+            "https://example.com:81/",
+            ErrorPages.archiveUrlFor(ErrorType.ERROR_UNKNOWN_HOST, "https://example.com:81"),
+        )
+    }
+
+    @Test
+    fun `archiveUrlFor returns empty for security and connectivity error types`() {
+        val uri = "https://example.com/"
+        assertEquals("", ErrorPages.archiveUrlFor(ErrorType.ERROR_SECURITY_BAD_CERT, uri))
+        assertEquals("", ErrorPages.archiveUrlFor(ErrorType.ERROR_SECURITY_SSL, uri))
+        assertEquals("", ErrorPages.archiveUrlFor(ErrorType.ERROR_BAD_HSTS_CERT, uri))
+        assertEquals("", ErrorPages.archiveUrlFor(ErrorType.ERROR_HTTPS_ONLY, uri))
+        assertEquals("", ErrorPages.archiveUrlFor(ErrorType.ERROR_SAFEBROWSING_PHISHING_URI, uri))
+        assertEquals("", ErrorPages.archiveUrlFor(ErrorType.ERROR_NO_INTERNET, uri))
+        assertEquals("", ErrorPages.archiveUrlFor(ErrorType.ERROR_OFFLINE, uri))
+    }
+
+    @Test
+    fun `archiveUrlFor returns empty for non-http uris and null`() {
+        assertEquals("", ErrorPages.archiveUrlFor(ErrorType.ERROR_UNKNOWN_HOST, "ftp://example.com/"))
+        assertEquals("", ErrorPages.archiveUrlFor(ErrorType.ERROR_UNKNOWN_HOST, "about:blank"))
+        assertEquals("", ErrorPages.archiveUrlFor(ErrorType.ERROR_UNKNOWN_HOST, null))
+    }
+
+    @Test
+    fun `createUrlEncodedErrorPage includes archive params only for archivable error types when enabled`() {
+        val archivablePage =
+            createUrlEncodedErrorPage(
+                testContext,
+                ErrorType.ERROR_UNKNOWN_HOST,
+                "https://example.com/",
+                archiveActionEnabled = true,
+            )
+        assertTrue(archivablePage.contains("&archiveUrl=${"https://example.com/".urlEncode()}"))
+        assertTrue(archivablePage.contains("&archiveCheckButtonLabel="))
+        assertTrue(archivablePage.contains("&archiveDescriptionMessage="))
+        assertTrue(archivablePage.contains("&archiveDescriptionLinkLabel="))
+
+        val nonArchivablePage =
+            createUrlEncodedErrorPage(
+                testContext,
+                ErrorType.ERROR_SECURITY_BAD_CERT,
+                "https://example.com/",
+                archiveActionEnabled = true,
+            )
+        assertFalse(nonArchivablePage.contains("&archiveUrl="))
+        assertFalse(nonArchivablePage.contains("&archiveCheckButtonLabel="))
+    }
+
+    @Test
+    fun `createUrlEncodedErrorPage interpolates uri param when required`() {
+        listOf(
+                "https://example1.org",
+                "http://example2.com/", // Note trailing slash.
+            )
+            .forEach { uri ->
+                val page =
+                    createUrlEncodedErrorPage(
+                        testContext,
+                        ErrorType.ERROR_BAD_HSTS_CERT,
+                        uri,
+                    )
+                assertTrue("generated page contains '${uri}' (encoded)", page.contains(uri.urlEncode()))
+                assertFalse("generated page does not contain uninterpolated strings", page.contains("\$s"))
+            }
+    }
+
+    @Test
+    fun `createUrlEncodedErrorPage omits archive params when the action is disabled`() {
+        val page =
+            createUrlEncodedErrorPage(
+                testContext,
+                ErrorType.ERROR_UNKNOWN_HOST,
+                "https://example.com/",
+                archiveActionEnabled = false,
+            )
+        assertFalse(page.contains("&archiveUrl="))
+        assertFalse(page.contains("&archiveCheckButtonLabel="))
     }
 
     private fun assertUrlEncodingIsValid(errorType: ErrorType) {
@@ -107,23 +216,26 @@ class ErrorPagesTest {
 
         val uri = "sampleUri"
 
-        val errorPage = createUrlEncodedErrorPage(
-            testContext,
-            errorType,
-            uri,
-            htmlFilename,
-        )
+        val errorPage =
+            createUrlEncodedErrorPage(
+                testContext,
+                errorType,
+                uri,
+                htmlFilename,
+            )
 
-        val expectedImageName = if (errorType.imageNameRes != null) {
-            testContext.resources.getString(errorType.imageNameRes) + ".svg"
-        } else {
-            ""
-        }
+        val errorStrings = DefaultErrorStringsProvider().errorStringsFor(testContext, errorType, uri)
+        val expectedImageName =
+            if (errorStrings.imageName != null) {
+                errorStrings.imageName + ".svg"
+            } else {
+                ""
+            }
 
         assertTrue(errorPage.startsWith("resource://android/assets/$htmlFilename"))
-        assertTrue(errorPage.contains("&button=${testContext.resources.getString(errorType.refreshButtonRes).urlEncode()}"))
+        assertTrue(errorPage.contains("&button=${errorStrings.refreshButton.urlEncode()}"))
 
-        val description = testContext.resources.getString(errorType.messageRes, uri).replace("<ul>", "<ul role=\"presentation\">")
+        val description = errorStrings.message.replace("<ul>", "<ul role=\"presentation\">")
 
         assertTrue(errorPage.contains("&description=${description.urlEncode()}"))
         assertTrue(errorPage.contains("&image=$expectedImageName"))

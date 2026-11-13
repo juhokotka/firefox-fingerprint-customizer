@@ -2,14 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsString.h"
-#include "nsReadableUtils.h"
 #include "UTFStrings.h"
+#include "gtest/gtest.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/Utf16.h"
 #include "nsHashKeys.h"
-
-#include "gtest/gtest.h"
+#include "nsReadableUtils.h"
+#include "nsString.h"
 
 using namespace mozilla;
 

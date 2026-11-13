@@ -4,12 +4,11 @@
 #ifndef include_gfx_ipc_UiCompositorControllerChild_h
 #define include_gfx_ipc_UiCompositorControllerChild_h
 
-#include "mozilla/layers/PUiCompositorControllerChild.h"
-
-#include "mozilla/gfx/2D.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/layers/UiCompositorControllerParent.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/layers/PUiCompositorControllerChild.h"
+#include "mozilla/layers/UiCompositorControllerParent.h"
 #include "nsThread.h"
 #ifdef MOZ_WIDGET_ANDROID
 #  include "SurfaceTexture.h"
@@ -41,7 +40,6 @@ class UiCompositorControllerChild final
   bool ResumeAndResize(const int32_t& aX, const int32_t& aY,
                        const int32_t& aHeight, const int32_t& aWidth);
   bool InvalidateAndRender();
-  bool SetMaxToolbarHeight(const int32_t& aHeight);
   bool SetFixedBottomOffset(int32_t aOffset);
   bool ToolbarAnimatorMessageFromUI(const int32_t& aMessage);
   bool SetDefaultClearColor(const uint32_t& aColor);
@@ -81,8 +79,8 @@ class UiCompositorControllerChild final
   void HandleFatalError(const char* aMsg) override;
   mozilla::ipc::IPCResult RecvToolbarAnimatorMessageFromCompositor(
       const int32_t& aMessage);
-  mozilla::ipc::IPCResult RecvNotifyCompositorScrollUpdate(
-      const CompositorScrollUpdate& aUpdate);
+  mozilla::ipc::IPCResult RecvNotifyCompositorScrollUpdates(
+      const nsTArray<mozilla::layers::CompositorScrollUpdate>& aUpdates);
   mozilla::ipc::IPCResult RecvScreenPixels(
       uint64_t aRequestId, bool aSuccess,
       Maybe<ipc::FileDescriptor>&& aAcquireFence);
@@ -101,7 +99,6 @@ class UiCompositorControllerChild final
   bool mIsOpen;
   uint64_t mProcessToken;
   Maybe<gfx::IntRect> mResize;
-  Maybe<int32_t> mMaxToolbarHeight;
   Maybe<uint32_t> mDefaultClearColor;
   Maybe<bool> mLayerUpdateEnabled;
   RefPtr<nsIWidget> mWidget;

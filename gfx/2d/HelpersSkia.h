@@ -5,7 +5,12 @@
 #ifndef MOZILLA_GFX_HELPERSSKIA_H_
 #define MOZILLA_GFX_HELPERSSKIA_H_
 
+#include <cmath>
+#include <vector>
+
 #include "2D.h"
+#include "mozilla/Assertions.h"
+#include "nsDebug.h"
 #include "skia/include/core/SkCanvas.h"
 #include "skia/include/core/SkFontTypes.h"
 #include "skia/include/core/SkPathEffect.h"
@@ -13,10 +18,6 @@
 #include "skia/include/core/SkShader.h"
 #include "skia/include/core/SkTileMode.h"
 #include "skia/include/effects/SkDashPathEffect.h"
-#include "mozilla/Assertions.h"
-#include <cmath>
-#include <vector>
-#include "nsDebug.h"
 
 namespace mozilla {
 namespace gfx {
@@ -92,6 +93,13 @@ static inline void GfxMatrixToSkiaMatrix(const Matrix4x4& aMatrix,
                  SkFloatToScalar(aMatrix._22), SkFloatToScalar(aMatrix._42),
                  SkFloatToScalar(aMatrix._14), SkFloatToScalar(aMatrix._24),
                  SkFloatToScalar(aMatrix._44));
+}
+
+static inline Matrix4x4 SkiaMatrixToGfxMatrix(const SkMatrix& aMatrix) {
+  return Matrix4x4(aMatrix.getScaleX(), aMatrix.getSkewY(), 0,
+                   aMatrix.getPerspX(), aMatrix.getSkewX(), aMatrix.getScaleY(),
+                   0, aMatrix.getPerspY(), 0, 0, 1, 0, aMatrix.getTranslateX(),
+                   aMatrix.getTranslateY(), 0, aMatrix[SkMatrix::kMPersp2]);
 }
 
 static inline SkPaint::Cap CapStyleToSkiaCap(CapStyle aCap) {
@@ -339,18 +347,11 @@ static inline FillRule GetFillRule(SkPathFillType aFillType) {
  * Returns true if the canvas is backed by pixels.  Returns false if the canvas
  * wraps an SkPDFDocument, for example.
  *
- * Note: It is not clear whether the test used to implement this function may
- * result in it returning false in some circumstances even when the canvas
- * _is_ pixel backed.  In other words maybe it is possible for such a canvas to
- * have kUnknown_SkPixelGeometry?
+ * SkBitmapDevice has a valid SkColorType. SkPDFDevice is always
+ * kUnknown_SkColorType.
  */
 static inline bool IsBackedByPixels(const SkCanvas* aCanvas) {
-  SkSurfaceProps props(0, kUnknown_SkPixelGeometry);
-  if (!aCanvas->getProps(&props) ||
-      props.pixelGeometry() == kUnknown_SkPixelGeometry) {
-    return false;
-  }
-  return true;
+  return aCanvas->imageInfo().colorType() != kUnknown_SkColorType;
 }
 
 /**

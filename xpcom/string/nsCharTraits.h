@@ -7,6 +7,7 @@
 
 #include <stdint.h>  // for |uint32_t|
 #include <string.h>  // for |memcpy|, et al
+
 #include "mozilla/MemoryChecking.h"
 
 // This file may be used (through nsUTF8Utils.h) from non-XPCOM code, in
@@ -214,7 +215,7 @@ struct nsCharTraits<char16_t> {
       ++aStr;
     }
 
-    return 0;
+    return nullptr;
   }
 };
 

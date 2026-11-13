@@ -7,6 +7,10 @@
    Android from loading the app image. #}
 {% set tag = "_disable_art_image_" %}
 
+{# Some HyperOS memory cleaner paths exclude processes named :sandboxed_*.
+   See bug 2079728. #}
+{% set sandbox_tag = "sandboxed_" %}
+
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"
           package="org.mozilla.geckoview">
     <application
@@ -33,6 +37,13 @@
                 android:exported="false"
                 android:isolatedProcess="false"
                 android:process=":gmplugin{{ tag }}">
+        </service>
+        <service
+                android:name="org.mozilla.gecko.process.GeckoChildProcessServices$isolatedGmplugin"
+                android:enabled="true"
+                android:exported="false"
+                android:isolatedProcess="true"
+                android:process=":isolatedGmplugin{{ tag }}">
         </service>
         <service
                 android:name="org.mozilla.gecko.process.GeckoChildProcessServices$socket"
@@ -75,7 +86,7 @@
                 android:enabled="true"
                 android:exported="false"
                 android:isolatedProcess="false"
-                android:process=":tab{{ tag }}{{ id }}">
+                android:process=":{{ sandbox_tag }}tab{{ tag }}{{ id }}">
         </service>
         <service
                 android:name="org.mozilla.gecko.process.GeckoChildProcessServices$isolatedTab{{ id }}"
@@ -93,5 +104,17 @@
                 android:useAppZygote="true"
                 android:process=":zygoteTab{{ tag }}">
         </service>
+        <!-- Serves the bytes Firefox put on the system clipboard via URI-
+             backed ClipData items. Its primary consumer is the W3C Async
+             Clipboard API web custom format protocol, but the provider
+             itself is MIME-agnostic. Exported so other Android apps
+             (Chrome, etc.) can read the data Firefox copied. -->
+        <provider
+                android:name="org.mozilla.gecko.GeckoClipboardContentProvider"
+                android:authorities="${applicationId}.clipboard"
+                android:exported="false"
+                android:grantUriPermissions="true"
+                tools:ignore="ExportedContentProvider">
+        </provider>
     </application>
 </manifest>

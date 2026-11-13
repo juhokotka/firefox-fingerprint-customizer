@@ -2,13 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use bzip2::read::BzDecoder;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tar::Archive;
 use xz::read::XzDecoder;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use log::info;
 
 /// Represents a certificate in an updater binary that should be replaced
@@ -54,10 +55,29 @@ pub(crate) fn prepare_updater(
 }
 
 fn unpack_updater(pkg: &Path, product: &str, output_dir: &Path) -> Result<PathBuf> {
-    let compressed = File::open(pkg)?;
-    let tar = XzDecoder::new(compressed);
-    let mut archive = Archive::new(tar);
-    archive.unpack(output_dir)?;
+    let mut file = File::open(pkg).context(format!("couldn't open package: {}", pkg.display()))?;
+    let mut magic = [0u8; 6];
+    file.read(&mut magic)
+        .context(format!("couldn't read from package: {}", pkg.display()))?;
+    file.seek(SeekFrom::Start(0)).context(format!(
+        "couldn't seek to start of package: {}",
+        pkg.display()
+    ))?;
+
+    let decoder: Box<dyn Read> = if magic.starts_with(&[0xfd, b'7', b'z', b'X', b'Z', 0x00]) {
+        Box::new(XzDecoder::new(file))
+    } else if magic.starts_with(b"BZh") {
+        Box::new(BzDecoder::new(file))
+    } else {
+        bail!("Unknown archive format: {}", pkg.display());
+    };
+
+    let mut archive = Archive::new(decoder);
+    archive.unpack(output_dir).context(format!(
+        "couldn't unpack pkg {} into dir {}",
+        pkg.display(),
+        output_dir.display()
+    ))?;
     let mut updater_binary = output_dir.to_path_buf();
     updater_binary.push(product);
     updater_binary.push("updater");
@@ -67,15 +87,21 @@ fn unpack_updater(pkg: &Path, product: &str, output_dir: &Path) -> Result<PathBu
     if !updater_binary.exists() {
         bail!("updater binary doesn't exist at {updater_path}");
     }
-    return Ok(updater_binary);
+    Ok(updater_binary)
 }
 
 fn replace_certs(cert_dir: &Path, updater: &Path, overrides: &[CertOverride]) -> Result<()> {
     // read the entire updater into memory; we need to do this to find cert
     // offsets further down
     let mut updater_bytes = Vec::new();
-    let mut updater_file = OpenOptions::new().read(true).write(true).open(updater)?;
-    updater_file.read_to_end(&mut updater_bytes)?;
+    let mut updater_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(updater)
+        .context(format!("couldn't open updater: {}", updater.display()))?;
+    updater_file
+        .read_to_end(&mut updater_bytes)
+        .context(format!("couldn't read updater: {}", updater.display()))?;
 
     let updater_str = updater.to_str().unwrap_or("updater");
 
@@ -97,8 +123,12 @@ fn replace_certs(cert_dir: &Path, updater: &Path, overrides: &[CertOverride]) ->
         // seek to the start of the `orig` cert and replace it with `replacement`
         // this relies on the fact that the certs are the same length, which is
         // checked at start-up.
-        updater_file.seek(SeekFrom::Start(offset as u64))?;
-        updater_file.write_all(&after_bytes)?;
+        updater_file
+            .seek(SeekFrom::Start(offset as u64))
+            .context(format!("couldn't seek in updater: {}", updater.display()))?;
+        updater_file
+            .write_all(&after_bytes)
+            .context(format!("couldn't write to updater: {}", updater.display()))?;
 
         info!(
             "Replaced {} with {} in {}",
@@ -112,7 +142,10 @@ fn replace_certs(cert_dir: &Path, updater: &Path, overrides: &[CertOverride]) ->
 fn read_cert(cert_dir: &Path, cert_name: &str) -> Result<Vec<u8>> {
     let cert_path = cert_dir.join(cert_name);
     let mut cert_bytes = Vec::new();
-    File::open(cert_path)?.read_to_end(&mut cert_bytes)?;
+    File::open(&cert_path)
+        .context(format!("couldn't open cert: {}", cert_path.display()))?
+        .read_to_end(&mut cert_bytes)
+        .context(format!("couldn't read cert: {}", cert_name))?;
     return Ok(cert_bytes);
 }
 
@@ -128,6 +161,27 @@ mod tests {
 
     fn fixture(item: &Path) -> PathBuf {
         return fixture_dir().join(item);
+    }
+
+    fn make_tar_bz2(product: &str, output: &std::path::Path) {
+        use bzip2::write::BzEncoder;
+        use bzip2::Compression;
+        use tar::Header;
+
+        let file = File::create(output).unwrap();
+        let enc = BzEncoder::new(file, Compression::default());
+        let mut builder = tar::Builder::new(enc);
+
+        let content = b"#!/bin/sh\n";
+        let mut header = Header::new_gnu();
+        header.set_path(format!("{product}/updater")).unwrap();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o755);
+        header.set_cksum();
+        builder.append(&header, &content[..]).unwrap();
+
+        let enc = builder.into_inner().unwrap();
+        enc.finish().unwrap();
     }
 
     fn make_tar_xz(product: &str, output: &std::path::Path) {
@@ -197,6 +251,32 @@ mod tests {
         let builder = tar::Builder::new(enc);
         let enc = builder.into_inner().unwrap();
         enc.finish().unwrap();
+
+        let result = unpack_updater(&archive, "firefox", &output_dir);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn unpack_updater_success_bz2() {
+        let tmpdir = TempDir::with_prefix("marannon_updater_test").unwrap();
+        let archive = tmpdir.path().join("test.tar.bz2");
+        let output_dir = tmpdir.path().join("output");
+        std::fs::create_dir(&output_dir).unwrap();
+
+        make_tar_bz2("firefox", &archive);
+
+        let result = unpack_updater(&archive, "firefox", &output_dir);
+        assert!(result.is_ok());
+        assert!(std::path::Path::new(&result.unwrap()).exists());
+    }
+
+    #[test]
+    fn unpack_updater_unknown_format() {
+        let tmpdir = TempDir::with_prefix("marannon_updater_test").unwrap();
+        let archive = tmpdir.path().join("test.garbage");
+        let output_dir = tmpdir.path().join("output");
+        std::fs::create_dir(&output_dir).unwrap();
+        std::fs::write(&archive, b"this is not a valid archive").unwrap();
 
         let result = unpack_updater(&archive, "firefox", &output_dir);
         assert!(result.is_err());

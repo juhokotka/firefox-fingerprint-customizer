@@ -5,6 +5,8 @@
 #ifndef V8_REGEXP_REGEXP_NODES_H_
 #define V8_REGEXP_REGEXP_NODES_H_
 
+#include <optional>
+
 #include "irregexp/imported/regexp-macro-assembler.h"
 
 namespace v8 {
@@ -13,6 +15,7 @@ namespace regexp {
 
 class AlternativeGenerationList;
 class BoyerMooreLookahead;
+class Capture;
 class Compiler;
 class NegativeSubmatchSuccess;
 template <typename T>
@@ -131,7 +134,7 @@ struct EatsAtLeastInfo final {
   uint8_t from_not_start;
 };
 
-class EmitResult final {
+class V8_NODISCARD EmitResult final {
  public:
   static EmitResult Success() { return EmitResult(kSuccess); }
   static EmitResult Error() { return EmitResult(kError); }
@@ -148,10 +151,144 @@ class EmitResult final {
 #define RETURN_IF_ERROR(stmt) \
   if (EmitResult r = (stmt); V8_UNLIKELY(r.IsError())) return r
 
+// Terminology shared by the three drain-optimization enums below (DrainMode,
+// AtomicLoopKind, ParkedGrant).
+//
+// Greedy loop: a `*` or `+` quantifier that grabs as many characters as it can
+//   up front.  The position it stops at, after consuming that maximal run, is
+//   the loop's "greedy extent".
+//
+// Continuation: whatever the pattern requires after the greedy loop.
+//
+// Drain (drain epilogue): the machinery that runs when the continuation fails.
+//   The loop hands back one iteration at a time, retrying the continuation at
+//   each earlier iteration boundary, and finally restores the position to the
+//   loop entry.  One walk-back over a run of length n is O(n); the cost matters
+//   because the enclosing search loop repeats it at every start position, so a
+//   run the search keeps re-scanning turns the whole match O(n^2).  The
+//   optimizations here prove parts of the drain can never succeed and skip
+//   them.
+//
+// Loop-exit backtrack: the backtrack the loop takes once the drain is
+//   exhausted -- every retry has failed and it unwinds out of the loop.  Its
+//   destination, the "loop-exit backtrack target", is trace->backtrack() (a
+//   sibling alternative, or the outer backtrack handler).  It is distinct from
+//   the interior backtracks the drain itself takes to retry the continuation at
+//   an earlier position (those target the loop body, not trace->backtrack()).
+//   A match never backtracks, so the loop-exit backtrack is always a failure.
+//
+// Parked position: normally a failed attempt must rewind the input position to
+//   where it started.  "Parking" instead leaves it at the greedy extent -- but
+//   only when the loop-exit backtrack target does not care where the position
+//   is (it rescans forward from wherever it lands, or simply fails).  A
+//   ParkedGrant on the trace records that this is allowed.
+//
+// Implicit search loop: an unanchored, non-sticky pattern like /\s+$/ must be
+//   tried at every start position.  V8 implements this by wrapping the whole
+//   pattern in an outer loop that either matches here or advances one character
+//   and retries (a prepended `.*?`; see the search-loop LoopChoiceNode).  This
+//   loop is not written by the user, hence "implicit"; the parking below is
+//   what stops it re-scanning characters an inner loop already consumed.
+//
+// Prefix (only relevant inside that implicit search loop): the fixed run of
+//   characters the trace still must consume on its way to the trailing inner
+//   loop it is about to enter.  For example the body of the search loop for
+//   /\s+$/ is `\s+`, which compiles to `\s\s*`, so the mandatory leading `\s`
+//   is the prefix and `\s*` is the trailing loop.  A "uniform" prefix draws
+//   only from that trailing loop's own character source (its class or literal
+//   character), so restarting the match partway into the prefix cannot behave
+//   any differently.
+
+// How much of the drain epilogue ChoiceNode::EmitFixedLengthLoop emits for a
+// fixed-length greedy loop.  The drain does two independent jobs: it retries
+// the continuation at each earlier iteration boundary, and it restores the
+// input position to the loop entry once fully unwound.
+//
+// kRetryAtEntry and kRestoreOnly reach the loop-exit backtrack in the same
+// state a fully-unwound kFull drain would (position restored to the loop
+// entry), so they are valid regardless of the exit target; only kOmit needs a
+// grant.  See ChooseFixedLengthLoopDrainMode for which mode each loop kind
+// gets.
+enum class DrainMode : uint8_t {
+  // Emit the standard char-by-char drain (retries and restore).
+  kFull,
+  // Interior retries are provably futile but the entry retry is not
+  // (AtomicLoopKind::kBoundary): on continuation failure, restore straight
+  // to the entry marker for a single retry there.
+  kRetryAtEntry,
+  // Every retry is futile, entry included (AtomicLoopKind::kDisjoint); only
+  // the drain's restore job remains: on continuation failure, restore to
+  // the entry marker and take the loop-exit backtrack.
+  kRestoreOnly,
+  // Every retry is futile and the loop-exit backtrack target tolerates the
+  // parked position (see Trace::parked_grant): skip the marker and the entire
+  // epilogue; continuation failure dispatches directly to the outer
+  // backtrack handler.
+  kOmit,
+};
+
+// Classification of `<fixed-length-loop><retreat-insensitive-continuation>`
+// shapes, used by Trace::Flush to skip the per-flush saved-position frame
+// and by ChoiceNode::Emit to reduce or omit the drain epilogue (see
+// DrainMode).  Computed and cached by LoopChoiceNode::atomic_loop_kind.
+enum class AtomicLoopKind : uint8_t {
+  kNone,
+  kAtEnd,     // Continuation is AT_END + ACCEPT; every retry futile.
+  kTotal,     // Continuation always succeeds at the greedy extent (a
+              // nullable-to-ACCEPT chain, e.g. the trailing `;?` of /\w+;?/ or
+              // the `\D*` continuation of the `\d*` loop in /(\d*)(\D*)/), so
+              // the continuation never fails and the drain is 100% dead.
+              // Strictly stronger than kAtEnd (which can fail off the end);
+              // gated identically.
+  kBoundary,  // Continuation starts with \b over a word-character body;
+              // interior retries futile, the entry retry only with a word
+              // character proven immediately before the entry.
+  kDisjoint,  // Continuation's first character set is disjoint from the
+              // body's; every retry futile.
+};
+
+// What a drain-omitted atomic loop's (see AtomicLoopKind) loop-exit backtrack
+// target is known to tolerate.  Carried on the Trace; see Trace::parked_grant
+// for the full contract.
+//
+// The levels are ordered from weakest to strongest permission: each one keeps
+// the previous guarantee and proves one more thing, so a stronger grant lets
+// more of the drain be omitted.  A gate accepts any level at or above the one
+// it needs.
+enum class ParkedGrant : uint8_t {
+  // No permission: the exit target treats the current position as the failed
+  // attempt's start, so the loop-exit backtrack must restore it.
+  kNone,
+  // The exit target tolerates any position -- it is the implicit search loop's
+  // advance-and-retry alternative, which rescans forward or fails -- so the
+  // loop may leave the position parked at the greedy extent.  Valid only with
+  // no pending prefix advance (cp_offset == 0), i.e. a bare `*` trailing loop:
+  // parking otherwise also skips restoring a mandatory prefix, and restart
+  // positions inside that prefix are ones this grant cannot prove futile
+  // (kParkedUniformPrefix can).
+  kParked,
+  // As kParked, but also valid with a mandatory prefix before the trailing loop
+  // -- notably a `+` loop like /\s+$/, whose leading `\s` would otherwise force
+  // the O(n^2) restore.  Sound because the prefix is uniform (see terminology):
+  // a restart skipped inside the run re-runs it and fails at the same
+  // character, and a restart on the run's terminator fails the prefix outright.
+  // See LoopChoiceNode::ComputeSearchBodyParkedGrant.
+  kParkedUniformPrefix,
+  // As kParkedUniformPrefix, and the prefix's last character has actually been
+  // consumed just before the loop entry (Trace::Flush materialized the pending
+  // advance).  The character left of the entry is then a known body-source
+  // character; when the body is word characters (AtomicLoopKind::kBoundary),
+  // that lets a trailing `\b` prove its own entry retry futile too -- unlocking
+  // kOmit for /\w+\b/-shaped loops.  See ChooseFixedLengthLoopDrainMode's
+  // kBoundary case.
+  kParkedNonEmptyUniformPrefix,
+};
+
 class V8_EXPORT_PRIVATE Node : public ZoneObject {
  public:
-  explicit Node(Zone* zone)
+  explicit Node(Flags flags, Zone* zone)
       : replacement_(nullptr),
+        flags_(flags),
         on_work_list_(false),
         trace_count_(0),
         zone_(zone) {
@@ -257,22 +394,24 @@ class V8_EXPORT_PRIVATE Node : public ZoneObject {
   virtual SeqNode* AsSeqNode() { return nullptr; }
 
   Zone* zone() const { return zone_; }
+  Flags flags() const { return flags_; }
 
   virtual bool IsBacktrack() const { return false; }
 
  protected:
-  enum LimitResult { DONE, CONTINUE };
+  enum LimitResult { DONE, CONTINUE, FAILED };
   Node* replacement_;
 
   LimitResult LimitVersions(Compiler* compiler, Trace* trace);
 
-  void set_bm_info(bool not_at_start, BoyerMooreLookahead* bm) {
-    bm_info_[not_at_start ? 1 : 0] = bm;
-  }
+  // Caches |bm| as this node's own lookahead, unless |bm| is a transient probe
+  // that opted out of caching (see BoyerMooreLookahead::caches_node_info).
+  void set_bm_info(bool not_at_start, BoyerMooreLookahead* bm);
 
  private:
   static const int kFirstCharBudget = 10;
   Label label_;
+  Flags flags_;
   bool on_work_list_;
   NodeInfo info_;
 
@@ -293,8 +432,8 @@ class V8_EXPORT_PRIVATE Node : public ZoneObject {
 
 class V8_EXPORT_PRIVATE SeqNode : public Node {
  public:
-  explicit SeqNode(Node* on_success)
-      : Node(on_success->zone()), on_success_(on_success) {}
+  SeqNode(Node* on_success, Flags flags)
+      : Node(flags, on_success->zone()), on_success_(on_success) {}
   Node* on_success() const { return on_success_; }
   void set_on_success(Node* node) { on_success_ = node; }
   void FillInBMInfo(Isolate* isolate, int offset, int budget,
@@ -320,29 +459,33 @@ class ActionNode : public SeqNode {
     POSITIVE_SUBMATCH_SUCCESS,
     EMPTY_MATCH_CHECK,
     CLEAR_CAPTURES,
-    MODIFY_FLAGS,
     EATS_AT_LEAST,
   };
-  static ActionNode* SetRegisterForLoop(int reg, int val, Node* on_success);
-  static ActionNode* IncrementRegister(int reg, Node* on_success);
-  static ActionNode* StorePosition(int reg, Node* on_success);
-  static ActionNode* RestorePosition(int reg, Node* on_success);
-  static ActionNode* ClearCaptures(Interval range, Node* on_success);
+  static ActionNode* SetRegisterForLoop(int reg, int val, Node* on_success,
+                                        Flags flags);
+  static ActionNode* IncrementRegister(int reg, Node* on_success, Flags flags);
+  static ActionNode* StorePosition(int reg, Node* on_success, Flags flags,
+                                   const Capture* capture);
+  static ActionNode* RestorePosition(int reg, Node* on_success, Flags flags);
+  static ActionNode* ClearCaptures(Interval range, Node* on_success,
+                                   Flags flags);
   static ActionNode* BeginPositiveSubmatch(int stack_pointer_reg,
                                            int position_reg, Node* body,
-                                           ActionNode* success_node);
+                                           ActionNode* success_node,
+                                           Flags flags);
   static ActionNode* BeginNegativeSubmatch(int stack_pointer_reg,
-                                           int position_reg, Node* on_success);
+                                           int position_reg, Node* on_success,
+                                           Flags flags);
   static ActionNode* PositiveSubmatchSuccess(int stack_pointer_reg,
                                              int restore_reg,
                                              int clear_capture_count,
                                              int clear_capture_from,
-                                             Node* on_success);
+                                             Node* on_success, Flags flags);
   static ActionNode* EmptyMatchCheck(int start_register,
                                      int repetition_register,
-                                     int repetition_limit, Node* on_success);
-  static ActionNode* ModifyFlags(Flags flags, Node* on_success);
-  static ActionNode* EatsAtLeast(int characters, Node* on_success);
+                                     int repetition_limit, Node* on_success,
+                                     Flags flags);
+  static ActionNode* EatsAtLeast(int characters, Node* on_success, Flags flags);
   ActionNode* AsActionNode() override { return this; }
   void Accept(NodeVisitor* visitor) override;
   V8_WARN_UNUSED_RESULT EmitResult Emit(Compiler* compiler,
@@ -353,13 +496,10 @@ class ActionNode : public SeqNode {
   void FillInBMInfo(Isolate* isolate, int offset, int budget,
                     BoyerMooreLookahead* bm, bool not_at_start) override;
   ActionType action_type() const { return action_type_; }
+  bool stores_backreferenced_capture() const;
   // TODO(erikcorry): We should allow some action nodes in fixed length loops.
   int FixedLengthLoopLength() override {
     return kNodeIsTooComplexForFixedLengthLoops;
-  }
-  Flags flags() const {
-    DCHECK_EQ(action_type(), MODIFY_FLAGS);
-    return Flags{data_.u_modify_flags.flags};
   }
   ActionNode* success_node() const {
     DCHECK_EQ(action_type(), BEGIN_POSITIVE_SUBMATCH);
@@ -387,6 +527,15 @@ class ActionNode : public SeqNode {
            action_type() == CLEAR_CAPTURES;
   }
 
+  // Register/capture updates only: no input consumed, no repositioning, no
+  // flag changes.
+  bool IsRegisterOnlyAction() const {
+    return action_type() == EATS_AT_LEAST || action_type() == STORE_POSITION ||
+           action_type() == INCREMENT_REGISTER ||
+           action_type() == SET_REGISTER_FOR_LOOP ||
+           action_type() == CLEAR_CAPTURES;
+  }
+
   int register_from() const {
     DCHECK(IsSimpleAction());
     return data_.u_simple.register_from;
@@ -395,12 +544,12 @@ class ActionNode : public SeqNode {
   int register_to() const { return data_.u_simple.register_to; }
 
  protected:
-  ActionNode(ActionType action_type, Node* on_success)
-      : SeqNode(on_success), action_type_(action_type) {}
+  ActionNode(ActionType action_type, Node* on_success, Flags flags)
+      : SeqNode(on_success, flags), action_type_(action_type) {}
 
-  ActionNode(ActionType action_type, Node* on_success, int from, int to = -1,
-             int value = 0)
-      : SeqNode(on_success), action_type_(action_type) {
+  ActionNode(ActionType action_type, Node* on_success, Flags flags, int from,
+             int to = -1, int value = 0)
+      : SeqNode(on_success, flags), action_type_(action_type) {
     data_.u_simple.register_from = from;
     data_.u_simple.register_to = to == -1 ? from : to;
     data_.u_simple.value = value;
@@ -413,6 +562,8 @@ class ActionNode : public SeqNode {
       int register_from;
       int register_to;
       int value;
+      // Only used for STORE_POSITION; null for implicit capture 0.
+      const Capture* capture;
     } u_simple;
     struct {
       int stack_pointer_register;
@@ -427,9 +578,6 @@ class ActionNode : public SeqNode {
       int repetition_limit;
     } u_empty_match_check;
     struct {
-      int flags;
-    } u_modify_flags;
-    struct {
       int characters;
     } u_eats_at_least;
   } data_;
@@ -442,10 +590,13 @@ class ActionNode : public SeqNode {
 
 class V8_EXPORT_PRIVATE TextNode : public SeqNode {
  public:
-  TextNode(ZoneList<TextElement>* elms, bool read_backward, Node* on_success)
-      : SeqNode(on_success), elms_(elms), read_backward_(read_backward) {}
-  TextNode(ClassRanges* that, bool read_backward, Node* on_success)
-      : SeqNode(on_success),
+  TextNode(ZoneList<TextElement>* elms, bool read_backward, Node* on_success,
+           Flags flags)
+      : SeqNode(on_success, flags),
+        elms_(elms),
+        read_backward_(read_backward) {}
+  TextNode(ClassRanges* that, bool read_backward, Node* on_success, Flags flags)
+      : SeqNode(on_success, flags),
         elms_(zone()->New<ZoneList<TextElement>>(1, zone())),
         read_backward_(read_backward) {
     elms_->Add(TextElement::FromClassRanges(that), zone());
@@ -454,16 +605,17 @@ class V8_EXPORT_PRIVATE TextNode : public SeqNode {
   static TextNode* CreateForCharacterRanges(Zone* zone,
                                             ZoneList<CharacterRange>* ranges,
                                             bool read_backward,
-                                            Node* on_success);
+                                            Node* on_success, Flags flags);
   // Create TextNode for a surrogate pair (i.e. match a sequence of two uc16
   // code unit ranges).
   static TextNode* CreateForSurrogatePair(
       Zone* zone, CharacterRange lead, ZoneList<CharacterRange>* trail_ranges,
-      bool read_backward, Node* on_success);
+      bool read_backward, Node* on_success, Flags flags);
   static TextNode* CreateForSurrogatePair(Zone* zone,
                                           ZoneList<CharacterRange>* lead_ranges,
                                           CharacterRange trail,
-                                          bool read_backward, Node* on_success);
+                                          bool read_backward, Node* on_success,
+                                          Flags flags);
   TextNode* AsTextNode() override { return this; }
   void Accept(NodeVisitor* visitor) override;
   V8_WARN_UNUSED_RESULT EmitResult Emit(Compiler* compiler,
@@ -473,7 +625,7 @@ class V8_EXPORT_PRIVATE TextNode : public SeqNode {
                             int budget) override;
   ZoneList<TextElement>* elements() { return elms_; }
   bool read_backward() const { return read_backward_; }
-  void MakeCaseIndependent(Isolate* isolate, bool is_one_byte, Flags flags);
+  void MakeCaseIndependent(Isolate* isolate, bool is_one_byte);
   int FixedLengthLoopLength() override;
   Node* GetSuccessorOfOmnivorousTextNode(Compiler* compiler) override;
   void FillInBMInfo(Isolate* isolate, int offset, int budget,
@@ -481,10 +633,23 @@ class V8_EXPORT_PRIVATE TextNode : public SeqNode {
   void CalculateOffsets();
   int Length();
 
+  // Returns the number of characters in the equivalence class, omitting those
+  // that cannot occur in the source string because it is Latin1.
+  int GetCaseIndependentLetters(Compiler* compiler, base::uc16 character,
+                                unibrow::uchar* letters,
+                                int letter_length) const;
+
   // Returns false if the text node can't match in one-byte mode.
   bool CanMatchLatin1(Compiler* compiler);
 
  private:
+  bool EmitSimpleCharacter(Compiler* compiler, base::uc16 c, Label* on_failure,
+                           int cp_offset, bool check, bool preloaded);
+  bool EmitAtomNonLetter(Compiler* compiler, base::uc16 c, Label* on_failure,
+                         int cp_offset, bool check, bool preloaded);
+  bool EmitAtomLetter(Compiler* compiler, base::uc16 c, Label* on_failure,
+                      int cp_offset, bool check, bool preloaded);
+
   enum TextEmitPassType {
     NON_LATIN1_MATCH,            // Check for characters that can never match.
     SIMPLE_CHARACTER_MATCH,      // Case-dependent single character check.
@@ -508,20 +673,23 @@ class AssertionNode : public SeqNode {
     AT_NON_BOUNDARY,
     AFTER_NEWLINE
   };
-  static AssertionNode* AtEnd(Node* on_success) {
-    return on_success->zone()->New<AssertionNode>(AT_END, on_success);
+  static AssertionNode* AtEnd(Node* on_success, Flags flags) {
+    return on_success->zone()->New<AssertionNode>(AT_END, on_success, flags);
   }
-  static AssertionNode* AtStart(Node* on_success) {
-    return on_success->zone()->New<AssertionNode>(AT_START, on_success);
+  static AssertionNode* AtStart(Node* on_success, Flags flags) {
+    return on_success->zone()->New<AssertionNode>(AT_START, on_success, flags);
   }
-  static AssertionNode* AtBoundary(Node* on_success) {
-    return on_success->zone()->New<AssertionNode>(AT_BOUNDARY, on_success);
+  static AssertionNode* AtBoundary(Node* on_success, Flags flags) {
+    return on_success->zone()->New<AssertionNode>(AT_BOUNDARY, on_success,
+                                                  flags);
   }
-  static AssertionNode* AtNonBoundary(Node* on_success) {
-    return on_success->zone()->New<AssertionNode>(AT_NON_BOUNDARY, on_success);
+  static AssertionNode* AtNonBoundary(Node* on_success, Flags flags) {
+    return on_success->zone()->New<AssertionNode>(AT_NON_BOUNDARY, on_success,
+                                                  flags);
   }
-  static AssertionNode* AfterNewline(Node* on_success) {
-    return on_success->zone()->New<AssertionNode>(AFTER_NEWLINE, on_success);
+  static AssertionNode* AfterNewline(Node* on_success, Flags flags) {
+    return on_success->zone()->New<AssertionNode>(AFTER_NEWLINE, on_success,
+                                                  flags);
   }
   AssertionNode* AsAssertionNode() override { return this; }
   void Accept(NodeVisitor* visitor) override;
@@ -542,16 +710,16 @@ class AssertionNode : public SeqNode {
   enum IfPrevious { kIsNonWord, kIsWord };
   V8_WARN_UNUSED_RESULT EmitResult BacktrackIfPrevious(
       Compiler* compiler, Trace* trace, IfPrevious backtrack_if_previous);
-  AssertionNode(AssertionType t, Node* on_success)
-      : SeqNode(on_success), assertion_type_(t) {}
+  AssertionNode(AssertionType t, Node* on_success, Flags flags)
+      : SeqNode(on_success, flags), assertion_type_(t) {}
   AssertionType assertion_type_;
 };
 
 class BackReferenceNode : public SeqNode {
  public:
   BackReferenceNode(int start_reg, int end_reg, bool read_backward,
-                    Node* on_success)
-      : SeqNode(on_success),
+                    Node* on_success, Flags flags)
+      : SeqNode(on_success, flags),
         start_reg_(start_reg),
         end_reg_(end_reg),
         read_backward_(read_backward) {}
@@ -578,7 +746,8 @@ class BackReferenceNode : public SeqNode {
 
 class UnanchoredAdvanceNode : public SeqNode {
  public:
-  explicit UnanchoredAdvanceNode(Node* on_success) : SeqNode(on_success) {}
+  explicit UnanchoredAdvanceNode(Node* on_success, Flags flags)
+      : SeqNode(on_success, flags) {}
   UnanchoredAdvanceNode* AsUnanchoredAdvanceNode() override { return this; }
   void Accept(NodeVisitor* visitor) override;
   V8_WARN_UNUSED_RESULT EmitResult Emit(Compiler* compiler,
@@ -593,7 +762,8 @@ class UnanchoredAdvanceNode : public SeqNode {
 class V8_EXPORT_PRIVATE EndNode : public Node {
  public:
   enum Action { ACCEPT, BACKTRACK, NEGATIVE_SUBMATCH_SUCCESS };
-  EndNode(Action action, Zone* zone) : Node(zone), action_(action) {
+  EndNode(Action action, Flags flags, Zone* zone)
+      : Node(flags, zone), action_(action) {
     EatsAtLeastInfo large(kLargeEatsAtLeastValue);
     if (action == BACKTRACK) set_eats_at_least_info(large);
   }
@@ -618,8 +788,8 @@ class NegativeSubmatchSuccess : public EndNode {
  public:
   NegativeSubmatchSuccess(int stack_pointer_reg, int position_reg,
                           int clear_capture_count, int clear_capture_start,
-                          Zone* zone)
-      : EndNode(NEGATIVE_SUBMATCH_SUCCESS, zone),
+                          Flags flags, Zone* zone)
+      : EndNode(NEGATIVE_SUBMATCH_SUCCESS, flags, zone),
         stack_pointer_register_(stack_pointer_reg),
         current_position_register_(position_reg),
         clear_capture_count_(clear_capture_count),
@@ -670,8 +840,8 @@ class AlternativeGeneration;
 
 class ChoiceNode : public Node {
  public:
-  explicit ChoiceNode(int expected_size, Zone* zone)
-      : Node(zone),
+  ChoiceNode(int expected_size, Flags flags, Zone* zone)
+      : Node(flags, zone),
         alternatives_(
             zone->New<ZoneList<GuardedAlternative>>(expected_size, zone)),
         not_at_start_(false),
@@ -713,21 +883,72 @@ class ChoiceNode : public Node {
   V8_WARN_UNUSED_RESULT EmitResult EmitOutOfLineContinuation(
       Compiler* compiler, Trace* trace, GuardedAlternative alternative,
       AlternativeGeneration* alt_gen, int preload_characters,
-      bool next_expects_preload);
+      bool next_expects_preload, ParkedGrant parked_grant);
   void SetUpPreLoad(Compiler* compiler, Trace* current_trace,
                     PreloadState* preloads);
   void AssertGuardsMentionRegisters(Trace* trace);
+  // Sets *bm_scan_emitted iff a Boyer-Moore skip-scan was emitted as a
+  // straight-line prelude. Callers can use this to gate alternative scan-loop
+  // strategies that would otherwise conflict.
   int EmitOptimizedUnanchoredSearch(Compiler* compiler, Trace* trace,
-                                    SpecialLoopState* search_loop_state);
+                                    SpecialLoopState* search_loop_state,
+                                    bool* bm_scan_emitted);
+  // Shared structural gate for the inline SkipUntil* scan strategies below.
+  // Returns the body node of the implicit `.*?` lazy-star loop (alt 1 is an
+  // omnivorous Text re-entering this loop) for inspection, skipping past any
+  // EATS_AT_LEAST tags and at most one deferrable ActionNode wrapper (e.g.
+  // STORE_POSITION for capture 0). When *wrapper_out is provided it receives
+  // that wrapper (for callers that emit the body directly and must defer it).
+  // Returns nullptr if `this` is not that shape. The caller computes this once
+  // and passes the result into both EmitSkipUntil* strategies below.
+  Node* MatchLazyStarLoopBody(Compiler* compiler,
+                              ActionNode** wrapper_out = nullptr);
+  // Sibling of EmitOptimizedUnanchoredSearch for the SkipUntilOneOfMasked
+  // peephole pattern. `body`/`wrapper` come from MatchLazyStarLoopBody. If
+  // `body` is a 2-alt Choice of Texts whose first 4 chars yield useful
+  // QuickCheck details, emits the scan op dispatching directly to the two
+  // alternative bodies (with a back-edge re-checking alt 1 at the same
+  // position, mirroring the peephole) and returns the body-emission result;
+  // the caller propagates it and skips EmitChoices. Returns nullopt if `body`
+  // is not that shape, so the caller falls through to the BitInTable strategy.
+  V8_WARN_UNUSED_RESULT std::optional<EmitResult>
+  EmitSkipUntilOneOfMaskedSearch(Compiler* compiler, Trace* trace, Node* body,
+                                 ActionNode* wrapper);
+  // Sibling of EmitOptimizedUnanchoredSearch: accelerates the implicit
+  // unanchored search to the first position where `body` (from
+  // MatchLazyStarLoopBody) can match, via the cheapest applicable SkipUntil*
+  // scan (Char / CharAnd / CharOrChar / BitInTable). Emits a straight-line
+  // prelude; the caller unconditionally falls through to EmitChoices afterwards
+  // (which emits the body at the candidate position), so there is no need to
+  // report back whether the prelude fired.
+  void EmitSkipUntilSearchPrelude(Compiler* compiler, Trace* trace, Node* body);
+  // Emitted from EmitOptimizedUnanchoredSearch (the Boyer-Moore seam). If the
+  // search body is Text(prefix) -> Choice(3 Texts) -- what a shared-prefix
+  // 3-way alternation factors into, e.g. /<script|<style|<link/ -- emits a
+  // SkipUntilOneOfMasked3 that fuses |bm|'s skip-table scan with a 3-way masked
+  // dispatch, routing every exit to one `cont`. Returns true if emitted, so the
+  // caller skips the bare table scan and falls through to EmitChoices.
+  bool EmitOneOfMasked3Search(Compiler* compiler, BoyerMooreLookahead* bm);
+  // For a greedy one-byte character-class body, emit a single SkipUntilChar /
+  // SkipUntilCharOrChar / SkipUntilCharAnd scan over its exit set in place of
+  // the per-iteration body + back-edge (landing on |exit|), and return true.
+  // The caller keeps the surrounding loop frame. False if not fusible.
+  bool MaybeEmitFixedLengthConsumeScan(Compiler* compiler, Label* exit,
+                                       int text_length);
   // Returns nullptr on failure.
   // TODO(jgruber): Consider wrapping the return value in EmitResult.
   V8_WARN_UNUSED_RESULT Trace* EmitFixedLengthLoop(
       Compiler* compiler, Trace* trace, AlternativeGenerationList* alt_gens,
       PreloadState* preloads, SpecialLoopState* fixed_length_loop_state,
-      int text_length, Flags flags);
+      int text_length, DrainMode drain_mode, ParkedGrant body_parked_grant);
   V8_WARN_UNUSED_RESULT EmitResult EmitChoices(
       Compiler* compiler, AlternativeGenerationList* alt_gens, int first_choice,
-      Trace* trace, PreloadState* preloads, Flags flags);
+      Trace* trace, PreloadState* preloads, ParkedGrant body_parked_grant);
+  // Emits the choice as a dispatch over a shared masked quick-check value
+  // when all alternatives agree on the mask; nullopt if not eligible.
+  std::optional<EmitResult> TryEmitMaskedValueDispatch(
+      Compiler* compiler, AlternativeGenerationList* alt_gens, Trace* trace,
+      PreloadState* preload);
 
   // If true, this node is never checked at the start of the input.
   // Allows a new trace to start with at_start() set to false.
@@ -737,10 +958,10 @@ class ChoiceNode : public Node {
 
 class NegativeLookaroundChoiceNode : public ChoiceNode {
  public:
-  explicit NegativeLookaroundChoiceNode(GuardedAlternative this_must_fail,
-                                        GuardedAlternative then_do_this,
-                                        Zone* zone)
-      : ChoiceNode(2, zone) {
+  NegativeLookaroundChoiceNode(GuardedAlternative this_must_fail,
+                               GuardedAlternative then_do_this, Flags flags,
+                               Zone* zone)
+      : ChoiceNode(2, flags, zone) {
     AddAlternative(this_must_fail);
     AddAlternative(then_do_this);
   }
@@ -775,8 +996,9 @@ class NegativeLookaroundChoiceNode : public ChoiceNode {
 
 class LoopChoiceNode : public ChoiceNode {
  public:
-  LoopChoiceNode(bool body_can_be_zero_length, bool read_backward, Zone* zone)
-      : ChoiceNode(2, zone),
+  LoopChoiceNode(bool body_can_be_zero_length, bool read_backward, Flags flags,
+                 Zone* zone)
+      : ChoiceNode(2, flags, zone),
         loop_node_(nullptr),
         continue_node_(nullptr),
         body_can_be_zero_length_(body_can_be_zero_length),
@@ -796,6 +1018,24 @@ class LoopChoiceNode : public ChoiceNode {
   bool read_backward() const override { return read_backward_; }
   LoopChoiceNode* AsLoopChoiceNode() override { return this; }
   void Accept(NodeVisitor* visitor) override;
+  // The atomic-loop classification of this node (see AtomicLoopKind).
+  AtomicLoopKind atomic_loop_kind();
+  // The fixed match length of one body iteration, or
+  // kNodeIsTooComplexForFixedLengthLoops.  Meaningful when atomic_loop_kind()
+  // is not kNone (the body is then a fixed-length chain).
+  int FixedLengthBodyIterationLength() {
+    return FixedLengthLoopLengthForAlternative(&alternatives()->at(0));
+  }
+  // True iff this is the implicit `.*?` search loop prepended to unanchored
+  // regexps: exactly two alternatives, the second an unguarded omnivorous
+  // TextNode re-entering this loop.
+  bool IsImplicitSearchLoop(Compiler* compiler);
+  // The ParkedGrant level this node's body alternative may carry: kNone if
+  // this is not the implicit search loop, else kParked, upgraded to
+  // kParkedUniformPrefix when the body is a chain of deferrable actions and
+  // text nodes drawing from a single character source that ends in an
+  // eligible loop over that same source (the `<class>+<AT_END>` expansion).
+  ParkedGrant ComputeSearchBodyParkedGrant(Compiler* compiler);
 
  private:
   // AddAlternative is made private for loop nodes because alternatives
@@ -809,6 +1049,9 @@ class LoopChoiceNode : public ChoiceNode {
   Node* continue_node_;
   bool body_can_be_zero_length_;
   bool read_backward_;
+  // Memo for atomic_loop_kind.
+  bool atomic_loop_kind_valid_ = false;
+  AtomicLoopKind atomic_loop_kind_ = AtomicLoopKind::kNone;
 };
 
 class NodeVisitor {

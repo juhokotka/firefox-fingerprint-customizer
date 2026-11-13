@@ -14,6 +14,7 @@
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/ServoBindings.h"
+#include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/dom/CSSTransition.h"
 #include "mozilla/dom/Document.h"
@@ -44,7 +45,8 @@ bool nsTransitionManager::UpdateTransitions(
   }
 
   MOZ_ASSERT(mPresContext->IsDynamic());
-  if (aNewStyle.StyleDisplay()->mDisplay == StyleDisplay::None) {
+  if (aNewStyle.StyleDisplay()->mDisplay == StyleDisplay::None &&
+      !StaticPrefs::layout_css_display_animations_enabled()) {
     StopAnimationsForElement(aElement, aPseudoRequest);
     return false;
   }
@@ -499,7 +501,7 @@ already_AddRefed<CSSTransition> nsTransitionManager::DoCreateTransition(
   auto animation = MakeRefPtr<CSSTransition>(
       mPresContext->Document()->GetScopeObject(), aProperty);
   animation->SetOwningElement(OwningElementRef(*aElement, aPseudoRequest));
-  animation->SetTimelineNoUpdate(timeline, nullptr,
+  animation->SetTimelineNoUpdate(timeline, {},
                                  mozilla::dom::Animation::FromJS::No);
   animation->SetCreationSequence(
       mPresContext->RestyleManager()->GetAnimationGeneration());

@@ -2,15 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/shared/Lowering-shared-inl.h"
+#include "jit/Lowering.h"
 
 #include "jit/LIR.h"
-#include "jit/Lowering.h"
 #include "jit/MIR-wasm.h"
 #include "jit/MIR.h"
 #include "jit/ScalarTypeUtils.h"
-
 #include "vm/SymbolType.h"
+
+#include "jit/shared/Lowering-shared-inl.h"
 
 using namespace js;
 using namespace jit;
@@ -143,7 +143,8 @@ bool LRecoverInfo::OperandIter::canOptimizeOutIfUnused() {
 #endif
 
 LAllocation LIRGeneratorShared::useRegisterOrIndexConstant(MDefinition* mir,
-                                                           Scalar::Type type) {
+                                                           Scalar::Type type,
+                                                           bool useAtStart) {
   if (CanUseInt32Constant(mir)) {
     MConstant* cst = mir->toConstant();
     int32_t val =
@@ -152,6 +153,9 @@ LAllocation LIRGeneratorShared::useRegisterOrIndexConstant(MDefinition* mir,
     if (ArrayOffsetFitsInInt32(val, type, &offset)) {
       return LAllocation(mir->toConstant());
     }
+  }
+  if (useAtStart) {
+    return useRegisterAtStart(mir);
   }
   return useRegister(mir);
 }

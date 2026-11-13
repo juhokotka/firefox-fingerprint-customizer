@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 
+from mozperftest.perfdocs.hardware import HardwareDocs
 from mozperftest.perfdocs.logger import PerfDocLogger
 from mozperftest.perfdocs.utils import (
     ON_TRY,
@@ -23,7 +24,7 @@ class Generator:
     """
     After each perfdocs directory was validated, the generator uses the templates
     for each framework, fills them with the test descriptions in config and saves
-    the perfdocs in the form index.rst as index file and suite_name.rst for
+    the perfdocs in the form index.md as index file and suite_name.md for
     each suite of tests in the framework.
     """
 
@@ -123,9 +124,14 @@ class Generator:
                     rst_content,
                 )
 
-            # Insert documentation into `.rst` file
+            # Insert documentation into `.md` file
             framework_rst = re.sub(
                 r"{documentation}", "\n".join(documentation), rst_content
+            )
+            framework_rst = re.sub(
+                r"{hardware_documentation}",
+                "\n".join(HardwareDocs().build_hardware_documentation()),
+                framework_rst,
             )
             frameworks_info[yaml_content["name"]] = {
                 "dynamic": framework_rst,
@@ -133,9 +139,9 @@ class Generator:
                 "static": [],
             }
 
-            # For static `.rst` file
+            # For static `.md` file
             for static_file in framework["static"]:
-                if static_file.endswith("rst"):
+                if static_file.endswith("md"):
                     frameworks_info[yaml_content["name"]]["static"].append({
                         "file": static_file,
                         "content": read_file(
@@ -196,7 +202,7 @@ class Generator:
                 )
 
             for static_name in framework_docs[framework_name]["static"]:
-                if static_name["file"].endswith(".rst"):
+                if static_name["file"].endswith(".md"):
                     # XXX Replace this with a shutil.copy call (like below)
                     save_file(
                         static_name["content"],
@@ -212,11 +218,11 @@ class Generator:
 
         # Get the main page and add the framework links to it
         mainpage = read_file(
-            pathlib.Path(self.templates_path, "index.rst"), stringify=True
+            pathlib.Path(self.templates_path, "index.md"), stringify=True
         )
 
-        fmt_frameworks = "\n".join([f"  * :doc:`{name}`" for name in frameworks])
-        fmt_toctree = "\n".join([f"  {name}" for name in frameworks])
+        fmt_frameworks = "\n".join([f"* {{doc}}`{name}`" for name in frameworks])
+        fmt_toctree = "\n".join([f"{name}" for name in frameworks])
 
         fmt_mainpage = re.sub(r"{toctree_documentation}", fmt_toctree, mainpage)
         fmt_mainpage = re.sub(r"{test_documentation}", fmt_frameworks, fmt_mainpage)

@@ -4,14 +4,14 @@
 
 #include "Omnijar.h"
 
-#include "nsDirectoryService.h"
-#include "nsDirectoryServiceDefs.h"
 #include "mozilla/GeckoArgs.h"
 #include "mozilla/HelperMacros.h"
 #include "mozilla/ipc/ProcessChild.h"
+#include "nsDirectoryService.h"
+#include "nsDirectoryServiceDefs.h"
 #include "nsIFile.h"
-#include "nsZipArchive.h"
 #include "nsNetUtil.h"
+#include "nsZipArchive.h"
 
 namespace mozilla {
 
@@ -77,7 +77,10 @@ nsresult Omnijar::InitOne(nsIFile* aPath, Type aType) {
     return NS_OK;
   }
 
-  RefPtr<nsZipArchive> zipReader = nsZipArchive::OpenArchive(file);
+  // This file is our own build-time packaged omni.jar, so it's safe to let
+  // nsZipArchive trust its optimized (Central-Directory-at-offset-4) layout.
+  RefPtr<nsZipArchive> zipReader =
+      nsZipArchive::OpenArchive(file, /* aAllowOptimizedLayout */ true);
   if (!zipReader) {
     // As file has been checked to exist as file above, any error indicates
     // that it is somehow corrupted internally.
@@ -90,7 +93,8 @@ nsresult Omnijar::InitOne(nsIFile* aPath, Type aType) {
   if (NS_SUCCEEDED(
           nsZipHandle::Init(zipReader, kOmnijarName, getter_AddRefs(handle)))) {
     outerReader = zipReader;
-    zipReader = nsZipArchive::OpenArchive(handle);
+    zipReader = nsZipArchive::OpenArchive(handle, nullptr,
+                                          /* aAllowOptimizedLayout */ true);
     if (!zipReader) {
       return NS_ERROR_FILE_CORRUPTED;
     }

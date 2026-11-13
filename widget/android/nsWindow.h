@@ -6,19 +6,19 @@
 #define NSWINDOW_H_
 
 #include "AndroidGraphics.h"
-#include "mozilla/layers/CompositorScrollUpdate.h"
-#include "nsIWidget.h"
-#include "gfxPoint.h"
-#include "nsIUserIdleServiceInternal.h"
-#include "nsTArray.h"
 #include "EventDispatcher.h"
+#include "gfxPoint.h"
 #include "mozilla/EventForwards.h"
-#include "mozilla/java/GeckoSessionNatives.h"
-#include "mozilla/java/WebResponseWrappers.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TextRange.h"
+#include "mozilla/java/GeckoSessionNatives.h"
+#include "mozilla/java/WebResponseWrappers.h"
+#include "mozilla/layers/CompositorScrollUpdate.h"
+#include "nsIUserIdleServiceInternal.h"
+#include "nsIWidget.h"
+#include "nsTArray.h"
 
 struct ANPEvent;
 
@@ -154,7 +154,6 @@ class nsWindow final : public nsIWidget {
                                 const InitData&) override;
   void Destroy() override;
   void DidClearParent(nsIWidget*) override;
-  float GetDPI() override;
   double GetDefaultScaleInternal() override;
   void Show(bool aState) override;
   bool IsVisible() const override;
@@ -232,8 +231,9 @@ class nsWindow final : public nsIWidget {
   RefPtr<mozilla::a11y::SessionAccessibility> GetSessionAccessibility();
 
   void RecvToolbarAnimatorMessageFromCompositor(int32_t aMessage) override;
-  void NotifyCompositorScrollUpdate(
-      const mozilla::layers::CompositorScrollUpdate& aUpdate) override;
+  void NotifyCompositorScrollUpdates(
+      const nsTArray<mozilla::layers::CompositorScrollUpdate>& aUpdates)
+      override;
   void UpdateDynamicToolbarMaxHeight(mozilla::ScreenIntCoord aHeight) override;
   mozilla::ScreenIntCoord GetDynamicToolbarMaxHeight() const override {
     return mDynamicToolbarMaxHeight;

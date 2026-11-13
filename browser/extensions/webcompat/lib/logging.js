@@ -6,12 +6,11 @@
 
 /* globals browser */
 
+// To enable logging, set extensions.webcompat.debug_logging=true and restart.
+
 const loggingPrefValue = browser.aboutConfigPrefs.getPref(
-  "disable_debug_logging"
+  "debug_logging",
+  false
 );
 
-const debugLog =
-  loggingPrefValue !== true &&
-  browser.appConstants.getReleaseBranch() !== "release_or_beta"
-    ? console.debug
-    : function () {};
+const debugLog = loggingPrefValue ? console.debug : () => {};

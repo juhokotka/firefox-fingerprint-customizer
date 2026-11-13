@@ -5,11 +5,12 @@
 
 #ifndef _nsBidiKeyboard
 #define _nsBidiKeyboard
-#include "nsIBidiKeyboard.h"
 #include <windows.h>
 
+#include "nsIBidiKeyboard.h"
+
 class nsBidiKeyboard : public nsIBidiKeyboard {
-  virtual ~nsBidiKeyboard();
+  virtual ~nsBidiKeyboard() = default;
 
  public:
   NS_DECL_ISUPPORTS

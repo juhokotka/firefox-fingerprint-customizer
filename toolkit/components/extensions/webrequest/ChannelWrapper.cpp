@@ -4,6 +4,8 @@
 
 #include "ChannelWrapper.h"
 
+#include <memory>
+
 #include "jsapi.h"
 #include "xpcpublic.h"
 
@@ -103,7 +105,7 @@ ChannelListHolder::~ChannelListHolder() {
 static LinkedList<ChannelWrapper>* GetChannelList() {
   static UniquePtr<ChannelListHolder> sChannelList;
   if (!sChannelList && !PastShutdownPhase(ShutdownPhase::XPCOMShutdown)) {
-    sChannelList.reset(new ChannelListHolder());
+    sChannelList = std::make_unique<ChannelListHolder>();
     ClearOnShutdown(&sChannelList, ShutdownPhase::XPCOMShutdown);
   }
   return sChannelList.get();
@@ -695,7 +697,10 @@ int64_t NormalizeFrameID(nsILoadInfo* aLoadInfo, uint64_t bcID) {
     bc = aLoadInfo->GetBrowsingContext();
   }
 
-  if (!bc || bcID == bc->Top()->Id()) {
+  if (!bc) {
+    return -1;
+  }
+  if (bcID == bc->Top()->Id()) {
     return 0;
   }
   return bcID;
@@ -716,7 +721,7 @@ int64_t ChannelWrapper::FrameId() const {
   if (nsCOMPtr<nsILoadInfo> loadInfo = GetLoadInfo()) {
     return NormalizeFrameID(loadInfo, BrowsingContextId(loadInfo));
   }
-  return 0;
+  return -1;
 }
 
 int64_t ChannelWrapper::ParentFrameId() const {
@@ -890,8 +895,8 @@ already_AddRefed<nsITraceableChannel> ChannelWrapper::GetTraceableChannel(
     if (aContentParent) {
       RefPtr<BrowsingContextGroup> group =
           BrowsingContextGroup::GetExisting(aAddon.GetBrowsingContextGroupId());
-      if (!group ||
-          group->GetHostProcess(EXTENSION_REMOTE_TYPE) != aContentParent) {
+      if (!group || group->GetHostProcess(RemoteType(
+                        RemoteType::Kind::Extension)) != aContentParent) {
         return nullptr;
       }
     } else {

@@ -6,12 +6,11 @@
 #define GFX_WEBRENDERMESSAGEUTILS_H
 
 #include "chrome/common/ipc_message_utils.h"
-
 #include "ipc/EnumSerializer.h"
 #include "ipc/IPCMessageUtils.h"
-#include "mozilla/webrender/webrender_ffi.h"
-#include "mozilla/webrender/WebRenderTypes.h"
 #include "mozilla/dom/MediaIPCUtils.h"
+#include "mozilla/webrender/WebRenderTypes.h"
+#include "mozilla/webrender/webrender_ffi.h"
 
 namespace IPC {
 
@@ -60,7 +59,8 @@ struct ParamTraits<mozilla::wr::ImageDescriptor> {
     if (stride != 0) {
       int bpp = mozilla::gfx::BytesPerPixel(
           mozilla::wr::ImageFormatToSurfaceFormat(format));
-      if (bpp <= 0 || stride / bpp < width) {
+      // If stride specified, width must be > 0.
+      if (bpp <= 0 || width <= 0 || stride / bpp < width) {
         return {};
       }
     }
@@ -219,7 +219,7 @@ inline auto TiedFields<mozilla::wr::InternerSubReport>(
 template <>
 inline auto TiedFields<mozilla::wr::InterningMemoryReport>(
     mozilla::wr::InterningMemoryReport& a) {
-  return std::tie(a.interners, a.data_stores);
+  return std::tie(a.interners, a.data_stores, a.dl_stores);
 }
 
 template <>

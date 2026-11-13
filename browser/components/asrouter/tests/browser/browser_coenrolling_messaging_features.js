@@ -8,9 +8,6 @@ const { ASRouter, MessageLoaderUtils } = ChromeUtils.importESModule(
 const { RemoteSettings } = ChromeUtils.importESModule(
   "resource://services-settings/remote-settings.sys.mjs"
 );
-const { ExperimentAPI } = ChromeUtils.importESModule(
-  "resource://nimbus/ExperimentAPI.sys.mjs"
-);
 const { NimbusTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/NimbusTestUtils.sys.mjs"
 );
@@ -262,6 +259,197 @@ add_task(async function testCoenrollingMessagingFeatures() {
   );
 
   ExperimentAPI.manager.store._deleteForTests("experiment-1");
+  ExperimentAPI.manager.store._deleteForTests("experiment-2");
+  await client.db.importChanges({}, Date.now(), [], { clear: true });
+  await ExperimentAPI._rsLoader.updateRecipes("test");
+  MessageLoaderUtils._recordedReachIds.clear();
+  await ASRouter._updateMessageProviders();
+  sandbox.restore();
+  await TestUtils.waitForCondition(
+    () => ![...featureAPI.getAllEnrollments()].length,
+    "Wait for unenrollment"
+  );
+});
+
+add_task(async function testNonCoenrollingMessagingFeatures() {
+  const sandbox = sinon.createSandbox();
+  await ASRouter.waitForInitialized;
+  await ASRouter._updateMessageProviders();
+  await ExperimentAPI._rsLoader.finishedUpdating();
+  await ExperimentAPI.ready();
+
+  Assert.strictEqual(
+    ExperimentAPI.manager.store.getAllActiveExperiments().length,
+    0,
+    "Clean state"
+  );
+
+  const featureId = "fxms-message-1";
+  const featureAPI = NimbusFeatures[featureId];
+
+  const recipe1 = NimbusTestUtils.factories.recipe("rollout-1", {
+    isRollout: true,
+    branches: [
+      {
+        slug: "control",
+        ratio: 1,
+        features: [
+          {
+            featureId,
+            value: {
+              id: "MESSAGE_1_CONTROL",
+              recordReach: true,
+              template: "spotlight",
+              trigger: { id: "fakeTrigger" },
+              targeting: "true",
+              groups: [],
+              content: {},
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  await client.db.importChanges({}, Date.now(), [recipe1], { clear: true });
+  await secureClient.db.importChanges({}, Date.now(), [], { clear: true });
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["app.shield.optoutstudies.enabled", true],
+      ["datareporting.healthreport.uploadEnabled", true],
+      [
+        "browser.newtabpage.activity-stream.asrouter.providers.messaging-experiments",
+        `{"id":"messaging-experiments","enabled":true,"type":"remote-experiments","updateCycleInMs":0}`,
+      ],
+    ],
+  });
+  await ExperimentAPI._rsLoader.updateRecipes("test");
+
+  await TestUtils.waitForCondition(
+    () =>
+      [...featureAPI.getAllEnrollments()].find(
+        ({ meta }) => meta.slug === "rollout-1"
+      ),
+    "Should be enrolled in rollout-1"
+  );
+
+  let messages = await TestUtils.waitForCondition(
+    () => ASRouter.state.messages.find(m => m._nimbusFeature === featureId),
+    "Should load the test message"
+  );
+  ok(messages, "Should load message for the rollout");
+
+  // Now try enrolling in an experiment with the same feature.
+  Assert.lessOrEqual(
+    ASRouter.state.messages.filter(m => m._nimbusFeature === featureId).length,
+    1,
+    "Should have a message from only one enrollment before enrolling in the second one"
+  );
+
+  const recipe2 = NimbusTestUtils.factories.recipe("experiment-2", {
+    branches: [
+      {
+        slug: "control",
+        ratio: 1,
+        features: [
+          {
+            featureId,
+            value: {
+              template: "multi",
+              messages: [
+                {
+                  id: "MESSAGE_2_CONTROL_1",
+                  recordReach: true,
+                  template: "spotlight",
+                  trigger: { id: "fakeTrigger" },
+                  targeting: "true",
+                  groups: [],
+                  content: {},
+                },
+                {
+                  id: "MESSAGE_2_CONTROL_2",
+                  recordReach: true,
+                  template: "spotlight",
+                  trigger: { id: "fakeTrigger" },
+                  targeting: "true",
+                  groups: [],
+                  content: {},
+                },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        slug: "treatment-a",
+        ratio: 1,
+        features: [
+          {
+            featureId,
+            value: {
+              template: "multi",
+              messages: [
+                {
+                  id: "MESSAGE_2_TREATMENT_A_1",
+                  recordReach: true,
+                  template: "spotlight",
+                  trigger: { id: "fakeTrigger" },
+                  targeting: "true",
+                  groups: [],
+                  content: {},
+                },
+                {
+                  id: "MESSAGE_2_TREATMENT_B_2",
+                  recordReach: true,
+                  template: "spotlight",
+                  trigger: { id: "fakeTrigger" },
+                  targeting: "true",
+                  groups: [],
+                  content: {},
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  await client.db.importChanges({}, Date.now(), [recipe1, recipe2], {
+    clear: true,
+  });
+  await ExperimentAPI._rsLoader.updateRecipes("test");
+
+  await TestUtils.waitForCondition(
+    () =>
+      ASRouter.state.messages.filter(m => m._nimbusFeature === featureId)
+        .length > 2,
+    "Should load the test messages"
+  );
+
+  let nimbusMessages = ASRouter.state.messages.filter(
+    m => m._nimbusFeature === featureId
+  );
+  is(
+    nimbusMessages.length,
+    4,
+    "Should have messages from only the new experiment"
+  );
+
+  await TestUtils.waitForCondition(
+    () =>
+      [...featureAPI.getAllEnrollments()].find(
+        ({ meta }) => meta.slug === "experiment-2"
+      ),
+    "Should be enrolled in experiment-2"
+  );
+  const slugs = new Set(nimbusMessages.map(m => m._nimbusSlug));
+  ok(
+    !slugs.has("rollout-1"),
+    "Should not have a message from rollout-1 anymore"
+  );
+
+  ExperimentAPI.manager.store._deleteForTests("rollout-1");
   ExperimentAPI.manager.store._deleteForTests("experiment-2");
   await client.db.importChanges({}, Date.now(), [], { clear: true });
   await ExperimentAPI._rsLoader.updateRecipes("test");

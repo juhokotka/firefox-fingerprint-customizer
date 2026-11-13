@@ -5,14 +5,12 @@
 #ifndef mozilla_net_Cookie_h
 #define mozilla_net_Cookie_h
 
+#include "mozilla/BasePrincipal.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/net/NeckoChannelParams.h"
 #include "nsICookie.h"
 #include "nsIMemoryReporter.h"
 #include "nsString.h"
-
-#include "mozilla/MemoryReporting.h"
-#include "mozilla/BasePrincipal.h"
-#include "mozilla/net/NeckoChannelParams.h"
-#include "nsIMemoryReporter.h"
 
 using mozilla::OriginAttributes;
 
@@ -86,6 +84,9 @@ class Cookie final : public nsICookie {
   }
   inline const nsCString& Path() const { return mData.path(); }
   inline int64_t ExpiryInMSec() const { return mData.expiryInMSec(); }
+  inline bool IsExpired(int64_t aCurrentTimeInMSec) const {
+    return ExpiryInMSec() <= aCurrentTimeInMSec;
+  }
   inline int64_t LastAccessedInUSec() const {
     return mData.lastAccessedInUSec();
   }
@@ -140,6 +141,8 @@ class Cookie final : public nsICookie {
   uint32_t NameAndValueBytes() {
     return mData.name().Length() + mData.value().Length();
   }
+
+  bool IsExpired() const;
 
   bool IsStale() const;
 

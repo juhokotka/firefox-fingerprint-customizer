@@ -4,17 +4,16 @@
 #ifndef _include_mozilla_gfx_ipc_CrossProcessPaint_h_
 #define _include_mozilla_gfx_ipc_CrossProcessPaint_h_
 
-#include "nsISupportsImpl.h"
-
+#include "mozilla/MozPromise.h"
 #include "mozilla/dom/ipc/IdType.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/gfx/Rect.h"
-#include "mozilla/MozPromise.h"
 #include "mozilla/ipc/ByteBuf.h"
 #include "nsColor.h"
-#include "nsTHashMap.h"
 #include "nsHashKeys.h"
+#include "nsISupportsImpl.h"
 #include "nsRefPtrHashtable.h"
+#include "nsTHashMap.h"
 #include "nsTHashSet.h"
 
 class nsIDocShell;
@@ -36,6 +35,7 @@ class WindowGlobalParent;
 namespace gfx {
 
 class CrossProcessPaint;
+class SourceSurface;
 
 enum class CrossProcessPaintFlags {
   None = 0,
@@ -108,6 +108,12 @@ class CrossProcessPaint final {
   typedef nsRefPtrHashtable<nsUint64HashKey, RecordedDependentSurface>
       ResolvedFragmentMap;
   typedef MozPromise<ResolvedFragmentMap, nsresult, true> ResolvePromise;
+
+  /**
+   * A target for a screenshot, alternative to dom::ImageBitmap
+   */
+  typedef MozPromise<RefPtr<SourceSurface>, nsresult, true> SnapshotPromise;
+
   /**
    * Begin an asynchronous paint of a cross process document tree starting at
    * a WindowGlobalParent. A maybe-async paint for the root WGP will be done,
@@ -123,17 +129,25 @@ class CrossProcessPaint final {
    *   at least kMinPaintScale. See the implementation for the current
    *   minimum value.
    * @param aBackgroundColor The background color to use.
-   * @param aPromise The promise to resolve with a dom::ImageBitmap.
-   *
-   * @returns Whether the paint was able to be initiated or not.
+   * @param aPromise The promise to resolve with a dom::ImageBitmap, or reject
+   *   if the paint could not be completed.
    */
-  static bool Start(dom::WindowGlobalParent* aRoot, const dom::DOMRect* aRect,
+  static void Start(dom::WindowGlobalParent* aRoot, const dom::DOMRect* aRect,
                     float aScale, nscolor aBackgroundColor,
                     CrossProcessPaintFlags aFlags, dom::Promise* aPromise);
 
   static RefPtr<ResolvePromise> Start(
+      dom::TabId aRootTabId, uint64_t aRootWindowContextId,
       nsTHashSet<uint64_t>&& aDependencies,
       CrossProcessPaintFlags aFlags = CrossProcessPaintFlags::None);
+
+  /**
+   * For obtaining full page screenshots on mobile
+   */
+  static RefPtr<SnapshotPromise> Start(dom::WindowGlobalParent* aRoot,
+                                       const Maybe<IntRect>& aRect,
+                                       float aScale, nscolor aBackgroundColor,
+                                       CrossProcessPaintFlags aFlags);
 
   void ReceiveFragment(dom::WindowGlobalParent* aWGP,
                        PaintFragment&& aFragment);
@@ -142,7 +156,8 @@ class CrossProcessPaint final {
  private:
   typedef nsTHashMap<nsUint64HashKey, PaintFragment> ReceivedFragmentMap;
 
-  CrossProcessPaint(float aScale, dom::TabId aRoot,
+  CrossProcessPaint(float aScale, dom::TabId aRootTabId,
+                    uint64_t aRootWindowContextId,
                     CrossProcessPaintFlags aFlags);
   ~CrossProcessPaint();
 
@@ -181,7 +196,9 @@ class CrossProcessPaint final {
   }
 
   MozPromiseHolder<ResolvePromise> mPromise;
-  dom::TabId mRoot;
+  // The tab id of the root page, or TabId(0) for in-process pages.
+  const dom::TabId mRootTabId;
+  const uint64_t mRootWindowContextId;
   float mScale;
   uint32_t mPendingFragments;
   ReceivedFragmentMap mReceivedFragments;

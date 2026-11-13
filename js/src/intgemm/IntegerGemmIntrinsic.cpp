@@ -11,8 +11,8 @@
 #include "mozilla/TimeStamp.h"
 
 #include <gemmology_fwd.h>
-#include "fmt/format.h"
 
+#include "fmt/format.h"
 #include "js/ErrorReport.h"
 #include "js/HeapAPI.h"
 #include "vm/ArrayBufferObject.h"
@@ -333,7 +333,8 @@ int32_t js::intgemm::IntrI8PrepareBias(
   size_t wasmBufferSize = GetWasmRawBufferLength(memBase);
   if (!CheckMatrixBoundAndAlignment(inputMatrixBPrepared, sizeB, wasmBufferSize,
                                     sizeof(int8_t)) ||
-      !CheckMatrixBound(output, sizeBias, wasmBufferSize, sizeof(float))) {
+      !CheckMatrixBoundAndAlignment(output, sizeBias, wasmBufferSize,
+                                    sizeof(float))) {
     return -1;
   }
 
@@ -345,7 +346,8 @@ int32_t js::intgemm::IntrI8PrepareBias(
       (-1) * ((127.0f / scaleA) * (127.0f / scaleB)) / (127.0f);
 
   if (inputBias) {
-    if (!CheckMatrixBound(inputBias, sizeBias, wasmBufferSize, sizeof(float))) {
+    if (!CheckMatrixBoundAndAlignment(inputBias, sizeBias, wasmBufferSize,
+                                      sizeof(float))) {
       return -1;
     }
     const float* inputBiasPtr = reinterpret_cast<float*>(&memBase[inputBias]);
@@ -396,9 +398,10 @@ int32_t js::intgemm::IntrI8MultiplyAndAddBias(
                                     sizeof(uint8_t)) ||
       !CheckMatrixBoundAndAlignment(inputMatrixBPrepared, sizeB, wasmBufferSize,
                                     sizeof(int8_t)) ||
-      !CheckMatrixBound(inputBiasPrepared, sizeBias, wasmBufferSize,
-                        sizeof(float)) ||
-      !CheckMatrixBound(output, sizeOutput, wasmBufferSize, sizeof(float))) {
+      !CheckMatrixBoundAndAlignment(inputBiasPrepared, sizeBias, wasmBufferSize,
+                                    sizeof(float)) ||
+      !CheckMatrixBoundAndAlignment(output, sizeOutput, wasmBufferSize,
+                                    sizeof(float))) {
     return -1;
   }
 
@@ -439,7 +442,9 @@ int32_t js::intgemm::IntrI8SelectColumnsOfB(wasm::Instance* instance,
     return -1;
   }
 
-  // Memory Bound checks for all matricies
+  // Memory bound checks for all matrices. SelectColumnsB reads and writes the
+  // input and output matrices with aligned SIMD stores, so both must be
+  // alignment-checked, not just bounds-checked.
   uint64_t sizeB = (uint64_t)rowsB * (uint64_t)colsB;
   uint64_t sizeOutput = (uint64_t)rowsB * (uint64_t)sizeColIndexList;
   size_t wasmBufferSize = GetWasmRawBufferLength(memBase);
@@ -447,7 +452,8 @@ int32_t js::intgemm::IntrI8SelectColumnsOfB(wasm::Instance* instance,
                                     sizeof(int8_t)) ||
       !CheckMatrixBound(colIndexList, sizeColIndexList, wasmBufferSize,
                         sizeof(uint32_t)) ||
-      !CheckMatrixBound(output, sizeOutput, wasmBufferSize, sizeof(int8_t))) {
+      !CheckMatrixBoundAndAlignment(output, sizeOutput, wasmBufferSize,
+                                    sizeof(int8_t))) {
     return -1;
   }
 
@@ -457,6 +463,27 @@ int32_t js::intgemm::IntrI8SelectColumnsOfB(wasm::Instance* instance,
   const uint32_t* colIndexListPtr =
       reinterpret_cast<const uint32_t*>(&memBase[colIndexList]);
   int8_t* outputPtr = reinterpret_cast<int8_t*>(&memBase[output]);
+
+  // Every selected column index must reference a valid column of B. Otherwise
+  // SelectColumnsB would read outside the bounds-checked input matrix, since it
+  // uses each index to compute an offset into inputMatrixBPrepared.
+  for (uint32_t i = 0; i < sizeColIndexList; i++) {
+    if (colIndexListPtr[i] >= colsB) {
+      return -1;
+    }
+  }
+
+  // The index list and output regions must not overlap. gemmology reads indices
+  // in groups of 8 while writing output incrementally, so overlap would allow
+  // output writes to corrupt not-yet-read indices, bypassing the validation
+  // above and enabling out-of-bounds reads into the input matrix.
+  uint64_t colIndexListEnd =
+      (uint64_t)colIndexList + (uint64_t)sizeColIndexList * sizeof(uint32_t);
+  uint64_t outputEnd = (uint64_t)output + sizeOutput;
+  if (colIndexList < outputEnd && output < colIndexListEnd) {
+    return -1;
+  }
+
   AutoProfilerMarker marker(cx->runtime()->geckoProfiler(),
                             "integemm::SelectColumnsB",
                             "rowsB: {} colsB: {} sizecolList: {}, sizeB: {}",

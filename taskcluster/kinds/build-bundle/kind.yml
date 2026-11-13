@@ -24,7 +24,9 @@ task-defaults:
     attributes:
         build_platform: android
     run:
+        clone-with: hg
         gradle-package-command: bundle
+        track-build-times: true
 
 tasks:
     focus-debug:

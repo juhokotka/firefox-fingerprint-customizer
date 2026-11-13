@@ -296,11 +296,12 @@ typedef [EnforceRange] unsigned long GPUTextureUsageFlags;
 [Func="mozilla::webgpu::Instance::PrefEnabled",
  Exposed=(Window, Worker), SecureContext]
 namespace GPUTextureUsage {
-    const GPUFlagsConstant COPY_SRC          = 0x01;
-    const GPUFlagsConstant COPY_DST          = 0x02;
-    const GPUFlagsConstant TEXTURE_BINDING   = 0x04;
-    const GPUFlagsConstant STORAGE_BINDING   = 0x08;
-    const GPUFlagsConstant RENDER_ATTACHMENT = 0x10;
+    const GPUFlagsConstant COPY_SRC             = 0x01;
+    const GPUFlagsConstant COPY_DST             = 0x02;
+    const GPUFlagsConstant TEXTURE_BINDING      = 0x04;
+    const GPUFlagsConstant STORAGE_BINDING      = 0x08;
+    const GPUFlagsConstant RENDER_ATTACHMENT    = 0x10;
+    const GPUFlagsConstant TRANSIENT_ATTACHMENT = 0x20;
 };
 
 [Func="mozilla::webgpu::Instance::PrefEnabled",
@@ -821,6 +822,8 @@ dictionary GPUBlendComponent {
     GPUBlendFactor dstFactor = "zero";
 };
 
+// NOTE: We depend on discriminants for this `enum` to match `wgpu_types::BlendFactor`! See also
+// `ConvertBlendComponent` in `dom/webgpu/Utility.cpp`.
 enum GPUBlendFactor {
     "zero",
     "one",
@@ -835,6 +838,10 @@ enum GPUBlendFactor {
     "src-alpha-saturated",
     "constant",
     "one-minus-constant",
+    "src1",
+    "one-minus-src1",
+    "src1-alpha",
+    "one-minus-src1-alpha",
 };
 
 enum GPUBlendOperation {

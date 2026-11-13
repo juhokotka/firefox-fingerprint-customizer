@@ -5,11 +5,11 @@
 #ifndef mozilla_InputTaskManager_h
 #define mozilla_InputTaskManager_h
 
+#include "TaskController.h"
+#include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPtr.h"
 #include "nsTArray.h"
 #include "nsXULAppAPI.h"
-#include "TaskController.h"
-#include "mozilla/StaticPtr.h"
-#include "mozilla/StaticPrefs_dom.h"
 
 namespace mozilla {
 
@@ -75,7 +75,7 @@ class InputTaskManager : public TaskManager {
   void NotifyVsync() { mInputPriorityController.WillRunVsync(); }
 
  private:
-  InputTaskManager() : mInputQueueState(STATE_DISABLED) {}
+  InputTaskManager() = default;
 
   class InputPriorityController {
    public:
@@ -124,7 +124,7 @@ class InputTaskManager : public TaskManager {
 
   int32_t GetPriorityModifierForEventLoopTurnForStrictVsyncAlignment();
 
-  Atomic<InputEventQueueState> mInputQueueState;
+  Atomic<InputEventQueueState> mInputQueueState{STATE_DISABLED};
 
   static StaticRefPtr<InputTaskManager> gInputTaskManager;
 

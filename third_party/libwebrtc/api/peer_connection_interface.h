@@ -75,8 +75,10 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "api/adaptation/resource.h"
 #include "api/async_dns_resolver.h"
@@ -122,6 +124,7 @@
 #include "api/transport/network_control.h"
 #include "api/transport/sctp_transport_factory_interface.h"
 #include "api/turn_customizer.h"
+#include "api/video/timing/video_jitter_timing_factory.h"
 #include "api/video/video_bitrate_allocator_factory.h"
 #include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_encoder_factory.h"
@@ -152,6 +155,12 @@ namespace webrtc {
 // IWYU pragma: begin_keep
 // MediaFactory class definition is not part of the api.
 class MediaFactory;
+
+// Forward-declared so PeerConnectionDependencies can hold a
+// std::unique_ptr<PeerConnectionTracerInterface> without including
+// api/peer_connection_tracer_interface.h (which itself includes this
+// header).
+class PeerConnectionTracerInterface;
 
 // IWYU pragma: end_keep
 // MediaStream container interface.
@@ -731,6 +740,11 @@ class RTC_EXPORT PeerConnectionInterface : public RefCountInterface {
     bool voice_activity_detection = true;
     bool ice_restart = false;
 
+    // JSEP allows generating an offer in any non-closed signaling state, but
+    // the WebRTC-PC createOffer() API only allows "stable" and
+    // "have-local-offer". Browser implementations should set this to true.
+    bool restrict_offer_to_stable_or_have_local_offer = false;
+
     // If true, will offer to BUNDLE audio/video/data together. Not to be
     // confused with RTCP mux (multiplexing RTP and RTCP together).
     bool use_rtp_mux = true;
@@ -1122,6 +1136,24 @@ class RTC_EXPORT PeerConnectionInterface : public RefCountInterface {
   // projects.
   virtual void AddIceCandidate(std::unique_ptr<IceCandidate> candidate,
                                std::function<void(RTCError)> callback) {}
+  // Unlike the callback-only overload above, this overload also passes an
+  // operation-completion callback with the result. An embedding that delivers
+  // the result asynchronously may defer invoking the completion callback until
+  // the result has reached its API consumer. It must be invoked exactly once on
+  // the operation's sequence.
+  virtual void AddIceCandidate(
+      std::unique_ptr<IceCandidate> candidate,
+      absl::AnyInvocable<void(RTCError, absl::AnyInvocable<void() &&>) &&>
+          callback) {
+    auto shared_callback =
+        std::make_shared<decltype(callback)>(std::move(callback));
+    AddIceCandidate(std::move(candidate),
+                    [shared_callback =
+                         std::move(shared_callback)](RTCError result) mutable {
+                      auto callback = std::move(*shared_callback);
+                      std::move(callback)(std::move(result), [] {});
+                    });
+  }
   virtual bool RemoveIceCandidate(const IceCandidate* candidate) = 0;
 
   // SetBitrate limits the bandwidth allocated for all RTP streams sent by
@@ -1414,6 +1446,14 @@ struct RTC_EXPORT PeerConnectionDependencies final {
   // Optional field trials to use.
   // Overrides those from PeerConnectionFactoryDependencies.
   std::unique_ptr<FieldTrialsView> trials;
+
+  // Optional passive observer of PeerConnection lifecycle and operation
+  // events, intended for diagnostics / trace surfaces such as
+  // chrome://webrtc-internals. See api/peer_connection_tracer_interface.h.
+  // Convention: set once at construction; the PeerConnection owns the tracer
+  // for its entire lifetime. Not intended to be shared across multiple
+  // PeerConnections.
+  std::unique_ptr<PeerConnectionTracerInterface> tracer;
 };
 
 // PeerConnectionFactoryDependencies holds all of the PeerConnectionFactory
@@ -1437,6 +1477,10 @@ struct RTC_EXPORT PeerConnectionFactoryDependencies final {
 
   // Optional dependencies
   Thread* network_thread = nullptr;
+  // Deprecated: Support for a worker thread that is distinct from the network
+  // thread is being removed. Applications must stop supplying a separate
+  // worker thread. See
+  // https://groups.google.com/g/discuss-webrtc/c/Fs_Hd5XNJh0
   Thread* worker_thread = nullptr;
   Thread* signaling_thread = nullptr;
   SocketFactory* socket_factory = nullptr;
@@ -1460,6 +1504,9 @@ struct RTC_EXPORT PeerConnectionFactoryDependencies final {
   // called without a `port_allocator`, and the above `network_manager' is null.
   std::unique_ptr<NetworkMonitorFactory> network_monitor_factory;
   std::unique_ptr<NetEqFactory> neteq_factory;
+  // Factory for creating VideoJitterTiming instances, used to track and
+  // manage video frame timing for rendering.
+  std::unique_ptr<VideoJitterTimingFactory> video_jitter_timing_factory;
   std::unique_ptr<SctpTransportFactoryInterface> sctp_factory;
   // Metronome used for decoding, must be called on the worker thread.
   std::unique_ptr<Metronome> decode_metronome;
@@ -1552,7 +1599,10 @@ class RTC_EXPORT PeerConnectionFactoryInterface : public RefCountInterface {
       const std::string& stream_id) = 0;
 
   // Creates an AudioSourceInterface.
-  // `options` decides audio processing settings.
+  // The `options` specified here are elevated and applied globally at the media
+  // engine level to configure global audio processing settings (like APM
+  // options for AEC, AGC, and NS). These options persist reliably across stream
+  // lifecycles.
   virtual scoped_refptr<AudioSourceInterface> CreateAudioSource(
       const AudioOptions& options) = 0;
 

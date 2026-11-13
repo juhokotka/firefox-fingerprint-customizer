@@ -2,13 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsDragService.h"
 #include "nsDragServiceGtk.h"
-#include "nsWindow.h"
+
 #include "WidgetUtilsGtk.h"
-#include "mozilla/gfx/2D.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/StaticPrefs_widget.h"
+#include "mozilla/gfx/2D.h"
+#include "nsDragService.h"
+#include "nsWindow.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -28,6 +29,14 @@ extern mozilla::LazyLogModule gWidgetDragLog;
 #else
 #  define LOGDRAGSERVICE(...)
 #endif
+
+nsDragSessionGtk::DragTaskGtk::~DragTaskGtk() = default;
+
+void nsDragSessionGtk::DragTaskGtk::Reset() {
+  mType = eDragTaskNone;
+  mWindow = nullptr;
+  mDragContext = nullptr;
+}
 
 ClipboardTargets nsDragSessionGtk::DragTaskGtk::GetTargets() {
   return ClipboardTargets(gdk_drag_context_list_targets(mDragContext));
@@ -64,8 +73,10 @@ void nsDragSessionGtk::ReplyToDragMotion() {
 
 void nsDragSessionGtk::ReplyToDragMotion(GdkDragContext* aDragContext,
                                          guint aTime) {
-  LOGDRAGSERVICE("nsDragSessionGtk::ReplyToDragMotion(%p) can drop %d",
-                 aDragContext, mCanDrop);
+  LOGDRAGSERVICE(
+      "nsDragSessionGtk::ReplyToDragMotion(%p) can drop %d"
+      " mDragAction %d",
+      aDragContext, mCanDrop, mDragAction);
 
   // gdk_drag_status() is a kind of red herring here.
   // It does not control final D&D operation type (copy/move) but controls
@@ -407,11 +418,13 @@ void nsDragSessionGtk::DropFinish(bool aSucceed) {
   // action is move, but we don't know whether the data was successfully
   // transferred.
   DragTaskGtk* task = static_cast<DragTaskGtk*>(mRecentTask.get());
-  if (task->mDragContext) {
-    LOGDRAGSERVICE("  drag finished (gtk_drag_finish)");
-    gtk_drag_finish(task->mDragContext, aSucceed,
-                    /* del = */ FALSE, task->mTime);
+  if (!task->mDragContext) {
+    return;
   }
+  LOGDRAGSERVICE("nsDragSessionGtk::DropFinish() (gtk_drag_finish) aSucceed %d",
+                 aSucceed);
+  gtk_drag_finish(task->mDragContext, aSucceed,
+                  /* del = */ FALSE, task->mTime);
 }
 
 nsWindow* nsDragSessionGtk::GetMostRecentDestWindow() {

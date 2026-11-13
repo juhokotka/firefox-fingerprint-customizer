@@ -64,6 +64,7 @@ function _url(path) {
 const BLANK_PAGE_URL = _url("translations-tester-blank.html");
 const SPANISH_PAGE_URL = _url("translations-tester-es.html");
 const SPANISH_PAGE_URL_2 = _url("translations-tester-es-2.html");
+const SPANISH_IFRAME_PAGE_URL = _url("translations-tester-iframe-es.html");
 const SPANISH_PAGE_SHORT_URL = _url("translations-tester-es-short.html");
 const SPANISH_PAGE_MISMATCH_URL = _url("translations-tester-es-mismatch.html");
 const SPANISH_PAGE_MISMATCH_SHORT_URL = _url("translations-tester-es-mismatch-short.html"); // prettier-ignore
@@ -102,6 +103,16 @@ const ALWAYS_TRANSLATE_LANGS_PREF =
 const NEVER_TRANSLATE_LANGS_PREF =
   "browser.translations.neverTranslateLanguages";
 const USE_LEXICAL_SHORTLIST_PREF = "browser.translations.useLexicalShortlist";
+const DOCUMENT_LANGUAGE_METADATA_LOAD_TIMEOUT_MS_PREF =
+  "dom.document_language_metadata.load_timeout_ms";
+const DOCUMENT_LANGUAGE_METADATA_RETRY_DELAY_BASE_MS_PREF =
+  "dom.document_language_metadata.retry_delay_base_ms";
+const DOCUMENT_LANGUAGE_METADATA_TEXT_SAMPLE_MIN_CODE_UNITS = 1500;
+const DOCUMENT_LANGUAGE_METADATA_TEXT_SAMPLE_TARGET_CODE_UNITS = 4096;
+const DOCUMENT_LANGUAGE_METADATA_TEST_PREFS = [
+  [DOCUMENT_LANGUAGE_METADATA_RETRY_DELAY_BASE_MS_PREF, 10],
+  [DOCUMENT_LANGUAGE_METADATA_LOAD_TIMEOUT_MS_PREF, 50],
+];
 
 /**
  * Provide a uniform way to log actions. This abuses the Error stack to get the callers
@@ -232,7 +243,7 @@ function serveOnce(html, statusCode = 200) {
   server.start(-1);
 
   let { primaryHost, primaryPort } = server.identity;
-  // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+  // eslint-disable-next-line sdl/no-insecure-url
   const url = `http://${primaryHost}:${primaryPort}/page.html`;
   info("Server listening for: " + url);
 
@@ -251,6 +262,108 @@ async function loadNewPage(browser, url) {
   });
   BrowserTestUtils.startLoadingURIString(browser, url);
   await loaded;
+}
+
+/**
+ * @param {MozBrowser} browser
+ * @returns {Promise<DocumentLanguageMetadata | null>}
+ */
+async function requestDocumentLanguageMetadata(browser) {
+  const windowGlobal = browser.browsingContext?.currentWindowGlobal;
+  if (!windowGlobal) {
+    return null;
+  }
+
+  return windowGlobal.requestDocumentLanguageMetadata({
+    textSampleMinCodeUnits:
+      DOCUMENT_LANGUAGE_METADATA_TEXT_SAMPLE_MIN_CODE_UNITS,
+    textSampleTargetCodeUnits:
+      DOCUMENT_LANGUAGE_METADATA_TEXT_SAMPLE_TARGET_CODE_UNITS,
+  });
+}
+
+/**
+ * Waits for document-language metadata to become available for the current page.
+ *
+ * @param {MozBrowser} browser
+ * @param {object} [options]
+ * @param {string | null} [options.htmlLangAttribute]
+ */
+async function waitForDocumentLanguageMetadata(
+  browser,
+  { htmlLangAttribute = null } = {}
+) {
+  let metadata = null;
+  await TestUtils.waitForCondition(async () => {
+    metadata = await requestDocumentLanguageMetadata(browser);
+    if (!metadata || metadata.textSample == null) {
+      return false;
+    }
+    return (
+      htmlLangAttribute == null ||
+      metadata.htmlLangAttribute === htmlLangAttribute
+    );
+  }, "Waiting for document-language metadata.");
+
+  return metadata;
+}
+
+/**
+ * Waits for the TranslationsParent actor to resolve language tags for the current page.
+ *
+ * @param {MozBrowser} browser
+ * @returns {Promise<LangTags>}
+ */
+async function waitForTranslationsLanguageState(browser) {
+  let langTags = null;
+  await TestUtils.waitForCondition(async () => {
+    let actor;
+    try {
+      actor = TranslationsParent.getTranslationsActor(browser);
+    } catch {
+      return false;
+    }
+
+    langTags = await actor.getLangTags();
+    return !!langTags;
+  }, "Waiting for TranslationsParent language state.");
+
+  return langTags;
+}
+
+/**
+ * Loads a new test page with the given initial HTML language tag and resolves
+ * lang tags from the TranslationsParent actor for that page.
+ *
+ * @param {MozBrowser} browser
+ * @param {string} langTag
+ * @returns {Promise<LangTags>}
+ */
+async function getLangTagsForLangTagTestPage(browser, langTag) {
+  const html = String.raw;
+  const { url, serverClosed } = serveOnce(html`
+    <!doctype html>
+    <html lang=${langTag}>
+      <head>
+        <meta charset="utf-8" />
+        <title>Translations Lang Tag Test</title>
+      </head>
+      <body>
+        <h1>Translations language tag test page</h1>
+        <p>
+          This page provides stable text while tests vary the initial HTML
+          language tag.
+        </p>
+      </body>
+    </html>
+  `);
+
+  await loadNewPage(browser, url);
+  await serverClosed;
+  await waitForDocumentLanguageMetadata(browser, {
+    htmlLangAttribute: langTag,
+  });
+  return waitForTranslationsLanguageState(browser);
 }
 
 /**
@@ -305,8 +418,9 @@ async function openAboutTranslations({
       ["browser.translations.logLevel", "All"],
       ["browser.translations.mostRecentTargetLanguages", ""],
       ["dom.events.testing.asyncClipboard", true],
-      [USE_LEXICAL_SHORTLIST_PREF, false],
       ["layout.css.text-transform.uppercase-eszett.enabled", false],
+      [USE_LEXICAL_SHORTLIST_PREF, false],
+      ...DOCUMENT_LANGUAGE_METADATA_TEST_PREFS,
       ...(prefs ?? []),
     ],
   });
@@ -2132,6 +2246,7 @@ async function createTranslationsDoc(
       ["browser.translations.enable", true],
       ["browser.translations.logLevel", "All"],
       [USE_LEXICAL_SHORTLIST_PREF, false],
+      ...DOCUMENT_LANGUAGE_METADATA_TEST_PREFS,
     ],
   });
 
@@ -2441,6 +2556,93 @@ function getTranslationsParent(win = window) {
 }
 
 /**
+ * Returns true if the given browsing context has an existing
+ * TranslationsParent actor, otherwise false.
+ *
+ * @param {BrowsingContext} browsingContext
+ * @returns {boolean}
+ */
+function hasTranslationParentActor(browsingContext) {
+  return !!browsingContext?.currentWindowGlobal?.getExistingActor(
+    "Translations"
+  );
+}
+
+/**
+ * Returns true if the given browser's content window has an existing
+ * TranslationsChild actor, otherwise false.
+ *
+ * @param {MozBrowser} [browser=gBrowser.selectedBrowser]
+ * @returns {Promise<boolean>}
+ */
+function hasTranslationChildActor(browser = gBrowser.selectedBrowser) {
+  return SpecialPowers.spawn(browser, [], () => {
+    return !!content.windowGlobalChild.getExistingActor("Translations");
+  });
+}
+
+/**
+ * Returns true if the given browsing context has an existing
+ * TranslationsChild actor, otherwise false.
+ *
+ * @param {BrowsingContext} browsingContext
+ * @returns {Promise<boolean>}
+ */
+function hasTranslationChildActorInBrowsingContext(browsingContext) {
+  return SpecialPowers.spawn(browsingContext, [], () => {
+    return !!content.windowGlobalChild.getExistingActor("Translations");
+  });
+}
+
+/**
+ * Waits for the given browser's content window to have an existing TranslationsChild actor.
+ *
+ * @param {MozBrowser} browser
+ * @param {string} message
+ * @returns {Promise<void>}
+ */
+function waitForTranslationChildActor(browser, message) {
+  return waitForCondition(
+    async () => hasTranslationChildActor(browser),
+    message
+  );
+}
+
+/**
+ * Waits for a browsing context to have an existing TranslationsParent actor.
+ *
+ * @param {BrowsingContext} browsingContext
+ * @param {string} message
+ * @returns {Promise<void>}
+ */
+function waitForTranslationParentActorInBrowsingContext(
+  browsingContext,
+  message
+) {
+  return waitForCondition(
+    () => hasTranslationParentActor(browsingContext),
+    message
+  );
+}
+
+/**
+ * Waits for a browsing context to have an existing TranslationsChild actor.
+ *
+ * @param {BrowsingContext} browsingContext
+ * @param {string} message
+ * @returns {Promise<void>}
+ */
+function waitForTranslationChildActorInBrowsingContext(
+  browsingContext,
+  message
+) {
+  return waitForCondition(
+    async () => hasTranslationChildActorInBrowsingContext(browsingContext),
+    message
+  );
+}
+
+/**
  * Closes all open panels and menu popups related to Translations.
  *
  * @param {ChromeWindow} [win]
@@ -2541,6 +2743,7 @@ async function setupActorTest({
       ["browser.translations.enable", true],
       ["browser.translations.logLevel", "All"],
       [USE_LEXICAL_SHORTLIST_PREF, false],
+      ...DOCUMENT_LANGUAGE_METADATA_TEST_PREFS,
       ...(prefs ?? []),
     ],
   });
@@ -2929,6 +3132,7 @@ async function loadTestPage({
         ["browser.translations.neverTranslateLanguages", ""],
         ["browser.translations.mostRecentTargetLanguages", ""],
         [USE_LEXICAL_SHORTLIST_PREF, false],
+        ...DOCUMENT_LANGUAGE_METADATA_TEST_PREFS,
         // Bug 1893100 - This is needed to ensure that switching focus
         // with tab works in tests independent of macOS settings that
         // would otherwise disable keyboard navigation at the OS level.
@@ -3244,6 +3448,294 @@ async function autoTranslatePage(options) {
 
   await runInPage(options.runInPage);
   await cleanup();
+}
+
+/**
+ * Returns the browsing context for a given iframe in the current content page.
+ *
+ * @param {RunInPageFn} runInPage
+ * @param {string} iframeId
+ * @returns {Promise<BrowsingContext>}
+ */
+async function getIframeBrowsingContext(runInPage, iframeId) {
+  const browsingContextId = await runInPage(
+    async (TranslationsTest, { iframeId: targetIframeId }) => {
+      await TranslationsTest.waitForCondition(
+        () =>
+          Boolean(
+            content.document.getElementById(targetIframeId)?.browsingContext
+          ),
+        `Waiting for iframe ${targetIframeId} to have a browsing context`
+      );
+
+      return content.document.getElementById(targetIframeId).browsingContext.id;
+    },
+    { iframeId }
+  );
+
+  return BrowsingContext.get(browsingContextId);
+}
+
+/**
+ * Returns the origin of the document loaded in a browser or browsing context.
+ *
+ * @param {MozBrowser | BrowsingContext} target
+ * @returns {Promise<string>}
+ */
+function getContentOrigin(target) {
+  return SpecialPowers.spawn(target, [], () => content.location.origin);
+}
+
+/**
+ * Navigates an iframe to the given URL and returns its browsing context.
+ *
+ * @param {RunInPageFn} runInPage
+ * @param {object} options
+ * @param {string} options.iframeId
+ * @param {string} options.url
+ * @returns {Promise<BrowsingContext>}
+ */
+async function navigateIframeToUrl(runInPage, { iframeId, url }) {
+  const browsingContextId = await runInPage(
+    async (TranslationsTest, { iframeId: targetIframeId, url: targetUrl }) => {
+      const iframe = content.document.getElementById(targetIframeId);
+      if (!iframe) {
+        throw new Error(`Could not find iframe: ${targetIframeId}`);
+      }
+
+      const loadPromise = new Promise(resolve => {
+        iframe.addEventListener("load", resolve, { once: true });
+      });
+
+      iframe.src = targetUrl;
+      await loadPromise;
+
+      await TranslationsTest.waitForCondition(
+        () => iframe.browsingContext,
+        `Waiting for iframe ${targetIframeId} to have a browsing context`
+      );
+
+      return iframe.browsingContext.id;
+    },
+    { iframeId, url }
+  );
+
+  return BrowsingContext.get(browsingContextId);
+}
+
+/**
+ * Asserts a translation result inside the specified browsing context.
+ *
+ * @param {object} options
+ * @param {BrowsingContext} options.browsingContext
+ * @param {string} options.selector
+ * @param {string} [options.attribute]
+ * @param {string | Array<string>} options.expectedResult
+ * @param {string} options.message
+ * @returns {Promise<void>}
+ */
+async function assertTranslationResultInBrowsingContext({
+  browsingContext,
+  selector,
+  attribute,
+  expectedResult,
+  message,
+}) {
+  await SpecialPowers.spawn(
+    browsingContext,
+    [{ selector, attribute, expectedResult, message }],
+    async function ({
+      selector: targetSelector,
+      attribute: targetAttribute,
+      expectedResult: expectedTranslationResult,
+      message: assertionMessage,
+    }) {
+      const TranslationsTest = ChromeUtils.importESModule(
+        "chrome://mochitests/content/browser/toolkit/components/translations/tests/browser/translations-test.mjs"
+      );
+
+      TranslationsTest.setup({ Assert, ContentTaskUtils, content });
+
+      await TranslationsTest.waitForCondition(
+        () => content.document.readyState === "complete",
+        "Waiting for the document to load"
+      );
+
+      await TranslationsTest.assertTranslationResult(
+        assertionMessage,
+        () => {
+          const element = content.document.querySelector(targetSelector);
+          return targetAttribute
+            ? element?.getAttribute(targetAttribute)
+            : element;
+        },
+        expectedTranslationResult
+      );
+    }
+  );
+}
+
+/**
+ * Scrolls the specified browsing context to the top.
+ *
+ * @param {BrowsingContext} browsingContext
+ * @returns {Promise<void>}
+ */
+async function scrollBrowsingContextToTop(browsingContext) {
+  await SpecialPowers.spawn(browsingContext, [], async function () {
+    const TranslationsTest = ChromeUtils.importESModule(
+      "chrome://mochitests/content/browser/toolkit/components/translations/tests/browser/translations-test.mjs"
+    );
+
+    TranslationsTest.setup({ Assert, ContentTaskUtils, content });
+
+    content.scrollTo({ top: 0, behavior: "smooth" });
+
+    await TranslationsTest.waitForCondition(
+      () => content.scrollY <= 10,
+      "Waiting for the browsing context scroll animation to complete."
+    );
+
+    await new Promise(resolve => {
+      content.requestAnimationFrame(() =>
+        content.requestAnimationFrame(resolve)
+      );
+    });
+  });
+}
+
+/**
+ * Scrolls the specified browsing context to the bottom.
+ *
+ * @param {BrowsingContext} browsingContext
+ * @returns {Promise<void>}
+ */
+async function scrollBrowsingContextToBottom(browsingContext) {
+  await SpecialPowers.spawn(browsingContext, [], async function () {
+    const TranslationsTest = ChromeUtils.importESModule(
+      "chrome://mochitests/content/browser/toolkit/components/translations/tests/browser/translations-test.mjs"
+    );
+
+    TranslationsTest.setup({ Assert, ContentTaskUtils, content });
+
+    const scrollHeight = content.document.documentElement.scrollHeight;
+    content.scrollTo({ top: scrollHeight, behavior: "smooth" });
+
+    await TranslationsTest.waitForCondition(
+      () => content.scrollY >= scrollHeight - content.innerHeight - 10,
+      "Waiting for the browsing context scroll animation to complete."
+    );
+
+    await new Promise(resolve => {
+      content.requestAnimationFrame(() =>
+        content.requestAnimationFrame(resolve)
+      );
+    });
+  });
+}
+
+/**
+ * Mutates the specified element's text content and title attribute in a browsing context.
+ *
+ * @param {object} options
+ * @param {BrowsingContext} options.browsingContext
+ * @param {string} options.selector
+ * @param {string} [options.textContent]
+ * @param {string} [options.title]
+ * @returns {Promise<void>}
+ */
+async function mutateElementInBrowsingContext({
+  browsingContext,
+  selector,
+  textContent,
+  title,
+}) {
+  await SpecialPowers.spawn(
+    browsingContext,
+    [{ selector, textContent, title }],
+    async function ({
+      selector: targetSelector,
+      textContent: targetTextContent,
+      title: targetTitle,
+    }) {
+      const element = content.document.querySelector(targetSelector);
+
+      if (!element) {
+        throw new Error(
+          `Could not find the element for selector: ${targetSelector}`
+        );
+      }
+
+      if (targetTextContent !== undefined) {
+        element.innerText = targetTextContent;
+      }
+
+      if (targetTitle !== undefined) {
+        element.setAttribute("title", targetTitle);
+      }
+    }
+  );
+}
+
+/**
+ * Inserts a testable iframe into the current content page.
+ *
+ * @param {RunInPageFn} runInPage
+ * @param {object} options
+ * @param {string} options.iframeId
+ * @param {string} options.referenceIframeId
+ * @param {"beforebegin" | "afterend"} options.position
+ * @param {string} [options.src]
+ * @returns {Promise<BrowsingContext>}
+ */
+async function insertIframeIntoPage(
+  runInPage,
+  { iframeId, referenceIframeId, position, src }
+) {
+  const browsingContextId = await runInPage(
+    async (
+      TranslationsTest,
+      {
+        iframeId: targetIframeId,
+        referenceIframeId: targetReferenceIframeId,
+        position: targetPosition,
+        src: targetSrc,
+      }
+    ) => {
+      const referenceIframe = content.document.getElementById(
+        targetReferenceIframeId
+      );
+
+      if (!referenceIframe) {
+        throw new Error(
+          `Could not find the iframe with id: ${targetReferenceIframeId}`
+        );
+      }
+
+      const iframe = content.document.createElement("iframe");
+      iframe.id = targetIframeId;
+      iframe.src =
+        targetSrc ?? `translations-tester-es.html?frame=${targetIframeId}`;
+      iframe.title = targetIframeId;
+
+      const loadPromise = new Promise(resolve => {
+        iframe.addEventListener("load", resolve, { once: true });
+      });
+
+      referenceIframe.insertAdjacentElement(targetPosition, iframe);
+      await loadPromise;
+
+      await TranslationsTest.waitForCondition(
+        () => iframe.browsingContext,
+        `Waiting for iframe ${targetIframeId} to have a browsing context`
+      );
+
+      return iframe.browsingContext.id;
+    },
+    { iframeId, referenceIframeId, position, src }
+  );
+
+  return BrowsingContext.get(browsingContextId);
 }
 
 /**
@@ -4026,6 +4518,7 @@ async function setupAboutPreferences(
       ["identity.fxaccounts.account.device.name", ""],
       [USE_LEXICAL_SHORTLIST_PREF, false],
       ["browser.settings-redesign.enabled", true],
+      ...DOCUMENT_LANGUAGE_METADATA_TEST_PREFS,
       ...prefs,
     ],
   });
@@ -4590,6 +5083,91 @@ async function destroyTranslationsEngine() {
   await EngineProcess.destroyTranslationsEngine();
 }
 
+/**
+ * A short engine idle timeout suitable for browser tests.
+ *
+ * @type {number}
+ */
+const TRANSLATIONS_ENGINE_CACHE_TIMEOUT_MS = 300;
+
+/** Test utility functions for translations engine lifetime. */
+class TranslationsEngineTestUtils {
+  /**
+   * Waits for the translations engine process to exit after its idle timeout.
+   *
+   * @param {LanguagePair} languagePair
+   * @returns {Promise<void>}
+   */
+  static async waitForIdleTimeout(languagePair) {
+    const engineParent = await EngineProcess.getTranslationsEngineParent();
+    const processShutdown = TestUtils.topicObserved(
+      "ipc:content-shutdown",
+      subject =>
+        subject instanceof Ci.nsIPropertyBag2 &&
+        subject.get("childID") === engineParent.childID
+    );
+
+    await engineParent.waitForEngineIdleTimeoutForTests(
+      languagePair,
+      TRANSLATIONS_ENGINE_CACHE_TIMEOUT_MS
+    );
+    await processShutdown;
+
+    ok(
+      EngineProcess.areAllEnginesTerminated(),
+      "The inference process exits after the translations engine expires."
+    );
+  }
+
+  /**
+   * Waits for a translations engine to expire while the inference process
+   * remains alive.
+   *
+   * @param {TranslationsEngineParent} engineParent
+   * @param {LanguagePair} languagePair
+   * @returns {Promise<void>}
+   */
+  static async waitForIdleTimeoutWithProcessAlive(engineParent, languagePair) {
+    await engineParent.waitForEngineIdleTimeoutForTests(
+      languagePair,
+      TRANSLATIONS_ENGINE_CACHE_TIMEOUT_MS
+    );
+
+    ok(
+      !EngineProcess.areAllEnginesTerminated(),
+      "The inference process remains alive after the translations engine expires."
+    );
+  }
+
+  /**
+   * Keeps the inference process alive independently of the translations engine.
+   *
+   * @returns {Promise<{
+   *   engineParent: TranslationsEngineParent,
+   *   release: () => Promise<void>,
+   * }>}
+   */
+  static async keepInferenceProcessAlive() {
+    const mlEngineParent = await EngineProcess.getMLEngineParent();
+    const engineParent = await EngineProcess.getTranslationsEngineParent();
+
+    ok(
+      !EngineProcess.areAllEnginesTerminated(),
+      "The independent engine actor keeps the inference process alive."
+    );
+    is(
+      engineParent.childID,
+      mlEngineParent.childID,
+      "Both engine actors use the same inference process."
+    );
+
+    return {
+      engineParent,
+      release: () => EngineProcess.destroyMLEngine(),
+    };
+  }
+}
+
 class AboutTranslationsTestUtils {
   /**
    * A collection of custom events that the about:translations document may dispatch.
@@ -4863,6 +5441,144 @@ class AboutTranslationsTestUtils {
     this.#resolveDownloads = resolveDownloads;
     this.#rejectDownloads = rejectDownloads;
     this.#autoDownloadFromRemoteSettings = autoDownloadFromRemoteSettings;
+  }
+
+  /**
+   * Verifies that about:translations can translate additional source text after
+   * its engine shuts down.
+   *
+   * @param {object} options
+   * @param {boolean} [options.keepProcessAlive=false]
+   * @param {Array<[string, any]>} [options.prefs]
+   * @param {(engineParent?: TranslationsEngineParent) => Promise<void>}
+   *   options.shutdownEngine
+   * @returns {Promise<void>}
+   */
+  static async assertTranslationAfterEngineShutdown({
+    keepProcessAlive = false,
+    prefs,
+    shutdownEngine,
+  }) {
+    const { aboutTranslationsTestUtils, cleanup } = await openAboutTranslations(
+      {
+        languagePairs: [
+          { fromLang: "en", toLang: "fr" },
+          { fromLang: "fr", toLang: "en" },
+        ],
+        prefs,
+      }
+    );
+    let processKeepAlive = null;
+
+    try {
+      processKeepAlive = keepProcessAlive
+        ? await TranslationsEngineTestUtils.keepInferenceProcessAlive()
+        : null;
+
+      const initialSourceText = "Hello world";
+
+      await aboutTranslationsTestUtils.assertEvents(
+        {
+          expected: [
+            [
+              AboutTranslationsTestUtils.Events.SourceTextInputDebounced,
+              { sourceText: initialSourceText },
+            ],
+            [
+              AboutTranslationsTestUtils.Events.TranslationRequested,
+              { translationId: 1 },
+            ],
+            [AboutTranslationsTestUtils.Events.ShowTranslatingPlaceholder],
+          ],
+        },
+        async () => {
+          await aboutTranslationsTestUtils.setSourceLanguageSelectorValue("en");
+          await aboutTranslationsTestUtils.setTargetLanguageSelectorValue("fr");
+          await aboutTranslationsTestUtils.setSourceTextAreaValue(
+            initialSourceText
+          );
+        }
+      );
+
+      await aboutTranslationsTestUtils.assertEvents(
+        {
+          expected: [
+            [
+              AboutTranslationsTestUtils.Events.TranslationComplete,
+              { translationId: 1 },
+            ],
+          ],
+        },
+        async () => {
+          await aboutTranslationsTestUtils.resolveDownloads(1);
+        }
+      );
+
+      await aboutTranslationsTestUtils.assertTranslatedText({
+        sourceLanguage: "en",
+        targetLanguage: "fr",
+        sourceText: initialSourceText,
+      });
+
+      await shutdownEngine(processKeepAlive?.engineParent);
+
+      const updatedSourceText = "Hello again";
+
+      info("Update the source text to trigger a new translation.");
+      await aboutTranslationsTestUtils.assertEvents(
+        {
+          expected: [
+            [
+              AboutTranslationsTestUtils.Events.SourceTextInputDebounced,
+              { sourceText: updatedSourceText },
+            ],
+            [
+              AboutTranslationsTestUtils.Events.URLUpdatedFromUI,
+              {
+                sourceLanguage: "en",
+                targetLanguage: "fr",
+                sourceText: updatedSourceText,
+              },
+            ],
+            [
+              AboutTranslationsTestUtils.Events.TranslationRequested,
+              { translationId: 2 },
+            ],
+          ],
+        },
+        async () => {
+          await aboutTranslationsTestUtils.setSourceTextAreaValue(
+            updatedSourceText
+          );
+        }
+      );
+
+      await aboutTranslationsTestUtils.assertEvents(
+        {
+          expected: [
+            [
+              AboutTranslationsTestUtils.Events.TranslationComplete,
+              { translationId: 2 },
+            ],
+          ],
+        },
+        async () => {
+          await aboutTranslationsTestUtils.resolveDownloads(1);
+        }
+      );
+
+      await aboutTranslationsTestUtils.assertTranslatedText({
+        sourceLanguage: "en",
+        targetLanguage: "fr",
+        sourceText: updatedSourceText,
+      });
+    } finally {
+      try {
+        await processKeepAlive?.release();
+      } finally {
+        await cleanup();
+      }
+    }
   }
 
   /**

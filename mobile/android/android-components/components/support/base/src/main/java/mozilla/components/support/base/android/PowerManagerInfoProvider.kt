@@ -9,20 +9,19 @@ import android.os.PowerManager
 import androidx.core.content.ContextCompat
 
 /**
- * This class provides information about battery optimisations without exposing the android
- * framework APIs directly, making it easier to test the code that depends on it.
+ * This class provides information about battery optimisations without exposing the android framework APIs directly,
+ * making it easier to test the code that depends on it.
  */
 interface PowerManagerInfoProvider {
 
-    /**
-     * Returns true if the user has disabled battery optimisations for the app.
-     */
+    /** Returns true if the user has disabled battery optimisations for the app. */
     fun isIgnoringBatteryOptimizations(): Boolean
+
+    /** Returns true if the device is in power save (battery saver) mode. */
+    fun isPowerSaveMode(): Boolean
 }
 
-/**
- * @see PowerManagerInfoProvider
- */
+/** @see PowerManagerInfoProvider */
 class DefaultPowerManagerInfoProvider(private val context: Context) : PowerManagerInfoProvider {
 
     private val powerManager by lazy {
@@ -31,4 +30,6 @@ class DefaultPowerManagerInfoProvider(private val context: Context) : PowerManag
 
     override fun isIgnoringBatteryOptimizations(): Boolean =
         powerManager?.isIgnoringBatteryOptimizations(context.packageName) ?: false
+
+    override fun isPowerSaveMode(): Boolean = powerManager?.isPowerSaveMode ?: false
 }

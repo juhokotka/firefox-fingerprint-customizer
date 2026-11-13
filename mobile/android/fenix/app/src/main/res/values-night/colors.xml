@@ -35,12 +35,15 @@
     <color name="fx_mobile_on_information_container">@color/novaVioletDesaturated0</color>
     <color name="fx_mobile_success">@color/novaGreen30</color>
     <color name="fx_mobile_on_success">@color/novaGray80</color>
+    <color name="fx_mobile_success_container">@color/novaGreen70</color>
+    <color name="fx_mobile_on_success_container">@color/novaVioletDesaturated0</color>
     <color name="fx_mobile_warning">@color/novaYellow30</color>
     <color name="fx_mobile_on_warning">@color/novaGray80</color>
     <color name="fx_mobile_warning_container">@color/novaYellow70</color>
     <color name="fx_mobile_on_warning_container">@color/novaVioletDesaturated0</color>
     <color name="fx_mobile_outline">@color/novaGray45</color>
-    <color name="fx_mobile_outline_variant">@color/novaGray65</color>
+    <color name="fx_mobile_outline_variant">@color/novaGray60</color>
+    <color name="fx_mobile_sheet_outline">@color/novaGray75</color>
     <color name="fx_mobile_surface_bright">@color/novaGray65</color>
     <color name="fx_mobile_surface_dim">@color/novaGray85</color>
     <color name="fx_mobile_surface_container">@color/novaGray75</color>
@@ -48,6 +51,7 @@
     <color name="fx_mobile_surface_container_highest">@color/novaGray65</color>
     <color name="fx_mobile_surface_container_low">@color/novaGray80</color>
     <color name="fx_mobile_surface_container_lowest">@color/novaGray85</color>
+    <color name="fx_mobile_surface_container_selected">@color/novaGray55</color>
     <color name="fx_mobile_autofill_text">@color/novaVioletDesaturated30A55</color>
     <color name="fx_mobile_selected_text">@color/novaGray45A80</color>
     <color name="fx_mobile_icon_private">@color/novaViolet50</color>
@@ -60,8 +64,6 @@
     <!-- Layers -->
     <!-- Card background, Menu background, Dialog, Banner -->
     <color name="fx_mobile_layer_color_2">@color/photonDarkGrey30</color>
-    <!-- Search -->
-    <color name="fx_mobile_layer_color_3">@color/photonDarkGrey80</color>
     <!-- Warning background -->
     <color name="fx_mobile_layer_color_warning">@color/photonYellow70A77</color>
     <!-- Error background -->
@@ -80,8 +82,6 @@
     <color name="fx_mobile_text_color_action_primary_disabled">@color/photonLightGrey05A40</color>
 
     <!-- Icon -->
-    <!-- Disabled icon -->
-    <color name="fx_mobile_icon_color_disabled">@color/photonLightGrey05A40</color>
     <!-- Icon inverted (on color) -->
     <color name="fx_mobile_icon_color_oncolor">@color/photonLightGrey05</color>
     <color name="fx_mobile_icon_color_accent_violet">@color/photonViolet20</color>
@@ -92,13 +92,8 @@
 
     <!-- Normal theme colors for dark mode -->
     <color name="accent_normal_theme">@color/photonViolet50</color>
-    <color name="accent_high_contrast_normal_theme">@color/photonViolet40</color>
-    <color name="neutral_normal_theme">@color/photonGrey20</color>
-    <color name="neutral_faded_normal_theme">#1FFBFBFE</color>
     <color name="toggle_off_knob_normal_theme">@color/toggle_off_knob_dark_theme</color>
     <color name="toggle_off_track_normal_theme">@color/toggle_off_track_dark_theme</color>
-    <color name="fill_link_from_clipboard_normal_theme">@color/photonViolet40</color>
-    <color name="add_on_private_browsing_exterior_circle_background_normal_theme">@color/accent_normal_theme</color>
     <color name="prompt_login_edit_text_cursor_color_normal_theme">@color/photonViolet50</color>
     <color name="search_suggestion_indicator_icon_color_normal_theme">@color/photonGreen60</color>
     <color name="search_suggestion_indicator_icon_bookmark_color_normal_theme">@color/photonBlue40</color>
@@ -128,16 +123,10 @@
     <color name="mozac_ui_tabcounter_default_tint" tools:ignore="UnusedResources">@color/fx_mobile_on_surface</color>
     <color name="mozac_ui_tabcounter_default_text" tools:ignore="UnusedResources">@color/fx_mobile_on_surface</color>
 
-    <!-- Account Sync Avatar fill colors -->
-    <color name="mozac_ui_avatar_warning_bg_fill_critical">@color/fx_mobile_on_surface_variant</color>
-    <color name="mozac_ui_avatar_warning_fill_critical">@color/fx_mobile_error</color>
-
-    <!-- Extensions disabled icon fill colors -->
-    <color name="mozac_ui_extensions_warning_bg_fill_critical">@color/fx_mobile_on_surface_variant</color>
-    <color name="mozac_ui_extensions_warning_fill_critical">@color/fx_mobile_error</color>
-
-    <!-- Lock slash critical fill colors for mozac_ic_lock_slash_critical_24 -->
-    <color name="mozac_ui_lock_slash_bg_fill_critical">@color/fx_mobile_on_surface_variant</color>
-    <color name="mozac_ui_lock_slash_fill_critical">@color/fx_mobile_error</color>
     <color name="preference_scroll_highlight">@color/fx_mobile_surface_container_highest</color>
+
+    <!-- Glance search bar widgets -->
+    <color name="search_bar_widget_background">@color/novaGray65</color>
+    <color name="search_bar_widget_button_background">@color/novaGray75</color>
+    <color name="search_bar_widget_divider">@color/novaGray55</color>
 </resources>

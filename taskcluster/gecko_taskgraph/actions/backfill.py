@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 SYMBOL_REGEX = re.compile("^(.*)-[a-z0-9]{11}-bk$")
 GROUP_SYMBOL_REGEX = re.compile("^(.*)-bk$")
 MIN_SLICE_GAP = 7
+_PRIORITIES = ["lowest", "very-low", "low", "medium", "high", "very-high", "highest"]
+_PERF_SUITES = ("raptor", "talos")
 
 # Allowed browser applications for performance test backfills
 # Only Firefox and Geckoview should be backfilled for regression detection
@@ -35,6 +37,23 @@ ALLOWED_PERFTEST_BACKFILL_APPS = (
     "geckoview",
     "fenix",
 )
+
+
+def _is_perf_task(task):
+    return (
+        task.kind == "perftest" or task.attributes.get("unittest_suite") in _PERF_SUITES
+    )
+
+
+def _lower_priority(current, max_priority):
+    try:
+        if current is None or _PRIORITIES.index(max_priority) < _PRIORITIES.index(
+            current
+        ):
+            return max_priority
+    except ValueError:
+        pass
+    return current
 
 
 def input_for_support_action(revision, task, times=1, retrigger=True):
@@ -134,6 +153,7 @@ def backfill_action(parameters, graph_config, input, task_group_id, task_id):
     This action takes a task ID and schedules it on previous pushes (via support action).
     When 'slices' is 0 (default), standard backfill is used (all pushes).
     When 'slices' > 0, the gap of missing pushes is detected and the mode is chosen automatically.
+
       - small gaps: standard backfill
       - large gaps: sliced backfill (exact pivot pushes at n/N+1, 2n/N+1, ... for slices=N).
 
@@ -165,7 +185,9 @@ def backfill_action(parameters, graph_config, input, task_group_id, task_id):
         strategy = "standard"
         pushes = get_pushes_from_params_input(parameters, input)
     else:
-        pushes = get_pushes_in_gap(parameters, input_for_action.get("label", ""))
+        pushes = get_pushes_in_gap(
+            parameters, input_for_action.get("label", ""), graph_config
+        )
         if len(pushes) < MIN_SLICE_GAP:
             strategy = "standard"
         else:
@@ -174,11 +196,14 @@ def backfill_action(parameters, graph_config, input, task_group_id, task_id):
     planned_pushes = plan_pushes_to_trigger(pushes, strategy, slices)
     failed = False
     logger.info(
-        "Backfill started: label=%s, strategy=%s, slices=%d, target_pushes=%s",
-        input_for_action.get("label", ""),
-        strategy,
-        slices,
-        planned_pushes,
+        "BACKFILL_STARTED: %s",
+        json.dumps({
+            "label": input_for_action.get("label", ""),
+            "strategy": strategy,
+            "slices": slices,
+            "scanned_push_count": len(pushes),
+            "target_pushes": planned_pushes,
+        }),
     )
     for i, push_id in enumerate(planned_pushes, 1):
         try:
@@ -229,7 +254,10 @@ def is_speedometer_task(label):
     return "shippable" in label and "speedometer3" in label
 
 
-def backfill_modifier(task, input):
+def backfill_modifier(task, input, lower_priority=False):
+    if lower_priority:
+        task.task["priority"] = _lower_priority(task.task.get("priority"), "very-low")
+
     if task.label != input["label"]:
         return task
 
@@ -269,10 +297,6 @@ def backfill_modifier(task, input):
                 GROUP_SYMBOL_REGEX, th_info["groupSymbol"], "-bk"
             )
         task.task["tags"]["action"] = "backfill-task"
-    return task
-
-
-def do_not_modify(task):
     return task
 
 
@@ -389,6 +413,11 @@ def add_task_with_original_manifests(
 
     to_run = [label]
 
+    # When backfilling a performance test, lower the priority of every task this
+    # action schedules (the test and its dependencies) to avoid delaying the
+    # tasks of regular pushes.
+    lower_priority = _is_perf_task(full_task_graph[label])
+
     logger.info("Creating tasks...")
     create_tasks(
         graph_config,
@@ -398,7 +427,7 @@ def add_task_with_original_manifests(
         parameters,
         decision_task_id,
         suffix="0",
-        modifier=partial(backfill_modifier, input=input),
+        modifier=partial(backfill_modifier, input=input, lower_priority=lower_priority),
     )
 
     # TODO Implement a way to write out artifacts without assuming there's

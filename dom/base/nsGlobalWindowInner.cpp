@@ -79,7 +79,6 @@
 #include "mozilla/StaticPrefs_docshell.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_extensions.h"
-#include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/StorageAccess.h"
 #include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/TelemetryHistogramEnums.h"
@@ -140,6 +139,7 @@
 #include "mozilla/dom/Location.h"
 #include "mozilla/dom/MediaDevices.h"
 #include "mozilla/dom/MediaKeys.h"
+#include "mozilla/dom/ModuleLoader.h"
 #include "mozilla/dom/Navigation.h"
 #include "mozilla/dom/NavigatorBinding.h"
 #include "mozilla/dom/Nullable.h"
@@ -152,6 +152,7 @@
 #include "mozilla/dom/PopupBlocker.h"
 #include "mozilla/dom/PrimitiveConversions.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/PushManager.h"
 #include "mozilla/dom/RootedDictionary.h"
 #include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -264,6 +265,7 @@
 #include "nsIPermissionManager.h"
 #include "nsIPrefBranch.h"
 #include "nsIPrincipal.h"
+#include "nsIPrintSettings.h"
 #include "nsIPrompt.h"
 #include "nsIRunnable.h"
 #include "nsIScreen.h"
@@ -308,6 +310,8 @@
 #include "nsTLiteralString.h"
 #include "nsTObserverArray.h"
 #include "nsTStringRepr.h"
+#include "nsThread.h"
+#include "nsThreadManager.h"
 #include "nsThreadUtils.h"
 #include "nsWeakReference.h"
 #include "nsWindowMemoryReporter.h"
@@ -320,10 +324,6 @@
 #include "prtypes.h"
 #include "xpcprivate.h"
 #include "xpcpublic.h"
-
-#ifdef NS_PRINTING
-#  include "nsIPrintSettings.h"
-#endif
 
 #ifdef MOZ_WEBSPEECH
 #  include "mozilla/dom/SpeechSynthesis.h"
@@ -436,10 +436,12 @@ class nsGlobalWindowObserver final : public nsIObserver,
   explicit nsGlobalWindowObserver(nsGlobalWindowInner* aWindow)
       : mWindow(aWindow) {}
   NS_DECL_ISUPPORTS
-  NS_IMETHOD Observe(nsISupports* aSubject, const char* aTopic,
-                     const char16_t* aData) override {
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY NS_IMETHOD
+  Observe(nsISupports* aSubject, const char* aTopic,
+          const char16_t* aData) override {
     if (!mWindow) return NS_OK;
-    return mWindow->Observe(aSubject, aTopic, aData);
+    const RefPtr<nsGlobalWindowInner> win = mWindow;
+    return win->Observe(aSubject, aTopic, aData);
   }
   void Forget() { mWindow = nullptr; }
   NS_IMETHOD GetInterface(const nsIID& aIID, void** aResult) override {
@@ -724,7 +726,7 @@ void nsGlobalWindowInner::RemoveIdleCallback(
                                   Timeout::Reason::eIdleCallbackTimeout);
   }
 
-  aRequest->removeFrom(mIdleRequestCallbacks);
+  aRequest->RemoveFromList();
 }
 
 void nsGlobalWindowInner::RunIdleRequest(IdleRequest* aRequest,
@@ -832,6 +834,7 @@ uint32_t nsGlobalWindowInner::RequestIdleCallback(
     request->SetTimeoutHandle(timeoutHandle);
   }
 
+  request->SetContainer(mIdleRequestCallbacksByHandle);
   mIdleRequestCallbacks.insertBack(request);
 
   if (!IsSuspended()) {
@@ -842,11 +845,8 @@ uint32_t nsGlobalWindowInner::RequestIdleCallback(
 }
 
 void nsGlobalWindowInner::CancelIdleCallback(uint32_t aHandle) {
-  for (IdleRequest* r : mIdleRequestCallbacks) {
-    if (r->Handle() == aHandle) {
-      RemoveIdleCallback(r);
-      break;
-    }
+  if (IdleRequest* request = mIdleRequestCallbacksByHandle->Get(aHandle)) {
+    RemoveIdleCallback(request);
   }
 }
 
@@ -929,6 +929,7 @@ nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow,
 #endif
       mFocusMethod(0),
       mIdleRequestCallbackCounter(1),
+      mIdleRequestCallbacksByHandle(new mozilla::dom::IdleRequestMap()),
       mIdleRequestExecutor(nullptr),
       mObservingRefresh(false),
       mIteratingDocumentFlushedResolvers(false),
@@ -1153,6 +1154,10 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   }
   StartDying();
 
+  if (JSObject* global = GetWrapperPreserveColor()) {
+    js::SetRealmIsDyingHint(global);
+  }
+
   ClearHasPointerRawUpdateEventListeners();
 
   if (mDoc && mDoc->GetWindowContext()) {
@@ -1310,6 +1315,7 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   mConsole = nullptr;
   mCookieStore = nullptr;
   mDocumentPiP = nullptr;
+  mPushManager = nullptr;
   mCloseWatcherManager = nullptr;
 
   mPaintWorklet = nullptr;
@@ -1322,11 +1328,12 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   }
   mSessionStorage = nullptr;
   if (mPerformance) {
-    // Since window is dying, nothing is going to be painted
-    // with meaningful sizes, so these temp data for LCP is
-    // no longer needed.
-    static_cast<PerformanceMainThread*>(mPerformance.get())
-        ->ClearGeneratedTempDataForLCP();
+    // Since window is dying, nothing is going to be painted with meaningful
+    // sizes, so the temp data for LCP and container timing is no longer needed.
+    // Clearing the container timing records also drops their raw element keys.
+    auto* perf = static_cast<PerformanceMainThread*>(mPerformance.get());
+    perf->ClearGeneratedTempDataForLCP();
+    perf->ClearContainerTimingData();
   }
   mPerformance = nullptr;
 
@@ -1436,8 +1443,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowInner)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebTaskScheduler)
 
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebTaskSchedulingState)
-
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTrustedTypePolicyFactory)
 
 #ifdef MOZ_WEBSPEECH
@@ -1507,6 +1512,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowInner)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mConsole)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCookieStore)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocumentPiP)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPushManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPaintWorklet)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mExternal)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mIntlUtils)
@@ -1548,8 +1554,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
     tmp->mWebTaskScheduler->Disconnect();
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebTaskScheduler)
   }
-
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebTaskSchedulingState)
 
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTrustedTypePolicyFactory)
 
@@ -1867,7 +1871,7 @@ void nsGlobalWindowInner::InitDocumentDependentState(JSContext* aCx) {
   if (mWebTaskScheduler) {
     mWebTaskScheduler->Disconnect();
     mWebTaskScheduler = nullptr;
-    mWebTaskSchedulingState = nullptr;
+    SetWebTaskSchedulingState(nullptr);
   }
 
   // This must be called after nullifying the internal objects because here we
@@ -1985,10 +1989,7 @@ nsresult nsGlobalWindowInner::EnsureClientSource() {
   nsCOMPtr<nsIPrincipal> foreignPartitionedPrincipal;
 
   nsresult rv = StoragePrincipalHelper::GetPrincipal(
-      this,
-      StaticPrefs::privacy_partition_serviceWorkers()
-          ? StoragePrincipalHelper::eForeignPartitionedPrincipal
-          : StoragePrincipalHelper::eRegularPrincipal,
+      this, StoragePrincipalHelper::eForeignPartitionedPrincipal,
       getter_AddRefs(foreignPartitionedPrincipal));
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -2176,15 +2177,7 @@ void nsGlobalWindowInner::GetEventTargetParent(EventChainPreVisitor& aVisitor) {
     case eMouseUp:
     case eDragEnd:
       if (aVisitor.mEvent->IsTrusted()) {
-        sMouseDown = false;
-        if (sDragServiceDisabled) {
-          nsCOMPtr<nsIDragService> ds =
-              do_GetService("@mozilla.org/widget/dragservice;1");
-          if (ds) {
-            sDragServiceDisabled = false;
-            ds->Unsuppress();
-          }
-        }
+        MouseButtonReleased();
       }
       break;
     default:
@@ -2192,6 +2185,22 @@ void nsGlobalWindowInner::GetEventTargetParent(EventChainPreVisitor& aVisitor) {
   }
 
   aVisitor.SetParentTarget(GetParentTarget(), true);
+}
+
+/* static */
+void nsGlobalWindowInner::MouseButtonReleased() {
+  if (!sMouseDown) {
+    return;
+  }
+  sMouseDown = false;
+  if (sDragServiceDisabled) {
+    nsCOMPtr<nsIDragService> ds =
+        do_GetService("@mozilla.org/widget/dragservice;1");
+    if (ds) {
+      sDragServiceDisabled = false;
+      ds->Unsuppress();
+    }
+  }
 }
 
 // Editor library types for about:blank compat workaround
@@ -2466,6 +2475,7 @@ nsresult nsGlobalWindowInner::PostHandleEvent(EventChainPostVisitor& aVisitor) {
     // Tell the parent process that the document is not loaded.
     if (mWindowGlobalChild) {
       mWindowGlobalChild->SendUpdateDocumentHasLoaded(mIsDocumentLoaded);
+      mWindowGlobalChild->OnDocumentUnloaded();
     }
   } else if (aVisitor.mEvent->mMessage == eLoad &&
              aVisitor.mEvent->IsTrusted()) {
@@ -2475,6 +2485,7 @@ nsresult nsGlobalWindowInner::PostHandleEvent(EventChainPostVisitor& aVisitor) {
     // Tell the parent process that the document is loaded.
     if (mWindowGlobalChild) {
       mWindowGlobalChild->SendUpdateDocumentHasLoaded(mIsDocumentLoaded);
+      mWindowGlobalChild->OnDocumentLoaded();
     }
 
     mTimeoutManager->OnDocumentLoaded();
@@ -3714,29 +3725,29 @@ void nsGlobalWindowInner::SetName(const nsAString& aName,
   FORWARD_TO_OUTER_OR_THROW(SetNameOuter, (aName, aError), aError, );
 }
 
-double nsGlobalWindowInner::GetInnerWidth(ErrorResult& aError) {
-  FORWARD_TO_OUTER_OR_THROW(GetInnerWidthOuter, (aError), aError, 0);
+double nsGlobalWindowInner::GetInnerWidth(CallerType aCallerType,
+                                          ErrorResult& aError) {
+  FORWARD_TO_OUTER_OR_THROW(GetInnerWidthOuter, (aCallerType, aError), aError,
+                            0);
 }
 
-nsresult nsGlobalWindowInner::GetInnerWidth(double* aWidth) {
+nsresult nsGlobalWindowInner::GetInnerWidth(CallerType aCallerType,
+                                            double* aWidth) {
   ErrorResult rv;
-  // Callee doesn't care about the caller type, but play it safe.
-  *aWidth = GetInnerWidth(rv);
+  *aWidth = GetInnerWidth(aCallerType, rv);
   return rv.StealNSResult();
 }
 
-double nsGlobalWindowInner::GetInnerHeight(ErrorResult& aError) {
-  // We ignore aCallerType; we only have that argument because some other things
-  // called by GetReplaceableWindowCoord need it.  If this ever changes, fix
-  //   nsresult nsGlobalWindowInner::GetInnerHeight(double* aInnerWidth)
-  // to actually take a useful CallerType and pass it in here.
-  FORWARD_TO_OUTER_OR_THROW(GetInnerHeightOuter, (aError), aError, 0);
+double nsGlobalWindowInner::GetInnerHeight(CallerType aCallerType,
+                                           ErrorResult& aError) {
+  FORWARD_TO_OUTER_OR_THROW(GetInnerHeightOuter, (aCallerType, aError), aError,
+                            0);
 }
 
-nsresult nsGlobalWindowInner::GetInnerHeight(double* aHeight) {
+nsresult nsGlobalWindowInner::GetInnerHeight(CallerType aCallerType,
+                                             double* aHeight) {
   ErrorResult rv;
-  // Callee doesn't care about the caller type, but play it safe.
-  *aHeight = GetInnerHeight(rv);
+  *aHeight = GetInnerHeight(aCallerType, rv);
   return rv.StealNSResult();
 }
 
@@ -3921,8 +3932,13 @@ already_AddRefed<BrowsingContext> nsGlobalWindowInner::GetChildWindow(
 }
 
 void nsGlobalWindowInner::RefreshRealmPrincipal() {
-  JS::SetRealmPrincipals(js::GetNonCCWObjectRealm(GetWrapperPreserveColor()),
-                         nsJSPrincipals::get(mDoc->NodePrincipal()));
+  JS::Realm* realm = js::GetNonCCWObjectRealm(GetWrapperPreserveColor());
+  nsJSPrincipals* existing = nsJSPrincipals::get(JS::GetRealmPrincipals(realm));
+  nsJSPrincipals* jsPrincipals = nsJSPrincipals::get(mDoc->NodePrincipal());
+  if (existing != jsPrincipals) {
+    HoldOldPrincipal(existing);
+  }
+  JS::SetRealmPrincipals(realm, jsPrincipals);
 }
 
 void nsGlobalWindowInner::RefreshReduceTimerPrecisionCallerType() {
@@ -4389,11 +4405,6 @@ WebTaskScheduler* nsGlobalWindowInner::Scheduler() {
   }
   MOZ_ASSERT(mWebTaskScheduler);
   return mWebTaskScheduler;
-}
-
-inline void nsGlobalWindowInner::SetWebTaskSchedulingState(
-    WebTaskSchedulingState* aState) {
-  mWebTaskSchedulingState = aState;
 }
 
 bool nsGlobalWindowInner::Find(const nsAString& aString, bool aCaseSensitive,
@@ -5225,7 +5236,7 @@ void nsGlobalWindowInner::FireOfflineStatusEventIfChanged() {
   } else {
     name.AssignLiteral("online");
   }
-  nsContentUtils::DispatchTrustedEvent(mDoc, this, name, CanBubble::eNo,
+  nsContentUtils::DispatchTrustedEvent(this, this, name, CanBubble::eNo,
                                        Cancelable::eNo);
 }
 
@@ -6277,8 +6288,8 @@ nsresult nsGlobalWindowInner::FireDelayedDOMEvents(bool aIncludeSubWindows) {
     }
 
     for (const nsCOMPtr<nsIDocShellTreeItem>& childShell : children) {
-      if (nsCOMPtr<nsPIDOMWindowOuter> pWin = childShell->GetWindow()) {
-        auto* win = nsGlobalWindowOuter::Cast(pWin);
+      if (const RefPtr<nsGlobalWindowOuter> win =
+              nsGlobalWindowOuter::Cast(childShell->GetWindow())) {
         win->FireDelayedDOMEvents(true);
       }
     }
@@ -7639,6 +7650,14 @@ DocumentPictureInPicture* nsGlobalWindowInner::DocumentPictureInPicture() {
   return mDocumentPiP;
 }
 
+mozilla::dom::PushManager* nsGlobalWindowInner::GetPushManager(
+    JSContext* aCx, ErrorResult& aRv) {
+  if (!mPushManager) {
+    mPushManager = PushManager::Create(aCx, this, aRv);
+  }
+  return mPushManager;
+}
+
 bool nsGlobalWindowInner::IsSecureContext() const {
   JS::Realm* realm = js::GetNonCCWObjectRealm(GetWrapperPreserveColor());
   return JS::GetIsSecureContext(realm);
@@ -7860,12 +7879,11 @@ RefPtr<GenericPromise> nsGlobalWindowInner::StorageAccessPermissionChanged(
   if (mDoc) {
     mDoc->ClearActiveCookieAndStoragePrincipals();
     if (mWindowGlobalChild) {
-      // XXX(farre): This is a bit backwards, but clearing the cookie
-      // principal might make us end up with a new effective storage
-      // principal on the child side than on the parent side, which
+      // Clearing the cookie principal might make us end up with a new effective
+      // storage principal on the child side than on the parent side, which
       // means that we need to sync it. See bug 1705359.
-      mWindowGlobalChild->SetDocumentPrincipal(
-          mDoc->NodePrincipal(), mDoc->EffectiveStoragePrincipal());
+      mWindowGlobalChild->SendUpdatePrincipalPartitioning(
+          !mDoc->UseRegularPrincipal());
     }
   }
 
@@ -7976,6 +7994,25 @@ void nsGlobalWindowInner::NoteMediaSourceURL(const nsACString& aURL) {
 void nsGlobalWindowInner::UnnoteMediaSourceURL(const nsACString& aURL) {
   DebugOnly<bool> found = mMediaSourceURLs.RemoveElementSorted(aURL);
   MOZ_ASSERT(found, "MediaSourceURL should have been noted");
+}
+
+void nsGlobalWindowInner::HoldOldPrincipal(nsIPrincipal* aPrincipal) {
+  mOldPrincipals.AppendElement(aPrincipal);
+  Dispatch(NewRunnableMethod(
+      "nsGlobalWindowInner::ClearOldPrincipalsIfNotNestedEventLoop", this,
+      &nsGlobalWindowInner::ClearOldPrincipalsIfNotNestedEventLoop));
+}
+
+void nsGlobalWindowInner::ClearOldPrincipalsIfNotNestedEventLoop() {
+  MOZ_ASSERT(NS_IsMainThread());
+  nsThread* mainThread = nsThreadManager::get().GetCurrentThread();
+  if (mainThread && mainThread->RecursionDepth() > 1) {
+    // Not OK to clear old principals from a nested event loop. In order
+    // to avoid spamming the nested event loop with runnables, just give
+    // up and leave the old principals around.
+    return;
+  }
+  mOldPrincipals.Clear();
 }
 
 void nsPIDOMWindowInner::MaybeSetHasPointerRawUpdateEventListeners() {

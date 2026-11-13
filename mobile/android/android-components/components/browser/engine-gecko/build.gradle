@@ -17,7 +17,6 @@ buildscript {
 plugins {
     id 'com.android.library'
     alias(libs.plugins.dependency.analysis)
-    alias(libs.plugins.python.envs.plugin)
     id 'org.mozilla.nimbus-gradle-plugin'
 }
 
@@ -54,7 +53,6 @@ dependencies {
     implementation project(':components:support-utils')
 
     implementation libs.androidx.core
-    implementation libs.androidx.datastore.preferences
     implementation libs.androidx.lifecycle.livedata
     implementation libs.androidx.paging
     implementation libs.kotlinx.coroutines
@@ -92,11 +90,6 @@ apply from: '../../../publish.gradle'
 nimbus {
     // The path to the Nimbus feature manifest file
     manifestFile = "geckoview.fml.yaml"
-
-    channels = [
-            debug: "debug",
-            release: "release",
-    ]
 
     // This is an optional value, and updates the plugin to use a copy of application
     // services. The path should be relative to the root project directory.

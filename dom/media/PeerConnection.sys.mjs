@@ -4,18 +4,16 @@
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
-  PeerConnectionIdp: "resource://gre/modules/media/PeerConnectionIdp.sys.mjs",
+  PeerConnectionIdp: "moz-src:///dom/media/PeerConnectionIdp.sys.mjs",
 });
 
 const PC_CONTRACT = "@mozilla.org/dom/peerconnection;1";
 const PC_OBS_CONTRACT = "@mozilla.org/dom/peerconnectionobserver;1";
-const PC_ICE_CONTRACT = "@mozilla.org/dom/rtcicecandidate;1";
 const PC_SESSION_CONTRACT = "@mozilla.org/dom/rtcsessiondescription;1";
 const PC_COREQUEST_CONTRACT = "@mozilla.org/dom/createofferrequest;1";
 
 const PC_CID = Components.ID("{bdc2e533-b308-4708-ac8e-a8bfade6d851}");
 const PC_OBS_CID = Components.ID("{d1748d4c-7f6a-4dc5-add6-d55b7678537e}");
-const PC_ICE_CID = Components.ID("{02b9970c-433d-4cc2-923d-f7028ac66073}");
 const PC_SESSION_CID = Components.ID("{1775081b-b62d-4954-8ffe-a067bbf508a7}");
 const PC_MANAGER_CID = Components.ID("{7293e901-2be3-4c02-b4bd-cbef6fc24f78}");
 const PC_COREQUEST_CID = Components.ID(
@@ -165,8 +163,7 @@ export class GlobalPCList {
       if (subject instanceof Ci.nsIWritablePropertyBag2) {
         let pluginID = subject.getPropertyAsUint32("pluginID");
         let pluginName = subject.getPropertyAsAString("pluginName");
-        let data = { pluginID, pluginName };
-        this.handleGMPCrash(data);
+        this.handleGMPCrash({ pluginID, pluginName });
       }
     } else if (
       topic == "PeerConnection:response:allow" ||
@@ -196,93 +193,11 @@ setupPrototype(GlobalPCList, {
 
 var _globalPCList = new GlobalPCList();
 
-// Parses grammar in RFC5245 section 15 and ICE TCP from RFC6544 section 4.5.
-function parseCandidate(line) {
-  const match = line.match(
-    /^(a=)?candidate:([A-Za-z0-9+\/]{1,32}) (\d+) (UDP|TCP) (\d+) ([A-Za-z0-9.:-]+) (\d+) typ (host|srflx|prflx|relay)(?: raddr ([A-Za-z0-9.:-]+) rport (\d+))?(.*)$/i
-  );
-  if (!match) {
-    return null;
-  }
-  const candidate = {
-    foundation: match[2],
-    componentId: parseInt(match[3], 10),
-    transport: match[4],
-    priority: parseInt(match[5], 10),
-    address: match[6],
-    port: parseInt(match[7], 10),
-    type: match[8],
-    relatedAddress: match[9],
-    relatedPort: match[10],
-  };
-  if (candidate.componentId < 1 || candidate.componentId > 256) {
-    return null;
-  }
-  if (candidate.priority < 0 || candidate.priority > 4294967295) {
-    return null;
-  }
-  if (candidate.port < 0 || candidate.port > 65535) {
-    return null;
-  }
-  candidate.component = { 1: "rtp", 2: "rtcp" }[candidate.componentId] || null;
-  candidate.protocol =
-    { udp: "udp", tcp: "tcp" }[candidate.transport.toLowerCase()] || null;
-
-  const tcpTypeMatch = match[11].match(/tcptype (\S+)/i);
-  if (tcpTypeMatch) {
-    candidate.tcpType = tcpTypeMatch[1];
-    if (
-      candidate.protocol != "tcp" ||
-      !["active", "passive", "so"].includes(candidate.tcpType)
-    ) {
-      return null;
-    }
-  }
-  return candidate;
-}
-
-export class RTCIceCandidate {
-  init(win) {
-    this._win = win;
-  }
-
-  __init(dict) {
-    if (dict.sdpMid == null && dict.sdpMLineIndex == null) {
-      throw new this._win.TypeError(
-        "Either sdpMid or sdpMLineIndex must be specified"
-      );
-    }
-    Object.assign(this, dict);
-    const candidate = parseCandidate(this.candidate);
-    if (!candidate) {
-      return;
-    }
-    Object.assign(this, candidate);
-  }
-
-  toJSON() {
-    return {
-      candidate: this.candidate,
-      sdpMid: this.sdpMid,
-      sdpMLineIndex: this.sdpMLineIndex,
-      usernameFragment: this.usernameFragment,
-    };
-  }
-}
-
-setupPrototype(RTCIceCandidate, {
-  classID: PC_ICE_CID,
-  contractID: PC_ICE_CONTRACT,
-  QueryInterface: ChromeUtils.generateQI(["nsIDOMGlobalPropertyInitializer"]),
-});
-
+// eslint-disable-next-line no-shadow
 export class RTCSessionDescription {
   init(win) {
     this._win = win;
     this._winID = this._win.windowGlobalChild.innerWindowId;
-    this._legacyPref = Services.prefs.getBoolPref(
-      "media.peerconnection.description.legacy.enabled"
-    );
   }
 
   __init({ type, sdp }) {
@@ -292,45 +207,9 @@ export class RTCSessionDescription {
   get type() {
     return this._type;
   }
-  set type(type) {
-    if (!this._legacyPref) {
-      // TODO: this throws even in sloppy mode. Remove in bug 1883992
-      throw new this._win.TypeError("setting getter-only property type");
-    }
-    this.warn();
-    this._type = type;
-  }
 
   get sdp() {
     return this._sdp;
-  }
-  set sdp(sdp) {
-    if (!this._legacyPref) {
-      // TODO: this throws even in sloppy mode. Remove in bug 1883992
-      throw new this._win.TypeError("setting getter-only property sdp");
-    }
-    this.warn();
-    this._sdp = sdp;
-  }
-
-  warn() {
-    if (!this._warned) {
-      // Warn once per RTCSessionDescription about deprecated writable usage.
-      if (this._legacyPref) {
-        this.logMsg(
-          "RTCSessionDescription's members are readonly! " +
-            "Writing to them is deprecated and will break soon!",
-          Ci.nsIScriptError.warningFlag
-        );
-      } else {
-        this.logMsg(
-          "RTCSessionDescription's members are readonly! " +
-            "Writing to them no longer works!",
-          Ci.nsIScriptError.errorFlag
-        );
-      }
-      this._warned = true;
-    }
   }
 
   logMsg(msg, flag) {
@@ -345,6 +224,7 @@ setupPrototype(RTCSessionDescription, {
   QueryInterface: ChromeUtils.generateQI(["nsIDOMGlobalPropertyInitializer"]),
 });
 
+// eslint-disable-next-line no-shadow
 export class RTCPeerConnection {
   constructor() {
     this._pc = null;
@@ -353,9 +233,6 @@ export class RTCPeerConnection {
     this._pendingRemoteDescription = null;
     this._currentLocalDescription = null;
     this._currentRemoteDescription = null;
-    this._legacyPref = Services.prefs.getBoolPref(
-      "media.peerconnection.description.legacy.enabled"
-    );
 
     // http://rtcweb-wg.github.io/jsep/#rfc.section.4.1.9
     // canTrickle == null means unknown; when a remote description is received it
@@ -441,6 +318,17 @@ export class RTCPeerConnection {
       if (rtcConfig.bundlePolicy != this._config.bundlePolicy) {
         throw new this._win.DOMException(
           "Cannot change bundlePolicy with setConfiguration",
+          "InvalidModificationError"
+        );
+      }
+
+      // alwaysNegotiateDataChannels must match
+      if (
+        rtcConfig.alwaysNegotiateDataChannels !=
+        this._config.alwaysNegotiateDataChannels
+      ) {
+        throw new this._win.DOMException(
+          "Cannot change alwaysNegotiateDataChannels with setConfiguration",
           "InvalidModificationError"
         );
       }
@@ -803,16 +691,16 @@ export class RTCPeerConnection {
       if (typeof this._win.onerror === "function") {
         this._win.onerror(e.message, e.fileName, e.lineNumber);
       }
-    } catch (e) {
+    } catch (err) {
       // If onerror itself throws, service it.
       try {
         this.logMsg(
-          e.message,
-          e.fileName,
-          e.lineNumber,
+          err.message,
+          err.fileName,
+          err.lineNumber,
           Ci.nsIScriptError.errorFlag
         );
-      } catch (e) {}
+      } catch {}
     }
   }
 
@@ -997,7 +885,10 @@ export class RTCPeerConnection {
   }
 
   async _createAnAnswer() {
-    if (this.signalingState != "have-remote-offer") {
+    if (
+      this.signalingState != "have-remote-offer" &&
+      this.signalingState != "have-local-pranswer"
+    ) {
       throw new this._win.DOMException(
         `Cannot create answer in ${this.signalingState}`,
         "InvalidStateError"
@@ -1067,12 +958,6 @@ export class RTCPeerConnection {
   }
 
   _setLocalDescription({ type, sdp }) {
-    if (type == "pranswer") {
-      throw new this._win.DOMException(
-        "pranswer not yet implemented",
-        "NotSupportedError"
-      );
-    }
     this._checkClosed();
     return this._chain(async () => {
       // Avoid Promise.all ahead of synchronous part of spec algorithm, since it
@@ -1096,7 +981,7 @@ export class RTCPeerConnection {
       if (!sdp) {
         if (type == "offer") {
           sdp = (await this._createAnOffer()).sdp;
-        } else if (type == "answer") {
+        } else if (type == "answer" || type == "pranswer") {
           sdp = (await this._createAnAnswer()).sdp;
         }
       } else {
@@ -1188,12 +1073,6 @@ export class RTCPeerConnection {
   }
 
   _setRemoteDescription({ type, sdp }) {
-    if (type == "pranswer") {
-      throw new this._win.DOMException(
-        "pranswer not yet implemented",
-        "NotSupportedError"
-      );
-    }
     this._checkClosed();
     return this._chain(async () => {
       try {
@@ -1300,6 +1179,9 @@ export class RTCPeerConnection {
   }
 
   addIceCandidate(cand, onSucc, onErr) {
+    // Spec requires us to return an already-rejected (with TypeError) promise
+    // if this fails, without any chaining or using RTCIceCandidate's
+    // constructor to catch the error.
     if (
       cand.candidate != "" &&
       cand.sdpMid == null &&
@@ -1364,14 +1246,13 @@ export class RTCPeerConnection {
       );
     }
 
-    let transceiver = this.getTransceivers().find(transceiver => {
-      return (
-        transceiver.sender.track == null &&
-        transceiver.getKind() == track.kind &&
-        !transceiver.stopped &&
-        !transceiver.hasBeenUsedToSend()
-      );
-    });
+    let transceiver = this.getTransceivers().find(
+      t =>
+        t.sender.track == null &&
+        t.getKind() == track.kind &&
+        !t.stopped &&
+        !t.hasBeenUsedToSend()
+    );
 
     if (transceiver) {
       transceiver.sender.setTrack(track);
@@ -1407,7 +1288,7 @@ export class RTCPeerConnection {
     }
 
     let transceiver = this.getTransceivers().find(
-      transceiver => !transceiver.stopped && transceiver.sender == sender
+      t => !t.stopped && t.sender == sender
     );
 
     // If the transceiver was removed due to rollback, let it slide.
@@ -1524,12 +1405,7 @@ export class RTCPeerConnection {
   }
 
   cacheDescription(name, type, sdp) {
-    if (
-      !this[name] ||
-      this[name].type != type ||
-      this[name].sdp != sdp ||
-      this._legacyPref
-    ) {
+    if (!this[name] || this[name].type != type || this[name].sdp != sdp) {
       this[name] = sdp.length
         ? new this._win.RTCSessionDescription({ type, sdp })
         : null;
@@ -1548,9 +1424,13 @@ export class RTCPeerConnection {
 
   get pendingLocalDescription() {
     this._checkClosed();
+    let type = this._pc.pendingOfferer ? "offer" : "answer";
+    if (this.signalingState == "have-local-pranswer") {
+      type = "pranswer";
+    }
     return this.cacheDescription(
       "_pendingLocalDescription",
-      this._pc.pendingOfferer ? "offer" : "answer",
+      type,
       this._pc.pendingLocalDescription
     );
   }
@@ -1570,9 +1450,13 @@ export class RTCPeerConnection {
 
   get pendingRemoteDescription() {
     this._checkClosed();
+    let type = this._pc.pendingOfferer ? "answer" : "offer";
+    if (this.signalingState == "have-remote-pranswer") {
+      type = "pranswer";
+    }
     return this.cacheDescription(
       "_pendingRemoteDescription",
-      this._pc.pendingOfferer ? "answer" : "offer",
+      type,
       this._pc.pendingRemoteDescription
     );
   }
@@ -1760,6 +1644,7 @@ setupPrototype(RTCPeerConnection, {
 
 // This is a separate class because we don't want to expose it to DOM.
 
+// eslint-disable-next-line no-shadow
 export class PeerConnectionObserver {
   init(win) {
     this._win = win;
@@ -1956,6 +1841,7 @@ setupPrototype(PeerConnectionObserver, {
   QueryInterface: ChromeUtils.generateQI(["nsIDOMGlobalPropertyInitializer"]),
 });
 
+// eslint-disable-next-line no-shadow
 export class CreateOfferRequest {
   constructor(windowID, innerWindowID, callID, isSecure) {
     Object.assign(this, { windowID, innerWindowID, callID, isSecure });

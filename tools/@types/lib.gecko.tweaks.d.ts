@@ -6,6 +6,8 @@
 interface CanonicalBrowsingContext extends LoadContextMixin {
   embedderElement: MozBrowser;
   currentWindowContext: WindowGlobalParent;
+  // Set by tabbrowser.
+  nonWebControlledLoadingURI?: nsIURI;
   parent: CanonicalBrowsingContext;
   parentWindowContext: WindowGlobalParent;
   top: CanonicalBrowsingContext;
@@ -25,6 +27,11 @@ interface ChromeWindow extends Window {
   isChromeWindow: true;
 }
 
+// Defined by the <menu> custom element in toolkit/content/widgets/menu.js.
+interface XULMenuElement {
+  readonly menupopup: XULPopupElement;
+}
+
 interface XULElementTagNameMap {
   browser: MozBrowser;
   iframe: XULFrameElement;
@@ -35,6 +42,12 @@ interface XULElementTagNameMap {
 }
 
 interface Document {
+  // Map elements created in the SVG namespace to the relevant type.
+  createElementNS(
+    namespace: "http://www.w3.org/2000/svg",
+    qualifiedName: string,
+    options?: string | ElementCreationOptions
+  ): SVGElement;
   createXULElement<K extends keyof XULElementTagNameMap>(
     localName: K,
     options?: string | ElementCreationOptions
@@ -43,6 +56,16 @@ interface Document {
     localName: string,
     options?: string | ElementCreationOptions
   ): XULElement;
+}
+
+interface CustomElementRegistry {
+  // Accept XUL custom elements, which the generated CustomElementConstructor
+  // leaves out by requiring an HTMLElement.
+  define(
+    name: string,
+    constructor: new () => XULElement,
+    options?: ElementDefinitionOptions
+  ): void;
 }
 
 type nsIGleanPingNoReason = {
@@ -69,6 +92,25 @@ interface MessageListenerManagerMixin {
   );
 }
 
+// @typescript/dom-lib-generator drops `matches` unless it's Element-shaped.
+interface MatchPattern {
+  matches(uri: URI, explicit?: boolean): boolean;
+  matches(url: string, explicit?: boolean): boolean;
+}
+
+interface MatchPatternSet {
+  matches(uri: URI, explicit?: boolean): boolean;
+  matches(url: string, explicit?: boolean): boolean;
+}
+
+interface ChannelWrapper {
+  matches(
+    filter?: MozRequestFilter,
+    extension?: WebExtensionPolicy | null,
+    options?: MozRequestMatchOptions
+  ): boolean;
+}
+
 interface MozQueryInterface {
   <T>(iid: T): nsQIResult<T>;
 }
@@ -76,6 +118,15 @@ interface MozQueryInterface {
 interface nsICryptoHash extends nsISupports {
   // Accepts a TypedArray.
   update(aData: ArrayLike<number>, aLen: number): void;
+}
+
+// The type generator drops UTF8String dictionary members from IOUtils options.
+interface ReadUTF8Options {
+  decrypt?: string;
+}
+
+interface WriteOptions {
+  encrypt?: string;
 }
 
 interface nsIDOMWindow extends Window {}

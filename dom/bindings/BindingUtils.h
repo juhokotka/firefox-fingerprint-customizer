@@ -18,6 +18,7 @@
 #include "js/experimental/BindingAllocs.h"
 #include "js/experimental/JitInfo.h"  // JSJitGetterOp, JSJitInfo
 #include "js/friend/WindowProxy.h"  // js::IsWindow, js::IsWindowProxy, js::ToWindowProxyIfWindow
+#include "jsapi.h"
 #include "jsfriendapi.h"
 #include "mozilla/Array.h"
 #include "mozilla/Assertions.h"
@@ -1074,7 +1075,7 @@ inline bool TryToOuterize(JS::MutableHandle<JS::Value> rval) {
   if (js::IsWindow(&rval.toObject())) {
     JSObject* obj = js::ToWindowProxyIfWindow(&rval.toObject());
     MOZ_ASSERT(obj);
-    rval.set(JS::ObjectValue(*obj));
+    rval.setObject(*obj);
   }
 
   return true;
@@ -1188,11 +1189,7 @@ MOZ_ALWAYS_INLINE bool MaybeWrapValue(JSContext* cx,
     // the way strings are handled. At present, this is used primarily
     // for structured cloning, so avoiding the overhead of JS_WrapValue
     // calls is less important than for other types.
-    if (rval.isBigInt()) {
-      return JS_WrapValue(cx, rval);
-    }
-    MOZ_ASSERT(rval.isSymbol());
-    JS_MarkCrossZoneId(cx, JS::PropertyKey::Symbol(rval.toSymbol()));
+    return JS_WrapValue(cx, rval);
   }
   return true;
 }
@@ -1303,7 +1300,7 @@ MOZ_ALWAYS_INLINE bool DoGetOrCreateDOMReflector(
   }
 #endif
 
-  rval.set(JS::ObjectValue(*obj));
+  rval.setObject(*obj);
 
   if (JS::GetCompartment(obj) == js::GetContextCompartment(cx)) {
     return TypeNeedsOuterization<T>::value ? TryToOuterize(rval) : true;
@@ -1356,7 +1353,7 @@ inline bool FinishWrapping(JSContext* cx, JS::Handle<JSObject*> obj,
                            JS::MutableHandle<JS::Value> rval) {
   // We can end up here in all sorts of compartments, per comments in
   // WrapNewBindingNonWrapperCachedObject(). Make sure to JS_WrapValue!
-  rval.set(JS::ObjectValue(*obj));
+  rval.setObject(*obj);
   return MaybeWrapObjectValue(cx, rval);
 }
 
@@ -1766,13 +1763,13 @@ inline bool WrapObject(JSContext* cx, const RefPtr<T>& p,
 template <>
 inline bool WrapObject<JSObject>(JSContext* cx, JSObject* p,
                                  JS::MutableHandle<JS::Value> rval) {
-  rval.set(JS::ObjectOrNullValue(p));
+  rval.setObjectOrNull(p);
   return true;
 }
 
 inline bool WrapObject(JSContext* cx, JSObject& p,
                        JS::MutableHandle<JS::Value> rval) {
-  rval.set(JS::ObjectValue(p));
+  rval.setObject(p);
   return true;
 }
 
@@ -2846,6 +2843,9 @@ class MOZ_STACK_CLASS BindingJSObjectCreator {
 
   ~BindingJSObjectCreator() {
     if (mReflector) {
+      if (IsDOMProxy(mReflector)) {
+        js::SetProxyPrivate(mReflector, JS::UndefinedValue());
+      }
       JS::SetReservedSlot(mReflector, DOM_OBJECT_SLOT, JS::UndefinedValue());
     }
   }
@@ -2991,7 +2991,7 @@ struct DeferredFinalizer<T, true> {
 };
 
 template <class T>
-static void AddForDeferredFinalization(T* aObject) {
+void AddForDeferredFinalization(T* aObject) {
   DeferredFinalizer<T>::AddForDeferredFinalization(aObject);
 }
 

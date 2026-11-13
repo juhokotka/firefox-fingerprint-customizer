@@ -7,13 +7,13 @@
 
 #include <type_traits>
 
-#include "nscore.h"
+#include "mozilla/RefPtr.h"
+#include "nsDebug.h"
+#include "nsError.h"
 #include "nsIOutputStream.h"
 #include "nsISupports.h"
-#include "nsError.h"
-#include "nsDebug.h"
 #include "nsISupportsImpl.h"
-#include "mozilla/RefPtr.h"
+#include "nscore.h"
 
 /**
  * Macro for adding a reference to an interface.
@@ -120,7 +120,7 @@ inline nsresult CallQueryInterface(T* aSource, DestinationType** aDestination) {
   // the canonical nsISupports pointer with CallQueryInterface.
   static_assert(
       !(std::is_same_v<DestinationType, T> ||
-        std::is_base_of<DestinationType, T>::value) ||
+        std::is_base_of_v<DestinationType, T>) ||
           std::is_same_v<DestinationType, nsISupports>,
       "don't use CallQueryInterface for compile-time-determinable casts");
 

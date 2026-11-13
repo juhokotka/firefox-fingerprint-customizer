@@ -198,6 +198,8 @@ const POLICIES_TESTS = [
       "xpinstall.enabled": false,
       "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons": false,
       "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features": false,
+      "extensions.getAddons.showPane": false,
+      "extensions.htmlaboutaddons.recommendations.enabled": false,
     },
   },
 
@@ -665,6 +667,52 @@ const POLICIES_TESTS = [
     },
   },
 
+  // POLICY: FirefoxHome->Widgets (Enabled honors Locked)
+  // Must run before the Locked entry below, which locks the same prefs.
+  {
+    policies: {
+      FirefoxHome: {
+        Widgets: {
+          Enabled: false,
+        },
+      },
+    },
+    unlockedPrefs: {
+      "browser.newtabpage.activity-stream.widgets.enabled": false,
+    },
+  },
+
+  // POLICY: FirefoxHome->Widgets
+  {
+    policies: {
+      FirefoxHome: {
+        Widgets: {
+          Enabled: true,
+          Blocked: ["crossword"],
+        },
+        Locked: true,
+      },
+    },
+    lockedPrefs: {
+      "browser.newtabpage.activity-stream.widgets.enabled": true,
+      "browser.newtabpage.activity-stream.widgets.crossword.enabled": false,
+    },
+  },
+
+  // POLICY: FirefoxHome->Widgets (Blocked locks even without Locked)
+  {
+    policies: {
+      FirefoxHome: {
+        Widgets: {
+          Blocked: ["stocks"],
+        },
+      },
+    },
+    lockedPrefs: {
+      "browser.newtabpage.activity-stream.widgets.stocks.enabled": false,
+    },
+  },
+
   // POLICY: OfferToSaveLoginsDefault
   {
     policies: {
@@ -889,6 +937,7 @@ const POLICIES_TESTS = [
       },
     },
     lockedPrefs: {
+      "media.videocontrols.picture-in-picture.enabled": false,
       "media.videocontrols.picture-in-picture.video-toggle.enabled": false,
     },
   },
@@ -1214,6 +1263,16 @@ const POLICIES_TESTS = [
     },
   },
 
+  // POLICY: CNSA2KeyAgreementEnabled
+  {
+    policies: {
+      CNSA2KeyAgreementEnabled: true,
+    },
+    lockedPrefs: {
+      "security.tls.enable_mlkem1024": true,
+    },
+  },
+
   // POLICY: HttpsOnlyMode
   {
     policies: {
@@ -1307,6 +1366,7 @@ const POLICIES_TESTS = [
         SmartTabGroups: { Value: "blocked" },
         LinkPreviewKeyPoints: { Value: "available" },
         SidebarChatbot: { Value: "blocked" },
+        SpeechRecognition: { Value: "available" },
       },
     },
     lockedPrefs: {
@@ -1322,6 +1382,7 @@ const POLICIES_TESTS = [
       "browser.ai.control.sidebarChatbot": "blocked",
       "browser.ml.chat.enabled": false,
       "browser.ml.chat.page": false,
+      "browser.ai.control.speechRecognition": "available",
     },
   },
 
@@ -1344,6 +1405,7 @@ const POLICIES_TESTS = [
       "browser.ai.control.sidebarChatbot": "blocked",
       "browser.ml.chat.enabled": false,
       "browser.ml.chat.page": false,
+      "browser.ai.control.speechRecognition": "blocked",
     },
     unlockedPrefs: {
       "browser.ai.control.translations": "available",

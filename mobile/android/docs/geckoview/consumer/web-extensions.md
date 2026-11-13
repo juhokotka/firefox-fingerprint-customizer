@@ -74,6 +74,22 @@ Note: these APIs are only available when the `geckoViewAddons`
 [permission](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/permissions)
 is present in the `manifest.json` file of the extension.
 
+[Content scripts](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Content_scripts)
+run in an isolated environment with access to the web page. Content scripts can
+access these messaging APIs if the `nativeMessagingFromContent` permission is
+present, in addition to the `geckoViewAddons` permission. These permissions are
+not documented on MDN, and are only available to privileged extensions such as
+built-in extensions.
+
+Note: Ordinarily, native extensions would use a [native
+manifest](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging#App_manifest)
+to define what native app identifier to use. For GeckoView this is *not*
+needed, the `nativeApp` parameter in `setMessageDelegate` will be
+use to determine what native app string is used.
+
+In all examples on this page, we use `"browser"` as the native app identifier,
+but you can choose any other string matching `[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*`.
+
 #### One-off messages
 
 The easiest way to send messages from a [content
@@ -82,12 +98,6 @@ or a [background
 script](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Anatomy_of_a_WebExtension#Background_scripts)
 is using
 [runtime.sendNativeMessage](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/runtime/sendNativeMessage).
-
-Note: Ordinarily, native extensions would use a [native
-manifest](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging#App_manifest)
-to define what native app identifier to use. For GeckoView this is *not*
-needed, the `nativeApp` parameter in `setMessageDelegate` will be
-use to determine what native app string is used.
 
 #### Messaging Example
 
@@ -109,9 +119,6 @@ session.getWebExtensionController()
     .setMessageDelegate(extension, messageDelegate, "browser");
 ```
 
-Note: the `"browser"` parameter in the code above determines what
-native app id the extension can use to send native messages.
-
 Note: extension can only send messages from content scripts if
 explicitly authorized by the app by adding
 `nativeMessagingFromContent` in the manifest.json file, e.g.
@@ -123,6 +130,10 @@ explicitly authorized by the app by adding
   "geckoViewAddons"
 ]
 ```
+
+If your use case does not require direct communication with content scripts, do
+not set the "nativeMessagingFromContent" permission to avoid unnecessary API
+exposure in content scripts (running in web content processes).
 
 #### Example
 
@@ -165,6 +176,10 @@ runtime.getWebExtensionController()
             e -> Log.e("MessageDelegate", "Error registering extension", e)
         );
 ```
+
+Note: If an extension sends a message before your call to `setMessageDelegate`,
+the message is queued. After the `setMessageDelegate` call, the delegate
+receives the previously queued messages.
 
 Now add the `geckoViewAddons`, `nativeMessaging` and
 `nativeMessagingFromContent` permissions to your `manifest.json`
@@ -356,6 +371,10 @@ protected void onCreate(Bundle savedInstanceState) {
     // ... other
 }
 ```
+
+Note: If an extension sends a message before your call to `setMessageDelegate`,
+the message is queued. After the `setMessageDelegate` call, the delegate
+receives the previously queued messages.
 
 For example, let’s send a message to the extension every time the user
 long presses on a key on the virtual keyboard, e.g. on the back button.

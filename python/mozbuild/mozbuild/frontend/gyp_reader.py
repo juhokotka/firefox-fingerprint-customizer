@@ -10,7 +10,6 @@ from collections.abc import Iterable
 import gyp
 import gyp.msvs_emulation
 import mozpack.path as mozpath
-import mozshellutil
 from mozpack.files import FileFinder
 
 from mozbuild.util import expand_variables
@@ -235,15 +234,16 @@ def process_gyp_result(
                 context["PROGRAM"] = name
             if spec["type"] == "shared_library":
                 context["FORCE_SHARED_LIB"] = True
-            elif (
-                spec["type"] == "static_library"
-                and spec.get("variables", {}).get("no_expand_libs", "0") == "1"
-            ):
-                # PSM links a NSS static library, but our folded libnss
-                # doesn't actually export everything that all of the
-                # objects within would need, so that one library
-                # should be built as a real static library.
-                context["NO_EXPAND_LIBS"] = True
+            elif spec["type"] == "static_library":
+                if spec.get("variables", {}).get("no_expand_libs", "0") == "1":
+                    # PSM links a NSS static library, but our folded libnss
+                    # doesn't actually export everything that all of the
+                    # objects within would need, so that one library
+                    # should be built as a real static library.
+                    context["NO_EXPAND_LIBS"] = True
+                if name in (gyp_dir_attrs.install_static_libs or []):
+                    context["BUILD_STATIC_LIB_ARCHIVE"] = True
+                    context["DIST_INSTALL"] = True
             if use_libs:
                 context["USE_LIBS"] = sorted(use_libs, key=lambda s: s.lower())
             if os_libs:
@@ -462,12 +462,6 @@ class GypProcessor:
             "build_files": [path],
             "root_targets": None,
         }
-        # The NSS gyp configuration uses CC and CFLAGS to determine the
-        # floating-point ABI on arm.
-        os.environ.update(
-            CC=mozshellutil.quote(*config.substs["CC"]),
-            CFLAGS=mozshellutil.quote(*config.substs["CC_BASE_FLAGS"]),
-        )
 
         if gyp_dir_attrs.no_chromium:
             includes = []

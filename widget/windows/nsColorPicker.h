@@ -6,8 +6,10 @@
 #ifndef nsColorPicker_h_
 #define nsColorPicker_h_
 
+// clang-format off
 #include <windows.h>
 #include <commdlg.h>
+// clang-format on
 
 #include "nsBaseColorPicker.h"
 #include "nsCOMPtr.h"
@@ -37,10 +39,10 @@ class AsyncColorChooser : public mozilla::Runnable {
 };
 
 class nsColorPicker final : public nsBaseColorPicker {
-  virtual ~nsColorPicker();
+  virtual ~nsColorPicker() = default;
 
  public:
-  nsColorPicker();
+  nsColorPicker() = default;
 
   NS_DECL_ISUPPORTS
 

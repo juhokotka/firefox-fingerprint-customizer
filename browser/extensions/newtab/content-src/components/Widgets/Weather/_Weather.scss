@@ -28,10 +28,7 @@
     font-size: var(--font-size-small);
 
     .widget-title h3 {
-      margin: 0;
-      font-size: var(--font-size-small);
       color: var(--text-color-deemphasized);
-      font-weight: var(--font-weight);
     }
 
     .weather-context-menu-wrapper {
@@ -40,16 +37,15 @@
     }
   }
 
-  .forecast-footer {
-    position: absolute;
-    inset-block-end: calc(var(--space-xlarge) * -1);
-    inset-inline-end: 0;
+  .sponsored-text {
+    visibility: hidden;
+    text-wrap-mode: nowrap;
     font-size: var(--newtab-font-size-xsmall);
+    color: var(--text-color-deemphasized);
+  }
 
-    .sponsored-text {
-      visibility: hidden;
-      text-wrap-mode: nowrap;
-    }
+  .forecast-footer {
+    margin-block-start: var(--space-small);
 
     .full-forecast {
       display: none;
@@ -70,7 +66,7 @@
   // Hover Rules
   &:hover,
   &:focus-within {
-    .forecast-footer .sponsored-text {
+    .sponsored-text {
       visibility: visible;
     }
 
@@ -157,10 +153,6 @@
         background-image: url('chrome://global/skin/icons/shaft-arrow-down.svg');
       }
     }
-
-    .weather-info-description {
-      display: none;
-    }
   }
 
   // Weather condition background colors
@@ -246,17 +238,35 @@
   &.small-widget {
     grid-column: span 2;
     grid-row: span 2;
+
+    // The small layout has no room to show the conditions summary, but it is the
+    // weather icon's only text alternative, so it is visually hidden rather than
+    // display: none to keep it in the accessibility tree.
+    .weather-info-description {
+      clip-path: inset(50%);
+      height: 1px;
+      overflow: hidden;
+      position: absolute;
+      white-space: nowrap;
+      width: 1px;
+    }
   }
 
   &.medium-widget {
     .weather-container {
-      align-items: center;
+      align-items: stretch;
       justify-content: space-between;
       gap: var(--space-medium);
     }
 
     .weather-conditions-view {
       flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .weather-conditions-view .sponsored-text {
+      margin-block-start: auto;
     }
 
     .weather-info-link {
@@ -284,18 +294,12 @@
     }
 
     .weather-info-description {
-      display: block;
       font-size: var(--font-size-small);
       color: var(--text-color-deemphasized);
     }
 
     .forecast-row-items li:nth-child(n+3) {
       display: none;
-    }
-
-    .forecast-footer {
-      inset-inline-end: auto;
-      inset-inline-start: 0;
     }
   }
 
@@ -341,17 +345,15 @@
     }
 
     .weather-info-description {
-      display: block;
       font-size: var(--font-size-small);
       color: var(--text-color-deemphasized);
     }
 
     .forecast-footer {
+      margin-block-start: 0;
       padding-block-start: var(--space-large);
       // Bug 2030130 - When warning is visible, reduce padding:
       // padding-block-start: var(--space-small);
-      position: relative;
-      inset: unset;
       display: flex;
       justify-content: space-between;
 

@@ -7,14 +7,16 @@
 #include "GLBlitHelper.h"
 #include "GLContext.h"
 #include "MozFramebuffer.h"
-#include "mozilla/gfx/Swizzle.h"
 #include "ScopedGLHelpers.h"
+#include "mozilla/gfx/Swizzle.h"
 
 namespace mozilla::layers {
 
 RenderSourceNLRS::RenderSourceNLRS(UniquePtr<gl::MozFramebuffer>&& aFramebuffer)
     : RenderSource(aFramebuffer->mSize),
       mFramebuffer(std::move(aFramebuffer)) {}
+
+RenderSourceNLRS::~RenderSourceNLRS() = default;
 
 DownscaleTargetNLRS::DownscaleTargetNLRS(
     gl::GLContext* aGL, UniquePtr<gl::MozFramebuffer>&& aFramebuffer)

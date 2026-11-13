@@ -3,12 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "GetAddrInfo.h"
-#include "mozilla/glean/NetwerkMetrics.h"
-#include "mozilla/net/DNSPacket.h"
-#include "nsIDNSService.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/StaticPrefs_network.h"
+#include "mozilla/glean/NetwerkMetrics.h"
+#include "mozilla/net/DNSPacket.h"
+#include "nsIDNSService.h"
 
 #ifdef DNSQUERY_AVAILABLE
 // There is a bug in windns.h where the type of parameter ppQueryResultsSet for
@@ -28,10 +28,13 @@ namespace mozilla::net {
 
 nsresult ResolveHTTPSRecordImpl(const nsACString& aHost,
                                 nsIDNSService::DNSFlags aFlags,
-                                TypeRecordResultType& aResult, uint32_t& aTTL) {
+                                TypeRecordResultType& aResult, uint32_t& aTTL,
+                                HTTPSAliasTarget& aAlias) {
   nsAutoCString host(aHost);
   PDNS_RECORD result = nullptr;
   nsAutoCString cname;
+  // True when |cname| came from an HTTPS AliasMode record rather than a CNAME.
+  bool cnameIsAlias = false;
   aTTL = UINT32_MAX;
 
   if (xpc::IsInAutomation() &&
@@ -57,7 +60,7 @@ nsresult ResolveHTTPSRecordImpl(const nsACString& aHost,
   auto freeDnsRecord =
       MakeScopeExit([&]() { DnsRecordListFree(result, DnsFreeRecordList); });
 
-  auto CheckRecords = [&aResult, &cname, &aTTL](
+  auto CheckRecords = [&aResult, &cname, &cnameIsAlias, &aTTL](
                           PDNS_RECORD result,
                           const nsCString& aHost) -> nsresult {
     PDNS_RECORD current = result;
@@ -87,6 +90,7 @@ nsresult ResolveHTTPSRecordImpl(const nsACString& aHost,
             return NS_ERROR_UNEXPECTED;
           }
           cname = parsed.mSvcDomainName;
+          cnameIsAlias = true;
           ToLowerCase(cname);
           break;
         }
@@ -99,6 +103,7 @@ nsresult ResolveHTTPSRecordImpl(const nsACString& aHost,
         aTTL = std::min<uint32_t>(aTTL, current->dwTtl);
       } else if (current->wType == DNS_TYPE_CNAME) {
         cname = current->Data.Cname.pNameHost;
+        cnameIsAlias = false;
         ToLowerCase(cname);
         aTTL = std::min<uint32_t>(aTTL, current->dwTtl);
         break;
@@ -117,22 +122,33 @@ nsresult ResolveHTTPSRecordImpl(const nsACString& aHost,
     }
 
     if (aResult.is<Nothing>() && !cname.IsEmpty()) {
+      // AliasMode/CNAME target. Its records may be chained within this same
+      // response; otherwise the caller re-queries aAlias.mName.
+      aAlias.mFromAliasMode = aAlias.mFromAliasMode || cnameIsAlias;
+      aAlias.mName = cname;
       host = cname;
       cname.Truncate();
       continue;
     }
 
     if (aResult.is<Nothing>()) {
-      return NS_ERROR_UNKNOWN_HOST;
+      break;
     }
   }
 
   // CNAME loop
   if (loopCount == 0) {
+    // Don't leave a stale alias target behind for the caller to follow.
+    aAlias = HTTPSAliasTarget{};
     return NS_ERROR_UNKNOWN_HOST;
   }
 
   if (aResult.is<Nothing>()) {
+    if (!aAlias.mName.IsEmpty()) {
+      // We resolved to an alias but its target wasn't in this response; the
+      // caller will issue a fresh lookup for it.
+      return NS_OK;
+    }
     // The call succeeded, but no HTTPS records were found.
     return NS_ERROR_UNKNOWN_HOST;
   }

@@ -37,121 +37,285 @@ function buildEditor(host, profile, userContextId) {
   container.className = "detailed-fingerprint-editor";
 
   // Section: Device
-  container.appendChild(buildSection(doc, "Device", [
-    buildRow(doc, "Device Type", buildSelect(doc, "deviceType",
-      lazy.FingerprintProfileStore.getAvailableDeviceTypes(), profile.device?.name)),
-    buildRow(doc, "Specific Variant", buildSelect(doc, "deviceVariant",
-      getAllVariantNames(), profile.device?.name)),
-    buildRow(doc, "Platform", buildInput(doc, "platform", profile.device?.platform)),
-    buildRow(doc, "User Agent", buildInput(doc, "userAgent", profile.device?.userAgent)),
-    buildRow(doc, "OS CPU", buildInput(doc, "oscpu", profile.device?.oscpu)),
-    buildRow(doc, "App Version", buildInput(doc, "appVersion", profile.device?.appVersion)),
-    buildRow(doc, "Navigator Platform", buildInput(doc, "navigatorPlatform", profile.device?.navigatorPlatform)),
-    buildRow(doc, "Hardware Concurrency", buildNumberInput(doc, "hardwareConcurrency", profile.device?.hardwareConcurrency)),
-    buildRow(doc, "Max Touch Points", buildNumberInput(doc, "maxTouchPoints", profile.device?.maxTouchPoints)),
-    buildRow(doc, "Do Not Track", buildInput(doc, "doNotTrack", profile.device?.doNotTrack)),
-    buildRow(doc, "Device Pixel Ratio", buildNumberInput(doc, "devicePixelRatio", profile.device?.devicePixelRatio)),
-    buildRow(doc, "Disk Size (GB)", buildNumberInput(doc, "diskSizeGB", profile.device?.diskSizeGB)),
-  ]));
+  container.appendChild(
+    buildSection(doc, "fingerprint-editor-section-device", [
+      buildRow(
+        doc,
+        "fingerprint-editor-device-type",
+        buildSelect(
+          doc,
+          "deviceType",
+          lazy.FingerprintProfileStore.getAvailableDeviceTypes().map(type => ({
+            value: type,
+            label: type,
+          })),
+          profile.device?.name
+        )
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-device-variant",
+        buildSelect(
+          doc,
+          "deviceVariant",
+          getAllVariantNames().map(name => ({ value: name, label: name })),
+          profile.device?.name
+        )
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-platform",
+        buildInput(doc, "platform", profile.device?.platform)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-user-agent",
+        buildInput(doc, "userAgent", profile.device?.userAgent)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-oscpu",
+        buildInput(doc, "oscpu", profile.device?.oscpu)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-app-version",
+        buildInput(doc, "appVersion", profile.device?.appVersion)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-navigator-platform",
+        buildInput(doc, "navigatorPlatform", profile.device?.navigatorPlatform)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-hardware-concurrency",
+        buildNumberInput(
+          doc,
+          "hardwareConcurrency",
+          profile.device?.hardwareConcurrency
+        )
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-max-touch-points",
+        buildNumberInput(doc, "maxTouchPoints", profile.device?.maxTouchPoints)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-do-not-track",
+        buildInput(doc, "doNotTrack", profile.device?.doNotTrack)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-device-pixel-ratio",
+        buildNumberInput(
+          doc,
+          "devicePixelRatio",
+          profile.device?.devicePixelRatio
+        )
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-disk-size",
+        buildNumberInput(doc, "diskSizeGB", profile.device?.diskSizeGB)
+      ),
+    ])
+  );
 
   // Section: Screen
   let screen = profile.device?.screen || {};
-  container.appendChild(buildSection(doc, "Screen", [
-    buildRow(doc, "Width", buildNumberInput(doc, "screenWidth", screen.width)),
-    buildRow(doc, "Height", buildNumberInput(doc, "screenHeight", screen.height)),
-    buildRow(doc, "Avail Width", buildNumberInput(doc, "screenAvailWidth", screen.availWidth)),
-    buildRow(doc, "Avail Height", buildNumberInput(doc, "screenAvailHeight", screen.availHeight)),
-    buildRow(doc, "Pixel Depth", buildNumberInput(doc, "screenPixelDepth", screen.pixelDepth)),
-    buildRow(doc, "Color Depth", buildNumberInput(doc, "screenColorDepth", screen.colorDepth)),
-  ]));
+  container.appendChild(
+    buildSection(doc, "fingerprint-editor-section-screen", [
+      buildRow(
+        doc,
+        "fingerprint-editor-screen-width",
+        buildNumberInput(doc, "screenWidth", screen.width)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-screen-height",
+        buildNumberInput(doc, "screenHeight", screen.height)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-screen-avail-width",
+        buildNumberInput(doc, "screenAvailWidth", screen.availWidth)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-screen-avail-height",
+        buildNumberInput(doc, "screenAvailHeight", screen.availHeight)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-screen-pixel-depth",
+        buildNumberInput(doc, "screenPixelDepth", screen.pixelDepth)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-screen-color-depth",
+        buildNumberInput(doc, "screenColorDepth", screen.colorDepth)
+      ),
+    ])
+  );
 
   // Section: WebGL
-  container.appendChild(buildSection(doc, "WebGL", [
-    buildRow(doc, "Vendor", buildInput(doc, "webglVendor", profile.device?.webglVendor)),
-    buildRow(doc, "Renderer", buildInput(doc, "webglRenderer", profile.device?.webglRenderer)),
-  ]));
+  container.appendChild(
+    buildSection(doc, "fingerprint-editor-section-webgl", [
+      buildRow(
+        doc,
+        "fingerprint-editor-webgl-vendor",
+        buildInput(doc, "webglVendor", profile.device?.webglVendor)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-webgl-renderer",
+        buildInput(doc, "webglRenderer", profile.device?.webglRenderer)
+      ),
+    ])
+  );
 
   // Section: Audio & Media
-  container.appendChild(buildSection(doc, "Audio & Media", [
-    buildRow(doc, "Audio Sample Rate", buildNumberInput(doc, "audioSampleRate", profile.device?.audioSampleRate)),
-    buildRow(doc, "Fonts (comma-separated)", buildTextarea(doc, "fontSet", (profile.device?.fontSet || []).join(", "))),
-  ]));
+  container.appendChild(
+    buildSection(doc, "fingerprint-editor-section-media", [
+      buildRow(
+        doc,
+        "fingerprint-editor-audio-sample-rate",
+        buildNumberInput(doc, "audioSampleRate", profile.device?.audioSampleRate)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-fonts",
+        buildTextarea(
+          doc,
+          "fontSet",
+          (profile.device?.fontSet || []).join(", ")
+        )
+      ),
+    ])
+  );
 
   // Section: Storage
   let storage = profile.storage || {};
-  container.appendChild(buildSection(doc, "Storage", [
-    buildRow(doc, "Quota (bytes)", buildNumberInput(doc, "storageQuota", storage.quota)),
-    buildRow(doc, "Usage (bytes)", buildNumberInput(doc, "storageUsage", storage.usage)),
-  ]));
+  container.appendChild(
+    buildSection(doc, "fingerprint-editor-section-storage", [
+      buildRow(
+        doc,
+        "fingerprint-editor-storage-quota",
+        buildNumberInput(doc, "storageQuota", storage.quota)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-storage-usage",
+        buildNumberInput(doc, "storageUsage", storage.usage)
+      ),
+    ])
+  );
 
   // Section: Location
   let location = profile.location || {};
-  container.appendChild(buildSection(doc, "Location", [
-    buildRow(doc, "Country", buildInput(doc, "country", location.country)),
-    buildRow(doc, "Timezone", buildInput(doc, "timezone", location.timezone)),
-    buildRow(doc, "Language", buildInput(doc, "language", location.language)),
-    buildRow(doc, "Languages (comma-separated)", buildTextarea(doc, "languages", (location.languages || []).join(", "))),
-  ]));
+  container.appendChild(
+    buildSection(doc, "fingerprint-editor-section-location", [
+      buildRow(
+        doc,
+        "fingerprint-editor-country",
+        buildInput(doc, "country", location.country)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-timezone",
+        buildInput(doc, "timezone", location.timezone)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-language",
+        buildInput(doc, "language", location.language)
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-languages",
+        buildTextarea(doc, "languages", (location.languages || []).join(", "))
+      ),
+    ])
+  );
 
   // Section: Noise
   let noise = profile.noise || {};
-  container.appendChild(buildSection(doc, "Fingerprint Noise", [
-    buildRow(doc, "Canvas Seed (hex)", buildTextarea(doc, "canvasSeed", (noise.canvasSeed || []).map(b => b.toString(16).padStart(2, "0")).join(""))),
-    buildRow(doc, "WebGL Seed (hex)", buildTextarea(doc, "webglSeed", (noise.webglSeed || []).map(b => b.toString(16).padStart(2, "0")).join(""))),
-    buildRow(doc, "Text Seed (hex)", buildTextarea(doc, "textSeed", (noise.textSeed || []).map(b => b.toString(16).padStart(2, "0")).join(""))),
-  ]));
+  container.appendChild(
+    buildSection(doc, "fingerprint-editor-section-noise", [
+      buildRow(
+        doc,
+        "fingerprint-editor-canvas-seed",
+        buildTextarea(doc, "canvasSeed", toHex(noise.canvasSeed))
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-webgl-seed",
+        buildTextarea(doc, "webglSeed", toHex(noise.webglSeed))
+      ),
+      buildRow(
+        doc,
+        "fingerprint-editor-text-seed",
+        buildTextarea(doc, "textSeed", toHex(noise.textSeed))
+      ),
+    ])
+  );
 
   // Section: Privacy Options
-  container.appendChild(buildSection(doc, "Privacy Options", [
-    buildRow(doc, "WebRTC Hide IP", buildCheckbox(doc, "webrtcHideIP", profile.webrtcHideIP)),
-    buildRow(doc, "Geolocation", buildSelect(doc, "geolocation", ["blocked", "allowed"], profile.geolocation)),
-  ]));
+  container.appendChild(
+    buildSection(doc, "fingerprint-editor-section-privacy", [
+      buildCheckbox(doc, "webrtcHideIP", profile.webrtcHideIP),
+      buildRow(
+        doc,
+        "fingerprint-editor-geolocation",
+        buildSelect(
+          doc,
+          "geolocation",
+          [
+            {
+              value: "blocked",
+              l10nId: "fingerprint-editor-geolocation-blocked",
+            },
+            {
+              value: "allowed",
+              l10nId: "fingerprint-editor-geolocation-allowed",
+            },
+          ],
+          profile.geolocation
+        )
+      ),
+    ])
+  );
 
   // Regenerate buttons
-  let btnRow = doc.createElementNS(HTML_NS, "div");
+  let btnRow = doc.createElementNS(HTML_NS, "moz-button-group");
   btnRow.className = "detailed-btn-row";
 
-  let rerollDeviceBtn = doc.createElementNS(HTML_NS, "button");
-  rerollDeviceBtn.textContent = "Reroll Device";
-  rerollDeviceBtn.type = "button";
+  let rerollDeviceBtn = makeButton(doc, "fingerprint-editor-reroll-device");
   rerollDeviceBtn.addEventListener("click", () => {
-    if (userContextId) {
-      profile = lazy.FingerprintProfileStore.rerollDevice(userContextId);
-      host.textContent = "";
-      buildEditor(host, profile, userContextId);
-    }
+    reroll("rerollDevice");
   });
 
-  let rerollNoiseBtn = doc.createElementNS(HTML_NS, "button");
-  rerollNoiseBtn.textContent = "Reroll Noise";
-  rerollNoiseBtn.type = "button";
-  rerollNoiseBtn.addEventListener("click", () => {
-    if (userContextId) {
-      profile = lazy.FingerprintProfileStore.rerollNoise(userContextId);
-      host.textContent = "";
-      buildEditor(host, profile, userContextId);
-    }
-  });
-
-  let rerollLocationBtn = doc.createElementNS(HTML_NS, "button");
-  rerollLocationBtn.textContent = "Reroll Location";
-  rerollLocationBtn.type = "button";
+  let rerollLocationBtn = makeButton(doc, "fingerprint-editor-reroll-location");
   rerollLocationBtn.addEventListener("click", () => {
-    if (userContextId) {
-      profile = lazy.FingerprintProfileStore.rerollLocation(userContextId);
-      host.textContent = "";
-      buildEditor(host, profile, userContextId);
-    }
+    reroll("rerollLocation");
   });
 
-  let recalcStorageBtn = doc.createElementNS(HTML_NS, "button");
-  recalcStorageBtn.textContent = "Recalculate Storage";
-  recalcStorageBtn.type = "button";
+  let rerollNoiseBtn = makeButton(doc, "fingerprint-editor-reroll-noise");
+  rerollNoiseBtn.addEventListener("click", () => {
+    reroll("rerollNoise");
+  });
+
+  let recalcStorageBtn = makeButton(
+    doc,
+    "fingerprint-editor-recalculate-storage"
+  );
   recalcStorageBtn.addEventListener("click", () => {
     let diskSizeGB =
       parseInt(container.querySelector('[name="diskSizeGB"]')?.value, 10) || 256;
     let diskBytes = diskSizeGB * 1024 * 1024 * 1024;
-    let quotaFraction = 0.20 + Math.random() * 0.60;
+    let quotaFraction = 0.2 + Math.random() * 0.6;
     let quota = Math.floor(diskBytes * quotaFraction);
     let usageMB = 5 * Math.pow(10, Math.random() * 2);
     let usage = Math.floor(usageMB * 1024 * 1024);
@@ -159,74 +323,109 @@ function buildEditor(host, profile, userContextId) {
     usage = Math.max(usage, 5 * 1024 * 1024);
     let quotaEl = container.querySelector('[name="storageQuota"]');
     let usageEl = container.querySelector('[name="storageUsage"]');
-    if (quotaEl) quotaEl.value = quota;
-    if (usageEl) usageEl.value = usage;
+    if (quotaEl) {
+      quotaEl.value = quota;
+    }
+    if (usageEl) {
+      usageEl.value = usage;
+    }
   });
 
-  btnRow.append(rerollDeviceBtn, rerollLocationBtn, rerollNoiseBtn,
-                recalcStorageBtn);
+  btnRow.append(
+    rerollDeviceBtn,
+    rerollLocationBtn,
+    rerollNoiseBtn,
+    recalcStorageBtn
+  );
   container.appendChild(btnRow);
 
   host.appendChild(container);
+
+  function reroll(method) {
+    if (!userContextId) {
+      return;
+    }
+    let updated = lazy.FingerprintProfileStore[method](userContextId);
+    host.textContent = "";
+    buildEditor(host, updated, userContextId);
+  }
 }
 
-function buildSection(doc, title, rows) {
-  let section = doc.createElementNS(HTML_NS, "fieldset");
-  let legend = doc.createElementNS(HTML_NS, "legend");
-  legend.textContent = title;
-  section.appendChild(legend);
+function toHex(bytes) {
+  return (bytes || []).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function buildSection(doc, titleId, rows) {
+  let section = doc.createElementNS(HTML_NS, "div");
+  section.className = "detailed-section";
+
+  let title = doc.createElementNS(HTML_NS, "h2");
+  title.className = "detailed-section-title";
+  doc.l10n.setAttributes(title, titleId);
+  section.appendChild(title);
+
   for (let row of rows) {
     section.appendChild(row);
   }
   return section;
 }
 
-function buildRow(doc, label, control) {
+function buildRow(doc, labelId, control) {
   let row = doc.createElementNS(HTML_NS, "div");
   row.className = "detailed-row";
-  let labelEl = doc.createElementNS(HTML_NS, "label");
-  labelEl.textContent = label;
-  row.appendChild(labelEl);
+
+  let label = doc.createElementNS(HTML_NS, "label");
+  doc.l10n.setAttributes(label, labelId);
+  row.appendChild(label);
   row.appendChild(control);
   return row;
 }
 
 function buildInput(doc, name, value) {
-  let input = doc.createElementNS(HTML_NS, "input");
-  input.name = name;
-  input.value = value || "";
-  input.className = "detailed-input";
+  let input = doc.createElementNS(HTML_NS, "moz-input-text");
+  input.setAttribute("name", name);
+  input.setAttribute("value", value || "");
   return input;
 }
 
 function buildNumberInput(doc, name, value) {
-  let input = doc.createElementNS(HTML_NS, "input");
-  input.type = "number";
-  input.name = name;
-  input.value = value || 0;
-  input.className = "detailed-input";
+  let input = doc.createElementNS(HTML_NS, "moz-input-number");
+  input.setAttribute("name", name);
+  input.setAttribute("value", value || 0);
   return input;
 }
 
 function buildTextarea(doc, name, value) {
-  let ta = doc.createElementNS(HTML_NS, "textarea");
-  ta.name = name;
-  ta.value = value || "";
-  ta.rows = 2;
-  ta.className = "detailed-input";
-  return ta;
+  let textarea = doc.createElementNS(HTML_NS, "moz-textarea");
+  textarea.setAttribute("name", name);
+  textarea.setAttribute("rows", "2");
+  textarea.setAttribute("value", value || "");
+  return textarea;
 }
 
-function buildSelect(doc, name, options, selected) {
-  let select = doc.createElementNS(HTML_NS, "select");
-  select.name = name;
-  select.className = "detailed-input";
-  for (let opt of options) {
-    let option = doc.createElementNS(HTML_NS, "option");
-    option.value = opt;
-    option.textContent = opt;
-    if (opt === selected) {
-      option.selected = true;
+/**
+ * @param {Document} doc
+ * @param {string} name
+ * @param {Array<{value: string, label?: string, l10nId?: string}>} choices
+ * @param {string} [selected]
+ */
+function buildSelect(doc, name, choices, selected) {
+  let values = choices.map(choice => choice.value);
+  // Mirror the native select: fall back to the first option when the stored
+  // value doesn't match any choice.
+  let value = values.includes(selected) ? selected : values[0];
+
+  let select = doc.createElementNS(HTML_NS, "moz-select");
+  select.setAttribute("name", name);
+  select.setAttribute("value", value);
+
+  for (let { value: choiceValue, label, l10nId } of choices) {
+    let option = doc.createElementNS(HTML_NS, "moz-option");
+    option.setAttribute("value", choiceValue);
+    if (l10nId) {
+      doc.l10n.setAttributes(option, l10nId);
+    } else {
+      option.setAttribute("label", label ?? choiceValue);
     }
     select.appendChild(option);
   }
@@ -234,12 +433,20 @@ function buildSelect(doc, name, options, selected) {
 }
 
 function buildCheckbox(doc, name, checked) {
-  let input = doc.createElementNS(HTML_NS, "input");
-  input.type = "checkbox";
-  input.name = name;
-  input.checked = !!checked;
-  input.className = "detailed-checkbox";
-  return input;
+  let checkbox = doc.createElementNS(HTML_NS, "moz-checkbox");
+  checkbox.className = "detailed-checkbox";
+  checkbox.setAttribute("name", name);
+  if (checked) {
+    checkbox.setAttribute("checked", "true");
+  }
+  doc.l10n.setAttributes(checkbox, "fingerprint-editor-webrtc-hide-ip");
+  return checkbox;
+}
+
+function makeButton(doc, l10nId) {
+  let button = doc.createElementNS(HTML_NS, "moz-button");
+  doc.l10n.setAttributes(button, l10nId);
+  return button;
 }
 
 function getAllVariantNames() {

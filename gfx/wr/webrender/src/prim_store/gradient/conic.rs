@@ -6,61 +6,30 @@
 //!
 //! Specification: https://drafts.csswg.org/css-images-4/#conic-gradients
 //!
-//! Conic gradients are rendered via cached render tasks and composited with the image brush.
+//! Conic gradients are rendered as quads with the gradient pattern (ps_quad_gradient).
 
-use api::{ExtendMode, GradientStop};
+use api::{AlphaMode, ExtendMode, GradientStop};
 use api::units::*;
 use crate::pattern::gradient::{conic_gradient_pattern};
-use crate::pattern::{Pattern, PatternBuilder, PatternBuilderContext, PatternBuilderState};
-use crate::scene_building::IsVisible;
+use crate::pattern::{Pattern, PatternBuilder, PatternBuilderState};
 use crate::intern::{Internable, InternDebug, Handle as InternHandle};
 use crate::internal_types::LayoutPrimitiveInfo;
 use crate::prim_store::{PrimitiveKind, PrimitiveOpacity};
-use crate::prim_store::{PrimKeyCommonData, PrimTemplateCommonData, PrimitiveStore};
-use crate::prim_store::{NinePatchDescriptor, PointKey, SizeKey, InternablePrimitive};
+use crate::prim_store::{PrimTemplateCommonData, PrimitiveStore};
+use crate::prim_store::{NinePatchDescriptor, InternablePrimitive};
 
 use std::ops::{Deref, DerefMut};
-use super::{stops_and_min_alpha, GradientStopKey};
+use super::stops_and_min_alpha;
 
 // `ConicGradientParams` now lives in `webrender_api::key_types` so builder-side
 // interning keys can reference it. Re-exported to keep existing references
 // working.
 pub use api::key_types::ConicGradientParams;
 
-/// Identifying key for a line decoration.
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, Eq, PartialEq, Hash, MallocSizeOf)]
-pub struct ConicGradientKey {
-    pub common: PrimKeyCommonData,
-    pub extend_mode: ExtendMode,
-    pub center: PointKey,
-    pub params: ConicGradientParams,
-    /// Per-axis tile size encoded as a fraction of `common.prim_size`. The
-    /// runtime `stretch_size` is `stretch_ratio * common.prim_size`.
-    pub stretch_ratio: SizeKey,
-    pub stops: Vec<GradientStopKey>,
-    pub tile_spacing: SizeKey,
-    pub nine_patch: Option<Box<NinePatchDescriptor>>,
-}
-
-impl ConicGradientKey {
-    pub fn new(
-        info: &LayoutPrimitiveInfo,
-        conic_grad: ConicGradient,
-    ) -> Self {
-        ConicGradientKey {
-            common: info.into(),
-            extend_mode: conic_grad.extend_mode,
-            center: conic_grad.center,
-            params: conic_grad.params,
-            stretch_ratio: conic_grad.stretch_ratio,
-            stops: conic_grad.stops,
-            tile_spacing: conic_grad.tile_spacing,
-            nine_patch: conic_grad.nine_patch,
-        }
-    }
-}
+// `ConicGradientKey` lives in `webrender_api::interned_prims` (alongside the
+// `ConicGradient` value) so the key can be built from api-resident types. The
+// frame-time `ConicGradientTemplate` and interning glue stay here.
+pub use api::interned_prims::ConicGradientKey;
 
 impl InternDebug for ConicGradientKey {}
 
@@ -70,7 +39,8 @@ impl InternDebug for ConicGradientKey {}
 pub struct ConicGradientTemplate {
     pub common: PrimTemplateCommonData,
     pub extend_mode: ExtendMode,
-    pub center: LayoutPoint,
+    pub alpha_mode: AlphaMode,
+    pub center: LayoutVector2D,
     pub params: ConicGradientParams,
     /// Per-axis fraction of `common.prim_size` covered by one tile of the
     /// gradient pattern. Multiply by `common.prim_size` at use to recover the
@@ -85,27 +55,16 @@ pub struct ConicGradientTemplate {
 impl PatternBuilder for ConicGradientTemplate {
     fn build(
         &self,
-        _sub_rect: Option<DeviceRect>,
-        offset: LayoutVector2D,
-        ctx: &PatternBuilderContext,
+        pattern_rect: &LayoutRect,
         state: &mut PatternBuilderState,
     ) -> Pattern {
-        // The scaling parameter is used to compensate for when we reduce the size
-        // of the render task for cached gradients. Here we aren't applying any.
-        let no_scale = DeviceVector2D::one();
-
-        // ConicGradientTemplate stores the center point relative to the primitive
-        // origin, but the shader works with start/end points in "proper" layout
-        // coordinates (relative to the primitive's spatial node).
-        let center = self.center + ctx.prim_origin.to_vector() + offset;
-
         conic_gradient_pattern(
-            center,
-            no_scale,
+            pattern_rect.min + self.center,
             self.params.angle,
             self.params.start_offset,
             self.params.end_offset,
             self.extend_mode,
+            self.alpha_mode,
             &self.stops,
             state.frame_gpu_data,
         )
@@ -140,6 +99,7 @@ impl From<ConicGradientKey> for ConicGradientTemplate {
             common,
             center: item.center.into(),
             extend_mode: item.extend_mode,
+            alpha_mode: item.alpha_mode,
             params: item.params,
             stretch_ratio: item.stretch_ratio.into(),
             tile_spacing: item.tile_spacing.into(),
@@ -168,7 +128,7 @@ impl InternablePrimitive for ConicGradient {
         self,
         info: &LayoutPrimitiveInfo,
     ) -> ConicGradientKey {
-        ConicGradientKey::new(info, self)
+        ConicGradientKey::new(info.into(), self)
     }
 
     fn make_instance_kind(
@@ -179,12 +139,6 @@ impl InternablePrimitive for ConicGradient {
         PrimitiveKind::ConicGradient {
             data_handle,
         }
-    }
-}
-
-impl IsVisible for ConicGradient {
-    fn is_visible(&self) -> bool {
-        true
     }
 }
 

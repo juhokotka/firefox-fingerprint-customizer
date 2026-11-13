@@ -12,6 +12,7 @@
 #include "AudioWorkletImpl.h"
 #include "PlayingRefChangeHandler.h"
 #include "Tracing.h"
+#include "blink/DenormalDisabler.h"
 #include "js/Array.h"  // JS::{Get,Set}ArrayLength, JS::NewArrayLength
 #include "js/CallAndConstruct.h"  // JS::Call, JS::IsCallable
 #include "js/Exception.h"
@@ -505,6 +506,10 @@ void WorkletNodeEngine::ProcessBlocksOnPorts(AudioNodeTrack* aTrack,
     }
   }
 
+  // Undo the graph thread's DenormalDisabler. SpiderMonkey manages disabling
+  // denormals.
+  WebCore::DenormalEnabler denormals;
+
   AutoEntryScript aes(mGlobal, "Worklet Process");
   JSContext* cx = aes.cx();
   auto produceSilenceWithError = MakeScopeExit([this, aTrack, cx, &aOutput] {
@@ -765,7 +770,10 @@ already_AddRefed<AudioWorkletNode> AudioWorkletNode::Constructor(
   // can share memory.
   JS::CloneDataPolicy cloneDataPolicy;
   cloneDataPolicy.allowIntraClusterClonableSharedObjects();
-  cloneDataPolicy.allowSharedMemoryObjects();
+  nsIGlobalObject* currentGlobal = xpc::CurrentNativeGlobal(cx);
+  if (currentGlobal->IsSharedMemoryAllowed()) {
+    cloneDataPolicy.allowSharedMemoryObjects();
+  }
 
   // StructuredCloneHolder does not have a move constructor.  Instead allocate
   // memory so that the pointer can be passed to the rendering thread.

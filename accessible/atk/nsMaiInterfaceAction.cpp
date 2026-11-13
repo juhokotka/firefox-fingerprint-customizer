@@ -3,13 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "InterfaceInitFuncs.h"
-
 #include "LocalAccessible-inl.h"
-#include "nsMai.h"
-#include "mozilla/Likely.h"
-#include "nsAccessibilityService.h"
 #include "Relation.h"
 #include "RemoteAccessible.h"
+#include "mozilla/Likely.h"
+#include "nsAccessibilityService.h"
+#include "nsMai.h"
 #include "nsString.h"
 
 using namespace mozilla;
@@ -147,7 +146,7 @@ static const gchar* getActionLocalizedNameCB(AtkAction* aAction,
   return getActionDescriptionCB(aAction, aActionIndex);
 }
 
-static const gchar* getKeyBindingCB(AtkAction* aAction, gint aActionIndex) {
+static const gchar* getKeyBindingCB(AtkAction* aAction, gint /*aActionIndex*/) {
   Accessible* acc = GetInternalObj(ATK_OBJECT(aAction));
   if (!acc) {
     return nullptr;

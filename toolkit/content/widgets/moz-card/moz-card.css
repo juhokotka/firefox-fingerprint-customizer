@@ -17,20 +17,23 @@
   --card-padding: var(--card-padding-compact);
   --card-gap: var(--card-gap-compact);
   --card-font-size: var(--card-font-size-compact);
+  --card-cover-image-padding: var(--card-cover-image-padding-compact);
 }
 
 :host([type="accordion"]) {
   summary {
-    padding-block: var(--card-padding-block, var(--card-padding));
+    padding-block-start: var(--card-padding-block-start, var(--card-padding-block, var(--card-padding)));
+    padding-block-end: var(--card-padding-block-end, var(--card-padding-block, var(--card-padding)));
   }
   #content {
-    padding-block-end: var(--card-padding-block, var(--card-padding));
+    padding-block-end: var(--card-padding-block-end, var(--card-padding-block, var(--card-padding)));
   }
 }
 
 :host(:not([type="accordion"])) {
   .moz-card {
-    padding-block: var(--card-padding-block, var(--card-padding));
+    padding-block-start: var(--card-padding-block-start, var(--card-padding-block, var(--card-padding)));
+    padding-block-end: var(--card-padding-block-end, var(--card-padding-block, var(--card-padding)));
   }
   #moz-card-details {
     display: flex;
@@ -47,12 +50,14 @@
   overflow-wrap: anywhere;
 }
 
-#moz-card-details {
+#moz-card-details,
+.moz-card-wrapper {
   width: 100%;
 }
 
 .moz-card,
 #moz-card-details,
+.moz-card-wrapper,
 #content {
   flex: 1;
 }
@@ -97,7 +102,7 @@ summary {
 
 #heading {
   font-size: var(--card-font-size);
-  font-weight: var(--font-weight-heading);
+  font-weight: var(--card-heading-font-weight, var(--font-weight-heading));
 }
 
 #content {
@@ -112,7 +117,7 @@ summary {
   @media (prefers-contrast) {
     :host([type="accordion"]) & {
       border-block-start: 0;
-      padding-block-start: var(--card-padding-block, var(--card-padding));
+      padding-block-start: var(--card-padding-block-start, var(--card-padding-block, var(--card-padding)));
     }
   }
 }
@@ -157,5 +162,30 @@ details {
         padding-block-start: 0;
       }
     }
+  }
+}
+
+#cover-image {
+  display: none;
+  padding-inline: var(--card-cover-image-padding);
+}
+
+::slotted(img[slot="cover-image"]) {
+  width: 100%;
+  height: var(--card-cover-image-height, var(--card-cover-image-height-default));
+  object-fit: var(--card-cover-image-object-fit, var(--card-cover-image-object-fit-default));
+  object-position: var(--card-cover-image-object-position, var(--card-cover-image-object-position-default));
+  border-radius: var(--card-cover-image-border-radius);
+}
+
+/* TODO: Probably opt-into this instead with a class or something */
+/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
+:host(:has([slot="cover-image"]:is(img, :not(:empty)))) {
+  .moz-card {
+    padding-block-start: var(--card-cover-image-padding);
+  }
+
+  #cover-image {
+    display: block;
   }
 }

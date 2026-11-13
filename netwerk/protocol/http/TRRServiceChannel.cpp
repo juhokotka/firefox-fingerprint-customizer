@@ -4,29 +4,30 @@
 
 #include "TRRServiceChannel.h"
 
-#include "HttpLog.h"
 #include "AltServiceChild.h"
-#include "mozilla/glean/NetwerkMetrics.h"
-#include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
+#include "HttpLog.h"
+#include "ProxyConfigLookup.h"
+#include "ReferrerInfo.h"
+#include "TRR.h"
+#include "TRRLoadInfo.h"
+#include "TRRService.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/StaticPrefs_network.h"
+#include "mozilla/glean/NetwerkMetrics.h"
+#include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
 #include "nsDNSPrefetch.h"
 #include "nsEscape.h"
 #include "nsHttpConnectionMgr.h"
 #include "nsHttpHeaderArray.h"
 #include "nsHttpTransaction.h"
-#include "nsThreadUtils.h"
-#include "nsICancelable.h"
 #include "nsICachingChannel.h"
-#include "nsIProtocolProxyService2.h"
+#include "nsICancelable.h"
 #include "nsIOService.h"
+#include "nsIProtocolProxyService2.h"
 #include "nsISeekableStream.h"
+#include "nsSocketTransportService2.h"
+#include "nsThreadUtils.h"
 #include "nsURLHelper.h"
-#include "ProxyConfigLookup.h"
-#include "TRRLoadInfo.h"
-#include "ReferrerInfo.h"
-#include "TRR.h"
-#include "TRRService.h"
 
 namespace mozilla::net {
 
@@ -278,7 +279,8 @@ nsresult TRRServiceChannel::ResolveProxy() {
       [self](nsIProxyInfo* aProxyInfo, nsresult aStatus) {
         self->OnProxyAvailable(nullptr, nullptr, aProxyInfo, aStatus);
       },
-      mURI, mProxyResolveFlags, getter_AddRefs(proxyRequest));
+      mURI, mProxyResolveFlags, LoadIsTRRServiceChannel(),
+      getter_AddRefs(proxyRequest));
 
   if (NS_FAILED(rv)) {
     if (!mCurrentEventTarget->IsOnCurrentThread()) {
@@ -475,7 +477,7 @@ nsresult TRRServiceChannel::BeginConnect() {
   if (gHttpHandler->IsHttp2Excluded(mConnectionInfo)) {
     StoreAllowSpdy(0);
     mCaps |= NS_HTTP_DISALLOW_SPDY;
-    mConnectionInfo->SetNoSpdy(true);
+    mConnectionInfo = mConnectionInfo->Mutate().SetNoSpdy(true).Finalize();
   }
 
   auto canUseHappyEyeballs = [&]() {
@@ -492,7 +494,8 @@ nsresult TRRServiceChannel::BeginConnect() {
     LOG(("%p NS_HTTP_USE_HAPPY_EYEBALLS ", this));
     mCaps |= NS_HTTP_USE_HAPPY_EYEBALLS;
     mCaps &= ~NS_HTTP_FORCE_WAIT_HTTP_RR;
-    mConnectionInfo->SetHappyEyeballsEnabled(true);
+    mConnectionInfo =
+        mConnectionInfo->Mutate().SetHappyEyeballsEnabled(true).Finalize();
   }
 
   // if this somehow fails we can go on without it
@@ -539,16 +542,18 @@ nsresult TRRServiceChannel::ContinueOnBeforeConnect() {
   mCaps |= NS_HTTP_TRR_FLAGS_FROM_MODE(nsIRequest::GetTRRMode());
 
   // Finalize ConnectionInfo flags before SpeculativeConnect
-  mConnectionInfo->SetAnonymous((mLoadFlags & LOAD_ANONYMOUS) != 0);
-  mConnectionInfo->SetPrivate(mPrivateBrowsing);
-  mConnectionInfo->SetNoSpdy(mCaps & NS_HTTP_DISALLOW_SPDY);
-  mConnectionInfo->SetBeConservative((mCaps & NS_HTTP_BE_CONSERVATIVE) ||
-                                     LoadBeConservative());
-  mConnectionInfo->SetTlsFlags(mTlsFlags);
-  mConnectionInfo->SetIsTrrServiceChannel(LoadIsTRRServiceChannel());
-  mConnectionInfo->SetTRRMode(nsIRequest::GetTRRMode());
-  mConnectionInfo->SetIPv4Disabled(mCaps & NS_HTTP_DISABLE_IPV4);
-  mConnectionInfo->SetIPv6Disabled(mCaps & NS_HTTP_DISABLE_IPV6);
+  mConnectionInfo = mConnectionInfo->Mutate()
+                        .SetAnonymous((mLoadFlags & LOAD_ANONYMOUS) != 0)
+                        .SetPrivate(mPrivateBrowsing)
+                        .SetNoSpdy(mCaps & NS_HTTP_DISALLOW_SPDY)
+                        .SetBeConservative((mCaps & NS_HTTP_BE_CONSERVATIVE) ||
+                                           LoadBeConservative())
+                        .SetTlsFlags(mTlsFlags)
+                        .SetIsTrrServiceChannel(LoadIsTRRServiceChannel())
+                        .SetTRRMode(nsIRequest::GetTRRMode())
+                        .SetIPv4Disabled(mCaps & NS_HTTP_DISABLE_IPV4)
+                        .SetIPv6Disabled(mCaps & NS_HTTP_DISABLE_IPV6)
+                        .Finalize();
 
   if (mLoadFlags & LOAD_FRESH_CONNECTION) {
     glean::networking::trr_connection_cycle_count.Get(TRRService::ProviderKey())
@@ -579,7 +584,11 @@ nsresult TRRServiceChannel::Connect() {
     return rv;
   }
 
-  return mTransaction->AsyncRead(this, getter_AddRefs(mTransactionPump));
+  rv = mTransaction->AsyncRead(this, getter_AddRefs(mTransactionPump));
+  if (NS_FAILED(rv)) {
+    (void)gHttpHandler->CancelTransaction(mTransaction, rv);
+  }
+  return rv;
 }
 
 nsresult TRRServiceChannel::SetupTransaction() {
@@ -929,23 +938,25 @@ void TRRServiceChannel::ProcessAltService(
   }
 
   RefPtr<nsHttpConnectionInfo> connectionInfo = aTransConnInfo;
-  auto processHeaderTask = [altSvc, scheme, originHost, originPort,
-                            userName(mUsername),
-                            privateBrowsing(mPrivateBrowsing), callbacks,
-                            proxyInfo, caps(mCaps), connectionInfo]() {
-    if (XRE_IsSocketProcess()) {
-      AltServiceChild::ProcessHeader(altSvc, scheme, originHost, originPort,
+  auto processHeaderTask =
+      [altSvc = std::move(altSvc), scheme = std::move(scheme),
+       originHost = std::move(originHost), originPort, userName(mUsername),
+       privateBrowsing(mPrivateBrowsing), callbacks = std::move(callbacks),
+       proxyInfo = std::move(proxyInfo), caps(mCaps),
+       connectionInfo = std::move(connectionInfo)]() {
+        if (XRE_IsSocketProcess()) {
+          AltServiceChild::ProcessHeader(
+              altSvc, scheme, originHost, originPort, userName, privateBrowsing,
+              callbacks, proxyInfo, caps & NS_HTTP_DISALLOW_SPDY,
+              OriginAttributes(), connectionInfo);
+          return;
+        }
+
+        AltSvcMapping::ProcessHeader(altSvc, scheme, originHost, originPort,
                                      userName, privateBrowsing, callbacks,
                                      proxyInfo, caps & NS_HTTP_DISALLOW_SPDY,
                                      OriginAttributes(), connectionInfo);
-      return;
-    }
-
-    AltSvcMapping::ProcessHeader(altSvc, scheme, originHost, originPort,
-                                 userName, privateBrowsing, callbacks,
-                                 proxyInfo, caps & NS_HTTP_DISALLOW_SPDY,
-                                 OriginAttributes(), connectionInfo);
-  };
+      };
 
   if (NS_IsMainThread()) {
     processHeaderTask();
@@ -1043,7 +1054,7 @@ nsresult TRRServiceChannel::SyncProcessRedirection(uint32_t aHttpStatus) {
   nsAutoCString locationBuf;
   if (NS_EscapeURL(location.get(), -1, esc_OnlyNonASCII | esc_Spaces,
                    locationBuf)) {
-    location = locationBuf;
+    location = std::move(locationBuf);
   }
 
   LOG(("redirecting to: %s [redirection-limit=%u]\n", location.get(),

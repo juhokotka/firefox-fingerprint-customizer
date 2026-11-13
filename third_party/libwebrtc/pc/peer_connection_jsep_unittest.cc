@@ -43,6 +43,8 @@
 #include "pc/test/fake_audio_capture_module.h"
 #include "pc/test/mock_peer_connection_observers.h"
 #include "rtc_base/thread.h"
+#include "test/create_test_environment.h"
+#include "test/create_test_field_trials.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/pc/sctp/fake_sctp_transport.h"
@@ -76,9 +78,6 @@ class PeerConnectionJsepTest : public ::testing::Test {
     network_thread_ = Thread::CreateWithSocketServer();
     network_thread_->SetName("NetworkThread", nullptr);
     EXPECT_TRUE(network_thread_->Start());
-    worker_thread_ = Thread::Create();
-    worker_thread_->SetName("WorkerThread", nullptr);
-    EXPECT_TRUE(worker_thread_->Start());
 #ifdef WEBRTC_ANDROID
     InitializeAndroidObjects();
 #endif
@@ -86,10 +85,10 @@ class PeerConnectionJsepTest : public ::testing::Test {
 
   PeerConnectionFactoryDependencies CreatePeerConnectionFactoryDependencies() {
     PeerConnectionFactoryDependencies dependencies;
-    dependencies.worker_thread = worker_thread_.get();
     dependencies.network_thread = network_thread_.get();
     dependencies.signaling_thread = Thread::Current();
     dependencies.adm = FakeAudioCaptureModule::Create();
+    dependencies.env = CreateTestEnvironment();
     EnableMediaWithDefaults(dependencies);
     dependencies.sctp_factory = std::make_unique<FakeSctpTransportFactory>();
     return dependencies;
@@ -101,13 +100,28 @@ class PeerConnectionJsepTest : public ::testing::Test {
     return CreatePeerConnection(config);
   }
 
+  WrapperPtr CreatePeerConnection(absl::string_view field_trials) {
+    RTCConfiguration config;
+    config.sdp_semantics = SdpSemantics::kUnifiedPlan;
+    return CreatePeerConnection(config, field_trials);
+  }
+
   WrapperPtr CreatePeerConnection(const RTCConfiguration& config) {
+    return CreatePeerConnection(config, "");
+  }
+
+  WrapperPtr CreatePeerConnection(const RTCConfiguration& config,
+                                  absl::string_view field_trials) {
     scoped_refptr<PeerConnectionFactoryInterface> pc_factory =
         CreateModularPeerConnectionFactory(
             CreatePeerConnectionFactoryDependencies());
     auto observer = std::make_unique<MockPeerConnectionObserver>();
-    auto result = pc_factory->CreatePeerConnectionOrError(
-        config, PeerConnectionDependencies(observer.get()));
+    PeerConnectionDependencies pc_deps(observer.get());
+    if (!field_trials.empty()) {
+      pc_deps.trials = CreateTestFieldTrialsPtr(field_trials);
+    }
+    auto result =
+        pc_factory->CreatePeerConnectionOrError(config, std::move(pc_deps));
     if (!result.ok()) {
       return nullptr;
     }
@@ -119,7 +133,6 @@ class PeerConnectionJsepTest : public ::testing::Test {
 
   test::RunLoop run_loop_;
   std::unique_ptr<Thread> network_thread_;
-  std::unique_ptr<Thread> worker_thread_;
 };
 
 // Tests for JSEP initial offer generation.
@@ -1205,7 +1218,9 @@ TEST_F(PeerConnectionJsepTest, OfferAnswerWithChangedMids) {
   constexpr char kFirstMid[] = "nondefaultmid";
   constexpr char kSecondMid[] = "randommid";
 
-  auto caller = CreatePeerConnection();
+  // Munging allowed: kMid (25)
+  auto caller =
+      CreatePeerConnection("WebRTC-NoSdpMangleAllowForTesting/Enabled,25/");
   caller->AddAudioTrack("a");
   caller->AddAudioTrack("b");
   auto callee = CreatePeerConnection();
@@ -1247,7 +1262,9 @@ TEST_F(PeerConnectionJsepTest, CreateOfferGeneratesUniqueMidIfAlreadyTaken) {
 
   // Now, do an offer/answer with one track which has the MID set to the default
   // second MID.
-  auto caller = CreatePeerConnection();
+  // Munging allowed: kMid (25)
+  auto caller =
+      CreatePeerConnection("WebRTC-NoSdpMangleAllowForTesting/Enabled,25/");
   caller->AddAudioTrack("a");
   auto callee = CreatePeerConnection();
 

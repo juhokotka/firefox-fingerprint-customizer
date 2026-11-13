@@ -59,6 +59,7 @@ ScriptLoadContext::ScriptLoadContext(
       mInCompilingList(false),
       mWasCompiledOMT(false),
       mIsPreload(false),
+      mIsCoalescedModulePreload(false),
       mUnreportedPreloadError(NS_OK),
       mLineNo(1),
       mColumnNo(0),
@@ -92,6 +93,36 @@ void ScriptLoadContext::MaybeUnblockOnload() {
   }
 }
 
+void ScriptLoadContext::NotifyPreloadCoalescingResult() {
+  MOZ_ASSERT(mIsCoalescedModulePreload);
+
+  if (HasStopped()) {
+    return;
+  }
+
+  MOZ_ASSERT(!Channel());
+
+  JS::loader::ModuleLoadRequest* request = mRequest->AsModuleRequest();
+  MOZ_ASSERT(request->IsTopLevel());
+
+  if (request->mModuleScript) {
+    // Fetching produced a module script, even if it has a parse error.
+    NotifyStop(NS_OK);
+    MOZ_ASSERT(HasStopped());
+  } else if (request->IsFinished()) {
+    // The fetch failed, or the request was canceled before it finished. Either
+    // way there will be no module script, so this is the element's last chance
+    // to hear about the load.
+    NotifyStop(NS_ERROR_FAILURE);
+    MOZ_ASSERT(HasStopped());
+  } else {
+    // The top-level module is still being fetched.
+    // The result of the fetch will be notified via
+    // ModuleLoaderBase::ResumeWaitingRequests or Cancel.
+    MOZ_ASSERT(request->IsFetching());
+  }
+}
+
 void ScriptLoadContext::MaybeCancelOffThreadScript() {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -99,7 +130,7 @@ void ScriptLoadContext::MaybeCancelOffThreadScript() {
     return;
   }
 
-  // Cancel the task if it hasn't been started yet or wait for it to finish.
+  // Nulling the task makes OffThreadCompilationCompleteTask discard the result.
   mCompileOrDecodeTask->Cancel();
   mCompileOrDecodeTask = nullptr;
 
@@ -253,7 +284,24 @@ already_AddRefed<JS::Stencil> ScriptLoadContext::StealOffThreadResult(
   RefPtr<CompileOrDecodeTask> compileOrDecodeTask =
       mCompileOrDecodeTask.forget();
 
-  return compileOrDecodeTask->StealResult(aCx, aInstantiationStorage);
+  StencilCompileOrDecodeTask* task =
+      compileOrDecodeTask->AsStencilCompileOrDecodeTask();
+  RefPtr<JS::Stencil> stencil = task->StealResult(aCx, aInstantiationStorage);
+
+  if (mRequest->IsRetrievedAsSerializedStencil()) {
+    mRequest->RestoreSRIAndSerializedStencil(
+        task->TakeSRIAndSerializedStencil());
+  }
+
+  return stencil.forget();
+}
+
+bool ScriptLoadContext::StealOffThreadWasmResult(
+    JSContext* aCx, JS::MutableHandle<JSObject*> aModuleOut) {
+  RefPtr<CompileOrDecodeTask> compileOrDecodeTask =
+      mCompileOrDecodeTask.forget();
+
+  return compileOrDecodeTask->AsWasmCompileTask()->StealResult(aCx, aModuleOut);
 }
 
 }  // namespace mozilla::dom

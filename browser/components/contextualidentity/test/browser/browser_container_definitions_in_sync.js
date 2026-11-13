@@ -12,24 +12,36 @@ function computedVar(className, varName) {
   return value;
 }
 
-// `gray` is only excluded when nova is off: the CSS then uses `currentColor` to
-// follow the theme, while the API exposes a fixed hex code for extensions. When
-// nova is on, gray uses the `--color-gray-30` token like every other color and
-// is compared normally.
+// Resolve a CSS color spec (hex, oklch, var(), ...) evaluated inside the given
+// container class to a normalized sRGB string, so values authored in different
+// color spaces (e.g. an oklch design token vs. a hex API code) compare equal.
+function resolveColor(className, spec) {
+  let el = document.createElement("box");
+  if (className) {
+    el.className = className;
+  }
+  el.style.color = spec;
+  document.documentElement.appendChild(el);
+  let computed = window.getComputedStyle(el).color;
+  el.remove();
+
+  let { r, g, b, a } = InspectorUtils.colorToRGBA(computed);
+  return a == 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
 add_task(async function container_color_codes_match_css() {
-  const novaEnabled = Services.prefs.getBoolPref("browser.nova.enabled", false);
   for (const color of ContextualIdentityService.containerColors) {
-    if (color === "gray" && !novaEnabled) {
-      continue;
-    }
-    let cssColor = computedVar(
+    let cssColor = resolveColor(
       `identity-color-${color}`,
-      "--identity-icon-color"
+      "var(--identity-stroke-color)"
     );
-    let apiColor = ContextualIdentityService.getContainerColorCode(color);
+    let apiColor = resolveColor(
+      null,
+      ContextualIdentityService.getContainerColorCode(color)
+    );
     is(
-      cssColor.toLowerCase(),
-      apiColor.toLowerCase(),
+      cssColor,
+      apiColor,
       `Color "${color}": usercontext.css and getContainerColorCode() must match`
     );
   }
@@ -72,14 +84,18 @@ add_task(function container_definitions_match_enterprise_policy_schema() {
   );
   let containerSchema = schema.properties.Containers.properties.Default.items;
 
+  // The schema enumerates allowed values as `oneOf: [{ const, title }, ...]`
+  let allowedValues = property =>
+    property.oneOf.map(({ const: value }) => value);
+
   Assert.deepEqual(
-    containerSchema.properties.color.enum.toSorted(),
+    allowedValues(containerSchema.properties.color).toSorted(),
     ContextualIdentityService.containerColors.toSorted(),
-    "Containers policy color enum must match the canonical color list"
+    "Containers policy color values must match the canonical color list"
   );
   Assert.deepEqual(
-    containerSchema.properties.icon.enum.toSorted(),
+    allowedValues(containerSchema.properties.icon).toSorted(),
     ContextualIdentityService.containerIcons.toSorted(),
-    "Containers policy icon enum must match the canonical icon list"
+    "Containers policy icon values must match the canonical icon list"
   );
 });

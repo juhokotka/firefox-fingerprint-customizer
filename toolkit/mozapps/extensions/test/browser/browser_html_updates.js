@@ -22,7 +22,6 @@ add_setup(async function () {
     set: [["extensions.checkUpdateSecurity", false]],
   });
 
-  Services.telemetry.clearEvents();
   registerCleanupFunction(() => {
     cleanupPendingNotifications();
   });
@@ -383,7 +382,6 @@ add_task(async function testUpdateAvailable() {
 });
 
 add_task(async function testReleaseNotesLoad() {
-  Services.telemetry.clearEvents();
   let id = "update-with-notes@mochi.test";
   let extension = await setupExtensionWithUpdate(id, {
     releaseNotes: `

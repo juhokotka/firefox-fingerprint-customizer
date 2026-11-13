@@ -3,9 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "IEnumFE.h"
-#include <algorithm>
 
-CEnumFormatEtc::CEnumFormatEtc() : mRefCnt(0), mCurrentIdx(0) {}
+#include <algorithm>
 
 // Constructor used by Clone()
 CEnumFormatEtc::CEnumFormatEtc(nsTArray<FormatEtc>& aArray)
@@ -13,8 +12,6 @@ CEnumFormatEtc::CEnumFormatEtc(nsTArray<FormatEtc>& aArray)
   // a deep copy, calls FormatEtc's copy constructor on each
   mFormatList.AppendElements(aArray);
 }
-
-CEnumFormatEtc::~CEnumFormatEtc() {}
 
 /* IUnknown impl. */
 

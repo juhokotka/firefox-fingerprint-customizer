@@ -2,6 +2,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "TRRService.h"
+
+#include "DNSServiceBase.h"
+#include "TRR.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/ProfilerMarkers.h"
+#include "mozilla/StaticPrefs_network.h"
+#include "mozilla/Telemetry.h"
+#include "mozilla/Tokenizer.h"
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/glean/NetwerkDnsMetrics.h"
+#include "mozilla/glean/NetwerkMetrics.h"
+#include "mozilla/net/NeckoParent.h"
+#include "mozilla/net/TRRServiceChild.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsComponentManagerUtils.h"
 #include "nsDirectoryServiceUtils.h"
@@ -10,25 +24,11 @@
 #include "nsICaptivePortalService.h"
 #include "nsIFile.h"
 #include "nsINetworkLinkService.h"
-#include "nsIObserverService.h"
 #include "nsIOService.h"
+#include "nsIObserverService.h"
 #include "nsNetUtil.h"
-#include "nsStandardURL.h"
-#include "DNSServiceBase.h"
-#include "TRR.h"
-#include "TRRService.h"
-
-#include "mozilla/Preferences.h"
-#include "mozilla/StaticPrefs_network.h"
-#include "mozilla/glean/NetwerkDnsMetrics.h"
-#include "mozilla/Telemetry.h"
-#include "mozilla/Tokenizer.h"
-#include "mozilla/dom/ContentParent.h"
-#include "mozilla/glean/NetwerkMetrics.h"
-#include "mozilla/net/NeckoParent.h"
-#include "mozilla/net/TRRServiceChild.h"
-#include "mozilla/ProfilerMarkers.h"
 #include "nsSocketTransportService2.h"
+#include "nsStandardURL.h"
 // Put DNSLogging.h at the end to avoid LOG being overwritten by other headers.
 #include "DNSLogging.h"
 
@@ -500,6 +500,16 @@ uint32_t TRRService::GetRequestTimeout() {
     return StaticPrefs::network_trr_strict_fallback_request_timeout_ms();
   }
 
+#if defined(ANDROID)
+  // On Android, the DoH connection is more likely to be broken due to network
+  // changes, etc. We use a slightly lower timeout for doh-rollout
+  // but users in mode 2 or 3 still get the regular timeout.
+  if (StaticPrefs::network_trr_mode() == nsIDNSService::MODE_NATIVEONLY &&
+      mMode == nsIDNSService::MODE_TRRFIRST) {
+    return StaticPrefs::network_android_doh_rollout_request_timeout_ms();
+  }
+#endif
+
   return StaticPrefs::network_trr_request_timeout_ms();
 }
 
@@ -517,28 +527,31 @@ TRRService::~TRRService() {
 }
 
 nsresult TRRService::DispatchTRRRequest(TRR* aTrrRequest) {
-  return DispatchTRRRequestInternal(aTrrRequest, true);
-}
-
-nsresult TRRService::DispatchTRRRequestInternal(TRR* aTrrRequest,
-                                                bool aWithLock) {
   NS_ENSURE_ARG_POINTER(aTrrRequest);
 
-  nsCOMPtr<nsIThread> thread = MainThreadOrTRRThread(aWithLock);
-  if (!thread) {
+  nsCOMPtr<nsIEventTarget> target = aTrrRequest->Target();
+  if (!target) {
     return NS_ERROR_FAILURE;
   }
 
   RefPtr<TRR> trr = aTrrRequest;
-  return thread->Dispatch(trr.forget());
+  return target->Dispatch(trr.forget());
 }
 
-already_AddRefed<nsIThread> TRRService::MainThreadOrTRRThread(bool aWithLock) {
+already_AddRefed<nsIEventTarget> TRRService::MainThreadOrTRRTarget(
+    bool aWithLock) {
   if (XRE_IsSocketProcess() || mDontUseTRRThread) {
-    return do_GetMainThread();
+    nsCOMPtr<nsIEventTarget> mainThread = do_GetMainThread();
+    return mainThread.forget();
   }
 
-  nsCOMPtr<nsIThread> thread = aWithLock ? TRRThread() : TRRThread_locked();
+  if (StaticPrefs::network_trr_parse_on_socket_thread()) {
+    nsCOMPtr<nsIEventTarget> sts = gSocketTransportService;
+    return sts.forget();
+  }
+
+  nsCOMPtr<nsIEventTarget> thread =
+      aWithLock ? TRRThread() : TRRThread_locked();
   return thread.forget();
 }
 
@@ -856,9 +869,11 @@ bool TRRService::ConfirmationContext::HandleEvent(ConfirmationEvent aEvent,
                "Should only confirm in TRR first mode");
     // Set aUseFreshConnection if TRR lookups are retried
     // or if confirmation already failed.
+    nsCOMPtr<nsIEventTarget> target = service->MainThreadOrTRRTarget(false);
     mTask = new TRR(service, service->mConfirmationNS, TRRTYPE_NS, ""_ns, false,
                     mState == CONFIRM_TRYING_FAILED ||
-                        StaticPrefs::network_trr_retry_on_recoverable_errors());
+                        StaticPrefs::network_trr_retry_on_recoverable_errors(),
+                    target);
     mTask->SetTimeout(StaticPrefs::network_trr_confirmation_timeout_ms());
     mTask->SetPurpose(TRR::Confirmation);
 
@@ -874,7 +889,7 @@ bool TRRService::ConfirmationContext::HandleEvent(ConfirmationEvent aEvent,
     }
 
     LOG(("Dispatching confirmation task: %p", mTask.get()));
-    service->DispatchTRRRequestInternal(mTask, false);
+    service->DispatchTRRRequest(mTask);
   };
 
   switch (aEvent) {
@@ -1145,8 +1160,9 @@ void TRRService::AddToBlocklist(const nsACString& aHost,
       LOG(("TRR: verify if '%s' resolves as NS\n", check.get()));
 
       // check if there's an NS entry for this name
+      nsCOMPtr<nsIEventTarget> target = MainThreadOrTRRTarget();
       RefPtr<TRR> trr = new TRR(this, check, TRRTYPE_NS, aOriginSuffix,
-                                privateBrowsing, false);
+                                privateBrowsing, false, target);
       trr->SetPurpose(TRR::Blocklist);
       DispatchTRRRequest(trr);
     }
@@ -1221,12 +1237,13 @@ void TRRService::RecordTRRStatus(TRR* aTrrRequest) {
 
   nsresult channelStatus = aTrrRequest->ChannelStatus();
 
-  glean::dns::trr_success.Get(
-      ProviderKey(),
-      NS_SUCCEEDED(channelStatus)
-          ? "Fine"_ns
-          : (channelStatus == NS_ERROR_NET_TIMEOUT_EXTERNAL ? "Timeout"_ns
-                                                            : "Bad"_ns));
+  glean::dns::trr_success
+      .Get(ProviderKey(),
+           NS_SUCCEEDED(channelStatus)
+               ? "Fine"_ns
+               : (channelStatus == NS_ERROR_NET_TIMEOUT_EXTERNAL ? "Timeout"_ns
+                                                                 : "Bad"_ns))
+      .Add();
   mConfirmation.RecordTRRStatus(aTrrRequest);
 }
 

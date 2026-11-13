@@ -96,16 +96,16 @@ add_task(async function test_startQuery_adds_results() {
   Assert.equal(added[0].payload.url, url, "Correct URL should be used");
   Assert.equal(
     added[0].payload.icon,
-    UrlbarUtils.getIconForUrl(url),
+    UrlbarShared.getIconForUrl(url),
     "Correct icon should be used"
   );
   Assert.ok(added[0].payload.isBlockable, "Result should be blockable");
   Assert.equal(added[0].payload.frecency, 100, "Frecency is returned");
 
-  let controller = UrlbarTestUtils.newMockController();
-  let stub = sinon.stub(controller, "removeResult");
+  let parentController = UrlbarTestUtils.mockChildController().parentController;
+  let stub = sinon.stub(parentController, "removeResult");
   let promiseRemoved = PlacesTestUtils.waitForNotification("page-removed");
-  await provider.onEngagement(queryContext, controller, {
+  await provider.onEngagement(queryContext, parentController, {
     selType: "dismiss",
     result: { payload: { url } },
   });
@@ -287,14 +287,14 @@ add_task(async function test_switchTab() {
     );
     Assert.equal(result.payload.url, url, "Check result URL");
     Assert.equal(
-      result.payload.userContextId,
+      result.payload.userContext.id,
       userContextId,
       "Check user context"
     );
     Assert.equal(result.payload.tabGroup, groupId, "Check tab group");
     Assert.equal(
       result.payload.icon,
-      UrlbarUtils.getIconForUrl(url),
+      UrlbarShared.getIconForUrl(url),
       "Check icon"
     );
   }

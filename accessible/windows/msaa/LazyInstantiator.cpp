@@ -4,23 +4,23 @@
 
 #include "LazyInstantiator.h"
 
+#include <oaidl.h>
+
 #include "MainThreadUtils.h"
-#include "mozilla/a11y/LocalAccessible.h"
-#include "mozilla/a11y/Compatibility.h"
-#include "mozilla/a11y/Platform.h"
-#include "mozilla/Assertions.h"
-#include "mozilla/mscom/ProcessRuntime.h"
-#include "mozilla/WinHeaderOnlyUtils.h"
 #include "MsaaRootAccessible.h"
+#include "WinUtils.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/WinHeaderOnlyUtils.h"
+#include "mozilla/a11y/Compatibility.h"
+#include "mozilla/a11y/LocalAccessible.h"
+#include "mozilla/a11y/Platform.h"
+#include "mozilla/mscom/ProcessRuntime.h"
 #include "nsAccessibilityService.h"
-#include "nsWindowsHelpers.h"
 #include "nsCOMPtr.h"
 #include "nsIFile.h"
+#include "nsWindowsHelpers.h"
 #include "nsXPCOM.h"
-#include "WinUtils.h"
 #include "prenv.h"
-
-#include <oaidl.h>
 
 #if !defined(STATE_SYSTEM_NORMAL)
 #  define STATE_SYSTEM_NORMAL (0)
@@ -462,7 +462,9 @@ LazyInstantiator::AddRef() {
 
 ULONG
 LazyInstantiator::Release() {
-  MOZ_DIAGNOSTIC_ASSERT(NS_IsMainThread());
+  NS_WARNING_ASSERTION(
+      NS_IsMainThread(),
+      "LazyInstantiator should only be released on main thread!");
   ULONG result;
 
   // Always delegate refcounting to mRealRootUnk when it exists

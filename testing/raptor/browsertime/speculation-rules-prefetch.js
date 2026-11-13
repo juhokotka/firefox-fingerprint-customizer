@@ -7,11 +7,26 @@
 const { logTest } = require("./utils/profiling");
 
 const EAGERNESS_LEVELS = ["immediate", "eager", "moderate", "conservative"];
+const SOURCES = ["document", "list"];
 
-// Drive the click so each eagerness level gets a fair chance to fire and
-// complete its prefetch before navigation. `dwellMs` is the settle/hold
-// window, sized to clear the target page's server stall.
-async function navigateWithPrefetch(commands, eagerness, selector, dwellMs) {
+async function moveToInstantly(commands, selector) {
+  const element = await commands.element.getByCss(selector);
+  const actions = commands.action.getActions();
+  await actions.move({ origin: element, duration: 0 }).perform();
+  await actions.clear();
+}
+
+// Drive the click so each eagerness level gets a fair chance to fire its
+// prefetch before navigation. `dwellMs` is the settle/hold window: sized to
+// clear the target page's server stall, or to land inside it for the
+// in-flight subtest.
+async function navigateWithPrefetch(
+  commands,
+  eagerness,
+  selector,
+  dwellMs,
+  log
+) {
   switch (eagerness) {
     case "immediate":
       // Prefetch starts at parse time; just let it finish, then click.
@@ -21,8 +36,13 @@ async function navigateWithPrefetch(commands, eagerness, selector, dwellMs) {
     case "eager":
     case "moderate":
       // Both fire on hover (eager sooner); sustain the hover, then click.
-      await commands.mouse.moveTo.bySelector(selector);
+      // Zero-duration move: Marionette interpolates the default 100 ms move
+      // in steps and only enters the link at the end, while chromedriver
+      // jumps straight to it, which would skew when the hover timer starts.
+      await moveToInstantly(commands, selector);
+      log("hover done");
       await commands.wait.byTime(dwellMs);
+      log("click issued");
       await commands.mouse.singleClick.bySelector(selector);
       break;
     case "conservative":
@@ -58,19 +78,42 @@ module.exports = logTest(
           `expected one of ${EAGERNESS_LEVELS.join(", ")}`
       );
     }
+    const source = context.options.browsertime.source || "document";
+    if (!SOURCES.includes(source)) {
+      throw new Error(
+        `speculation-rules-prefetch: unsupported source "${source}"; ` +
+          `expected one of ${SOURCES.join(", ")}`
+      );
+    }
     // Covers each level's trigger latency plus the 500 ms backend stall.
     const dwellMs = Number(context.options.browsertime.dwell_ms ?? 1000);
 
     context.log.info(
-      `speculation-rules-prefetch: button=${buttonId}, ` +
+      `speculation-rules-prefetch: button=${buttonId}, source=${source}, ` +
         `eagerness=${eagerness}, dwell_ms=${dwellMs}`
     );
 
-    await commands.navigate(`${serverUrl}/landing.html?eagerness=${eagerness}`);
+    await commands.navigate(
+      `${serverUrl}/landing.html?eagerness=${eagerness}&source=${source}`
+    );
     await commands.wait.byTime(250);
 
     await commands.measure.start();
-    await navigateWithPrefetch(commands, eagerness, `#${buttonId}`, dwellMs);
+    // Wall-clock stamps, so they line up with the demo server's request log.
+    const stamp = what =>
+      context.log.info(
+        `speculation-rules-prefetch: ${what} at ` +
+          `${Math.round(performance.timeOrigin + performance.now())}`
+      );
+    stamp("trigger");
+    await navigateWithPrefetch(
+      commands,
+      eagerness,
+      `#${buttonId}`,
+      dwellMs,
+      stamp
+    );
+    stamp("clicked");
     await commands.wait.byTime(2500);
     await commands.measure.stop();
 

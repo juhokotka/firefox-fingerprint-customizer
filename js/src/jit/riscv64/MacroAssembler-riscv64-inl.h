@@ -390,6 +390,14 @@ void MacroAssembler::andPtr(Imm32 imm, Register src, Register dest) {
   ma_and(dest, src, imm);
 }
 
+void MacroAssembler::andPtr(Imm32 imm, const Address& dest) {
+  UseScratchRegisterScope temps(this);
+  Register scratch2 = temps.Acquire();
+  loadPtr(dest, scratch2);
+  ma_and(scratch2, scratch2, imm);
+  storePtr(scratch2, dest);
+}
+
 void MacroAssembler::branch8(Condition cond, const Address& lhs, Imm32 rhs,
                              Label* label) {
   UseScratchRegisterScope temps(this);
@@ -1065,8 +1073,8 @@ void MacroAssembler::branchTestPrimitive(Condition cond,
 void MacroAssembler::branchTestPrimitive(Condition cond, Register tag,
                                          Label* label) {
   MOZ_ASSERT(cond == Equal || cond == NotEqual);
-  ma_b(tag, ImmTagSignExt(JS::detail::ValueUpperExclPrimitiveTag), label,
-       (cond == Equal) ? Below : AboveOrEqual, ShortJump);
+  ma_b(tag, ImmTagSignExt(JSVAL_TAG_OBJECT), label,
+       (cond == Equal) ? NotEqual : Equal, ShortJump);
 }
 void MacroAssembler::branchTestPtr(Condition cond, Register lhs, Register rhs,
                                    Label* label) {
@@ -1585,6 +1593,12 @@ void MacroAssembler::lshift64(Imm32 imm, Register64 dest) {
   MOZ_ASSERT(0 <= imm.value && imm.value < 64);
   slli(dest.reg, dest.reg, imm.value);
 }
+
+void MacroAssembler::lshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  slli(dest.reg, src.reg, imm.value);
+}
+
 void MacroAssembler::lshiftPtr(Register shift, Register dest) {
   sll(dest, dest, shift);
 }
@@ -1636,11 +1650,11 @@ void MacroAssembler::maxPtr(Register lhs, ImmWord rhs, Register dest) {
 
 void MacroAssembler::maxDouble(FloatRegister other, FloatRegister srcDest,
                                bool handleNaN) {
-  Float64Max(srcDest, srcDest, other);
+  Float64Max(srcDest, srcDest, other, handleNaN);
 }
 void MacroAssembler::maxFloat32(FloatRegister other, FloatRegister srcDest,
                                 bool handleNaN) {
-  Float32Max(srcDest, srcDest, other);
+  Float32Max(srcDest, srcDest, other, handleNaN);
 }
 void MacroAssembler::memoryBarrier(MemoryBarrier barrier) {
   if (!barrier.isNone()) {
@@ -1649,11 +1663,11 @@ void MacroAssembler::memoryBarrier(MemoryBarrier barrier) {
 }
 void MacroAssembler::minDouble(FloatRegister other, FloatRegister srcDest,
                                bool handleNaN) {
-  Float64Min(srcDest, srcDest, other);
+  Float64Min(srcDest, srcDest, other, handleNaN);
 }
 void MacroAssembler::minFloat32(FloatRegister other, FloatRegister srcDest,
                                 bool handleNaN) {
-  Float32Min(srcDest, srcDest, other);
+  Float32Min(srcDest, srcDest, other, handleNaN);
 }
 void MacroAssembler::move16SignExtend(Register src, Register dest) {
   SignExtendShort(dest, src);
@@ -1692,7 +1706,7 @@ void MacroAssembler::move64To32(Register64 src, Register dest) {
 }
 
 void MacroAssembler::move8ZeroExtend(Register src, Register dest) {
-  andi(dest, src, 0xFF);
+  ZeroExtendByte(dest, src);
 }
 
 void MacroAssembler::move8SignExtend(Register src, Register dest) {
@@ -1832,6 +1846,11 @@ void MacroAssembler::orPtr(Imm32 imm, Register src, Register dest) {
   ma_or(dest, src, imm);
 }
 
+void MacroAssembler::nor32(Imm32 imm, Register src, Register dest) {
+  or32(imm, src, dest);
+  not32(dest);
+}
+
 void MacroAssembler::popcnt32(Register input, Register output, Register tmp) {
   Popcnt32(output, input, tmp);
 }
@@ -1908,6 +1927,37 @@ void MacroAssembler::rotateRight(Register count, Register input,
   Ror(dest, input, count);
 }
 
+// ===============================================================
+// Shift or rotate, then combine with another register
+
+void MacroAssembler::lshift32ThenAdd(Imm32 shift, Register rhs,
+                                     Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  lshift32(shift, srcDest);
+  add32(rhs, srcDest);
+}
+
+void MacroAssembler::lshift32ThenOr(Imm32 shift, Register rhs,
+                                    Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  lshift32(shift, srcDest);
+  or32(rhs, srcDest);
+}
+
+void MacroAssembler::rshiftPtrThenXor(Imm32 shift, Register rhs,
+                                      Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  rshiftPtr(shift, srcDest);
+  xorPtr(rhs, srcDest);
+}
+
+void MacroAssembler::rotateLeft64ThenXor(Imm32 count, Register64 rhs,
+                                         Register64 srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  rotateLeft64(count, srcDest, srcDest, InvalidReg);
+  xor64(rhs, srcDest);
+}
+
 void MacroAssembler::rshift32Arithmetic(Register src, Register dest) {
   sraw(dest, dest, src);
 }
@@ -1938,6 +1988,12 @@ void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 dest) {
   srai(dest.reg, dest.reg, imm.value);
 }
 
+void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 src,
+                                        Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  srai(dest.reg, src.reg, imm.value);
+}
+
 void MacroAssembler::rshift64Arithmetic(Register shift, Register64 dest) {
   sra(dest.reg, dest.reg, shift);
 }
@@ -1949,6 +2005,11 @@ void MacroAssembler::rshift64(Register shift, Register64 dest) {
 void MacroAssembler::rshift64(Imm32 imm, Register64 dest) {
   MOZ_ASSERT(0 <= imm.value && imm.value < 64);
   srli(dest.reg, dest.reg, imm.value);
+}
+
+void MacroAssembler::rshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  srli(dest.reg, src.reg, imm.value);
 }
 
 void MacroAssembler::rshiftPtrArithmetic(Imm32 imm, Register dest) {
@@ -2028,31 +2089,31 @@ void MacroAssembler::sqrtFloat32(FloatRegister src, FloatRegister dest) {
   fsqrt_s(dest, src);
 }
 
-FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
-                                                const Address& dest, Register) {
+FaultingCodeRange MacroAssembler::storeFloat16(FloatRegister src,
+                                               const Address& dest, Register) {
   return ma_storeFloat16(src, dest);
 }
-FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
-                                                const BaseIndex& dest,
-                                                Register) {
+FaultingCodeRange MacroAssembler::storeFloat16(FloatRegister src,
+                                               const BaseIndex& dest,
+                                               Register) {
   return ma_storeFloat16(src, dest);
 }
 
-FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
-                                                const Address& addr) {
-  return ma_storeFloat(src, addr);
-}
-FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
-                                                const BaseIndex& addr) {
-  return ma_storeFloat(src, addr);
-}
-
-FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
+FaultingCodeRange MacroAssembler::storeFloat32(FloatRegister src,
                                                const Address& addr) {
+  return ma_storeFloat(src, addr);
+}
+FaultingCodeRange MacroAssembler::storeFloat32(FloatRegister src,
+                                               const BaseIndex& addr) {
+  return ma_storeFloat(src, addr);
+}
+
+FaultingCodeRange MacroAssembler::storeDouble(FloatRegister src,
+                                              const Address& addr) {
   return ma_storeDouble(src, addr);
 }
-FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
-                                               const BaseIndex& addr) {
+FaultingCodeRange MacroAssembler::storeDouble(FloatRegister src,
+                                              const BaseIndex& addr) {
   return ma_storeDouble(src, addr);
 }
 

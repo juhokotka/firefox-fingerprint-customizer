@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, qtrace, qwarn};
+use neqo_common::{Buffer, Role, qdebug, qtrace};
 
 use crate::{
     AppError, ConnectionEvents, Error, Res,
@@ -22,18 +22,48 @@ use crate::{
     recovery::{self, StreamRecoveryToken},
     recv_stream::{RecvStream, RecvStreams},
     send_stream::{SendStream, SendStreams, TransmissionPriority},
-    stats::FrameStats,
+    stats::{FrameStats, Stats},
     stream_id::{StreamId, StreamType},
     tparams::{
         TransportParameterId::{
             InitialMaxData, InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote,
-            InitialMaxStreamDataUni, InitialMaxStreamsBidi, InitialMaxStreamsUni,
+            InitialMaxStreamDataUni, InitialMaxStreamsBidi, InitialMaxStreamsUni, ResetStreamAt,
         },
         TransportParametersHandler,
     },
 };
 
 pub type SendOrder = i64;
+
+/// Identifier for a send group, unique within a connection.
+///
+/// A newtype around `u64` rather than a bare alias, so a raw integer (or a `SendOrder`)
+/// cannot be passed where a send-group id is expected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SendGroupId(u64);
+
+impl SendGroupId {
+    /// Creates a new `SendGroupId`. Note: `0` is reserved as a sentinel
+    /// (`NULL_GROUP_ID`) and will be rejected
+    /// by [`SendStreams::set_sendgroup`](crate::send_stream::SendStreams::set_sendgroup).
+    #[must_use]
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    /// The underlying integer, e.g. for wire encoding.
+    #[must_use]
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+/// Sentinel for the null sendGroup: ungrouped fair streams in
+/// [`SendStreams`], datagrams with no group assigned in `DatagramQueue`.
+/// Real `SendGroupId` values start at 1 (see `neqo-http3`'s `send_group.rs`),
+/// so 0 is safe as a shared sentinel. Rejected by
+/// [`SendStreams::set_sendgroup`](crate::send_stream::SendStreams::set_sendgroup).
+pub(crate) const NULL_GROUP_ID: SendGroupId = SendGroupId::new(0);
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct StreamOrder {
@@ -88,7 +118,7 @@ impl Streams {
             remote_stream_limits: RemoteStreamLimits::new(limit_bidi, limit_uni, role),
             local_stream_limits: LocalStreamLimits::new(role),
             send: SendStreams::default(),
-            recv: RecvStreams::default(),
+            recv: RecvStreams::new(role),
         }
     }
 
@@ -99,6 +129,8 @@ impl Streams {
 
     pub fn zero_rtt_rejected(&mut self) {
         self.clear_streams();
+        // Rejected data does not count against the new 1-RTT flow-control limit.
+        *self.sender_fc.borrow_mut() = SenderFlowControl::new((), 0);
         debug_assert_eq!(
             self.remote_stream_limits[StreamType::BiDi].max_active(),
             self.tps.borrow().local().get_integer(InitialMaxStreamsBidi)
@@ -112,6 +144,7 @@ impl Streams {
 
     /// # Errors
     /// When the frame is invalid.
+    #[expect(clippy::too_many_lines, reason = "Yep, but it's a nice big match.")]
     pub fn input_frame(&mut self, frame: &Frame, stats: &mut FrameStats) -> Res<()> {
         match frame {
             Frame::ResetStream {
@@ -120,9 +153,38 @@ impl Streams {
                 final_size,
             } => {
                 stats.reset_stream += 1;
+                // Terminate connection with STREAM_STATE_ERROR if send-only
+                // stream (-transport 19.4)
+                if stream_id.is_send_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 if self.obtain_stream(*stream_id)?.1.is_some() {
+                    // A plain RESET_STREAM is a reliable reset with `reliable_size == 0`.
                     self.recv
-                        .reset(*stream_id, *application_error_code, *final_size)?;
+                        .reset(*stream_id, *application_error_code, *final_size, 0)?;
+                }
+            }
+            Frame::ResetStreamAt {
+                stream_id,
+                application_error_code,
+                final_size,
+                reliable_size,
+            } => {
+                stats.reset_stream_at += 1;
+                // We must have advertised support to legitimately receive this frame.
+                if !self.tps.borrow().local().get_empty(ResetStreamAt) {
+                    return Err(Error::ProtocolViolation);
+                }
+                if stream_id.is_send_only(self.role) {
+                    return Err(Error::StreamState);
+                }
+                if self.obtain_stream(*stream_id)?.1.is_some() {
+                    self.recv.reset(
+                        *stream_id,
+                        *application_error_code,
+                        *final_size,
+                        *reliable_size,
+                    )?;
                 }
             }
             Frame::StopSending {
@@ -130,9 +192,17 @@ impl Streams {
                 application_error_code,
             } => {
                 stats.stop_sending += 1;
+                // Terminate connection with STREAM_STATE_ERROR if receive-only
+                // stream (-transport 19.5)
+                if stream_id.is_recv_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 self.events
                     .send_stream_stop_sending(*stream_id, *application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
+                    // The peer has no interest in this data, so drop any commitment and send a
+                    // plain RESET_STREAM rather than reliably delivering the committed prefix.
+                    ss.drop_commitment();
                     ss.reset(*application_error_code);
                 }
             }
@@ -144,6 +214,11 @@ impl Streams {
                 ..
             } => {
                 stats.stream += 1;
+                // Terminate connection with STREAM_STATE_ERROR if send-only
+                // stream (-transport 19.8)
+                if stream_id.is_send_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.inbound_stream_frame(*fin, *offset, data)?;
                 }
@@ -162,6 +237,11 @@ impl Streams {
                     *maximum_stream_data
                 );
                 stats.max_stream_data += 1;
+                // Terminate connection with STREAM_STATE_ERROR if receive-only
+                // stream (-transport 19.10)
+                if stream_id.is_recv_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
                     ss.set_max_stream_data(*maximum_stream_data);
                 }
@@ -174,8 +254,7 @@ impl Streams {
                 self.handle_max_streams(*stream_type, *maximum_streams);
             }
             Frame::DataBlocked { data_limit } => {
-                // Should never happen since we set data limit to max
-                qwarn!("Received DataBlocked with data limit {data_limit}");
+                qdebug!("Received DataBlocked with data limit {data_limit}");
                 stats.data_blocked += 1;
                 self.handle_data_blocked();
             }
@@ -315,6 +394,10 @@ impl Streams {
         self.recv.clear();
     }
 
+    pub fn update_stats(&self, stats: &mut Stats) {
+        stats.fc_max_active = self.receiver_fc.borrow().max_active();
+    }
+
     /// # Errors
     /// When the stream does not exist or has no more data.
     ///
@@ -335,7 +418,7 @@ impl Streams {
         // send counterpart just disappeared may now be clearable too.
         self.recv.set_ended(self.send.remove_ended());
 
-        let (removed_bidi, removed_uni) = self.recv.remove_ended(&self.send, self.role);
+        let (removed_bidi, removed_uni) = self.recv.remove_ended(&self.send);
 
         // Send max_streams updates if we removed remote-initiated recv streams.
         // The updates will be send if any streams has been removed.
@@ -439,6 +522,12 @@ impl Streams {
     /// When the stream does not exist.
     pub fn set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.send.set_fairness(stream_id, fairness)
+    }
+
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn set_sendgroup(&mut self, stream_id: StreamId, group_id: Option<SendGroupId>) -> Res<()> {
+        self.send.set_sendgroup(stream_id, group_id)
     }
 
     /// # Errors

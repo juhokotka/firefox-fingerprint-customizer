@@ -6,9 +6,9 @@
 
 #include "mozilla/CheckedInt.h"
 #include "mozilla/TextUtils.h"
-#include "nsTArray.h"
-#include "nsCRT.h"
 #include "nsASCIIMask.h"
+#include "nsCRT.h"
+#include "nsTArray.h"
 
 static const char hexCharsUpper[] = "0123456789ABCDEF";
 static const char hexCharsUpperLower[] = "0123456789ABCDEFabcdef";

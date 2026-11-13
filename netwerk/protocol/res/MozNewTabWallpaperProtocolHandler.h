@@ -5,10 +5,10 @@
 #ifndef MozNewTabWallpaperProtocolHandler_h_
 #define MozNewTabWallpaperProtocolHandler_h_
 
-#include "mozilla/Result.h"
-#include "mozilla/MozPromise.h"
-#include "mozilla/net/RemoteStreamGetter.h"
 #include "SubstitutingProtocolHandler.h"
+#include "mozilla/MozPromise.h"
+#include "mozilla/Result.h"
+#include "mozilla/net/RemoteStreamGetter.h"
 #include "nsIInputStream.h"
 #include "nsWeakReference.h"
 

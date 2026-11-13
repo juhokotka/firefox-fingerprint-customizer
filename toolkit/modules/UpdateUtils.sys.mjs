@@ -8,8 +8,6 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   WindowsRegistry: "resource://gre/modules/WindowsRegistry.sys.mjs",
-  WindowsVersionInfo:
-    "resource://gre/modules/components-utils/WindowsVersionInfo.sys.mjs",
   ctypes: "resource://gre/modules/ctypes.sys.mjs",
 });
 
@@ -506,6 +504,29 @@ export var UpdateUtils = {
     const policyValue = pref.policyFn();
     return policyValue !== null;
   },
+
+  summarizeLatestUpdate(history) {
+    let is_patch = null;
+    let target_version = null;
+    let previous_version = null;
+    let total_retries = 0;
+    if (history && history.length) {
+      is_patch = history[0]?.isCompleteUpdate != "true";
+      // In updates.xml, 'appVersion' is the version we are updating to.
+      target_version = history[0]?.appVersion;
+      previous_version = history[0]?.previousAppVersion;
+      if (history[0]?.childNodes && history[0]?.childNodes.length) {
+        total_retries = history[0].childNodes.reduce(
+          (accum, item) =>
+            item?.numTotalInstallAttempts
+              ? accum + item.numTotalInstallAttempts
+              : accum,
+          0
+        );
+      }
+    }
+    return { is_patch, target_version, previous_version, total_retries };
+  },
 };
 
 const PER_INSTALLATION_DEFAULTS_BRANCH = "__DEFAULTS__";
@@ -850,8 +871,8 @@ async function readUpdateConfig() {
           await writeUpdateConfig(migrationConfig);
           onMigrationSuccessful();
           return migrationConfig;
-        } catch (e) {
-          console.error("readUpdateConfig: Migration failed: ", e);
+        } catch (e2) {
+          console.error("readUpdateConfig: Migration failed: ", e2);
         }
       }
     } else {
@@ -1083,33 +1104,36 @@ ChromeUtils.defineLazyGetter(UpdateUtils, "OSVersion", function () {
 
   if (osVersion) {
     if (AppConstants.platform == "win") {
-      // Add service pack and build number
-      try {
-        const { servicePackMajor, servicePackMinor, buildNumber } =
-          lazy.WindowsVersionInfo.get();
-        osVersion += `.${servicePackMajor}.${servicePackMinor}.${buildNumber}`;
-      } catch (err) {
-        console.error("Unable to retrieve windows version information: ", err);
+      const CURRENT_VERSION_PATH =
+        "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
+
+      // 'CurrentBuild' is a REG_SZ for some reason, so coerce it to a number
+      // first.
+      let build = Number(
+        lazy.WindowsRegistry.readRegKey(
+          Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+          CURRENT_VERSION_PATH,
+          "CurrentBuild",
+          Ci.nsIWindowsRegKey.WOW64_64
+        )
+      );
+      if (Number.isInteger(build)) {
+        osVersion += `.0.0.${build}`;
+      } else {
         osVersion += ".unknown";
       }
 
-      // add UBR if on Windows 10
-      if (
-        Services.vc.compare(Services.sysinfo.getProperty("version"), "10") >= 0
-      ) {
-        const WINDOWS_UBR_KEY_PATH =
-          "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
-        let ubr = lazy.WindowsRegistry.readRegKey(
-          Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
-          WINDOWS_UBR_KEY_PATH,
-          "UBR",
-          Ci.nsIWindowsRegKey.WOW64_64
-        );
-        if (ubr !== undefined) {
-          osVersion += `.${ubr}`;
-        } else {
-          osVersion += ".unknown";
-        }
+      // The value of UBR is already a REG_DWORD, so don't coerce it.
+      let ubr = lazy.WindowsRegistry.readRegKey(
+        Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+        CURRENT_VERSION_PATH,
+        "UBR",
+        Ci.nsIWindowsRegKey.WOW64_64
+      );
+      if (Number.isInteger(ubr)) {
+        osVersion += `.${ubr}`;
+      } else {
+        osVersion += ".unknown";
       }
 
       // Add processor architecture

@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <utility>
 
-#include "DirectoryMetadata.h"
 #include "ErrorList.h"
 #include "FileUtils.h"
 #include "GroupInfo.h"
@@ -29,6 +28,7 @@
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/dom/Nullable.h"
+#include "mozilla/dom/quota/AssertionsImpl.h"
 #include "mozilla/dom/quota/Client.h"
 #include "mozilla/dom/quota/CommonMetadata.h"
 #include "mozilla/dom/quota/Constants.h"
@@ -51,6 +51,7 @@
 #include "mozilla/dom/quota/UniversalDirectoryLock.h"
 #include "mozilla/dom/quota/UsageInfo.h"
 #include "mozilla/fallible.h"
+#include "mozilla/glean/DomQuotaMetrics.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "nsCOMPtr.h"
@@ -70,6 +71,16 @@
 #include "prtime.h"
 
 namespace mozilla::dom::quota {
+
+namespace {
+void RecordCorruptionUnrecovered(const nsresult aRv,
+                                 const nsLiteralCString& aContext) {
+  if (IsDatabaseCorruptionError(aRv)) {
+    glean::quotamanager::storage_sqlite_corruption_unrecovered.Get(aContext)
+        .Add();
+  }
+}
+}  // namespace
 
 using namespace mozilla::ipc;
 
@@ -251,7 +262,7 @@ class GetUsageOp final
                              const PersistenceType aPersistenceType,
                              const nsACString& aOrigin,
                              const int64_t aTimestamp, const bool aPersisted,
-                             const uint64_t aUsage);
+                             const int64_t aUsage);
 
   RefPtr<BoolPromise> OpenDirectory() override;
 
@@ -997,14 +1008,21 @@ class PersistOp final : public PersistRequestBase {
   void GetResponse(RequestResponse& aResponse) override;
 };
 
+// Estimates usage and limit for either an origin (as exposed to content via
+// navigator.storage.estimate()) or its whole group (parent process only).
 class EstimateOp final : public OpenStorageDirectoryHelper<QuotaRequestBase> {
-  const EstimateParams mParams;
+ public:
+  enum class Scope { Origin, Group };
+
+ private:
+  const PrincipalInfo mPrincipalInfo;
+  const Scope mScope;
   OriginMetadata mOriginMetadata;
   std::pair<uint64_t, uint64_t> mUsageAndLimit;
 
  public:
   EstimateOp(MovingNotNull<RefPtr<QuotaManager>> aQuotaManager,
-             const EstimateParams& aParams);
+             const PrincipalInfo& aPrincipalInfo, Scope aScope);
 
  private:
   ~EstimateOp() = default;
@@ -1024,7 +1042,6 @@ class ListOriginsOp final
     : public OpenStorageDirectoryHelper<
           ResolvableNormalOriginOp<CStringArray, /* IsExclusive */ true>>,
       public TraverseRepositoryHelper {
-  // XXX Bug 1521541 will make each origin has it's own state.
   nsTArray<nsCString> mOrigins;
 
  public:
@@ -1286,7 +1303,17 @@ RefPtr<QuotaRequestBase> CreatePersistOp(
 RefPtr<QuotaRequestBase> CreateEstimateOp(
     MovingNotNull<RefPtr<QuotaManager>> aQuotaManager,
     const EstimateParams& aParams) {
-  return MakeRefPtr<EstimateOp>(std::move(aQuotaManager), aParams);
+  return MakeRefPtr<EstimateOp>(std::move(aQuotaManager),
+                                aParams.principalInfo(),
+                                EstimateOp::Scope::Origin);
+}
+
+RefPtr<QuotaRequestBase> CreateEstimateGroupUsageOp(
+    MovingNotNull<RefPtr<QuotaManager>> aQuotaManager,
+    const EstimateGroupUsageParams& aParams) {
+  return MakeRefPtr<EstimateOp>(std::move(aQuotaManager),
+                                aParams.principalInfo(),
+                                EstimateOp::Scope::Group);
 }
 
 RefPtr<ResolvableNormalOriginOp<CStringArray, /* IsExclusive */ true>>
@@ -1333,6 +1360,7 @@ nsresult FinalizeOriginEvictionOp::DoDirectoryWork(
   for (const auto& lock : mLocks) {
     aQuotaManager.OriginClearCompleted(lock->OriginMetadata(),
                                        ClientStorageScope::CreateFromNull());
+    aQuotaManager.RemoveOriginFromCacheForEviction(lock->OriginMetadata());
   }
 
   return NS_OK;
@@ -1382,17 +1410,17 @@ nsresult SaveOriginAccessTimeOp::DoDirectoryWork(QuotaManager& aQuotaManager) {
       OkIf(aQuotaManager.IsTemporaryOriginInitializedInternal(mOriginMetadata)),
       NS_ERROR_NOT_INITIALIZED);
 
-  auto maybeOriginStateMetadata =
-      aQuotaManager.GetOriginStateMetadata(mOriginMetadata);
+  auto maybeFullOriginMetadata =
+      aQuotaManager.GetFullOriginMetadata(mOriginMetadata);
 
-  auto originStateMetadata = maybeOriginStateMetadata.extract();
+  auto fullOriginMetadata = maybeFullOriginMetadata.extract();
 
   // See the documentation for this pref in StaticPrefList.yaml
   if (StaticPrefs::dom_quotaManager_temporaryStorage_updateOriginAccessTime()) {
-    originStateMetadata.mLastAccessTime = PR_Now();
+    fullOriginMetadata.mLastAccessTime = PR_Now();
   }
 
-  originStateMetadata.mAccessed = true;
+  fullOriginMetadata.mAccessed = true;
 
   QM_TRY_INSPECT(const auto& file,
                  aQuotaManager.GetOriginDirectory(mOriginMetadata));
@@ -1403,16 +1431,15 @@ nsresult SaveOriginAccessTimeOp::DoDirectoryWork(QuotaManager& aQuotaManager) {
   QM_TRY_INSPECT(const bool& exists, MOZ_TO_RESULT_INVOKE_MEMBER(file, Exists));
 
   if (exists) {
-    QM_TRY(
-        MOZ_TO_RESULT(SaveDirectoryMetadataHeader(*file, originStateMetadata)));
-
+    QM_TRY(MOZ_TO_RESULT(
+        aQuotaManager.CreateDirectoryMetadata2(*file, fullOriginMetadata)));
     mSaved = true;
 
     aQuotaManager.IncreaseSaveOriginAccessTimeCountInternal();
   }
 
   aQuotaManager.UpdateOriginAccessTime(mOriginMetadata,
-                                       originStateMetadata.mLastAccessTime);
+                                       fullOriginMetadata.mLastAccessTime);
 
   return NS_OK;
 }
@@ -1677,7 +1704,7 @@ void GetUsageOp::ProcessOriginInternal(QuotaManager* aQuotaManager,
                                        const nsACString& aOrigin,
                                        const int64_t aTimestamp,
                                        const bool aPersisted,
-                                       const uint64_t aUsage) {
+                                       const int64_t aUsage) {
   if (!mGetAll && aQuotaManager->IsOriginInternal(aOrigin)) {
     return;
   }
@@ -1712,10 +1739,7 @@ void GetUsageOp::ProcessOriginInternal(QuotaManager* aQuotaManager,
     originUsage->mPersisted = aPersisted;
   }
 
-  // Ignore usage values which have underflowed (workaround for bug 1585978)
-  if (aUsage < INT64_MAX) [[likely]] {
-    originUsage->mUsage += aUsage;
-  }
+  originUsage->mUsage += QM_CLAMP_TO_ZERO(aUsage);
 
   originUsage->mLastAccessTime =
       std::max<int64_t>(originUsage->mLastAccessTime, aTimestamp);
@@ -2123,7 +2147,10 @@ nsresult InitOp::DoDirectoryWork(QuotaManager& aQuotaManager) {
 
   AUTO_PROFILER_LABEL("InitOp::DoDirectoryWork", OTHER);
 
-  QM_TRY(MOZ_TO_RESULT(aQuotaManager.EnsureStorageIsInitializedInternal()));
+  QM_TRY(MOZ_TO_RESULT(aQuotaManager.EnsureStorageIsInitializedInternal()),
+         QM_PROPAGATE,
+         std::bind(RecordCorruptionUnrecovered, std::placeholders::_1,
+                   "storage"_ns));
 
   return NS_OK;
 }
@@ -2162,7 +2189,10 @@ nsresult InitializePersistentStorageOp::DoDirectoryWork(
          NS_ERROR_NOT_INITIALIZED);
 
   QM_TRY(MOZ_TO_RESULT(
-      aQuotaManager.EnsurePersistentStorageIsInitializedInternal()));
+             aQuotaManager.EnsurePersistentStorageIsInitializedInternal()),
+         QM_PROPAGATE,
+         std::bind(RecordCorruptionUnrecovered, std::placeholders::_1,
+                   "persistent_storage"_ns));
 
   return NS_OK;
 }
@@ -2208,7 +2238,10 @@ nsresult InitTemporaryStorageOp::DoDirectoryWork(QuotaManager& aQuotaManager) {
 
   if (!wasInitialized) {
     QM_TRY(MOZ_TO_RESULT(
-        aQuotaManager.EnsureTemporaryStorageIsInitializedInternal()));
+               aQuotaManager.EnsureTemporaryStorageIsInitializedInternal()),
+           QM_PROPAGATE,
+           std::bind(RecordCorruptionUnrecovered, std::placeholders::_1,
+                     "temporary_storage"_ns));
 
     mAllTemporaryGroups = Some(aQuotaManager.GetAllTemporaryGroups());
   }
@@ -2951,6 +2984,8 @@ void ClearRequestBase::DeleteFilesInternal(
             aQuotaManager.OriginClearCompleted(
                 metadata, ClientStorageScope::CreateFromNull());
 
+            aQuotaManager.RemoveOriginFromCacheForEviction(metadata);
+
             break;
           }
 
@@ -2992,6 +3027,8 @@ void ClearRequestBase::DeleteFilesInternal(
 
             aQuotaManager.OriginClearCompleted(
                 metadata, ClientStorageScope::CreateFromNull());
+
+            aQuotaManager.RemoveOriginFromCacheForEviction(metadata);
 
             break;
           }
@@ -3648,8 +3685,8 @@ nsresult PersistOp::DoDirectoryWork(QuotaManager& aQuotaManager) {
   if (created) {
     // A new origin directory has been created.
 
-    const auto [timestamp, maintenanceDate, accessed] = [&aQuotaManager,
-                                                         &originMetadata]() {
+    FullOriginMetadata fullOriginMetadata =
+        [&aQuotaManager, &originMetadata]() -> FullOriginMetadata {
       // Update OriginInfo too if temporary origin was already initialized.
       if (aQuotaManager.IsTemporaryStorageInitializedInternal()) {
         if (aQuotaManager.IsTemporaryOriginInitializedInternal(
@@ -3659,33 +3696,28 @@ nsresult PersistOp::DoDirectoryWork(QuotaManager& aQuotaManager) {
           // and it needs to be updated because the origin directory has been
           // just created.
 
-          return aQuotaManager.WithOriginInfo(
+          auto metadata = aQuotaManager.WithOriginInfo(
               originMetadata, [](const auto& originInfo) {
-                const int64_t timestamp = originInfo->LockedAccessTime();
-                const int32_t maintenanceDate =
-                    originInfo->LockedMaintenanceDate();
-                const bool accessed = originInfo->LockedAccessed();
-
+                auto metadata = originInfo->LockedFlattenToFullOriginMetadata();
                 originInfo->LockedDirectoryCreated();
-
-                return std::make_tuple(timestamp, maintenanceDate, accessed);
+                return metadata;
               });
+
+          metadata.mPersisted = true;
+          return metadata;
         }
       }
 
       const int64_t timestamp = PR_Now();
 
-      return std::make_tuple(
-          /* timestamp */ timestamp,
-          /* maintenanceDate */ Date::FromTimestamp(timestamp).ToDays(),
-          /* accessed */ false);
+      return FullOriginMetadata{
+          originMetadata,
+          OriginStateMetadata{timestamp,
+                              Date::FromTimestamp(timestamp).ToDays(),
+                              /* aAccessed */ false, /* aPersisted */ true,
+                              /* aDirty */ false},
+          ClientUsageArray(), /* aUsage */ 0, kCurrentQuotaVersion};
     }();
-
-    FullOriginMetadata fullOriginMetadata = FullOriginMetadata{
-        originMetadata,
-        OriginStateMetadata{timestamp, maintenanceDate, accessed,
-                            /* aPersisted */ true},
-        ClientUsageArray(), /* aUsage */ 0, kCurrentQuotaVersion};
 
     if (aQuotaManager.IsTemporaryStorageInitializedInternal()) {
       // Usually, infallible operations are placed after fallible ones.
@@ -3718,49 +3750,40 @@ nsresult PersistOp::DoDirectoryWork(QuotaManager& aQuotaManager) {
     }
   } else {
     QM_TRY_UNWRAP(
-        OriginStateMetadata originStateMetadata,
+        FullOriginMetadata fullOriginMetadata,
         ([&aQuotaManager, &originMetadata,
-          &directory]() -> mozilla::Result<OriginStateMetadata, nsresult> {
-          Maybe<OriginStateMetadata> maybeOriginStateMetadata =
-              aQuotaManager.IsTemporaryStorageInitializedInternal()
-                  ? aQuotaManager.GetOriginStateMetadata(originMetadata)
-                  : Nothing();
-
-          if (maybeOriginStateMetadata) {
-            return maybeOriginStateMetadata.extract();
+          &directory]() -> mozilla::Result<FullOriginMetadata, nsresult> {
+          if (aQuotaManager.IsTemporaryStorageInitializedInternal()) {
+            auto maybeFullOriginMetadata =
+                aQuotaManager.GetFullOriginMetadata(originMetadata);
+            if (maybeFullOriginMetadata) {
+              return maybeFullOriginMetadata.extract();
+            }
           }
 
-          // Get the metadata (restore the metadata file if necessary). We only
-          // use the origin state metadata.
-          QM_TRY_INSPECT(
-              const auto& metadata,
+          QM_TRY_RETURN(
               aQuotaManager.LoadFullOriginMetadataWithRestore(directory));
-
-          return metadata;
         }()));
 
-    if (!originStateMetadata.mPersisted) {
+    if (!fullOriginMetadata.mPersisted) {
       // Set the persisted flag to true and also update origin access time
       // while we are here.
 
       // See the documentation for this pref in StaticPrefList.yaml
       if (StaticPrefs::
               dom_quotaManager_temporaryStorage_updateOriginAccessTime()) {
-        originStateMetadata.mLastAccessTime = PR_Now();
+        fullOriginMetadata.mLastAccessTime = PR_Now();
       }
 
-      originStateMetadata.mPersisted = true;
+      fullOriginMetadata.mPersisted = true;
 
-      QM_TRY(MOZ_TO_RESULT(
-          SaveDirectoryMetadataHeader(*directory, originStateMetadata)));
+      QM_TRY(MOZ_TO_RESULT(aQuotaManager.CreateDirectoryMetadata2(
+          *directory, fullOriginMetadata)));
 
       // Directory metadata has been successfully updated.
       // Update OriginInfo too if temporary storage was already initialized.
       if (aQuotaManager.IsTemporaryStorageInitializedInternal()) {
         aQuotaManager.PersistOrigin(originMetadata);
-
-        // XXX The origin access time should be updated too (but not the
-        // accessed flag).
       }
     }
   }
@@ -3775,19 +3798,20 @@ void PersistOp::GetResponse(RequestResponse& aResponse) {
 }
 
 EstimateOp::EstimateOp(MovingNotNull<RefPtr<QuotaManager>> aQuotaManager,
-                       const EstimateParams& aParams)
+                       const PrincipalInfo& aPrincipalInfo, Scope aScope)
     : OpenStorageDirectoryHelper(std::move(aQuotaManager),
                                  "dom::quota::EstimateOp"),
-      mParams(aParams) {
+      mPrincipalInfo(aPrincipalInfo),
+      mScope(aScope) {
   AssertIsOnOwningThread();
 }
 
 nsresult EstimateOp::DoInit(QuotaManager& aQuotaManager) {
   AssertIsOnOwningThread();
 
-  QM_TRY_UNWRAP(PrincipalMetadata principalMetadata,
-                GetInfoFromValidatedPrincipalInfo(aQuotaManager,
-                                                  mParams.principalInfo()));
+  QM_TRY_UNWRAP(
+      PrincipalMetadata principalMetadata,
+      GetInfoFromValidatedPrincipalInfo(aQuotaManager, mPrincipalInfo));
 
   principalMetadata.AssertInvariants();
 
@@ -3815,8 +3839,11 @@ nsresult EstimateOp::DoDirectoryWork(QuotaManager& aQuotaManager) {
 
   AUTO_PROFILER_LABEL("EstimateOp::DoDirectoryWork", OTHER);
 
-  // Get cached usage (the method doesn't have to stat any files).
-  mUsageAndLimit = aQuotaManager.GetUsageAndLimitForEstimate(mOriginMetadata);
+  // Get cached usage (the methods don't have to stat any files).
+  mUsageAndLimit =
+      mScope == Scope::Group
+          ? aQuotaManager.GetGroupUsageAndLimitForEstimate(mOriginMetadata)
+          : aQuotaManager.GetUsageAndLimitForEstimate(mOriginMetadata);
 
   return NS_OK;
 }

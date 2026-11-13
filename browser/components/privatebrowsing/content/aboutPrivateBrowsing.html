@@ -26,11 +26,16 @@
     />
     <link rel="localization" href="branding/brand.ftl" />
     <link rel="localization" href="toolkit/branding/brandings.ftl" />
+    <link rel="localization" href="toolkit/global/mozPromo.ftl" />
     <link rel="localization" href="browser/aboutPrivateBrowsing.ftl" />
     <script src="chrome://browser/content/aboutPrivateBrowsing.js"></script>
     <script
       type="module"
       src="chrome://browser/content/contentSearchHandoffUI.mjs"
+    ></script>
+    <script
+      type="module"
+      src="chrome://browser/content/private-browsing-mask-intro.mjs"
     ></script>
     <script
       type="module"
@@ -81,6 +86,10 @@
     <div class="showPrivate showSearch container">
       <div class="logo-and-wordmark">
         <div id="about-private-browsing-logo" class="logo"></div>
+        <private-browsing-mask-intro
+          id="about-private-browsing-mask-intro"
+          hidden
+        ></private-browsing-mask-intro>
         <div class="wordmark"></div>
       </div>
       <p
@@ -89,7 +98,7 @@
       ></p>
       <p
         class="nova-subheader"
-        data-l10n-id="about-private-browsing-nova-info-subheader"
+        data-l10n-id="about-private-browsing-nova-info-subheader2"
       ></p>
       <div class="search-inner-wrapper">
         <content-search-handoff-ui></content-search-handoff-ui>
@@ -108,6 +117,12 @@
             id="private-browsing-myths"
             data-l10n-id="about-private-browsing-felt-privacy-v1-info-link"
             target="_blank"
+          ></a>
+          <a
+            id="private-window-basics"
+            href="#"
+            data-l10n-id="about-private-browsing-private-window-basics-link"
+            hidden
           ></a>
         </div>
       </div>
@@ -149,12 +164,6 @@
         <moz-button slot="actions" id="nova-promo-button" type="primary">
         </moz-button>
       </moz-promo>
-      <moz-button
-        data-l10n-id="about-private-browsing-promo-close-button"
-        id="nova-dismiss-btn"
-        type="ghost"
-        iconsrc="chrome://global/skin/icons/close.svg"
-      ></moz-button>
     </div>
   </body>
 </html>

@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "gmock/gmock.h"
-#include "gtest/gtest.h"
 #include "gtest/gtest-spi.h"
+#include "gtest/gtest.h"
 #include "mozilla/LazyIdleThread.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/TaskQueue.h"
@@ -111,8 +111,8 @@ TEST(TestTargetShutdownTask, PoolAndTaskQueue)
   EXPECT_EQ(pool->UnregisterShutdownTask(poolTask1), NS_ERROR_UNEXPECTED);
 
   {
-    RefPtr<TaskQueue> target =
-        TaskQueue::Create(do_AddRef(pool), "TaskQueue", true);
+    RefPtr<TaskQueue> target = TaskQueue::Create(
+        do_AddRef(pool), "TaskQueue", TailDispatchPolicy::ConsistentOrdering);
 
     // Add two tasks, remove one, leave one for shutdown.
     auto queueTask1 = MakeRefPtr<DidRunTask>(target);

@@ -132,7 +132,7 @@ struct TextMarker : public BaseMarkerType<TextMarker> {
   // type since it can be used by various different markers.
   static constexpr const char* Description = nullptr;
 
-  static constexpr bool StoreName = true;
+  static constexpr bool ETWStoreName = true;
 
   using MS = MarkerSchema;
   static constexpr MS::PayloadField PayloadFields[] =
@@ -141,7 +141,7 @@ struct TextMarker : public BaseMarkerType<TextMarker> {
           "name",
           MS::InputType::CString,
           "Details",
-          MS::Format::String,
+          MS::Format::UniqueString,
       }};
 
   static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
@@ -153,7 +153,7 @@ struct TextMarker : public BaseMarkerType<TextMarker> {
 
   static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
                                    const ProfilerString8View& aText) {
-    aWriter.StringProperty("name", aText);
+    aWriter.UniqueStringProperty("name", aText);
   }
 };
 
@@ -163,7 +163,7 @@ struct TextStackMarker : public BaseMarkerType<TextStackMarker> {
   // type since it can be used by various different markers.
   static constexpr const char* Description = nullptr;
 
-  static constexpr bool StoreName = true;
+  static constexpr bool ETWStoreName = true;
 
   using MS = MarkerSchema;
   static constexpr MS::PayloadField PayloadFields[] =
@@ -172,7 +172,7 @@ struct TextStackMarker : public BaseMarkerType<TextStackMarker> {
           "name",
           MS::InputType::CString,
           "Details",
-          MS::Format::String,
+          MS::Format::UniqueString,
       }};
 
   static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
@@ -186,7 +186,7 @@ struct TextStackMarker : public BaseMarkerType<TextStackMarker> {
 
   static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
                                    const ProfilerString8View& aText) {
-    aWriter.StringProperty("name", aText);
+    aWriter.UniqueStringProperty("name", aText);
   }
 };
 
@@ -198,7 +198,7 @@ struct Tracing : public BaseMarkerType<Tracing> {
   // type since it can be used by various different markers.
   static constexpr const char* Description = nullptr;
 
-  static constexpr bool StoreName = true;
+  static constexpr bool ETWStoreName = true;
 
   using MS = MarkerSchema;
   static constexpr MS::PayloadField PayloadFields[] = {{
@@ -227,7 +227,7 @@ struct StackMarker : public BaseMarkerType<StackMarker> {
   // type since it can be used by various different markers.
   static constexpr const char* Description = nullptr;
 
-  static constexpr bool StoreName = true;
+  static constexpr bool ETWStoreName = true;
 
   using MS = MarkerSchema;
   static constexpr MS::PayloadField PayloadFields[0] = {};

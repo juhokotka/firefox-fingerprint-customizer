@@ -7,12 +7,12 @@
 #ifndef mozilla_CompactPair_h
 #define mozilla_CompactPair_h
 
-#include "mozilla/Attributes.h"
-
 #include <cstddef>
 #include <tuple>
 #include <type_traits>
 #include <utility>
+
+#include "mozilla/Attributes.h"
 
 namespace mozilla {
 
@@ -50,6 +50,8 @@ class CompactPair {
   CompactPair& operator=(CompactPair&& aOther) = default;
   CompactPair& operator=(const CompactPair& aOther) = default;
 
+  bool operator==(const CompactPair& aOther) const = default;
+
   constexpr A& first() { return mFirst; }
   constexpr const A& first() const { return mFirst; }
   constexpr B& second() { return mSecond; }
@@ -76,14 +78,6 @@ CompactPair<std::remove_cvref_t<A>, std::remove_cvref_t<B>> MakeCompactPair(
     A&& aA, B&& aB) {
   return CompactPair<std::remove_cvref_t<A>, std::remove_cvref_t<B>>(
       std::forward<A>(aA), std::forward<B>(aB));
-}
-
-/**
- * CompactPair equality comparison
- */
-template <typename A, typename B>
-bool operator==(const CompactPair<A, B>& aLhs, const CompactPair<A, B>& aRhs) {
-  return aLhs.first() == aRhs.first() && aLhs.second() == aRhs.second();
 }
 
 }  // namespace mozilla

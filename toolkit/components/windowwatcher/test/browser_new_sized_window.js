@@ -45,16 +45,14 @@ function test_dimensions({ width, height }) {
         Assert.equal(rect.height, height, "Should have the requested height");
       }
 
-      let treeOwner = win.docShell.treeOwner;
-      let persistPosition = {};
-      let persistSize = {};
-      let persistSizeMode = {};
-      treeOwner.getPersistence(persistPosition, persistSize, persistSizeMode);
+      let chromeFlags = win.docShell.treeOwner
+        .QueryInterface(Ci.nsIInterfaceRequestor)
+        .getInterface(Ci.nsIAppWindow).chromeFlags;
 
-      Assert.ok(!persistPosition.value, "Should not persist position");
-      Assert.ok(!persistSize.value, "Should not persist size");
-      Assert.ok(!persistSizeMode.value, "Should not persist size mode");
-
+      Assert.ok(
+        !!(chromeFlags & Ci.nsIWebBrowserChrome.CHROME_NO_PERSISTENCE),
+        "Should disable persistence"
+      );
       await BrowserTestUtils.closeWindow(win);
     }
   );

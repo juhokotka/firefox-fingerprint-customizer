@@ -5,21 +5,21 @@
 #include "RenderCompositorLayerNative.h"
 
 #include "GLContext.h"
+#include "GLContextEGL.h"
 #include "GLContextProvider.h"
+#include "RenderCompositorRecordedFrame.h"
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/ProfilerMarkers.h"
-#include "mozilla/gfx/gfxVars.h"
+#include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/gfx/Logging.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/CompositionRecorder.h"
-#include "mozilla/layers/GpuFence.h"
 #include "mozilla/layers/NativeLayer.h"
 #include "mozilla/layers/ProfilerScreenshots.h"
 #include "mozilla/layers/SurfacePool.h"
-#include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/webrender/RenderTextureHost.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/widget/CompositorWidget.h"
-#include "RenderCompositorRecordedFrame.h"
 
 #if defined(MOZ_WAYLAND)
 #  include "mozilla/layers/NativeLayerWayland.h"
@@ -80,7 +80,7 @@ RenderedFrameId RenderCompositorLayerNative::EndFrame(
 
   DoSwap();
 
-  MOZ_ASSERT(mPendingGpuFeces.empty());
+  MOZ_ASSERT(mPendingGpuFences.empty());
 
   return frameId;
 }
@@ -287,12 +287,6 @@ void RenderCompositorLayerNative::UnbindNativeLayer() {
   mCurrentlyBoundNativeLayer = nullptr;
 }
 
-void RenderCompositorLayerNative::CreateSurface(
-    wr::NativeSurfaceId aId, wr::DeviceIntPoint aVirtualOffset,
-    wr::DeviceIntSize aTileSize, bool aIsOpaque) {
-  MOZ_ASSERT_UNREACHABLE("Unexpected to be called!");
-}
-
 void RenderCompositorLayerNative::CreateExternalSurface(wr::NativeSurfaceId aId,
                                                         bool aIsOpaque) {
   MOZ_RELEASE_ASSERT(mSurfaces.find(aId) == mSurfaces.end());
@@ -359,7 +353,11 @@ void RenderCompositorLayerNativeOGL::AttachExternalImage(
   // image->Lock only uses the channel index to populate the returned
   // `WrExternalImage`. Since we don't use that, it doesn't matter
   // what channel index we pass.
-  image->Lock(0, mGL);
+  // A DMABUF buffer is attached to the wl_surface as-is and is never sampled
+  // here, so locking it without a GL context skips a per-frame EGLImage import
+  // and BO mapping. Every other backend still requires a context (e.g.
+  // RenderMacIOSurfaceTextureHost).
+  image->Lock(0, image->AsRenderDMABUFTextureHost() ? nullptr : mGL.get());
 
   RenderCompositorLayerNative::AttachExternalImage(aId, aExternalImage);
 }
@@ -369,16 +367,6 @@ void RenderCompositorLayerNative::DestroySurface(NativeSurfaceId aId) {
   MOZ_RELEASE_ASSERT(surfaceCursor != mSurfaces.end());
 
   mSurfaces.erase(surfaceCursor);
-}
-
-void RenderCompositorLayerNative::CreateTile(wr::NativeSurfaceId aId, int aX,
-                                             int aY) {
-  MOZ_ASSERT_UNREACHABLE("Unexpected to be called!");
-}
-
-void RenderCompositorLayerNative::DestroyTile(wr::NativeSurfaceId aId, int aX,
-                                              int aY) {
-  MOZ_ASSERT_UNREACHABLE("Unexpected to be called!");
 }
 
 /* static */
@@ -428,7 +416,7 @@ void RenderCompositorLayerNative::AddSurface(
   if (surface.mIsExternal) {
     RefPtr<layers::GpuFence> fence = layer->GetGpuFence();
     if (fence && BackendType() == layers::WebRenderBackend::HARDWARE) {
-      mPendingGpuFeces.emplace_back(fence);
+      mPendingGpuFences.emplace_back(fence);
     }
   }
 }
@@ -482,7 +470,22 @@ bool RenderCompositorLayerNativeOGL::InitDefaultFramebuffer() {
 
 void RenderCompositorLayerNativeOGL::DoSwap() { InsertFrameDoneSync(); }
 
-void RenderCompositorLayerNativeOGL::DoFlush() { mGL->fFlush(); }
+void RenderCompositorLayerNativeOGL::DoFlush() {
+  if (mGL->GetContextType() == gl::GLContextType::EGL) {
+    const auto* gle = gl::GLContextEGL::Cast(mGL);
+    const auto& egl = gle->mEgl;
+
+    // When setting a Metal-rendered IOSurface as a CALayer's contents, pending
+    // Metal commands must be explicitly scheduled to ensure they are committed
+    // with the next transaction.
+    // https://groups.google.com/g/angleproject/c/6UeZshVzt28/m/pRCjGEfmEwAJ
+    if (egl->IsExtensionSupported(
+            gl::EGLExtension::ANGLE_wait_until_work_scheduled)) {
+      egl->fWaitUntilWorkScheduledANGLE();
+    }
+  }
+  mGL->fFlush();
+}
 
 void RenderCompositorLayerNativeOGL::InsertFrameDoneSync() {
 #ifdef XP_DARWIN
@@ -492,7 +495,7 @@ void RenderCompositorLayerNativeOGL::InsertFrameDoneSync() {
     mGL->fDeleteSync(mThisFrameDoneFences->mSync);
   }
   mThisFrameDoneFences =
-      MakeUnique<BackPressureFences>(std::move(mPendingGpuFeces));
+      MakeUnique<BackPressureFences>(std::move(mPendingGpuFences));
   mThisFrameDoneFences->mSync =
       mGL->fFenceSync(LOCAL_GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 #endif
@@ -500,19 +503,8 @@ void RenderCompositorLayerNativeOGL::InsertFrameDoneSync() {
 
 bool RenderCompositorLayerNativeOGL::WaitForGPU() {
   if (mPreviousFrameDoneFences) {
-    bool complete = false;
-    while (!complete) {
-      complete = true;
-      for (const auto& fence : mPreviousFrameDoneFences->mGpuFeces) {
-        if (!fence->HasCompleted()) {
-          complete = false;
-          break;
-        }
-      }
-
-      if (!complete) {
-        PR_Sleep(PR_MillisecondsToInterval(1));
-      }
+    for (const auto& fence : mPreviousFrameDoneFences->mGpuFences) {
+      fence->ClientWait(TimeDuration::Forever());
     }
 
     if (mPreviousFrameDoneFences->mSync) {

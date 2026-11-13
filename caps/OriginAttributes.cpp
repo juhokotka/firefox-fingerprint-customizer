@@ -3,10 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/OriginAttributes.h"
+
 #include "mozilla/Assertions.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/dom/quota/QuotaManager.h"
+#include "nsCharSeparatedTokenizer.h"
 #include "nsIEffectiveTLDService.h"
 #include "nsIURI.h"
 #include "nsNetCID.h"

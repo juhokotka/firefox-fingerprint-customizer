@@ -5,16 +5,17 @@
 #ifndef mozilla_a11y_RemoteAccessible_h
 #define mozilla_a11y_RemoteAccessible_h
 
+#include "AccAttributes.h"
+#include "LocalAccessible.h"
 #include "mozilla/a11y/Accessible.h"
 #include "mozilla/a11y/CacheConstants.h"
 #include "mozilla/a11y/HyperTextAccessibleBase.h"
 #include "mozilla/a11y/Role.h"
-#include "AccAttributes.h"
 #include "nsIAccessibleText.h"
 #include "nsIAccessibleTypes.h"
-#include "nsTArray.h"
+#include "nsISupportsImpl.h"
 #include "nsRect.h"
-#include "LocalAccessible.h"
+#include "nsTArray.h"
 
 namespace mozilla {
 namespace a11y {
@@ -30,10 +31,24 @@ enum class RelationType;
  */
 class RemoteAccessible : public Accessible, public HyperTextAccessibleBase {
  public:
-  virtual ~RemoteAccessible() {
-    MOZ_ASSERT(!mWrapper);
-    MOZ_COUNT_DTOR(RemoteAccessible);
-  }
+  // AddRef/Release are declared virtual (rather than using the plain
+  // NS_INLINE_DECL_REFCOUNTING) so that DocAccessibleParent, which is a
+  // RemoteAccessible subclass with its own nsISupports-based refcount (see
+  // NS_DECL_ISUPPORTS in DocAccessibleParent.h), can override them with a
+  // single implementation. Without this, a DocAccessibleParent stored in
+  // another node's mChildren/mParent would be tracked by two independent,
+  // disconnected refcounts.
+  //
+  // They're hand-written here rather than using
+  // NS_INLINE_DECL_VIRTUAL_REFCOUNTING_WITH_DESTROY because that macro's
+  // NS_ASSERT_OWNINGTHREAD assumes a single owning thread. On Android, the
+  // RemoteAccessible tree is legitimately touched from both the main thread
+  // and the Android UI thread, protected by
+  // nsAccessibilityService::GetAndroidMonitor() rather than by restricting
+  // access to a single thread. See AssertActiveThread in the .cpp for the
+  // assertion this uses instead.
+  NS_IMETHOD_(MozExternalRefCountType) AddRef(void) override;
+  NS_IMETHOD_(MozExternalRefCountType) Release(void) override;
 
   virtual bool IsRemote() const override { return true; }
 
@@ -53,10 +68,11 @@ class RemoteAccessible : public Accessible, public HyperTextAccessibleBase {
     return child;
   }
   RemoteAccessible* RemoteFirstChild() const {
-    return mChildren.Length() ? mChildren[0] : nullptr;
+    return mChildren.Length() ? mChildren[0].get() : nullptr;
   }
   RemoteAccessible* RemoteLastChild() const {
-    return mChildren.Length() ? mChildren[mChildren.Length() - 1] : nullptr;
+    return mChildren.Length() ? mChildren[mChildren.Length() - 1].get()
+                              : nullptr;
   }
   RemoteAccessible* RemotePrevSibling() const {
     if (IsDoc()) {
@@ -70,7 +86,7 @@ class RemoteAccessible : public Accessible, public HyperTextAccessibleBase {
       return nullptr;  // No parent.
     }
     MOZ_ASSERT(RemoteParent());
-    return idx > 0 ? RemoteParent()->mChildren[idx - 1] : nullptr;
+    return idx > 0 ? RemoteParent()->mChildren[idx - 1].get() : nullptr;
   }
   RemoteAccessible* RemoteNextSibling() const {
     if (IsDoc()) {
@@ -87,7 +103,7 @@ class RemoteAccessible : public Accessible, public HyperTextAccessibleBase {
     size_t newIdx = idx + 1;
     MOZ_ASSERT(RemoteParent());
     return newIdx < RemoteParent()->mChildren.Length()
-               ? RemoteParent()->mChildren[newIdx]
+               ? RemoteParent()->mChildren[newIdx].get()
                : nullptr;
   }
 
@@ -364,7 +380,7 @@ class RemoteAccessible : public Accessible, public HyperTextAccessibleBase {
   uint32_t GetCachedTextLength();
   Maybe<const nsTArray<int32_t>&> GetCachedTextLines();
   nsRect GetCachedCharRect(int32_t aOffset);
-  RefPtr<const AccAttributes> GetCachedTextAttributes();
+  const AccAttributes* GetCachedTextAttributes();
   const AccAttributes* GetCachedARIAAttributes() const;
 
   nsString GetCachedHTMLNameAttribute() const;
@@ -428,6 +444,11 @@ class RemoteAccessible : public Accessible, public HyperTextAccessibleBase {
   virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf);
 
  protected:
+  virtual ~RemoteAccessible() {
+    MOZ_ASSERT(!mWrapper);
+    MOZ_COUNT_DTOR(RemoteAccessible);
+  }
+
   RemoteAccessible(uint64_t aID, DocAccessibleParent* aDoc, role aRole,
                    AccType aType, AccGenericType aGenericTypes,
                    uint8_t aRoleMapEntryIndex)
@@ -514,7 +535,13 @@ class RemoteAccessible : public Accessible, public HyperTextAccessibleBase {
     }
   }
 
-  RemoteAccessible* mParent;
+  // Asserts that it's safe for the calling thread to touch this
+  // RemoteAccessible's refcount right now. See the comment on AddRef/Release.
+  void AssertActiveThread() const;
+
+  nsAutoRefCnt mRefCnt;
+
+  RefPtr<RemoteAccessible> mParent;
 
   friend DocAccessibleParent;
   friend TextLeafPoint;
@@ -525,7 +552,7 @@ class RemoteAccessible : public Accessible, public HyperTextAccessibleBase {
   friend class sdnAccessible;
 #endif
 
-  nsTArray<RemoteAccessible*> mChildren;
+  nsTArray<RefPtr<RemoteAccessible>> mChildren;
   DocAccessibleParent* mDoc;
   uintptr_t mWrapper;
   uint64_t mID;

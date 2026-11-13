@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/JSJitFrameIter-inl.h"
-
 #include "jit/CalleeToken.h"
 #include "jit/IonScript.h"
 #include "jit/JitcodeMap.h"
@@ -17,7 +15,9 @@
 #include "jit/VMFunctions.h"
 #include "js/friend/DumpFunctions.h"  // js::DumpObject, js::DumpValue
 #include "vm/JitActivation.h"
+#include "vm/JSContext.h"
 
+#include "jit/JSJitFrameIter-inl.h"
 #include "vm/JSScript-inl.h"
 
 using namespace js;
@@ -149,12 +149,21 @@ void JSJitFrameIter::baselineScriptAndPc(JSScript** scriptRes,
     return;
   }
 
-  // There must be a BaselineScript with a RetAddrEntry for the current return
-  // address.
+  // The return address is either in the frame's current BaselineScript
+  // or in a version of the script with a pending DebugModeOSRReturnSite.
   uint8_t* retAddr = resumePCinCurrentFrame();
-  const RetAddrEntry& entry =
-      script->baselineScript()->retAddrEntryFromReturnAddress(retAddr);
-  *pcRes = entry.pc(script);
+  const RetAddrEntry* retAddrEntry = nullptr;
+  if (baselineFrame()->hasPendingDebugModeOSRReturn()) {
+    JitRuntime* jitRuntime = activation_->cx()->runtime()->jitRuntime();
+    auto* site = jitRuntime->lookupDebugModeOSRReturnSite(retAddr);
+    MOZ_RELEASE_ASSERT(site);
+    retAddrEntry = &site->retAddrEntry();
+  } else {
+    BaselineScript* baselineScript = script->baselineScript();
+    MOZ_ASSERT(baselineScript->containsCodeAddress(retAddr));
+    retAddrEntry = &baselineScript->retAddrEntryFromReturnAddress(retAddr);
+  }
+  *pcRes = retAddrEntry->pc(script);
 }
 
 Value* JSJitFrameIter::actualArgs() const { return jsFrame()->actualArgs(); }
@@ -176,11 +185,20 @@ static uint32_t ComputeBaselineFrameSize(const JSJitFrameIter& frame) {
   // Note: an UnwoundJit exit frame is a JitFrameLayout that was turned into an
   // ExitFrameLayout by EnsureUnwoundJitExitFrame. We have to use the original
   // header size here because that's what we have on the stack.
-  if (frame.isScripted() || frame.isUnwoundJitExit()) {
+  //
+  // A BaselineInterpreterEntry frame can be called directly by a Baseline frame
+  // (without an intervening stub frame) for JSOp::Resume.
+  if (frame.isScripted() || frame.isUnwoundJitExit() ||
+      frame.isBaselineInterpreterEntry()) {
     return frameSize - JitFrameLayout::Size();
   }
 
   if (frame.isExitFrame()) {
+    // A CalledFromJit exit frame (lazy-link stub or interpreter stub) wraps a
+    // full JitFrameLayout for the callee it was about to enter.
+    if (frame.isExitFrameLayout<CalledFromJitExitFrameLayout>()) {
+      return frameSize - JitFrameLayout::Size();
+    }
     frameSize -= ExitFrameLayout::Size();
     if (frame.exitFrame()->isWrapperExit()) {
       VMFunctionId id = frame.exitFrame()->footer()->functionId();

@@ -38,6 +38,7 @@
 #include "gc/AllocKind.h"
 #include "gc/Barrier.h"
 #include "gc/GCEnum.h"
+#include "jit/InlinableNatives.h"
 #include "js/CallArgs.h"
 #include "js/CallNonGenericMethod.h"
 #include "js/Class.h"
@@ -1117,25 +1118,26 @@ static DurationObject* CreateTemporalDuration(JSContext* cx,
 
   // Steps 4-13.
   // Add zero to convert -0 to +0.
-  object->initFixedSlot(DurationObject::YEARS_SLOT,
-                        NumberValue(years + (+0.0)));
-  object->initFixedSlot(DurationObject::MONTHS_SLOT,
-                        NumberValue(months + (+0.0)));
-  object->initFixedSlot(DurationObject::WEEKS_SLOT,
-                        NumberValue(weeks + (+0.0)));
-  object->initFixedSlot(DurationObject::DAYS_SLOT, NumberValue(days + (+0.0)));
-  object->initFixedSlot(DurationObject::HOURS_SLOT,
-                        NumberValue(hours + (+0.0)));
-  object->initFixedSlot(DurationObject::MINUTES_SLOT,
-                        NumberValue(minutes + (+0.0)));
-  object->initFixedSlot(DurationObject::SECONDS_SLOT,
-                        NumberValue(seconds + (+0.0)));
-  object->initFixedSlot(DurationObject::MILLISECONDS_SLOT,
-                        NumberValue(milliseconds + (+0.0)));
-  object->initFixedSlot(DurationObject::MICROSECONDS_SLOT,
-                        NumberValue(microseconds + (+0.0)));
-  object->initFixedSlot(DurationObject::NANOSECONDS_SLOT,
-                        NumberValue(nanoseconds + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::YEARS_SLOT,
+                             NumberValue(years + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::MONTHS_SLOT,
+                             NumberValue(months + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::WEEKS_SLOT,
+                             NumberValue(weeks + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::DAYS_SLOT,
+                             NumberValue(days + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::HOURS_SLOT,
+                             NumberValue(hours + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::MINUTES_SLOT,
+                             NumberValue(minutes + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::SECONDS_SLOT,
+                             NumberValue(seconds + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::MILLISECONDS_SLOT,
+                             NumberValue(milliseconds + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::MICROSECONDS_SLOT,
+                             NumberValue(microseconds + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::NANOSECONDS_SLOT,
+                             NumberValue(nanoseconds + (+0.0)));
 
   // Step 14.
   return object;
@@ -1174,25 +1176,26 @@ DurationObject* js::temporal::CreateTemporalDuration(JSContext* cx,
 
   // Steps 4-13.
   // Add zero to convert -0 to +0.
-  object->initFixedSlot(DurationObject::YEARS_SLOT,
-                        NumberValue(years + (+0.0)));
-  object->initFixedSlot(DurationObject::MONTHS_SLOT,
-                        NumberValue(months + (+0.0)));
-  object->initFixedSlot(DurationObject::WEEKS_SLOT,
-                        NumberValue(weeks + (+0.0)));
-  object->initFixedSlot(DurationObject::DAYS_SLOT, NumberValue(days + (+0.0)));
-  object->initFixedSlot(DurationObject::HOURS_SLOT,
-                        NumberValue(hours + (+0.0)));
-  object->initFixedSlot(DurationObject::MINUTES_SLOT,
-                        NumberValue(minutes + (+0.0)));
-  object->initFixedSlot(DurationObject::SECONDS_SLOT,
-                        NumberValue(seconds + (+0.0)));
-  object->initFixedSlot(DurationObject::MILLISECONDS_SLOT,
-                        NumberValue(milliseconds + (+0.0)));
-  object->initFixedSlot(DurationObject::MICROSECONDS_SLOT,
-                        NumberValue(microseconds + (+0.0)));
-  object->initFixedSlot(DurationObject::NANOSECONDS_SLOT,
-                        NumberValue(nanoseconds + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::YEARS_SLOT,
+                             NumberValue(years + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::MONTHS_SLOT,
+                             NumberValue(months + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::WEEKS_SLOT,
+                             NumberValue(weeks + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::DAYS_SLOT,
+                             NumberValue(days + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::HOURS_SLOT,
+                             NumberValue(hours + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::MINUTES_SLOT,
+                             NumberValue(minutes + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::SECONDS_SLOT,
+                             NumberValue(seconds + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::MILLISECONDS_SLOT,
+                             NumberValue(milliseconds + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::MICROSECONDS_SLOT,
+                             NumberValue(microseconds + (+0.0)));
+  object->initFixedSlotTyped(DurationObject::NANOSECONDS_SLOT,
+                             NumberValue(nanoseconds + (+0.0)));
 
   // Step 14.
   return object;
@@ -4199,16 +4202,19 @@ static const JSFunctionSpec Duration_prototype_methods[] = {
 };
 
 static const JSPropertySpec Duration_prototype_properties[] = {
-    JS_PSG("years", Duration_years, 0),
-    JS_PSG("months", Duration_months, 0),
-    JS_PSG("weeks", Duration_weeks, 0),
-    JS_PSG("days", Duration_days, 0),
-    JS_PSG("hours", Duration_hours, 0),
-    JS_PSG("minutes", Duration_minutes, 0),
-    JS_PSG("seconds", Duration_seconds, 0),
-    JS_PSG("milliseconds", Duration_milliseconds, 0),
-    JS_PSG("microseconds", Duration_microseconds, 0),
-    JS_PSG("nanoseconds", Duration_nanoseconds, 0),
+    JS_INLINABLE_PSG("years", Duration_years, 0, DurationYears),
+    JS_INLINABLE_PSG("months", Duration_months, 0, DurationMonths),
+    JS_INLINABLE_PSG("weeks", Duration_weeks, 0, DurationWeeks),
+    JS_INLINABLE_PSG("days", Duration_days, 0, DurationDays),
+    JS_INLINABLE_PSG("hours", Duration_hours, 0, DurationHours),
+    JS_INLINABLE_PSG("minutes", Duration_minutes, 0, DurationMinutes),
+    JS_INLINABLE_PSG("seconds", Duration_seconds, 0, DurationSeconds),
+    JS_INLINABLE_PSG("milliseconds", Duration_milliseconds, 0,
+                     DurationMilliseconds),
+    JS_INLINABLE_PSG("microseconds", Duration_microseconds, 0,
+                     DurationMicroseconds),
+    JS_INLINABLE_PSG("nanoseconds", Duration_nanoseconds, 0,
+                     DurationNanoseconds),
     JS_PSG("sign", Duration_sign, 0),
     JS_PSG("blank", Duration_blank, 0),
     JS_STRING_SYM_PS(toStringTag, "Temporal.Duration", JSPROP_READONLY),

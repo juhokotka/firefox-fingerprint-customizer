@@ -4,33 +4,29 @@
 
 #include "gfxFontEntry.h"
 
-#include "mozilla/FontPropertyTypes.h"
+#include <algorithm>
 
-#include "mozilla/Logging.h"
-
-#include "gfxTextRun.h"
-#include "gfxPlatform.h"
-
-#include "gfxTypes.h"
+#include "COLRFonts.h"
+#include "FontPaletteCache.h"
+#include "ThebesRLBox.h"
 #include "gfxContext.h"
 #include "gfxGraphiteShaper.h"
 #include "gfxHarfBuzzShaper.h"
-#include "gfxUserFontSet.h"
+#include "gfxPlatform.h"
 #include "gfxPlatformFontList.h"
+#include "gfxSVGGlyphs.h"
+#include "gfxTextRun.h"
+#include "gfxTypes.h"
+#include "gfxUserFontSet.h"
+#include "graphite2/Font.h"
+#include "harfbuzz/hb-ot.h"
+#include "harfbuzz/hb.h"
+#include "mozilla/FontPropertyTypes.h"
 #include "mozilla/Likely.h"
+#include "mozilla/Logging.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/StaticPrefs_layout.h"
-#include "gfxSVGGlyphs.h"
-#include "COLRFonts.h"
-
-#include "harfbuzz/hb.h"
-#include "harfbuzz/hb-ot.h"
-#include "graphite2/Font.h"
-
-#include "ThebesRLBox.h"
-
-#include <algorithm>
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -58,7 +54,6 @@ gfxFontEntry::gfxFontEntry(const nsACString& aName, bool aIsStandardFace)
       mIgnoreGSUB(false),
       mSkipDefaultFeatureSpaceCheck(false),
       mSVGInitialized(false),
-      mHasCmapTable(false),
       mGrFaceInitialized(false),
       mCheckedForColorGlyph(false),
       mCheckedForVariationAxes(false),
@@ -80,6 +75,8 @@ gfxFontEntry::~gfxFontEntry() {
   hb_blob_destroy(mCOLR.exchange(nullptr));
   hb_blob_destroy(mCPAL.exchange(nullptr));
 
+  delete mPaletteCache.exchange(nullptr);
+
   if (TrakTableInitialized()) {
     // Only if it was initialized, so that we don't try to call hb_blob_destroy
     // on the kTrakTableUninitialized flag value!
@@ -99,11 +96,21 @@ gfxFontEntry::~gfxFontEntry() {
     }
   }
 
-  delete mSVGGlyphs.exchange(nullptr);
+  // Only the main thread uses SVG glyphs, but the last reference to a font
+  // entry may be dropped on any thread. Nothing else can access the entry
+  // anymore at this point, so this read is safe.
+  MOZ_ASSERT(NS_IsMainThread() || !mSVGGlyphs);
+  mSVGGlyphs = nullptr;
   delete[] mUVSData.exchange(nullptr);
 
   gfxCharacterMap* cmap = mCharacterMap.exchange(nullptr);
   NS_IF_RELEASE(cmap);
+
+#ifdef MOZ_FONTATIONS
+  if (SkrifaFontRef* font = mSkrifaFontFace) {
+    skrifa_font_delete(font);
+  }
+#endif
 
   // By the time the entry is destroyed, all font instances that were
   // using it should already have been deleted, and so any Graphite
@@ -117,7 +124,7 @@ void gfxFontEntry::InitializeFrom(fontlist::Face* aFace,
   mShmemFamily = aFamily;
   mStyleRange = aFace->mStyle;
   mWeightRange = aFace->mWeight;
-  mStretchRange = aFace->mStretch;
+  mWidthRange = aFace->mWidth;
   mFixedPitch = aFace->mFixedPitch;
   mIsBadUnderlineFont = aFamily->IsBadUnderlineFamily();
   auto* list = gfxPlatformFontList::PlatformFontList()->SharedFontList();
@@ -127,8 +134,34 @@ void gfxFontEntry::InitializeFrom(fontlist::Face* aFace,
   MOZ_PUSH_IGNORE_THREAD_SAFETY
   mFamilyName = aFamily->DisplayName().AsString(list);
   MOZ_POP_THREAD_SAFETY
-  mHasCmapTable = TrySetShmemCharacterMap();
+  TrySetShmemCharacterMap();
 }
+
+#ifdef MOZ_FONTATIONS
+bool gfxFontEntry::SetSkrifaFont(SkrifaFontRef* aSkrifaFont,
+                                 MemoryMappedFile&& aSkrifaFontFile) {
+  // If another thread came in and initialized the font face ahead of us,
+  // just delete the face this thread constructed.
+  if (mSkrifaFontFace.compareExchange(nullptr, aSkrifaFont)) {
+    // If we won the race, store our file data to back the font.
+    mSkrifaFontFile = std::move(aSkrifaFontFile);
+    return true;
+  }
+  // We lost the race, delete the font we just constructed and let the
+  // file mapping be destroyed normally.
+  skrifa_font_delete(aSkrifaFont);
+  return false;
+}
+
+bool gfxFontEntry::SetSkrifaFont(SkrifaFontRef* aSkrifaFont) {
+  // If we lose a race to set the Skrifa font, just discard it.
+  if (mSkrifaFontFace.compareExchange(nullptr, aSkrifaFont)) {
+    return true;
+  }
+  skrifa_font_delete(aSkrifaFont);
+  return false;
+}
+#endif
 
 bool gfxFontEntry::TrySetShmemCharacterMap() {
   auto* pfl = gfxPlatformFontList::PlatformFontList();
@@ -146,22 +179,24 @@ bool gfxFontEntry::TrySetShmemCharacterMap() {
 }
 
 bool gfxFontEntry::TestCharacterMap(uint32_t aCh) {
-  if (!mCharacterMap && !mShmemCharacterMap) {
+  if (!HasCharacterMap()) {
     ReadCMAP();
-    MOZ_ASSERT(mCharacterMap || mShmemCharacterMap,
-               "failed to initialize character map");
+    MOZ_ASSERT(HasCharacterMap(), "failed to initialize character map");
   }
-  return mShmemCharacterMap ? GetShmemCharacterMap()->test(aCh)
-                            : GetCharacterMap()->test(aCh);
+  if (const auto* map = GetShmemCharacterMap()) {
+    return map->test(aCh);
+  }
+  AutoReadLock lock(mLock);
+  gfxCharacterMap* map = mCharacterMap;
+  return map ? map->test(aCh) : false;
 }
 
 void gfxFontEntry::EnsureUVSMapInitialized() {
   // mUVSOffset will not be initialized
   // until cmap is initialized.
-  if (!mCharacterMap && !mShmemCharacterMap) {
+  if (!HasCharacterMap()) {
     ReadCMAP();
-    NS_ASSERTION(mCharacterMap || mShmemCharacterMap,
-                 "failed to initialize character map");
+    MOZ_ASSERT(HasCharacterMap(), "failed to initialize character map");
   }
 
   if (!mUVSOffset) {
@@ -215,6 +250,7 @@ bool gfxFontEntry::SupportsScriptInGSUB(const hb_tag_t* aScriptTags,
 
 nsresult gfxFontEntry::ReadCMAP(FontInfoData* aFontInfoData) {
   MOZ_ASSERT(false, "using default no-op implementation of ReadCMAP");
+  AutoWriteLock lock(mLock);
   RefPtr<gfxCharacterMap> cmap = new gfxCharacterMap(0);
   if (mCharacterMap.compareExchange(nullptr, cmap.get())) {
     cmap.forget().leak();  // mCharacterMap now owns the reference
@@ -223,12 +259,25 @@ nsresult gfxFontEntry::ReadCMAP(FontInfoData* aFontInfoData) {
 }
 
 nsCString gfxFontEntry::RealFaceName() {
+#if MOZ_FONTATIONS
+  if (auto* skf = GetSkrifaFont()) {
+    nsCString name;
+    if (skrifa_font_get_preferred_name(skf, gfxFontUtils::NAME_ID_FULL,
+                                       &name)) {
+#  if NIGHTLY_BUILD
+      name.AppendLiteral(" (skrifa)");
+#  endif
+      return name;
+    }
+  }
+#endif
+
   AutoTable nameTable(this, TRUETYPE_TAG('n', 'a', 'm', 'e'));
   if (nameTable) {
-    nsAutoCString name;
+    nsCString name;
     nsresult rv = gfxFontUtils::GetFullNameFromTable(nameTable, name);
     if (NS_SUCCEEDED(rv)) {
-      return std::move(name);
+      return name;
     }
   }
   return Name();
@@ -327,6 +376,7 @@ bool gfxFontEntry::TryGetSVGData(const gfxFont* aFont) {
   if (!NS_IsMainThread()) {
     return false;
   }
+  AssertIsOnMainThread();
 
   if (!mSVGInitialized) {
     // If UnitsPerEm is not known/valid, we can't use SVG glyphs
@@ -345,10 +395,7 @@ bool gfxFontEntry::TryGetSVGData(const gfxFont* aFont) {
 
     // gfxSVGGlyphs will hb_blob_destroy() the table when it is finished
     // with it.
-    auto* svgGlyphs = new gfxSVGGlyphs(svgTable, this);
-    if (!mSVGGlyphs.compareExchange(nullptr, svgGlyphs)) {
-      delete svgGlyphs;
-    }
+    mSVGGlyphs = MakeUnique<gfxSVGGlyphs>(svgTable, this);
     mSVGInitialized = true;
   }
 
@@ -399,6 +446,46 @@ bool gfxFontEntry::TryGetColorGlyphs() {
   return mCOLR && mCPAL;
 }
 
+already_AddRefed<gfx::FontPalette> gfxFontEntry::GetPalette(
+    nsAtom* aPaletteName, gfx::FontPaletteValueSet* aPaletteValueSet) {
+  // Get the palette cache, creating it if necessary. Note that once the
+  // mPaletteCache has been assigned, it is never modified until font entry
+  // destruction, so there is no risk of the local `cache` pointer here
+  // becoming invalid during this function.
+  gfx::PaletteCache* cache = mPaletteCache;
+  if (!cache) {
+    cache = new gfx::PaletteCache();
+    if (!mPaletteCache.compareExchange(nullptr, cache)) {
+      delete cache;  // Lost a race: use the cache created by the winner.
+      cache = mPaletteCache;
+    }
+  }
+
+  // Reading and modifying the cache is guarded by our RWLock.
+  {
+    // First try to return an existing cached palette.
+    AutoReadLock lock(mLock);
+    RefPtr palette = cache->GetCachedPalette(aPaletteValueSet, aPaletteName);
+    if (palette) {
+      return palette.forget();
+    }
+  }
+
+  // Create a new resolved palette.
+  gfxFontEntry::AutoHBFace face = GetHBFace();
+  RefPtr palette = MakeRefPtr<FontPalette>(gfx::COLRFonts::CreateColorPalette(
+      face, aPaletteValueSet, aPaletteName, FamilyName()));
+
+  // Store it in the cache for future use. This may evict an existing cache
+  // entry, but any caller that retrieved the old entry was given its own
+  // strong reference to the palette it contained, which will remain valid
+  // as long as the caller holds its ref.
+  AutoWriteLock lock(mLock);
+  cache->AddPalette(aPaletteValueSet, aPaletteName, palette);
+
+  return palette.forget();
+}
+
 already_AddRefed<gfxCharacterMap> gfxFontEntry::GetCMAPFromFontInfo(
     FontInfoData* aFontInfoData, uint32_t& aUVSOffset) {
   if (!aFontInfoData || !aFontInfoData->mLoadCmaps) {
@@ -424,6 +511,22 @@ size_t gfxFontEntry::FontTableBlob::SizeOfExcludingThis(
 }
 
 hb_blob_t* gfxFontEntry::GetFontTable(uint32_t aTag) {
+#if MOZ_FONTATIONS
+  if (auto* skf = GetSkrifaFont()) {
+    SkrifaFontTable table = skrifa_font_get_table(skf, aTag);
+    if (!table.length) {
+      return nullptr;
+    }
+    return hb_blob_create(reinterpret_cast<const char*>(table.data),
+                          table.length, HB_MEMORY_MODE_READONLY, nullptr,
+                          nullptr);
+  }
+#endif
+  return GetFontTableInternal(aTag);
+}
+
+// virtual method: may be overridden by platform subclasses
+hb_blob_t* gfxFontEntry::GetFontTableInternal(uint32_t aTag) {
   auto* cache = GetFontTableCache(true);
   MOZ_ASSERT(cache, "missing or incomplete GetFontTable override?");
   if (!cache) {
@@ -630,13 +733,15 @@ void gfxFontEntry::ReleaseGrFace(tainted_opaque_gr<gr_face*> aFace) {
 }
 
 void gfxFontEntry::DisconnectSVG() {
+  AssertIsOnMainThread();
   if (mSVGInitialized && mSVGGlyphs) {
     mSVGGlyphs = nullptr;
     mSVGInitialized = false;
   }
 }
 
-bool gfxFontEntry::HasFontTable(uint32_t aTableTag) {
+// Default implementation, may be overridden by platform backends
+bool gfxFontEntry::HasFontTableInternal(uint32_t aTableTag) {
   AutoTable table(this, aTableTag);
   return table && hb_blob_get_length(table) > 0;
 }
@@ -1047,11 +1152,57 @@ gfxFloat gfxFontEntry::TrackingForCSSPx(gfxFloat aSize) const {
          t * int16_t(mTrakValues[sizeIndex]);
 }
 
+bool gfxFontEntry::HasVariations() {
+#if MOZ_FONTATIONS
+  if (const auto* skf = GetSkrifaFont()) {
+    return skrifa_font_axes_count(skf) > 0;
+  }
+#endif
+  return HasVariationsInternal();
+}
+
+void gfxFontEntry::GetVariationAxes(
+    nsTArray<gfxFontVariationAxis>& aVariationAxes) {
+  MOZ_ASSERT(aVariationAxes.IsEmpty());
+#if MOZ_FONTATIONS
+  if (const auto* skf = GetSkrifaFont()) {
+    size_t count = skrifa_font_axes_count(skf);
+    aVariationAxes.SetCapacity(count);
+    if (skrifa_font_copy_axes(skf, &aVariationAxes, false) < count) {
+      // We got fewer axes than |count|, presumably because some were hidden.
+      // Compact the array to reduce wasted space.
+      aVariationAxes.Compact();
+    }
+    return;
+  }
+#endif
+  GetVariationAxesInternal(aVariationAxes);
+}
+
+void gfxFontEntry::GetVariationInstances(
+    nsTArray<gfxFontVariationInstance>& aInstances) {
+  MOZ_ASSERT(aInstances.IsEmpty());
+#if MOZ_FONTATIONS
+  if (const auto* skf = GetSkrifaFont()) {
+    size_t count = skrifa_font_instances_count(skf);
+    aInstances.SetCapacity(count);
+    for (size_t i = 0; i < count; ++i) {
+      gfxFontVariationInstance* inst = aInstances.AppendElement();
+      if (!skrifa_font_copy_instance(skf, i, &inst->mName, &inst->mValues)) {
+        NS_WARNING("failed to get font variation instance from skrifa?");
+        aInstances.RemoveLastElement();
+      }
+    }
+    return;
+  }
+#endif
+  GetVariationInstancesInternal(aInstances);
+}
+
 void gfxFontEntry::SetupVariationRanges() {
   // No locking because this is done during initialization before any other
   // thread has access to the entry.
-  if (!gfxPlatform::HasVariationFontSupport() ||
-      !StaticPrefs::layout_css_font_variations_enabled() || !HasVariations() ||
+  if (!gfxPlatform::HasVariationFontSupport() || !HasVariations() ||
       IsUserFont()) {
     return;
   }
@@ -1086,14 +1237,14 @@ void gfxFontEntry::SetupVariationRanges() {
 
       case HB_TAG('w', 'd', 't', 'h'):
         if (axis.mMinValue >= 0.0f && axis.mMaxValue <= 1000.0f &&
-            Stretch().Min() <= FontStretch::FromFloat(axis.mMaxValue)) {
-          if (FontStretch::FromFloat(axis.mDefaultValue) != Stretch().Min()) {
+            Width().Min() <= FontWidth::FromFloat(axis.mMaxValue)) {
+          if (FontWidth::FromFloat(axis.mDefaultValue) != Width().Min()) {
             mStandardFace = false;
           }
-          mStretchRange = StretchRange(FontStretch::FromFloat(axis.mMinValue),
-                                       FontStretch::FromFloat(axis.mMaxValue));
+          mWidthRange = WidthRange(FontWidth::FromFloat(axis.mMinValue),
+                                   FontWidth::FromFloat(axis.mMaxValue));
         } else {
-          mRangeFlags |= RangeFlags::eNonCSSStretch;
+          mRangeFlags |= RangeFlags::eNonCSSWidth;
         }
         break;
 
@@ -1132,7 +1283,6 @@ void gfxFontEntry::CheckForVariationAxes() {
   if (mCheckedForVariationAxes) {
     return;
   }
-  mCheckedForVariationAxes = true;
   if (HasVariations()) {
     AutoTArray<gfxFontVariationAxis, 4> axes;
     GetVariationAxes(axes);
@@ -1149,6 +1299,7 @@ void gfxFontEntry::CheckForVariationAxes() {
       }
     }
   }
+  mCheckedForVariationAxes = true;
 }
 
 bool gfxFontEntry::HasBoldVariableWeight() {
@@ -1181,25 +1332,20 @@ bool gfxFontEntry::HasOpticalSize() {
 
 void gfxFontEntry::GetVariationsForStyle(nsTArray<gfxFontVariation>& aResult,
                                          const gfxFontStyle& aStyle) {
-  if (!gfxPlatform::HasVariationFontSupport() ||
-      !StaticPrefs::layout_css_font_variations_enabled()) {
-    return;
-  }
-
-  if (!HasVariations()) {
+  if (!gfxPlatform::HasVariationFontSupport() || !HasVariations()) {
     return;
   }
 
   // Resolve high-level CSS properties from the requested style
-  // (font-{style,weight,stretch}) to the appropriate variations.
+  // (font-{style,weight,width}) to the appropriate variations.
   // The value used is clamped to the range available in the font face,
   // unless the face is a user font where no explicit descriptor was
   // given, indicated by the corresponding 'auto' range-flag.
 
-  // We don't do these mappings if the font entry has weight and/or stretch
+  // We don't do these mappings if the font entry has weight and/or width
   // ranges that do not appear to use the CSS property scale. Some older
   // fonts created for QuickDrawGX/AAT may use "normalized" values where the
-  // standard variation is 1.0 rather than 400.0 (weight) or 100.0 (stretch).
+  // standard variation is 1.0 rather than 400.0 (weight) or 100.0 (width).
 
   if (!(mRangeFlags & RangeFlags::eNonCSSWeight)) {
     float weight = (IsUserFont() && (mRangeFlags & RangeFlags::eAutoWeight))
@@ -1208,12 +1354,11 @@ void gfxFontEntry::GetVariationsForStyle(nsTArray<gfxFontVariation>& aResult,
     aResult.AppendElement(gfxFontVariation{HB_TAG('w', 'g', 'h', 't'), weight});
   }
 
-  if (!(mRangeFlags & RangeFlags::eNonCSSStretch)) {
-    float stretch = (IsUserFont() && (mRangeFlags & RangeFlags::eAutoStretch))
-                        ? aStyle.stretch.ToFloat()
-                        : Stretch().Clamp(aStyle.stretch).ToFloat();
-    aResult.AppendElement(
-        gfxFontVariation{HB_TAG('w', 'd', 't', 'h'), stretch});
+  if (!(mRangeFlags & RangeFlags::eNonCSSWidth)) {
+    float width = (IsUserFont() && (mRangeFlags & RangeFlags::eAutoWidth))
+                      ? aStyle.width.ToFloat()
+                      : Width().Clamp(aStyle.width).ToFloat();
+    aResult.AppendElement(gfxFontVariation{HB_TAG('w', 'd', 't', 'h'), width});
   }
 
   if (aStyle.style.IsItalic() && SupportsItalic()) {
@@ -1236,16 +1381,16 @@ void gfxFontEntry::GetVariationsForStyle(nsTArray<gfxFontVariation>& aResult,
 
   struct TagEquals {
     bool Equals(const gfxFontVariation& aIter, uint32_t aTag) const {
-      return aIter.mTag == aTag;
+      return aIter.tag == aTag;
     }
   };
 
   auto replaceOrAppend = [&aResult](const gfxFontVariation& aSetting) {
-    auto index = aResult.IndexOf(aSetting.mTag, 0, TagEquals());
+    auto index = aResult.IndexOf(aSetting.tag, 0, TagEquals());
     if (index == aResult.NoIndex) {
       aResult.AppendElement(aSetting);
     } else {
-      aResult[index].mValue = aSetting.mValue;
+      aResult[index].value = aSetting.value;
     }
   };
 
@@ -1278,9 +1423,10 @@ void gfxFontEntry::AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
   aSizes->mFontListSize += mName.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
 
   // cmaps are shared so only non-shared cmaps are included here
-  if (mCharacterMap && GetCharacterMap()->mBuildOnTheFly) {
-    aSizes->mCharMapsSize +=
-        GetCharacterMap()->SizeOfIncludingThis(aMallocSizeOf);
+  if (RefPtr<gfxCharacterMap> map = GetCharacterMapAddRefed()) {
+    if (map->mBuildOnTheFly) {
+      aSizes->mCharMapsSize += map->SizeOfIncludingThis(aMallocSizeOf);
+    }
   }
 
   {
@@ -1309,9 +1455,9 @@ void gfxFontEntry::AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
     aSizes->mFontTableCacheSize +=
         mUserFontData->SizeOfIncludingThis(aMallocSizeOf);
   }
-  if (mSVGGlyphs) {
+  if (gfxSVGGlyphs* svgGlyphs = GetSVGGlyphs()) {
     aSizes->mFontTableCacheSize +=
-        GetSVGGlyphs()->SizeOfIncludingThis(aMallocSizeOf);
+        svgGlyphs->SizeOfIncludingThis(aMallocSizeOf);
   }
 
   {
@@ -1405,10 +1551,9 @@ gfxFontEntry* gfxFontFamily::FindFontForStyle(const gfxFontStyle& aFontStyle,
   return nullptr;
 }
 
-static inline double WeightStyleStretchDistance(
+static inline double WeightStyleWidthDistance(
     gfxFontEntry* aFontEntry, const gfxFontStyle& aTargetStyle) {
-  double stretchDist =
-      StretchDistance(aFontEntry->Stretch(), aTargetStyle.stretch);
+  double widthDist = WidthDistance(aFontEntry->Width(), aTargetStyle.width);
   double styleDist = StyleDistance(
       aFontEntry->SlantStyle(), aTargetStyle.style,
       aTargetStyle.synthesisStyle != StyleFontSynthesisStyle::ObliqueOnly);
@@ -1416,14 +1561,14 @@ static inline double WeightStyleStretchDistance(
 
   // Sanity-check that the distances are within the expected range
   // (update if implementation of the distance functions is changed).
-  MOZ_ASSERT(stretchDist >= 0.0 && stretchDist <= 2000.0);
+  MOZ_ASSERT(widthDist >= 0.0 && widthDist <= 2000.0);
   MOZ_ASSERT(styleDist >= 0.0 && styleDist <= 900.0);
   MOZ_ASSERT(weightDist >= 0.0 && weightDist <= 1600.0);
 
-  // weight/style/stretch priority: stretch >> style >> weight
-  // so we multiply the stretch and style values to make them dominate
+  // weight/style/width priority: width >> style >> weight
+  // so we multiply the width and style values to make them dominate
   // the result
-  return stretchDist * kStretchFactor + styleDist * kStyleFactor +
+  return widthDist * kWidthFactor + styleDist * kStyleFactor +
          weightDist * kWeightFactor;
 }
 
@@ -1502,14 +1647,14 @@ void gfxFontFamily::FindAllFontsForStyle(
   }
 
   // Pick the font(s) that are closest to the desired weight, style, and
-  // stretch. Iterate over all fonts, measuring the weight/style distance.
+  // width. Iterate over all fonts, measuring the weight/style distance.
   // Because of unicode-range values, there may be more than one font for a
   // given but the 99% use case is only a single font entry per
-  // weight/style/stretch distance value. To optimize this, only add entries
+  // weight/style/width distance value. To optimize this, only add entries
   // to the matched font array when another entry already has the same
-  // weight/style/stretch distance and add the last matched font entry. For
+  // weight/style/width distance and add the last matched font entry. For
   // normal platform fonts with a single font entry for each
-  // weight/style/stretch combination, only the last matched font entry will
+  // weight/style/width combination, only the last matched font entry will
   // be added.
 
   double minDistance = INFINITY;
@@ -1519,8 +1664,8 @@ void gfxFontFamily::FindAllFontsForStyle(
   // note that faces are sorted with "standard" faces later in the list.
   for (uint32_t i = count; i > 0;) {
     fe = mAvailableFonts[--i];
-    // weight/style/stretch priority: stretch >> style >> weight
-    double distance = WeightStyleStretchDistance(fe, aFontStyle);
+    // weight/style/width priority: width >> style >> weight
+    double distance = WeightStyleWidthDistance(fe, aFontStyle);
     if (distance < minDistance) {
       matched = fe;
       if (!aFontEntryList.IsEmpty()) {
@@ -1560,16 +1705,16 @@ void gfxFontFamily::CheckForSimpleFamily() {
     return;
   }
 
-  StretchRange firstStretch = mAvailableFonts[0]->Stretch();
-  if (!firstStretch.IsSingle()) {
+  WidthRange firstWidth = mAvailableFonts[0]->Width();
+  if (!firstWidth.IsSingle()) {
     return;  // family with variation fonts is not considered "simple"
   }
 
   gfxFontEntry* faces[4] = {nullptr};
   for (uint8_t i = 0; i < count; ++i) {
     gfxFontEntry* fe = mAvailableFonts[i];
-    if (fe->Stretch() != firstStretch || fe->IsOblique()) {
-      // simple families don't have varying font-stretch or oblique
+    if (fe->Width() != firstWidth || fe->IsOblique()) {
+      // simple families don't have varying font-width or oblique
       return;
     }
     if (!fe->Weight().IsSingle() || !fe->SlantStyle().IsSingle()) {
@@ -1608,7 +1753,7 @@ bool gfxFontFamily::ContainsFace(gfxFontEntry* aFontEntry) {
     if (mAvailableFonts[i] && mAvailableFonts[i]->mIsUserFontContainer) {
       gfxUserFontEntry* ufe =
           static_cast<gfxUserFontEntry*>(mAvailableFonts[i].get());
-      if (ufe->GetPlatformFontEntry() == aFontEntry) {
+      if (ufe->PlatformFontEntryEquals(aFontEntry)) {
         return true;
       }
     }
@@ -1674,7 +1819,7 @@ void gfxFontFamily::FindFontForChar(GlobalFontMatch* aMatchData) {
       }
 
       fe = e;
-      distance = WeightStyleStretchDistance(fe, aMatchData->mStyle);
+      distance = WeightStyleWidthDistance(fe, aMatchData->mStyle);
       if (aMatchData->mPresentation != FontPresentation::Any) {
         RefPtr<gfxFont> font = fe->FindOrMakeFont(&aMatchData->mStyle);
         if (!font) {
@@ -1691,7 +1836,7 @@ void gfxFontFamily::FindFontForChar(GlobalFontMatch* aMatchData) {
   }
 
   if (!fe && !aMatchData->mStyle.IsNormalStyle()) {
-    // If style/weight/stretch was not Normal, see if we can
+    // If style/weight/width was not Normal, see if we can
     // fall back to a next-best face (e.g. Arial Black -> Bold,
     // or Arial Narrow -> Regular).
     GlobalFontMatch data(aMatchData->mCh, aMatchData->mNextCh,
@@ -1729,7 +1874,7 @@ void gfxFontFamily::SearchAllFontsForChar(GlobalFontMatch* aMatchData) {
   for (uint32_t i = numFonts; i > 0;) {
     gfxFontEntry* fe = mAvailableFonts[--i];
     if (fe && fe->HasCharacter(aMatchData->mCh)) {
-      float distance = WeightStyleStretchDistance(fe, aMatchData->mStyle);
+      float distance = WeightStyleWidthDistance(fe, aMatchData->mStyle);
       if (aMatchData->mPresentation != FontPresentation::Any) {
         RefPtr<gfxFont> font = fe->FindOrMakeFont(&aMatchData->mStyle);
         if (!font) {
@@ -2045,7 +2190,8 @@ void gfxFontFamily::ReadAllCMAPs(FontInfoData* aFontInfoData) {
       continue;
     }
     face->ReadCMAP(aFontInfoData);
-    familyMap.Union(*(face->GetCharacterMap()));
+    RefPtr faceMap = face->GetCharacterMapAddRefed();
+    familyMap.Union(*(faceMap));
   }
 
   AutoWriteLock lock(mLock);

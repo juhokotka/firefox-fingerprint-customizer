@@ -11,7 +11,7 @@ add_task(async function test_filtering_disable_only_source() {
   });
   let provider = registerBasicTestProvider([match]);
   let context = createContext(undefined, { providers: [provider.name] });
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
 
   info("Disable the only available source, should get no matches");
   Services.prefs.setBoolPref("browser.urlbar.suggest.openpage", false);
@@ -42,7 +42,7 @@ add_task(async function test_filtering_disable_one_source() {
   ];
   let provider = registerBasicTestProvider(matches);
   let context = createContext(undefined, { providers: [provider.name] });
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
 
   info("Disable one of the sources, should get a single match");
   Services.prefs.setBoolPref("browser.urlbar.suggest.history", false);
@@ -74,7 +74,7 @@ add_task(async function test_filtering_restriction_token() {
   let context = createContext(`foo ${UrlbarShared.RESTRICT_TOKENS.OPENPAGE}`, {
     providers: [provider.name],
   });
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
 
   info("Use a restriction character, should get a single match");
   let promise = Promise.all([
@@ -100,7 +100,7 @@ add_task(async function test_filter_javascript() {
   });
   let provider = registerBasicTestProvider([match, jsMatch]);
   let context = createContext(undefined, { providers: [provider.name] });
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
 
   info("By default javascript should be filtered out");
   let promise = promiseControllerNotification(controller, "onQueryResults");
@@ -159,7 +159,7 @@ add_task(async function test_filter_isActive() {
       return "BadProvider";
     }
     get type() {
-      return UrlbarUtils.PROVIDER_TYPE.PROFILE;
+      return UrlbarShared.PROVIDER_TYPE.PROFILE;
     }
     async isActive(context) {
       info("Acceptable sources: " + context.sources);
@@ -180,7 +180,7 @@ add_task(async function test_filter_isActive() {
     sources: [UrlbarShared.RESULT_SOURCE.TABS],
     providers: [provider.name, "BadProvider"],
   });
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
 
   info("Only tabs should be returned");
   let promise = promiseControllerNotification(controller, "onQueryResults");
@@ -207,7 +207,7 @@ add_task(async function test_filter_queryContext() {
       return "BadProvider";
     }
     get type() {
-      return UrlbarUtils.PROVIDER_TYPE.PROFILE;
+      return UrlbarShared.PROVIDER_TYPE.PROFILE;
     }
     async isActive(_context) {
       return true;
@@ -223,7 +223,7 @@ add_task(async function test_filter_queryContext() {
   let context = createContext(undefined, {
     providers: [provider.name],
   });
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
 
   await controller.startQuery(context, controller);
   providersManager.unregisterProvider(provider);
@@ -250,14 +250,14 @@ add_task(async function test_nofilter_heuristic() {
   let provider = registerBasicTestProvider(
     matches,
     undefined,
-    UrlbarUtils.PROVIDER_TYPE.HEURISTIC
+    UrlbarShared.PROVIDER_TYPE.HEURISTIC
   );
 
   let context = createContext(undefined, {
     sources: [UrlbarShared.RESULT_SOURCE.SEARCH],
     providers: [provider.name],
   });
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
 
   // Disable search matches through prefs.
   Services.prefs.setBoolPref("browser.urlbar.suggest.openpage", false);
@@ -336,7 +336,7 @@ add_task(async function test_nofilter_restrict() {
     let context = createContext(token + " foo", {
       providers: ["MyProvider"],
     });
-    let controller = UrlbarTestUtils.newMockController();
+    let controller = UrlbarTestUtils.mockChildController();
     // Disable the corresponding pref.
     const pref = "browser.urlbar.suggest." + properties.pref;
     info("Disabling " + pref);
@@ -382,7 +382,7 @@ add_task(async function test_filter_priority() {
     }
     let providerNames = providers.map(p => p.name);
     let context = createContext(undefined, { providers: providerNames });
-    let controller = UrlbarTestUtils.newMockController();
+    let controller = UrlbarTestUtils.mockChildController();
     await controller.startQuery(context, controller);
     for (let name of providerNames) {
       providersManager.unregisterProvider({ name });

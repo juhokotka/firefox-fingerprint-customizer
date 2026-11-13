@@ -2,27 +2,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "RemoteAccessible.h"
+
 #include "ARIAMap.h"
 #include "CachedTableAccessible.h"
-#include "RemoteAccessible.h"
+#include "Pivot.h"
+#include "Relation.h"
+#include "TextLeafRange.h"
+#include "mozilla/Monitor.h"
 #include "mozilla/a11y/CacheConstants.h"
 #include "mozilla/a11y/DocAccessibleParent.h"
 #include "mozilla/a11y/DocManager.h"
 #include "mozilla/a11y/Platform.h"
+#include "mozilla/a11y/RelationType.h"
 #include "mozilla/a11y/TableAccessible.h"
 #include "mozilla/a11y/TableCellAccessible.h"
-#include "mozilla/dom/Element.h"
 #include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/gfx/Matrix.h"
-#include "nsAccessibilityService.h"
 #include "nsAccUtils.h"
+#include "nsAccessibilityService.h"
 #include "nsFocusManager.h"
 #include "nsTextEquivUtils.h"
-#include "Pivot.h"
-#include "Relation.h"
-#include "TextLeafRange.h"
-#include "mozilla/a11y/RelationType.h"
 #include "xpcAccessibleDocument.h"
 
 #ifdef A11Y_LOG
@@ -48,6 +50,48 @@ static constexpr uint64_t kNecessaryBoundsDomains =
 static constexpr uint64_t kNecessaryStateDomains =
     CacheDomain::State | CacheDomain::Viewport;
 
+void RemoteAccessible::AssertActiveThread() const {
+#ifdef ANDROID
+  // The RemoteAccessible tree is touched from both the main thread and the
+  // Android UI thread, but never concurrently. Whichever of those threads is
+  // currently doing so holds nsAccessibilityService::GetAndroidMonitor().
+  //
+  // DocAccessibleParent is exempted from this on the main thread because its
+  // refcount is also touched by generic IPDL actor lifecycle code which can't
+  // be made to acquire this lock; it isn't specific to accessibility. That code
+  // only runs before the doc is reachable from the tree (and thus before it is
+  // reachable from the Android UI thread) or after it has already been removed
+  // from the tree, so it can't race with the Android UI thread.
+  if (!(NS_IsMainThread() && IsDoc())) {
+    nsAccessibilityService::GetAndroidMonitor().AssertCurrentThreadOwns();
+  }
+#else
+  MOZ_ASSERT(NS_IsMainThread());
+#endif
+}
+
+NS_IMETHODIMP_(MozExternalRefCountType) RemoteAccessible::AddRef(void) {
+  MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(RemoteAccessible)
+  MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");
+  AssertActiveThread();
+  ++mRefCnt;
+  NS_LOG_ADDREF(this, mRefCnt, "RemoteAccessible", sizeof(*this));
+  return mRefCnt;
+}
+
+NS_IMETHODIMP_(MozExternalRefCountType) RemoteAccessible::Release(void) {
+  MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");
+  AssertActiveThread();
+  --mRefCnt;
+  NS_LOG_RELEASE(this, mRefCnt, "RemoteAccessible");
+  if (mRefCnt == 0) {
+    mRefCnt = 1; /* stabilize */
+    delete this;
+    return 0;
+  }
+  return mRefCnt;
+}
+
 void RemoteAccessible::Shutdown() {
   MOZ_DIAGNOSTIC_ASSERT(!IsDoc());
   xpcAccessibleDocument* xpcDoc =
@@ -70,7 +114,13 @@ void RemoteAccessible::Shutdown() {
   // accessibles can be destroyed before the doc they own.
   uint32_t childCount = mChildren.Length();
   if (!IsOuterDoc()) {
-    for (uint32_t idx = 0; idx < childCount; idx++) mChildren[idx]->Shutdown();
+    for (uint32_t idx = 0; idx < childCount; idx++) {
+      RemoteAccessible* child = mChildren[idx].get();
+      // Drop our reference before recursing so the refcount assertion below
+      // reflects only mDoc's reference once we get to it.
+      mChildren[idx] = nullptr;
+      child->Shutdown();
+    }
   } else {
     if (childCount > 1) {
       MOZ_CRASH("outer doc has too many documents!");
@@ -80,9 +130,20 @@ void RemoteAccessible::Shutdown() {
   }
 
   mChildren.Clear();
+  // mDoc's mAccessibles entry should be the only reference left at this
+  // point; every other reference (our parent's mChildren, our own children's
+  // mParent) should already have been released above or by our caller. If
+  // this fires, something else is unexpectedly holding a strong reference to
+  // this RemoteAccessible, which will leak it below rather than destroy it.
+  MOZ_DIAGNOSTIC_ASSERT(int32_t(mRefCnt) == 1,
+                        "RemoteAccessible has an unexpected extra reference "
+                        "at shutdown");
   ProxyDestroyed(static_cast<RemoteAccessible*>(this));
-  // mDoc owns this RemoteAccessible, so RemoveAccessible deletes this.
-  mDoc->RemoveAccessible(static_cast<RemoteAccessible*>(this));
+  DocAccessibleParent* doc = mDoc;
+  mDoc = nullptr;
+  // This drops doc's reference to this RemoteAccessible. If nothing else
+  // references it (e.g. another node's mChildren), it is destroyed now.
+  doc->RemoveAccessible(static_cast<RemoteAccessible*>(this));
 }
 
 void RemoteAccessible::SetChildDoc(DocAccessibleParent* aChildDoc) {
@@ -146,7 +207,10 @@ Accessible* RemoteAccessible::EmbeddedChildAt(uint32_t aChildIdx) {
 }
 
 LocalAccessible* RemoteAccessible::OuterDocOfRemoteBrowser() const {
-  auto tab = static_cast<dom::BrowserParent*>(mDoc->Manager());
+  auto* tab = mDoc->GetBrowserParent();
+  if (NS_WARN_IF(!tab)) {
+    return nullptr;
+  }
   dom::Element* frame = tab->GetOwnerElement();
   NS_ASSERTION(frame, "why isn't the tab in a frame!");
   if (!frame) return nullptr;
@@ -197,8 +261,10 @@ bool RemoteAccessible::ApplyCache(CacheUpdateType aUpdateType,
     // Updating the viewport cache means the offscreen state of this
     // document's accessibles has changed. Update the HashSet we use for
     // checking offscreen state here.
-    MOZ_ASSERT(IsDoc(),
-               "Fetched the viewport cache from a non-doc accessible?");
+    if (!IsDoc()) {
+      MOZ_ASSERT_UNREACHABLE("Received viewport cache for non-doc accessible");
+      return false;
+    }
     AsDoc()->mOnScreenAccessibles.Clear();
     for (auto id : *maybeViewportCache) {
       AsDoc()->mOnScreenAccessibles.Insert(id);
@@ -244,7 +310,7 @@ bool RemoteAccessible::ApplyCache(CacheUpdateType aUpdateType,
     mCachedFields->Update(aFields);
   }
 
-  if (IsTextLeaf()) {
+  if (IsText()) {
     RemoteAccessible* parent = RemoteParent();
     if (parent && parent->IsHyperText()) {
       parent->InvalidateCachedHyperTextOffsets();
@@ -993,7 +1059,7 @@ LayoutDeviceIntRect RemoteAccessible::BoundsWithOffset(
 
     if (aOffset.isSome()) {
       // The rect we've passed in is in app units, so no conversion needed.
-      nsRect internalRect = *aOffset;
+      const nsRect& internalRect = *aOffset;
       bounds.SetRectX(bounds.x + internalRect.x, internalRect.width);
       bounds.SetRectY(bounds.y + internalRect.y, internalRect.height);
     }
@@ -1155,7 +1221,8 @@ Relation RemoteAccessible::RelationByType(RelationType aType) const {
           CacheDomain::Relations |          // relations info, DOMName attribute
           CacheDomain::Value |              // Value
           CacheDomain::DOMNodeIDAndClass |  // DOMNodeID
-          CacheDomain::GroupInfo            // GetOrCreateGroupInfo
+          CacheDomain::GroupInfo |          // GetOrCreateGroupInfo
+          CacheDomain::State                // ERRORMSG relation
           )) {
     return Relation();
   }
@@ -1302,6 +1369,13 @@ Relation RemoteAccessible::RelationByType(RelationType aType) const {
   Relation rel;
   if (!mCachedFields) {
     return rel;
+  }
+
+  if (aType == RelationType::ERRORMSG) {
+    if (auto rawState = mCachedFields->GetAttribute<uint64_t>(CacheKey::State);
+        !rawState || !(*rawState & states::INVALID)) {
+      return rel;
+    }
   }
 
   auto GetDirectRelationFromCache =
@@ -1761,13 +1835,13 @@ void RemoteAccessible::ScrollSubstringToPoint(int32_t aStartOffset,
                                          aCoordinateType, aX, aY);
 }
 
-RefPtr<const AccAttributes> RemoteAccessible::GetCachedTextAttributes() {
+const AccAttributes* RemoteAccessible::GetCachedTextAttributes() {
   if (mDoc->RequestDomainsIfInactive(CacheDomain::Text)) {
     return nullptr;
   }
   MOZ_ASSERT(IsText() || IsHyperText());
   if (mCachedFields) {
-    auto attrs = mCachedFields->GetAttributeRefPtr<AccAttributes>(
+    auto attrs = mCachedFields->GetAttributeWeakPtr<AccAttributes>(
         CacheKey::TextAttributes);
     VERIFY_CACHE(CacheDomain::Text);
     return attrs;
@@ -1799,8 +1873,7 @@ already_AddRefed<AccAttributes> RemoteAccessible::DefaultTextAttributes() {
       continue;
     }
 
-    if (RefPtr<const AccAttributes> parentAttrs =
-            parent->GetCachedTextAttributes()) {
+    if (const AccAttributes* parentAttrs = parent->GetCachedTextAttributes()) {
       // Update our text attributes with any parent entries we don't have.
       parentAttrs->CopyTo(result, true);
     }
@@ -2397,7 +2470,7 @@ bool RemoteAccessible::HasPrimaryAction() const {
 
 void RemoteAccessible::TakeFocus() const {
   (void)mDoc->SendTakeFocus(mID);
-  auto* bp = static_cast<dom::BrowserParent*>(mDoc->Manager());
+  auto* bp = mDoc->GetBrowserParent();
   MOZ_ASSERT(bp);
   if (nsFocusManager::GetFocusedElementStatic() == bp->GetOwnerElement()) {
     // This remote document tree is already focused. We don't need to do
@@ -2718,20 +2791,28 @@ void RemoteAccessible::Language(nsAString& aLocale) {
   if (mDoc->RequestDomainsIfInactive(CacheDomain::Text)) {
     return;
   }
-
-  if (IsHyperText() || IsText()) {
-    for (RemoteAccessible* parent = this; parent;
-         parent = parent->RemoteParent()) {
-      // Climb up the tree to find where the nearest language attribute is.
-      if (RefPtr<const AccAttributes> attrs =
-              parent->GetCachedTextAttributes()) {
+  auto GetLanguage = [&aLocale](RemoteAccessible* aAcc) {
+    if (aAcc->IsHyperText() || aAcc->IsText()) {
+      if (const AccAttributes* attrs = aAcc->GetCachedTextAttributes()) {
         if (attrs->GetAttribute(nsGkAtoms::language, aLocale)) {
-          return;
+          return true;
         }
       }
+    } else if (aAcc->mCachedFields) {
+      if (aAcc->mCachedFields->GetAttribute(CacheKey::Language, aLocale)) {
+        return true;
+      }
     }
-  } else if (mCachedFields) {
-    mCachedFields->GetAttribute(CacheKey::Language, aLocale);
+
+    return false;
+  };
+
+  for (RemoteAccessible* parent = this; parent;
+       parent = parent->RemoteParent()) {
+    // Climb up the tree to find where the nearest language attribute is.
+    if (GetLanguage(parent)) {
+      return;
+    }
   }
 }
 

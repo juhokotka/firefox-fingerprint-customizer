@@ -6,8 +6,15 @@ import { html, nothing } from "chrome://global/content/vendor/lit.all.mjs";
 import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
 import {
   parseMarkdown,
+  parseMarkdownBlocks,
   CHAT_WRAPPER_ELEMENTS,
 } from "chrome://browser/content/aiwindow/modules/ChatMarkdownParser.mjs";
+import { dispatchClientError } from "chrome://browser/content/aiwindow/modules/ClientErrorTelemetry.mjs";
+import {
+  isSettingsURL,
+  isSmartPageURL,
+} from "chrome://browser/content/aiwindow/modules/TrustedInternalURLs.mjs";
+import { parseTabGroupMentionId } from "chrome://browser/content/urlbar/SmartbarMentionUtils.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://browser/content/aiwindow/components/ai-chat-card.mjs";
 // eslint-disable-next-line import/no-unassigned-import
@@ -31,7 +38,16 @@ const HISTORY_GRID_PAGE_SIZE = 12;
  */
 export class AIChatMessage extends MozLitElement {
   #lastMessage = null;
-  #lastMessageElement = "";
+  #lastMessageElement = null;
+  #blockHtml = [];
+
+  /**
+   * The assistant message whose first-character telemetry event was most recently sent.
+   * This guards against double-sending an event for streaming responses to the same message.
+   *
+   * @type {string|null}
+   */
+  #firstCharacterReportedMessageId = null;
 
   /**
    * Track if link unfurling needs to re-run, as it needs to manually manipulate
@@ -82,6 +98,7 @@ export class AIChatMessage extends MozLitElement {
   static properties = {
     role: { type: String, reflect: true, attribute: "data-message-role" }, // "user" | "assistant"
     message: { type: String },
+    messageL10n: { type: Object, attribute: false },
     messageId: { type: String, reflect: true, attribute: "data-message-id" },
     complete: { type: Boolean, reflect: true },
     seenUrls: { type: Object, attribute: false },
@@ -175,7 +192,42 @@ export class AIChatMessage extends MozLitElement {
     }
   }
 
+  /**
+   * Reports when an assistant message first displays readable text.
+   *
+   * @param {Map} changed - Properties changed by this update.
+   */
+  #maybeReportTimeToFirstCharacter(changed) {
+    // The message list can reuse this element for a different message,
+    // so we need to first ensure that the context is relevant to report
+    // the time to first character.
+    if (
+      (!changed.has("message") && !changed.has("messageId")) ||
+      this.role !== "assistant" ||
+      !this.messageId ||
+      this.#firstCharacterReportedMessageId === this.messageId ||
+      !this.message?.trim() ||
+      !this.#lastMessageElement?.innerText.trim()
+    ) {
+      return;
+    }
+
+    this.#firstCharacterReportedMessageId = this.messageId;
+    this.dispatchEvent(
+      new CustomEvent("AIChatContent:FirstCharacterDisplayed", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          conversationId: this.conversationId,
+          messageId: this.messageId,
+        },
+      })
+    );
+  }
+
   updated(changed) {
+    this.#maybeReportTimeToFirstCharacter(changed);
+
     if (changed.has("complete") && this.complete && this.role === "assistant") {
       const messageEl = this.shadowRoot?.querySelector(`.message-${this.role}`);
       const text = messageEl
@@ -251,38 +303,28 @@ export class AIChatMessage extends MozLitElement {
       }
 
       const label = a.textContent || linkHref;
-      const iconSrc = this.#getIconSrc(linkHref);
 
       // Create Website Chip
       const chip = root.ownerDocument.createElement("ai-website-chip");
       chip.type = "in-line";
       chip.label = label;
-      chip.iconSrc = iconSrc;
-      chip.href = linkHref;
+
+      // Messages submitted before the type was serialized carry only a color.
+      const color = params.get("color");
+      const isTabGroup = params.get("type")
+        ? params.get("type") == "tabGroup"
+        : !!color;
+      if (isTabGroup) {
+        chip.isTabGroup = true;
+        chip.tabGroupColor = color ?? "";
+        chip.tabGroupId = parseTabGroupMentionId(linkHref) ?? "";
+      } else {
+        chip.iconSrc = this.#getIconSrc(linkHref);
+        chip.href = linkHref;
+      }
 
       a.replaceWith(chip);
     }
-  }
-
-  static #SETTINGS_URL = new URL("about:preferences");
-  static #SETTINGS_ALIAS_URL = new URL("about:settings");
-
-  /**
-   * Returns true if the parsed URL points to the browser settings page.
-   * Matches both about:preferences and its about:settings alias,
-   *
-   * @param {URL} parsed - A parsed URL object
-   * @returns {boolean}
-   */
-  #isSettingsURL(parsed) {
-    if (!parsed) {
-      return false;
-    }
-    return (
-      parsed.protocol === AIChatMessage.#SETTINGS_URL.protocol &&
-      (parsed.pathname === AIChatMessage.#SETTINGS_URL.pathname ||
-        parsed.pathname === AIChatMessage.#SETTINGS_ALIAS_URL.pathname)
-    );
   }
 
   /**
@@ -306,8 +348,12 @@ export class AIChatMessage extends MozLitElement {
     for (const anchor of root.querySelectorAll("a[href]")) {
       const parsed = URL.parse(anchor.href);
 
-      // Settings pages are always trusted
-      if (this.#isSettingsURL(parsed)) {
+      // Settings pages are always trusted; a generated page only when this
+      // conversation produced it.
+      if (
+        isSettingsURL(parsed) ||
+        (isSmartPageURL(parsed) && this.seenUrls.has(anchor.href))
+      ) {
         continue;
       }
 
@@ -636,14 +682,13 @@ export class AIChatMessage extends MozLitElement {
    * @param {Element} element the element in which to insert the parsed markdown.
    */
   #parseMarkdown(markdown, element) {
-    element.setHTML(parseMarkdown(markdown), {
-      sanitizer: AIChatMessage.#chatMessageSanitizer,
-    });
-    // Pass messageId to table elements for copy functionality.
-    if (this.messageId) {
-      for (const table of element.querySelectorAll("ai-chat-table")) {
-        table.setAttribute("message-id", this.messageId);
-      }
+    try {
+      element.setHTML(parseMarkdown(markdown), {
+        sanitizer: AIChatMessage.#chatMessageSanitizer,
+      });
+    } catch (error) {
+      dispatchClientError(this, error, "markdown");
+      throw error;
     }
   }
 
@@ -659,44 +704,129 @@ export class AIChatMessage extends MozLitElement {
   }
 
   /**
-   * Render the assistant message by parsing parsing the markdown and then manually
-   * unfurl any unseen links. This function is memoized based on the message contents
-   * and seen links Set to guard against unneccessary re-renders.
+   * Render one top-level block's HTML into a single sanitized element.
+   * markdown-it renders each block to exactly one element, which we return.
    *
-   * @returns {HTMLElement}
+   * @param {string} blockHtml
+   * @returns {Element|null}
+   */
+  #renderBlockElement(blockHtml) {
+    const scratch = this.ownerDocument.createElement("div");
+    try {
+      scratch.setHTML(blockHtml, {
+        sanitizer: AIChatMessage.#chatMessageSanitizer,
+      });
+    } catch (error) {
+      dispatchClientError(this, error, "markdown");
+      throw error;
+    }
+    return scratch.firstElementChild;
+  }
+
+  /**
+   * Reconcile the container's children against freshly parsed block HTML. Blocks
+   * whose HTML is unchanged keep their existing DOM untouched (so finished
+   * tables and their observers are never rebuilt); only changed or new blocks
+   * are re-rendered, and trailing removed blocks are dropped.
+   *
+   * @param {Element} container
+   * @param {Array<string>} newHtml - One HTML string per top-level block.
+   * @returns {number} How many blocks were (re)rendered this pass.
+   */
+  #reconcileBlocks(container, newHtml) {
+    const oldHtml = this.#blockHtml;
+    let rebuilt = 0;
+    for (let i = 0; i < newHtml.length; i++) {
+      if (container.children[i] && oldHtml[i] === newHtml[i]) {
+        continue;
+      }
+      const node = this.#renderBlockElement(newHtml[i]);
+      if (!node) {
+        continue;
+      }
+      rebuilt++;
+      if (container.children[i]) {
+        container.replaceChild(node, container.children[i]);
+      } else {
+        container.append(node);
+      }
+    }
+    while (container.children.length > newHtml.length) {
+      container.lastElementChild.remove();
+    }
+    this.#blockHtml = newHtml;
+    return rebuilt;
+  }
+
+  /**
+   * Render the assistant message. Localized messages render from their l10n id
+   * via Fluent dom overlay otherwise the markdown is parsed and unseen links
+   * are unfurled. The markdown path is memoized on the message contents and
+   * seen links Set to guard against unnecessary re-renders.
+   *
+   * @returns {HTMLElement|import("chrome://global/content/vendor/lit.all.mjs").TemplateResult}
    */
   getAssistantMessage() {
+    if (this.messageL10n?.id) {
+      return this.#renderL10nMessage();
+    }
+
+    // Reuse one persistent container across chunks so finished DOM
+    // (and its custom elements) is never torn down; we refill it in place.
+    if (!this.#lastMessageElement) {
+      this.#lastMessageElement = this.ownerDocument.createElement("div");
+      this.#lastMessageElement.className = "message-" + this.role;
+    }
+    const messageElement = this.#lastMessageElement;
+
     if (this.message == this.#lastMessage && !this.#unfurledUrlsNeedUpdating) {
       // The message is the same and the seen URLs haven't changed.
       return this.#lastMessageElement;
     }
 
-    let messageElement = this.ownerDocument.createElement("div");
-    messageElement.className = "message-" + this.role;
-
     if (!this.message) {
       // There is no message to show. Use an empty message element.
+      messageElement.replaceChildren();
+      messageElement.classList.remove("with-history");
+      this.#blockHtml = [];
       this.#lastMessage = this.message;
-      this.#lastMessageElement = messageElement;
       return messageElement;
     }
 
-    // Parse the message into markdown, and unfurl any unseen links.
-    this.#parseMarkdown(this.message, messageElement);
+    // seenUrls/history/completion changes can alter an already-rendered block
+    // (e.g. a now-seen link must stop being unfurled), so force a full reconcile.
+    if (this.#unfurledUrlsNeedUpdating) {
+      this.#blockHtml = [];
+    }
+
+    // Time the render so its per-chunk cost shows up in the Firefox Profiler.
+    // This runs in the content process, so use the User Timing API rather than
+    // ChromeUtils markers (which are parent-process only).
+    const renderStart = performance.now();
+    const blockHtml = parseMarkdownBlocks(this.message).map(
+      block => block.html
+    );
+    const rebuiltCount = this.#reconcileBlocks(messageElement, blockHtml);
 
     // When the conversation has history results, hide lists by default so a
     // list that will become a grid never flashes as raw bullets;
     // #replaceHistoryResults reveals non-history lists (and converts matches).
     if (this.historyResults?.size) {
       messageElement.classList.add("with-history");
+    } else {
+      messageElement.classList.remove("with-history");
     }
 
     this.#replaceHistoryResults(messageElement);
     this.#unfurlUnseenLinks(messageElement);
 
+    performance.measure("SmartWindow chat render", {
+      start: renderStart,
+      detail: { rebuilt: rebuiltCount, total: blockHtml.length },
+    });
+
     // Track the properties for memoization.
     this.#lastMessage = this.message;
-    this.#lastMessageElement = messageElement;
     this.#unfurledUrlsNeedUpdating = false;
 
     return messageElement;
@@ -720,6 +850,27 @@ export class AIChatMessage extends MozLitElement {
     this.parseUserMarkdown(this.message, messageElement);
 
     return messageElement;
+  }
+
+  /**
+   * Render a localized assistant message via Fluent dom overlay. The message
+   * text and any embedded '<a data-l10n-name>' link text come from the l10n id.
+   * The link's href is set here.
+   *
+   * @returns {import("chrome://global/content/vendor/lit.all.mjs").TemplateResult}
+   */
+  #renderL10nMessage() {
+    const { id, args, link } = this.messageL10n;
+    return html`<div class="message-assistant">
+      <span
+        data-l10n-id=${id}
+        data-l10n-args=${args ? JSON.stringify(args) : nothing}
+      >
+        ${link
+          ? html`<a data-l10n-name=${link.l10nName} href=${link.href}></a>`
+          : nothing}
+      </span>
+    </div>`;
   }
 
   render() {

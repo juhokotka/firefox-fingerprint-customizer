@@ -5,10 +5,10 @@
 #ifndef CacheFileInputStream_h_
 #define CacheFileInputStream_h_
 
+#include "CacheFileChunk.h"
+#include "nsCOMPtr.h"
 #include "nsIAsyncInputStream.h"
 #include "nsISeekableStream.h"
-#include "nsCOMPtr.h"
-#include "CacheFileChunk.h"
 
 namespace mozilla {
 namespace net {
@@ -44,6 +44,8 @@ class CacheFileInputStream : public nsIAsyncInputStream,
   };
 
  private:
+  friend class CacheFile;
+
   virtual ~CacheFileInputStream();
 
   void CloseWithStatusLocked(nsresult aStatus);

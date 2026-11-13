@@ -5,8 +5,8 @@
 #ifndef mozilla_net_AutoClose_h
 #define mozilla_net_AutoClose_h
 
-#include "nsCOMPtr.h"
 #include "mozilla/Mutex.h"
+#include "nsCOMPtr.h"
 
 namespace mozilla {
 namespace net {
@@ -19,6 +19,9 @@ class AutoClose {
  public:
   AutoClose() : mMutex("net::AutoClose.mMutex") {}
   ~AutoClose() { CloseAndRelease(); }
+
+  void operator=(const AutoClose<T>&) = delete;
+  AutoClose(const AutoClose<T>&) = delete;
 
   explicit operator bool() {
     MutexAutoLock lock(mMutex);
@@ -46,9 +49,6 @@ class AutoClose {
       ptr->Close();
     }
   }
-
-  void operator=(const AutoClose<T>&) = delete;
-  AutoClose(const AutoClose<T>&) = delete;
 
   nsCOMPtr<T> mPtr MOZ_GUARDED_BY(mMutex);
   Mutex mMutex;

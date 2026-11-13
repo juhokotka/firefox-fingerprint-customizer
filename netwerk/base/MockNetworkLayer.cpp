@@ -3,10 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MockNetworkLayer.h"
+
 #include "MockNetworkLayerController.h"
 #include "nsSocketTransportService2.h"
-#include "prmem.h"
 #include "prio.h"
+#include "prmem.h"
 
 namespace mozilla::net {
 
@@ -123,6 +124,14 @@ static PRInt32 MockNetworkSendTo(PRFileDesc* fd, const void* buf,
     SOCKET_LOG(
         ("MockNetworkSendTo %p addr [%s] failed", secret, addrPort.get()));
     PR_SetError(PR_CONNECT_REFUSED_ERROR, 0);
+    return -1;
+  }
+  if (FindWouldBlockUDPAddr(netAddr)) {
+    nsAutoCString addrPort;
+    netAddr.ToAddrPortString(addrPort);
+    SOCKET_LOG(
+        ("MockNetworkSendTo %p addr [%s] would block", secret, addrPort.get()));
+    PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
     return -1;
   }
   if (FindBlockedUDPAddr(netAddr)) {

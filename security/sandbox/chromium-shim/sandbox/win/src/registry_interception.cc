@@ -15,9 +15,7 @@
 #include "sandbox/win/src/sandbox_nt_util.h"
 #include "sandbox/win/src/sharedmem_ipc_client.h"
 #include "sandbox/win/src/target_services.h"
-#include "mozilla/sandboxing/sandboxLogging.h"
-
-#define STATUS_OBJECT_NAME_NOT_FOUND ((NTSTATUS)0xC0000034L)
+#include "sandbox/win/TargetGeckoClient.h"
 
 namespace sandbox {
 namespace {
@@ -77,15 +75,11 @@ NTSTATUS WINAPI TargetNtCreateKey(NtCreateKeyFunction orig_CreateKey,
   NTSTATUS status =
       orig_CreateKey(key, desired_access, object_attributes, title_index,
                      class_name, create_options, disposition);
-  if (NT_SUCCESS(status)) {
+  if (NT_SUCCESS(status) || status == STATUS_OBJECT_NAME_NOT_FOUND) {
     return status;
   }
 
-  if (STATUS_OBJECT_NAME_NOT_FOUND != status) {
-    mozilla::sandboxing::LogBlocked("NtCreateKey",
-                                    object_attributes->ObjectName->Buffer,
-                                    object_attributes->ObjectName->Length);
-  }
+  SYSCALL_BROKERING_WITH_CONTEXT(object_attributes->ObjectName);
 
   // We don't trust that the IPC can work this early.
   if (!SandboxFactory::GetTargetServices()->GetState()->InitCalled()) {
@@ -161,9 +155,7 @@ NTSTATUS WINAPI TargetNtCreateKey(NtCreateKeyFunction orig_CreateKey,
     } __except (EXCEPTION_EXECUTE_HANDLER) {
       break;
     }
-    mozilla::sandboxing::LogAllowed("NtCreateKey",
-                                    object_attributes->ObjectName->Buffer,
-                                    object_attributes->ObjectName->Length);
+    SYSCALL_BROKERED();
   } while (false);
 
   return status;
@@ -225,9 +217,6 @@ NTSTATUS WINAPI CommonNtOpenKey(NTSTATUS status, PHANDLE key,
     } __except (EXCEPTION_EXECUTE_HANDLER) {
       break;
     }
-    mozilla::sandboxing::LogAllowed("NtOpenKey[Ex]",
-                                    object_attributes->ObjectName->Buffer,
-                                    object_attributes->ObjectName->Length);
   } while (false);
 
   return status;
@@ -238,17 +227,17 @@ NTSTATUS WINAPI TargetNtOpenKey(NtOpenKeyFunction orig_OpenKey, PHANDLE key,
                                 POBJECT_ATTRIBUTES object_attributes) {
   // Check if the process can open it first.
   NTSTATUS status = orig_OpenKey(key, desired_access, object_attributes);
-  if (NT_SUCCESS(status)) {
+  if (NT_SUCCESS(status) || status == STATUS_OBJECT_NAME_NOT_FOUND) {
     return status;
   }
 
-  if (STATUS_OBJECT_NAME_NOT_FOUND != status) {
-    mozilla::sandboxing::LogBlocked("NtOpenKey",
-                                    object_attributes->ObjectName->Buffer,
-                                    object_attributes->ObjectName->Length);
-  }
+  SYSCALL_BROKERING_WITH_CONTEXT(object_attributes->ObjectName);
 
-  return CommonNtOpenKey(status, key, desired_access, object_attributes);
+  status = CommonNtOpenKey(status, key, desired_access, object_attributes);
+  if (NT_SUCCESS(status)) {
+    SYSCALL_BROKERED();
+  }
+  return status;
 }
 
 NTSTATUS WINAPI TargetNtOpenKeyEx(NtOpenKeyExFunction orig_OpenKeyEx,
@@ -262,17 +251,18 @@ NTSTATUS WINAPI TargetNtOpenKeyEx(NtOpenKeyExFunction orig_OpenKeyEx,
   // We do not support open_options at this time. The 2 current known values
   // are REG_OPTION_CREATE_LINK, to open a symbolic link, and
   // REG_OPTION_BACKUP_RESTORE to open the key with special privileges.
-  if (NT_SUCCESS(status) || open_options != 0) {
+  if (NT_SUCCESS(status) || open_options != 0 ||
+      status == STATUS_OBJECT_NAME_NOT_FOUND) {
     return status;
   }
 
-  if (STATUS_OBJECT_NAME_NOT_FOUND != status) {
-    mozilla::sandboxing::LogBlocked("NtOpenKeyEx",
-                                    object_attributes->ObjectName->Buffer,
-                                    object_attributes->ObjectName->Length);
-  }
+  SYSCALL_BROKERING_WITH_CONTEXT(object_attributes->ObjectName);
 
-  return CommonNtOpenKey(status, key, desired_access, object_attributes);
+  status = CommonNtOpenKey(status, key, desired_access, object_attributes);
+  if (NT_SUCCESS(status)) {
+    SYSCALL_BROKERED();
+  }
+  return status;
 }
 
 }  // namespace sandbox

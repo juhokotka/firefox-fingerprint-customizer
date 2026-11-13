@@ -378,11 +378,11 @@ e.g. steps 6 and 8 involve IPC, not just "stack unwinding").
 1. 1. If the input events landed outside a dispatch-to-content region,
    any available events in the input block are processed. These may
    trigger behaviours like scrolling or tap gestures.
-    1. If the input events landed inside a dispatch-to-content region,
-       the events are left in the queue and a timeout is initiated. If
-       the timeout expires before step 9 is completed, the APZ assumes
-       the input block was not cancelled and the tentative target is
-       correct, and processes them as part of step 10.
+   1. If the input events landed inside a dispatch-to-content region,
+      the events are left in the queue and a timeout is initiated. If
+      the timeout expires before step 9 is completed, the APZ assumes
+      the input block was not cancelled and the tentative target is
+      correct, and processes them as part of step 10.
 4. The call stack unwinds back to APZCTreeManager::ReceiveInputEvent,
    which does an in-place modification of the input event so that any
    async transforms are removed.
@@ -407,12 +407,12 @@ e.g. steps 6 and 8 involve IPC, not just "stack unwinding").
    depending on the input type.
 1. 1. If the events were processed as part of step 4(i), the
    notifications from step 8 are ignored and step 10 is skipped.
-    1. If events were queued as part of step 4(ii), and steps 5-8
-       complete before the timeout, the arrival of both notifications
-       from step 8 will mark the input block ready for processing.
-    2. If events were queued as part of step 4(ii), but steps 5-8 take
-       longer than the timeout, the notifications from step 8 will be
-       ignored and step 10 will already have happened.
+   1. If events were queued as part of step 4(ii), and steps 5-8
+      complete before the timeout, the arrival of both notifications
+      from step 8 will mark the input block ready for processing.
+   2. If events were queued as part of step 4(ii), but steps 5-8 take
+      longer than the timeout, the notifications from step 8 will be
+      ignored and step 10 will already have happened.
 8. If events were queued as part of step 4(ii) they are now either
    processed (if the input block was not cancelled and Gecko detected a
    scrollframe under the input event, or if the timeout expired) or
@@ -871,6 +871,70 @@ the global thread/lock ordering. Feel free to add others:
     This will allow us to continue running the deferred tasks on the sampler
     thread rather than having to bounce them to another thread.
 
-[gtest documentation]: /gtest/index.html
-[mochitest documentation]: /testing/mochitest-plain/index.html
-[reftest documentation]: /layout/Reftest.html
+## Important "anchor points" in APZ-related code
+
+The following is a list of places in APZ-related code which are
+frequent starting points for understanding the codebase or
+debugging issues:
+
+- [`APZCTreeManager::ReceiveInputEvent`](https://searchfox.org/firefox-main/rev/202150dcdade5798ca858b843b51b20112b4d061/gfx/layers/apz/src/APZCTreeManager.cpp#1595)
+  This is where input events coming from the operating system (or
+  synthesized by tests) arrive at APZ (in the GPU process, or the parent
+  process if there is no GPU process).
+- [`APZCTreeManager::UpdateHitTestingTree`](https://searchfox.org/firefox-main/rev/c52eaa9c6798bd845cc796b3fd793b9c69480d96/gfx/layers/apz/src/APZCTreeManager.cpp#454)
+  This is where a main-thread transaction from a content process (or,
+  for the browser chrome, the parent process) arrives at APZ, carrying
+  information about scrollable elements in the latest display list for
+  the page. This can result in the creation of new `AsyncPanZoomController`
+  objects, removal of old ones, and calling `NotifyMainThreadTransaction` on
+  existing ones.
+- [`AsyncPanZoomController::NotifyMainThreadTransaction`](https://searchfox.org/firefox-main/rev/202150dcdade5798ca858b843b51b20112b4d061/gfx/layers/apz/src/AsyncPanZoomController.cpp#5580)
+  Called by `UpdateHitTestingTree`, this is where an `AsyncPanZoomController`
+  objects receives information pertaining to it from the most recent
+  main thread transaction. This includes metrics about the scrollable
+  element such as its scroll port (composition bounds) and scrollable
+  rect size, and a list of scroll position updates that have happened
+  in the content process since the last transaction.
+- [`APZCTreeManager::SampleForWebRender`](https://searchfox.org/firefox-main/rev/202150dcdade5798ca858b843b51b20112b4d061/gfx/layers/apz/src/APZCTreeManager.cpp#810)
+  Called on every composite, this is where APZ provides WebRender with
+  information about async transforms (i.e. transforms representing
+  async scrolling or zooming) that WebRender should apply for this composite.
+- [`ScrollContainerFrame::ScrollToImpl`](https://searchfox.org/firefox-main/rev/202150dcdade5798ca858b843b51b20112b4d061/layout/generic/ScrollContainerFrame.cpp#3032)
+  This is the common codepath shared by operations that update the
+  main thread's copy of the scroll position of a scrollable element.
+  The update can originate from either APZ via a "repaint request",
+  or from operations that arise on the main thread (such as
+  `window.scrollTo()`.)
+- [`BrowserChild::UpdateFrame`](https://searchfox.org/firefox-main/rev/202150dcdade5798ca858b843b51b20112b4d061/dom/ipc/BrowserChild.cpp#233)
+  This is the entry point for a content process receiving and processing
+  a "repaint request" from APZ, which allows main-thread state to be
+  updated to reflect changes to the scroll position that occurred in
+  APZ (such as in response to user input events).
+- [`nsLayoutUtils::ComputeScrollMetadata`](https://searchfox.org/firefox-main/rev/202150dcdade5798ca858b843b51b20112b4d061/layout/base/nsLayoutUtils.cpp#8797)
+  Called during WebRender display list building, this is the place where
+  the main thread gathers the metrics about a scrollable elmeent
+  (including the list of scroll position updates) that will be sent to
+  APZ (via `UpdateHitTestingTree` and `NotifyMainThreadTransaction`).
+- [`WebRenderCommandBuider::BuildWebRenderCommands`](https://searchfox.org/firefox-main/rev/202150dcdade5798ca858b843b51b20112b4d061/gfx/layers/wr/WebRenderCommandBuilder.cpp#1765)
+  This is the entry point to WebRender display list building, which
+  takes a Gecko display list ands processes it to build data structures
+  that will be sent to WebRender and to APZ as part of a main thread
+  transaction.
+- [`nsLayoutUtils::PaintFrame`](https://searchfox.org/firefox-main/rev/202150dcdade5798ca858b843b51b20112b4d061/layout/base/nsLayoutUtils.cpp#2931)
+  This is the entry point to the entire rendering pipeline that will
+  result in a main-thread transaction, including building the Gecko
+  display list, building the WebRender display list from it, and sending
+  the resulting data structures to the GPU process.
+
+[gtest documentation]: /gtest/index.md
+[mochitest documentation]: /testing/mochitest-plain/index.md
+[reftest documentation]: /layout/Reftest.md
+
+## Architecture Diagrams
+
+### APZCTreeManager and its IPC actors
+
+The diagram below shows which parts of the `APZTreeManager` data flow are handled by each process.
+
+```{image} APZCTreeManagerArchitecture.svg
+```

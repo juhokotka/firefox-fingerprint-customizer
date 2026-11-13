@@ -4,19 +4,16 @@
 
 #include "mozilla/AnimationEventDispatcher.h"
 
+#include "mozilla/AnimationUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
-#include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/dom/Animation.h"
 #include "mozilla/dom/AnimationEffect.h"
 #include "mozilla/dom/AnimationPlaybackEvent.h"
 #include "mozilla/dom/CSSAnimation.h"
-#include "mozilla/dom/CSSNumericValueBinding.h"
 #include "mozilla/dom/CSSTransition.h"
-#include "mozilla/dom/CSSUnitValue.h"
-#include "mozilla/dom/ScrollTimeline.h"  // For PROGRESS_TIMELINE_DURATION_MILLISEC
 #include "nsCSSProps.h"
 #include "nsGlobalWindowInner.h"
 #include "nsPresContext.h"
@@ -26,62 +23,49 @@ using namespace mozilla;
 
 namespace geckoprofiler::markers {
 
-struct CSSAnimationMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("CSSAnimation");
-  }
-  static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
-                                   const nsCString& aName,
-                                   const nsCString& aTarget,
-                                   const nsCString& aProperties,
-                                   const nsCString& aOnCompositor) {
-    aWriter.StringProperty("Name", aName);
-    aWriter.StringProperty("Target", aTarget);
-    aWriter.StringProperty("properties", aProperties);
-    aWriter.StringProperty("oncompositor", aOnCompositor);
-  }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.AddKeyFormat("Name", MS::Format::String);
-    schema.AddKeyLabelFormat("properties", "Animated Properties",
-                             MS::Format::String);
-    schema.AddKeyLabelFormat("oncompositor", "Can Run on Compositor",
-                             MS::Format::String);
-    schema.AddKeyFormat("Target", MS::Format::String);
-    schema.SetChartLabel("{marker.data.Name}");
-    schema.SetTableLabel("{marker.data.Name}: {marker.data.properties}");
-    return schema;
-  }
+struct CSSAnimationMarker : public BaseMarkerType<CSSAnimationMarker> {
+  static constexpr const char* Name = "CSSAnimation";
+  using MS = MarkerSchema;
+  static constexpr MS::Location Locations[] = {
+      MS::Location::MarkerChart,
+      MS::Location::MarkerTable,
+  };
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"Name", MS::InputType::CString},
+      {"Target", MS::InputType::CString},
+      {"properties", MS::InputType::CString, "Animated Properties"},
+      {"oncompositor", MS::InputType::CString, "Can Run on Compositor"},
+  };
+  static constexpr const char* ChartLabel = "{marker.data.Name}";
+  static constexpr const char* TableLabel =
+      "{marker.data.Name}: {marker.data.properties}";
+  // The name tells an animation apart from one of its iterations.
+  static constexpr bool ETWStoreName = true;
 };
 
-struct CSSTransitionMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("CSSTransition");
-  }
+struct CSSTransitionMarker : public BaseMarkerType<CSSTransitionMarker> {
+  static constexpr const char* Name = "CSSTransition";
+  using MS = MarkerSchema;
+  static constexpr MS::Location Locations[] = {
+      MS::Location::MarkerChart,
+      MS::Location::MarkerTable,
+  };
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"Target", MS::InputType::CString},
+      {"property", MS::InputType::CString, "Animated Property"},
+      {"oncompositor", MS::InputType::Boolean, "Can Run on Compositor"},
+      {"Canceled", MS::InputType::Boolean},
+  };
+  static constexpr const char* ChartLabel = "{marker.data.property}";
+  static constexpr const char* TableLabel = "{marker.data.property}";
   static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
-                                   const nsCString& aTarget,
-                                   const nsCString& aProperty,
+                                   const ProfilerString8View& aTarget,
+                                   const ProfilerString8View& aProperty,
                                    bool aOnCompositor, bool aCanceled) {
-    aWriter.StringProperty("Target", aTarget);
-    aWriter.StringProperty("property", aProperty);
-    aWriter.BoolProperty("oncompositor", aOnCompositor);
+    StreamJSONMarkerDataImpl(aWriter, aTarget, aProperty, aOnCompositor);
     if (aCanceled) {
       aWriter.BoolProperty("Canceled", aCanceled);
     }
-  }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.AddKeyLabelFormat("property", "Animated Property",
-                             MS::Format::String);
-    schema.AddKeyLabelFormat("oncompositor", "Can Run on Compositor",
-                             MS::Format::String);
-    schema.AddKeyFormat("Canceled", MS::Format::String);
-    schema.AddKeyFormat("Target", MS::Format::String);
-    schema.SetChartLabel("{marker.data.property}");
-    schema.SetTableLabel("{marker.data.property}");
-    return schema;
   }
 };
 
@@ -114,7 +98,7 @@ void AnimationEventDispatcher::Disconnect() {
 void AnimationEventDispatcher::QueueEvent(AnimationEventInfo&& aEvent) {
   const bool wasEmpty = mPendingEvents.IsEmpty();
   mPendingEvents.AppendElement(std::move(aEvent));
-  mIsSorted = !wasEmpty;
+  mIsSorted = wasEmpty;
   if (wasEmpty) {
     ScheduleDispatch();
   }
@@ -260,20 +244,18 @@ void AnimationEventInfo::Dispatch(nsPresContext* aPresContext) {
     }
 
     dom::AnimationPlaybackEventInit init;
+    const bool progressBased = mAnimation->AcceptsPercentageBasedTime();
+    nsIGlobalObject* global = mAnimation->GetParentObject();
     if (!data.mCurrentTime.IsNull()) {
-      if (mAnimation->AcceptsPercentageBasedTime()) {
-        const double progress =
-            data.mCurrentTime.Value() /
-            static_cast<double>(PROGRESS_TIMELINE_DURATION_MILLISEC) * 100.0;
-        init.mCurrentTime.SetValue().SetAsCSSNumericValue() =
-            dom::MakeCSSUnitValue(mAnimation->GetParentObject(),
-                                  StyleNumericType::Percent(), progress,
-                                  "percent"_ns);
-      } else {
-        init.mCurrentTime.SetValue().SetAsDouble() = data.mCurrentTime.Value();
-      }
+      AnimationUtils::DoubleToCSSNumberish(data.mCurrentTime.Value(),
+                                           progressBased, global,
+                                           init.mCurrentTime.SetValue());
     }
-    init.mTimelineTime = data.mTimelineTime;
+    if (!data.mTimelineTime.IsNull()) {
+      AnimationUtils::DoubleToCSSNumberish(data.mTimelineTime.Value(),
+                                           progressBased, global,
+                                           init.mTimelineTime.SetValue());
+    }
     MOZ_ASSERT(nsDependentAtomString(data.mOnEvent).Find(u"on"_ns) == 0,
                "mOnEvent atom should start with 'on'!");
     RefPtr<dom::AnimationPlaybackEvent> event =

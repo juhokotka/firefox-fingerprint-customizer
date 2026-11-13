@@ -21,17 +21,9 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   HistoryController: "resource:///modules/HistoryController.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
-  ProfileAge: "resource://gre/modules/ProfileAge.sys.mjs",
 });
 
-let XPCOMUtils = ChromeUtils.importESModule(
-  "resource://gre/modules/XPCOMUtils.sys.mjs"
-).XPCOMUtils;
-
 const NEVER_REMEMBER_HISTORY_PREF = "browser.privatebrowsing.autostart";
-const HAS_IMPORTED_HISTORY_PREF = "browser.migrate.interactions.history";
-const IMPORT_HISTORY_DISMISSED_PREF =
-  "browser.tabs.firefox-view.importHistory.dismissed";
 
 const SEARCH_RESULTS_LIMIT = 300;
 
@@ -41,7 +33,6 @@ class HistoryInView extends ViewPage {
     this._started = false;
     // Setting maxTabsLength to -1 for no max
     this.maxTabsLength = -1;
-    this.profileAge = 8;
     this.fullyUpdated = false;
     this.cumulativeSearches = 0;
   }
@@ -59,37 +50,6 @@ class HistoryInView extends ViewPage {
     this.controller.updateCache();
 
     this.toggleVisibilityInCardContainer();
-  }
-
-  async connectedCallback() {
-    super.connectedCallback();
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "importHistoryDismissedPref",
-      IMPORT_HISTORY_DISMISSED_PREF,
-      false,
-      () => {
-        this.requestUpdate();
-      }
-    );
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "hasImportedHistoryPref",
-      HAS_IMPORTED_HISTORY_PREF,
-      false,
-      () => {
-        this.requestUpdate();
-      }
-    );
-
-    if (!this.importHistoryDismissedPref && !this.hasImportedHistoryPrefs) {
-      let profileAccessor = await lazy.ProfileAge();
-      let profileCreateTime = await profileAccessor.created;
-      let timeNow = new Date().getTime();
-      let profileAge = timeNow - profileCreateTime;
-      // Convert milliseconds to days
-      this.profileAge = profileAge / 1000 / 60 / 60 / 24;
-    }
   }
 
   stop() {
@@ -127,11 +87,6 @@ class HistoryInView extends ViewPage {
     searchTextbox: "moz-input-search",
     sortInputs: { all: "input[name=history-sort-option]" },
     panelList: "panel-list",
-  };
-
-  static properties = {
-    // Making profileAge a reactive property for testing
-    profileAge: { type: Number },
   };
 
   async getUpdateComplete() {
@@ -231,19 +186,6 @@ class HistoryInView extends ViewPage {
     );
 
     migrationWizardDialog.showModal();
-  }
-
-  shouldShowImportBanner() {
-    return (
-      this.profileAge < 8 &&
-      !this.hasImportedHistoryPref &&
-      !this.importHistoryDismissedPref &&
-      Services.policies.isAllowed("profileImport")
-    );
-  }
-
-  dismissImportHistory() {
-    Services.prefs.setBoolPref(IMPORT_HISTORY_DISMISSED_PREF, true);
   }
 
   updated() {
@@ -353,30 +295,42 @@ class HistoryInView extends ViewPage {
   }
 
   #emptyMessageTemplate() {
+    const nova = Services.prefs.getBoolPref("browser.nova.enabled", false);
     let descriptionHeader;
     let descriptionLabels;
     let descriptionLink;
     if (Services.prefs.getBoolPref(NEVER_REMEMBER_HISTORY_PREF, false)) {
       // History pref set to never remember history
-      descriptionHeader = "firefoxview-dont-remember-history-empty-header-2";
+      descriptionHeader = nova
+        ? "firefoxview-dont-remember-history-empty-header-3"
+        : "firefoxview-dont-remember-history-empty-header-2";
       descriptionLabels = [
-        "firefoxview-dont-remember-history-empty-description-one",
+        nova
+          ? "firefoxview-dont-remember-history-empty-description-2"
+          : "firefoxview-dont-remember-history-empty-description-one",
       ];
       descriptionLink = {
         url: "about:preferences#privacy",
         name: "history-settings-url-two",
       };
     } else {
-      descriptionHeader = "firefoxview-history-empty-header";
-      descriptionLabels = [
-        "firefoxview-history-empty-description",
-        "firefoxview-history-empty-description-two",
-      ];
+      descriptionHeader = nova
+        ? "firefoxview-history-empty-header-2"
+        : "firefoxview-history-empty-header";
+      descriptionLabels = nova
+        ? ["firefoxview-history-empty-description-2"]
+        : [
+            "firefoxview-history-empty-description",
+            "firefoxview-history-empty-description-two",
+          ];
       descriptionLink = {
         url: "about:preferences#privacy",
         name: "history-settings-url",
       };
     }
+    let asset = nova
+      ? "chrome://browser/skin/sidebar/kit-page-history.svg"
+      : "chrome://browser/content/firefoxview/history-empty.svg";
     return html`
       <fxview-empty-state
         headerLabel=${descriptionHeader}
@@ -384,7 +338,7 @@ class HistoryInView extends ViewPage {
         .descriptionLink=${descriptionLink}
         class="empty-state history"
         ?isSelectedTab=${this.selectedTab}
-        mainImageUrl="chrome://browser/content/firefoxview/history-empty.svg"
+        mainImageUrl=${asset}
       >
       </fxview-empty-state>
     `;
@@ -486,7 +440,7 @@ class HistoryInView extends ViewPage {
         <card-container
           class="import-history-banner"
           hideHeader="true"
-          ?hidden=${!this.shouldShowImportBanner()}
+          ?hidden=${!this.controller.shouldShowImportBanner}
           role="group"
           aria-labelledby="header"
           aria-describedby="description"
@@ -513,7 +467,7 @@ class HistoryInView extends ViewPage {
                 class="close"
                 type="icon ghost"
                 data-l10n-id="firefoxview-import-history-close-button"
-                @click=${this.dismissImportHistory}
+                @click=${() => this.controller.dismissImportHistory()}
               ></moz-button>
             </div>
           </div>

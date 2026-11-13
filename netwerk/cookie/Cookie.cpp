@@ -3,17 +3,19 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Cookie.h"
+
+#include <cstdlib>
+
 #include "CookieCommons.h"
-#include "mozilla/HashFunctions.h"
 #include "CookieStorage.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Encoding.h"
+#include "mozilla/HashFunctions.h"
+#include "mozilla/StaticPrefs_network.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/glean/NetwerkMetrics.h"
-#include "mozilla/StaticPrefs_network.h"
 #include "nsIURLParser.h"
 #include "nsURLHelper.h"
-#include <cstdlib>
 
 namespace mozilla {
 namespace net {
@@ -175,6 +177,10 @@ size_t Cookie::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
          mData.value().SizeOfExcludingThisIfUnshared(MallocSizeOf) +
          mData.host().SizeOfExcludingThisIfUnshared(MallocSizeOf) +
          mData.path().SizeOfExcludingThisIfUnshared(MallocSizeOf);
+}
+
+bool Cookie::IsExpired() const {
+  return IsExpired(PR_Now() / PR_USEC_PER_MSEC);
 }
 
 bool Cookie::IsStale() const {

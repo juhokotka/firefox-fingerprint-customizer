@@ -28,6 +28,12 @@ pub struct EnrolledExperiment {
     pub is_rollout: bool,
 }
 
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
+pub struct EnrollmentSlugs {
+    pub slug: String,
+    pub branch_slug: String,
+}
+
 // ⚠️ Attention : Changes to this type should be accompanied by a new test  ⚠️
 // ⚠️ in `test_lib_bw_compat.rs`, and may require a DB migration. ⚠️
 #[derive(Deserialize, Serialize, Debug, Default, Clone, PartialEq, Eq)]
@@ -347,7 +353,7 @@ pub enum RandomizationUnit {
     UserId,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AvailableRandomizationUnits {
     pub user_id: Option<String>,
     pub nimbus_id: Option<String>,
@@ -377,7 +383,7 @@ impl AvailableRandomizationUnits {
         }
     }
 
-    pub fn get_value<'a>(&'a self, wanted: &'a RandomizationUnit) -> Option<&'a str> {
+    pub fn get_value(&self, wanted: &RandomizationUnit) -> Option<&str> {
         match wanted {
             RandomizationUnit::NimbusId => self.nimbus_id.as_deref(),
             RandomizationUnit::UserId => self.user_id.as_deref(),

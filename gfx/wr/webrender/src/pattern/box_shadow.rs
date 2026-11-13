@@ -5,7 +5,7 @@
 use api::{BorderRadius, BoxShadowClipMode};
 use api::units::*;
 use api::ColorF;
-use crate::pattern::{Pattern, PatternBuilder, PatternBuilderContext, PatternBuilderState, PatternKind, PatternShaderInput, PatternTextureInput};
+use crate::pattern::{Pattern, PatternBuilder, PatternBuilderState, PatternKind, PatternShaderInput, PatternTextureInput};
 use crate::render_task_graph::RenderTaskId;
 use crate::renderer::BlendMode;
 
@@ -15,6 +15,11 @@ pub struct BoxShadowPatternData {
     /// Full blur alloc size in local pixels (= 2*blur_region + src_rect_size per axis).
     /// Used as the UV denominator so shadow_pos/alloc_size maps 1:1 to texture position.
     pub shadow_rect_alloc_size: LayoutSize,
+    /// Device-space extent the blurred mask content occupies within its atlas entry
+    /// (= shadow_rect_alloc_size * content_scale). The shader maps nine-patch UV=1.0
+    /// to this true content edge rather than to the (integer, rounded) atlas entry
+    /// edge, so sub-texel rounding does not shift the shadow as the blur animates.
+    pub content_device_size: DeviceSize,
     /// Size of dest_rect in local pixels. For outset this equals shadow_rect_alloc_size
     /// (prim_rect == dest_rect). For inset the prim is the element rect while dest_rect
     /// is smaller (the shadow area), so these differ.
@@ -33,12 +38,13 @@ pub struct BoxShadowPatternData {
 impl PatternBuilder for BoxShadowPatternData {
     fn build(
         &self,
-        _sub_rect: Option<DeviceRect>,
-        _offset: LayoutVector2D,
-        _ctx: &PatternBuilderContext,
+        _pattern_rect: &LayoutRect,
         state: &mut PatternBuilderState,
     ) -> Pattern {
-        let mut writer = state.frame_gpu_data.f32.write_blocks(6);
+        let superellipse = !self.element_radius.shapes_all_round();
+
+        let block_count = if superellipse { 7 } else { 6 };
+        let mut writer = state.frame_gpu_data.f32.write_blocks(block_count);
         writer.push_one([
             self.shadow_rect_alloc_size.width,
             self.shadow_rect_alloc_size.height,
@@ -70,15 +76,23 @@ impl PatternBuilder for BoxShadowPatternData {
             self.element_radius.bottom_left.height,
         ]);
         writer.push_one([
-            self.element_radius.shape_top_left,
-            self.element_radius.shape_top_right,
-            self.element_radius.shape_bottom_right,
-            self.element_radius.shape_bottom_left,
+            self.content_device_size.width,
+            self.content_device_size.height,
+            0.0,
+            0.0,
         ]);
+        if superellipse {
+            writer.push_one([
+                self.element_radius.shape_top_left,
+                self.element_radius.shape_top_right,
+                self.element_radius.shape_bottom_right,
+                self.element_radius.shape_bottom_left,
+            ]);
+        }
         let addr = writer.finish();
 
         Pattern {
-            kind: PatternKind::BoxShadow,
+            kind: if superellipse { PatternKind::BoxShadowSuperellipse } else { PatternKind::BoxShadow },
             shader_input: PatternShaderInput(addr.as_int(), 0),
             texture_input: PatternTextureInput::new(self.render_task),
             base_color: self.color,

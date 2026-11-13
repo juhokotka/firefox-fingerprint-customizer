@@ -113,7 +113,7 @@ with Files("DynamicsCompressorNode.webidl"):
 with Files("EditContext.webidl"):
     BUG_COMPONENT = ("Core", "DOM: Editor")
 
-with Files("FeaturePolicy.webidl"):
+with Files("PermissionsPolicy.webidl"):
     BUG_COMPONENT = ("Core", "DOM: Security")
 
 with Files("File*"):
@@ -621,7 +621,6 @@ WEBIDL_FILES = [
     "ExtendableMessageEvent.webidl",
     "External.webidl",
     "FailedCertSecurityInfo.webidl",
-    "FeaturePolicy.webidl",
     "Fetch.webidl",
     "FetchEvent.webidl",
     "FetchObserver.webidl",
@@ -784,6 +783,7 @@ WEBIDL_FILES = [
     "Lock.webidl",
     "LockManager.webidl",
     "LoginStatus.webidl",
+    "MathMLAnchorElement.webidl",
     "MathMLElement.webidl",
     "MediaCapabilities.webidl",
     "MediaDebugInfo.webidl",
@@ -870,6 +870,7 @@ WEBIDL_FILES = [
     "PaymentRequestUpdateEvent.webidl",
     "PaymentResponse.webidl",
     "Performance.webidl",
+    "PerformanceContainerTiming.webidl",
     "PerformanceEntry.webidl",
     "PerformanceEventTiming.webidl",
     "PerformanceLargestContentfulPaint.webidl",
@@ -885,13 +886,13 @@ WEBIDL_FILES = [
     "PerformanceTiming.webidl",
     "PeriodicWave.webidl",
     "Permissions.webidl",
+    "PermissionsPolicy.webidl",
     "PermissionStatus.webidl",
     "PictureInPictureWindow.webidl",
     "Plugin.webidl",
     "PluginArray.webidl",
     "PointerEvent.webidl",
     "PopoverInvokerElement.webidl",
-    "PrivateAttribution.webidl",
     "ProcessingInstruction.webidl",
     "Promise.webidl",
     "PushEvent.webidl",
@@ -901,6 +902,7 @@ WEBIDL_FILES = [
     "PushSubscription.webidl",
     "PushSubscriptionOptions.webidl",
     "QueuingStrategy.webidl",
+    "QuotaExceededError.webidl",
     "RadioNodeList.webidl",
     "Range.webidl",
     "ReadableByteStreamController.webidl",
@@ -1118,7 +1120,9 @@ WEBIDL_FILES = [
     "WebTaskScheduling.webidl",
     "WebTransport.webidl",
     "WebTransportDatagramDuplexStream.webidl",
+    "WebTransportDatagramsWritable.webidl",
     "WebTransportError.webidl",
+    "WebTransportSendGroup.webidl",
     "WebTransportSendReceiveStream.webidl",
     "WebXR.webidl",
     "WheelEvent.webidl",
@@ -1167,6 +1171,7 @@ if CONFIG["MOZ_WEBRTC"]:
         "RTCEncodedVideoFrame.webidl",
         "RTCError.webidl",
         "RTCIceCandidate.webidl",
+        "RTCIceCandidatePair.webidl",
         "RTCIceTransport.webidl",
         "RTCIdentityAssertion.webidl",
         "RTCIdentityProvider.webidl",
@@ -1187,20 +1192,27 @@ if CONFIG["MOZ_WEBRTC"]:
 
 if CONFIG["MOZ_WEBSPEECH"]:
     WEBIDL_FILES += [
-        "SpeechGrammar.webidl",
-        "SpeechGrammarList.webidl",
-        "SpeechRecognition.webidl",
-        "SpeechRecognitionAlternative.webidl",
-        "SpeechRecognitionError.webidl",
-        "SpeechRecognitionEvent.webidl",
-        "SpeechRecognitionResult.webidl",
-        "SpeechRecognitionResultList.webidl",
         "SpeechSynthesis.webidl",
         "SpeechSynthesisErrorEvent.webidl",
         "SpeechSynthesisEvent.webidl",
         "SpeechSynthesisUtterance.webidl",
         "SpeechSynthesisVoice.webidl",
     ]
+
+    # The speech recognition backend (mudler/parakeet.cpp, backends/llama)
+    # isn't built on Android; see dom/media/webspeech/moz.build.
+    if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
+        WEBIDL_FILES += [
+            "SpeechGrammar.webidl",
+            "SpeechGrammarList.webidl",
+            "SpeechRecognition.webidl",
+            "SpeechRecognitionAlternative.webidl",
+            "SpeechRecognitionErrorEvent.webidl",
+            "SpeechRecognitionEvent.webidl",
+            "SpeechRecognitionPhrase.webidl",
+            "SpeechRecognitionResult.webidl",
+            "SpeechRecognitionResultList.webidl",
+        ]
 
 WEBIDL_FILES += [
     "CustomEvent.webidl",
@@ -1319,10 +1331,14 @@ if CONFIG["MOZ_WEBRTC"]:
 
 if CONFIG["MOZ_WEBSPEECH"]:
     GENERATED_EVENTS_WEBIDL_FILES += [
-        "SpeechRecognitionEvent.webidl",
         "SpeechSynthesisErrorEvent.webidl",
         "SpeechSynthesisEvent.webidl",
     ]
+
+    if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
+        GENERATED_EVENTS_WEBIDL_FILES += [
+            "SpeechRecognitionEvent.webidl",
+        ]
 
 if CONFIG["ACCESSIBILITY"]:
     WEBIDL_FILES += [

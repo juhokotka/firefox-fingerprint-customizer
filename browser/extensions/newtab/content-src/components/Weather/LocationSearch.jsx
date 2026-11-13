@@ -15,6 +15,8 @@ function LocationSearch({ outerClassName, onLocationSelected }) {
   const locationSearchString = useSelector(
     state => state.Weather.locationSearchString
   );
+  // @nova-cleanup(remove-pref): Delete this read and the novaEnabled guard on
+  // the use-current-location button below; keep showCurrentLocation.
   const novaEnabled = useSelector(state => state.Prefs.values["nova.enabled"]);
   const weatherOptIn = useSelector(
     state => state.Prefs.values["system.showWeatherOptIn"]
@@ -129,6 +131,7 @@ function LocationSearch({ outerClassName, onLocationSelected }) {
         />
         <moz-button
           className="close-icon"
+          data-l10n-id="newtab-weather-cancel-input"
           type="icon ghost"
           size="small"
           iconSrc="chrome://global/skin/icons/close.svg"

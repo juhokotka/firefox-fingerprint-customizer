@@ -80,11 +80,23 @@ if CONFIG["MOZ_ICU4X"]:
 if CONFIG["USE_LIBZ_RS"]:
     gkrust_features += ["libz-rs-sys"]
 
+if CONFIG["MOZ_FONTATIONS"]:
+    gkrust_features += ["fontations"]
+
 if CONFIG["MOZ_JXL"]:
     gkrust_features += ["jxl_decoder"]
 
 if CONFIG["MOZ_BUILD_APP"] == "browser" and CONFIG["OS_ARCH"] == "WINNT":
     gkrust_features += ["shell_windows"]
+
+if CONFIG["MOZ_BACKGROUNDTASKS"] and CONFIG["OS_ARCH"] == "WINNT":
+    gkrust_features += ["backgroundtaskregistrar"]
+
+if CONFIG["ENABLE_TESTS"]:
+    gkrust_features += ["enable_tests"]
+
+# Tell noise it is being built in Gecko.
+gkrust_features += ["noise_xpcom"]
 
 # This must remain last.
 gkrust_features = ["gkrust-shared/%s" % f for f in gkrust_features]

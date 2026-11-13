@@ -15,10 +15,12 @@
 #include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/Report.h"
+#include "mozilla/dom/ReportDeliver.h"
 #include "mozilla/dom/ReportingObserver.h"
 #include "mozilla/dom/ServiceWorker.h"
 #include "mozilla/dom/ServiceWorkerContainer.h"
 #include "mozilla/dom/ServiceWorkerRegistration.h"
+#include "mozilla/dom/WebTaskScheduler.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "nsContentUtils.h"
 #include "nsGlobalWindowInner.h"
@@ -66,6 +68,20 @@ bool nsIGlobalObject::IsScriptForbidden(JSObject* aCallback,
   }
 
   return false;
+}
+
+bool nsIGlobalObject::CanRunJSMicroTask(JSObject* aCallbackGlobal) const {
+  auto* principal = PrincipalOrNull();
+  if (principal && principal->IsSystemPrincipal()) {
+    return !IsScriptForbidden(aCallbackGlobal, false);
+  }
+
+  if (NS_IsMainThread()) {
+    return xpc::Scriptability::AllowedIfExists(aCallbackGlobal);
+  }
+
+  // For Workers continue skipping tasks when the worker is dying.
+  return !mIsDying;
 }
 
 nsIGlobalObject::~nsIGlobalObject() {
@@ -132,10 +148,15 @@ void nsIGlobalObject::UnlinkObjectsInGlobal() {
     }
   }
 
+  // Will queue a task if not on main thread, as should be the case for workers.
+  mozilla::dom::ReportDeliver::RemoveGlobalEndpoints(
+      reinterpret_cast<uintptr_t>(this));
+
   ClearReports();
   mReportingObservers.Clear();
   mCountQueuingStrategySizeFunction = nullptr;
   mByteLengthQueuingStrategySizeFunction = nullptr;
+  SetWebTaskSchedulingState(nullptr);
 }
 
 void nsIGlobalObject::TraverseObjectsInGlobal(
@@ -145,6 +166,21 @@ void nsIGlobalObject::TraverseObjectsInGlobal(
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mReportingObservers)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCountQueuingStrategySizeFunction)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mByteLengthQueuingStrategySizeFunction)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebTaskSchedulingState)
+}
+
+void nsIGlobalObject::SetWebTaskSchedulingState(
+    mozilla::dom::WebTaskSchedulingState* aState) {
+  // Keep CycleCollectedJSContext count of the globals that have a
+  // WebTaskSchedulingState in sync. The context is null at thread shutdown, in
+  // which case the count is going away with it anyway.
+  if (!!mWebTaskSchedulingState != !!aState) {
+    if (CycleCollectedJSContext* ccjs = CycleCollectedJSContext::Get()) {
+      aState ? ccjs->NoteWebTaskSchedulingStateAdded()
+             : ccjs->NoteWebTaskSchedulingStateRemoved();
+    }
+  }
+  mWebTaskSchedulingState = aState;
 }
 
 void nsIGlobalObject::AddGlobalTeardownObserver(
@@ -403,7 +439,7 @@ void nsIGlobalObject::BroadcastReport(Report* aReport) {
 
   const uint32_t maxReportCount =
       mozilla::StaticPrefs::dom_reporting_delivering_maxReports();
-  const nsString& reportType = aReport->Type();
+  nsAtom* reportType = aReport->Type();
 
   for (size_t i = 0u; count > maxReportCount && i < mReportBuffer.Length();) {
     if (mReportBuffer[i]->Type() == reportType) {

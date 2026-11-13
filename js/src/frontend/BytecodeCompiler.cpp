@@ -549,7 +549,9 @@ static bool CreateExtraBindingInfoVector(
     bool isShadowed = false;
 
     id = unwrappedBindingKeys[i];
-    cx->markId(id);
+    if (!cx->wrapOrRecordRefToId(&id)) {
+      return false;
+    }
 
     bool found;
     if (!HasProperty(cx, cx->global(), id, &found)) {
@@ -594,7 +596,9 @@ static WithEnvironmentObject* CreateExtraBindingsEnvironment(
     }
 
     id = unwrappedBindingKeys[i];
-    cx->markId(id);
+    if (!cx->wrapOrRecordRefToId(&id)) {
+      return nullptr;
+    }
     JS::Rooted<JS::Value> val(cx, unwrappedBindingValues[i]);
     if (!cx->compartment()->wrap(cx, &val) ||
         !NativeDefineDataProperty(cx, extraBindingsObj, id, val, 0)) {
@@ -793,8 +797,13 @@ bool SourceAwareCompiler<Unit>::createSourceAndParser(FrontendContext* fc) {
 
   fc_ = fc;
 
-  if (!compilationState_.source->assignSource(fc, options, sourceBuffer_)) {
-    return false;
+  {
+    ScriptSource::DataWriter writer(compilationState_.source);
+    MOZ_ASSERT(writer.hasWriteAccess());
+    if (!writer->assignSource(fc, options, compilationState_.source,
+                              sourceBuffer_)) {
+      return false;
+    }
   }
 
   MOZ_ASSERT(compilationState_.canLazilyParse ==
@@ -1479,12 +1488,10 @@ static bool CompileLazyFunctionToStencilMaybeInstantiate(
 }
 
 template <typename Unit>
-static bool DelazifyCanonicalScriptedFunctionImpl(JSContext* cx,
-                                                  FrontendContext* fc,
-                                                  ScopeBindingCache* scopeCache,
-                                                  JS::Handle<JSFunction*> fun,
-                                                  JS::Handle<BaseScript*> lazy,
-                                                  ScriptSource* ss) {
+static bool DelazifyCanonicalScriptedFunctionImpl(
+    JSContext* cx, FrontendContext* fc, ScopeBindingCache* scopeCache,
+    JS::Handle<JSFunction*> fun, JS::Handle<BaseScript*> lazy, ScriptSource* ss,
+    ScriptSource::DataReader& reader) {
   MOZ_ASSERT(!lazy->hasBytecode(), "Script is already compiled!");
   MOZ_ASSERT(lazy->function() == fun);
 
@@ -1501,6 +1508,7 @@ static bool DelazifyCanonicalScriptedFunctionImpl(JSContext* cx,
       .setSelfHostingMode(false)
       .setEagerDelazificationStrategy(lazy->delazificationMode())
       .setEagerBaselineStrategy(JS::EagerBaselineOption::None);
+  options.allowHTMLComments = !lazy->hasModuleGoal();
 
   Rooted<CompilationInput> input(cx, CompilationInput(options));
   input.get().initFromLazy(cx, lazy, ss);
@@ -1519,22 +1527,22 @@ static bool DelazifyCanonicalScriptedFunctionImpl(JSContext* cx,
   size_t sourceStart = lazy->sourceStart();
   size_t sourceLength = lazy->sourceEnd() - lazy->sourceStart();
 
-  MOZ_ASSERT(ss->hasSourceText());
+  MOZ_ASSERT(reader->hasSourceText());
 
   // Parse and compile the script from source.
   UncompressedSourceCache::AutoHoldEntry holder;
 
-  MOZ_ASSERT(ss->hasSourceType<Unit>());
+  MOZ_ASSERT(reader->hasSourceType<Unit>());
 
-  ScriptSource::PinnedUnits<Unit> units(cx, ss, holder, sourceStart,
-                                        sourceLength);
-  if (!units.get()) {
+  const Unit* units =
+      reader->units<Unit>(cx, holder, sourceStart, sourceLength);
+  if (!units) {
     return false;
   }
 
   return CompileLazyFunctionToStencilMaybeInstantiate(
-      cx, fc, cx->tempLifoAlloc(), input.get(), scopeCache, units.get(),
-      sourceLength, stencils, nullptr);
+      cx, fc, cx->tempLifoAlloc(), input.get(), scopeCache, units, sourceLength,
+      stencils, nullptr);
 }
 
 bool frontend::DelazifyCanonicalScriptedFunction(JSContext* cx,
@@ -1550,17 +1558,20 @@ bool frontend::DelazifyCanonicalScriptedFunction(JSContext* cx,
   ScriptSource* ss = lazy->scriptSource();
   ScopeBindingCache* scopeCache = &cx->caches().scopeCache;
 
-  if (ss->hasSourceType<Utf8Unit>()) {
+  ScriptSource::DataReader reader(ss);
+  MOZ_ASSERT(reader.hasSourceText());
+
+  if (reader->hasSourceType<Utf8Unit>()) {
     // UTF-8 source text.
-    return DelazifyCanonicalScriptedFunctionImpl<Utf8Unit>(cx, fc, scopeCache,
-                                                           fun, lazy, ss);
+    return DelazifyCanonicalScriptedFunctionImpl<Utf8Unit>(
+        cx, fc, scopeCache, fun, lazy, ss, reader);
   }
 
-  MOZ_ASSERT(ss->hasSourceType<char16_t>());
+  MOZ_ASSERT(reader->hasSourceType<char16_t>());
 
   // UTF-16 source text.
   return DelazifyCanonicalScriptedFunctionImpl<char16_t>(cx, fc, scopeCache,
-                                                         fun, lazy, ss);
+                                                         fun, lazy, ss, reader);
 }
 
 template <typename Unit>
@@ -1569,7 +1580,7 @@ static const CompilationStencil* DelazifyCanonicalScriptedFunctionImpl(
     const JS::PrefableCompileOptions& prefableOptions,
     ScopeBindingCache* scopeCache, ScriptIndex scriptIndex,
     InitialStencilAndDelazifications* stencils,
-    DelazifyFailureReason* failureReason) {
+    ScriptSource::DataReader& reader, DelazifyFailureReason* failureReason) {
   MOZ_ASSERT(stencils);
 
   ScriptStencilRef script{*stencils, scriptIndex};
@@ -1592,13 +1603,12 @@ static const CompilationStencil* DelazifyCanonicalScriptedFunctionImpl(
   size_t sourceLength = extra.extent.sourceEnd - sourceStart;
 
   ScriptSource* ss = stencils->getInitial()->source;
-  MOZ_ASSERT(ss->hasSourceText());
+  MOZ_ASSERT(reader->hasSourceText());
+  MOZ_ASSERT(reader->hasSourceType<Unit>());
 
-  MOZ_ASSERT(ss->hasSourceType<Unit>());
-
-  ScriptSource::PinnedUnitsIfUncompressed<Unit> units(ss, sourceStart,
-                                                      sourceLength);
-  if (!units.get()) {
+  const Unit* units =
+      reader->uncompressedUnits<Unit>(sourceStart, sourceLength);
+  if (!units) {
     *failureReason = DelazifyFailureReason::Compressed;
     return nullptr;
   }
@@ -1610,6 +1620,7 @@ static const CompilationStencil* DelazifyCanonicalScriptedFunctionImpl(
       .setScriptSourceOffset(sourceStart)
       .setNoScriptRval(false)
       .setSelfHostingMode(false);
+  options.allowHTMLComments = !extra.hasModuleGoal();
 
   // CompilationInput initialized with initFromStencil only reference
   // information from the CompilationStencil context and the ref-counted
@@ -1619,8 +1630,8 @@ static const CompilationStencil* DelazifyCanonicalScriptedFunctionImpl(
 
   const CompilationStencil* borrow;
   if (!CompileLazyFunctionToStencilMaybeInstantiate(
-          nullptr, fc, tempLifoAlloc, input, scopeCache, units.get(),
-          sourceLength, stencils, &borrow)) {
+          nullptr, fc, tempLifoAlloc, input, scopeCache, units, sourceLength,
+          stencils, &borrow)) {
     *failureReason = DelazifyFailureReason::Other;
     return nullptr;
   }
@@ -1635,18 +1646,22 @@ const CompilationStencil* frontend::DelazifyCanonicalScriptedFunction(
     InitialStencilAndDelazifications* stencils,
     DelazifyFailureReason* failureReason) {
   ScriptSource* ss = stencils->getInitial()->source;
-  if (ss->hasSourceType<Utf8Unit>()) {
+
+  ScriptSource::DataReader reader(ss);
+  MOZ_ASSERT(reader.hasSourceText());
+
+  if (reader->hasSourceType<Utf8Unit>()) {
     // UTF-8 source text.
     return DelazifyCanonicalScriptedFunctionImpl<Utf8Unit>(
         fc, tempLifoAlloc, prefableOptions, scopeCache, scriptIndex, stencils,
-        failureReason);
+        reader, failureReason);
   }
 
   // UTF-16 source text.
-  MOZ_ASSERT(ss->hasSourceType<char16_t>());
+  MOZ_ASSERT(reader->hasSourceType<char16_t>());
   return DelazifyCanonicalScriptedFunctionImpl<char16_t>(
       fc, tempLifoAlloc, prefableOptions, scopeCache, scriptIndex, stencils,
-      failureReason);
+      reader, failureReason);
 }
 
 static JSFunction* CompileStandaloneFunction(

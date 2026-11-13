@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "vm/TypedArrayObject-inl.h"
 #include "vm/TypedArrayObject.h"
 
 #include "mozilla/Casting.h"
@@ -23,6 +22,8 @@
 #include <numeric>
 #include <string.h>
 #include <string_view>
+
+#include "vm/TypedArrayObject-inl.h"
 #if !defined(XP_WIN) && !defined(__wasi__)
 #  include <sys/mman.h>
 #endif
@@ -384,10 +385,16 @@ static TypedArrayType* NewTypedArrayObject(JSContext* cx, const JSClass* clasp,
   static_assert(!std::is_same_v<TypedArrayType, FixedLengthTypedArrayObject> ||
                 nfixed == FixedLengthTypedArrayObject::FIXED_DATA_START);
 
+  ObjectFlags objectFlags;
+  if constexpr (std::is_same_v<TypedArrayType, ImmutableTypedArrayObject>) {
+    // Immutable elements are non-configurable, non-writable data properties.
+    objectFlags.setFlag(ObjectFlag::NeedsProxyGetSetResultValidation);
+  }
+
   Rooted<SharedShape*> shape(
       cx,
       SharedShape::getInitialShape(cx, clasp, cx->realm(), AsTaggedProto(proto),
-                                   nfixed, ObjectFlags()));
+                                   nfixed, objectFlags));
   if (!shape) {
     return nullptr;
   }
@@ -682,6 +689,7 @@ class TypedArrayObjectTemplate {
   static TypedArrayObject* fromBufferSameCompartment(
       JSContext* cx, Handle<ArrayBufferObjectMaybeShared*> buffer,
       uint64_t byteOffset, uint64_t lengthIndex, HandleObject proto) {
+    cx->releaseCheck(buffer);
     // Steps 6-9.
     size_t length = 0;
     auto autoLength = AutoLength::No;
@@ -4259,9 +4267,10 @@ TypedArrayObject* js::TypedArraySubarrayWithLength(
     intptr_t length) {
   MOZ_ASSERT(!obj->hasDetachedBuffer());
   MOZ_ASSERT(!obj->is<ResizableTypedArrayObject>());
-  MOZ_ASSERT(start >= 0);
-  MOZ_ASSERT(length >= 0);
-  MOZ_ASSERT(size_t(start + length) <= obj->length().valueOr(0));
+  MOZ_RELEASE_ASSERT(start >= 0);
+  MOZ_RELEASE_ASSERT(length >= 0);
+  MOZ_RELEASE_ASSERT(size_t(start) + size_t(length) <=
+                     obj->length().valueOr(0));
 
   if (!TypedArrayObject::ensureHasBuffer(cx, obj)) {
     return nullptr;
@@ -4304,9 +4313,9 @@ TypedArrayObject* js::TypedArraySubarrayRecover(JSContext* cx,
                                                 Handle<TypedArrayObject*> obj,
                                                 intptr_t start,
                                                 intptr_t length) {
-  MOZ_ASSERT(!obj->is<ResizableTypedArrayObject>());
-  MOZ_ASSERT(start >= 0);
-  MOZ_ASSERT(length >= 0);
+  MOZ_RELEASE_ASSERT(!obj->is<ResizableTypedArrayObject>());
+  MOZ_RELEASE_ASSERT(start >= 0);
+  MOZ_RELEASE_ASSERT(length >= 0);
 
   // Special case: The buffer was detached after calling `subarray`. This case
   // can only happen when recovering a TypedArraySubarray allocation.
@@ -6132,17 +6141,10 @@ bool TypedArrayObjectTemplate<float16>::getElementPure(TypedArrayObject* tarray,
                                                        size_t index,
                                                        Value* vp) {
   float16 f16 = getIndex(tarray, index);
-  /*
-   * Doubles in typed arrays could be typed-punned arrays of integers. This
-   * could allow user code to break the engine-wide invariant that only
-   * canonical nans are stored into jsvals, which means user code could
-   * confuse the engine into interpreting a double-typed jsval as an
-   * object-typed jsval.
-   *
-   * This could be removed for platforms/compilers known to convert a 32-bit
-   * non-canonical nan to a 64-bit canonical nan.
-   */
-  *vp = JS::CanonicalizedDoubleValue(static_cast<double>(f16));
+
+  // The value may be a non-canonical NaN. DoubleValue canonicalizes it to
+  // preserve the invariant that only canonical NaNs are stored in Values.
+  *vp = DoubleValue(static_cast<double>(f16));
   return true;
 }
 
@@ -6152,17 +6154,9 @@ bool TypedArrayObjectTemplate<float>::getElementPure(TypedArrayObject* tarray,
   float val = getIndex(tarray, index);
   double dval = val;
 
-  /*
-   * Doubles in typed arrays could be typed-punned arrays of integers. This
-   * could allow user code to break the engine-wide invariant that only
-   * canonical nans are stored into jsvals, which means user code could
-   * confuse the engine into interpreting a double-typed jsval as an
-   * object-typed jsval.
-   *
-   * This could be removed for platforms/compilers known to convert a 32-bit
-   * non-canonical nan to a 64-bit canonical nan.
-   */
-  *vp = JS::CanonicalizedDoubleValue(dval);
+  // The value may be a non-canonical NaN. DoubleValue canonicalizes it to
+  // preserve the invariant that only canonical NaNs are stored in Values.
+  *vp = DoubleValue(dval);
   return true;
 }
 
@@ -6171,14 +6165,9 @@ bool TypedArrayObjectTemplate<double>::getElementPure(TypedArrayObject* tarray,
                                                       size_t index, Value* vp) {
   double val = getIndex(tarray, index);
 
-  /*
-   * Doubles in typed arrays could be typed-punned arrays of integers. This
-   * could allow user code to break the engine-wide invariant that only
-   * canonical nans are stored into jsvals, which means user code could
-   * confuse the engine into interpreting a double-typed jsval as an
-   * object-typed jsval.
-   */
-  *vp = JS::CanonicalizedDoubleValue(val);
+  // The value may be a non-canonical NaN. DoubleValue canonicalizes it to
+  // preserve the invariant that only canonical NaNs are stored in Values.
+  *vp = DoubleValue(val);
   return true;
 }
 
@@ -7568,10 +7557,6 @@ JS_PUBLIC_API JS::Scalar::Type JS_GetArrayBufferViewType(JSObject* obj) {
     return Scalar::MaxTypedArrayViewType;
   }
   MOZ_CRASH("invalid ArrayBufferView type");
-}
-
-JS_PUBLIC_API size_t JS_MaxMovableTypedArraySize() {
-  return FixedLengthTypedArrayObject::INLINE_BUFFER_LIMIT;
 }
 
 namespace JS {

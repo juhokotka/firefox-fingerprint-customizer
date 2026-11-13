@@ -12,7 +12,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   UrlbarSearchUtils:
     "moz-src:///browser/components/urlbar/UrlbarSearchUtils.sys.mjs",
   UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
 });
 
 const SHOW_COUNTDOWN_THRESHOLD_DAYS = 30;
@@ -231,11 +230,17 @@ export class ImportantDatesSuggestions extends SuggestProvider {
         isBlockable: true,
       },
       highlights: {
-        title: lazy.UrlbarUtils.HIGHLIGHT.ALL,
+        title: lazy.UrlbarShared.HIGHLIGHT.ALL,
       },
     });
   }
 
+  /**
+   * @param {UrlbarQueryContext} _queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   * @param {string} _searchString
+   */
   onEngagement(_queryContext, controller, details, _searchString) {
     switch (details.selType) {
       case "manage":
@@ -244,10 +249,11 @@ export class ImportantDatesSuggestions extends SuggestProvider {
       case "dismiss": {
         let { result } = details;
         lazy.QuickSuggest.dismissResult(result);
-        result.acknowledgeDismissalL10n = {
-          id: "firefox-suggest-dismissal-acknowledgment-one",
-        };
-        controller.removeResult(result);
+        controller.removeResult(result, {
+          acknowledgeDismissalL10n: {
+            id: "firefox-suggest-dismissal-acknowledgment-one",
+          },
+        });
         break;
       }
     }

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +37,7 @@ import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import mozilla.components.compose.base.modifier.onShown
 import mozilla.components.compose.base.utils.inComposePreview
 import mozilla.components.service.pocket.PocketStory
@@ -55,7 +55,7 @@ import org.mozilla.fenix.home.ui.HomepageTestTag.HOMEPAGE_SPONSORED_STORY
 import org.mozilla.fenix.home.ui.HomepageTestTag.HOMEPAGE_STORY
 import org.mozilla.fenix.home.ui.HomepageTestTag.POCKET_STORIES
 import org.mozilla.fenix.theme.FirefoxTheme
-import kotlin.math.roundToInt
+import org.mozilla.fenix.wallpapers.WallpaperTheme
 
 private const val DEFAULT_MAX_LINES = 2
 private const val ACCESSIBILITY_MAX_LINES_SCALE_FACTOR = 1.2f
@@ -84,10 +84,11 @@ fun SponsoredContentStory(
         ) {
             Text(
                 text = sponsoredContent.title,
-                modifier = Modifier.semantics {
-                    testTagsAsResourceId = true
-                    testTag = "pocket.sponsoredContent.title"
-                },
+                modifier =
+                    Modifier.semantics {
+                        testTagsAsResourceId = true
+                        testTag = "pocket.sponsoredContent.title"
+                    },
                 overflow = TextOverflow.Ellipsis,
                 maxLines = maxLines(),
                 style = FirefoxTheme.typography.body2,
@@ -95,10 +96,11 @@ fun SponsoredContentStory(
 
             Text(
                 text = stringResource(R.string.pocket_stories_sponsor_indication),
-                modifier = Modifier.semantics {
-                    testTagsAsResourceId = true
-                    testTag = "pocket.sponsoredContent.identifier"
-                },
+                modifier =
+                    Modifier.semantics {
+                        testTagsAsResourceId = true
+                        testTag = "pocket.sponsoredContent.identifier"
+                    },
                 overflow = TextOverflow.Ellipsis,
                 maxLines = 1,
                 style = FirefoxTheme.typography.caption,
@@ -120,14 +122,15 @@ fun ContentRecommendationStory(
     backgroundColor: Color,
     onClick: (ContentRecommendation) -> Unit,
 ) {
-    val imageUrl = recommendation.imageUrl.replace(
-        "{wh}",
-        with(LocalDensity.current) {
-            "${IMAGE_SIZE.dp.toPx().roundToInt()}x${
+    val imageUrl =
+        recommendation.imageUrl.replace(
+            "{wh}",
+            with(LocalDensity.current) {
+                "${IMAGE_SIZE.dp.toPx().roundToInt()}x${
                 IMAGE_SIZE.dp.toPx().roundToInt()
             }"
-        },
-    )
+            },
+        )
 
     ListItemTabSurface(
         imageUrl = imageUrl,
@@ -136,10 +139,11 @@ fun ContentRecommendationStory(
     ) {
         Text(
             text = recommendation.title,
-            modifier = Modifier.semantics {
-                testTagsAsResourceId = true
-                testTag = "pocket.contentRecommendation.title"
-            },
+            modifier =
+                Modifier.semantics {
+                    testTagsAsResourceId = true
+                    testTag = "pocket.contentRecommendation.title"
+                },
             overflow = TextOverflow.Ellipsis,
             maxLines = maxLines(),
             style = FirefoxTheme.typography.body2,
@@ -158,8 +162,8 @@ fun ContentRecommendationStory(
  * Displays a list of [PocketStory]s.
  *
  * @param stories The list of [PocketStory]s to be displayed.
- * @param contentPadding Dimension for padding the content after it has been clipped.
- * This space will be used for shadows and also content rendering when the list is scrolled.
+ * @param contentPadding Dimension for padding the content after it has been clipped. This space will be used for
+ *   shadows and also content rendering when the list is scrolled.
  * @param backgroundColor The background [Color] of each story.
  * @param onStoryShown Callback for when a certain story is visible to the user.
  * @param onStoryClicked Callback for when the user taps on a recommended story.
@@ -169,41 +173,39 @@ fun ContentRecommendationStory(
 fun Stories(
     @PreviewParameter(StoryProvider::class) stories: List<PocketStory>,
     contentPadding: Dp,
-    backgroundColor: Color = MaterialTheme.colorScheme.surfaceBright,
+    backgroundColor: Color = WallpaperTheme.cardBackgroundColor,
     onStoryShown: (PocketStory, Triple<Int, Int, Int>) -> Unit,
     onStoryClicked: (PocketStory, Triple<Int, Int, Int>) -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .height(intrinsicSize = IntrinsicSize.Max)
-            .horizontalScroll(rememberScrollState())
-            .padding(start = contentPadding, end = contentPadding)
-            .semantics {
-                testTagsAsResourceId = true
-                testTag = POCKET_STORIES
-            },
+        modifier =
+            Modifier.height(intrinsicSize = IntrinsicSize.Max)
+                .horizontalScroll(rememberScrollState())
+                .padding(start = contentPadding, end = contentPadding)
+                .semantics {
+                    testTagsAsResourceId = true
+                    testTag = POCKET_STORIES
+                },
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         stories.forEachIndexed { columnIndex, story ->
             val rowIndex = 0
             Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .semantics {
+                modifier =
+                    Modifier.fillMaxHeight().semantics {
                         testTagsAsResourceId = true
-                        testTag = when (story) {
-                            is PocketRecommendedStory,
-                            is ContentRecommendation,
-                                -> HOMEPAGE_STORY
+                        testTag =
+                            when (story) {
+                                is PocketRecommendedStory,
+                                is ContentRecommendation -> HOMEPAGE_STORY
 
-                            else -> HOMEPAGE_SPONSORED_STORY
-                        }
-                    },
+                                else -> HOMEPAGE_SPONSORED_STORY
+                            }
+                    }
             ) {
                 when (story) {
                     is PocketRecommendedStory,
-                    is PocketSponsoredStory,
-                        -> {
+                    is PocketSponsoredStory -> {
                         // no-op, don't handle these [PocketStory] types as they are no longer
                         // supported.
                     }
@@ -221,39 +223,41 @@ fun Stories(
                     }
 
                     is SponsoredContent -> {
-                        val screenBounds = Rect()
-                            .apply { LocalView.current.getWindowVisibleDisplayFrame(this) }
-                            .apply {
-                                // Check if this is in a preview because `settings()` breaks previews
-                                if (!inComposePreview) {
-                                    val verticalOffset =
-                                        with(LocalDensity.current) {
-                                            dimensionResource(id = R.dimen.browser_toolbar_height).roundToPx()
-                                        }
+                        val screenBounds =
+                            Rect()
+                                .apply { LocalView.current.getWindowVisibleDisplayFrame(this) }
+                                .apply {
+                                    // Check if this is in a preview because `settings()` breaks previews
+                                    if (!inComposePreview) {
+                                        val verticalOffset =
+                                            with(LocalDensity.current) {
+                                                dimensionResource(id = R.dimen.browser_toolbar_height).roundToPx()
+                                            }
 
-                                    if (components.settings.shouldUseBottomToolbar) {
-                                        bottom -= verticalOffset
-                                    } else {
-                                        top += verticalOffset
+                                        if (components.settings.shouldUseBottomToolbar) {
+                                            bottom -= verticalOffset
+                                        } else {
+                                            top += verticalOffset
+                                        }
                                     }
                                 }
-                            }
 
                         Box(
-                            modifier = Modifier.onShown(
-                                threshold = 0.5f,
-                                onVisible = {
-                                    onStoryShown(
-                                        story,
-                                        Triple(
-                                            rowIndex,
-                                            columnIndex,
-                                            stories.indexOf(story),
-                                        ),
-                                    )
-                                },
-                                screenBounds = screenBounds,
-                            ),
+                            modifier =
+                                Modifier.onShown(
+                                    threshold = 0.5f,
+                                    onVisible = {
+                                        onStoryShown(
+                                            story,
+                                            Triple(
+                                                rowIndex,
+                                                columnIndex,
+                                                stories.indexOf(story),
+                                            ),
+                                        )
+                                    },
+                                    screenBounds = screenBounds,
+                                )
                         ) {
                             SponsoredContentStory(
                                 sponsoredContent = story,
@@ -279,12 +283,13 @@ private fun StoriesWithCategoriesPreview() {
         Surface {
             Column {
                 Stories(
-                    stories = listOf(
-                        FakeHomepagePreview.contentRecommendation(),
-                        FakeHomepagePreview.sponsoredContent(),
-                        FakeHomepagePreview.contentRecommendation(),
-                        FakeHomepagePreview.sponsoredContent(),
-                    ),
+                    stories =
+                        listOf(
+                            FakeHomepagePreview.contentRecommendation(),
+                            FakeHomepagePreview.sponsoredContent(),
+                            FakeHomepagePreview.contentRecommendation(),
+                            FakeHomepagePreview.sponsoredContent(),
+                        ),
                     contentPadding = 0.dp,
                     onStoryShown = { _, _ -> },
                     onStoryClicked = { _, _ -> },
@@ -293,9 +298,10 @@ private fun StoriesWithCategoriesPreview() {
                 Spacer(Modifier.height(10.dp))
 
                 StoriesCategories(
-                    categories = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor"
-                        .split(" ")
-                        .map { PocketRecommendedStoriesCategory(it) },
+                    categories =
+                        "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor"
+                            .split(" ")
+                            .map { PocketRecommendedStoriesCategory(it) },
                     selections = emptyList(),
                     onCategoryClick = {},
                 )
@@ -310,12 +316,13 @@ private fun StoriesPreview() {
     FirefoxTheme {
         Surface {
             Stories(
-                stories = listOf(
-                    FakeHomepagePreview.contentRecommendation(),
-                    FakeHomepagePreview.sponsoredContent(),
-                    FakeHomepagePreview.contentRecommendation(),
-                    FakeHomepagePreview.sponsoredContent(),
-                ),
+                stories =
+                    listOf(
+                        FakeHomepagePreview.contentRecommendation(),
+                        FakeHomepagePreview.sponsoredContent(),
+                        FakeHomepagePreview.contentRecommendation(),
+                        FakeHomepagePreview.sponsoredContent(),
+                    ),
                 contentPadding = 0.dp,
                 onStoryShown = { _, _ -> },
                 onStoryClicked = { _, _ -> },
@@ -324,9 +331,7 @@ private fun StoriesPreview() {
     }
 }
 
-@Composable
-@ReadOnlyComposable
-private fun maxLines() = if (limitMaxLines()) DEFAULT_MAX_LINES else Int.MAX_VALUE
+@Composable @ReadOnlyComposable private fun maxLines() = if (limitMaxLines()) DEFAULT_MAX_LINES else Int.MAX_VALUE
 
 @Composable
 @ReadOnlyComposable

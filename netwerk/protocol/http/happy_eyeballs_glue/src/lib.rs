@@ -16,11 +16,6 @@ use std::time::{Duration, Instant};
 use thin_vec::ThinVec;
 use xpcom::{AtomicRefcnt, RefCounted};
 
-#[cfg(not(windows))]
-use libc::{AF_INET, AF_INET6};
-#[cfg(windows)]
-use winapi::shared::ws2def::{AF_INET, AF_INET6};
-
 #[repr(C)]
 pub enum IpPreference {
     DualStackPreferV6 = 0,
@@ -87,7 +82,11 @@ pub unsafe extern "C" fn happy_eyeballs_create(
     let alt_svc_vec: Vec<_> = alt_svc
         .iter()
         .map(|a| happy_eyeballs::AltSvc {
-            host: None,
+            host: if a.host.is_empty() {
+                None
+            } else {
+                Some(a.host.to_utf8().to_string())
+            },
             port: if a.port != 0 { Some(a.port) } else { None },
             http_version: a.http_version.into(),
         })
@@ -97,8 +96,10 @@ pub unsafe extern "C" fn happy_eyeballs_create(
 
     // Clamp the delays to at least 10ms to avoid excessive connection attempts,
     // and the multiplier to at least 1 (it is a non-zero factor).
-    let resolution_delay_ms =
-        std::cmp::max(10, static_prefs::pref!("network.http.happy_eyeballs_resolution_delay"));
+    let resolution_delay_ms = std::cmp::max(
+        10,
+        static_prefs::pref!("network.http.happy_eyeballs_resolution_delay"),
+    );
     let connection_attempt_delay_ms = std::cmp::max(
         10,
         static_prefs::pref!("network.http.happy_eyeballs_connection_attempt_delay"),
@@ -149,7 +150,9 @@ pub unsafe extern "C" fn happy_eyeballs_create(
 pub unsafe extern "C" fn happy_eyeballs_process_dns_response_a(
     he: *mut HappyEyeballs,
     id: u64,
-    addrs: *const ThinVec<NetAddr>,
+    addrs: *const ThinVec<IpAddr>,
+    is_trr: bool,
+    stale: bool,
 ) -> nsresult {
     let Some(he) = (unsafe { he.as_mut() }) else {
         debug_assert!(false, "unexpected null he pointer");
@@ -161,14 +164,16 @@ pub unsafe extern "C" fn happy_eyeballs_process_dns_response_a(
         return NS_ERROR_INVALID_ARG;
     };
 
-    he.process_dns_response_a(id, addrs)
+    he.process_dns_response_a(id, addrs, is_trr, stale)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn happy_eyeballs_process_dns_response_aaaa(
     he: *mut HappyEyeballs,
     id: u64,
-    addrs: *const ThinVec<NetAddr>,
+    addrs: *const ThinVec<IpAddr>,
+    is_trr: bool,
+    stale: bool,
 ) -> nsresult {
     let Some(he) = (unsafe { he.as_mut() }) else {
         debug_assert!(false, "unexpected null he pointer");
@@ -180,7 +185,7 @@ pub unsafe extern "C" fn happy_eyeballs_process_dns_response_aaaa(
         return NS_ERROR_INVALID_ARG;
     };
 
-    he.process_dns_response_aaaa(id, addrs)
+    he.process_dns_response_aaaa(id, addrs, is_trr, stale)
 }
 
 #[no_mangle]
@@ -189,6 +194,7 @@ pub unsafe extern "C" fn happy_eyeballs_process_dns_response_https(
     id: u64,
     service_infos: *const ThinVec<ServiceInfo>,
     is_trr: bool,
+    stale: bool,
 ) -> nsresult {
     let Some(he) = (unsafe { he.as_mut() }) else {
         debug_assert!(false, "unexpected null he pointer");
@@ -200,7 +206,7 @@ pub unsafe extern "C" fn happy_eyeballs_process_dns_response_https(
         return NS_ERROR_INVALID_ARG;
     };
 
-    he.process_dns_response_https(id, service_infos, is_trr)
+    he.process_dns_response_https(id, service_infos, is_trr, stale)
 }
 
 #[no_mangle]
@@ -275,52 +281,55 @@ pub struct HappyEyeballs {
 }
 
 impl HappyEyeballs {
-    fn process_dns_response_a(&mut self, id: u64, net_addrs: &ThinVec<NetAddr>) -> nsresult {
+    fn process_dns_response_a(
+        &mut self,
+        id: u64,
+        ip_addrs: &ThinVec<IpAddr>,
+        is_trr: bool,
+        stale: bool,
+    ) -> nsresult {
         let id: happy_eyeballs::Id = id.into();
-        let mut addrs = Vec::with_capacity(net_addrs.len());
-        for na in net_addrs.iter() {
-            let family =
-                i32::from(unsafe { moz_netaddr_get_family((na as *const NetAddr).cast()) });
-            if family != AF_INET {
-                debug_assert!(false, "got {} instead of AF_INET in A record", family);
+        let mut addrs = Vec::with_capacity(ip_addrs.len());
+        for ip in ip_addrs {
+            let IpAddr::V4(octets) = ip else {
+                debug_assert!(false, "got IPv6 address in A record");
                 return NS_ERROR_UNEXPECTED;
-            }
-            let ip_be = unsafe { moz_netaddr_get_network_order_ip((na as *const NetAddr).cast()) };
-            let ipv4 = Ipv4Addr::from(u32::from_be(ip_be));
-            addrs.push(ipv4);
+            };
+            addrs.push(Ipv4Addr::from(*octets));
         }
 
-        self.profiler.dns_response(id, &addrs);
-        self.metrics.dns_response(id);
+        self.profiler.dns_response(id, &addrs, stale);
+        self.metrics.dns_response(id, !addrs.is_empty(), is_trr);
 
         let result = happy_eyeballs::DnsResult::A(Ok(addrs));
-        let input = happy_eyeballs::Input::DnsResult { id, result };
+        let input = happy_eyeballs::Input::DnsResult { id, result, stale };
         self.inner.process_input(input, Instant::now());
 
         NS_OK
     }
 
-    fn process_dns_response_aaaa(&mut self, id: u64, net_addrs: &ThinVec<NetAddr>) -> nsresult {
+    fn process_dns_response_aaaa(
+        &mut self,
+        id: u64,
+        ip_addrs: &ThinVec<IpAddr>,
+        is_trr: bool,
+        stale: bool,
+    ) -> nsresult {
         let id: happy_eyeballs::Id = id.into();
-        let mut addrs = Vec::with_capacity(net_addrs.len());
-        for na in net_addrs.iter() {
-            let family =
-                i32::from(unsafe { moz_netaddr_get_family((na as *const NetAddr).cast()) });
-            if family != AF_INET6 {
-                debug_assert!(false, "got {} instead of AF_INET6 in AAAA record", family);
+        let mut addrs = Vec::with_capacity(ip_addrs.len());
+        for ip in ip_addrs {
+            let IpAddr::V6(octets) = ip else {
+                debug_assert!(false, "got IPv4 address in AAAA record");
                 return NS_ERROR_UNEXPECTED;
-            }
-            let p = unsafe { moz_netaddr_get_ipv6((na as *const NetAddr).cast()) };
-            let octs: [u8; 16] = unsafe { std::slice::from_raw_parts(p, 16).try_into().unwrap() };
-            let ipv6 = Ipv6Addr::from(octs);
-            addrs.push(ipv6);
+            };
+            addrs.push(Ipv6Addr::from(*octets));
         }
 
-        self.profiler.dns_response(id, &addrs);
-        self.metrics.dns_response(id);
+        self.profiler.dns_response(id, &addrs, stale);
+        self.metrics.dns_response(id, !addrs.is_empty(), is_trr);
 
         let result = happy_eyeballs::DnsResult::Aaaa(Ok(addrs));
-        let input = happy_eyeballs::Input::DnsResult { id, result };
+        let input = happy_eyeballs::Input::DnsResult { id, result, stale };
         self.inner.process_input(input, Instant::now());
 
         NS_OK
@@ -331,6 +340,7 @@ impl HappyEyeballs {
         id: u64,
         service_infos: &ThinVec<ServiceInfo>,
         is_trr: bool,
+        stale: bool,
     ) -> nsresult {
         let id: happy_eyeballs::Id = id.into();
         let mut infos = Vec::new();
@@ -355,32 +365,21 @@ impl HappyEyeballs {
             };
 
             let mut ipv4_vec = Vec::new();
-            for na in &svc_info.ipv4_hints {
-                let family =
-                    i32::from(unsafe { moz_netaddr_get_family((na as *const NetAddr).cast()) });
-                debug_assert_eq!(family, AF_INET, "Expected IPv4 address in IPv4 hints");
-                if family != AF_INET {
+            for ip in &svc_info.ipv4_hints {
+                let IpAddr::V4(octets) = ip else {
+                    debug_assert!(false, "got IPv6 address in IPv4 hints");
                     return NS_ERROR_UNEXPECTED;
-                }
-                let ip_be =
-                    unsafe { moz_netaddr_get_network_order_ip((na as *const NetAddr).cast()) };
-                let ipv4 = Ipv4Addr::from(u32::from_be(ip_be));
-                ipv4_vec.push(ipv4);
+                };
+                ipv4_vec.push(Ipv4Addr::from(*octets));
             }
 
             let mut ipv6_vec = Vec::new();
-            for na in &svc_info.ipv6_hints {
-                let family =
-                    i32::from(unsafe { moz_netaddr_get_family((na as *const NetAddr).cast()) });
-                debug_assert_eq!(family, AF_INET6, "Expected IPv6 address in IPv6 hints");
-                if family != AF_INET6 {
+            for ip in &svc_info.ipv6_hints {
+                let IpAddr::V6(octets) = ip else {
+                    debug_assert!(false, "got IPv4 address in IPv6 hints");
                     return NS_ERROR_UNEXPECTED;
-                }
-                let p = unsafe { moz_netaddr_get_ipv6((na as *const NetAddr).cast()) };
-                let octs: [u8; 16] =
-                    unsafe { std::slice::from_raw_parts(p, 16).try_into().unwrap() };
-                let ipv6 = Ipv6Addr::from(octs);
-                ipv6_vec.push(ipv6);
+                };
+                ipv6_vec.push(Ipv6Addr::from(*octets));
             }
 
             let port = if svc_info.port == 0 {
@@ -400,11 +399,11 @@ impl HappyEyeballs {
             });
         }
 
-        self.profiler.dns_response_https(id, &infos);
+        self.profiler.dns_response_https(id, &infos, stale);
         self.metrics.dns_response_https(id, &infos, is_trr);
 
         let result = happy_eyeballs::DnsResult::Https(Ok(infos));
-        let input = happy_eyeballs::Input::DnsResult { id, result };
+        let input = happy_eyeballs::Input::DnsResult { id, result, stale };
         self.inner.process_input(input, Instant::now());
 
         NS_OK
@@ -460,14 +459,17 @@ impl HappyEyeballs {
                 id,
                 hostname,
                 record_type,
+                allow_stale,
             }) => {
-                self.profiler.dns_query_started(id, record_type);
+                self.profiler
+                    .dns_query_started(id, record_type, allow_stale);
                 self.metrics.dns_query_started(id, record_type);
                 let hostname: String = hostname.into();
                 dns_hostname.assign(hostname.as_bytes());
                 *ret_event = Output::SendDnsQuery {
                     id: id.into(),
                     record_type: record_type.into(),
+                    allow_stale,
                 };
             }
             Some(happy_eyeballs::Output::Timer { duration, .. }) => {
@@ -485,18 +487,25 @@ impl HappyEyeballs {
                 endpoint,
                 is_ech_retry,
             }) => {
-                self.profiler.connection_attempt_started(id, &endpoint);
-                self.metrics.connection_attempt_started(id);
-                if let Some(ref ech) = endpoint.ech_config {
-                    ech_config.extend_from_slice(ech.as_ref());
+                if let Some(address) = endpoint.address() {
+                    self.profiler.connection_attempt_started(id, &endpoint);
+                    self.metrics.connection_attempt_started(id);
+                    if let Some(ref ech) = endpoint.ech_config {
+                        ech_config.extend_from_slice(ech.as_ref());
+                    }
+                    *ret_event = Output::AttemptConnection {
+                        id: id.into(),
+                        http_version: endpoint.http_version.into(),
+                        addr: address.ip().into(),
+                        port: address.port(),
+                        is_ech_retry,
+                    };
+                } else {
+                    // Only the by-name resolution modes lack an address, and we
+                    // use the default `ResolutionMode::ByIp`.
+                    debug_assert!(false, "connection attempt without an address");
+                    *ret_event = Output::None;
                 }
-                *ret_event = Output::AttemptConnection {
-                    id: id.into(),
-                    http_version: endpoint.http_version.into(),
-                    addr: endpoint.address.ip().into(),
-                    port: endpoint.address.port(),
-                    is_ech_retry,
-                };
             }
             Some(happy_eyeballs::Output::CancelConnection { id }) => {
                 self.profiler.connection_cancelled(id);
@@ -521,11 +530,13 @@ impl HappyEyeballs {
     }
 }
 
-// TODO: Expose host.
 #[repr(C)]
 pub struct AltSvc {
     pub http_version: HttpVersion,
     pub port: u16,
+    /// The alt-svc alternate's host. Empty means the alternate uses the origin
+    /// host (a port/protocol-only alt-svc).
+    pub host: nsCString,
 }
 
 #[repr(C)]
@@ -629,8 +640,8 @@ pub struct ServiceInfo {
     pub target_name: nsCString,
     pub alpn_http_versions: ThinVec<HttpVersion>,
     pub ech_config: ThinVec<u8>,
-    pub ipv4_hints: ThinVec<NetAddr>,
-    pub ipv6_hints: ThinVec<NetAddr>,
+    pub ipv4_hints: ThinVec<IpAddr>,
+    pub ipv6_hints: ThinVec<IpAddr>,
 }
 
 #[repr(C)]
@@ -659,6 +670,10 @@ pub enum Output {
     SendDnsQuery {
         id: u64,
         record_type: DnsRecordType,
+        /// Whether the resolver may answer this query from a stale (expired)
+        /// cache entry. `false` for the follow-up query that revalidates a
+        /// stale answer, which must come from a fresh lookup.
+        allow_stale: bool,
     },
     Timer {
         duration_ms: u64,
@@ -711,16 +726,4 @@ unsafe impl RefCounted for HappyEyeballs {
     unsafe fn release(&self) {
         happy_eyeballs_release(self);
     }
-}
-
-// Opaque interface to mozilla::net::NetAddr defined in DNS.h
-#[repr(C)]
-pub union NetAddr {
-    _private: [u8; 0],
-}
-
-extern "C" {
-    fn moz_netaddr_get_family(arg: *const NetAddr) -> u16;
-    fn moz_netaddr_get_network_order_ip(arg: *const NetAddr) -> u32;
-    fn moz_netaddr_get_ipv6(arg: *const NetAddr) -> *const u8;
 }

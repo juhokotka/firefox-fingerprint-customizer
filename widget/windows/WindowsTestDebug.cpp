@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "WindowsTestDebug.h"
+
 #include "nsCOMPtr.h"
 #include "nsIFile.h"
 #include "nsTArray.h"
@@ -52,10 +53,6 @@ class WindowsDebugProcessData : public nsIWindowsDebugProcessData {
 
 NS_IMPL_ISUPPORTS(WindowsDebugProcessData, nsIWindowsDebugProcessData)
 NS_IMPL_ISUPPORTS(WindowsTestDebug, nsIWindowsTestDebug)
-
-WindowsTestDebug::WindowsTestDebug() {}
-
-WindowsTestDebug::~WindowsTestDebug() {}
 
 static nsReturnRef<HMODULE> MakeRestartManager() {
   nsModuleHandle module(::LoadLibraryW(L"Rstrtmgr.dll"));

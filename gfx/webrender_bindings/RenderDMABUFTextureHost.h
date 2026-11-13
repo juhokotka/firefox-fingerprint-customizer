@@ -5,9 +5,9 @@
 #ifndef MOZILLA_GFX_RENDERDMABUFTEXTUREHOST_H
 #define MOZILLA_GFX_RENDERDMABUFTEXTUREHOST_H
 
-#include "mozilla/layers/TextureHostOGL.h"
 #include "RenderTextureHost.h"
 #include "RenderTextureHostSWGL.h"
+#include "mozilla/layers/TextureHostOGL.h"
 #include "mozilla/widget/DMABufSurface.h"
 
 namespace mozilla {
@@ -39,7 +39,7 @@ class RenderDMABUFTextureHost final : public RenderTextureHostSWGL {
     return mSurface->GetFormat();
   }
   gfx::ColorDepth GetColorDepth() const override {
-    return gfx::ColorDepth::COLOR_8;
+    return mSurface->GetColorDepth();
   }
   size_t GetPlaneCount() const override { return mSurface->GetTextureCount(); };
   bool MapPlane(RenderCompositor* aCompositor, uint8_t aChannelIndex,

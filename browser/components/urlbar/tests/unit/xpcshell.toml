@@ -5,10 +5,15 @@ run-if = [
 head = "head.js"
 firefox-appdir = "browser"
 support-files = ["data/engine.xml"]
+# The shipped engines contribute tab-to-search rows to queries that prefix
+# their domain, which these tests don't account for.
+prefs = ["browser.urlbar.suggest.engines=false"]
 
 ["test_000_frecency.js"]
 
 ["test_UrlbarChildController_unit.js"]
+
+["test_UrlbarNewTabComponentRegistrant.js"]
 
 ["test_UrlbarParentController_integration.js"]
 
@@ -24,6 +29,8 @@ support-files = ["data/engine.xml"]
 
 ["test_UrlbarProviderSemanticHistorySearch.js"]
 
+["test_UrlbarProviderTopSites.js"]
+
 ["test_UrlbarQueryContext.js"]
 
 ["test_UrlbarQueryContext_restrictSource.js"]
@@ -33,6 +40,20 @@ support-files = ["data/engine.xml"]
 ["test_UrlbarResult_wireSerialization.js"]
 
 ["test_UrlbarSearchUtils.js"]
+
+["test_UrlbarShared_deepEqual.js"]
+
+["test_UrlbarShared_formatDate.js"]
+
+["test_UrlbarShared_getTokenMatches.js"]
+
+["test_UrlbarShared_isOriginUrl.js"]
+
+["test_UrlbarShared_stripUnsafeProtocolOnPaste.js"]
+
+["test_UrlbarShared_unEscapeURIForUI.js"]
+
+["test_UrlbarTelemetryUtils_wireSerialization.js"]
 
 ["test_UrlbarUtils_addToInputHistoryWhenReady.js"]
 
@@ -44,19 +65,17 @@ support-files = ["data/engine.xml"]
 
 ["test_UrlbarUtils_copySnakeKeysToCamel.js"]
 
-["test_UrlbarUtils_formatDate.js"]
+["test_UrlbarUtils_dismissAutofill.js"]
 
 ["test_UrlbarUtils_getBackspaceBlock.js"]
 
+["test_UrlbarUtils_getRemoteImageUrl.js"]
+
 ["test_UrlbarUtils_getShortcutOrURIAndPostData.js"]
 
-["test_UrlbarUtils_getTokenMatches.js"]
-
-["test_UrlbarUtils_isOriginUrl.js"]
+["test_UrlbarUtils_reintegrateAutofill.js"]
 
 ["test_UrlbarUtils_skippableTimer.js"]
-
-["test_UrlbarUtils_unEscapeURIForUI.js"]
 
 ["test_about_urls.js"]
 
@@ -187,8 +206,10 @@ requesttimeoutfactor = 2  # Slow on Linux and Windows
 ["test_providerRecentSearches.js"]
 
 ["test_providerTabToSearch.js"]
+prefs = ["browser.urlbar.suggest.engines=true"]
 
 ["test_providerTabToSearch_partialHost.js"]
+prefs = ["browser.urlbar.suggest.engines=true"]
 
 ["test_provider_notification.js"]
 
@@ -213,11 +234,15 @@ skip-if = [
 
 ["test_resultGroups.js"]
 
+["test_resultGroups_smartbar.js"]
+
 ["test_result_highlights.js"]
 
 ["test_richsuggestions.js"]
 
 ["test_richsuggestions_order.js"]
+
+["test_searchEngineStore.js"]
 
 ["test_search_engine_restyle.js"]
 

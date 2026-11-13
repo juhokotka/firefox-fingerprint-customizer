@@ -12,10 +12,9 @@ import {
   UrlbarProvider,
   UrlbarUtils,
 } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   ExtensionSearchHandler:
     "resource://gre/modules/ExtensionSearchHandler.sys.mjs",
 
@@ -35,10 +34,10 @@ export class UrlbarProviderOmnibox extends UrlbarProvider {
   }
 
   /**
-   * @returns {Values<typeof UrlbarUtils.PROVIDER_TYPE>}
+   * @returns {Values<typeof lazy.UrlbarShared.PROVIDER_TYPE>}
    */
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.HEURISTIC;
+    return lazy.UrlbarShared.PROVIDER_TYPE.HEURISTIC;
   }
 
   /**
@@ -107,12 +106,12 @@ export class UrlbarProviderOmnibox extends UrlbarProvider {
         title: description,
         content: queryContext.searchString,
         keyword: queryContext.tokens[0].value,
-        icon: UrlbarUtils.ICON.EXTENSION,
+        icon: lazy.UrlbarShared.ICON.EXTENSION,
       },
       highlights: {
-        title: UrlbarUtils.HIGHLIGHT.TYPED,
-        content: UrlbarUtils.HIGHLIGHT.TYPED,
-        keyword: UrlbarUtils.HIGHLIGHT.TYPED,
+        title: lazy.UrlbarShared.HIGHLIGHT.TYPED,
+        content: lazy.UrlbarShared.HIGHLIGHT.TYPED,
+        keyword: lazy.UrlbarShared.HIGHLIGHT.TYPED,
       },
     });
     addCallback(this, heuristicResult);
@@ -142,12 +141,12 @@ export class UrlbarProviderOmnibox extends UrlbarProvider {
               content,
               keyword: queryContext.tokens[0].value,
               isBlockable: suggestion.deletable,
-              icon: UrlbarUtils.ICON.EXTENSION,
+              icon: lazy.UrlbarShared.ICON.EXTENSION,
             },
             highlights: {
-              title: UrlbarUtils.HIGHLIGHT.TYPED,
-              content: UrlbarUtils.HIGHLIGHT.TYPED,
-              keyword: UrlbarUtils.HIGHLIGHT.TYPED,
+              title: lazy.UrlbarShared.HIGHLIGHT.TYPED,
+              content: lazy.UrlbarShared.HIGHLIGHT.TYPED,
+              keyword: lazy.UrlbarShared.HIGHLIGHT.TYPED,
             },
           });
           addCallback(this, result);
@@ -167,6 +166,11 @@ export class UrlbarProviderOmnibox extends UrlbarProvider {
     );
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   */
   onEngagement(queryContext, controller, details) {
     let { result } = details;
     if (details.selType == "dismiss" && result.payload.isBlockable) {

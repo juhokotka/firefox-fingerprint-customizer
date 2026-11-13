@@ -4,7 +4,7 @@ https://creativecommons.org/publicdomain/zero/1.0/ */
 "use strict";
 
 ChromeUtils.defineESModuleGetters(this, {
-  BackupError: "resource:///modules/backup/BackupError.mjs",
+  BackupError: "moz-src:///browser/components/backup/BackupError.mjs",
   ERRORS: "chrome://browser/content/backup/backup-constants.mjs",
   RESTORE_STEPS: "chrome://browser/content/backup/backup-constants.mjs",
   AppConstants: "resource://gre/modules/AppConstants.sys.mjs",
@@ -92,7 +92,7 @@ add_task(async function testResourceFailure() {
     "createBackupTestRecoveredProfile"
   );
 
-  await bs.getBackupFileInfo(backupFilePath);
+  await bs.loadBackupFileInfo(backupFilePath);
   const restoreID = bs.state.restoreID;
 
   await Assert.rejects(

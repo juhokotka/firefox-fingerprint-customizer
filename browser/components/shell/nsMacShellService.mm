@@ -10,7 +10,6 @@
 #include "nsIContent.h"
 #include "nsICookieJarSettings.h"
 #include "nsIObserverService.h"
-#include "nsIWebBrowserPersist.h"
 #include "nsMacShellService.h"
 #include "nsIProperties.h"
 #include "nsServiceManagerUtils.h"
@@ -20,16 +19,17 @@
 #include "nsIDocShell.h"
 #include "nsILoadContext.h"
 #include "nsIPrefService.h"
-#include "mozilla/dom/Element.h"
 #include "mozilla/dom/ReferrerInfo.h"
 #include "DesktopBackgroundImage.h"
 
 #include <Carbon/Carbon.h>
+#include <CoreFoundation/CFArray.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <ApplicationServices/ApplicationServices.h>
 
 #import <AppKit/AppKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <ServiceManagement/ServiceManagement.h>
 
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/Promise.h"
@@ -37,7 +37,6 @@
 #include "nsThreadUtils.h"
 #include "xpcpublic.h"
 
-using mozilla::dom::Element;
 using mozilla::widget::SetDesktopImage;
 
 #define NETWORK_PREFPANE "/System/Library/PreferencePanes/Network.prefPane"_ns
@@ -47,8 +46,8 @@ using mozilla::widget::SetDesktopImage;
 
 #define SAFARI_BUNDLE_IDENTIFIER "com.apple.Safari"
 
-NS_IMPL_ISUPPORTS(nsMacShellService, nsIMacShellService, nsIShellService,
-                  nsIToolkitShellService, nsIWebProgressListener)
+NS_IMPL_ISUPPORTS_INHERITED(nsMacShellService, nsShellService, nsIShellService,
+                            nsIMacShellService)
 
 NS_IMETHODIMP
 nsMacShellService::IsDefaultBrowser(bool aForAllTypes,
@@ -77,24 +76,47 @@ nsMacShellService::IsDefaultBrowser(bool aForAllTypes,
 }
 
 NS_IMETHODIMP
+nsMacShellService::IsDefaultBrowserAsync(bool aForAllTypes, JSContext* aContext,
+                                         mozilla::dom::Promise** _retval) {
+  return nsShellService::IsDefaultBrowserAsync(aForAllTypes, aContext, _retval);
+}
+
+NS_IMETHODIMP
 nsMacShellService::SetDefaultBrowser(bool aForAllUsers) {
   // Note: We don't support aForAllUsers on Mac OS X.
 
-  CFStringRef firefoxID = ::CFBundleGetIdentifier(::CFBundleGetMainBundle());
-  if (!firefoxID) {
-    return NS_ERROR_FAILURE;
-  }
+  if (@available(macOS 27.0, *)) {
+    // macOS 27 raises a separate prompt for each LSSetDefault* call below
+    // resulting in multiple default browser change confirmation prompts.
+    // The NSWorkspace API, which avoids this problem, is available on macOS
+    // 12+, but limit its use here to macOS 27+ for now to be conservative.
+    // We only set the default application for the http URL scheme.
+    // Empirically, that has been shown to set the default browser and the
+    // default handler for https/http schemes and html files.
+    NSURL* appURL = [[NSBundle mainBundle] bundleURL];
+    if (!appURL) {
+      return NS_ERROR_FAILURE;
+    }
+    [[NSWorkspace sharedWorkspace] setDefaultApplicationAtURL:appURL
+                                         toOpenURLsWithScheme:@"http"
+                                            completionHandler:nil];
+  } else {
+    CFStringRef firefoxID = ::CFBundleGetIdentifier(::CFBundleGetMainBundle());
+    if (!firefoxID) {
+      return NS_ERROR_FAILURE;
+    }
 
-  if (::LSSetDefaultHandlerForURLScheme(CFSTR("http"), firefoxID) != noErr) {
-    return NS_ERROR_FAILURE;
-  }
-  if (::LSSetDefaultHandlerForURLScheme(CFSTR("https"), firefoxID) != noErr) {
-    return NS_ERROR_FAILURE;
-  }
+    if (::LSSetDefaultHandlerForURLScheme(CFSTR("http"), firefoxID) != noErr) {
+      return NS_ERROR_FAILURE;
+    }
+    if (::LSSetDefaultHandlerForURLScheme(CFSTR("https"), firefoxID) != noErr) {
+      return NS_ERROR_FAILURE;
+    }
 
-  if (::LSSetDefaultRoleHandlerForContentType(kUTTypeHTML, kLSRolesAll,
-                                              firefoxID) != noErr) {
-    return NS_ERROR_FAILURE;
+    if (::LSSetDefaultRoleHandlerForContentType(kUTTypeHTML, kLSRolesAll,
+                                                firefoxID) != noErr) {
+      return NS_ERROR_FAILURE;
+    }
   }
 
   nsCOMPtr<nsIPrefBranch> prefs(do_GetService(NS_PREFSERVICE_CONTRACTID));
@@ -109,123 +131,16 @@ nsMacShellService::SetDefaultBrowser(bool aForAllUsers) {
 }
 
 NS_IMETHODIMP
-nsMacShellService::SetDesktopBackground(Element* aElement, int32_t aPosition,
-                                        const nsACString& aImageName) {
+nsMacShellService::SetDesktopBackgroundFile(nsIFile* aFile, int32_t aPosition) {
   // Note: We don't support aPosition on OS X.
+  (void)aPosition;
 
-  // Get the image URI:
-  nsresult rv;
-  nsCOMPtr<nsIImageLoadingContent> imageContent =
-      do_QueryInterface(aElement, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-  nsCOMPtr<nsIURI> imageURI;
-  rv = imageContent->GetCurrentURI(getter_AddRefs(imageURI));
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIObserverService> os(
+      do_GetService("@mozilla.org/observer-service;1"));
+  if (os)
+    os->NotifyObservers(nullptr, "shell:desktop-background-changed", nullptr);
 
-  nsIURI* docURI = aElement->OwnerDoc()->GetDocumentURI();
-  if (!docURI) return NS_ERROR_FAILURE;
-
-  nsCOMPtr<nsIProperties> fileLocator(
-      do_GetService("@mozilla.org/file/directory_service;1", &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Get the current user's "Pictures" folder (That's ~/Pictures):
-  fileLocator->Get(NS_OSX_PICTURE_DOCUMENTS_DIR, NS_GET_IID(nsIFile),
-                   getter_AddRefs(mBackgroundFile));
-  if (!mBackgroundFile) return NS_ERROR_OUT_OF_MEMORY;
-
-  nsAutoString fileNameUnicode;
-  CopyUTF8toUTF16(aImageName, fileNameUnicode);
-
-  // and add the imgage file name itself:
-  mBackgroundFile->Append(fileNameUnicode);
-
-  // Download the image; the desktop background will be set in OnStateChange()
-  nsCOMPtr<nsIWebBrowserPersist> wbp(do_CreateInstance(
-      "@mozilla.org/embedding/browser/nsWebBrowserPersist;1", &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  uint32_t flags = nsIWebBrowserPersist::PERSIST_FLAGS_NO_CONVERSION |
-                   nsIWebBrowserPersist::PERSIST_FLAGS_REPLACE_EXISTING_FILES |
-                   nsIWebBrowserPersist::PERSIST_FLAGS_FROM_CACHE;
-
-  wbp->SetPersistFlags(flags);
-  wbp->SetProgressListener(this);
-
-  nsCOMPtr<nsILoadContext> loadContext;
-  nsCOMPtr<nsISupports> container = aElement->OwnerDoc()->GetContainer();
-  nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(container);
-  if (docShell) {
-    loadContext = do_QueryInterface(docShell);
-  }
-
-  auto referrerInfo =
-      mozilla::MakeRefPtr<mozilla::dom::ReferrerInfo>(*aElement);
-
-  nsCOMPtr<nsICookieJarSettings> cookieJarSettings =
-      aElement->OwnerDoc()->CookieJarSettings();
-  return wbp->SaveURI(imageURI, aElement->NodePrincipal(), 0, referrerInfo,
-                      cookieJarSettings, nullptr, nullptr, mBackgroundFile,
-                      nsIContentPolicy::TYPE_IMAGE,
-                      loadContext->UsePrivateBrowsing());
-}
-
-NS_IMETHODIMP
-nsMacShellService::OnProgressChange(nsIWebProgress* aWebProgress,
-                                    nsIRequest* aRequest,
-                                    int32_t aCurSelfProgress,
-                                    int32_t aMaxSelfProgress,
-                                    int32_t aCurTotalProgress,
-                                    int32_t aMaxTotalProgress) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsMacShellService::OnLocationChange(nsIWebProgress* aWebProgress,
-                                    nsIRequest* aRequest, nsIURI* aLocation,
-                                    uint32_t aFlags) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsMacShellService::OnStatusChange(nsIWebProgress* aWebProgress,
-                                  nsIRequest* aRequest, nsresult aStatus,
-                                  const char16_t* aMessage) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsMacShellService::OnSecurityChange(nsIWebProgress* aWebProgress,
-                                    nsIRequest* aRequest, uint32_t aState) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsMacShellService::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
-                                          nsIRequest* aRequest,
-                                          uint32_t aEvent) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsMacShellService::OnStateChange(nsIWebProgress* aWebProgress,
-                                 nsIRequest* aRequest, uint32_t aStateFlags,
-                                 nsresult aStatus) {
-  if (NS_SUCCEEDED(aStatus) && (aStateFlags & STATE_STOP) &&
-      (aRequest == nullptr)) {
-    nsCOMPtr<nsIObserverService> os(
-        do_GetService("@mozilla.org/observer-service;1"));
-    if (os)
-      os->NotifyObservers(nullptr, "shell:desktop-background-changed", nullptr);
-
-    bool exists = false;
-    nsresult rv = mBackgroundFile->Exists(&exists);
-    if (NS_FAILED(rv) || !exists) {
-      return NS_OK;
-    }
-
-    SetDesktopImage(mBackgroundFile);
-  }
+  SetDesktopImage(aFile);
 
   return NS_OK;
 }
@@ -528,5 +443,133 @@ nsMacShellService::IsDefaultHandlerAWebBrowserFor(
     }
   }
 
+  return NS_OK;
+}
+
+// For OS versions >= 13.0 we use the newest available API (SMAppService)
+// but for earlier OS versions we use the old LSSharedFileList API which was
+// deprecated in 10.11 but was still working up to version 12 (indeed it
+// still works in 26.0). The API that wasn't deprecated between 10.11 and 12
+// is much more complex and requires a helper application so using this older
+// API felt like an ok trade off for versions before 13.
+static bool EnableLaunchOnLoginBefore13() {
+  LSSharedFileListRef loginItemsListRef = LSSharedFileListCreate(
+      nullptr, kLSSharedFileListSessionLoginItems, nullptr);
+  if (!loginItemsListRef) {
+    return false;
+  }
+  NSURL* bundleURL = [[NSBundle mainBundle] bundleURL];
+
+  LSSharedFileListItemRef itemRef;
+  itemRef = LSSharedFileListInsertItemURL(
+      loginItemsListRef, kLSSharedFileListItemLast, nullptr, nullptr,
+      (__bridge CFURLRef)bundleURL, nullptr, nullptr);
+
+  CFRelease(loginItemsListRef);
+
+  if (itemRef) {
+    CFRelease(itemRef);
+  } else {
+    return false;
+  }
+
+  return true;
+}
+
+NS_IMETHODIMP
+nsMacShellService::EnableLaunchOnLogin(bool* aResult) {
+  if (@available(macOS 13.0, *)) {
+    *aResult = [[SMAppService mainAppService] registerAndReturnError:nil];
+  } else {
+    *aResult = EnableLaunchOnLoginBefore13();
+  }
+
+  return NS_OK;
+}
+
+#define kLSSharesFileListEmptyOptions 0
+
+/**
+ *
+ * Find the bundle in the Login Items shared file list and
+ * maybe remove it. Returns true if it was found (and removed).
+ *
+ * @param {bool} alsoRemove - Whether the item should be removed
+ * when it is found.
+ *
+ * @returns {bool}
+ *          Whether item was found in the Login Items.
+ */
+static bool FindAndMaybeRemoveBundleBefore13(bool aAlsoRemove) {
+  LSSharedFileListRef loginItemsListRef = LSSharedFileListCreate(
+      nullptr, kLSSharedFileListSessionLoginItems, nullptr);
+  if (!loginItemsListRef) {
+    return false;
+  }
+
+  CFArrayRef snapshot =
+      LSSharedFileListCopySnapshot(loginItemsListRef, nullptr);
+  if (!snapshot) {
+    CFRelease(loginItemsListRef);
+    return false;
+  }
+
+  NSArray* loginItems = (NSArray*)snapshot;
+  NSURL* bundleURL = [[NSBundle mainBundle] bundleURL];
+
+  bool found = false;
+
+  for (id item in loginItems) {
+    // itemRef doesn't need released as it is owned by snapshot
+    LSSharedFileListItemRef itemRef = (LSSharedFileListItemRef)item;
+    CFURLRef itemURLRef;
+
+    itemURLRef = LSSharedFileListItemCopyResolvedURL(
+        itemRef, kLSSharesFileListEmptyOptions, nullptr);
+    if (!itemURLRef) {
+      continue;
+    }
+
+    NSURL* itemURL = (NSURL*)itemURLRef;
+
+    if ([itemURL isEqual:bundleURL]) {
+      if (aAlsoRemove) {
+        LSSharedFileListItemRemove(loginItemsListRef, itemRef);
+      }
+
+      found = true;
+    }
+
+    CFRelease(itemURLRef);
+
+    if (found) {
+      break;
+    }
+  }
+
+  CFRelease(snapshot);
+  CFRelease(loginItemsListRef);
+
+  return found;
+}
+
+NS_IMETHODIMP
+nsMacShellService::DisableLaunchOnLogin(bool* aResult) {
+  if (@available(macOS 13.0, *)) {
+    *aResult = [[SMAppService mainAppService] unregisterAndReturnError:nil];
+  } else {
+    *aResult = FindAndMaybeRemoveBundleBefore13(true);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsMacShellService::GetLaunchOnLoginEnabled(bool* aResult) {
+  if (@available(macOS 13.0, *)) {
+    SMAppServiceStatus status = [[SMAppService mainAppService] status];
+    *aResult = (status == SMAppServiceStatusEnabled);
+  } else {
+    *aResult = FindAndMaybeRemoveBundleBefore13(false);
+  }
   return NS_OK;
 }

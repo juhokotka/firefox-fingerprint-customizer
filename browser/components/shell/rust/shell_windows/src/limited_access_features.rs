@@ -97,7 +97,7 @@ use xpcom::{
 };
 
 #[xpcom(implement(nsILimitedAccessFeature), nonatomic)]
-struct LimitedAccessFeature {
+pub struct LimitedAccessFeature {
     feature_id: String,
     token: String,
     attestation: String,
@@ -146,28 +146,37 @@ impl LimitedAccessFeature {
 pub struct LimitedAccessFeatureService {}
 
 impl LimitedAccessFeatureService {
-    xpcom_method!(get_taskbar_pin_feature_id => GetTaskbarPinFeatureId() -> nsACString);
-    pub fn get_taskbar_pin_feature_id(&self) -> Result<nsCString, nsresult> {
-        Ok(nsCString::from("com.microsoft.windows.taskbar.pin"))
+    pub fn new() -> RefPtr<Self> {
+        Self::allocate(InitLimitedAccessFeatureService {})
     }
 
-    xpcom_method!(generate_limited_access_feature => GenerateLimitedAccessFeature(featureId: *const nsACString) -> *const nsILimitedAccessFeature);
     pub fn generate_limited_access_feature(
         &self,
         feature_id: &nsACString,
-    ) -> Result<RefPtr<nsILimitedAccessFeature>, nsresult> {
+    ) -> Result<RefPtr<LimitedAccessFeature>, nsresult> {
         let (family_name, publisher_id) = get_package_identity()?;
         let token = generate_token(&feature_id.to_utf8(), &family_name)
             .inspect_err(|e| log::error!("Error generating feature token: {e:?}"))?;
         let attestation = generate_attestation(&feature_id.to_utf8(), &publisher_id);
 
-        let feature = LimitedAccessFeature::allocate(InitLimitedAccessFeature {
+        Ok(LimitedAccessFeature::allocate(InitLimitedAccessFeature {
             feature_id: feature_id.to_utf8().into(),
             token,
-            attestation: attestation,
-        });
+            attestation,
+        }))
+    }
 
-        feature
+    xpcom_method!(get_taskbar_pin_feature_id => GetTaskbarPinFeatureId() -> nsACString);
+    pub fn get_taskbar_pin_feature_id(&self) -> Result<nsCString, nsresult> {
+        Ok(nsCString::from("com.microsoft.windows.taskbar.pin"))
+    }
+
+    xpcom_method!(generate_xpcom_limited_access_feature => GenerateLimitedAccessFeature(featureId: *const nsACString) -> *const nsILimitedAccessFeature);
+    fn generate_xpcom_limited_access_feature(
+        &self,
+        feature_id: &nsACString,
+    ) -> Result<RefPtr<nsILimitedAccessFeature>, nsresult> {
+        self.generate_limited_access_feature(feature_id)?
             .query_interface::<nsILimitedAccessFeature>()
             .ok_or(NS_ERROR_UNEXPECTED)
     }
@@ -292,7 +301,7 @@ pub extern "C" fn new_limited_access_feature_service(
     iid: *const xpcom::nsIID,
     result: *mut *mut xpcom::reexports::libc::c_void,
 ) -> nsresult {
-    let service = LimitedAccessFeatureService::allocate(InitLimitedAccessFeatureService {});
+    let service = LimitedAccessFeatureService::new();
     // SAFETY: The caller is responsible to pass a valid IID and pointer-to-pointer.
     unsafe { service.QueryInterface(iid, result) }
 }

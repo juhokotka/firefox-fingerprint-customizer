@@ -5,23 +5,20 @@
 package org.mozilla.fenix.webcompat.di
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.serialization.json.Json
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.service.nimbus.NimbusApi
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.webcompat.WebCompatState
+import org.mozilla.fenix.webcompat.DefaultGleanBrokenSiteReportSender
 import org.mozilla.fenix.webcompat.middleware.DefaultNimbusExperimentsProvider
 import org.mozilla.fenix.webcompat.middleware.DefaultWebCompatReporterRetrievalService
-import org.mozilla.fenix.webcompat.middleware.WebCompatInfoDeserializer
 import org.mozilla.fenix.webcompat.middleware.WebCompatReporterNavigationMiddleware
 import org.mozilla.fenix.webcompat.middleware.WebCompatReporterStorageMiddleware
 import org.mozilla.fenix.webcompat.middleware.WebCompatReporterSubmissionMiddleware
 import org.mozilla.fenix.webcompat.middleware.WebCompatReporterTelemetryMiddleware
 
-/**
- * Provides middleware for the WebCompat Reporter store.
- */
+/** Provides middleware for the WebCompat Reporter store. */
 object WebCompatReporterMiddlewareProvider {
 
     /**
@@ -37,57 +34,41 @@ object WebCompatReporterMiddlewareProvider {
         appStore: AppStore,
         scope: CoroutineScope,
         nimbusApi: NimbusApi,
-    ) = listOf(
-        provideStorageMiddleware(appStore),
-        provideSubmissionMiddleware(
-            appStore = appStore,
-            browserStore = browserStore,
-            webCompatInfoDeserializer = provideWebCompatInfoDeserializer(),
-            scope = scope,
-            nimbusApi = nimbusApi,
-        ),
-        provideNavigationMiddleware(),
-        provideTelemetryMiddleware(),
-    )
+    ) =
+        listOf(
+            provideStorageMiddleware(appStore),
+            provideSubmissionMiddleware(
+                appStore = appStore,
+                browserStore = browserStore,
+                scope = scope,
+                nimbusApi = nimbusApi,
+            ),
+            provideNavigationMiddleware(),
+            provideTelemetryMiddleware(),
+        )
 
-    private fun provideStorageMiddleware(
-        appStore: AppStore,
-    ) = WebCompatReporterStorageMiddleware(
-        appStore = appStore,
-    )
+    private fun provideStorageMiddleware(appStore: AppStore) = WebCompatReporterStorageMiddleware(appStore = appStore)
 
     private fun provideSubmissionMiddleware(
         appStore: AppStore,
         browserStore: BrowserStore,
-        webCompatInfoDeserializer: WebCompatInfoDeserializer,
         scope: CoroutineScope,
         nimbusApi: NimbusApi,
     ): WebCompatReporterSubmissionMiddleware {
-        val webCompatReporterRetrievalService = DefaultWebCompatReporterRetrievalService(
-            browserStore = browserStore,
-            webCompatInfoDeserializer = webCompatInfoDeserializer,
-        )
+        val webCompatReporterRetrievalService = DefaultWebCompatReporterRetrievalService(browserStore = browserStore)
+
+        val gleanBrokenSiteReportSender = DefaultGleanBrokenSiteReportSender(browserStore = browserStore)
 
         return WebCompatReporterSubmissionMiddleware(
             appStore = appStore,
             webCompatReporterRetrievalService = webCompatReporterRetrievalService,
+            gleanBrokenSiteReportSender = gleanBrokenSiteReportSender,
             scope = scope,
             nimbusExperimentsProvider = DefaultNimbusExperimentsProvider(nimbusApi),
         )
     }
 
-    private fun provideNavigationMiddleware() =
-        WebCompatReporterNavigationMiddleware()
+    private fun provideNavigationMiddleware() = WebCompatReporterNavigationMiddleware()
 
-    private fun provideTelemetryMiddleware() =
-        WebCompatReporterTelemetryMiddleware()
-
-    private val json by lazy {
-        Json {
-            ignoreUnknownKeys = true
-            useAlternativeNames = false
-        }
-    }
-
-    internal fun provideWebCompatInfoDeserializer() = WebCompatInfoDeserializer(json = json)
+    private fun provideTelemetryMiddleware() = WebCompatReporterTelemetryMiddleware()
 }

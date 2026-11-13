@@ -4,11 +4,14 @@
 
 #include <initializer_list>
 
+#include "jit/BaselineDebugModeOSR.h"
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
 #include "jit/MacroAssembler.h"
+#include "jit/SharedICRegisters.h"
 #include "vm/JitActivation.h"
 #include "vm/JSContext.h"
+#include "vm/Stack.h"  // js::ResumeFrameArgs
 
 #include "jit/MacroAssembler-inl.h"
 
@@ -374,4 +377,128 @@ void JitRuntime::generateEnterJitShared(MacroAssembler& masm, Register argcReg,
   // Push the callee token.
   masm.push(calleeTokenReg);
 }
+
+void JitRuntime::generateEnterJitResumeShared(MacroAssembler& masm,
+                                              Register argvReg,
+                                              Register calleeTokenReg,
+                                              Register scratch,
+                                              Register scratch2) {
+  // Preconditions:
+  // - argvReg points at the ResumeFrameArgs Values.
+  // - calleeTokenReg holds the callee token, still tagged (a function for a
+  //   generator/async callee, or a script for a top-level-await module).
+  //
+  // Postconditions:
+  // - the resume frame has been pushed: for a function frame the formals
+  //   (|undefined|; dead on resume) and |this|; for a module frame nothing.
+  //   The resume args are pushed outside that argument region (after the
+  //   formals for functions, above the frame layout for modules).
+  // - the callee token and the resume frame descriptor have been pushed.
+  //
+  // This matches the frame built by BaselineCodeGen::emit_Resume.
+
+  auto pushResumeArgs = [&]() {
+    // Push from the last slot to the first, to preserve their order.
+    for (uint32_t slot = ResumeFrameArgs::NumSlots; slot > 0; slot--) {
+      masm.pushValue(Address(argvReg, ResumeFrameArgs::offsetOfSlot(slot - 1)));
+    }
+  };
+
+  // The stack alignment below requires a Value-aligned stack. On 64-bit this is
+  // guaranteed because the C++ entry only pushes words, but on 32-bit it can
+  // leave sp word-aligned, so round down there.
+  if constexpr (sizeof(uintptr_t) < sizeof(Value)) {
+    masm.andToStackPtr(Imm32(~(int32_t(sizeof(Value)) - 1)));
+  }
+
+  Label module, frameDone;
+  masm.branchTestPtr(Assembler::NonZero, calleeTokenReg,
+                     Imm32(CalleeTokenScriptBit), &module);
+  {
+    Register fun = scratch;
+    masm.movePtr(calleeTokenReg, fun);
+    masm.andPtr(Imm32(uint32_t(CalleeTokenMask)), fun);
+
+    Register nformals = scratch2;
+    masm.loadFunctionArgCount(fun, nformals);
+    masm.alignJitStackBasedOnNArgs(nformals, /* countIncludesThis = */ false,
+                                   /* extraArgs = */ ResumeFrameArgs::NumSlots);
+
+    pushResumeArgs();
+
+    // Push |undefined| for the formals and for |this|. Because |this| is also
+    // pushed, we count down to -1 so we always push at least one Value.
+    Label formalLoop;
+    masm.bind(&formalLoop);
+    masm.pushValue(UndefinedValue());
+    masm.branchSub32(Assembler::NotSigned, Imm32(1), nformals, &formalLoop);
+
+    masm.jump(&frameDone);
+  }
+  masm.bind(&module);
+  {
+    // Module frame (top-level await): the resume args are the only Values
+    // pushed, there's no |this| or arguments.
+    masm.alignJitStackBasedOnNumValues(ResumeFrameArgs::NumSlots);
+    pushResumeArgs();
+  }
+  masm.bind(&frameDone);
+
+  masm.push(calleeTokenReg);
+  masm.push(FrameDescriptor(FrameType::CppToJSJit, /* argc = */ 0,
+                            /* hasInlinedICScript = */ false,
+                            /* isResumingGenerator = */ true));
+}
 #endif  // !JS_CODEGEN_ARM64
+
+void JitRuntime::generateBaselineDebugModeOSRHandler(MacroAssembler& masm) {
+  AutoCreatedBy acb(masm, "JitRuntime::generateBaselineDebugModeOSRHandler");
+
+  baselineDebugModeOSRHandlerOffset_ = startTrampolineCode(masm);
+
+  LiveRegisterSet regs(RegisterSet::Volatile());
+  masm.PushRegsInMask(regs);
+
+  AllocatableGeneralRegisterSet scratchRegs(GeneralRegisterSet::Volatile());
+  Register returnAddress = scratchRegs.takeAny();
+  Register baselineFrame = scratchRegs.takeAny();
+  Register scratch = scratchRegs.takeAny();
+
+#ifdef JS_HW_SHADOW_STACK
+  // The patched call from the DebugModeOSR return site to the per-script
+  // epilogue pushes a return address entry through which we never return.
+  masm.addToShadowStackPtr(Imm32(sizeof(uintptr_t)), scratch);
+#endif
+
+  const size_t registerDumpSize =
+      MacroAssembler::PushRegsInMaskSizeInBytes(regs);
+  MOZ_ASSERT(registerDumpSize <= INT32_MAX);
+  // The per-script epilogue leaves the patched call's return address here.
+  Address resumeAddrSlot(masm.getStackPointer(), int32_t(registerDumpSize));
+
+  masm.loadPtr(resumeAddrSlot, returnAddress);
+  // The DebugModeOSRReturnSite address is before the patched call.
+  masm.subPtr(Imm32(Assembler::PatchWrite_NearCallSize()), returnAddress);
+  masm.loadBaselineFramePtr(FramePointer, baselineFrame);
+
+  using Fn = uint8_t* (*)(BaselineFrame*, const uint8_t*);
+  masm.setupUnalignedABICall(scratch);
+  masm.passABIArg(baselineFrame);
+  masm.passABIArg(returnAddress);
+  masm.callWithABI<Fn, BaselineDebugModeOSRResumeAddr>();
+
+  masm.storePtr(ReturnReg, resumeAddrSlot);
+  masm.PopRegsInMask(regs);
+
+#ifdef JS_CODEGEN_X86
+  // ABINonArgReturnVolatileReg holds the Baseline return value's tag on x86.
+  constexpr Register resumeAddress = ICStubReg;
+#else
+  constexpr Register resumeAddress = ABINonArgReturnVolatileReg;
+#endif
+  static_assert(resumeAddress != ReturnReg &&
+                resumeAddress != JSReturnReg_Type &&
+                resumeAddress != JSReturnReg_Data);
+  masm.pop(resumeAddress);
+  masm.jump(resumeAddress);
+}

@@ -27,8 +27,17 @@ function makeConversation({
     securityProperties.setUntrustedInput();
   }
   securityProperties.commit();
+  const pendingBrowserActionTelemetry = new Map();
   return {
     securityProperties,
+    stashPendingBrowserActionTelemetry(toolCallId, telemetryInfo) {
+      pendingBrowserActionTelemetry.set(toolCallId, telemetryInfo);
+    },
+    takePendingBrowserActionTelemetry(toolCallId) {
+      const info = pendingBrowserActionTelemetry.get(toolCallId);
+      pendingBrowserActionTelemetry.delete(toolCallId);
+      return info;
+    },
     serpUrlsForAnonymousFetch: new Set(),
     addSeenUrls() {},
     async addHistoryResults() {},
@@ -91,4 +100,30 @@ async function insertPlacesMetadata(
       }
     );
   });
+}
+
+function createFakeTab(url, title, lastAccessed) {
+  return {
+    linkedBrowser: {
+      currentURI: {
+        spec: url,
+      },
+    },
+    label: title,
+    lastAccessed,
+  };
+}
+
+function createFakeWindow(tabs, closed = false, isAIWindow = true) {
+  return {
+    closed,
+    gBrowser: {
+      tabs,
+    },
+    document: {
+      documentElement: {
+        hasAttribute: attr => attr === "ai-window" && isAIWindow,
+      },
+    },
+  };
 }

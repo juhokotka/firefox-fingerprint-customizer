@@ -32,8 +32,8 @@ private const val REVIEW_PROMPT_SHOWN_NIMBUS_EVENT_ID = "review_prompt_shown"
  * @param disableCustomPrompt Update settings to disable the custom prompt UI.
  * @param createJexlHelper Returns a helper for evaluating JEXL expressions.
  * @param buildTriggerMainCriteria Builds a sequence of trigger's main criteria that all need to be true.
- * @param buildTriggerSubCriteria Builds a sequence of trigger's sub-criteria.
- * Only one of these needs to be true (in addition to the main criteria).
+ * @param buildTriggerSubCriteria Builds a sequence of trigger's sub-criteria. Only one of these needs to be true (in
+ *   addition to the main criteria).
  * @param nimbusEventStore [NimbusEventStore] used to record events evaluated in JEXL expressions.
  */
 class ReviewPromptMiddleware(
@@ -85,25 +85,30 @@ class ReviewPromptMiddleware(
     }
 
     private fun handleReviewPromptCheck(store: Store<AppState, AppAction>) {
-        // We shouldn't show the review prompt if continuous onboarding is in progress.
-        if (continuousOnboardingInProgress()) {
-            return
-        }
-
         if (store.state.reviewPrompt != ReviewPromptState.Unknown) {
             // We only want to try to show it once to avoid unnecessary disk reads.
             return
         }
 
-        val shouldShowPrompt: Boolean = createJexlHelper().use { jexlHelper ->
-            val allMainCriteriaSatisfied = buildTriggerMainCriteria(jexlHelper).all { it }
-            if (!allMainCriteriaSatisfied) {
-                return@use false
-            }
-
-            val atLeastOneOfSubCriteriaSatisfied = buildTriggerSubCriteria(jexlHelper).any { it }
-            return@use atLeastOneOfSubCriteriaSatisfied
+        // We shouldn't show the review prompt if continuous onboarding is in progress. This check runs on every
+        // HomeFragment.onStart(), and continuous onboarding can complete while its last stage is still on screen, so
+        // set the state to not eligible instead of leaving it unknown.
+        // The state lives as long as the app process, so the prompt is only re-evaluated on the next cold start.
+        if (continuousOnboardingInProgress()) {
+            store.dispatch(DoNotShowReviewPrompt)
+            return
         }
+
+        val shouldShowPrompt: Boolean =
+            createJexlHelper().use { jexlHelper ->
+                val allMainCriteriaSatisfied = buildTriggerMainCriteria(jexlHelper).all { it }
+                if (!allMainCriteriaSatisfied) {
+                    return@use false
+                }
+
+                val atLeastOneOfSubCriteriaSatisfied = buildTriggerSubCriteria(jexlHelper).any { it }
+                return@use atLeastOneOfSubCriteriaSatisfied
+            }
 
         if (shouldShowPrompt) {
             if (shouldShowCustomPrompt()) {
@@ -117,39 +122,32 @@ class ReviewPromptMiddleware(
     }
 
     private fun handleReviewPromptShown() {
-        nimbusEventStore.recordEventOrThrow(eventId = REVIEW_PROMPT_SHOWN_NIMBUS_EVENT_ID)
-            .invokeOnCompletion { cause ->
-                when (cause) {
-                    null -> recordResult("success")
-                    is CancellationException -> recordResult("cancelled")
-                    else -> {
-                        // Failed.
-                        disableCustomPrompt()
-                        recordResult("error")
-                    }
+        nimbusEventStore.recordEventOrThrow(eventId = REVIEW_PROMPT_SHOWN_NIMBUS_EVENT_ID).invokeOnCompletion { cause ->
+            when (cause) {
+                null -> recordResult("success")
+                is CancellationException -> recordResult("cancelled")
+                else -> {
+                    // Failed.
+                    disableCustomPrompt()
+                    recordResult("error")
                 }
             }
+        }
     }
 
-    /**
-     * Send telemetry for a result of [NimbusEventStore.recordEventOrThrow].
-     */
+    /** Send telemetry for a result of [NimbusEventStore.recordEventOrThrow]. */
     private fun recordResult(result: String) {
-        CustomReviewPrompt.nimbusEventRecorded.record(
-            CustomReviewPrompt.NimbusEventRecordedExtra(result),
-        )
+        CustomReviewPrompt.nimbusEventRecorded.record(CustomReviewPrompt.NimbusEventRecordedExtra(result))
         CustomReviewPrompt.recordNimbusEventAttempts[result].add(1)
     }
 }
 
 /**
- * Checks that the prompt hasn't been shown in the last 4 months
- * to avoid hitting the Play In-App Review API quota.
+ * Checks that the prompt hasn't been shown in the last 4 months to avoid hitting the Play In-App Review API quota.
  *
- * Implementation note:
- * A month is tracked in Nimbus as a 28-day bucket, so converting it to 4 weeks doesn't change the semantics.
- * Because of how buckets are advanced, using a monthly bucket can be almost an entire month off, so using weeks
- * gives us better precision (means we might wait for 4 months and almost a week, instead of almost 5 months).
+ * Implementation note: A month is tracked in Nimbus as a 28-day bucket, so converting it to 4 weeks doesn't change the
+ * semantics. Because of how buckets are advanced, using a monthly bucket can be almost an entire month off, so using
+ * weeks gives us better precision (means we might wait for 4 months and almost a week, instead of almost 5 months).
  * This is why I opted for 16 weeks instead of 4 months.
  *
  * See:
@@ -173,8 +171,6 @@ internal fun isDefaultBrowser(jexlHelper: NimbusMessagingHelperInterface) =
  * Note: Because Nimbus limits data to 4 calendar years, this will ignore app opens before then.
  */
 @VisibleForTesting
-internal fun hasBeenOpenedSeveralTimes(
-    jexlHelper: NimbusMessagingHelperInterface,
-): Boolean {
+internal fun hasBeenOpenedSeveralTimes(jexlHelper: NimbusMessagingHelperInterface): Boolean {
     return jexlHelper.evalJexlSafe("'app_opened'|eventSum('Years', 4, 0) >= 5")
 }

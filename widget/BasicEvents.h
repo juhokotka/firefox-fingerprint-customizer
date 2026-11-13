@@ -7,16 +7,16 @@
 
 #include <stdint.h>
 
+#include "Units.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/layers/LayersTypes.h"
-#include "nsCOMPtr.h"
 #include "nsAtom.h"
+#include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
 #include "nsIWidget.h"
 #include "nsString.h"
-#include "Units.h"
 
 #ifdef DEBUG
 #  include "nsXULAppAPI.h"

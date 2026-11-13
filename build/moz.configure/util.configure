@@ -85,6 +85,16 @@ def normsep(path):
     return mozpath.normsep(path)
 
 
+def normalize_path_list_entry(path):
+    """Normalize a path: forward slashes, uppercase drive letter, trailing slash."""
+    path = normsep(path)
+    if len(path) > 1 and path[1] == ":":
+        path = path[0].upper() + path[1:]
+    if path and not path.endswith("/"):
+        path += "/"
+    return path
+
+
 @imports("ctypes")
 @imports(_from="ctypes", _import="wintypes")
 @imports(_from="mozbuild.configure.constants", _import="WindowsBinaryType")
@@ -224,7 +234,7 @@ def find_program(file, paths=None, allow_spaces=False):
     if paths:
         if not isinstance(paths, (list, tuple)):
             die(
-                "Paths provided to find_program must be a list of strings, " "not %r",
+                "Paths provided to find_program must be a list of strings, not %r",
                 paths,
             )
         paths = pathsep.join(paths)
@@ -273,7 +283,7 @@ def try_invoke_compiler(
             return configure_cache[compiler_path][key]
 
     if not isinstance(flags, (list, tuple)):
-        die("Flags provided to try_compile must be a list of strings, " "not %r", flags)
+        die("Flags provided to try_compile must be a list of strings, not %r", flags)
 
     suffix = {
         "C": ".c",

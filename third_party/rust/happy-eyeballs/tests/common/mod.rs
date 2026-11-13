@@ -7,8 +7,8 @@ use std::{
 
 use happy_eyeballs::{
     CONNECTION_ATTEMPT_DELAY, ConnectionAttemptHttpVersions, ConnectionResult, DnsRecordType,
-    DnsResult, EchConfig, Endpoint, HappyEyeballs, HttpVersion, Id, Input, NetworkConfig, Output,
-    RESOLUTION_DELAY, ServiceInfo,
+    DnsResult, EchConfig, Endpoint, EndpointTarget, HappyEyeballs, HttpVersion, Id, Input,
+    NetworkConfig, Output, RESOLUTION_DELAY, ServiceInfo,
 };
 
 pub const HOSTNAME: &str = "example.com";
@@ -139,6 +139,7 @@ pub fn in_dns_https_positive(id: Id) -> Input {
             HOSTNAME,
             &[HttpVersion::H3, HttpVersion::H2],
         )])),
+        stale: false,
     }
 }
 
@@ -148,6 +149,7 @@ pub fn in_dns_https_positive_ech(id: Id) -> Input {
         result: DnsResult::Https(Ok(vec![
             service_info(1, HOSTNAME, &[HttpVersion::H3, HttpVersion::H2]).ech(),
         ])),
+        stale: false,
     }
 }
 
@@ -155,6 +157,7 @@ pub fn in_dns_https_positive_no_alpn(id: Id) -> Input {
     Input::DnsResult {
         id,
         result: DnsResult::Https(Ok(vec![service_info(1, HOSTNAME, &[])])),
+        stale: false,
     }
 }
 
@@ -166,11 +169,24 @@ fn in_dns_https_with_hints(id: Id, ipv4_hints: Vec<Ipv4Addr>, ipv6_hints: Vec<Ip
                 .ipv4_hints(ipv4_hints)
                 .ipv6_hints(ipv6_hints),
         ])),
+        stale: false,
     }
 }
 
 pub fn in_dns_https_positive_v6_hints(id: Id) -> Input {
     in_dns_https_with_hints(id, vec![], vec![V6_ADDR])
+}
+
+/// HTTPS record for the origin advertising only HTTP/1.1 (the "https" scheme
+/// default ALPN) with a single IPv6 address hint.
+pub fn in_dns_https_v6_hint_h1(id: Id) -> Input {
+    Input::DnsResult {
+        id,
+        result: DnsResult::Https(Ok(vec![
+            service_info(1, HOSTNAME, &[HttpVersion::H1]).ipv6_hints(vec![V6_ADDR]),
+        ])),
+        stale: false,
+    }
 }
 
 pub fn in_dns_https_positive_v4_hints(id: Id) -> Input {
@@ -187,6 +203,7 @@ pub fn in_dns_https_positive_svc1(id: Id) -> Input {
         result: DnsResult::Https(Ok(vec![
             service_info(1, SVC1, &[HttpVersion::H3, HttpVersion::H2]).ipv6_hints(vec![V6_ADDR_2]),
         ])),
+        stale: false,
     }
 }
 
@@ -194,6 +211,19 @@ pub fn in_dns_https_negative(id: Id) -> Input {
     Input::DnsResult {
         id,
         result: DnsResult::Https(Err(())),
+        stale: false,
+    }
+}
+
+/// An HTTPS answer with an IPv6 hint, served from a stale (expired) cache entry.
+pub fn in_dns_https_stale_v6_hints(id: Id) -> Input {
+    Input::DnsResult {
+        id,
+        result: DnsResult::Https(Ok(vec![
+            service_info(1, HOSTNAME, &[HttpVersion::H3, HttpVersion::H2])
+                .ipv6_hints(vec![V6_ADDR]),
+        ])),
+        stale: true,
     }
 }
 
@@ -201,6 +231,17 @@ pub fn in_dns_aaaa_positive(id: Id) -> Input {
     Input::DnsResult {
         id,
         result: DnsResult::Aaaa(Ok(vec![V6_ADDR])),
+        stale: false,
+    }
+}
+
+/// A positive AAAA answer the resolver served from a stale (expired) cache
+/// entry, as under Optimistic DNS.
+pub fn in_dns_aaaa_stale(id: Id) -> Input {
+    Input::DnsResult {
+        id,
+        result: DnsResult::Aaaa(Ok(vec![V6_ADDR])),
+        stale: true,
     }
 }
 
@@ -208,6 +249,17 @@ pub fn in_dns_a_positive(id: Id) -> Input {
     Input::DnsResult {
         id,
         result: DnsResult::A(Ok(vec![V4_ADDR])),
+        stale: false,
+    }
+}
+
+/// A positive A answer the resolver served from a stale (expired) cache entry,
+/// as under Optimistic DNS.
+pub fn in_dns_a_stale(id: Id) -> Input {
+    Input::DnsResult {
+        id,
+        result: DnsResult::A(Ok(vec![V4_ADDR])),
+        stale: true,
     }
 }
 
@@ -215,6 +267,27 @@ pub fn in_dns_aaaa_negative(id: Id) -> Input {
     Input::DnsResult {
         id,
         result: DnsResult::Aaaa(Err(())),
+        stale: false,
+    }
+}
+
+/// A positive but empty AAAA answer (`Ok(vec![])`): the resolver returned no
+/// IPv6 addresses. Distinct from a negative answer (`Err`).
+pub fn in_dns_aaaa_empty(id: Id) -> Input {
+    Input::DnsResult {
+        id,
+        result: DnsResult::Aaaa(Ok(vec![])),
+        stale: false,
+    }
+}
+
+/// A positive but empty A answer (`Ok(vec![])`): the resolver returned no IPv4
+/// addresses. Distinct from a negative answer (`Err`).
+pub fn in_dns_a_empty(id: Id) -> Input {
+    Input::DnsResult {
+        id,
+        result: DnsResult::A(Ok(vec![])),
+        stale: false,
     }
 }
 
@@ -222,6 +295,7 @@ pub fn in_dns_a_negative(id: Id) -> Input {
     Input::DnsResult {
         id,
         result: DnsResult::A(Err(())),
+        stale: false,
     }
 }
 
@@ -251,6 +325,18 @@ pub fn out_send_dns(id: Id, hostname: &str, record_type: DnsRecordType) -> Outpu
         id,
         hostname: hostname.into(),
         record_type,
+        allow_stale: true,
+    }
+}
+
+/// Expected refresh query: the follow-up that revalidates a stale answer, so it
+/// forbids a stale answer (`allow_stale: false`).
+pub fn out_send_dns_refresh(id: Id, hostname: &str, record_type: DnsRecordType) -> Output {
+    Output::SendDnsQuery {
+        id,
+        hostname: hostname.into(),
+        record_type,
+        allow_stale: false,
     }
 }
 
@@ -274,7 +360,7 @@ pub fn out_attempt_v6_h1_h2(id: Id) -> Output {
     Output::AttemptConnection {
         id,
         endpoint: Endpoint {
-            address: SocketAddr::new(V6_ADDR.into(), PORT),
+            target: EndpointTarget::Address(SocketAddr::new(V6_ADDR.into(), PORT)),
             http_version: ConnectionAttemptHttpVersions::H2OrH1,
             ech_config: None,
         },
@@ -286,7 +372,7 @@ pub fn out_attempt_v6_h2(id: Id) -> Output {
     Output::AttemptConnection {
         id,
         endpoint: Endpoint {
-            address: SocketAddr::new(V6_ADDR.into(), PORT),
+            target: EndpointTarget::Address(SocketAddr::new(V6_ADDR.into(), PORT)),
             http_version: ConnectionAttemptHttpVersions::H2,
             ech_config: None,
         },
@@ -298,7 +384,7 @@ pub fn out_attempt_v6_h3(id: Id) -> Output {
     Output::AttemptConnection {
         id,
         endpoint: Endpoint {
-            address: SocketAddr::new(V6_ADDR.into(), PORT),
+            target: EndpointTarget::Address(SocketAddr::new(V6_ADDR.into(), PORT)),
             http_version: ConnectionAttemptHttpVersions::H3,
             ech_config: None,
         },
@@ -310,7 +396,7 @@ pub fn out_attempt_v6_h3_custom_port(id: Id) -> Output {
     Output::AttemptConnection {
         id,
         endpoint: Endpoint {
-            address: SocketAddr::new(V6_ADDR.into(), CUSTOM_PORT),
+            target: EndpointTarget::Address(SocketAddr::new(V6_ADDR.into(), CUSTOM_PORT)),
             http_version: ConnectionAttemptHttpVersions::H3,
             ech_config: None,
         },
@@ -322,7 +408,7 @@ pub fn out_attempt_v4_h1_h2(id: Id) -> Output {
     Output::AttemptConnection {
         id,
         endpoint: Endpoint {
-            address: SocketAddr::new(V4_ADDR.into(), PORT),
+            target: EndpointTarget::Address(SocketAddr::new(V4_ADDR.into(), PORT)),
             http_version: ConnectionAttemptHttpVersions::H2OrH1,
             ech_config: None,
         },
@@ -334,7 +420,7 @@ pub fn out_attempt_v4_h2(id: Id) -> Output {
     Output::AttemptConnection {
         id,
         endpoint: Endpoint {
-            address: SocketAddr::new(V4_ADDR.into(), PORT),
+            target: EndpointTarget::Address(SocketAddr::new(V4_ADDR.into(), PORT)),
             http_version: ConnectionAttemptHttpVersions::H2,
             ech_config: None,
         },
@@ -346,7 +432,7 @@ pub fn out_attempt_v4_h3(id: Id) -> Output {
     Output::AttemptConnection {
         id,
         endpoint: Endpoint {
-            address: SocketAddr::new(V4_ADDR.into(), PORT),
+            target: EndpointTarget::Address(SocketAddr::new(V4_ADDR.into(), PORT)),
             http_version: ConnectionAttemptHttpVersions::H3,
             ech_config: None,
         },
@@ -358,7 +444,7 @@ pub fn out_attempt_v4_h3_custom_port(id: Id) -> Output {
     Output::AttemptConnection {
         id,
         endpoint: Endpoint {
-            address: SocketAddr::new(V4_ADDR.into(), CUSTOM_PORT),
+            target: EndpointTarget::Address(SocketAddr::new(V4_ADDR.into(), CUSTOM_PORT)),
             http_version: ConnectionAttemptHttpVersions::H3,
             ech_config: None,
         },
@@ -370,7 +456,7 @@ pub fn out_attempt_v6_h2_custom_port(id: Id) -> Output {
     Output::AttemptConnection {
         id,
         endpoint: Endpoint {
-            address: SocketAddr::new(V6_ADDR.into(), CUSTOM_PORT),
+            target: EndpointTarget::Address(SocketAddr::new(V6_ADDR.into(), CUSTOM_PORT)),
             http_version: ConnectionAttemptHttpVersions::H2,
             ech_config: None,
         },
@@ -382,7 +468,7 @@ pub fn out_attempt_v4_h2_custom_port(id: Id) -> Output {
     Output::AttemptConnection {
         id,
         endpoint: Endpoint {
-            address: SocketAddr::new(V4_ADDR.into(), CUSTOM_PORT),
+            target: EndpointTarget::Address(SocketAddr::new(V4_ADDR.into(), CUSTOM_PORT)),
             http_version: ConnectionAttemptHttpVersions::H2,
             ech_config: None,
         },
@@ -399,7 +485,7 @@ pub fn out_attempt(
     Output::AttemptConnection {
         id,
         endpoint: Endpoint {
-            address: SocketAddr::new(addr, port),
+            target: EndpointTarget::Address(SocketAddr::new(addr, port)),
             http_version,
             ech_config: None,
         },

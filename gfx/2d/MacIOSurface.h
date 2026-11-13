@@ -10,9 +10,9 @@
 #  include <QuartzCore/QuartzCore.h>
 #  include <dlfcn.h>
 
-#  include "mozilla/gfx/Types.h"
-#  include "mozilla/Maybe.h"
 #  include "CFTypeRefPtr.h"
+#  include "mozilla/Maybe.h"
+#  include "mozilla/gfx/Types.h"
 
 namespace mozilla {
 namespace gl {

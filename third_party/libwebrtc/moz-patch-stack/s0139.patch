@@ -1,22 +1,21 @@
-From: Byron Campen <docfaraday@gmail.com>
-Date: Tue, 26 May 2026 18:03:00 -0500
-Subject: Bug 2040478 - (fix-834ea60925) Add missing std namespace r?mjf
+From: Nico Grunbaum <ngrunbaum@mozilla.com>
+Date: Mon, 15 Jun 2026 11:02:00 -0700
+Subject: Bug 2047265 - (fix-0751415722) disable rtc_rust
 
-Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/89a59f60370f6df6f89b2d03eb7c8d4be7aac1c7
+Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/b4df73705cf0855de2938aadaef93e12b1a3b153
 ---
- rtc_base/ssl_stream_adapter.h | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
+ .gn | 1 +
+ 1 file changed, 1 insertion(+)
 
-diff --git a/rtc_base/ssl_stream_adapter.h b/rtc_base/ssl_stream_adapter.h
-index 00fd5f2da9..22a854e3d3 100644
---- a/rtc_base/ssl_stream_adapter.h
-+++ b/rtc_base/ssl_stream_adapter.h
-@@ -129,7 +129,7 @@ class SSLStreamAdapter : public StreamInterface {
-   static std::unique_ptr<SSLStreamAdapter> Create(
-       std::unique_ptr<StreamInterface> stream,
-       absl::AnyInvocable<void(SSLHandshakeError)> handshake_error,
--      nullptr_t /*field_trials*/) {
-+      std::nullptr_t /*field_trials*/) {
-     return Create(std::move(stream), std::move(handshake_error));
-   }
+diff --git a/.gn b/.gn
+index 0b8c216ad5..41d0ada2cf 100644
+--- a/.gn
++++ b/.gn
+@@ -94,6 +94,7 @@ default_args = {
+   enable_rust = false # Mozilla
+   enable_rust_cxx = true
+   enable_chromium_prelude = true
++  rtc_rust = false
  
+   # See context on https://issues.chromium.org/issues/415076048.
+   enable_js_protobuf = false

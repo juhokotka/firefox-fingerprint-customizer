@@ -5,10 +5,10 @@
 #include "UrlClassifierFeatureEmailTrackingProtection.h"
 
 #include "mozilla/AntiTrackingUtils.h"
-#include "mozilla/net/ChannelClassifierUtils.h"
-#include "mozilla/net/UrlClassifierCommon.h"
 #include "mozilla/ScopedPrefs.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/net/ChannelClassifierUtils.h"
+#include "mozilla/net/UrlClassifierCommon.h"
 #include "nsIChannel.h"
 #include "nsILoadContext.h"
 #include "nsIWebProgressListener.h"

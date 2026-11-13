@@ -11,10 +11,13 @@ var { AppConstants } = ChromeUtils.importESModule(
   "resource://gre/modules/AppConstants.sys.mjs"
 );
 
-var { uploadProfileArtifact, installProfilerDumpAndQuit } =
-  ChromeUtils.importESModule(
-    "resource://testing-common/TestProfilerArtifact.sys.mjs"
-  );
+var {
+  uploadProfileArtifact,
+  installProfilerDumpAndQuit,
+  shouldSaveFailureProfile,
+} = ChromeUtils.importESModule(
+  "resource://testing-common/TestProfilerArtifact.sys.mjs"
+);
 
 ChromeUtils.defineESModuleGetters(this, {
   AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
@@ -54,7 +57,13 @@ const SIMPLETEST_OVERRIDES = [
   "info",
   "expectAssertions",
   "requestCompleteLog",
+  "registerCleanupFunction",
 ];
+
+// An uncaught error with one of these names, from any process, fails the
+// running test. Currently this is only the accesskey check by menupopup and
+// panel-list code.
+const FAILING_UNCAUGHT_ERROR_NAMES = ["AccessKeyConflictError"];
 
 setTimeout(testInit, 0);
 
@@ -229,6 +238,46 @@ function isGenerator(value) {
   return value && typeof value === "object" && typeof value.next === "function";
 }
 
+/**
+ * Returns a description of an element that is precise enough to find it in the
+ * tree without having to reproduce the failure.
+ *
+ * To be shared with ClickChecks.js and the assertion functions, see bug 2063601.
+ */
+function describeElement(elt) {
+  let desc = elt.localName;
+  if (elt.id) {
+    desc += "#" + elt.id;
+  } else {
+    // Elements without an id are usually generated ones (bookmark folders,
+    // extension menus...), so name whatever else can be used to find them.
+    if (elt.classList.length) {
+      desc += "." + [...elt.classList].join(".");
+    }
+    let label = elt.getAttribute("label") || elt.getAttribute("aria-label");
+    if (label) {
+      desc += `[label="${label}"]`;
+    }
+    let container = elt.parentElement.closest("[id]");
+    if (container) {
+      desc += " inside #" + container.id;
+    }
+  }
+
+  // A panel hosting notifications or several views is only an anchor shared by
+  // unrelated features, so what it currently shows is what identifies it.
+  let contents = [
+    ...elt.querySelectorAll(
+      "popupnotification:not([hidden]), panelview[visible]"
+    ),
+  ];
+  if (contents.length) {
+    desc += " showing " + contents.map(n => describeElement(n)).join(", ");
+  }
+
+  return desc;
+}
+
 function Tester(aTests, structuredLogger, aCallback) {
   this.structuredLogger = structuredLogger;
   this.tests = aTests;
@@ -304,6 +353,15 @@ function Tester(aTests, structuredLogger, aCallback) {
   window.SpecialPowers.SimpleTest = this.SimpleTest;
   window.SpecialPowers.setAsDefaultAssertHandler();
 
+  // In the EventUtils scope, as EventUtils reaches for this.ClickChecks to
+  // suppress the checks for synthesized clicks, and AccessibilityUtils reads
+  // its popup helpers at load time.
+  this._scriptLoader.loadSubScript(
+    "chrome://mochikit/content/tests/SimpleTest/ClickChecks.js",
+    this.EventUtils
+  );
+  this.ClickChecks = this.EventUtils.ClickChecks;
+
   this._scriptLoader.loadSubScript(
     "chrome://mochikit/content/tests/SimpleTest/AccessibilityUtils.js",
     // AccessibilityUtils are integrated with EventUtils to perform additional
@@ -313,6 +371,10 @@ function Tester(aTests, structuredLogger, aCallback) {
   );
   this.AccessibilityUtils = this.EventUtils.AccessibilityUtils;
 
+  // Before AccessibilityUtils, so that its check runs, and reports, first: the
+  // accessibility checks force refresh driver ticks, which can let a popup
+  // finish opening before we look at its state.
+  this.ClickChecks.init(this.SimpleTest);
   this.AccessibilityUtils.init(this.SimpleTest);
 
   var extensionUtilsScope = {
@@ -400,6 +462,7 @@ function Tester(aTests, structuredLogger, aCallback) {
 Tester.prototype = {
   EventUtils: {},
   AccessibilityUtils: {},
+  ClickChecks: {},
   SimpleTest: {},
   ContentTask: null,
   ExtensionTestUtils: null,
@@ -455,8 +518,6 @@ Tester.prototype = {
       "constructor",
       "top",
       "Application",
-      "__SS_tabsToRestore",
-      "__SSi",
       "webConsoleCommandController",
       // Thunderbird
       "MailMigrator",
@@ -527,6 +588,70 @@ Tester.prototype = {
     }
     // graphics test window is already gone, just call callback immediately
     aCallback();
+  },
+
+  // Tests shouldn't leave panels or menupopups open: the next test file would
+  // then start with an unexpected popup covering the browser, and get blamed for
+  // the failures it causes. Called before the vsync check so that it waits for
+  // the closing animation of the popups we hide here.
+  async checkForOpenPopups() {
+    if (AppConstants.MOZ_APP_NAME == "thunderbird") {
+      return;
+    }
+
+    this.currentTest.addResult(new testMessage("checking for open popups"));
+
+    // Popups that open on hover close on a timer once the mouse has moved off
+    // them. 'mousecancel' synthesizes the pointer vanishing from the top level
+    // window, which ends the hover without starting a new one anywhere; the
+    // coordinates are unused for this event type.
+    this.EventUtils.synthesizeMouseAtPoint(
+      0,
+      0,
+      { type: "mousecancel" },
+      window
+    );
+
+    // Sticky hover panels stay in the 'open' state for a few ms after the
+    // mousecancel above, so wait rather than fail on a popup that isn't closed.
+    let openPopups = [];
+    try {
+      await this.TestUtils.waitForCondition(() => {
+        openPopups = [...document.querySelectorAll("menupopup,panel")].filter(
+          popup => popup.state != "closed"
+        );
+        return !openPopups.length;
+      }, "waiting for popups to close");
+    } catch (e) {
+      if (!openPopups.length) {
+        // waitForCondition also rejects when the condition function throws, in
+        // which case openPopups is empty and nothing else would be reported.
+        console.error(e);
+        this.currentTest.addResult(
+          new testResult({
+            name: "Failed to check for open popups: " + e,
+            allowFailure: this.currentTest.allowFailure,
+          })
+        );
+      }
+
+      // A popup the test actually leaked has nothing pending to close it, so it
+      // is still in the list the condition built on its last run. Reporting that
+      // list rather than querying again avoids missing a popup that closed
+      // between then and the timeout.
+      let msg = this.currentTest.timedOut
+        ? "Found a popup after previous test timed out"
+        : "Found an unexpected popup at the end of test run";
+      for (let popup of openPopups) {
+        this.currentTest.addResult(
+          new testResult({
+            name: msg + ": " + describeElement(popup),
+            allowFailure: this.currentTest.allowFailure,
+          })
+        );
+        popup.hidePopup();
+      }
+    }
   },
 
   checkWindowsState: function Tester_checkWindowsState() {
@@ -646,6 +771,49 @@ Tester.prototype = {
     }
   },
 
+  // The harness only collects the data the leak check needs on some build
+  // configurations; elsewhere neither the teardown below nor the collections
+  // have anything to report to.
+  get _shouldCheckForLeaks() {
+    return (
+      AppConstants.RELEASE_OR_BETA ||
+      AppConstants.DEBUG ||
+      AppConstants.MOZ_CODE_COVERAGE ||
+      AppConstants.ASAN ||
+      AppConstants.TSAN
+    );
+  },
+
+  // Releases the frames and browsers intentionally kept alive until shutdown.
+  _releaseResourcesKeptAliveUntilShutdown() {
+    if (gConfig.testRoot != "browser") {
+      return;
+    }
+
+    // Skip if SeaMonkey
+    if (AppConstants.MOZ_APP_NAME != "seamonkey") {
+      // Replace the document currently loaded in the browser's sidebar.
+      // This will prevent false positives for tests that were the last
+      // to touch the sidebar. They will thus not be blamed for leaking
+      // a document.
+      let sidebar = document.getElementById("sidebar");
+      if (sidebar) {
+        sidebar.setAttribute("src", "about:blank");
+        sidebar.docShell?.createAboutBlankDocumentViewer(null, null);
+      }
+    }
+
+    // Destroy BackgroundPageThumbs resources.
+    let { BackgroundPageThumbs } = ChromeUtils.importESModule(
+      "resource://gre/modules/BackgroundPageThumbs.sys.mjs"
+    );
+    BackgroundPageThumbs._destroy();
+
+    if (window.gBrowser) {
+      NewTabPagePreloading.removePreloadedBrowser(window);
+    }
+  },
+
   _shutdownCleanup(aCallback) {
     let start = ChromeUtils.now();
     Cu.schedulePreciseShrinkingGC(() => {
@@ -660,6 +828,19 @@ Tester.prototype = {
       });
       aCallback();
     });
+  },
+
+  // Runs the collections that reclaim what the tests and
+  // _releaseResourcesKeptAliveUntilShutdown released, then reports what
+  // survived them.
+  async _collectAndCheckForLeakedWindows(excludeCurrentTest = false) {
+    await new Promise(resolve => this._shutdownCleanup(resolve));
+    // The first round of collections leaves what it released behind as garbage
+    // cycles that only the next round reclaims.
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => this._shutdownCleanup(resolve));
+
+    await this._checkForLeakedWindows(excludeCurrentTest);
   },
 
   async _checkForLeakedWindows(excludeCurrentTest = false) {
@@ -696,6 +877,7 @@ Tester.prototype = {
     DOMWindowTracker.destroy();
     Services.console.unregisterListener(this);
 
+    this.ClickChecks.uninit();
     this.AccessibilityUtils.uninit();
 
     // It's important to terminate the module to avoid crashes on shutdown.
@@ -751,6 +933,21 @@ Tester.prototype = {
     try {
       var msg = "Console message: " + aConsoleMessage.message;
       if (this.currentTest) {
+        if (
+          aConsoleMessage instanceof Ci.nsIScriptError &&
+          FAILING_UNCAUGHT_ERROR_NAMES.some(name =>
+            aConsoleMessage.errorMessage.startsWith(`${name}:`)
+          )
+        ) {
+          this.currentTest.addResult(
+            new testResult({
+              name: msg,
+              pass: false,
+              allowFailure: this.currentTest.allowFailure,
+            })
+          );
+          return;
+        }
         this.currentTest.addResult(new testMessage(msg));
       } else {
         this.structuredLogger.info(
@@ -924,6 +1121,104 @@ Tester.prototype = {
     }
   },
 
+  _getAllPermissions() {
+    let perms = new Map();
+    for (let perm of Services.perms.all) {
+      perms.set(`${perm.principal.origin} ${perm.type}`, perm);
+    }
+    return perms;
+  },
+
+  // Permissions Gecko adds by itself in response to user interaction, page
+  // loads or storage access grants.
+  _isAutomaticPermission({ type, capability }) {
+    return (
+      [
+        "storageAccessAPI",
+        "highValueCOOP",
+        "highValueIsLoggedIn",
+        "highValueHasSavedLogin",
+      ].includes(type) ||
+      type.startsWith("3rdPartyStorage^") ||
+      type.startsWith("3rdPartyFrameStorage^") ||
+      (type == "https-only-load-insecure" &&
+        capability ==
+          Ci.nsIHttpsOnlyModePermission.HTTPSFIRST_LOAD_INSECURE_ALLOW)
+    );
+  },
+
+  async checkPermissionsAfterTest() {
+    await window.SpecialPowers.flushPermissions();
+
+    const describe = p =>
+      p
+        ? `capability ${p.capability}, expireType ${p.expireType}, expireTime ${p.expireTime}`
+        : "unset";
+    const isSame = (a, b) =>
+      a?.capability == b?.capability &&
+      a?.expireType == b?.expireType &&
+      a?.expireTime == b?.expireTime;
+    const isThunderbird = AppConstants.MOZ_APP_NAME == "thunderbird";
+    let base = this._basePermissions;
+    let current = this._getAllPermissions();
+    let changed = false;
+    for (let key of new Set([...base.keys(), ...current.keys()])) {
+      let before = base.get(key);
+      let after = current.get(key);
+      if (isSame(before, after)) {
+        continue;
+      }
+      let { principal, type } = after || before;
+      if (this._isAutomaticPermission(after || before)) {
+        if (before) {
+          Services.perms.addFromPrincipal(
+            principal,
+            type,
+            before.capability,
+            before.expireType,
+            before.expireTime
+          );
+        } else {
+          Services.perms.removeFromPrincipal(principal, type);
+        }
+        continue;
+      }
+      changed = true;
+      this.currentTest.addResult(
+        new testResult({
+          name: `test left a permission changed: ${type} for ${principal.origin} (was ${describe(before)}, now ${describe(after)})`,
+          // Thunderbird tests haven't been fixed yet, see bug 2081390.
+          pass: isThunderbird,
+          todo: isThunderbird,
+          allowFailure: this.currentTest.allowFailure,
+        })
+      );
+    }
+    if (!changed) {
+      return;
+    }
+    // Restoring permissions one by one would turn default permissions into
+    // stored ones, and EXPIRE_POLICY permissions can't be removed one by one.
+    // removeAll() clears everything and re-imports the defaults.
+    Services.perms.removeAll();
+    current = this._getAllPermissions();
+    for (let [key, perm] of base) {
+      if (isSame(perm, current.get(key))) {
+        continue;
+      }
+      Services.perms.addFromPrincipal(
+        perm.principal,
+        perm.type,
+        perm.capability,
+        perm.expireType,
+        perm.expireTime
+      );
+    }
+    // Default permissions added during the test (eg. by RemotePermissionService)
+    // are re-imported by removeAll(), don't report them again for the next test.
+    this._basePermissions = this._getAllPermissions();
+  },
+
   /**
    * In the event that a test module left any traces in Session Restore state,
    * clean those up so that each test module starts execution with the same
@@ -953,22 +1248,19 @@ Tester.prototype = {
     );
 
     // Forget closed tab groups in the test window.
-    const closedTabGroups = window.SessionStore.getClosedTabGroups(window);
+    const closedTabGroups = window.SessionStore.getClosedTabGroups({
+      sourceWindow: window,
+    });
     closedTabGroups.forEach(tabGroup =>
       window.SessionStore.forgetClosedTabGroup(window, tabGroup.id)
     );
   },
 
   async notifyProfilerOfTestEnd() {
-    // See if we should upload a profile of a failing test.
-    // If MOZ_PROFILER_SHUTDOWN is set, the profiler got started from --profiler
-    // and a profile will be shown even if there's no test failure.
-    if (
-      this.currentTest.failCount &&
-      Services.env.exists("MOZ_UPLOAD_DIR") &&
-      !Services.env.exists("MOZ_PROFILER_SHUTDOWN") &&
-      Services.profiler.IsActive()
-    ) {
+    // Upload a profile of a failing test, when one should be saved (e.g. not
+    // when --profiler already saves a shutdown profile; see
+    // shouldSaveFailureProfile).
+    if (this.currentTest.failCount && shouldSaveFailureProfile()) {
       await uploadProfileArtifact(this.currentTest.path, this.structuredLogger);
     }
   },
@@ -977,6 +1269,7 @@ Tester.prototype = {
     // On first call (no currentTest yet), check for initial window state issues
     if (!this.currentTest) {
       this.checkWindowsState();
+      this._basePermissions = this._getAllPermissions();
     } else {
       this.PerTestCoverageUtils.afterTestSync();
 
@@ -1000,6 +1293,9 @@ Tester.prototype = {
           );
         }
       }
+
+      // After the cleanup functions, which can still click things.
+      this.ClickChecks.forgetMouseDownState();
 
       // Ensure any sinon stubs and spies have been cleaned up before the next test.
       if (Cu.isESModuleLoaded("resource://testing-common/Sinon.sys.mjs")) {
@@ -1042,6 +1338,21 @@ Tester.prototype = {
         winUtils.restoreNormalRefresh();
       }
 
+      if (winUtils.isMouseDown) {
+        this.currentTest.addResult(
+          new testResult({
+            name:
+              "test left the mouse button pressed; synthesize a matching" +
+              " mouseup. While the mouse is down, moving or resizing a" +
+              " window suppresses drag and drop for the following tests.",
+            allowFailure: this.currentTest.allowFailure,
+          })
+        );
+        // Outside of the window, so that the mouseup only generates a click
+        // on the root element, if any.
+        window.synthesizeMouseEvent("mouseup", -10, -10);
+      }
+
       if (this.SimpleTest.isExpectingUncaughtException()) {
         this.currentTest.addResult(
           new testResult({
@@ -1060,6 +1371,8 @@ Tester.prototype = {
       this.PromiseTestUtils.ensureDOMPromiseRejectionsProcessed();
       this.PromiseTestUtils.assertNoUncaughtRejections();
       this.PromiseTestUtils.assertNoMoreExpectedRejections();
+      await this.checkForOpenPopups();
+
       await this.ensureVsyncDisabled();
 
       Object.keys(window).forEach(function (prop) {
@@ -1231,11 +1544,18 @@ Tester.prototype = {
       this.PromiseTestUtils.assertNoUncaughtRejections();
       this.PromiseTestUtils.clearAllowedUncaughtRejections();
 
-      await this.notifyProfilerOfTestEnd();
-
       // Check the window state before logging testEnd so that any cleanup
       // assertions are included in the test result, not logged after test_end.
+      // This has to happen before notifyProfilerOfTestEnd, which only saves a
+      // profile for a failing test: a test whose only failure is a stale tab or
+      // a leaked window would otherwise not have failed yet.
       this.checkWindowsState();
+
+      // After checkWindowsState, so that permissions changed by closing tabs or
+      // windows the test left open are attributed to this test.
+      await this.checkPermissionsAfterTest();
+
+      await this.notifyProfilerOfTestEnd();
 
       let time = Date.now() - this.lastStartTime;
 
@@ -1279,45 +1599,12 @@ Tester.prototype = {
     // Make sure the window is raised before starting the next test.
     this.SimpleTest.waitForFocus(() => {
       if (this.done) {
-        if (
-          !AppConstants.RELEASE_OR_BETA &&
-          !AppConstants.DEBUG &&
-          !AppConstants.MOZ_CODE_COVERAGE &&
-          !AppConstants.ASAN &&
-          !AppConstants.TSAN
-        ) {
+        if (!this._shouldCheckForLeaks) {
           this.finish();
           return;
         }
 
-        // Uninitialize a few things explicitly so that they can clean up
-        // frames and browser intentionally kept alive until shutdown to
-        // eliminate false positives.
-        if (gConfig.testRoot == "browser") {
-          // Skip if SeaMonkey
-          if (AppConstants.MOZ_APP_NAME != "seamonkey") {
-            // Replace the document currently loaded in the browser's sidebar.
-            // This will prevent false positives for tests that were the last
-            // to touch the sidebar. They will thus not be blamed for leaking
-            // a document.
-            let sidebar = document.getElementById("sidebar");
-            if (sidebar) {
-              sidebar.setAttribute("src", "data:text/html;charset=utf-8,");
-              sidebar.docShell.createAboutBlankDocumentViewer(null, null);
-              sidebar.setAttribute("src", "about:blank");
-            }
-          }
-
-          // Destroy BackgroundPageThumbs resources.
-          let { BackgroundPageThumbs } = ChromeUtils.importESModule(
-            "resource://gre/modules/BackgroundPageThumbs.sys.mjs"
-          );
-          BackgroundPageThumbs._destroy();
-
-          if (window.gBrowser) {
-            NewTabPagePreloading.removePreloadedBrowser(window);
-          }
-        }
+        this._releaseResourcesKeptAliveUntilShutdown();
 
         // Schedule GC and CC runs before finishing in order to detect
         // DOM windows leaked by our tests or the tested code. Note that we
@@ -1344,14 +1631,7 @@ Tester.prototype = {
         barrier.wait().then(() => {
           Services.ppmm.broadcastAsyncMessage("browser-test:collect-request");
 
-          this._shutdownCleanup(() => {
-            setTimeout(() => {
-              this._shutdownCleanup(async () => {
-                await this._checkForLeakedWindows();
-                this.finish();
-              });
-            }, 1000);
-          });
+          this._collectAndCheckForLeakedWindows().then(() => this.finish());
         });
 
         return;
@@ -1503,6 +1783,7 @@ Tester.prototype = {
 
     this.SimpleTest.reset();
     // Reset accessibility environment.
+    this.ClickChecks.reset();
     this.AccessibilityUtils.reset(this.a11y_checks, this.currentTest.path);
 
     // Load the tests into a testscope
@@ -1745,10 +2026,16 @@ Tester.prototype = {
                 "PASS",
                 "Test timed out"
               );
-              self._shutdownCleanup(async () => {
-                await self._checkForLeakedWindows(true);
-                self.finish();
-              });
+              // nextTest, which normally does these, doesn't run for a test
+              // that timed out. Its shutdown-leaks barrier is not repeated
+              // here: waiting on TabDestroyObserver can hang a session that
+              // has already timed out.
+              self.ClickChecks.forgetMouseDownState();
+              if (self._shouldCheckForLeaks) {
+                self._releaseResourcesKeptAliveUntilShutdown();
+                await self._collectAndCheckForLeakedWindows(true);
+              }
+              self.finish();
             }
           },
           gTimeoutSeconds * 1000,

@@ -2,15 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <arpa/inet.h>
+#include <dns_sd.h>
+#include <poll.h>
+
 #include "GetAddrInfo.h"
+#include "mozilla/StaticPrefs_network.h"
 #include "mozilla/glean/NetwerkMetrics.h"
 #include "mozilla/net/DNSPacket.h"
 #include "nsIDNSService.h"
-#include "mozilla/StaticPrefs_network.h"
-
-#include <dns_sd.h>
-#include <poll.h>
-#include <arpa/inet.h>
 
 namespace mozilla::net {
 
@@ -22,6 +22,8 @@ struct DNSContext {
   TypeRecordResultType* mResult;
   nsCString mHost;
   uint32_t* mTTL;
+  // Set to the TargetName when the response is an HTTPS AliasMode record.
+  nsCString mAliasName;
 };
 
 // Callback for DNSServiceQueryRecord
@@ -87,8 +89,8 @@ void QueryCallback(DNSServiceRef aSDRef, DNSServiceFlags aFlags,
     }
     LOG("alias mode %s -> %s", context->mHost.get(),
         parsed.mSvcDomainName.get());
-    context->mHost = parsed.mSvcDomainName;
-    ToLowerCase(context->mHost);
+    context->mAliasName = parsed.mSvcDomainName;
+    ToLowerCase(context->mAliasName);
     return;
   }
 
@@ -102,7 +104,8 @@ void QueryCallback(DNSServiceRef aSDRef, DNSServiceFlags aFlags,
 
 nsresult ResolveHTTPSRecordImpl(const nsACString& aHost,
                                 nsIDNSService::DNSFlags aFlags,
-                                TypeRecordResultType& aResult, uint32_t& aTTL) {
+                                TypeRecordResultType& aResult, uint32_t& aTTL,
+                                HTTPSAliasTarget& aAlias) {
   nsAutoCString host(aHost);
   nsAutoCString cname;
 
@@ -162,6 +165,14 @@ nsresult ResolveHTTPSRecordImpl(const nsACString& aHost,
     return context.mRv;
   }
   if (aResult.is<Nothing>()) {
+    if (!context.mAliasName.IsEmpty()) {
+      // The response was an HTTPS AliasMode record (intermediate CNAMEs are
+      // ignored by QueryCallback); hand the target back so the caller can
+      // issue a fresh lookup for it.
+      aAlias.mName = context.mAliasName;
+      aAlias.mFromAliasMode = true;
+      return NS_OK;
+    }
     // The call succeeded, but no HTTPS records were found.
     return NS_ERROR_UNKNOWN_HOST;
   }

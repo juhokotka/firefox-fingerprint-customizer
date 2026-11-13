@@ -33,6 +33,7 @@
 #include "gc/AllocKind.h"
 #include "gc/Barrier.h"
 #include "gc/GCEnum.h"
+#include "jit/InlinableNatives.h"
 #include "js/CallArgs.h"
 #include "js/CallNonGenericMethod.h"
 #include "js/Class.h"
@@ -524,18 +525,18 @@ static ZonedDateTimeObject* CreateTemporalZonedDateTime(
 
   // Step 4.
   auto epochNs = ToEpochNanoseconds(epochNanoseconds);
-  object->initFixedSlot(ZonedDateTimeObject::SECONDS_SLOT,
-                        NumberValue(epochNs.seconds));
-  object->initFixedSlot(ZonedDateTimeObject::NANOSECONDS_SLOT,
-                        Int32Value(epochNs.nanoseconds));
+  object->initFixedSlotTyped(ZonedDateTimeObject::SECONDS_SLOT,
+                             DoubleValue(epochNs.seconds));
+  object->initFixedSlotTyped(ZonedDateTimeObject::NANOSECONDS_SLOT,
+                             Int32Value(epochNs.nanoseconds));
 
   // Step 5.
-  object->initFixedSlot(ZonedDateTimeObject::TIMEZONE_SLOT,
-                        timeZone.toSlotValue());
+  object->initFixedSlotTyped(ZonedDateTimeObject::TIMEZONE_SLOT,
+                             timeZone.toSlotValue());
 
   // Step 6.
-  object->initFixedSlot(ZonedDateTimeObject::CALENDAR_SLOT,
-                        calendar.toSlotValue());
+  object->initFixedSlotTyped(ZonedDateTimeObject::CALENDAR_SLOT,
+                             calendar.toSlotValue());
 
   // Step 7.
   return object;
@@ -558,18 +559,18 @@ ZonedDateTimeObject* js::temporal::CreateTemporalZonedDateTime(
   }
 
   // Step 4.
-  object->initFixedSlot(ZonedDateTimeObject::SECONDS_SLOT,
-                        NumberValue(epochNanoseconds.seconds));
-  object->initFixedSlot(ZonedDateTimeObject::NANOSECONDS_SLOT,
-                        Int32Value(epochNanoseconds.nanoseconds));
+  object->initFixedSlotTyped(ZonedDateTimeObject::SECONDS_SLOT,
+                             DoubleValue(epochNanoseconds.seconds));
+  object->initFixedSlotTyped(ZonedDateTimeObject::NANOSECONDS_SLOT,
+                             Int32Value(epochNanoseconds.nanoseconds));
 
   // Step 5.
-  object->initFixedSlot(ZonedDateTimeObject::TIMEZONE_SLOT,
-                        timeZone.toSlotValue());
+  object->initFixedSlotTyped(ZonedDateTimeObject::TIMEZONE_SLOT,
+                             timeZone.toSlotValue());
 
   // Step 6.
-  object->initFixedSlot(ZonedDateTimeObject::CALENDAR_SLOT,
-                        calendar.toSlotValue());
+  object->initFixedSlotTyped(ZonedDateTimeObject::CALENDAR_SLOT,
+                             calendar.toSlotValue());
 
   // Step 7.
   return object;
@@ -3149,7 +3150,8 @@ static const JSPropertySpec ZonedDateTime_prototype_properties[] = {
     JS_PSG("millisecond", ZonedDateTime_millisecond, 0),
     JS_PSG("microsecond", ZonedDateTime_microsecond, 0),
     JS_PSG("nanosecond", ZonedDateTime_nanosecond, 0),
-    JS_PSG("epochMilliseconds", ZonedDateTime_epochMilliseconds, 0),
+    JS_INLINABLE_PSG("epochMilliseconds", ZonedDateTime_epochMilliseconds, 0,
+                     ZonedDateTimeEpochMilliseconds),
     JS_PSG("epochNanoseconds", ZonedDateTime_epochNanoseconds, 0),
     JS_PSG("dayOfWeek", ZonedDateTime_dayOfWeek, 0),
     JS_PSG("dayOfYear", ZonedDateTime_dayOfYear, 0),

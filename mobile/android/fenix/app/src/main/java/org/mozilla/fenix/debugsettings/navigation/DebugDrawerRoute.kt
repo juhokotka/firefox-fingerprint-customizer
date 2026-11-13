@@ -11,14 +11,16 @@ import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.concept.integrity.IntegrityClient
 import mozilla.components.concept.storage.CreditCardsAddressesStorage
 import mozilla.components.concept.storage.LoginsStorage
+import mozilla.components.feature.ipprotection.store.IPProtectionStore
+import mozilla.components.feature.listentopage.ListenStore
+import mozilla.components.feature.tabgroups.storage.repository.TabGroupRepository
 import org.mozilla.fenix.R
-import org.mozilla.fenix.components.AppStore
-import org.mozilla.fenix.components.ClientUUID
-import org.mozilla.fenix.components.appstate.AppAction
+import org.mozilla.fenix.components.ClientUuid
 import org.mozilla.fenix.debugsettings.addons.ui.AddonsDebugToolsScreen
 import org.mozilla.fenix.debugsettings.addresses.AddressesDebugRegionRepository
 import org.mozilla.fenix.debugsettings.addresses.AddressesTools
 import org.mozilla.fenix.debugsettings.autofill.AutofillTools
+import org.mozilla.fenix.debugsettings.cfrs.CfrTools as CfrToolsScreen
 import org.mozilla.fenix.debugsettings.cfrs.CfrToolsState
 import org.mozilla.fenix.debugsettings.cfrs.CfrToolsStore
 import org.mozilla.fenix.debugsettings.crashtools.CrashTools
@@ -27,30 +29,28 @@ import org.mozilla.fenix.debugsettings.distributions.DistributionTools
 import org.mozilla.fenix.debugsettings.gleandebugtools.GleanDebugToolsStore
 import org.mozilla.fenix.debugsettings.gleandebugtools.ui.GleanDebugToolsScreen
 import org.mozilla.fenix.debugsettings.integrity.IntegrityTools
+import org.mozilla.fenix.debugsettings.ipprotection.IPProtectionLocationTools as IPProtectionLocationToolsScreen
+import org.mozilla.fenix.debugsettings.listentopage.ListenToPageTools
 import org.mozilla.fenix.debugsettings.logins.LoginsTools
 import org.mozilla.fenix.debugsettings.region.RegionTools
 import org.mozilla.fenix.debugsettings.store.DebugDrawerAction
 import org.mozilla.fenix.debugsettings.store.DebugDrawerStore
 import org.mozilla.fenix.debugsettings.tabprocesstools.TabProcessTools
 import org.mozilla.fenix.debugsettings.tabs.TabGroupTools
-import org.mozilla.fenix.tabgroups.storage.repository.TabGroupRepository
-import org.mozilla.fenix.debugsettings.cfrs.CfrTools as CfrToolsScreen
 import org.mozilla.fenix.debugsettings.tabs.TabTools as TabToolsScreen
 
 /**
  * The navigation routes for screens within the Debug Drawer.
  *
- * @property route The unique route used to navigate to the destination. This string can also contain
- * optional parameters for arguments or deep linking.
+ * @property route The unique route used to navigate to the destination. This string can also contain optional
+ *   parameters for arguments or deep linking.
  * @property title The string ID of the destination's title.
  */
 enum class DebugDrawerRoute(
     val route: String,
     @param:StringRes val title: Int,
 ) {
-    /**
-     * The navigation route for [TabToolsScreen].
-     */
+    /** The navigation route for [TabToolsScreen]. */
     TabTools(
         route = "tab_tools",
         title = R.string.debug_drawer_tab_tools_title,
@@ -103,22 +103,24 @@ enum class DebugDrawerRoute(
         route = "tab_process_tools",
         title = R.string.debug_drawer_tab_process_tools_title,
     ),
-    SportsWidgetTool(
-        route = "sports_widget_tool",
-        title = R.string.debug_drawer_sports_widget_tool_title,
-    ),
     DistributionTools(
         route = "distribution_tools",
         title = R.string.debug_drawer_distribution_tools_title,
     ),
-    ;
+    IPProtectionLocationTools(
+        route = "ip_protection_location_tools",
+        title = R.string.debug_drawer_ip_protection_location_tools_title,
+    ),
+    ListenToPageTools(
+        route = "listen_to_page_tools",
+        title = R.string.debug_drawer_listen_to_page_tools_title,
+    );
 
     companion object {
         /**
          * Transforms the values of [DebugDrawerRoute] into a list of [DebugDrawerDestination]s.
          *
          * @param debugDrawerStore [DebugDrawerStore] used to dispatch navigation actions.
-         * @param appStore [AppStore] used to dispatch [AppAction] actions.
          * @param browserStore [BrowserStore] used to access [BrowserState].
          * @param cfrToolsStore [CfrToolsStore] used to access [CfrToolsState].
          * @param gleanDebugToolsStore [GleanDebugToolsStore] used to dispatch glean debug tools actions.
@@ -129,188 +131,195 @@ enum class DebugDrawerRoute(
          * @param integrityClient used to test an [IntegrityClient] in [IntegrityTools].
          * @param inactiveTabsEnabled Whether the inactive tabs feature is enabled.
          * @param tabGroupRepository [TabGroupRepository] used to access and modify tab groups for [TabGroupTools].
+         * @param lazyIPProtectionStore [IPProtectionStore] used to edit the country list in
+         *   [IPProtectionLocationToolsScreen]. Lazy so that opening the drawer does not build the store.
+         * @param listenStore Store for [ListenToPageTools]
          */
         @Suppress("LongParameterList", "LongMethod")
         fun generateDebugDrawerDestinations(
             debugDrawerStore: DebugDrawerStore,
-            appStore: AppStore,
             browserStore: BrowserStore,
             cfrToolsStore: CfrToolsStore,
             gleanDebugToolsStore: GleanDebugToolsStore,
             loginsStorage: LoginsStorage,
             addressesDebugRegionRepository: AddressesDebugRegionRepository,
             creditCardsAddressesStorage: CreditCardsAddressesStorage,
-            clientUUID: ClientUUID,
+            clientUUID: ClientUuid,
             integrityClient: IntegrityClient,
             inactiveTabsEnabled: Boolean,
             tabGroupRepository: TabGroupRepository,
-        ): List<DebugDrawerDestination> =
-            entries.map { debugDrawerRoute ->
-                var isChildDestination: Boolean = false
-                val onClick: () -> Unit
-                val content: @Composable () -> Unit
-                when (debugDrawerRoute) {
-                    TabTools -> {
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.TabTools)
-                        }
-                        content = {
-                            TabToolsScreen(
-                                store = browserStore,
-                                inactiveTabsEnabled = inactiveTabsEnabled,
-                            )
-                        }
+            lazyIPProtectionStore: Lazy<IPProtectionStore>,
+            listenStore: ListenStore,
+        ): List<DebugDrawerDestination> = entries.map { debugDrawerRoute ->
+            var isChildDestination: Boolean = false
+            val onClick: () -> Unit
+            val content: @Composable () -> Unit
+            when (debugDrawerRoute) {
+                TabTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.TabTools)
                     }
-
-                    Logins -> {
-                        isChildDestination = true
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.Logins)
-                        }
-                        content = {
-                            LoginsTools(
-                                browserStore = browserStore,
-                                loginsStorage = loginsStorage,
-                            )
-                        }
-                    }
-
-                    Addresses -> {
-                        isChildDestination = true
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.Addresses)
-                        }
-                        content = {
-                            AddressesTools(
-                                debugRegionRepository = addressesDebugRegionRepository,
-                                creditCardsAddressesStorage = creditCardsAddressesStorage,
-                            )
-                        }
-                    }
-
-                    CreditCards -> {
-                        isChildDestination = true
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.CreditCards)
-                        }
-                        content = {
-                            CreditCardsTools(
-                                creditCardsAddressesStorage = creditCardsAddressesStorage,
-                            )
-                        }
-                    }
-                    Autofill -> {
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.Autofill)
-                        }
-                        content = {
-                            AutofillTools(
-                                debugDrawerStore = debugDrawerStore,
-                            )
-                        }
-                    }
-
-                    CfrTools -> {
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.CfrTools)
-                        }
-                        content = {
-                            CfrToolsScreen(cfrToolsStore = cfrToolsStore)
-                        }
-                    }
-
-                    GleanDebugTools -> {
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.GleanDebugTools)
-                        }
-                        content = {
-                            GleanDebugToolsScreen(gleanDebugToolsStore = gleanDebugToolsStore)
-                        }
-                    }
-
-                    RegionDebugTools -> {
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.RegionDebugTools)
-                        }
-                        content = {
-                            RegionTools(
-                                browserStore = browserStore,
-                            )
-                        }
-                    }
-
-                    AddonsDebugTools -> {
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.AddonsDebugTools)
-                        }
-                        content = {
-                            AddonsDebugToolsScreen()
-                        }
-                    }
-
-                    CrashDebugTools -> {
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.CrashDebugTools)
-                        }
-                        content = {
-                            CrashTools()
-                        }
-                    }
-                    IntegrityTools -> {
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.IntegrityDebugTools)
-                        }
-                        content = {
-                            IntegrityTools(clientUUID, integrityClient)
-                        }
-                    }
-
-                    TabGroupTools -> {
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.TabGroupDebugTools)
-                        }
-                        content = {
-                            TabGroupTools(
-                                tabGroupRepository = tabGroupRepository,
-                                browserStore = browserStore,
-                            )
-                        }
-                    }
-
-                    TabProcessTools -> {
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.TabProcessTools)
-                        }
-                        content = {
-                            TabProcessTools()
-                        }
-                    }
-
-                    SportsWidgetTool -> {
-                        onClick = {
-                            appStore.dispatch(AppAction.SportsWidgetAction.DebugToolVisibilityChanged(visible = true))
-                            debugDrawerStore.dispatch(DebugDrawerAction.DrawerClosed)
-                        }
-                        content = {}
-                    }
-
-                    DistributionTools -> {
-                        onClick = {
-                            debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.DistributionTools)
-                        }
-                        content = {
-                            DistributionTools()
-                        }
+                    content = {
+                        TabToolsScreen(
+                            store = browserStore,
+                            inactiveTabsEnabled = inactiveTabsEnabled,
+                        )
                     }
                 }
 
-                DebugDrawerDestination(
-                    route = debugDrawerRoute.route,
-                    title = debugDrawerRoute.title,
-                    isChildDestination = isChildDestination,
-                    onClick = onClick,
-                    content = content,
-                )
+                Logins -> {
+                    isChildDestination = true
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.Logins)
+                    }
+                    content = {
+                        LoginsTools(
+                            browserStore = browserStore,
+                            loginsStorage = loginsStorage,
+                        )
+                    }
+                }
+
+                Addresses -> {
+                    isChildDestination = true
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.Addresses)
+                    }
+                    content = {
+                        AddressesTools(
+                            debugRegionRepository = addressesDebugRegionRepository,
+                            creditCardsAddressesStorage = creditCardsAddressesStorage,
+                        )
+                    }
+                }
+
+                CreditCards -> {
+                    isChildDestination = true
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.CreditCards)
+                    }
+                    content = {
+                        CreditCardsTools(creditCardsAddressesStorage = creditCardsAddressesStorage)
+                    }
+                }
+                Autofill -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.Autofill)
+                    }
+                    content = {
+                        AutofillTools(debugDrawerStore = debugDrawerStore)
+                    }
+                }
+
+                CfrTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.CfrTools)
+                    }
+                    content = {
+                        CfrToolsScreen(cfrToolsStore = cfrToolsStore)
+                    }
+                }
+
+                GleanDebugTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.GleanDebugTools)
+                    }
+                    content = {
+                        GleanDebugToolsScreen(gleanDebugToolsStore = gleanDebugToolsStore)
+                    }
+                }
+
+                RegionDebugTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.RegionDebugTools)
+                    }
+                    content = {
+                        RegionTools(browserStore = browserStore)
+                    }
+                }
+
+                AddonsDebugTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.AddonsDebugTools)
+                    }
+                    content = {
+                        AddonsDebugToolsScreen()
+                    }
+                }
+
+                CrashDebugTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.CrashDebugTools)
+                    }
+                    content = {
+                        CrashTools()
+                    }
+                }
+                IntegrityTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.IntegrityDebugTools)
+                    }
+                    content = {
+                        IntegrityTools(clientUUID, integrityClient)
+                    }
+                }
+
+                TabGroupTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.TabGroupDebugTools)
+                    }
+                    content = {
+                        TabGroupTools(
+                            tabGroupRepository = tabGroupRepository,
+                            browserStore = browserStore,
+                        )
+                    }
+                }
+
+                TabProcessTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.TabProcessTools)
+                    }
+                    content = {
+                        TabProcessTools()
+                    }
+                }
+
+                DistributionTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.DistributionTools)
+                    }
+                    content = {
+                        DistributionTools()
+                    }
+                }
+
+                IPProtectionLocationTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.IPProtectionLocationTools)
+                    }
+                    content = {
+                        IPProtectionLocationToolsScreen(store = lazyIPProtectionStore.value)
+                    }
+                }
+
+                ListenToPageTools -> {
+                    onClick = {
+                        debugDrawerStore.dispatch(DebugDrawerAction.NavigateTo.ListenToPageTools)
+                    }
+                    content = {
+                        ListenToPageTools(listenStore = listenStore, browserStore = browserStore)
+                    }
+                }
             }
+
+            DebugDrawerDestination(
+                route = debugDrawerRoute.route,
+                title = debugDrawerRoute.title,
+                isChildDestination = isChildDestination,
+                onClick = onClick,
+                content = content,
+            )
+        }
     }
 }

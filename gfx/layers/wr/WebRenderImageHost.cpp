@@ -6,7 +6,10 @@
 
 #include <utility>
 
+#include "mozilla/ProfilerMarkers.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/StaticPrefs_gfx.h"
+#include "mozilla/StaticPrefs_webgl.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/AsyncImagePipelineManager.h"
 #include "mozilla/layers/CompositorThread.h"
@@ -16,9 +19,6 @@
 #include "mozilla/layers/RemoteTextureMap.h"
 #include "mozilla/layers/WebRenderBridgeParent.h"
 #include "mozilla/layers/WebRenderTextureHost.h"
-#include "mozilla/ProfilerMarkers.h"
-#include "mozilla/StaticPrefs_gfx.h"
-#include "mozilla/StaticPrefs_webgl.h"
 #include "nsAString.h"
 #include "nsDebug.h"          // for NS_WARNING, NS_ASSERTION
 #include "nsPrintfCString.h"  // for nsPrintfCString

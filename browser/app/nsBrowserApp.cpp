@@ -43,7 +43,7 @@
 #  define strcasecmp _stricmp
 #  ifdef MOZ_SANDBOX
 #    include "mozilla/sandboxing/SandboxInitialization.h"
-#    include "mozilla/sandboxing/sandboxLogging.h"
+#    include "mozilla/sandboxing/TargetGeckoServices.h"
 #  endif
 #endif
 #include "BinaryPath.h"
@@ -104,7 +104,9 @@ using namespace mozilla;
 
 #define kDesktopFolder "browser"
 
-#ifdef MOZ_BACKGROUNDTASKS
+// Only `Output` below cares about this, and only on Windows, where it decides
+// whether to pop up a message box.
+#if defined(MOZ_BACKGROUNDTASKS) && defined(XP_WIN) && !MOZ_WINCONSOLE
 static bool gIsBackgroundTask = false;
 #endif
 
@@ -179,7 +181,7 @@ static bool IsFlag(const char* arg, const char* s) {
   return false;
 }
 
-#ifdef MOZ_BACKGROUNDTASKS
+#if defined(MOZ_BACKGROUNDTASKS) && defined(XP_WIN) && !MOZ_WINCONSOLE
 /**
  * Return true if any arguments are flags with the given string.
  *
@@ -340,7 +342,7 @@ int main(int argc, char* argv[], char* envp[]) {
   ReserveDefaultFileDescriptors();
 #endif
 
-#ifdef MOZ_BACKGROUNDTASKS
+#if defined(MOZ_BACKGROUNDTASKS) && defined(XP_WIN) && !MOZ_WINCONSOLE
   // Check whether this is a background task very early, as the `Output`
   // function uses this information.
   gIsBackgroundTask = HasFlag(argc, argv, "backgroundtask");
@@ -459,7 +461,8 @@ int main(int argc, char* argv[], char* envp[]) {
         return 1;
       }
 
-      childData.ProvideLogFunction = mozilla::sandboxing::ProvideLogFunction;
+      childData.setTargetGeckoServices =
+          mozilla::sandboxing::SetTargetGeckoServices;
     }
 #  endif
 
@@ -517,6 +520,12 @@ int main(int argc, char* argv[], char* envp[]) {
   mozilla::freestanding::gSharedSection.ConvertToReadOnly();
 
   mozilla::CreateAndStorePreXULSkeletonUI(GetModuleHandle(nullptr), argc, argv);
+
+  // Preload cryptbase.dll from the system directory to avoid loading a
+  // planted one. This used to be done unconditionally in mozglue's DllMain;
+  // it's now parent-only, as child processes either don't need it, or by
+  // the time they do the sandbox already guarantees PreferSystem32Images.
+  ::LoadLibraryExW(L"cryptbase.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
 #endif
 
   nsresult rv = InitXPCOMGlue(LibLoadingStrategy::ReadAhead);

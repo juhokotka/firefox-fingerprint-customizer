@@ -315,9 +315,7 @@ void ScrollAnchorContainer::UserScrolled() {
   }
   InvalidateAnchor();
 
-  if (!StaticPrefs::
-          layout_css_scroll_anchoring_reset_heuristic_during_animation() &&
-      Frame()->ScrollAnimationState().contains(
+  if (Frame()->ScrollAnimationState().contains(
           ScrollContainerFrame::AnimationState::APZInProgress)) {
     // We'd want to skip resetting our heuristic while APZ is running an async
     // scroll because this UserScrolled function gets called on every refresh
@@ -465,20 +463,16 @@ void ScrollAnchorContainer::Destroy() {
 void ScrollAnchorContainer::ApplyAdjustments() {
   if (!mAnchorNode || mAnchorNodeIsDirty || mDisabled ||
       Frame()->HasPendingScrollRestoration() ||
-      (StaticPrefs::
-           layout_css_scroll_anchoring_reset_heuristic_during_animation() &&
-       Frame()->IsProcessingScrollEvent()) ||
       Frame()->ScrollAnimationState().contains(
           ScrollContainerFrame::AnimationState::TriggeredByScript) ||
       Frame()->GetScrollPosition() == nsPoint()) {
     ANCHOR_LOG(
         "Ignoring post-reflow (anchor=%p, dirty=%d, disabled=%d, "
-        "pendingRestoration=%d, scrollevent=%d, scriptAnimating=%d, "
+        "pendingRestoration=%d, scriptAnimating=%d, "
         "zeroScrollPos=%d pendingSuppression=%d, "
         "container=%p).\n",
         mAnchorNode, mAnchorNodeIsDirty, mDisabled,
         Frame()->HasPendingScrollRestoration(),
-        Frame()->IsProcessingScrollEvent(),
         Frame()->ScrollAnimationState().contains(
             ScrollContainerFrame::AnimationState::TriggeredByScript),
         Frame()->GetScrollPosition() == nsPoint(), mSuppressAnchorAdjustment,
@@ -715,11 +709,10 @@ nsIFrame* ScrollAnchorContainer::FindAnchorIn(nsIFrame* aFrame) const {
     // Skip child lists that contain out-of-flow frames, we'll visit them by
     // following placeholders in the in-flow lists so that we visit these
     // frames in DOM order.
-    // XXX do we actually need to exclude FrameChildListID::OverflowOutOfFlow
-    // too?
+    // XXX do we actually need to exclude FrameChildListID::OverflowFloats too?
     if (listID == FrameChildListID::Absolute ||
         listID == FrameChildListID::Float ||
-        listID == FrameChildListID::OverflowOutOfFlow) {
+        listID == FrameChildListID::OverflowFloats) {
       continue;
     }
 

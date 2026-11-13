@@ -85,7 +85,6 @@ src/Makefile
 
 # Ignore directories gclient syncs.
 src/testing
-# NOTE: src/third_party/lss is NOT ignored — it contains linux_syscall_support.h
-# which is required for Linux crash reporter builds.
+src/third_party/lss
 src/third_party/protobuf
 src/tools/gyp

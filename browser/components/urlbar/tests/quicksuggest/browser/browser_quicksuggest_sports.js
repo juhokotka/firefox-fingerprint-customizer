@@ -68,8 +68,10 @@ add_setup(async function () {
     ],
   });
 
+  UrlbarTestUtils.stubLocale("en-US");
   registerCleanupFunction(() => {
     UrlbarTestUtils.stubNowZonedDateTime(null);
+    UrlbarTestUtils.stubLocale(null);
   });
 });
 
@@ -79,10 +81,10 @@ add_setup(async function () {
 
 // * Known sports
 // * In each suggestion value, both teams have icons
-// * Game statuses: past
+// * Game statuses: past (not today)
 //
 // => Each item should show both teams' icons
-add_task(async function knownSports_bothIcons_past() {
+add_task(async function knownSports_bothIcons_past_notToday() {
   await doTest({
     now: "2025-10-31T14:00:00-04:00[-04:00]",
     data: KNOWN_SPORTS.map(data =>
@@ -100,6 +102,55 @@ add_task(async function knownSports_bothIcons_past() {
         },
         expected: {
           isAwayTeamImageHidden: false,
+        },
+      })
+    ),
+  });
+});
+
+// * Known sports
+// * In each suggestion value, both teams have icons
+// * Game statuses: past (today)
+//
+// => Each item should show both teams' icons
+add_task(async function knownSports_bothIcons_past_today() {
+  await doTest({
+    now: "2025-10-31T14:00:00-04:00[-04:00]",
+    data: KNOWN_SPORTS.map(data =>
+      makeValueAndExpectedItem({
+        ...data,
+        date: "2025-10-31T17:00:00Z",
+        statusType: "past",
+        homeTeam: {
+          icon: TEST_ICON_URL_HOME,
+          score: 1,
+        },
+        awayTeam: {
+          icon: TEST_ICON_URL_AWAY,
+          score: 0,
+        },
+        expected: {
+          isAwayTeamImageHidden: false,
+          itemOverrides: {
+            date: "Today",
+            status: {
+              l10n: {
+                id: "urlbar-result-sports-status-final",
+              },
+            },
+            "home-team-date-chiclet-day": {
+              textContent: "31",
+            },
+            "home-team-date-chiclet-month": {
+              textContent: "Oct",
+            },
+            "away-team-date-chiclet-day": {
+              textContent: "31",
+            },
+            "away-team-date-chiclet-month": {
+              textContent: "Oct",
+            },
+          },
         },
       })
     ),
@@ -636,6 +687,49 @@ add_task(async function scoreInOneTeam() {
   });
 });
 
+// The l10n IDs of a realtime suggestion's result menu commands are derived from
+// its realtime type, so the menu can be broken for one type only.
+add_task(async function resultMenu() {
+  MerinoTestUtils.server.response.body.suggestions = makeMerinoSuggestions([
+    {
+      date: "2025-10-31T17:00:00Z",
+      sport: "NFL",
+      sport_category: "football",
+      query: "query 1",
+      home_team: { name: "Home Team", score: 1 },
+      away_team: { name: "Away Team", score: 0 },
+      status_type: "live",
+    },
+  ]);
+
+  await UrlbarTestUtils.promiseAutocompleteResultPopup({
+    window,
+    value: "only match the Merino suggestion",
+  });
+  await UrlbarTestUtils.openResultMenu(window, { resultIndex: 1 });
+
+  let menuitems = gURLBar.view.resultMenu.querySelectorAll("panel-item");
+  Assert.deepEqual(
+    [...menuitems].map(m => document.l10n.getAttributes(m).id),
+    [
+      "urlbar-result-menu-show-less-frequently2",
+      "urlbar-result-menu-dont-show-sports2",
+      "urlbar-result-menu-manage-firefox-suggest2",
+      "urlbar-result-menu-learn-more2",
+      "urlbar-view-context-menu-skip-menu-with-tab",
+    ],
+    "The result menu should contain the expected commands"
+  );
+  await TestUtils.waitForCondition(
+    () => [...menuitems].every(m => m.textContent),
+    "Waiting for all commands to be labeled"
+  );
+
+  gURLBar.view.resultMenu.removeAttribute("open");
+  await UrlbarTestUtils.promisePopupClose(window);
+  gURLBar.handleRevert();
+});
+
 async function doTest({ now, data }) {
   let nows = Array.isArray(now) ? now : [now];
 
@@ -749,12 +843,22 @@ async function doOneTest({ expectedItems }) {
             "Child element should have expected attribute: " +
               JSON.stringify({ childName, attr })
           );
-          Assert.equal(
-            child.getAttribute(attr),
-            value,
-            "Child element attribute should have expected value: " +
-              JSON.stringify({ childName, attr })
-          );
+
+          if (childNamePrefix.endsWith("image")) {
+            UrlbarTestUtils.checkImageUrl(
+              child.getAttribute(attr),
+              UrlbarTestUtils.makeMozRemoteImageUrl(value),
+              "Child image attribute should have expected value: " +
+                JSON.stringify({ childName, attr })
+            );
+          } else {
+            Assert.equal(
+              child.getAttribute(attr),
+              value,
+              "Child element attribute should have expected value: " +
+                JSON.stringify({ childName, attr })
+            );
+          }
         }
       }
 
@@ -822,10 +926,13 @@ async function doOneTest({ expectedItems }) {
  *   Partial `home_team` in the suggestion value.
  * @param {{ icon: ?string, score: ?number }} options.awayTeam
  *   Partial `away_team` in the suggestion value.
- * @param {{ isAwayTeamImageHidden: bool }} options.expected
- * @param {bool} options.expected.isAwayTeamImageHidden
- *   Whether the away team image container is expected to be hidden (because
- *   it's the same as the home team image container).
+ * @param {object} options.expected
+ *   {bool} isAwayTeamImageHidden
+ *     Whether the away team image container is expected to be hidden (because
+ *     it's the same as the home team image container).
+ *   {?object} itemOverrides
+ *     Values to use for `expectedItem` instead of the defaults that this
+ *     function normally creates. See the code for details.
  *
  * @returns {{ value: any, expectedItem: any }}
  */
@@ -835,9 +942,9 @@ function makeValueAndExpectedItem({
   fallbackIconName,
   date,
   statusType,
+  expected,
   homeTeam = {},
   awayTeam = {},
-  expected: { isAwayTeamImageHidden },
 }) {
   let expectedItem = {
     sport,
@@ -872,13 +979,13 @@ function makeValueAndExpectedItem({
         awayTeam.icon || !fallbackIconName
           ? null
           : `url("chrome://browser/skin/urlbar/sports-${fallbackIconName}.svg")`,
-      isHidden: isAwayTeamImageHidden,
+      isHidden: expected.isAwayTeamImageHidden,
     },
     "away-team-image": {
       attributes: {
         src: awayTeam.icon ?? null,
       },
-      isHidden: isAwayTeamImageHidden,
+      isHidden: expected.isAwayTeamImageHidden,
     },
   };
 
@@ -962,13 +1069,20 @@ function makeValueAndExpectedItem({
     },
     "away-team-date-chiclet-day": {
       textContent: chicletDay,
-      isHidden: !!awayTeam.icon || !!fallbackIconName || isAwayTeamImageHidden,
+      isHidden:
+        !!awayTeam.icon || !!fallbackIconName || expected.isAwayTeamImageHidden,
     },
     "away-team-date-chiclet-month": {
       textContent: chicletMonth,
-      isHidden: !!awayTeam.icon || !!fallbackIconName || isAwayTeamImageHidden,
+      isHidden:
+        !!awayTeam.icon || !!fallbackIconName || expected.isAwayTeamImageHidden,
     },
   };
+
+  // Merge `expectedItem` with the passed-in overrides.
+  if (expected.itemOverrides) {
+    mergeObjects(expectedItem, expected.itemOverrides);
+  }
 
   return {
     expectedItem,
@@ -1004,4 +1118,19 @@ function makeMerinoSuggestions(values) {
       },
     },
   ];
+}
+
+function mergeObjects(dest, other) {
+  for (let [key, value] of Object.entries(other)) {
+    if (
+      value &&
+      typeof value == "object" &&
+      dest[key] &&
+      typeof dest[key] == "object"
+    ) {
+      mergeObjects(dest[key], value);
+    } else {
+      dest[key] = value;
+    }
+  }
 }

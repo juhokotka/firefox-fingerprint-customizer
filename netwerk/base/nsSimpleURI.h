@@ -5,15 +5,15 @@
 #ifndef nsSimpleURI_h_
 #define nsSimpleURI_h_
 
-#include "nsIIPCSerializableURI.h"
-#include "nsIURI.h"
-#include "nsIURIWithSizeOf.h"
-#include "nsISerializable.h"
-#include "nsString.h"
-#include "nsIClassInfo.h"
-#include "nsIURIMutator.h"
-#include "nsISimpleURIMutator.h"
 #include "URIHasher.h"
+#include "nsIClassInfo.h"
+#include "nsIIPCSerializableURI.h"
+#include "nsISerializable.h"
+#include "nsISimpleURIMutator.h"
+#include "nsIURI.h"
+#include "nsIURIMutator.h"
+#include "nsIURIWithSizeOf.h"
+#include "nsString.h"
 
 namespace mozilla {
 namespace net {

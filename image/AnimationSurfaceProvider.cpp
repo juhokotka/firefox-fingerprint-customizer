@@ -4,14 +4,15 @@
 
 #include "AnimationSurfaceProvider.h"
 
+#include <memory>
+
+#include "DecodePool.h"
+#include "Decoder.h"
 #include "mozilla/StaticPrefs_image.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/SharedSurfacesChild.h"
 #include "mozilla/layers/SourceSurfaceSharedData.h"
 #include "nsProxyRelease.h"
-
-#include "DecodePool.h"
-#include "Decoder.h"
 
 using namespace mozilla::gfx;
 using namespace mozilla::layers;
@@ -44,8 +45,8 @@ AnimationSurfaceProvider::AnimationSurfaceProvider(
       (sizeof(uint32_t) * frameSize.width * frameSize.height);
   size_t batch = StaticPrefs::image_animated_decode_on_demand_batch_size();
 
-  mFrames.reset(
-      new AnimationFrameRetainedBuffer(threshold, batch, aCurrentFrame));
+  mFrames = std::make_unique<AnimationFrameRetainedBuffer>(threshold, batch,
+                                                           aCurrentFrame);
 }
 
 AnimationSurfaceProvider::~AnimationSurfaceProvider() {
@@ -438,10 +439,12 @@ void AnimationSurfaceProvider::RequestFrameDiscarding() {
 
   MOZ_ASSERT(!mDecoder->GetFrameRecycler());
   if (StaticPrefs::image_animated_decode_on_demand_recycle_AtStartup()) {
-    mFrames.reset(new AnimationFrameRecyclingQueue(std::move(*oldFrameQueue)));
+    mFrames = std::make_unique<AnimationFrameRecyclingQueue>(
+        std::move(*oldFrameQueue));
     mDecoder->SetFrameRecycler(this);
   } else {
-    mFrames.reset(new AnimationFrameDiscardingQueue(std::move(*oldFrameQueue)));
+    mFrames = std::make_unique<AnimationFrameDiscardingQueue>(
+        std::move(*oldFrameQueue));
   }
 }
 

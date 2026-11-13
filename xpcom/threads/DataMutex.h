@@ -6,6 +6,7 @@
 #define DataMutex_h_
 
 #include <utility>
+
 #include "mozilla/Mutex.h"
 #include "mozilla/StaticMutex.h"
 
@@ -69,10 +70,10 @@ class DataMutexBase {
       }
     }
 
+    AutoLockBase(const AutoLockBase& aOther) = delete;
+
    private:
     friend class DataMutexBase;
-
-    AutoLockBase(const AutoLockBase& aOther) = delete;
 
     explicit AutoLockBase(DataMutexBase<T, MutexType>* aDataMutex)
         : mOwner(aDataMutex) {

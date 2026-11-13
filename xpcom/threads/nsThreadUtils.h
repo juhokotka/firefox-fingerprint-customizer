@@ -5,19 +5,18 @@
 #ifndef nsThreadUtils_h_
 #define nsThreadUtils_h_
 
-#include <type_traits>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include "MainThreadUtils.h"
-#include "mozilla/EventQueue.h"
 #include "mozilla/AbstractThread.h"
 #include "mozilla/Atomics.h"
+#include "mozilla/EventQueue.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/TimeStamp.h"
-
 #include "nsCOMPtr.h"
 #include "nsICancelableRunnable.h"
 #include "nsIDiscardableRunnable.h"
@@ -1097,7 +1096,7 @@ class RunnableMethodImpl final
 
  private:
   virtual ~RunnableMethodImpl() { Revoke(); };
-  static void TimedOut(nsITimer* aTimer, void* aClosure) {
+  static void TimedOut(nsITimer* /*aTimer*/, void* aClosure) {
     static_assert(IsIdle(Kind), "Don't use me!");
     RefPtr<CancelableIdleRunnable> r =
         static_cast<CancelableIdleRunnable*>(aClosure);

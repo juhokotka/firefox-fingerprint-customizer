@@ -2,21 +2,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "WebSocketLog.h"
 #include "WebSocketChannelParent.h"
-#include "nsIAuthPromptProvider.h"
-#include "nsIPrincipal.h"
-#include "nsICookieJarSettings.h"
+
+#include "IPCTransportProvider.h"
+#include "SerializedLoadContext.h"
+#include "WebSocketLog.h"
 #include "mozilla/dom/ContentParent.h"
+#include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
-#include "mozilla/ipc/BackgroundUtils.h"
-#include "SerializedLoadContext.h"
+#include "mozilla/net/ChannelEventQueue.h"
 #include "mozilla/net/NeckoCommon.h"
 #include "mozilla/net/WebSocketChannel.h"
-#include "nsComponentManagerUtils.h"
-#include "IPCTransportProvider.h"
-#include "mozilla/net/ChannelEventQueue.h"
+#include "nsIAuthPromptProvider.h"
+#include "nsICookieJarSettings.h"
+#include "nsIPrincipal.h"
+#include "nsIWebSocketProtocolHandler.h"
+#include "nsServiceManagerUtils.h"
 
 using namespace mozilla::ipc;
 
@@ -62,6 +64,7 @@ mozilla::ipc::IPCResult WebSocketChannelParent::RecvAsyncOpen(
   nsresult rv;
   nsCOMPtr<nsILoadInfo> loadInfo;
   nsCOMPtr<nsIURI> uri;
+  nsCOMPtr<nsIWebSocketProtocolHandler> wsHandler;
   nsCString origin;
   OriginAttributes originAttributes;
 
@@ -92,13 +95,12 @@ mozilla::ipc::IPCResult WebSocketChannelParent::RecvAsyncOpen(
     }
   }
 
-  if (aSecure) {
-    mChannel =
-        do_CreateInstance("@mozilla.org/network/protocol;1?name=wss", &rv);
-  } else {
-    mChannel =
-        do_CreateInstance("@mozilla.org/network/protocol;1?name=ws", &rv);
-  }
+  wsHandler = do_GetService(aSecure ? "@mozilla.org/network/protocol;1?name=wss"
+                                    : "@mozilla.org/network/protocol;1?name=ws",
+                            &rv);
+  if (NS_FAILED(rv)) goto fail;
+
+  rv = wsHandler->NewWebSocketChannel(getter_AddRefs(mChannel));
   if (NS_FAILED(rv)) goto fail;
 
   rv = mChannel->SetSerial(mSerial);

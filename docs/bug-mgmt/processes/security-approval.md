@@ -1,33 +1,37 @@
+(security-bug-approval-process)=
+
 # Security Bug Approval Process
 
 ## How to fix a core-security bug in Firefox - developer guidelines
 
 Follow these security guidelines if you’re involved in reviewing,
 testing and landing a security patch:
-{ref}`fixing-security-bugs`.
+[Fixing Security Bugs](fixing-security-bugs.md).
 
-## Purpose: don't 0-day ourselves
+## Purpose: protect the worst security vulnerabilities while reducing developer friction
 
-People watch our check-ins. They may be able to start exploiting our
-users before we can get an update out to them if
+In the past, obfuscating our security patches was an effective
+technique to frustrate the process of exploiting vulnerabilities that
+were fixed in development branches but not yet released to users.
+However the advent of AI tools means that most potential vulnerability
+fixes can be analyzed autonomously to discover the root cause of an
+issue, as well as how to trigger it and in many cases even develop
+a proof of concept exhibiting exploitation control.
 
-- the patch is an obvious security fix (bounds check, kungFuDeathGrip,
-  etc.)
-- the check-in comment says "security fix" or includes trigger words
-  like "exploitable", "vulnerable", "overflow", "injection", "use after
-  free", etc.
-- comments in the code mention those types of things or how someone
-  could abuse the bug
-- the check-in contains testcases that show exactly how to trigger the
-  vulnerability
+Therefore, our primary mechanism to protect users is to ship security
+fixes as quickly as possible.
 
-## Principle: assume the worst
-
-- If there's no rating we assume it could be critical
-- If we don't know the regression range we assume it needs porting to
-  all supported branches
+Accordingly, we have minimized the sec-approval process to reduce
+developer friction when landing security patches.
 
 ## Process for Security Bugs (Developer Perspective)
+
+One type of security bug is a straightforward vulnerability. A
+second type is a more casual analysis of a code pattern, an architecture
+limitation, or a general observation about bug patterns.
+
+It is important to recognize the difference between these two types of issues,
+especially when commenting in bugs with external reporters.
 
 ### Filing / Managing Bugs
 
@@ -39,9 +43,15 @@ users before we can get an update out to them if
   Depends, Regressed By, Regressions, or See Also. Users with the editbugs
   permission will be able to see the reference, but not view a restricted bug
   or its summary. Users without the permission will not be able to see the
-  link. For critical severity bugs where even that seems problematic, consider
-  mentioning the bug in a comment on the security bug instead. We can always
-  fill in the links later after the fix has shipped.
+  link.
+- Try not to discuss problematic code patterns or architecture limitations
+  in bugs filed by external reporters, or in situations where fixing the
+  undesirable behavior is likely to be a project that does not complete
+  within half a year or more. Instead, file a second bug tagged
+  `sec-audit` (for identifying patterns and addressing them) or `sec-want`
+  (for developing more comprehensive checks or fixing a design), and move
+  that discussion there. AI is very good at taking patterns and
+  descriptions and finding new bugs based on them.
 
 ### Developing the Patch
 
@@ -49,9 +59,9 @@ users before we can get an update out to them if
   fixed. Don’t paint a picture or an arrow pointing to security issues
   any more than the code changes already do.
 - Do not push to Try servers if possible: this exposes the security
-  issues for these critical and high rated bugs to public viewing. In
-  an ideal case, testing of patches is done locally before final
-  check-in to mozilla-central.
+  issues for these high rated vulnerabilities to public viewing. In an
+  ideal case, testing of patches is done locally before final check-in
+  to mozilla-central.
 - If pushing to Try servers is necessary, **do not include the bug
   number in the patch**. Ideally, do not include tests in the push as
   the tests can illustrate the exact nature of the security problem
@@ -62,46 +72,56 @@ users before we can get an update out to them if
 
 Request review of the patch in the same process as normal. After the
 patch has been reviewed you will request sec-approval as needed. See
-{ref}`fixing-security-bugs`
+[Fixing Security Bugs](fixing-security-bugs.md)
 for more examples/details of these points.
 
 ### Preparing the patch for landing
 
-See {ref}`fixing-security-bugs`
+See [Fixing Security Bugs](fixing-security-bugs.md)
 for more details.
 
 ### On Requesting sec-approval
 
-For security bugs with no sec- severity rating assume the worst and
-follow the rules for sec-critical. During the sec-approval process we
-will notice it has not been rated and rate it during the process.
+Previously, sec-approval was required for all `sec-high` rated security
+bugs in most circumstances. This is now inverted.
 
-Core-security bug fixes can be landed by a developer without any
-explicit approval if:
+**sec-approval is only required for bugs that represent a vulnerability
+in the parent process, triggerable from a content process**.
 
-## A)
+This is typically constrained to bugs with the keywords `sec-high` and
+`csectype-sandbox-escape`.
 
- The bug has a sec-low, sec-moderate, sec-other, or sec-want
-rating.
+- If a bug does not have a security rating, you are invited to give it
+  one, following the [Client Severity Guidelines](https://wiki.mozilla.org/Security_Severity_Ratings/Client)
+- If a bug is a cross-process bug that does not affect the Parent
+  Process, the correct keyword is `csectype-priv-escalation`. In the
+  past, these were given `csectype-sandbox-escape` but this is no longer
+  correct, and you are invited to fix the keywords if you encounter them
+  used incorrectly.
 
-## or
+For the avoidance of doubt, core-security bug fixes can be landed by
+a developer without any explicit approval if:
 
-## B)
+- The bug has a sec-low, sec-moderate, sec-other, or sec-want rating.
+- The bug has a sec-high rating, but only affects the content process
+- The bug has a sec-high rating, but only affects some other, non-Parent process
+- The bug has a sec-high rating, is a cross-process bug, but that target process
+  is the GPU, RDD, GMP, Utility, Socket, or other non-Parent process
+- The bug _is_ a parent process bug _but_ it is a recent regression on
+  mozilla-central. Meaning:
+  - A specific regressing check-in has been identified
+  - The developer can (**and has**) marked the status flags for ESR and
+    Beta as "unaffected"
+  - We have not shipped this vulnerability in anything other than a
+    nightly build
 
- The bug is a recent regression on mozilla-central. This means
+If it meets any of the above criteria, developers do not need to ask for
+sec-approval.
 
-- A specific regressing check-in has been identified
-- The developer can (**and has**) marked the status flags for ESR and
-  Beta as "unaffected"
-- We have not shipped this vulnerability in anything other than a
-  nightly build
-
-If it meets the above criteria, developers do not need to ask for sec-approval.
-
-In all other cases, developers should ask for sec-approval. When a patch is
-ready to be landed, click on the "Details" link for it in the Bugzilla
-attachment table (not directly on phabricator at time of writing), then set the
-sec-approval flag to '?'.
+In the sandbox escape case, developers should ask for sec-approval. When
+a patch is ready to be landed, click on the "Details" link for it in the
+Bugzilla attachment table (not directly on phabricator at time of writing),
+then set the sec-approval flag to '?'.
 
 If developers are unsure about a bug and it has a patch ready, just
 request sec-approval anyway and move on. Don't overthink it!
@@ -110,7 +130,7 @@ An automatic nomination comment will be added to bugzilla when
 sec-approval is set to '?'. The questions in this need to be filled out
 as best as possible when sec-approval is requested for the patch.
 
-It is as follows (courtesy of Dan Veditz):
+It is as follows:
 
 ```
 [Security approval request comment]

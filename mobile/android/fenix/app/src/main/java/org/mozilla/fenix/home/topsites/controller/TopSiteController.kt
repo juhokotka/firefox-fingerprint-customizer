@@ -4,18 +4,19 @@
 
 package org.mozilla.fenix.home.topsites.controller
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.res.ColorStateList
 import android.view.LayoutInflater
 import android.widget.EditText
 import androidx.annotation.VisibleForTesting
+import androidx.appcompat.R as appcompatR
 import androidx.appcompat.app.AlertDialog
 import androidx.core.widget.addTextChangedListener
 import androidx.navigation.NavController
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
+import java.lang.ref.WeakReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import mozilla.components.browser.state.search.SearchEngine
@@ -24,6 +25,7 @@ import mozilla.components.browser.state.state.searchEngines
 import mozilla.components.browser.state.state.selectedOrDefaultSearchEngine
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.feature.tabs.TabsUseCases
+import mozilla.components.feature.top.sites.DefaultTopSitesProvider
 import mozilla.components.feature.top.sites.TopSite
 import mozilla.components.feature.top.sites.TopSitesUseCases
 import mozilla.components.service.mars.MozAdsUseCases
@@ -31,6 +33,7 @@ import mozilla.components.support.ktx.android.content.getColorFromAttr
 import mozilla.components.support.ktx.android.view.showKeyboard
 import mozilla.components.support.ktx.kotlin.isUrl
 import mozilla.components.support.ktx.kotlin.toNormalizedUrl
+import mozilla.components.ui.icons.R as iconsR
 import mozilla.components.ui.widgets.withCenterAlignedButtons
 import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.fenix.GleanMetrics.Pings
@@ -46,82 +49,59 @@ import org.mozilla.fenix.components.usecases.FenixBrowserUseCases
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.nav
 import org.mozilla.fenix.home.HomeFragmentDirections
+import org.mozilla.fenix.home.blocklist.hasSameBlocklistEntryAs
 import org.mozilla.fenix.home.topsites.AddShortcutEntryPoint
 import org.mozilla.fenix.home.topsites.AddShortcutSource
 import org.mozilla.fenix.home.topsites.ShortcutsFragmentDirections
 import org.mozilla.fenix.home.topsites.interactor.TopSiteInteractor
 import org.mozilla.fenix.settings.SupportUtils
 import org.mozilla.fenix.utils.Settings
-import java.lang.ref.WeakReference
-import androidx.appcompat.R as appcompatR
-import mozilla.components.ui.icons.R as iconsR
 
 /**
- * The surface where a top sites / shortcuts interaction occurred. Used as the `source` extra on
- * the `top_sites` Glean events.
+ * The surface where a top sites / shortcuts interaction occurred. Used as the `source` extra on the `top_sites` Glean
+ * events.
  */
 enum class TopSitesSource(val sourceName: String) {
     HOMEPAGE("homepage"),
     SHORTCUTS_LIBRARY("shortcuts_library"),
 }
 
-/**
- * An interface that handles the view manipulation of the top sites triggered by the Interactor.
- */
+/** An interface that handles the view manipulation of the top sites triggered by the Interactor. */
 interface TopSiteController {
-    /**
-     * @see [TopSiteInteractor.onOpenInPrivateTabClicked]
-     */
+    /** @see [TopSiteInteractor.onOpenInPrivateTabClicked] */
     fun handleOpenInPrivateTabClicked(topSite: TopSite)
 
-    /**
-     * @see [TopSiteInteractor.onEditTopSiteClicked]
-     */
+    /** @see [TopSiteInteractor.onEditTopSiteClicked] */
     fun handleEditTopSiteClicked(topSite: TopSite)
 
-    /**
-     * @see [TopSiteInteractor.onRemoveTopSiteClicked]
-     */
+    /** @see [TopSiteInteractor.onRemoveTopSiteClicked] */
     fun handleRemoveTopSiteClicked(topSite: TopSite)
 
-    /**
-     * @see [TopSiteInteractor.onSelectTopSite]
-     */
+    /** @see [TopSiteInteractor.onSelectTopSite] */
     fun handleSelectTopSite(topSite: TopSite, position: Int)
 
-    /**
-     * @see [TopSiteInteractor.onTopSiteImpression]
-     */
+    /** @see [TopSiteInteractor.onTopSiteImpression] */
     fun handleTopSiteImpression(topSite: TopSite.Provided, position: Int)
 
-    /**
-     * @see [TopSiteInteractor.onSettingsClicked]
-     */
+    /** @see [TopSiteInteractor.onSettingsClicked] */
     fun handleTopSiteSettingsClicked()
 
-    /**
-     * @see [TopSiteInteractor.onSponsorPrivacyClicked]
-     */
+    /** @see [TopSiteInteractor.onSponsorPrivacyClicked] */
     fun handleSponsorPrivacyClicked()
 
-    /**
-     * @see [TopSiteInteractor.onTopSiteLongClicked]
-     */
+    /** @see [TopSiteInteractor.onTopSiteLongClicked] */
     fun handleTopSiteLongClicked(topSite: TopSite)
 
-    /**
-     * @see [TopSiteInteractor.onShowAllTopSitesClicked]
-     */
+    /** @see [TopSiteInteractor.onShowAllTopSitesClicked] */
     fun handleShowAllTopSitesClicked()
 
-    /**
-     * @see [TopSiteInteractor.onShortcutsLibraryViewed]
-     */
+    /** @see [TopSiteInteractor.onExpandToggleClicked] */
+    fun handleExpandToggleClicked(isExpanded: Boolean)
+
+    /** @see [TopSiteInteractor.onShortcutsLibraryViewed] */
     fun handleShortcutsLibraryViewed()
 
-    /**
-     * @see [TopSiteInteractor.onSaveShortcut]
-     */
+    /** @see [TopSiteInteractor.onSaveShortcut] */
     fun handleSaveShortcut(
         title: String,
         url: String,
@@ -130,9 +110,7 @@ interface TopSiteController {
     )
 }
 
-/**
- * The default implementation of [TopSiteController].
- */
+/** The default implementation of [TopSiteController]. */
 @Suppress("LongParameterList")
 class DefaultTopSiteController(
     private val activityRef: WeakReference<Activity>,
@@ -140,6 +118,7 @@ class DefaultTopSiteController(
     private val store: BrowserStore,
     private val appStore: AppStore,
     private val settings: Settings,
+    private val defaultTopSitesProvider: DefaultTopSitesProvider,
     private val addTabUseCase: TabsUseCases.AddNewTabUseCase,
     private val selectTabUseCase: TabsUseCases.SelectTabUseCase,
     private val fenixBrowserUseCases: FenixBrowserUseCases,
@@ -157,18 +136,12 @@ class DefaultTopSiteController(
 
     override fun handleOpenInPrivateTabClicked(topSite: TopSite) {
         if (topSite is TopSite.Provided) {
-            TopSites.openContileInPrivateTab.record(
-                TopSites.OpenContileInPrivateTabExtra(source = source.sourceName),
-            )
+            TopSites.openContileInPrivateTab.record(TopSites.OpenContileInPrivateTabExtra(source = source.sourceName))
         } else {
-            TopSites.openInPrivateTab.record(
-                TopSites.OpenInPrivateTabExtra(source = source.sourceName),
-            )
+            TopSites.openInPrivateTab.record(TopSites.OpenInPrivateTabExtra(source = source.sourceName))
         }
 
-        appStore.dispatch(
-            AppAction.BrowsingModeManagerModeChanged(BrowsingMode.Private),
-        )
+        appStore.dispatch(AppAction.BrowsingModeManagerModeChanged(BrowsingMode.Private))
 
         if (navController.currentDestination?.id == R.id.shortcutsFragment) {
             navController.navigate(ShortcutsFragmentDirections.actionShortcutsFragmentToBrowserFragment())
@@ -183,11 +156,9 @@ class DefaultTopSiteController(
         )
     }
 
-    @SuppressLint("InflateParams")
     override fun handleEditTopSiteClicked(topSite: TopSite) {
         activity.let {
-            val customLayout =
-                LayoutInflater.from(it).inflate(R.layout.top_sites_edit_dialog, null)
+            val customLayout = LayoutInflater.from(it).inflate(R.layout.top_sites_edit_dialog, null)
             val titleEditText = customLayout.findViewById<EditText>(R.id.top_site_title)
             val urlEditText = customLayout.findViewById<TextInputEditText>(R.id.top_site_url)
             val urlLayout = customLayout.findViewById<TextInputLayout>(R.id.top_site_url_layout)
@@ -195,50 +166,52 @@ class DefaultTopSiteController(
             titleEditText.setText(topSite.title)
             urlEditText.setText(topSite.url)
 
-            MaterialAlertDialogBuilder(it).apply {
-                setTitle(R.string.top_sites_edit_dialog_title)
-                setView(customLayout)
-                setPositiveButton(R.string.top_sites_edit_dialog_save) { _, _ -> }
-                setNegativeButton(R.string.top_sites_rename_dialog_cancel) { dialog, _ ->
-                    dialog.cancel()
-                }
-            }.show().withCenterAlignedButtons().also { dialog ->
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                    val urlText = urlEditText.text.toString()
-
-                    if (urlText.isUrl()) {
-                        viewLifecycleScope.launch {
-                            updateTopSite(
-                                topSite = topSite,
-                                title = titleEditText.text.toString(),
-                                url = urlText.toNormalizedUrl(),
-                            )
-                        }
-
-                        dialog.dismiss()
-                    } else {
-                        val criticalColor = ColorStateList.valueOf(
-                            activity.getColorFromAttr(appcompatR.attr.colorError),
-                        )
-                        urlLayout.setErrorIconTintList(criticalColor)
-                        urlLayout.setErrorTextColor(criticalColor)
-                        urlLayout.boxStrokeErrorColor = criticalColor
-
-                        urlLayout.error =
-                            activity.resources.getString(R.string.top_sites_edit_dialog_url_error)
-
-                        urlLayout.setErrorIconDrawable(iconsR.drawable.mozac_ic_warning_fill_24)
+            MaterialAlertDialogBuilder(it)
+                .apply {
+                    setTitle(R.string.top_sites_edit_dialog_title)
+                    setView(customLayout)
+                    setPositiveButton(R.string.top_sites_edit_dialog_save) { _, _ -> }
+                    setNegativeButton(R.string.top_sites_rename_dialog_cancel) { dialog, _ ->
+                        dialog.cancel()
                     }
                 }
+                .show()
+                .withCenterAlignedButtons()
+                .also { dialog ->
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val urlText = urlEditText.text.toString()
 
-                urlEditText.addTextChangedListener {
-                    urlLayout.error = null
-                    urlLayout.errorIconDrawable = null
+                        if (urlText.isUrl()) {
+                            viewLifecycleScope.launch {
+                                updateTopSite(
+                                    topSite = topSite,
+                                    title = titleEditText.text.toString(),
+                                    url = urlText.toNormalizedUrl(),
+                                )
+                            }
+
+                            dialog.dismiss()
+                        } else {
+                            val criticalColor =
+                                ColorStateList.valueOf(activity.getColorFromAttr(appcompatR.attr.colorError))
+                            urlLayout.setErrorIconTintList(criticalColor)
+                            urlLayout.setErrorTextColor(criticalColor)
+                            urlLayout.boxStrokeErrorColor = criticalColor
+
+                            urlLayout.error = activity.resources.getString(R.string.top_sites_edit_dialog_url_error)
+
+                            urlLayout.setErrorIconDrawable(iconsR.drawable.mozac_ic_warning_fill_24)
+                        }
+                    }
+
+                    urlEditText.addTextChangedListener {
+                        urlLayout.error = null
+                        urlLayout.errorIconDrawable = null
+                    }
+
+                    titleEditText.setSelection(0, titleEditText.text.length)
+                    titleEditText.showKeyboard()
                 }
-
-                titleEditText.setSelection(0, titleEditText.text.length)
-                titleEditText.showKeyboard()
-            }
         }
     }
 
@@ -264,59 +237,57 @@ class DefaultTopSiteController(
         TopSites.remove.record(TopSites.RemoveExtra(source = source.sourceName))
 
         when (topSite.url) {
-            SupportUtils.GOOGLE_URL -> TopSites.googleTopSiteRemoved.record(
-                TopSites.GoogleTopSiteRemovedExtra(source = source.sourceName),
-            )
+            SupportUtils.GOOGLE_URL ->
+                TopSites.googleTopSiteRemoved.record(TopSites.GoogleTopSiteRemovedExtra(source = source.sourceName))
         }
 
         viewLifecycleScope.launch {
-            with(activity.components.useCases.topSitesUseCase) {
-                removeTopSites(topSite)
-            }
+            // Any top site sharing the URL of a default top site from the provider needs to be added to the blocklist,
+            // whatever its type, otherwise the default top site would reappear in its place.
+            val shouldBlock =
+                defaultTopSitesProvider.getDefaultTopSites().any { it.url.hasSameBlocklistEntryAs(topSite.url) }
+            appStore.dispatch(AppAction.RemoveTopSite(topSite = topSite, shouldBlock = shouldBlock))
+
+            topSitesUseCases.removeTopSites(topSite)
         }
     }
 
     override fun handleSelectTopSite(topSite: TopSite, position: Int) {
         when (topSite) {
-            is TopSite.Default -> TopSites.openDefault.record(
-                TopSites.OpenDefaultExtra(source = source.sourceName),
-            )
-            is TopSite.Frecent -> TopSites.openFrecency.record(
-                TopSites.OpenFrecencyExtra(source = source.sourceName),
-            )
-            is TopSite.Pinned -> TopSites.openPinned.record(
-                TopSites.OpenPinnedExtra(source = source.sourceName),
-            )
+            is TopSite.Default -> TopSites.openDefault.record(TopSites.OpenDefaultExtra(source = source.sourceName))
+            is TopSite.Frecent -> TopSites.openFrecency.record(TopSites.OpenFrecencyExtra(source = source.sourceName))
+            is TopSite.Pinned -> TopSites.openPinned.record(TopSites.OpenPinnedExtra(source = source.sourceName))
             is TopSite.Provided -> {
                 sendMozAdsClickInteraction(clickUrl = topSite.clickUrl)
 
-                TopSites.openContileTopSite.record(
-                    TopSites.OpenContileTopSiteExtra(source = source.sourceName),
-                ).also {
+                TopSites.openContileTopSite.record(TopSites.OpenContileTopSiteExtra(source = source.sourceName)).also {
                     recordTopSitesClickTelemetry(topSite, position)
                 }
             }
         }
 
         when (topSite.url) {
-            SupportUtils.GOOGLE_URL -> TopSites.openGoogleSearchAttribution.record(
-                TopSites.OpenGoogleSearchAttributionExtra(source = source.sourceName),
-            )
+            SupportUtils.GOOGLE_URL ->
+                TopSites.openGoogleSearchAttribution.record(
+                    TopSites.OpenGoogleSearchAttributionExtra(source = source.sourceName)
+                )
         }
 
         val availableEngines: List<SearchEngine> = getAvailableSearchEngines()
         val searchAccessPoint = MetricsUtils.Source.TOPSITE
 
-        availableEngines.firstOrNull { engine ->
-            engine.resultUrls.firstOrNull { it.contains(topSite.url) } != null
-        }?.let { searchEngine ->
-            MetricsUtils.recordSearchMetrics(
-                searchEngine,
-                searchEngine == store.state.search.selectedOrDefaultSearchEngine,
-                searchAccessPoint,
-                activity.components.nimbus.events,
-            )
-        }
+        availableEngines
+            .firstOrNull { engine ->
+                engine.resultUrls.firstOrNull { it.contains(topSite.url) } != null
+            }
+            ?.let { searchEngine ->
+                MetricsUtils.recordSearchMetrics(
+                    searchEngine,
+                    searchEngine == store.state.search.selectedOrDefaultSearchEngine,
+                    searchAccessPoint,
+                    activity.components.nimbus.events,
+                )
+            }
 
         if (settings.enableHomepageAsNewTab) {
             fenixBrowserUseCases.loadUrlOrSearch(
@@ -325,18 +296,18 @@ class DefaultTopSiteController(
                 private = false,
             )
         } else {
-            val existingTabForUrl = when (topSite) {
-                is TopSite.Frecent, is TopSite.Pinned -> {
-                    store.state.tabs.firstOrNull { topSite.url == it.content.url }
+            val existingTabForUrl =
+                when (topSite) {
+                    is TopSite.Frecent,
+                    is TopSite.Pinned -> {
+                        store.state.tabs.firstOrNull { topSite.url == it.content.url }
+                    }
+
+                    else -> null
                 }
 
-                else -> null
-            }
-
             if (existingTabForUrl == null) {
-                TopSites.openInNewTab.record(
-                    TopSites.OpenInNewTabExtra(source = source.sourceName),
-                )
+                TopSites.openInNewTab.record(TopSites.OpenInNewTabExtra(source = source.sourceName))
 
                 addTabUseCase.invoke(
                     url = appendSearchAttributionToUrlIfNeeded(topSite.url),
@@ -361,7 +332,7 @@ class DefaultTopSiteController(
             TopSites.ContileClickExtra(
                 position = position + 1,
                 source = source.sourceName,
-            ),
+            )
         )
 
         topSite.id?.let { TopSites.contileTileId.set(it) }
@@ -377,7 +348,7 @@ class DefaultTopSiteController(
             TopSites.ContileImpressionExtra(
                 position = position + 1,
                 source = source.sourceName,
-            ),
+            )
         )
 
         topSite.id?.let { TopSites.contileTileId.set(it) }
@@ -399,16 +370,12 @@ class DefaultTopSiteController(
     }
 
     override fun handleTopSiteSettingsClicked() {
-        TopSites.contileSettings.record(
-            TopSites.ContileSettingsExtra(source = source.sourceName),
-        )
+        TopSites.contileSettings.record(TopSites.ContileSettingsExtra(source = source.sourceName))
         navController.navigate(R.id.homeSettingsFragment)
     }
 
     override fun handleSponsorPrivacyClicked() {
-        TopSites.contileSponsorsAndPrivacy.record(
-            TopSites.ContileSponsorsAndPrivacyExtra(source = source.sourceName),
-        )
+        TopSites.contileSponsorsAndPrivacy.record(TopSites.ContileSponsorsAndPrivacyExtra(source = source.sourceName))
 
         if (navController.currentDestination?.id == R.id.shortcutsFragment) {
             navController.navigate(ShortcutsFragmentDirections.actionShortcutsFragmentToBrowserFragment())
@@ -424,9 +391,7 @@ class DefaultTopSiteController(
     }
 
     override fun handleTopSiteLongClicked(topSite: TopSite) {
-        TopSites.longPress.record(
-            TopSites.LongPressExtra(type = topSite.type, source = source.sourceName),
-        )
+        TopSites.longPress.record(TopSites.LongPressExtra(type = topSite.type, source = source.sourceName))
     }
 
     override fun handleShowAllTopSitesClicked() {
@@ -434,6 +399,14 @@ class DefaultTopSiteController(
             R.id.homeFragment,
             HomeFragmentDirections.actionHomeFragmentToShortcutsFragment(),
         )
+    }
+
+    override fun handleExpandToggleClicked(isExpanded: Boolean) {
+        if (isExpanded) {
+            TopSites.showMore.record(NoExtras())
+        } else {
+            TopSites.showLess.record(NoExtras())
+        }
     }
 
     override fun handleShortcutsLibraryViewed() {
@@ -446,9 +419,7 @@ class DefaultTopSiteController(
         source: AddShortcutSource,
         entryPoint: AddShortcutEntryPoint,
     ) {
-        appStore.dispatch(
-            ShortcutAction.ShortcutAdded(source = source, entryPoint = entryPoint),
-        )
+        appStore.dispatch(ShortcutAction.ShortcutAdded(source = source, entryPoint = entryPoint))
 
         viewLifecycleScope.launch {
             topSitesUseCases.addPinnedSites(
@@ -458,10 +429,7 @@ class DefaultTopSiteController(
         }
     }
 
-    /**
-     * Append a search attribution query to any provided search engine URL based on the
-     * user's current region.
-     */
+    /** Append a search attribution query to any provided search engine URL based on the user's current region. */
     private fun appendSearchAttributionToUrlIfNeeded(url: String): String {
         if (url == SupportUtils.GOOGLE_URL) {
             store.state.search.region?.let { region ->

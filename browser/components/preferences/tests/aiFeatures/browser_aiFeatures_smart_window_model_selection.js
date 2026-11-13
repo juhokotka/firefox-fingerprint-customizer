@@ -18,6 +18,8 @@ describe("Smart Window model selection", () => {
       set: [
         ["browser.preferences.aiControls", true],
         ["browser.smartwindow.enabled", true],
+        // TODO: Bug 2053495 - Refactor tests upon pref removal
+        ["browser.smartwindow.mistralRelease", false],
         ["browser.smartwindow.tos.consentTime", 1770830464],
       ],
     });
@@ -65,6 +67,8 @@ describe("Smart Window model selection", () => {
       null,
       "No radio is selected if user didn't select model choices"
     );
+
+    await assertRadioGroupAccessibleName(modelSelection);
 
     const fastRadio = doc.querySelector(
       'moz-radio[data-l10n-id="smart-window-model-fast"]'

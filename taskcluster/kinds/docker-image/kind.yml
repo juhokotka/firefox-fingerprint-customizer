@@ -53,10 +53,6 @@ tasks:
         parent: ubuntu2204-arm64-base
         definition: build-python
         arch: arm64
-    ubuntu1804-build-python-wheels:
-        symbol: I(ub18-build-python-wheels)
-        parent: ubuntu1804-base
-        definition: build-python-wheels
     ubuntu2204-build-python-wheels:
         symbol: I(ub22-build-python-wheels)
         parent: ubuntu2204-base
@@ -65,11 +61,6 @@ tasks:
         symbol: I(ub24-build-python-wheels)
         parent: ubuntu2404-base
         definition: build-python-wheels
-    ubuntu2404-arm64-build-python-wheels:
-        symbol: I(ub24-arm64-python-wheels)
-        parent: ubuntu2404-arm64-base
-        definition: build-python-wheels
-        arch: arm64
     # Neither the ubuntu2004-*raw nor the ubuntu2004-*packages images can have
     # packages dependencies.
     ubuntu2004-raw:
@@ -239,9 +230,9 @@ tasks:
         symbol: I(deb12-raw)
         definition: debian-raw
         args:
-            BASE_IMAGE: debian:bookworm-20230612
+            BASE_IMAGE: debian:bookworm-20261020
             DIST: bookworm
-            SNAPSHOT: '20230611T210420Z'
+            SNAPSHOT: 20261022T022452Z
     debian12-packages:
         symbol: I(deb12-pkg)
         definition: debian-packages
@@ -285,9 +276,9 @@ tasks:
         symbol: I(deb13-raw)
         definition: debian-raw
         args:
-            BASE_IMAGE: debian:trixie-20251117
+            BASE_IMAGE: debian:trixie-20261020
             DIST: trixie
-            SNAPSHOT: '20251124T083047Z'
+            SNAPSHOT: 20261022T022452Z
     debian13-packages:
         symbol: I(deb13-pkg)
         definition: debian-packages
@@ -322,9 +313,9 @@ tasks:
         symbol: I(deb12-a64-raw)
         definition: debian-raw
         args:
-            BASE_IMAGE: debian:bookworm-20230612
+            BASE_IMAGE: debian:bookworm-20261020
             DIST: bookworm
-            SNAPSHOT: '20230611T210420Z'
+            SNAPSHOT: 20261022T022452Z
         arch: arm64
     debian12-arm64-base:
         symbol: I(deb12-a64-base)
@@ -343,9 +334,9 @@ tasks:
         symbol: I(deb13-a64-raw)
         definition: debian-raw
         args:
-            BASE_IMAGE: debian:trixie-20251117
+            BASE_IMAGE: debian:trixie-20261020
             DIST: trixie
-            SNAPSHOT: '20251124T083047Z'
+            SNAPSHOT: 20261022T022452Z
         arch: arm64
     debian13-arm64-base:
         symbol: I(deb13-a64-base)
@@ -405,14 +396,15 @@ tasks:
         parent: fetch
     static-analysis-build:
         symbol: I(static-analysis-build)
-        parent: debian12-base
+        parent: debian13-base
     gdb-test:
         symbol: I(gdb)
-        parent: debian12-amd64-build
+        parent: debian13-amd64-build
     index-task:
         symbol: I(idx)
     funsize-update-generator:
         symbol: I(pg)
+        parent: debian12-base
     partials-zuc:
         symbol: I(pz)
         parent: debian13-base
@@ -433,6 +425,9 @@ tasks:
     periodic-updates:
         symbol: I(file)
         parent: debian12-base
+    bhr-aggregate:
+        symbol: I(bhr)
+        parent: debian13-base
     webrender:
         symbol: I(webrender)
         parent: debian12-base

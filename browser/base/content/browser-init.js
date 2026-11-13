@@ -2,44 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var gSerialDeviceObserver = {
-  _activePortCounts: new WeakMap(),
-
-  observe(subject, topic, _data) {
-    if (topic != "serial-device-state-changed") {
-      return;
-    }
-
-    let props = subject.QueryInterface(Ci.nsIPropertyBag2);
-    const browserId = props.getPropertyAsUint64("browserId");
-    let bc = BrowsingContext.getCurrentTopByBrowserId(browserId);
-    if (!bc) {
-      console.warn("BrowsingContext not found for browser ID:", browserId);
-      return;
-    }
-    let browser = bc.embedderElement;
-    if (!browser) {
-      console.warn("No embedder element for BrowsingContext");
-      return;
-    }
-
-    let connected = props.getPropertyAsBool("connected");
-    let count = this._activePortCounts.get(browser) || 0;
-    count = connected ? count + 1 : Math.max(0, count - 1);
-    this._activePortCounts.set(browser, count);
-
-    if (gBrowser) {
-      gBrowser.updateBrowserSharing(browser, {
-        serial: count > 0 ? "serial" : null,
-      });
-    }
-  },
-
-  resetBrowserCount(browser) {
-    this._activePortCounts.delete(browser);
-  },
-};
-
 let _resolveDelayedStartup;
 var delayedStartupPromise = new Promise(resolve => {
   _resolveDelayedStartup = resolve;
@@ -150,6 +112,10 @@ var gBrowserInit = {
   onBeforeInitialXULLayout() {
     this._setupFirstContentWindowPaintPromise();
 
+    if (!window.toolbar.visible) {
+      document.documentElement.setAttribute("popup-window", true);
+    }
+
     updateBookmarkToolbarVisibility();
 
     // Set a sane starting width/height for all resolutions on new profiles.
@@ -209,8 +175,25 @@ var gBrowserInit = {
       if (extraOptions.hasKey("aiwindow-immersive-view")) {
         document.documentElement.setAttribute("aiwindow-immersive-view", true);
       }
-      if (extraOptions.hasKey("aiwindow-new-window")) {
-        document.documentElement.setAttribute("aiwindow-new-window", true);
+      if (extraOptions.hasKey("chromeless-window")) {
+        document.documentElement.setAttribute("chromeless-window", true);
+      }
+      if (extraOptions.hasKey("web-extension-popup-window")) {
+        document.documentElement.setAttribute(
+          "web-extension-popup-window",
+          true
+        );
+      }
+      if (extraOptions.hasKey("aswebauth")) {
+        document.documentElement.setAttribute("aswebauth", true);
+      }
+    }
+
+    let tabToAdopt = this.getTabToAdopt();
+    if (tabToAdopt?.hasAttribute?.("mini-window")) {
+      document.documentElement.setAttribute("mini-window", "true");
+      if (tabToAdopt.hasAttribute("cropped-mini-window")) {
+        document.documentElement.setAttribute("cropped-mini-window", "true");
       }
     }
 
@@ -281,8 +264,6 @@ var gBrowserInit = {
       },
       window
     );
-
-    gURLBar.initPlaceHolder();
 
     // Hack to ensure that the various initial pages favicon is loaded
     // instantaneously, to avoid flickering and improve perceived performance.
@@ -360,7 +341,8 @@ var gBrowserInit = {
 
     if (
       !window.toolbar.visible ||
-      window.document.documentElement.hasAttribute("taskbartab")
+      window.document.documentElement.hasAttribute("taskbartab") ||
+      window.document.documentElement.hasAttribute("cropped-mini-window")
     ) {
       // adjust browser UI for popups
       gURLBar.readOnly = true;
@@ -390,17 +372,17 @@ var gBrowserInit = {
       gURLBar.removeAttribute("focused");
 
       let swapBrowsers = () => {
-        if (gBrowser.isTabGroupLabel(tabToAdopt)) {
+        if (Tabbrowser.isTabGroupLabel(tabToAdopt)) {
           // TODO bug 1967937: Merge this case with the tab group case below.
           gBrowser.adoptTabGroup(tabToAdopt.group, { elementIndex: 0 });
           gBrowser.removeTab(gBrowser.selectedTab);
-        } else if (gBrowser.isTabGroup(tabToAdopt)) {
+        } else if (Tabbrowser.isTabGroup(tabToAdopt)) {
           // Via gBrowser.replaceGroupWithWindow
           let tempBlankTab = gBrowser.selectedTab;
           gBrowser.adoptTabGroup(tabToAdopt, { tabIndex: 0, selectTab: true });
           gBrowser.removeTab(tempBlankTab);
           Glean.tabgroup.groupInteractions.move_window.add(1);
-        } else if (gBrowser.isSplitViewWrapper(tabToAdopt)) {
+        } else if (Tabbrowser.isSplitViewWrapper(tabToAdopt)) {
           let tempBlankTab = gBrowser.selectedTab;
           let splitview = gBrowser.adoptSplitView(tabToAdopt, {
             elementIndex: 0,
@@ -425,7 +407,7 @@ var gBrowserInit = {
         this._clearTabToAdopt();
       };
       if (
-        gBrowser.isTab(tabToAdopt) &&
+        Tabbrowser.isTab(tabToAdopt) &&
         !tabToAdopt.linkedBrowser.isRemoteBrowser
       ) {
         swapBrowsers();
@@ -443,6 +425,7 @@ var gBrowserInit = {
 
     if (!PrivateBrowsingUtils.enabled) {
       document.getElementById("Tools:PrivateBrowsing").hidden = true;
+      document.getElementById("menu_newPrivateWindow").hidden = true;
       // Setting disabled doesn't disable the shortcut, so we just remove
       // the keybinding.
       document.getElementById("key_privatebrowsing").remove();
@@ -530,10 +513,6 @@ var gBrowserInit = {
       this._translationsEnabledStateObserver,
       "translations:enabled-state-changed"
     );
-    Services.obs.addObserver(
-      gSerialDeviceObserver,
-      "serial-device-state-changed"
-    );
 
     BrowserUtils.callModulesFromCategory(
       {
@@ -545,10 +524,6 @@ var gBrowserInit = {
     );
 
     UpdateUrlbarSearchSplitterState();
-
-    if (Services.prefs.getBoolPref("browser.search.widget.new", false)) {
-      document.getElementById("searchbar-new")?.delayedStartupInit();
-    }
 
     let safeMode = document.getElementById("helpSafeMode");
     if (Services.appinfo.inSafeMode) {
@@ -584,13 +559,13 @@ var gBrowserInit = {
 
     initBackForwardButtonTooltip(
       "back-button-tooltip-description",
-      "navbar-tooltip-back-2",
+      "navbar-tooltip-back-3",
       "goBackKb"
     );
 
     initBackForwardButtonTooltip(
       "forward-button-tooltip-description",
-      "navbar-tooltip-forward-2",
+      "navbar-tooltip-forward-3",
       "goForwardKb"
     );
 
@@ -786,22 +761,26 @@ var gBrowserInit = {
           let btn = document.createXULElement("toolbarbutton");
           btn.id = "urlbar-container-button";
           btn.className = "toolbarbutton-1 chromeclass-toolbar-additional container-status-button";
-          btn.setAttribute("tooltiptext", "Privacy Container");
           btn.setAttribute("removable", "false");
+          btn.setAttribute("data-l10n-attrs", "tooltiptext");
+          document.l10n.setAttributes(btn, "container-status-button");
 
-          // Create inner content: label first, then status dot after it.
-          // e.g. "Privacy Container: On ●"
+          // Inner content: status icon, label, status dot.
           let content = document.createXULElement("hbox");
           content.className = "container-status-content";
           content.setAttribute("align", "center");
 
+          let icon = document.createXULElement("image");
+          icon.className = "container-status-icon off";
+
           let label = document.createXULElement("label");
           label.className = "container-status-text";
-          label.setAttribute("value", "Privacy Container: Off");
+          document.l10n.setAttributes(label, "container-status-off");
 
           let dot = document.createXULElement("image");
           dot.className = "container-status-dot off";
 
+          content.appendChild(icon);
           content.appendChild(label);
           content.appendChild(dot);
           btn.appendChild(content);
@@ -812,6 +791,55 @@ var gBrowserInit = {
           // ── Panel builder ──────────────────────────────────────────
           function buildContainerPanel(panel) {
             panel.textContent = "";
+
+            const HTML_NS = "http://www.w3.org/1999/xhtml";
+            const html = name => document.createElementNS(HTML_NS, name);
+            const l10n = (el, id, args) => {
+              document.l10n.setAttributes(el, id, args);
+              return el;
+            };
+            // A footer/styled button.
+            const makeButton = (id, args, onClick, primary) => {
+              let b = html("moz-button");
+              if (primary) {
+                b.setAttribute("type", "primary");
+              }
+              l10n(b, id, args);
+              b.addEventListener("click", () => {
+                panel.hidePopup();
+                onClick();
+              });
+              return b;
+            };
+            // A selectable row.  Rows are plain HTML so they can hold a
+            // two-line label plus a trailing button, which panel-item can't.
+            const makeRow = extraClass => {
+              let row = html("div");
+              row.className = "containers-panel-item" +
+                (extraClass ? " " + extraClass : "");
+              row.setAttribute("role", "button");
+              row.setAttribute("tabindex", "0");
+              // Keep keyboard activation in sync with the click handler.
+              row.addEventListener("keydown", event => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  row.click();
+                }
+              });
+              return row;
+            };
+            const makeCheck = () => {
+              let check = html("span");
+              check.className = "containers-panel-check";
+              return check;
+            };
+            const makePill = identity => {
+              let pill = html("span");
+              pill.className = "pmc-pill identity-color-" + identity.color;
+              pill.textContent = identity.name ||
+                ("Container " + identity.userContextId);
+              return pill;
+            };
 
             let containerMode = Services.prefs.getBoolPref(
               "privacy.browser.containerMode", false
@@ -847,8 +875,19 @@ var gBrowserInit = {
               }
             }
 
+            // ── Panel scaffolding (157 panel-header / body / footer) ──
+            let panelHeader = document.createXULElement("box");
+            panelHeader.className = "panel-header";
+            let panelTitle = html("h1");
+            let panelTitleSpan = html("span");
+            panelTitleSpan.setAttribute("data-l10n-id", "containers-list-title");
+            panelTitle.appendChild(panelTitleSpan);
+            panelHeader.appendChild(panelTitle);
+            panel.appendChild(panelHeader);
+            panel.appendChild(document.createXULElement("toolbarseparator"));
+
             let vbox = document.createXULElement("vbox");
-            vbox.className = "containers-panel-content";
+            vbox.className = "panel-subview-body containers-panel-content";
 
             // ── Identity mismatch card ──
             // When the selected tab's real identity differs from the
@@ -857,15 +896,6 @@ var gBrowserInit = {
             try {
               let ms = ContainerStatusUI._getState();
               if (ms && ms.mismatch && (ms.persona || ms.tabIdentity)) {
-                const HTML_NS = "http://www.w3.org/1999/xhtml";
-                let makePill = identity => {
-                  let pill = document.createElementNS(HTML_NS, "span");
-                  pill.className =
-                    "pmc-pill identity-color-" + identity.color;
-                  pill.textContent = identity.name ||
-                    ("Container " + identity.userContextId);
-                  return pill;
-                };
                 let makeHeader = () => {
                   let header = document.createXULElement("hbox");
                   header.className = "pmc-header";
@@ -874,92 +904,91 @@ var gBrowserInit = {
                   hIcon.className = "pmc-header-icon";
                   let hTitle = document.createXULElement("label");
                   hTitle.className = "pmc-title";
-                  hTitle.value = "Identity mismatch";
+                  document.l10n.setAttributes(hTitle,
+                    "containers-mismatch-title");
                   header.appendChild(hIcon);
                   header.appendChild(hTitle);
                   return header;
-                };
-                let makeBtn = (label, onClick, primary) => {
-                  let btn = document.createXULElement("toolbarbutton");
-                  btn.className = primary
-                    ? "pmc-btn pmc-btn-primary" : "pmc-btn";
-                  btn.setAttribute("label", label);
-                  btn.addEventListener("click", function () {
-                    panel.hidePopup();
-                    onClick();
-                  });
-                  return btn;
                 };
 
                 let card = document.createXULElement("vbox");
                 card.className = "persona-mismatch-card";
                 card.appendChild(makeHeader());
 
-                let text = document.createElementNS(HTML_NS, "div");
+                // The prose is assembled from fragment messages so the two
+                // container names can stay rendered as color-coded pills.
+                let fragment = id => l10n(html("span"), id);
+                let text = html("div");
                 text.className = "pmc-text";
 
                 if (ms.persona) {
                   // Active persona, but this tab lives elsewhere.
-                  let personaName = ms.persona.name;
                   if (ms.tabIdentity) {
-                    text.append("This tab is browsing as ",
+                    text.append(
+                      fragment("containers-mismatch-persona-lead"), " ",
                       makePill(ms.tabIdentity),
-                      ". Your active persona is ",
-                      makePill(ms.persona), ".");
+                      fragment("containers-mismatch-persona-mid"), " ",
+                      makePill(ms.persona),
+                      fragment("containers-mismatch-persona-tail"));
                   } else {
                     text.append(
-                      "This is a normal tab using your real device ",
-                      "fingerprint. Your active persona is ",
-                      makePill(ms.persona), ".");
+                      fragment("containers-mismatch-normal-lead"), " ",
+                      makePill(ms.persona),
+                      fragment("containers-mismatch-normal-tail"));
                   }
                   card.appendChild(text);
-                  card.appendChild(makeBtn("Reopen in " + personaName,
+                  card.appendChild(makeButton("containers-mismatch-reopen",
+                    { name: ms.persona.name },
                     () => ContainerStatusUI.reopenSelectedTabInActivePersona(),
                     true));
                 } else {
                   // Normal Mode, but this tab still belongs to a container
                   // and keeps presenting that container's fingerprint.
-                  let tabName = ms.tabIdentity.name ||
-                    ("Container " + ms.tabUcId);
-                  text.append("This tab is still browsing as ",
+                  text.append(
+                    fragment("containers-mismatch-off-lead"), " ",
                     makePill(ms.tabIdentity),
-                    ", but privacy containers are off. New pages you open ",
-                    "will use your real fingerprint.");
+                    fragment("containers-mismatch-off-tail"));
                   card.appendChild(text);
-                  card.appendChild(makeBtn("Switch to " + tabName,
+                  card.appendChild(makeButton("containers-mismatch-switch",
+                    { name: ms.tabIdentity.name || ("Container " + ms.tabUcId) },
                     () => ContainerStatusUI.switchPersonaToSelectedTab(),
                     true));
                 }
 
-                let row = document.createXULElement("hbox");
+                let row = html("div");
                 row.className = "pmc-actions";
                 if (ms.persona) {
-                  row.appendChild(makeBtn("Close tab",
-                    () => ContainerStatusUI.closeSelectedTab()));
+                  row.appendChild(makeButton("containers-mismatch-close-tab",
+                    null, () => ContainerStatusUI.closeSelectedTab()));
                 } else {
-                  row.appendChild(makeBtn("Reopen as normal tab",
-                    () => ContainerStatusUI.reopenSelectedTabAsNormal()));
+                  row.appendChild(makeButton("containers-mismatch-reopen-normal",
+                    null, () => ContainerStatusUI.reopenSelectedTabAsNormal()));
                 }
-                row.appendChild(makeBtn("Keep", () => {}));
+                row.appendChild(makeButton("containers-mismatch-keep",
+                  null, () => {}));
                 card.appendChild(row);
 
                 vbox.appendChild(card);
-                vbox.appendChild(document.createXULElement("menuseparator"));
               }
             } catch (e) {
               console.error("[ContainerButton] Mismatch card error:", e);
             }
 
-            // ── Normal Mode button ──
-            let normalBtn = document.createXULElement("toolbarbutton");
-            normalBtn.className = "containers-panel-item containers-panel-mode-btn";
+            // ── Normal Mode row ──
+            let normalRow = makeRow("containers-panel-mode-btn");
+            let normalIcon = html("span");
+            normalIcon.className =
+              "userContext-icon identity-icon-fingerprint identity-color-gray";
+            let normalName = html("span");
+            normalName.className = "containers-panel-name";
+            l10n(normalName, "containers-list-normal-mode");
+            normalRow.appendChild(normalIcon);
+            normalRow.appendChild(normalName);
             if (!hasActiveContainer) {
-              normalBtn.setAttribute("label", "\u2713 Normal Mode");
-              normalBtn.classList.add("selected");
-            } else {
-              normalBtn.setAttribute("label", "Normal Mode");
+              normalRow.classList.add("selected");
+              normalRow.appendChild(makeCheck());
             }
-            normalBtn.addEventListener("click", function () {
+            normalRow.addEventListener("click", function () {
               // Only a real state change (a persona was active) counts as a
               // switch; clicking the already-selected Normal Mode must not
               // spawn tabs.
@@ -983,16 +1012,19 @@ var gBrowserInit = {
               ContainerStatusUI._updateButtonStatus();
               panel.hidePopup();
             });
-            vbox.appendChild(normalBtn);
+            vbox.appendChild(normalRow);
 
-            // ── Clear Container button (only when a container is active) ──
+            // ── Clear Container row (only when a container is active) ──
             if (hasActiveContainer) {
-              let clearBtn = document.createXULElement("toolbarbutton");
-              clearBtn.className = "containers-panel-item containers-panel-clear-btn";
-              clearBtn.setAttribute("label", "Clear Container");
-              clearBtn.setAttribute("tooltiptext",
-                "Close all tabs in the current container and return to Normal Mode");
-              clearBtn.addEventListener("click", function () {
+              let clearRow = makeRow("containers-panel-clear-btn");
+              let clearIcon = html("span");
+              clearIcon.className = "containers-panel-action-icon";
+              let clearName = html("span");
+              clearName.className = "containers-panel-name";
+              l10n(clearName, "containers-list-clear");
+              clearRow.appendChild(clearIcon);
+              clearRow.appendChild(clearName);
+              clearRow.addEventListener("click", function () {
                 try {
                   // Open the fresh normal-mode tab FIRST: it is not in the
                   // container so it survives the tab sweep below, and it
@@ -1012,10 +1044,10 @@ var gBrowserInit = {
                 ContainerStatusUI._updateButtonStatus();
                 panel.hidePopup();
               });
-              vbox.appendChild(clearBtn);
+              vbox.appendChild(clearRow);
             }
 
-            vbox.appendChild(document.createXULElement("menuseparator"));
+            vbox.appendChild(document.createXULElement("toolbarseparator"));
 
             // ── Container list ──
             let identities = [];
@@ -1027,41 +1059,33 @@ var gBrowserInit = {
             }
 
             if (identities.length === 0) {
-              let empty = document.createXULElement("label");
-              empty.textContent = "No containers yet. Click + to create one.";
+              let empty = html("div");
               empty.className = "containers-panel-empty";
+              l10n(empty, "containers-list-empty");
               vbox.appendChild(empty);
             } else {
               for (let identity of identities) {
                 let ucId = identity.userContextId;
                 let isActive = containerMode && ucId === activeUcId;
 
-                // Build the row as a single toolbarbutton with an edit
-                // button appended.  We do NOT wrap in an hbox because XUL
-                // hbox can swallow click events destined for children.
-                let row = document.createXULElement("toolbarbutton");
-                row.className = "containers-panel-item containers-panel-row";
+                let row = makeRow("containers-panel-row");
                 if (isActive) {
                   row.classList.add("selected");
                 }
-                // Store the userContextId on the element for debugging
-                row.setAttribute("data-usercontextid", ucId);
+                row.dataset.usercontextid = ucId;
 
-                // Container icon (fixed width, left-aligned)
-                let icon = document.createXULElement("image");
+                // Container icon (round, tinted, identity-colored)
+                let icon = html("span");
                 icon.className = "userContext-icon identity-icon-" +
                   identity.icon + " identity-color-" + identity.color;
-                icon.style.width = "16px";
-                icon.style.height = "16px";
-                icon.style.flexShrink = "0";
 
                 // Name + subtitle stacked vertically (grows to fill)
-                let nameBox = document.createXULElement("vbox");
+                let nameBox = html("div");
                 nameBox.className = "containers-panel-namebox";
 
-                let nameLabel = document.createXULElement("label");
+                let nameLabel = html("span");
                 nameLabel.className = "containers-panel-name";
-                nameLabel.value = identity.name || ("Container " + ucId);
+                nameLabel.textContent = identity.name || ("Container " + ucId);
 
                 // Build subtitle: short device type - country
                 let subtitle = "";
@@ -1097,9 +1121,9 @@ var gBrowserInit = {
 
                 nameBox.appendChild(nameLabel);
                 if (subtitle) {
-                  let subLabel = document.createXULElement("label");
+                  let subLabel = html("span");
                   subLabel.className = "containers-panel-subtitle";
-                  subLabel.value = subtitle;
+                  subLabel.textContent = subtitle;
                   nameBox.appendChild(subLabel);
                 }
 
@@ -1108,17 +1132,17 @@ var gBrowserInit = {
 
                 // Active checkmark
                 if (isActive) {
-                  let check = document.createXULElement("label");
-                  check.className = "containers-panel-check";
-                  check.value = "\u2713";
-                  row.appendChild(check);
+                  row.appendChild(makeCheck());
                 }
 
-                // Edit button (appended to the row, right-aligned via CSS)
-                let editBtn = document.createXULElement("toolbarbutton");
+                // Edit button (trailing; pushed to the end by CSS)
+                let editBtn = html("moz-button");
                 editBtn.className = "containers-panel-edit-btn";
-                editBtn.setAttribute("label", "Edit");
-                editBtn.setAttribute("tooltiptext", "Edit container");
+                editBtn.setAttribute("type", "icon ghost");
+                editBtn.setAttribute("size", "small");
+                editBtn.setAttribute("iconSrc",
+                  "chrome://global/skin/icons/edit.svg");
+                editBtn.setAttribute("data-l10n-id", "containers-list-edit");
                 editBtn.addEventListener("click", function (event) {
                   event.stopPropagation();
                   event.preventDefault();
@@ -1178,19 +1202,20 @@ var gBrowserInit = {
               }
             }
 
-            vbox.appendChild(document.createXULElement("menuseparator"));
+            panel.appendChild(vbox);
 
-            // ── Add container button ──
-            let addBtn = document.createXULElement("toolbarbutton");
-            addBtn.className = "containers-panel-item containers-panel-add-btn";
-            addBtn.setAttribute("label", "+ New Container");
+            // ── Footer ──
+            let footer = html("moz-button-group");
+            footer.className = "panel-footer containers-panel-footer";
+            let addBtn = html("moz-button");
+            addBtn.setAttribute("type", "primary");
+            addBtn.setAttribute("data-l10n-id", "containers-list-add");
             addBtn.addEventListener("click", function () {
               openPreferences("containers");
               panel.hidePopup();
             });
-            vbox.appendChild(addBtn);
-
-            panel.appendChild(vbox);
+            footer.appendChild(addBtn);
+            panel.appendChild(footer);
           }
 
           // Click handler: toggle panel
@@ -1295,6 +1320,8 @@ var gBrowserInit = {
     } catch (e) {
       console.error("[ContainerButton] Init error:", e);
     }
+
+    Referrals.maybeLockPref();
 
     this.delayedStartupFinished = true;
     _resolveDelayedStartup();
@@ -1525,91 +1552,25 @@ var gBrowserInit = {
       return;
     }
 
-    function scheduleIdleTask(func, options) {
-      requestIdleCallback(function idleTaskRunner() {
-        if (!window.closed) {
-          func();
-        }
-      }, options);
-    }
-
-    scheduleIdleTask(() => {
-      // Initialize the Sync UI
-      gSync.init();
-    });
-
-    scheduleIdleTask(() => {
-      // Read prefers-reduced-motion setting
-      let reduceMotionQuery = window.matchMedia(
-        "(prefers-reduced-motion: reduce)"
-      );
-      function readSetting() {
-        gReduceMotionSetting = reduceMotionQuery.matches;
-      }
-      reduceMotionQuery.addListener(readSetting);
-      readSetting();
-    });
-
-    scheduleIdleTask(() => {
-      // setup simple gestures support
-      gGestureSupport.init(true);
-
-      // setup history swipe animation
-      gHistorySwipeAnimation.init();
-    });
-
-    scheduleIdleTask(() => {
-      gBrowserThumbnails.init();
-    });
-
-    scheduleIdleTask(
-      () => {
-        // Initialize the download manager some time after the app starts so that
-        // auto-resume downloads begin (such as after crashing or quitting with
-        // active downloads) and speeds up the first-load of the download manager UI.
-        // If the user manually opens the download manager before the timeout, the
-        // downloads will start right away, and initializing again won't hurt.
-        try {
-          DownloadsCommon.initializeAllDataLinks();
-          ChromeUtils.importESModule(
-            "moz-src:///browser/components/downloads/DownloadsTaskbar.sys.mjs"
-          )
-            .DownloadsTaskbar.registerIndicator(window)
-            .catch(ex => {
-              console.error(ex);
-            });
-          if (AppConstants.platform == "macosx") {
-            ChromeUtils.importESModule(
-              "moz-src:///browser/components/downloads/DownloadsMacFinderProgress.sys.mjs"
-            ).DownloadsMacFinderProgress.register();
-          }
-        } catch (ex) {
-          console.error(ex);
-        }
+    BrowserUtils.callModulesFromCategory(
+      {
+        categoryName: "browser-window-idle-tasks",
+        profilerMarker: "perWindowIdleTask",
+        idleDispatch: window,
+        jsGlobal: globalThis,
       },
-      { timeout: 10000 }
+      window
     );
 
-    if (Win7Features) {
-      scheduleIdleTask(() => Win7Features.onOpenWindow());
-    }
-
-    scheduleIdleTask(async () => {
-      NewTabPagePreloading.maybeCreatePreloadedBrowser(window);
-    });
-
-    scheduleIdleTask(() => {
-      gGfxUtils.init();
-    });
-
-    scheduleIdleTask(async () => {
-      await gProfiles.init();
-    });
-
-    // This should always go last, since the idle tasks (except for the ones with
-    // timeouts) should execute in order. Note that this observer notification is
-    // not guaranteed to fire, since the window could close before we get here.
-    scheduleIdleTask(() => {
+    // This should always go last, since the idle tasks above execute in order.
+    // Dispatch it on the same idle queue as the consumers above (the window's,
+    // via requestIdleCallback) so it runs after them. Note that this observer
+    // notification is not guaranteed to fire, since the window could close
+    // before we get here.
+    requestIdleCallback(() => {
+      if (window.closed) {
+        return;
+      }
       this.idleTasksFinished.resolve();
       Services.obs.notifyObservers(
         window,
@@ -1688,12 +1649,6 @@ var gBrowserInit = {
       return;
     }
 
-    gGestureSupport.init(false);
-
-    gHistorySwipeAnimation.uninit();
-
-    gSync.uninit();
-
     try {
       gBrowser.removeProgressListener(window.XULBrowserWindow);
       gBrowser.removeTabsProgressListener(window.TabsProgressListener);
@@ -1714,11 +1669,6 @@ var gBrowserInit = {
     if (this._boundDelayedStartup) {
       this._cancelDelayedStartup();
     } else {
-      if (Win7Features) {
-        Win7Features.onCloseWindow();
-      }
-      gBrowserThumbnails.uninit();
-
       BrowserUtils.callModulesFromCategory(
         {
           categoryName: "browser-window-unload-delayed-startup",
@@ -1771,10 +1721,6 @@ var gBrowserInit = {
       Services.obs.removeObserver(
         this._translationsEnabledStateObserver,
         "translations:enabled-state-changed"
-      );
-      Services.obs.removeObserver(
-        gSerialDeviceObserver,
-        "serial-device-state-changed"
       );
     }
 

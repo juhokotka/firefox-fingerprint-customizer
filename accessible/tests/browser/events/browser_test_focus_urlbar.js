@@ -55,7 +55,7 @@ class TipTestProvider extends UrlbarProvider {
     return "TipTestProvider";
   }
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.PROFILE;
+    return UrlbarShared.PROVIDER_TYPE.PROFILE;
   }
   async isActive() {
     return true;
@@ -79,13 +79,13 @@ async function runTests() {
   });
 
   await PlacesTestUtils.addVisits([
-    // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+    // eslint-disable-next-line sdl/no-insecure-url
     "http://example1.com/blah",
-    // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+    // eslint-disable-next-line sdl/no-insecure-url
     "http://example2.com/blah",
-    // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+    // eslint-disable-next-line sdl/no-insecure-url
     "http://example1.com/",
-    // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+    // eslint-disable-next-line sdl/no-insecure-url
     "http://example2.com/",
   ]);
 
@@ -254,15 +254,23 @@ async function runTests() {
     // With native context menus, we do not observe accessibility events and we
     // cannot send synthetic key events to the menu.
     info("Opening and closing context native context menu");
-    let contextMenu = gURLBar.querySelector(".textbox-contextmenu");
+    let contextMenu = window.EditContextMenu.popup;
     let popupshown = BrowserTestUtils.waitForEvent(contextMenu, "popupshown");
-    EventUtils.synthesizeMouseAtCenter(gURLBar.querySelector("moz-input-box"), {
-      type: "contextmenu",
-    });
+    // ... we should, however, see a focus event on the input after the
+    // native menu is closed. We await this below to ensure the popup is fully
+    // hidden (to a11y) before moving on.
+    focused = waitForEvent(EVENT_FOCUS, textBox);
+    EventUtils.synthesizeMouseAtCenter(
+      gURLBar.querySelector(".urlbar-input-box"),
+      {
+        type: "contextmenu",
+      }
+    );
     await popupshown;
     let popuphidden = BrowserTestUtils.waitForEvent(contextMenu, "popuphidden");
     contextMenu.hidePopup();
     await popuphidden;
+    await focused;
   } else {
     info(
       "Ensuring context menu gets menu event on launch, and item focus on down"
@@ -271,9 +279,12 @@ async function runTests() {
       nsIAccessibleEvent.EVENT_MENUPOPUP_START,
       isEventForMenuPopup
     );
-    EventUtils.synthesizeMouseAtCenter(gURLBar.querySelector("moz-input-box"), {
-      type: "contextmenu",
-    });
+    EventUtils.synthesizeMouseAtCenter(
+      gURLBar.querySelector(".urlbar-input-box"),
+      {
+        type: "contextmenu",
+      }
+    );
     await menuEvent;
 
     focused = waitForEvent(EVENT_FOCUS, isEventForMenuItem);
@@ -301,20 +312,20 @@ async function runTipTests() {
     new UrlbarResult({
       type: UrlbarShared.RESULT_TYPE.URL,
       source: UrlbarShared.RESULT_SOURCE.HISTORY,
-      // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+      // eslint-disable-next-line sdl/no-insecure-url
       payload: { url: "http://mozilla.org/a" },
     }),
     new UrlbarResult({
       type: UrlbarShared.RESULT_TYPE.TIP,
       source: UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
       payload: {
-        // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+        // eslint-disable-next-line sdl/no-insecure-url
         helpUrl: "http://example.com/",
         type: "test",
         titleL10n: { id: "urlbar-search-tips-confirm" },
         buttons: [
           {
-            // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+            // eslint-disable-next-line sdl/no-insecure-url
             url: "http://example.com/",
             l10n: { id: "urlbar-search-tips-confirm" },
           },
@@ -324,13 +335,13 @@ async function runTipTests() {
     new UrlbarResult({
       type: UrlbarShared.RESULT_TYPE.URL,
       source: UrlbarShared.RESULT_SOURCE.HISTORY,
-      // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+      // eslint-disable-next-line sdl/no-insecure-url
       payload: { url: "http://mozilla.org/b" },
     }),
     new UrlbarResult({
       type: UrlbarShared.RESULT_TYPE.URL,
       source: UrlbarShared.RESULT_SOURCE.HISTORY,
-      // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+      // eslint-disable-next-line sdl/no-insecure-url
       payload: { url: "http://mozilla.org/c" },
     }),
   ];

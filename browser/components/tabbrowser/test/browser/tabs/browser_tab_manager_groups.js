@@ -4,15 +4,15 @@
 "use strict";
 
 const { TabStateFlusher } = ChromeUtils.importESModule(
-  "resource:///modules/sessionstore/TabStateFlusher.sys.mjs"
+  "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs"
+);
+const { sinon } = ChromeUtils.importESModule(
+  "resource://testing-common/Sinon.sys.mjs"
 );
 
 add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
-    set: [
-      ["test.wait300msAfterTabSwitch", true],
-      ["browser.tabs.groups.enabled", true],
-    ],
+    set: [["browser.tabs.groups.enabled", true]],
   });
   forgetSavedTabGroups();
   window.gTabsPanel.init();
@@ -237,63 +237,6 @@ add_task(async function test_tabGroupsView() {
 
   await removeTabGroup(group1);
   await removeTabGroup(group2);
-  forgetSavedTabGroups();
-});
-
-add_task(async function test_groupsViewHiddenWithAlternateMenu() {
-  forgetSavedTabGroups();
-  const savedGroupId = "alternate-menu-saved-group";
-  let savedGroup = await createTestGroup({
-    id: savedGroupId,
-    label: "Saved Group",
-  });
-  savedGroup.save();
-  await removeTabGroup(savedGroup);
-  let openGroup = await createTestGroup({ label: "Open Group" });
-
-  await SpecialPowers.pushPrefEnv({
-    set: [["browser.tabs.groups.alternateMenu", true]],
-  });
-
-  let allTabsMenu = await openTabsMenu();
-  Assert.equal(
-    allTabsMenu.querySelectorAll("#allTabsMenu-groupsView toolbaritem").length,
-    0,
-    "groups section is empty when alternate menu is enabled"
-  );
-  Assert.ok(
-    !allTabsMenu.querySelector("#allTabsMenu-groupsView .subview-subheader"),
-    "recent tab groups header is not shown when alternate menu is enabled"
-  );
-  Assert.ok(
-    allTabsMenu.querySelector("#allTabsMenu-groupsSeparator").hidden,
-    "groups separator is hidden when alternate menu is enabled"
-  );
-  Assert.ok(
-    allTabsMenu.querySelector("#allTabsMenu-currentWindowHeader").hidden,
-    "current window header is hidden when alternate menu is enabled"
-  );
-  await closeTabsMenu();
-
-  await SpecialPowers.popPrefEnv();
-
-  allTabsMenu = await openTabsMenu();
-  Assert.equal(
-    allTabsMenu.querySelectorAll("#allTabsMenu-groupsView toolbaritem").length,
-    2,
-    "groups section is restored when alternate menu is disabled"
-  );
-  Assert.ok(
-    !allTabsMenu.querySelector("#allTabsMenu-groupsSeparator").hidden,
-    "groups separator is visible when alternate menu is disabled"
-  );
-  Assert.ok(
-    !allTabsMenu.querySelector("#allTabsMenu-currentWindowHeader").hidden,
-    "current window header is visible when alternate menu is disabled"
-  );
-  await closeTabsMenu();
-
-  await removeTabGroup(openGroup);
   forgetSavedTabGroups();
 });
 
@@ -758,4 +701,63 @@ add_task(async function test_createGroupFromTabContextMenu() {
     BrowserTestUtils.removeTab(tab);
   }
   forgetSavedTabGroups();
+});
+
+/**
+ * Tests that "Share Group" on a current-window group row resolves the correct
+ * tab group and closes the panel. The current-window rows are built by
+ * TabsList and must expose `data-tab-group-id` on the button so the shared
+ * `open-tab-group-context-menu` command handler can find the group.
+ */
+add_task(async function test_shareCurrentWindowGroup() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.contentsharing.enabled", true]],
+  });
+  let group = await createTestGroup({ label: "Current Window Group" });
+
+  let allTabsMenu = await openTabsMenu();
+  let groupButton = allTabsMenu.querySelector(
+    `#allTabsMenu-allTabsView-tabs .all-tabs-group-button[data-tab-group-id="${group.id}"]`
+  );
+  Assert.ok(
+    groupButton,
+    "Current-window group row exposes data-tab-group-id on its button"
+  );
+
+  let contextMenu = await getContextMenu(
+    groupButton,
+    "open-tab-group-context-menu"
+  );
+  let shareItem = contextMenu.querySelector(
+    "#open-tab-group-context-menu_share"
+  );
+  Assert.ok(!shareItem.hidden, "Share Group item is shown");
+
+  let shareStub = sinon
+    .stub(ContentSharingUtils, "handleShareTabGroup")
+    .resolves();
+  let panel = allTabsMenu.closest("panel");
+  let panelHidden = BrowserTestUtils.waitForPopupEvent(panel, "hidden");
+  contextMenu.activateItem(shareItem);
+  await panelHidden;
+
+  Assert.ok(
+    shareStub.calledOnce,
+    "handleShareTabGroup was called exactly once"
+  );
+  Assert.equal(
+    shareStub.firstCall.args[0],
+    group,
+    "handleShareTabGroup was called with the correct tab group"
+  );
+  Assert.equal(
+    panel.state,
+    "closed",
+    "List all tabs panel is closed when the share dialog opens"
+  );
+
+  shareStub.restore();
+  await removeTabGroup(group);
+  forgetSavedTabGroups();
+  await SpecialPowers.popPrefEnv();
 });

@@ -7,12 +7,12 @@
 #ifndef mozilla_EnumSet_h
 #define mozilla_EnumSet_h
 
-#include "mozilla/Assertions.h"
-#include "mozilla/Attributes.h"
-
 #include <bit>
 #include <initializer_list>
 #include <type_traits>
+
+#include "mozilla/Assertions.h"
+#include "mozilla/Attributes.h"
 #ifdef DEBUG
 #  include <cstdint>
 #endif
@@ -159,22 +159,19 @@ class EnumSet {
   /**
    * Equality
    */
+#ifdef DEBUG
   constexpr bool operator==(const EnumSet& aEnumSet) const {
     return mBitField == aEnumSet.mBitField;
   }
+#else
+  bool operator==(const EnumSet& aEnumSet) const = default;
+#endif
 
   /**
    * Equality
    */
   constexpr bool operator==(T aEnum) const {
     return mBitField == BitFor(aEnum);
-  }
-
-  /**
-   * Not equal
-   */
-  constexpr bool operator!=(const EnumSet& aEnumSet) const {
-    return !operator==(aEnumSet);
   }
 
   /**

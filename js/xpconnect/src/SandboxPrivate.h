@@ -5,22 +5,25 @@
 #ifndef SANDBOXPRIVATE_H_
 #define SANDBOXPRIVATE_H_
 
+#include "mozilla/net/CookieJarSettings.h"
 #include "mozilla/SchedulerGroup.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StorageAccess.h"
 #include "mozilla/WeakPtr.h"
-#include "mozilla/net/CookieJarSettings.h"
+
 #include "nsContentUtils.h"
 #include "nsIGlobalObject.h"
-#include "nsIScriptObjectPrincipal.h"
 #include "nsIPrincipal.h"
+#include "nsIScriptObjectPrincipal.h"
 #include "nsWeakReference.h"
 #include "nsWrapperCache.h"
 
-#include "js/loader/ModuleLoaderBase.h"
-
 #include "js/Object.h"  // JS::GetPrivate, JS::SetPrivate
 #include "js/RootingAPI.h"
+
+namespace JS::loader {
+class ModuleLoaderBase;
+}  // namespace JS::loader
 
 class SandboxPrivate final : public nsIGlobalObject,
                              public nsIScriptObjectPrincipal,
@@ -119,19 +122,22 @@ class SandboxPrivate final : public nsIGlobalObject,
 
   bool IsXPCSandbox() override { return true; }
 
- private:
-  explicit SandboxPrivate(nsIPrincipal* principal)
-      : mPrincipal(principal),
-        mCookieJarSettings(
-            mozilla::net::CookieJarSettings::Create(mPrincipal)) {}
+  void SetAssociatedWindow(nsPIDOMWindowInner* aWindow);
+  already_AddRefed<nsPIDOMWindowInner> GetAssociatedWindow();
 
-  virtual ~SandboxPrivate() = default;
+ private:
+  explicit SandboxPrivate(nsIPrincipal* principal);
+
+  virtual ~SandboxPrivate();
 
   nsCOMPtr<nsIPrincipal> mPrincipal;
 
   nsCOMPtr<nsICookieJarSettings> mCookieJarSettings;
 
   RefPtr<JS::loader::ModuleLoaderBase> mModuleLoader;
+
+  // Weak to avoid keeping the associated window alive.
+  nsWeakPtr mAssociatedWindow;
 };
 
 #endif  // SANDBOXPRIVATE_H_

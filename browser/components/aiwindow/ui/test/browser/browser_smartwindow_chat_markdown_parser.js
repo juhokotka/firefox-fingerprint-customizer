@@ -3,7 +3,7 @@
 
 "use strict";
 
-const { parseMarkdown } = ChromeUtils.importESModule(
+const { parseMarkdown, parseMarkdownBlocks } = ChromeUtils.importESModule(
   "chrome://browser/content/aiwindow/modules/ChatMarkdownParser.mjs"
 );
 
@@ -334,6 +334,106 @@ add_task(function test_streaming_url_token_outside_link_renders_autolink() {
   Assert.equal(getAnchorHref(result), "https://example.com/page");
 });
 
+// A URL token the model invented is stripped from the message, which leaves
+// the link that held it with an empty destination. Markdown reads `[label]()`
+// as a link to nowhere and would render a clickable anchor whose empty href
+// resolves to the chat document itself, so the anchor is dropped and the
+// label kept as text.
+
+add_task(function test_parse_markdown_empty_link_destination() {
+  const result = parseMarkdown("Here is [link]() in a sentence.");
+  Assert.equal(
+    countAnchors(result),
+    0,
+    `A link with no destination should not render an anchor; got: ${result}`
+  );
+  Assert.ok(
+    !result.includes("</a>"),
+    `Dropping the anchor should not leave a stray closing tag; got: ${result}`
+  );
+  Assert.ok(
+    result.includes("Here is link in a sentence."),
+    `The label should remain as plain text; got: ${result}`
+  );
+});
+
+add_task(function test_parse_markdown_whitespace_link_destination() {
+  const result = parseMarkdown("[link](   )");
+  Assert.equal(
+    countAnchors(result),
+    0,
+    `A whitespace-only destination should not render an anchor; got: ${result}`
+  );
+  Assert.ok(result.includes("link"), `The label should remain; got: ${result}`);
+});
+
+add_task(function test_parse_markdown_empty_destination_keeps_label_markup() {
+  const result = parseMarkdown("[**bold label**]()");
+  Assert.equal(countAnchors(result), 0, `Expected no anchor; got: ${result}`);
+  assertHasTag(result, "strong");
+  Assert.ok(
+    result.includes("bold label"),
+    `Formatting inside the label should survive; got: ${result}`
+  );
+});
+
+add_task(function test_parse_markdown_empty_destination_beside_real_link() {
+  // Guards the pairing between the link_open and link_close rules: dropping
+  // one link's tags must not disturb another link in the same paragraph.
+  const result = parseMarkdown("[a](https://real.example.com) and [b]()");
+  Assert.equal(
+    countAnchors(result),
+    1,
+    `Only the link with a destination should render; got: ${result}`
+  );
+  Assert.equal(getAnchorHref(result), "https://real.example.com");
+  Assert.equal(getAnchorText(result), "a");
+  Assert.ok(
+    result.includes("and b"),
+    `The dropped link's label should remain as text; got: ${result}`
+  );
+});
+
+add_task(function test_parse_markdown_fragment_destination_still_links() {
+  // The check is "is the destination empty", not "is it a usable URL", so a
+  // destination that isn't a full URL must still render as a link.
+  const result = parseMarkdown("[x](#section)");
+  Assert.equal(
+    countAnchors(result),
+    1,
+    `A fragment destination should still render an anchor; got: ${result}`
+  );
+  Assert.equal(getAnchorHref(result), "#section");
+  Assert.equal(getAnchorText(result), "x");
+});
+
+add_task(function test_streaming_unresolved_url_token_renders_as_text() {
+  // End to end: the stream parser drops a token it cannot resolve, and what it
+  // leaves behind must not reach the user as a link.
+  const tokenToUrl = new Map([["URL_X_1", "https://example.com"]]);
+  const body = streamThroughTokenParser(
+    ["[real](§url_token: URL_X_1§) and [fake](§url_token: MADE_UP_1§)"],
+    tokenToUrl
+  );
+  Assert.equal(
+    body,
+    "[real](https://example.com) and [fake]()",
+    `An unresolved token should leave an empty destination; got: ${body}`
+  );
+
+  const result = parseMarkdown(body);
+  Assert.equal(
+    countAnchors(result),
+    1,
+    `Only the resolved token should render as a link; got: ${result}`
+  );
+  Assert.equal(getAnchorText(result), "real");
+  Assert.ok(
+    result.includes("and fake"),
+    `The invented link should read as plain text; got: ${result}`
+  );
+});
+
 add_task(function test_parse_markdown_mixed_content() {
   const markdown = `# Heading
 
@@ -353,4 +453,79 @@ Text after the table`;
     result.includes("Text after the table"),
     "Should contain trailing text"
   );
+});
+
+function assertBlocksMatchWhole(markdown, label) {
+  const whole = parseMarkdown(markdown);
+  const joined = parseMarkdownBlocks(markdown)
+    .map(block => block.html)
+    .join("");
+  Assert.equal(
+    joined,
+    whole,
+    `Block-by-block render should match whole render: ${label}`
+  );
+}
+
+const EQUIVALENCE_CORPUS = [
+  ["two paragraphs", "First paragraph.\n\nSecond paragraph."],
+  ["heading then paragraph", "# Title\n\nBody text."],
+  ["a table", "| A | B |\n|---|---|\n| 1 | 2 |"],
+  [
+    "paragraph, table, paragraph",
+    "Before.\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nAfter.",
+  ],
+  [
+    "two adjacent tables",
+    "| A | B |\n|---|---|\n| 1 | 2 |\n\n| C | D |\n|---|---|\n| 3 | 4 |",
+  ],
+  ["tight list", "- one\n- two\n- three"],
+  ["loose list", "- one\n\n- two\n\n- three"],
+  ["ordered list", "1. first\n2. second"],
+  ["nested list", "- outer\n  - inner\n  - inner two"],
+  ["blockquote", "> quoted line\n> second line"],
+  ["nested blockquote", "> outer\n> > inner"],
+  ["table inside blockquote", "> | A | B |\n> |---|---|\n> | 1 | 2 |"],
+  ["closed code fence", "```js\nconst x = 1;\n```"],
+  ["unclosed code fence", "```js\nconst x = 1;"],
+  ["indented code", "    indented code line"],
+  ["horizontal rule", "above\n\n---\n\nbelow"],
+  ["setext heading", "My Title\n========\n\nBody."],
+  ["html is escaped", "<script>alert('x')</script>"],
+  ["forward reference link", "See [docs][1].\n\n[1]: https://example.com"],
+  ["backward reference link", "[1]: https://example.com\n\nSee [docs][1]."],
+  ["lone reference definition", "[1]: https://example.com"],
+  ["list then fence", "- item\n\n```\ncode\n```"],
+];
+
+add_task(function test_parse_markdown_blocks_match_whole_render() {
+  for (const [label, markdown] of EQUIVALENCE_CORPUS) {
+    assertBlocksMatchWhole(markdown, label);
+  }
+});
+
+add_task(function test_parse_markdown_blocks_match_across_streaming_prefixes() {
+  const message = [
+    "# Weekly update",
+    "",
+    "Here is what shipped, with a [reference][ref] and a table:",
+    "",
+    "| Feature | Status |",
+    "|---------|--------|",
+    "| Search  | Done   |",
+    "| Import  | WIP    |",
+    "",
+    "```js",
+    "const done = true;",
+    "```",
+    "",
+    "- follow up one",
+    "- follow up two",
+    "",
+    "[ref]: https://example.com",
+  ].join("\n");
+
+  for (let i = 1; i <= message.length; i++) {
+    assertBlocksMatchWhole(message.slice(0, i), `prefix length ${i}`);
+  }
 });

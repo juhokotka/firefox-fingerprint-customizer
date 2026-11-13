@@ -4,37 +4,29 @@
 
 #include "nsAppShell.h"
 
+#include <android/log.h>
+#include <pthread.h>
+
+#include "AndroidBridge.h"
+#include "AndroidBridgeUtilities.h"
+#include "AndroidSurfaceTexture.h"
 #include "base/basictypes.h"
 #include "base/message_loop.h"
 #include "base/task.h"
-#include "mozilla/Hal.h"
 #include "gfxConfig.h"
-#include "nsDragService.h"
-#include "nsExceptionHandler.h"
-#include "nsIScreen.h"
-#include "nsWindow.h"
-#include "nsThreadUtils.h"
-#include "nsIObserverService.h"
-#include "nsIAppStartup.h"
-#include "nsIGeolocationProvider.h"
-#include "nsIDOMWakeLockListener.h"
-#include "nsIPowerManagerService.h"
-#include "nsISpeculativeConnect.h"
-#include "nsIURIFixup.h"
-#include "nsCategoryManagerUtils.h"
-#include "mozilla/dom/GeolocationPosition.h"
-
 #include "mozilla/AppShutdown.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Components.h"
-#include "mozilla/Services.h"
+#include "mozilla/Hal.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProfilerLabels.h"
-#include "mozilla/Hal.h"
+#include "mozilla/Services.h"
+#include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/Document.h"
-#include "mozilla/gfx/gfxVars.h"
+#include "mozilla/dom/GeolocationPosition.h"
 #include "mozilla/gfx/Logging.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/intl/OSPreferences.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/java/GeckoAppShellNatives.h"
@@ -43,20 +35,26 @@
 #include "mozilla/java/GeckoThreadNatives.h"
 #include "mozilla/java/XPCOMEventTargetNatives.h"
 #include "mozilla/widget/ScreenManager.h"
-#include "mozilla/StaticPrefs_dom.h"
+#include "nsCategoryManagerUtils.h"
+#include "nsDragService.h"
+#include "nsExceptionHandler.h"
+#include "nsIAppStartup.h"
+#include "nsIDOMWakeLockListener.h"
+#include "nsIGeolocationProvider.h"
+#include "nsIObserverService.h"
+#include "nsIPowerManagerService.h"
+#include "nsIScreen.h"
+#include "nsISpeculativeConnect.h"
+#include "nsIURIFixup.h"
+#include "nsThreadUtils.h"
+#include "nsWindow.h"
 #include "prenv.h"
 #include "prtime.h"
 
-#include "AndroidBridge.h"
-#include "AndroidBridgeUtilities.h"
-#include "AndroidSurfaceTexture.h"
-#include <android/log.h>
-#include <pthread.h>
-
 #ifdef MOZ_GECKOVIEW_HISTORY
-#  include "nsNetUtil.h"
-#  include "nsIURI.h"
 #  include "IHistory.h"
+#  include "nsIURI.h"
+#  include "nsNetUtil.h"
 #endif
 
 #ifdef MOZ_LOGGING
@@ -65,6 +63,7 @@
 
 #include "AndroidAlerts.h"
 #include "AndroidUiThread.h"
+#include "Base64UtilsSupport.h"
 #include "GeckoBatteryManager.h"
 #include "GeckoEditableSupport.h"
 #include "GeckoNetworkManager.h"
@@ -74,10 +73,9 @@
 #include "GeckoVRManager.h"
 #include "ImageDecoderSupport.h"
 #include "JavaBuiltins.h"
+#include "MozLogSupport.h"
 #include "ScreenHelperAndroid.h"
 #include "WebExecutorSupport.h"
-#include "Base64UtilsSupport.h"
-#include "MozLogSupport.h"
 
 #ifdef DEBUG_ANDROID_EVENTS
 #  define EVLOG(args...) ALOG(args)
@@ -208,8 +206,7 @@ class GeckoThreadSupport final
     nsCOMPtr<nsIAppStartup> appStartup = components::AppStartup::Service();
 
     if (appStartup) {
-      bool userAllowedQuit = true;
-      appStartup->Quit(nsIAppStartup::eForceQuit, 0, &userAllowedQuit);
+      appStartup->Quit(nsIAppStartup::eForceQuit, 0);
     }
   }
 

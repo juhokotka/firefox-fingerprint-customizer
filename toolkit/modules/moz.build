@@ -10,6 +10,9 @@ with Files("**"):
 with Files("docs/**"):
     BUG_COMPONENT = ("Toolkit", "Async Tooling")
 
+with Files("launchonlogin/**"):
+    BUG_COMPONENT = ("Toolkit", "General")
+
 with Files("subprocess/**"):
     BUG_COMPONENT = ("Toolkit", "Async Tooling")
 
@@ -124,9 +127,6 @@ with Files("SubDialog.sys.mjs"):
 with Files("UpdateUtils.sys.mjs"):
     BUG_COMPONENT = ("Toolkit", "Application Update")
 
-with Files("WindowsLaunchOnLogin.sys.mjs"):
-    BUG_COMPONENT = ("Toolkit", "General")
-
 with Files("WindowsRegistry.sys.mjs"):
     BUG_COMPONENT = ("Toolkit", "General")
 
@@ -200,11 +200,11 @@ EXTRA_JS_MODULES += [
     "PrivateBrowsingUtils.sys.mjs",
     "ProcessType.sys.mjs",
     "ProfileAge.sys.mjs",
+    "ProfileKekPassword.sys.mjs",
     "Region.sys.mjs",
     "RemotePageAccessManager.sys.mjs",
     "ResetProfile.sys.mjs",
     "RustSharedRemoteSettingsService.sys.mjs",
-    "ScheduledTask.sys.mjs",
     "SelectionUtils.sys.mjs",
     "ServiceRequest.sys.mjs",
     "ShortcutUtils.sys.mjs",
@@ -213,6 +213,8 @@ EXTRA_JS_MODULES += [
     "Timer.sys.mjs",
     "Troubleshoot.sys.mjs",
     "UpdateUtils.sys.mjs",
+    "URLKeywordAnalyzer.sys.mjs",
+    "URLKeywordStopWords.sys.mjs",
     "UrlUtils.sys.mjs",
     "WebChannel.sys.mjs",
 ]
@@ -222,6 +224,7 @@ MOZ_SRC_FILES += [
     "DateTimePickerPanel.sys.mjs",
     "FaviconUtils.sys.mjs",
     "InputPickerPanelCommon.sys.mjs",
+    "RegionLocaleMap.sys.mjs",
 ]
 
 if CONFIG["MOZ_ASAN_REPORTER"]:
@@ -265,9 +268,13 @@ if "Android" != CONFIG["OS_TARGET"]:
         "GMPInstallManager.sys.mjs",
         "GMPUtils.sys.mjs",
         "LightweightThemeConsumer.sys.mjs",
+        "ScheduledTask.sys.mjs",
     ]
-
+    TESTING_JS_MODULES += [
+        "tests/modules/SystemDelay.sys.mjs",
+    ]
     DIRS += [
+        "launchonlogin",
         "subprocess",
     ]
 
@@ -278,7 +285,6 @@ if CONFIG["OS_TARGET"] not in ("Android", "WINNT"):
 
 if CONFIG["MOZ_WIDGET_TOOLKIT"] == "windows":
     EXTRA_JS_MODULES += [
-        "WindowsLaunchOnLogin.sys.mjs",
         "WindowsRegistry.sys.mjs",
     ]
 
@@ -288,6 +294,7 @@ for var in (
     "MOZ_APP_DISPLAYNAME",
     "MOZ_APP_VERSION",
     "MOZ_APP_VERSION_DISPLAY",
+    "MOZ_BACKGROUNDTASK_ACTIVATABLE_CLASS_ID",
     "MOZ_BING_API_CLIENTID",
     "MOZ_BING_API_KEY",
     "MOZ_GOOGLE_SAFEBROWSING_API_KEY",
@@ -317,7 +324,6 @@ for var in (
 
 for var in (
     "NIGHTLY_BUILD",
-    "ENABLE_EXPLICIT_RESOURCE_MANAGEMENT",
     "RELEASE_OR_BETA",
     "EARLY_BETA_OR_EARLIER",
     "MOZ_ESR",
@@ -338,6 +344,7 @@ for var in (
     "MOZ_UPDATE_AGENT",
     "MOZ_BITS_DOWNLOAD",
     "MOZ_DEBUG",
+    "MOZ_DIAGNOSTIC_ASSERT_ENABLED",
     "MOZ_ASAN",
     "MOZ_ASAN_REPORTER",
     "MOZ_TSAN",
@@ -352,11 +359,11 @@ for var in (
     "MOZ_CODE_COVERAGE",
     "ENABLE_WEBDRIVER",
     "MOZ_GLEAN_ANDROID",
+    "MOZ_FONTATIONS",
     "MOZ_JXL",
     "MOZ_SYSTEM_POLICIES",
     "MOZ_SELECTABLE_PROFILES",
     "USE_LIBZ_RS",
-    "MOZ_ANDROID_CONTENT_SERVICE_ISOLATED_PROCESS",
 ):
     DEFINES[f"{var}_BOOL"] = "true" if CONFIG[var] else "false"
 

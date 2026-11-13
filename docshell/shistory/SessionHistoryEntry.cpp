@@ -6,6 +6,7 @@
 #include "ipc/IPCMessageUtilsSpecializations.h"
 #include "mozilla/dom/SessionHistoryEntry.h"
 #include "nsCOMPtr.h"
+#include "nsContentUtils.h"
 #include "nsDocShell.h"
 #include "nsDocShellLoadState.h"
 #include "nsFrameLoader.h"
@@ -43,6 +44,14 @@ extern mozilla::LazyLogModule gSHLog;
 namespace mozilla {
 namespace dom {
 
+// Only store policy container for loads that can't carry it themselves
+// (about:blank, about:srcdoc, blob:, data:, ...)
+// bug 1867137, bug 2011236
+static nsIPolicyContainer* PolicyContainerToStore(
+    nsIURI* aURI, nsIPolicyContainer* aPolicyContainer) {
+  return CSP_ShouldURIInheritCSP(aURI) ? aPolicyContainer : nullptr;
+}
+
 SessionHistoryInfo::SessionHistoryInfo(nsDocShellLoadState* aLoadState,
                                        nsIChannel* aChannel)
     : mURI(aLoadState->URI()),
@@ -61,9 +70,18 @@ SessionHistoryInfo::SessionHistoryInfo(nsDocShellLoadState* aLoadState,
       mSharedState(SharedState::Create(
           aLoadState->TriggeringPrincipal(), aLoadState->PrincipalToInherit(),
           aLoadState->PartitionedPrincipalToInherit(),
-          aLoadState->PolicyContainer(),
+          PolicyContainerToStore(aLoadState->URI(),
+                                 aLoadState->PolicyContainer()),
           /* FIXME Is this correct? */
           aLoadState->TypeHint())) {
+  MOZ_DIAGNOSTIC_ASSERT(!mURI->SchemeIs("javascript"));
+
+  // Verify the documented purpose of mBaseURI.
+  MOZ_DIAGNOSTIC_ASSERT(
+      !mBaseURI || mSrcdocData ||
+      (aLoadState->TriggeringPrincipal() &&
+       aLoadState->TriggeringPrincipal()->IsSystemPrincipal()));
+
   // Pull the upload stream off of the channel instead of the load state, as
   // ownership has already been transferred from the load state to the channel.
   if (nsCOMPtr<nsIUploadChannel2> postChannel = do_QueryInterface(aChannel)) {
@@ -83,6 +101,7 @@ SessionHistoryInfo::SessionHistoryInfo(nsDocShellLoadState* aLoadState,
 SessionHistoryInfo::SessionHistoryInfo(
     const SessionHistoryInfo& aSharedStateFrom, nsIURI* aURI)
     : mURI(aURI), mSharedState(aSharedStateFrom.mSharedState) {
+  MOZ_DIAGNOSTIC_ASSERT(!mURI || !mURI->SchemeIs("javascript"));
   MaybeUpdateTitleFromURI();
   mHasUserInteraction = aSharedStateFrom.mHasUserInteraction;
 }
@@ -96,6 +115,7 @@ SessionHistoryInfo::SessionHistoryInfo(
       mSharedState(SharedState::Create(
           aTriggeringPrincipal, aPrincipalToInherit,
           aPartitionedPrincipalToInherit, aPolicyContainer, aContentType)) {
+  MOZ_DIAGNOSTIC_ASSERT(!mURI || !mURI->SchemeIs("javascript"));
   MaybeUpdateTitleFromURI();
 }
 
@@ -107,6 +127,7 @@ SessionHistoryInfo::SessionHistoryInfo(
     NS_WARNING("NS_GetFinalChannelURI somehow failed in SessionHistoryInfo?");
     aChannel->GetURI(getter_AddRefs(mURI));
   }
+  MOZ_DIAGNOSTIC_ASSERT(!mURI->SchemeIs("javascript"));
   mLoadType = aLoadType;
 
   nsCOMPtr<nsILoadInfo> loadInfo;
@@ -121,7 +142,8 @@ SessionHistoryInfo::SessionHistoryInfo(
 
   mSharedState.Get()->mPartitionedPrincipalToInherit =
       aPartitionedPrincipalToInherit;
-  mSharedState.Get()->mPolicyContainer = aPolicyContainer;
+  mSharedState.Get()->mPolicyContainer =
+      PolicyContainerToStore(mURI, aPolicyContainer);
   aChannel->GetContentType(mSharedState.Get()->mContentType);
   aChannel->GetOriginalURI(getter_AddRefs(mOriginalURI));
 
@@ -166,6 +188,22 @@ void SessionHistoryInfo::SetPostData(nsIInputStream* aPostData) {
 
 uint64_t SessionHistoryInfo::SharedId() const {
   return mSharedState.Get()->mId;
+}
+
+Maybe<NewSessionHistorySharedState> SessionHistoryInfo::NewSharedStateRequest()
+    const {
+  MOZ_ASSERT(XRE_IsContentProcess());
+  SHEntrySharedState* state = mSharedState.Get();
+  if (!nsContentUtils::IsProcessSpecificIdFrom(state->mId, XRE_GetChildID())) {
+    return Nothing();
+  }
+  return Some(NewSessionHistorySharedState{state->mId, state->mPolicyContainer,
+                                           state->mContentType});
+}
+
+void SessionHistoryInfo::SetSharedState(SHEntrySharedParentState* aState) {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  mSharedState.Set(aState);
 }
 
 nsILayoutHistoryState* SessionHistoryInfo::GetLayoutHistoryState() {
@@ -232,6 +270,7 @@ void SessionHistoryInfo::FillLoadInfo(nsDocShellLoadState& aLoadState) const {
   aLoadState.SetOriginalURI(mOriginalURI);
   aLoadState.SetMaybeResultPrincipalURI(Some(mResultPrincipalURI));
   aLoadState.SetUnstrippedURI(mUnstrippedURI);
+  aLoadState.SetBaseURI(mBaseURI);
   aLoadState.SetLoadReplace(mLoadReplace);
   nsCOMPtr<nsIInputStream> postData = GetPostData();
   aLoadState.SetPostDataStream(postData);
@@ -252,16 +291,13 @@ void SessionHistoryInfo::FillLoadInfo(nsDocShellLoadState& aLoadState) const {
   // the source browsing context that was used when the history entry was
   // first created. bug 947716 has been created to address this issue.
   nsAutoString srcdoc;
-  nsCOMPtr<nsIURI> baseURI;
   if (mSrcdocData) {
     srcdoc = mSrcdocData.value();
-    baseURI = mBaseURI;
     flags |= nsDocShell::InternalLoad::INTERNAL_LOAD_FLAGS_IS_SRCDOC;
   } else {
     srcdoc = VoidString();
   }
   aLoadState.SetSrcdocData(srcdoc);
-  aLoadState.SetBaseURI(baseURI);
   aLoadState.SetInternalLoadFlags(flags);
 
   aLoadState.SetFirstParty(true);
@@ -489,6 +525,7 @@ SessionHistoryEntry::GetURI(nsIURI** aURI) {
 
 NS_IMETHODIMP
 SessionHistoryEntry::SetURI(nsIURI* aURI) {
+  MOZ_DIAGNOSTIC_ASSERT(!aURI->SchemeIs("javascript"));
   mInfo->mURI = aURI;
   return NS_OK;
 }
@@ -1281,47 +1318,6 @@ void SessionHistoryEntry::GetChildAt(int32_t aIndex,
   child.forget(aChild);
 }
 
-SessionHistoryEntry*
-SessionHistoryEntry::GetChildSHEntryIfHasNoDynamicallyAddedChild(
-    int32_t aChildOffset) {
-  bool dynamicallyAddedChild = false;
-  HasDynamicallyAddedChild(&dynamicallyAddedChild);
-  if (dynamicallyAddedChild) {
-    return nullptr;
-  }
-
-  // If the user did a shift-reload on this frameset page,
-  // we don't want to load the subframes from history.
-  if (IsForceReloadType(mInfo->mLoadType) || mInfo->mLoadType == LOAD_REFRESH) {
-    return nullptr;
-  }
-
-  /* Before looking for the subframe's url, check
-   * the expiration status of the parent. If the parent
-   * has expired from cache, then subframes will not be
-   * loaded from history in certain situations.
-   * If the user pressed reload and the parent frame has expired
-   *  from cache, we do not want to load the child frame from history.
-   */
-  if (SharedInfo()->mExpired && (mInfo->mLoadType == LOAD_RELOAD_NORMAL)) {
-    // The parent has expired. Return null.
-    return nullptr;
-  }
-  // Get the child subframe from session history.
-  auto* child = mChildren.SafeElementAt(aChildOffset);
-  if (child) {
-    // Set the parent's Load Type on the child
-    child->SetLoadType(mInfo->mLoadType);
-  }
-  return child;
-}
-
-NS_IMETHODIMP_(void)
-SessionHistoryEntry::GetChildSHEntryIfHasNoDynamicallyAddedChild(
-    int32_t aChildOffset, nsISHEntry** aChild) {
-  *aChild = GetChildSHEntryIfHasNoDynamicallyAddedChild(aChildOffset);
-}
-
 NS_IMETHODIMP
 SessionHistoryEntry::ReplaceChild(nsISHEntry* aNewChild) {
   NS_ENSURE_STATE(aNewChild);
@@ -1373,7 +1369,7 @@ NS_IMETHODIMP
 SessionHistoryEntry::GetWireframe(JSContext* aCx,
                                   JS::MutableHandle<JS::Value> aOut) {
   if (mWireframe.isNothing()) {
-    aOut.set(JS::NullValue());
+    aOut.setNull();
   } else if (NS_WARN_IF(!mWireframe->ToObjectInternal(aCx, aOut))) {
     return NS_ERROR_FAILURE;
   }
@@ -1606,6 +1602,12 @@ bool ParamTraits<mozilla::dom::SessionHistoryInfo>::Read(
     return false;
   }
 
+  if (aResult->mURI && aResult->mURI->SchemeIs("javascript")) {
+    // Note: Session restore also skips javascript: URIs to avoid hitting this.
+    aReader->FatalError("javascript: URIs should not enter session history");
+    return false;
+  }
+
   nsCOMPtr<nsIPrincipal> triggeringPrincipal;
   nsCOMPtr<nsIPrincipal> principalToInherit;
   nsCOMPtr<nsIPrincipal> partitionedPrincipalToInherit;
@@ -1639,23 +1641,8 @@ bool ParamTraits<mozilla::dom::SessionHistoryInfo>::Read(
   if (sharedState) {
     aResult->mSharedState.Set(sharedState);
 
-    MOZ_ASSERT(triggeringPrincipal
-                   ? triggeringPrincipal->Equals(
-                         aResult->mSharedState.Get()->mTriggeringPrincipal)
-                   : !aResult->mSharedState.Get()->mTriggeringPrincipal,
-               "We don't expect this to change!");
-    MOZ_ASSERT(principalToInherit
-                   ? principalToInherit->Equals(
-                         aResult->mSharedState.Get()->mPrincipalToInherit)
-                   : !aResult->mSharedState.Get()->mPrincipalToInherit,
-               "We don't expect this to change!");
-    MOZ_ASSERT(
-        partitionedPrincipalToInherit
-            ? partitionedPrincipalToInherit->Equals(
-                  aResult->mSharedState.Get()->mPartitionedPrincipalToInherit)
-            : !aResult->mSharedState.Get()->mPartitionedPrincipalToInherit,
-        "We don't expect this to change!");
-
+    // The principals content sent are ignored. They can differ for state that
+    // content created, as the parent took those from the document instead.
     MOZ_ASSERT(policyContainer
                    ? PolicyContainer::Equals(
                          PolicyContainer::Cast(policyContainer),
@@ -1665,7 +1652,7 @@ bool ParamTraits<mozilla::dom::SessionHistoryInfo>::Read(
                "We don't expect this to change!");
     MOZ_ASSERT(contentType.Equals(aResult->mSharedState.Get()->mContentType),
                "We don't expect this to change!");
-  } else {
+  } else if (!XRE_IsParentProcess()) {
     aResult->mSharedState.ChangeId(sharedId);
     aResult->mSharedState.Get()->mTriggeringPrincipal =
         triggeringPrincipal.forget();
@@ -1676,6 +1663,10 @@ bool ParamTraits<mozilla::dom::SessionHistoryInfo>::Read(
     aResult->mSharedState.Get()->mPolicyContainer = policyContainer.forget();
     aResult->mSharedState.Get()->mContentType = contentType;
   }
+  // Otherwise the parent doesn't know sharedId. It never adopts an id from
+  // content: aResult keeps the fresh state it was constructed with, which no
+  // document is bound to. Content asks for new state explicitly, see
+  // CanonicalBrowsingContext::CreateSharedState.
 
   if (!ReadParam(aReader, &aResult->mSharedState.Get()->mLayoutHistoryState) ||
       !ReadParam(aReader, &aResult->mSharedState.Get()->mCacheKey) ||
@@ -1691,6 +1682,9 @@ bool ParamTraits<mozilla::dom::SessionHistoryInfo>::Read(
 
 IMPLEMENT_IPC_SERIALIZER_WITH_FIELDS(mozilla::dom::PreviousSessionHistoryInfo,
                                      mSameOriginSessionHistoryInfo);
+
+IMPLEMENT_IPC_SERIALIZER_WITH_FIELDS(mozilla::dom::NewSessionHistorySharedState,
+                                     mId, mPolicyContainer, mContentType);
 
 IMPLEMENT_IPC_SERIALIZER_WITH_FIELDS(mozilla::dom::LoadingSessionHistoryInfo,
                                      mInfo, mContiguousEntries, mPreviousEntry,

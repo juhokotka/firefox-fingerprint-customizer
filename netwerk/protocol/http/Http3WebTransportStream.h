@@ -7,8 +7,8 @@
 
 #include <functional>
 
-#include "WebTransportStreamBase.h"
 #include "Http3StreamBase.h"
+#include "WebTransportStreamBase.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Result.h"
 #include "mozilla/ResultVariant.h"
@@ -54,7 +54,8 @@ class Http3WebTransportStream final : public WebTransportStreamBase,
   Http3ConnectUDPStream* GetHttp3ConnectUDPStream() override { return nullptr; }
   Http3StreamTunnel* GetHttp3StreamTunnel() override { return nullptr; }
 
-  void SetSendOrder(Maybe<int64_t> aSendOrder) override;
+  void SetSendOrder(int64_t aSendOrder) override;
+  void SetSendGroup(uint64_t aSendGroupId) override;
 
   [[nodiscard]] nsresult ReadSegments() override;
   [[nodiscard]] nsresult WriteSegments() override;
@@ -69,7 +70,7 @@ class Http3WebTransportStream final : public WebTransportStreamBase,
 
   void SendFin() override;
   void Reset(uint64_t aErrorCode) override;
-  void SendStopSending(uint8_t aErrorCode) override;
+  void SendStopSending(uint64_t aErrorCode) override;
 
   already_AddRefed<nsIWebTransportSendStreamStats> GetSendStreamStats()
       override;
@@ -78,6 +79,14 @@ class Http3WebTransportStream final : public WebTransportStreamBase,
 
   // When mRecvState is RECV_DONE, this means we already received the FIN.
   bool RecvDone() const override { return mRecvState == RECV_DONE; }
+
+  bool SentReset() const { return mResetError.isSome(); }
+
+  // RESET_STREAM or STOP_SENDING from the peer on a bidirectional stream ends
+  // only the receive or the send half, respectively; the other half stays
+  // usable until it finishes on its own.
+  void CloseReceiveSide(nsresult aResult);
+  void CloseSendSide(nsresult aResult);
 
  private:
   friend class Http3WebTransportSession;
@@ -97,7 +106,7 @@ class Http3WebTransportStream final : public WebTransportStreamBase,
   // The error code used to reset the stream. Should be only set once.
   Maybe<uint64_t> mResetError;
   // The error code used for STOP_SENDING. Should be only set once.
-  Maybe<uint8_t> mStopSendingError;
+  Maybe<uint64_t> mStopSendingError;
 
   // This is used when SendFin or Reset is called when mSendState is SENDING.
   nsTArray<std::function<void()>> mPendingTasks;

@@ -394,7 +394,7 @@ const MESSAGES = () => {
                 alignment: "top",
               },
               title: {
-                string_id: "tab-groups-onboarding-saved-groups-title-3",
+                string_id: "tab-groups-onboarding-saved-groups-title-4",
               },
               primary_button: {
                 label: {
@@ -409,7 +409,7 @@ const MESSAGES = () => {
         ],
       },
       targeting:
-        "('browser.tabs.groups.enabled' | preferenceValue) && userPrefs.cfrFeatures && (!messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] || messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] < currentDate|date - 3600000) && alltabsButtonAreaType != null",
+        "('browser.tabs.groups.enabled' | preferenceValue) && ('browser.tabs.groups.onboardingCallouts.enabled' | preferenceValue) && userPrefs.cfrFeatures && (!messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] || messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] < currentDate|date - 3600000) && alltabsButtonAreaType != null",
       trigger: {
         id: "tabGroupSaved",
       },
@@ -472,7 +472,7 @@ const MESSAGES = () => {
         ],
       },
       targeting:
-        "('browser.tabs.groups.enabled' | preferenceValue) && userPrefs.cfrFeatures && (!messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] || messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] < currentDate|date - 3600000) && alltabsButtonAreaType == null",
+        "('browser.tabs.groups.enabled' | preferenceValue) && ('browser.tabs.groups.onboardingCallouts.enabled' | preferenceValue) && userPrefs.cfrFeatures && (!messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] || messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.CREATE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] < currentDate|date - 3600000) && alltabsButtonAreaType == null",
       trigger: {
         id: "tabGroupSaved",
       },
@@ -519,7 +519,7 @@ const MESSAGES = () => {
                 alignment: "top",
               },
               title: {
-                string_id: "tab-groups-onboarding-create-group-title-3",
+                string_id: "tab-groups-onboarding-create-group-title-4",
               },
               primary_button: {
                 label: {
@@ -534,7 +534,7 @@ const MESSAGES = () => {
         ],
       },
       targeting:
-        "('browser.tabs.groups.enabled' | preferenceValue) && userPrefs.cfrFeatures && (!messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] || messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] < currentDate|date - 3600000) && alltabsButtonAreaType != null",
+        "('browser.tabs.groups.enabled' | preferenceValue) && ('browser.tabs.groups.onboardingCallouts.enabled' | preferenceValue) && userPrefs.cfrFeatures && (!messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] || messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] < currentDate|date - 3600000) && alltabsButtonAreaType != null",
       trigger: {
         id: "tabGroupCreated",
       },
@@ -597,7 +597,7 @@ const MESSAGES = () => {
         ],
       },
       targeting:
-        "('browser.tabs.groups.enabled' | preferenceValue) && userPrefs.cfrFeatures && (!messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] || messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] < currentDate|date - 3600000) && alltabsButtonAreaType == null",
+        "('browser.tabs.groups.enabled' | preferenceValue) && ('browser.tabs.groups.onboardingCallouts.enabled' | preferenceValue) && userPrefs.cfrFeatures && (!messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] || messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT[messageImpressions.SAVE_TAB_GROUP_ONBOARDING_CALLOUT | length - 1] < currentDate|date - 3600000) && alltabsButtonAreaType == null",
       trigger: {
         id: "tabGroupCreated",
       },
@@ -642,7 +642,7 @@ const MESSAGES = () => {
                 alignment: "top",
               },
               title: {
-                string_id: "tab-groups-onboarding-session-restore-title-2",
+                string_id: "tab-groups-onboarding-session-restore-title-3",
               },
               primary_button: {
                 label: {
@@ -657,7 +657,7 @@ const MESSAGES = () => {
         ],
       },
       targeting:
-        "('browser.tabs.groups.enabled' | preferenceValue) && userPrefs.cfrFeatures && previousSessionEnd && ('browser.startup.page' | preferenceValue != 3) && savedTabGroups >= 1 && alltabsButtonAreaType != null",
+        "('browser.tabs.groups.enabled' | preferenceValue) && ('browser.tabs.groups.onboardingCallouts.enabled' | preferenceValue) && userPrefs.cfrFeatures && previousSessionEnd && ('browser.startup.page' | preferenceValue != 3) && savedTabGroups >= 1 && alltabsButtonAreaType != null",
       trigger: {
         id: "defaultBrowserCheck",
       },
@@ -720,7 +720,7 @@ const MESSAGES = () => {
         ],
       },
       targeting:
-        "('browser.tabs.groups.enabled' | preferenceValue) && userPrefs.cfrFeatures && previousSessionEnd && ('browser.startup.page' | preferenceValue != 3) && savedTabGroups >= 1 && alltabsButtonAreaType == null",
+        "('browser.tabs.groups.enabled' | preferenceValue) && ('browser.tabs.groups.onboardingCallouts.enabled' | preferenceValue) && userPrefs.cfrFeatures && previousSessionEnd && ('browser.startup.page' | preferenceValue != 3) && savedTabGroups >= 1 && alltabsButtonAreaType == null",
       trigger: {
         id: "defaultBrowserCheck",
       },
@@ -974,79 +974,6 @@ const MESSAGES = () => {
       )} && ${matchIncompleteTargeting(PDFJS_PREF)}`,
       trigger: { id: "pdfJsFeatureCalloutCheck" },
     },
-    // cookie banner reduction onboarding
-    {
-      id: "CFR_COOKIEBANNER",
-      groups: ["cfr"],
-      template: "feature_callout",
-      content: {
-        id: "CFR_COOKIEBANNER",
-        template: "multistage",
-        backdrop: "transparent",
-        transitions: false,
-        disableHistoryUpdates: true,
-        screens: [
-          {
-            id: "COOKIEBANNER_CALLOUT",
-            anchors: [
-              {
-                selector: "#tracking-protection-icon-container",
-                panel_position: {
-                  callout_attachment: "topleft",
-                  anchor_attachment: "bottomcenter",
-                },
-              },
-            ],
-            content: {
-              position: "callout",
-              autohide: true,
-              title: {
-                string_id: "cookie-banner-blocker-onboarding-header",
-                paddingInline: "12px 0",
-              },
-              subtitle: {
-                string_id: "cookie-banner-blocker-onboarding-body",
-                paddingInline: "34px 0",
-              },
-              title_logo: {
-                alignment: "top",
-                height: "20px",
-                width: "20px",
-                imageURL:
-                  "chrome://browser/skin/controlcenter/3rdpartycookies-blocked.svg",
-              },
-              dismiss_button: {
-                size: "small",
-                action: { dismiss: true },
-              },
-              additional_button: {
-                label: {
-                  string_id: "cookie-banner-blocker-onboarding-learn-more",
-                  marginInline: "34px 0",
-                },
-                style: "link",
-                alignment: "start",
-                action: {
-                  type: "OPEN_URL",
-                  data: {
-                    args: "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/cookie-banner-reduction",
-                    where: "tabshifted",
-                  },
-                },
-              },
-            },
-          },
-        ],
-      },
-      frequency: {
-        lifetime: 1,
-      },
-      skip_in_tests: "it's not tested in automation",
-      trigger: {
-        id: "cookieBannerHandled",
-      },
-      targeting: `'cookiebanners.ui.desktop.enabled'|preferenceValue == true && 'cookiebanners.ui.desktop.showCallout'|preferenceValue == true && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features' | preferenceValue != false`,
-    },
     {
       id: "NEW_PROFILE_APP_MENU_TOUR",
       groups: [],
@@ -1083,7 +1010,9 @@ const MESSAGES = () => {
               position: "callout",
               logo: {
                 imageURL:
-                  "chrome://browser/content/asrouter/assets/fox-with-profiles.svg",
+                  "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/ms-images/20260826181028--7f65b212-972a-4d49-a896-27c687ba149f--ea3315b7-2b00-4a73-95ec-492d30d1c736.svg",
+                darkModeImageURL:
+                  "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/ms-images/20260826164831--30a2ac66-7a85-41e8-98c1-caf29c5d3c65--9ddf04c9-fc70-43b4-8e60-bdfbca425f16.svg",
                 height: "100%",
                 width: "100%",
               },

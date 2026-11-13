@@ -20,20 +20,23 @@ data class Prompt(
 /**
  * Marker interface for any failure surfaced by a cloud-based LLM provider.
  *
- * Implementation modules attach more specific category interfaces (e.g. [RateLimited],
- * [RequestTooLarge]) to their concrete exception types. Consumers may type-check the
- * categories to drive UI or recovery behavior without depending on any particular impl.
+ * Implementation modules attach more specific category interfaces (e.g. [RateLimited], [RequestTooLarge]) to their
+ * concrete exception types. Consumers may type-check the categories to drive UI or recovery behavior without depending
+ * on any particular impl.
  */
 interface CloudFailure
 
 /** The request body or content exceeded what the service accepts. */
 interface RequestTooLarge : CloudFailure
 
+/** Sign in fallback failed */
+interface AttestationFailure : CloudFailure
+
 /**
  * Rate or token limit hit.
  *
- * @property retryAfter Seconds the caller should wait before retrying, if the service
- *  provided a hint. `null` if no hint was given.
+ * @property retryAfter Seconds the caller should wait before retrying, if the service provided a hint. `null` if no
+ *   hint was given.
  */
 interface RateLimited : CloudFailure {
     val retryAfter: Long?
@@ -41,6 +44,12 @@ interface RateLimited : CloudFailure {
 
 /** Authentication or authorization failure. */
 interface AuthFailure : CloudFailure
+
+/**
+ * No usable credentials are available and the user must authenticate (e.g. sign in) before the request can proceed.
+ * Distinct from [AuthFailure], which indicates an already-authenticated session whose authorization failed.
+ */
+interface AuthenticationRequired : CloudFailure
 
 /** A network-level failure reaching the service. */
 interface NetworkError : CloudFailure
@@ -54,9 +63,7 @@ interface ServerError : CloudFailure {
     val statusCode: Int
 }
 
-/**
- * An abstract definition of a LLM that can receive prompts.
- */
+/** An abstract definition of a LLM that can receive prompts. */
 interface Llm {
     /**
      * A prompt request delivered to the LLM for inference.
@@ -67,10 +74,9 @@ interface Llm {
     suspend fun prompt(prompt: Prompt): Flow<String>
 
     /**
-     * An exception thrown by an LLM. Implementation modules may subclass this to
-     * attach additional context (rate-limit metadata, HTTP status, etc.). Consumers
-     * that need numeric codes for UI or telemetry should maintain their own mapping
-     * from subtypes to codes.
+     * An exception thrown by an LLM. Implementation modules may subclass this to attach additional context (rate-limit
+     * metadata, HTTP status, etc.). Consumers that need numeric codes for UI or telemetry should maintain their own
+     * mapping from subtypes to codes.
      *
      * @param message A human-readable description of the failure.
      * @param cause The original throwable that caused this exception, if any.
@@ -80,12 +86,8 @@ interface Llm {
         cause: Throwable? = null,
     ) : kotlin.Exception(message, cause) {
         companion object {
-            /**
-             * Create an unspecified error.
-             */
-            fun unknown(message: String?) = Llm.Exception(
-                message = message ?: "Unknown Llm Exception",
-            )
+            /** Create an unspecified error. */
+            fun unknown(message: String?) = Llm.Exception(message = message ?: "Unknown Llm Exception")
         }
     }
 }

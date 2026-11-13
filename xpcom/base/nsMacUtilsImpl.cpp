@@ -4,13 +4,16 @@
 
 #include "nsMacUtilsImpl.h"
 
+#include <sys/param.h>
+
+#include "CFTypeRefPtr.h"
 #include "base/command_line.h"
 #include "base/process_util.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Omnijar.h"
-#include "nsComponentManagerUtils.h"
 #include "nsCOMPtr.h"
+#include "nsComponentManagerUtils.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsIFile.h"
 #include "nsReadableUtils.h"
@@ -70,11 +73,11 @@ static Atomic<TCSMStatus> sTCSMStatus(TCSM_Unknown);
 
 #if defined(MOZ_SANDBOX) || defined(__aarch64__)
 
-// Utility method to call ClearOnShutdown() on the main thread
-static nsresult ClearCachedAppPathOnShutdown() {
-  MOZ_ASSERT(NS_IsMainThread());
-  ClearOnShutdown(&sCachedAppPath);
-  return NS_OK;
+static void ClearCachedAppPathOnShutdown() {
+  mozilla::RunOnShutdown([] {
+    StaticMutexAutoLock lock(sCachedAppPathMutex);
+    sCachedAppPath = nullptr;
+  });
 }
 
 // Get the path to the .app directory (aka bundle) for the parent process.
@@ -100,8 +103,7 @@ bool nsMacUtilsImpl::GetAppPath(nsCString& aAppPath) {
   nsAutoCString::const_iterator start, end;
   appBinaryPath.BeginReading(start);
   appBinaryPath.EndReading(end);
-  if (RFindInReadable(pattern, start, end,
-                      nsCaseInsensitiveCStringComparator)) {
+  if (CaseInsensitiveRFindInReadable(pattern, start, end)) {
     end = start;
     appBinaryPath.BeginReading(start);
 
@@ -109,8 +111,7 @@ bool nsMacUtilsImpl::GetAppPath(nsCString& aAppPath) {
     // by searching backwards once more. The child executable resides
     // in Firefox.app/Contents/MacOS/plugin-container/Contents/MacOS.
     if (!XRE_IsParentProcess()) {
-      if (RFindInReadable(pattern, start, end,
-                          nsCaseInsensitiveCStringComparator)) {
+      if (CaseInsensitiveRFindInReadable(pattern, start, end)) {
         end = start;
         appBinaryPath.BeginReading(start);
       } else {
@@ -312,6 +313,45 @@ static nsresult GetStringValueFromBundlePlist(const nsAString& aKey,
 
   aValue.Assign(valueBuffer);
   free(valueBuffer);
+  return NS_OK;
+}
+
+nsresult nsMacUtilsImpl::GetExecutablePathFromBundle(
+    const nsCString& aBundlePath, nsACString& aExecutablePath) {
+  auto bundlePathRef =
+      CFTypeRefPtr<CFStringRef>::WrapUnderCreateRule(CFStringCreateWithCString(
+          kCFAllocatorDefault, aBundlePath.get(), kCFStringEncodingUTF8));
+  if (!bundlePathRef) {
+    return NS_ERROR_FAILURE;
+  }
+
+  auto bundleURL = CFTypeRefPtr<CFURLRef>::WrapUnderCreateRule(
+      CFURLCreateWithFileSystemPath(kCFAllocatorDefault, bundlePathRef.get(),
+                                    kCFURLPOSIXPathStyle, true));
+  if (!bundleURL) {
+    return NS_ERROR_FAILURE;
+  }
+
+  auto bundle = CFTypeRefPtr<CFBundleRef>::WrapUnderCreateRule(
+      CFBundleCreate(kCFAllocatorDefault, bundleURL.get()));
+  if (!bundle) {
+    return NS_ERROR_FAILURE;
+  }
+
+  auto executableURL = CFTypeRefPtr<CFURLRef>::WrapUnderCreateRule(
+      CFBundleCopyExecutableURL(bundle.get()));
+  if (!executableURL) {
+    return NS_ERROR_FAILURE;
+  }
+
+  char pathBuffer[MAXPATHLEN];
+  if (!CFURLGetFileSystemRepresentation(executableURL.get(), true,
+                                        reinterpret_cast<UInt8*>(pathBuffer),
+                                        sizeof(pathBuffer))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  aExecutablePath.Assign(pathBuffer);
   return NS_OK;
 }
 

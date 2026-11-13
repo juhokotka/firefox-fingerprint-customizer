@@ -7,22 +7,18 @@ package org.mozilla.fenix.ui.efficiency.pageObjects
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.ui.efficiency.helpers.BasePage
-import org.mozilla.fenix.ui.efficiency.helpers.Selector
-import org.mozilla.fenix.ui.efficiency.navigation.NavigationRegistry
+import org.mozilla.fenix.ui.efficiency.navigation.PageObjectContract
+import org.mozilla.fenix.ui.efficiency.navigation.PageObjectKind
 import org.mozilla.fenix.ui.efficiency.selectors.ShortcutsSelectors
 
+@PageObjectContract(PageObjectKind.SELECTOR_ONLY)
 class ShortcutsPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) : BasePage(composeRule) {
     override val pageName = "ShortcutsPage"
 
-    init {
-        NavigationRegistry.register(
-            from = "HomePage",
-            to = pageName,
-            steps = listOf(),
-        )
-    }
+    // No navigation edge is registered on purpose. This page previously registered one with an empty
+    // step list, which made navigateToPage() a silent no-op that reported success without going
+    // anywhere. With no edge at all it fails loudly with "no navigation path found", which is the
+    // honest answer until someone needs this page and can supply — and verify — real steps.
 
-    override fun mozGetSelectorsByGroup(group: String): List<Selector> {
-        return ShortcutsSelectors.all.filter { it.groups.contains(group) }
-    }
+    override val selectorCatalog = ShortcutsSelectors
 }

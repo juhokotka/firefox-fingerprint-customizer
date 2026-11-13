@@ -9,24 +9,29 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import mozilla.components.feature.accounts.push.CloseTabsCommandReceiver
+import org.mozilla.fenix.utils.Settings
 
 /**
- * A [CloseTabsCommandReceiver.Observer] that navigates back to the
- * home screen when the last tab is closed, so that the user
- * doesn't see a ghost web content view for the closed tab.
+ * A [CloseTabsCommandReceiver.Observer] that navigates back to the home screen when the last tab is closed, so that the
+ * user doesn't see a ghost web content view for the closed tab.
  *
  * @param scope The [CoroutineScope] to use for launching coroutines.
  * @param navController The [NavController] to use for navigation.
+ * @param settings [Settings] application settings.
  */
 class CloseLastSyncedTabObserver(
     private val scope: CoroutineScope,
     private val navController: NavController,
+    private val settings: Settings,
 ) : CloseTabsCommandReceiver.Observer {
     override fun onLastTabClosed() {
         // Observers aren't guaranteed to be called on a specific thread,
         // and `NavController` is main thread-only.
         scope.launch(Dispatchers.Main) {
-            val directions = BrowserFragmentDirections.actionGlobalHome(focusOnAddressBar = true)
+            val directions =
+                BrowserFragmentDirections.actionGlobalHome(
+                    focusOnAddressBar = !settings.enableHomepageTrendingRecentSearch
+                )
             navController.navigate(directions)
         }
     }

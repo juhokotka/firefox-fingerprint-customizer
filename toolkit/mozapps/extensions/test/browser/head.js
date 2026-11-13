@@ -5,10 +5,6 @@
 
 /* eslint no-unused-vars: ["error", {vars: "local", caughtErrors: "none", args: "none"}] */
 
-const { TelemetryTestUtils } = ChromeUtils.importESModule(
-  "resource://testing-common/TelemetryTestUtils.sys.mjs"
-);
-
 const { AboutAddonsTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/AboutAddonsTestUtils.sys.mjs"
 );
@@ -1364,47 +1360,6 @@ MockInstall.prototype = {
   },
 };
 
-function waitForCondition(condition, nextTest, errorMsg) {
-  let tries = 0;
-  let interval = setInterval(function () {
-    if (tries >= 30) {
-      ok(false, errorMsg);
-      moveOn();
-    }
-    var conditionPassed;
-    try {
-      conditionPassed = condition();
-    } catch (e) {
-      ok(false, e + "\n" + e.stack);
-      conditionPassed = false;
-    }
-    if (conditionPassed) {
-      moveOn();
-    }
-    tries++;
-  }, 100);
-  let moveOn = function () {
-    clearInterval(interval);
-    nextTest();
-  };
-}
-
-// Wait for and then acknowledge (by pressing the primary button) the
-// given notification.
-function promiseNotification(id = "addon-webext-permissions") {
-  return new Promise(resolve => {
-    function popupshown() {
-      let notification = PopupNotifications.getNotification(id);
-      if (notification) {
-        PopupNotifications.panel.removeEventListener("popupshown", popupshown);
-        PopupNotifications.panel.firstElementChild.button.click();
-        resolve();
-      }
-    }
-    PopupNotifications.panel.addEventListener("popupshown", popupshown);
-  });
-}
-
 /**
  * Wait for the given PopupNotification to display
  *
@@ -1419,6 +1374,14 @@ function promisePopupNotificationShown(name = "addon-webext-permissions") {
     function popupshown() {
       let notification = PopupNotifications.getNotification(name);
       if (!notification) {
+        return;
+      }
+      // Don't use PopupNotifications.isPanelOpen here: it also returns true
+      // while the panel is still in the "showing" state, in which case the
+      // popup frame isn't open yet and its contents aren't focusable.
+      let panelState = PopupNotifications.panel.state;
+      if (panelState != "open") {
+        info(`Ignoring popupshown for ${name}, panel state: ${panelState}`);
         return;
       }
 

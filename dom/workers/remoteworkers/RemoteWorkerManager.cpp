@@ -55,22 +55,11 @@ bool IsServiceWorker(const RemoteWorkerData& aData) {
 }
 
 void TransmitPermissionsAndCookiesAndBlobURLsForPrincipalInfo(
-    ContentParent* aContentParent, const PrincipalInfo& aPrincipalInfo) {
+    ContentParent* aContentParent, nsIPrincipal* aPrincipal) {
   AssertIsOnMainThread();
   MOZ_ASSERT(aContentParent);
 
-  auto principalOrErr = PrincipalInfoToPrincipal(aPrincipalInfo);
-
-  if (NS_WARN_IF(principalOrErr.isErr())) {
-    return;
-  }
-
-  nsCOMPtr<nsIPrincipal> principal = principalOrErr.unwrap();
-
-  aContentParent->TransmitBlobURLsForPrincipal(principal);
-
-  MOZ_ALWAYS_SUCCEEDS(
-      aContentParent->TransmitPermissionsForPrincipal(principal));
+  MOZ_ALWAYS_SUCCEEDS(aContentParent->AboutToLoadOrigin(aPrincipal));
 
   CookieServiceParent* cs = nullptr;
 
@@ -85,21 +74,21 @@ void TransmitPermissionsAndCookiesAndBlobURLsForPrincipalInfo(
   }
 
   if (cs) {
-    nsCOMPtr<nsIURI> uri = principal->GetURI();
-    cs->UpdateCookieInContentList(uri, principal->OriginAttributesRef());
+    nsCOMPtr<nsIURI> uri = aPrincipal->GetURI();
+    cs->UpdateCookieInContentList(uri, aPrincipal->OriginAttributesRef());
   } else {
-    aContentParent->AddPrincipalToCookieInProcessCache(principal);
+    aContentParent->AddPrincipalToCookieInProcessCache(aPrincipal);
   }
 }
 
 }  // namespace
 
 // static
-bool RemoteWorkerManager::MatchRemoteType(const nsACString& processRemoteType,
-                                          const nsACString& workerRemoteType) {
+bool RemoteWorkerManager::MatchRemoteType(const RemoteType& processRemoteType,
+                                          const RemoteType& workerRemoteType) {
   LOG(("MatchRemoteType [processRemoteType=%s, workerRemoteType=%s]",
-       PromiseFlatCString(processRemoteType).get(),
-       PromiseFlatCString(workerRemoteType).get()));
+       processRemoteType.Stringify().get(),
+       workerRemoteType.Stringify().get()));
 
   // Respecting COOP and COEP requires processing headers in the parent
   // process in order to choose an appropriate content process, but the
@@ -113,15 +102,15 @@ bool RemoteWorkerManager::MatchRemoteType(const nsACString& processRemoteType,
   // RemoteWorkerManager::GetRemoteType should not select this remoteType
   // and so workerRemoteType is not expected to be set to a coop+coep
   // remoteType and here we can just assert that it is not happening.
-  MOZ_ASSERT(!IsWebCoopCoepRemoteType(workerRemoteType));
+  MOZ_ASSERT(!workerRemoteType.IsWebCoopCoep());
 
-  return processRemoteType.Equals(workerRemoteType);
+  return processRemoteType == workerRemoteType;
 }
 
 // static
-Result<nsCString, nsresult> RemoteWorkerManager::GetRemoteType(
+Result<RemoteType, nsresult> RemoteWorkerManager::GetRemoteType(
     const nsCOMPtr<nsIPrincipal>& aPrincipal, WorkerKind aWorkerKind,
-    const nsACString& aCurrentRemoteType) {
+    const RemoteType& aCurrentRemoteType) {
   AssertIsOnMainThread();
 
   MOZ_ASSERT_IF(aWorkerKind == WorkerKind::WorkerKindService,
@@ -131,7 +120,7 @@ Result<nsCString, nsresult> RemoteWorkerManager::GetRemoteType(
   // to finish the load in the parent process.
   if (!BrowserTabsRemoteAutostart()) {
     LOG(("GetRemoteType: Loading in parent process as e10s is disabled"));
-    return NOT_REMOTE_TYPE;
+    return RemoteType::NotRemote();
   }
 
   auto result = IsolationOptionsForWorker(
@@ -150,8 +139,8 @@ Result<nsCString, nsresult> RemoteWorkerManager::GetRemoteType(
         ("GetRemoteType workerType=%s, principal=%s, "
          "preferredRemoteType=%s, selectedRemoteType=%s",
          aWorkerKind == WorkerKind::WorkerKindService ? "service" : "shared",
-         principalOrigin.get(), PromiseFlatCString(aCurrentRemoteType).get(),
-         options.mRemoteType.get()));
+         principalOrigin.get(), aCurrentRemoteType.Stringify().get(),
+         options.mRemoteType.Stringify().get()));
   }
 
   return options.mRemoteType;
@@ -159,7 +148,7 @@ Result<nsCString, nsresult> RemoteWorkerManager::GetRemoteType(
 
 // static
 bool RemoteWorkerManager::HasExtensionPrincipal(const RemoteWorkerData& aData) {
-  auto principalInfo = aData.principalInfo();
+  const auto& principalInfo = aData.principalInfo();
   return principalInfo.type() == PrincipalInfo::TContentPrincipalInfo &&
          // This helper method is also called from the background thread and so
          // we can't check if the principal does have an addonPolicy object
@@ -266,22 +255,38 @@ void RemoteWorkerManager::LaunchInternal(
   MOZ_ASSERT(aTargetActor == mParentActor ||
              mChildActors.Contains(aTargetActor));
 
+  if (aController->IsTerminated()) {
+    return;
+  }
+
+  auto principalOrErr = PrincipalInfoToPrincipal(aData.principalInfo());
+  if (NS_WARN_IF(principalOrErr.isErr())) {
+    AsyncCreationFailed(aController);
+    return;
+  }
+  nsCOMPtr<nsIPrincipal> principal = principalOrErr.unwrap();
+
   // We need to send permissions to content processes, but not if we're spawning
   // the worker here in the parent process.
   if (aTargetActor != mParentActor) {
     MOZ_ASSERT(aKeepAlive);
 
-    // This won't cause any race conditions because the content process
-    // should wait for the permissions to be received before executing the
-    // Service Worker.
+    // Tentatively mark the origin as loaded by this content process, then
+    // dispatch a task to the main thread to actually send down relevant
+    // information.
+    //
+    // The content process will also tentatively mark the origin as loaded as
+    // the worker is created, and will delay running meaningful work until
+    // origin-specific data has been received.
+    aKeepAlive->LoadedOrigins()->AddTentative(principal);
+
     nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
-        __func__, [contentHandle = RefPtr{aKeepAlive.get()},
-                   principalInfo = aData.principalInfo()] {
+        __func__, [contentHandle = RefPtr{aKeepAlive.get()}, principal] {
           AssertIsOnMainThread();
           if (RefPtr<ContentParent> contentParent =
                   contentHandle->GetContentParent()) {
             TransmitPermissionsAndCookiesAndBlobURLsForPrincipalInfo(
-                contentParent, principalInfo);
+                contentParent, principal);
           }
         });
 
@@ -325,7 +330,7 @@ void RemoteWorkerManager::AsyncCreationFailed(
 
 template <typename Callback>
 void RemoteWorkerManager::ForEachActor(
-    Callback&& aCallback, const nsACString& aRemoteType,
+    Callback&& aCallback, const RemoteType& aRemoteType,
     Maybe<base::ProcessId> aProcessId) const {
   AssertIsOnBackgroundThread();
 
@@ -430,7 +435,7 @@ RemoteWorkerManager::SelectTargetActor(const RemoteWorkerData& aData,
   // Extension principal workers are allowed to run on the parent process
   // when "extensions.webextensions.remote" pref is false.
   if (aProcessId == base::GetCurrentProcId() &&
-      aData.remoteType().Equals(NOT_REMOTE_TYPE) &&
+      aData.remoteType().IsNotRemote() &&
       !StaticPrefs::extensions_webextensions_remote() &&
       HasExtensionPrincipal(aData)) {
     MOZ_ASSERT(mParentActor);

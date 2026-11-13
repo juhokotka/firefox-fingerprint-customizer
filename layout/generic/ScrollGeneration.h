@@ -5,6 +5,7 @@
 #ifndef mozilla_ScrollGeneration_h_
 #define mozilla_ScrollGeneration_h_
 
+#include <compare>
 #include <cstdint>
 #include <iosfwd>
 #include <tuple>
@@ -33,13 +34,11 @@ struct ScrollGeneration final {
 
  public:
   // Dummy constructor, needed for IPDL purposes. Not intended for manual use.
-  ScrollGeneration();
+  ScrollGeneration() = default;
 
   uint64_t Raw() const { return mValue; }
 
-  bool operator<(const ScrollGeneration<Tag>& aOther) const;
-  bool operator==(const ScrollGeneration<Tag>& aOther) const;
-  bool operator!=(const ScrollGeneration<Tag>& aOther) const;
+  auto operator<=>(const ScrollGeneration<Tag>&) const = default;
 
   friend std::ostream& operator<< <>(std::ostream& aStream,
                                      const ScrollGeneration<Tag>& aGen);
@@ -47,7 +46,7 @@ struct ScrollGeneration final {
   auto MutTiedFields() { return std::tie(mValue); }
 
  private:
-  uint64_t mValue;
+  uint64_t mValue{0};
 };
 
 using APZScrollGeneration = ScrollGeneration<APZTag>;

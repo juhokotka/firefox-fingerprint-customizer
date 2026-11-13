@@ -3,6 +3,25 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 
+# dmgInstallHelper
+# ==============================================================
+
+option(
+    "--enable-dmg-install-helper-debug",
+    when=target_is_osx,
+    help="Enable the DMG Install Helper for debugging",
+)
+
+
+@depends("--enable-dmg-install-helper-debug", when=target_is_osx)
+def debug_dmg_install_helper(enabled):
+    if enabled:
+        return True
+
+
+set_config("DMG_INSTALL_HELPER_DEBUG", debug_dmg_install_helper)
+
+
 # Updater
 # ==============================================================
 @depends(build_project, target)
@@ -26,7 +45,6 @@ set_define("MOZ_UPDATER", True, when="--enable-updater")
 
 option(
     "--enable-unverified-updates",
-    default=False,
     help="Enable application update without verifying MAR or updater binary signatures",
 )
 
@@ -61,7 +79,6 @@ set_config(
 option(
     "--enable-mac-elevated-updates-with-generic-certs",
     when=target_is_osx,
-    default=False,
     help="Allow local developer-signed builds to perform elevated updates on macOS",
 )
 
@@ -94,16 +111,34 @@ def smauthorizedclients_requirements(enabled, bundle_id):
 set_config("MOZ_SMAUTHORIZEDCLIENTS_REQUIREMENTS", smauthorizedclients_requirements)
 
 
-@depends("--enable-mac-elevated-updates-with-generic-certs", when=target_is_osx)
-def smprivilegedexec_requirements(enabled):
-    updater_id = "org.mozilla.updater"
-    if enabled:
-        return mac_relaxed_requirements_string(updater_id)
+def requirements_string(exec_id, relaxed):
+    if relaxed:
+        return mac_relaxed_requirements_string(exec_id)
     else:
-        return mac_prod_requirements_string(updater_id)
+        return mac_prod_requirements_string(exec_id)
 
 
-set_config("MOZ_SMPRIVILEGEDEXECUTABLES_REQUIREMENTS", smprivilegedexec_requirements)
+@depends("--enable-mac-elevated-updates-with-generic-certs", when=target_is_osx)
+@imports(_from="xml.sax.saxutils", _import="escape")
+def generate_smprivilegedexec_requirements(relaxed):
+    requirements = ""
+    smprivilegedexecutables_list = [
+        "org.mozilla.dmgInstallHelper",
+        "org.mozilla.updater",
+    ]
+
+    for executable in smprivilegedexecutables_list:
+        requirements += f"<key>{escape(executable)}</key>"
+        requirements += (
+            f"<string>{escape(requirements_string(executable, relaxed))}</string>"
+        )
+
+    return requirements
+
+
+set_config(
+    "MOZ_SMPRIVILEGEDEXECUTABLES_REQUIREMENTS", generate_smprivilegedexec_requirements
+)
 
 # MAR channel ID configuration
 # ==============================================================
@@ -177,7 +212,6 @@ set_config(
 def check_maintenance_service(mainteance_service, updater):
     if mainteance_service and not updater:
         die("--enable-updater is required to --enable-maintenance-service")
-    return mainteance_service
 
 
 # Update agent (currently Windows and macOS only)
@@ -217,7 +251,6 @@ def check_update_agent(update_agent, backgroundtasks, updater):
         die("--enable-backgroundtasks is required to --enable-update-agent")
     if update_agent and not updater:
         die("--enable-updater is required to --enable-update-agent")
-    return update_agent
 
 
 # Enable or disable the default browser agent, which monitors the user's default
@@ -264,7 +297,38 @@ option(
     help="Disable building the notification server",
 )
 
-set_config("MOZ_NOTIFICATION_SERVER", True, when="--enable-notification-server")
+
+@depends("--enable-notification-server", when=notification_server_default)
+def notification_server_flag(enabled):
+    if enabled:
+        return True
+
+
+set_config("MOZ_NOTIFICATION_SERVER", notification_server_flag)
+
+
+# Enable or disable the push notification helper, which allows web push
+# notifications to be delivered when Firefox is closed.
+# ==============================================================================
+@depends(target, build_project)
+def push_notification_helper_default(target, build_project):
+    return target.os == "WINNT" and build_project == "browser"
+
+
+option(
+    "--disable-push-notification-helper",
+    when=push_notification_helper_default,
+    help="Disable building the push notification helper",
+)
+
+
+@depends("--enable-push-notification-helper", when=push_notification_helper_default)
+def push_notification_helper_flag(enabled):
+    if enabled:
+        return True
+
+
+set_config("MOZ_PUSH_NOTIFICATION_HELPER", push_notification_helper_flag)
 
 # Supported patch formats for the updater
 # =======================================

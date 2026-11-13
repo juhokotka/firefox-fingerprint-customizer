@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this,
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import os
 import platform
 import re
@@ -69,6 +71,10 @@ class GitRepository(Repository):
     @property
     def head_rev(self):
         return self._run("rev-parse", "HEAD").strip()
+
+    @property
+    def is_shallow(self):
+        return self._run("rev-parse", "--is-shallow-repository").strip() == "true"
 
     def is_cinnabar_repo(self) -> bool:
         """Return `True` if the repo is a git-cinnabar clone."""
@@ -263,9 +269,7 @@ class GitRepository(Repository):
         if force:
             cmd.append("-f")
 
-        cmd.extend(paths)
-
-        self._run(*cmd)
+        self._run_batched(*cmd, paths=paths)
 
     def forget_add_remove_files(self, *paths: Union[str, Path]):
         if not paths:
@@ -273,7 +277,7 @@ class GitRepository(Repository):
 
         paths = [str(path) for path in paths]
 
-        self._run("reset", *paths)
+        self._run_batched("reset", paths=paths)
 
     def get_tracked_files_finder(self, path=None):
         files = [p for p in self._run("ls-files", "-z").split("\0") if p]
@@ -583,7 +587,12 @@ class GitRepository(Repository):
         self._run("config", key, value)
         print(f'Set git config: "{key} = {value}"')
 
-    def configure(self, state_dir: Path, update_only: bool = False):
+    def configure(
+        self,
+        state_dir: Path,
+        update_only: bool = False,
+        no_system_changes: bool = False,
+    ):
         """Run the Git configuration steps."""
         if not update_only:
             print("Configuring git...")
@@ -626,6 +635,9 @@ class GitRepository(Repository):
 
             # https://git-scm.com/docs/git-config#Documentation/git-config.txt-coreuntrackedCache
             self.set_config_key_value(key="core.untrackedCache", value="true")
+            # https://git-scm.com/docs/git-config#Documentation/git-config.txt-checkoutworkers
+            if not self._run("config", "--get", "checkout.workers", return_codes=[1]):
+                self.set_config_key_value(key="checkout.workers", value="0")
 
             # https://git-scm.com/docs/git-config#Documentation/git-config.txt-corefsmonitor
             if system == "Windows":
@@ -637,7 +649,7 @@ class GitRepository(Repository):
             elif system == "Darwin":
                 # On macOS (Darwin) we enable the built-in fsmonitor which is superior to Watchman.
                 self.set_config_key_value(key="core.fsmonitor", value="true")
-            elif system == "Linux":
+            elif system == "Linux" and not no_system_changes:
                 # On Linux the built-in fsmonitor isn’t available, so we unset it and attempt to set up
                 # Watchman to achieve similar fsmonitor-style speedups.
                 subprocess.run(

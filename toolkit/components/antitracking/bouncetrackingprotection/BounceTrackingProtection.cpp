@@ -306,6 +306,23 @@ nsresult BounceTrackingProtection::RecordStatefulBounces(
       mStorage->GetOrCreateStateGlobal(aBounceTrackingState);
   MOZ_ASSERT(globalState);
 
+  // The storage partition we're about to write bounce trackers into is keyed by
+  // the BounceTrackingState's cached OriginAttributes. Assert it still matches
+  // the tab's current top BrowsingContext, so that if a tab's userContextId
+  // were ever to change during its lifetime we don't file bounces under a
+  // container the tab no longer lives in. The BrowsingContext may be gone when
+  // recording on tab close during shutdown; in that case there is nothing to
+  // compare against and we skip the check. See Bug 2054941.
+#ifdef DEBUG
+  if (RefPtr<dom::BrowsingContext> bc =
+          aBounceTrackingState->CurrentBrowsingContext()) {
+    MOZ_ASSERT(bc->OriginAttributesRef().EqualsIgnoringFPD(
+                   aBounceTrackingState->OriginAttributesRef()),
+               "BTP: recording bounces under a container that no longer "
+               "matches the tab's BrowsingContext (Bug 2054941).");
+  }
+#endif
+
   nsTArray<nsCString> classifiedHosts;
 
   // For each host in navigable’s bounce tracking record's bounce set:
@@ -383,6 +400,13 @@ nsresult BounceTrackingProtection::RecordStatefulBounces(
 
     nsresult rv = props->SetPropertyAsUint64(
         u"browserId"_ns, aBounceTrackingState->GetBrowserId());
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    // Number of hosts classified as bounce trackers in this call. Tests use
+    // this to distinguish a finalization that classified trackers from one that
+    // finalized an empty or fully exempt record.
+    rv = props->SetPropertyAsUint32(u"bounceTrackerCandidateCount"_ns,
+                                    classifiedHosts.Length());
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = obsSvc->NotifyObservers(
@@ -478,10 +502,8 @@ BounceTrackingProtection::Observe(nsISupports* aSubject, const char* aTopic,
               __FUNCTION__, aTopic);
 
   if (!strcmp(aTopic, "idle-daily")) {
-#ifndef MOZ_WIDGET_ANDROID  // OHTTP is not supported on Android.
     // Submit custom telemetry ping.
     glean_pings::BounceTrackingProtection.Submit();
-#endif  // #ifndef MOZ_WIDGET_ANDROID
   }
   return NS_OK;
 }
@@ -676,6 +698,42 @@ BounceTrackingProtection::HasRecentlyPurgedSite(const nsACString& aSiteHost,
       return NS_OK;
     }
   }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+BounceTrackingProtection::GetRecentPurgedChainEntriesForSite(
+    const nsACString& aSiteHost,
+    nsTArray<RefPtr<nsIBounceTrackingPurgeEntry>>& aEntries) {
+  NS_ENSURE_TRUE(!aSiteHost.IsEmpty(), NS_ERROR_INVALID_ARG);
+
+  nsTArray<RefPtr<BounceTrackingPurgeEntry>> matchingEntries;
+
+  for (const auto& globalEntry : mStorage->StateGlobalMapRef()) {
+    RefPtr<BounceTrackingStateGlobal> stateGlobal = globalEntry.GetData();
+    MOZ_ASSERT(stateGlobal);
+
+    for (auto iter = stateGlobal->RecentPurgesMapRef().ConstIter();
+         !iter.Done(); iter.Next()) {
+      for (const auto& entry : iter.Data()) {
+        bool matches = iter.Key().Equals(aSiteHost);
+        if (!matches) {
+          BounceTrackingRecord* record = entry->GetBounceChainRecord();
+          if (record) {
+            matches = record->GetInitialHost().Equals(aSiteHost) ||
+                      record->GetFinalHost().Equals(aSiteHost) ||
+                      record->GetBounceHosts().Contains(aSiteHost);
+          }
+        }
+        if (matches) {
+          matchingEntries.InsertElementSorted(entry,
+                                              PurgeEntryTimeComparator{});
+        }
+      }
+    }
+  }
+
+  aEntries.AppendElements(matchingEntries);
   return NS_OK;
 }
 
@@ -936,6 +994,7 @@ BounceTrackingProtection::PurgeBounceTrackers() {
           const GenericNonExclusivePromise::ResolveOrRejectValue& aResult) {
         if (aResult.IsReject()) {
           nsresult rv = aResult.RejectValue();
+          self->mPurgeInProgress = false;
           resultPromise->Reject(rv, __func__);
           return;
         }
@@ -965,6 +1024,7 @@ BounceTrackingProtection::PurgeBounceTrackers() {
           nsresult rv = self->PurgeBounceTrackersForStateGlobal(
               stateGlobal, bounceTrackingAllowList, clearPromises);
           if (NS_WARN_IF(NS_FAILED(rv))) {
+            self->mPurgeInProgress = false;
             resultPromise->Reject(rv, __func__);
             return;
           }
@@ -1239,15 +1299,26 @@ nsresult BounceTrackingProtection::PurgeStateForHostAndOriginAttributes(
 
   NS_ENSURE_TRUE(pattern.ToJSON(oaPatternString), NS_ERROR_FAILURE);
 
+  // XPIDL consts can't use & or ~, so CLEAR_STATE_FOR_TRACKER_PURGING lists
+  // its flags explicitly. Catch it drifting from CLEAR_COOKIES_AND_SITE_DATA.
+  static_assert(
+      nsIClearDataService::CLEAR_STATE_FOR_TRACKER_PURGING ==
+          ((nsIClearDataService::CLEAR_ALL_CACHES |
+            nsIClearDataService::CLEAR_COOKIES_AND_SITE_DATA |
+            nsIClearDataService::CLEAR_CLIENT_AUTH_REMEMBER_SERVICE |
+            nsIClearDataService::CLEAR_MEDIA_DEVICES |
+            nsIClearDataService::CLEAR_STORAGE_ACCESS) &
+           ~nsIClearDataService::CLEAR_BOUNCE_TRACKING_PROTECTION_STATE),
+      "CLEAR_STATE_FOR_TRACKER_PURGING is out of sync with "
+      "CLEAR_COOKIES_AND_SITE_DATA");
+
   rv = clearDataService->DeleteDataFromSiteAndOriginAttributesPatternString(
       aHost, oaPatternString, false,
-      // Exempt purging our own state for the given tracker since we already
-      // update it ourselves. Additionally a nested call to the
+      // CLEAR_STATE_FOR_TRACKER_PURGING excludes our own state. We already
+      // update it ourselves and a nested call to the
       // BounceTrackingProtectionCleaner while iterating over the candidate set
       // may lead to crashes.
-      nsIClearDataService::CLEAR_STATE_FOR_TRACKER_PURGING &
-          ~nsIClearDataService::CLEAR_BOUNCE_TRACKING_PROTECTION_STATE,
-      cb);
+      nsIClearDataService::CLEAR_STATE_FOR_TRACKER_PURGING, cb);
   NS_ENSURE_SUCCESS(rv, rv);
 
   clearPromise.forget(aClearPromise);

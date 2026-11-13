@@ -4,15 +4,15 @@
 
 #include "mozilla/layers/UiCompositorControllerChild.h"
 
+#include "mozilla/StaticPrefs_layers.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/gfx/GPUProcessManager.h"
+#include "mozilla/ipc/Endpoint.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/SynchronousTask.h"
 #include "mozilla/layers/UiCompositorControllerMessageTypes.h"
 #include "mozilla/layers/UiCompositorControllerParent.h"
-#include "mozilla/gfx/GPUProcessManager.h"
-#include "mozilla/ipc/Endpoint.h"
-#include "mozilla/StaticPrefs_layers.h"
-#include "mozilla/StaticPtr.h"
 #include "nsIWidget.h"
 #include "nsProxyRelease.h"
 #include "nsThreadUtils.h"
@@ -99,15 +99,6 @@ bool UiCompositorControllerChild::InvalidateAndRender() {
     return false;
   }
   return SendInvalidateAndRender();
-}
-
-bool UiCompositorControllerChild::SetMaxToolbarHeight(const int32_t& aHeight) {
-  if (!mIsOpen) {
-    mMaxToolbarHeight = Some(aHeight);
-    // Since we are caching this value, pretend the call succeeded.
-    return true;
-  }
-  return SendMaxToolbarHeight(aHeight);
 }
 
 bool UiCompositorControllerChild::SetFixedBottomOffset(int32_t aOffset) {
@@ -265,10 +256,10 @@ UiCompositorControllerChild::RecvToolbarAnimatorMessageFromCompositor(
 }
 
 mozilla::ipc::IPCResult
-UiCompositorControllerChild::RecvNotifyCompositorScrollUpdate(
-    const CompositorScrollUpdate& aUpdate) {
+UiCompositorControllerChild::RecvNotifyCompositorScrollUpdates(
+    const nsTArray<mozilla::layers::CompositorScrollUpdate>& aUpdates) {
   if (mWidget) {
-    mWidget->NotifyCompositorScrollUpdate(aUpdate);
+    mWidget->NotifyCompositorScrollUpdates(aUpdates);
   }
 
   return IPC_OK();
@@ -353,10 +344,6 @@ void UiCompositorControllerChild::SendCachedValues() {
     SendResumeAndResize(mResize.ref().x, mResize.ref().y, mResize.ref().width,
                         mResize.ref().height, &resumed);
     mResize.reset();
-  }
-  if (mMaxToolbarHeight) {
-    SendMaxToolbarHeight(mMaxToolbarHeight.ref());
-    mMaxToolbarHeight.reset();
   }
   if (mDefaultClearColor) {
     SendDefaultClearColor(mDefaultClearColor.ref());

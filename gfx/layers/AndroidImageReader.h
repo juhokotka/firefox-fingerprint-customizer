@@ -12,13 +12,16 @@
 #include "GLImages.h"
 #include "ImageContainer.h"
 #include "mozilla/Atomics.h"
-#include "mozilla/gfx/Types.h"
-#include "mozilla/gfx/2D.h"
-#include "mozilla/layers/LayersTypes.h"
-#include "mozilla/layers/LayersSurfaces.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/ThreadSafeWeakPtr.h"
+#include "mozilla/UniquePtrExtensions.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/Types.h"
+#include "mozilla/layers/LayersSurfaces.h"
+#include "mozilla/layers/LayersTypes.h"
 #include "nsISupportsImpl.h"
 
 struct AHardwareBuffer;
@@ -59,7 +62,8 @@ class AndroidImageReaderImage final : public Image {
 
   void OnSetCurrent() override;
 
-  bool MaybeReleaseFrameToCodec(bool aRender);
+  bool MaybeReleaseFrameToCodec(const MonitorAutoLock& aProofOfLock,
+                                bool aRender);
 
   void RegisterSetCurrentCallback(
       UniquePtr<SurfaceTextureImage::SetCurrentCallback> aCallback) {
@@ -89,11 +93,11 @@ class AndroidImageWrapper {
                                AHardwareBuffer* aHardwareBuffer,
                                const gfx::IntSize aSize,
                                const gfx::SurfaceFormat aFormat,
-                               mozilla::UniqueFileHandle&& aFence);
+                               mozilla::UniqueFileHandle&& aWriteFenceFd);
 
-  mozilla::detail::FileHandleType GetHandle() { return mFence.get(); }
+  mozilla::UniqueFileHandle CloneWriteFenceFd();
 
-  mozilla::UniqueFileHandle CloneFence();
+  void SetReadFenceFd(UniqueFileHandle&& aFenceFd);
 
   const AHardwareBuffer* mHardwareBuffer;
   const gfx::IntSize mSize;
@@ -102,9 +106,12 @@ class AndroidImageWrapper {
  protected:
   ~AndroidImageWrapper();
 
+  Mutex mMutex;
+
   const RefPtr<AndroidImageReader> mImageReader;
   AImage* mImage;
-  const mozilla::UniqueFileHandle mFence;
+  const mozilla::UniqueFileHandle mWriteFenceFd MOZ_GUARDED_BY(mMutex);
+  mozilla::UniqueFileHandle mReadFenceFd MOZ_GUARDED_BY(mMutex);
 };
 
 /**
@@ -113,9 +120,12 @@ class AndroidImageWrapper {
  * ANativeWindow. And it allows to get AHardwareBuffer from AImage.
  * AHardwareBuffer wraps android GraphicBuffer.
  */
-class AndroidImageReader final {
+class AndroidImageReader final
+    : public SupportsThreadSafeWeakPtr<AndroidImageReader> {
  public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AndroidImageReader)
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(AndroidImageReader)
+
+  virtual ~AndroidImageReader();
 
   static already_AddRefed<AndroidImageReader> Create();
 
@@ -129,6 +139,8 @@ class AndroidImageReader final {
                                   gfx::DataSourceSurface* aSurface,
                                   const gfx::IntSize aSize,
                                   const gfx::SurfaceFormat aFormat);
+
+  void MaybeRenderFirstFrame(AndroidMediaCodecFrameId aFrameId);
 
   bool DoUpdateTexImage(const MonitorAutoLock& aProofOfLock,
                         AndroidMediaCodecFrameId aFrameId)
@@ -157,7 +169,8 @@ class AndroidImageReader final {
  protected:
   friend class AndroidImageWrapper;
 
-  virtual ~AndroidImageReader();
+  bool AcquirePendingImage() MOZ_REQUIRES(mMonitor);
+
   bool Init();
   void ReleaseResources();
 
@@ -170,6 +183,9 @@ class AndroidImageReader final {
   ANativeWindow* mNativeWindow MOZ_GUARDED_BY(mMonitor);
   AndroidMediaCodecFrameId mCurrentFrameId MOZ_GUARDED_BY(mMonitor);
   RefPtr<AndroidImageWrapper> mCurrentImage MOZ_GUARDED_BY(mMonitor);
+  // A rendered codec buffer remains outstanding across notification timeouts.
+  // Keep its identity until its AImage has been acquired.
+  Maybe<AndroidMediaCodecFrameId> mPendingFrameId MOZ_GUARDED_BY(mMonitor);
   bool mWaitingFrameAvailable MOZ_GUARDED_BY(mMonitor) = false;
   bool mIsPendingNextImage MOZ_GUARDED_BY(mMonitor) = false;
 
@@ -215,7 +231,7 @@ class GpuProcessAndroidImageReaderMap {
     explicit ImageReaderHolder(AndroidImageReader* aImageReader);
     ~ImageReaderHolder();
 
-    AndroidImageReader* mImageReader = nullptr;
+    ThreadSafeWeakPtr<AndroidImageReader> mImageReader;
     AndroidImageConsumer* mImageConsumer = nullptr;
   };
 

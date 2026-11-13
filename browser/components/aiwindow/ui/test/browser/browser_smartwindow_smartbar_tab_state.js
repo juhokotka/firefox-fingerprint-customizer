@@ -17,6 +17,10 @@ const { ChatStore, MESSAGE_ROLE } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/ui/modules/ChatStore.sys.mjs"
 );
 
+const { AgentUI } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/ui/modules/AgentUI.sys.mjs"
+);
+
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   sinon: "resource://testing-common/Sinon.sys.mjs",
@@ -147,6 +151,23 @@ async function navigateFromFullpage(win, browser, conversation) {
   );
 }
 
+/**
+ * Gets the context chips in the smartbar input header.
+ *
+ * @param {Window} win
+ */
+async function getSidebarContextChips(win) {
+  if (!AIWindowUI.isSidebarOpen(win)) {
+    return null;
+  }
+  const sidebarBrowser = win.document.getElementById(AIWindowUI.BROWSER_ID);
+  const smartbar = BrowserTestUtils.querySelectorDeep(
+    sidebarBrowser.contentDocument,
+    "#ai-window-smartbar"
+  );
+  return smartbar.contextChips.map(c => c.url);
+}
+
 describe("Smartbar tab state input tracking", () => {
   describe("when one tab has a sidebar", () => {
     let win, browser, tab, sandbox, sidebarBrowser;
@@ -222,6 +243,23 @@ describe("Smartbar tab state input tracking", () => {
         await getSidebarInputValue(win),
         "",
         "Input should be empty after chat submission"
+      );
+    });
+
+    it("should clear input after an agent command submission", async () => {
+      // Simulate an agent command (e.g. /watch) being handled: the commit
+      // returns early before submitChatMessage runs, so the stored draft must
+      // still be cleared by the commit handler itself.
+      sandbox.stub(AgentUI, "tryHandleCommand").returns(true);
+
+      await typeInSmartbar(sidebarBrowser, "watch this");
+      await submitSmartbar(sidebarBrowser);
+
+      await switchAwayAndBack(win, tab);
+      Assert.equal(
+        await getSidebarInputValue(win),
+        "",
+        "Input should be empty after an agent command submission"
       );
     });
 
@@ -392,6 +430,112 @@ describe("Smartbar tab state input tracking", () => {
         async () => (await getSidebarInputValue(win)) === "hello",
         "Tab A should restore its stored input"
       );
+    });
+
+    it("should restore each tab's stored context chips on switch", async () => {
+      const smartbar = BrowserTestUtils.querySelectorDeep(
+        sidebarBrowser.contentDocument,
+        "#ai-window-smartbar"
+      );
+      const tabBChip = {
+        type: "tab",
+        url: "https://example.com",
+        label: "Example label for Tab B",
+      };
+      smartbar.addContextMention(tabBChip);
+
+      await BrowserTestUtils.switchTab(win.gBrowser, tabA);
+      await TestUtils.waitForCondition(async () => {
+        const chips = await getSidebarContextChips(win);
+        return chips?.length === 0;
+      }, "Tab A should start with no context chips");
+
+      await BrowserTestUtils.switchTab(win.gBrowser, tabB);
+      await TestUtils.waitForCondition(async () => {
+        const chips = await getSidebarContextChips(win);
+        return chips?.length === 1 && chips[0] === tabBChip.url;
+      }, "Tab B should start with one context chip");
+
+      await BrowserTestUtils.switchTab(win.gBrowser, tabA);
+
+      const tabAChip = {
+        type: "tab",
+        url: "https://example.net",
+        label: "Example label for Tab A",
+      };
+      smartbar.addContextMention(tabAChip);
+      await TestUtils.waitForCondition(async () => {
+        const chips = await getSidebarContextChips(win);
+        return chips?.length === 1 && chips[0] === tabAChip.url;
+      }, "Tab A should have one context chip");
+
+      await BrowserTestUtils.switchTab(win.gBrowser, tabB);
+      await BrowserTestUtils.switchTab(win.gBrowser, tabA);
+      await TestUtils.waitForCondition(async () => {
+        const chips = await getSidebarContextChips(win);
+        return chips?.length === 1 && chips[0] === tabAChip.url;
+      }, "Tab A should restore its context chip");
+    });
+
+    it("should restore a tab's stored context chips when the sidebar reopens", async () => {
+      const smartbar = BrowserTestUtils.querySelectorDeep(
+        sidebarBrowser.contentDocument,
+        "#ai-window-smartbar"
+      );
+      const tabBChip = {
+        type: "tab",
+        url: "https://example.com",
+        label: "Example label for Tab B",
+      };
+      smartbar.addContextMention(tabBChip);
+      await TestUtils.waitForCondition(async () => {
+        const chips = await getSidebarContextChips(win);
+        return chips?.length === 1 && chips[0] === tabBChip.url;
+      }, "Tab B should start with one context chip");
+
+      await BrowserTestUtils.switchTab(win.gBrowser, tabA);
+      if (AIWindowUI.isSidebarOpen(win)) {
+        AIWindowUI.closeSidebar(win);
+      }
+
+      await AIWindowUI.openSidebar(win);
+      await TestUtils.waitForCondition(
+        async () => !(await getSidebarContextChips(win))?.length,
+        "Reopening the sidebar on tab A should not show tab B's chips"
+      );
+    });
+
+    it("should clear the context chips when smartbar is submitted, even after switching tabs", async () => {
+      const smartbar = BrowserTestUtils.querySelectorDeep(
+        sidebarBrowser.contentDocument,
+        "#ai-window-smartbar"
+      );
+      const tabBChip = {
+        type: "tab",
+        url: "https://example.com",
+        label: "Example label for Tab B",
+      };
+      smartbar.addContextMention(tabBChip);
+      await TestUtils.waitForCondition(async () => {
+        const chips = await getSidebarContextChips(win);
+        return chips?.length === 1 && chips[0] === tabBChip.url;
+      }, "Tab B should start with one context chip");
+
+      await typeInSmartbar(sidebarBrowser, "hey");
+      await submitSmartbar(sidebarBrowser);
+
+      await TestUtils.waitForCondition(async () => {
+        const chips = await getSidebarContextChips(win);
+        return chips?.length === 0;
+      }, "Tab B should have no context chips after submit");
+
+      await BrowserTestUtils.switchTab(win.gBrowser, tabA);
+      await BrowserTestUtils.switchTab(win.gBrowser, tabB);
+
+      await TestUtils.waitForCondition(async () => {
+        const chips = await getSidebarContextChips(win);
+        return chips?.length === 0;
+      }, "Tab B should still have no context chips even after switching from another tab");
     });
   });
 });

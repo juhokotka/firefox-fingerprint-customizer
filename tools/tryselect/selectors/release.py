@@ -46,7 +46,6 @@ class ReleaseParser(BaseTryParser):
                 "choices": [
                     "main-to-beta",
                     "beta-to-release",
-                    "early-to-late-beta",
                     "release-to-esr",
                 ],
                 "help": "Migration to run for the release (can be specified multiple times).",
@@ -93,6 +92,7 @@ def run(
     try_config_params=None,
     stage_changes=False,
     dry_run=False,
+    write_task_config=False,
     message="{msg}",
     closed_tree=False,
     push_to_vcs=False,
@@ -114,9 +114,6 @@ def run(
         "current_weave_version": current_version.major_number + 2,
         "next_weave_version": version.major_number + 2,
     }
-
-    if "beta-to-release" in migrations and "early-to-late-beta" not in migrations:
-        migrations.append("early-to-late-beta")
 
     release_type = version.version_type.name.lower()
     if release_type not in ("beta", "release", "esr"):
@@ -176,6 +173,7 @@ def run(
         metrics,
         stage_changes=stage_changes,
         dry_run=dry_run,
+        write_task_config=write_task_config,
         closed_tree=closed_tree,
         try_task_config=task_config,
         files_to_change=files_to_change,

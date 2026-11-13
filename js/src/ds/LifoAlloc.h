@@ -6,7 +6,6 @@
 #define ds_LifoAlloc_h
 
 #include "mozilla/Attributes.h"
-#include "mozilla/CheckedArithmetic.h"
 #include "mozilla/MemoryChecking.h"
 #include "mozilla/MemoryReporting.h"
 
@@ -233,10 +232,10 @@ class SingleLinkedList;
 template <typename T, typename D = JS::DeletePolicy<T>>
 class SingleLinkedListElement {
   friend class SingleLinkedList<T, D>;
-  js::UniquePtr<T, D> next_;
+  js::UniquePtr<T, D> next_{nullptr};
 
  public:
-  SingleLinkedListElement() : next_(nullptr) {}
+  SingleLinkedListElement() = default;
   ~SingleLinkedListElement() { MOZ_ASSERT(!next_); }
 
   T* next() const { return next_.get(); }
@@ -305,12 +304,7 @@ class SingleLinkedList {
       return *this;
     }
 
-    bool operator!=(const Iterator& other) const {
-      return current_ != other.current_;
-    }
-    bool operator==(const Iterator& other) const {
-      return current_ == other.current_;
-    }
+    bool operator==(const Iterator& other) const = default;
   };
 
   Iterator begin() const { return Iterator(head_.get()); }
@@ -1208,11 +1202,7 @@ class LifoAllocPolicy : public AllocPolicyBase {
     if (MOZ_UNLIKELY(!n)) {
       return nullptr;
     }
-    size_t oldLength;
-    [[maybe_unused]] bool nooverflow =
-        mozilla::SafeMul(oldSize, sizeof(T), &oldLength);
-    MOZ_ASSERT(nooverflow);
-    memcpy(n, p, std::min(oldLength, newSize * sizeof(T)));
+    std::copy_n(p, std::min(oldSize, newSize), n);
     return n;
   }
   template <typename T>

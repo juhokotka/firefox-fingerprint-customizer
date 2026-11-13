@@ -4,7 +4,7 @@
 "use strict";
 
 // We explicitly need HTTP URLs in this test
-/* eslint-disable @microsoft/sdl/no-insecure-url */
+/* eslint-disable sdl/no-insecure-url */
 
 requestLongerTimeout(2);
 
@@ -22,7 +22,6 @@ async function setPrefsAndResetFog(
 
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["test.wait300msAfterTabSwitch", true],
       ["dom.security.https_only_mode", aHTTPSOnlyPref],
       ["dom.security.https_first", aHTTPSFirstPref],
       ["dom.security.https_first_schemeless", aSchemeLessPref],

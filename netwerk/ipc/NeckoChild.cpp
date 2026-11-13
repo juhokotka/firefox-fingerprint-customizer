@@ -2,31 +2,31 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsHttp.h"
 #include "mozilla/net/NeckoChild.h"
-#include "mozilla/dom/ContentChild.h"
-#include "mozilla/dom/BrowserChild.h"
-#include "mozilla/net/HttpChannelChild.h"
-#include "mozilla/net/ChildDNSService.h"
-#include "mozilla/net/CookieServiceChild.h"
-#include "mozilla/net/WebSocketChannelChild.h"
-#include "mozilla/net/WebSocketEventListenerChild.h"
-#include "mozilla/net/DNSRequestChild.h"
-#include "mozilla/net/IPCTransportProvider.h"
-#include "mozilla/dom/network/TCPSocketChild.h"
-#include "mozilla/net/AltDataOutputStreamChild.h"
-#include "mozilla/net/CacheEntryWriteHandleChild.h"
-#include "mozilla/net/SocketProcessBridgeChild.h"
 
 #include "SerializedLoadContext.h"
-#include "nsGlobalWindowInner.h"
-#include "nsIOService.h"
-#include "nsINetworkLinkService.h"
-#include "nsQueryObject.h"
-#include "mozilla/ipc/URIUtils.h"
-#include "mozilla/Components.h"
-#include "nsNetUtil.h"
 #include "SimpleChannel.h"
+#include "mozilla/Components.h"
+#include "mozilla/dom/BrowserChild.h"
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/network/TCPSocketChild.h"
+#include "mozilla/ipc/URIUtils.h"
+#include "mozilla/net/AltDataOutputStreamChild.h"
+#include "mozilla/net/CacheEntryWriteHandleChild.h"
+#include "mozilla/net/ChildDNSService.h"
+#include "mozilla/net/CookieServiceChild.h"
+#include "mozilla/net/DNSRequestChild.h"
+#include "mozilla/net/HttpChannelChild.h"
+#include "mozilla/net/IPCTransportProvider.h"
+#include "mozilla/net/SocketProcessBridgeChild.h"
+#include "mozilla/net/WebSocketChannelChild.h"
+#include "mozilla/net/WebSocketEventListenerChild.h"
+#include "nsGlobalWindowInner.h"
+#include "nsHttp.h"
+#include "nsINetworkLinkService.h"
+#include "nsIOService.h"
+#include "nsNetUtil.h"
+#include "nsQueryObject.h"
 
 using mozilla::dom::TCPSocketChild;
 
@@ -90,7 +90,7 @@ PAltDataOutputStreamChild* NeckoChild::AllocPAltDataOutputStreamChild(
 bool NeckoChild::DeallocPAltDataOutputStreamChild(
     PAltDataOutputStreamChild* aActor) {
   AltDataOutputStreamChild* child =
-      static_cast<AltDataOutputStreamChild*>(aActor);
+      mozilla::ipc::ActorCast<AltDataOutputStreamChild>(aActor);
   child->ReleaseIPDLReference();
   return true;
 }
@@ -105,7 +105,7 @@ bool NeckoChild::DeallocPCookieServiceChild(PCookieServiceChild* cs) {
   NS_ASSERTION(IsNeckoChild(),
                "DeallocPCookieServiceChild called by non-child!");
 
-  CookieServiceChild* p = static_cast<CookieServiceChild*>(cs);
+  CookieServiceChild* p = mozilla::ipc::ActorCast<CookieServiceChild>(cs);
   p->Release();
   return true;
 }
@@ -118,7 +118,8 @@ PWebSocketChild* NeckoChild::AllocPWebSocketChild(
 }
 
 bool NeckoChild::DeallocPWebSocketChild(PWebSocketChild* child) {
-  WebSocketChannelChild* p = static_cast<WebSocketChannelChild*>(child);
+  WebSocketChannelChild* p =
+      mozilla::ipc::ActorCast<WebSocketChannelChild>(child);
   p->ReleaseIPDLReference();
   return true;
 }
@@ -133,7 +134,7 @@ PWebSocketEventListenerChild* NeckoChild::AllocPWebSocketEventListenerChild(
 bool NeckoChild::DeallocPWebSocketEventListenerChild(
     PWebSocketEventListenerChild* aActor) {
   RefPtr<WebSocketEventListenerChild> c =
-      dont_AddRef(static_cast<WebSocketEventListenerChild*>(aActor));
+      dont_AddRef(mozilla::ipc::ActorCast<WebSocketEventListenerChild>(aActor));
   MOZ_ASSERT(c);
   return true;
 }

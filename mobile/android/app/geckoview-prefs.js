@@ -227,14 +227,15 @@ pref("extensions.strictCompatibility", false);
 pref("extensions.systemAddon.update.enabled", true);
 pref("extensions.systemAddon.update.url", "https://aus5.mozilla.org/update/3/SystemAddons/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 
-// Enable the EnvironmentAddonBuilder collecting the Glean
-// activeAddons/theme/GMPlugins metrics.
-pref("extensions.telemetry.EnvironmentAddonBuilder", true);
-
 pref("extensions.update.background.url", "https://versioncheck-bg.addons.mozilla.org/update/VersionCheck.php?reqVersion=%REQ_VERSION%&id=%ITEM_ID%&version=%ITEM_VERSION%&maxAppVersion=%ITEM_MAXAPPVERSION%&status=%ITEM_STATUS%&appID=%APP_ID%&appVersion=%APP_VERSION%&appOS=%APP_OS%&appABI=%APP_ABI%&locale=%APP_LOCALE%&currentAppVersion=%CURRENT_APP_VERSION%&updateType=%UPDATE_TYPE%&compatMode=%COMPATIBILITY_MODE%");
 pref("extensions.update.enabled", true);
 pref("extensions.update.interval", 86400);
 pref("extensions.update.url", "https://versioncheck.addons.mozilla.org/update/VersionCheck.php?reqVersion=%REQ_VERSION%&id=%ITEM_ID%&version=%ITEM_VERSION%&maxAppVersion=%ITEM_MAXAPPVERSION%&status=%ITEM_STATUS%&appID=%APP_ID%&appVersion=%APP_VERSION%&appOS=%APP_OS%&appABI=%APP_ABI%&locale=%APP_LOCALE%&currentAppVersion=%CURRENT_APP_VERSION%&updateType=%UPDATE_TYPE%&compatMode=%COMPATIBILITY_MODE%");
+
+// Register the type of the background-video-playback intervention's kill-switch
+// pref (bug 2060611) so Nimbus can toggle it. Defaults to disabled; the
+// intervention is turned on for Nightly via a Nimbus rollout.
+pref("extensions.webcompat.disabled_interventions.2060611", true);
 
 // Enable prompts for browser.permissions.request() (bug 1392176)
 pref("extensions.webextOptionalPermissionPrompts", true);
@@ -252,6 +253,12 @@ pref("formhelper.autozoom", true);
 
 // Optionally send web console output to logcat (bug 1415318)
 pref("geckoview.console.enabled", false);
+
+// How long (ms) to keep an autocomplete selection prompt open after its field
+// loses focus, so that moving focus between fields of the same form doesn't
+// dismiss and immediately reopen the prompt. Tunable for slower devices.
+// (bug 2040184)
+pref("geckoview.autocomplete.selection_dismiss_delay_ms", 150);
 
 // Inherit locale from the OS, used for multi-locale builds
 pref("intl.locale.requested", "");
@@ -335,14 +342,6 @@ pref("network.ohttp.configURL", "https://prod.ohttp-gateway.prod.webservices.moz
 
 // Controls OHTTP relay URL
 pref("network.ohttp.relayURL", "https://mozilla-ohttp.fastly-edge.com/");
-
-// Nimbus QA prefs. Used for testing pref-setting experiments.
-pref("nimbus.qa.pref-string-default", "default");
-pref("nimbus.qa.pref-string-user", "default");
-pref("nimbus.qa.pref-int-default", 0);
-pref("nimbus.qa.pref-int-user", 0);
-pref("nimbus.qa.pref-bool-default", false);
-pref("nimbus.qa.pref-bool-user", false);
 
 // Complete the page load progress bar at different places according to this pref.
 // See the possible values below:

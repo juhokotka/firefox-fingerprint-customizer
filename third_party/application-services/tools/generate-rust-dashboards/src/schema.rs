@@ -105,6 +105,8 @@ pub struct TimeSeriesPanel {
 #[serde(rename_all = "camelCase")]
 pub struct FieldConfig {
     pub defaults: FieldConfigDefaults,
+    #[serde(default)]
+    pub overrides: Vec<FieldConfigOverride>,
 }
 
 #[derive(Default, Serialize)]
@@ -128,6 +130,8 @@ pub enum Unit {
     Microseconds,
     #[serde(rename = "ns")]
     Nanoseconds,
+    #[serde(rename = "sishort")]
+    SiShort,
 }
 
 #[derive(Default, Serialize)]
@@ -159,6 +163,35 @@ pub struct DataLink {
     pub url: String,
     pub target_blank: bool,
     pub one_click: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldConfigOverride {
+    pub matcher: FieldConfigOverrideMatcher,
+    pub properties: Vec<FieldConfigOverrideProperty>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldConfigOverrideMatcher {
+    pub id: String,
+    pub options: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "id")]
+pub enum FieldConfigOverrideProperty {
+    Color { value: FieldConfigOverrideColor },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "mode")]
+pub enum FieldConfigOverrideColor {
+    #[serde(rename_all = "camelCase")]
+    Fixed { fixed_color: String },
 }
 
 #[derive(Default, Serialize)]
@@ -217,6 +250,7 @@ pub struct PieChartReduceOptions {
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Target {
+    pub datasource: Datasource,
     pub format: TargetFormat,
     pub raw_query: bool,
     pub raw_sql: String,
@@ -677,6 +711,7 @@ impl Datasource {
 impl Target {
     pub fn timeseries(sql: impl Into<String>) -> Self {
         Self {
+            datasource: Datasource::bigquery(),
             format: TargetFormat::Timeseries,
             raw_query: true,
             raw_sql: sql.into(),
@@ -685,6 +720,7 @@ impl Target {
 
     pub fn table(sql: impl Into<String>) -> Self {
         Self {
+            datasource: Datasource::bigquery(),
             format: TargetFormat::Table,
             raw_query: true,
             raw_sql: sql.into(),

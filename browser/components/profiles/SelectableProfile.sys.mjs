@@ -7,8 +7,8 @@ import { DownloadPaths } from "resource://gre/modules/DownloadPaths.sys.mjs";
 import { FileUtils } from "resource://gre/modules/FileUtils.sys.mjs";
 import { ProfilesDatastoreService } from "moz-src:///toolkit/profile/ProfilesDatastoreService.sys.mjs";
 import { SelectableProfileService } from "resource:///modules/profiles/SelectableProfileService.sys.mjs";
-import { BackupService } from "resource:///modules/backup/BackupService.sys.mjs";
-import { ArchiveEncryptionState } from "resource:///modules/backup/ArchiveEncryptionState.sys.mjs";
+import { BackupService } from "moz-src:///browser/components/backup/BackupService.sys.mjs";
+import { ArchiveEncryptionState } from "moz-src:///browser/components/backup/ArchiveEncryptionState.sys.mjs";
 
 const lazy = {};
 
@@ -259,7 +259,10 @@ export class SelectableProfile {
 
     const fileExists = await IOUtils.exists(this.getAvatarPath());
     if (!fileExists) {
-      throw new Error("Custom avatar file doesn't exist.");
+      // The avatar is missing, so fall back to a default.
+      Glean.profilesError.avatar.record();
+      await this.setAvatar("star");
+      return standardAvatarURL("star", size);
     }
     const file = await File.createFromFileName(this.getAvatarPath());
     this.#lastAvatarURL = URL.createObjectURL(file);

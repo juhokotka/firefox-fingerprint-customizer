@@ -26,6 +26,8 @@ support-files = [
 
 ["test_AboutNewTabResourceMapping_emergencyFallback.js"]
 
+["test_AboutNewTabResourceMapping_entitledVersion.js"]
+
 ["test_AboutNewTabResourceMapping_langpackShadow.js"]
 
 ["test_disableNewTabAsAddon_pref.js"]
@@ -41,4 +43,7 @@ skip-if = [
 head = "../../../../extensions/newtab/test/xpcshell/head.js head_nimbus_trainhop.js"
 
 ["test_nimbus_newtabTrainhopAddon_onBrowserReady.js"]
+head = "../../../../extensions/newtab/test/xpcshell/head.js head_nimbus_trainhop.js"
+
+["test_nimbus_newtabTrainhopAddon_shutdown.js"]
 head = "../../../../extensions/newtab/test/xpcshell/head.js head_nimbus_trainhop.js"

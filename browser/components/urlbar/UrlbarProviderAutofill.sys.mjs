@@ -5,6 +5,7 @@
 /**
  * @import {OpenedConnection} from "resource://gre/modules/Sqlite.sys.mjs"
  * @import {Query} from "./UrlbarProvidersManager.sys.mjs"
+ * @import {UrlbarAutofillData} from "chrome://browser/content/urlbar/UrlbarResult.mjs"
  */
 
 /**
@@ -12,33 +13,79 @@
  */
 
 import {
+  INPUT_HISTORY_USE_DECAY,
   UrlbarProvider,
   UrlbarUtils,
 } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   AboutPagesUtils: "resource://gre/modules/AboutPagesUtils.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
   UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
   UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
   UrlUtils: "resource://gre/modules/UrlUtils.sys.mjs",
+  pageFrecencyThreshold: () => {
+    return lazy.PlacesUtils.history.pageFrecencyThreshold(90, 0, true);
+  },
+  historyEnabled: { pref: "places.history.enabled", default: true },
+  frecencyDecayRate: {
+    pref: "places.frecency.decayRate",
+    default: "0.975",
+    onUpdate: () => (gUrlUseCountThreshold = null),
+    /** @param {number|string} val */
+    transform: val => {
+      let rate = typeof val == "string" ? parseFloat(val) : val;
+      return rate > 0 && rate < 1 ? rate : 0.975;
+    },
+  },
+  urlMinPicks: {
+    pref: "browser.urlbar.autoFill.adaptiveHistory.urlMinPicks",
+    default: 3,
+    onUpdate: () => (gUrlUseCountThreshold = null),
+  },
+  urlPicksAgeDays: {
+    pref: "browser.urlbar.autoFill.adaptiveHistory.urlPicksAgeDays",
+    default: 14,
+    onUpdate: () => (gUrlUseCountThreshold = null),
+  },
 });
 
-ChromeUtils.defineLazyGetter(lazy, "pageFrecencyThreshold", () => {
-  return lazy.PlacesUtils.history.pageFrecencyThreshold(90, 0, true);
-});
+/**
+ * Converts a number of picks into the `moz_inputhistory.use_count` a row would
+ * hold if it were picked that many times in one sitting and then left untouched
+ * for `ageDays`.
+ *
+ * @param {number} picks
+ *   The number of times the (url, input) pairing was picked.
+ * @param {number} ageDays
+ *   Days of idle decay assumed to have elapsed since the last pick.
+ * @returns {number}
+ *   The resulting use_count.
+ */
+export function inputHistoryPicksToUseCount(picks, ageDays) {
+  let useCount = 0;
+  for (let i = 0; i < picks; i++) {
+    useCount = useCount * INPUT_HISTORY_USE_DECAY + 1;
+  }
+  return useCount * lazy.frecencyDecayRate ** ageDays;
+}
 
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "historyEnabled",
-  "places.history.enabled",
-  true
-);
+// Memoized use_count threshold. Each of the three prefs it derives from resets
+// this from its own pref observer, since a lazy pref getter can only watch one.
+// Do not read this directly since it is null until computed.
+// Call `urlUseCountThreshold()` instead.
+let gUrlUseCountThreshold = null;
+
+function urlUseCountThreshold() {
+  gUrlUseCountThreshold ??= inputHistoryPicksToUseCount(
+    lazy.urlMinPicks,
+    lazy.urlPicksAgeDays
+  );
+  return gUrlUseCountThreshold;
+}
 
 // Returns which result sources are eligible for autofill. When
 // places.history.enabled is false the user has opted out of recording
@@ -380,10 +427,10 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
   }
 
   /**
-   * @returns {Values<typeof UrlbarUtils.PROVIDER_TYPE>}
+   * @returns {Values<typeof lazy.UrlbarShared.PROVIDER_TYPE>}
    */
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.HEURISTIC;
+    return lazy.UrlbarShared.PROVIDER_TYPE.HEURISTIC;
   }
 
   /**
@@ -415,7 +462,7 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
 
     // Trying to autofill an extremely long string would be expensive, and
     // not particularly useful since the filled part falls out of screen anyway.
-    if (queryContext.searchString.length > UrlbarUtils.MAX_TEXT_LENGTH) {
+    if (queryContext.searchString.length > lazy.UrlbarShared.MAX_TEXT_LENGTH) {
       return false;
     }
 
@@ -507,38 +554,36 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
     }
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   */
   async onEngagement(queryContext, controller, details) {
     let { result } = details;
     let didRemove = false;
 
     switch (details.selType) {
       case RESULT_MENU_COMMANDS.DISMISS: {
-        await lazy.PlacesUtils.history
-          .remove(result.payload.url)
-          .catch(console.error);
+        await UrlbarUtils.dismissAutofill(result.payload.url, {
+          removeFromHistory: true,
+        });
         didRemove = true;
         break;
       }
       case RESULT_MENU_COMMANDS.DISMISS_AUTOFILL: {
-        let blockUntilMs =
-          Date.now() +
-          lazy.UrlbarPrefs.get("autoFill.dismissalBlockDurationMs");
-        await UrlbarUtils.blockAutofill(result.payload.url, blockUntilMs).catch(
-          console.error
-        );
+        await UrlbarUtils.dismissAutofill(result.payload.url);
         didRemove = true;
         break;
       }
     }
 
     if (didRemove) {
-      UrlbarUtils.clearAutofillBackspaceEntryForUrl(result.payload.url);
-
       // Upon removing the autofill, we should do another search.
-      controller.input._setValue(queryContext.searchString);
+      controller.input.setValue(queryContext.searchString);
       controller.input.startQuery({
         searchString: queryContext.searchString,
-        allowAutofill: false,
+        allowAutofill: true,
         resetSearchState: false,
       });
     }
@@ -556,7 +601,7 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
       result.autofill.type === "adaptive_origin" ||
       result.autofill.type === "origin"
     ) {
-      let isOrigin = UrlbarUtils.isOriginUrl(result.payload.url);
+      let isOrigin = lazy.UrlbarShared.isOriginUrl(result.payload.url);
       let resultArray = [];
 
       if (!isPrivate) {
@@ -828,6 +873,7 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
       useCountThreshold: lazy.UrlbarPrefs.get(
         "autoFillAdaptiveHistoryUseCountThreshold"
       ),
+      urlUseCountThreshold: urlUseCountThreshold(),
       nowMs: Date.now(),
       adaptiveAutofillEnabled: lazy.UrlbarPrefs.get(
         "autoFill.adaptiveHistory.enabled"
@@ -853,6 +899,10 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
           AND :fullSearchString BETWEEN i.input AND i.input || X'FFFF'
           AND ${sourceCondition}
           AND i.use_count >= :useCountThreshold
+          AND (
+            fixup_url(h.url) = fixup_url(o.host) || '/'
+            OR i.use_count >= :urlUseCountThreshold
+          )
           AND (:strippedPrefix = '' OR get_prefix(h.url) = :strippedPrefix)
           AND (
             starts_with OR
@@ -923,6 +973,7 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
     // `finalCompleteValue` will include it to properly reflect the real URL.
     let finalCompleteValue;
 
+    /** @type {UrlbarAutofillData["type"]} */
     let autofilledType;
     let adaptiveHistoryInput;
 
@@ -937,7 +988,7 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
         let url = row.getResultByName("url");
         let strippedURL = row.getResultByName("stripped_url");
 
-        if (!UrlbarUtils.canAutofillURL(url, strippedURL, true)) {
+        if (!lazy.UrlbarShared.canAutofillURL(url, strippedURL, true)) {
           return null;
         }
 
@@ -971,7 +1022,7 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
         adaptiveHistoryInput = row.getResultByName("input");
         fixedURL = row.getResultByName("url_fixed");
         finalCompleteValue = row.getResultByName("url");
-        autofilledType = UrlbarUtils.isOriginUrl(finalCompleteValue)
+        autofilledType = lazy.UrlbarShared.isOriginUrl(finalCompleteValue)
           ? "adaptive_origin"
           : "adaptive_url";
         break;
@@ -1021,7 +1072,7 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
 
     let payload = {
       url: finalCompleteValue,
-      icon: UrlbarUtils.getIconForUrl(finalCompleteValue),
+      icon: lazy.UrlbarShared.getIconForUrl(finalCompleteValue),
     };
 
     let noVisitAction = !!title;
@@ -1029,10 +1080,13 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
       payload.title = title;
     } else {
       let trimHttps = lazy.UrlbarPrefs.getScotchBonnetPref("trimHttps");
-      let displaySpec = UrlbarUtils.prepareUrlForDisplay(finalCompleteValue, {
-        trimURL: false,
-      });
-      let [fallbackTitle] = UrlbarUtils.stripPrefixAndTrim(displaySpec, {
+      let displaySpec = lazy.UrlbarShared.prepareUrlForDisplay(
+        finalCompleteValue,
+        {
+          trimURL: false,
+        }
+      );
+      let [fallbackTitle] = lazy.UrlbarShared.stripPrefixAndTrim(displaySpec, {
         stripHttp: !trimHttps,
         stripHttps: trimHttps,
         trimEmptyQuery: true,
@@ -1055,9 +1109,9 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
       },
       payload,
       highlights: {
-        url: UrlbarUtils.HIGHLIGHT.TYPED,
-        title: UrlbarUtils.HIGHLIGHT.TYPED,
-        fallbackTitle: UrlbarUtils.HIGHLIGHT.TYPED,
+        url: lazy.UrlbarShared.HIGHLIGHT.TYPED,
+        title: lazy.UrlbarShared.HIGHLIGHT.TYPED,
+        fallbackTitle: lazy.UrlbarShared.HIGHLIGHT.TYPED,
       },
     });
   }
@@ -1082,7 +1136,7 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
 
     for (const aboutUrl of lazy.AboutPagesUtils.visibleAboutUrls) {
       if (aboutUrl.startsWith(`about:${this._searchString.toLowerCase()}`)) {
-        let [trimmedUrl] = UrlbarUtils.stripPrefixAndTrim(aboutUrl, {
+        let [trimmedUrl] = lazy.UrlbarShared.stripPrefixAndTrim(aboutUrl, {
           stripHttp: true,
           trimEmptyQuery: true,
           trimSlash: !this._searchString.includes("/"),
@@ -1103,11 +1157,11 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
           payload: {
             title: trimmedUrl,
             url: aboutUrl,
-            icon: UrlbarUtils.getIconForUrl(aboutUrl),
+            icon: lazy.UrlbarShared.getIconForUrl(aboutUrl),
           },
           highlights: {
-            title: UrlbarUtils.HIGHLIGHT.TYPED,
-            url: UrlbarUtils.HIGHLIGHT.TYPED,
+            title: lazy.UrlbarShared.HIGHLIGHT.TYPED,
+            url: lazy.UrlbarShared.HIGHLIGHT.TYPED,
           },
         });
       }
@@ -1199,7 +1253,7 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
    *   The fallback origin result, or null if no fallback is appropriate.
    */
   async _getFallbackOriginResult(conn, autofillUrl) {
-    if (UrlbarUtils.isOriginUrl(autofillUrl)) {
+    if (lazy.UrlbarShared.isOriginUrl(autofillUrl)) {
       return null;
     }
 
@@ -1229,7 +1283,7 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
       payload: {
         url: originUrl,
         title: title ?? originUrl,
-        icon: UrlbarUtils.getIconForUrl(originUrl),
+        icon: lazy.UrlbarShared.getIconForUrl(originUrl),
         isBlockable: true,
         blockL10n: { id: "urlbar-result-menu-remove-from-history2" },
         helpUrl:

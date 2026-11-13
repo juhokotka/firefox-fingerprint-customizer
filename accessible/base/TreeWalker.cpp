@@ -5,12 +5,11 @@
 #include "TreeWalker.h"
 
 #include "ARIAMap.h"
-#include "nsAccessibilityService.h"
 #include "DocAccessible.h"
-
-#include "nsIContentInlines.h"
 #include "mozilla/dom/ChildIterator.h"
 #include "mozilla/dom/Element.h"
+#include "nsAccessibilityService.h"
+#include "nsIContentInlines.h"
 
 namespace mozilla::a11y {
 
@@ -325,7 +324,7 @@ LocalAccessible* TreeWalker::AccessibleFor(nsIContent* aNode, uint32_t aFlags,
 
   // Create an accessible if allowed.
   if (!(aFlags & eWalkCache) && mContext->IsAcceptableChild(aNode) &&
-      !aria::IsValidARIAHidden(mDoc)) {
+      !aria::IsValidARIAHidden(mDoc->GetContent())) {
     mDoc->RelocateARIAOwnedIfNeeded(aNode);
     return GetAccService()->CreateAccessible(aNode, mContext, aSkipSubtree);
   }

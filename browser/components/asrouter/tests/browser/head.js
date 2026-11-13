@@ -2,6 +2,7 @@
 
 ChromeUtils.defineESModuleGetters(this, {
   ASRouter: "resource:///modules/asrouter/ASRouter.sys.mjs",
+  ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   FeatureCallout: "resource:///modules/asrouter/FeatureCallout.sys.mjs",
 
   FeatureCalloutBroker:
@@ -10,6 +11,7 @@ ChromeUtils.defineESModuleGetters(this, {
   FeatureCalloutMessages:
     "resource:///modules/asrouter/FeatureCalloutMessages.sys.mjs",
 
+  NimbusTestUtils: "resource://testing-common/NimbusTestUtils.sys.mjs",
   PlacesTestUtils: "resource://testing-common/PlacesTestUtils.sys.mjs",
   QueryCache: "resource:///modules/asrouter/ASRouterTargeting.sys.mjs",
   AboutWelcomeParent: "resource:///actors/AboutWelcomeParent.sys.mjs",
@@ -25,12 +27,22 @@ const { sinon } = ChromeUtils.importESModule(
 const BROWSER_GLUE =
   Cc["@mozilla.org/browser/browserglue;1"].getService().wrappedJSObject;
 
+ChromeUtils.defineLazyGetter(this, "PlacesFrecencyRecalculator", () => {
+  return Cc["@mozilla.org/places/frecency-recalculator;1"].getService(
+    Ci.nsIObserver
+  ).wrappedJSObject;
+});
+
 // Feature callout constants
 const calloutId = "feature-callout";
 const calloutSelector = `#${calloutId}.featureCallout`;
 const calloutCTASelector = `#${calloutId} :is(.primary, .secondary)`;
 const calloutDismissSelector = `#${calloutId} .dismiss-button`;
 const CTASelector = `#${calloutId} :is(.primary, .secondary)`;
+
+add_setup(function setup() {
+  registerCleanupFunction(NimbusTestUtils.disableSignatureVerification());
+});
 
 function pushPrefs(...prefs) {
   return SpecialPowers.pushPrefEnv({ set: prefs });

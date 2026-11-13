@@ -3,6 +3,8 @@
 
 "use strict";
 
+const { showBookmarksSidebar, openFolder } = SidebarTestUtils.bookmarks;
+
 const UPDATED_BOOKMARKS_PREF = "sidebar.updatedBookmarks.enabled";
 
 add_setup(async () => {
@@ -15,32 +17,6 @@ add_setup(async () => {
     SidebarTestUtils.closePanel(window);
   });
 });
-
-async function showBookmarksSidebar() {
-  if (SidebarController.currentID !== "viewBookmarksSidebar") {
-    await SidebarTestUtils.showPanel(window, "viewBookmarksSidebar");
-  }
-  const { contentDocument, contentWindow } = SidebarController.browser;
-  await TestUtils.waitForCondition(
-    () => contentDocument.querySelector("sidebar-bookmarks"),
-    "Wait for sidebar-bookmarks element"
-  );
-  const component = contentDocument.querySelector("sidebar-bookmarks");
-  await component.updateComplete;
-  return { component, contentWindow };
-}
-
-async function openFolder(details) {
-  if (!details.open) {
-    const summary = details.querySelector("summary");
-    summary.click();
-    await BrowserTestUtils.waitForMutationCondition(
-      details,
-      { attributes: true },
-      () => details.open
-    );
-  }
-}
 
 async function waitForNestedListRows(nestedList) {
   info("waiting for nested list rows to render");
@@ -65,7 +41,7 @@ add_task(async function test_arrow_down_into_expanded_folder() {
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
   });
 
-  const { component, contentWindow } = await showBookmarksSidebar();
+  const { component, contentWindow } = await showBookmarksSidebar(window);
   const tabList = component.bookmarkList;
 
   await BrowserTestUtils.waitForMutationCondition(
@@ -100,7 +76,7 @@ add_task(async function test_arrow_up_from_first_row_focuses_parent_summary() {
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
   });
 
-  const { component, contentWindow } = await showBookmarksSidebar();
+  const { component, contentWindow } = await showBookmarksSidebar(window);
   const tabList = component.bookmarkList;
 
   await BrowserTestUtils.waitForMutationCondition(
@@ -138,7 +114,7 @@ add_task(async function test_arrow_down_navigates_between_rows() {
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
   });
 
-  const { component, contentWindow } = await showBookmarksSidebar();
+  const { component, contentWindow } = await showBookmarksSidebar(window);
   const tabList = component.bookmarkList;
 
   await BrowserTestUtils.waitForMutationCondition(
@@ -193,7 +169,7 @@ add_task(async function test_arrow_down_from_last_row_to_next_folder() {
     parentGuid: folder2.guid,
   });
 
-  const { component, contentWindow } = await showBookmarksSidebar();
+  const { component, contentWindow } = await showBookmarksSidebar(window);
   const tabList = component.bookmarkList;
 
   await BrowserTestUtils.waitForMutationCondition(
@@ -267,7 +243,7 @@ add_task(async function test_arrow_left_collapses_folder() {
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
   });
 
-  const { component, contentWindow } = await showBookmarksSidebar();
+  const { component, contentWindow } = await showBookmarksSidebar(window);
   const tabList = component.bookmarkList;
 
   await BrowserTestUtils.waitForMutationCondition(
@@ -302,7 +278,7 @@ add_task(async function test_arrow_left_from_row_focuses_parent_summary() {
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
   });
 
-  const { component, contentWindow } = await showBookmarksSidebar();
+  const { component, contentWindow } = await showBookmarksSidebar(window);
   const tabList = component.bookmarkList;
 
   await BrowserTestUtils.waitForMutationCondition(
@@ -335,7 +311,7 @@ add_task(async function test_arrow_right_expands_folder() {
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
   });
 
-  const { component, contentWindow } = await showBookmarksSidebar();
+  const { component, contentWindow } = await showBookmarksSidebar(window);
   const tabList = component.bookmarkList;
 
   await BrowserTestUtils.waitForMutationCondition(
@@ -376,7 +352,7 @@ add_task(async function test_arrow_right_enters_already_expanded_folder() {
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
   });
 
-  const { component, contentWindow } = await showBookmarksSidebar();
+  const { component, contentWindow } = await showBookmarksSidebar(window);
   const tabList = component.bookmarkList;
 
   await BrowserTestUtils.waitForMutationCondition(
@@ -426,7 +402,7 @@ add_task(async function test_arrow_up_enters_previous_expanded_folder() {
     parentGuid: folder2.guid,
   });
 
-  const { component, contentWindow } = await showBookmarksSidebar();
+  const { component, contentWindow } = await showBookmarksSidebar(window);
   const tabList = component.bookmarkList;
 
   await BrowserTestUtils.waitForMutationCondition(
@@ -486,6 +462,70 @@ add_task(async function test_arrow_up_enters_previous_expanded_folder() {
       folder1NestedList.rowEls[folder1NestedList.rowEls.length - 1]
     ),
     "Last row in expanded previous folder is focused."
+  );
+
+  SidebarTestUtils.closePanel(window);
+  await PlacesUtils.bookmarks.eraseEverything();
+});
+
+add_task(async function test_only_active_row_is_tab_stop() {
+  await PlacesUtils.bookmarks.insertTree({
+    guid: PlacesUtils.bookmarks.toolbarGuid,
+    children: [
+      { url: "https://example.com/one/", title: "One" },
+      { url: "https://example.com/two/", title: "Two" },
+    ],
+  });
+
+  const { component, contentWindow } = await showBookmarksSidebar(window);
+  const tabList = component.bookmarkList;
+
+  const toolbarDetails = await BrowserTestUtils.waitForMutationCondition(
+    tabList.shadowRoot,
+    { childList: true, subtree: true },
+    () => tabList.folderEls[0]
+  );
+  await openFolder(toolbarDetails);
+  const nestedList = toolbarDetails.querySelector("sidebar-bookmark-list");
+  await waitForNestedListRows(nestedList);
+  Assert.equal(nestedList.rowEls.length, 2, "Two bookmark rows are shown.");
+
+  info("Navigate into the folder and down to the second row.");
+  const toolbarSummary = toolbarDetails.querySelector("summary");
+  toolbarSummary.focus();
+  await focusWithKeyboard(nestedList.rowEls[0], "KEY_ArrowDown", contentWindow);
+  await focusWithKeyboard(nestedList.rowEls[1], "KEY_ArrowDown", contentWindow);
+
+  Assert.equal(
+    nestedList.rowEls[0].getAttribute("tabindex"),
+    -1,
+    "The unselected row is not a tab stop."
+  );
+  Assert.equal(
+    nestedList.rowEls[1].getAttribute("tabindex"),
+    0,
+    "The selected row is a tab stop."
+  );
+
+  info("Tab from the focused row exits the panel.");
+  const panelBlurred = BrowserTestUtils.waitForEvent(contentWindow, "blur");
+  EventUtils.synthesizeKey("KEY_Tab", {}, contentWindow);
+  await panelBlurred;
+  Assert.ok(
+    !contentWindow.document.hasFocus(),
+    "Tab from a bookmark row moves focus out of the panel."
+  );
+
+  info("Shift+Tab returns to the active row, not another item.");
+  const rowRefocused = BrowserTestUtils.waitForEvent(
+    nestedList.rowEls[1],
+    "focus"
+  );
+  EventUtils.synthesizeKey("KEY_Tab", { shiftKey: true });
+  await rowRefocused;
+  Assert.ok(
+    isActiveElement(nestedList.rowEls[1]),
+    "Shift+Tab returns focus to the active row."
   );
 
   SidebarTestUtils.closePanel(window);

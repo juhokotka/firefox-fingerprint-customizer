@@ -221,6 +221,7 @@ static constexpr Register JSReturnReg_Type = r3;
 static constexpr Register JSReturnReg_Data = r2;
 static constexpr Register StackPointer = sp;
 static constexpr Register FramePointer = r11;
+static constexpr Register LinkRegister = lr;
 static constexpr Register ReturnReg = r0;
 static constexpr Register64 ReturnReg64(r1, r0);
 
@@ -274,6 +275,10 @@ static constexpr Register RegExpExecTestStringReg = CallTempReg1;
 static constexpr Register RegExpSearcherRegExpReg = CallTempReg0;
 static constexpr Register RegExpSearcherStringReg = CallTempReg1;
 static constexpr Register RegExpSearcherLastIndexReg = CallTempReg2;
+
+// Register used by the bailout tail and bailout stubs during stack
+// reconstruction.
+static constexpr Register BailoutStubHandlerReg = CallTempReg0;
 
 static constexpr FloatRegister d0 = {FloatRegisters::d0, VFPRegister::Double};
 static constexpr FloatRegister d1 = {FloatRegisters::d1, VFPRegister::Double};
@@ -1218,10 +1223,10 @@ class Assembler : public AssemblerShared {
 
   void initDisassembler();
   void finishDisassembler();
-  void spew(Instruction* i);
-  void spewBranch(Instruction* i, const LabelDoc& target);
-  void spewLiteralLoad(PoolHintPun& php, bool loadToPC, const Instruction* offs,
-                       const LiteralDoc& doc);
+  void spew(Instruction* i, BufferOffset offs);
+  void spewBranch(Instruction* i, BufferOffset offs, const LabelDoc& target);
+  void spewLiteralLoad(PoolHintPun& php, bool loadToPC, const Instruction* i,
+                       BufferOffset offs, const LiteralDoc& doc);
 #endif
 
  public:
@@ -1342,6 +1347,10 @@ class Assembler : public AssemblerShared {
 
   // Size of the instruction stream, in bytes, after pools are flushed.
   size_t size() const;
+  // Returns the size of the buffer we can currently read, hence ignoring any
+  // un-flushed data in currently-under-construction constant pool(s).
+  size_t readableSize() const;
+
   // Size of the jump relocation table, in bytes.
   size_t jumpRelocationTableBytes() const;
   size_t dataRelocationTableBytes() const;
@@ -1355,7 +1364,7 @@ class Assembler : public AssemblerShared {
     MOZ_ASSERT(hasCreator());
     BufferOffset offs = m_buffer.putInt(x);
 #ifdef JS_DISASM_ARM
-    spew(m_buffer.getInstOrNull(offs));
+    spew(m_buffer.getInstOrNull(offs), offs);
 #endif
     return offs;
   }
@@ -1366,7 +1375,7 @@ class Assembler : public AssemblerShared {
   writeBranchInst(uint32_t x, const LabelDoc& documentation) {
     BufferOffset offs = m_buffer.putInt(x);
 #ifdef JS_DISASM_ARM
-    spewBranch(m_buffer.getInstOrNull(offs), documentation);
+    spewBranch(m_buffer.getInstOrNull(offs), offs, documentation);
 #endif
     return offs;
   }

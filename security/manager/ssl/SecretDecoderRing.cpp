@@ -5,13 +5,14 @@
 
 #include "SecretDecoderRing.h"
 
+#include "SSLTokensCache.h"
 #include "ScopedNSSTypes.h"
 #include "mozilla/Base64.h"
 #include "mozilla/Casting.h"
+#include "mozilla/ErrorResult.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs_security.h"
-#include "mozilla/ErrorResult.h"
 #include "mozilla/dom/Promise.h"
 #include "nsCOMPtr.h"
 #include "nsIInterfaceRequestor.h"
@@ -310,11 +311,8 @@ SecretDecoderRing::Login(const nsACString& password, bool* success) {
 NS_IMETHODIMP
 SecretDecoderRing::Logout() {
   PK11_LogoutAll();
-  nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(NS_NSSCOMPONENT_CID));
-  if (!nssComponent) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-  return nssComponent->ClearSSLExternalAndInternalSessionCache();
+  mozilla::net::SSLTokensCache::ClearSessionCacheAndTokens();
+  return NS_OK;
 }
 
 NS_IMETHODIMP

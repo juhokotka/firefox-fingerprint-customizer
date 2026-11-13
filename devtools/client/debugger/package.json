@@ -15,18 +15,15 @@
     "test": "TZ=Africa/Nairobi jest",
     "test-ci": "TZ=Africa/Nairobi jest --json",
     "test:watch": "jest --watch",
-    "test:coverage": "yarn test --coverage",
-    "test:all": "yarn test"
+    "test:coverage": "npm test -- --coverage",
+    "test:all": "npm test"
   },
   "dependencies": {
-    "acorn": "~8.8.2",
+    "acorn": "~8.17.0",
     "source-map": "0.7.4",
     "wasmparser": "^3.1.1"
   },
   "private": true,
-  "workspaces": [
-    "packages/*"
-  ],
   "files": [
     "src",
     "assets"

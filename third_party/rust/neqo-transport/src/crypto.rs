@@ -4,6 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(
+    feature = "bench",
+    expect(
+        clippy::missing_errors_doc,
+        clippy::missing_panics_doc,
+        clippy::must_use_candidate,
+        reason = "These items are only public API when the `bench` feature is enabled."
+    )
+)]
+
 use std::{
     cell::RefCell,
     cmp::{max, min},
@@ -15,7 +25,11 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Buffer, Encoder, Role, hex, hex_snip_middle, qdebug, qinfo, qtrace};
+use neqo_common::{
+    Buffer, Encoder, Role,
+    hex::{Hex, HexSnipMiddle},
+    qdebug, qinfo, qtrace, to_u64,
+};
 pub use nss::Epoch;
 use nss::{
     Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, Mode, PrivateKey, PublicKey,
@@ -30,8 +44,7 @@ use crate::{
     ConnectionParameters, Error, Res,
     cid::ConnectionIdRef,
     frame::{FrameEncoder as _, FrameType},
-    packet::{self},
-    recovery,
+    packet, recovery,
     recv_stream::RxStreamOrderer,
     send_stream::TxBuffer,
     sni::find_sni,
@@ -136,6 +149,11 @@ impl Crypto {
         &self.protocols
     }
 
+    /// Whether the local role is that of a server.
+    const fn is_server(&self) -> bool {
+        matches!(self.tls, Agent::Server(_))
+    }
+
     pub fn server_enable_0rtt<Z: ZeroRttChecker + 'static>(
         &mut self,
         tphandler: TpHandler,
@@ -190,7 +208,7 @@ impl Crypto {
     ) -> Res<&HandshakeState> {
         let input = data.map(|d| {
             #[cfg(feature = "build-fuzzing-corpus")]
-            if space == PacketNumberSpace::Initial && matches!(self.tls, Agent::Server(_)) {
+            if space == PacketNumberSpace::Initial && self.is_server() {
                 neqo_common::write_item_to_fuzzing_corpus("find_sni", d);
             }
             let rec = Record {
@@ -219,22 +237,23 @@ impl Crypto {
     }
 
     /// Enable 0-RTT and return `true` if it is enabled successfully.
-    pub fn enable_0rtt(&mut self, version: Version, role: Role) -> Res<bool> {
+    pub fn enable_0rtt(&mut self, version: Version) -> Res<bool> {
         let info = self.tls.preinfo()?;
         // `info.early_data()` returns false for a server,
         // so use `early_data_cipher()` to tell if 0-RTT is enabled.
         let Some(cipher) = info.early_data_cipher() else {
             return Ok(false);
         };
-        let (dir, secret) = match role {
-            Role::Client => (
-                CryptoDxDirection::Write,
-                self.tls.write_secret(Epoch::ZeroRtt),
-            ),
-            Role::Server => (
+        let (dir, secret) = if self.is_server() {
+            (
                 CryptoDxDirection::Read,
                 self.tls.read_secret(Epoch::ZeroRtt),
-            ),
+            )
+        } else {
+            (
+                CryptoDxDirection::Write,
+                self.tls.write_secret(Epoch::ZeroRtt),
+            )
         };
         let secret = secret.ok_or(Error::Internal)?;
         self.states.set_0rtt_keys(version, dir, &secret, cipher)?;
@@ -249,12 +268,12 @@ impl Crypto {
     }
 
     /// Returns true if new handshake keys were installed.
-    pub fn install_keys(&mut self, role: Role) -> Res<bool> {
+    pub fn install_keys(&mut self) -> Res<bool> {
         if self.tls.state().is_final() {
             Ok(false)
         } else {
             let installed_hs = self.install_handshake_keys()?;
-            if role == Role::Server {
+            if self.is_server() {
                 self.maybe_install_application_write_key(self.version)?;
             }
             Ok(installed_hs)
@@ -335,24 +354,22 @@ impl Crypto {
             .write_frame(space, sni_slicing, builder, tokens, stats);
     }
 
-    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
+    pub fn acked(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         qdebug!(
-            "Acked crypto frame space={} offset={} length={}",
-            token.space,
+            "Acked crypto frame space={space} offset={} length={}",
             token.offset,
             token.length
         );
-        self.streams.acked(token);
+        self.streams.acked(space, token);
     }
 
-    pub fn lost(&mut self, token: &CryptoRecoveryToken) {
+    pub fn lost(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         qinfo!(
-            "Lost crypto frame space={} offset={} length={}",
-            token.space,
+            "Lost crypto frame space={space} offset={} length={}",
             token.offset,
             token.length
         );
-        self.streams.lost(token);
+        self.streams.lost(space, token);
     }
 
     /// Mark any outstanding frames in the indicated space as "lost" so
@@ -377,7 +394,7 @@ impl Crypto {
     ) -> Option<ResumptionToken> {
         if let Agent::Client(ref mut c) = self.tls {
             c.resumption_token().as_ref().map(|t| {
-                qtrace!("TLS token {}", hex(t.as_ref()));
+                qtrace!("TLS token {}", Hex::new(t.as_ref()));
                 let mut enc = Encoder::default();
                 enc.encode_uint(4, version.wire_version());
                 enc.encode_varint(rtt);
@@ -386,7 +403,7 @@ impl Crypto {
                 });
                 enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
-                qdebug!("resumption token {}", hex_snip_middle(enc.as_ref()));
+                qdebug!("resumption token {}", HexSnipMiddle::new(enc.as_ref()));
                 ResumptionToken::new(enc.into(), t.expiration_time())
             })
         } else {
@@ -618,6 +635,11 @@ impl CryptoDxState {
         self.epoch & 1 != 1
     }
 
+    #[must_use]
+    pub const fn epoch(&self) -> usize {
+        self.epoch
+    }
+
     /// This is a continuation of a previous, so adjust the range accordingly.
     /// Fail if the two ranges overlap.  Do nothing if the directions don't match.
     pub fn continuation(&mut self, prev: &Self) -> Res<()> {
@@ -679,7 +701,11 @@ impl CryptoDxState {
         sample: &[u8; hp::Key::SAMPLE_SIZE],
     ) -> Res<[u8; hp::Key::SAMPLE_SIZE]> {
         let mask = self.hpkey.mask(sample)?;
-        qtrace!("[{self}] HP sample={} mask={}", hex(sample), hex(mask));
+        qtrace!(
+            "[{self}] HP sample={} mask={}",
+            Hex::new(sample),
+            Hex::new(mask)
+        );
         Ok(mask)
     }
 
@@ -697,8 +723,8 @@ impl CryptoDxState {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qtrace!(
             "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
-            hex(data[hdr.clone()].as_ref()),
-            hex(data[hdr.end..].as_ref())
+            Hex::new(data[hdr.clone()].as_ref()),
+            Hex::new(data[hdr.end..].as_ref())
         );
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
@@ -718,7 +744,7 @@ impl CryptoDxState {
         // Use only the actual current header for AAD.
         let len = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
-        qtrace!("[{self}] encrypt ct={}", hex(&data[..len]));
+        qtrace!("[{self}] encrypt ct={}", Hex::new(&data[..len]));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
         Ok(len)
@@ -738,8 +764,8 @@ impl CryptoDxState {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         qtrace!(
             "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
-            hex(data[hdr.clone()].as_ref()),
-            hex(data[hdr.end..].as_ref())
+            Hex::new(data[hdr.clone()].as_ref()),
+            Hex::new(data[hdr.end..].as_ref())
         );
         self.invoked()?;
         let (hdr, data) = data.split_at_mut(hdr.end);
@@ -748,24 +774,22 @@ impl CryptoDxState {
         Ok(len)
     }
 
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
-    pub(crate) fn test_default_write() -> Self {
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
+    pub fn test_default_write() -> Self {
         Self::test_default_with_direction(CryptoDxDirection::Write)
     }
 
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
-    pub(crate) fn test_default_read() -> Self {
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
+    pub fn test_default_read() -> Self {
         Self::test_default_with_direction(CryptoDxDirection::Read)
     }
 
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
     fn test_default_with_direction(direction: CryptoDxDirection) -> Self {
         // This matches the value in packet.rs
         const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
-        Self::new_initial(Version::default(), direction, "server in", CLIENT_CID, 0).unwrap()
+        Self::new_initial(Version::default(), direction, "server in", CLIENT_CID, 0)
+            .expect("state created")
     }
 
     /// Get the amount of extra padding packets protected with this profile need.
@@ -852,6 +876,11 @@ pub struct CryptoStates {
     // If this is set, then we have noticed a genuine update.
     // Once this time passes, we should switch in new keys.
     read_update_time: Option<Instant>,
+    // The read epoch of the most recent key update we have responded to.
+    // A duplicate of the packet that carried an update decrypts with the same
+    // keys and would otherwise be detected as that update again; comparing
+    // against this stops us from responding to the same update twice.
+    read_update_epoch: Option<usize>,
 }
 
 impl CryptoStates {
@@ -1068,7 +1097,7 @@ impl CryptoStates {
         for v in versions {
             qdebug!(
                 "[{self}] Creating initial cipher state v={v:?}, role={role:?} dcid={}",
-                hex(dcid)
+                Hex::new(dcid)
             );
 
             let mut initial = CryptoState {
@@ -1291,7 +1320,17 @@ impl CryptoStates {
     /// Prepare to update read keys.  This doesn't happen immediately as
     /// we want to ensure that we can continue to receive any delayed
     /// packets that use the old keys.  So we just set a timer.
-    pub fn key_update_received(&mut self, expiration: Instant) -> Res<()> {
+    pub fn key_update_received(&mut self, epoch: usize, expiration: Instant) -> Res<()> {
+        // Respond to each key update once. A duplicate of the packet that
+        // carried the update decrypts with the same keys and is detected as
+        // the same update again; responding twice would advance the write keys
+        // a second time and trip an assertion in `maybe_update_write`.
+        if self.read_update_epoch.is_some_and(|e| epoch <= e) {
+            qtrace!("[{self}] Ignoring duplicate key update for epoch {epoch}");
+            return Ok(());
+        }
+        self.read_update_epoch = Some(epoch);
+
         qtrace!("[{self}] Key update received");
         // If we received a key update, then we assume that the peer has
         // acknowledged a packet we sent in this epoch. It's OK to do that
@@ -1358,9 +1397,8 @@ impl CryptoStates {
     }
 
     /// Make some state for removing protection in tests.
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
-    pub(crate) fn test_default() -> Self {
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
+    pub fn test_default() -> Self {
         let read = |epoch| {
             let mut dx = CryptoDxState::test_default_read();
             dx.epoch = epoch;
@@ -1369,16 +1407,14 @@ impl CryptoStates {
         let app_read = |epoch| CryptoDxAppData {
             dx: read(epoch),
             cipher: TLS_AES_128_GCM_SHA256,
-            next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).unwrap(),
+            next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).expect("key is valid"),
         };
-        let initials = EnumMap::from_array([
-            None,
-            Some(CryptoState {
+        let initials = EnumMap::from_fn(|v| {
+            (v == Version::Version1).then(|| CryptoState {
                 tx: CryptoDxState::test_default_write(),
                 rx: read(0),
-            }),
-            None,
-        ]);
+            })
+        });
         Self {
             initials,
             handshake: None,
@@ -1389,6 +1425,7 @@ impl CryptoStates {
             app_read: Some(app_read(3)),
             app_read_next: Some(app_read(4)),
             read_update_time: None,
+            read_update_epoch: None,
         }
     }
 
@@ -1438,6 +1475,7 @@ impl CryptoStates {
             app_read: Some(app_read(3)),
             app_read_next: Some(app_read(4)),
             read_update_time: None,
+            read_update_epoch: None,
         }
     }
 }
@@ -1512,9 +1550,16 @@ impl CryptoStreams {
         Ok(())
     }
 
+    /// # Errors
+    /// `CryptoBufferExceeded` when too much data is buffered, or when it is in too many ranges.
     pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
         let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
-        rx.inbound_frame(offset, data);
+        // Nothing this far ahead can ever be delivered.
+        if !data.is_empty() && offset > rx.retired() + Self::BUFFER_LIMIT {
+            return Err(Error::CryptoBufferExceeded);
+        }
+        rx.inbound_frame(offset, data)
+            .map_err(|_| Error::CryptoBufferExceeded)?;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
             Ok(())
         } else {
@@ -1534,15 +1579,15 @@ impl CryptoStreams {
             .read_to_end(buf))
     }
 
-    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
-        if let Some(cs) = self.get_mut(token.space) {
+    pub fn acked(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
+        if let Some(cs) = self.get_mut(space) {
             cs.tx.mark_as_acked(token.offset, token.length);
         }
     }
 
-    pub fn lost(&mut self, token: &CryptoRecoveryToken) {
+    pub fn lost(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         // See BZ 1624800, ignore lost packets in spaces we've dropped keys
-        if let Some(cs) = self.get_mut(token.space) {
+        if let Some(cs) = self.get_mut(space) {
             cs.tx.mark_as_lost(token.offset, token.length);
         }
     }
@@ -1625,8 +1670,7 @@ impl CryptoStreams {
             // - remaining space, less the header, which counts only one byte for the length at
             //   first to avoid underestimating length
             let length = min(data.len(), builder.remaining() - header_len);
-            header_len +=
-                Encoder::varint_len(u64::try_from(length).expect("usize fits in u64")) - 1;
+            header_len += Encoder::varint_len(to_u64(length)) - 1;
             let length = min(data.len(), builder.remaining() - header_len);
 
             builder.encode_frame(FrameType::Crypto, |b| {
@@ -1647,7 +1691,6 @@ impl CryptoStreams {
             cs.tx.mark_as_sent(offset, len);
             qdebug!("CRYPTO for {space} offset={offset}, len={len}");
             tokens.push(recovery::Token::Crypto(CryptoRecoveryToken {
-                space,
                 offset,
                 length: len,
             }));
@@ -1669,7 +1712,7 @@ impl CryptoStreams {
                 // `left` is short enough to fit into this packet. So send from the *end*
                 // of `right`, so that the second half of the SNI is in another packet.
                 let right_len = right.len() + left.len() - limit;
-                right_offset += right_len as u64;
+                right_offset += to_u64(right_len);
                 (_, right) = right.split_at(right_len);
             } else if right.len() <= limit {
                 // `right` is short enough to fit into this packet. So only send a part of `left`.
@@ -1701,7 +1744,7 @@ impl CryptoStreams {
                     let packets_needed = data.len().div_ceil(builder.limit());
                     let limit = data.len() / packets_needed;
                     let ((left_offset, left), (right_offset, right)) =
-                        limit_chunks((offset, left), (offset + mid as u64, right), limit);
+                        limit_chunks((offset, left), (offset + to_u64(mid), right), limit);
                     (
                         write_chunk(right_offset, right, builder),
                         write_chunk(left_offset, left, builder),
@@ -1742,9 +1785,10 @@ impl Default for CryptoStreams {
     }
 }
 
+/// The packet number space is not recorded because it can be derived from the carrying packet's
+/// type.
 #[derive(Debug, Clone)]
 pub struct CryptoRecoveryToken {
-    space: PacketNumberSpace,
     offset: u64,
     length: usize,
 }
@@ -1761,5 +1805,43 @@ mod tests {
         fixture_init();
         let dx = CryptoDxState::test_default_write();
         assert_eq!(dx.to_string(), "epoch 0 Write");
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod buffer_limits {
+    use neqo_common::to_u64;
+
+    use super::{CryptoStreams, PacketNumberSpace, RxStreamOrderer};
+    use crate::Error;
+
+    /// How many one-byte ranges, each separated by a one-byte gap, to offer.
+    const RANGES: u64 = to_u64(RxStreamOrderer::MAX_GAPS) * 2;
+
+    // Offsets have to stay inside `BUFFER_LIMIT`.
+    static_assertions::const_assert!(2 * RANGES < CryptoStreams::BUFFER_LIMIT);
+
+    #[test]
+    fn crypto_offset_beyond_buffer() {
+        let offset = CryptoStreams::BUFFER_LIMIT + 1;
+        assert_eq!(
+            CryptoStreams::default().inbound_frame(PacketNumberSpace::Initial, offset, &[0; 1]),
+            Err(Error::CryptoBufferExceeded)
+        );
+        assert_eq!(
+            CryptoStreams::default().inbound_frame(PacketNumberSpace::Initial, offset, &[]),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn crypto_too_many_ranges() {
+        let mut cs = CryptoStreams::default();
+        let rejected = (0..RANGES).find_map(|i| {
+            cs.inbound_frame(PacketNumberSpace::Initial, 2 * i + 1, &[0; 1])
+                .err()
+        });
+        assert_eq!(rejected, Some(Error::CryptoBufferExceeded));
     }
 }

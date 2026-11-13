@@ -5,10 +5,10 @@
 #ifndef nsHttpRequestHead_h_
 #define nsHttpRequestHead_h_
 
+#include "mozilla/RecursiveMutex.h"
 #include "nsHttp.h"
 #include "nsHttpHeaderArray.h"
 #include "nsString.h"
-#include "mozilla/RecursiveMutex.h"
 
 class nsIHttpHeaderVisitor;
 

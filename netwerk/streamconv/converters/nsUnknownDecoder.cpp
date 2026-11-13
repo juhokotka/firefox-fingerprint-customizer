@@ -3,29 +3,27 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsUnknownDecoder.h"
-#include "nsIPipe.h"
-#include "nsIInputStream.h"
-#include "nsIOutputStream.h"
-#include "nsMimeTypes.h"
 
+#include <algorithm>
+
+#include "mozilla/StaticPrefs_network.h"
 #include "nsCRT.h"
-
-#include "nsIMIMEService.h"
-
-#include "nsIViewSourceChannel.h"
-#include "nsIHttpChannel.h"
-#include "nsIForcePendingChannel.h"
+#include "nsComponentManagerUtils.h"
 #include "nsIEncodedChannel.h"
+#include "nsIForcePendingChannel.h"
+#include "nsIHttpChannel.h"
+#include "nsIInputStream.h"
+#include "nsIMIMEService.h"
+#include "nsIOutputStream.h"
+#include "nsIPipe.h"
 #include "nsIURI.h"
-#include "nsStringStream.h"
+#include "nsIViewSourceChannel.h"
+#include "nsMimeTypes.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsQueryObject.h"
-#include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
-#include "mozilla/StaticPrefs_network.h"
-
-#include <algorithm>
+#include "nsStringStream.h"
 
 #define MAX_BUFFER_SIZE 512u
 
@@ -416,10 +414,11 @@ void nsUnknownDecoder::DetermineContentType(nsIRequest* aRequest) {
   // Check if data are compressed.
   nsAutoCString decodedData;
 
+  nsresult rv = NS_OK;
   if (channel) {
     // ConvertEncodedData is always called only on a single thread for each
     // instance of an object.
-    nsresult rv = ConvertEncodedData(aRequest, mBuffer, mBufferLen);
+    rv = ConvertEncodedData(aRequest, mBuffer, mBufferLen);
     if (NS_SUCCEEDED(rv)) {
       MutexAutoLock lock(mMutex);
       decodedData = mDecodedData;
@@ -430,10 +429,30 @@ void nsUnknownDecoder::DetermineContentType(nsIRequest* aRequest) {
     }
   }
 
+  // https://mimesniff.spec.whatwg.org/#sniffing-a-mislabeled-binary-resource
   if (httpChannel) {
     nsAutoCString contentType;
     httpChannel->GetContentType(contentType);
     if (contentType.EqualsLiteral("text/plain")) {
+      auto isEncoded = [&]() -> bool {
+        nsAutoCString contentEncoding;
+        return NS_SUCCEEDED(httpChannel->GetResponseHeader(
+                   "Content-Encoding"_ns, contentEncoding)) &&
+               !contentEncoding.IsEmpty();
+      };
+
+      // Do not sniff if the response is content-encoded but decoding produced
+      // no data. This happens when the compressed stream is larger than our
+      // sniffing buffer and the encoding (like zstd) only emits output once it
+      // has a full block. Compressed bytes always look like binary data, so
+      // sniffing them would turn a valid text/plain document into a download.
+      // A genuine decompression failure (NS_FAILED(rv)) also leaves decodedData
+      // empty; in that case we still fall through to SniffBinary.
+      if (decodedData.IsEmpty() && isEncoded() && NS_SUCCEEDED(rv)) {
+        MutexAutoLock lock(mMutex);
+        mContentType = TEXT_PLAIN;
+        return;
+      }
       SniffBinary(aRequest);
       return;
     }
@@ -477,7 +496,7 @@ void nsUnknownDecoder::DetermineContentType(nsIRequest* aRequest) {
                   testDataLen, sniffedType);
   {
     MutexAutoLock lock(mMutex);
-    mContentType = sniffedType;
+    mContentType = std::move(sniffedType);
     if (!mContentType.IsEmpty()) {
       return;
     }
@@ -618,7 +637,7 @@ bool nsUnknownDecoder::SniffURI(nsIRequest* aRequest) {
         result = mimeService->GetTypeFromURI(uri, type);
         if (NS_SUCCEEDED(result)) {
           MutexAutoLock lock(mMutex);
-          mContentType = type;
+          mContentType = std::move(type);
           return true;
         }
       }

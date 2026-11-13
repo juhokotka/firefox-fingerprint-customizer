@@ -217,7 +217,14 @@ API_AVAILABLE(macos(13.3))
 API_AVAILABLE(macos(13.3))
 @interface MacOSAuthenticatorPresentationContextProvider
     : NSObject <ASAuthorizationControllerPresentationContextProviding>
-@property(nonatomic, strong) NSWindow* window;
+// We store the window number rather than a strong reference to the NSWindow so
+// that an in-flight (or stalled) passkey handshake never keeps the requesting
+// browser window alive past its close. A retained window that has been -close'd
+// lingers as an invisible "ghost" that still captures mouse events (bug
+// 2015460). The anchor is resolved lazily from the number; if the window has
+// since closed, -windowWithWindowNumber: returns nil, which is an acceptable
+// anchor.
+@property(nonatomic) NSInteger windowNumber;
 @end
 
 namespace mozilla::dom {
@@ -577,11 +584,11 @@ NSDictionary<NSData*, ASAuthorizationPublicKeyCredentialPRFAssertionInputValues*
 @end
 
 @implementation MacOSAuthenticatorPresentationContextProvider
-@synthesize window = window;
+@synthesize windowNumber = windowNumber;
 
 - (ASPresentationAnchor)presentationAnchorForAuthorizationController:
     (ASAuthorizationController*)controller {
-  return window;
+  return [NSApp windowWithWindowNumber:windowNumber];
 }
 @end
 
@@ -982,7 +989,7 @@ void MacOSWebAuthnService::PerformRequests(
   MOZ_ASSERT(!mPresentationContextProvider);
   mPresentationContextProvider =
       [[MacOSAuthenticatorPresentationContextProvider alloc] init];
-  mPresentationContextProvider.window = window;
+  mPresentationContextProvider.windowNumber = window.windowNumber;
   mAuthorizationController.presentationContextProvider =
       mPresentationContextProvider;
 
@@ -1458,6 +1465,13 @@ MacOSWebAuthnService::AddVirtualAuthenticator(
     const nsACString& aProtocol, const nsACString& aTransport,
     bool aHasResidentKey, bool aHasUserVerification, bool aIsUserConsenting,
     bool aIsUserVerified, nsACString& aRetval) {
+  MOZ_ASSERT(NS_IsMainThread());
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+MacOSWebAuthnService::HasVirtualAuthenticator(
+    const nsACString& aAuthenticatorId, bool* aRetval) {
   MOZ_ASSERT(NS_IsMainThread());
   return NS_ERROR_NOT_IMPLEMENTED;
 }

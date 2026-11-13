@@ -58,7 +58,6 @@ class nsFirstLetterFrame : public nsContainerFrame {
                                            BaselineExportContext) const final;
   LogicalSides GetLogicalSkipSides() const final;
 
-  // final of nsFrame method
   nsresult GetChildFrameContainingOffset(int32_t inContentOffset, bool inHint,
                                          int32_t* outFrameContentOffset,
                                          nsIFrame** outChildFrame) final;
@@ -84,7 +83,7 @@ class nsFirstLetterFrame : public nsContainerFrame {
   bool UseTightBounds() const;
 
  protected:
-  nscoord mBaseline;
+  nscoord mBaseline = 0;
 
   void DrainOverflowFrames(nsPresContext* aPresContext);
 };

@@ -27,6 +27,7 @@
 #include "sandbox/win/src/sandbox_nt_util.h"
 #include "sandbox/win/src/sandbox_types.h"
 #include "sandbox/win/src/sharedmem_ipc_client.h"
+#include "sandbox/win/TargetGeckoClient.h"
 
 namespace sandbox {
 namespace {
@@ -147,6 +148,8 @@ std::optional<base::span<const uint8_t>> TargetServicesBase::GetDelegateData() {
 
 // Failure here is a breach of security so the process is terminated.
 void TargetServicesBase::LowerToken() {
+  mozilla::sandboxing::AutoProfileMarker profileInterval(
+      "TargetServicesBase::LowerToken");
   if (!SetProcessIntegrityLevel(g_shared_delayed_integrity_level)) {
     ::TerminateProcess(::GetCurrentProcess(), SBOX_FATAL_INTEGRITY);
   }

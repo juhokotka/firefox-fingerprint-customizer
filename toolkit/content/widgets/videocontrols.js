@@ -39,20 +39,20 @@ this.VideoControlsWidget = class {
   /*
    * Actually switch the implementation.
    * - With "controls" set, the VideoControlsImplWidget controls should load.
+   * - Without it, the NoControlsPictureInPictureImpleWidget should load
+   *   if the video is being viewed in Picture-in-Picture.
    * - Without it, on mobile, the NoControlsMobileImplWidget should load, so
    *   the user could see the click-to-play button when the video/audio is blocked.
-   * - Without it, on desktop, the NoControlsPictureInPictureImpleWidget should load
-   *   if the video is being viewed in Picture-in-Picture.
    */
   switchImpl() {
     let newImpl;
     let pageURI = this.document.documentURI;
     if (this.element.controls) {
       newImpl = VideoControlsImplWidget;
-    } else if (this.isMobile) {
-      newImpl = NoControlsMobileImplWidget;
     } else if (VideoControlsWidget.isPictureInPictureVideo(this.element)) {
       newImpl = NoControlsPictureInPictureImplWidget;
+    } else if (this.isMobile) {
+      newImpl = NoControlsMobileImplWidget;
     } else if (
       pageURI.startsWith("http://") ||
       pageURI.startsWith("https://")
@@ -1201,7 +1201,9 @@ this.VideoControlsImplWidget = class {
         this.scrubber.isDragging = false;
 
         if (this.isPausedByDragging) {
-          this.video.play();
+          this.video.play().catch(() => {
+            /* Do nothing on rejection */
+          });
           this.isPausedByDragging = false;
         }
       },
@@ -1667,7 +1669,9 @@ this.VideoControlsImplWidget = class {
       startPlay() {
         this._triggeredByControls = true;
         this.hideClickToPlay();
-        this.video.play();
+        this.video.play().catch(() => {
+          /* Do nothing on rejection */
+        });
       },
 
       togglePause() {
@@ -2499,6 +2503,12 @@ this.VideoControlsImplWidget = class {
         let isMobile = this.window.navigator.appVersion.includes("Android");
         if (isMobile) {
           this.controlsContainer.classList.add("mobile");
+          this.shadowRoot
+            .getElementById("pictureInPicture")
+            .setAttribute(
+              "data-l10n-id",
+              "videocontrols-status-picture-in-picture-android"
+            );
         }
 
         // TODO: Switch to touch controls on touch-based desktops (bug 1447547)
@@ -2680,7 +2690,9 @@ this.VideoControlsImplWidget = class {
           case "mouseup":
             if (aEvent.originalTarget == this.Utils.controlsSpacer) {
               if (this.firstShow) {
-                this.Utils.video.play();
+                this.Utils.video.play().catch(() => {
+                  /* Do nothing on rejection */
+                });
                 this.firstShow = false;
               }
               this.toggleControls();
@@ -2975,7 +2987,9 @@ this.NoControlsMobileImplWidget = class {
         }
 
         this.noControlsOverlay.hidden = true;
-        this.video.play();
+        this.video.play().catch(() => {
+          /* Do nothing on rejection */
+        });
       },
 
       init(shadowRoot) {
@@ -3098,6 +3112,15 @@ this.NoControlsPictureInPictureImplWidget = class {
       parserDoc.documentElement,
       true
     );
+    let isMobile = this.window.navigator.appVersion.includes("Android");
+    if (isMobile) {
+      this.shadowRoot
+        .getElementById("pictureInPicture")
+        .setAttribute(
+          "data-l10n-id",
+          "videocontrols-status-picture-in-picture-android"
+        );
+    }
     this.l10n = new this.window.DOMLocalization([
       "branding/brand.ftl",
       "toolkit/global/videocontrols.ftl",

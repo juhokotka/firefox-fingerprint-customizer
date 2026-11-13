@@ -2,14 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsNamedPipeService.h"
+
+#include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Logging.h"
 #include "mozilla/Services.h"
 #include "nsCOMPtr.h"
 #include "nsIObserverService.h"
-#include "nsNamedPipeService.h"
 #include "nsNetCID.h"
 #include "nsThreadUtils.h"
-#include "mozilla/ClearOnShutdown.h"
-#include "mozilla/Logging.h"
 
 namespace mozilla {
 namespace net {
@@ -24,9 +25,6 @@ StaticRefPtr<NamedPipeService> NamedPipeService::gSingleton;
 
 NS_IMPL_ISUPPORTS(NamedPipeService, nsINamedPipeService, nsIObserver,
                   nsIRunnable)
-
-NamedPipeService::NamedPipeService()
-    : mIocp(nullptr), mIsShutdown(false), mLock("NamedPipeServiceLock") {}
 
 nsresult NamedPipeService::Init() {
   MOZ_ASSERT(!mIsShutdown);

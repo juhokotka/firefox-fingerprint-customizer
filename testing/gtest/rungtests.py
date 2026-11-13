@@ -154,10 +154,13 @@ class GTests:
             result = run_test_process("gtest", env)
         else:
             suites = get_gtest_suites(args, cwd, env)
-            result = all(
+            # Some suites have side-effects like emitting PERFHERDER_DATA, so
+            # don't short-circuit on the first failure.
+            results = [
                 run_test_process(f"gtest.{filt.suite}", filt(env))
                 for filt in suite_filters(suites)
-            )
+            ]
+            result = all(results)
 
         if perfherder_data and "MOZ_AUTOMATION" in os.environ:
             upload_dir = pathlib.Path(os.getenv("MOZ_UPLOAD_DIR"))
@@ -209,6 +212,12 @@ class GTests:
             raise Exception("xre_path does not exist: %s", self.xre_path)
         env = dict(os.environ)
         env = self.build_core_environment(env)
+        # Some gtests spawn a Python helper via the PYTHON env var (e.g.
+        # DesktopLauncherDownloaderTest launches `python -m http.server`).
+        # Point it at the interpreter running the harness rather than
+        # inheriting a bare `python3` that ShellExecuteExW on Windows would
+        # resolve to the WindowsApps alias.
+        env["PYTHON"] = sys.executable
         env["PERFHERDER_ALERTING_ENABLED"] = "1"
         pathvar = ""
         if mozinfo.os == "linux":

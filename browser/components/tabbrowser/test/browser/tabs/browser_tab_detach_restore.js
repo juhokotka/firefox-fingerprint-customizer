@@ -1,12 +1,12 @@
 "use strict";
 
 const { TabStateFlusher } = ChromeUtils.importESModule(
-  "resource:///modules/sessionstore/TabStateFlusher.sys.mjs"
+  "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs"
 );
 
 add_task(async function () {
   let uri =
-    // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+    // eslint-disable-next-line sdl/no-insecure-url
     "http://example.com/browser/browser/components/tabbrowser/test/browser/tabs/dummy_page.html";
 
   // Clear out the closed windows set to start

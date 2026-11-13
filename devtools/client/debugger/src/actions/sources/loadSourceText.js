@@ -23,7 +23,7 @@ import { memoizeableAction } from "../../utils/memoizableAction";
 
 import { getEditor } from "../../utils/editor/index";
 
-async function loadGeneratedSource(sourceActor, { client }) {
+async function loadGeneratedSource(sourceActor) {
   // If no source actor can be found then the text for the
   // source cannot be loaded.
   if (!sourceActor) {
@@ -32,9 +32,12 @@ async function loadGeneratedSource(sourceActor, { client }) {
 
   let response;
   try {
-    response = await client.sourceContents(sourceActor);
+    response = await sourceActor.targetFront.getSourceContentForResource(
+      sourceActor.sourceObject.type,
+      sourceActor.id
+    );
   } catch (e) {
-    throw new Error(`sourceContents failed: ${e}`);
+    throw new Error(`targetFront.getSourceContentForResource failed: ${e}`);
   }
 
   return {
@@ -88,7 +91,7 @@ async function loadGeneratedSourceTextPromise(sourceActor, thunkArgs) {
     type: "LOAD_GENERATED_SOURCE_TEXT",
     sourceActor,
     epoch,
-    [PROMISE]: loadGeneratedSource(sourceActor, thunkArgs),
+    [PROMISE]: loadGeneratedSource(sourceActor),
   });
 
   await onSourceTextContentAvailable(
@@ -251,5 +254,45 @@ export function loadSourceText(source, sourceActor) {
       );
     }
     return dispatch(loadGeneratedSourceText(sourceActor));
+  };
+}
+
+export function removeGeneratedSourceText(actorId) {
+  return {
+    type: "REMOVE_GENERATED_SOURCE_TEXT",
+    actorId,
+  };
+}
+
+/**
+ * Force refreshing the text content for a given source actor,
+ * without unnecessary intermediate state change.
+ *
+ * Similar to `loadGeneratedSourceTextPromise`, but avoid the intermediate
+ * "start" state related to PROMISE middleware.
+ *
+ * @param {object} sourceActor
+ */
+export function forceRefreshGeneratedSourceText(sourceActor) {
+  return async thunkArgs => {
+    const { dispatch, getState } = thunkArgs;
+    const epoch = getSourcesEpoch(getState());
+
+    const sourceTextContent = await loadGeneratedSource(sourceActor);
+    await dispatch({
+      type: "LOAD_GENERATED_SOURCE_TEXT",
+      sourceActor,
+      epoch,
+
+      // Reproduce the PROMISE middleware output, without the intermediate "start" promise state:
+      status: "done",
+      value: sourceTextContent,
+    });
+
+    await onSourceTextContentAvailable(
+      sourceActor.sourceObject,
+      sourceActor,
+      thunkArgs
+    );
   };
 }

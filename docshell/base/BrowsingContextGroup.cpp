@@ -131,10 +131,12 @@ void BrowsingContextGroup::EnsureHostProcess(ContentParent* aProcess) {
   MOZ_DIAGNOSTIC_ASSERT(!mDestroyed);
   MOZ_DIAGNOSTIC_ASSERT(this != sChromeGroup,
                         "cannot have content host for chrome group");
-  MOZ_DIAGNOSTIC_ASSERT(aProcess->GetRemoteType() != PREALLOC_REMOTE_TYPE,
-                        "cannot use preallocated process as host");
-  MOZ_DIAGNOSTIC_ASSERT(!aProcess->GetRemoteType().IsEmpty(),
+  MOZ_DIAGNOSTIC_ASSERT(aProcess->GetRemoteType().IsKnown(),
                         "host process must have remote type");
+  MOZ_DIAGNOSTIC_ASSERT(!aProcess->GetRemoteType().IsPrealloc(),
+                        "cannot use preallocated process as host");
+  MOZ_DIAGNOSTIC_ASSERT(!aProcess->GetRemoteType().IsNotRemote(),
+                        "host process must be remote");
 
   // XXX: The diagnostic crashes in bug 1816025 seemed to come through caller
   // ContentParent::GetNewOrUsedLaunchingBrowserProcess where we already
@@ -168,7 +170,7 @@ void BrowsingContextGroup::EnsureHostProcess(ContentParent* aProcess) {
 
 void BrowsingContextGroup::RemoveHostProcess(ContentParent* aProcess) {
   MOZ_DIAGNOSTIC_ASSERT(aProcess);
-  MOZ_DIAGNOSTIC_ASSERT(aProcess->GetRemoteType() != PREALLOC_REMOTE_TYPE);
+  MOZ_DIAGNOSTIC_ASSERT(!aProcess->GetRemoteType().IsPrealloc());
   auto entry = mHosts.Lookup(aProcess->GetRemoteType());
   if (entry && entry.Data() == aProcess) {
     entry.Remove();
@@ -193,7 +195,7 @@ static void CollectContextInitializers(
 void BrowsingContextGroup::Subscribe(ContentParent* aProcess) {
   MOZ_DIAGNOSTIC_ASSERT(!mDestroyed);
   MOZ_DIAGNOSTIC_ASSERT(aProcess && !aProcess->IsLaunching());
-  MOZ_DIAGNOSTIC_ASSERT(aProcess->GetRemoteType() != PREALLOC_REMOTE_TYPE);
+  MOZ_DIAGNOSTIC_ASSERT(!aProcess->GetRemoteType().IsPrealloc());
 
   // Check if we're already subscribed to this process.
   if (!mSubscribers.EnsureInserted(aProcess)) {
@@ -219,7 +221,8 @@ void BrowsingContextGroup::Subscribe(ContentParent* aProcess) {
 
   nsTArray<OriginAgentClusterInitializer> useOriginAgentCluster;
   for (auto& entry : mUseOriginAgentCluster) {
-    if (!aProcess->ValidatePrincipal(entry.GetKey())) {
+    if (!aProcess->ValidatePrincipal(
+            entry.GetKey(), {ValidatePrincipalOptions::AllowNotLoadedOrigin})) {
       continue;
     }
 
@@ -234,7 +237,7 @@ void BrowsingContextGroup::Subscribe(ContentParent* aProcess) {
 
 void BrowsingContextGroup::Unsubscribe(ContentParent* aProcess) {
   MOZ_DIAGNOSTIC_ASSERT(aProcess);
-  MOZ_DIAGNOSTIC_ASSERT(aProcess->GetRemoteType() != PREALLOC_REMOTE_TYPE);
+  MOZ_DIAGNOSTIC_ASSERT(!aProcess->GetRemoteType().IsPrealloc());
   mSubscribers.Remove(aProcess);
   aProcess->RemoveBrowsingContextGroup(this);
 
@@ -246,7 +249,7 @@ void BrowsingContextGroup::Unsubscribe(ContentParent* aProcess) {
 }
 
 ContentParent* BrowsingContextGroup::GetHostProcess(
-    const nsACString& aRemoteType) {
+    const RemoteType& aRemoteType) {
   return mHosts.GetWeak(aRemoteType);
 }
 
@@ -270,8 +273,8 @@ bool BrowsingContextGroup::IsKnownForMessageReader(
       // The process should only be able to name this BCG if it is
       // subscribed, or if the BCG has been destroyed (and has therefore
       // stopped tracking subscribers).
-      if (topActor->GetSide() == mozilla::ipc::ParentSide && !mDestroyed &&
-          !mSubscribers.Contains(static_cast<ContentParent*>(topActor))) {
+      if (ContentParent* cp = ActorDynCast<ContentParent>(topActor);
+          cp && !mDestroyed && !mSubscribers.Contains(cp)) {
         aReader->FatalError(
             "Process is not subscribed to this BrowsingContextGroup");
         return false;
@@ -687,7 +690,7 @@ void BrowsingContextGroup::NotifyFocusedOrActiveBrowsingContextToProcess(
 // Non-http(s) principals always use origin agent clusters.
 static bool AlwaysUseOriginAgentCluster(nsIPrincipal* aPrincipal) {
   return !aPrincipal->GetIsContentPrincipal() ||
-         (!aPrincipal->SchemeIs("http") && !aPrincipal->SchemeIs("https"));
+         !net::SchemeIsHttpOrHttps(aPrincipal);
 }
 
 void BrowsingContextGroup::SetUseOriginAgentClusterFromNetwork(
@@ -709,7 +712,8 @@ void BrowsingContextGroup::SetUseOriginAgentClusterFromNetwork(
   EachParent([&](ContentParent* aContentParent) {
     // If this ContentParent can never load this principal, don't send it the
     // information.
-    if (!aContentParent->ValidatePrincipal(aPrincipal)) {
+    if (!aContentParent->ValidatePrincipal(
+            aPrincipal, {ValidatePrincipalOptions::AllowNotLoadedOrigin})) {
       return;
     }
 
@@ -737,10 +741,11 @@ Maybe<bool> BrowsingContextGroup::UsesOriginAgentCluster(
 
   // If this assertion fails, we may return `Nothing()` below unexpectedly, as
   // the parent process may have chosen to not process-switch.
+  RefPtr<LoadedOriginSet> loadedOrigins = CurrentLoadedOriginSet();
   MOZ_DIAGNOSTIC_ASSERT(
       XRE_IsParentProcess() ||
-          ValidatePrincipalCouldPotentiallyBeLoadedBy(
-              aPrincipal, ContentChild::GetSingleton()->GetRemoteType()),
+          loadedOrigins->ValidatePrincipal(
+              aPrincipal, {ValidatePrincipalOptions::AllowNotLoadedOrigin}),
       "Attempting to create document with unexpected principal");
 
   if (auto entry = mUseOriginAgentCluster.Lookup(aPrincipal)) {

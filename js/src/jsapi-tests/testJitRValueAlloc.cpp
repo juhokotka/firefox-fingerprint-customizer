@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jit/Snapshots.h"
-
 #include "jsapi-tests/tests.h"
 
 using namespace js;
@@ -54,11 +53,7 @@ class Fibonacci {
       return *this;
     }
 
-    bool operator==(const Iterator& other) const {
-      return value_ == other.value_ && last_ == other.last_;
-    }
-
-    bool operator!=(const Iterator& other) const { return !(*this == other); }
+    bool operator==(const Iterator& other) const = default;
 
     auto operator*() const { return static_cast<int32_t>(value_); }
   };

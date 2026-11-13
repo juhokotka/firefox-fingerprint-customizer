@@ -30,9 +30,62 @@ neterror-add-exception-button = Always continue for this site
 neterror-settings-button = Change DNS settings
 neterror-view-certificate-link = View Certificate
 
+## Search call-to-action shown on the online dnsNotFound error page when
+## browser.netError.searchCTA.enabled is true. Offers a one-click web search
+## derived from the address that failed to resolve.
+
+neterror-search-cta-title = This site can’t be reached
+
+# $hostname (String) - The host of the address that failed to load, including
+# any subdomains, for example "docs.example.com". The host is emphasized.
+neterror-search-cta-intro2 = Could not connect to the server at <strong>{ $hostname }</strong>.
+
+# Heading above the list of recovery hints on the search CTA error page.
+neterror-search-cta-things-to-try = Try these steps:
+
+neterror-search-cta-hint-check-address = Double-check the website address
+
+# Shown when no Search button is offered, so no specific query can be named.
+neterror-search-cta-hint-search = Search the web to find the site
+
+# Shown when the Search button is offered, naming the exact query it will run.
+# $query (String) - The search query derived from the address that failed to
+# load, beginning with the site's name, for example "example best hiking
+# boots". The query and the quotation marks around it are emphasized.
+neterror-search-cta-hint-search-query = Search the web for <strong>“{ $query }”</strong>
+
+# .tooltiptext doubles as the button's accessible description, so it explains
+# that results open in a new tab.
+neterror-search-cta-search-button =
+    .label = Search
+    .accesskey = c
+    .tooltiptext = Opens search results in a new tab
+
+neterror-search-cta-reload-button =
+    .label = Reload
+    .accesskey = R
+
+# Shown in place of the Search button when the user clicks it but connectivity
+# has dropped since the page loaded, so the search cannot be performed.
+neterror-search-cta-offline = You appear to be offline. Reconnect and try again.
+
+# $error (String) - The error code, for example "dnsNotFound".
+neterror-search-cta-error-code = Error code: { $error }
+
+# The search CTA's own "Learn more" link text (no trailing ellipsis).
+neterror-search-cta-learn-more = Learn more
+
 ##
 
 neterror-pref-reset = It looks like your network security settings might be causing this. Do you want the default settings to be restored?
+
+## Shown on about:neterror and about:certerror when the SSLKEYLOGFILE
+## environment variable is set, which causes { -brand-short-name } to log TLS
+## session keys that can be used to decrypt encrypted network traffic.
+
+neterror-sslkeylogging-warning =
+    .heading = Your connection may not be private
+    .message = An app or service may see your encrypted traffic from this site.
 
 ## Specific error messages
 
@@ -46,9 +99,6 @@ neterror-load-osx-permission = If you are trying to load a local network page, p
 
 neterror-http-error-page = Check to make sure you’ve typed the website address correctly.
 neterror-http-empty-response = Check to make sure you’ve typed the website address correctly and try again in a few moments.
-# Variables:
-#   $hostname (String) - Hostname of the website to which the user was trying to connect.
-neterror-http-empty-response-description = { $hostname } sent back an empty page.
 
 neterror-captive-portal = You must log in to this network before you can access the internet.
 

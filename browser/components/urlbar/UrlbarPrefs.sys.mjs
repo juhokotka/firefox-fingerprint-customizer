@@ -13,16 +13,14 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { TelemetryReportingPolicy } from "resource://gre/modules/TelemetryReportingPolicy.sys.mjs";
 
 const lazy = XPCOMUtils.declareLazy({
-  CustomizableUI:
-    "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
+  UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
 });
 
 const PREF_URLBAR_BRANCH = "browser.urlbar.";
 
 /**
- * @typedef {boolean|number|string|[number, string]} PreferenceDefaultAndType
+ * @typedef {boolean|number|string|[number|string, string]} PreferenceDefaultAndType
  * Prefs are defined as [pref name, default value] or [pref name, [default
  * value, type]]. In the former case, the getter method name is inferred from
  * the typeof the default value.
@@ -92,6 +90,20 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   // 30 days since user input it as the default.
   ["autoFill.adaptiveHistory.useCountThreshold", [0.47, "float"]],
 
+  // Approximate number of times the user must have picked a URL with a path for
+  // a given input before it becomes an adaptive history autofill candidate.
+  // Converted into a `moz_inputhistory.use_count` threshold by
+  // `inputHistoryPicksToUseCount` in UrlbarProviderAutofill.sys.mjs, so the
+  // exact pick count depends on how the picks were spread over time.
+  ["autoFill.adaptiveHistory.urlMinPicks", 3],
+
+  // Days of idle decay assumed since the last pick when converting
+  // `urlMinPicks` into a use_count threshold.
+  ["autoFill.adaptiveHistory.urlPicksAgeDays", 14],
+
+  // The number of times URL canonization has been used in non-private windows.
+  ["canonizedURLCount", 0],
+
   // Feature gate pref for clipboard suggestions in the urlbar.
   ["clipboard.featureGate", false],
 
@@ -132,6 +144,12 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   // 0 - never resolve; 1 - use heuristics (default); 2 - always resolve
   ["dnsResolveSingleWordsAfterSearch", 0],
 
+  // Maximum time (ms) the event bufferer defers events for. In automation
+  // providers can be quite slow, thus we need a longer timeout to avoid
+  // intermittent failures. Must be larger than
+  // ProvidersManager.chunkResultsDelayMs.
+  ["eventBufferer.deferringTimeoutMs", Cu.isInAutomation ? 1500 : 300],
+
   // If Suggest is disabled before these seconds from a search, then send a
   // disable event.
   ["events.disableSuggest.maxSecondsFromLastSearch", 300],
@@ -148,10 +166,6 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   // Nimbus variable and is expected to be set via nimbus experiment
   // configuration.
   ["exposureResults", ""],
-
-  // When we send events to (privileged) extensions (urlbar API), we wait this
-  // amount of time in milliseconds for them to respond before timing out.
-  ["extension.timeout", 400],
 
   // When we send events to extensions that use the omnibox API, we wait this
   // amount of time in milliseconds for them to respond before timing out.
@@ -255,6 +269,14 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   // for mdn suggestions.
   ["mdn.showLessFrequentlyCount", 0],
 
+  // The maximum number of tab mentions the Smartbar suggests.
+  ["mentions.maxResults", 5],
+
+  // The maximum number of tab group mentions the Smartbar suggests. Capped
+  // separately from mentions.maxResults so groups and tabs are limited
+  // independently.
+  ["mentions.maxGroupResults", 5],
+
   // Comma-separated list of client variants to send to Merino
   ["merino.clientVariants", ""],
 
@@ -280,9 +302,27 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   // Set default NER threshold value of 0.5
   ["nerThreshold", [0.5, "float"]],
 
+  // Feature gate pref for the <moz-urlbar> on about:newtab and about:home. When
+  // enabled, it supersedes New Tab's handoff search bar.
+  ["newtab.featureGate", false],
+
+  // Layout variant A of the New Tab search bar. Only takes effect while
+  // `newtab.featureGate` is enabled.
+  ["newtab.variantA", false],
+
+  // Layout variant B of the New Tab search bar, with the search engine button
+  // above the input. Only takes effect while `newtab.featureGate` is enabled.
+  ["newtab.variantB", false],
+
   // Whether addresses and search results typed into the address bar
   // should be opened in new tabs by default.
   ["openintab", false],
+
+  // The cached name of the (private) default engine.
+  // This is used to initialize the placeholder of the
+  // urlbar before the search engine store is ready.
+  ["placeholderName", ["", "utf8"]],
+  ["placeholderName.private", ["", "utf8"]],
 
   // If disabled, QuickActions will not be included in either the default search
   // mode or the QuickActions search mode.
@@ -314,40 +354,6 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   // Whether or not use the Nova icon size for AMP suggestion.
   // Otherwise, use standard rich-suggestion size.
   ["quicksuggest.ampTopPickUseNovaIconSize", false],
-
-  // Whether the Firefox Suggest data collection opt-in result is enabled.
-  ["quicksuggest.contextualOptIn", false],
-
-  // The last time (as seconds) the user dismissed the Firefox Suggest contextual
-  // opt-in result.
-  ["quicksuggest.contextualOptIn.lastDismissedTime", 0],
-
-  // Number that the user dismissed the Firefox Suggest contextual opt-in result.
-  ["quicksuggest.contextualOptIn.dismissedCount", 0],
-
-  // Period until reshow the Firefox Suggest contextual opt-in result when first dismissed.
-  ["quicksuggest.contextualOptIn.firstReshowAfterPeriodDays", 7],
-
-  // Period until reshow the Firefox Suggest contextual opt-in result when second dismissed.
-  ["quicksuggest.contextualOptIn.secondReshowAfterPeriodDays", 14],
-
-  // Period until reshow the Firefox Suggest contextual opt-in result when third dismissed.
-  ["quicksuggest.contextualOptIn.thirdReshowAfterPeriodDays", 60],
-
-  // Number of impression for the Firefox Suggest contextual opt-in result.
-  ["quicksuggest.contextualOptIn.impressionCount", 0],
-
-  // Limit for impression to dismiss the Firefox Suggest contextual opt-in
-  // result.
-  ["quicksuggest.contextualOptIn.impressionLimit", 20],
-
-  // The first impression time (seconds) for the Firefox Suggest contextual
-  // opt-in result.
-  ["quicksuggest.contextualOptIn.firstImpressionTime", 0],
-
-  // Days until dismiss the Firefox Suggest contextual opt-in result after first
-  // impression.
-  ["quicksuggest.contextualOptIn.impressionDaysLimit", 5],
 
   // Comma-separated list of Suggest dynamic suggestion types to enable.
   ["quicksuggest.dynamicSuggestionTypes", ""],
@@ -460,6 +466,11 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   // search host.
   ["scotchBonnet.persistSearchMode", false],
 
+  // Whether the search button declines to be the target of the toolbar tab
+  // stop in front of the input. The shipping default is set in firefox.js,
+  // where it's enabled on Nightly only.
+  ["searchModeSwitcher.skipTabStop", false],
+
   // Feature gate pref for search restrict keywords being shown in the urlbar.
   ["searchRestrictKeywords.featureGate", false],
 
@@ -500,6 +511,12 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   // Global toggle for whether the show search terms feature
   // can be used at all, and enabled/disabled by the user.
   ["showSearchTerms.featureGate", false],
+
+  // The maximum number of results in the smartbar popup.
+  ["smartbar.maxResults", 7],
+
+  // Whether to show search suggestions before general results in the smartbar.
+  ["smartbar.showSearchSuggestionsFirst", false],
 
   // Whether speculative connections should be enabled.
   ["speculativeConnect.enabled", true],
@@ -587,6 +604,14 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   // Whether results will include realtime sports suggestions.
   ["suggest.sports", true],
 
+  // If `browser.urlbar.temporal.featureGate` is true, this controls whether
+  // temporal search suggestions are turned on.
+  ["suggest.temporal", true],
+
+  // If `browser.urlbar.suggest.temporal` is true, this controls whether
+  // seasonal temporal search suggestions are shown.
+  ["suggest.temporal.seasonal", true],
+
   // Whether results will include top sites and the view will open on focus.
   ["suggest.topsites", true],
 
@@ -614,9 +639,6 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   // will be deduplicated.
   ["deduplication.enabled", true],
 
-  // How old history results have to be to be deduplicated.
-  ["deduplication.thresholdDays", 0],
-
   // semanticHistory search query minLength threshold to be enabled.
   ["suggest.semanticHistory.minLength", 5],
 
@@ -631,11 +653,23 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   // onboarding results before we stop showing them.
   ["tabToSearch.onboard.interactionsLeft", 3],
 
+  // Feature gate pref for temporal search suggestions in the zero prefix view.
+  ["temporal.featureGate", false],
+
+  // The maximum number of temporal search suggestions to show.
+  ["temporal.rowCount", 3],
+
   // The number of times the user has been shown the onboarding search tip.
   ["tipShownCount.searchTip_onboard", 0],
 
   // The number of times the user has been shown the redirect search tip.
   ["tipShownCount.searchTip_redirect", 0],
+
+  // Whether to show the tracker count pill in the urlbar.
+  ["trackerCount.enabled", true],
+
+  // Whether we've ever shown the pill in the address bar with the number of trackers (used to trigger a Feature Callout).
+  ["trackerCountShown", false],
 
   // Feature gate pref for trending suggestions in the urlbar.
   ["trending.featureGate", true],
@@ -656,6 +690,9 @@ const PREF_URLBAR_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
 
   // Remove redundant portions from URLs.
   ["trimURLs", true],
+
+  // Remove leading 'www.' from url displayed in the urlbar.
+  ["trimWww", false],
 
   // Enable the updated design combining the privacy and shield icon
   // and panels in the Urlbar.
@@ -742,11 +779,17 @@ const PREF_URLBAR_DEFAULTS_MAP = new Map(PREF_URLBAR_DEFAULTS);
 const PREF_OTHER_DEFAULTS = /** @type {PreferenceDefinition[]} */ ([
   ["browser.fixup.dns_first_for_single_words", false],
   ["browser.ml.enable", false],
+  ["browser.nova.enabled", false],
   ["browser.search.openintab", false],
   ["browser.search.suggest.enabled", true],
   ["browser.search.suggest.enabled.private", false],
   ["browser.search.widget.new", true],
+  ["browser.settings-redesign.enabled", true],
+  ["browser.smartwindow.agent.enabled", false],
+  ["browser.smartwindow.smartbarMentions.loglevel", "Error"],
   ["keyword.enabled", true],
+  ["privacy.query_stripping.strip_on_share.enabled", true],
+  ["privacy.userContext.enabled", true],
   ["security.insecure_connection_text.enabled", true],
   [TelemetryReportingPolicy.TOU_ACCEPTED_DATE_PREF, 0],
   ["ui.popup.disable_autohide", false],
@@ -782,7 +825,12 @@ const PREF_TYPES = new Map([
   ["float", "Float"],
   ["number", "Int"],
   ["string", "Char"],
+  // Prefs that can hold non-ASCII must be declared "utf8".
+  ["utf8", "String"],
 ]);
+
+let inParent =
+  Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_DEFAULT;
 
 /**
  * Builds the default result groups and returns the root group.  Result
@@ -790,7 +838,7 @@ const PREF_TYPES = new Map([
  * grouped and sorted.  Each group is an object that looks like this:
  *
  * @typedef {object} ResultGroup
- * @property {Values<typeof lazy.UrlbarUtils.RESULT_GROUP>} [group]
+ * @property {Values<typeof lazy.UrlbarShared.RESULT_GROUP>} [group]
  *     This is defined only on groups without children, and it determines the
  *     result group that the group will contain.
  * @property {number} [maxResultCount]
@@ -838,25 +886,28 @@ function makeDefaultResultGroups({
       {
         maxResultCount: 1,
         children: [
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_EXTENSION },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_SEARCH_TIP },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_OMNIBOX },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_ENGINE_ALIAS },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_BOOKMARK_KEYWORD },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_AUTOFILL },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_TEST },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_EXTENSION },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_SEARCH_TIP },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_OMNIBOX },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_ENGINE_ALIAS },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_BOOKMARK_KEYWORD },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_AUTOFILL },
+          {
+            group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE,
+          },
           {
             group:
-              lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_RESTRICT_KEYWORD_AUTOFILL,
+              lazy.UrlbarShared.RESULT_GROUP
+                .HEURISTIC_RESTRICT_KEYWORD_AUTOFILL,
           },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_HISTORY_URL },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_FALLBACK },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_HISTORY_URL },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_FALLBACK },
         ],
       },
       // extensions using the omnibox API
       {
-        group: lazy.UrlbarUtils.RESULT_GROUP.OMNIBOX,
+        group: lazy.UrlbarShared.RESULT_GROUP.OMNIBOX,
       },
     ],
   };
@@ -873,19 +924,19 @@ function makeDefaultResultGroups({
         children: [
           {
             flex: 9,
-            group: lazy.UrlbarUtils.RESULT_GROUP.GENERAL,
+            group: lazy.UrlbarShared.RESULT_GROUP.GENERAL,
             orderBy: "frecency",
           },
           {
             flex: 1,
-            group: lazy.UrlbarUtils.RESULT_GROUP.SEMANTIC_HISTORY,
+            group: lazy.UrlbarShared.RESULT_GROUP.SEMANTIC_HISTORY,
             orderBy: "frecency",
           },
         ],
       }
     : {
         flex: 2,
-        group: lazy.UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: lazy.UrlbarShared.RESULT_GROUP.GENERAL,
         orderBy: "frecency",
       };
 
@@ -903,53 +954,53 @@ function makeDefaultResultGroups({
                 // If `maxHistoricalSearchSuggestions` == 0, the muxer forces
                 // `maxResultCount` to be zero and flex is ignored, per query.
                 flex: 2,
-                group: lazy.UrlbarUtils.RESULT_GROUP.FORM_HISTORY,
+                group: lazy.UrlbarShared.RESULT_GROUP.FORM_HISTORY,
               },
               {
                 flex: 99,
-                group: lazy.UrlbarUtils.RESULT_GROUP.RECENT_SEARCH,
+                group: lazy.UrlbarShared.RESULT_GROUP.RECENT_SEARCH,
               },
               {
                 flex: 4,
-                group: lazy.UrlbarUtils.RESULT_GROUP.REMOTE_SUGGESTION,
+                group: lazy.UrlbarShared.RESULT_GROUP.REMOTE_SUGGESTION,
               },
             ],
           },
           {
-            group: lazy.UrlbarUtils.RESULT_GROUP.TAIL_SUGGESTION,
+            group: lazy.UrlbarShared.RESULT_GROUP.TAIL_SUGGESTION,
           },
         ],
       },
       // general
       {
-        group: lazy.UrlbarUtils.RESULT_GROUP.GENERAL_PARENT,
+        group: lazy.UrlbarShared.RESULT_GROUP.GENERAL_PARENT,
         children: [
           {
             availableSpan: 3,
-            group: lazy.UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+            group: lazy.UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
           },
           {
             flexChildren: true,
             children: [
               {
                 flex: 1,
-                group: lazy.UrlbarUtils.RESULT_GROUP.REMOTE_TAB,
+                group: lazy.UrlbarShared.RESULT_GROUP.REMOTE_TAB,
               },
               generalChild,
               {
                 // We show relatively many about-page results because they're
                 // only added for queries starting with "about:".
                 flex: 2,
-                group: lazy.UrlbarUtils.RESULT_GROUP.ABOUT_PAGES,
+                group: lazy.UrlbarShared.RESULT_GROUP.ABOUT_PAGES,
               },
               {
                 flex: 99,
-                group: lazy.UrlbarUtils.RESULT_GROUP.RESTRICT_SEARCH_KEYWORD,
+                group: lazy.UrlbarShared.RESULT_GROUP.RESTRICT_SEARCH_KEYWORD,
               },
             ],
           },
           {
-            group: lazy.UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+            group: lazy.UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
           },
         ],
       },
@@ -985,19 +1036,19 @@ function makeSmartBarGroups({
         children: [
           {
             flex: 9,
-            group: lazy.UrlbarUtils.RESULT_GROUP.GENERAL,
+            group: lazy.UrlbarShared.RESULT_GROUP.GENERAL,
             orderBy: "frecency",
           },
           {
             flex: 1,
-            group: lazy.UrlbarUtils.RESULT_GROUP.SEMANTIC_HISTORY,
+            group: lazy.UrlbarShared.RESULT_GROUP.SEMANTIC_HISTORY,
             orderBy: "frecency",
           },
         ],
       }
     : {
         flex: 2,
-        group: lazy.UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: lazy.UrlbarShared.RESULT_GROUP.GENERAL,
         orderBy: "frecency",
       };
 
@@ -1009,7 +1060,7 @@ function makeSmartBarGroups({
         children: [
           {
             availableSpan: 2,
-            group: lazy.UrlbarUtils.RESULT_GROUP.AI,
+            group: lazy.UrlbarShared.RESULT_GROUP.AI,
           },
           {
             flexChildren: true,
@@ -1018,30 +1069,30 @@ function makeSmartBarGroups({
                 // If `maxHistoricalSearchSuggestions` == 0, the muxer forces
                 // `maxResultCount` to be zero and flex is ignored, per query.
                 flex: 2,
-                group: lazy.UrlbarUtils.RESULT_GROUP.FORM_HISTORY,
+                group: lazy.UrlbarShared.RESULT_GROUP.FORM_HISTORY,
               },
               {
                 flex: 99,
-                group: lazy.UrlbarUtils.RESULT_GROUP.RECENT_SEARCH,
+                group: lazy.UrlbarShared.RESULT_GROUP.RECENT_SEARCH,
               },
               {
                 flex: 4,
-                group: lazy.UrlbarUtils.RESULT_GROUP.REMOTE_SUGGESTION,
+                group: lazy.UrlbarShared.RESULT_GROUP.REMOTE_SUGGESTION,
               },
             ],
           },
           {
-            group: lazy.UrlbarUtils.RESULT_GROUP.TAIL_SUGGESTION,
+            group: lazy.UrlbarShared.RESULT_GROUP.TAIL_SUGGESTION,
           },
         ],
       },
       // general
       {
-        group: lazy.UrlbarUtils.RESULT_GROUP.GENERAL_PARENT,
+        group: lazy.UrlbarShared.RESULT_GROUP.GENERAL_PARENT,
         children: [
           {
             availableSpan: 3,
-            group: lazy.UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+            group: lazy.UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
           },
           {
             flexChildren: true,
@@ -1049,39 +1100,42 @@ function makeSmartBarGroups({
               generalChild,
               {
                 flex: 1,
-                group: lazy.UrlbarUtils.RESULT_GROUP.REMOTE_TAB,
+                group: lazy.UrlbarShared.RESULT_GROUP.REMOTE_TAB,
               },
               {
                 // We show relatively many about-page results because they're
                 // only added for queries starting with "about:".
                 flex: 2,
-                group: lazy.UrlbarUtils.RESULT_GROUP.ABOUT_PAGES,
+                group: lazy.UrlbarShared.RESULT_GROUP.ABOUT_PAGES,
               },
             ],
           },
           {
-            group: lazy.UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
+            group: lazy.UrlbarShared.RESULT_GROUP.INPUT_HISTORY,
           },
         ],
       },
     ],
   };
+
+  // The search branch always gets the larger share of results.
+  let [searchBranch, generalBranch] = mainGroup.children;
+  searchBranch.flex = 2;
+  generalBranch.flex = 1;
   if (!showSearchSuggestionsFirst) {
     mainGroup.children.reverse();
   }
-  mainGroup.children[0].flex = 2;
-  mainGroup.children[1].flex = 1;
   return {
     children: [
       // heuristic
       {
         maxResultCount: 1,
         children: [
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_AUTOFILL },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_HISTORY_URL },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_AI_CHAT },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_FALLBACK },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_TEST },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_AUTOFILL },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_HISTORY_URL },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_AI_CHAT },
+          { group: lazy.UrlbarShared.RESULT_GROUP.HEURISTIC_FALLBACK },
         ],
       },
       mainGroup,
@@ -1129,7 +1183,7 @@ class Preferences {
    *
    * @param {string} pref
    *        The name of the preference to get.
-   * @returns {*} The preference value.
+   * @returns {any} The preference value.
    */
   get(pref) {
     let value = this._map.get(pref);
@@ -1148,7 +1202,7 @@ class Preferences {
    *
    * @param {string} pref
    *        The name of the preference to set.
-   * @param {*} value The preference value.
+   * @param {any} value The preference value.
    */
   set(pref, value) {
     let { defaultValue, set } = this._getPrefDescriptor(pref);
@@ -1159,12 +1213,22 @@ class Preferences {
   }
 
   /**
+   * Flips `resultMenu.keyboardAccessible`.
+   */
+  toggleResultMenuKeyboardAccessible() {
+    this.set(
+      "resultMenu.keyboardAccessible",
+      !this.get("resultMenu.keyboardAccessible")
+    );
+  }
+
+  /**
    * Adds a value to a preference that handles multiple comma-separated values.
    * Throws an error if the preference does not have a comma-separated value.
    *
    * @param {string} pref
    *   The name of the preference to set.
-   * @param {*} value
+   * @param {any} value
    *   The preference value.
    */
   add(pref, value) {
@@ -1211,13 +1275,13 @@ class Preferences {
    *
    * @param {string} pref
    *        The name of the preference to clear.
-   * @returns {*} The preference value.
+   * @returns {any} The preference value.
    */
   getScotchBonnetPref(pref) {
     return this.get("scotchBonnet.enableOverride") || this.get(pref);
   }
 
-  #getShowSearchSuggestionsFirst(context) {
+  #getShowSearchSuggestionsFirst(context, pref = "showSearchSuggestionsFirst") {
     let showSearchSuggestionsFirst =
       context.searchString ||
       (!this.get("suggest.trending") && !this.get("suggest.recentsearches"));
@@ -1225,9 +1289,9 @@ class Preferences {
     let inSearchEngineMode = !!context.searchMode?.engineName;
 
     // If we're in a case were search suggestions would be shown first, but not
-    // in search engine mode, then just use the user preference.
+    // in search engine mode, then just use the preference.
     if (!inSearchEngineMode && showSearchSuggestionsFirst) {
-      showSearchSuggestionsFirst = this.get("showSearchSuggestionsFirst");
+      showSearchSuggestionsFirst = this.get(pref);
     }
     return showSearchSuggestionsFirst;
   }
@@ -1253,7 +1317,8 @@ class Preferences {
           })
         );
       }
-      case "searchbar": {
+      case "searchbar":
+      case "newtab_searchbar": {
         // This is a temporary placeholder until searchbar gets its own config.
         return this.#getOrCacheResultGroups(key, () =>
           makeDefaultResultGroups({
@@ -1263,9 +1328,10 @@ class Preferences {
         );
       }
       case "smartbar": {
-        // This is a temporary placeholder until smartbar gets its own config.
-        let showSearchSuggestionsFirst =
-          this.#getShowSearchSuggestionsFirst(context);
+        let showSearchSuggestionsFirst = this.#getShowSearchSuggestionsFirst(
+          context,
+          "smartbar.showSearchSuggestionsFirst"
+        );
         key += showSearchSuggestionsFirst;
         return this.#getOrCacheResultGroups(key, () =>
           makeSmartBarGroups({
@@ -1345,10 +1411,16 @@ class Preferences {
 
     // Some prefs may influence others.
     switch (pref) {
+      case "browser.nova.enabled":
+        this._map.delete("newtabFeatureGate");
+        this._map.delete("newtabVariantA");
+        this._map.delete("newtabVariantB");
+        return;
       case "autoFill.adaptiveHistory.useCountThreshold":
         this._map.delete("autoFillAdaptiveHistoryUseCountThreshold");
         return;
       case "showSearchSuggestionsFirst":
+      case "smartbar.showSearchSuggestionsFirst":
       case "suggest.semanticHistory.separateGroup":
         this.#cachedResultGroups.clear();
         return;
@@ -1418,7 +1490,7 @@ class Preferences {
    *
    * @param {string} pref
    *        The name of the preference to get.
-   * @returns {*} The raw preference value.
+   * @returns {any} The raw preference value.
    */
   _readPref(pref) {
     let { defaultValue, get } = this._getPrefDescriptor(pref);
@@ -1436,12 +1508,20 @@ class Preferences {
    *
    * @param {string} pref
    *        The name of the preference to get.
-   * @returns {*} The validated and/or fixed-up preference value.
+   * @returns {any} The validated and/or fixed-up preference value.
    */
   _getPrefValue(pref) {
     switch (pref) {
       case "shortcuts.actions": {
         return this.get("scotchBonnet.enableOverride") && this._readPref(pref);
+      }
+      case "newtabFeatureGate": {
+        // The New Tab search bar is only themed for Nova.
+        return this.get("browser.nova.enabled") && this._readPref(pref);
+      }
+      case "newtabVariantA":
+      case "newtabVariantB": {
+        return this.get("newtabFeatureGate") && this._readPref(pref);
       }
       case "defaultBehavior": {
         let val = 0;
@@ -1559,19 +1639,6 @@ class Preferences {
   }
 
   /**
-   * Return whether or not persisted search terms is enabled.
-   *
-   * @returns {boolean} true: if enabled.
-   */
-  isPersistedSearchTermsEnabled() {
-    return (
-      this.getScotchBonnetPref("showSearchTerms.featureGate") &&
-      this.get("showSearchTerms.enabled") &&
-      !lazy.CustomizableUI.getPlacementOfWidget("search-container")
-    );
-  }
-
-  /**
    * @type {Map<string, ResultGroup>}
    * Result groups cached by search access point and params used to build them.
    */
@@ -1593,6 +1660,12 @@ class Preferences {
         this._observerWeakRefs.splice(i, 1);
         continue;
       }
+
+      if (!inParent) {
+        // This is necessary for observers created in non-chrome code.
+        observer = Cu.waiveXrays(observer);
+      }
+
       if (method in observer) {
         try {
           observer[method](changed, ...rest);

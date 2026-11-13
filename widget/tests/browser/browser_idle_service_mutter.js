@@ -72,12 +72,63 @@ add_task(async function () {
   }
   info("Mutter idle backend active; exercising the cache path.");
 
-  // Two reads within the fresh-cache window (kCacheFreshMs == 1000ms) are
-  // served from the cache without a new DBus poll, so they must be identical.
-  // This deterministically exercises the synchronous fresh-cache return path.
-  const a = idle.idleTime;
-  const b = idle.idleTime;
-  Assert.equal(b, a, "rapid successive reads return the same cached value");
+  // Within the fresh-cache window (kCacheFreshMs == 1000ms) reads are served
+  // from the cache without a new DBus poll. The cached value is advanced by
+  // the time elapsed since it was sampled (bug 2053041), so repeated reads must
+  // report a forward-moving value: returning a frozen value would make
+  // nsUserIdleService misread the stall as a return from idle and re-arm its
+  // timer in a tight loop.
+  //
+  // A background refresh re-samples mCachedIdleTime (logged as "Async handler
+  // got N, cached"), which drops the reported value back to a fresh real
+  // reading. Local user interaction can trigger that at any time, so fresh
+  // readings that straddle a cache update are not comparable. Only readings
+  // from a single cache sample -- an unbroken run of "returns cached (fresh)"
+  // lines with no cache update in between -- advance monotonically, so we
+  // collect the fresh readings split on each cache-update boundary and assert
+  // within each run rather than across the whole capture.
+  async function freshRuns() {
+    if (!(await IOUtils.exists(logFile))) {
+      return [];
+    }
+    const text = await IOUtils.readUTF8(logFile);
+    const runs = [];
+    let run = null;
+    for (const m of text.matchAll(
+      /returns cached \(fresh\) (\d+)|(Async handler got)/g
+    )) {
+      if (m[2]) {
+        run = null; // A cache update ends the current run.
+      } else {
+        if (!run) {
+          runs.push((run = []));
+        }
+        run.push(parseInt(m[1], 10));
+      }
+    }
+    return runs;
+  }
+
+  // Drive fresh reads until at least one within-sample run shows advancement.
+  await TestUtils.waitForCondition(
+    async () => {
+      void idle.idleTime;
+      return (await freshRuns()).some(r => r.length >= 2 && r.at(-1) > r[0]);
+    },
+    "fresh-cache idle time advances with the wall clock (bug 2053041)",
+    100,
+    100
+  );
+
+  for (const run of await freshRuns()) {
+    for (let i = 1; i < run.length; i++) {
+      Assert.greaterOrEqual(
+        run[i],
+        run[i - 1],
+        "fresh-cache idle time is non-decreasing within a cache sample"
+      );
+    }
+  }
 
   // The fresh window must time out: once more than kCacheFreshMs has elapsed,
   // the next read takes the stale branch, returns the cached value, and kicks

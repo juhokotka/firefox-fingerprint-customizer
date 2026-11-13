@@ -6,6 +6,7 @@
 #define mozilla_image_Orientation_h
 
 #include <stdint.h>
+
 #include "mozilla/gfx/Rect.h"
 
 namespace mozilla {
@@ -63,14 +64,7 @@ struct Orientation {
     return (rotation == Angle::D90) || (rotation == Angle::D270);
   }
 
-  bool operator==(const Orientation& aOther) const {
-    return rotation == aOther.rotation && flip == aOther.flip &&
-           flipFirst == aOther.flipFirst;
-  }
-
-  bool operator!=(const Orientation& aOther) const {
-    return !(*this == aOther);
-  }
+  bool operator==(const Orientation& aOther) const = default;
 
   OrientedIntSize ToOriented(const UnorientedIntSize& aSize) const {
     if (SwapsWidthAndHeight()) {

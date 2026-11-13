@@ -14,15 +14,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "chrome://remote/content/shared/messagehandler/MessageHandler.sys.mjs",
   error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
   generateUUID: "chrome://remote/content/shared/UUID.sys.mjs",
-  isParentProcess:
-    "chrome://remote/content/shared/BrowsingContextUtils.sys.mjs",
   NavigableManager: "chrome://remote/content/shared/NavigableManager.sys.mjs",
   OwnershipModel: "chrome://remote/content/webdriver-bidi/RemoteValue.sys.mjs",
   pprint: "chrome://remote/content/shared/Format.sys.mjs",
   processExtraData:
     "chrome://remote/content/webdriver-bidi/modules/Intercept.sys.mjs",
   RealmType: "chrome://remote/content/shared/Realm.sys.mjs",
-  RemoteAgent: "chrome://remote/content/components/RemoteAgent.sys.mjs",
   SessionDataCategory:
     "chrome://remote/content/shared/messagehandler/sessiondata/SessionData.sys.mjs",
   SessionDataMethod:
@@ -252,14 +249,7 @@ class ScriptModule extends RootBiDiModule {
       userContexts = new Set();
 
       for (const userContextId of userContextIds) {
-        const internalId =
-          lazy.UserContextManager.getInternalIdById(userContextId);
-
-        if (internalId === null) {
-          throw new lazy.error.NoSuchUserContextError(
-            `User context with id: ${userContextId} doesn't exist`
-          );
-        }
+        const internalId = this._getUserContextInternalId(userContextId);
 
         userContexts.add(internalId);
       }
@@ -466,12 +456,8 @@ class ScriptModule extends RootBiDiModule {
     const context = await this.#getContextFromTarget({
       contextId,
       realmId,
-      supportsChromeScope: true,
+      supportsPrivilegedScope: true,
     });
-
-    // Bug 2030901: this check should be handled by getContextFromTarget via
-    // _getNavigable, but at the moment this would regress other commands.
-    this.#assertParentProcessScriptAccess(context);
 
     const serializationOptionsWithDefaults =
       lazy.setDefaultAndAssertSerializationOptions(serializationOptions);
@@ -591,12 +577,8 @@ class ScriptModule extends RootBiDiModule {
     const context = await this.#getContextFromTarget({
       contextId,
       realmId,
-      supportsChromeScope: true,
+      supportsPrivilegedScope: true,
     });
-
-    // Bug 2030901: this check should be handled by getContextFromTarget via
-    // _getNavigable, but at the moment this would regress other commands.
-    this.#assertParentProcessScriptAccess(context);
 
     const serializationOptionsWithDefaults =
       lazy.setDefaultAndAssertSerializationOptions(serializationOptions);
@@ -838,16 +820,6 @@ class ScriptModule extends RootBiDiModule {
     return true;
   }
 
-  #assertParentProcessScriptAccess(context) {
-    // `supportsChromeScope` only checks browsingContext.isContent, but about
-    // pages can have isContent=true but still run in parent process.
-    if (!lazy.RemoteAgent.allowSystemAccess && lazy.isParentProcess(context)) {
-      throw new lazy.error.UnsupportedOperationError(
-        `script.evaluate and script.callFunction are not supported for parent process browsing contexts: ${context.id}`
-      );
-    }
-  }
-
   #assertResultOwnership(resultOwnership) {
     if (
       ![lazy.OwnershipModel.None, lazy.OwnershipModel.Root].includes(
@@ -900,7 +872,7 @@ class ScriptModule extends RootBiDiModule {
 
   #buildReturnValue(evaluationResult) {
     evaluationResult = lazy.processExtraData(
-      this.messageHandler.sessionId,
+      this.messageHandler.internalSessionId,
       evaluationResult
     );
 
@@ -933,10 +905,10 @@ class ScriptModule extends RootBiDiModule {
   async #getContextFromTarget({
     contextId,
     realmId,
-    supportsChromeScope = false,
+    supportsPrivilegedScope = false,
   }) {
     if (contextId !== null) {
-      return this._getNavigable(contextId, { supportsChromeScope });
+      return this._getNavigable(contextId, { supportsPrivilegedScope });
     }
 
     const destination = {
@@ -948,7 +920,7 @@ class ScriptModule extends RootBiDiModule {
     const realm = realmInfos.find(info => info.realm == realmId);
 
     if (realm && realm.context !== null) {
-      return this._getNavigable(realm.context, { supportsChromeScope });
+      return this._getNavigable(realm.context, { supportsPrivilegedScope });
     }
 
     throw new lazy.error.NoSuchFrameError(`Realm with id ${realmId} not found`);
@@ -1347,6 +1319,10 @@ class ScriptModule extends RootBiDiModule {
         this.#subscribeEvent(value);
       }
     }
+  }
+
+  static get supportedCommandsInRestrictedSession() {
+    return ["callFunction", "disown", "evaluate"];
   }
 
   static get supportedEvents() {

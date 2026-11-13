@@ -6,6 +6,8 @@ import string
 import textwrap
 
 import buildconfig
+import mozpack.path as mozpath
+from mozbuild.nss_libs import nss_link_dylibs
 
 
 def generate_bool(name):
@@ -20,6 +22,28 @@ def generate_string_array(name):
         + ",".join(map(escape_rust_string, value))
         + "];\n"
     )
+
+
+def generate_string_array_literal(name, values):
+    return (
+        f"pub const {name}: [&str; {len(values)}] = ["
+        + ",".join(map(escape_rust_string, values))
+        + "];\n"
+    )
+
+
+def generate_objdir_flags(name):
+    """Like generate_string_array, but with the objdir resolved at runtime from MOZ_TOPOBJDIR."""
+    topobjdir = mozpath.normsep(buildconfig.topobjdir)
+
+    def flag_expr(flag):
+        prefix, sep, suffix = mozpath.normsep(flag).partition(topobjdir)
+        if not sep or suffix[:1] not in ("", "/"):
+            return escape_rust_string(flag)
+        return f"crate::objdir_flag({escape_rust_string(prefix)}, {escape_rust_string(suffix)})"
+
+    flags = ", ".join(map(flag_expr, buildconfig.substs.get(name) or []))
+    return f"pub static {name}: crate::Flags = crate::Flags::new(|| vec![{flags}]);\n"
 
 
 def generate_string(name):
@@ -53,27 +77,22 @@ def generate(output):
     # reference the topobjdir.
     output.write(
         textwrap.dedent(
-            f"""
+            """
             /// Macro used to name a path in the objdir for use with macros like `include!`
             #[macro_export]
-            macro_rules! objdir_path {{
-                ($path:expr) => {{
-                    concat!({escape_rust_string(buildconfig.topobjdir + "/")}, $path)
-                }}
-            }}
+            macro_rules! objdir_path {
+                ($path:expr) => {
+                    concat!(env!("MOZ_TOPOBJDIR"), "/", $path)
+                }
+            }
 
             /// Macro used to name a path in the srcdir for use with macros like `include!`
             #[macro_export]
-            macro_rules! srcdir_path {{
-                ($path:expr) => {{
-                    concat!({escape_rust_string(buildconfig.topsrcdir + "/")}, $path)
-                }}
-            }}
-
-            /// The objdir path for use in build scripts
-            pub const TOPOBJDIR: &str = {escape_rust_string(buildconfig.topobjdir)};
-            /// The srcdir path for use in build scripts
-            pub const TOPSRCDIR: &str = {escape_rust_string(buildconfig.topsrcdir)};
+            macro_rules! srcdir_path {
+                ($path:expr) => {
+                    concat!(env!("MOZ_TOPSRCDIR"), "/", $path)
+                }
+            }
 
             """
         )
@@ -106,6 +125,7 @@ def generate(output):
         )
 
     # Write out some useful strings from the buildconfig.
+    output.write(generate_string("MOZ_BACKGROUNDTASK_ACTIVATABLE_CLASS_ID"))
     output.write(generate_string("MOZ_MACBUNDLE_ID"))
     output.write(generate_string("MOZ_APP_BASENAME"))
     output.write(generate_string("MOZ_APP_NAME"))
@@ -114,6 +134,7 @@ def generate(output):
 
     # Write out some useful booleans from the buildconfig.
     output.write(generate_bool("MOZ_FOLD_LIBS"))
+    output.write(generate_bool("MOZ_GLUE_IN_PROGRAM"))
     output.write(generate_bool("NIGHTLY_BUILD"))
     output.write(generate_bool("RELEASE_OR_BETA"))
     output.write(generate_bool("EARLY_BETA_OR_EARLIER"))
@@ -127,8 +148,8 @@ def generate(output):
     output.write(generate_string_array("BINDGEN_SYSTEM_FLAGS"))
     output.write(generate_string_array("MOZ_GTK3_CFLAGS"))
     output.write(generate_string_array("MOZ_GTK3_LIBS"))
-    output.write(generate_string_array("NSPR_CFLAGS"))
-    output.write(generate_string_array("NSS_CFLAGS"))
+    output.write(generate_objdir_flags("NSPR_CFLAGS"))
+    output.write(generate_objdir_flags("NSS_CFLAGS"))
     output.write(generate_string_array("MOZ_PIXMAN_CFLAGS"))
     output.write(generate_string_array("MOZ_ICU_CFLAGS"))
 
@@ -136,3 +157,13 @@ def generate(output):
     output.write(generate_string("MOZ_APP_ID"))
     output.write(generate_string("MOZ_CRASHREPORTER_URL"))
     output.write(generate_string("MOZ_UPDATE_CHANNEL"))
+
+    # NSS shared libraries the megazord and rusttests link against. The list lives
+    # in mozbuild.nss_libs so that the libsForTests packaging action can use the
+    # same definition.
+    output.write(
+        generate_string_array_literal(
+            "NSS_LINK_DYLIBS",
+            nss_link_dylibs(buildconfig.substs, buildconfig.defines),
+        )
+    )

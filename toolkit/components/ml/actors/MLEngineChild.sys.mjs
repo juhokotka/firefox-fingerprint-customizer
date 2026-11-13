@@ -39,16 +39,6 @@ const lazy = XPCOMUtils.declareLazy({
   mlUtils: { service: "@mozilla.org/ml-utils;1", iid: Ci.nsIMLUtils },
 });
 
-/**
- * Cached resolution of "best-onnx" for this inference-child process. Null
- * until the first engine creation attempt observes whether the native
- * runtime is usable; thereafter set to the concrete backend that worked.
- * See `dom/onnx/InferenceSession.cpp` for the underlying ORT load.
- *
- * @type {null | "onnx" | "onnx-native"}
- */
-let gBestOnnxBackend = null;
-
 const SAFE_OVERRIDE_OPTIONS = [
   "dtype",
   "logLevel",
@@ -58,6 +48,28 @@ const SAFE_OVERRIDE_OPTIONS = [
   "timeoutMS",
   "tokenizerRevision",
 ];
+
+/**
+ * Structured clone keeps only an Error's name, message and stack, so the HTTP
+ * status and service error code a BackendError carries are sent beside the
+ * error and reattached by MLEngineParent.
+ *
+ * @param {any} error
+ * @returns {{status?: number, error?: any} | null}
+ */
+function getErrorDetails(error) {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  const details = {};
+  if (typeof error.status === "number") {
+    details.status = error.status;
+  }
+  if (error.error !== undefined && error.error !== null) {
+    details.error = error.error;
+  }
+  return Object.keys(details).length ? details : null;
+}
 
 /**
  * The engine child is responsible for the life cycle and instantiation of the local
@@ -92,6 +104,9 @@ export class MLEngineChild extends JSProcessActorChild {
       }
       case "MLEngine:GetStatusByEngineId": {
         return this.getStatusByEngineId();
+      }
+      case "MLEngine:RequestIsNativeOnnxRuntimeAvailable": {
+        return this.requestIsNativeOnnxRuntimeAvailable();
       }
       case "MLEngine:ForceShutdown": {
         for (const engineDispatcher of this.#engineDispatchers.values()) {
@@ -203,20 +218,50 @@ export class MLEngineChild extends JSProcessActorChild {
   }
 
   /**
-   * Resolves a requested backend to a concrete backend identifier. "best-onnx"
-   * is handled locally: return the cached choice if one exists, otherwise
-   * optimistically try onnx-native (the caller's engine creation will update
-   * the cache on success or fallback). Other "best-*" values defer to the
-   * parent.
+   * Resolves to true if the native ONNX runtime is available, otherwise false.
    *
-   * @param {?string} backend - Requested backend or a "best-*" value.
+   * @returns {Promise<boolean>}
+   */
+  async requestIsNativeOnnxRuntimeAvailable() {
+    const workerConfig = await this.getWorkerConfig();
+    const worker = new lazy.BasePromiseWorker(
+      workerConfig.url,
+      workerConfig.options
+    );
+
+    try {
+      return await worker.post("isNativeOnnxRuntimeAvailable", []);
+    } finally {
+      worker.terminate();
+    }
+  }
+
+  /**
+   * Resolves a requested backend to a concrete backend identifier. "best-onnx"
+   * asks the parent for native ONNX availability, which is cached once per
+   * parent process in `EngineProcess`, and resolves to onnx-native or onnx
+   * accordingly. A `false` result is taken at face value (native unavailable or
+   * the probe failed) and resolves to wasm onnx. Any other value is already
+   * concrete.
+   *
+   * @param {string} backend - Requested backend or "best-onnx".
    * @returns {Promise<string>} Resolved backend identifier.
    */
-  chooseBestBackend(backend) {
-    if (backend === lazy.BACKENDS.bestOnnx) {
-      return Promise.resolve(gBestOnnxBackend ?? lazy.BACKENDS.onnxNative);
+  async chooseBestBackend(backend) {
+    if (backend !== lazy.BACKENDS.bestOnnx) {
+      return backend;
     }
-    return this.sendQuery("MLEngine:ChooseBestBackend", backend);
+    const available = await this.#getNativeOnnxRuntimeAvailability();
+    return available ? lazy.BACKENDS.onnxNative : lazy.BACKENDS.onnx;
+  }
+
+  /**
+   * Asks the parent for the shared native ONNX availability value.
+   *
+   * @returns {Promise<boolean>}
+   */
+  #getNativeOnnxRuntimeAvailability() {
+    return this.sendQuery("MLEngine:GetNativeOnnxRuntimeAvailability");
   }
 
   /**
@@ -443,41 +488,18 @@ class EngineDispatcher {
       this.pipelineOptions.backend === lazy.BACKENDS.onnxNative;
 
     try {
-      const engine = await tryCreate();
-      if (triedNativeForBestOnnx) {
-        gBestOnnxBackend = lazy.BACKENDS.onnxNative;
-      }
-      return engine;
+      return await tryCreate();
     } catch (error) {
-      // best-onnx promised the caller a working onnx engine. If the native
-      // attempt failed, fall back to the wasm onnx backend. The
-      // NotSupportedError raised from dom/onnx/InferenceSession.cpp gets
-      // wrapped at Pipeline.mjs:87, which strips the original .name, so
-      // match on the message text from the C++ source instead. On that
-      // match we cache the wasm choice; on any other failure we still
-      // retry once with wasm but leave the cache alone.
+      // best-onnx promised the caller a working onnx engine. The availability
+      // gate should keep native creation from being attempted when it can't
+      // load, but if it fails anyway, fall back once to the wasm onnx backend.
       if (!triedNativeForBestOnnx) {
         throw error;
       }
-      // KEEP IN SYNC: dom/onnx/InferenceSession.cpp raises this exact
-      // string via MaybeRejectWithNotSupportedError when libonnxruntime
-      // is missing. We match on message text because the BackendError
-      // wrapper at Pipeline.mjs:87 strips the original error name.
-      const isOrtUnavailable =
-        /onnxruntime shared library could not be loaded/.test(
-          error?.message ?? ""
-        );
-      if (isOrtUnavailable) {
-        gBestOnnxBackend = lazy.BACKENDS.onnx;
-        lazy.console.warn(
-          "Native onnx runtime not available; falling back to wasm onnx backend."
-        );
-      } else {
-        lazy.console.warn(
-          "onnx-native engine creation failed; retrying with wasm onnx backend.",
-          error
-        );
-      }
+      lazy.console.warn(
+        "onnx-native engine creation failed; retrying with wasm onnx backend.",
+        error
+      );
       this.pipelineOptions.backend = lazy.BACKENDS.onnx;
       this.pipelineOptions = new lazy.PipelineOptions(this.pipelineOptions);
       return tryCreate();
@@ -659,9 +681,19 @@ class EngineDispatcher {
               requestId,
               response: null,
               error,
+              errorDetails: getErrorDetails(error),
             });
           }
           this.#status = "IDLE";
+          break;
+        }
+        case "EnginePort:Cancel": {
+          try {
+            const engine = await this.#engine;
+            await engine.cancel(data.requestId);
+          } catch (error) {
+            lazy.console.error("Failed to cancel the run", error);
+          }
           break;
         }
         default:
@@ -821,6 +853,23 @@ class InferenceEngine {
       workerOptions,
       functions
     );
+    // Rebuilds the BackendError a backend threw (see toMsg in Pipeline.mjs),
+    // keeping the status and error code the service reported.
+    worker.ExceptionHandlers.BackendError = data => {
+      const error = new Error(data.message);
+      error.name = data.name;
+      error.backendName = data.backendName;
+      if (data.stack) {
+        error.stack = data.stack;
+      }
+      if ("status" in data) {
+        error.status = data.status;
+      }
+      if ("error" in data) {
+        error.error = data.error;
+      }
+      return error;
+    };
 
     const startTime = ChromeUtils.now();
     const args = [wasm, pipelineOptions];
@@ -856,6 +905,17 @@ class InferenceEngine {
       );
     }
     return this.#worker.post("run", [request, requestId, engineRunOptions]);
+  }
+
+  /**
+   * @param {string} requestId - The identifier of the run to cancel.
+   * @returns {Promise<void>}
+   */
+  async cancel(requestId) {
+    if (!this.#worker) {
+      return;
+    }
+    await this.#worker.post("cancel", [requestId]);
   }
 
   async terminate() {

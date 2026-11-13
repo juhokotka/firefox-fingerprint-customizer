@@ -4,6 +4,7 @@
 "use strict";
 
 ChromeUtils.defineESModuleGetters(this, {
+  AdsClient: "resource://newtab/lib/AdsClient.sys.mjs",
   AdsFeed: "resource://newtab/lib/AdsFeed.sys.mjs",
   actionCreators: "resource://newtab/common/Actions.mjs",
   actionTypes: "resource://newtab/common/Actions.mjs",
@@ -44,6 +45,11 @@ const PREF_FEED_SECTIONS_TOPSTORIES = "feeds.section.topstories";
 const PREF_SYSTEM_TOPSTORIES = "feeds.system.topstories";
 const PREF_SHOW_SPONSORED = "showSponsored";
 const PREF_SYSTEM_SHOW_SPONSORED = "system.showSponsored";
+
+// Calculated pref from nimbus experiments
+const PREF_ADS_BACKEND_CONFIG = "adsBackendConfig";
+const PREF_ADS_BACKEND_CONFIG_FLAG_TRUE = "flag_true";
+const PREF_ADS_BACKEND_CONFIG_FLAG_FALSE = "flag_false";
 
 const mockedTileData = [
   {
@@ -298,6 +304,10 @@ function getAdsFeedForTest() {
           [PREF_SYSTEM_TOPSTORIES]: true,
           [PREF_SHOW_SPONSORED]: true,
           [PREF_SYSTEM_SHOW_SPONSORED]: true,
+          [PREF_ADS_BACKEND_CONFIG]: {
+            [PREF_ADS_BACKEND_CONFIG_FLAG_TRUE]: true,
+            [PREF_ADS_BACKEND_CONFIG_FLAG_FALSE]: false,
+          },
         },
       },
     },
@@ -571,7 +581,7 @@ add_task(async function test_fetchData_noOHTTP() {
 add_task(async function test_fetchData_OHTTP() {
   const sandbox = sinon.createSandbox();
   const CONTEXT_ID = "ContextId";
-  sandbox.stub(ContextId, "request").returns(CONTEXT_ID);
+  sandbox.stub(ContextId, "request").resolves(CONTEXT_ID);
   const feed = getAdsFeedForTest();
 
   Services.prefs.setBoolPref(PREF_UNIFIED_ADS_OHTTP_ENABLED, true);
@@ -614,12 +624,21 @@ add_task(async function test_fetchData_OHTTP() {
     "should not send cookies"
   );
 
+  Assert.equal(
+    Object.keys(ObliviousHTTP.ohttpRequest.firstCall.args[3].headers).join(),
+    "content-type",
+    "should send headers that ohttpRequest can enumerate"
+  );
+
   info("AdsFeed: fetchData() should construct request body");
   Assert.equal(
     ObliviousHTTP.ohttpRequest.firstCall.args[3].body,
     JSON.stringify({
       context_id: CONTEXT_ID,
-      flags: {},
+      flags: {
+        [PREF_ADS_BACKEND_CONFIG_FLAG_TRUE]: true,
+        [PREF_ADS_BACKEND_CONFIG_FLAG_FALSE]: false,
+      },
       placements: [
         {
           placement: "newtab_tile_1",
@@ -644,7 +663,7 @@ add_task(async function test_fetchData_OHTTP() {
 add_task(async function test_fetchData_OHTTP_with_adsBackendConfig() {
   const sandbox = sinon.createSandbox();
   const CONTEXT_ID = "ContextId";
-  sandbox.stub(ContextId, "request").returns(CONTEXT_ID);
+  sandbox.stub(ContextId, "request").resolves(CONTEXT_ID);
   const feed = getAdsFeedForTest();
 
   Services.prefs.setBoolPref(PREF_UNIFIED_ADS_OHTTP_ENABLED, true);
@@ -656,10 +675,6 @@ add_task(async function test_fetchData_OHTTP_with_adsBackendConfig() {
     PREF_UNIFIED_ADS_OHTTP_CONFIG_URL,
     "https://config.test"
   );
-  feed.store.state.Prefs.values.adsBackendConfig = {
-    feature1: false,
-    feature2: true,
-  };
 
   const mockConfig = { config: "mocked" };
 
@@ -697,8 +712,8 @@ add_task(async function test_fetchData_OHTTP_with_adsBackendConfig() {
     JSON.stringify({
       context_id: CONTEXT_ID,
       flags: {
-        feature1: false,
-        feature2: true,
+        [PREF_ADS_BACKEND_CONFIG_FLAG_TRUE]: true,
+        [PREF_ADS_BACKEND_CONFIG_FLAG_FALSE]: false,
       },
       placements: [
         {
@@ -785,6 +800,7 @@ add_task(async function test_fetchWithAdsClient_mapsToLegacyShape() {
       { placement: "newtab_tile_1", count: 1 },
       { placement: "newtab_spocs", count: 6 },
     ],
+    {},
     {}
   );
 
@@ -826,6 +842,104 @@ add_task(async function test_fetchWithAdsClient_mapsToLegacyShape() {
       priority: 2,
     },
     "ranking mapped"
+  );
+
+  sandbox.restore();
+});
+
+add_task(async function test_fetchData_callsAdsClientWhenEnabled() {
+  let sandbox = sinon.createSandbox();
+
+  sandbox.stub(AdsFeed.prototype, "PersistentCache").returns({
+    set: () => {},
+    get: () => {},
+  });
+
+  sandbox.stub(AdsClient, "isEnabled").returns(true);
+  const ADS_CLIENT = {
+    requestTileAds: sinon.fake.resolves(
+      new Map([
+        [
+          "newtab_tile_1",
+          {
+            blockKey: "block1",
+            name: "Tile 1",
+            url: "https://tile.example/",
+            imageUrl: "https://tile.example/img.png",
+            callbacks: {
+              click: "https://tile.example/click",
+              impression: "https://tile.example/impression",
+            },
+          },
+        ],
+      ])
+    ),
+    requestSpocAds: sinon.fake.resolves(
+      new Map([
+        [
+          "newtab_spocs",
+          [
+            {
+              format: "spoc",
+              url: "https://spoc.example/",
+              imageUrl: "https://spoc.example/img.png",
+              callbacks: { click: "https://spoc.example/click" },
+              title: "Spoc 1",
+              domain: "spoc.example",
+              excerpt: "Excerpt",
+              sponsor: "Sponsor",
+              sponsoredByOverride: null,
+              blockKey: "spocblock1",
+              caps: { capKey: "cap1", day: 5 },
+              ranking: {
+                itemScore: 0.5,
+                personalizationModels: new Map([
+                  ["arts_and_entertainment", 1],
+                  ["travel", 1],
+                ]),
+                priority: 2,
+              },
+            },
+          ],
+        ],
+      ])
+    ),
+  };
+  sandbox.stub(AdsClient, "getClient").returns(ADS_CLIENT);
+  const REQUEST_OPTIONS = {
+    flags: new Map([
+      [PREF_ADS_BACKEND_CONFIG_FLAG_TRUE, true],
+      [PREF_ADS_BACKEND_CONFIG_FLAG_FALSE, false],
+    ]),
+    ohttp: true,
+  };
+  sandbox.stub(AdsClient, "requestOptions").returns(REQUEST_OPTIONS);
+
+  const feed = getAdsFeedForTest();
+
+  await feed.onAction({
+    type: actionTypes.INIT,
+  });
+  Assert.ok(AdsClient.isEnabled.calledOnce);
+  Assert.ok(AdsClient.getClient.calledOnce);
+
+  await feed.fetchData({
+    tiles: true,
+    spocs: true,
+  });
+
+  Assert.ok(AdsClient.requestOptions.calledOnce);
+  Assert.ok(
+    ADS_CLIENT.requestTileAds.calledOnceWithExactly(
+      sinon.match.any,
+      REQUEST_OPTIONS
+    )
+  );
+  Assert.ok(
+    ADS_CLIENT.requestSpocAds.calledOnceWithExactly(
+      sinon.match.any,
+      REQUEST_OPTIONS
+    )
   );
 
   sandbox.restore();

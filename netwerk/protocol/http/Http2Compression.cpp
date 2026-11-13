@@ -17,8 +17,8 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
 #include "nsCharSeparatedTokenizer.h"
-#include "nsIMemoryReporter.h"
 #include "nsHttpHandler.h"
+#include "nsIMemoryReporter.h"
 
 namespace mozilla {
 namespace net {
@@ -111,8 +111,6 @@ static void InitializeStaticHeaders() {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   if (!gStaticHeaders) {
     gStaticHeaders = new nsDeque<nvPair>(new nvPairDeallocator());
-    gStaticReporter = new HpackStaticTableReporter();
-    RegisterStrongMemoryReporter(do_AddRef(gStaticReporter));
     AddStaticElement(":authority"_ns);
     AddStaticElement(":method"_ns, "GET"_ns);
     AddStaticElement(":method"_ns, "POST"_ns);
@@ -174,6 +172,8 @@ static void InitializeStaticHeaders() {
     AddStaticElement("vary"_ns);
     AddStaticElement("via"_ns);
     AddStaticElement("www-authenticate"_ns);
+    gStaticReporter = new HpackStaticTableReporter();
+    RegisterStrongMemoryReporter(do_AddRef(gStaticReporter));
   }
 }
 
@@ -805,7 +805,7 @@ nsresult Http2Decompressor::CopyHuffmanStringFromInput(uint32_t bytes,
     }
   }
 
-  val = buf;
+  val = std::move(buf);
   LOG(("CopyHuffmanStringFromInput decoded a full string!"));
   return NS_OK;
 }

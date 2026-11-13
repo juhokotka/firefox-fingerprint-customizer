@@ -49,7 +49,6 @@ XPIDL_SOURCES += [
     "nsIIOService.idl",
     "nsILoadContextInfo.idl",
     "nsILoadGroup.idl",
-    "nsILoadGroupChild.idl",
     "nsILoadInfo.idl",
     "nsIMIMEInputStream.idl",
     "nsIMockNetworkLayerController.idl",
@@ -97,6 +96,7 @@ XPIDL_SOURCES += [
     "nsISocketTransport.idl",
     "nsISocketTransportService.idl",
     "nsISpeculativeConnect.idl",
+    "nsISSLTokensCache.idl",
     "nsIStandardURL.idl",
     "nsIStreamListener.idl",
     "nsIStreamListenerTee.idl",
@@ -122,6 +122,9 @@ XPIDL_SOURCES += [
     "nsIURLParser.idl",
     "nsPISocketTransportService.idl",
 ]
+
+if CONFIG["ENABLE_TESTS"]:
+    XPIDL_SOURCES += ["nsISSLTokensCacheTest.idl"]
 
 XPIDL_MODULE = "necko"
 
@@ -261,6 +264,11 @@ if CONFIG["FUZZING"]:
         "FuzzySecurityInfo.cpp",
         "FuzzySocketControl.cpp",
     ]
+    SOURCE_HEADERS += [
+        "FuzzyLayer.h",
+        "FuzzySecurityInfo.h",
+        "FuzzySocketControl.h",
+    ]
 
 if CONFIG["FUZZING_INTERFACES"] and CONFIG["LIBFUZZER"]:
     include("/tools/fuzzing/libfuzzer-flags.mozbuild")
@@ -282,6 +290,9 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "windows":
         "nsURLHelperWin.cpp",
         "ShutdownLayer.cpp",
     ]
+    SOURCE_HEADERS += [
+        "ShutdownLayer.h",
+    ]
 else:
     SOURCES += [
         "nsURLHelperUnix.cpp",
@@ -298,7 +309,6 @@ DIRS += [
     "rust-helper",
     "http-sfv",
     "idna_glue",
-    "ssl_tokens_cache",
     "uritemplate_glue",
     "urlpattern_glue",
 ]
@@ -326,6 +336,62 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
         "/xpcom/base",
     ]
 
+if CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
+    LOCAL_INCLUDES += [
+        "/netwerk/system/android",
+    ]
+
 GeneratedFile(
     "ascii_pac_utils.inc", script="makecppstring.py", inputs=["ascii_pac_utils.js"]
 )
+
+SOURCE_HEADERS += [
+    "ARefBase.h",
+    "ArrayBufferInputStream.h",
+    "AutoClose.h",
+    "BackgroundFileSaver.h",
+    "EventTokenBucket.h",
+    "IPv6Utils.h",
+    "LNAPermissionRequest.h",
+    "MockNetworkLayer.h",
+    "MockNetworkLayerController.h",
+    "NetworkDataCountLayer.h",
+    "NetworkInfoServiceImpl.h",
+    "nsAsyncStreamCopier.h",
+    "nsAuthInformationHolder.h",
+    "nsBase64Encoder.h",
+    "nsBaseContentStream.h",
+    "nsBufferedStreams.h",
+    "nsDirectoryIndexStream.h",
+    "nsDNSPrefetch.h",
+    "nsDownloader.h",
+    "nsIncrementalStreamLoader.h",
+    "nsInputStreamChannel.h",
+    "nsIOService.h",
+    "nsLoadGroup.h",
+    "nsNetAddr.h",
+    "nsNetSegmentUtils.h",
+    "nsPACMan.h",
+    "nsPreloadedStream.h",
+    "nsProtocolProxyService.h",
+    "nsProxyInfo.h",
+    "nsRequestObserverProxy.h",
+    "nsServerSocket.h",
+    "nsSimpleStreamListener.h",
+    "nsSocketTransport2.h",
+    "nsSocketTransportService2.h",
+    "nsStreamListenerTee.h",
+    "nsStreamLoader.h",
+    "nsStreamTransportService.h",
+    "nsSyncStreamListener.h",
+    "nsTransportUtils.h",
+    "nsUDPSocket.h",
+    "PollableEvent.h",
+    "ProxyAutoConfig.h",
+    "ProxyConfig.h",
+    "SimpleBuffer.h",
+    "SuspendableChannelWrapper.h",
+    "Tickler.h",
+    "TLSServerSocket.h",
+    "TRRLoadInfo.h",
+]

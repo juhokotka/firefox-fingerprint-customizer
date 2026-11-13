@@ -6,7 +6,6 @@ package org.mozilla.focus.helpers
 
 import android.content.Context
 import androidx.test.platform.app.InstrumentationRegistry
-import org.mozilla.focus.cookiebanner.CookieBannerOption
 import org.mozilla.focus.ext.settings
 
 class FeatureSettingsHelper {
@@ -14,8 +13,7 @@ class FeatureSettingsHelper {
     private val settings = context.settings
 
     // saving default values of feature flags
-    private var shouldShowCfrForTrackingProtection: Boolean =
-        settings.shouldShowCfrForTrackingProtection
+    private var shouldShowCfrForTrackingProtection: Boolean = settings.shouldShowCfrForTrackingProtection
 
     fun setCfrForTrackingProtectionEnabled(enabled: Boolean) {
         settings.shouldShowCfrForTrackingProtection = enabled
@@ -23,15 +21,6 @@ class FeatureSettingsHelper {
 
     fun setShowStartBrowsingCfrEnabled(enabled: Boolean) {
         settings.shouldShowStartBrowsingCfr = enabled
-    }
-
-    fun setCookieBannerReductionEnabled(enabled: Boolean) {
-        settings.isCookieBannerEnable = enabled
-        if (enabled) {
-            settings.saveCurrentCookieBannerOptionInSharePref(CookieBannerOption.CookieBannerRejectAll())
-        } else {
-            settings.saveCurrentCookieBannerOptionInSharePref(CookieBannerOption.CookieBannerDisabled())
-        }
     }
 
     fun setSearchWidgetDialogEnabled(enabled: Boolean) {

@@ -2,24 +2,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "CookieServiceParent.h"
+
 #include "CookieCommons.h"
 #include "CookieLogging.h"
-#include "CookieServiceParent.h"
+#include "mozIThirdPartyUtil.h"
+#include "mozilla/BasePrincipal.h"
+#include "mozilla/StaticPrefs_network.h"
+#include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/dom/ContentParent.h"
+#include "mozilla/ipc/URIUtils.h"
 #include "mozilla/net/CookieService.h"
 #include "mozilla/net/CookieServiceParent.h"
 #include "mozilla/net/PNeckoParent.h"
-
-#include "mozilla/BasePrincipal.h"
-#include "mozilla/ipc/URIUtils.h"
-#include "mozilla/StoragePrincipalHelper.h"
-#include "mozIThirdPartyUtil.h"
 #include "nsArrayUtils.h"
 #include "nsIChannel.h"
-#include "mozilla/StaticPrefs_network.h"
 #include "nsIEffectiveTLDService.h"
-#include "nsNetCID.h"
 #include "nsMixedContentBlocker.h"
+#include "nsNetCID.h"
 
 using namespace mozilla::ipc;
 

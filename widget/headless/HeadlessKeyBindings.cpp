@@ -3,6 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "HeadlessKeyBindings.h"
+
+#include <memory>
+
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/NativeKeyBindingsType.h"
@@ -14,7 +17,7 @@ namespace widget {
 HeadlessKeyBindings& HeadlessKeyBindings::GetInstance() {
   static UniquePtr<HeadlessKeyBindings> sInstance;
   if (!sInstance) {
-    sInstance.reset(new HeadlessKeyBindings());
+    sInstance = std::make_unique<HeadlessKeyBindings>();
     ClearOnShutdown(&sInstance);
   }
   return *sInstance;

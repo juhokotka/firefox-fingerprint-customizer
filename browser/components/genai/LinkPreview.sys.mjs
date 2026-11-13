@@ -22,6 +22,10 @@ export const LABS_STATE = Object.freeze({
   ROLLOUT_ENDED: 2,
 });
 
+ChromeUtils.defineLazyGetter(lazy, "canUseLlamaCpp", () =>
+  Cc["@mozilla.org/ml-utils;1"].getService(Ci.nsIMLUtils).canUseLlamaCpp()
+);
+
 XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
   "allowedLanguages",
@@ -230,8 +234,8 @@ export const LinkPreview = {
   },
 
   get canRunOnDevice() {
-    // Link Preview has no known restrictions based on device hardware.
-    return true;
+    // Key points generation requires the native llama.cpp backend.
+    return lazy.canUseLlamaCpp;
   },
 
   get isBlocked() {
@@ -265,6 +269,7 @@ export const LinkPreview = {
 
   get canShowKeyPoints() {
     return (
+      this.canRunOnDevice &&
       this._isRegionSupported() &&
       this._isLocaleSupported() &&
       !this._isDisabledByPolicy()
@@ -349,7 +354,7 @@ export const LinkPreview = {
     }
 
     // Prefetch the model when enabling by simulating a request.
-    if (enabled && lazy.prefetchOnEnable && this._isRegionSupported()) {
+    if (enabled && lazy.prefetchOnEnable && this.canShowKeyPoints) {
       this.generateKeyPoints();
     }
 
@@ -804,11 +809,15 @@ export const LinkPreview = {
     }
 
     // Check for the start of a long unmodified primary button press on a link.
+    // A mousedown that doesn't report the primary button as held is synthesized
+    // to activate an element, e.g. keyboard activation of a panel button, and
+    // no mouseup will follow to end the press.
     const win = event.currentTarget;
     const stateObject = this._windowStates.get(win);
     if (
       event.type == "mousedown" &&
       !event.button &&
+      event.buttons & 1 &&
       !event.altKey &&
       !event.ctrlKey &&
       !event.metaKey &&

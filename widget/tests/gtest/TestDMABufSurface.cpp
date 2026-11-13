@@ -2,17 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gtest/gtest.h"
+#include <fcntl.h>
+#include <gbm.h>
+#include <unistd.h>
 
-#include "mozilla/widget/DMABufSurface.h"
+#include "gtest/gtest.h"
+#include "mozilla/NotNull.h"
 #include "mozilla/gfx/FileHandleWrapper.h"
 #include "mozilla/ipc/FileDescriptor.h"
 #include "mozilla/layers/LayersSurfaces.h"
-#include "mozilla/NotNull.h"
+#include "mozilla/widget/DMABufSurface.h"
 #include "nsTArray.h"
-
-#include <fcntl.h>
-#include <unistd.h>
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -40,11 +40,11 @@ static SurfaceDescriptor MakeRGBADescriptor(RefPtr<FileHandleWrapper> fd) {
   AutoTArray<NotNull<RefPtr<FileHandleWrapper>>, 1> fence;
   AutoTArray<ipc::FileDescriptor, 1> refCount;
   return SurfaceDescriptor(SurfaceDescriptorDMABuf(
-      DMABufSurface::SURFACE_RGBA, 0, modifiers, 0, fds, width, height, width,
-      height, format, strides, offsets, gfx::YUVColorSpace::BT601,
-      gfx::ColorRange::LIMITED, gfx::ColorSpace2::UNKNOWN,
-      gfx::TransferFunction::Default, 0, fence, 1, 0, refCount, nullptr,
-      false));
+      DMABufSurface::SURFACE_RGBA, GBM_FORMAT_ARGB8888, modifiers, 0, fds,
+      width, height, width, height, format, strides, offsets,
+      gfx::YUVColorSpace::BT601, gfx::ColorRange::LIMITED,
+      gfx::ColorSpace2::UNKNOWN, gfx::TransferFunction::Default, 0, fence, 1, 0,
+      refCount, nullptr, false, gfx::HDRMetadata()));
 }
 
 // Matches what DMABufSurfaceYUV::Serialize() produces for a two-plane 128×128
@@ -67,7 +67,7 @@ static SurfaceDescriptor MakeYUVDescriptor(RefPtr<FileHandleWrapper> fd0,
       height, widthAligned, heightAligned, format, strides, offsets,
       gfx::YUVColorSpace::BT601, gfx::ColorRange::LIMITED,
       gfx::ColorSpace2::UNKNOWN, gfx::TransferFunction::Default, 0, fence, 1, 0,
-      refCount, nullptr, false));
+      refCount, nullptr, false, gfx::HDRMetadata()));
 }
 
 // Run 3 serialize → import cycles for a single-plane RGBA surface.

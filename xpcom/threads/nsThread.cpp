@@ -12,60 +12,66 @@
 #  undef LOG
 #endif
 
-#include "mozilla/ReentrantMonitor.h"
-#include "nsMemoryPressure.h"
-#include "nsThreadManager.h"
-#include "nsIClassInfoImpl.h"
-#include "nsCOMPtr.h"
-#include "nsQueryObject.h"
-#include "pratom.h"
+#include "GeckoProfiler.h"
+#include "ThreadDelay.h"
+#include "ThreadEventQueue.h"
+#include "ThreadEventTarget.h"
 #include "mozilla/BackgroundHangMonitor.h"
+#include "mozilla/ChaosMode.h"
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/Logging.h"
-#include "nsIObserverService.h"
 #include "mozilla/IOInterposer.h"
-#include "mozilla/ipc/MessageChannel.h"
-#include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProfilerRunnable.h"
+#include "mozilla/ReentrantMonitor.h"
 #include "mozilla/SchedulerGroup.h"
 #include "mozilla/Services.h"
 #include "mozilla/SpinEventLoopUntil.h"
 #include "mozilla/StaticLocalPtr.h"
 #include "mozilla/StaticPrefs_threads.h"
 #include "mozilla/TaskController.h"
-#include "nsExceptionHandler.h"
-#include "nsFmtString.h"
-#include "nsXPCOMPrivate.h"
-#include "mozilla/ChaosMode.h"
-#include "prerror.h"
-#include "mozilla/glean/XpcomMetrics.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/ScriptSettings.h"
-#include "nsThreadSyncDispatch.h"
+#include "mozilla/glean/XpcomMetrics.h"
+#include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/MessageChannel.h"
+#include "nsCOMPtr.h"
+#include "nsExceptionHandler.h"
+#include "nsFmtString.h"
+#include "nsIClassInfoImpl.h"
+#include "nsIObserverService.h"
+#include "nsMemoryPressure.h"
+#include "nsQueryObject.h"
 #include "nsServiceManagerUtils.h"
-#include "GeckoProfiler.h"
-#include "ThreadEventQueue.h"
-#include "ThreadEventTarget.h"
-#include "ThreadDelay.h"
+#include "nsThreadManager.h"
+#include "nsThreadSyncDispatch.h"
+#include "nsXPCOMPrivate.h"
+#include "pratom.h"
+#include "prerror.h"
+
+#ifdef NS_THREAD_SHUTDOWN_ANNOTATIONS_ENABLED
+#  include "mozilla/JSONStringWriteFuncs.h"
+#  include "mozilla/JSONWriter.h"
+#  include "prtime.h"
+#endif
 
 #ifdef XP_LINUX
 #  ifdef __GLIBC__
 #    include <gnu/libc-version.h>
 #  endif
-#  include <sys/mman.h>
-#  include <sys/time.h>
-#  include <sys/resource.h>
 #  include <sched.h>
 #  include <stdio.h>
+#  include <sys/mman.h>
+#  include <sys/resource.h>
+#  include <sys/time.h>
 #endif
 
 #ifdef XP_WIN
-#  include "mozilla/DynamicallyLinkedFunctionPtr.h"
-
 #  include <winbase.h>
+
+#  include "mozilla/DynamicallyLinkedFunctionPtr.h"
 
 using GetCurrentThreadStackLimitsFn = void(WINAPI*)(PULONG_PTR LowLimit,
                                                     PULONG_PTR HighLimit);
@@ -89,10 +95,11 @@ using GetCurrentThreadStackLimitsFn = void(WINAPI*)(PULONG_PTR LowLimit,
 #endif
 
 #ifdef MOZ_CANARY
-#  include <unistd.h>
 #  include <execinfo.h>
-#  include <signal.h>
 #  include <fcntl.h>
+#  include <signal.h>
+#  include <unistd.h>
+
 #  include "nsXULAppAPI.h"
 #endif
 
@@ -109,6 +116,59 @@ static LazyLogModule sThreadLog("nsThread");
 NS_DECL_CI_INTERFACE_GETTER(nsThread)
 
 Array<char, nsThread::kRunnableNameBufSize> nsThread::sMainThreadRunnableName;
+
+#ifdef NS_THREAD_SHUTDOWN_ANNOTATIONS_ENABLED
+
+/* static */ StaticMutex nsThread::sShutdownAnnotationMutex;
+
+static constexpr const char* PhaseName(
+    nsThread::ShutdownAnnotationPhase aPhase) {
+  switch (aPhase) {
+    case nsThread::ShutdownAnnotationPhase::None:
+      return "None";
+    case nsThread::ShutdownAnnotationPhase::Joining:
+      return "Joining";
+    case nsThread::ShutdownAnnotationPhase::Recv:
+      return "Recv";
+    case nsThread::ShutdownAnnotationPhase::Ack:
+      return "Ack";
+  }
+  return "?";
+}
+
+/* static */ nsCString nsThread::BuildShutdownAnnotationJson(
+    const nsTArray<ShutdownHandshakeInfo>& aEntries) {
+  nsCString out;
+  JSONStringRefWriteFunc sink(out);
+  JSONWriter w(sink);
+  w.StartArrayElement();
+  for (const auto& e : aEntries) {
+    w.StartObjectElement();
+    w.IntProperty("joining_tid", e.mJoiningTid);
+    w.StringProperty("joining_name", MakeStringSpan(e.mJoiningName.get()));
+    w.IntProperty("closing_tid", e.mClosingTid);
+    w.StringProperty("closing_name", MakeStringSpan(e.mClosingName.get()));
+    w.StringProperty("phase", MakeStringSpan(PhaseName(e.mPhase)));
+    w.IntProperty("phase_since", e.mPhaseSinceEpochSec);
+    w.EndObject();
+  }
+  w.EndArray();
+  return out;
+}
+
+/* static */ nsCString nsThread::BuildContendedAnnotationJson() {
+  nsCString out;
+  JSONStringRefWriteFunc sink(out);
+  JSONWriter w(sink);
+  w.StartArrayElement();
+  w.StartObjectElement();
+  w.StringProperty("error", "contended");
+  w.EndObject();
+  w.EndArray();
+  return out;
+}
+
+#endif  // NS_THREAD_SHUTDOWN_ANNOTATIONS_ENABLED
 
 //-----------------------------------------------------------------------------
 // Because we do not have our own nsIFactory, we have to implement nsIClassInfo
@@ -225,11 +285,13 @@ class nsThreadShutdownEvent : public Runnable {
     // broken when the thread exits.
     mThread->mShutdownContext = mShutdownContext;
     MessageLoop::current()->Quit();
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
-    // Let's leave a trace that we passed here in the thread's name.
-    nsAutoCString threadName(PR_GetThreadName(PR_GetCurrentThread()));
-    threadName.Append(",SHDRCV"_ns);
-    NS_SetCurrentThreadName(threadName.get());
+#ifdef NS_THREAD_SHUTDOWN_ANNOTATIONS_ENABLED
+    {
+      StaticMutexAutoLock lock(nsThread::sShutdownAnnotationMutex);
+      mThread->mShutdownAnnotationPhase =
+          nsThread::ShutdownAnnotationPhase::Recv;
+      mThread->mShutdownPhaseSinceEpochSec = PR_Now() / PR_USEC_PER_SEC;
+    }
 #endif
     return NS_OK;
   }
@@ -433,11 +495,12 @@ void nsThread::ThreadFunc(void* aArg) {
     // the world what happened right here.
     MOZ_RELEASE_ASSERT(NS_SUCCEEDED(dispatch_ack_rv));
 
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
-    // Let's leave a trace that we passed here in the thread's name.
-    nsAutoCString threadName(PR_GetThreadName(PR_GetCurrentThread()));
-    threadName.Append(",SHDACK"_ns);
-    NS_SetCurrentThreadName(threadName.get());
+#ifdef NS_THREAD_SHUTDOWN_ANNOTATIONS_ENABLED
+    {
+      StaticMutexAutoLock lock(sShutdownAnnotationMutex);
+      self->mShutdownAnnotationPhase = ShutdownAnnotationPhase::Ack;
+      self->mShutdownPhaseSinceEpochSec = PR_Now() / PR_USEC_PER_SEC;
+    }
 #endif
   } else {
     NS_WARNING(
@@ -623,9 +686,6 @@ nsresult nsThread::Init(const nsACString& aName) {
     if (!(thread = PR_CreateThread(PR_USER_THREAD, ThreadFunc, initData.get(),
                                    PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
                                    PR_JOINABLE_THREAD, mStackSize))) {
-      // Until bug 2017883 is fixed, these values may not be useful on
-      // Windows as NSPR does not propagate the OS error from thread
-      // creation.
       PRErrorCode prError = PR_GetError();
       PRInt32 osError = PR_GetOSError();
       CrashReporter::RecordAnnotationNSCString(
@@ -841,7 +901,20 @@ nsThread::BeginShutdown(nsIThreadShutdown** aShutdown) {
   RefPtr<nsThreadShutdownContext> context =
       new nsThreadShutdownContext(WrapNotNull(this), currentThread);
 
+#ifdef NS_THREAD_SHUTDOWN_ANNOTATIONS_ENABLED
+  {
+    nsAutoCString joiningName;
+    currentThread->GetThreadName(joiningName);
+    StaticMutexAutoLock lock(sShutdownAnnotationMutex);
+    mShutdownAnnotationPhase = ShutdownAnnotationPhase::Joining;
+    mShutdownJoiningTid = currentThread->ThreadId();
+    mShutdownPhaseSinceEpochSec = PR_Now() / PR_USEC_PER_SEC;
+    mShutdownJoiningName = joiningName;
+  }
+#endif
+
   ++currentThread->mOutstandingShutdownContexts;
+
   nsCOMPtr<nsIRunnable> clearOutstanding = NS_NewRunnableFunction(
       "nsThread::ClearOutstandingShutdownContext",
       [currentThread] { --currentThread->mOutstandingShutdownContexts; });
@@ -903,6 +976,73 @@ void nsThread::WaitForAllAsynchronousShutdowns() {
       "nsThread::WaitForAllAsynchronousShutdowns"_ns,
       [&]() { return mOutstandingShutdownContexts == 0; }, this);
 }
+
+#ifdef NS_THREAD_SHUTDOWN_ANNOTATIONS_ENABLED
+/* static */ Maybe<nsTArray<nsThread::ShutdownHandshakeInfo>>
+nsThread::CollectShutdownHandshakes() {
+  nsTArray<ShutdownHandshakeInfo> entries;
+  nsTArray<nsThread*> closingThreads;
+  nsThreadManager& tm = nsThreadManager::get();
+
+  // We can run on the terminator watchdog thread while the main thread is
+  // hung, so we must never block: Init() holds the thread list lock across
+  // PR_CreateThread, and waiting for it here would keep the watchdog from
+  // reaching its crash. Report contention as Nothing so the caller can tell
+  // it apart from "no handshakes in flight".
+  OffTheBooksMutexAutoTryLock lock(tm.ThreadListMutex());
+  if (!lock) {
+    return Nothing();
+  }
+
+  {
+    StaticMutexAutoTryLock alock(sShutdownAnnotationMutex);
+    if (!alock) {
+      return Nothing();
+    }
+    for (auto* thread : tm.ThreadList()) {
+      if (thread->mShutdownAnnotationPhase == ShutdownAnnotationPhase::None) {
+        continue;
+      }
+      ShutdownHandshakeInfo& info = *entries.AppendElement();
+      info.mJoiningTid = thread->mShutdownJoiningTid;
+      info.mJoiningName = thread->mShutdownJoiningName;
+      info.mClosingTid = thread->mThreadId;
+      info.mPhase = thread->mShutdownAnnotationPhase;
+      info.mPhaseSinceEpochSec = thread->mShutdownPhaseSinceEpochSec;
+      closingThreads.AppendElement(thread);
+    }
+  }
+
+  // GetThreadName() takes mThreadName's mutex, and BeginShutdown() acquires
+  // mThreadName before sShutdownAnnotationMutex, so we must call it outside
+  // the annotation lock. ThreadListMutex is still held, keeping the pointers
+  // valid.
+  for (size_t i = 0; i < entries.Length(); ++i) {
+    closingThreads[i]->GetThreadName(entries[i].mClosingName);
+  }
+  return Some(std::move(entries));
+}
+
+/* static */ void nsThread::CollectShutdownHangAnnotation() {
+  Maybe<nsTArray<ShutdownHandshakeInfo>> entries = CollectShutdownHandshakes();
+  if (!entries) {
+    // Say that we could not read the state, so that contention does not read
+    // as "no handshakes in flight".
+    nsCString json = BuildContendedAnnotationJson();
+    CrashReporter::RecordAnnotationNSCString(
+        CrashReporter::Annotation::ShuttingDownThreads, json);
+    return;
+  }
+  if (entries->IsEmpty()) {
+    CrashReporter::UnrecordAnnotation(
+        CrashReporter::Annotation::ShuttingDownThreads);
+    return;
+  }
+  nsCString json = BuildShutdownAnnotationJson(*entries);
+  CrashReporter::RecordAnnotationNSCString(
+      CrashReporter::Annotation::ShuttingDownThreads, json);
+}
+#endif  // NS_THREAD_SHUTDOWN_ANNOTATIONS_ENABLED
 
 NS_IMETHODIMP
 nsThread::Shutdown() {
@@ -1215,7 +1355,7 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult) {
     // main thread soon and/or other events hit the main thread regularly
     // enough in those processes we activate lazy purge for, such that this
     // does not matter.
-    TaskController::Get()->MayScheduleIdleMemoryCleanup();
+    TaskController::Get()->MayScheduleMemoryCleanup();
   }
 #endif
 
@@ -1445,6 +1585,8 @@ nsThreadShutdownContext::StopWaitingAndLeakThread() {
   return NS_OK;
 }
 
+nsThreadShutdownContext::~nsThreadShutdownContext() = default;
+
 void nsThreadShutdownContext::MarkCompleted() {
   MOZ_ASSERT(!mCompleted);
   mCompleted = true;
@@ -1502,6 +1644,16 @@ void PerformanceCounterState::RunnableDidRun(const nsCString& aName,
   }
 }
 
+struct LongTaskMarker : public BaseMarkerType<LongTaskMarker> {
+  static constexpr const char* Name = "MainThreadLongTask";
+
+  static constexpr bool ETWStoreName = true;
+
+  using MS = MarkerSchema;
+  static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
+                                               MS::Location::MarkerTable};
+};
+
 void PerformanceCounterState::MaybeReportAccumulatedTime(const nsCString& aName,
                                                          TimeStamp aNow) {
   MOZ_ASSERT(mCurrentTimeSliceStart,
@@ -1527,22 +1679,6 @@ void PerformanceCounterState::MaybeReportAccumulatedTime(const nsCString& aName,
     mLastLongTaskEnd = aNow;
 
     if (profiler_thread_is_being_profiled_for_markers()) {
-      struct LongTaskMarker {
-        static constexpr Span<const char> MarkerTypeName() {
-          return MakeStringSpan("MainThreadLongTask");
-        }
-        static void StreamJSONMarkerData(
-            baseprofiler::SpliceableJSONWriter& aWriter) {
-          aWriter.StringProperty("category", "LongTask");
-        }
-        static MarkerSchema MarkerTypeDisplay() {
-          using MS = MarkerSchema;
-          MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-          schema.AddKeyLabelFormat("category", "Type", MS::Format::String);
-          return schema;
-        }
-      };
-
       profiler_add_marker(mCurrentRunnableIsIdleRunnable
                               ? ProfilerString8View("LongIdleTask")
                               : ProfilerString8View("LongTask"),

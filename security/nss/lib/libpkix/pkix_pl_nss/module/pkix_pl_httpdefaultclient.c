@@ -80,7 +80,7 @@ static const PKIX_UInt32 httpprotocolLen = 5; /* strlen(httpprotocol) */
  *      non-fatal way.
  *  Returns a Fatal Error if the function fails in an unrecoverable way.
  */
-static PKIX_Error *
+PKIX_Error *
 pkix_pl_HttpDefaultClient_HdrCheckComplete(
         PKIX_PL_HttpDefaultClient *client,
         PKIX_UInt32 bytesRead,
@@ -300,10 +300,16 @@ pkix_pl_HttpDefaultClient_HdrCheckComplete(
          }
  
          if (contentLength > 0) {
-             /* allocate a buffer of size contentLength  for the content */
+             if (client->filledupBytes > (PKIX_UInt32)contentLength) {
+                 client->connectStatus = HTTP_ERROR;
+                 PORT_SetError(SEC_ERROR_OCSP_BAD_HTTP_RESPONSE);
+                 goto cleanup;
+             }
+
+             /* allocate a buffer of size contentLength for the content */
              PKIX_CHECK(PKIX_PL_Malloc(contentLength, (void **)&body, plCtx),
                         PKIX_MALLOCFAILED);
-             
+
              /* copy any remaining bytes in current buffer into new buffer */
              if (client->filledupBytes > 0) {
                  PORT_Memcpy(body, &(client->rcvBuf[headerLength]),
@@ -350,7 +356,7 @@ cleanup:
  *      a non-fatal way.
  *  Returns a Fatal Error if the function fails in an unrecoverable way.
  */
-static PKIX_Error *
+PKIX_Error *
 pkix_pl_HttpDefaultClient_Create(
         const char *host,
         PRUint16 portnum,

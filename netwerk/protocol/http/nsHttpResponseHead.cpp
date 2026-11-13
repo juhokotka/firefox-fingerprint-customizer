@@ -3,19 +3,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
+#include "nsHttpResponseHead.h"
 
-#include "mozilla/dom/MimeType.h"
+#include <algorithm>
+
+#include "CacheControlParser.h"
+#include "HttpLog.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/TextUtils.h"
-#include "nsHttpResponseHead.h"
+#include "mozilla/dom/MimeType.h"
+#include "nsCRT.h"
 #include "nsIHttpHeaderVisitor.h"
 #include "nsPrintfCString.h"
-#include "prtime.h"
-#include "nsCRT.h"
 #include "nsURLHelper.h"
-#include "CacheControlParser.h"
-#include <algorithm>
+#include "prtime.h"
 
 namespace mozilla {
 namespace net {
@@ -1199,9 +1200,19 @@ nsresult nsHttpResponseHead::ParseResponseContentLength(
 
 nsresult nsHttpResponseHead::VisitHeaders(
     nsIHttpHeaderVisitor* visitor, nsHttpHeaderArray::VisitorFilter filter) {
+  return VisitHeaders(filter,
+                      [visitor = nsCOMPtr{visitor}](const nsACString& aHeader,
+                                                    const nsACString& aValue) {
+                        return visitor->VisitHeader(aHeader, aValue);
+                      });
+}
+
+nsresult nsHttpResponseHead::VisitHeaders(
+    nsHttpHeaderArray::VisitorFilter aFilter,
+    nsHttpHeaderArray::VisitorCallback aCallback) {
   RecursiveMutexAutoLock monitor(mRecursiveMutex);
   ++mInVisitHeaders;
-  nsresult rv = mHeaders.VisitHeaders(visitor, filter);
+  nsresult rv = mHeaders.VisitHeaders(aFilter, aCallback);
   --mInVisitHeaders;
   return rv;
 }

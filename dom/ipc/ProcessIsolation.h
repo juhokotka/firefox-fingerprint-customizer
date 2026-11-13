@@ -18,6 +18,7 @@
 namespace mozilla::dom {
 
 class CanonicalBrowsingContext;
+class LoadedOriginSet;
 class WindowGlobalParent;
 
 extern mozilla::LazyLogModule gProcessIsolationLog;
@@ -28,17 +29,10 @@ constexpr nsLiteralCString kHighValueHasSavedLoginPermission =
 constexpr nsLiteralCString kHighValueIsLoggedInPermission =
     "highValueIsLoggedIn"_ns;
 
-/**
- * Given a specific set of BrowsingContext origin attributes, get a shared "web"
- * process which should be used for loading shared content.
- */
-nsCString SharedWebRemoteType(const OriginAttributes& aAttrs,
-                              bool aDisableJit = false);
-
 // NavigationIsolationOptions is passed through the methods to store the state
 // of the possible process and/or browsing context change.
 struct NavigationIsolationOptions {
-  nsCString mRemoteType;
+  RemoteType mRemoteType;
   bool mReplaceBrowsingContext = false;
   uint64_t mSpecificGroupId = 0;
   bool mShouldCrossOriginIsolate = false;
@@ -61,15 +55,15 @@ struct NavigationIsolationOptions {
 Result<NavigationIsolationOptions, nsresult> IsolationOptionsForNavigation(
     CanonicalBrowsingContext* aTopBC, WindowGlobalParent* aParentWindow,
     nsIURI* aChannelCreationURI, nsIChannel* aChannel,
-    const nsACString& aCurrentRemoteType, bool aHasCOOPMismatch,
+    const RemoteType& aCurrentRemoteType, bool aHasCOOPMismatch,
     bool aForNewTab, uint32_t aLoadStateLoadType,
     const Maybe<uint64_t>& aChannelId,
-    const Maybe<nsCString>& aRemoteTypeOverride);
+    const Maybe<RemoteType>& aRemoteTypeOverride);
 
 // WorkerIsolationOptions is passed back to the RemoteWorkerManager to store the
 // destination process information for remote worker loads.
 struct WorkerIsolationOptions {
-  nsCString mRemoteType;
+  RemoteType mRemoteType;
 };
 
 /**
@@ -80,7 +74,7 @@ struct WorkerIsolationOptions {
  */
 Result<WorkerIsolationOptions, nsresult> IsolationOptionsForWorker(
     nsIPrincipal* aPrincipal, WorkerKind aWorkerKind,
-    const nsACString& aCurrentRemoteType, bool aUseRemoteSubframes);
+    const RemoteType& aCurrentRemoteType, bool aUseRemoteSubframes);
 
 /**
  * Given a URI being loaded, and some relevant context, predict what remote type
@@ -92,9 +86,18 @@ Result<WorkerIsolationOptions, nsresult> IsolationOptionsForWorker(
  * frontend JS, and should not be used as part of navigation. The remote types
  * selected by this method are not used to enforce security invariants.
  */
-Result<nsCString, nsresult> PredictRemoteTypeForURI(
+Result<RemoteType, nsresult> PredictRemoteTypeForURI(
     nsIURI* aURI, const OriginAttributes& aOriginAttributes,
-    const nsACString& aPreferredRemoteType, bool aUseRemoteSubframes);
+    const RemoteType& aPreferredRemoteType, bool aUseRemoteSubframes);
+
+/**
+ * If `aURI` is an `about:reader` URI whose "url" query parameter names a
+ * document about:reader will actually load, return that URL, otherwise return
+ * `nullptr`.
+ *
+ * Safe to call with any URI.
+ */
+already_AddRefed<nsIURI> GetAboutReaderURL(nsIURI* aURI);
 
 /**
  * Adds a `highValue` permission to the permissions database, and make loads of
@@ -127,20 +130,54 @@ void AddHighValuePermission(const nsACString& aOrigin,
 bool IsIsolateHighValueSiteEnabled();
 
 /**
+ * Options for ValidatePrincipal methods. By default:
+ *
+ * 1. The principal must not be `nullptr`.
+ * 2. The principal must be a null or content principal
+ * 3. The principal must be in the target process' LoadedOriginSet.
+ *   - There are some exceptions to this (e.g. extension, null principals).
+ *   - Principals are added to the set by `ContentParent::AboutToLoadOrigin`.
+ * 4. The principal must be "generally loadable" by the target remote type.
+ *   - See the implementation of ValidatePrincipalCouldPotentiallyBeLoadedBy.
+ *
+ * These options allow disabling parts of these checks.
+ */
+enum class ValidatePrincipalOptions {
+  // Allow the principal to be `nullptr` (i.e. not present)
+  AllowNullPtr,
+
+  // Allow the principal to be an expanded principal.
+  // Sub-principals will each be validated.
+  AllowExpanded,
+
+  // Allow the system principal if it is in the process' LoadedOriginSet.
+  //
+  // This should only occur in the inference process, or when a legacy system
+  // principal chrome:// document has been forcibly loaded within this process.
+  AllowSystemIfLoaded,
+
+  // Don't check the LoadedOriginSet during this ValidatePrincipal call.
+  // This is used for checks before `ContentParent::AboutToLoadOrigin`.
+  AllowNotLoadedOrigin,
+
+  // Allow the system principal unconditionally, ignoring the LoadedOriginSet.
+  AlwaysAllowSystem,
+
+  // Internal flag used while validating null principal precursors.
+  Internal_ValidatingPrecursor,
+};
+
+/**
  * Perform a lax check that a process with the given RemoteType could
  * potentially load a Document or run script with the given principal.
  *
  * WARNING: This is intentionally a lax check, to avoid false positives in
  * assertions, and should NOT be used for process isolation decisions.
  */
-enum class ValidatePrincipalOptions {
-  AllowNullPtr,  // Not a NullPrincipal but a nullptr as Principal.
-  AllowSystem,
-  AllowExpanded,
-};
 bool ValidatePrincipalCouldPotentiallyBeLoadedBy(
-    nsIPrincipal* aPrincipal, const nsACString& aRemoteType,
-    const EnumSet<ValidatePrincipalOptions>& aOptions = {});
+    nsIPrincipal* aPrincipal, const RemoteType& aRemoteType,
+    const EnumSet<ValidatePrincipalOptions>& aOptions,
+    LoadedOriginSet* aLoadedOriginSet = nullptr);
 
 }  // namespace mozilla::dom
 

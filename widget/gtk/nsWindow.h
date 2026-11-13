@@ -9,29 +9,31 @@
 #include <gtk/gtk.h>
 
 #include "CompositorWidget.h"
+#include "IMContextWrapper.h"
+#include "LookAndFeel.h"
 #include "MozContainer.h"
-#include "WaylandSurfaceLock.h"
 #include "VsyncSource.h"
+#include "WaylandSurfaceLock.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/RWLock.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/Result.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/RWLock.h"
 #include "mozilla/gfx/BaseMargin.h"
 #include "mozilla/widget/WindowSurface.h"
 #include "mozilla/widget/WindowSurfaceProvider.h"
-#include "nsIWidget.h"
 #include "nsIDragService.h"
+#include "nsIWidget.h"
 #include "nsRefPtrHashtable.h"
-#include "IMContextWrapper.h"
-#include "LookAndFeel.h"
 
 #ifdef ACCESSIBILITY
 #  include "mozilla/a11y/LocalAccessible.h"
 #endif
 #ifdef MOZ_X11
 #  include <gdk/gdkx.h>
+
 #  include "X11UndefineNone.h"
 #endif
 
@@ -39,9 +41,9 @@
 #  undef LOG
 #  undef LOGVERBOSE
 
+#  include "Units.h"
 #  include "mozilla/Logging.h"
 #  include "nsTArray.h"
-#  include "Units.h"
 
 extern mozilla::LazyLogModule gWidgetLog;
 extern mozilla::LazyLogModule gWidgetDragLog;
@@ -149,6 +151,8 @@ class WaylandSurface;
 class WaylandSurfaceLock;
 class nsWindowX11;
 class nsWindowWayland;
+class nsWindowWaylandToplevel;
+class nsWindowWaylandPopup;
 }  // namespace widget
 }  // namespace mozilla
 
@@ -169,6 +173,12 @@ class nsWindow : public nsIWidget {
   NS_INLINE_DECL_REFCOUNTING_INHERITED(nsWindow, nsIWidget)
 
   virtual mozilla::widget::nsWindowWayland* AsWayland() { return nullptr; }
+  virtual mozilla::widget::nsWindowWaylandPopup* AsWaylandPopup() {
+    return nullptr;
+  }
+  virtual mozilla::widget::nsWindowWaylandToplevel* AsWaylandToplevel() {
+    return nullptr;
+  }
   virtual mozilla::widget::nsWindowX11* AsX11() { return nullptr; }
 
   // called when we are destroyed
@@ -183,7 +193,6 @@ class nsWindow : public nsIWidget {
                                 const LayoutDeviceIntRect& aRect,
                                 const InitData&) override;
   void Destroy() override;
-  float GetDPI() override;
   double GetDefaultScaleInternal() override;
   uint32_t GetMaxTouchPoints() const override;
   mozilla::DesktopToLayoutDeviceScale GetDesktopToDeviceScale() const override;
@@ -201,12 +210,11 @@ class nsWindow : public nsIWidget {
   nsSizeMode GetSizeMode() const { return mSizeMode; }
   nsSizeMode SizeMode() override { return mSizeMode; }
   void SetSizeMode(nsSizeMode aMode) override;
-  void GetWorkspaceID(nsAString& workspaceID) override;
-  void MoveToWorkspace(const nsAString& workspaceID) override;
   void Enable(bool aState) override;
   void SetFocus(Raise, mozilla::dom::CallerType aCallerType) override;
   LayoutDeviceIntRect GetBounds() override;
   LayoutDeviceIntRect GetScreenBounds() override;
+  DesktopIntRect GetClientArea() const { return mClientArea; }
   DesktopIntRect GetScreenBoundsUnscaled();
   LayoutDeviceIntRect GetClientBounds() override;
   LayoutDeviceIntSize GetClientSize() override;
@@ -248,6 +256,8 @@ class nsWindow : public nsIWidget {
 #ifdef MOZ_WAYLAND
     static Bounds ComputeWayland(const nsWindow*);
 #endif
+    static DesktopIntMargin ComputeCSDMargin(GtkWidget* aShell,
+                                             GtkWidget* aChild);
   };
   void SchedulePendingBounds();
   void MaybeRecomputeBounds();
@@ -286,7 +296,15 @@ class nsWindow : public nsIWidget {
   mozilla::widget::IMContextWrapper* GetIMContext() const { return mIMContext; }
 
   bool DispatchCommandEvent(nsAtom* aCommand);
-  bool DispatchContentCommandEvent(mozilla::EventMessage aMsg);
+
+  /**
+   * Return true if the command is enabled or the target is in a remote content.
+   * Return false if the command is disabled.
+   * Return error if TextEventDispatcher is not available or the event handler
+   * returns error.
+   */
+  mozilla::Result<bool, nsresult> DispatchContentCommandEvent(
+      mozilla::EventMessage);
 
   // event callbacks
   gboolean OnExposeEvent(cairo_t* cr);
@@ -337,7 +355,7 @@ class nsWindow : public nsIWidget {
       mozilla::gfx::DrawTarget* aDrawTarget,
       const LayoutDeviceIntRegion& aInvalidRegion) override;
 
-  virtual void SetProgress(unsigned long progressPercent) {};
+  virtual void SetProgress(unsigned long progressPercent) {}
 
   bool SynchronouslyRepaintOnResize() override;
 
@@ -496,8 +514,6 @@ class nsWindow : public nsIWidget {
 
   mozilla::UniquePtr<mozilla::widget::WaylandSurfaceLock> LockSurface();
 
-  bool ApplyEnterLeaveMutterWorkaround();
-
   void NotifyOcclusionState(mozilla::widget::OcclusionState aState) override;
 
   static nsWindow* GetWindow(GdkWindow* window);
@@ -534,14 +550,17 @@ class nsWindow : public nsIWidget {
  protected:
   virtual ~nsWindow();
 
-  virtual void CreateNative() = 0;
-  virtual void DestroyNative() = 0;
+  virtual void CreateNative() {}
+  virtual void DestroyNative() {}
 
   void ConfigureToplevelWindow();
-  virtual void ConfigureToplevelWindowNative() {};
+  virtual void ConfigureToplevelWindowNative() {}
 
-  virtual void EnableVSyncSource() {};
-  virtual void DisableVSyncSource() {};
+  // Native implementation of OnMap() event for X11/Wayland.
+  virtual void OnMapNative() {}
+
+  virtual void EnableVSyncSource() {}
+  virtual void DisableVSyncSource() {}
 
   // event handling code
   void DispatchActivateEvent(void);
@@ -603,6 +622,8 @@ class nsWindow : public nsIWidget {
 
   void CreateAndPutGdkScrollEvent(mozilla::LayoutDeviceIntPoint aPoint,
                                   double aDeltaX, double aDeltaY);
+
+  bool IsFullscreenSupported();
 
   nsCString mGtkWindowAppClass;
   nsCString mGtkWindowAppName;
@@ -769,6 +790,7 @@ class nsWindow : public nsIWidget {
 
   float mLastMotionPressure = 0.0f;
 
+  // Input region margin is stored in layout (scaled) coordinates.
   InputRegion mInputRegion;
 
   bool DragInProgress(void);

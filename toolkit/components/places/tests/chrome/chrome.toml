@@ -7,3 +7,5 @@ support-files = ["head.js"]
 support-files = ["browser_disableglobalhistory.xhtml"]
 
 ["test_cached_favicon.xhtml"]
+
+["test_page_icon.xhtml"]

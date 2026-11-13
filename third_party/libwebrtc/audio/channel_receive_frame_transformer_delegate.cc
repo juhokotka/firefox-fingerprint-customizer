@@ -17,6 +17,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <variant>
 
 #include "absl/base/nullability.h"
 #include "api/frame_transformer_interface.h"
@@ -60,6 +61,9 @@ class TransformableIncomingAudioFrame
   uint8_t GetPayloadType() const override { return header_.payloadType; }
   uint32_t GetSsrc() const override { return ssrc_; }
   uint32_t GetTimestamp() const override { return header_.timestamp; }
+  RtpTimestampInfo GetRtpTimestampInfo() const override {
+    return RtpTimestampWithOffset{header_.timestamp};
+  }
   std::span<const uint32_t> GetContributingSources() const override {
     return std::span<const uint32_t>(header_.arrOfCSRCs, header_.numCSRCs);
   }
@@ -142,9 +146,11 @@ ChannelReceiveFrameTransformerDelegate::ChannelReceiveFrameTransformerDelegate(
     ReceiveFrameCallback receive_frame_callback,
     scoped_refptr<FrameTransformerInterface> frame_transformer,
     TaskQueueBase* absl_nonnull channel_receive_thread)
-    : receive_frame_callback_(receive_frame_callback),
+    : receive_frame_callback_(std::move(receive_frame_callback)),
       frame_transformer_(std::move(frame_transformer)),
-      channel_receive_thread_(channel_receive_thread) {}
+      channel_receive_thread_(channel_receive_thread) {
+  RTC_DCHECK(receive_frame_callback_);
+}
 
 void ChannelReceiveFrameTransformerDelegate::Init() {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
@@ -167,7 +173,9 @@ void ChannelReceiveFrameTransformerDelegate::Transform(
     Timestamp receive_time) {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
   if (short_circuit_) {
-    receive_frame_callback_(packet, header, receive_time);
+    if (receive_frame_callback_) {
+      receive_frame_callback_(packet, header, receive_time);
+    }
   } else {
     frame_transformer_->Transform(
         std::make_unique<TransformableIncomingAudioFrame>(
@@ -206,7 +214,10 @@ void ChannelReceiveFrameTransformerDelegate::ReceiveFrame(
   if (frame->GetDirection() ==
       TransformableFrameInterface::Direction::kSender) {
     header.payloadType = transformed_frame->GetPayloadType();
-    header.timestamp = transformed_frame->GetTimestamp();
+    RTC_CHECK(std::holds_alternative<RtpTimestampWithOffset>(
+        transformed_frame->GetRtpTimestampInfo()));
+    header.timestamp = std::get<RtpTimestampWithOffset>(
+        transformed_frame->GetRtpTimestampInfo());
     header.ssrc = transformed_frame->GetSsrc();
     if (transformed_frame->AbsoluteCaptureTimestamp().has_value()) {
       header.extension.absolute_capture_time = AbsoluteCaptureTime();

@@ -63,10 +63,12 @@
   <string name="about_content" tools:ignore="BrandUsage">Is é Mozilla a tháirgeann %1$s.</string>
   <!-- Private Browsing -->
   <string name="private_browsing_common_myths">Gnáthmhiotais maidir le brabhsáil phríobháideach</string>
-  <!-- Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active. -->
-  <string name="private_browsing_a11y_session_announcement">Seisiún brabhsála príobháidí</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
+  <!--
+    Private Browsing
 
+    Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active.
+  -->
+  <string name="private_browsing_a11y_session_announcement">Seisiún brabhsála príobháidí</string>
   <!--
     Home screen icons - Long press shortcuts
 
@@ -75,11 +77,11 @@
   <string name="home_screen_shortcut_open_new_tab_2">Cluaisín nua</string>
   <!-- Shortcut action to open new private tab -->
   <string name="home_screen_shortcut_open_new_private_tab_2">Cluaisín nua príobháideach</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Button text for showing all the tabs in the tabs tray -->
+  <string name="recent_tabs_show_all">Taispeáin gach ceann</string>
+  <!-- Content description for the button which navigates the user to show all of their history. -->
+  <string name="past_explorations_show_all_content_description_2">Taispeáin gach taiscéalaíocht san am atá caite</string>
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Ar Ais</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Ar Aghaidh</string>
@@ -181,10 +183,6 @@
   <string name="search_suggestions_onboarding_title">Ceadaigh moltaí cuardaigh i seisiúin phríobháideacha?</string>
   <!-- Search suggestion onboarding hint description text, %s is the name of the app (for example "Firefox"). -->
   <string name="search_suggestions_onboarding_text">Comhroinneann %s gach uile rud a chuireann tú isteach sa mbarra suímh leis an inneall cuardaigh réamhshocraithe.</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!-- Text preview for smaller sized widgets -->
   <string name="search_widget_text_short">Cuardach</string>
   <!-- Text preview for larger sized widgets -->
@@ -195,7 +193,11 @@
     Title for the settings page
   -->
   <string name="settings">Socruithe</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">Ginearálta</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Maidir Leis</string>
@@ -371,12 +373,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d mír roghnaithe</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Na 7 lá is déanaí</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Na 30 lá is déanaí</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Nios sine</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">Níl aon stair anseo</string>
   <!--
@@ -431,12 +427,6 @@
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">Socruithe</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">Bileog Mearshocruithe</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">Molta</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -647,10 +637,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">Socruithe Cosanta</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">Ardchosaint ar Lorgaireacht</string>
   <!-- Text displayed that links to website about enhanced tracking protection -->
   <string name="preference_enhanced_tracking_protection_explanation_learn_more">Tuilleadh eolais</string>
@@ -666,8 +654,6 @@
   <string name="preference_enhanced_tracking_protection_custom_info_button">Rudaí a bhfuil cosc orthu le cosaint dhian</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">Coiscthe</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">Ceadaithe</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">Lorgairí Meán Sóisialta</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -684,10 +670,6 @@
   <string name="etp_tracking_content_title">Ábhar Lorgaireachta</string>
   <!-- Description of tracking content that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_description">Cuireann sé seo cosc ar fhógraí, ar fhíseáin, agus ar ábhar eile a bhfuil cód lorgaireachta ann. Imríonn sé tionchar ar fheidhmíocht suíomh áirithe.</string>
-  <!-- Enhanced Tracking Protection message that protection is currently on for this site -->
-  <string name="etp_panel_on">Tá cosaint AR SIÚL don suíomh seo</string>
-  <!-- Enhanced Tracking Protection message that protection is currently off for this site -->
-  <string name="etp_panel_off">Tá cosaint MÚCHTA don suíomh seo</string>
   <!-- Header for exceptions list for which sites enhanced tracking protection is always off -->
   <string name="enhanced_tracking_protection_exceptions">Tá Ardchosaint ar Lorgaireachta múchta do na suímh seo</string>
   <!-- About page link text to open what's new link. %s is the name of the app (for example "Firefox"). -->
@@ -763,8 +745,6 @@
   <string name="preference_accessibility_force_enable_zoom_summary">Cumasaigh chun pinseáil agus zúmáil a cheadú, fiú ar shuímh a chuireann cosc ar na gothaí seo.</string>
   <!-- Used as text for a link in ip_protection_onboarding_body. Make sure to adapt capitalization if the link is in the middle of the sentence. -->
   <string name="ip_protection_onboarding_body_link_promo">Tuilleadh eolais</string>
-  <!-- Snackbar (in-app pop-up notification) action button text that takes the user to the VPN settings screen. -->
-  <string name="ip_protection_data_limit_reached_snackbar_action">Socruithe</string>
   <!-- Title of the Add search engine screen -->
   <string name="search_engine_add_custom_search_engine_title">Cuir inneall cuardaigh leis</string>
   <!-- Title of the Edit search engine screen -->
@@ -798,19 +778,10 @@
   <!-- label shown when there are not site exceptions to show in the site exception settings -->
   <string name="no_site_exceptions">Gan eisceachtaí suímh</string>
   <!--
-    text shown before the issuer name to indicate who its verified by, %1$s is the name of
-    the certificate authority that verified the ticket
+    Context description text for the "Show all" button in the shortcuts home screen section
+    which navigates the user to a screen displaying all the shortcuts.
   -->
-  <string name="certificate_info_verified_by">Fíoraithe ag: %1$s</string>
+  <string name="homepage_shortcuts_show_all_content_description">Taispeáin gach aicearra</string>
   <!-- Title for the "Popular sites" section in the "Add to homepage" bottom sheet. -->
   <string name="homepage_shortcuts_popular_sites">Suíomhanna ardéilimh</string>
-  <!-- Translations feature -->
-
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

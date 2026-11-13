@@ -82,7 +82,9 @@ class InputModule extends RootBiDiModule {
       (eventName === "synthesizeWheelAtPoint" &&
         lazy.actions.useAsyncWheelEvents) ||
       (eventName == "synthesizeMouseAtPoint" &&
-        lazy.actions.useAsyncMouseEvents);
+        lazy.actions.useAsyncMouseEvents) ||
+      (eventName == "synthesizeTouchAtPoint" &&
+        lazy.actions.useAsyncTouchEvents);
 
     // TODO: Call the _dispatchEvent method of the windowglobal module once
     // chrome support was added for the message handler.
@@ -99,6 +101,12 @@ class InputModule extends RootBiDiModule {
           await lazy.event.synthesizeMouseAtPoint(
             details.x,
             details.y,
+            details.eventData,
+            context.topChromeWindow
+          );
+          break;
+        case "synthesizeTouchAtPoint":
+          await lazy.event.synthesizeTouchAtPoint(
             details.eventData,
             context.topChromeWindow
           );
@@ -290,7 +298,9 @@ class InputModule extends RootBiDiModule {
       lazy.pprint`Expected "context" to be a string, got ${contextId}`
     );
 
-    const context = this._getNavigable(contextId);
+    const context = this._getNavigable(contextId, {
+      supportsPrivilegedScope: true,
+    });
 
     // Bug 1821460: Fetch top-level browsing context.
     const inputState = this.#getInputState(context);
@@ -331,7 +341,9 @@ class InputModule extends RootBiDiModule {
       lazy.pprint`Expected "context" to be a string, got ${contextId}`
     );
 
-    const context = this._getNavigable(contextId);
+    const context = this._getNavigable(contextId, {
+      supportsPrivilegedScope: true,
+    });
 
     // Bug 1821460: Fetch top-level browsing context.
     const inputState = this.#getInputState(context);
@@ -397,6 +409,10 @@ class InputModule extends RootBiDiModule {
       element,
       files,
     });
+  }
+
+  static get supportedCommandsInRestrictedSession() {
+    return ["performActions", "releaseActions", "setFiles"];
   }
 
   static get supportedEvents() {

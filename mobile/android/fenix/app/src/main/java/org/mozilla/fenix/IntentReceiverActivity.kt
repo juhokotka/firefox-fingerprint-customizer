@@ -21,6 +21,7 @@ import mozilla.components.support.utils.INTENT_TYPE_PDF
 import mozilla.components.support.utils.ext.packageManagerCompatHelper
 import mozilla.components.support.utils.toSafeIntent
 import org.mozilla.fenix.GleanMetrics.Events
+import org.mozilla.fenix.GleanMetrics.SyncAuth
 import org.mozilla.fenix.HomeActivity.Companion.PRIVATE_BROWSING_MODE
 import org.mozilla.fenix.components.IntentProcessorType
 import org.mozilla.fenix.components.getType
@@ -31,9 +32,7 @@ import org.mozilla.fenix.perf.StartupTimeline
 import org.mozilla.fenix.shortcut.NewTabShortcutIntentProcessor
 import org.mozilla.fenix.shortcut.UninstallShortcutIntentProcessor
 
-/**
- * Processes incoming intents and sends them to the corresponding activity.
- */
+/** Processes incoming intents and sends them to the corresponding activity. */
 class IntentReceiverActivity : Activity() {
 
     private val logger = Logger("IntentReceiverActivity")
@@ -88,13 +87,22 @@ class IntentReceiverActivity : Activity() {
             Events.openedLink.record(Events.OpenedLinkExtra("NORMAL"))
         }
 
+        val data = intent.toSafeIntent().data
+        if (intent.action == Intent.ACTION_VIEW && isFxaPairingLink(data)) {
+            SyncAuth.pairingLinkOpened.record(
+                SyncAuth.PairingLinkOpenedExtra(
+                    campaignAttributed = components.settings.isUserPairingCampaignAttributed
+                )
+            )
+        }
+
         addReferrerInformation(intent)
 
         if (intent.type == INTENT_TYPE_PDF) {
             val referrerIsFenix = this.isIntentInternal()
             Events.openedExtPdf.record(Events.OpenedExtPdfExtra(referrerIsFenix))
             if (!referrerIsFenix) {
-                intent.toSafeIntent().data?.let(::persistUriReadPermission)
+                data?.let(::persistUriReadPermission)
             }
         }
 
@@ -135,17 +143,18 @@ class IntentReceiverActivity : Activity() {
     }
 
     private fun getIntentProcessors(private: Boolean): List<IntentProcessor> {
-        val modeDependentProcessors = if (private) {
-            listOf(
-                components.intentProcessors.privateCustomTabIntentProcessor,
-                components.intentProcessors.privateIntentProcessor,
-            )
-        } else {
-            listOf(
-                components.intentProcessors.customTabIntentProcessor,
-                components.intentProcessors.intentProcessor,
-            )
-        }
+        val modeDependentProcessors =
+            if (private) {
+                listOf(
+                    components.intentProcessors.privateCustomTabIntentProcessor,
+                    components.intentProcessors.privateIntentProcessor,
+                )
+            } else {
+                listOf(
+                    components.intentProcessors.customTabIntentProcessor,
+                    components.intentProcessors.intentProcessor,
+                )
+            }
 
         return components.intentProcessors.externalAppIntentProcessors +
             components.intentProcessors.fennecPageShortcutIntentProcessor +
@@ -153,7 +162,7 @@ class IntentReceiverActivity : Activity() {
             components.intentProcessors.webNotificationsIntentProcessor +
             components.intentProcessors.passwordManagerIntentProcessor +
             modeDependentProcessors +
-            NewTabShortcutIntentProcessor() +
+            NewTabShortcutIntentProcessor(components.settings.enableHomepageAsNewTab) +
             UninstallShortcutIntentProcessor()
     }
 
@@ -161,13 +170,14 @@ class IntentReceiverActivity : Activity() {
         // Pass along referrer information when possible.
         // unfortunately you can get a RuntimeException thrown from android here
         @Suppress("TooGenericExceptionCaught")
-        val r = try {
-            // NB: referrer can be spoofed by the calling application. Use with caution.
-            referrer
-        } catch (_: RuntimeException) {
-            // this could happen if the referrer intent contains data we can't deserialize
-            return
-        } ?: return
+        val r =
+            try {
+                // NB: referrer can be spoofed by the calling application. Use with caution.
+                referrer
+            } catch (_: RuntimeException) {
+                // this could happen if the referrer intent contains data we can't deserialize
+                return
+            } ?: return
         intent.putExtra(EXTRA_ACTIVITY_REFERRER_PACKAGE, r.host)
         r.host?.let { host ->
             try {
@@ -190,3 +200,14 @@ private fun Intent.stripUnwantedFlags() {
     // do not want to propagate this flag from the intent receiver activity to the browser.
     flags = flags and Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS.inv()
 }
+
+private val FXA_PAIRING_HOSTS = setOf("accounts.firefox.com", "accounts.stage.mozaws.net")
+private const val FXA_PAIRING_PATH_PREFIX = "/pair"
+
+/** Whether [uri] is a Firefox Accounts pairing link on the production or stage server. */
+@VisibleForTesting
+internal fun isFxaPairingLink(uri: Uri?): Boolean =
+    uri != null &&
+        uri.scheme == "https" &&
+        uri.host?.lowercase() in FXA_PAIRING_HOSTS &&
+        uri.path.orEmpty().startsWith(FXA_PAIRING_PATH_PREFIX)

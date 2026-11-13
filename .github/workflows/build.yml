@@ -24,12 +24,22 @@ jobs:
     name: Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
+    env:
+      # Headless runners have no notification center. mach's build-complete
+      # notification launches terminal-notifier on macOS, which hangs while
+      # holding the step's stdout pipe. The build step then never returns and
+      # the job is killed at the 6h limit even though the build already
+      # finished. MOZ_NOSPAM disables mach notifications on every platform.
+      MOZ_NOSPAM: "1"
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: macOS Apple Silicon
-            os: macos-14
+            # macos-14 was retired on 2026-11-02 and its runner configuration
+            # is no longer accepted. macos-15 is the oldest supported arm64
+            # (M-series) label for public repositories.
+            os: macos-15
             artifact_ext: zip
             archive_name: macos-arm64
             toolchain_cache_path: /Users/runner/.mozbuild
@@ -132,6 +142,13 @@ jobs:
           sudo apt-get clean
           docker system prune -af --volumes || true
           df -h /
+          # Do NOT add swap here. A 12 GiB swapfile was tried and made things
+          # worse: instead of a clean OOM (exit 143, log preserved) the runner
+          # thrashed, lost contact with the server, and GitHub discarded the
+          # entire log blob ("The hosted runner lost communication with the
+          # server ... starves it for CPU/Memory"). Peak memory must be lowered
+          # at the source, not padded with virtual memory. The Build Firefox
+          # step runs a memory sampler so we can see the real peak.
 
       - name: Free disk space (macOS)
         if: runner.os == 'macOS'
@@ -326,7 +343,37 @@ jobs:
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
         run: |
           if command -v sccache >/dev/null 2>&1; then sccache --show-stats || true; fi
-          ./mach build
+          # mach assumes 1.0 GiB per job, but Firefox 160 unified-build units
+          # plus gkrust/rustc need far more. On the 16 GiB Windows/Linux runners
+          # the auto-selected -j4 exhausts RAM/pagefile late in the build
+          # (LLVM out of memory / runner shutdown signal). Cap them at 2.
+          # macOS (3 cores, 7 GiB) completes at its default -j3 and is already
+          # close to the 360-minute job limit, so leave it untouched.
+          # Diagnostic pass: sample Linux memory every 30s so the build log
+          # records the exact peak and the process responsible before the
+          # runner dies. No swap is configured, so the log should survive.
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            echo "=== Linux memory limits (diagnostic) ==="
+            cat /sys/fs/cgroup/memory.max 2>/dev/null || true
+            cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || true
+            free -m
+            (
+              set +e
+              while true; do
+                sleep 30
+                echo "--- MEM SAMPLE $(date -u +%H:%M:%S) ---"
+                free -m
+                ps -eo pid,rss,comm --sort=-rss | head -8
+              done
+            ) &
+            MONITOR_PID=$!
+            trap 'kill "$MONITOR_PID" 2>/dev/null || true' EXIT
+          fi
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            ./mach build
+          else
+            ./mach build -j2
+          fi
           if command -v sccache >/dev/null 2>&1; then sccache --show-stats || true; fi
 
       # ── 12. Package ──

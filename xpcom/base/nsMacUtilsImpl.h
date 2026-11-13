@@ -5,10 +5,10 @@
 #ifndef nsMacUtilsImpl_h_
 #define nsMacUtilsImpl_h_
 
-#include "nsString.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPtr.h"
+#include "nsString.h"
 
 using mozilla::Atomic;
 using mozilla::StaticAutoPtr;
@@ -65,6 +65,12 @@ nsCString CodeSignatureTypeToString(CodeSignatureType aType);
 
 // Returns the signature type for the binary at `aPath`.
 CodeSignatureType GetSignatureType(const nsCString& aPath);
+
+// Returns the path to the main executable of the bundle at `aBundlePath`, as
+// named by the bundle's Info.plist. Fails if the bundle or the executable it
+// names is not on disk.
+nsresult GetExecutablePathFromBundle(const nsCString& aBundlePath,
+                                     nsACString& aExecutablePath);
 
 }  // namespace nsMacUtilsImpl
 

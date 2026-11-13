@@ -7,6 +7,7 @@
 #include "DriftCompensation.h"
 #include "MediaTrackGraph.h"
 #include "MediaTrackListener.h"
+#include "TimeUnits.h"
 #include "VP8TrackEncoder.h"
 #include "WebMWriter.h"  // TODO: it's weird to include muxer header to get the class definition of VP8 METADATA
 #include "YUVBufferGenerator.h"
@@ -68,6 +69,79 @@ class TestVP8TrackEncoder : public VP8TrackEncoder {
 
   MediaQueue<EncodedFrame> mEncodedVideoQueue;
 };
+
+static nsTArray<uint64_t> EncodeFrameDurations(
+    const nsTArray<TimeDuration>& aFrameDurations) {
+  TestVP8TrackEncoder encoder;
+  YUVBufferGenerator generator;
+  generator.Init(mozilla::gfx::IntSize(640, 480));
+  TimeStamp now = TimeStamp::Now();
+
+  VideoSegment segment;
+  TimeDuration endOffset;
+  for (const TimeDuration& duration : aFrameDurations) {
+    segment.AppendFrame(generator.GenerateI420Image(), generator.GetSize(),
+                        PRINCIPAL_HANDLE_NONE, false, now + endOffset);
+    endOffset += duration;
+  }
+
+  encoder.SetStartOffset(now);
+  encoder.AppendVideoSegment(std::move(segment));
+  encoder.AdvanceCurrentTime(now + endOffset);
+  encoder.NotifyEndOfStream();
+
+  EXPECT_TRUE(encoder.IsEncodingComplete());
+  EXPECT_TRUE(encoder.mEncodedVideoQueue.IsFinished());
+
+  nsTArray<uint64_t> durations;
+  while (RefPtr<EncodedFrame> frame = encoder.mEncodedVideoQueue.PopFront()) {
+    durations.AppendElement(frame->mDuration);
+  }
+  return durations;
+}
+
+static uint64_t SumDurations(const nsTArray<uint64_t>& aDurations) {
+  uint64_t total = 0;
+  for (uint64_t duration : aDurations) {
+    total += duration;
+  }
+  return total;
+}
+
+TEST(VP8VideoTrackEncoder, ExactMillisecondDurationsPreserveTimeline)
+{
+  nsTArray<TimeDuration> frameDurations;
+  frameDurations.AppendElement(TimeDuration::FromMilliseconds(33));
+  frameDurations.AppendElement(TimeDuration::FromMilliseconds(34));
+  frameDurations.AppendElement(TimeDuration::FromMilliseconds(33));
+
+  nsTArray<uint64_t> durations = EncodeFrameDurations(frameDurations);
+
+  ASSERT_EQ(3U, durations.Length());
+  EXPECT_EQ(33000U, durations[0]);
+  EXPECT_EQ(34000U, durations[1]);
+  EXPECT_EQ(33000U, durations[2]);
+  EXPECT_EQ(100000U, SumDurations(durations));
+}
+
+TEST(VP8VideoTrackEncoder, SubTickDurationsUseNearestTrackTick)
+{
+  // Calculate the number of microseconds that will round to one track tick:
+  // ceil(1 second in usecs / (2 * track rate))
+  const int64_t usecsThatRoundToOneTrackTick =
+      (PR_USEC_PER_SEC + int64_t(VIDEO_TRACK_RATE) * 2 - 1) /
+      (int64_t(VIDEO_TRACK_RATE) * 2);
+
+  nsTArray<TimeDuration> frameDurations;
+  frameDurations.AppendElement(
+      TimeDuration::FromMicroseconds(usecsThatRoundToOneTrackTick));
+
+  nsTArray<uint64_t> durations = EncodeFrameDurations(frameDurations);
+
+  ASSERT_EQ(1U, durations.Length());
+  EXPECT_EQ(uint64_t(media::TimeUnit(1, VIDEO_TRACK_RATE).ToMicroseconds()),
+            durations[0]);
+}
 
 // Init test
 TEST(VP8VideoTrackEncoder, Initialization)
@@ -147,6 +221,84 @@ TEST(VP8VideoTrackEncoder, FrameEncode)
   EXPECT_TRUE(encoder.IsEncodingComplete());
   EXPECT_TRUE(encoder.mEncodedVideoQueue.IsFinished());
   EXPECT_FALSE(encoder.mEncodedVideoQueue.AtEndOfStream());
+}
+
+struct FrameSpec {
+  gfx::IntSize mIntrinsicSize;
+  bool mForceBlack;
+  TimeDuration mDuration;
+};
+
+// Encodes the given frames through a fresh encoder and returns the resulting
+// packets. All frames share one bright (non-black) source image, so a muted
+// frame differs from an unmuted one only through the encoder's black-frame
+// substitution.
+static nsTArray<RefPtr<EncodedFrame>> EncodeFrames(
+    const TimeStamp& aStart, const gfx::IntSize& aCodedSize,
+    const nsTArray<FrameSpec>& aFrames) {
+  YUVBufferGenerator generator;
+  generator.Init(aCodedSize, /* aLuma = */ 180, /* aChroma = */ 128);
+  TestVP8TrackEncoder encoder;
+  VideoSegment segment;
+  TimeDuration offset;
+  for (const FrameSpec& frame : aFrames) {
+    segment.AppendFrame(generator.GenerateI420Image(), frame.mIntrinsicSize,
+                        PRINCIPAL_HANDLE_NONE, frame.mForceBlack,
+                        aStart + offset);
+    offset += frame.mDuration;
+  }
+  encoder.SetStartOffset(aStart);
+  encoder.AppendVideoSegment(std::move(segment));
+  encoder.AdvanceCurrentTime(aStart + offset);
+  encoder.NotifyEndOfStream();
+  EXPECT_TRUE(encoder.IsEncodingComplete());
+  EXPECT_TRUE(encoder.mEncodedVideoQueue.IsFinished());
+  nsTArray<RefPtr<EncodedFrame>> frames;
+  while (RefPtr<EncodedFrame> frame = encoder.mEncodedVideoQueue.PopFront()) {
+    frames.AppendElement(std::move(frame));
+  }
+  return frames;
+}
+
+// A muted VideoChunk keeps its source image but records as black. When its
+// intrinsic size exceeds the black-image dimension cap, the encoder must still
+// emit the same black frame as an ordinary muted chunk. Verify this by
+// comparing encoded packets: a muted frame with an oversized intrinsic size
+// must encode identically to an ordinary muted frame, and both must differ from
+// an unmuted control.
+TEST(VP8VideoTrackEncoder, MutedFrameWithLargeIntrinsicSizeEncodesBlack)
+{
+  const gfx::IntSize codedSize(64, 64);
+  const gfx::IntSize largeIntrinsicSize(65535, 65535);
+  const TimeDuration oneSecond = TimeDuration::FromSeconds(1);
+  const TimeStamp start = TimeStamp::Now();
+
+  const nsTArray<RefPtr<EncodedFrame>> normalMutedFrames =
+      EncodeFrames(start, codedSize,
+                   nsTArray<FrameSpec>{{codedSize, false, oneSecond},
+                                       {codedSize, true, oneSecond}});
+  const nsTArray<RefPtr<EncodedFrame>> largeMutedFrames =
+      EncodeFrames(start, codedSize,
+                   nsTArray<FrameSpec>{{codedSize, false, oneSecond},
+                                       {largeIntrinsicSize, true, oneSecond}});
+  const nsTArray<RefPtr<EncodedFrame>> unmutedFrames =
+      EncodeFrames(start, codedSize,
+                   nsTArray<FrameSpec>{{codedSize, false, oneSecond},
+                                       {codedSize, false, oneSecond}});
+
+  ASSERT_GE(normalMutedFrames.Length(), 2u);
+  ASSERT_EQ(normalMutedFrames.Length(), largeMutedFrames.Length());
+  ASSERT_EQ(normalMutedFrames.Length(), unmutedFrames.Length());
+
+  const RefPtr<EncodedFrame>& normalMuted = normalMutedFrames.LastElement();
+  const RefPtr<EncodedFrame>& largeMuted = largeMutedFrames.LastElement();
+  const RefPtr<EncodedFrame>& unmuted = unmutedFrames.LastElement();
+
+  EXPECT_EQ(normalMuted->mFrameType, largeMuted->mFrameType);
+  EXPECT_EQ(normalMuted->mDuration, largeMuted->mDuration);
+  EXPECT_TRUE(*normalMuted->mFrameData == *largeMuted->mFrameData);
+  EXPECT_FALSE(*normalMuted->mFrameData == *unmuted->mFrameData);
+  EXPECT_FALSE(*largeMuted->mFrameData == *unmuted->mFrameData);
 }
 
 // Test that encoding a single frame gives useful output.

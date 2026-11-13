@@ -17,8 +17,6 @@
   <string name="tab_tray_add_new_collection_name">Isem</string>
   <!-- Text for the positive action button -->
   <string name="open_in_app_cfr_positive_button_text">Ddu ɣer tisɣal</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
   <string name="camera_permissions_needed_positive_button_text">Ddu ɣer tisɣal</string>
   <!--
@@ -56,10 +54,6 @@
   <string name="search_suggestions_onboarding_do_not_allow_button">Ad ur ssirig</string>
   <!-- Search engine suggestion title text. %s is the name of the suggested engine. -->
   <string name="search_engine_suggestions_title">Rzu %s</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!-- Text preview for smaller sized widgets -->
   <string name="search_widget_text_short">Rzu</string>
   <!-- Text preview for larger sized widgets -->
@@ -70,7 +64,11 @@
     Title for the settings page
   -->
   <string name="settings">Tisɣal</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">Amatay</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Ɣef</string>
@@ -189,16 +187,6 @@
   <string name="remove_top_site">Kkes</string>
   <!-- Context description text for the button to delete a single history item -->
   <string name="history_delete_item">Kkes</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">Ass-a</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">Assennaṭ</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">7 n wussan imeggura</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">30 n wussan imeggura</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Iqburen</string>
   <!-- Close tab button text on the tab crash page -->
   <string name="tab_crash_close">Mdel aseksel</string>
   <!-- Screen title for adding a bookmarks folder -->
@@ -278,8 +266,6 @@
   <string name="preferences_delete_browsing_data_downloads">Agamen</string>
   <!-- Text for the allow button for the data deletion dialog -->
   <string name="delete_browsing_data_prompt_allow">Kkes</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">Ittusureg</string>
   <!-- About page link text to open know your rights link -->
   <string name="about_know_your_rights">Issin izerfan-nnek/m</string>
   <!-- Add button text for the Add to Homescreen dialog -->
@@ -322,13 +308,4 @@
   <string name="voice_search_explainer">ssiwel dɣi</string>
   <!-- Title text displayed in the rename top site dialog. -->
   <string name="top_sites_rename_dialog_title">Isem</string>
-  <!-- Translations feature -->
-
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

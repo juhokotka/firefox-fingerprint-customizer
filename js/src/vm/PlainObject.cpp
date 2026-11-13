@@ -6,8 +6,6 @@
  * JS object implementation.
  */
 
-#include "vm/PlainObject-inl.h"
-
 #include "mozilla/Assertions.h"  // MOZ_ASSERT
 
 #include "jspubtd.h"  // JSProto_Object
@@ -21,6 +19,7 @@
 
 #include "vm/JSFunction-inl.h"
 #include "vm/JSObject-inl.h"  // js::NewObjectWithGroup, js::NewObjectGCKind
+#include "vm/PlainObject-inl.h"
 
 using namespace js;
 

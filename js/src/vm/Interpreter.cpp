@@ -6,8 +6,6 @@
  * JavaScript bytecode interpreter.
  */
 
-#include "vm/Interpreter-inl.h"
-
 #include "mozilla/DebugOnly.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Maybe.h"
@@ -37,16 +35,16 @@
 #include "js/friend/WindowProxy.h"    // js::IsWindowProxy
 #include "js/Printer.h"
 #include "proxy/DeadObjectProxy.h"
+#include "util/Denormals.h"
 #include "util/StringBuilder.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/BigIntType.h"
+#include "vm/BoundFunctionObject.h"
 #include "vm/BytecodeUtil.h"  // JSDVG_SEARCH_STACK
 #include "vm/ConstantCompareOperand.h"
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-#  include "vm/ErrorObject.h"
-#endif
 #include "vm/EqualityOperations.h"  // js::StrictlyEqual
+#include "vm/ErrorObject.h"
 #include "vm/GeneratorObject.h"
 #include "vm/Iteration.h"
 #include "vm/JSContext.h"
@@ -61,18 +59,16 @@
 #include "vm/StringType.h"
 #include "vm/ThrowMsgKind.h"     // ThrowMsgKind
 #include "vm/TypeofEqOperand.h"  // TypeofEqOperand
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-#  include "vm/UsingHint.h"
-#endif
+#include "vm/UsingHint.h"
+
 #include "builtin/Boolean-inl.h"
 #include "debugger/DebugAPI-inl.h"
 #include "gc/WeakMap-inl.h"
 #include "vm/ArgumentsObject-inl.h"
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-#  include "vm/DisposableRecord-inl.h"
-#endif
+#include "vm/DisposableRecord-inl.h"
 #include "vm/EnvironmentObject-inl.h"
 #include "vm/GeckoProfiler-inl.h"
+#include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/ObjectOperations-inl.h"
@@ -340,11 +336,45 @@ InterpreterFrame* ExecuteState::pushInterpreterFrame(JSContext* cx) {
                                                  evalInFrame_);
 }
 
+GeneratorResumeState::GeneratorResumeState(
+    JSContext* cx, Handle<AbstractGeneratorObject*> genObj,
+    HandleValue resumeValue, GeneratorResumeKind resumeKind,
+    MutableHandleValue result)
+    : RunState(cx, GeneratorResume, genObj->script()),
+      genObj_(genObj),
+      resumeValue_(resumeValue),
+      resumeKind_(resumeKind),
+      result_(result) {
+#ifdef DEBUG
+  // An `await` is only resumed by a promise reaction, which never forces a
+  // return. BytecodeEmitter::emitCheckAwaitResumeKind relies on this.
+  JSScript* script = genObj->script();
+  jsbytecode* pc =
+      script->offsetToPC(script->resumeOffsets()[genObj->resumeIndex()]);
+  MOZ_ASSERT_IF(JSOp(*SuspendPCForAfterYield(pc)) == JSOp::Await,
+                resumeKind != GeneratorResumeKind::Return);
+#endif
+}
+
+InterpreterFrame* GeneratorResumeState::pushInterpreterFrame(JSContext* cx) {
+  RootedObject envChain(cx, &genObj_->environmentChain());
+  if (genObj_->isModuleGenerator()) {
+    RootedScript script(cx, genObj_->module().script());
+    return cx->interpreterStack().pushExecuteFrame(
+        cx, script, envChain, NullFramePtr(), /* reserveResumeArgs = */ true);
+  }
+  RootedFunction callee(cx, &genObj_->callee());
+  return cx->interpreterStack().pushGeneratorResumeFrame(cx, callee, envChain);
+}
+
 InterpreterFrame* RunState::pushInterpreterFrame(JSContext* cx) {
   if (isInvoke()) {
     return asInvoke()->pushInterpreterFrame(cx);
   }
-  return asExecute()->pushInterpreterFrame(cx);
+  if (isExecute()) {
+    return asExecute()->pushInterpreterFrame(cx);
+  }
+  return asGeneratorResume()->pushInterpreterFrame(cx);
 }
 
 static MOZ_ALWAYS_INLINE bool MaybeEnterInterpreterTrampoline(JSContext* cx,
@@ -413,6 +443,9 @@ bool js::RunScript(JSContext* cx, RunState& state) {
 
   MOZ_ASSERT_IF(cx->runtime()->hasJitRuntime(),
                 !cx->runtime()->jitRuntime()->disallowArbitraryCode());
+  MOZ_ASSERT_IF(cx->runtime()->hasJitRuntime(),
+                !cx->runtime()->jitRuntime()->inPureCall());
+  MOZ_ASSERT(!DenormalsDisabled());
 
   // Since any script can conceivably GC, make sure it's safe to do so.
   cx->verifyIsSafeToGC();
@@ -477,7 +510,8 @@ bool js::RunScript(JSContext* cx, RunState& state) {
 
 STATIC_PRECONDITION_ASSUME(ubound(args.argv_) >= argc)
 MOZ_ALWAYS_INLINE bool CallJSNative(JSContext* cx, Native native,
-                                    CallReason reason, const CallArgs& args) {
+                                    CallReason reason, const CallArgs& args,
+                                    bool switchToCalleeRealm = true) {
   AutoCheckRecursionLimit recursion(cx);
   if (!recursion.check(cx)) {
     return false;
@@ -494,7 +528,14 @@ MOZ_ALWAYS_INLINE bool CallJSNative(JSContext* cx, Native native,
   cx->check(args);
   MOZ_ASSERT(!args.callee().is<ProxyObject>());
 
-  AutoRealm ar(cx, &args.callee());
+  // Switch to the callee's realm. Assert we don't do this for bound functions
+  // because they don't have an associated realm in the spec.
+  mozilla::Maybe<AutoRealm> ar;
+  if (switchToCalleeRealm) {
+    MOZ_ASSERT(!args.callee().is<BoundFunctionObject>());
+    ar.emplace(cx, &args.callee());
+  }
+
   bool ok = native(cx, args.length(), args.base());
   if (ok) {
     cx->check(args.rval());
@@ -506,14 +547,15 @@ MOZ_ALWAYS_INLINE bool CallJSNative(JSContext* cx, Native native,
 }
 
 STATIC_PRECONDITION(ubound(args.argv_) >= argc)
-MOZ_ALWAYS_INLINE bool CallJSNativeConstructor(JSContext* cx, Native native,
-                                               const CallArgs& args) {
+MOZ_ALWAYS_INLINE bool CallJSNativeConstructor(
+    JSContext* cx, Native native, const CallArgs& args,
+    bool switchToCalleeRealm = true) {
 #ifdef DEBUG
   RootedObject callee(cx, &args.callee());
 #endif
 
   MOZ_ASSERT(args.thisv().isMagic());
-  if (!CallJSNative(cx, native, CallReason::Call, args)) {
+  if (!CallJSNative(cx, native, CallReason::Call, args, switchToCalleeRealm)) {
     return false;
   }
 
@@ -577,7 +619,8 @@ bool js::InternalCallOrConstruct(JSContext* cx, const CallArgs& args,
     JSNative call = args.callee().callHook();
     MOZ_ASSERT(call, "isCallable without a callHook?");
 
-    return CallJSNative(cx, call, reason, args);
+    bool switchToCalleeRealm = (call != BoundFunctionObject::call);
+    return CallJSNative(cx, call, reason, args, switchToCalleeRealm);
   }
 
   /* Invoke native functions. */
@@ -738,7 +781,8 @@ static bool InternalConstruct(JSContext* cx, const AnyConstructArgs& args,
   JSNative construct = callee.constructHook();
   MOZ_ASSERT(construct != nullptr, "IsConstructor without a construct hook?");
 
-  return CallJSNativeConstructor(cx, construct, args);
+  bool switchToCalleeRealm = (construct != BoundFunctionObject::construct);
+  return CallJSNativeConstructor(cx, construct, args, switchToCalleeRealm);
 }
 
 // Check that |callee|, the callee in a |new| expression, is a constructor.
@@ -1206,11 +1250,6 @@ static HandleErrorContinuation ProcessTryNotes(JSContext* cx,
 
     switch (tn->kind()) {
       case TryNoteKind::Catch:
-        /* Catch cannot intercept the closing of a generator. */
-        if (cx->isClosingGenerator()) {
-          break;
-        }
-
         SettleOnTryNote(cx, tn, ei, regs);
         return CatchContinuation;
 
@@ -1249,29 +1288,12 @@ static HandleErrorContinuation ProcessTryNotes(JSContext* cx,
       case TryNoteKind::Loop:
         break;
 
-      // TryNoteKind::ForOfIterClose is handled internally by the try note
-      // iterator.
       default:
         MOZ_CRASH("Invalid try note");
     }
   }
 
   return SuccessfulReturnContinuation;
-}
-
-bool js::HandleClosingGeneratorReturn(JSContext* cx, AbstractFramePtr frame,
-                                      bool ok) {
-  /*
-   * Propagate the exception or error to the caller unless the exception
-   * is an asynchronous return from a generator.
-   */
-  if (cx->isClosingGenerator()) {
-    cx->clearPendingException();
-    ok = true;
-    auto* genObj = GetGeneratorObjectForFrame(cx, frame);
-    genObj->setClosed(cx);
-  }
-  return ok;
 }
 
 static HandleErrorContinuation HandleError(JSContext* cx,
@@ -1294,16 +1316,14 @@ static HandleErrorContinuation HandleError(JSContext* cx,
 again:
   if (cx->isExceptionPending()) {
     /* Call debugger throw hooks. */
-    if (!cx->isClosingGenerator()) {
-      if (!DebugAPI::onExceptionUnwind(cx, regs.fp())) {
-        if (!cx->isExceptionPending()) {
-          goto again;
-        }
+    if (!DebugAPI::onExceptionUnwind(cx, regs.fp())) {
+      if (!cx->isExceptionPending()) {
+        goto again;
       }
-      // Ensure that the debugger hasn't returned 'true' while clearing the
-      // exception state.
-      MOZ_ASSERT(cx->isExceptionPending());
     }
+    // Ensure that the debugger hasn't returned 'true' while clearing the
+    // exception state.
+    MOZ_ASSERT(cx->isExceptionPending());
 
     HandleErrorContinuation res = ProcessTryNotes(cx, ei, regs);
     switch (res) {
@@ -1319,8 +1339,6 @@ again:
                       regs.fp()->script()->maybeGetPCCounts(regs.pc));
         return res;
     }
-
-    ok = HandleClosingGeneratorReturn(cx, regs.fp(), ok);
   } else {
     UnwindIteratorsForUncatchableException(cx, regs);
 
@@ -1624,7 +1642,6 @@ void js::ReportInNotObjectError(JSContext* cx, HandleValue lref,
                             InformalValueTypeName(rref));
 }
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
 // Explicit Resource Management Proposal
 // 7.5.6 GetDisposeMethod ( V, hint )
 // https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-getdisposemethod
@@ -1665,7 +1682,7 @@ bool js::SyncDisposalClosure(JSContext* cx, unsigned argc, JS::Value* vp) {
   }
 
   // Step 1.b.ii.1.f. Return promiseCapability.[[Promise]].
-  args.rval().set(JS::ObjectValue(*promiseCapability));
+  args.rval().setObject(*promiseCapability);
   return true;
 }
 
@@ -1747,7 +1764,7 @@ bool js::AddDisposableResourceToCapability(JSContext* cx,
     }
     asyncWrapper->initExtendedSlot(uint8_t(SyncDisposalClosureSlots::Method),
                                    method);
-    disposeMethod.set(JS::ObjectValue(*asyncWrapper));
+    disposeMethod.setObject(*asyncWrapper);
   } else {
     disposeMethod.set(method);
   }
@@ -1761,7 +1778,6 @@ bool js::AddDisposableResourceToCapability(JSContext* cx,
   return NewbornArrayPush(cx, disposeCapability,
                           JS::ObjectValue(*disposableRecord));
 }
-#endif
 
 bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
                                                            RunState& state) {
@@ -1942,18 +1958,26 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
   RootedField<JSScript*> rootScript0(roots);
   RootedField<Scope*> rootScope0(roots);
 
-  DebugOnly<uint32_t> blockDepth;
-
   /* State communicated between non-local jumps: */
   bool interpReturnOK;
   bool frameHalfInitialized;
 
-  if (!activation.entryFrame()->prologue(cx)) {
-    goto prologue_error;
-  }
-
-  if (!DebugAPI::onEnterFrame(cx, activation.entryFrame())) {
-    goto error;
+  if (state.isGeneratorResume()) {
+    const GeneratorResumeState& genState = *state.asGeneratorResume();
+    activation.setEnteredForGeneratorResume();
+    AbstractGeneratorObject::resume(cx, activation, genState.generator(),
+                                    genState.resumeValue(),
+                                    genState.resumeKind());
+    if (!probes::EnterScript(cx, script, script->function(), entryFrame)) {
+      goto error;
+    }
+  } else {
+    if (!entryFrame->prologue(cx)) {
+      goto prologue_error;
+    }
+    if (!DebugAPI::onEnterFrame(cx, entryFrame)) {
+      goto error;
+    }
   }
 
   // Increment the coverage for the main entry point.
@@ -1976,8 +2000,11 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
       }
 
       if (script->isDebuggee()) {
+        // Suppress breakpoints/stepping until after the JSOp::AfterYield op.
+        bool suppressTrap = REGS.fp()->isResumingGenerator();
+
         if (DebugAPI::stepModeEnabled(script)) {
-          if (!DebugAPI::onSingleStep(cx)) {
+          if (!suppressTrap && !DebugAPI::onSingleStep(cx)) {
             goto error;
           }
           moreInterrupts = true;
@@ -1988,7 +2015,7 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
         }
 
         if (DebugAPI::hasBreakpointsAt(script, REGS.pc)) {
-          if (!DebugAPI::onTrap(cx)) {
+          if (!suppressTrap && !DebugAPI::onTrap(cx)) {
             goto error;
           }
         }
@@ -2066,12 +2093,6 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
     CASE(Lineno)
     END_CASE(Lineno)
 
-    CASE(ForceInterpreter) {
-      // Ensure pattern matching still works.
-      MOZ_ASSERT(script->hasForceInterpreterOp());
-    }
-    END_CASE(ForceInterpreter)
-
     CASE(Undefined) { PUSH_UNDEFINED(); }
     END_CASE(Undefined)
 
@@ -2114,7 +2135,6 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
     }
     END_CASE(LeaveWith)
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
     CASE(AddDisposable) {
       ReservedRooted<JSObject*> env(&rootObject0,
                                     REGS.fp()->environmentChain());
@@ -2166,7 +2186,6 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
       PUSH_OBJECT(*errorObj);
     }
     END_CASE(CreateSuppressedError)
-#endif
 
     CASE(Return) {
       POP_RETURN_VALUE();
@@ -2225,11 +2244,10 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
 
         goto error;
       } else {
-        // Stack should be empty for the outer frame, unless we executed the
-        // first |await| expression in an async function.
-        MOZ_ASSERT(REGS.stackDepth() == 0 ||
-                   (JSOp(*REGS.pc) == JSOp::Await &&
-                    !REGS.fp()->isResumedGenerator()));
+        // Stack should be empty for the activation's entry frame, unless we
+        // suspended at a yield or await.
+        MOZ_ASSERT(REGS.stackDepth() == 0 || JSOp(*REGS.pc) == JSOp::Await ||
+                   JSOp(*REGS.pc) == JSOp::Yield);
       }
       goto exit;
     }
@@ -2418,12 +2436,6 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
       REGS.sp[-1].setBoolean(result);
     }
     END_CASE(OptimizeGetIterator)
-
-    CASE(IsGenClosing) {
-      bool b = REGS.sp[-1].isMagic(JS_GENERATOR_CLOSING);
-      PUSH_BOOLEAN(b);
-    }
-    END_CASE(IsGenClosing)
 
     CASE(Dup) {
       MOZ_ASSERT(REGS.stackDepth() >= 1);
@@ -3334,13 +3346,13 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
           // MaybeEnterInterpreterTrampoline so we can generate an
           // entry trampoline for the new frame.
           if (jit::JitOptions.emitInterpreterEntryTrampoline) {
-            if (MaybeEnterInterpreterTrampoline(cx, state)) {
-              interpReturnOK = true;
-              CHECK_BRANCH();
-              REGS.sp = args.spAfterCall();
-              goto jit_return;
+            if (!MaybeEnterInterpreterTrampoline(cx, state)) {
+              goto error;
             }
-            goto error;
+            interpReturnOK = true;
+            CHECK_BRANCH();
+            REGS.sp = args.spAfterCall();
+            goto jit_return;
           }
 #endif
         }
@@ -3766,9 +3778,13 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
 
     CASE(CanSkipAwait) {
       ReservedRooted<Value> val(&rootValue0, REGS.sp[-1]);
-      bool canSkip;
-      if (!CanSkipAwait(cx, val, &canSkip)) {
-        goto error;
+      // The await can only be skipped when this is the first frame of its
+      // activation.
+      bool canSkip = false;
+      if (REGS.fp() == activation.entryFrame()) {
+        if (!CanSkipAwait(cx, val, &canSkip)) {
+          goto error;
+        }
       }
 
       PUSH_BOOLEAN(canSkip);
@@ -4224,36 +4240,55 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
     }
     END_CASE(ResumeKind)
 
-    CASE(CheckResumeKind) {
-      int32_t kindInt = REGS.sp[-1].toInt32();
-      GeneratorResumeKind resumeKind = IntToResumeKind(kindInt);
-      if (MOZ_UNLIKELY(resumeKind != GeneratorResumeKind::Next)) {
-        ReservedRooted<Value> val(&rootValue0, REGS.sp[-3]);
-        Rooted<AbstractGeneratorObject*> gen(
-            cx, &REGS.sp[-2].toObject().as<AbstractGeneratorObject>());
-        MOZ_ALWAYS_FALSE(GeneratorThrowOrReturn(cx, activation.regs().fp(), gen,
-                                                val, resumeKind));
-        goto error;
-      }
-      REGS.sp -= 2;
-    }
-    END_CASE(CheckResumeKind)
-
     CASE(Resume) {
       {
         Rooted<AbstractGeneratorObject*> gen(
             cx, &REGS.sp[-3].toObject().as<AbstractGeneratorObject>());
         ReservedRooted<Value> val(&rootValue0, REGS.sp[-2]);
-        ReservedRooted<Value> resumeKindVal(&rootValue1, REGS.sp[-1]);
+        GeneratorResumeKind resumeKind = IntToResumeKind(REGS.sp[-1].toInt32());
+
+        // If the generator has JIT code, try to resume into it.
+        {
+          MutableHandle<Value> rval = REGS.stackHandleAt(-3);
+          GeneratorResumeState state(cx, gen, val, resumeKind, rval);
+          AutoRealm ar(cx, gen);
+          jit::EnterJitStatus status = jit::MaybeEnterJit(cx, state);
+          switch (status) {
+            case jit::EnterJitStatus::Error:
+              goto error;
+            case jit::EnterJitStatus::Ok:
+              REGS.sp -= 2;
+              interpReturnOK = true;
+              goto jit_return;
+            case jit::EnterJitStatus::NotEntered:
+              break;
+          }
+
+#ifdef NIGHTLY_BUILD
+          // If entry trampolines are enabled, call back into
+          // MaybeEnterInterpreterTrampoline so we can generate an entry
+          // trampoline for the new frame.
+          if (jit::JitOptions.emitInterpreterEntryTrampoline) {
+            if (!MaybeEnterInterpreterTrampoline(cx, state)) {
+              goto error;
+            }
+            REGS.sp -= 2;
+            interpReturnOK = true;
+            goto jit_return;
+          }
+#endif
+        }
 
         // popInlineFrame expects there to be an additional value on the stack
         // to pop off, so leave "gen" on the stack.
         REGS.sp -= 1;
 
-        if (!AbstractGeneratorObject::resume(cx, activation, gen, val,
-                                             resumeKindVal)) {
+        RootedFunction callee(cx, &gen->callee());
+        RootedObject envChain(cx, &gen->environmentChain());
+        if (!activation.pushInlineGeneratorResumeFrame(callee, envChain)) {
           goto error;
         }
+        AbstractGeneratorObject::resume(cx, activation, gen, val, resumeKind);
 
         JSScript* generatorScript = REGS.fp()->script();
         if (cx->realm() != generatorScript->realm()) {
@@ -4265,21 +4300,35 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
                                  generatorScript->function(), REGS.fp())) {
           goto error;
         }
-
-        if (!DebugAPI::onResumeFrame(cx, REGS.fp())) {
-          MOZ_ASSERT_IF(cx->isPropagatingForcedReturn(), gen->isClosed());
-          goto error;
-        }
       }
       ADVANCE_AND_DISPATCH(0);
     }
 
     CASE(AfterYield) {
-      // AbstractGeneratorObject::resume takes care of setting the frame's
-      // debuggee flag.
+      // InterpreterFrame::initCallFrame (or initExecuteFrame for module
+      // frames) takes care of setting the frame's debuggee flag.
       MOZ_ASSERT_IF(REGS.fp()->script()->isDebuggee(), REGS.fp()->isDebuggee());
+
+#ifdef DEBUG
+      // The generator must be marked as running.
+      auto* genObj = GetGeneratorObjectForFrame(cx, REGS.fp());
+      MOZ_ASSERT(genObj->isRunning());
+#endif
+
+      // Clear the isResumingGenerator flag so the frame is treated as an
+      // ordinary running frame from now on.
+      REGS.fp()->clearResumingGenerator();
+
       INIT_COVERAGE();
       COUNT_COVERAGE();
+
+      if (MOZ_UNLIKELY(script->isDebuggee())) {
+        if (!DebugAPI::onResumeFrame(cx, REGS.fp())) {
+          MOZ_ASSERT_IF(cx->isPropagatingForcedReturn(),
+                        GetGeneratorObjectForFrame(cx, REGS.fp())->isClosed());
+          goto error;
+        }
+      }
     }
     END_CASE(AfterYield)
 
@@ -5307,12 +5356,10 @@ bool js::ThrowCheckIsObject(JSContext* cx, CheckIsObjectKind kind) {
                                 JSMSG_DECORATOR_INVALID_RETURN_TYPE);
       break;
 #endif
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
     case CheckIsObjectKind::Disposable:
       JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                                 JSMSG_DISPOSABLE_NOT_OBJ);
       break;
-#endif
     default:
       MOZ_CRASH("Unknown kind");
   }

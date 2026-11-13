@@ -6,10 +6,10 @@
 #define GLREADTEXIMAGEHELPER_H_
 
 #include "GLContextTypes.h"
-#include "nsSize.h"
 #include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/gfx/MatrixFwd.h"
 #include "mozilla/gfx/Types.h"
+#include "nsSize.h"
 
 namespace mozilla {
 
@@ -33,11 +33,6 @@ void ReadPixelsIntoDataSurface(GLContext* aGL,
 
 already_AddRefed<gfx::DataSourceSurface> ReadBackSurface(
     GLContext* gl, GLuint aTexture, bool aYInvert, gfx::SurfaceFormat aFormat);
-
-already_AddRefed<gfx::DataSourceSurface> YInvertImageSurface(
-    gfx::DataSourceSurface* aSurf, uint32_t aStride);
-
-void SwapRAndBComponents(gfx::DataSourceSurface* surf);
 
 class GLReadTexImageHelper final {
   // The GLContext is the sole owner of the GLBlitHelper.

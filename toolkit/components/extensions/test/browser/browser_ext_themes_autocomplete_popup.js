@@ -6,6 +6,12 @@ let scotchBonnet = Services.prefs.getBoolPref(
   "browser.urlbar.scotchBonnet.enableOverride"
 );
 
+// Nova being enabled changes some of the styling that is being tested here.
+let novaEnabled = Services.prefs.getBoolPref(
+  "browser.nova.enabled",
+  true // If the pref isn't set to false, assume Nova styles are enabled by default.
+);
+
 // This test checks whether applied WebExtension themes that attempt to change
 // popup properties are applied correctly to the autocomplete bar.
 const POPUP_COLOR_DARK = "#00A400";
@@ -15,11 +21,15 @@ const POPUP_TEXT_COLOR_BRIGHT = "#ffffff";
 const POPUP_SELECTED_COLOR = "#9400ff";
 const POPUP_SELECTED_TEXT_COLOR = "#09b9a6";
 
-const POPUP_URL_COLOR_DARK = "oklch(0.55 0.24 260)";
+// Nova doesn't force a brand link color on LWT documents, so URLs fall back to
+// the platform's system link color for both color-schemes.
+const POPUP_URL_COLOR_DARK = novaEnabled ? "LinkText" : "oklch(0.55 0.24 260)";
 const POPUP_ACTION_COLOR_DARK = scotchBonnet
   ? POPUP_TEXT_COLOR_DARK
   : "#5b5b66";
-const POPUP_URL_COLOR_BRIGHT = "oklch(0.76 0.14 205)";
+const POPUP_URL_COLOR_BRIGHT = novaEnabled
+  ? "LinkText"
+  : "oklch(0.76 0.14 205)";
 const POPUP_ACTION_COLOR_BRIGHT = scotchBonnet
   ? POPUP_TEXT_COLOR_BRIGHT
   : "#bfbfc9";
@@ -31,14 +41,32 @@ ChromeUtils.defineESModuleGetters(this, {
   UrlbarTestUtils: "resource://testing-common/UrlbarTestUtils.sys.mjs",
 });
 
-function getComputedColorValue(color) {
+/**
+ * @param {string} color A hex color, an oklch() color or a system color keyword.
+ * @param {Element} [contextElement] Element whose used color-scheme a system
+ *   color keyword should be resolved against. Required for system colors.
+ * @returns {string} The value `getComputedStyle()` would report for `color`.
+ */
+function getComputedColorValue(color, contextElement) {
   if (color.startsWith("oklch")) {
     return color;
   }
-  return `rgb(${hexToRGB(color).join(", ")})`;
+  if (color.startsWith("#")) {
+    return `rgb(${hexToRGB(color).join(", ")})`;
+  }
+  // System colors vary by platform and by used color-scheme, so let the style
+  // system resolve them next to the element they're being compared against.
+  let probe = contextElement.ownerDocument.createElement("span");
+  probe.style.color = color;
+  contextElement.after(probe);
+  let computed = window.getComputedStyle(probe).color;
+  probe.remove();
+  return computed;
 }
 
 add_setup(async function () {
+  info(`Run with Nova browser styles ${novaEnabled ? "enabled" : "disabled"}`);
+
   await PlacesUtils.history.clear();
   const NUM_VISITS = 10;
   let visits = [];
@@ -137,7 +165,7 @@ add_task(async function test_popup_url() {
 
   Assert.equal(
     window.getComputedStyle(urlResult.element.url).color,
-    getComputedColorValue(POPUP_URL_COLOR_DARK),
+    getComputedColorValue(POPUP_URL_COLOR_DARK, urlResult.element.url),
     `Urlbar popup url color should be set to ${POPUP_URL_COLOR_DARK}`
   );
 
@@ -176,7 +204,7 @@ add_task(async function test_popup_url() {
 
   Assert.equal(
     window.getComputedStyle(urlResult.element.url).color,
-    getComputedColorValue(POPUP_URL_COLOR_BRIGHT),
+    getComputedColorValue(POPUP_URL_COLOR_BRIGHT, urlResult.element.url),
     `Urlbar popup url color should be set to ${POPUP_URL_COLOR_BRIGHT}`
   );
 

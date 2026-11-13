@@ -5,17 +5,22 @@
 #ifndef GFXFCPLATFORMFONTLIST_H_
 #define GFXFCPLATFORMFONTLIST_H_
 
+#include <fontconfig/fontconfig.h>
+
+#include "ft2build.h"
 #include "gfxFT2FontBase.h"
 #include "gfxPlatformFontList.h"
 #include "mozilla/FontPropertyTypes.h"
 #include "mozilla/RefPtr.h"
 #include "nsClassHashtable.h"
-
-#include <fontconfig/fontconfig.h>
-#include "ft2build.h"
 #include FT_FREETYPE_H
 #include FT_TRUETYPE_TABLES_H
 #include FT_MULTIPLE_MASTERS_H
+
+#ifdef MOZ_FONTATIONS
+#  include "mozilla/MemoryMappedFile.h"
+#  include "mozilla/gfx/fontations_glue_generated.h"
+#endif
 
 #if defined(MOZ_SANDBOX) && defined(XP_LINUX)
 #  include "mozilla/SandboxBroker.h"
@@ -63,26 +68,23 @@ struct default_delete<FcObjectSet> {
 
 class gfxFontconfigFontEntry final : public gfxFT2FontEntryBase {
   friend class gfxFcPlatformFontList;
-  using FTUserFontData = mozilla::gfx::FTUserFontData;
 
  public:
   // used for system fonts with explicit patterns
   explicit gfxFontconfigFontEntry(const nsACString& aFaceName,
-                                  FcPattern* aFontPattern,
-                                  bool aIgnoreFcCharmap);
+                                  FcPattern* aFontPattern);
 
   // used for data fonts where the fontentry takes ownership
   // of the font data and the FT_Face
   explicit gfxFontconfigFontEntry(const nsACString& aFaceName,
-                                  WeightRange aWeight, StretchRange aStretch,
+                                  WeightRange aWeight, WidthRange aWidth,
                                   SlantStyleRange aStyle,
                                   RefPtr<mozilla::gfx::SharedFTFace>&& aFace);
 
   // used for @font-face local system fonts with explicit patterns
   explicit gfxFontconfigFontEntry(const nsACString& aFaceName,
                                   FcPattern* aFontPattern, WeightRange aWeight,
-                                  StretchRange aStretch,
-                                  SlantStyleRange aStyle);
+                                  WidthRange aWidth, SlantStyleRange aStyle);
 
   gfxFontEntry* Clone() const override;
 
@@ -91,21 +93,13 @@ class gfxFontconfigFontEntry final : public gfxFT2FontEntryBase {
   FcPattern* GetPattern() { return mFontPattern; }
 
   nsresult ReadCMAP(FontInfoData* aFontInfoData = nullptr) override;
-  bool TestCharacterMap(uint32_t aCh) override;
 
   mozilla::gfx::SharedFTFace* GetFTFace();
-  FTUserFontData* GetUserFontData() override;
+  FontData* GetUserFontData() override;
 
   FT_MM_Var* GetMMVar() override;
 
-  bool HasVariations() override;
-  void GetVariationAxes(nsTArray<gfxFontVariationAxis>& aAxes) override;
-  void GetVariationInstances(
-      nsTArray<gfxFontVariationInstance>& aInstances) override;
-
-  bool HasFontTable(uint32_t aTableTag) override;
   nsresult CopyFontTable(uint32_t aTableTag, nsTArray<uint8_t>&) override;
-  hb_blob_t* GetFontTable(uint32_t aTableTag) override;
   FontTableCache* GetFontTableCache(bool aCreate) override {
     return mFontTableCache;
   };
@@ -117,10 +111,22 @@ class gfxFontconfigFontEntry final : public gfxFT2FontEntryBase {
 
   gfxFont* CreateFontInstance(const gfxFontStyle* aFontStyle) override;
 
+  bool HasVariationsInternal() override;
+  void GetVariationAxesInternal(nsTArray<gfxFontVariationAxis>& aAxes) override;
+  void GetVariationInstancesInternal(
+      nsTArray<gfxFontVariationInstance>& aInstances) override;
+
+  bool HasFontTableInternal(uint32_t aTableTag) override;
+  hb_blob_t* GetFontTableInternal(uint32_t aTableTag) override;
+
   void GetUserFontFeatures(FcPattern* aPattern);
 
   // pattern for a single face of a family
   RefPtr<FcPattern> mFontPattern;
+
+#ifdef MOZ_FONTATIONS
+  void InitSkrifaFontFace() override;
+#endif
 
   // FTFace - initialized when needed. Once mFTFaceInitialized is true,
   // the face can be accessed without locking.
@@ -136,13 +142,6 @@ class gfxFontconfigFontEntry final : public gfxFT2FontEntryBase {
   // Font table cache, created only if we fail to create a hb_face_t that wraps
   // the complete font data.
   mozilla::Atomic<FontTableCache*> mFontTableCache;
-
-  // Whether TestCharacterMap should check the actual cmap rather than asking
-  // fontconfig about character coverage.
-  // We do this for app-bundled (rather than system) fonts, as they may
-  // include color glyphs that fontconfig would overlook, and for fonts
-  // loaded via @font-face.
-  bool mIgnoreFcCharmap;
 
   // Whether the face supports variations. For system-installed fonts, we
   // query fontconfig for this (so they will only work if fontconfig is
@@ -278,12 +277,12 @@ class gfxFcPlatformFontList final : public gfxPlatformFontList {
   already_AddRefed<gfxFontEntry> LookupLocalFont(
       FontVisibilityProvider* aFontVisibilityProvider,
       const nsACString& aFontName, WeightRange aWeightForEntry,
-      StretchRange aStretchForEntry, SlantStyleRange aStyleForEntry) override;
+      WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry) override;
 
   already_AddRefed<gfxFontEntry> MakePlatformFont(
       const nsACString& aFontName, WeightRange aWeightForEntry,
-      StretchRange aStretchForEntry, SlantStyleRange aStyleForEntry,
-      const uint8_t* aFontData, uint32_t aLength) override;
+      WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry,
+      FontData* aFontData) override;
 
   bool FindAndAddFamiliesLocked(
       FontVisibilityProvider* aFontVisibilityProvider,

@@ -9,40 +9,40 @@
 
 #import <AppKit/AppKit.h>
 
-#include "gfxFontConstants.h"
-#include "gfxPlatformMac.h"
-#include "gfxMacPlatformFontList.h"
-#include "gfxMacFont.h"
-#include "gfxUserFontSet.h"
 #include "SharedFontList-impl.h"
+#include "gfxFontConstants.h"
+#include "gfxMacFont.h"
+#include "gfxMacPlatformFontList.h"
+#include "gfxPlatformMac.h"
+#include "gfxUserFontSet.h"
 
 #include "harfbuzz/hb.h"
 
 #include "AppleUtils.h"
 #include "MainThreadUtils.h"
-#include "nsDirectoryServiceUtils.h"
-#include "nsDirectoryServiceDefs.h"
 #include "nsAppDirectoryServiceDefs.h"
-#include "nsIDirectoryEnumerator.h"
 #include "nsCharTraits.h"
 #include "nsCocoaUtils.h"
 #include "nsComponentManagerUtils.h"
+#include "nsDirectoryServiceDefs.h"
+#include "nsDirectoryServiceUtils.h"
+#include "nsIDirectoryEnumerator.h"
 #include "nsServiceManagerUtils.h"
 #include "nsTArray.h"
 
-#include "mozilla/dom/ContentChild.h"
-#include "mozilla/dom/ContentParent.h"
 #include "mozilla/FontPropertyTypes.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/gfx/2D.h"
 
-#include <unistd.h>
-#include <time.h>
 #include <dlfcn.h>
+#include <time.h>
+#include <unistd.h>
 
 #define StandardFonts
 #include "StandardFonts-macos.inc"
@@ -401,10 +401,9 @@ void gfxMacPlatformFontList::LookupSystemFont(LookAndFeel::FontID aSystemFontID,
                                                   : FontSlantStyle::NORMAL;
   aFontStyle.weight =
       (traits & NSFontBoldTrait) ? FontWeight::BOLD : FontWeight::NORMAL;
-  aFontStyle.stretch = (traits & NSFontExpandedTrait) ? FontStretch::EXPANDED
-                       : (traits & NSFontCondensedTrait)
-                           ? FontStretch::CONDENSED
-                           : FontStretch::NORMAL;
+  aFontStyle.width = (traits & NSFontExpandedTrait)    ? FontWidth::EXPANDED
+                     : (traits & NSFontCondensedTrait) ? FontWidth::CONDENSED
+                                                       : FontWidth::NORMAL;
   aFontStyle.size = font.pointSize;
   aFontStyle.systemFont = true;
 }

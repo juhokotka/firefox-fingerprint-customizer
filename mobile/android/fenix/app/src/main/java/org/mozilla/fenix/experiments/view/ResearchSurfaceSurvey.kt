@@ -36,6 +36,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import mozilla.components.compose.base.button.FilledButton
 import mozilla.components.compose.base.button.OutlinedButton
@@ -43,39 +44,31 @@ import org.mozilla.fenix.R
 import org.mozilla.fenix.theme.FirefoxTheme
 
 /**
- * The ratio of the content height to screen height. This was determined from the designs in figma
- * taking the top and bottom padding to be 10% of screen height.
+ * The ratio of the content height to screen height. This was determined from the designs in figma taking the top and
+ * bottom padding to be 10% of screen height.
  */
 private const val FULLSCREEN_HEIGHT = 0.8f
 
 /**
- * The ratio of the button width to screen width. This was determined from the designs in figma
- * taking the horizontal button paddings to be 5% of the screen width.
+ * The ratio of the button width to screen width. This was determined from the designs in figma taking the horizontal
+ * button paddings to be 5% of the screen width.
  */
 private const val BUTTON_WIDTH = 0.9f
 
-/**
- * Values used in slide in animation.
- * These values were confirmed through demo builds and UX review.
- */
+/** Values used in slide in animation. These values were confirmed through demo builds and UX review. */
 private const val INITIAL_OFFSET = 1000
 private const val ANIMATION_DURATION_MS = 500
 
 @Composable
-private fun SlideInFromBottomAnimation(
-    content: @Composable () -> Unit,
-) {
+private fun SlideInFromBottomAnimation(content: @Composable () -> Unit) {
     var offsetY by remember { mutableIntStateOf(INITIAL_OFFSET) }
-    val offsetState by animateDpAsState(
-        targetValue = offsetY.dp,
-        animationSpec = tween(durationMillis = ANIMATION_DURATION_MS),
-    )
+    val offsetState by
+        animateDpAsState(
+            targetValue = offsetY.dp,
+            animationSpec = tween(durationMillis = ANIMATION_DURATION_MS),
+        )
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .offset(y = offsetState),
-    ) {
+    Box(modifier = Modifier.fillMaxSize().offset { IntOffset(x = 0, y = offsetState.roundToPx()) }) {
         content()
     }
 
@@ -103,17 +96,12 @@ fun ResearchSurfaceSurvey(
 ) {
     SlideInFromBottomAnimation {
         Surface {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding(),
-            ) {
+            Box(modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxHeight(FULLSCREEN_HEIGHT)
-                        .align(Alignment.Center)
-                        .verticalScroll(rememberScrollState()),
+                    modifier =
+                        Modifier.fillMaxHeight(FULLSCREEN_HEIGHT)
+                            .align(Alignment.Center)
+                            .verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
@@ -126,9 +114,7 @@ fun ResearchSurfaceSurvey(
                         Image(
                             painter = painterResource(R.drawable.ic_firefox),
                             contentDescription = null,
-                            modifier = Modifier
-                                .height(112.dp)
-                                .width(108.dp),
+                            modifier = Modifier.height(112.dp).width(108.dp),
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))

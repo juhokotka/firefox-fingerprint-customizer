@@ -5,9 +5,9 @@
 #ifndef mozilla_SandboxBrokerPolicyFactory_h
 #define mozilla_SandboxBrokerPolicyFactory_h
 
-#include "mozilla/SandboxBroker.h"
-
 #include <mutex>
+
+#include "mozilla/SandboxBroker.h"
 
 namespace mozilla {
 
@@ -21,6 +21,9 @@ class SandboxBrokerPolicyFactory {
   static UniquePtr<SandboxBroker::Policy> GetRDDPolicy(int aPid);
   static UniquePtr<SandboxBroker::Policy> GetSocketProcessPolicy(int aPid);
   static UniquePtr<SandboxBroker::Policy> GetUtilityProcessPolicy(int aPid);
+#ifndef ANDROID
+  static UniquePtr<SandboxBroker::Policy> GetHWInferencePolicy(int aPid);
+#endif  // !ANDROID
 
  private:
   UniquePtr<const SandboxBroker::Policy> mCommonContentPolicy;

@@ -5,14 +5,13 @@
 #ifndef nsLoadGroup_h_
 #define nsLoadGroup_h_
 
-#include "nsILoadGroup.h"
-#include "nsILoadGroupChild.h"
-#include "nsIObserver.h"
+#include "mozilla/TimeStamp.h"
 #include "nsCOMPtr.h"
-#include "nsWeakReference.h"
+#include "nsILoadGroup.h"
+#include "nsIObserver.h"
 #include "nsISupportsPriority.h"
 #include "nsTHashSet.h"
-#include "mozilla/TimeStamp.h"
+#include "nsWeakReference.h"
 
 class nsIRequestContext;
 class nsIRequestContextService;
@@ -22,7 +21,6 @@ namespace mozilla {
 namespace net {
 
 class nsLoadGroup : public nsILoadGroup,
-                    public nsILoadGroupChild,
                     public nsIObserver,
                     public nsISupportsPriority,
                     public nsSupportsWeakReference {
@@ -36,10 +34,6 @@ class nsLoadGroup : public nsILoadGroup,
   ////////////////////////////////////////////////////////////////////////////
   // nsILoadGroup methods:
   NS_DECL_NSILOADGROUP
-
-  ////////////////////////////////////////////////////////////////////////////
-  // nsILoadGroupChild methods:
-  NS_DECL_NSILOADGROUPCHILD
 
   ////////////////////////////////////////////////////////////////////////////
   // nsISupportsPriority methods:

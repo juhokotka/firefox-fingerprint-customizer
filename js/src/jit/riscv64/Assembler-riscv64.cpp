@@ -51,8 +51,13 @@ namespace jit {
 
 bool Assembler::FLAG_riscv_debug = false;
 
-// Size of the instruction stream, in bytes.
+// Size of the instruction stream, in bytes.  Note this doesn't take
+// into account the size of any un-flushed constant pools.
 size_t Assembler::size() const { return m_buffer.size(); }
+
+// Returns the size of the buffer we can currently read, hence ignoring any
+// un-flushed data in currently-under-construction constant pool(s).
+size_t Assembler::readableSize() const { return m_buffer.size(); }
 
 bool Assembler::swapBuffer(wasm::Bytes& bytes) {
   // For now, specialize to the one use case. As long as wasm::Bytes is a
@@ -126,291 +131,6 @@ void Assembler::copyDataRelocationTable(uint8_t* dest) {
   if (dataRelocations_.length()) {
     memcpy(dest, dataRelocations_.buffer(), dataRelocations_.length());
   }
-}
-
-void Assembler::RV_li(Register rd, int64_t imm) {
-  UseScratchRegisterScope temps(this);
-  if (RecursiveLiCount(imm) > GeneralLiCount(imm, temps.hasAvailable())) {
-    GeneralLi(rd, imm);
-  } else {
-    RecursiveLi(rd, imm);
-  }
-}
-
-int Assembler::RV_li_count(int64_t imm, bool is_get_temp_reg) {
-  if (RecursiveLiCount(imm) > GeneralLiCount(imm, is_get_temp_reg)) {
-    return GeneralLiCount(imm, is_get_temp_reg);
-  }
-  return RecursiveLiCount(imm);
-}
-
-void Assembler::GeneralLi(Register rd, int64_t imm) {
-  // 64-bit imm is put in the register rd.
-  // In most cases the imm is 32 bit and 2 instructions are generated. If a
-  // temporary register is available, in the worst case, 6 instructions are
-  // generated for a full 64-bit immediate. If temporay register is not
-  // available the maximum will be 8 instructions. If imm is more than 32 bits
-  // and a temp register is available, imm is divided into two 32-bit parts,
-  // low_32 and up_32. Each part is built in a separate register. low_32 is
-  // built before up_32. If low_32 is negative (upper 32 bits are 1), 0xffffffff
-  // is subtracted from up_32 before up_32 is built. This compensates for 32
-  // bits of 1's in the lower when the two registers are added. If no temp is
-  // available, the upper 32 bit is built in rd, and the lower 32 bits are
-  // devided to 3 parts (11, 11, and 10 bits). The parts are shifted and added
-  // to the upper part built in rd.
-  if (is_int32(imm + 0x800)) {
-    // 32-bit case. Maximum of 2 instructions generated
-    auto [high_20, low_12] = ToHigh20Low12(int32_t(imm));
-    if (high_20) {
-      lui(rd, (int32_t)high_20);
-      if (low_12) {
-        addi(rd, rd, low_12);
-      }
-    } else {
-      addi(rd, zero_reg, low_12);
-    }
-    return;
-  }
-  UseScratchRegisterScope temps(this);
-  AutoForbidPoolsAndNops afp(this, 8);
-  // 64-bit case: divide imm into two 32-bit parts, upper and lower
-  int64_t up_32 = imm >> 32;
-  int64_t low_32 = imm & 0xffffffffull;
-  Register temp_reg = rd;
-  // Check if a temporary register is available
-  if (up_32 == 0 || low_32 == 0) {
-    // No temp register is needed
-  } else {
-    temp_reg = temps.hasAvailable() ? temps.Acquire() : InvalidReg;
-  }
-  if (temp_reg != InvalidReg) {
-    // keep track of hardware behavior for lower part in sim_low
-    int64_t sim_low = 0;
-    // Build lower part
-    if (low_32 != 0) {
-      int64_t high_20 = ((low_32 + 0x800) >> 12);
-      int64_t low_12 = low_32 & 0xfff;
-      if (high_20) {
-        // Adjust to 20 bits for the case of overflow
-        high_20 &= 0xfffff;
-        sim_low = ((high_20 << 12) << 32) >> 32;
-        lui(rd, (int32_t)high_20);
-        if (low_12) {
-          sim_low += (low_12 << 52 >> 52) | low_12;
-          addi(rd, rd, low_12);
-        }
-      } else {
-        sim_low = low_12;
-        ori(rd, zero_reg, low_12);
-      }
-    }
-    if (sim_low & 0x100000000) {
-      // Bit 31 is 1. Either an overflow or a negative 64 bit
-      if (up_32 == 0) {
-        // Positive number, but overflow because of the add 0x800
-        ZeroExtendWord(rd, rd);
-        return;
-      }
-      // low_32 is a negative 64 bit after the build
-      up_32 = (up_32 - 0xffffffff) & 0xffffffff;
-    }
-    if (up_32 == 0) {
-      return;
-    }
-    // Build upper part in a temporary register
-    if (low_32 == 0) {
-      // Build upper part in rd
-      temp_reg = rd;
-    }
-    int64_t high_20 = (up_32 + 0x800) >> 12;
-    int64_t low_12 = up_32 & 0xfff;
-    if (high_20) {
-      // Adjust to 20 bits for the case of overflow
-      high_20 &= 0xfffff;
-      lui(temp_reg, (int32_t)high_20);
-      if (low_12) {
-        addi(temp_reg, temp_reg, low_12);
-      }
-    } else {
-      ori(temp_reg, zero_reg, low_12);
-    }
-    // Put it at the bgining of register
-    slli(temp_reg, temp_reg, 32);
-    if (low_32 != 0) {
-      add(rd, rd, temp_reg);
-    }
-    return;
-  }
-  // No temp register. Build imm in rd.
-  // Build upper 32 bits first in rd. Divide lower 32 bits parts and add
-  // parts to the upper part by doing shift and add.
-  // First build upper part in rd.
-  int64_t high_20 = (up_32 + 0x800) >> 12;
-  int64_t low_12 = up_32 & 0xfff;
-  if (high_20) {
-    // Adjust to 20 bits for the case of overflow
-    high_20 &= 0xfffff;
-    lui(rd, (int32_t)high_20);
-    if (low_12) {
-      addi(rd, rd, low_12);
-    }
-  } else {
-    ori(rd, zero_reg, low_12);
-  }
-  // upper part already in rd. Each part to be added to rd, has maximum of 11
-  // bits, and always starts with a 1. rd is shifted by the size of the part
-  // plus the number of zeros between the parts. Each part is added after the
-  // left shift.
-  uint32_t mask = 0x80000000;
-  int32_t shift_val = 0;
-  int32_t i;
-  for (i = 0; i < 32; i++) {
-    if ((low_32 & mask) == 0) {
-      mask >>= 1;
-      shift_val++;
-      if (i == 31) {
-        // rest is zero
-        slli(rd, rd, shift_val);
-      }
-      continue;
-    }
-    // The first 1 seen
-    int32_t part;
-    if ((i + 11) < 32) {
-      // Pick 11 bits
-      part = ((uint32_t)(low_32 << i) >> i) >> (32 - (i + 11));
-      slli(rd, rd, shift_val + 11);
-      ori(rd, rd, part);
-      i += 10;
-      mask >>= 11;
-    } else {
-      part = (uint32_t)(low_32 << i) >> i;
-      slli(rd, rd, shift_val + (32 - i));
-      ori(rd, rd, part);
-      break;
-    }
-    shift_val = 0;
-  }
-}
-
-int Assembler::GeneralLiCount(int64_t imm, bool is_get_temp_reg) {
-  int count = 0;
-  // imitate Assembler::RV_li
-  if (is_int32(imm + 0x800)) {
-    // 32-bit case. Maximum of 2 instructions generated
-    auto [high_20, low_12] = ToHigh20Low12(int32_t(imm));
-    if (high_20) {
-      count++;
-      if (low_12) {
-        count++;
-      }
-    } else {
-      count++;
-    }
-    return count;
-  }
-  // 64-bit case: divide imm into two 32-bit parts, upper and lower
-  int64_t up_32 = imm >> 32;
-  int64_t low_32 = imm & 0xffffffffull;
-  // Check if a temporary register is available
-  if (is_get_temp_reg) {
-    // keep track of hardware behavior for lower part in sim_low
-    int64_t sim_low = 0;
-    // Build lower part
-    if (low_32 != 0) {
-      int64_t high_20 = ((low_32 + 0x800) >> 12);
-      int64_t low_12 = low_32 & 0xfff;
-      if (high_20) {
-        // Adjust to 20 bits for the case of overflow
-        high_20 &= 0xfffff;
-        sim_low = ((high_20 << 12) << 32) >> 32;
-        count++;
-        if (low_12) {
-          sim_low += (low_12 << 52 >> 52) | low_12;
-          count++;
-        }
-      } else {
-        sim_low = low_12;
-        count++;
-      }
-    }
-    if (sim_low & 0x100000000) {
-      // Bit 31 is 1. Either an overflow or a negative 64 bit
-      if (up_32 == 0) {
-        // Positive number, but overflow because of the add 0x800
-        count += HasZbaExtension() ? /* zext.w */ 1 : /* slli; srli */ 2;
-        return count;
-      }
-      // low_32 is a negative 64 bit after the build
-      up_32 = (up_32 - 0xffffffff) & 0xffffffff;
-    }
-    if (up_32 == 0) {
-      return count;
-    }
-    int64_t high_20 = (up_32 + 0x800) >> 12;
-    int64_t low_12 = up_32 & 0xfff;
-    if (high_20) {
-      // Adjust to 20 bits for the case of overflow
-      high_20 &= 0xfffff;
-      count++;
-      if (low_12) {
-        count++;
-      }
-    } else {
-      count++;
-    }
-    // Put it at the bgining of register
-    count++;
-    if (low_32 != 0) {
-      count++;
-    }
-    return count;
-  }
-  // No temp register. Build imm in rd.
-  // Build upper 32 bits first in rd. Divide lower 32 bits parts and add
-  // parts to the upper part by doing shift and add.
-  // First build upper part in rd.
-  int64_t high_20 = (up_32 + 0x800) >> 12;
-  int64_t low_12 = up_32 & 0xfff;
-  if (high_20) {
-    // Adjust to 20 bits for the case of overflow
-    high_20 &= 0xfffff;
-    count++;
-    if (low_12) {
-      count++;
-    }
-  } else {
-    count++;
-  }
-  // upper part already in rd. Each part to be added to rd, has maximum of 11
-  // bits, and always starts with a 1. rd is shifted by the size of the part
-  // plus the number of zeros between the parts. Each part is added after the
-  // left shift.
-  uint32_t mask = 0x80000000;
-  int32_t i;
-  for (i = 0; i < 32; i++) {
-    if ((low_32 & mask) == 0) {
-      mask >>= 1;
-      if (i == 31) {
-        // rest is zero
-        count++;
-      }
-      continue;
-    }
-    // The first 1 seen
-    if ((i + 11) < 32) {
-      // Pick 11 bits
-      count++;
-      count++;
-      i += 10;
-      mask >>= 11;
-    } else {
-      count++;
-      count++;
-      break;
-    }
-  }
-  return count;
 }
 
 struct ImmPtrParts {
@@ -564,13 +284,13 @@ class LiPtr {
     at(1)->SetIFormat(RO_ADDI, rd.code(), rd.code(), low_12);
 
     // slli(rd, rd, 11);  // Space for next 11 bits
-    at(2)->SetIFormat(RO_SLLI, rd.code(), rd.code(), 11);
+    at(2)->SetIShiftFormat(RO_SLLI, rd.code(), rd.code(), 11);
 
     // ori(rd, rd, b11);  // 11 bits are added, 42 bit in rd.
     at(3)->SetIFormat(RO_ORI, rd.code(), rd.code(), b11);
 
     // slli(rd, rd, 6);  // Space for next 6 bits
-    at(4)->SetIFormat(RO_SLLI, rd.code(), rd.code(), 6);
+    at(4)->SetIShiftFormat(RO_SLLI, rd.code(), rd.code(), 6);
 
     // ori(rd, rd, a6);  // 6 bits are added, 48 bit in rd.
     at(5)->SetIFormat(RO_ORI, rd.code(), rd.code(), a6);
@@ -1279,18 +999,6 @@ int32_t Assembler::branchOffset(Label* L, OffsetSize bits,
     return offset;
   }
 
-  // Keep track of short-range branches targeting unbound labels. We may need
-  // to insert veneers in PatchShortRangeBranchToVeneer() below.
-  if (bits < OffsetSize::kOffset32) {
-    // This is the last possible branch target.
-    BufferOffset deadline(next_instr_offset.getOffset() +
-                          ImmBranchMaxForwardOffset(bits));
-    DEBUG_PRINTF("\tregisterBranchDeadline %d type %d\n", deadline.getOffset(),
-                 OffsetSizeToImmBranchRangeType(bits));
-    m_buffer.registerBranchDeadline(OffsetSizeToImmBranchRangeType(bits),
-                                    deadline);
-  }
-
   // The label is unbound and previously unused: Store the offset in the label
   // itself for patching by bind().
   if (!L->used()) {
@@ -1349,12 +1057,21 @@ int32_t Assembler::branchOffset(Label* L) {
   return branchOffset(L, OffsetSize::kOffset32, next_instr_offset);
 }
 
-int32_t Assembler::branchOffset(Label* L, OffsetSize bits) {
+void Assembler::registerBranchDeadline(Label* L, OffsetSize bits,
+                                       BufferOffset next_instr_offset) {
   MOZ_ASSERT(bits < OffsetSize::kOffset32);
 
-  // One instruction (jal, branch, etc), possibly one new deadline.
-  BufferOffset next_instr_offset = nextInstrOffset(1, 1);
-  return branchOffset(L, bits, next_instr_offset);
+  // Keep track of short-range branches targeting unbound labels. We may need
+  // to insert veneers in PatchShortRangeBranchToVeneer() below.
+  if (!L->bound()) {
+    // This is the last possible branch target.
+    BufferOffset deadline(next_instr_offset.getOffset() +
+                          ImmBranchMaxForwardOffset(bits));
+    DEBUG_PRINTF("\tregisterBranchDeadline %d type %d\n", deadline.getOffset(),
+                 OffsetSizeToImmBranchRangeType(bits));
+    m_buffer.registerBranchDeadline(OffsetSizeToImmBranchRangeType(bits),
+                                    deadline);
+  }
 }
 
 Assembler::Condition Assembler::InvertCondition(Condition cond) {
@@ -1605,11 +1322,8 @@ void Assembler::retarget(Label* label, Label* target) {
 }
 
 bool Assembler::appendRawCode(const uint8_t* code, size_t numBytes) {
-  if (m_buffer.oom()) {
-    return false;
-  }
-  m_buffer.putBytes(numBytes, code);
-  return !m_buffer.oom();
+  flush();
+  return m_buffer.appendRawCode(code, numBytes);
 }
 
 void Assembler::ToggleCall(CodeLocationLabel inst_, bool enabled) {

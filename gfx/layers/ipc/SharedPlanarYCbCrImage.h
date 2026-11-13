@@ -5,7 +5,8 @@
 #ifndef GFX_LAYERS_IPC_SHAREDPLANARYCBCRIMAGE_H_
 #define GFX_LAYERS_IPC_SHAREDPLANARYCBCRIMAGE_H_
 
-#include <stdint.h>             // for uint8_t, uint32_t
+#include <stdint.h>  // for uint8_t, uint32_t
+
 #include "ImageContainer.h"     // for PlanarYCbCrImage, etc
 #include "mozilla/RefPtr.h"     // for RefPtr
 #include "mozilla/ipc/Shmem.h"  // for Shmem
@@ -20,6 +21,7 @@ namespace mozilla {
 namespace layers {
 
 class ImageClient;
+class ShmemHolder;
 class TextureClient;
 class TextureClientRecycleAllocator;
 
@@ -53,6 +55,9 @@ class SharedPlanarYCbCrImage : public PlanarYCbCrImage {
   TextureClientRecycleAllocator* RecycleAllocator();
 
  private:
+  // Outlives mTextureClient so cached plane pointers retain their mapping even
+  // when ImageBridge shutdown destroys the TextureClient explicitly.
+  RefPtr<ShmemHolder> mShmemHolder;
   RefPtr<TextureClient> mTextureClient;
   RefPtr<ImageClient> mCompositable;
   RefPtr<TextureClientRecycleAllocator> mRecycleAllocator;

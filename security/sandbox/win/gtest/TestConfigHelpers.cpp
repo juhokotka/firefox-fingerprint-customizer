@@ -2,18 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gtest/gtest.h"
-#include "gmock/gmock.h"
-
-#include <string>
 #include <windows.h>
 
+#include <string>
+
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 #include "nsLiteralString.h"
 #include "nsWindowsHelpers.h"
-#include "sandbox/win/src/sandbox.h"
 #include "sandbox/win/src/app_container.h"
 #include "sandbox/win/src/policy_engine_opcodes.h"
+#include "sandbox/win/src/sandbox.h"
+
+// clang-format off
 #include "../src/sandboxbroker/ConfigHelpers.h"
+// clang-format on
 
 using namespace sandbox;
 using mozilla::sandboxing::UserFontConfigHelper;
@@ -307,6 +310,20 @@ TEST_F(UserFontConfigHelperTest, DirsAreIgnored) {
   SetUpPaths({LR"(C:\Users\Moz User\Fonts\)"});
 
   EXPECT_READONLY_EQ(LR"(C:\Users\Moz Us]er\Fonts\)").Times(0);
+
+  EXPECT_TRUE(CreateHelperAndCallAddRules());
+}
+
+TEST_F(UserFontConfigHelperTest, PathsWithWildcardsAreIgnored) {
+  const auto* validCharsPath1 = LR"(C:\Users\Moz User\Fonts\FontFile1.ttf)";
+  const auto* validCharsPath2 = LR"(\??\C:\Users\Moz User\Fonts\FontFile2.ttf)";
+  SetUpPaths({validCharsPath1, LR"(C:\Users\Moz User\Font/s\invalid.ttf)",
+              LR"(C:\Users\Moz User\Fonts\*)",
+              LR"(C:\Users\Moz User\Fonts\invalid*)",
+              LR"(C:\Users\Moz User\Fonts\invalid/?)", validCharsPath2});
+
+  EXPECT_READONLY_EQ(validCharsPath1).After(mWinUserFontCall);
+  EXPECT_READONLY_EQ(validCharsPath2).After(mWinUserFontCall);
 
   EXPECT_TRUE(CreateHelperAndCallAddRules());
 }

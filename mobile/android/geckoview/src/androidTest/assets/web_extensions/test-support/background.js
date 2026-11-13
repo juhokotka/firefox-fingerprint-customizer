@@ -23,8 +23,23 @@ const APIS = {
   GetLinkColor({ tab, selector }) {
     return browser.test.getLinkColor(tab.id, selector);
   },
+  IsVideoCloning({ tab, selector }) {
+    return browser.test.isVideoCloning(tab.id, selector);
+  },
+  GetVideoStatusMessage({ tab, selector }) {
+    return browser.test.getVideoStatusMessage(tab.id, selector);
+  },
   GetPidForTab({ tab }) {
     return browser.test.getPidForTab(tab.id);
+  },
+  GetBrowsingContextGroupIdForTab({ tab }) {
+    return browser.test.getBrowsingContextGroupIdForTab(tab.id);
+  },
+  GetRemoteTypeForTab({ tab }) {
+    return browser.test.getRemoteTypeForTab(tab.id);
+  },
+  MintPictureInPicturePlacementToken({ tab }) {
+    return browser.test.mintPictureInPicturePlacementToken(tab.id);
   },
   WaitForContentTransformsReceived({ tab }) {
     return browser.test.waitForContentTransformsReceived(tab.id);
@@ -80,12 +95,6 @@ const APIS = {
   IsFissionRunning() {
     return browser.test.isFissionRunning();
   },
-  TriggerCookieBannerDetected({ tab }) {
-    return browser.test.triggerCookieBannerDetected(tab.id);
-  },
-  TriggerCookieBannerHandled({ tab }) {
-    return browser.test.triggerCookieBannerHandled(tab.id);
-  },
   TriggerTranslationsOffer({ tab }) {
     return browser.test.triggerTranslationsOffer(tab.id);
   },
@@ -101,8 +110,8 @@ const APIS = {
   TeardownAlertsService() {
     return browser.test.teardownAlertsService();
   },
-  NotifyUserGestureActivation({ tab }) {
-    return browser.test.notifyUserGestureActivation(tab.id);
+  ShowPicker({ tab, selector }) {
+    return browser.test.showPicker(tab.id, selector);
   },
   SaveTrackingDBEvents({ log }) {
     return browser.test.saveTrackingDBEvents(log);

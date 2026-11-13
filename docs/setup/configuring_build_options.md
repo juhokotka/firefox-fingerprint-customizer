@@ -277,8 +277,8 @@ In order to enable `buildcache` for Firefox builds, you can use
 
 : Enable full optimizations for Rust code.
 
-You can make an optimized build with debugging symbols. See {ref}`Building
-with Debug Symbols <building-with-debug-symbols>`.
+You can make an optimized build with debugging symbols. See [Building
+with Debug Symbols](building_with_debug_symbols.md).
 
 ### Building as Beta or Release
 
@@ -288,9 +288,13 @@ with Debug Symbols <building-with-debug-symbols>`.
   test the different ifdef behaviors. To do a full beta simulation see
   [Sheriffing/How To/Beta simulations](https://wiki.mozilla.org/Sheriffing/How_To/Beta_simulations).
 
-- `early-beta`
-- `late-beta`
+- `beta`
 - `release`
+
+`early-beta` and `late-beta` are deprecated aliases of `beta`, accepted only
+transitionally so that existing mozconfigs keep working. The distinct early and
+late beta periods are being phased out, so both do exactly what `beta` does.
+Update your mozconfig to `--as-milestone=beta`; the aliases will be removed.
 
 ### Tests
 
@@ -351,7 +355,7 @@ builds."
 ## Building multiple projects from the same source tree
 
 It is possible to build multiple projects from the same source tree,
-as long as you [use a different objdir](#Building_with_an_Objdir) for
+as long as you [use a different objdir](#building-with-an-objdir) for
 each project.
 
 You need to create multiple `mozconfig` files.

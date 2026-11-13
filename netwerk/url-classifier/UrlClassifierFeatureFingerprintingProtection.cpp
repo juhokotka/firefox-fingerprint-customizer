@@ -5,13 +5,13 @@
 #include "UrlClassifierFeatureFingerprintingProtection.h"
 
 #include "mozilla/AntiTrackingUtils.h"
+#include "mozilla/ScopedPrefs.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/net/ChannelClassifierUtils.h"
 #include "mozilla/net/UrlClassifierCommon.h"
-#include "mozilla/ScopedPrefs.h"
-#include "nsNetUtil.h"
-#include "mozilla/StaticPtr.h"
-#include "nsIWebProgressListener.h"
 #include "nsIChannel.h"
+#include "nsIWebProgressListener.h"
+#include "nsNetUtil.h"
 
 namespace mozilla {
 namespace net {

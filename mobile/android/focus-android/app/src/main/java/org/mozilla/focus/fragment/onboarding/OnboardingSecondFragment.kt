@@ -14,9 +14,8 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.fragment.app.Fragment
+import androidx.fragment.compose.content
 import mozilla.components.support.utils.Browsers
 import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.focus.GleanMetrics.Onboarding
@@ -24,22 +23,18 @@ import org.mozilla.focus.R
 import org.mozilla.focus.ext.requireComponents
 import org.mozilla.focus.ui.theme.FocusTheme
 
-/**
- * The second fragment of the onboarding flow.
- */
+/** The second fragment of the onboarding flow. */
 class OnboardingSecondFragment : Fragment() {
     private lateinit var onboardingInteractor: OnboardingInteractor
 
-    private var activityResultLauncher: ActivityResultLauncher<Intent> = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) {
-        onboardingInteractor.onActivityResultImplementation(it)
-    }
+    private var activityResultLauncher: ActivityResultLauncher<Intent> =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            onboardingInteractor.onActivityResultImplementation(it)
+        }
 
     override fun onAttach(context: Context) {
         super.onAttach(context)
-        val transition =
-            TransitionInflater.from(context).inflateTransition(R.transition.firstrun_exit)
+        val transition = TransitionInflater.from(context).inflateTransition(R.transition.firstrun_exit)
         exitTransition = transition
     }
 
@@ -48,23 +43,16 @@ class OnboardingSecondFragment : Fragment() {
         container: ViewGroup?,
         savedInstanceState: Bundle?,
     ): View {
-        onboardingInteractor = DefaultOnboardingInteractor(
-            DefaultOnboardingController(
-                onboardingStorage = OnboardingStorage(requireContext()),
-                appStore = requireComponents.appStore,
-                context = requireActivity(),
-                selectedTabId = requireComponents.store.state.selectedTabId,
-            ),
-        )
-        return ComposeView(requireContext()).apply {
-            isTransitionGroup = true
-            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-        }
-    }
-
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-        (view as ComposeView).setContent {
+        onboardingInteractor =
+            DefaultOnboardingInteractor(
+                DefaultOnboardingController(
+                    onboardingStorage = OnboardingStorage(requireContext()),
+                    appStore = requireComponents.appStore,
+                    context = requireActivity(),
+                    selectedTabId = requireComponents.store.state.selectedTabId,
+                )
+            )
+        return content {
             FocusTheme {
                 OnBoardingSecondScreenCompose(
                     setAsDefaultBrowser = {
@@ -78,21 +66,18 @@ class OnboardingSecondFragment : Fragment() {
                 )
             }
         }
+            .apply { isTransitionGroup = true }
     }
 
     override fun onResume() {
         super.onResume()
         // check if the default browser was changed from OS settings for devices with Android 8 & 9.
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-            Browsers.isDefaultBrowser(requireContext())
-        ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && Browsers.isDefaultBrowser(requireContext())) {
             onboardingInteractor.onFinishOnBoarding()
         }
     }
 
-    /**
-     * Companion object for [OnboardingSecondFragment].
-     */
+    /** Companion object for [OnboardingSecondFragment]. */
     companion object {
         const val FRAGMENT_TAG = "onboarding-second-fragment"
     }

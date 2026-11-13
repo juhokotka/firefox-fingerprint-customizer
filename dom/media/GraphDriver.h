@@ -116,7 +116,8 @@ struct GraphInterface : public nsISupports {
         mSwitchedRunnable = nullptr;
       }
     };
-    Variant<Undefined, StillProcessing, Stop, SwitchDriver> mResult;
+    Variant<Undefined, StillProcessing, Stop, SwitchDriver> mResult{
+        Undefined()};
 
     explicit IterationResult(StillProcessing&& aArg)
         : mResult(std::move(aArg)) {}
@@ -124,7 +125,7 @@ struct GraphInterface : public nsISupports {
     explicit IterationResult(SwitchDriver&& aArg) : mResult(std::move(aArg)) {}
 
    public:
-    IterationResult() : mResult(Undefined()) {}
+    IterationResult() = default;
     IterationResult(const IterationResult&) = delete;
     IterationResult(IterationResult&&) = default;
 
@@ -393,7 +394,7 @@ class MediaTrackGraphInitThreadRunnable;
  */
 class ThreadedDriver : public GraphDriver {
   class IterationWaitHelper {
-    Monitor mMonitor MOZ_UNANNOTATED;
+    Monitor mMonitor MOZ_UNANNOTATED{"IterationWaitHelper::mMonitor"};
     // The below members are guarded by mMonitor.
 
     // Whether another iteration is required either to process control
@@ -404,7 +405,7 @@ class ThreadedDriver : public GraphDriver {
     TimeStamp mWakeTime;
 
    public:
-    IterationWaitHelper() : mMonitor("IterationWaitHelper::mMonitor") {}
+    IterationWaitHelper() = default;
 
     /**
      * If another iteration is needed we wait for aDuration, otherwise we wait
@@ -499,6 +500,7 @@ class SystemClockDriver final : public ThreadedDriver {
   SystemClockDriver(GraphInterface* aGraphInterface,
                     GraphDriver* aPreviousDriver, uint32_t aSampleRate);
   virtual ~SystemClockDriver();
+  void RunThread() override;
   SystemClockDriver* AsSystemClockDriver() override { return this; }
   const SystemClockDriver* AsSystemClockDriver() const override { return this; }
   const TimeStamp& IterationTimeStamp() const {
@@ -747,8 +749,12 @@ class AudioCallbackDriver final : public GraphDriver,
   // we hold a strong reference on its behalf.
   RefPtr<CubebUtils::CubebHandle> mCubeb;
   /* cubeb stream for this graph. This is non-null after a successful
-   * cubeb_stream_init(). CubebOperation thread only. */
-  nsAutoRef<cubeb_stream> mAudioStream;
+   * cubeb_stream_init(). Written and read on the CubebOperation thread only,
+   * except for AudioOutputLatency(), which reads it from the main thread.
+   * Behind a lock because of that cross-thread read; never touched by the
+   * real-time audio callback thread. */
+  DataMutex<nsAutoRef<cubeb_stream>> mAudioStream{
+      "AudioCallbackDriver::mAudioStream"};
   /* The number of input channels from cubeb. Set before opening cubeb. If it is
    * zero then the driver is output-only. */
   const uint32_t mInputChannelCount;

@@ -2,21 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gc/WeakMap-inl.h"
-
 #include "gc/PublicIterators.h"
 #include "vm/JSObject.h"
 
 #include "gc/AtomMarking-inl.h"
 #include "gc/Marking-inl.h"
 #include "gc/StoreBuffer-inl.h"
+#include "gc/WeakMap-inl.h"
 
 using namespace js;
 using namespace js::gc;
 
 void js::gc::MarkSymbolForWeakMapReadBarrier(JS::Zone* zone, JS::Symbol* sym) {
   MOZ_ASSERT(zone && !zone->isAtomsZone());
-  zone->runtimeFromMainThread()->gc.atomMarking.inlinedMarkAtom(zone, sym);
+  zone->runtimeFromMainThread()->gc.atomReferences.inlinedRecordRefInfallible(
+      zone, sym);
 }
 
 WeakMapBase::WeakMapBase(JSObject* memOf, Zone* zone)
@@ -113,8 +113,10 @@ bool WeakMapBase::addEphemeronEdgesForEntry(MarkColor mapColor,
       // The delegate is already being kept alive in a minor GC since it has an
       // edge from a tenured cell (the key). Make sure the key stays alive too.
       delegate->storeBuffer()->putWholeCell(key);
-    } else if (!addEphemeronEdge(mapColor, &delegate->asTenured(), key)) {
-      return false;
+    } else if (delegate->zone()->isGCMarking()) {
+      if (!addEphemeronEdge(mapColor, &delegate->asTenured(), key)) {
+        return false;
+      }
     }
   }
 
@@ -129,7 +131,10 @@ bool WeakMapBase::addEphemeronEdge(MarkColor color, gc::TenuredCell* src,
                                    gc::TenuredCell* dst) {
   // Add an implicit edge from |src| to |dst|.
 
-  auto& edgeTable = src->zone()->gcEphemeronEdges();
+  Zone* zone = src->zone();
+  MOZ_ASSERT(zone->isGCMarking());
+
+  auto& edgeTable = zone->gcEphemeronEdges();
   auto p = edgeTable.lookupForAdd(src);
   if (!p) {
     if (!edgeTable.add(p, src, EphemeronEdgeVector())) {

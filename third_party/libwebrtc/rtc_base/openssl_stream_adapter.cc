@@ -41,7 +41,6 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
-#include "rtc_base/openssl_adapter.h"
 #include "rtc_base/openssl_digest.h"
 #include "rtc_base/openssl_utility.h"
 #include "rtc_base/span_helpers.h"
@@ -87,6 +86,7 @@ struct SrtpCipherMapEntry {
 };
 
 // This isn't elegant, but it's better than an external reference
+// Note: these are not the IANA names but the OpenSSL/BoringSSL ones.
 constexpr SrtpCipherMapEntry kSrtpCipherMap[] = {
     {.internal_name = "SRTP_AES128_CM_SHA1_80", .id = kSrtpAes128CmSha1_80},
     {.internal_name = "SRTP_AES128_CM_SHA1_32", .id = kSrtpAes128CmSha1_32},
@@ -902,8 +902,7 @@ void OpenSSLStreamAdapter::SetTimeout(int delay_ms) {
             retransmission_count_++;
             RTC_LOG(LS_INFO) << "DTLS retransmission";
           } else if (res < 0) {
-            RTC_LOG(LS_INFO) << "DTLSv1_handle_timeout() return -1";
-            Error("DTLSv1_handle_timeout", res, -1, true);
+            Error("DTLSv1_handle_timeout", res, SSL_AD_INTERNAL_ERROR, true);
             return TimeDelta::PlusInfinity();
           }
           // We check the timer even after SSL_CONNECTED,
@@ -1102,6 +1101,9 @@ void OpenSSLStreamAdapter::Cleanup(uint8_t alert) {
     SSL_CTX_free(ssl_ctx_);
     ssl_ctx_ = nullptr;
   }
+#ifdef OPENSSL_IS_BORINGSSL
+  clock_for_testing_.reset();
+#endif
   identity_.reset();
   peer_cert_chain_.reset();
 
@@ -1176,8 +1178,7 @@ SSL_CTX* OpenSSLStreamAdapter::SetupSSLContext() {
     return nullptr;
   }
 
-  // TODO(bugs.webrtc.org/339300437): Remove dependency.
-  SSL_CTX_set_info_callback(ctx, OpenSSLAdapter::SSLInfoCallback);
+  SSL_CTX_set_info_callback(ctx, openssl::SSLInfoCallback);
 
   int mode = SSL_VERIFY_PEER;
   if (GetClientAuthEnabled()) {

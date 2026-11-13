@@ -6,35 +6,27 @@
 #define MOZILLA_GFX_GpuFenceMTLSharedEvent_H
 
 #include "mozilla/layers/GpuFence.h"
-#include "mozilla/UniquePtr.h"
-#include "mozilla/webgpu/ffi/wgpu.h"
-#include "mozilla/webgpu/WebGPUTypes.h"
 
 namespace mozilla {
-
-namespace webgpu {
-namespace ffi {
-struct WGPUMetalSharedEventHandle;
-}
-}  // namespace webgpu
 
 namespace layers {
 
 class GpuFenceMTLSharedEvent : public GpuFence {
  public:
-  static RefPtr<GpuFenceMTLSharedEvent> Create(
-      UniquePtr<webgpu::ffi::WGPUMetalSharedEventHandle>&& aSharedEventHandle,
-      const uint64_t aFenceValue);
+  // Adopts a reference to the supplied shared event. The caller must not
+  // release it after calling this.
+  static RefPtr<GpuFenceMTLSharedEvent> Create(void* aSharedEvent,
+                                               const uint64_t aFenceValue);
 
   bool HasCompleted() override;
+  bool ClientWait(TimeDuration aTimeout) override;
+  bool ServerWait(gl::GLContext* aGL, TimeDuration aTimeout) override;
 
  protected:
-  GpuFenceMTLSharedEvent(
-      UniquePtr<webgpu::ffi::WGPUMetalSharedEventHandle>&& aSharedEventHandle,
-      const uint64_t aFenceValue);
-  virtual ~GpuFenceMTLSharedEvent() = default;
+  GpuFenceMTLSharedEvent(void* aSharedEvent, const uint64_t aFenceValue);
+  virtual ~GpuFenceMTLSharedEvent();
 
-  UniquePtr<webgpu::ffi::WGPUMetalSharedEventHandle> mSharedEventHandle;
+  void* const mSharedEvent;
   const uint64_t mFenceValue;
 };
 

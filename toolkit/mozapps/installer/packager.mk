@@ -21,7 +21,9 @@ endif
 
 export USE_ELF_HACK
 
-stage-package: multilocale.txt locale-manifest.in $(MOZ_PKG_MANIFEST) $(MOZ_PKG_MANIFEST_DEPS)
+MOZ_PKG_DUPEFLAGS ?= $(addprefix -f ,$(MOZ_PKG_ALLOWED_DUPES))
+
+stage-package: multilocale.txt locale-manifest.in $(MOZ_PKG_MANIFEST)
 	NO_PKG_FILES="$(NO_PKG_FILES)" \
 	$(PYTHON3) $(MOZILLA_DIR)/toolkit/mozapps/installer/packager.py $(DEFINES) $(ACDEFINES) \
 		--format $(MOZ_PACKAGER_FORMAT) \
@@ -42,14 +44,12 @@ prepare-package: stage-package
 ifdef RUN_FIND_DUPES
 	$(PYTHON3) $(MOZILLA_DIR)/toolkit/mozapps/installer/find-dupes.py $(DEFINES) $(ACDEFINES) $(MOZ_PKG_DUPEFLAGS) $(DIST)/$(MOZ_PKG_DIR)
 endif # RUN_FIND_DUPES
-ifndef MOZ_IS_COMM_TOPDIR
 ifdef RUN_MOZHARNESS_ZIP
 	# Package mozharness
 	$(call py_action,test_archive $(MOZHARNESS_PACKAGE), \
 		mozharness \
 		$(ABS_DIST)/$(PKG_PATH)$(MOZHARNESS_PACKAGE))
 endif # RUN_MOZHARNESS_ZIP
-endif # MOZ_IS_COMM_TOPDIR
 ifdef MOZ_PACKAGE_JSSHELL
 	# Package JavaScript Shell
 	@echo 'Packaging JavaScript Shell...'
@@ -92,7 +92,7 @@ ifdef ENABLE_MOZSEARCH_PLUGIN
           $(PYTHON3) $(topsrcdir)/mach rust-analyzer-config -o $(topsrcdir)/rust-analyzer.json && \
           CARGO=$(MOZ_FETCHES_DIR)/rustc/bin/cargo \
           RUSTC=$(MOZ_FETCHES_DIR)/rustc/bin/rustc \
-          $(MOZ_FETCHES_DIR)/rustc/bin/rust-analyzer scip . --config-path $(topsrcdir)/rust-analyzer.json && \
+          $(MOZ_FETCHES_DIR)/rust-analyzer/bin/rust-analyzer scip . --config-path $(topsrcdir)/rust-analyzer.json && \
           zip -r5D '$(ABS_DIST)/$(PKG_PATH)$(MOZSEARCH_SCIP_INDEX_BASENAME).zip' \
           index.scip
 	rm $(topsrcdir)/rust-analyzer.json
@@ -128,6 +128,12 @@ ifeq (Darwin_cocoa, $(OS_ARCH)_$(MOZ_WIDGET_TOOLKIT))
 	$(call py_action,zip $(UPDATE_FRAMEWORK_ARTIFACTS_ARCHIVE_BASENAME).zip,--error-if-empty -C $(ABS_DIST)/update_framework_artifacts '$(ABS_DIST)/$(PKG_PATH)$(UPDATE_FRAMEWORK_ARTIFACTS_ARCHIVE_BASENAME).zip' '*.framework')
 endif # Darwin_cocoa
 endif # MOZ_ARTIFACT_BUILDS
+ifdef MOZ_APPSERVICES_IN_TREE
+ifdef MOZ_LIBMEGAZORD_ARTIFACTS
+	@echo 'Generating libmegazord.so artifacts archive ($(LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME).zip)'
+	$(call py_action,package_libmegazord_artifacts $(LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME).zip,--dist-bin '$(ABS_DIST)/bin' '$(ABS_DIST)/$(PKG_PATH)$(LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME).zip')
+endif
+endif
 
 make-package-internal: prepare-package make-sourcestamp-file
 	@echo 'Compressing...'
@@ -145,7 +151,6 @@ ifdef MOZ_AUTOMATION
 	cp $(DEPTH)/mozinfo.json $(MOZ_MOZINFO_FILE)
 	$(PYTHON3) $(MOZILLA_DIR)/toolkit/mozapps/installer/informulate.py \
 		$(MOZ_BUILDINFO_FILE) $(MOZ_BUILDHUB_JSON) $(MOZ_BUILDID_INFO_TXT_FILE) \
-		$(MOZ_PKG_PLATFORM) \
 		$(if $(or $(filter-out mobile/android,$(MOZ_BUILD_APP)),$(MOZ_ANDROID_WITH_FENNEC)), \
 		--package=$(DIST)/$(PACKAGE) --installer=$(INSTALLER_PACKAGE), \
 		--no-download \
@@ -179,10 +184,6 @@ upload:
 		$(UPLOAD_PATH)
 	$(PYTHON3) -u $(MOZILLA_DIR)/build/upload.py --base-path $(ABS_DIST) $(CHECKSUM_FILE)
 
-hg-bundle:
-	$(MKDIR) -p $(DIST)/$(PKG_SRCPACK_PATH)
-	$(CREATE_HG_BUNDLE_CMD)
-
 ALL_LOCALES = $(if $(filter en-US,$(LOCALES)),$(LOCALES),$(LOCALES) en-US)
 
 # Firefox uses @RESPATH@.
@@ -200,13 +201,6 @@ endif
 multilocale.txt: LOCALES?=$(MOZ_CHROME_MULTILOCALE)
 multilocale.txt:
 	$(call py_action,file_generate $@,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main '$(MULTILOCALE_DIR)/multilocale.txt' $(MDDEPDIR)/multilocale.txt.pp '$(MULTILOCALE_DIR)/multilocale.txt' $(ALL_LOCALES))
-
-# This version of the target uses AB_CD to build multilocale.txt and places it
-# in the $(XPI_NAME)/res dir - it should be used when repackaging a build.
-multilocale.txt-%: LOCALES?=$(AB_CD)
-multilocale.txt-%: MULTILOCALE_DIR=$(DIST)/xpi-stage/$(XPI_NAME)/res
-multilocale.txt-%:
-	$(call py_action,file_generate multilocale.txt,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main '$(MULTILOCALE_DIR)/multilocale.txt' $(MDDEPDIR)/multilocale.txt.pp '$(MULTILOCALE_DIR)/multilocale.txt' $(ALL_LOCALES))
 
 locale-manifest.in: LOCALES?=$(MOZ_CHROME_MULTILOCALE)
 locale-manifest.in: $(GLOBAL_DEPS) FORCE

@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this,
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import errno
 import os
 import re
@@ -53,6 +55,10 @@ class HgRepository(Repository):
     @property
     def head_rev(self):
         return self._run("log", "-r", ".", "-T", "{node}")
+
+    @property
+    def is_shallow(self):
+        return False
 
     def is_cinnabar_repo(self) -> bool:
         return False
@@ -213,12 +219,12 @@ class HgRepository(Repository):
 
         paths = [str(path) for path in paths]
 
-        args = ["addremove"] + paths
+        args = ["addremove"]
         m = re.search(r"\d+\.\d+", self.tool_version)
         simplified_version = float(m.group(0)) if m else 0
         if simplified_version >= 3.9:
             args = ["--config", "extensions.automv="] + args
-        self._run(*args)
+        self._run_batched(*args, paths=paths)
 
     def forget_add_remove_files(self, *paths: Union[str, Path]):
         if not paths:
@@ -226,7 +232,7 @@ class HgRepository(Repository):
 
         paths = [str(path) for path in paths]
 
-        self._run("forget", *paths)
+        self._run_batched("forget", paths=paths)
 
     def get_tracked_files_finder(self, path=None):
         # Can return backslashes on Windows. Normalize to forward slashes.
@@ -361,14 +367,14 @@ class HgRepository(Repository):
     ) -> list[str]:
         """Return a list of commit SHAs for nodes on the current branch."""
         if not base_ref:
-            base_ref = self.base_ref
+            base_ref = "last(ancestors(.) and public())"
 
-        head_ref = head or self.head_ref
+        head_ref = head or self.branch or "."
 
         cmd = [
             "log",
             "-r",
-            f"{base_ref}::{head_ref} and not {base_ref}",
+            f"({base_ref})::({head_ref}) and not ({base_ref})",
             "-T",
             "{node}\n",
         ]
@@ -510,7 +516,12 @@ class HgRepository(Repository):
 
         return vct_dir
 
-    def configure(self, state_dir: Path, update_only: bool = False):
+    def configure(
+        self,
+        state_dir: Path,
+        update_only: bool = False,
+        no_system_changes: bool = False,
+    ):
         """Run the Mercurial configuration wizard."""
         vct_dir = self._update_vct(state_dir)
 

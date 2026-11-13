@@ -21,8 +21,11 @@ webidl Node;
 %{C++
 #include "mozilla/Maybe.h"
 
-namespace mozilla::dom {
+namespace mozilla {
+class OriginAttributes;
+namespace dom {
 class ClientInfo;
+}
 }
 
 using mozilla::Maybe;

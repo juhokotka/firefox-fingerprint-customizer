@@ -11,7 +11,7 @@ The uninstaller may be the most straightforward of the installer components. The
 - If the application directory is empty after that, then it is removed, but it's left alone if any files are still present.
 - If the copy of Firefox that was just uninstalled is the only one that was using the maintenance service, the maintenance service uninstaller is also run.
 - Any BITS jobs from this installation of Firefox are cancelled.
-- The first {ref}`"uninstall" ping` found is uploaded, and all uninstall pings are deleted (for this installation).
+- The first {doc}`/toolkit/components/telemetry/data/uninstall-ping` found is uploaded, and all uninstall pings are deleted (for this installation).
 
 Note that profiles and any other user-generated files (e.g., crash reports) are specifically not uninstalled.
 
@@ -24,6 +24,16 @@ It's important to remember that PostUpdate is, indeed, post-update. It doesn't r
 PostUpdate actually runs two times after each update: once in an elevated context, and once as a regular user who performed the update. Both runs do similar work - the main difference being that we update HKLM registry entries are updated by the elevated instance, while HKCU ones are updated by the non-elevated instance.
 
 It's also important to remember that PostUpdate, being part of the installer code, only exists on Windows, so it can't be used to fix things up on other platforms the same way.
+
+To add a new task to run during PostUpdate, you need to determine when it should run, then add it to the corresponding function in `uninstaller_helpers.nsh`.
+
+If the task needs the permissions of the installation (regardless whether the user was elevated or not), put it in `PostUpdateInstallation`. **Put it here unless you have a compelling reason otherwise,** as the other functions might not run in some installations. Use the `SHCTX` registry 'hive' to automatically pick the correct locations in the registry, and keep the ShellVarContext untouched to avoid accidentally using the incorrect locations.
+
+If you're certain that you need more control than that, there's a few other places you can put the code. Avoid using any of these without a strong reason: they don't run consistently, and it's easier to make mistakes (e.g. if only one user gets a fix when everyone should get a fix).
+
+* If the task needs to run with Administrator privileges, put it in `PostUpdateElevated`. Your code will not run if Firefox wasn't installed by an administrator. (But check: does your code actually need admin? Usually HKCU works as well as HKLM.)
+* If the task needs to run _without_ Administrator privileges, as a plain user, put it in `PostUpdateNonElevated`. **Your code will only run for the user who happens to run the update,** so it won't affect everyone on a multi-user machine. In enterprise scenarioes this may not run at all. (But check: are you sure there isn't a way to do your setup for all users?)
+* You can also use `PostUpdateCurrentUser` to run as the user who happened to run the update if there was elevation. This is a weaker version of `PostUpdateNonElevated`, as it only runs if the installation was done as administrator; avoid using unless you know what you're doing.
 
 ## Default Browser and Shortcut Handling
 

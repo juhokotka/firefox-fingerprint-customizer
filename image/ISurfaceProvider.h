@@ -10,6 +10,8 @@
 #ifndef mozilla_image_ISurfaceProvider_h
 #define mozilla_image_ISurfaceProvider_h
 
+#include "SurfaceCache.h"
+#include "imgFrame.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
@@ -17,9 +19,6 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/image/WebRenderImageProvider.h"
-
-#include "imgFrame.h"
-#include "SurfaceCache.h"
 
 namespace mozilla {
 namespace image {
@@ -101,7 +100,7 @@ class ISurfaceProvider : public WebRenderImageProvider {
     MOZ_ASSERT(aImageKey, "Must have a valid image key");
   }
 
-  virtual ~ISurfaceProvider() {}
+  virtual ~ISurfaceProvider() = default;
 
   /// @return an eagerly computed drawable reference to a surface. For
   /// dynamically generated animation surfaces, @aFrame specifies the 0-based
@@ -166,6 +165,9 @@ class MOZ_STACK_CLASS DrawableSurface final {
     aOther.mHaveSurface = false;
     return *this;
   }
+
+  DrawableSurface(const DrawableSurface& aOther) = delete;
+  DrawableSurface& operator=(const DrawableSurface& aOther) = delete;
 
   /**
    * If this DrawableSurface is dynamically generated from an animation, attempt
@@ -257,9 +259,6 @@ class MOZ_STACK_CLASS DrawableSurface final {
   imgFrame* operator->() { return DrawableRef().get(); }
 
  private:
-  DrawableSurface(const DrawableSurface& aOther) = delete;
-  DrawableSurface& operator=(const DrawableSurface& aOther) = delete;
-
   DrawableFrameRef& DrawableRef() {
     MOZ_ASSERT(mHaveSurface);
 
@@ -335,7 +334,7 @@ class SimpleSurfaceProvider final : public ISurfaceProvider {
   }
 
  private:
-  virtual ~SimpleSurfaceProvider() {}
+  virtual ~SimpleSurfaceProvider() = default;
 
   NotNull<RefPtr<imgFrame>> mSurface;
   DrawableFrameRef mLockRef;

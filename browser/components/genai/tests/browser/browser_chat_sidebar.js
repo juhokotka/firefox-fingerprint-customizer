@@ -106,6 +106,13 @@ add_task(async function test_sidebar_onboarding() {
     document.querySelector("label:has(.localhost)")
   );
   Assert.ok(label, "Got a provider");
+  const header = document.getElementById("header");
+  const browserContainer = document.getElementById("browser-container");
+  Assert.ok(header.inert, "Header is inert during onboarding");
+  Assert.ok(
+    browserContainer.inert,
+    "Provider frame is inert during onboarding"
+  );
   let events =
     Glean.genaiChatbot.onboardingProviderChoiceDisplayed.testGetValue();
   Assert.equal(events.length, 1, "Displayed onboarding once");
@@ -158,6 +165,11 @@ add_task(async function test_sidebar_onboarding() {
     () => !document.getElementById("multi-stage-message-root")
   );
   Assert.ok(noOnboarding, "Onboarding container went away");
+  Assert.ok(!header.inert, "Header is not inert after onboarding");
+  Assert.ok(
+    !browserContainer.inert,
+    "Provider frame is not inert after onboarding"
+  );
 
   events = Glean.genaiChatbot.onboardingFinish.testGetValue();
   Assert.equal(events.length, 1, "Finished once");
@@ -170,6 +182,59 @@ add_task(async function test_sidebar_onboarding() {
 
   Services.prefs.clearUserPref("browser.ml.chat.provider");
   await SidebarController.hide();
+});
+
+add_task(async function test_switch_from_chat_onboarding() {
+  // Bug 2076296 - Ensure that the revamped sidebar switcher works during onboarding.
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["sidebar.revamp", true],
+      ["sidebar.verticalTabs", false],
+      ["sidebar.visibility", "hide-launcher"],
+      ["sidebar.main.tools", "aichat,history"],
+      ["browser.ml.chat.provider", ""],
+    ],
+  });
+
+  await SidebarTestUtils.showPanel(window, "viewGenaiChatSidebar");
+  const { contentDocument, contentWindow } = SidebarController.browser;
+  const isFocused = () =>
+    contentDocument
+      .getElementById("multi-stage-message-root")
+      ?.contains(contentDocument.activeElement);
+  if (!isFocused()) {
+    await BrowserTestUtils.waitForEvent(
+      contentWindow,
+      "focusin",
+      false,
+      isFocused
+    );
+  }
+  const { switcher } = SidebarController.panelHeader;
+  Assert.ok(BrowserTestUtils.isVisible(switcher), "Panel switcher is visible");
+
+  const listShown = BrowserTestUtils.waitForEvent(switcher.panelList, "shown");
+  EventUtils.synthesizeMouseAtCenter(switcher.button, {}, window);
+  await listShown;
+
+  const { label } = (await SidebarController.getRevampSwitcherItems()).find(
+    ({ view }) => view === "viewHistorySidebar"
+  );
+  const historyItem = [...switcher.panelItems].find(({ textContent }) =>
+    textContent.includes(label)
+  );
+  Assert.ok(historyItem, "History is available in the switcher");
+  const sidebarShown = BrowserTestUtils.waitForEvent(window, "SidebarShown");
+  EventUtils.synthesizeMouseAtCenter(historyItem, {}, window);
+  await sidebarShown;
+  Assert.equal(
+    SidebarController.currentID,
+    "viewHistorySidebar",
+    "History panel opened from chatbot onboarding"
+  );
+
+  SidebarTestUtils.closePanel(window);
+  await SpecialPowers.popPrefEnv();
 });
 
 /**
@@ -239,6 +304,7 @@ add_task(async function test_sidebar_menu() {
   const popup = await TestUtils.waitForCondition(() =>
     document.getElementById("chatbot-menupopup")
   );
+  await BrowserTestUtils.waitForPopupEvent(popup, "shown");
 
   Assert.ok(popup, "Menu popup created");
   let items = popup.querySelectorAll("menuitem");
@@ -254,11 +320,11 @@ add_task(async function test_sidebar_menu() {
   );
 
   // Disable shortcuts via menu
-  items[2].click();
-  const shown = BrowserTestUtils.waitForEvent(popup, "popupshown");
+  await BrowserTestUtils.activateMenuItem(items[2]);
+
   Services.prefs.clearUserPref("browser.ml.chat.provider");
   button.click();
-  await shown;
+  await BrowserTestUtils.waitForPopupEvent(popup, "shown");
 
   items = popup.querySelectorAll("menuitem");
   Assert.ok(!items[1].hasAttribute("checked"), "Shortcuts not shown");
@@ -316,12 +382,12 @@ add_task(async function test_keyboard_shortcut() {
 
   await SpecialPowers.pushPrefEnv({ set: [[enabled, true]] });
   key.doCommand();
-
+  await SidebarController.waitUntilStable();
   Assert.ok(Services.prefs.getBoolPref(enabled), "Enabled with keyboard");
   Assert.ok(SidebarController.isOpen, "Opened chatbot with keyboard");
 
   key.doCommand();
-
+  await SidebarController.waitUntilStable();
   Assert.ok(!SidebarController.isOpen, "Closed chatbot with keyboard");
 
   Assert.ok(
@@ -378,6 +444,9 @@ add_task(async function test_pip_actor_not_chat_sidebar() {
  * Check that the sidebar is focused when opened
  */
 add_task(async function test_sidebar_browser_focus() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.ml.chat.provider", TEST_CHAT_PROVIDER_URL]],
+  });
   const sidebar = document.getElementById("sidebar");
   await SidebarController.show("viewGenaiChatSidebar");
   Assert.equal(document.activeElement, sidebar, "Sidebar is focused");
@@ -418,4 +487,92 @@ add_task(async function test_webext_content_script_in_chat_sidebar() {
 
   await SidebarController.hide();
   await extension.unload();
+});
+
+/**
+ * Check that tab-modal prompts requested for the chatbot browser are shown as
+ * tab dialogs owned by the sidebar browser (so that they can be closed
+ * programmatically) instead of falling back to window-modal prompts.
+ */
+add_task(async function test_tab_modal_prompt_in_chat_sidebar() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.ml.chat.provider", TEST_CHAT_PROVIDER_URL]],
+  });
+
+  // Opening a tab dialog on the sidebar browser creates dialog frames that
+  // live as long as the sidebar does, so use a separate window that can be
+  // closed to tear them down instead of leaking them (bug 1513656).
+  const win = await BrowserTestUtils.openNewBrowserWindow();
+  const { SidebarController } = win;
+  await SidebarController.show("viewGenaiChatSidebar");
+
+  const chatbotBrowser = await TestUtils.waitForCondition(() => {
+    const sidebarDocument = SidebarController.browser.contentWindow.document;
+    return sidebarDocument
+      .getElementById("browser-container")
+      .querySelector("browser");
+  }, "Chatbot <browser> is loaded in the sidebar");
+  // The prompt has to be requested for a browser that is done loading,
+  // otherwise the navigation closes the tab dialog again right away.
+  await TestUtils.waitForCondition(
+    () =>
+      chatbotBrowser.browsingContext?.currentWindowGlobal &&
+      chatbotBrowser.currentURI?.spec == TEST_CHAT_PROVIDER_URL &&
+      !chatbotBrowser.webProgress?.isLoadingDocument,
+    "Chatbot <browser> loaded the provider page"
+  );
+
+  const promptActor =
+    chatbotBrowser.browsingContext.currentWindowGlobal.getActor("Prompt");
+  const showOnSidebarBrowser =
+    promptActor.shouldShowPromptOnSidebarBrowser(chatbotBrowser);
+  Assert.ok(
+    showOnSidebarBrowser,
+    "Prompts for the chatbot <browser> are shown on the sidebar browser"
+  );
+  if (!showOnSidebarBrowser) {
+    // Continuing would open a blocking window-modal dialog that nothing can
+    // dismiss, hanging the harness rather than failing this test.
+    await BrowserTestUtils.closeWindow(win);
+    return;
+  }
+
+  const dialogManager = win.gBrowser
+    .getTabDialogBox(win.document.getElementById("sidebar"))
+    .getTabDialogManager();
+
+  const promptID = "test-chat-sidebar-tab-prompt";
+  let promptRejected = false;
+  const promptPromise = Services.prompt
+    .asyncConfirmEx(
+      chatbotBrowser.browsingContext,
+      Ci.nsIPromptService.MODAL_TYPE_TAB,
+      "Scan in progress",
+      "Reviewing what you pasted",
+      Ci.nsIPromptService.BUTTON_POS_0 *
+        Ci.nsIPromptService.BUTTON_TITLE_CANCEL,
+      null,
+      null,
+      null,
+      null,
+      false,
+      { promptID }
+    )
+    .catch(() => {
+      promptRejected = true;
+    });
+
+  const dialog = await TestUtils.waitForCondition(
+    () => dialogManager.dialogs.find(d => d.promptID == promptID),
+    "Prompt is shown as a tab dialog managed by the sidebar browser"
+  );
+  // Aborting before the dialog document has loaded would close the dialog
+  // without it marking the prompt as aborted.
+  await dialog._dialogReady;
+
+  dialogManager.abortDialogs(d => d.promptID == promptID);
+  await promptPromise;
+  Assert.ok(promptRejected, "Dialog was closed programmatically");
+
+  await BrowserTestUtils.closeWindow(win);
 });

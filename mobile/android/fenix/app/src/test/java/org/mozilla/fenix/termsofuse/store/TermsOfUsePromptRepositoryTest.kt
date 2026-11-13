@@ -18,9 +18,7 @@ import org.robolectric.RobolectricTestRunner
 
 private const val TIME_IN_MILLIS = 1759926358L
 
-/**
- * This copies the default set in `nimbus.fml.yaml` `terms-of-use-prompt` `max-display-count`.
- */
+/** This copies the default set in `nimbus.fml.yaml` `terms-of-use-prompt` `max-display-count`. */
 private const val MAX_DISPLAY_COUNT = 2
 
 @RunWith(RobolectricTestRunner::class)
@@ -32,7 +30,7 @@ class TermsOfUsePromptRepositoryTest {
     @Before
     fun setup() {
         settings = Settings(testContext)
-        repository = DefaultTermsOfUsePromptRepository(settings)
+        repository = DefaultTermsOfUsePromptRepository(settings, currentTimeMillisProvider = { TIME_IN_MILLIS })
     }
 
     @Test
@@ -189,7 +187,7 @@ class TermsOfUsePromptRepositoryTest {
         assertEquals(0, settings.termsOfUseAcceptedVersion)
         assertEquals(0L, settings.termsOfUseAcceptedTimeInMillis)
 
-        repository.updateHasAcceptedTermsOfUsePreference(nowMillis = TIME_IN_MILLIS)
+        repository.updateHasAcceptedTermsOfUsePreference()
 
         assertTrue(settings.hasAcceptedTermsOfService)
         assertEquals(5, settings.termsOfUseAcceptedVersion)

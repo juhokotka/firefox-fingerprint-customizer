@@ -3,35 +3,35 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsWaylandDisplay.h"
-#include "DMABufFormats.h"
-
-#include "base/message_loop.h"    // for MessageLoop
-#include "base/task.h"            // for NewRunnableMethod, etc
-#include "mozilla/gfx/Logging.h"  // for gfxCriticalNote
-#include "mozilla/StaticMutex.h"
-#include "mozilla/StaticPtr.h"
-#include "mozilla/StaticPrefs_widget.h"
-#include "mozilla/StaticPrefs_general.h"
-#include "mozilla/Sprintf.h"
-#include "WidgetUtilsGtk.h"
-#include "nsGtkKeyUtils.h"
-#include "nsGtkUtils.h"
-#include "nsLayoutUtils.h"
-#include "nsWindow.h"
-#include "wayland-proxy.h"
-#include "ScreenHelperGTK.h"
-#include "nsIAppStartup.h"
-#include "nsServiceManagerUtils.h"
-#include "nsThreadUtils.h"
 
 #include <dlfcn.h>
+
+#include "DMABufFormats.h"
+#include "ScreenHelperGTK.h"
+#include "WidgetUtilsGtk.h"
+#include "base/message_loop.h"  // for MessageLoop
+#include "base/task.h"          // for NewRunnableMethod, etc
+#include "mozilla/Sprintf.h"
+#include "mozilla/StaticMutex.h"
+#include "mozilla/StaticPrefs_general.h"
+#include "mozilla/StaticPrefs_widget.h"
+#include "mozilla/StaticPtr.h"
+#include "mozilla/gfx/Logging.h"  // for gfxCriticalNote
+#include "nsGtkKeyUtils.h"
+#include "nsGtkUtils.h"
+#include "nsIAppStartup.h"
+#include "nsLayoutUtils.h"
+#include "nsServiceManagerUtils.h"
+#include "nsThreadUtils.h"
+#include "nsWindow.h"
+#include "wayland-proxy.h"
 
 #undef LOG
 #undef LOG_VERBOSE
 #ifdef MOZ_LOGGING
+#  include "Units.h"
 #  include "mozilla/Logging.h"
 #  include "nsTArray.h"
-#  include "Units.h"
 extern mozilla::LazyLogModule gWidgetWaylandLog;
 #  define LOG(...) \
     MOZ_LOG(gWidgetWaylandLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
@@ -84,7 +84,30 @@ nsWaylandDisplay* WaylandDisplayGet() {
   return gWaylandDisplay;
 }
 
-void nsWaylandDisplay::SetShm(wl_shm* aShm) { mShm = aShm; }
+#ifdef MOZ_LOGGING
+void nsWaylandDisplay::SetShmFormat(uint32_t aFormat) {
+  switch (aFormat) {
+    case WL_SHM_FORMAT_ABGR2101010:
+      LOG("WL_SHM_FORMAT_ABGR2101010 supported");
+      break;
+    case WL_SHM_FORMAT_YUV420:
+      LOG("WL_SHM_FORMAT_YUV420 supported");
+      break;
+  }
+}
+#endif
+
+void nsWaylandDisplay::SetShm(wl_shm* aShm) {
+  mShm = aShm;
+#ifdef MOZ_LOGGING
+  static const struct wl_shm_listener shm_listener{
+      [](void* data, struct wl_shm* wl_shm, uint32_t format) {
+        auto* display = static_cast<nsWaylandDisplay*>(data);
+        display->SetShmFormat(format);
+      }};
+  wl_shm_add_listener(mShm, &shm_listener, this);
+#endif
+}
 
 class WaylandPointerEvent {
  public:
@@ -530,6 +553,13 @@ void nsWaylandDisplay::SetAppMenuManager(
 
 void nsWaylandDisplay::SetFixes(wl_fixes* aFixes) { mFixes = aFixes; }
 
+// BT2020/PQ is the minimum to enable HDR.
+bool nsWaylandDisplay::IsHDREnabled() const {
+  return mColorManagerSupportedFeature.mParametric &&
+         mSupportedPrimaries[WP_COLOR_MANAGER_V1_PRIMARIES_BT2020] &&
+         mSupportedTransfer[WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ];
+}
+
 void nsWaylandDisplay::SetCMSupportedFeature(uint32_t aFeature) {
   LOG("nsWaylandDisplay::SetCMSupportedFeature() [%d]", aFeature);
   switch (aFeature) {
@@ -902,12 +932,15 @@ static void global_registry_handler(void* data, wl_registry* registry,
   } else if (iface.EqualsLiteral("wl_fixes")) {
     // wl_fixes_interface was introduced in libwayland-client 1.24, but
     // Ubuntu 22.04 still ships 1.20.
-    // We force wl_fixes v.1 interface.
     static auto* sWlFixesInterface =
         (wl_interface*)dlsym(RTLD_DEFAULT, "wl_fixes_interface");
     if (sWlFixesInterface) {
-      auto* fixes =
-          WaylandRegistryBind<wl_fixes>(registry, id, sWlFixesInterface, 1);
+      // Note that we cannot simply do MIN(version, 2) because the dynamically
+      // loaded wl_fixes_interface can be v1, which can then lead to out of
+      // bounds reads when sending v2 requests.
+      const uint32_t libraryVersion = MIN(sWlFixesInterface->version, 2);
+      auto* fixes = WaylandRegistryBind<wl_fixes>(
+          registry, id, sWlFixesInterface, MIN(version, libraryVersion));
       display->SetFixes(fixes);
     } else {
       LOG("wl_fixes_interface is missing!");
@@ -1059,10 +1092,14 @@ void nsWaylandDisplay::SessionManagerInit() {
 // below.
 
 // 32% of crashes - Example: "unknown object (4278190083), message error(ous)"
+// This is the one pattern where libwayland has already thrown the compositor's
+// error text away, so add what wayland-proxy captured. That string is empty
+// when nothing was captured. See bug 2039706.
 MOZ_NEVER_INLINE static void WlLogHandler_UnknownObject(const char* error) {
-  MOZ_CRASH_UNSAFE_PRINTF("(%s) %s Proxy: %s",
+  MOZ_CRASH_UNSAFE_PRINTF("(%s) %s Proxy: %s Compositor error: %s",
                           GetDesktopEnvironmentIdentifier().get(), error,
-                          WaylandProxy::GetState());
+                          WaylandProxy::GetState(),
+                          WaylandProxy::GetLastProtocolError());
 }
 
 // 20% of crashes - Example: "wp_viewport#296: error 2: source rectangle out
@@ -1145,6 +1182,15 @@ MOZ_NEVER_INLINE static void WlLogHandler_MarshallingError(const char* error) {
 // buffer (1 x 1) is larger than the configured fullscreen state (0 x 0)"
 MOZ_NEVER_INLINE static void WlLogHandler_XdgSurfaceBufferMismatch(
     const char* error) {
+  MOZ_CRASH_UNSAFE_PRINTF("(%s) %s Proxy: %s",
+                          GetDesktopEnvironmentIdentifier().get(), error,
+                          WaylandProxy::GetState());
+}
+
+// Compositor connection lost - Example: "Error reading events from display:
+// Broken pipe". The Wayland compositor terminated our connection (e.g. session
+// end, monitor hot-unplug); this is outside Firefox's control. See Bug 1984696.
+MOZ_NEVER_INLINE static void WlLogHandler_DisplayReadError(const char* error) {
   MOZ_CRASH_UNSAFE_PRINTF("(%s) %s Proxy: %s",
                           GetDesktopEnvironmentIdentifier().get(), error,
                           WaylandProxy::GetState());
@@ -1244,6 +1290,11 @@ static void WlLogHandler(const char* format, va_list args) {
     WlLogHandler_XdgSurfaceBufferMismatch(error);
   }
 
+  // Pattern 12: compositor connection lost (Bug 1984696)
+  if (strstr(error, "Error reading events from display")) {
+    WlLogHandler_DisplayReadError(error);
+  }
+
   // Fallback for unmatched patterns - use original inline code
   MOZ_CRASH_UNSAFE_PRINTF("(%s) %s Proxy: %s",
                           GetDesktopEnvironmentIdentifier().get(), error,
@@ -1262,8 +1313,7 @@ void WlCompositorUnavailableHandler() {
         nsCOMPtr<nsIAppStartup> appStartup =
             do_GetService("@mozilla.org/toolkit/app-startup;1");
         if (appStartup) {
-          bool userAllowedQuit = true;
-          appStartup->Quit(nsIAppStartup::eForceQuit, 0, &userAllowedQuit);
+          appStartup->Quit(nsIAppStartup::eForceQuit, 0);
         }
       }));
 }
@@ -1328,6 +1378,36 @@ void nsWaylandDisplay::Init() {
   if (!GetFractionalScaleManager()) {
     NS_WARNING("Missing wp_fractional_scale_v1 wayland protocol!");
   }
+}
+
+bool nsWaylandDisplay::IsTFSupported(uint32_t aTF) {
+  if (aTF < sColorTransfersNum) {
+    return mSupportedTransfer[aTF] == (int)aTF;
+  } else {
+    NS_WARNING("Unknow color transfer function!");
+    return false;
+  }
+}
+
+bool nsWaylandDisplay::IsSetMDCVSupported() {
+  return mColorManagerSupportedFeature.mDisplayPrimaries;
+}
+
+bool nsWaylandDisplay::IsSetLuminancesSupported() {
+  return mColorManagerSupportedFeature.mLuminances;
+}
+
+bool nsWaylandDisplay::IsPrimariesSupported(uint32_t aPrimaries) {
+  if (aPrimaries < sColorPrimariesNum) {
+    return mSupportedPrimaries[aPrimaries] == (int)aPrimaries;
+  } else {
+    NS_WARNING("Unknow color primaries!");
+    return false;
+  }
+}
+
+bool nsWaylandDisplay::IsParametricSupported() {
+  return mColorManagerSupportedFeature.mParametric;
 }
 
 }  // namespace mozilla::widget

@@ -20,18 +20,21 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.core.graphics.createBitmap
 import androidx.core.net.toUri
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.UiSelector
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiObject2
+import java.time.LocalDate
+import java.time.LocalTime
 import mozilla.components.browser.state.search.SearchEngine
 import mozilla.components.browser.state.state.availableSearchEngines
 import org.junit.Assert
+import org.mozilla.fenix.R
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.helpers.Constants.TAG
 import org.mozilla.fenix.helpers.Constants.recommendedAddons
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.waitForAppWindowToBeUpdated
+import org.mozilla.fenix.home.topsites.TopSitesTestTag
 import org.mozilla.fenix.utils.IntentUtils
-import java.time.LocalDate
-import java.time.LocalTime
 
 object DataGenerationHelper {
     val appContext: Context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -42,20 +45,19 @@ object DataGenerationHelper {
         customActionButtonDescription: String = "",
     ): Intent {
         Log.i(TAG, "createCustomTabIntent: Trying to create custom tab intent with url: $pageUrl")
-        val appContext = InstrumentationRegistry.getInstrumentation()
-            .targetContext
-            .applicationContext
+        val appContext = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
         val pendingIntent = PendingIntent.getActivity(appContext, 0, Intent(), IntentUtils.DEFAULT_PENDING_INTENT_FLAGS)
-        val customTabsIntent = CustomTabsIntent.Builder()
-            .addMenuItem(customMenuItemLabel, pendingIntent)
-            .setShareState(CustomTabsIntent.SHARE_STATE_ON)
-            .setActionButton(
-                createTestBitmap(),
-                customActionButtonDescription,
-                pendingIntent,
-                true,
-            )
-            .build()
+        val customTabsIntent =
+            CustomTabsIntent.Builder()
+                .addMenuItem(customMenuItemLabel, pendingIntent)
+                .setShareState(CustomTabsIntent.SHARE_STATE_ON)
+                .setActionButton(
+                    createTestBitmap(),
+                    customActionButtonDescription,
+                    pendingIntent,
+                    true,
+                )
+                .build()
         customTabsIntent.intent.data = pageUrl.toUri()
         Log.i(TAG, "createCustomTabIntent: Created custom tab intent with url: $pageUrl")
         return customTabsIntent.intent
@@ -70,7 +72,8 @@ object DataGenerationHelper {
         return bitmap
     }
 
-    fun getStringResource(id: Int, argument: String = TestHelper.appName) = TestHelper.appContext.resources.getString(id, argument)
+    fun getStringResource(id: Int, argument: String = TestHelper.appName) =
+        TestHelper.appContext.resources.getString(id, argument)
 
     fun getStringResource(id: Int, vararg args: Any) = TestHelper.appContext.resources.getString(id, *args)
 
@@ -80,21 +83,17 @@ object DataGenerationHelper {
     }
 
     private val charPool: List<Char> = ('a'..'z') + ('A'..'Z') + ('0'..'9')
+
     fun generateRandomString(stringLength: Int): String {
         Log.i(TAG, "generateRandomString: Trying to generate a random string with $stringLength characters")
         val randomString =
-            (1..stringLength)
-                .map { kotlin.random.Random.nextInt(0, charPool.size) }
-                .map(charPool::get)
-                .joinToString("")
+            (1..stringLength).map { kotlin.random.Random.nextInt(0, charPool.size) }.map(charPool::get).joinToString("")
         Log.i(TAG, "generateRandomString: Generated random string: $randomString")
 
         return randomString
     }
 
-    /**
-     * Creates clipboard data.
-     */
+    /** Creates clipboard data. */
     fun setTextToClipBoard(context: Context, message: String) {
         Log.i(TAG, "setTextToClipBoard: Trying to set clipboard text to: $message")
         val clipBoard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -105,12 +104,10 @@ object DataGenerationHelper {
     }
 
     /**
-     * Constructs a date and time placeholder string for sponsored Fx suggest links.
-     * The format of the datetime is YYYYMMDDHH, where YYYY is the four-digit year,
-     * MM is the two-digit month, DD is the two-digit day, and HH is the two-digit hour.
-     * Single-digit months, days, and hours are padded with a leading zero to ensure
-     * the correct format. For example, a date and time of January 10, 2024, at 3 PM
-     * would be represented as "2024011015".
+     * Constructs a date and time placeholder string for sponsored Fx suggest links. The format of the datetime is
+     * YYYYMMDDHH, where YYYY is the four-digit year, MM is the two-digit month, DD is the two-digit day, and HH is the
+     * two-digit hour. Single-digit months, days, and hours are padded with a leading zero to ensure the correct format.
+     * For example, a date and time of January 10, 2024, at 3 PM would be represented as "2024011015".
      *
      * @return A string representing the current date and time in the specified format.
      */
@@ -124,38 +121,55 @@ object DataGenerationHelper {
         val currentYear = currentDate.year.toString()
         val currentHour = currentTime.hour.toString().padStart(2, '0')
 
-        Log.i(TAG, "getSponsoredFxSuggestPlaceHolder: Got: ${currentYear + currentMonth + currentDay + currentHour} as the sponsored search suggestion placeholder")
+        Log.i(
+            TAG,
+            "getSponsoredFxSuggestPlaceHolder: Got: ${currentYear + currentMonth + currentDay + currentHour} as the sponsored search suggestion placeholder",
+        )
 
         return currentYear + currentMonth + currentDay + currentHour
     }
 
     /**
-     * Returns sponsored shortcut title based on the index.
+     * Returns the title of the [ordinal]th sponsored shortcut, counting only sponsored shortcuts.
+     *
+     * The shortcuts are located by their sponsored label rather than by their absolute position in the top sites list,
+     * because the number of default pinned shortcuts preceding them varies by release channel and region. See
+     * [sponsoredShortcuts].
+     *
+     * @param ordinal One-based index among the sponsored shortcuts only.
      */
-    fun getSponsoredShortcutTitle(position: Int): String {
-        Log.i(TAG, "getSponsoredShortcutTitle: Trying to get the title of the sponsored shortcut at position: ${position - 1}")
-        val sponsoredShortcut = mDevice.findObject(
-            UiSelector()
-                .resourceId("top_sites_list.top_site_item")
-                .index(position - 1),
-        ).getChild(
-            UiSelector()
-                .resourceId("top_sites_list.top_site_item.top_site_title"),
-        ).text
-        Log.i(TAG, "getSponsoredShortcutTitle: The sponsored shortcut at position: ${position - 1} has title: $sponsoredShortcut")
+    fun getSponsoredShortcutTitle(ordinal: Int): String {
+        Log.i(TAG, "getSponsoredShortcutTitle: Trying to get the title of sponsored shortcut #$ordinal")
+        val sponsoredShortcut =
+            sponsoredShortcuts()[ordinal - 1].findObject(By.res(TopSitesTestTag.TOP_SITE_TITLE)).text
+        Log.i(TAG, "getSponsoredShortcutTitle: Sponsored shortcut #$ordinal has title: $sponsoredShortcut")
         return sponsoredShortcut
     }
 
     /**
-     * Returns the title of the first matching extension.
+     * Returns the top sites that are labelled as sponsored, in the order they appear on the homepage.
+     *
+     * Every shortcut lays out a sponsored label, but it only carries text when the shortcut is sponsored, so matching
+     * on that text distinguishes them.
      */
+    fun sponsoredShortcuts(): List<UiObject2> {
+        val sponsoredLabel = getStringResource(R.string.top_sites_sponsored_label)
+        return mDevice.findObjects(By.res(TopSitesTestTag.TOP_SITE_ITEM_ROOT)).filter {
+            it.findObject(By.text(sponsoredLabel)) != null
+        }
+    }
+
+    /** Returns the title of the first matching extension. */
     fun getRecommendedExtensionTitle(composeTestRule: ComposeTestRule): String {
         var verifiedCount = 0
 
         recommendedAddons.forEach { addon ->
             try {
                 waitForAppWindowToBeUpdated()
-                Log.i(TAG, "getRecommendedExtensionTitle: Trying to verify that addon: $addon is recommended and displayed")
+                Log.i(
+                    TAG,
+                    "getRecommendedExtensionTitle: Trying to verify that addon: $addon is recommended and displayed",
+                )
                 composeTestRule.onNodeWithContentDescription("Add $addon", substring = true).assertIsDisplayed()
                 Log.i(TAG, "getRecommendedExtensionTitle: Verified that addon: $addon is recommended and displayed")
 
@@ -169,8 +183,8 @@ object DataGenerationHelper {
     }
 
     /**
-     * The list of Search engines for the "home" region of the user.
-     * For en-us it will return the 6 engines selected by default: Google, Bing, DuckDuckGo, Amazon, Ebay, Wikipedia.
+     * The list of Search engines for the "home" region of the user. For en-us it will return the 6 engines selected by
+     * default: Google, Bing, DuckDuckGo, Amazon, Ebay, Wikipedia.
      */
     fun getRegionSearchEnginesList(): List<SearchEngine> {
         Log.i(TAG, "getRegionSearchEnginesList: Trying to get the search engines based on the region of the user")
@@ -181,11 +195,14 @@ object DataGenerationHelper {
     }
 
     /**
-     * The list of Search engines available to be added by user choice.
-     * For en-us it will return the 2 engines: Reddit, Youtube.
+     * The list of Search engines available to be added by user choice. For en-us it will return the 2 engines: Reddit,
+     * Youtube.
      */
     fun getAvailableSearchEngines(): List<SearchEngine> {
-        Log.i(TAG, "getAvailableSearchEngines: Trying to get the alternative search engines based on the region of the user")
+        Log.i(
+            TAG,
+            "getAvailableSearchEngines: Trying to get the alternative search engines based on the region of the user",
+        )
         val searchEnginesList = TestHelper.appContext.components.core.store.state.search.availableSearchEngines
         Assert.assertTrue("$TAG: Search engines list returned nothing", searchEnginesList.isNotEmpty())
         Log.i(TAG, "getAvailableSearchEngines: Got $searchEnginesList based on the region of the user")

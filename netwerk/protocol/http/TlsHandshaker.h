@@ -6,6 +6,7 @@
 #define TlsHandshaker_h_
 
 #include "nsITlsHandshakeListener.h"
+#include "nsString.h"
 
 class nsISocketTransport;
 class nsITLSSocketControl;
@@ -57,11 +58,7 @@ class TlsHandshaker : public nsITlsHandshakeCallbackListener {
   }
   const nsCString& EarlyNegotiatedALPN() const { return mEarlyNegotiatedALPN; }
   void SetNPNComplete() { mNPNComplete = true; }
-  void NotifyClose() {
-    mTlsHandshakeComplitionPending = false;
-    mNPNComplete = true;
-    mOwner = nullptr;
-  }
+  void NotifyClose();
 
  private:
   virtual ~TlsHandshaker();

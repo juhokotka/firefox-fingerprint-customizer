@@ -3,151 +3,149 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
+#include "nsHttpChannel.h"
 
 #include <inttypes.h>
 
-#include "mozilla/ScopeExit.h"
-#include "mozilla/Sprintf.h"
-#include "mozilla/ToString.h"
-#include "mozilla/dom/nsCSPContext.h"
-#include "mozilla/dom/NavigatorLogin.h"
-#include "mozilla/glean/AntitrackingMetrics.h"
-#include "mozilla/glean/NetwerkMetrics.h"
-#include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
-#include "mozilla/net/CaptivePortalService.h"
-#include "mozilla/net/CookieServiceParent.h"
-#include "mozilla/net/NoVarySearchUtils.h"
-#include "mozilla/StoragePrincipalHelper.h"
-
-#include "nsCOMPtr.h"
-#include "nsContentSecurityUtils.h"
-#include "nsHttp.h"
-#include "nsHttpChannel.h"
-#include "nsHttpChannelAuthProvider.h"
-#include "nsHttpConnectionMgr.h"
-#include "nsHttpHandler.h"
-#include "nsIStreamConverter.h"
-#include "nsString.h"
-#include "nsICacheStorageService.h"
-#include "nsICacheStorage.h"
-#include "nsICacheEntry.h"
-#include "nsICookieNotification.h"
-#include "nsICryptoHash.h"
-#include "nsIEffectiveTLDService.h"
-#include "nsIHttpHeaderVisitor.h"
-#include "nsINetworkInterceptController.h"
-#include "nsIStringBundle.h"
-#include "nsIStreamListenerTee.h"
-#include "nsISeekableStream.h"
-#include "nsIProtocolProxyService2.h"
-#include "nsIURLQueryStringStripper.h"
-#include "nsIWebTransport.h"
-#include "nsCRT.h"
-#include "nsMimeTypes.h"
-#include "nsNetCID.h"
-#include "nsNetUtil.h"
-#include "nsIStreamTransportService.h"
-#include "prnetdb.h"
-#include "nsEscape.h"
-#include "nsComponentManagerUtils.h"
-#include "nsStreamUtils.h"
-#include "nsIOService.h"
-#include "nsDNSPrefetch.h"
-#include "nsChannelClassifier.h"
-#include "nsIRedirectResultListener.h"
-#include "mozilla/TimeStamp.h"
-#include "nsError.h"
-#include "nsPrintfCString.h"
-#include "nsQueryObject.h"
-#include "nsThreadUtils.h"
-#include "nsIConsoleService.h"
-#include "nsINetworkErrorLogging.h"
+#include "AlternateServices.h"
+#include "CacheControlParser.h"
+#include "CacheStorageService.h"
+#include "CookieService.h"
+#include "HttpChannelParent.h"
+#include "HttpLog.h"
+#include "HttpTrafficAnalyzer.h"
+#include "HttpTransactionParent.h"
+#include "InterceptedHttpChannel.h"
+#include "LNAPermissionRequest.h"
+#include "LoadContextInfo.h"
+#include "NetworkMarker.h"
+#include "ThirdPartyUtil.h"
 #include "mozilla/AntiTrackingRedirectHeuristic.h"
 #include "mozilla/AntiTrackingUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/BasePrincipal.h"
+#include "mozilla/Components.h"
+#include "mozilla/ContentBlockingAllowList.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/FlowMarkers.h"
+#include "mozilla/LoadInfo.h"
+#include "mozilla/NullPrincipal.h"
 #include "mozilla/PerfStats.h"
 #include "mozilla/ProfilerDumpOrCrash.h"
 #include "mozilla/ProfilerLabels.h"
-#include "mozilla/FlowMarkers.h"
-#include "mozilla/Components.h"
+#include "mozilla/ScopeExit.h"
+#include "mozilla/Services.h"
+#include "mozilla/Sprintf.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/StaticPrefs_security.h"
-#include "sslt.h"
-#include "nsCharSeparatedTokenizer.h"
-#include "nsContentUtils.h"
-#include "nsContentSecurityManager.h"
-#include "nsIClassOfService.h"
-#include "CookieService.h"
-#include "nsIPrincipal.h"
-#include "nsIScriptError.h"
-#include "nsIScriptSecurityManager.h"
-#include "nsITransportSecurityInfo.h"
-#include "nsIWebProgressListener.h"
-#include "LoadContextInfo.h"
-#include "netCore.h"
-#include "nsHttpTransaction.h"
-#include "nsICancelable.h"
-#include "nsIHttpChannelInternal.h"
-#include "nsIPrompt.h"
-#include "nsInputStreamPump.h"
-#include "nsURLHelper.h"
-#include "nsISiteIntegrityService.h"
-#include "nsISiteSecurityService.h"
-#include "nsISocketTransport.h"
-#include "nsIStreamConverterService.h"
-#include "nsIURIMutator.h"
-#include "nsString.h"
-#include "nsStringStream.h"
-#include "mozilla/dom/PerformanceStorage.h"
-#include "mozilla/dom/ReferrerInfo.h"
-#include "mozilla/glean/DomSecurityMetrics.h"
+#include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/Services.h"
-#include "nsISystemInfo.h"
-#include "mozilla/Components.h"
-#include "AlternateServices.h"
-#include "NetworkMarker.h"
-#include "nsIDNSRecord.h"
+#include "mozilla/TimeStamp.h"
+#include "mozilla/ToString.h"
 #include "mozilla/dom/ClientInfo.h"
 #include "mozilla/dom/Document.h"
+#include "mozilla/dom/NavigatorLogin.h"
+#include "mozilla/dom/PerformanceStorage.h"
 #include "mozilla/dom/PolicyContainer.h"
-#include "nsICompressConvStats.h"
-#include "nsCORSListenerProxy.h"
-#include "nsISocketProvider.h"
-#include "mozilla/extensions/StreamFilterParent.h"
-#include "mozilla/net/SFVService.h"
-#include "mozilla/NullPrincipal.h"
-#include "CacheControlParser.h"
-#include "nsMixedContentBlocker.h"
-#include "CacheStorageService.h"
-#include "HttpChannelParent.h"
-#include "HttpTransactionParent.h"
-#include "ThirdPartyUtil.h"
-#include "InterceptedHttpChannel.h"
-#include "nsINetworkLinkService.h"
-#include "mozilla/ContentBlockingAllowList.h"
+#include "mozilla/dom/ReferrerInfo.h"
+#include "mozilla/dom/SecFetch.h"
 #include "mozilla/dom/ServiceWorkerUtils.h"
+#include "mozilla/dom/WindowGlobalParent.h"
+#include "mozilla/dom/nsCSPContext.h"
 #include "mozilla/dom/nsHTTPSOnlyStreamListener.h"
 #include "mozilla/dom/nsHTTPSOnlyUtils.h"
+#include "mozilla/extensions/StreamFilterParent.h"
+#include "mozilla/glean/AntitrackingMetrics.h"
+#include "mozilla/glean/DomSecurityMetrics.h"
+#include "mozilla/glean/NetwerkMetrics.h"
+#include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
 #include "mozilla/net/AsyncUrlChannelClassifier.h"
-#include "mozilla/net/CookieJarSettings.h"
-#include "mozilla/net/NeckoChannelParams.h"
-#include "mozilla/net/OpaqueResponseUtils.h"
+#include "mozilla/net/CaptivePortalService.h"
 #include "mozilla/net/ChannelClassifierUtils.h"
+#include "mozilla/net/CookieJarSettings.h"
+#include "mozilla/net/CookieServiceParent.h"
+#include "mozilla/net/NeckoChannelParams.h"
+#include "mozilla/net/NoVarySearchUtils.h"
+#include "mozilla/net/OpaqueResponseUtils.h"
+#include "mozilla/net/SFVService.h"
+#include "mozilla/net/SocketProcessParent.h"
+#include "mozilla/net/TRRService.h"
 #include "mozilla/net/URLPatternGlue.h"
 #include "mozilla/net/urlpattern_glue.h"
-#include "HttpTrafficAnalyzer.h"
-#include "mozilla/net/SocketProcessParent.h"
-#include "mozilla/dom/SecFetch.h"
-#include "mozilla/dom/WindowGlobalParent.h"
-#include "mozilla/net/TRRService.h"
-#include "LNAPermissionRequest.h"
+#include "netCore.h"
+#include "nsCOMPtr.h"
+#include "nsCORSListenerProxy.h"
+#include "nsCRT.h"
+#include "nsChannelClassifier.h"
+#include "nsCharSeparatedTokenizer.h"
+#include "nsComponentManagerUtils.h"
+#include "nsContentSecurityManager.h"
+#include "nsContentSecurityUtils.h"
+#include "nsContentUtils.h"
+#include "nsDNSPrefetch.h"
+#include "nsError.h"
+#include "nsEscape.h"
+#include "nsHttp.h"
+#include "nsHttpChannelAuthProvider.h"
+#include "nsHttpConnectionMgr.h"
+#include "nsHttpHandler.h"
+#include "nsHttpTransaction.h"
+#include "nsICacheEntry.h"
+#include "nsICacheStorage.h"
+#include "nsICacheStorageService.h"
+#include "nsICancelable.h"
+#include "nsIClassOfService.h"
+#include "nsICompressConvStats.h"
+#include "nsIConsoleService.h"
+#include "nsICookieNotification.h"
+#include "nsICryptoHash.h"
+#include "nsIDNSRecord.h"
+#include "nsIEffectiveTLDService.h"
+#include "nsIHttpChannelInternal.h"
+#include "nsIHttpHeaderVisitor.h"
+#include "nsINetworkErrorLogging.h"
+#include "nsINetworkInterceptController.h"
+#include "nsINetworkLinkService.h"
+#include "nsIOService.h"
+#include "nsIPrincipal.h"
+#include "nsIPrompt.h"
+#include "nsIProtocolProxyService2.h"
+#include "nsIRedirectResultListener.h"
+#include "nsIScriptError.h"
+#include "nsIScriptSecurityManager.h"
+#include "nsISeekableStream.h"
+#include "nsISiteIntegrityService.h"
+#include "nsISiteSecurityService.h"
+#include "nsISocketProvider.h"
+#include "nsISocketTransport.h"
+#include "nsIStreamConverter.h"
+#include "nsIStreamConverterService.h"
+#include "nsIStreamListenerTee.h"
+#include "nsIStreamTransportService.h"
+#include "nsIStringBundle.h"
+#include "nsISystemInfo.h"
+#include "nsITransportSecurityInfo.h"
+#include "nsIURIMutator.h"
+#include "nsIURLQueryStringStripper.h"
+#include "nsIWebProgressListener.h"
+#include "nsIWebTransport.h"
+#include "nsInputStreamPump.h"
+#include "nsMimeTypes.h"
+#include "nsMixedContentBlocker.h"
+#include "nsNetCID.h"
+#include "nsNetUtil.h"
+#include "nsPrintfCString.h"
+#include "nsQueryObject.h"
+#include "nsStreamUtils.h"
+#include "nsString.h"
+#include "nsStringStream.h"
+#include "nsThreadUtils.h"
+#include "nsURLHelper.h"
 #include "nsUnknownDecoder.h"
+#include "prnetdb.h"
+#include "sslt.h"
 #ifdef XP_WIN
 #  include "HttpWinUtils.h"
 #endif
@@ -688,6 +686,13 @@ nsresult nsHttpChannel::PrepareToConnect() {
                     }
                     return;
                   }
+                  if (!self->mDictDecompress) {
+                    // The request already completed and released the dictionary
+                    // (SetDecompressDictionary(nullptr) from the compress
+                    // converter's OnStopRequest) before this async prefetch
+                    // callback ran. Nothing left to resume.
+                    return;
+                  }
                   MOZ_ASSERT(self->mDictDecompress->DictionaryReady());
                   if (self->mSuspendedForDictionary) {
                     LOG(
@@ -758,9 +763,8 @@ nsresult nsHttpChannel::PrepareToConnect() {
   // If Windows 10 SSO is enabled, we potentially add auth
   // information to secure top level loads (DOCUMENTs) and iframes
   // (SUBDOCUMENTs) that aren't anonymous or private browsing.
-  if (StaticPrefs::network_http_windows_sso_enabled() &&
-      mURI->SchemeIs("https") && !(mLoadFlags & LOAD_ANONYMOUS) &&
-      !mPrivateBrowsing) {
+  if (StaticPrefs::network_http_windows_sso_enabled() && IsHTTPS() &&
+      !(mLoadFlags & LOAD_ANONYMOUS) && !mPrivateBrowsing) {
     ExtContentPolicyType type = mLoadInfo->GetExternalContentPolicyType();
     if ((type == ExtContentPolicy::TYPE_DOCUMENT ||
          type == ExtContentPolicy::TYPE_SUBDOCUMENT) &&
@@ -786,9 +790,8 @@ nsresult nsHttpChannel::PrepareToConnect() {
   // If macOS SSO is enabled, we potentially add auth
   // information to secure top level loads (DOCUMENTs) and iframes
   // (SUBDOCUMENTs) that aren't anonymous or private browsing.
-  if (StaticPrefs::network_http_microsoft_entra_sso_enabled() &&
-      mURI->SchemeIs("https") && !(mLoadFlags & LOAD_ANONYMOUS) &&
-      !mPrivateBrowsing) {
+  if (StaticPrefs::network_http_microsoft_entra_sso_enabled() && IsHTTPS() &&
+      !(mLoadFlags & LOAD_ANONYMOUS) && !mPrivateBrowsing) {
     ExtContentPolicyType type = mLoadInfo->GetExternalContentPolicyType();
     if ((type == ExtContentPolicy::TYPE_DOCUMENT ||
          type == ExtContentPolicy::TYPE_SUBDOCUMENT) &&
@@ -925,7 +928,7 @@ nsresult nsHttpChannel::OnBeforeConnect() {
   }
 
   nsCOMPtr<nsIPrincipal> resultPrincipal;
-  if (!mURI->SchemeIs("https")) {
+  if (!IsHTTPS()) {
     nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
         this, getter_AddRefs(resultPrincipal));
   }
@@ -945,11 +948,9 @@ nsresult nsHttpChannel::OnBeforeConnect() {
   // SecurityInfo.sys.mjs
   mLoadInfo->SetHstsStatus(isSecureURI);
 
-  RefPtr<mozilla::dom::BrowsingContext> bc;
-  mLoadInfo->GetBrowsingContext(getter_AddRefs(bc));
   // If bypassing the cache and we're forced offline
   // we can just return the error here.
-  if (bc && bc->Top()->GetForceOffline() &&
+  if (IsForcedOffline() &&
       BYPASS_LOCAL_CACHE(mLoadFlags, LoadPreferCacheLoadOverBypass())) {
     return NS_ERROR_OFFLINE;
   }
@@ -982,9 +983,10 @@ nsresult nsHttpChannel::OnBeforeConnect() {
       };
 
       bool willCallback = false;
-      rv = NS_ShouldSecureUpgrade(
-          mURI, mLoadInfo, resultPrincipal, LoadAllowSTS(), originAttributes,
-          shouldUpgrade, std::move(resultCallback), willCallback);
+      rv = NS_ShouldSecureUpgrade(mURI, mLoadInfo, this, resultPrincipal,
+                                  LoadAllowSTS(), originAttributes,
+                                  shouldUpgrade, std::move(resultCallback),
+                                  willCallback);
       // If the request gets upgraded because of the HTTPS-Only mode, but no
       // event listener has been registered so far, we want to do that here.
       uint32_t httpOnlyStatus = mLoadInfo->GetHttpsOnlyStatus();
@@ -1069,12 +1071,9 @@ nsresult nsHttpChannel::MaybeUseHTTPSRRForUpgrade(bool aShouldUpgrade,
     return aStatus;
   }
 
-  RefPtr<mozilla::dom::BrowsingContext> bc;
-  mLoadInfo->GetBrowsingContext(getter_AddRefs(bc));
-  bool forceOffline = bc && bc->Top()->GetForceOffline();
+  bool forceOffline = IsForcedOffline();
 
-  if (mURI->SchemeIs("https") || aShouldUpgrade || !LoadUseHTTPSSVC() ||
-      forceOffline) {
+  if (IsHTTPS() || aShouldUpgrade || !LoadUseHTTPSSVC() || forceOffline) {
     return ContinueOnBeforeConnect(aShouldUpgrade, aStatus);
   }
 
@@ -1177,12 +1176,13 @@ nsresult nsHttpChannel::ContinueOnBeforeConnect(bool aShouldUpgrade,
     return aStatus;
   }
 
-  if (aShouldUpgrade && !mURI->SchemeIs("https")) {
+  if (aShouldUpgrade && !IsHTTPS()) {
     // only set HTTPS_RR to be responsbile for the upgrade in the loadinfo
     // if it actually was responsible, otherwise the correct flag is
     // already present in the loadinfo.
     if (aUpgradeWithHTTPSRR) {
       mLoadInfo->SetHttpsUpgradeTelemetry(nsILoadInfo::HTTPS_RR);
+      NS_LogSecureUpgradeToConsole(mURI, mLoadInfo, this, "HTTPS RR"_ns);
     }
     return AsyncCall(&nsHttpChannel::HandleAsyncRedirectChannelToHttps);
   }
@@ -1236,19 +1236,24 @@ nsresult nsHttpChannel::ContinueOnBeforeConnect(bool aShouldUpgrade,
   mCaps |= NS_HTTP_TRR_FLAGS_FROM_MODE(nsIRequest::GetTRRMode());
 
   // Finalize ConnectionInfo flags before SpeculativeConnect
-  mConnectionInfo->SetAnonymous((mLoadFlags & LOAD_ANONYMOUS) != 0);
-  mConnectionInfo->SetPrivate(mPrivateBrowsing);
-  mConnectionInfo->SetNoSpdy(mCaps & NS_HTTP_DISALLOW_SPDY);
-  mConnectionInfo->SetBeConservative((mCaps & NS_HTTP_BE_CONSERVATIVE) ||
-                                     LoadBeConservative());
-  mConnectionInfo->SetTlsFlags(mTlsFlags);
-  mConnectionInfo->SetIsTrrServiceChannel(LoadIsTRRServiceChannel());
-  mConnectionInfo->SetTRRMode(nsIRequest::GetTRRMode());
-  mConnectionInfo->SetIPv4Disabled(mCaps & NS_HTTP_DISABLE_IPV4);
-  mConnectionInfo->SetIPv6Disabled(mCaps & NS_HTTP_DISABLE_IPV6);
-  mConnectionInfo->SetHttp3Disabled(mCaps & NS_HTTP_DISALLOW_HTTP3);
-  mConnectionInfo->SetAnonymousAllowClientCert(
-      (mLoadFlags & LOAD_ANONYMOUS_ALLOW_CLIENT_CERT) != 0);
+  mConnectionInfo =
+      mConnectionInfo->Mutate()
+          .SetAnonymous((mLoadFlags & LOAD_ANONYMOUS) != 0)
+          .SetPrivate(mPrivateBrowsing)
+          .SetNoSpdy(mCaps & NS_HTTP_DISALLOW_SPDY)
+          .SetBeConservative((mCaps & NS_HTTP_BE_CONSERVATIVE) ||
+                             LoadBeConservative())
+          .SetTlsFlags(mTlsFlags)
+          .SetIsTrrServiceChannel(LoadIsTRRServiceChannel())
+          .SetTRRMode(nsIRequest::GetTRRMode())
+          .SetIPv4Disabled(mCaps & NS_HTTP_DISABLE_IPV4)
+          .SetIPv6Disabled(mCaps & NS_HTTP_DISABLE_IPV6)
+          .SetHttp3Policy((mCaps & NS_HTTP_DISALLOW_HTTP3)
+                              ? Http3Policy::Disabled
+                              : Http3Policy::Allowed)
+          .SetAnonymousAllowClientCert(
+              (mLoadFlags & LOAD_ANONYMOUS_ALLOW_CLIENT_CERT) != 0)
+          .Finalize();
 
   if (mWebTransportSessionEventListener) {
     nsTArray<RefPtr<nsIWebTransportHash>> aServerCertHashes;
@@ -1334,13 +1339,6 @@ nsresult nsHttpChannel::HandleOverrideResponse() {
   rv = mOverrideResponse->VisitResponseHeaders(&visitor);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (WillRedirect(*mResponseHead)) {
-    // TODO: Bug 759040 - We should call HandleAsyncRedirect directly here,
-    // to avoid event dispatching latency.
-    LOG(("Skipping read of overridden response redirect entity\n"));
-    return AsyncCall(&nsHttpChannel::HandleAsyncRedirect);
-  }
-
   // This block parses the cookie header, collects any cookie changes,
   // and sends them to the parent actor.
   {
@@ -1377,6 +1375,13 @@ nsresult nsHttpChannel::HandleOverrideResponse() {
 
   if ((statusCode < 500) && (statusCode != 421)) {
     ProcessAltService();
+  }
+
+  if (WillRedirect(*mResponseHead)) {
+    // TODO: Bug 759040 - We should call HandleAsyncRedirect directly here,
+    // to avoid event dispatching latency.
+    LOG(("Skipping read of overridden response redirect entity\n"));
+    return AsyncCall(&nsHttpChannel::HandleAsyncRedirect);
   }
 
   nsAutoCString body;
@@ -1493,7 +1498,7 @@ nsresult nsHttpChannel::ConnectOnTailUnblock() {
   SpeculativeConnect();
 
   // open a cache entry for this channel...
-  rv = OpenCacheEntry(mURI->SchemeIs("https"));
+  rv = OpenCacheEntry(IsHTTPS());
 
   // do not continue if asyncOpenCacheEntry is in progress
   if (AwaitingCacheCallbacks()) {
@@ -1544,15 +1549,14 @@ nsresult nsHttpChannel::ContinueConnect() {
                      "CORS preflight must have been finished by the time we "
                      "do the rest of ContinueConnect");
 
-  RefPtr<mozilla::dom::BrowsingContext> bc;
-  mLoadInfo->GetBrowsingContext(getter_AddRefs(bc));
+  bool forceOffline = IsForcedOffline();
 
   // we may or may not have a cache entry at this point
   if (mCacheEntry) {
     // read straight from the cache if possible...
     if (CachedContentIsValid()) {
       // If we're forced offline, and set to bypass the cache, return offline.
-      if (bc && bc->Top()->GetForceOffline() &&
+      if (forceOffline &&
           BYPASS_LOCAL_CACHE(mLoadFlags, LoadPreferCacheLoadOverBypass())) {
         return NS_ERROR_OFFLINE;
       }
@@ -1594,7 +1598,7 @@ nsresult nsHttpChannel::ContinueConnect() {
   }
 
   // We're about to hit the network. Don't if we're forced offline.
-  if (bc && bc->Top()->GetForceOffline()) {
+  if (forceOffline) {
     return NS_ERROR_OFFLINE;
   }
 
@@ -1677,6 +1681,9 @@ nsresult nsHttpChannel::DispatchTransaction(
 
   rv = mTransaction->AsyncRead(this, getter_AddRefs(mTransactionPump));
   if (NS_FAILED(rv)) {
+    // The transaction is already on the socket thread and points at our
+    // request head; don't let it outlive us.
+    (void)gHttpHandler->CancelTransaction(mTransaction, rv);
     return rv;
   }
 
@@ -1702,12 +1709,8 @@ void nsHttpChannel::SpeculativeConnect() {
   // don't speculate if we are offline, when doing http upgrade (i.e.
   // websockets bootstrap), or if we can't do keep-alive (because then we
   // couldn't reuse the speculative connection anyhow).
-  RefPtr<mozilla::dom::BrowsingContext> bc;
-  mLoadInfo->GetBrowsingContext(getter_AddRefs(bc));
-
   if (gIOService->IsOffline() || mUpgradeProtocolCallback ||
-      !(mCaps & NS_HTTP_ALLOW_KEEPALIVE) ||
-      (bc && bc->Top()->GetForceOffline())) {
+      !(mCaps & NS_HTTP_ALLOW_KEEPALIVE) || IsForcedOffline()) {
     return;
   }
 
@@ -2207,27 +2210,13 @@ nsresult nsHttpChannel::InitTransaction() {
 
   HttpTrafficCategory category = CreateTrafficCategory();
   mTransaction->SetIsForWebTransport(!!mWebTransportSessionEventListener);
+  mTransaction->SetRequestBodyIsStreaming(LoadUploadStreamIsStreaming());
 
   RefPtr<mozilla::dom::BrowsingContext> bc;
   mLoadInfo->GetBrowsingContext(getter_AddRefs(bc));
 
   nsILoadInfo::IPAddressSpace parentAddressSpace =
-      nsILoadInfo::IPAddressSpace::Unknown;
-  // For worker-initiated requests, read IP address space from the policy
-  // container which carries the parent document's address space.
-  Maybe<dom::ClientInfo> clientInfo = mLoadInfo->GetClientInfo();
-  if (clientInfo.isSome() && clientInfo->Type() != dom::ClientType::Window) {
-    nsCOMPtr<nsIPolicyContainer> policyContainer =
-        mLoadInfo->GetPolicyContainer();
-    if (policyContainer) {
-      parentAddressSpace =
-          PolicyContainer::Cast(policyContainer)->GetIPAddressSpace();
-    }
-  } else if (!bc) {
-    parentAddressSpace = mLoadInfo->GetParentIpAddressSpace();
-  } else {
-    parentAddressSpace = bc->GetCurrentIPAddressSpace();
-  }
+      mozilla::net::GetParentIPAddressSpace(mLoadInfo);
 
   // Check if this is a top-level navigation load and grant LNA permissions
   // to skip local network access verification for navigational loads
@@ -2549,8 +2538,9 @@ nsresult nsHttpChannel::CallOnStartRequest() {
   // false when a stream converter is applied.
   bool unknownDecoderStarted = false;
   bool shouldSniff = false;
+  bool hasContentType = mResponseHead && mResponseHead->HasContentType();
   if (mResponseHead) {
-    if (!mResponseHead->HasContentType()) {
+    if (!hasContentType) {
       shouldSniff = true;
     } else {
       shouldSniff =
@@ -2559,7 +2549,7 @@ nsresult nsHttpChannel::CallOnStartRequest() {
   }
   if (shouldSniff) {
     MOZ_ASSERT(mConnectionInfo, "Should have connection info here");
-    if (!mContentTypeHint.IsEmpty()) {
+    if (!mContentTypeHint.IsEmpty() && !hasContentType) {
       mResponseHead->SetContentType(mContentTypeHint);
     } else if (mResponseHead->Version() == HttpVersion::v0_9 &&
                mConnectionInfo->OriginPort() !=
@@ -2886,7 +2876,7 @@ nsresult nsHttpChannel::ProcessWAICTHeader() {
   // Unlike HSTS, WAICT is supported for HTTP as well, so we need to use the
   // correct helper.
   OriginAttributes originAttributes;
-  if (mURI->SchemeIs("https")) {
+  if (IsHTTPS()) {
     if (NS_WARN_IF(!StoragePrincipalHelper::GetOriginAttributesForHTTPSRR(
             this, originAttributes))) {
       return NS_ERROR_FAILURE;
@@ -2943,7 +2933,7 @@ nsresult nsHttpChannel::ProcessSecurityHeaders() {
   // If this channel is not loading securely, STS or PKP doesn't do anything.
   // In the case of HSTS, the upgrade to HTTPS takes place earlier in the
   // channel load process.
-  if (!mURI->SchemeIs("https")) {
+  if (!IsHTTPS()) {
     return NS_OK;
   }
 
@@ -3073,15 +3063,8 @@ void nsHttpChannel::ProcessAltService(nsHttpConnectionInfo* aTransConnInfo) {
   }
 
   OriginAttributes originAttributes;
-  // Regular principal in case we have a proxy.
-  if (proxyInfo &&
-      !StaticPrefs::privacy_partition_network_state_connection_with_proxy()) {
-    StoragePrincipalHelper::GetOriginAttributes(
-        this, originAttributes, StoragePrincipalHelper::eRegularPrincipal);
-  } else {
-    StoragePrincipalHelper::GetOriginAttributesForNetworkState(
-        this, originAttributes);
-  }
+  StoragePrincipalHelper::GetOriginAttributesForHttpConnection(
+      this, !!proxyInfo, originAttributes);
 
   AltSvcMapping::ProcessHeader(altSvc, scheme, originHost, originPort,
                                mUsername, mPrivateBrowsing, callbacks,
@@ -3517,6 +3500,15 @@ nsresult nsHttpChannel::ContinueProcessResponse3(nsresult rv) {
         // It's up to the consumer to re-try w/o setting a custom
         // auth header if cached credentials should be attempted.
         rv = NS_ERROR_FAILURE;
+      } else if (httpStatus == 401 && LoadUploadStreamIsStreaming() &&
+                 !(mLoadFlags & LOAD_ANONYMOUS)) {
+        // A body whose source is null cannot be resubmitted with credentials,
+        // so this is a network error rather than an auth prompt. Ahead of the
+        // frame-ancestor check, which would still deliver the 401. Still too
+        // broad for mode "cors" with credentials "include", which the channel
+        // cannot tell apart from the cases the spec fails here.
+        // https://fetch.spec.whatwg.org/#concept-http-network-or-cache-fetch
+        rv = NS_ERROR_NET_BODY_NOT_REPLAYABLE;
       } else if (httpStatus == 401 &&
                  !nsContentSecurityUtils::CheckCSPFrameAncestorAndXFO(this)) {
         // CSP Frame Ancestor and X-Frame-Options check has failed
@@ -3561,7 +3553,8 @@ nsresult nsHttpChannel::ContinueProcessResponse3(nsresult rv) {
         if (mTransaction && mTransaction->ProxyConnectFailed()) {
           return ProcessFailedProxyConnect(httpStatus);
         }
-        if (rv == NS_ERROR_BASIC_HTTP_AUTH_DISABLED) {
+        if (rv == NS_ERROR_BASIC_HTTP_AUTH_DISABLED ||
+            rv == NS_ERROR_NET_BODY_NOT_REPLAYABLE) {
           mStatus = rv;
         }
         rv = ProcessNormal();
@@ -3705,6 +3698,7 @@ nsresult nsHttpChannel::ContinueProcessResponse4(nsresult rv) {
 
   if (NS_SUCCEEDED(rv)) {
     UpdateInhibitPersistentCachingFlag();
+    (void)MaybeReplaceNoVarySearchAliasEntry();
 
     if (mCacheEntry) {
       rv = UpdateExpirationTime();
@@ -3761,6 +3755,13 @@ nsresult nsHttpChannel::ContinueProcessNormal(nsresult rv) {
   // being called inside our OnDataAvailable (see bug 136678).
   StoreCachedContentIsPartial(false);
 
+  // The body we are about to deliver comes from the network, so no cached
+  // alternative data describes it.  Normally InitCacheEntry() has already
+  // dropped it, but not when we no longer hold the entry it came from.
+  mAvailableCachedAltDataType.Truncate();
+  StoreDeliveringAltData(false);
+  mAltDataLength = -1;
+
   UpdateInhibitPersistentCachingFlag();
 
   // We may need to install the cache listener before CallonStartRequest,
@@ -3787,6 +3788,8 @@ nsresult nsHttpChannel::ContinueProcessNormal(nsresult rv) {
     Cancel(NS_ERROR_INVALID_CONTENT_ENCODING);
     return NS_ERROR_INVALID_CONTENT_ENCODING;
   }
+
+  (void)MaybeReplaceNoVarySearchAliasEntry();
 
   if (mCacheEntry && !LoadCacheEntryIsReadOnly()) {
     // Must update expiration time early - ParseDictionary reads it, and
@@ -4245,7 +4248,7 @@ nsresult nsHttpChannel::RedirectToNewChannelForAuthRetry() {
   }
 
   MOZ_ASSERT(mConnectionInfo);
-  httpChannelImpl->mConnectionInfo = mConnectionInfo->Clone();
+  httpChannelImpl->mConnectionInfo = mConnectionInfo;
 
   // we need to store the state to skip unnecessary checks in the new channel
   httpChannelImpl->StoreAuthRedirectedChannel(true);
@@ -4402,6 +4405,9 @@ nsresult nsHttpChannel::OpenRedirectChannel(nsresult rv) {
 
   notifier.RedirectSucceeded();
 
+  // Report timing data if e10s is disabled
+  MaybeReportTimingDataForRedirect(mRedirectChannel);
+
   ReleaseListeners();
 
   return NS_OK;
@@ -4523,7 +4529,7 @@ bool nsHttpChannel::ResponseWouldVary(nsICacheEntry* entry) {
         // If hash failed, be conservative (the cached hash
         // exists at this point) and claim response would vary
         if (NS_FAILED(rv)) return true;
-        newVal = hash;
+        newVal = std::move(hash);
 
         LOG(
             ("nsHttpChannel::ResponseWouldVary [this=%p] "
@@ -4876,26 +4882,27 @@ void nsHttpChannel::MaybeGenerateNELReport() {
 
   nsAutoCString endpointURL;
   ReportingHeader::GetEndpointForReportIncludeSubdomains(
-      group, channelPrincipal, /* includeSubdomains */ true, endpointURL);
+      NS_ConvertUTF16toUTF8(group), channelPrincipal,
+      /* includeSubdomains */ true, endpointURL);
   if (endpointURL.IsEmpty()) {
     return;
   }
 
   ReportDeliver::ReportData data;
-  data.mType = u"network-error"_ns;
-  data.mGroupName = group;
-  data.mURL = url;
+  data.mType = "network-error"_ns;
+  data.mGroupName = NS_ConvertUTF16toUTF8(group);
+  data.mURL = NS_ConvertUTF16toUTF8(url);
   data.mFailures = 0;
   data.mCreationTime = TimeStamp::Now();
 
   data.mPrincipal = std::move(channelPrincipal);
-  data.mEndpointURL = endpointURL;
-  data.mReportBodyJSON = body;
+  data.mEndpointURL = std::move(endpointURL);
+  data.mReportBodyJSON = std::move(body);
   nsAutoCString userAgent;
   // XXX(valentin): Should this be the potentially user set value of the header
   // or the current value of user_agent from http handler?
   (void)mRequestHead.GetHeader(nsHttp::User_Agent, userAgent);
-  data.mUserAgent = NS_ConvertUTF8toUTF16(userAgent);
+  data.mUserAgent = std::move(userAgent);
 
   // Enqueue the report to be delivered by the reporting API
   ReportDeliver::Fetch(data);
@@ -5043,25 +5050,11 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(bool isHttps) {
 
   nsAutoCString cacheKey;
 
-  nsCOMPtr<nsICacheStorageService> cacheStorageService(
-      components::CacheStorage::Service());
-  if (!cacheStorageService) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
   nsCOMPtr<nsICacheStorage> cacheStorage;
   mCacheEntryURI = mURI;
 
-  RefPtr<LoadContextInfo> info = GetLoadContextInfo(this);
-  if (!info) {
-    return NS_ERROR_FAILURE;
-  }
-
   uint32_t cacheEntryOpenFlags;
   bool offline = gIOService->IsOffline();
-
-  RefPtr<mozilla::dom::BrowsingContext> bc;
-  mLoadInfo->GetBrowsingContext(getter_AddRefs(bc));
 
   nsAutoCString cacheControlRequestHeader;
   (void)mRequestHead.GetHeader(nsHttp::Cache_Control,
@@ -5071,7 +5064,7 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(bool isHttps) {
     return NS_OK;
   }
 
-  bool forceOffline = bc && bc->Top()->GetForceOffline();
+  bool forceOffline = IsForcedOffline();
   if (offline || (mLoadFlags & INHIBIT_CACHING) || forceOffline) {
     if (BYPASS_LOCAL_CACHE(mLoadFlags, LoadPreferCacheLoadOverBypass()) &&
         !offline && !forceOffline) {
@@ -5095,17 +5088,7 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(bool isHttps) {
       mRequestHead.HasHeader(nsHttp::If_Match) ||
       mRequestHead.HasHeader(nsHttp::If_Range));
 
-  if (mLoadFlags & INHIBIT_PERSISTENT_CACHING) {
-    rv = cacheStorageService->MemoryCacheStorage(
-        info,  // ? choose app cache as well...
-        getter_AddRefs(cacheStorage));
-  } else if (LoadPinCacheContent()) {
-    rv = cacheStorageService->PinningCacheStorage(info,
-                                                  getter_AddRefs(cacheStorage));
-  } else {
-    rv = cacheStorageService->DiskCacheStorage(info,
-                                               getter_AddRefs(cacheStorage));
-  }
+  rv = GetCacheStorage(getter_AddRefs(cacheStorage));
   NS_ENSURE_SUCCESS(rv, rv);
 
   if ((mClassOfService.Flags() & nsIClassOfService::Leader) ||
@@ -5157,6 +5140,105 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(bool isHttps) {
   return NS_OK;
 }
 
+// We asked the cache for mCacheEntryURI, but the entry we got back may be
+// stored under a different URL: on an exact-key miss the cache falls back to a
+// No-Vary-Search secondary lookup, which can return a sibling entry whose URL
+// is equivalent to ours under its No-Vary-Search header. Record which of the
+// two happened, so that later code can tell whether the entry it holds is
+// really ours to write to.
+void nsHttpChannel::NoteCacheEntryKeyMatch(nsICacheEntry* aEntry) {
+  StoreCacheEntryIsNoVarySearchMatch(false);
+
+  if (!aEntry || !mCacheEntryURI) {
+    return;
+  }
+
+  // Normalize the same way CacheStorage::AsyncOpenURI did to build the key.
+  nsCOMPtr<nsIURI> noRefURI;
+  nsAutoCString spec;
+  if (NS_FAILED(
+          NS_GetURIWithoutRef(mCacheEntryURI, getter_AddRefs(noRefURI))) ||
+      NS_FAILED(noRefURI->GetAsciiSpec(spec))) {
+    return;
+  }
+
+  nsAutoCString key;
+  if (NS_FAILED(aEntry->GetKey(key))) {
+    return;
+  }
+
+  if (!key.Equals(spec)) {
+    LOG(
+        ("nsHttpChannel::NoteCacheEntryKeyMatch [this=%p] No-Vary-Search hit, "
+         "entry is stored under %s",
+         this, key.get()));
+    StoreCacheEntryIsNoVarySearchMatch(true);
+  }
+}
+
+// Picks the storage matching the channel's persistence flags as they stand
+// right now. Called both when first opening the entry and when replacing an
+// alias entry later, by which point a no-store response may have set
+// INHIBIT_PERSISTENT_CACHING and the replacement must be memory-only.
+nsresult nsHttpChannel::GetCacheStorage(nsICacheStorage** aStorage) {
+  nsCOMPtr<nsICacheStorageService> service(components::CacheStorage::Service());
+  if (!service) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  RefPtr<LoadContextInfo> info = GetLoadContextInfo(this);
+  if (!info) {
+    return NS_ERROR_FAILURE;
+  }
+
+  if (mLoadFlags & INHIBIT_PERSISTENT_CACHING) {
+    return service->MemoryCacheStorage(info,  // ? choose app cache as well...
+                                       aStorage);
+  }
+  if (LoadPinCacheContent()) {
+    return service->PinningCacheStorage(info, aStorage);
+  }
+  return service->DiskCacheStorage(info, aStorage);
+}
+
+// Called before anything is written to mCacheEntry. When the entry we hold was
+// found through No-Vary-Search it is stored under a different URL, and this
+// response describes mCacheEntryURI only, so writing to it would put our
+// content under someone else's key. Open a fresh entry of our own instead.
+// Releasing the last handle on the borrowed entry reverts it from REVALIDATING
+// back to READY, leaving its own representation untouched.
+nsresult nsHttpChannel::MaybeReplaceNoVarySearchAliasEntry() {
+  if (!LoadCacheEntryIsNoVarySearchMatch() || !mCacheEntry ||
+      LoadCacheEntryIsReadOnly()) {
+    return NS_OK;
+  }
+
+  LOG(("nsHttpChannel::MaybeReplaceNoVarySearchAliasEntry [this=%p]", this));
+
+  nsCOMPtr<nsICacheStorage> storage;
+  nsresult rv = GetCacheStorage(getter_AddRefs(storage));
+  if (NS_SUCCEEDED(rv)) {
+    rv = storage->OpenTruncate(mCacheEntryURI, mCacheIdExtension,
+                               getter_AddRefs(mCacheEntry));
+  }
+
+  if (NS_FAILED(rv)) {
+    LOG(("  failed to open %s, the response will not be cached",
+         mCacheEntryURI->GetSpecOrDefault().get()));
+    mCacheEntry = nullptr;
+    return rv;
+  }
+
+  // We now hold an entry keyed on mCacheEntryURI, so it is ours to write to.
+  StoreCacheEntryIsNoVarySearchMatch(false);
+  StoreCacheEntryIsWriteOnly(true);
+  // The alt-data belonged to the entry we just let go of.
+  mAvailableCachedAltDataType.Truncate();
+  StoreDeliveringAltData(false);
+
+  return NS_OK;
+}
+
 nsresult nsHttpChannel::CheckPartial(nsICacheEntry* aEntry, int64_t* aSize,
                                      int64_t* aContentLength) {
   return nsHttp::CheckPartial(
@@ -5175,6 +5257,28 @@ void nsHttpChannel::UntieValidationRequest() {
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 }
 
+void nsHttpChannel::DiscardCacheEntryCheckState() {
+  StoreCachedContentIsValid(CachedContentValidity::Invalid);
+
+  if (mDidReval) {
+    LOG(("  Removing conditional request headers"));
+    UntieValidationRequest();
+    mDidReval = false;
+  }
+
+  if (LoadCachedContentIsPartial()) {
+    LOG(("  Removing byte range request headers"));
+    UntieByteRangeRequest();
+    StoreCachedContentIsPartial(false);
+  }
+
+  mCachedResponseHead = nullptr;
+  mCacheInputStream.CloseAndRelease();
+  mAvailableCachedAltDataType.Truncate();
+  StoreDeliveringAltData(false);
+  mAltDataLength = -1;
+}
+
 NS_IMETHODIMP
 nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, uint32_t* aResult) {
   nsresult rv = NS_OK;
@@ -5183,6 +5287,22 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, uint32_t* aResult) {
                             Flow::FromPointer(this));
   LOG(("nsHttpChannel::OnCacheEntryCheck enter [channel=%p entry=%p]", this,
        entry));
+
+  // Held for the whole check: this may run on the cache I/O thread while the
+  // backstop timeout runs on the main thread, and the timeout must not slip in
+  // between the test below and the state we arm from here on.
+  MutexAutoLock lock(mCacheWaitLock);
+
+  if (mCacheWaitTimedOut) {
+    LOG(("  cache entry check arrived after backstop timeout, declining"));
+    *aResult = ENTRY_NOT_WANTED;
+    return NS_OK;
+  }
+
+  // Each check starts from a clean slate.
+  DiscardCacheEntryCheckState();
+
+  NoteCacheEntryKeyMatch(entry);
 
   nsAutoCString cacheControlRequestHeader;
   (void)mRequestHead.GetHeader(nsHttp::Cache_Control,
@@ -5306,6 +5426,18 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, uint32_t* aResult) {
     rv = CheckPartial(entry, &size, &contentLength);
     NS_ENSURE_SUCCESS(rv, rv);
 
+    if (LoadCacheEntryIsNoVarySearchMatch() &&
+        (size == int64_t(-1) ||
+         (contentLength != int64_t(-1) && contentLength != size))) {
+      // Completing this entry means appending our bytes to content stored
+      // under a different URL, and unlike a full response we cannot divert
+      // that to an entry of our own: the range request only makes sense
+      // against what is already there. Refetch from scratch instead.
+      LOG(("  incomplete No-Vary-Search alias entry, not wanted"));
+      *aResult = ENTRY_NOT_WANTED;
+      return NS_OK;
+    }
+
     if (size == int64_t(-1)) {
       LOG(("  write is in progress"));
       if (mLoadFlags & LOAD_BYPASS_LOCAL_CACHE_IF_BUSY) {
@@ -5366,7 +5498,7 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, uint32_t* aResult) {
     }
   }
 
-  bool isHttps = mURI->SchemeIs("https");
+  bool isHttps = IsHTTPS();
 
   bool doValidation = false;
   bool doBackgroundValidation = false;
@@ -5393,6 +5525,17 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, uint32_t* aResult) {
         LoadAllowStaleCacheContent(), LoadForceValidateCacheContent(),
         isImmutable, LoadCustomConditionalRequest(), mRequestHead, entry,
         cacheControlRequest, fromPreviousSession, &doBackgroundValidation);
+
+    // A navigation activated from a completed speculation-rules prefetch record
+    // must serve the prefetched response as-is (spec: "create navigation params
+    // from a prefetch record"), so skip freshness/no-store revalidation of the
+    // entry we just found.
+    if (doValidation && mLoadInfo->GetActivatedFromNavigationalPrefetch()) {
+      LOG(
+          ("  serving speculation-rules prefetch from cache without "
+           "validation"));
+      doValidation = false;
+    }
   }
 
   nsAutoCString requestedETag;
@@ -5636,23 +5779,9 @@ nsresult nsHttpChannel::OnNormalCacheEntryAvailable(nsICacheEntry* aEntry,
   StoreWaitForCacheEntry(LoadWaitForCacheEntry() & ~WAIT_FOR_CACHE_ENTRY);
 
   if (NS_FAILED(aEntryStatus) || aNew) {
-    // Make sure this flag is dropped.  It may happen the entry is doomed
-    // between OnCacheEntryCheck and OnCacheEntryAvailable.
-    StoreCachedContentIsValid(CachedContentValidity::Invalid);
-
-    // From the same reason remove any conditional headers added
-    // in OnCacheEntryCheck.
-    if (mDidReval) {
-      LOG(("  Removing conditional request headers"));
-      UntieValidationRequest();
-      mDidReval = false;
-    }
-
-    if (LoadCachedContentIsPartial()) {
-      LOG(("  Removing byte range request headers"));
-      UntieByteRangeRequest();
-      StoreCachedContentIsPartial(false);
-    }
+    // It may happen the entry is doomed between OnCacheEntryCheck and
+    // OnCacheEntryAvailable; whatever the check armed from it must go.
+    DiscardCacheEntryCheckState();
 
     if (mLoadFlags & LOAD_ONLY_FROM_CACHE) {
       // if this channel is only allowed to pull from the cache, then
@@ -5664,6 +5793,7 @@ nsresult nsHttpChannel::OnNormalCacheEntryAvailable(nsICacheEntry* aEntry,
   if (NS_SUCCEEDED(aEntryStatus)) {
     mCacheEntry = aEntry;
     StoreCacheEntryIsWriteOnly(aNew);
+    NoteCacheEntryKeyMatch(aEntry);
   }
 
   return NS_OK;
@@ -5777,7 +5907,7 @@ nsresult nsHttpChannel::OpenCacheInputStream(nsICacheEntry* cacheEntry,
                                              bool startBuffering) {
   nsresult rv;
 
-  if (mURI->SchemeIs("https")) {
+  if (IsHTTPS()) {
     rv = cacheEntry->GetSecurityInfo(getter_AddRefs(mCachedSecurityInfo));
     if (NS_FAILED(rv)) {
       LOG(("failed to parse security-info [channel=%p, entry=%p]", this,
@@ -5840,6 +5970,24 @@ nsresult nsHttpChannel::OpenCacheInputStream(nsICacheEntry* cacheEntry,
 
   nsAutoCString contentType;
   mCachedResponseHead->ContentType(contentType);
+
+  // Alt-data written by a content process (bytecode cache) may only be
+  // consumed by a load whose principal matches the one that produced it.
+  if (altDataFromChild && !altDataType.IsEmpty()) {
+    nsAutoCString storedOrigin;
+    cacheEntry->GetMetaDataElement("alt-data-principal",
+                                   getter_Copies(storedOrigin));
+    nsAutoCString currentOrigin;
+    GetAltDataBindingOrigin(currentOrigin);
+    if (storedOrigin.IsEmpty() || currentOrigin.IsEmpty() ||
+        !storedOrigin.Equals(currentOrigin)) {
+      LOG(
+          ("Rejecting child-written alt-data due to principal mismatch "
+           "[channel=%p, stored='%s', current='%s']",
+           this, storedOrigin.get(), currentOrigin.get()));
+      altDataType.Truncate();
+    }
+  }
 
   bool foundAltData = false;
   bool deliverAltData = true;
@@ -6072,8 +6220,10 @@ void nsHttpChannel::CloseCacheEntry(bool doomOnFailure) {
     mCacheEntry->AsyncDoom(nullptr);
   } else {
     // Store updated security info, makes cached EV status race less likely
-    // (see bug 1040086)
-    if (mSecurityInfo) {
+    // (see bug 1040086). On a plain cache hit ReadFromCache() adopted the info
+    // this very entry handed us in OpenCacheInputStream(), so storing it back
+    // would only re-serialize the certificate chain and rewrite the entry file.
+    if (mSecurityInfo && mSecurityInfo != mCachedSecurityInfo) {
       mCacheEntry->SetSecurityInfo(mSecurityInfo);
     }
 
@@ -6081,11 +6231,7 @@ void nsHttpChannel::CloseCacheEntry(bool doomOnFailure) {
     // to remain valid so that subsequent navigations reuse the prefetched
     // response instead of re-fetching. See bug 1527334.
     if (NS_SUCCEEDED(mStatus) && mResponseHead) {
-      nsAutoCString secPurpose;
-      nsHttpAtom secPurposeAtom = nsHttp::ResolveAtom("Sec-Purpose"_ns);
-      if (secPurposeAtom &&
-          NS_SUCCEEDED(mRequestHead.GetHeader(secPurposeAtom, secPurpose)) &&
-          secPurpose.EqualsLiteral("prefetch") &&
+      if (StringBeginsWith(GetSecPurpose(), "prefetch"_ns) &&
           !mResponseHead->MustValidate()) {
         nsAutoCString expires;
         (void)mResponseHead->GetHeader(nsHttp::Expires, expires);
@@ -6150,6 +6296,12 @@ nsresult nsHttpChannel::InitCacheEntry() {
 
   LOG(("nsHttpChannel::InitCacheEntry [this=%p entry=%p]\n", this,
        mCacheEntry.get()));
+
+  // Normally already handled before the response was applied to the entry, but
+  // recreating an alias entry would doom and rewrite another URL's entry, so
+  // never reach Recreate() below while the flag is still set.
+  rv = MaybeReplaceNoVarySearchAliasEntry();
+  if (NS_FAILED(rv)) return NS_OK;
 
   bool recreate = !LoadCacheEntryIsWriteOnly();
   bool dontPersist = mLoadFlags & INHIBIT_PERSISTENT_CACHING;
@@ -6216,8 +6368,7 @@ void nsHttpChannel::UpdateInhibitPersistentCachingFlag() {
   }
 
   // Only cache SSL content on disk if the pref is set
-  if (!gHttpHandler->IsPersistentHttpsCachingEnabled() &&
-      mURI->SchemeIs("https")) {
+  if (!gHttpHandler->IsPersistentHttpsCachingEnabled() && IsHTTPS()) {
     mLoadFlags |= INHIBIT_PERSISTENT_CACHING;
   }
 }
@@ -6306,7 +6457,7 @@ nsresult nsHttpChannel::UpdateCacheEntryHeaders(nsICacheEntry* entry,
               if (NS_FAILED(rv)) {
                 val = "<hash failed>"_ns;
               } else {
-                val = hash;
+                val = std::move(hash);
               }
 
               LOG(("   hashed to %s\n", val.get()));
@@ -6429,8 +6580,9 @@ bool nsHttpChannel::ParseDictionary(nsICacheEntry* aEntry,
     uint32_t expTime = 0;
     (void)GetCacheTokenExpirationTime(&expTime);
 
+    RefPtr<LoadContextInfo> lci = GetLoadContextInfo(this);
     dicts->AddEntry(mURI, key, matchVal, matchDestItems, matchIdVal, Some(hash),
-                    aModified, expTime, getter_AddRefs(mDictSaving));
+                    aModified, expTime, lci, getter_AddRefs(mDictSaving));
     // If this was 304 Not Modified, then we don't need the dictionary data
     // (though we may update the dictionary entry if the match/id/etc changed).
     // If this is 304, mDictSaving will be cleared by AddEntry.
@@ -6650,7 +6802,8 @@ nsresult nsHttpChannel::DoInstallCacheListener(bool aSaveDecompressed,
              LoadHasAppliedConversion(), this));
         MOZ_DIAGNOSTIC_ASSERT(false, "Can't save dictionary uncompressed");
         mCacheEntry->SetDictionary(nullptr);
-        DictionaryCache::RemoveDictionary(nsCString(mDictSaving->GetURI()));
+        DictionaryCache::RemoveDictionary(nsCString(mDictSaving->GetURI()),
+                                          mDictSaving->GetLoadContextInfo());
         mDictSaving = nullptr;
       }
     }
@@ -6727,6 +6880,7 @@ nsresult nsHttpChannel::SetupReplacementChannel(nsIURI* newURI,
         NetworkLoadType::LOAD_REDIRECT, mLastStatusReported, TimeStamp::Now(),
         size, mCacheDisposition, mLoadInfo->GetInnerWindowID(),
         mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch(),
         &timings, std::move(mSource), httpVersion, responseStatus,
         Some(nsDependentCString(contentType.get())), newURI, redirectFlags,
         channelId);
@@ -6835,7 +6989,7 @@ nsresult nsHttpChannel::AsyncProcessRedirection(uint32_t redirectType) {
   nsAutoCString locationBuf;
   if (NS_EscapeURL(location.get(), -1, esc_OnlyNonASCII | esc_Spaces,
                    locationBuf)) {
-    location = locationBuf;
+    location = std::move(locationBuf);
   }
 
   mRedirectType = redirectType;
@@ -7424,6 +7578,7 @@ nsresult nsHttpChannel::CancelInternal(nsresult status) {
         mLastStatusReported, TimeStamp::Now(), size, mCacheDisposition,
         mLoadInfo->GetInnerWindowID(),
         mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch(),
         &mTransactionTimings, std::move(mSource));
   }
 
@@ -7799,7 +7954,7 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
   if (NS_SUCCEEDED(mRequestHead.GetHeader(nsHttp::Cookie, cookieHeader))) {
     // if this is a cache revalidaing channel (mIsStaleRevalidation), then this
     // represents both user cookies and cookies from cookieService
-    mUserSetCookieHeader = cookieHeader;
+    mUserSetCookieHeader = std::move(cookieHeader);
   }
 
   // Set user agent override, do so before OnOpeningRequest notification
@@ -7850,7 +8005,8 @@ void nsHttpChannel::AsyncOpenFinal(TimeStamp aTimeStamp) {
         mURI, requestMethod, mPriority, mChannelId, NetworkLoadType::LOAD_START,
         mChannelCreationTimestamp, mLastStatusReported, 0, mCacheDisposition,
         mLoadInfo->GetInnerWindowID(),
-        mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus);
+        mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch());
   }
 
   // Added due to PauseTask/DelayHttpChannel
@@ -7992,7 +8148,7 @@ nsresult nsHttpChannel::BeginConnect() {
   nsAutoCString host;
   nsAutoCString scheme;
   int32_t port = -1;
-  bool isHttps = mURI->SchemeIs("https");
+  bool isHttps = IsHTTPS();
 
   rv = mURI->GetScheme(scheme);
   if (NS_SUCCEEDED(rv)) rv = mURI->GetAsciiHost(host);
@@ -8037,15 +8193,8 @@ nsresult nsHttpChannel::BeginConnect() {
   SetGlobalPrivacyControl();
 
   OriginAttributes originAttributes;
-  // Regular principal in case we have a proxy.
-  if (proxyInfo &&
-      !StaticPrefs::privacy_partition_network_state_connection_with_proxy()) {
-    StoragePrincipalHelper::GetOriginAttributes(
-        this, originAttributes, StoragePrincipalHelper::eRegularPrincipal);
-  } else {
-    StoragePrincipalHelper::GetOriginAttributesForNetworkState(
-        this, originAttributes);
-  }
+  StoragePrincipalHelper::GetOriginAttributesForHttpConnection(
+      this, !!proxyInfo, originAttributes);
 
   // Adjust mCaps according to our request headers:
   //  - If "Connection: close" is set as a request header, then do not bother
@@ -8088,8 +8237,10 @@ nsresult nsHttpChannel::BeginConnect() {
       }
       wtconSettings->GetDedicated(&dedicated);
       if (dedicated) {
-        connInfo->SetWebTransportId(
-            nsHttpConnectionInfo::GenerateNewWebTransportId());
+        connInfo = connInfo->Mutate()
+                       .SetWebTransportId(
+                           nsHttpConnectionInfo::GenerateNewWebTransportId())
+                       .Finalize();
       }
     } else {
       connInfo = new nsHttpConnectionInfo(host, port, ""_ns, mUsername,
@@ -8233,7 +8384,8 @@ nsresult nsHttpChannel::BeginConnect() {
     LOG(("%p NS_HTTP_USE_HAPPY_EYEBALLS ", this));
     mCaps |= NS_HTTP_USE_HAPPY_EYEBALLS;
     mCaps &= ~NS_HTTP_FORCE_WAIT_HTTP_RR;
-    mConnectionInfo->SetHappyEyeballsEnabled(true);
+    mConnectionInfo =
+        mConnectionInfo->Mutate().SetHappyEyeballsEnabled(true).Finalize();
   }
 
   // No need to lookup HTTPSSVC record if mHTTPSSVCRecord already contains a
@@ -8247,7 +8399,7 @@ nsresult nsHttpChannel::BeginConnect() {
       gHttpHandler->IsHttp2Excluded(mConnectionInfo)) {
     StoreAllowSpdy(0);
     mCaps |= NS_HTTP_DISALLOW_SPDY;
-    mConnectionInfo->SetNoSpdy(true);
+    mConnectionInfo = mConnectionInfo->Mutate().SetNoSpdy(true).Finalize();
   }
 
   // We can be passed with the auth provider if this channel was
@@ -8294,11 +8446,13 @@ nsresult nsHttpChannel::BeginConnect() {
     }
   }
 
-  // Force-Reload should reset the persistent connection pool for this host
+  // Force-Reload should reset the persistent connection pool.
   if (mLoadFlags & LOAD_FRESH_CONNECTION) {
-    // just the initial document resets the whole pool
+    // Only the initial document resets the pool, and only for connections
+    // sharing this channel's origin attributes.
     if (mLoadFlags & LOAD_INITIAL_DOCUMENT_URI) {
-      gHttpHandler->AltServiceCache()->ClearAltServiceMappings();
+      gHttpHandler->AltServiceCache()->ClearAltServiceMappingsMatchingOA(
+          mConnectionInfo->GetOriginAttributes());
       rv = gHttpHandler->DoShiftReloadConnectionCleanupWithConnInfo(
           mConnectionInfo);
       if (NS_FAILED(rv)) {
@@ -8424,15 +8578,36 @@ void nsHttpChannel::MaybeStartDNSPrefetch() {
                                         });
     }
 
-    // Issue per-family prefetches (A and AAAA) so Happy Eyeballs can reuse
-    // them instead of starting its own lookups. Skip a family that won't be
-    // queried; with IPv6 disabled the AAAA request collapses to A, so skip it
-    // to avoid a duplicate.
-    bool skipIPv4 = mCaps & NS_HTTP_DISABLE_IPV4;
-    bool skipIPv6 = (mCaps & NS_HTTP_DISABLE_IPV6) ||
-                    StaticPrefs::network_dns_disableIPv6();
-    (void)mDNSPrefetch->PrefetchHighPerFamily(dnsFlags, skipIPv4, skipIPv6);
+    if (StaticPrefs::network_http_happy_eyeballs_enabled()) {
+      // Happy Eyeballs connects per-family, so issue per-family prefetches
+      // (A and AAAA) that it can reuse instead of starting its own lookups.
+      // Skip a family that won't be queried; with IPv6 disabled the AAAA
+      // request collapses to A, so skip it to avoid a duplicate.
+      bool skipIPv4 = mCaps & NS_HTTP_DISABLE_IPV4;
+      bool skipIPv6 = (mCaps & NS_HTTP_DISABLE_IPV6) ||
+                      StaticPrefs::network_dns_disableIPv6();
+      (void)mDNSPrefetch->PrefetchHighPerFamily(dnsFlags, skipIPv4, skipIPv6);
+    } else {
+      if (mCaps & NS_HTTP_DISABLE_IPV4) {
+        dnsFlags |= nsIDNSService::RESOLVE_DISABLE_IPV4;
+      } else if (mCaps & NS_HTTP_DISABLE_IPV6) {
+        dnsFlags |= nsIDNSService::RESOLVE_DISABLE_IPV6;
+      }
+      (void)mDNSPrefetch->PrefetchHigh(dnsFlags);
+    }
   }
+}
+
+bool nsHttpChannel::IsForcedOffline() const {
+  RefPtr<mozilla::dom::BrowsingContext> bc;
+  mLoadInfo->GetBrowsingContext(getter_AddRefs(bc));
+  if (!bc) {
+    // Loads that are not performed by a window, such as keepalive fetches
+    // handled by the FetchService and fetches from workers, only record the
+    // browsing context they are associated with.
+    mLoadInfo->GetAssociatedBrowsingContext(getter_AddRefs(bc));
+  }
+  return bc && bc->Top()->GetForceOffline();
 }
 
 NS_IMETHODIMP
@@ -8886,14 +9061,6 @@ nsHttpChannel::GetTransactionPending(TimeStamp* _retval) {
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-nsHttpChannel::GetIsSSL(bool* aIsSSL) {
-  // this attribute is really misnamed - it wants to know if
-  // https:// is being used. SSL might be used to cover http://
-  // in some circumstances (proxies, http/2, etc..)
-  return mURI->SchemeIs("https", aIsSSL);
-}
-
-NS_IMETHODIMP
 nsHttpChannel::GetProxyMethodIsConnect(bool* aProxyMethodIsConnect) {
   *aProxyMethodIsConnect = mConnectionInfo->UsingConnect();
   return NS_OK;
@@ -9067,6 +9234,19 @@ static already_AddRefed<nsIURI> GetFallbackURI(nsIURI* aURI) {
   }
 
   return backupURI.forget();
+}
+
+// The essential domain fallback only targets Firefox's own internal requests
+// Opening a link from browser UI or a priviledged page still carries the
+// system principal so we need to exclude these regular pageloads.
+static bool IsInternalSystemLoad(nsILoadInfo* aLoadInfo) {
+  if (!aLoadInfo->TriggeringPrincipal()->IsSystemPrincipal()) {
+    return false;
+  }
+
+  ExtContentPolicyType type = aLoadInfo->GetExternalContentPolicyType();
+  return type != ExtContentPolicy::TYPE_DOCUMENT &&
+         type != ExtContentPolicy::TYPE_SUBDOCUMENT;
 }
 
 // static
@@ -9349,8 +9529,7 @@ nsHttpChannel::OnStartRequest(nsIRequest* request) {
     MaybeUpdateDocumentIPAddressSpaceFromCache();
   }
 
-  if (!mCanceled && mTransaction &&
-      mLoadInfo->TriggeringPrincipal()->IsSystemPrincipal()) {
+  if (!mCanceled && mTransaction && IsInternalSystemLoad(mLoadInfo)) {
     // We have to report telemetry before we actually attempt to redirect to
     // the fallback domain because doing so will change mStatus
     ReportSystemChannelTelemetry(mStatus);
@@ -9409,8 +9588,7 @@ nsHttpChannel::OnStartRequest(nsIRequest* request) {
   // If this is a system principal request to an essential domain and we
   // currently have connectivity, then check if there's a fallback domain we
   // can use to retry. If so we redirect to the fallback domain.
-  if (NS_FAILED(mStatus) && !mCanceled &&
-      mLoadInfo->TriggeringPrincipal()->IsSystemPrincipal()) {
+  if (NS_FAILED(mStatus) && !mCanceled && IsInternalSystemLoad(mLoadInfo)) {
     if (StaticPrefs::network_essential_domains_fallback() &&
         hasConnectivity()) {
       auto passDomainCategory = [&](nsIChannel* aRedirectedChannel) {
@@ -9935,20 +10113,7 @@ static void RecordLNATelemetry(nsHttpChannel* aChannel, bool aLoadSuccess) {
   loadInfo->GetBrowsingContext(getter_AddRefs(bc));
 
   nsILoadInfo::IPAddressSpace parentAddressSpace =
-      nsILoadInfo::IPAddressSpace::Unknown;
-  Maybe<dom::ClientInfo> clientInfo = loadInfo->GetClientInfo();
-  if (clientInfo.isSome() && clientInfo->Type() != dom::ClientType::Window) {
-    nsCOMPtr<nsIPolicyContainer> policyContainer =
-        loadInfo->GetPolicyContainer();
-    if (policyContainer) {
-      parentAddressSpace =
-          PolicyContainer::Cast(policyContainer)->GetIPAddressSpace();
-    }
-  } else if (!bc) {
-    parentAddressSpace = loadInfo->GetParentIpAddressSpace();
-  } else {
-    parentAddressSpace = bc->GetCurrentIPAddressSpace();
-  }
+      mozilla::net::GetParentIPAddressSpace(loadInfo);
 
   // Early return if NOT LNA - don't record telemetry or log
   if (!mozilla::net::IsLocalOrPrivateNetworkAccess(
@@ -10470,60 +10635,6 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
   glean::http::channel_disposition.AccumulateSingleSample(chanDisposition);
   RecordHttpChanDispositionGlean(chanDisposition);
 
-  // Collect specific telemetry for measuring image, video, audio
-  // success/failure rates in regular browsing mode and when auto upgrading of
-  // subresources is enabled. Note that we only evaluate actual image types, not
-  // favicons.
-  nsContentPolicyType internalLoadType;
-  mLoadInfo->GetInternalContentPolicyType(&internalLoadType);
-  bool statusIsSuccess = NS_SUCCEEDED(aStatus);
-  if (internalLoadType == nsIContentPolicy::TYPE_INTERNAL_IMAGE ||
-      internalLoadType == nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD) {
-    if (mLoadInfo->GetBrowserDidUpgradeInsecureRequests()) {
-      glean::mixed_content::images
-          .EnumGet(statusIsSuccess
-                       ? glean::mixed_content::ImagesLabel::eImgupsuccess
-                       : glean::mixed_content::ImagesLabel::eImgupfailure)
-          .Add();
-    } else {
-      glean::mixed_content::images
-          .EnumGet(statusIsSuccess
-                       ? glean::mixed_content::ImagesLabel::eImgnoupsuccess
-                       : glean::mixed_content::ImagesLabel::eImgnoupfailure)
-          .Add();
-    }
-  }
-  if (internalLoadType == nsIContentPolicy::TYPE_INTERNAL_VIDEO) {
-    if (mLoadInfo->GetBrowserDidUpgradeInsecureRequests()) {
-      glean::mixed_content::video
-          .EnumGet(statusIsSuccess
-                       ? glean::mixed_content::VideoLabel::eVideoupsuccess
-                       : glean::mixed_content::VideoLabel::eVideoupfailure)
-          .Add();
-    } else {
-      glean::mixed_content::video
-          .EnumGet(statusIsSuccess
-                       ? glean::mixed_content::VideoLabel::eVideonoupsuccess
-                       : glean::mixed_content::VideoLabel::eVideonoupfailure)
-          .Add();
-    }
-  }
-  if (internalLoadType == nsIContentPolicy::TYPE_INTERNAL_AUDIO) {
-    if (mLoadInfo->GetBrowserDidUpgradeInsecureRequests()) {
-      glean::mixed_content::audio
-          .EnumGet(statusIsSuccess
-                       ? glean::mixed_content::AudioLabel::eAudioupsuccess
-                       : glean::mixed_content::AudioLabel::eAudioupfailure)
-          .Add();
-    } else {
-      glean::mixed_content::audio
-          .EnumGet(statusIsSuccess
-                       ? glean::mixed_content::AudioLabel::eAudionoupsuccess
-                       : glean::mixed_content::AudioLabel::eAudionoupfailure)
-          .Add();
-    }
-  }
-
   // if needed, check cache entry has all data we expect
   if (mCacheEntry && mCachePump && LoadConcurrentCacheAccess() &&
       aContentComplete) {
@@ -10623,8 +10734,15 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
         mLastStatusReported, TimeStamp::Now(), size, mCacheDisposition,
         mLoadInfo->GetInnerWindowID(),
         mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
-        &mTransactionTimings, std::move(mSource), httpVersion, responseStatus,
-        Some(nsDependentCString(contentType.get())));
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch(),
+        &mTransactionTimings, std::move(mSource),
+        // Skip the version for a cached response: it reflects the original
+        // fetch, not this request's connection.
+        (mCacheDisposition == kCacheHit ||
+         mCacheDisposition == kCacheHitViaReval)
+            ? Nothing()
+            : httpVersion,
+        responseStatus, Some(nsDependentCString(contentType.get())));
   }
 
   if (mAuthRetryPending &&
@@ -11394,6 +11512,9 @@ nsresult nsHttpChannel::DoAuthRetry(
 
   MOZ_ASSERT(!mTransaction, "should not have a transaction");
 
+  // Clear security info so it can be repopulated by the retried connection.
+  mSecurityInfo = nullptr;
+
   // Note that we don't have to toggle |IsPending| anymore. See the reasons
   // below.
   // 1. We can't suspend the channel during "http-on-modify-request"
@@ -11830,9 +11951,7 @@ static bool HasNullRequestOrigin(nsHttpChannel* aChannel, nsIURI* aURI,
                                  bool isAddonRequest) {
   // Step 1. If request has a redirect-tainted origin, then return "null".
   if (aChannel->HasRedirectTaintedOrigin()) {
-    if (StaticPrefs::network_http_origin_redirectTainted()) {
-      return true;
-    }
+    return true;
   }
 
   // Non-standard: Only allow HTTP and HTTPS origins.
@@ -12000,10 +12119,9 @@ void nsHttpChannel::SetDoNotTrack() {
 void nsHttpChannel::SetGlobalPrivacyControl() {
   MOZ_ASSERT(NS_IsMainThread(), "Must be called on the main thread");
 
-  if (StaticPrefs::privacy_globalprivacycontrol_functionality_enabled() &&
-      (StaticPrefs::privacy_globalprivacycontrol_enabled() ||
-       (StaticPrefs::privacy_globalprivacycontrol_pbmode_enabled() &&
-        NS_UsePrivateBrowsing(this)))) {
+  if (StaticPrefs::privacy_globalprivacycontrol_enabled() ||
+      (StaticPrefs::privacy_globalprivacycontrol_pbmode_enabled() &&
+       NS_UsePrivateBrowsing(this))) {
     // Send the header with a value of 1 to indicate opting-out
     DebugOnly<nsresult> rv =
         mRequestHead.SetHeader(nsHttp::GlobalPrivacyControl, "1"_ns, false);
@@ -12251,11 +12369,21 @@ nsresult nsHttpChannel::OnCacheWaitTimeout() {
   }
 
   LOG(("  cache entry wait timed out, forcing network [this=%p]", this));
-  mCacheWaitTimedOut = true;
+  {
+    // Waits for an OnCacheEntryCheck in flight on the cache I/O thread.
+    MutexAutoLock lock(mCacheWaitLock);
+    mCacheWaitTimedOut = true;
+  }
 
-  // Stop treating the outstanding cache open as blocking.  A late
-  // OnCacheEntryAvailable will be ignored (see mCacheWaitTimedOut).
+  // Stop treating the outstanding cache open as blocking.  We stay registered
+  // as a callback on the entry, but a late OnCacheEntryCheck or
+  // OnCacheEntryAvailable will be declined/ignored (see mCacheWaitTimedOut).
   StoreWaitForCacheEntry(LoadWaitForCacheEntry() & ~WAIT_FOR_CACHE_ENTRY);
+
+  // OnCacheEntryCheck may already have run for an entry we now won't get
+  // (e.g. it asked to be rechecked once a wedged writer finishes); the network
+  // response must not carry its conditional headers or alt-data.
+  DiscardCacheEntryCheckState();
 
   nsresult rv = TriggerNetwork();
   if (NS_FAILED(rv)) {
@@ -12555,11 +12683,17 @@ void nsHttpChannel::ReEvaluateReferrerAfterTrackingStatusIsKnown() {
 
 namespace {
 
-class BackgroundRevalidatingListener : public nsIStreamListener {
+// Also acts as the only notification callbacks of the revalidating channel, so
+// that none of its notifications reach the consumer of the original channel.
+class BackgroundRevalidatingListener : public nsIStreamListener,
+                                       public nsIInterfaceRequestor,
+                                       public nsIChannelEventSink {
+ public:
   NS_DECL_ISUPPORTS
-
   NS_DECL_NSISTREAMLISTENER
   NS_DECL_NSIREQUESTOBSERVER
+  NS_DECL_NSIINTERFACEREQUESTOR
+  NS_DECL_NSICHANNELEVENTSINK
 
  private:
   virtual ~BackgroundRevalidatingListener() = default;
@@ -12593,8 +12727,29 @@ BackgroundRevalidatingListener::OnStopRequest(nsIRequest* request,
   return NS_OK;
 }
 
+NS_IMETHODIMP
+BackgroundRevalidatingListener::GetInterface(const nsIID& aIID,
+                                             void** aResult) {
+  if (aIID.Equals(NS_GET_IID(nsIChannelEventSink))) {
+    return QueryInterface(aIID, aResult);
+  }
+  return NS_ERROR_NO_INTERFACE;
+}
+
+// The redirect response itself revalidates the cache entry, there is no need
+// to follow it.
+NS_IMETHODIMP
+BackgroundRevalidatingListener::AsyncOnChannelRedirect(
+    nsIChannel* aOldChannel, nsIChannel* aNewChannel, uint32_t aFlags,
+    nsIAsyncVerifyRedirectCallback* aCallback) {
+  LOG(("BackgroundRevalidatingListener::AsyncOnChannelRedirect %p vetoing",
+       aOldChannel));
+  return NS_BINDING_ABORTED;
+}
+
 NS_IMPL_ISUPPORTS(BackgroundRevalidatingListener, nsIStreamListener,
-                  nsIRequestObserver)
+                  nsIRequestObserver, nsIInterfaceRequestor,
+                  nsIChannelEventSink)
 
 }  // namespace
 
@@ -12627,10 +12782,30 @@ void nsHttpChannel::PerformBackgroundCacheRevalidationNow() {
   nsLoadFlags loadFlags = mLoadFlags | LOAD_ONLY_IF_MODIFIED | VALIDATE_ALWAYS |
                           LOAD_BACKGROUND | LOAD_BYPASS_SERVICE_WORKER;
 
+  RefPtr<BackgroundRevalidatingListener> listener =
+      new BackgroundRevalidatingListener();
+
+  nsCOMPtr<nsIPrincipal> principal;
+  nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
+      this, getter_AddRefs(principal));
+  nsCOMPtr<nsILoadGroup> loadGroup;
+  rv = NS_NewLoadGroup(getter_AddRefs(loadGroup), principal);
+  if (NS_FAILED(rv)) {
+    LOG(("  failed to create the load group, rv=0x%08x",
+         static_cast<uint32_t>(rv)));
+    return;
+  }
+
+  // XXX(valentin): Preserving the old load info means mInitialSecurityCheckDone
+  // will be true. Using CloneForNewRequest would be closer to the spec, but
+  // it would mean redoing previous checks.
+  nsCOMPtr<nsILoadInfo> loadInfo =
+      static_cast<mozilla::net::LoadInfo*>(mLoadInfo.get())->Clone();
+
   nsCOMPtr<nsIChannel> validatingChannel;
-  rv = NS_NewChannelInternal(getter_AddRefs(validatingChannel), mURI, mLoadInfo,
-                             nullptr /* performance storage */, mLoadGroup,
-                             mCallbacks, loadFlags);
+  rv = NS_NewChannelInternal(getter_AddRefs(validatingChannel), mURI, loadInfo,
+                             nullptr /* performance storage */, loadGroup,
+                             listener, loadFlags);
   if (NS_FAILED(rv)) {
     LOG(("  failed to created the channel, rv=0x%08x",
          static_cast<uint32_t>(rv)));
@@ -12639,6 +12814,7 @@ void nsHttpChannel::PerformBackgroundCacheRevalidationNow() {
 
   nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(validatingChannel));
   MOZ_ASSERT(httpChannel);
+
   nsCOMPtr<nsIHttpHeaderVisitor> visitor =
       new CopyNonDefaultHeaderVisitor(httpChannel);
   rv = VisitNonDefaultRequestHeaders(visitor);
@@ -12663,8 +12839,6 @@ void nsHttpChannel::PerformBackgroundCacheRevalidationNow() {
     httpChan->mStaleRevalidation = true;
   }
 
-  RefPtr<BackgroundRevalidatingListener> listener =
-      new BackgroundRevalidatingListener();
   rv = validatingChannel->AsyncOpen(listener);
   if (NS_FAILED(rv)) {
     LOG(("  failed to open the channel, rv=0x%08x", static_cast<uint32_t>(rv)));

@@ -56,6 +56,21 @@
             ],
           },
         }],
+        # MSVC needs no flags for these intrinsics; clang-cl does.
+        [ 'OS=="win" and clang_cl==1 and target_arch=="x64"', {
+          'msvs_settings': {
+            'VCCLCompilerTool': {
+              'AdditionalOptions': [
+                '-mssse3',
+                '-msse4.1',
+                '-msse4.2',
+                '-mpclmul',
+                '-maes',
+                '-mavx',
+              ],
+            },
+          },
+        }],
         [ 'target_arch=="arm"', {
           # Gecko doesn't support non-NEON platform on Android, but tier-3
           # platform such as Linux/arm will need it
@@ -125,6 +140,21 @@
             ],
           },
         }],
+        [ 'OS=="win" and clang_cl==1 and target_arch=="x64"', {
+          'msvs_settings': {
+            'VCCLCompilerTool': {
+              'AdditionalOptions': [
+                '-mssse3',
+                '-msse4.1',
+                '-msse4.2',
+                '-mpclmul',
+                '-maes',
+                '-mavx',
+                '-mavx2',
+              ],
+            },
+          },
+        }],
         [ 'target_arch=="arm"', {
           # Gecko doesn't support non-NEON platform on Android, but tier-3
           # platform such as Linux/arm will need it
@@ -169,6 +199,17 @@
               '-mssse3',
               '-msse4.1'
             ],
+          },
+        }],
+        [ 'OS=="win" and clang_cl==1', {
+          'msvs_settings': {
+            'VCCLCompilerTool': {
+              'AdditionalOptions': [
+                '-msha',
+                '-mssse3',
+                '-msse4.1'
+              ],
+            },
           },
         }]
       ]
@@ -302,6 +343,15 @@
           'cflags_mozilla': [
             '-march=armv8-a+crypto'
           ],
+          'conditions': [
+            [ 'OS=="win" and clang_cl==1', {
+              'msvs_settings': {
+                'VCCLCompilerTool': {
+                  'AdditionalOptions': [ '-march=armv8-a+crypto' ],
+                },
+              },
+            }],
+          ],
         }]
       ]
     },
@@ -314,6 +364,134 @@
       'dependencies': [
         '<(DEPTH)/exports.gyp:nss_exports'
       ]
+    },
+    # The vendored libcrux ML-KEM + ML-DSA combined extraction (lib/freebl/libcrux/)
+    # is built with an isolated include scope: the verified/ dirs are removed so
+    # libcrux's krml/eurydice headers can't collide with the HACL* extraction that
+    # still lives in verified/. The libcrux .c are self-contained (no PORT_/RNG_),
+    # so a single mode-agnostic library serves every freebl variant. The freebl
+    # wrappers that DO call PORT_/RNG_ (kyber.c, ml_dsa.c) live in the 'pqcwrap'
+    # targets, which mirror the FREEBL_NO_DEPEND split of the freebl libs that
+    # link them. The target is named 'crux' rather than 'libcrux': Firefox's
+    # build system treats a "lib" prefix on a LIBRARY_NAME specially, so a
+    # 'libcrux' target can't be named in USE_LIBS there.
+    {
+      'target_name': 'crux',
+      'type': 'static_library',
+      'sources': [
+        'libcrux/combined_core.c',
+        'libcrux/libcrux_ct_ops.c',
+        'libcrux/libcrux_sha3_portable.c',
+        'libcrux/libcrux_mlkem_core.c',
+        'libcrux/libcrux_mlkem_portable.c',
+        'libcrux/libcrux_mlkem512_portable.c',
+        'libcrux/libcrux_mlkem768_portable.c',
+        'libcrux/libcrux_mlkem1024_portable.c',
+        'libcrux/libcrux_mldsa_core.c',
+        'libcrux/libcrux_mldsa_portable.c',
+        'libcrux/libcrux_mldsa44_portable.c',
+        'libcrux/libcrux_mldsa65_portable.c',
+        'libcrux/libcrux_mldsa87_portable.c',
+      ],
+      'dependencies': [
+        '<(DEPTH)/exports.gyp:nss_exports',
+      ],
+      'include_dirs!': [
+        'verified',
+        'verified/internal',
+        'verified/karamel/include',
+        'verified/karamel/krmllib/dist/minimal',
+      ],
+      'include_dirs': [
+        'libcrux',
+        'libcrux/internal',
+        'libcrux/karamel',
+      ],
+      'conditions': [
+        [ 'OS=="win"', {
+          # C4146: unary minus applied to an unsigned type. eurydice_glue.h
+          # does this deliberately in its wrapping_neg helpers. The extraction
+          # is kept byte-identical to upstream (CI diffs it), so silence the
+          # warning rather than patching the header.
+          'msvs_settings': {
+            'VCCLCompilerTool': {
+              'AdditionalOptions': [ '/wd4146' ],
+            },
+          },
+        }],
+      ],
+    },
+    {
+      'target_name': 'pqcwrap',
+      'type': 'static_library',
+      'sources': [
+        'kyber.c',
+        'ml_dsa.c',
+      ],
+      'dependencies': [
+        '<(DEPTH)/exports.gyp:nss_exports',
+        'crux',
+      ],
+      'include_dirs!': [
+        'verified',
+        'verified/internal',
+        'verified/karamel/include',
+        'verified/karamel/krmllib/dist/minimal',
+      ],
+      'include_dirs': [
+        'libcrux',
+        'libcrux/internal',
+        'libcrux/karamel',
+      ],
+      'conditions': [
+        [ 'OS=="win"', {
+          # See the crux target: eurydice_glue.h trips C4146.
+          'msvs_settings': {
+            'VCCLCompilerTool': {
+              'AdditionalOptions': [ '/wd4146' ],
+            },
+          },
+        }],
+      ],
+    },
+    {
+      'target_name': 'pqcwrap_static',
+      'type': 'static_library',
+      'sources': [
+        'kyber.c',
+        'ml_dsa.c',
+      ],
+      'dependencies': [
+        '<(DEPTH)/exports.gyp:nss_exports',
+        'crux',
+      ],
+      'include_dirs!': [
+        'verified',
+        'verified/internal',
+        'verified/karamel/include',
+        'verified/karamel/krmllib/dist/minimal',
+      ],
+      'include_dirs': [
+        'libcrux',
+        'libcrux/internal',
+        'libcrux/karamel',
+      ],
+      'conditions': [
+        [ 'OS=="win"', {
+          # See the crux target: eurydice_glue.h trips C4146.
+          'msvs_settings': {
+            'VCCLCompilerTool': {
+              'AdditionalOptions': [ '/wd4146' ],
+            },
+          },
+        }],
+        [ 'OS=="linux"', {
+          'defines!': [
+            'FREEBL_NO_DEPEND',
+            'FREEBL_LOWHASH',
+          ],
+        }],
+      ],
     },
     # Build a static freebl library so we can statically link it into
     # the binary. This way we don't have to dlopen() the shared lib
@@ -328,6 +506,8 @@
         '<(DEPTH)/exports.gyp:nss_exports',
         'hw-acc-crypto-avx',
         'hw-acc-crypto-avx2',
+        'crux',
+        'pqcwrap_static',
         'gcm.gyp:gcm'
       ],
       'conditions': [
@@ -385,6 +565,8 @@
         '<(DEPTH)/exports.gyp:nss_exports',
         'hw-acc-crypto-avx',
         'hw-acc-crypto-avx2',
+        'crux',
+        'pqcwrap',
         'gcm.gyp:gcm-nodepend',
       ],
       'conditions': [
@@ -466,6 +648,8 @@
         '<(DEPTH)/exports.gyp:nss_exports',
         'hw-acc-crypto-avx',
         'hw-acc-crypto-avx2',
+        'crux',
+        'pqcwrap',
       ],
     },
     {
@@ -483,6 +667,8 @@
         '<(DEPTH)/exports.gyp:nss_exports',
         'hw-acc-crypto-avx',
         'hw-acc-crypto-avx2',
+        'crux',
+        'pqcwrap',
         'gcm.gyp:gcm',
       ],
       'asflags_mozilla': [
@@ -529,7 +715,6 @@
       'verified/karamel/include',
       'verified/karamel/krmllib/dist/minimal',
       'deprecated',
-      'verified/eurydice',
     ],
     'defines': [
       'SHLIB_SUFFIX=\"<(dll_suffix)\"',

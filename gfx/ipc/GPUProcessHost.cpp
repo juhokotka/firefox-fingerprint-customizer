@@ -3,16 +3,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "GPUProcessHost.h"
+
+#include "VRGPUChild.h"
 #include "chrome/common/process_watcher.h"
 #include "gfxPlatform.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs_layers.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/gfx/GPUChild.h"
 #include "mozilla/gfx/Logging.h"
-#include "mozilla/layers/SynchronousTask.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/StaticPrefs_layers.h"
-#include "VRGPUChild.h"
 #include "mozilla/ipc/ProcessUtils.h"
+#include "mozilla/layers/SynchronousTask.h"
 #ifdef MOZ_WIDGET_ANDROID
 #  include "mozilla/java/GeckoProcessManagerWrappers.h"
 #endif
@@ -38,8 +39,7 @@ GPUProcessHost::GPUProcessHost(Listener* aListener)
       mLaunchPhase(LaunchPhase::Unlaunched),
       mProcessToken(0),
       mShutdownRequested(false),
-      mChannelClosed(false),
-      mLiveToken(new media::Refcountable<bool>(true)) {
+      mChannelClosed(false) {
   MOZ_COUNT_CTOR(GPUProcessHost);
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
@@ -55,11 +55,12 @@ GPUProcessHost::~GPUProcessHost() { MOZ_COUNT_DTOR(GPUProcessHost); }
 bool GPUProcessHost::Launch(geckoargs::ChildProcessArgs aExtraOpts) {
   MOZ_ASSERT(mLaunchPhase == LaunchPhase::Unlaunched);
   MOZ_ASSERT(!mGPUChild);
-  MOZ_ASSERT(!gfxPlatform::IsHeadless());
+  MOZ_ASSERT(!gfxPlatform::IsHeadless() ||
+             StaticPrefs::layers_gpu_process_allow_headless_AtStartup());
 
   mPrefSerializer = MakeUnique<ipc::SharedPreferenceSerializer>();
   if (!mPrefSerializer->SerializeToSharedMemory(GeckoProcessType_GPU,
-                                                /* remoteType */ ""_ns)) {
+                                                /* remoteType */ {})) {
     return false;
   }
   mPrefSerializer->AddSharedPrefCmdLineArgs(*this, aExtraOpts);
@@ -154,9 +155,9 @@ void GPUProcessHost::OnChannelConnected(base::ProcessId peer_pid) {
   GeckoChildProcessHost::OnChannelConnected(peer_pid);
 
   NS_DispatchToMainThread(NS_NewRunnableFunction(
-      "GPUProcessHost::OnChannelConnected",
-      [self = this, liveToken = mLiveToken]() {
-        if (*liveToken && self->mLaunchPhase == LaunchPhase::Waiting) {
+      "GPUProcessHost::OnChannelConnected", [self = RefPtr{this}]() {
+        if (!self->mShutdownRequested &&
+            self->mLaunchPhase == LaunchPhase::Waiting) {
           self->InitAfterConnect(true);
         }
       }));
@@ -193,9 +194,9 @@ void GPUProcessHost::InitAfterConnect(bool aSucceeded) {
                                 true>::CreateAndResolve(csm, __func__);
             })
             ->Map(GetCurrentSerialEventTarget(), __func__,
-                  [self = this, liveToken = mLiveToken](
+                  [self = RefPtr{this}](
                       java::CompositorSurfaceManager::GlobalRef&& aCsm) {
-                    if (*liveToken) {
+                    if (!self->mShutdownRequested) {
                       self->mCompositorSurfaceManager = aCsm;
                     }
                     return Ok{};
@@ -205,11 +206,7 @@ void GPUProcessHost::InitAfterConnect(bool aSucceeded) {
 
     GPUChild::InitPromiseType::All(GetCurrentSerialEventTarget(), initPromises)
         ->Then(GetCurrentSerialEventTarget(), __func__,
-               [self = this, liveToken = mLiveToken]() {
-                 if (*liveToken) {
-                   self->OnAsyncInitComplete();
-                 }
-               });
+               [self = RefPtr{this}]() { self->OnAsyncInitComplete(); });
   } else {
     mLaunchPhase = LaunchPhase::Complete;
     if (mListener) {
@@ -263,12 +260,9 @@ void GPUProcessHost::Shutdown(bool aUnexpectedShutdown) {
   MOZ_ASSERT(!mShutdownRequested);
 
   mListener = nullptr;
+  mShutdownRequested = true;
 
   if (mGPUChild) {
-    // OnChannelClosed uses this to check if the shutdown was expected or
-    // unexpected.
-    mShutdownRequested = true;
-
     if (aUnexpectedShutdown) {
       mGPUChild->OnUnexpectedShutdown();
     }
@@ -287,17 +281,7 @@ void GPUProcessHost::Shutdown(bool aUnexpectedShutdown) {
     // communicate anything back.
     KillHard(/* aGenerateMinidump */ false);
 #endif
-
-    // If we're shutting down unexpectedly, we're in the middle of handling an
-    // ActorDestroy for PGPUChild, which is still on the stack. We'll return
-    // back to OnChannelClosed.
-    //
-    // Otherwise, we'll wait for OnChannelClose to be called whenever PGPUChild
-    // acknowledges shutdown.
-    return;
   }
-
-  DestroyProcess();
 }
 
 void GPUProcessHost::OnChannelClosed() {
@@ -306,8 +290,6 @@ void GPUProcessHost::OnChannelClosed() {
   if (!mShutdownRequested && mListener) {
     // This is an unclean shutdown. Notify our listener that we're going away.
     mListener->OnProcessUnexpectedShutdown(this);
-  } else {
-    DestroyProcess();
   }
 
   // Release the actor.
@@ -340,16 +322,6 @@ void GPUProcessHost::KillProcess(bool aGenerateMinidump) {
 }
 
 void GPUProcessHost::CrashProcess() { mGPUChild->SendCrashProcess(); }
-
-void GPUProcessHost::DestroyProcess() {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  // Any pending tasks will be cancelled from now on.
-  *mLiveToken = false;
-
-  NS_DispatchToMainThread(
-      NS_NewRunnableFunction("DestroyProcessRunnable", [this] { Destroy(); }));
-}
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
 bool GPUProcessHost::FillMacSandboxInfo(MacSandboxInfo& aInfo) {

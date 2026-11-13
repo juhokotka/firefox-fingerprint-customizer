@@ -19,7 +19,6 @@
 
 #include "js/Utility.h"
 #include "js/WasmFeatures.h"
-
 #include "wasm/WasmBinary.h"
 #include "wasm/WasmCompile.h"
 #include "wasm/WasmCompileArgs.h"

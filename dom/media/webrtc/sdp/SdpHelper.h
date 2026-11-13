@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "mozilla/dom/PeerConnectionObserverEnumsBinding.h"
 #include "nsError.h"
 #include "sdp/SdpAttribute.h"
 #include "sdp/SdpMediaSection.h"
@@ -34,6 +35,9 @@ class SdpHelper {
                                   const Sdp& newOffer, const size_t level);
   bool IceCredentialsDiffer(const SdpMediaSection& msection1,
                             const SdpMediaSection& msection2);
+
+  bool FingerprintsDiffer(const SdpMediaSection& msection1,
+                          const SdpMediaSection& msection2);
 
   bool MsectionIsDisabled(const SdpMediaSection& msection) const;
   static void DisableMsection(Sdp* sdp, SdpMediaSection* msection);
@@ -95,8 +99,8 @@ class SdpHelper {
       SdpMediaSection* localMsection);
 
   bool SdpMatch(const Sdp& sdp1, const Sdp& sdp2);
-  nsresult ValidateTransportAttributes(const Sdp& aSdp,
-                                       const sdp::SdpType aType);
+  Maybe<dom::PCError> ValidateTransportAttributes(const Sdp& aSdp,
+                                                  sdp::SdpType aType);
 
  private:
   std::string& mLastError;

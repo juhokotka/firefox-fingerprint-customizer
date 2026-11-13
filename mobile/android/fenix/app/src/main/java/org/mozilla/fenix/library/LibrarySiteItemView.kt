@@ -11,46 +11,62 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.core.content.res.use
 import androidx.core.view.isVisible
 import mozilla.components.concept.menu.MenuController
 import mozilla.components.concept.menu.Orientation
+import mozilla.components.support.ktx.android.view.pixelSizeFor
+import org.mozilla.fenix.R
 import org.mozilla.fenix.databinding.LibrarySiteItemBinding
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.loadIntoView
 import org.mozilla.fenix.selection.SelectionHolder
 import org.mozilla.fenix.selection.SelectionInteractor
 
-class LibrarySiteItemView @JvmOverloads constructor(
+class LibrarySiteItemView
+@JvmOverloads
+constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0,
     defStyleRes: Int = 0,
 ) : ConstraintLayout(context, attrs, defStyleAttr, defStyleRes) {
 
-    private val binding = LibrarySiteItemBinding.inflate(
-        LayoutInflater.from(context),
-        this,
-        true,
-    )
+    private val binding =
+        LibrarySiteItemBinding.inflate(
+            LayoutInflater.from(context),
+            this,
+        )
 
-    val titleView: TextView get() = binding.title
+    init {
+        minHeight = pixelSizeFor(R.dimen.library_item_height)
+        val selectableBackground =
+            context.obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackground)).use {
+                it.getResourceId(0, 0)
+            }
+        if (background == null && selectableBackground != 0) {
+            setBackgroundResource(selectableBackground)
+        }
+    }
 
-    val urlView: TextView get() = binding.url
+    val titleView: TextView
+        get() = binding.title
 
-    val iconView: ImageView get() = binding.favicon
+    val urlView: TextView
+        get() = binding.url
 
-    val overflowView: ImageButton get() = binding.overflowMenu
+    val iconView: ImageView
+        get() = binding.favicon
 
-    /**
-     * Change visibility of parts of this view based on what type of item is being represented.
-     */
+    val overflowView: ImageButton
+        get() = binding.overflowMenu
+
+    /** Change visibility of parts of this view based on what type of item is being represented. */
     fun displayAs(mode: ItemType) {
         urlView.isVisible = mode == ItemType.SITE
     }
 
-    /**
-     * Changes the icon to show a check mark if [isSelected]
-     */
+    /** Changes the icon to show a check mark if [isSelected] */
     fun changeSelected(isSelected: Boolean) {
         binding.icon.displayedChild = if (isSelected) 1 else 0
     }
@@ -97,6 +113,7 @@ class LibrarySiteItemView @JvmOverloads constructor(
     }
 
     enum class ItemType {
-        SITE, FOLDER
+        SITE,
+        FOLDER,
     }
 }

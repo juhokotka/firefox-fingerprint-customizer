@@ -6,6 +6,7 @@
 #define MOZILLA_GFX_SCALEDFONTDWRITE_H_
 
 #include <dwrite.h>
+
 #include "DWriteSettings.h"
 #include "ScaledFontBase.h"
 
@@ -36,7 +37,7 @@ class ScaledFontDWrite final : public ScaledFontBase {
   bool GetWRFontInstanceOptions(
       Maybe<wr::FontInstanceOptions>* aOutOptions,
       Maybe<wr::FontInstancePlatformOptions>* aOutPlatformOptions,
-      std::vector<FontVariation>* aOutVariations) override;
+      std::vector<wr::FontVariation>* aOutVariations) override;
 
   DWriteSettings& DWriteSettings() const;
 

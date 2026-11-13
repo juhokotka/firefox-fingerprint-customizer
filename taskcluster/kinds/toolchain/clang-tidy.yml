@@ -12,6 +12,7 @@ task-defaults:
     worker:
         max-run-time: 3600
     run:
+        clone-with: hg
         toolchain-artifact: public/build/clang-tidy.tar.zst
         resources:
             - 'build/clang-plugin/**/*.cpp'
@@ -23,7 +24,7 @@ task-defaults:
             - 'build/build-clang/build-clang.py'
     fetches:
         fetch:
-            - clang-21
+            - clang-22
 
 linux64-clang-tidy:
     index:

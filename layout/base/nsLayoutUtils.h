@@ -120,6 +120,9 @@ class WebRenderLayerManager;
 namespace widget {
 enum class TransparencyMode : uint8_t;
 }
+namespace wr {
+class DisplayListBuilder;
+}  // namespace wr
 }  // namespace mozilla
 
 // Flags to customize the behavior of nsLayoutUtils::DrawString.
@@ -395,6 +398,11 @@ class nsLayoutUtils {
    */
   static bool IsPrimaryStyleFrame(const nsIFrame* aFrame);
 
+  enum class CompareTreePositionFlags : uint8_t {
+    None = 0x00,
+    FramesMayBeInDifferentOrIncompleteTrees = 0x01,
+  };
+
   /**
    * CompareTreePosition determines whether aFrame1 comes before or
    * after aFrame2 in a preorder traversal of the frame tree, where out
@@ -409,23 +417,28 @@ class nsLayoutUtils {
    *                        aContent1 or aContent2, this function will
    *                        still work, but it will be slower than
    *                        normal.
+   * @param aFlags If FramesMayBeInDifferentOrIncompleteTrees is set,
+   *               consider that being unable to find tree position to be
+   *               part of the expected behaviour.
    * @return < 0 if aContent1 is before aContent2
    *         > 0 if aContent1 is after aContent2,
-   *         0 otherwise (meaning they're the same, or they're in
-   *           different frame trees)
+   *         0 otherwise, meaning they're the same, or they're in
+   *           different/incomplete frame tree(s).
    */
   static int32_t CompareTreePosition(
       const nsIFrame* aFrame1, const nsIFrame* aFrame2,
-      const nsIFrame* aCommonAncestor = nullptr) {
-    return DoCompareTreePosition(aFrame1, aFrame2, aCommonAncestor);
+      const nsIFrame* aCommonAncestor = nullptr,
+      CompareTreePositionFlags aFlags = CompareTreePositionFlags::None) {
+    return DoCompareTreePosition(aFrame1, aFrame2, aCommonAncestor, aFlags);
   }
 
   static int32_t CompareTreePosition(
       const nsIFrame* aFrame1, const nsIFrame* aFrame2,
       const nsTArray<const nsIFrame*>& aFrame2Ancestors,
-      const nsIFrame* aCommonAncestor = nullptr) {
+      const nsIFrame* aCommonAncestor = nullptr,
+      CompareTreePositionFlags aFlags = CompareTreePositionFlags::None) {
     return DoCompareTreePosition(aFrame1, aFrame2, aFrame2Ancestors,
-                                 aCommonAncestor);
+                                 aCommonAncestor, aFlags);
   }
 
   static const nsIFrame* FillAncestors(const nsIFrame* aFrame,
@@ -434,11 +447,12 @@ class nsLayoutUtils {
 
   static int32_t DoCompareTreePosition(const nsIFrame* aFrame1,
                                        const nsIFrame* aFrame2,
-                                       const nsIFrame* aCommonAncestor);
+                                       const nsIFrame* aCommonAncestor,
+                                       CompareTreePositionFlags aFlags);
   static int32_t DoCompareTreePosition(
       const nsIFrame* aFrame1, const nsIFrame* aFrame2,
       const nsTArray<const nsIFrame*>& aFrame2Ancestors,
-      const nsIFrame* aCommonAncestor);
+      const nsIFrame* aCommonAncestor, CompareTreePositionFlags aFlags);
 
   /**
    * LastContinuationWithChild gets the last continuation in aFrame's chain
@@ -599,6 +613,22 @@ class nsLayoutUtils {
    */
   static mozilla::ScrollContainerFrame* GetNearestScrollableFrameForDirection(
       nsIFrame* aFrame, mozilla::layers::ScrollDirections aDirections);
+
+  /**
+   * GetNearestScrollContainerFrameToScrollTowards locates the first ancestor of
+   * aFrame (or aFrame itself) that is scrollable and whose current scroll
+   * position can still move toward the given physical edge (i.e. it isn't
+   * already scrolled to that edge).
+   * The search extends across document boundaries, but does not cross process
+   * boundaries; callers should handle cross-process scroll handoff themselves.
+   *
+   * @param  aFrame the frame to start with
+   * @param  aSideBits the physical edge we want to scroll toward
+   * @return the nearest scroll container frame or nullptr if not found
+   */
+  static mozilla::ScrollContainerFrame*
+  GetNearestScrollContainerFrameToScrollTowards(nsIFrame* aFrame,
+                                                mozilla::SideBits aSideBits);
 
   enum {
     /**
@@ -883,25 +913,24 @@ class nsLayoutUtils {
       const nsIFrame* aFrame, const nsRect& aRect, const nsIFrame* aAncestor,
       bool* aPreservesAxisAlignedRectangles = nullptr,
       mozilla::Maybe<Matrix4x4Flagged>* aMatrixCache = nullptr,
-      bool aStopAtStackingContextAndDisplayPortAndOOFFrame = false,
+      mozilla::TransformMatrixFlags aFlags = {},
       nsIFrame** aOutAncestor = nullptr) {
-    return TransformFrameRectToAncestor(
-        aFrame, aRect, RelativeTo{aAncestor}, aPreservesAxisAlignedRectangles,
-        aMatrixCache, aStopAtStackingContextAndDisplayPortAndOOFFrame,
-        aOutAncestor);
+    return TransformFrameRectToAncestor(aFrame, aRect, RelativeTo{aAncestor},
+                                        aPreservesAxisAlignedRectangles,
+                                        aMatrixCache, aFlags, aOutAncestor);
   }
   static nsRect TransformFrameRectToAncestor(
       const nsIFrame* aFrame, const nsRect& aRect, RelativeTo aAncestor,
       bool* aPreservesAxisAlignedRectangles = nullptr,
       mozilla::Maybe<Matrix4x4Flagged>* aMatrixCache = nullptr,
-      bool aStopAtStackingContextAndDisplayPortAndOOFFrame = false,
+      mozilla::TransformMatrixFlags aFlags = {},
       nsIFrame** aOutAncestor = nullptr);
 
   /**
    * Gets the transform for aFrame relative to aAncestor. Pass null for
-   * aAncestor to go up to the root frame. Including nsIFrame::IN_CSS_UNITS
-   * flag in aFlags will return CSS pixels, by default it returns device
-   * pixels.
+   * aAncestor to go up to the root frame. Including
+   * TransformMatrixFlag::InCSSUnits in aFlags will return CSS pixels,
+   * by default it returns device pixels.
    * More info can be found in nsIFrame::GetTransformMatrix.
    *
    * Some notes on the possible combinations of |aFrame.mViewportType| and
@@ -937,7 +966,8 @@ class nsLayoutUtils {
    * ==========================================================================
    */
   static Matrix4x4Flagged GetTransformToAncestor(
-      RelativeTo aFrame, RelativeTo aAncestor, uint32_t aFlags = 0,
+      RelativeTo aFrame, RelativeTo aAncestor,
+      mozilla::TransformMatrixFlags aFlags = {},
       nsIFrame** aOutAncestor = nullptr);
 
   /**
@@ -989,7 +1019,7 @@ class nsLayoutUtils {
    * Whether author-specified borders / backgrounds disable theming for a given
    * appearance value.
    */
-  static bool AuthorSpecifiedBorderBackgroundDisablesTheming(
+  static bool AuthorOrUserSpecifiedBorderBackgroundDisablesTheming(
       mozilla::StyleAppearance);
 
   /**
@@ -1459,7 +1489,7 @@ class nsLayoutUtils {
   /**
    * Find the nearest ancestor that's a block
    */
-  static nsBlockFrame* FindNearestBlockAncestor(nsIFrame* aFrame);
+  static nsBlockFrame* FindNearestBlockAncestor(const nsIFrame* aFrame);
 
   /*
    * Whether the frame is an nsBlockFrame which is not a wrapper block.
@@ -1722,9 +1752,9 @@ class nsLayoutUtils {
    *   StyleBoxSizing::ContentBox to this function, or to just use the
    *   convenience-wrapper that has "ContentBox" in the function name.
    */
-  static inline nscoord ComputeStretchBSize(
-      nscoord aSizeToFill, nscoord aMargin, nscoord aBorderPadding,
-      mozilla::StyleBoxSizing aBoxSizing) {
+  static inline nscoord ComputeStretchSize(nscoord aSizeToFill, nscoord aMargin,
+                                           nscoord aBorderPadding,
+                                           mozilla::StyleBoxSizing aBoxSizing) {
     NS_ASSERTION(aSizeToFill != NS_UNCONSTRAINEDSIZE,
                  "We don't handle situations with unconstrained "
                  "aSizeToFill; caller should handle that!");
@@ -1738,16 +1768,15 @@ class nsLayoutUtils {
   static inline nscoord ComputeStretchContentBoxBSize(nscoord aSizeToFill,
                                                       nscoord aMargin,
                                                       nscoord aBorderPadding) {
-    return ComputeStretchBSize(aSizeToFill, aMargin, aBorderPadding,
-                               mozilla::StyleBoxSizing::ContentBox);
+    return ComputeStretchSize(aSizeToFill, aMargin, aBorderPadding,
+                              mozilla::StyleBoxSizing::ContentBox);
   }
   // Similar to the above convenience-wrapper, but now for inline-axis.
-  // TODO(dholbert): would it be useful to add a box-sizing-aware version of
-  // this API for the inline axis too, like we've got for the block axis?
   static inline nscoord ComputeStretchContentBoxISize(nscoord aSizeToFill,
                                                       nscoord aMargin,
                                                       nscoord aBorderPadding) {
-    return std::max(0, aSizeToFill - aMargin - aBorderPadding);
+    return ComputeStretchSize(aSizeToFill, aMargin, aBorderPadding,
+                              mozilla::StyleBoxSizing::ContentBox);
   }
 
   /**
@@ -2160,13 +2189,18 @@ class nsLayoutUtils {
   /**
    * Given the image container, frame, and dest rect, determine the best fitting
    * size to decode the image at, and calculate any necessary SVG parameters.
+   * aRasterizedForDest, if given, is set when the returned size is the dest
+   * rect's own snapped device size, so a surface of that size is meant to be
+   * drawn 1:1 in the dest rect rather than scaled to it.
    */
   static mozilla::gfx::IntSize ComputeImageContainerDrawingParameters(
       imgIContainer* aImage, nsIFrame* aForFrame,
       const LayoutDeviceRect& aDestRect, const LayoutDeviceRect& aFillRect,
+      mozilla::wr::DisplayListBuilder& aBuilder,
       const StackingContextHelper& aSc, uint32_t aFlags,
       mozilla::SVGImageContext& aSVGContext,
-      mozilla::Maybe<mozilla::image::ImageIntRegion>& aRegion);
+      mozilla::Maybe<mozilla::image::ImageIntRegion>& aRegion,
+      bool* aRasterizedForDest = nullptr);
 
   /**
    * Given a source area of an image (in appunits) and a destination area
@@ -2372,7 +2406,7 @@ class nsLayoutUtils {
   // This function can be called on any thread.
   static mozilla::SurfaceFromElementResult SurfaceFromVideoFrame(
       mozilla::dom::VideoFrame* aVideoFrame, uint32_t aSurfaceFlags,
-      RefPtr<DrawTarget>& aTarget);
+      RefPtr<DrawTarget>& aTarget, bool aOptimizeSourceSurface = true);
   static mozilla::SurfaceFromElementResult SurfaceFromVideoFrame(
       mozilla::dom::VideoFrame* aVideoFrame, uint32_t aSurfaceFlags = 0) {
     RefPtr<DrawTarget> target = nullptr;
@@ -2624,7 +2658,6 @@ class nsLayoutUtils {
   /**
    * Unions the overflow areas of the children of aFrame with aOverflowAreas.
    * aSkipChildLists specifies any child lists that should be skipped.
-   * FrameChildListID::Popup is always skipped.
    */
   static void UnionChildOverflow(
       nsIFrame* aFrame, mozilla::OverflowAreas& aOverflowAreas,
@@ -2830,8 +2863,7 @@ class nsLayoutUtils {
    * are likely to need special-case handling of the RCD-RSF.
    */
   static nsSize CalculateCompositionSizeForFrame(
-      nsIFrame* aFrame, bool aSubtractScrollbars = true,
-      const nsSize* aOverrideScrollPortSize = nullptr,
+      nsIFrame* aFrame, const nsSize* aOverrideScrollPortSize = nullptr,
       IncludeDynamicToolbar aIncludeDynamicToolbar =
           IncludeDynamicToolbar::Auto);
 
@@ -3070,7 +3102,8 @@ class nsLayoutUtils {
    * root of the frame tree if |aTopFrame| is nullptr, and returns true if
    * a transformed frame is encountered.
    */
-  static bool IsTransformed(nsIFrame* aForFrame, nsIFrame* aTopFrame = nullptr);
+  static bool IsTransformed(const nsIFrame* aForFrame,
+                            const nsIFrame* aTopFrame = nullptr);
 
   /**
    * Walk up from aFrame to the cross-doc root, accumulating all the APZ
@@ -3249,27 +3282,6 @@ class nsLayoutUtils {
    */
   static void RecomputeSmoothScrollDefault();
 
-  struct CombinedFragments {
-    // Previous continuation, if exists, that got skipped due to being on a
-    // different page, or a different containing block continuation.
-    const nsIFrame* mSkippedPrevContinuation = nullptr;
-    // Same as above, but next continuation.
-    const nsIFrame* mSkippedNextContinuation = nullptr;
-    // The overall frame rect formed by unioning the frame's fragment rects.
-    nsRect mRect;
-  };
-  /**
-   * Get the union of the rects of aFrame and its continuations (but not if the
-   * context is paginated and they're on a different page, as it doesn't make
-   * sense to "merge" their rects in that case).
-   *
-   * @param aFrame The target frame whose combined fragments are wanted.
-   * @param aContainingBlock If provided, union fragments only up to its
-   * fragmentation boundary.
-   */
-  static CombinedFragments GetCombinedFragmentRects(
-      const nsIFrame* aFrame, const nsIFrame* aContainingBlock = nullptr);
-
  private:
   /**
    * Helper function for LogTestDataForPaint().
@@ -3287,6 +3299,7 @@ class nsLayoutUtils {
 
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(nsLayoutUtils::PaintFrameFlags)
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(nsLayoutUtils::GetPopupFrameForPointFlags)
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(nsLayoutUtils::CompareTreePositionFlags)
 
 template <typename PointType, typename RectType, typename CoordType>
 /* static */ bool nsLayoutUtils::PointIsCloserToRect(

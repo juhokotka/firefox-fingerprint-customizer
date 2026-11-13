@@ -8,11 +8,11 @@
 
 #include "GLContext.h"
 #include "GLContextEGL.h"
+#include "RenderCompositorRecordedFrame.h"
 #include "mozilla/layers/BuildConstants.h"
 #include "mozilla/layers/Effects.h"
 #include "mozilla/layers/TextureHostOGL.h"
 #include "mozilla/widget/CompositorWidget.h"
-#include "RenderCompositorRecordedFrame.h"
 
 #if defined(XP_WIN)
 #  include "mozilla/webrender/RenderCompositorD3D11SWGL.h"
@@ -182,7 +182,7 @@ LayoutDeviceIntSize RenderCompositorLayersSWGL::GetBufferSize() {
 
 void RenderCompositorLayersSWGL::Bind(wr::NativeTileId aId,
                                       wr::DeviceIntPoint* aOffset,
-                                      uint32_t* aFboId,
+                                      uint64_t* aSurfaceHandle,
                                       wr::DeviceIntRect aDirtyRect,
                                       wr::DeviceIntRect aValidRect) {
   MOZ_RELEASE_ASSERT(false);
@@ -224,9 +224,9 @@ void RenderCompositorLayersSWGL::UnmapTile() {
   mCurrentTile = nullptr;
 }
 
-void RenderCompositorLayersSWGL::CreateSurface(
-    wr::NativeSurfaceId aId, wr::DeviceIntPoint aVirtualOffset,
-    wr::DeviceIntSize aTileSize, bool aIsOpaque) {
+void RenderCompositorLayersSWGL::CreateSurface(wr::NativeSurfaceId aId,
+                                               wr::DeviceIntSize aTileSize,
+                                               bool aIsOpaque) {
   MOZ_RELEASE_ASSERT(mSurfaces.find(aId) == mSurfaces.end());
   auto surface = DoCreateSurface(aTileSize, aIsOpaque);
   mSurfaces.insert({aId, std::move(surface)});

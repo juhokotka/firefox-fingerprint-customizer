@@ -9,10 +9,12 @@
 
 #include "mozilla/dom/DOMTypes.h"
 #include "nsCOMPtr.h"
+#include "nsIAlertsService.h"
 #include "nsINotificationStorage.h"
 #include "nsStringFwd.h"
 
 enum class nsresult : uint32_t;
+class nsIAlertCallbacks;
 class nsIAlertNotification;
 class nsIPrincipal;
 class nsINotificationStorage;
@@ -38,6 +40,7 @@ enum class PermissionCheckPurpose : uint8_t {
   PermissionAttribute,
   NotificationShow,
   LoadImageForShow,
+  PushSubscribe,
 };
 
 /**
@@ -67,6 +70,14 @@ NotificationPermission GetNotificationPermission(
     nsIPrincipal* aPrincipal, nsIPrincipal* aEffectiveStoragePrincipal,
     bool isSecureContext, PermissionCheckPurpose aPurpose);
 
+using NotificationPermissionPromise = MozPromise<Ok, nsresult, false>;
+// Check notification permission and check aPrincipal against Safe Browsing
+// list (removes notification permission if it is on it).
+// Resolves if notifications are allowed, rejects otherwise.
+RefPtr<NotificationPermissionPromise> EnsureValidNotificationPermission(
+    nsIPrincipal* aPrincipal, nsIPrincipal* aEffectiveStoragePrincipal,
+    bool aIsSecureContext);
+
 nsCOMPtr<nsINotificationStorage> GetNotificationStorage(bool isPrivate);
 
 using NotificationsPromise =
@@ -81,6 +92,35 @@ nsresult PersistNotification(nsIPrincipal* aPrincipal,
                              const IPCNotification& aNotification,
                              const nsString& aScope);
 nsresult UnpersistNotification(nsIPrincipal* aPrincipal, const nsString& aId);
+Result<nsCOMPtr<nsIAlertNotification>, nsresult> CreateAlertForNotification(
+    const IPCNotificationOptions& aOptions, nsIPrincipal& aPrincipal,
+    imgIContainer* aIcon);
+
+// Common nsIAlertCallbacks handling between DWP and non-DWP notifications.
+class NotificationCallbacksCommon : public nsIAlertCallbacks {
+ public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIALERTCALLBACKS
+
+  NotificationCallbacksCommon(const nsAString& aScope, nsIPrincipal* aPrincipal,
+                              IPCNotification aNotification);
+
+ protected:
+  virtual ~NotificationCallbacksCommon() = 0;
+
+  void PersistNotification();
+  void UnpersistNotification();
+  nsresult RespondOnClick(nsIAlertAction* aAction);
+  void RecordAlertShowTelemetry();
+  // May want to replace with SWR ID, see bug 1881812
+  nsString mScope;
+  nsCOMPtr<nsIPrincipal> mPrincipal;
+  IPCNotification mNotification;
+
+  Maybe<nsCString> mCategory;
+  bool mShown = false;
+  bool mClicked = false;
+};
 
 enum class CloseMode {
   CloseMethod,
@@ -95,7 +135,7 @@ void UnregisterNotification(nsIPrincipal* aPrincipal, const nsString& aId);
 // The cleanup happens when this is globally the first call, or always if
 // dom.webnotifications.testing.force_storage_cleanup.enabled is set.
 nsresult ShowAlertWithCleanup(nsIAlertNotification* aAlert,
-                              nsIObserver* aAlertListener);
+                              nsIAlertCallbacks* aAlertCallbacks);
 
 nsresult RemovePermission(nsIPrincipal* aPrincipal);
 nsresult OpenSettings(nsIPrincipal* aPrincipal);

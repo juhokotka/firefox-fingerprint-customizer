@@ -2,9 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Dafsa.h"
 #include "gtest/gtest.h"
-
+#include "mozilla/Dafsa.h"
 #include "nsString.h"
 
 using mozilla::Dafsa;
@@ -13,9 +12,12 @@ namespace dafsa_test_1 {
 #include "dafsa_test_1.inc"  // kDafsa
 }
 
+static_assert(std::is_trivially_destructible_v<Dafsa>);
+
 TEST(Dafsa, Constructor)
 {
-  Dafsa d(dafsa_test_1::kDafsa);
+  static constinit Dafsa d(dafsa_test_1::kDafsa);
+  (void)d;
 }
 
 TEST(Dafsa, StringsFound)

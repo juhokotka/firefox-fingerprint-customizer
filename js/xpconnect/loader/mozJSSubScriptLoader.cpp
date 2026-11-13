@@ -3,40 +3,41 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozJSSubScriptLoader.h"
-#include "js/experimental/JSStencil.h"
-#include "mozJSModuleLoader.h"
-#include "mozJSLoaderUtils.h"
 
-#include "nsIURI.h"
-#include "nsIIOService.h"
-#include "nsIChannel.h"
-#include "nsIInputStream.h"
-#include "nsNetCID.h"
-#include "nsNetUtil.h"
+#include "mozilla/ContentPrincipal.h"
+#include "mozilla/dom/ScriptLoader.h"
+#include "mozilla/ExtensionPolicyService.h"
+#include "mozilla/ProfilerLabels.h"
+#include "mozilla/ProfilerMarkers.h"
+#include "mozilla/scache/StartupCache.h"
+#include "mozilla/scache/StartupCacheUtils.h"
+#include "mozilla/ScriptPreloader.h"
+#include "mozilla/StaticPrefs_security.h"
+#include "mozilla/SystemPrincipal.h"
+#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
-#include "xpcprivate.h"                   // xpc::OptionsBase
+#include "mozJSLoaderUtils.h"
+#include "mozJSModuleLoader.h"
+#include "nsContentSecurityUtils.h"
+#include "nsContentUtils.h"
+#include "nsIChannel.h"
+#include "nsIInputStream.h"
+#include "nsIIOService.h"
+#include "nsIURI.h"
+#include "nsNetCID.h"
+#include "nsNetUtil.h"
+#include "nsString.h"
+#include "xpcprivate.h"  // xpc::OptionsBase
+
 #include "js/CompilationAndEvaluation.h"  // JS::Compile
 #include "js/CompileOptions.h"  // JS::ReadOnlyCompileOptions, JS::DecodeOptions
 #include "js/EnvironmentChain.h"  // JS::EnvironmentChain
+#include "js/experimental/JSStencil.h"
 #include "js/friend/JSMEnvironment.h"  // JS::ExecuteInJSMEnvironment, JS::IsJSMEnvironment
 #include "js/SourceText.h"             // JS::Source{Ownership,Text}
 #include "js/Wrapper.h"
-
-#include "mozilla/ContentPrincipal.h"
-#include "mozilla/ExtensionPolicyService.h"
-#include "mozilla/dom/ScriptLoader.h"
-#include "mozilla/ProfilerLabels.h"
-#include "mozilla/ProfilerMarkers.h"
-#include "mozilla/ScriptPreloader.h"
-#include "mozilla/SystemPrincipal.h"
-#include "mozilla/scache/StartupCache.h"
-#include "mozilla/scache/StartupCacheUtils.h"
-#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
-#include "nsContentUtils.h"
-#include "nsContentSecurityUtils.h"
-#include "nsString.h"
 
 using namespace mozilla::scache;
 using namespace JS;
@@ -48,20 +49,19 @@ class MOZ_STACK_CLASS LoadSubScriptOptions : public OptionsBase {
  public:
   explicit LoadSubScriptOptions(JSContext* cx = xpc_GetSafeJSContext(),
                                 JSObject* options = nullptr)
-      : OptionsBase(cx, options),
-        target(cx),
-        ignoreCache(false),
-        wantReturnValue(false) {}
+      : OptionsBase(cx, options), target(cx) {}
 
   virtual bool Parse() override {
     return ParseObject("target", &target) &&
            ParseBoolean("ignoreCache", &ignoreCache) &&
-           ParseBoolean("wantReturnValue", &wantReturnValue);
+           ParseBoolean("wantReturnValue", &wantReturnValue) &&
+           ParseBoolean("allowUnsafeURL", &allowUnsafeURL);
   }
 
   RootedObject target;
-  bool ignoreCache;
-  bool wantReturnValue;
+  bool ignoreCache = false;
+  bool wantReturnValue = false;
+  bool allowUnsafeURL = false;
 };
 
 /* load() error msgs, XXX localize? */
@@ -136,6 +136,8 @@ static bool EvalStencil(JSContext* cx, HandleObject targetObj,
   if (!script) {
     return false;
   }
+
+  ScriptLoader::AssociateFetchInfoWithSystemClassicScript(script, uri);
 
   if (JS_IsGlobalObject(targetObj)) {
     if (!JS_ExecuteScript(cx, script, retval)) {
@@ -316,22 +318,23 @@ mozJSSubScriptLoader::LoadSubScriptWithOptions(const nsAString& url,
   return DoLoadSubScriptWithOptions(url, options, cx, retval);
 }
 
-static bool CheckAllowedURI(JSContext* aCx, nsIURI* aURI) {
+static bool CheckAllowedURI(JSContext* aCx, bool aAllowUnsafe, nsIURI* aURI) {
   // Trusted schemes like moz-src: are always ok.
   if (nsContentSecurityUtils::IsTrustedScheme(aURI)) {
     return true;
   }
 
-  // TODO(Bug 1974213) Block file: and jar: schemes.
-  // TODO(Bug 1976115) experiment_apis scripts are run from jar:file: URL
-  // instead of moz-extension:-URL
-  if (aURI->SchemeIs("file") || aURI->SchemeIs("jar")) {
-    return true;
-  }
+  if (aAllowUnsafe || StaticPrefs::security_allow_unsafe_subscript_loads()) {
+    // TODO(Bug 1976115) experiment_apis scripts are run from jar:file: URL
+    // instead of moz-extension:-URL
+    if (aURI->SchemeIs("file") || aURI->SchemeIs("jar")) {
+      return true;
+    }
 
-  // TODO(Bug 1974691) Don't load subscripts from un-privileged moz-extension:
-  if (aURI->SchemeIs("moz-extension")) {
-    return true;
+    // TODO(Bug 1974691) Don't load subscripts from un-privileged moz-extension:
+    if (aURI->SchemeIs("moz-extension")) {
+      return true;
+    }
   }
 
   ReportError(aCx, "Trying to load untrusted URI.", aURI);
@@ -410,7 +413,7 @@ nsresult mozJSSubScriptLoader::DoLoadSubScriptWithOptions(
     return NS_OK;
   }
 
-  if (!CheckAllowedURI(cx, uri)) {
+  if (!CheckAllowedURI(cx, options.allowUnsafeURL, uri)) {
     return NS_OK;
   }
 

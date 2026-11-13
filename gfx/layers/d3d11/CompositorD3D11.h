@@ -5,13 +5,14 @@
 #ifndef MOZILLA_GFX_COMPOSITORD3D11_H
 #define MOZILLA_GFX_COMPOSITORD3D11_H
 
-#include "mozilla/gfx/2D.h"
-#include "gfx2DGlue.h"
-#include "mozilla/layers/Compositor.h"
-#include "TextureD3D11.h"
 #include <d3d11.h>
 #include <dxgi1_2.h>
+
 #include "ShaderDefinitionsD3D11.h"
+#include "TextureD3D11.h"
+#include "gfx2DGlue.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/layers/Compositor.h"
 
 class nsWidget;
 
@@ -25,7 +26,7 @@ class DeviceAttachmentsD3D11;
 class CompositorD3D11 : public Compositor {
  public:
   explicit CompositorD3D11(widget::CompositorWidget* aWidget);
-  virtual ~CompositorD3D11();
+  virtual ~CompositorD3D11() = default;
 
   CompositorD3D11* AsCompositorD3D11() override { return this; }
 

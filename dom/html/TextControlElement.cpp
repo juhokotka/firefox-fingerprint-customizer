@@ -39,7 +39,7 @@ static RefPtr<Element> MakeAnonElement(Document& aDoc,
     // all our pseudo-elements other than the root should not show up in the
     // a11y tree.
     element->SetAttr(kNameSpaceID_None, nsGkAtoms::aria_hidden, u"true"_ns,
-                     false);
+                     false, IsKnownNewAttr::Yes);
   }
   return element;
 }
@@ -51,21 +51,6 @@ RefPtr<Element> MakePlaceholderOrPreview(Document& aDoc,
   RefPtr text = aDoc.CreateTextNode(aValue);
   el->AppendChildTo(text, false, IgnoreErrors());
   return el;
-}
-
-Element* TextControlElement::FindShadowPseudo(PseudoStyleType aType) const {
-  auto* sr = GetShadowRoot();
-  if (!sr) {
-    return nullptr;
-  }
-  for (auto* child = sr->GetFirstChild(); child;
-       child = child->GetNextSibling()) {
-    auto* el = Element::FromNode(child);
-    if (el->GetPseudoElementType() == aType) {
-      return el;
-    }
-  }
-  return nullptr;
 }
 
 void TextControlElement::GetPreviewValue(nsAString& aValue) {
@@ -178,8 +163,8 @@ already_AddRefed<Element> TextControlElement::CreateButton() const {
           doc.ChromeRulesEnabled()) {
         RefPtr button =
             MakeAnonElement(doc, PseudoStyleType::MozReveal, nsGkAtoms::button);
-        button->SetAttr(kNameSpaceID_None, nsGkAtoms::tabindex, u"-1"_ns,
-                        false);
+        button->SetAttr(kNameSpaceID_None, nsGkAtoms::tabindex, u"-1"_ns, false,
+                        IsKnownNewAttr::Yes);
         return button.forget();
       }
       break;
@@ -191,9 +176,10 @@ already_AddRefed<Element> TextControlElement::CreateButton() const {
           doc.ChromeRulesEnabled()) {
         RefPtr button = MakeAnonElement(
             doc, PseudoStyleType::MozSearchClearButton, nsGkAtoms::button);
-        button->SetAttr(kNameSpaceID_None, nsGkAtoms::tabindex, u"-1"_ns,
-                        false);
-        button->SetAttr(kNameSpaceID_None, nsGkAtoms::title, u""_ns, false);
+        button->SetAttr(kNameSpaceID_None, nsGkAtoms::tabindex, u"-1"_ns, false,
+                        IsKnownNewAttr::Yes);
+        button->SetAttr(kNameSpaceID_None, nsGkAtoms::title, u""_ns, false,
+                        IsKnownNewAttr::Yes);
         return button.forget();
       }
       break;

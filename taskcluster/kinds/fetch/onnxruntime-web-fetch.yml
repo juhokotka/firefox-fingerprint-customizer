@@ -10,14 +10,6 @@ ort.jsep.wasm:
         sha256: c46655e8a94afc45338d4cb2b840475f88e5012d524509916e505079c00bfa39
         size: 21596019
 
-wllama.wasm:
-    description: Llama.cpp WASM files
-    fetch:
-        type: static-url
-        url: https://storage.googleapis.com/moz-model-hub/wasm/2.3.1/wllama.wasm
-        sha256: d7e1cd83a4ee7a3cb460be6c8b7762dfa2a992269786101dc4c5e4517c9177a3
-        size: 1762319
-
 xenova-all-minilm-l6-v2:
     description: feature extraction model
     fetch:
@@ -45,32 +37,46 @@ mozilla-intent:
         path-prefix: "onnx-models/Mozilla/mobilebert-uncased-finetuned-LoRA-intent-classifier/main/"
         artifact-name: mobilebert-uncased-finetuned-LoRA-intent-classifier.tar.zst
 
+mozilla-smart-intent:
+    description: Smart Window intent model
+    fetch:
+        type: git
+        repo: https://huggingface.co/Mozilla/mobilebert-query-intent-detection
+        revision: ab6ab166c5edb83c9b4893c5c1395c9ee2a14d17
+        path-prefix: "onnx-models/mozilla/mobilebert-query-intent-detection/main/"
+        artifact-name: mobilebert-query-intent-detection.tar.zst
+
+# We are testing two model architectures for form autofill. The first
+# (below) is text classification
 mozilla-autofill:
     description: autofill model
     fetch:
         type: git
-        repo: https://huggingface.co/Mozilla/tinybert-uncased-autofill
-        revision: a8cdc0f19f2f5b6a099e4d7f24725a0b57073cb4
-        path-prefix: "onnx-models/Mozilla/tinybert-uncased-autofill/main/"
-        artifact-name: tinybert-uncased-autofill.tar.zst
+        repo: https://huggingface.co/Mozilla/tinybert-address-autofill
+        # tag v0.2.5 -- sbsd5 checkpoint, reduce_range quantization (Bug 2064781)
+        revision: cd00055e7634d9ffb6ceb98a8027ee5a52b256b2
+        path-prefix: "onnx-models/mozilla/tinybert-address-autofill/v0.2.5/"
+        artifact-name: tinybert-address-autofill.tar.zst
 
-distilbart-cnn-12-6:
-    description: Distilbart-cnn-12-6 text summarization model
+# Triple-encoder autofill model - shared feature-extraction encoder and head
+mozilla-autofill-embed:
+    description: autofill triple-encoder (feature-extraction) model
     fetch:
         type: git
-        repo: https://huggingface.co/Mozilla/distilbart-cnn-12-6
-        revision: 7e89ed86d5904288460b5ebb3ebebd9992588701
-        path-prefix: "onnx-models/Mozilla/distilbart-cnn-12-6/main/"
-        artifact-name: distilbart-cnn-12-6.tar.zst
+        repo: https://huggingface.co/Mozilla/form-autofill-embed
+        # tag v0.3.1 -- sj546 encoder, reduce_range quantization (Bug 2064781)
+        revision: 23fcf285489245e6270fb99ad2373e6275c45597
+        path-prefix: "onnx-models/mozilla/form-autofill-embed/v0.3.1/"
+        artifact-name: form-autofill-embed.tar.zst
 
-qwen2.5-0.5-instruct:
-    description: Qwen text summarization model
+mozilla-autofill-head:
+    description: autofill triple-encoder fusion head model
     fetch:
         type: git
-        repo: https://huggingface.co/Mozilla/Qwen2.5-0.5B-Instruct
-        revision: fd3f0e7171371df20d5eefc7851cf96706c391de
-        path-prefix: "onnx-models/Mozilla/Qwen2.5-0.5B-Instruct/main/"
-        artifact-name: qwen2_5-0_5_instruct.tar.zst
+        repo: https://huggingface.co/Mozilla/form-autofill-head
+        revision: 33f69b42305bcfc0aff34514f84ef16c7f5d9522
+        path-prefix: "onnx-models/mozilla/form-autofill-head/v0.3.1/"
+        artifact-name: form-autofill-head.tar.zst
 
 mozilla-smart-tab-topic:
     description: Smart Tab Topic Model
@@ -108,30 +114,12 @@ Qwen3-0.6B-GGUF:
         path-prefix: "onnx-models/unsloth/Qwen3-0.6B-GGUF/main/"
         artifact-name: Qwen3-0.6B-GGUF.tar.zst
 
-
-speecht5-tts:
-    description: microsoft/speecht5_tts with ONNX weights to be compatible with Transformers.js
+mozilla-query-intent:
+    description: Smart Window intent detection model
     fetch:
         type: git
-        repo: https://huggingface.co/Xenova/speecht5_tts
-        revision: 73001d8bf5a9a7532c9cede52b5d3c21936939b1
-        path-prefix: "onnx-models/Xenova/speecht5_tts/main/"
-        artifact-name: speecht5_tts.tar.zst
-
-speecht5-tts-vocoder:
-    description: vocoder for speecht5_tts
-    fetch:
-        type: git
-        repo: https://huggingface.co/Xenova/speecht5_hifigan
-        revision: 05bbb2dea568f207f71113f71c9ecc216840238e
-        path-prefix: "onnx-models/Xenova/speecht5_hifigan/main/"
-        artifact-name: speecht5_tts_hifigan.tar.zst
-
-speecht5-tts-speaker:
-    description: speaker embedding for speecht5_tts
-    fetch:
-        type: git
-        repo: https://huggingface.co/datasets/Xenova/transformers.js-docs
-        revision: 4cc21eccd7f4ad1174c2f721c02468e43bf39b60
-        path-prefix: "onnx-models/Xenova/transformers.js-docs/main/"
-        artifact-name: speecht5_tts_speaker_embedding.tar.zst
+        repo: https://huggingface.co/Mozilla/mobilebert-query-intent-detection
+        revision: f37f03073eb286317abdcf1fc681548327f43281
+        # Lowercase, to match the model id the browser requests.
+        path-prefix: "onnx-models/mozilla/mobilebert-query-intent-detection/main/"
+        artifact-name: mobilebert-query-intent-detection.tar.zst

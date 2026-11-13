@@ -27,9 +27,9 @@ namespace dom {
 template <typename Collection, typename Function>
 static auto ForAllPublicRTCStatsCollectionMembers(Collection& aStats,
                                                   Function aFunction) {
-  static_assert(std::is_same_v<typename std::remove_const<Collection>::type,
-                               RTCStatsCollection>,
-                "aStats must be a const or non-const RTCStatsCollection");
+  static_assert(
+      std::is_same_v<std::remove_const_t<Collection>, RTCStatsCollection>,
+      "aStats must be a const or non-const RTCStatsCollection");
   return aFunction(
       aStats.mInboundRtpStreamStats, aStats.mOutboundRtpStreamStats,
       aStats.mRemoteInboundRtpStreamStats, aStats.mRemoteOutboundRtpStreamStats,
@@ -47,9 +47,9 @@ static auto ForAllPublicRTCStatsCollectionMembers(Collection& aStats,
 template <typename Collection, typename Function>
 static auto ForAllRTCStatsCollectionMembers(Collection& aStats,
                                             Function aFunction) {
-  static_assert(std::is_same_v<typename std::remove_const<Collection>::type,
-                               RTCStatsCollection>,
-                "aStats must be a const or non-const RTCStatsCollection");
+  static_assert(
+      std::is_same_v<std::remove_const_t<Collection>, RTCStatsCollection>,
+      "aStats must be a const or non-const RTCStatsCollection");
   return ForAllPublicRTCStatsCollectionMembers(aStats, [&](auto&... aMember) {
     return aFunction(aMember..., aStats.mRawLocalCandidates,
                      aStats.mRawRemoteCandidates, aStats.mVideoFrameHistories,
@@ -150,11 +150,12 @@ DEFINE_IPC_SERIALIZER_WITH_SUPER_CLASS_AND_FIELDS(
     mTotalInterFrameDelay, mTotalSquaredInterFrameDelay, mPauseCount,
     mTotalPausesDuration, mFreezeCount, mTotalFreezesDuration,
     mLastPacketReceivedTimestamp, mHeaderBytesReceived, mFecPacketsReceived,
-    mFecPacketsDiscarded, mBytesReceived, mNackCount, mFirCount, mPliCount,
-    mTotalProcessingDelay, mEstimatedPlayoutTimestamp, mFramesReceived,
-    mJitterBufferDelay, mJitterBufferEmittedCount, mJitterBufferTargetDelay,
-    mJitterBufferMinimumDelay, mTotalSamplesReceived, mConcealedSamples,
-    mSilentConcealedSamples, mConcealmentEvents,
+    mFecPacketsDiscarded, mBytesReceived, mRtxSsrc,
+    mRetransmittedPacketsReceived, mRetransmittedBytesReceived, mNackCount,
+    mFirCount, mPliCount, mTotalProcessingDelay, mEstimatedPlayoutTimestamp,
+    mFramesReceived, mJitterBufferDelay, mJitterBufferEmittedCount,
+    mJitterBufferTargetDelay, mJitterBufferMinimumDelay, mTotalSamplesReceived,
+    mConcealedSamples, mSilentConcealedSamples, mConcealmentEvents,
     mInsertedSamplesForDeceleration, mRemovedSamplesForAcceleration,
     mAudioLevel, mTotalAudioEnergy, mTotalSamplesDuration,
     mFramesAssembledFromMultiplePackets, mTotalAssemblyTime);
@@ -171,9 +172,9 @@ DEFINE_IPC_SERIALIZER_WITH_SUPER_CLASS_AND_FIELDS(
     mozilla::dom::RTCOutboundRtpStreamStats,
     mozilla::dom::RTCSentRtpStreamStats, mRemoteId, mFramesEncoded,
     mKeyFramesEncoded, mQpSum, mNackCount, mFirCount, mPliCount,
-    mHeaderBytesSent, mRetransmittedPacketsSent, mRetransmittedBytesSent,
-    mTotalEncodedBytesTarget, mFrameWidth, mFrameHeight, mFramesPerSecond,
-    mFramesSent, mHugeFramesSent, mTotalEncodeTime);
+    mHeaderBytesSent, mRtxSsrc, mRetransmittedPacketsSent,
+    mRetransmittedBytesSent, mTargetBitrate, mFrameWidth, mFrameHeight,
+    mFramesPerSecond, mFramesSent, mHugeFramesSent, mTotalEncodeTime);
 
 DEFINE_IPC_SERIALIZER_WITH_SUPER_CLASS_AND_FIELDS(
     mozilla::dom::RTCRemoteInboundRtpStreamStats,
@@ -232,7 +233,7 @@ DEFINE_IPC_SERIALIZER_WITH_SUPER_CLASS_AND_FIELDS(
     mPacketsReceived, mBytesSent, mBytesReceived, mIceRole,
     mIceLocalUsernameFragment, mDtlsState, mIceState, mSelectedCandidatePairId,
     mLocalCertificateId, mRemoteCertificateId, mTlsVersion, mDtlsCipher,
-    mDtlsRole, mSrtpCipher)
+    mDtlsRole, mSrtpCipher, mSelectedCandidatePairChanges)
 
 DEFINE_IPC_SERIALIZER_WITH_SUPER_CLASS_AND_FIELDS(
     mozilla::dom::RTCCertificateStats, mozilla::dom::RTCStats, mFingerprint,

@@ -5,8 +5,9 @@
 #ifndef mozilla_image_Resolution_h
 #define mozilla_image_Resolution_h
 
-#include "mozilla/Assertions.h"
 #include <cmath>
+
+#include "mozilla/Assertions.h"
 
 namespace mozilla {
 namespace image {
@@ -21,10 +22,7 @@ struct Resolution {
     MOZ_ASSERT(mY != 0.0f);
   }
 
-  bool operator==(const Resolution& aOther) const {
-    return mX == aOther.mX && mY == aOther.mY;
-  }
-  bool operator!=(const Resolution& aOther) const { return !(*this == aOther); }
+  bool operator==(const Resolution& aOther) const = default;
 
   float mX = 1.0f;
   float mY = 1.0f;

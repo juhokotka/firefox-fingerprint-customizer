@@ -4,31 +4,28 @@
 
 #include "CompositorD3D11.h"
 
+#include "BlendShaderConstants.h"
+#include "D3D11ShareHandleImage.h"
+#include "DeviceAttachmentsD3D11.h"
 #include "TextureD3D11.h"
-
+#include "gfxConfig.h"
+#include "gfxCrashReporterUtils.h"
+#include "gfxUtils.h"
 #include "gfxWindowsPlatform.h"
-#include "nsIWidget.h"
+#include "mozilla/ProfilerState.h"
+#include "mozilla/StaticPrefs_gfx.h"
+#include "mozilla/StaticPrefs_layers.h"
 #include "mozilla/gfx/D3D11Checks.h"
 #include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/gfx/GPUParent.h"
+#include "mozilla/gfx/StackArray.h"
 #include "mozilla/gfx/Swizzle.h"
 #include "mozilla/layers/Diagnostics.h"
 #include "mozilla/layers/Effects.h"
 #include "mozilla/layers/HelpersD3D11.h"
-#include "nsWindowsHelpers.h"
-#include "gfxConfig.h"
-#include "gfxCrashReporterUtils.h"
-#include "gfxUtils.h"
-#include "mozilla/gfx/StackArray.h"
 #include "mozilla/widget/WinCompositorWidget.h"
-
-#include "mozilla/ProfilerState.h"
-#include "mozilla/StaticPrefs_gfx.h"
-#include "mozilla/StaticPrefs_layers.h"
-
-#include "D3D11ShareHandleImage.h"
-#include "DeviceAttachmentsD3D11.h"
-#include "BlendShaderConstants.h"
+#include "nsIWidget.h"
+#include "nsWindowsHelpers.h"
 
 namespace mozilla {
 
@@ -102,8 +99,6 @@ CompositorD3D11::CompositorD3D11(widget::CompositorWidget* aWidget)
       mUseMutexOnPresent(false) {
   mUseMutexOnPresent = StaticPrefs::gfx_use_mutex_on_present_AtStartup();
 }
-
-CompositorD3D11::~CompositorD3D11() {}
 
 template <typename VertexType>
 void CompositorD3D11::SetVertexBuffer(ID3D11Buffer* aBuffer) {
@@ -890,14 +885,6 @@ Maybe<IntRect> CompositorD3D11::BeginFrame(const nsIntRegion& aInvalidRegion,
 
   mContext->OMSetBlendState(mAttachments->mPremulBlendState, sBlendFactor,
                             0xFFFFFFFF);
-
-  if (mAttachments->mSyncObject) {
-    if (!mAttachments->mSyncObject->Synchronize()) {
-      // It's timeout here. Since the timeout is related to the driver-removed,
-      // skip this frame.
-      return Nothing();
-    }
-  }
 
   return Some(rect);
 }

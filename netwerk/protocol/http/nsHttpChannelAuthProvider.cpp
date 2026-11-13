@@ -3,44 +3,44 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
+#include "nsHttpChannelAuthProvider.h"
 
+#include "HttpLog.h"
+#include "MockHttpAuth.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/Components.h"
 #include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/Tokenizer.h"
-#include "MockHttpAuth.h"
-#include "nsHttpChannelAuthProvider.h"
-#include "nsCRT.h"
-#include "nsNetUtil.h"
-#include "nsHttpHandler.h"
-#include "nsIHttpAuthenticator.h"
-#include "nsIHttpChannelInternal.h"
-#include "nsIAuthPrompt2.h"
-#include "nsIAuthPromptProvider.h"
-#include "nsIInterfaceRequestor.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "nsEscape.h"
-#include "nsAuthInformationHolder.h"
-#include "nsIStringBundle.h"
-#include "nsIPromptService.h"
 #include "netCore.h"
-#include "nsIHttpAuthenticableChannel.h"
-#include "nsIURI.h"
+#include "nsAuthInformationHolder.h"
+#include "nsCRT.h"
 #include "nsContentUtils.h"
+#include "nsEscape.h"
 #include "nsHttp.h"
 #include "nsHttpBasicAuth.h"
 #include "nsHttpDigestAuth.h"
+#include "nsHttpHandler.h"
+#include "nsIAuthPrompt2.h"
+#include "nsIAuthPromptProvider.h"
+#include "nsIHttpAuthenticableChannel.h"
+#include "nsIHttpAuthenticator.h"
+#include "nsIHttpChannelInternal.h"
+#include "nsIInterfaceRequestor.h"
+#include "nsIInterfaceRequestorUtils.h"
+#include "nsIPromptService.h"
+#include "nsIStringBundle.h"
+#include "nsIURI.h"
+#include "nsNetUtil.h"
 #ifdef MOZ_AUTH_EXTENSION
 #  include "nsHttpNegotiateAuth.h"
 #endif
-#include "nsHttpNTLMAuth.h"
-#include "nsServiceManagerUtils.h"
-#include "nsIURL.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/StaticPrefs_prompts.h"
+#include "nsHttpNTLMAuth.h"
 #include "nsIProxiedChannel.h"
 #include "nsIProxyInfo.h"
+#include "nsIURL.h"
+#include "nsServiceManagerUtils.h"
 
 namespace mozilla::net {
 
@@ -84,8 +84,7 @@ nsHttpChannelAuthProvider::Init(nsIHttpAuthenticableChannel* channel) {
   nsresult rv = mAuthChannel->GetURI(getter_AddRefs(mURI));
   if (NS_FAILED(rv)) return rv;
 
-  rv = mAuthChannel->GetIsSSL(&mUsingSSL);
-  if (NS_FAILED(rv)) return rv;
+  mUsingSSL = mURI->SchemeIs("https");
 
   nsCOMPtr<nsIProxiedChannel> proxied(channel);
   if (proxied) {
@@ -579,7 +578,7 @@ nsresult nsHttpChannelAuthProvider::GetCredentials(
                                              opaque, &stale, &ac.algorithm,
                                              &qop);
     }
-    cc.AppendElement(ac);
+    cc.AppendElement(std::move(ac));
   }
 
   // Returns true if an authorization is in progress
@@ -682,6 +681,7 @@ nsresult nsHttpChannelAuthProvider::GetCredentials(
         // expected asynchronously, save current challenge being
         // processed and all remaining challenges to use later in
         // OnAuthAvailable and now immediately return
+        *currentAuthType = authType;
         mCurrentChallenge = cc[i].challenge;
         // imperfect; does not save server-side preference ordering.
         // instead, continues with remaining string as provided by client
@@ -878,6 +878,13 @@ nsresult nsHttpChannelAuthProvider::GetCredentialsForChallenge(
   // a 'network reset' error every time.  Hence, we mark the connection
   // as restartable.
   mAuthChannel->ConnectionRestartable(!authAtProgress);
+
+  if (identFromURI &&
+      (authFlags & nsIHttpAuthenticator::IDENTITY_INCLUDES_DOMAIN)) {
+    LOG(("  ignoring URL identity for a domain-identity scheme\n"));
+    ident->Clear();
+    identFromURI = false;
+  }
 
   if (identityInvalid) {
     if (entry) {
@@ -1408,6 +1415,10 @@ NS_IMETHODIMP nsHttpChannelAuthProvider::OnAuthAvailable(
   nsCString creds;
   rv = GenCredsAndSetEntry(auth, mProxyAuth, scheme, host, port, path, realm,
                            mCurrentChallenge, *ident, sessionStateGrip, creds);
+  if (rv == NS_ERROR_IN_PROGRESS) {
+    // OnCredsGenerated will be called and needs mCurrentChallenge.
+    return NS_OK;
+  }
 
   mCurrentChallenge.Truncate();
   if (NS_FAILED(rv)) {
@@ -1456,8 +1467,10 @@ NS_IMETHODIMP nsHttpChannelAuthProvider::OnAuthCancelled(nsISupports* aContext,
       // next challenges since it is no longer relevant.
       if (mProxyAuth) {
         NS_IF_RELEASE(mProxyAuthContinuationState);
+        mProxyAuthType.Truncate();
       } else {
         NS_IF_RELEASE(mAuthContinuationState);
+        mAuthType.Truncate();
       }
       nsAutoCString creds;
       rv = GetCredentials(mRemainingChallenges, mProxyAuth, creds);

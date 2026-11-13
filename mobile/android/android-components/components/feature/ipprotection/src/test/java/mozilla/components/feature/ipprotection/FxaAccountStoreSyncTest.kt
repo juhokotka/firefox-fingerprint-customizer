@@ -8,7 +8,9 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import mozilla.components.ExperimentalAndroidComponentsApi
 import mozilla.components.concept.sync.AuthFlowError
-import mozilla.components.feature.ipprotection.IPProtectionFxaAuthFlow.Companion.SCOPE_IPPROTECTION
+import mozilla.components.concept.sync.OAuthAccount
+import mozilla.components.feature.ipprotection.auth.fxa.IPProtectionFxaAuthFlow.Companion.SCOPE_IPPROTECTION
+import mozilla.components.feature.ipprotection.storage.FxaAccountStoreSync
 import mozilla.components.feature.ipprotection.store.InternalAction
 import mozilla.components.feature.ipprotection.store.state.AccountStatus
 import mozilla.components.service.fxa.manager.AccountState
@@ -37,7 +39,7 @@ class FxaAccountStoreSyncTest {
     }
 
     @Test
-    fun `WHEN initialized THEN the initial Unknown account state is forwarded as WarmingUp`() = runTest {
+    fun `WHEN initialized THEN the initial Unknown account state is forwarded as Uninitialized`() = runTest {
         val (ipProtectionStore, captureMiddleware) = buildStore()
 
         FxaAccountStoreSync(syncStore, ipProtectionStore, lazyOf(accountManager), StandardTestDispatcher(testScheduler))
@@ -46,25 +48,30 @@ class FxaAccountStoreSyncTest {
         testScheduler.advanceUntilIdle()
 
         captureMiddleware.assertFirstAction(InternalAction.AccountManagerStateChanged::class) {
-            assertEquals(AccountStatus.WarmingUp, it.status)
+            assertEquals(AccountStatus.Uninitialized, it.status)
         }
-        assertEquals(AccountStatus.WarmingUp, ipProtectionStore.state.accountState.status)
+        assertEquals(AccountStatus.Uninitialized, ipProtectionStore.state.accountState.status)
     }
 
     @Test
     fun `WHEN the account state changes THEN the mapped status is forwarded`() = runTest {
         // All these cases are the same mappings - and we do not want them to change.
-        val cases = listOf(
-            AccountState.AuthenticationProblem to AccountStatus.NeedsAuthentication,
-            AccountState.NotAuthenticated to AccountStatus.Uninitialized,
-            AccountState.Authenticating("https://accounts.firefox.com/oauth") to AccountStatus.WarmingUp,
-        )
+        val cases =
+            listOf(
+                AccountState.AuthenticationProblem to AccountStatus.NeedsAuthentication,
+                AccountState.NotAuthenticated to AccountStatus.NoAccount,
+            )
 
         cases.forEach { (accountState, expectedStatus) ->
             val (ipProtectionStore, captureMiddleware) = buildStore()
             val syncStore = SyncStore()
 
-            FxaAccountStoreSync(syncStore, ipProtectionStore, lazyOf(accountManager), StandardTestDispatcher(testScheduler))
+            FxaAccountStoreSync(
+                    syncStore,
+                    ipProtectionStore,
+                    lazyOf(accountManager),
+                    StandardTestDispatcher(testScheduler),
+                )
                 .initialize()
 
             syncStore.dispatch(SyncAction.UpdateAccountState(accountState))
@@ -103,23 +110,29 @@ class FxaAccountStoreSyncTest {
     }
 
     @Test
-    fun `WHEN authenticated AND the IP protection scope is not granted THEN NeedsAuthorization is forwarded`() = runTest {
-        val (ipProtectionStore, captureMiddleware) = buildStore()
+    fun `WHEN authenticated AND the IP protection scope is not granted THEN NeedsAuthorization is forwarded`() =
+        runTest {
+            val (ipProtectionStore, captureMiddleware) = buildStore()
 
-        whenever(accountManager.containsScope(SCOPE_IPPROTECTION)).thenReturn(false)
+            whenever(accountManager.containsScope(SCOPE_IPPROTECTION)).thenReturn(false)
 
-        FxaAccountStoreSync(syncStore, ipProtectionStore, lazyOf(accountManager), StandardTestDispatcher(testScheduler))
-            .initialize()
+            FxaAccountStoreSync(
+                    syncStore,
+                    ipProtectionStore,
+                    lazyOf(accountManager),
+                    StandardTestDispatcher(testScheduler),
+                )
+                .initialize()
 
-        syncStore.dispatch(SyncAction.UpdateAccountState(AccountState.Authenticated))
+            syncStore.dispatch(SyncAction.UpdateAccountState(AccountState.Authenticated))
 
-        testScheduler.advanceUntilIdle()
+            testScheduler.advanceUntilIdle()
 
-        captureMiddleware.assertLastAction(InternalAction.AccountManagerStateChanged::class) {
-            assertEquals(AccountStatus.NeedsAuthorization, it.status)
+            captureMiddleware.assertLastAction(InternalAction.AccountManagerStateChanged::class) {
+                assertEquals(AccountStatus.NeedsAuthorization, it.status)
+            }
+            assertEquals(AccountStatus.NeedsAuthorization, ipProtectionStore.state.accountState.status)
         }
-        assertEquals(AccountStatus.NeedsAuthorization, ipProtectionStore.state.accountState.status)
-    }
 
     @Test
     fun `WHEN the account state is unchanged THEN nothing new is forwarded`() = runTest {
@@ -151,5 +164,34 @@ class FxaAccountStoreSyncTest {
         }
         // The reducer moves AuthFailed into NeedsAuthentication.
         assertEquals(AccountStatus.NeedsAuthentication, ipProtectionStore.state.accountState.status)
+    }
+
+    @Test
+    fun `WHEN onReady is called without an account THEN NoAccount is forwarded`() {
+        val (ipProtectionStore, captureMiddleware) = buildStore()
+
+        val sync = FxaAccountStoreSync(syncStore, ipProtectionStore, lazyOf(accountManager), StandardTestDispatcher())
+
+        sync.onReady(authenticatedAccount = null)
+
+        captureMiddleware.assertLastAction(InternalAction.AccountManagerStateChanged::class) {
+            assertEquals(AccountStatus.NoAccount, it.status)
+        }
+        assertEquals(AccountStatus.NoAccount, ipProtectionStore.state.accountState.status)
+    }
+
+    @Test
+    fun `WHEN onReady is called with an account THEN WarmingUp is forwarded`() {
+        val (ipProtectionStore, captureMiddleware) =
+            buildStore(buildIPProtectionState(accountStatus = AccountStatus.Uninitialized))
+
+        val sync = FxaAccountStoreSync(syncStore, ipProtectionStore, lazyOf(accountManager), StandardTestDispatcher())
+
+        sync.onReady(authenticatedAccount = mock<OAuthAccount>())
+
+        captureMiddleware.assertLastAction(InternalAction.AccountManagerStateChanged::class) {
+            assertEquals(AccountStatus.WarmingUp, it.status)
+        }
+        assertEquals(AccountStatus.WarmingUp, ipProtectionStore.state.accountState.status)
     }
 }

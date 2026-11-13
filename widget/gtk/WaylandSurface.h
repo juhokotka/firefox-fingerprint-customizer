@@ -5,11 +5,12 @@
 #ifndef MOZ_WAYLAND_SURFACE_H_
 #define MOZ_WAYLAND_SURFACE_H_
 
-#include "nsWaylandDisplay.h"
-#include "mozilla/Mutex.h"
-#include "mozilla/Atomics.h"
+#include "WUniquePtr.h"
 #include "WaylandSurfaceLock.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/GRefPtr.h"
+#include "mozilla/Mutex.h"
+#include "nsWaylandDisplay.h"
 
 /* Workaround for bug at wayland-util.h,
  * present in wayland-devel < 1.12
@@ -339,13 +340,9 @@ class WaylandSurface final {
   void SetParentLocked(const WaylandSurfaceLock& aProofOfLock,
                        RefPtr<WaylandSurface> aParent);
 
-  bool EnableColorManagementLocked(const WaylandSurfaceLock& aProofOfLock,
-                                   mozilla::gfx::YUVColorSpace aColorSpace,
-                                   gfx::TransferFunction aTransferFunction);
   void SetColorRepresentationLocked(const WaylandSurfaceLock& aProofOfLock,
-                                    mozilla::gfx::YUVColorSpace aColorSpace,
-                                    bool aFullRange,
-                                    uint32_t aWPChromaLocation);
+                                    int aWLColorCoeficients, bool aFullRange,
+                                    uint32_t aWPChromaLocation = 0);
 
   static void ImageDescriptionFailed(
       void* aData, struct wp_image_description_v1* aImageDescription,
@@ -361,6 +358,22 @@ class WaylandSurface final {
                             bool aCommitAllowed) {
     mCommitAllowed = aCommitAllowed;
   }
+
+  static bool SetPrimaries(wp_image_description_creator_params_v1* aParams,
+                           mozilla::gfx::YUVColorSpace aColorSpace);
+  static bool SetTransferFunction(
+      wp_image_description_creator_params_v1* aParams,
+      gfx::TransferFunction aTransferFunction);
+
+  void SetHDRMetadata(wp_image_description_creator_params_v1* aParams,
+                      gfx::TransferFunction aTransferFunction,
+                      GdkWindow* aGdkWindow,
+                      const mozilla::gfx::HDRMetadata& aHDRMetadata);
+
+  void SetColorManagementLocked(
+      const WaylandSurfaceLock& aProofOfLock,
+      wp_color_manager_v1* aColorManager,
+      wp_image_description_creator_params_v1* aParams);
 
  private:
   ~WaylandSurface();
@@ -442,7 +455,7 @@ class WaylandSurface final {
   RefPtr<WaylandSurface> mParent;
 
   // wl_surface setup/states
-  wl_surface* mSurface = nullptr;
+  WUniquePtr<wl_surface> mSurface;
   mozilla::Atomic<bool, mozilla::Relaxed> mSurfaceNeedsCommit{false};
   bool mCommitAllowed = true;
 
@@ -451,7 +464,7 @@ class WaylandSurface final {
   // In such case we set mSurfaceNeedsCommit to parent for it.
   bool mSubsurfaceDesync = true;
 
-  wl_subsurface* mSubsurface = nullptr;
+  WUniquePtr<wl_subsurface> mSubsurface;
   DesktopIntPoint mSubsurfacePosition;
 
   // Wayland buffers recently attached to this surface or held by
@@ -472,7 +485,7 @@ class WaylandSurface final {
   mozilla::Atomic<wl_egl_window*, mozilla::Relaxed> mEGLWindow{nullptr};
 
   bool mViewportFollowsSizeChanges = false;
-  wp_viewport* mViewport = nullptr;
+  WUniquePtr<wp_viewport> mViewport;
   DesktopRect mViewportSourceRect{-1, -1, -1, -1};
   DesktopIntSize mViewportDestinationSize{-1, -1};
 
@@ -481,7 +494,7 @@ class WaylandSurface final {
   bool mBufferTransformFlippedY = false;
 
   // Frame callback for mIsVisible flag
-  wl_callback* mVisibleFrameCallback = nullptr;
+  WUniquePtr<wl_callback> mVisibleFrameCallback;
 
   // VSync callback handler called every frame or by time for emulated ones.
   struct VSyncCallback {
@@ -491,7 +504,7 @@ class WaylandSurface final {
   };
   VSyncCallback mVSyncCallbackHandler;
 
-  wl_callback* mVSyncFrameCallback = nullptr;
+  WUniquePtr<wl_callback> mVSyncFrameCallback;
 
   bool mVSyncCallbackEnabled = true;
   std::function<void(bool)> mVSyncCallbackStateHandler = nullptr;
@@ -501,8 +514,8 @@ class WaylandSurface final {
   constexpr static int sEmulatedVSyncCallbackTimeoutMs = (int)(1000.0 / 60.0);
 
   // Frame callback used to set opaque region to wl_surface.
-  wl_region* mPendingOpaqueRegion = nullptr;
-  wl_callback* mOpaqueRegionFrameCallback = nullptr;
+  WUniquePtr<wl_region> mPendingOpaqueRegion;
+  WUniquePtr<wl_callback> mOpaqueRegionFrameCallback;
 
   // WaylandSurface is used from Compositor/Rendering/Main threads.
   mozilla::Mutex mMutex{"WaylandSurface"};
@@ -534,8 +547,8 @@ class WaylandSurface final {
   //
   // xx_fractional_scale_v2 is used to set coordinates scale to particular
   // surface so it must be present.
-  wp_fractional_scale_v1* mFractionalScaleListener = nullptr;
-  xx_fractional_scale_v2* mCoordinatesScaleManager = nullptr;
+  WUniquePtr<wp_fractional_scale_v1> mFractionalScaleListener;
+  WUniquePtr<xx_fractional_scale_v2> mCoordinatesScaleManager;
 
   // Callback issued when fractional / coordinates scale changes.
   // Ceiled (integer) scale changes is monitored by nsWindow as it's
@@ -552,9 +565,20 @@ class WaylandSurface final {
 
   // HDR support
   bool mHDRSet = false;
-  wp_color_management_surface_v1* mColorSurface = nullptr;
-  wp_color_representation_surface_v1* mColorRepresentationSurface = nullptr;
-  wp_image_description_v1* mImageDescription = nullptr;
+  WUniquePtr<wp_color_management_surface_v1> mColorSurface;
+  WUniquePtr<wp_color_representation_surface_v1> mColorRepresentationSurface;
+  WUniquePtr<wp_image_description_v1> mImageDescription;
+
+  static void SetLuminances(wp_image_description_creator_params_v1* aParams,
+                            float minLum, float maxLum, float refLum);
+
+  static void SetContentLightLevel(
+      wp_image_description_creator_params_v1* aParams,
+      const mozilla::gfx::ContentLightLevel& aContentLightLevel);
+
+  static void SetMasteringDisplayColorVolume(
+      wp_image_description_creator_params_v1* aParams,
+      const mozilla::gfx::Smpte2086Metadata& aSmpte2086);
 };
 
 }  // namespace mozilla::widget

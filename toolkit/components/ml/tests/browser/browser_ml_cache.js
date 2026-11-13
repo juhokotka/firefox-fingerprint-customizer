@@ -1001,11 +1001,11 @@ add_task(async function test_deleteNonMatchingModelRevisions() {
     }),
   ]);
 
-  await hub.deleteNonMatchingModelRevisions(
+  await hub.deleteNonMatchingModelRevisions({
     taskName,
-    `${hostname}/org/model2`,
-    "v3"
-  );
+    modelWithHostname: `${hostname}/org/model2`,
+    targetRevision: "v3",
+  });
 
   const [retrievedData, headers] = await cache.getFile({
     model: `${hostname}/org/model`,
@@ -1600,6 +1600,91 @@ add_task(async function test_getting_file_disallowed_custom_hub() {
 });
 
 /**
+ * isModelAvailable should resolve from the cache instead of hitting the
+ * network when the file is already present locally.
+ */
+add_task(async function test_isModelAvailable_cached_skips_network() {
+  const hub = new ModelHub({
+    rootUrl: "https://example.com",
+    urlTemplate: "{model}/{revision}",
+    allowDenyList: [{ filter: "ALLOW", urlPrefix: "https://example.com" }],
+  });
+  hub.cache = await initializeCache();
+
+  const model = "acme/bert";
+  const revision = "main";
+  const file = "config.json";
+
+  await hub.cache.put({
+    taskName: "task_model",
+    model: "example.com/acme/bert",
+    revision,
+    file,
+    data: createBlob(),
+    headers: null,
+  });
+
+  const fetchStub = sinon.stub(MLUtils, "fetchUrl");
+
+  const isAvailable = await hub.isModelAvailable(model, revision, { file });
+
+  Assert.ok(isAvailable, "Cached model should be reported as available.");
+  Assert.ok(
+    fetchStub.notCalled,
+    "isModelAvailable should not hit the network for a cached file."
+  );
+
+  fetchStub.restore();
+  await deleteCache(hub.cache);
+});
+
+/**
+ * isModelAvailable should not trust a cached file whose hub has since been
+ * denylisted: it must delete the cached model and report unavailable.
+ */
+add_task(async function test_isModelAvailable_cached_denylisted() {
+  const hub = new ModelHub({
+    rootUrl: "https://forbidden.com",
+    urlTemplate: "{model}/{revision}",
+    allowDenyList: [{ filter: "DENY", urlPrefix: "https://forbidden.com" }],
+  });
+  hub.cache = await initializeCache();
+
+  const model = "acme/bert";
+  const revision = "main";
+  const file = "config.json";
+
+  await hub.cache.put({
+    taskName: "task_model",
+    model: "forbidden.com/acme/bert",
+    revision,
+    file,
+    data: createBlob(),
+    headers: null,
+  });
+
+  const isAvailable = await hub.isModelAvailable(model, revision, { file });
+
+  Assert.ok(
+    !isAvailable,
+    "Cached model on a denylisted hub should be reported unavailable."
+  );
+
+  const dataAfterDenylist = await hub.cache.getFile({
+    model: "forbidden.com/acme/bert",
+    revision,
+    file,
+  });
+  Assert.equal(
+    dataAfterDenylist,
+    null,
+    "The denylisted cached model should be deleted."
+  );
+
+  await deleteCache(hub.cache);
+});
+
+/**
  * Test deleting files used by several engines
  */
 add_task(async function test_DeleteFileByEngines() {
@@ -2131,6 +2216,60 @@ add_task(async function test_migrateStore_dedupsLegacyAndNewEngineIds() {
     listed.metadata.engineIds,
     ["link-preview"],
     "Migration should collapse duplicate ids to the new engineId only."
+  );
+
+  await deleteCache(cache);
+});
+
+/**
+ * Verify the 7 -> 8 schema migration re-keys task rows whose taskName was
+ * renamed, so already-downloaded model files keep hitting the cache instead
+ * of being downloaded again.
+ */
+add_task(async function test_migrateStore_renamesWllamaTaskName() {
+  const dbName = `modelFiles-${crypto.randomUUID()}`;
+  await TestIndexedDBCache.deleteDatabaseAndWait(dbName).catch(() => {});
+
+  const model = "org/link-preview";
+  const revision = "v1";
+  const file = "weights.bin";
+
+  // Seed a row under the pre-migration schema with the obsolete taskName.
+  let cache = await IndexedDBCache.init({ dbName, version: 7 });
+  await cache.put({
+    engineId: "link-preview",
+    taskName: "wllama-text-generation",
+    model,
+    revision,
+    file,
+    data: createBlob(),
+    headers: null,
+  });
+  cache.db.close();
+
+  // Reopen at the current schema version and confirm the row was re-keyed.
+  cache = await IndexedDBCache.init({ dbName });
+
+  let listed = await cache.listFiles({
+    taskName: "llama-text-generation",
+    model,
+    revision,
+  });
+  Assert.equal(
+    listed.files.length,
+    1,
+    "Migration should re-key the row to the new taskName."
+  );
+
+  listed = await cache.listFiles({
+    taskName: "wllama-text-generation",
+    model,
+    revision,
+  });
+  Assert.deepEqual(
+    listed.files,
+    [],
+    "No row should remain under the old taskName."
   );
 
   await deleteCache(cache);

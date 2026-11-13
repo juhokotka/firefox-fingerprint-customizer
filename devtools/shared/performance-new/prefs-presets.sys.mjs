@@ -88,6 +88,8 @@ export const presets = {
       // On-device machine learning threads:
       "onnx_worker",
       "llama.cpp",
+      "Parakeet",
+      "TextGenerator",
     ],
     duration: 0,
     l10nIds: {
@@ -116,6 +118,10 @@ export const presets = {
       "WrWorker",
       "CanvasWorkers",
       "TextureUpdate",
+      // Image decoding threads: most formats decode on the TaskController
+      // thread pool, JPEG XL additionally uses its own pool.
+      "TaskController",
+      "JxlDecode",
     ],
     duration: 0,
     l10nIds: {
@@ -189,6 +195,8 @@ export const presets = {
       "IPDL Background",
       "onnx_worker",
       "llama.cpp",
+      "Parakeet",
+      "TextGenerator",
     ],
     duration: 0,
     l10nIds: {
@@ -377,12 +385,16 @@ export function getPrefPostfix(pageContext) {
   switch (pageContext) {
     case "devtools":
     case "aboutprofiling":
-    case "aboutlogging":
       // Don't use any postfix on the prefs.
       return "";
     case "devtools-remote":
     case "aboutprofiling-remote":
       return ".remote";
+    case "aboutlogging":
+      // about:logging uses its own set of recording prefs, so that using it
+      // doesn't clobber the settings used for normal profiling (the popup,
+      // about:profiling).
+      return ".aboutlogging";
     default: {
       const { UnhandledCaseError } = ChromeUtils.importESModule(
         "resource://devtools/shared/performance-new/errors.sys.mjs",
@@ -496,7 +508,7 @@ export function setRecordingSettings(pageContext, prefs) {
  * @return {void}
  */
 export function revertRecordingSettings() {
-  for (const prefPostfix of ["", ".remote"]) {
+  for (const prefPostfix of ["", ".remote", ".aboutlogging"]) {
     Services.prefs.clearUserPref(PRESET_PREF + prefPostfix);
     Services.prefs.clearUserPref(ENTRIES_PREF + prefPostfix);
     Services.prefs.clearUserPref(INTERVAL_PREF + prefPostfix);

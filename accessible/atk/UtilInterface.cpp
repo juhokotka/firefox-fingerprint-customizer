@@ -2,15 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <atk/atk.h>
+#include <gtk/gtk.h>
+#include <string.h>
+
 #include "ApplicationAccessible.h"
 #include "mozilla/Likely.h"
 #include "nsAccessibilityService.h"
 #include "nsMai.h"
-
-#include <atk/atkobject.h>
-#include <atk/atkutil.h>
-#include <gtk/gtk.h>
-#include <string.h>
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -181,7 +180,7 @@ union AtkKeySnoopFuncPointer {
   gpointer data;
 };
 
-static gboolean notify_hf(gpointer key, gpointer value, gpointer data) {
+static gboolean notify_hf(gpointer /*key*/, gpointer value, gpointer data) {
   MaiKeyEventInfo* info = (MaiKeyEventInfo*)data;
   AtkKeySnoopFuncPointer atkKeySnoop;
   atkKeySnoop.data = value;
@@ -196,7 +195,7 @@ static void insert_hf(gpointer key, gpointer value, gpointer data) {
 
 static GHashTable* sKey_listener_list = nullptr;
 
-static gint mai_key_snooper(GtkWidget* the_widget, GdkEventKey* event,
+static gint mai_key_snooper(GtkWidget* /*the_widget*/, GdkEventKey* event,
                             gpointer func_data) {
   /* notify each AtkKeySnoopFunc in turn... */
 
@@ -274,21 +273,23 @@ static const gchar* mai_util_get_toolkit_version() { return MAI_VERSION; }
 
 static void _listener_info_destroy(gpointer data) { g_free(data); }
 
-static void window_added(AtkObject* atk_obj, guint index, AtkObject* child) {
+static void window_added(AtkObject* /*atk_obj*/, guint /*index*/,
+                         AtkObject* child) {
   if (!IS_MAI_OBJECT(child)) return;
 
   static guint id = g_signal_lookup("create", MAI_TYPE_ATK_OBJECT);
   g_signal_emit(child, id, 0);
 }
 
-static void window_removed(AtkObject* atk_obj, guint index, AtkObject* child) {
+static void window_removed(AtkObject* /*atk_obj*/, guint /*index*/,
+                           AtkObject* child) {
   if (!IS_MAI_OBJECT(child)) return;
 
   static guint id = g_signal_lookup("destroy", MAI_TYPE_ATK_OBJECT);
   g_signal_emit(child, id, 0);
 }
 
-static void UtilInterfaceInit(MaiUtilClass* klass) {
+static void UtilInterfaceInit(MaiUtilClass* /*klass*/) {
   AtkUtilClass* atk_class;
   gpointer data;
 

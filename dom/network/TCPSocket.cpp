@@ -44,6 +44,7 @@
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
+#include "nsStreamUtils.h"
 #include "nsString.h"
 #include "nsStringStream.h"
 #include "secerr.h"
@@ -140,13 +141,15 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TCPSocket)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 TCPSocket::TCPSocket(nsIGlobalObject* aGlobal, const nsAString& aHost,
-                     uint16_t aPort, bool aSsl, bool aUseArrayBuffers)
+                     uint16_t aPort, bool aSsl, bool aUseArrayBuffers,
+                     uint32_t aConnectionFlags)
     : DOMEventTargetHelper(aGlobal),
       mReadyState(TCPReadyState::Closed),
       mUseArrayBuffers(aUseArrayBuffers),
       mHost(aHost),
       mPort(aPort),
       mSsl(aSsl),
+      mConnectionFlags(aConnectionFlags),
       mAsyncCopierActive(false),
       mWaitingForDrain(false),
       mInnerWindowID(0),
@@ -262,6 +265,13 @@ nsresult TCPSocket::Init(nsIProxyInfo* aProxyInfo) {
       sts->CreateTransport(socketTypes, NS_ConvertUTF16toUTF8(mHost), mPort,
                            aProxyInfo, nullptr, getter_AddRefs(transport));
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // Must happen before InitWithUnconnectedTransport, which opens the streams
+  // and thereby dispatches the connect to the socket thread.
+  if (mConnectionFlags) {
+    rv = transport->SetConnectionFlags(mConnectionFlags);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
 
   return InitWithUnconnectedTransport(transport);
 }
@@ -467,18 +477,38 @@ void TCPSocket::ActivateTLS() {
 
   if (alreadyOnSTST) {
     ActivateTLSHelper();
-    return;
+  } else {
+    // Since we use mozilla::SyncRunnable::DispatchToThread, it is unnecessary
+    // to AddRef/Release TCPSocket in CallActivateTLS.
+    auto CallActivateTLS = [&self = *this]() mutable {
+      self.ActivateTLSHelper();
+    };
+    mozilla::SyncRunnable::DispatchToThread(
+        socketThread,
+        NS_NewRunnableFunction("TCPSocket::UpgradeToSecure->ActivateTLSHelper",
+                               CallActivateTLS));
   }
 
-  // Since we use mozilla::SyncRunnable::DispatchToThread, it is unnecessary to
-  // AddRef/Release TCPSocket in CallActivateTLS.
-  auto CallActivateTLS = [&self = *this]() mutable {
-    self.ActivateTLSHelper();
-  };
-  mozilla::SyncRunnable::DispatchToThread(
-      socketThread,
-      NS_NewRunnableFunction("TCPSocket::UpgradeToSecure->ActivateTLSHelper",
-                             CallActivateTLS));
+  // Data buffered before TLS was enabled was received in plaintext, and must
+  // not be delivered as if it had been received over TLS.
+  DiscardPendingInput();
+}
+
+void TCPSocket::DiscardPendingInput() {
+  if (!mSocketInputStream) {
+    return;
+  }
+  uint64_t available = 0;
+  while (NS_SUCCEEDED(mSocketInputStream->Available(&available)) &&
+         available > 0) {
+    uint32_t read = 0;
+    nsresult rv = mSocketInputStream->ReadSegments(
+        NS_DiscardSegment, nullptr,
+        uint32_t(std::min<uint64_t>(available, UINT32_MAX)), &read);
+    if (NS_FAILED(rv) || !read) {
+      break;
+    }
+  }
 }
 
 void TCPSocket::ActivateTLSHelper() {
@@ -915,7 +945,8 @@ already_AddRefed<TCPSocket> TCPSocket::Constructor(
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
   RefPtr<TCPSocket> socket =
       new TCPSocket(global, aHost, aPort, aOptions.mUseSecureTransport,
-                    aOptions.mBinaryType == TCPSocketBinaryType::Arraybuffer);
+                    aOptions.mBinaryType == TCPSocketBinaryType::Arraybuffer,
+                    aOptions.mConnectionFlags);
   socket->ResolveProxy();
 
   return socket.forget();
@@ -1039,6 +1070,12 @@ TCPSocket::OnStartRequest(nsIRequest* aRequest) { return NS_OK; }
 NS_IMETHODIMP
 TCPSocket::OnDataAvailable(nsIRequest* aRequest, nsIInputStream* aStream,
                            uint64_t aOffset, uint32_t aCount) {
+  if (mWaitingForStartTLS) {
+    // Received in plaintext after TLS was requested but before it was enabled.
+    uint32_t read;
+    return aStream->ReadSegments(NS_DiscardSegment, nullptr, aCount, &read);
+  }
+
   if (mUseArrayBuffers) {
     nsTArray<uint8_t> buffer;
     buffer.SetCapacity(aCount);

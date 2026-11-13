@@ -3,30 +3,29 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
-
 #include "HttpTransactionChild.h"
 
+#include "HttpLog.h"
+#include "OpaqueResponseUtils.h"
+#include "mozilla/ScopeExit.h"
+#include "mozilla/StaticPrefs_network.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/net/BackgroundDataBridgeParent.h"
 #include "mozilla/net/ChannelEventQueue.h"
 #include "mozilla/net/InputChannelThrottleQueueChild.h"
 #include "mozilla/net/SocketProcessChild.h"
-#include "mozilla/ScopeExit.h"
-#include "mozilla/StaticPrefs_network.h"
+#include "nsHttpHandler.h"
 #include "nsHttpResponseHead.h"
-#include "nsInputStreamPump.h"
+#include "nsHttpTransaction.h"
+#include "nsIRequestContext.h"
 #include "nsISocketTransport.h"
 #include "nsITransportSecurityInfo.h"
-#include "nsHttpHandler.h"
-#include "nsHttpTransaction.h"
+#include "nsInputStreamPump.h"
 #include "nsNetUtil.h"
 #include "nsProxyInfo.h"
 #include "nsProxyRelease.h"
 #include "nsQueryObject.h"
 #include "nsSerializationHelper.h"
-#include "OpaqueResponseUtils.h"
-#include "nsIRequestContext.h"
 
 namespace mozilla::net {
 
@@ -143,7 +142,7 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvResumePump() {
 mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
     const uint32_t& aCaps, const HttpConnectionInfoCloneArgs& aArgs,
     const nsHttpRequestHead& aReqHeaders, const Maybe<IPCStream>& aRequestBody,
-    const uint64_t& aReqContentLength,
+    const uint64_t& aReqContentLength, const bool& aRequestBodyIsStreaming,
     const uint64_t& aTopLevelOuterContentWindowId,
     const HttpTrafficCategory& aHttpTrafficCategory,
     const uint64_t& aRequestContextID, const ClassOfService& aClassOfService,
@@ -160,6 +159,7 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
   }
 
   mTransaction = new nsHttpTransaction();
+  mTransaction->SetRequestBodyIsStreaming(aRequestBodyIsStreaming);
   mChannelId = aChannelId;
   mIsDocumentLoad = aIsDocumentLoad;
   mRedirectStart = aRedirectStart;
@@ -289,7 +289,7 @@ HttpTransactionChild::OnDataAvailable(nsIRequest* aRequest,
   rv = NS_DispatchToMainThread(
       NS_NewRunnableFunction(
           "HttpTransactionChild::OnDataAvailable",
-          [self, offset(aOffset), count(aCount), data(data)]() {
+          [self, offset(aOffset), count(aCount), data = std::move(data)]() {
             nsHttp::SendFunc<nsCString> sendFunc =
                 [self](const nsCString& aData, uint64_t aOffset,
                        uint32_t aCount) {
@@ -422,13 +422,13 @@ HttpTransactionChild::OnStartRequest(nsIRequest* aRequest) {
       HttpVersion version = head->Version();
       mProtocolVersion.Assign(nsHttp::GetProtocolVersion(version));
     }
-    optionalHead = Some(*head);
-
     if (GetOpaqueResponseBlockedReason(*head) ==
         OpaqueResponseBlockedReason::BLOCKED_SHOULD_SNIFF) {
       RefPtr<nsInputStreamPump> pump = do_QueryObject(mTransactionPump);
       pump->PeekStream(GetDataForSniffer, &dataForSniffer);
     }
+
+    optionalHead.emplace(std::move(*head));
   }
 
   Maybe<nsCString> optionalAltSvcUsed;

@@ -10,7 +10,7 @@ edition = "2018"
 
 [features]
 default = ["static_freetype"]
-profiler = ["tracy-rs/enable_profiler"]
+tracy = ["tracy-rs/enable_profiler"]
 capture = ["api/serialize", "ron", "serde", "smallvec/serde", "etagere/serialization", "glyph_rasterizer/capture"]
 replay = ["api/deserialize", "ron", "serde", "smallvec/serde", "etagere/serialization", "glyph_rasterizer/replay"]
 display_list_stats = ["api/display_list_stats"]
@@ -56,7 +56,6 @@ etagere = "0.2.13"
 glean = { workspace = true, optional = true }
 firefox-on-glean = { version = "0.1.0", optional = true }
 swgl = { path = "../swgl", optional = true }
-topological-sort = "0.1"
 peek-poke = { version = "0.3", path = "../peek-poke" }
 allocator-api2 = { version = "0.2.18", features = ["alloc", "serde"] }
 zeitstempel = "0.2.0"

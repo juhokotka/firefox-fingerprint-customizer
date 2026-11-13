@@ -8,6 +8,8 @@ import android.view.View
 import androidx.annotation.LayoutRes
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
+import mozilla.components.support.ktx.util.URLStringUtils
+import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.databinding.HistoryMetadataGroupListItemBinding
 import org.mozilla.fenix.ext.hideAndDisable
@@ -15,11 +17,8 @@ import org.mozilla.fenix.ext.showAndEnable
 import org.mozilla.fenix.library.history.History
 import org.mozilla.fenix.library.historymetadata.interactor.HistoryMetadataGroupInteractor
 import org.mozilla.fenix.selection.SelectionHolder
-import mozilla.components.ui.icons.R as iconsR
 
-/**
- * View holder for a history metadata list item.
- */
+/** View holder for a history metadata list item. */
 class HistoryMetadataGroupItemViewHolder(
     view: View,
     private val interactor: HistoryMetadataGroupInteractor,
@@ -50,7 +49,7 @@ class HistoryMetadataGroupItemViewHolder(
     fun bind(item: History.Metadata, isPendingDeletion: Boolean) {
         binding.historyLayout.isVisible = !isPendingDeletion
         binding.historyLayout.titleView.text = item.title
-        binding.historyLayout.urlView.text = item.url
+        binding.historyLayout.urlView.text = URLStringUtils.toLosslessDisplayUrl(item.url)
 
         binding.historyLayout.setSelectionInteractor(item, selectionHolder, interactor)
         binding.historyLayout.changeSelected(item in selectionHolder.selectedItems)
@@ -69,7 +68,6 @@ class HistoryMetadataGroupItemViewHolder(
     }
 
     companion object {
-        @LayoutRes
-        val LAYOUT_ID = R.layout.history_metadata_group_list_item
+        @LayoutRes val LAYOUT_ID = R.layout.history_metadata_group_list_item
     }
 }

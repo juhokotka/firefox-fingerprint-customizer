@@ -23,10 +23,9 @@
 #include "api/call/transport.h"
 #include "api/crypto/crypto_options.h"
 #include "api/environment/environment.h"
-#include "api/environment/environment_factory.h"
-#include "api/field_trials.h"
 #include "api/frame_transformer_interface.h"
 #include "api/make_ref_counted.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
 #include "api/test/mock_frame_transformer.h"
@@ -63,8 +62,7 @@
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/rate_limiter.h"
-#include "test/create_test_field_trials.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/mock_transport.h"
@@ -96,9 +94,8 @@ constexpr int16_t kInitialPictureId1 = 222;
 constexpr int16_t kInitialPictureId2 = 44;
 constexpr int16_t kInitialTl0PicIdx1 = 99;
 constexpr int16_t kInitialTl0PicIdx2 = 199;
-constexpr int64_t kRetransmitWindowSizeMs = 500;
-constexpr int kTransportsSequenceExtensionId = 7;
-constexpr int kDependencyDescriptorExtensionId = 8;
+constexpr RtpHeaderExtensionId kTransportsSequenceExtensionId(7);
+constexpr RtpHeaderExtensionId kDependencyDescriptorExtensionId(8);
 
 class MockRtcpIntraFrameObserver : public RtcpIntraFrameObserver {
  public:
@@ -178,25 +175,22 @@ class RtpVideoSenderTestFixture {
       scoped_refptr<FrameTransformerInterface> frame_transformer,
       const std::vector<int>& payload_types,
       absl::string_view field_trials = "")
-      : field_trials_(CreateTestFieldTrials(field_trials)),
-        time_controller_(Timestamp::Millis(1000000)),
-        env_(CreateEnvironment(&field_trials_,
-                               time_controller_.GetClock(),
-                               time_controller_.CreateTaskQueueFactory())),
+      : time_controller_(Timestamp::Millis(1000000)),
+        env_(CreateTestEnvironment(
+            {.field_trials = field_trials, .time = &time_controller_})),
         config_(CreateVideoSendStreamConfig(&transport_,
                                             ssrcs,
                                             rtx_ssrcs,
                                             payload_type,
                                             payload_types)),
         bitrate_config_(GetBitrateConfig()),
-        transport_controller_(
-            RtpTransportConfig{.env = env_, .bitrate_config = bitrate_config_}),
-        stats_proxy_(time_controller_.GetClock(),
+        transport_controller_(RtpTransportConfig{
+            .env = env_,
+            .bitrate_config = bitrate_config_,
+            .worker_thread = time_controller_.GetMainThread()}),
+        stats_proxy_(env_,
                      config_,
-                     VideoEncoderConfig::ContentType::kRealtimeVideo,
-                     env_.field_trials()),
-        retransmission_rate_limiter_(time_controller_.GetClock(),
-                                     kRetransmitWindowSizeMs) {
+                     VideoEncoderConfig::ContentType::kRealtimeVideo) {
     transport_controller_.EnsureStarted();
     std::map<uint32_t, RtpState> suspended_ssrcs;
     router_ = std::make_unique<RtpVideoSender>(
@@ -205,9 +199,8 @@ class RtpVideoSenderTestFixture {
         &transport_,
         CreateObservers(&encoder_feedback_, &stats_proxy_, &stats_proxy_,
                         &stats_proxy_, frame_count_observer, &stats_proxy_),
-        &transport_controller_, &retransmission_rate_limiter_,
-        std::make_unique<FecControllerDefault>(env_), nullptr, CryptoOptions{},
-        frame_transformer);
+        &transport_controller_, std::make_unique<FecControllerDefault>(env_),
+        nullptr, CryptoOptions{}, frame_transformer);
   }
   RtpVideoSenderTestFixture(
       const std::vector<uint32_t>& ssrcs,
@@ -266,7 +259,6 @@ class RtpVideoSenderTestFixture {
   void SetSending(bool sending) { router_->SetSending(sending); }
 
  private:
-  FieldTrials field_trials_;
   NiceMock<MockTransport> transport_;
   NiceMock<MockRtcpIntraFrameObserver> encoder_feedback_;
   GlobalSimulatedTimeController time_controller_;
@@ -275,14 +267,16 @@ class RtpVideoSenderTestFixture {
   BitrateConstraints bitrate_config_;
   RtpTransportControllerSend transport_controller_;
   SendStatisticsProxy stats_proxy_;
-  RateLimiter retransmission_rate_limiter_;
   std::unique_ptr<RtpVideoSender> router_;
 };
 
-BitrateAllocationUpdate CreateBitrateAllocationUpdate(int target_bitrate_bps) {
+BitrateAllocationUpdate CreateBitrateAllocationUpdate(
+    int target_bitrate_bps,
+    DataSize packet_overhead = DataSize::Zero()) {
   BitrateAllocationUpdate update;
   update.target_bitrate = DataRate::BitsPerSec(target_bitrate_bps);
   update.round_trip_time = TimeDelta::Zero();
+  update.packet_overhead = packet_overhead;
   return update;
 }
 
@@ -1346,26 +1340,31 @@ TEST(RtpVideoSenderTest, OverheadIsSubtractedFromTargetBitrate) {
   constexpr uint32_t kOverheadPerPacketBytes =
       kRtpHeaderSizeBytes + kTransportPacketOverheadBytes;
   RtpVideoSenderTestFixture test({kSsrc1}, {}, kPayloadType, {}, field_trials);
-  test.router()->OnTransportOverheadChanged(kTransportPacketOverheadBytes);
   test.SetSending(true);
 
   {
-    test.router()->OnBitrateUpdated(CreateBitrateAllocationUpdate(300000),
-                                    /*framerate*/ 15);
+    test.router()->OnBitrateUpdated(
+        CreateBitrateAllocationUpdate(
+            300000, DataSize::Bytes(kTransportPacketOverheadBytes)),
+        /*framerate*/ 15);
     // 1 packet per frame.
     EXPECT_EQ(test.router()->GetPayloadBitrateBps(),
               300000 - kOverheadPerPacketBytes * 8 * 30);
   }
   {
-    test.router()->OnBitrateUpdated(CreateBitrateAllocationUpdate(150000),
-                                    /*framerate*/ 15);
+    test.router()->OnBitrateUpdated(
+        CreateBitrateAllocationUpdate(
+            150000, DataSize::Bytes(kTransportPacketOverheadBytes)),
+        /*framerate*/ 15);
     // 1 packet per frame.
     EXPECT_EQ(test.router()->GetPayloadBitrateBps(),
               150000 - kOverheadPerPacketBytes * 8 * 15);
   }
   {
-    test.router()->OnBitrateUpdated(CreateBitrateAllocationUpdate(1000000),
-                                    /*framerate*/ 30);
+    test.router()->OnBitrateUpdated(
+        CreateBitrateAllocationUpdate(
+            1000000, DataSize::Bytes(kTransportPacketOverheadBytes)),
+        /*framerate*/ 30);
     // 3 packets per frame.
     EXPECT_EQ(test.router()->GetPayloadBitrateBps(),
               1000000 - kOverheadPerPacketBytes * 8 * 30 * 3);
@@ -1613,24 +1612,21 @@ TEST(RtpVideoSenderTest, PostTaskRaceDoesNotLeadToDanglingPointer) {
   NiceMock<MockRtcpIntraFrameObserver> encoder_feedback;
 
   GlobalSimulatedTimeController time_controller(Timestamp::Millis(1000000));
-  Environment env = CreateEnvironment(time_controller.GetClock(),
-                                      time_controller.CreateTaskQueueFactory());
+  Environment env = CreateTestEnvironment({.time = &time_controller});
 
   VideoSendStream::Config config(&transport);
   config.rtp.ssrcs = {kSsrc1};
 
   SendStatisticsProxy stats_proxy(
-      time_controller.GetClock(), config,
-      VideoEncoderConfig::ContentType::kRealtimeVideo, env.field_trials());
+      env, config, VideoEncoderConfig::ContentType::kRealtimeVideo);
 
   BitrateConstraints bitrate_config = GetBitrateConfig();
-  RtpTransportConfig transport_config{.env = env,
-                                      .bitrate_config = bitrate_config};
+  RtpTransportConfig transport_config{
+      .env = env,
+      .bitrate_config = bitrate_config,
+      .worker_thread = time_controller.GetMainThread()};
   RtpTransportControllerSend transport_controller(transport_config);
   transport_controller.EnsureStarted();
-
-  RateLimiter retransmission_rate_limiter(time_controller.GetClock(),
-                                          kRetransmitWindowSizeMs);
 
   std::map<uint32_t, RtpState> suspended_ssrcs;
   std::map<uint32_t, RtpPayloadState> suspended_payload_states;
@@ -1641,9 +1637,8 @@ TEST(RtpVideoSenderTest, PostTaskRaceDoesNotLeadToDanglingPointer) {
       &transport,
       CreateObservers(&encoder_feedback, &stats_proxy, &stats_proxy,
                       &stats_proxy, nullptr, &stats_proxy),
-      &transport_controller, &retransmission_rate_limiter,
-      std::make_unique<FecControllerDefault>(env), nullptr, CryptoOptions{},
-      nullptr);
+      &transport_controller, std::make_unique<FecControllerDefault>(env),
+      nullptr, CryptoOptions{}, nullptr);
 
   router->SetSending(true);
   // Verify it's registered

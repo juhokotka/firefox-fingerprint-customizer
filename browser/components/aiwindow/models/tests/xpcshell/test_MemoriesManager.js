@@ -17,20 +17,21 @@ const {
   HISTORY: SOURCE_HISTORY,
   CONVERSATION_USER_REQUEST: SOURCE_USER_REQUEST,
   MAX_MEMORY_SUMMARY_LENGTH,
+  MEMORY_TYPE_DURABLE_MEMORY,
+  MEMORY_TYPE_SHORT_TERM_MEMORY,
+  MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE,
+  MEMORY_SENSITIVITY_CATEGORY_SENSITIVE,
 } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/memories/MemoriesConstants.sys.mjs"
 );
 const { MemoryStore } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs"
 );
-const { EmbeddingsGenerator } = ChromeUtils.importESModule(
-  "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs"
-);
 const { AIWindow } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs"
 );
-const { AIWindowAccountAuth } = ChromeUtils.importESModule(
-  "moz-src:///browser/components/aiwindow/ui/modules/AIWindowAccountAuth.sys.mjs"
+const { AuthProvider } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/models/AuthProvider.sys.mjs"
 );
 const { EveryWindow } = ChromeUtils.importESModule(
   "resource:///modules/EveryWindow.sys.mjs"
@@ -52,19 +53,31 @@ const TEST_MODEL = "test-model";
 const TEST_MESSAGE = "Remember I like coffee.";
 const TEST_MEMORIES = [
   {
+    type: MEMORY_TYPE_DURABLE_MEMORY,
     memory_summary: "Loves drinking coffee",
     reasoning: "Frequeently orders coffee online for pickup",
-    tags: ["category:Food & Drink", "intent:Plan / Organize"],
+    tags: ["category:Food & Drink", "intent:Plan / Organize", "extra:tag"],
+    sources: ["history"],
+    sensitivity_category: MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE,
+    updated_at: 1000,
   },
   {
+    type: MEMORY_TYPE_SHORT_TERM_MEMORY,
     memory_summary: "Buys dog food online",
     reasoning: "Frequently buys dog food on websites like Chewy",
     tags: ["category:Pets & Animals", "intent:Buy / Acquire"],
+    sources: ["session"],
+    sensitivity_category: MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE,
+    updated_at: 1,
   },
   {
+    type: MEMORY_TYPE_DURABLE_MEMORY,
     memory_summary: "Plays games online",
     reasoning: "Visits a lot of gaming-related websites",
-    tags: ["category:Games", "intent:Entertain / Relax"],
+    tags: ["category:Games", "intent:Entertain / Relax", "extra:tag"],
+    sources: ["user_request"],
+    sensitivity_category: MEMORY_SENSITIVITY_CATEGORY_SENSITIVE,
+    updated_at: 200,
   },
 ];
 
@@ -99,6 +112,78 @@ async function addMemories() {
   }
 }
 
+/**
+ * Helper function to return relevant memories with fake semantic embeddings
+ *
+ * @param {string} message
+ * @param {int} topK
+ * @param {float} threshold
+ */
+async function getFakeRelevantMemories(message, topK, threshold) {
+  // Mock the private embeddings generator in MemoriesManager
+  // We'll create a fake generator that returns predictable embeddings
+  const fakeGenerator = {
+    async embedMany(_texts) {
+      // Return fake embeddings: one for each memory
+      // Coffee memory gets [1, 0, 0], dog food gets [0, 1, 0], games gets [0, 0, 1]
+
+      const embeds = [];
+      for (const text of _texts) {
+        if (text.includes("coffee")) {
+          embeds.push([1, 0, 0]); //  "Loves drinking coffee" embedding
+        } else if (text.includes("dog food")) {
+          embeds.push([0, 1, 0]); //  "Buys dog food online" embedding (orthogonal)
+        } else {
+          embeds.push([0, 0, 1]); //  "Plays games online" embedding (orthogonal)
+        }
+      }
+      return { output: embeds };
+    },
+    async embed(_text) {
+      // Query about coffee should be similar to first memory
+      return {
+        output: [[0.9, 0.1, 0]], // Similar to coffee embedding
+      };
+    },
+  };
+
+  // Create a version that uses our fake generator
+  // Sort by id to ensure deterministic order
+  const memories = (
+    await MemoryStore.getMemories({ includeSoftDeleted: true })
+  ).sort((a, b) => a.id.localeCompare(b.id));
+  if (memories.length === 0) {
+    return [];
+  }
+
+  // Use fake embeddings
+  const memoryEmbeddings = (
+    await fakeGenerator.embedMany(
+      memories.map(m => `${m.memory_summary}. ${m.reasoning || ""}`)
+    )
+  ).output;
+
+  let queryEmbedding = (await fakeGenerator.embed(message)).output;
+  if (Array.isArray(queryEmbedding) && queryEmbedding.length === 1) {
+    queryEmbedding = queryEmbedding[0];
+  }
+
+  // Calculate cosine similarity manually
+  const { cosSim } = ChromeUtils.importESModule(
+    "chrome://global/content/ml/NLPUtils.sys.mjs"
+  );
+
+  const similarities = memoryEmbeddings.map((memEmb, idx) => ({
+    ...memories[idx],
+    similarity: cosSim(queryEmbedding, memEmb),
+  }));
+
+  return similarities
+    .filter(m => m.similarity >= (threshold ?? 0.3))
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, topK ?? 5);
+}
+
 add_setup(async function () {
   // Setup prefs used across multiple tests
   Services.prefs.setStringPref(PREF_API_KEY, API_KEY);
@@ -120,240 +205,6 @@ add_setup(async function () {
       }
     }
   });
-});
-
-/**
- * Tests retrieving all stored memories
- */
-add_task(async function test_getAllMemories() {
-  await addMemories();
-
-  const memories = await MemoriesManager.getAllMemories();
-
-  // Check that the right number of memories were retrieved
-  Assert.equal(
-    memories.length,
-    TEST_MEMORIES.length,
-    "Should retrieve all stored memories."
-  );
-
-  // Check that the memories summaries are correct
-  const testMemoriesSummaries = TEST_MEMORIES.map(
-    memory => memory.memory_summary
-  );
-  const retrievedMemoriesSummaries = memories.map(
-    memory => memory.memory_summary
-  );
-  retrievedMemoriesSummaries.forEach(memorySummary => {
-    Assert.ok(
-      testMemoriesSummaries.includes(memorySummary),
-      `Memory summary "${memorySummary}" should be in the test memories.`
-    );
-  });
-
-  await deleteAllMemories();
-});
-
-/**
- * Tests retrieving specific memories by ID
- */
-add_task(async function test_getMemoriesByID() {
-  await addMemories();
-
-  const memories = await MemoriesManager.getAllMemories();
-  const firstMemoryToRetrieve = memories[0];
-  const secontMemoryToRetreive = memories[2];
-
-  const memoryRetrievedById = await MemoriesManager.getMemoriesByID(
-    new Set([firstMemoryToRetrieve.id, secontMemoryToRetreive.id])
-  );
-  const retrievedMemorySummaries = memoryRetrievedById.map(
-    mem => mem.memory_summary
-  );
-
-  Assert.equal(
-    memoryRetrievedById.length,
-    2,
-    "Should have retrieved both memories by their IDs"
-  );
-
-  Assert.ok(
-    retrievedMemorySummaries.includes(firstMemoryToRetrieve.memory_summary),
-    "Memories retrieved by ID should include the first expected summary"
-  );
-  Assert.ok(
-    retrievedMemorySummaries.includes(secontMemoryToRetreive.memory_summary),
-    "Memories retrieved by ID should include the second expected summary"
-  );
-
-  await deleteAllMemories();
-});
-
-/**
- * Tests soft deleting a memory by ID
- */
-add_task(async function test_softDeleteMemoryById() {
-  await addMemories();
-
-  // Pull memories that aren't already soft deleted
-  const memoriesBeforeSoftDelete = await MemoriesManager.getAllMemories();
-
-  // Pick a memory off the top to soft delete
-  const memoryBeforeSoftDelete = memoriesBeforeSoftDelete[0];
-
-  // Double check that the memory isn't already soft deleted
-  Assert.equal(
-    memoryBeforeSoftDelete.is_deleted,
-    false,
-    "Memory should not be soft deleted initially."
-  );
-
-  // Soft delete the memory
-  const memoryAfterSoftDelete = await MemoriesManager.softDeleteMemoryById(
-    memoryBeforeSoftDelete.id
-  );
-
-  // Check that the memory is soft deleted
-  Assert.equal(
-    memoryAfterSoftDelete.is_deleted,
-    true,
-    "Memory should be soft deleted after calling softDeleteMemoryById."
-  );
-
-  // Retrieve all memories again, including soft deleted ones this time to make sure the deletion saved correctly
-  const memoriesAfterSoftDelete = await MemoriesManager.getAllMemories({
-    includeSoftDeleted: true,
-  });
-  const softDeletedMemories = memoriesAfterSoftDelete.filter(
-    memory => memory.is_deleted
-  );
-  Assert.equal(
-    softDeletedMemories.length,
-    1,
-    "There should be one soft deleted memory."
-  );
-
-  await deleteAllMemories();
-});
-
-/**
- * Tests attempting to soft delete a memory that doesn't exist by ID
- */
-add_task(async function test_softDeleteMemoryById_not_found() {
-  await addMemories();
-
-  // Retrieve all memories, including soft deleted ones
-  const memoriesBeforeSoftDelete = await MemoriesManager.getAllMemories({
-    includeSoftDeleted: true,
-  });
-
-  // Check that no memories are soft deleted initially
-  const softDeletedMemoriesBefore = memoriesBeforeSoftDelete.filter(
-    memory => memory.is_deleted
-  );
-  Assert.equal(
-    softDeletedMemoriesBefore.length,
-    0,
-    "There should be no soft deleted memories initially."
-  );
-
-  // Attempt to soft delete a non-existent memory
-  const memoryAfterSoftDelete =
-    await MemoriesManager.softDeleteMemoryById("non-existent-id");
-
-  // Check that the result is null (no memories were soft deleted)
-  Assert.equal(
-    memoryAfterSoftDelete,
-    null,
-    "softDeleteMemoryById should return null for non-existent memory ID."
-  );
-
-  // Retrieve all memories again to confirm no memories were soft deleted
-  const memoriesAfterSoftDelete = await MemoriesManager.getAllMemories({
-    includeSoftDeleted: true,
-  });
-  const softDeletedMemoriesAfter = memoriesAfterSoftDelete.filter(
-    memory => memory.is_deleted
-  );
-  Assert.equal(
-    softDeletedMemoriesAfter.length,
-    0,
-    "There should be no soft deleted memories after attempting to delete a non-existent memory."
-  );
-
-  await deleteAllMemories();
-});
-
-/**
- * Tests hard deleting a memory by ID
- */
-add_task(async function test_hardDeleteMemoryById() {
-  await addMemories();
-
-  // Retrieve all memories, including soft deleted ones
-  const memoriesBeforeHardDelete = await MemoriesManager.getAllMemories({
-    includeSoftDeleted: true,
-  });
-
-  // Pick a memory off the top to test hard deletion
-  const memoryBeforeHardDelete = memoriesBeforeHardDelete[0];
-
-  // Hard delete the memory
-  const deletionResult = await MemoriesManager.hardDeleteMemoryById(
-    memoryBeforeHardDelete.id
-  );
-
-  // Check that the deletion was successful
-  Assert.ok(
-    deletionResult,
-    "hardDeleteMemoryById should return true on successful deletion."
-  );
-
-  // Retrieve all memories again to confirm the hard deletion was saved correctly
-  const memoriesAfterHardDelete = await MemoriesManager.getAllMemories({
-    includeSoftDeleted: true,
-  });
-  Assert.equal(
-    memoriesAfterHardDelete.length,
-    memoriesBeforeHardDelete.length - 1,
-    "There should be one fewer memory after hard deletion."
-  );
-
-  await deleteAllMemories();
-});
-
-/**
- * Tests attempting to hard delete a memory that doesn't exist by ID
- */
-add_task(async function test_hardDeleteMemoryById_not_found() {
-  await addMemories();
-
-  // Retrieve all memories, including soft deleted ones
-  const memoriesBeforeHardDelete = await MemoriesManager.getAllMemories({
-    includeSoftDeleted: true,
-  });
-
-  // Hard delete the memory
-  const deletionResult =
-    await MemoriesManager.hardDeleteMemoryById("non-existent-id");
-
-  // Check that the result is false (no memories were hard deleted)
-  Assert.ok(
-    !deletionResult,
-    "hardDeleteMemoryById should return false for non-existent memory ID."
-  );
-
-  // Retrieve all memories again to make sure no memories were hard deleted
-  const memoriesAfterHardDelete = await MemoriesManager.getAllMemories({
-    includeSoftDeleted: true,
-  });
-  Assert.equal(
-    memoriesAfterHardDelete.length,
-    memoriesBeforeHardDelete.length,
-    "Memory count before and after failed hard deletion should be the same."
-  );
-
-  await deleteAllMemories();
 });
 
 /**
@@ -527,88 +378,16 @@ add_task(async function test_memoryClassifyMessage_sad_path_bad_schema() {
 });
 
 /**
- * Tests retrieving relevant memories for a user message using embeddings
+ * Ensures calls to getRelevantMemories via the public MemoriesManager API are correctly
+ * routed through MemoryStore and returned
  */
-add_task(async function test_getRelevantMemories_happy_path() {
-  // Add memories so that we pass the existing memories check in the `getRelevantMemories` method
+add_task(async function test_getRelevantMemories_through_MemoryStore() {
   await addMemories();
 
   const sb = sinon.createSandbox();
   try {
-    // Mock the private embeddings generator in MemoriesManager
-    // We'll create a fake generator that returns predictable embeddings
-    const fakeGenerator = {
-      async embedMany(_texts) {
-        // Return fake embeddings: one for each memory
-        // Coffee memory gets [1, 0, 0], dog food gets [0, 1, 0], games gets [0, 0, 1]
-
-        const embeds = [];
-        for (const text of _texts) {
-          if (text.includes("coffee")) {
-            embeds.push([1, 0, 0]); //  "Loves drinking coffee" embedding
-          } else if (text.includes("dog food")) {
-            embeds.push([0, 1, 0]); //  "Buys dog food online" embedding (orthogonal)
-          } else {
-            embeds.push([0, 0, 1]); //  "Plays games online" embedding (orthogonal)
-          }
-        }
-        return { output: embeds };
-      },
-      async embed(_text) {
-        // Query about coffee should be similar to first memory
-        return {
-          output: [[0.9, 0.1, 0]], // Similar to coffee embedding
-        };
-      },
-    };
-
-    // Stub getRelevantMemories to use fake embeddings
-    let callCount = 0;
-
-    sb.stub(MemoriesManager, "getRelevantMemories").callsFake(
-      async function (message, topK, threshold) {
-        // On first call, let it create the generator, then replace it
-        if (callCount === 0) {
-          callCount++;
-          // Create a version that uses our fake generator
-          // Sort by id to ensure deterministic order
-          const memories = (await MemoriesManager.getAllMemories()).sort(
-            (a, b) => a.id.localeCompare(b.id)
-          );
-          if (memories.length === 0) {
-            return [];
-          }
-
-          // Use fake embeddings
-          const memoryEmbeddings = (
-            await fakeGenerator.embedMany(
-              memories.map(m => `${m.memory_summary}. ${m.reasoning || ""}`)
-            )
-          ).output;
-
-          let queryEmbedding = (await fakeGenerator.embed(message)).output;
-          if (Array.isArray(queryEmbedding) && queryEmbedding.length === 1) {
-            queryEmbedding = queryEmbedding[0];
-          }
-
-          // Calculate cosine similarity manually
-          const { cosSim } = ChromeUtils.importESModule(
-            "chrome://global/content/ml/NLPUtils.sys.mjs"
-          );
-
-          const similarities = memoryEmbeddings.map((memEmb, idx) => ({
-            ...memories[idx],
-            similarity: cosSim(queryEmbedding, memEmb),
-          }));
-
-          return similarities
-            .filter(m => m.similarity >= (threshold || 0.3))
-            .sort((a, b) => b.similarity - a.similarity)
-            .slice(0, topK || 5);
-        }
-        // Return empty array for subsequent calls
-        return [];
-      }
+    sb.stub(MemoryStore, "getRelevantMemories").callsFake(
+      getFakeRelevantMemories
     );
 
     const relevantMemories =
@@ -639,139 +418,9 @@ add_task(async function test_getRelevantMemories_happy_path() {
       "number",
       "Similarity should be a number"
     );
-
-    // Delete memories after test
-    await deleteAllMemories();
   } finally {
     sb.restore();
-  }
-});
-
-/**
- * Tests failed memories retrieval - no existing memories stored
- *
- * We don't mock an engine for this test case because getRelevantMemories should immediately return an empty array
- * because there aren't any existing memories -> No need to call the LLM.
- */
-add_task(
-  async function test_getRelevantMemories_sad_path_no_existing_memories() {
-    const relevantMemories =
-      await MemoriesManager.getRelevantMemories(TEST_MESSAGE);
-
-    // Check that result is an empty array
-    Assert.ok(Array.isArray(relevantMemories), "Result should be an array.");
-    Assert.equal(
-      relevantMemories.length,
-      0,
-      "Result should be an empty array when there are no existing memories."
-    );
-  }
-);
-
-/**
- * Tests failed memories retrieval - no memories meet similarity threshold
- */
-add_task(
-  async function test_getRelevantMemories_sad_path_null_classification() {
-    // Add memories so that we pass the existing memories check
-    await addMemories();
-
-    const sb = sinon.createSandbox();
-    try {
-      // Mock getRelevantMemories to return empty array (no memories above threshold)
-      const stub = sb.stub(MemoriesManager, "getRelevantMemories").resolves([]);
-
-      const relevantMemories =
-        await MemoriesManager.getRelevantMemories(TEST_MESSAGE);
-
-      // Check that the stub was called
-      Assert.ok(stub.calledOnce, "getRelevantMemories should be called once");
-
-      // Check that result is an empty array
-      Assert.ok(Array.isArray(relevantMemories), "Result should be an array.");
-      Assert.equal(
-        relevantMemories.length,
-        0,
-        "Result should be an empty array when no memories meet similarity threshold."
-      );
-
-      // Delete memories after test
-      await deleteAllMemories();
-    } finally {
-      sb.restore();
-    }
-  }
-);
-
-/**
- * Tests that getRelevantMemories properly invalidates cache when memories are updated.
- * Cache should be reused when memories haven't changed, but invalidated when updated_at changes.
- */
-add_task(async function test_getRelevantMemories_cache_invalidation() {
-  await deleteAllMemories();
-
-  // Clear the embeddings cache before this test
-  MemoriesManager._clearEmbeddingsCache();
-
-  const sb = sinon.createSandbox();
-  try {
-    await addMemories();
-
-    let embedManyCallCount = 0;
-
-    const fakeGenerator = {
-      async embedMany(texts) {
-        embedManyCallCount++;
-        return {
-          output: texts.map((_, i) => [i === 0 ? 1 : 0, i === 1 ? 1 : 0, 0]),
-        };
-      },
-      async embed(_text) {
-        return { output: [[0.9, 0.1, 0]] };
-      },
-    };
-
-    sb.stub(EmbeddingsGenerator.prototype, "embedMany").callsFake(
-      fakeGenerator.embedMany
-    );
-    sb.stub(EmbeddingsGenerator.prototype, "embed").callsFake(
-      fakeGenerator.embed
-    );
-
-    await MemoriesManager.getRelevantMemories("coffee");
-    Assert.equal(
-      embedManyCallCount,
-      1,
-      "embedMany should be called once on first call"
-    );
-
-    await MemoriesManager.getRelevantMemories("coffee");
-    Assert.equal(
-      embedManyCallCount,
-      1,
-      "embedMany should NOT be called again when memories unchanged (cache hit)"
-    );
-
-    const memories = await MemoriesManager.getAllMemories();
-    // Explicitly set a different timestamp to ensure cache invalidation
-    const originalTimestamp = memories[0].updated_at;
-    await MemoryStore.updateMemory(memories[0].id, {
-      memory_summary: "Loves drinking coffee and tea",
-      updated_at: originalTimestamp + 1000, // Explicitly different timestamp
-    });
-
-    await MemoriesManager.getRelevantMemories("coffee");
-    Assert.equal(
-      embedManyCallCount,
-      2,
-      "embedMany should be called again after memory update (cache invalidated)"
-    );
-
     await deleteAllMemories();
-  } finally {
-    sb.restore();
-    // Clear the cache after this test to avoid affecting other tests
-    MemoriesManager._clearEmbeddingsCache();
   }
 });
 
@@ -792,7 +441,7 @@ add_task(async function test_shouldEnableMemoriesFromSchedulers_firstrunGate() {
   try {
     sb.stub(AIWindow, "isAIWindowEnabled").returns(true);
     sb.stub(AIWindow, "isAIWindowActive").returns(true);
-    sb.stub(AIWindowAccountAuth, "hasToSConsent").get(() => true);
+    sb.stub(AuthProvider, "hasToSConsent").get(() => true);
     sb.stub(EveryWindow, "readyWindows").get(() => [{}]);
 
     Services.prefs.setBoolPref(PREF_GENERATE_MEMORIES_FROM_HISTORY, true);
@@ -841,7 +490,6 @@ add_task(async function test_saveRequestedMemory_truncates_long_summary() {
   sandbox
     .stub(ChatStore, "getMostRecentMessages")
     .resolves([{ content: { body: "remember I prefer Walmart" } }]);
-  sandbox.stub(MemoriesManager, "getRelevantMemories").resolves([]);
   try {
     await deleteAllMemories();
     const result = await MemoriesManager.saveRequestedMemory(
@@ -898,7 +546,6 @@ add_task(async function test_saveRequestedMemory_happy_path_creates() {
   sandbox
     .stub(ChatStore, "getMostRecentMessages")
     .resolves([{ content: { body: "remember I prefer Walmart" } }]);
-  sandbox.stub(MemoriesManager, "getRelevantMemories").resolves([]);
   try {
     await deleteAllMemories();
     const result = await MemoriesManager.saveRequestedMemory(
@@ -922,75 +569,6 @@ add_task(async function test_saveRequestedMemory_happy_path_creates() {
     sandbox.restore();
     await deleteAllMemories();
   }
-});
-
-/**
- * Tests the unified session watermark: read/write and migration seeding from
- * the legacy per-modality timestamps.
- */
-add_task(async function test_sessionWatermark_readWrite_and_migration() {
-  await MemoryStore.updateMeta({
-    last_session_memory_ts: 0,
-    last_history_memory_ts: 0,
-    last_chat_memory_ts: 0,
-  });
-
-  await MemoriesManager.setLastSessionMemoryTimestamp(123456);
-  Assert.equal(
-    await MemoriesManager.getLastSessionMemoryTimestamp(),
-    123456,
-    "Should read back the persisted session watermark"
-  );
-
-  // With no session watermark, seed from the older of the two legacy values.
-  await MemoryStore.updateMeta({
-    last_session_memory_ts: 0,
-    last_history_memory_ts: 500,
-    last_chat_memory_ts: 300,
-  });
-  Assert.equal(
-    await MemoriesManager.getLastSessionMemoryTimestamp(),
-    300,
-    "Should seed from min(legacy history, legacy chat) when no session watermark"
-  );
-
-  await MemoryStore.updateMeta({
-    last_session_memory_ts: 0,
-    last_history_memory_ts: 0,
-    last_chat_memory_ts: 0,
-  });
-});
-
-/**
- * Tests saveMemories persists with the given source tag and leaves the
- * watermark untouched (advancing it is the caller's responsibility now).
- */
-add_task(async function test_saveMemories_persists_with_source() {
-  await deleteAllMemories();
-  await MemoriesManager.setLastSessionMemoryTimestamp(777);
-
-  const { persistedMemories } = await MemoriesManager.saveMemories([
-    {
-      memory_summary: "Likes both dogs and cats",
-      reasoning: "r",
-      tags: ["category:Pets & Animals", "intent:Entertain / Relax"],
-      sources: ["session"],
-    },
-  ]);
-
-  Assert.equal(persistedMemories.length, 1, "Should persist one memory");
-  Assert.deepEqual(
-    persistedMemories[0].sources,
-    ["session"],
-    "Persisted memory should carry the session source tag"
-  );
-  Assert.equal(
-    await MemoriesManager.getLastSessionMemoryTimestamp(),
-    777,
-    "saveMemories should not change the watermark"
-  );
-
-  await deleteAllMemories();
 });
 
 /**
@@ -1305,3 +883,8 @@ add_task(
     }
   }
 );
+
+/**
+ * Tests that filtering parameters are correctly passed through the public getMemories API in MemoriesManager
+ * to MemoryStore
+ */

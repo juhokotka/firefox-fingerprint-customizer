@@ -23,6 +23,10 @@ const GUARDIAN_ENDPOINT_PREF = "browser.ipProtection.guardian.endpoint";
 
 do_get_profile();
 
+add_setup(function () {
+  Services.fog.initializeFOG();
+});
+
 function makeGuardianServer(
   arg = {
     enrollment: (_request, _response) => {},
@@ -56,6 +60,7 @@ function makeProvider(sandbox, gpiToken = "fake-gpi-token") {
   sandbox.stub(provider, "_unregisterGpiListener");
   sandbox.stub(provider, "_dispatchGpiWarmUp");
   sandbox.stub(provider, "_onGpiWarmUpCompleted");
+  sandbox.stub(provider, "_onGpiWarmUpFailed");
   sandbox.stub(provider, "_fetchGpiToken").resolves(gpiToken);
   return provider;
 }
@@ -127,9 +132,15 @@ add_task(async function test_isReady_becomes_true_after_warmup_event() {
   const provider = makeProvider(sandbox);
   provider._onGpiWarmUpCompleted.restore();
   provider.init();
-  Assert.ok(!provider.isReady, "Not ready before GPI:WarmUpCompleted");
+  Assert.ok(
+    !provider.isReady,
+    "Not ready before GeckoView:IPProtection:GPI:WarmUpCompleted"
+  );
   provider._onGpiWarmUpCompleted();
-  Assert.ok(provider.isReady, "Ready after GPI:WarmUpCompleted");
+  Assert.ok(
+    provider.isReady,
+    "Ready after GeckoView:IPProtection:GPI:WarmUpCompleted"
+  );
   provider.uninit();
   sandbox.restore();
 });
@@ -666,6 +677,35 @@ add_task(async function test_fetchProxyPass_sends_auth_header() {
     "Bearer my-jwt",
     "Correct Authorization header sent"
   );
+  sandbox.restore();
+});
+
+// --- Telemetry ---
+
+add_task(async function test_gpi_enrollment_records_failure_reason() {
+  Services.fog.testResetFOG();
+  const sandbox = sinon.createSandbox();
+  using serverWrapper = makeGuardianServer({
+    enrollment: (request, response) => {
+      response.setStatusLine(request.httpVersion, 400, "Bad Request");
+      response.write(JSON.stringify({ reason: "missing-package-name" }));
+    },
+  });
+  // eslint-disable-next-line no-unused-vars
+  using _setup = setupServer(serverWrapper);
+  const provider = makeProvider(sandbox);
+  await provider.aboutToStart();
+
+  const events = Glean.ipprotection.gpiEnrollment.testGetValue();
+  Assert.equal(events?.length, 1, "Exactly one enrollment event recorded");
+  const { extra } = events[0];
+  Assert.equal(
+    extra.reason,
+    "missing_package_name",
+    "Server reason mapped to coarse category"
+  );
+  Assert.equal(extra.httpStatus, "400", "HTTP status recorded");
+  Assert.equal(extra.hadPreviousJwt, "false", "hadPreviousJwt=false recorded");
   sandbox.restore();
 });
 

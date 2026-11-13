@@ -412,7 +412,7 @@ void js::NukeRemovedCrossCompartmentWrapper(JSContext* cx, JSObject* wrapper) {
   MOZ_ASSERT(wrapper->is<CrossCompartmentWrapperObject>());
   JSObject* target = UncheckedUnwrapWithoutExpose(wrapper);
   auto ptr = wrapper->compartment()->lookupWrapper(target);
-  MOZ_ASSERT_IF(ptr, ptr->value() != wrapper);
+  MOZ_ASSERT_IF(ptr, ptr->value().unbarrieredGet() != wrapper);
 #endif
 
   NotifyGCNukeWrapper(cx, wrapper);

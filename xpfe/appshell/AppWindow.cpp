@@ -123,7 +123,6 @@ AppWindow::AppWindow(uint32_t aChromeFlags)
       mLockedUntilChromeLoad(false),
       mIgnoreXULSize(false),
       mIgnoreXULPosition(false),
-      mChromeFlagsFrozen(false),
       mIgnoreXULSizeMode(false),
       mDestroying(false),
       mRegistered(false),
@@ -303,22 +302,6 @@ NS_IMETHODIMP AppWindow::GetDocShell(nsIDocShell** aDocShell) {
 NS_IMETHODIMP AppWindow::GetChromeFlags(uint32_t* aChromeFlags) {
   NS_ENSURE_ARG_POINTER(aChromeFlags);
   *aChromeFlags = mChromeFlags;
-  return NS_OK;
-}
-
-NS_IMETHODIMP AppWindow::SetChromeFlags(uint32_t aChromeFlags) {
-  NS_ASSERTION(!mChromeFlagsFrozen,
-               "SetChromeFlags() after AssumeChromeFlagsAreFrozen()!");
-
-  mChromeFlags = aChromeFlags;
-  if (mChromeLoaded) {
-    ApplyChromeFlags();
-  }
-  return NS_OK;
-}
-
-NS_IMETHODIMP AppWindow::AssumeChromeFlagsAreFrozen() {
-  mChromeFlagsFrozen = true;
   return NS_OK;
 }
 
@@ -1021,20 +1004,20 @@ NS_IMETHODIMP AppWindow::EnsureAuthPrompter() {
   return mAuthPrompter ? NS_OK : NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP AppWindow::GetAvailScreenSize(int32_t* aAvailWidth,
-                                            int32_t* aAvailHeight) {
+Maybe<CSSIntSize> AppWindow::GetAvailScreenSize() {
   nsCOMPtr<mozIDOMWindowProxy> domWindow;
   GetWindowDOMWindow(getter_AddRefs(domWindow));
-  NS_ENSURE_STATE(domWindow);
+  if (!domWindow) {
+    return {};
+  }
 
   auto* window = nsGlobalWindowOuter::Cast(domWindow);
-
   RefPtr<nsScreen> screen = window->GetScreen();
-  NS_ENSURE_STATE(screen);
+  if (!screen) {
+    return {};
+  }
 
-  *aAvailWidth = screen->AvailWidth();
-  *aAvailHeight = screen->AvailHeight();
-  return NS_OK;
+  return Some(CSSIntSize(screen->AvailWidth(), screen->AvailHeight()));
 }
 
 // Rounds window size to 1000x1000, or, if there isn't enough available
@@ -1045,13 +1028,10 @@ NS_IMETHODIMP AppWindow::ForceRoundedDimensions() {
   }
 
   CSSToLayoutDeviceScale scale = UnscaledDevicePixelsPerCSSPixel();
-
-  CSSIntSize availSizeCSS;
-  GetAvailScreenSize(&availSizeCSS.width, &availSizeCSS.height);
-
+  const CSSIntSize availSizeCSS = GetAvailScreenSize().valueOr(CSSIntSize());
   // To get correct chrome size, we have to resize the window to a proper
   // size first. So, here, we size it to its available size.
-  SetSpecifiedSize(availSizeCSS.width, availSizeCSS.height);
+  SetSpecifiedSize(availSizeCSS);
 
   // Get the current window size for calculating chrome UI size.
   CSSIntSize windowSizeCSS = RoundedToInt(GetSize() / scale);
@@ -1139,14 +1119,12 @@ static Maybe<int32_t> ReadIntAttribute(const Element& aElement,
 // to fit to the screen when staggering windows; if they're negative,
 // we use the window's current size instead.
 bool AppWindow::LoadPositionFromXUL(int32_t aSpecWidth, int32_t aSpecHeight) {
-  // if we're the hidden window, don't try to validate our size/position. We're
-  // special.
-  if (mIsHiddenWindow) {
-    return false;
-  }
-
-  // If we're not in the normal sizemode, don't move the window around.
-  if (mWindow->SizeMode() != nsSizeMode_Normal) {
+  // There are a few cases where we don't want to honor the XUL position:
+  // * If we're the hidden window (we're hidden, so...)
+  // * If we're not in normal sizemode (no point in moving the window around).
+  // * If disabled (like on GTK) (the WM does a better job at this than us).
+  if (mIsHiddenWindow || mWindow->SizeMode() != nsSizeMode_Normal ||
+      !StaticPrefs::browser_load_xul_position_enabled()) {
     return false;
   }
 
@@ -1195,23 +1173,24 @@ bool AppWindow::LoadPositionFromXUL(int32_t aSpecWidth, int32_t aSpecHeight) {
     gotPosition = true;
   }
 
-  if (gotPosition) {
-    // Our position will be relative to our parent, if any
-    nsCOMPtr<nsIBaseWindow> parent(do_QueryReferent(mParentWindow));
-    if (parent) {
-      const DesktopIntPoint parentPos = RoundedToInt(
-          parent->GetPosition() / parent->DevicePixelsPerDesktopPixel());
-      specPoint += parentPos;
-    } else {
-      StaggerPosition(specPoint.x.value, specPoint.y.value, cssSize.width,
-                      cssSize.height);
-    }
+  if (!gotPosition) {
+    return false;
+  }
+  // Our position will be relative to our parent, if any
+  nsCOMPtr<nsIBaseWindow> parent(do_QueryReferent(mParentWindow));
+  if (parent) {
+    const DesktopIntPoint parentPos = RoundedToInt(
+        parent->GetPosition() / parent->DevicePixelsPerDesktopPixel());
+    specPoint += parentPos;
+  } else {
+    StaggerPosition(specPoint.x.value, specPoint.y.value, cssSize.width,
+                    cssSize.height);
   }
   mWindow->ConstrainPosition(specPoint);
   if (specPoint != curPoint) {
     SetPositionDesktopPix(specPoint.x, specPoint.y);
   }
-  return gotPosition;
+  return true;
 }
 
 static Maybe<int32_t> ReadSize(const Element& aElement, nsAtom* aAttr,
@@ -1260,31 +1239,24 @@ bool AppWindow::LoadSizeFromXUL(int32_t& aSpecWidth, int32_t& aSpecHeight) {
   return gotSize;
 }
 
-void AppWindow::SetSpecifiedSize(int32_t aSpecWidth, int32_t aSpecHeight) {
-  // These are in CSS pixels of the main window.
-  // TODO(emilio): In my testing we usually have a pres context around, can we
-  // just use it? That'd simplify the coordinate calculations.
-  {
-    int32_t screenWidth;
-    int32_t screenHeight;
-
-    if (NS_SUCCEEDED(GetAvailScreenSize(&screenWidth, &screenHeight))) {
-      if (aSpecWidth > screenWidth) {
-        aSpecWidth = screenWidth;
-      }
-      if (aSpecHeight > screenHeight) {
-        aSpecHeight = screenHeight;
-      }
-    }
-  }
-
+void AppWindow::SetSpecifiedSize(const CSSIntSize& aSpecifiedSize) {
   NS_ASSERTION(mWindow, "we expected to have a window already");
+
+  auto cssToDev = UnscaledDevicePixelsPerCSSPixel();
+  CSSIntSize size = aSpecifiedSize;
+  if (auto screenSize = GetAvailScreenSize()) {
+    // Constrain to the available screen size, but allow window decorations to
+    // go past the edges.
+    const CSSIntPoint slop =
+        RoundedToInt(mWindow->GetScreenEdgeSlop() / cssToDev);
+    size.width = std::min(size.width, screenSize->width + 2 * slop.x);
+    size.height = std::min(size.height, screenSize->height + 2 * slop.y);
+  }
 
   mIntrinsicallySized = false;
 
   // Convert specified values to device pixels, and resize
-  auto newSize = RoundedToInt(CSSIntSize(aSpecWidth, aSpecHeight) *
-                              UnscaledDevicePixelsPerCSSPixel());
+  LayoutDeviceIntSize newSize = RoundedToInt(size * cssToDev);
 
   // Note: Because of the asynchronous resizing on Linux we have to call
   // SetSize even when the size doesn't appear to change. A previous call that
@@ -1340,7 +1312,7 @@ bool AppWindow::UpdateWindowStateFromMiscXULAttributes() {
     nsCOMPtr<mozIDOMWindowProxy> ourWindow;
     GetWindowDOMWindow(getter_AddRefs(ourWindow));
     auto* piWindow = nsPIDOMWindowOuter::From(ourWindow);
-    piWindow->SetFullScreen(true);
+    MOZ_KnownLive(piWindow)->SetFullScreen(true);
   } else {
     // For maximized windows, ignore the XUL size and position attributes,
     // as setting them would set the window back to normal sizemode.
@@ -1550,11 +1522,6 @@ void AppWindow::SyncAttributesToWidget() {
       windowElement->GetBoolAttr(nsGkAtoms::hidetitlebarseparator));
   NS_ENSURE_TRUE_VOID(mWindow);
 
-  // "toggletoolbar" attribute
-  mWindow->SetShowsToolbarButton(
-      windowElement->HasAttribute(u"toggletoolbar"_ns));
-  NS_ENSURE_TRUE_VOID(mWindow);
-
   // "macnativefullscreen" attribute. Only override the creation-time default
   // when the attribute is actually present; absence means "use the
   // window-creation default" (set in nsCocoaWindow::CreateNativeWindow), not
@@ -1617,6 +1584,7 @@ static void ConvertWindowSize(nsIAppWindow* aWin, const nsAtom* aAttr,
 nsresult AppWindow::GetPersistentValue(const nsAtom* aAttr, nsAString& aValue) {
   if (!XRE_IsParentProcess()) {
     // The XULStore is only available in the parent process.
+    MOZ_ASSERT_UNREACHABLE("AppWindow in child process?");
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1698,6 +1666,10 @@ nsresult AppWindow::GetDocXulStoreKeys(nsString& aUriSpec,
 nsresult AppWindow::MaybeSaveEarlyWindowPersistentValues(
     const LayoutDeviceIntRect& aRect) {
 #ifdef XP_WIN
+  if (!ShouldSavePersistentValues()) {
+    return NS_OK;
+  }
+
   nsAutoString uri;
   nsAutoString windowElementId;
   nsresult rv = GetDocXulStoreKeys(uri, windowElementId);
@@ -1744,6 +1716,8 @@ nsresult AppWindow::MaybeSaveEarlyWindowPersistentValues(
   // ship the skeleton UI to all users, we should strongly consider a more
   // robust solution than this. The vertical position of the urlbar will be
   // fixed.
+  //
+  // FIXME: Looks like this never happened :(
   nsAutoString attributeValue;
   urlbarEl->GetAttribute(u"breakout-extend"_ns, attributeValue);
   // Scale down the urlbar if it is focused
@@ -1863,19 +1837,32 @@ nsresult AppWindow::MaybeSaveEarlyWindowPersistentValues(
   return NS_OK;
 }
 
-nsresult AppWindow::SetPersistentValue(const nsAtom* aAttr,
-                                       const nsAString& aValue) {
+bool AppWindow::ShouldSavePersistentValues() const {
+  if (mChromeFlags & nsIWebBrowserChrome::CHROME_NO_PERSISTENCE) {
+    return false;
+  }
+  if (!mWindow || mWindow->SizeMode() == nsSizeMode_Fullscreen) {
+    return false;
+  }
+  return true;
+}
+
+void AppWindow::MaybeSetPersistentValue(const nsAtom* aAttr,
+                                        const nsAString& aValue) {
   if (!XRE_IsParentProcess()) {
     // The XULStore is only available in the parent process.
-    return NS_ERROR_UNEXPECTED;
+    MOZ_ASSERT_UNREACHABLE("AppWindow in child process?");
+    return;
   }
-
+  if (!ShouldSavePersistentValues()) {
+    return;
+  }
   nsAutoString uri;
   nsAutoString windowElementId;
   nsresult rv = GetDocXulStoreKeys(uri, windowElementId);
 
   if (NS_FAILED(rv) || windowElementId.IsEmpty()) {
-    return rv;
+    return;
   }
 
   nsAutoString maybeConvertedValue(aValue);
@@ -1889,17 +1876,17 @@ nsresult AppWindow::SetPersistentValue(const nsAtom* aAttr,
   if (!mLocalStore) {
     mLocalStore = do_GetService("@mozilla.org/xul/xulstore;1");
     if (NS_WARN_IF(!mLocalStore)) {
-      return NS_ERROR_NOT_INITIALIZED;
+      return;
     }
   }
 
-  return mLocalStore->SetValue(
-      uri, windowElementId, nsDependentAtomString(aAttr), maybeConvertedValue);
+  mLocalStore->SetValue(uri, windowElementId, nsDependentAtomString(aAttr),
+                        maybeConvertedValue);
 }
 
 void AppWindow::MaybeSavePersistentPositionAndSize(
     PersistentAttributes aAttributes, Element& aRootElement,
-    const nsAString& aPersistString, bool aShouldPersist) {
+    const nsAString& aPersistString) {
   if ((aAttributes & PersistentAttributes{PersistentAttribute::Position,
                                           PersistentAttribute::Size})
           .isEmpty()) {
@@ -1934,17 +1921,13 @@ void AppWindow::MaybeSavePersistentPositionAndSize(
       sizeString.Truncate();
       sizeString.AppendInt(NSToIntRound(rect.X() / posScale.scale));
       aRootElement.SetAttr(nsGkAtoms::screenX, sizeString, IgnoreErrors());
-      if (aShouldPersist) {
-        (void)SetPersistentValue(nsGkAtoms::screenX, sizeString);
-      }
+      MaybeSetPersistentValue(nsGkAtoms::screenX, sizeString);
     }
     if (aPersistString.Find(u"screenY") >= 0) {
       sizeString.Truncate();
       sizeString.AppendInt(NSToIntRound(rect.Y() / posScale.scale));
       aRootElement.SetAttr(nsGkAtoms::screenY, sizeString, IgnoreErrors());
-      if (aShouldPersist) {
-        (void)SetPersistentValue(nsGkAtoms::screenY, sizeString);
-      }
+      MaybeSetPersistentValue(nsGkAtoms::screenY, sizeString);
     }
   }
 
@@ -1955,26 +1938,22 @@ void AppWindow::MaybeSavePersistentPositionAndSize(
       sizeString.Truncate();
       sizeString.AppendInt(NSToIntRound(innerRect.Width() / sizeScale.scale));
       aRootElement.SetAttr(nsGkAtoms::width, sizeString, IgnoreErrors());
-      if (aShouldPersist) {
-        (void)SetPersistentValue(nsGkAtoms::width, sizeString);
-      }
+      MaybeSetPersistentValue(nsGkAtoms::width, sizeString);
     }
     if (aPersistString.Find(u"height") >= 0) {
       sizeString.Truncate();
       sizeString.AppendInt(NSToIntRound(innerRect.Height() / sizeScale.scale));
       aRootElement.SetAttr(nsGkAtoms::height, sizeString, IgnoreErrors());
-      if (aShouldPersist) {
-        (void)SetPersistentValue(nsGkAtoms::height, sizeString);
-      }
+      MaybeSetPersistentValue(nsGkAtoms::height, sizeString);
     }
   }
 
-  (void)MaybeSaveEarlyWindowPersistentValues(rect);
+  MaybeSaveEarlyWindowPersistentValues(rect);
 }
 
 void AppWindow::MaybeSavePersistentMiscAttributes(
     PersistentAttributes aAttributes, Element& aRootElement,
-    const nsAString& aPersistString, bool aShouldPersist) {
+    const nsAString& aPersistString) {
   if (!aAttributes.contains(PersistentAttribute::Misc)) {
     return;
   }
@@ -1990,11 +1969,11 @@ void AppWindow::MaybeSavePersistentMiscAttributes(
       sizeString.Assign(SIZEMODE_NORMAL);
     }
     aRootElement.SetAttr(nsGkAtoms::sizemode, sizeString, IgnoreErrors());
-    if (aShouldPersist && aPersistString.Find(u"sizemode") >= 0) {
-      (void)SetPersistentValue(nsGkAtoms::sizemode, sizeString);
+    if (aPersistString.Find(u"sizemode") >= 0) {
+      MaybeSetPersistentValue(nsGkAtoms::sizemode, sizeString);
     }
   }
-  aRootElement.SetBoolAttr(nsGkAtoms::gtktiledwindow, mWindow->IsTiled());
+  aRootElement.SetBoolAttr(nsGkAtoms::tiled, mWindow->IsTiled());
 }
 
 void AppWindow::SavePersistentAttributes(
@@ -2017,11 +1996,10 @@ void AppWindow::SavePersistentAttributes(
     return;
   }
 
-  bool shouldPersist = mWindow->SizeMode() != nsSizeMode_Fullscreen;
   MaybeSavePersistentPositionAndSize(aAttributes, *docShellElement,
-                                     persistString, shouldPersist);
+                                     persistString);
   MaybeSavePersistentMiscAttributes(aAttributes, *docShellElement,
-                                    persistString, shouldPersist);
+                                    persistString);
   mPersistentAttributesDirty -= aAttributes;
 }
 
@@ -2297,65 +2275,8 @@ void AppWindow::EnableParent(bool aEnable) {
   }
 }
 
-void AppWindow::SetContentScrollbarVisibility(bool aVisible) {
-  nsCOMPtr<nsPIDOMWindowOuter> contentWin(
-      do_GetInterface(mPrimaryContentShell));
-  if (!contentWin) {
-    return;
-  }
-
-  nsContentUtils::SetScrollbarsVisibility(contentWin->GetDocShell(), aVisible);
-}
-
-void AppWindow::ApplyChromeFlags() {
-  nsCOMPtr<dom::Element> root = GetWindowDOMElement();
-  if (!root) {
-    return;
-  }
-
-  if (mChromeLoaded) {
-    // The two calls in this block don't need to happen early because they
-    // don't cause a global restyle on the document.  Not only that, but the
-    // scrollbar stuff needs a content area to toggle the scrollbars on anyway.
-    // So just don't do these until mChromeLoaded is true.
-
-    // Scrollbars have their own special treatment.
-    SetContentScrollbarVisibility(mChromeFlags &
-                                  nsIWebBrowserChrome::CHROME_SCROLLBARS);
-  }
-
-  /* the other flags are handled together. we have style rules
-     in navigator.css that trigger visibility based on
-     the 'chromehidden' attribute of the <window> tag. */
-  nsAutoString newvalue;
-
-  if (!(mChromeFlags & nsIWebBrowserChrome::CHROME_MENUBAR))
-    newvalue.AppendLiteral("menubar ");
-
-  if (!(mChromeFlags & nsIWebBrowserChrome::CHROME_TOOLBAR))
-    newvalue.AppendLiteral("toolbar ");
-
-  if (!(mChromeFlags & nsIWebBrowserChrome::CHROME_LOCATIONBAR))
-    newvalue.AppendLiteral("location ");
-
-  if (!(mChromeFlags & nsIWebBrowserChrome::CHROME_PERSONAL_TOOLBAR))
-    newvalue.AppendLiteral("directories ");
-
-  if (!(mChromeFlags & nsIWebBrowserChrome::CHROME_STATUSBAR))
-    newvalue.AppendLiteral("status ");
-
-  if (!(mChromeFlags & nsIWebBrowserChrome::CHROME_EXTRA))
-    newvalue.AppendLiteral("extrachrome ");
-
-  // Note that if we're not actually changing the value this will be a no-op,
-  // so no need to compare to the old value.
-  IgnoredErrorResult rv;
-  root->SetAttribute(u"chromehidden"_ns, newvalue, rv);
-}
-
 NS_IMETHODIMP
 AppWindow::BeforeStartLayout() {
-  ApplyChromeFlags();
   // Ordering here is important, loading width/height values in
   // LoadPersistentWindowState() depends on the customtitlebar attribute (since
   // we need to translate outer to inner sizes).
@@ -2418,6 +2339,8 @@ void AppWindow::LoadPersistentWindowState() {
   loadValue(nsGkAtoms::screenY);
   loadValue(nsGkAtoms::width);
   loadValue(nsGkAtoms::height);
+  // FIXME: We should probably not restore the sizemode attribute if it doesn't
+  // match our actual widget-side state, or if mIgnoreXULSize and co is set.
   loadValue(nsGkAtoms::sizemode);
 }
 
@@ -2502,24 +2425,16 @@ void AppWindow::SizeShell() {
     specHeight += windowDiff.height;
   }
 
-  bool positionSet = !mIgnoreXULPosition;
   nsCOMPtr<nsIAppWindow> parentWindow(do_QueryReferent(mParentWindow));
-#if defined(XP_UNIX) && !defined(XP_MACOSX)
-  // don't override WM placement on unix for independent, top-level windows
-  // (however, we think the benefits of intelligent dependent window placement
-  // trump that override.)
-  if (!parentWindow) positionSet = false;
-#endif
-  if (positionSet) {
-    // We have to do this before sizing the window, because sizing depends
-    // on the resolution of the screen we're on. But positioning needs to
-    // know the size so that it can constrain to screen bounds.... as an
-    // initial guess here, we'll use the specified size (if any).
-    positionSet = LoadPositionFromXUL(specWidth, specHeight);
-  }
+  // We have to do this before sizing the window, because sizing depends
+  // on the resolution of the screen we're on. But positioning needs to
+  // know the size so that it can constrain to screen bounds.... as an
+  // initial guess here, we'll use the specified size (if any).
+  bool positionSet =
+      !mIgnoreXULPosition && LoadPositionFromXUL(specWidth, specHeight);
 
   if (gotSize) {
-    SetSpecifiedSize(specWidth, specHeight);
+    SetSpecifiedSize(CSSIntSize(specWidth, specHeight));
   }
 
   // If LoadSizeFromXUL set the size, mIntrinsicallySized will be false.
@@ -2606,11 +2521,12 @@ void AppWindow::WindowMoved(nsIWidget*, const LayoutDeviceIntPoint&) {
 
   // Notify all tabs that the widget moved.
   if (mDocShell && mDocShell->GetWindow()) {
-    nsCOMPtr<EventTarget> eventTarget =
+    const nsCOMPtr<EventTarget> eventTarget =
         mDocShell->GetWindow()->GetTopWindowRoot();
+    const RefPtr<Document> doc = mDocShell->GetDocument();
     nsContentUtils::DispatchChromeEvent(
-        mDocShell->GetDocument(), eventTarget, u"MozUpdateWindowPos"_ns,
-        CanBubble::eNo, Cancelable::eNo, nullptr);
+        doc, eventTarget, u"MozUpdateWindowPos"_ns, CanBubble::eNo,
+        Cancelable::eNo, nullptr);
   }
 
   // Persist position, but not immediately, in case this OS is firing
@@ -2714,6 +2630,17 @@ void AppWindow::SizeModeChanged(nsSizeMode aSizeMode) {
   // then need to be different.
 }
 
+void AppWindow::FullscreenChangeFailed(bool aInFullscreen) {
+  // NotChanging means our own fullscreen state never moved, so no change of
+  // ours is going to finish and tell the window that its request is over. Do
+  // that here instead. When our state did move, SizeModeChanged() has already
+  // started a change that calls FinishFullscreenChange() when it completes,
+  // and calling it twice would send a second fullscreen event.
+  if (mFullscreenChangeState == FullscreenChangeState::NotChanging) {
+    FinishFullscreenChange(aInFullscreen);
+  }
+}
+
 void AppWindow::FullscreenWillChange(bool aInFullscreen) {
   if (mDocShell) {
     if (nsCOMPtr<nsPIDOMWindowOuter> ourWindow = mDocShell->GetWindow()) {
@@ -2724,9 +2651,7 @@ void AppWindow::FullscreenWillChange(bool aInFullscreen) {
 
   CSSToLayoutDeviceScale scale = UnscaledDevicePixelsPerCSSPixel();
   CSSIntSize windowSizeCSS = RoundedToInt(GetSize() / scale);
-
-  CSSIntSize screenSizeCSS;
-  GetAvailScreenSize(&screenSizeCSS.width, &screenSizeCSS.height);
+  CSSIntSize screenSizeCSS = GetAvailScreenSize().valueOr(CSSIntSize());
 
   // Check if the window is already at the expected dimensions. If it is, set
   // the fullscreen change state to WidgetResized to avoid waiting for a resize
@@ -2758,11 +2683,12 @@ void AppWindow::FullscreenChanged(bool aInFullscreen) {
     NS_DelayedDispatchToCurrentThread(
         NS_NewRunnableFunction(
             "AppWindow::FullscreenChanged",
-            [this, kungFuDeathGrip, newState, aInFullscreen]() {
-              if (mFullscreenChangeState == newState) {
-                FinishFullscreenChange(aInFullscreen);
-              }
-            }),
+            [this, kungFuDeathGrip, newState, aInFullscreen]()
+                MOZ_CAN_RUN_SCRIPT_BOUNDARY_LAMBDA {
+                  if (mFullscreenChangeState == newState) {
+                    FinishFullscreenChange(aInFullscreen);
+                  }
+                }),
         80);
   }
 }
@@ -2809,31 +2735,6 @@ void AppWindow::OcclusionStateChanged(bool aIsFullyOccluded) {
     win->DispatchCustomEvent(u"occlusionstatechange"_ns,
                              ChromeOnlyDispatch::eYes);
   }
-}
-
-void AppWindow::OSToolbarButtonPressed() {
-  // Keep a reference as setting the chrome flags can fire events.
-  nsCOMPtr<nsIAppWindow> appWindow(this);
-
-  // rjc: don't use "nsIWebBrowserChrome::CHROME_EXTRA"
-  //      due to components with multiple sidebar components
-  //      (such as Mail/News, Addressbook, etc)... and frankly,
-  //      Mac IE, OmniWeb, and other Mac OS X apps all work this way
-  uint32_t chromeMask = (nsIWebBrowserChrome::CHROME_TOOLBAR |
-                         nsIWebBrowserChrome::CHROME_LOCATIONBAR |
-                         nsIWebBrowserChrome::CHROME_PERSONAL_TOOLBAR);
-
-  nsCOMPtr<nsIWebBrowserChrome> wbc(do_GetInterface(appWindow));
-  if (!wbc) return;
-
-  uint32_t chromeFlags, newChromeFlags = 0;
-  wbc->GetChromeFlags(&chromeFlags);
-  newChromeFlags = chromeFlags & chromeMask;
-  if (!newChromeFlags)
-    chromeFlags |= chromeMask;
-  else
-    chromeFlags &= (~newChromeFlags);
-  wbc->SetChromeFlags(chromeFlags);
 }
 
 void AppWindow::WindowActivated() {
@@ -3060,7 +2961,6 @@ void AppWindow::OnChromeLoaded() {
   nsresult rv = EnsureContentTreeOwner();
 
   if (NS_SUCCEEDED(rv)) {
-    ApplyChromeFlags();
     SyncAttributesToWidget();
     if (RefPtr ps = GetPresShell()) {
       // Sync window properties now, before showing the window.
@@ -3249,6 +3149,12 @@ void AppWindow::WidgetListenerDelegate::SizeModeChanged(nsSizeMode aSizeMode) {
   holder->SizeModeChanged(aSizeMode);
 }
 
+void AppWindow::WidgetListenerDelegate::FullscreenChangeFailed(
+    bool aInFullscreen) {
+  RefPtr<AppWindow> holder = mAppWindow;
+  holder->FullscreenChangeFailed(aInFullscreen);
+}
+
 void AppWindow::WidgetListenerDelegate::MacFullscreenMenubarOverlapChanged(
     DesktopCoord aOverlapAmount) {
   RefPtr<AppWindow> holder = mAppWindow;
@@ -3259,11 +3165,6 @@ void AppWindow::WidgetListenerDelegate::OcclusionStateChanged(
     bool aIsFullyOccluded) {
   RefPtr<AppWindow> holder = mAppWindow;
   holder->OcclusionStateChanged(aIsFullyOccluded);
-}
-
-void AppWindow::WidgetListenerDelegate::OSToolbarButtonPressed() {
-  RefPtr<AppWindow> holder = mAppWindow;
-  holder->OSToolbarButtonPressed();
 }
 
 void AppWindow::WidgetListenerDelegate::WindowActivated() {

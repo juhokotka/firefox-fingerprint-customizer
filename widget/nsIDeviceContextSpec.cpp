@@ -5,12 +5,11 @@
 #include "nsIDeviceContextSpec.h"
 
 #include "gfxPoint.h"
+#include "mozilla/Components.h"
+#include "mozilla/TaskQueue.h"
 #include "mozilla/gfx/PrintPromise.h"
 #include "nsError.h"
 #include "nsIPrintSettings.h"
-
-#include "mozilla/Components.h"
-#include "mozilla/TaskQueue.h"
 
 using mozilla::MakeRefPtr;
 using mozilla::gfx::PrintEndDocumentPromise;
@@ -23,11 +22,7 @@ using mozilla::gfx::PrintEndDocumentPromise;
 
 float nsIDeviceContextSpec::GetPrintingScale() {
 #ifdef XP_WIN
-  if (mPrintSettings->GetOutputFormat() != nsIPrintSettings::kOutputFormatPDF
-#  ifdef MOZ_ENABLE_SKIA_PDF
-      && !mPrintViaSkPDF
-#  endif
-  ) {
+  if (mPrintSettings->GetOutputFormat() != nsIPrintSettings::kOutputFormatPDF) {
     // The print settings will have the resolution stored from the real device.
     int32_t resolution;
     mPrintSettings->GetResolution(&resolution);

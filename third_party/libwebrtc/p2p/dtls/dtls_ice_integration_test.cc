@@ -20,7 +20,6 @@
 #include "api/dtls_transport_interface.h"
 #include "api/ice_transport_interface.h"
 #include "api/numerics/samples_stats_counter.h"
-#include "api/test/rtc_error_matchers.h"
 #include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
 #include "p2p/base/connection_info.h"
@@ -114,17 +113,20 @@ class DtlsIceIntegrationTest : public dtls_ice_integration_fixture::Base,
 };
 
 TEST_P(DtlsIceIntegrationTest, SmokeTest) {
+  if (!IsBoringSsl() && client_.config.dtls_in_stun &&
+      server_.config.dtls_in_stun) {
+    GTEST_SKIP() << "DTLS-in-STUN needs boringssl.";
+  }
+
   ConfigureEmulatedNetwork(/* pct_loss= */ 0);
   Prepare();
   client_thread()->PostTask([&]() { client_.ice()->MaybeStartGathering(); });
   server_thread()->PostTask([&]() { server_.ice()->MaybeStartGathering(); });
 
   // Note: this only reaches the pending piggybacking state.
-  EXPECT_THAT(
-      WaitUntil(
-          [&] { return client_.dtls->writable() && server_.dtls->writable(); },
-          IsTrue(), wait_until_settings()),
-      IsRtcOk());
+  EXPECT_TRUE(WaitUntil(
+      [&] { return client_.dtls->writable() && server_.dtls->writable(); },
+      wait_until_settings()));
 
   client_thread()->BlockingCall([&]() {
     EXPECT_EQ(client_.dtls->IsDtlsPiggybackSupportedByPeer(),
@@ -148,16 +150,19 @@ TEST_P(DtlsIceIntegrationTest, SmokeTest) {
 }
 
 TEST_P(DtlsIceIntegrationTest, AddCandidates) {
+  if (!IsBoringSsl() && client_.config.dtls_in_stun &&
+      server_.config.dtls_in_stun) {
+    GTEST_SKIP() << "DTLS-in-STUN needs boringssl.";
+  }
+
   Prepare();
   client_.ice()->MaybeStartGathering();
   server_.ice()->MaybeStartGathering();
 
   // Note: this only reaches the pending piggybacking state.
-  EXPECT_THAT(
-      WaitUntil(
-          [&] { return client_.dtls->writable() && server_.dtls->writable(); },
-          IsTrue(), wait_until_settings()),
-      IsRtcOk());
+  EXPECT_TRUE(WaitUntil(
+      [&] { return client_.dtls->writable() && server_.dtls->writable(); },
+      wait_until_settings()));
   EXPECT_EQ(client_.dtls->IsDtlsPiggybackSupportedByPeer(),
             client_.config.dtls_in_stun && server_.config.dtls_in_stun);
   EXPECT_EQ(server_.dtls->IsDtlsPiggybackSupportedByPeer(),
@@ -174,41 +179,42 @@ TEST_P(DtlsIceIntegrationTest, AddCandidates) {
 
   // Validate that we can add new Connections (that become writable).
   network_manager_->AddInterface(SocketAddress("192.168.2.1", 0));
-  EXPECT_THAT(WaitUntil(
-                  [&] {
-                    return CountWritableConnections(client_.ice()) > 1 &&
-                           CountWritableConnections(server_.ice()) > 1;
-                  },
-                  IsTrue(), wait_until_settings()),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil(
+      [&] {
+        return CountWritableConnections(client_.ice()) > 1 &&
+               CountWritableConnections(server_.ice()) > 1;
+      },
+      wait_until_settings()));
 }
 
 // Check that DtlsInStun still works even if SetRemoteFingerprint is called
 // "late". This is what happens if the answer sdp comes strictly after ICE has
 // connected. Before this patch, this would disable stun-piggy-backing.
 TEST_P(DtlsIceIntegrationTest, ClientLateCertificate) {
+  if (!IsBoringSsl() && client_.config.dtls_in_stun &&
+      server_.config.dtls_in_stun) {
+    GTEST_SKIP() << "DTLS-in-STUN needs boringssl.";
+  }
+
   client_.store_but_dont_set_remote_fingerprint = true;
   ConfigureEmulatedNetwork(/* pct_loss= */ 0);
   Prepare();
   client_thread()->PostTask([&]() { client_.ice()->MaybeStartGathering(); });
   server_thread()->PostTask([&]() { server_.ice()->MaybeStartGathering(); });
 
-  ASSERT_THAT(WaitUntil(
-                  [&] {
-                    return client_thread()->BlockingCall([&]() {
-                      return CountWritableConnections(client_.ice());
-                    }) > 0;
-                  },
-                  IsTrue(), wait_until_settings()),
-              IsRtcOk());
+  ASSERT_TRUE(WaitUntil(
+      [&] {
+        return client_thread()->BlockingCall([&]() {
+          return CountWritableConnections(client_.ice());
+        }) > 0;
+      },
+      wait_until_settings()));
 
   client_thread()->BlockingCall([&]() { SetRemoteFingerprint(client_); });
 
-  ASSERT_THAT(
-      WaitUntil(
-          [&] { return client_.dtls->writable() && server_.dtls->writable(); },
-          IsTrue(), wait_until_settings()),
-      IsRtcOk());
+  ASSERT_TRUE(WaitUntil(
+      [&] { return client_.dtls->writable() && server_.dtls->writable(); },
+      wait_until_settings()));
 
   client_thread()->BlockingCall([&]() {
     EXPECT_EQ(client_.dtls->IsDtlsPiggybackSupportedByPeer(),
@@ -235,16 +241,15 @@ TEST_P(DtlsIceIntegrationTest, TestWithPacketLoss) {
   client_thread()->PostTask([&]() { client_.ice()->MaybeStartGathering(); });
   server_thread()->PostTask([&]() { server_.ice()->MaybeStartGathering(); });
 
-  EXPECT_THAT(WaitUntil(
-                  [&] {
-                    return client_thread()->BlockingCall([&]() {
-                      return client_.dtls->writable();
-                    }) && server_thread()->BlockingCall([&]() {
-                      return server_.dtls->writable();
-                    });
-                  },
-                  IsTrue(), wait_until_settings()),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil(
+      [&] {
+        return client_thread()->BlockingCall([&]() {
+          return client_.dtls->writable();
+        }) && server_thread()->BlockingCall([&]() {
+          return server_.dtls->writable();
+        });
+      },
+      wait_until_settings()));
 
   EXPECT_EQ(client_thread()->BlockingCall([&]() {
     return client_.dtls->IsDtlsPiggybackSupportedByPeer();
@@ -273,16 +278,15 @@ TEST_P(DtlsIceIntegrationTest, LongRunningTestWithPacketLoss) {
   client_thread()->PostTask([&]() { client_.ice()->MaybeStartGathering(); });
   server_thread()->PostTask([&]() { server_.ice()->MaybeStartGathering(); });
 
-  ASSERT_THAT(WaitUntil(
-                  [&] {
-                    return client_thread()->BlockingCall([&]() {
-                      return client_.dtls->writable();
-                    }) && server_thread()->BlockingCall([&]() {
-                      return server_.dtls->writable();
-                    });
-                  },
-                  IsTrue(), wait_until_settings()),
-              IsRtcOk());
+  ASSERT_TRUE(WaitUntil(
+      [&] {
+        return client_thread()->BlockingCall([&]() {
+          return client_.dtls->writable();
+        }) && server_thread()->BlockingCall([&]() {
+          return server_.dtls->writable();
+        });
+      },
+      wait_until_settings()));
 
   auto now = CurrentTime();
   auto end = now + TimeDelta::Minutes(
@@ -327,16 +331,15 @@ TEST_P(DtlsIceIntegrationTest, LongRunningTestWithPacketLoss) {
       }
     }
 
-    EXPECT_THAT(WaitUntil(
-                    [&] {
-                      return client_thread()->BlockingCall([&]() {
-                        return client_.dtls->writable();
-                      }) && server_thread()->BlockingCall([&]() {
-                        return server_.dtls->writable();
-                      });
-                    },
-                    IsTrue(), wait_until_settings()),
-                IsRtcOk());
+    EXPECT_TRUE(WaitUntil(
+        [&] {
+          return client_thread()->BlockingCall([&]() {
+            return client_.dtls->writable();
+          }) && server_thread()->BlockingCall([&]() {
+            return server_.dtls->writable();
+          });
+        },
+        wait_until_settings()));
     ASSERT_THAT(client_thread()->BlockingCall(
                     [&]() { return client_.dtls->dtls_state(); }),
                 Not(Eq(DtlsTransportState::kFailed)));
@@ -361,6 +364,11 @@ TEST_P(DtlsIceIntegrationTest, LongRunningTestWithPacketLoss) {
 // Verify that DtlsStunPiggybacking works even if one (or several)
 // of the STUN_BINDING_REQUESTs are so full that dtls does not fit.
 TEST_P(DtlsIceIntegrationTest, AlmostFullSTUN_BINDING) {
+  if (!IsBoringSsl() && client_.config.dtls_in_stun &&
+      server_.config.dtls_in_stun) {
+    GTEST_SKIP() << "DTLS-in-STUN needs boringssl.";
+  }
+
   ConfigureEmulatedNetwork(/* pct_loss= */ 0);
   Prepare();
 
@@ -374,11 +382,9 @@ TEST_P(DtlsIceIntegrationTest, AlmostFullSTUN_BINDING) {
   server_thread()->PostTask([&]() { server_.ice()->MaybeStartGathering(); });
 
   // Note: this only reaches the pending piggybacking state.
-  EXPECT_THAT(
-      WaitUntil(
-          [&] { return client_.dtls->writable() && server_.dtls->writable(); },
-          IsTrue(), wait_until_settings()),
-      IsRtcOk());
+  EXPECT_TRUE(WaitUntil(
+      [&] { return client_.dtls->writable() && server_.dtls->writable(); },
+      wait_until_settings()));
 
   client_thread()->BlockingCall([&]() {
     EXPECT_EQ(client_.dtls->IsDtlsPiggybackSupportedByPeer(),

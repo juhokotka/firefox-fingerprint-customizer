@@ -25,6 +25,11 @@ const {
 const { debounce } = require("resource://devtools/shared/debounce.js");
 const EventEmitter = require("resource://devtools/shared/event-emitter.js");
 const CssLogic = require("resource://devtools/shared/inspector/css-logic.js");
+const {
+  setColorSchemeEmulation,
+  setPrintEmulationEnabled,
+  setReducedMotionEmulation,
+} = require("resource://devtools/client/inspector/emulation/actions/emulation.js");
 
 loader.lazyRequireGetter(
   this,
@@ -69,10 +74,17 @@ loader.lazyRequireGetter(
   "resource://devtools/client/shared/link.js",
   true
 );
+loader.lazyRequireGetter(
+  this,
+  "openDocLink",
+  "resource://devtools/client/shared/link.js",
+  true
+);
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   AppConstants: "resource://gre/modules/AppConstants.sys.mjs",
+  getMdnLinkParams: "resource://devtools/shared/mdn.mjs",
 });
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
@@ -100,6 +112,14 @@ const PSEUDO_ELEMENTS_CONTAINER_ID = "pseudo-elements-container";
 const ELEMENT_CONTAINER_ID = "element-container";
 const REGISTERED_PROPERTIES_CONTAINER_ID = "registered-properties-container";
 const POSITION_TRY_CONTAINER_ID = "position-try-container";
+
+// MDN documentation links
+const MDN_PRINT_MEDIA_URL =
+  "https://developer.mozilla.org/docs/Web/CSS/Reference/At-rules/@media";
+const MDN_PREFERS_COLOR_SCHEME_URL =
+  "https://developer.mozilla.org/docs/Web/CSS/@media/prefers-color-scheme";
+const MDN_PREFERS_REDUCED_MOTION_URL =
+  "https://developer.mozilla.org/docs/Web/CSS/@media/prefers-reduced-motion";
 
 /**
  * Our model looks like this:
@@ -201,15 +221,35 @@ class CssRuleView extends EventEmitter {
     );
     this.classPanel = doc.getElementById("ruleview-class-panel");
     this.classToggle = doc.getElementById("class-panel-toggle");
-    this.colorSchemeLightSimulationButton = doc.getElementById(
-      "color-scheme-simulation-light-toggle"
+    this.emulationPanel = doc.getElementById("emulation-panel");
+    this.emulationToggle = doc.getElementById("emulation-panel-toggle");
+    this.emulationPrintHeading = doc.getElementById("emulation-print-heading");
+    this.emulationColorSchemeHeading = doc.getElementById(
+      "emulation-color-scheme-heading"
     );
-    this.colorSchemeDarkSimulationButton = doc.getElementById(
-      "color-scheme-simulation-dark-toggle"
+    this.emulationReducedMotionHeading = doc.getElementById(
+      "emulation-reduced-motion-heading"
     );
-    this.printSimulationButton = doc.getElementById("print-simulation-toggle");
+    this.#printEmulationCheckbox = doc.getElementById(
+      "print-emulation-enabled"
+    );
+    this.#colorSchemeLightRadio = doc.getElementById(
+      "color-scheme-emulation-light"
+    );
+    this.#colorSchemeDarkRadio = doc.getElementById(
+      "color-scheme-emulation-dark"
+    );
+    this.#colorSchemeNoneRadio = doc.getElementById(
+      "color-scheme-emulation-none"
+    );
+    this.#colorSchemeLightEmulationButton = doc.getElementById(
+      "color-scheme-emulation-light-toggle"
+    );
+    this.#colorSchemeDarkEmulationButton = doc.getElementById(
+      "color-scheme-emulation-dark-toggle"
+    );
 
-    this.#initSimulationFeatures();
+    this.#initEmulationFeatures();
 
     this.searchClearButton.hidden = true;
 
@@ -226,7 +266,7 @@ class CssRuleView extends EventEmitter {
       this.onHighlighterHidden
     );
 
-    this.shortcuts = new KeyShortcuts({ window: this.styleWindow });
+    this.shortcuts = new KeyShortcuts(this.styleWindow);
     this.shortcuts.on("Escape", event => this.#onShortcut("Escape", event));
     this.shortcuts.on("Return", event => this.#onShortcut("Return", event));
     this.shortcuts.on("Space", event => this.#onShortcut("Space", event));
@@ -268,6 +308,17 @@ class CssRuleView extends EventEmitter {
     this.pseudoClassPanel.addEventListener(
       "change",
       this.#onTogglePseudoClass,
+      baseEventConfig
+    );
+    this.emulationToggle.addEventListener(
+      "click",
+      this.#onToggleEmulationPanel,
+      baseEventConfig
+    );
+    // The "change" event bubbles up from checkbox inputs nested within the panel container.
+    this.emulationPanel.addEventListener(
+      "change",
+      this.#onEmulationPanelChange,
       baseEventConfig
     );
 
@@ -331,6 +382,13 @@ class CssRuleView extends EventEmitter {
   #elementsWithPendingClicks;
   #showUserAgentStyles;
   #focusNextUserAddedRule;
+
+  #colorSchemeLightEmulationButton;
+  #colorSchemeDarkEmulationButton;
+  #printEmulationCheckbox;
+  #colorSchemeLightRadio;
+  #colorSchemeDarkRadio;
+  #colorSchemeNoneRadio;
 
   // References to all active rule containers DOM Elements.
   // Containers can be: "pseudo element", "inherited by", "keyframes",...
@@ -700,38 +758,64 @@ class CssRuleView extends EventEmitter {
   }
 
   /**
-   * Enables the print and color scheme simulation only for local and remote tab debugging.
+   * Enables the print and color scheme emulation only for local and remote tab debugging.
    */
-  async #initSimulationFeatures() {
+  async #initEmulationFeatures() {
     if (!this.inspector.commands.descriptorFront.isTabDescriptor) {
       return;
     }
-    this.colorSchemeLightSimulationButton.removeAttribute("hidden");
-    this.colorSchemeDarkSimulationButton.removeAttribute("hidden");
-    this.printSimulationButton.removeAttribute("hidden");
+    this.#colorSchemeLightEmulationButton.removeAttribute("hidden");
+    this.#colorSchemeDarkEmulationButton.removeAttribute("hidden");
+    this.emulationToggle.removeAttribute("hidden");
+
     const { signal } = this.#abortController;
     const baseEventConfig = { signal };
-    this.printSimulationButton.addEventListener(
+
+    const mdnLinkParams = lazy.getMdnLinkParams("inspector-emulation");
+
+    this.emulationPrintHeading.href = `${MDN_PRINT_MEDIA_URL}?${mdnLinkParams}`;
+    this.emulationPrintHeading.addEventListener(
       "click",
-      this.#onTogglePrintSimulation,
+      e => this.#onHeadingLinkClick(e),
       baseEventConfig
     );
-    this.colorSchemeLightSimulationButton.addEventListener(
+
+    this.emulationColorSchemeHeading.href = `${MDN_PREFERS_COLOR_SCHEME_URL}?${mdnLinkParams}`;
+    this.emulationColorSchemeHeading.addEventListener(
       "click",
-      this.#onToggleLightColorSchemeSimulation,
+      e => this.#onHeadingLinkClick(e),
       baseEventConfig
     );
-    this.colorSchemeDarkSimulationButton.addEventListener(
+
+    this.emulationReducedMotionHeading.href = `${MDN_PREFERS_REDUCED_MOTION_URL}?${mdnLinkParams}`;
+    this.emulationReducedMotionHeading.addEventListener(
       "click",
-      this.#onToggleDarkColorSchemeSimulation,
+      e => this.#onHeadingLinkClick(e),
+      baseEventConfig
+    );
+
+    this.#colorSchemeLightEmulationButton.addEventListener(
+      "click",
+      this.#onToggleLightColorSchemeEmulation,
+      baseEventConfig
+    );
+    this.#colorSchemeDarkEmulationButton.addEventListener(
+      "click",
+      this.#onToggleDarkColorSchemeEmulation,
       baseEventConfig
     );
     const { rfpCSSColorScheme } = this.inspector.walker;
     if (rfpCSSColorScheme) {
-      this.colorSchemeLightSimulationButton.setAttribute("disabled", true);
-      this.colorSchemeDarkSimulationButton.setAttribute("disabled", true);
-      console.warn("Color scheme simulation is disabled in RFP mode.");
+      this.#colorSchemeLightEmulationButton.setAttribute("disabled", true);
+      this.#colorSchemeDarkEmulationButton.setAttribute("disabled", true);
+      this.#colorSchemeLightRadio.setAttribute("disabled", true);
+      this.#colorSchemeDarkRadio.setAttribute("disabled", true);
+      console.warn("Color scheme emulation is disabled in RFP mode.");
     }
+
+    this.styleDocument
+      .getElementById("emulation-reduced-motion-container")
+      .removeAttribute("hidden");
   }
 
   /**
@@ -1077,9 +1161,14 @@ class CssRuleView extends EventEmitter {
       this.#highlighters = null;
     }
 
-    this.colorSchemeLightSimulationButton = null;
-    this.colorSchemeDarkSimulationButton = null;
-    this.printSimulationButton = null;
+    this.#colorSchemeLightEmulationButton = null;
+    this.#colorSchemeDarkEmulationButton = null;
+    this.emulationPanel = null;
+    this.emulationToggle = null;
+    this.#printEmulationCheckbox = null;
+    this.#colorSchemeLightRadio = null;
+    this.#colorSchemeDarkRadio = null;
+    this.#colorSchemeNoneRadio = null;
 
     this.tooltips.destroy();
 
@@ -1599,25 +1688,19 @@ class CssRuleView extends EventEmitter {
 
     this.#containers.set(containerId, { header, container });
 
-    const isPseudo = containerId == PSEUDO_ELEMENTS_CONTAINER_ID;
     const { signal } = this.#abortController;
     toggleButton.addEventListener(
       "click",
-      this.#toggleContainerVisibility.bind(
-        this,
-        containerId,
-        isPseudo,
-        !this.showPseudoElements
-      ),
+      this.#toggleContainerVisibility.bind(this, containerId),
       { signal }
     );
 
-    if (isPseudo) {
-      this.#toggleContainerVisibility(
-        containerId,
-        isPseudo,
-        this.showPseudoElements
-      );
+    // All containers are expanded by default, but pseudo elements
+    // are only expanded if the related preference is true.
+    // So manually collapse the pseudo container if this pref is false.
+    const isPseudo = containerId == PSEUDO_ELEMENTS_CONTAINER_ID;
+    if (isPseudo && !this.showPseudoElements) {
+      this.#toggleContainerVisibility(containerId);
     }
 
     return { header, container };
@@ -1664,31 +1747,25 @@ class CssRuleView extends EventEmitter {
    *
    * @param  {string}  containerId
    *         Container ID.
-   * @param  {boolean}  isPseudo
-   *         Whether or not the container will hold pseudo element rules
-   * @param  {boolean}  showPseudo
-   *         Whether or not pseudo element rules should be displayed
    */
-  #toggleContainerVisibility(containerId, isPseudo, showPseudo) {
+  #toggleContainerVisibility(containerId) {
     const { header, container } = this.#containers.get(containerId);
     const toggleButton = header.querySelector("button");
-    let isOpen = toggleButton.getAttribute("aria-expanded") === "true";
+    const shouldExpand = toggleButton.getAttribute("aria-expanded") !== "true";
 
+    // Memoize the state in the pref for pseudo elements
+    const isPseudo = containerId == PSEUDO_ELEMENTS_CONTAINER_ID;
     if (isPseudo) {
-      this.#showPseudoElements = !!showPseudo;
-
+      this.#showPseudoElements = shouldExpand;
       Services.prefs.setBoolPref(
         "devtools.inspector.show_pseudo_elements",
-        this.showPseudoElements
+        this.#showPseudoElements
       );
-
-      container.hidden = !this.showPseudoElements;
-      isOpen = !this.showPseudoElements;
-    } else {
-      container.hidden = !container.hidden;
     }
 
-    toggleButton.setAttribute("aria-expanded", !isOpen);
+    container.hidden = !shouldExpand;
+
+    toggleButton.setAttribute("aria-expanded", shouldExpand);
   }
 
   /**
@@ -2323,6 +2400,133 @@ class CssRuleView extends EventEmitter {
     this.classPanel.hidden = true;
   }
 
+  #onToggleEmulationPanel = () => {
+    if (this.emulationPanel.hidden) {
+      this.showEmulationPanel();
+    } else {
+      this.hideEmulationPanel();
+    }
+  };
+
+  showEmulationPanel() {
+    this.hidePseudoClassPanel();
+    this.hideClassPanel();
+
+    this.emulationToggle.setAttribute("aria-pressed", "true");
+    this.emulationPanel.inert = false;
+    this.emulationPanel.hidden = false;
+  }
+
+  hideEmulationPanel() {
+    this.emulationToggle.setAttribute("aria-pressed", "false");
+    this.emulationPanel.inert = true;
+    this.emulationPanel.hidden = true;
+  }
+
+  /**
+   * Called when a setting in the emulation panel is changed and updates the emulation
+   * accordingly.
+   *
+   * @param {Event} event
+   *         Change event object.
+   */
+  #onEmulationPanelChange = event => {
+    const { target } = event;
+    if (target.id === "print-emulation-enabled") {
+      this.#updatePrintEmulation(this.#printEmulationCheckbox.checked);
+    } else if (target.name === "color-scheme-emulation") {
+      this.#updateColorSchemeEmulation(target.value || null);
+    } else if (target.name === "reduced-motion-emulation") {
+      this.#updateReducedMotionEmulation(target.value || null);
+    }
+  };
+
+  /**
+   * Called when the print emulation checkbox is toggled and updates the print emulation accordingly.
+   *
+   * @param {boolean} enabled
+   */
+  async #updatePrintEmulation(enabled) {
+    setPrintEmulationEnabled(enabled);
+
+    await this.inspector.commands.targetConfigurationCommand.updateConfiguration(
+      {
+        printSimulationEnabled: enabled,
+      }
+    );
+
+    this.refreshPanel();
+  }
+
+  /**
+   * Called when the color scheme emulation radios are toggled and updates the color scheme emulation accordingly.
+   *
+   * @param {string|null} colorScheme
+   */
+  async #updateColorSchemeEmulation(colorScheme) {
+    setColorSchemeEmulation(colorScheme);
+
+    this.#syncColorSchemeUI(colorScheme);
+
+    await this.inspector.commands.targetConfigurationCommand.updateConfiguration(
+      {
+        colorSchemeSimulation: colorScheme,
+      }
+    );
+
+    this.refreshPanel();
+  }
+
+  /**
+   * Called when the reduced motion emulation radios are toggled and update the reduced motion emulation accordingly.
+   *
+   * @param {string|null} value
+   *        Reduced motion emulation value.
+   */
+  async #updateReducedMotionEmulation(value) {
+    setReducedMotionEmulation(value);
+
+    await this.inspector.commands.targetConfigurationCommand.updateConfiguration(
+      {
+        reducedMotionEmulation: value,
+      }
+    );
+
+    this.refreshPanel();
+  }
+
+  /**
+   * Synchronizes the color scheme simulation UI with the given color scheme.
+   *
+   * @param {string|null} colorScheme
+   */
+  #syncColorSchemeUI(colorScheme) {
+    this.#colorSchemeLightRadio.checked = colorScheme === "light";
+    this.#colorSchemeDarkRadio.checked = colorScheme === "dark";
+    this.#colorSchemeNoneRadio.checked = colorScheme === null;
+
+    this.#colorSchemeLightEmulationButton.setAttribute(
+      "aria-pressed",
+      colorScheme === "light"
+    );
+    this.#colorSchemeDarkEmulationButton.setAttribute(
+      "aria-pressed",
+      colorScheme === "dark"
+    );
+  }
+
+  #onHeadingLinkClick = e => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const isMacOS = Services.appinfo.OS === "Darwin";
+
+    openDocLink(e.target.href, {
+      relatedToCurrent: true,
+      inBackground: isMacOS ? e.metaKey : e.ctrlKey,
+    });
+  };
+
   /**
    * Handle the keypress event in the rule view.
    */
@@ -2351,59 +2555,30 @@ class CssRuleView extends EventEmitter {
     }
   }
 
-  #onToggleLightColorSchemeSimulation = async () => {
-    const shouldSimulateLightScheme =
-      this.colorSchemeLightSimulationButton.getAttribute("aria-pressed") !==
-      "true";
+  /**
+   * Called when the light color scheme emulation button is toggled and updates the color scheme emulation accordingly.
+   */
+  #onToggleLightColorSchemeEmulation = async () => {
+    const currentColorScheme =
+      this.#colorSchemeLightEmulationButton.getAttribute("aria-pressed") ===
+      "true"
+        ? null
+        : "light";
 
-    this.colorSchemeLightSimulationButton.setAttribute(
-      "aria-pressed",
-      shouldSimulateLightScheme
-    );
-
-    this.colorSchemeDarkSimulationButton.setAttribute("aria-pressed", "false");
-
-    await this.inspector.commands.targetConfigurationCommand.updateConfiguration(
-      {
-        colorSchemeSimulation: shouldSimulateLightScheme ? "light" : null,
-      }
-    );
-    // Refresh the current element's rules in the panel.
-    this.refreshPanel();
+    await this.#updateColorSchemeEmulation(currentColorScheme);
   };
 
-  #onToggleDarkColorSchemeSimulation = async () => {
-    const shouldSimulateDarkScheme =
-      this.colorSchemeDarkSimulationButton.getAttribute("aria-pressed") !==
-      "true";
+  /**
+   * Called when the dark color scheme emulation button is toggled and updates the color scheme emulation accordingly.
+   */
+  #onToggleDarkColorSchemeEmulation = async () => {
+    const currentColorScheme =
+      this.#colorSchemeDarkEmulationButton.getAttribute("aria-pressed") ===
+      "true"
+        ? null
+        : "dark";
 
-    this.colorSchemeDarkSimulationButton.setAttribute(
-      "aria-pressed",
-      shouldSimulateDarkScheme
-    );
-
-    this.colorSchemeLightSimulationButton.setAttribute("aria-pressed", "false");
-
-    await this.inspector.commands.targetConfigurationCommand.updateConfiguration(
-      {
-        colorSchemeSimulation: shouldSimulateDarkScheme ? "dark" : null,
-      }
-    );
-    // Refresh the current element's rules in the panel.
-    this.refreshPanel();
-  };
-
-  #onTogglePrintSimulation = async () => {
-    const enabled =
-      this.printSimulationButton.getAttribute("aria-pressed") !== "true";
-    this.printSimulationButton.setAttribute("aria-pressed", enabled);
-    await this.inspector.commands.targetConfigurationCommand.updateConfiguration(
-      {
-        printSimulationEnabled: enabled,
-      }
-    );
-    // Refresh the current element's rules in the panel.
-    this.refreshPanel();
+    await this.#updateColorSchemeEmulation(currentColorScheme);
   };
 
   /**
@@ -2624,7 +2799,7 @@ class CssRuleView extends EventEmitter {
       // Set the scroll behavior to "instant" to avoid timing issues between toggling
       // the pseudo element container and scrolling smoothly to the rule.
       scrollBehavior = "instant";
-      this.#toggleContainerVisibility(PSEUDO_ELEMENTS_CONTAINER_ID, true, true);
+      this.#toggleContainerVisibility(PSEUDO_ELEMENTS_CONTAINER_ID);
     }
 
     const textProp = matchingTextPropComputed.textProp;
@@ -2810,11 +2985,7 @@ class RuleViewTool {
       this.onPanelSelected,
       baseEventConfig
     );
-    this.inspector.styleChangeTracker.on(
-      "style-changed",
-      this.refresh,
-      baseEventConfig
-    );
+    this.inspector.on("style-changed", this.refresh, baseEventConfig);
 
     this.inspector.commands.resourceCommand.watchResources(
       [

@@ -7,10 +7,10 @@
 
 #include <functional>
 
-#include "mozilla/CheckedInt.h"
-#include "mozilla/Queue.h"
 #include "WebTransportFlowControl.h"
 #include "WebTransportStreamBase.h"
+#include "mozilla/CheckedInt.h"
+#include "mozilla/Queue.h"
 
 namespace mozilla::net {
 
@@ -52,7 +52,7 @@ class Http2WebTransportStream final : public WebTransportStreamBase {
 
   StreamId WebTransportStreamId() const override;
   uint64_t GetStreamId() const override;
-  void SendStopSending(uint8_t aErrorCode) override;
+  void SendStopSending(uint64_t aErrorCode) override;
   void SendFin() override;
   void Reset(uint64_t aErrorCode) override;
   already_AddRefed<nsIWebTransportSendStreamStats> GetSendStreamStats()
@@ -60,7 +60,8 @@ class Http2WebTransportStream final : public WebTransportStreamBase {
   already_AddRefed<nsIWebTransportReceiveStreamStats> GetReceiveStreamStats()
       override;
   bool RecvDone() const override;
-  void SetSendOrder(Maybe<int64_t> aSendOrder) override;
+  void SetSendOrder(int64_t aSendOrder) override;
+  void SetSendGroup(uint64_t aSendGroupId) override {}
   SenderFlowControlBase* SenderFc() override { return &mFc; }
   ReceiverFlowControlBase* ReceiverFc() override { return &mReceiverFc; }
 

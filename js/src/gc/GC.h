@@ -99,6 +99,8 @@ class ArenaChunk;
 extern bool GetGCParameterInfo(const char* name, JSGCParamKey* keyOut,
                                bool* writableOut);
 
+extern bool IsGCParameterFuzzingSafe(JSGCParamKey key);
+
 namespace gc {
 
 void FinishGC(JSContext* cx, JS::GCReason = JS::GCReason::FINISH_GC);
@@ -228,6 +230,8 @@ void VerifyBarriers(JSRuntime* rt, VerifierType type);
 
 void MaybeVerifyBarriers(JSContext* cx, bool always = false);
 
+void MaybeSleepForConcurrentMarkingDelays(JSContext* cx);
+
 void DumpArenaInfo();
 
 #else
@@ -235,6 +239,8 @@ void DumpArenaInfo();
 static inline void VerifyBarriers(JSRuntime* rt, VerifierType type) {}
 
 static inline void MaybeVerifyBarriers(JSContext* cx, bool always = false) {}
+
+static inline void MaybeSleepForConcurrentMarkingDelays(JSContext* cx) {}
 
 #endif
 

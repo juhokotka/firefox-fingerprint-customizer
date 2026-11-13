@@ -7,16 +7,13 @@ package org.mozilla.fenix.ext
 import android.app.Activity
 import android.content.Intent
 import android.content.res.ColorStateList
-import android.content.res.Resources
 import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
-import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.DimenRes
 import androidx.annotation.IdRes
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
@@ -28,23 +25,18 @@ import androidx.navigation.NavController
 import androidx.navigation.NavDirections
 import androidx.navigation.NavOptions
 import androidx.navigation.fragment.findNavController
+import com.google.android.material.R as materialR
 import mozilla.components.concept.base.crash.Breadcrumb
-import mozilla.components.support.utils.ext.isLandscape
+import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.NavHostActivity
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.Components
-import org.mozilla.fenix.components.toolbar.ToolbarContainerView
-import org.mozilla.fenix.components.toolbar.ToolbarPosition
 import org.mozilla.fenix.navigation.DefaultNavControllerProvider
 import org.mozilla.fenix.navigation.NavControllerProvider
 import org.mozilla.fenix.theme.ThemeManager
 import org.mozilla.fenix.utils.isLargeScreenSize
-import com.google.android.material.R as materialR
-import mozilla.components.ui.icons.R as iconsR
 
-/**
- * Get the requireComponents of this application.
- */
+/** Get the requireComponents of this application. */
 val Fragment.requireComponents: Components
     get() = requireContext().components
 
@@ -54,9 +46,8 @@ val Fragment.requireComponents: Components
  * @param id The ID of the current destination.
  * @param directions The [NavDirections] that define the navigation action and arguments.
  * @param options Optional [NavOptions] to customize the navigation behavior (e.g., animations, pop behavior).
- * @param navControllerProvider The [NavControllerProvider] used to retrieve the [NavController].
- * Defaults to [.DefaultNavControllerProvider].
- *
+ * @param navControllerProvider The [NavControllerProvider] used to retrieve the [NavController]. Defaults to
+ *   [.DefaultNavControllerProvider].
  * @throws IllegalStateException if the [NavController] cannot be found for the current [Fragment].
  */
 fun Fragment.nav(
@@ -69,13 +60,11 @@ fun Fragment.nav(
     navController.nav(id, directions, options)
 }
 
-fun Fragment.getPreferenceKey(
-    @StringRes resourceId: Int,
-): String = getString(resourceId)
+fun Fragment.getPreferenceKey(@StringRes resourceId: Int): String = getString(resourceId)
 
 /**
- * Displays the activity toolbar with the given [title].
- * Throws if the fragment is not attached to an [AppCompatActivity].
+ * Displays the activity toolbar with the given [title]. Throws if the fragment is not attached to an
+ * [AppCompatActivity].
  */
 fun Fragment.showToolbar(title: String) {
     (requireActivity() as AppCompatActivity).title = title
@@ -84,9 +73,8 @@ fun Fragment.showToolbar(title: String) {
 }
 
 /**
- * Displays the activity toolbar with a given [title] and an icon button
- * with the given [iconResId] and [onClick]
- * Throws if the fragment is not attached to an [AppCompatActivity].
+ * Displays the activity toolbar with a given [title] and an icon button with the given [iconResId] and [onClick] Throws
+ * if the fragment is not attached to an [AppCompatActivity].
  *
  * @param title The title of the toolbar.
  * @param contentDescription The content description of the icon button for accessibility.
@@ -105,24 +93,25 @@ fun Fragment.showToolbarWithIconButton(
     (activity as? NavHostActivity)?.getSupportActionBarAndInflateIfNecessary()?.show()
 
     val menuHost = activity as MenuHost
-    val provider = object : MenuProvider {
-        override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
-            menu.clear()
+    val provider =
+        object : MenuProvider {
+            override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
+                menu.clear()
 
-            val item = menu.add(Menu.NONE, Menu.NONE, Menu.NONE, "")
-            item.setIcon(iconResId)
-            val colorResId = ThemeManager.resolveAttribute(materialR.attr.colorOnSurface, activity)
-            item.iconTintList = ColorStateList.valueOf(activity.getColor(colorResId))
-            item.contentDescription = contentDescription
-            item.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
-            item.setOnMenuItemClickListener {
-                onClick()
-                true
+                val item = menu.add(Menu.NONE, Menu.NONE, Menu.NONE, "")
+                item.setIcon(iconResId)
+                val colorResId = ThemeManager.resolveAttribute(materialR.attr.colorOnSurface, activity)
+                item.iconTintList = ColorStateList.valueOf(activity.getColor(colorResId))
+                item.contentDescription = contentDescription
+                item.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+                item.setOnMenuItemClickListener {
+                    onClick()
+                    true
+                }
             }
-        }
 
-        override fun onMenuItemSelected(menuItem: MenuItem): Boolean = false
-    }
+            override fun onMenuItemSelected(menuItem: MenuItem): Boolean = false
+        }
 
     menuHost.addMenuProvider(provider, viewLifecycleOwner, Lifecycle.State.RESUMED)
 }
@@ -138,20 +127,16 @@ internal inline fun Fragment.runIfFragmentIsAttached(block: () -> Unit) {
     }
 }
 
-/**
- * Hides the activity toolbar.
- * Throws if the fragment is not attached to an [AppCompatActivity].
- */
+/** Hides the activity toolbar. Throws if the fragment is not attached to an [AppCompatActivity]. */
 fun Fragment.hideToolbar() {
     (requireActivity() as AppCompatActivity).supportActionBar?.hide()
 }
 
 /**
- * Pops the backstack to force users to re-auth if they put the app in the background and return to
- * it while being inside a secured flow (e.g. logins or credit cards).
+ * Pops the backstack to force users to re-auth if they put the app in the background and return to it while being
+ * inside a secured flow (e.g. logins or credit cards).
  *
- * Does nothing if the user is currently navigating to any of the [destinations] given as a
- * parameter.
+ * Does nothing if the user is currently navigating to any of the [destinations] given as a parameter.
  */
 fun Fragment.redirectToReAuth(
     destinations: List<Int>,
@@ -164,8 +149,7 @@ fun Fragment.redirectToReAuth(
         activity?.invalidateOptionsMenu()
         when (currentLocation) {
             R.id.creditCardEditorFragment,
-            R.id.creditCardsManagementFragment,
-            -> {
+            R.id.creditCardsManagementFragment -> {
                 findNavController().popBackStack(R.id.autofillSettingFragment, false)
             }
         }
@@ -182,13 +166,15 @@ fun Fragment.breadcrumb(
         Breadcrumb(
             category = this::class.java.simpleName,
             message = message,
-            data = data + mapOf(
-                "instance" to hashCode().toString(),
-                "activityInstance" to activity?.hashCode().toString(),
-                "activityName" to activityName,
-            ),
+            data =
+                data +
+                    mapOf(
+                        "instance" to hashCode().toString(),
+                        "activityInstance" to activity?.hashCode().toString(),
+                        "activityName" to activityName,
+                    ),
             level = Breadcrumb.Level.INFO,
-        ),
+        )
     )
 }
 
@@ -199,24 +185,16 @@ fun Fragment.breadcrumb(
  */
 fun Fragment.secure() {
     if (!requireComponents.settings.allowScreenCaptureInSecureScreens) {
-        this.activity?.window?.addFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-        )
+        this.activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
     }
 }
 
-/**
- * Clears the [WindowManager.LayoutParams.FLAG_SECURE] flag for the current activity window.
- */
+/** Clears the [WindowManager.LayoutParams.FLAG_SECURE] flag for the current activity window. */
 fun Fragment.removeSecure() {
-    this.activity?.window?.clearFlags(
-        WindowManager.LayoutParams.FLAG_SECURE,
-    )
+    this.activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
 }
 
-/**
- * Register a request to start an activity for result.
- */
+/** Register a request to start an activity for result. */
 fun Fragment.registerForActivityResult(
     onFailure: (result: ActivityResult) -> Unit = {},
     onSuccess: (result: ActivityResult) -> Unit,
@@ -230,142 +208,27 @@ fun Fragment.registerForActivityResult(
     }
 }
 
-/**
- *  Checks whether the current fragment is running on a large window.
- */
+/** Checks whether the current fragment is running on a large window. */
 fun Fragment.isLargeWindow(): Boolean {
     return requireContext().isLargeWindow()
 }
 
-/**
- * Checks whether the current fragment is running on a tablet.
- */
+/** Checks whether the current fragment is running on a tablet. */
 fun Fragment.isLargeScreenSize(): Boolean {
     return requireContext().isLargeScreenSize()
 }
 
-/**
- * Checks whether the app's current window height is at least more than [TALL_SCREEN_HEIGHT_DP].
- */
+/** Checks whether the app's current window height is at least more than [TALL_SCREEN_HEIGHT_DP]. */
 fun Fragment.isTallWindow(): Boolean {
     return requireContext().isTallWindow()
 }
 
-/**
- * Checks whether the app's current window width is at least more than [WIDE_SCREEN_WIDTH_DP].
- */
+/** Checks whether the app's current window width is at least more than [WIDE_SCREEN_WIDTH_DP]. */
 fun Fragment.isWideWindow(): Boolean {
     return requireContext().isWideWindow()
 }
 
-/**
- * Returns the height of the bottom toolbar.
- *
- * The bottom toolbar can consist of:
- *  - a combination of address bar, navigation bar & a microsurvey.
- *  - be absent.
- *
- * @param includeNavBarIfEnabled If true and the navigation bar feature is enabled it's height
- * will be included in the calculation.
- */
-fun Fragment.getBottomToolbarHeight(includeNavBarIfEnabled: Boolean = true): Int {
-    val settings = requireComponents.settings
-
-    val isMicrosurveyEnabled = settings.shouldShowMicrosurveyPrompt
-    val isToolbarAtBottom = settings.toolbarPosition == ToolbarPosition.BOTTOM
-    val isNavBarEnabled = settings.shouldUseExpandedToolbar && isTallWindow() && !isWideWindow()
-
-    val microsurveyHeight = if (isMicrosurveyEnabled) {
-        pixelSizeFor(R.dimen.browser_microsurvey_height)
-    } else {
-        0
-    }
-
-    val toolbarHeight = if (isToolbarAtBottom) {
-        settings.browserToolbarHeight
-    } else {
-        0
-    }
-
-    val navBarHeight =
-        if (includeNavBarIfEnabled && isNavBarEnabled) {
-        pixelSizeFor(
-            if (isToolbarAtBottom) {
-                R.dimen.browser_navbar_height_small
-            } else {
-                R.dimen.browser_navbar_height
-            },
-        )
-    } else {
-        0
-    }
-
-    return microsurveyHeight + toolbarHeight + navBarHeight
-}
-
-/**
- * Returns the height of the top toolbar.
- *
- * @param includeTabStripIfAvailable If true and the tab strip feature is enabled it's height
- * will be included in the calculation.
- */
-fun Fragment.getTopToolbarHeight(includeTabStripIfAvailable: Boolean = true): Int {
-    val settings = requireComponents.settings
-    val isToolbarAtTop = settings.toolbarPosition == ToolbarPosition.TOP
-    val toolbarHeight = settings.browserToolbarHeight
-
-    return if (includeTabStripIfAvailable && settings.isTabStripEnabled) {
-        toolbarHeight + pixelSizeFor(R.dimen.tab_strip_height)
-    } else if (isToolbarAtTop) {
-        toolbarHeight
-    } else {
-        0
-    }
-}
-
-/**
- *
- * Manages the state of the microsurvey prompt on orientation change.
- *
- * @param parent The top level [ViewGroup] of the fragment, which will be hosting the [bottomToolbarContainerView].
- * @param bottomToolbarContainerView The [ToolbarContainerView] hosting the microsurvey prompt.
- * @param reinitializeMicrosurveyPrompt lambda for re-initializing the microsurvey prompt inside the host [Fragment].
- */
-fun Fragment.updateMicrosurveyPromptForConfigurationChange(
-    parent: ViewGroup,
-    bottomToolbarContainerView: ToolbarContainerView?,
-    reinitializeMicrosurveyPrompt: () -> Unit,
-) {
-    if (!requireContext().isLandscape()) {
-        // Already having a bottomContainer after switching back to portrait mode will happen when address bar is
-        // positioned at bottom and also as an edge case if configurationChange is called after onCreateView with the
-        // same orientation. Observed on a foldable emulator while going from single screen portrait mode to landscape
-        // tablet, back and forth.
-        bottomToolbarContainerView?.let {
-            parent.removeView(it)
-        }
-
-        reinitializeMicrosurveyPrompt()
-    }
-}
-
-/**
- * Returns the pixel size for the given dimension resource ID.
- *
- * This is a wrapper around [Resources.getDimensionPixelSize], reducing verbosity when accessing
- * dimension values from a [Fragment].
- *
- * @param resId Resource ID of the dimension.
- * @return The pixel size corresponding to the given dimension resource.
- */
-@Suppress("Resources.GetDimensionPixelSizeInsteadOfPixelSizeFor")
-fun Fragment.pixelSizeFor(
-    @DimenRes resId: Int,
-) = resources.getDimensionPixelSize(resId)
-
-/**
- * Opens a [url] in a new tab and navigates to the browser fragment.
- */
+/** Opens a [url] in a new tab and navigates to the browser fragment. */
 fun Fragment.openInNewTab(url: String) {
     requireComponents.useCases.tabsUseCases.addTab(url)
     findNavController().navigate(R.id.browserFragment)

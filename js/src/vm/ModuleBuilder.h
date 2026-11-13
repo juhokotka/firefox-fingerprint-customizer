@@ -7,7 +7,8 @@
 
 #include "mozilla/Attributes.h"  // MOZ_STACK_CLASS
 
-#include "jstypes.h"                // JS_PUBLIC_API
+#include "jstypes.h"  // JS_PUBLIC_API
+
 #include "frontend/EitherParser.h"  // js::frontend::EitherParser
 #include "frontend/ParserAtom.h"    // js::frontend::TaggedParserAtomIndex
 #include "frontend/Stencil.h"       // js::frontend::StencilModuleEntry
@@ -40,6 +41,10 @@ class MOZ_STACK_CLASS ModuleBuilder {
       : ModuleBuilder(fc, frontend::EitherParser(parser)) {}
 
   bool processImport(frontend::BinaryNode* importNode);
+  bool processImportWithPhase(frontend::NameNode* localNameNode,
+                              frontend::TaggedParserAtomIndex specifier,
+                              frontend::NameNode* moduleSpec,
+                              ImportPhase phase);
   bool processExport(frontend::ParseNode* exportNode);
   bool processExportFrom(frontend::BinaryNode* exportNode);
 

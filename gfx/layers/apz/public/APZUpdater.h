@@ -8,14 +8,14 @@
 #include <deque>
 #include <unordered_map>
 
-#include "base/platform_thread.h"  // for PlatformThreadId
 #include "LayersTypes.h"
-#include "mozilla/layers/WebRenderScrollData.h"
+#include "Units.h"
+#include "base/platform_thread.h"  // for PlatformThreadId
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/layers/WebRenderScrollData.h"
 #include "mozilla/webrender/WebRenderTypes.h"
 #include "nsThreadUtils.h"
-#include "Units.h"
 
 namespace mozilla {
 

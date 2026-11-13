@@ -5,10 +5,11 @@
 #ifndef GLCONTEXTEGL_H_
 #define GLCONTEXTEGL_H_
 
+#include <memory>
+
 #include "GLContext.h"
 #include "GLLibraryEGL.h"
 #include "nsRegion.h"
-#include <memory>
 
 namespace mozilla {
 namespace layers {
@@ -34,7 +35,18 @@ inline std::shared_ptr<EglDisplay> CreateSoftwareEglDisplay(
   if (!lib) {
     return nullptr;
   }
-  return lib->CreateDisplay(false, true, out_failureId);
+  return lib->CreateDisplay(EGLCreateDisplayFlags{.mForceSoftware = true},
+                            out_failureId);
+}
+
+inline std::shared_ptr<EglDisplay> CreateHighPowerEglDisplay(
+    nsACString* const out_failureId) {
+  const auto lib = GLLibraryEGL::Get(out_failureId);
+  if (!lib) {
+    return nullptr;
+  }
+  return lib->CreateDisplay(EGLCreateDisplayFlags{.mPreferHighPower = true},
+                            out_failureId);
 }
 
 // -
@@ -71,6 +83,10 @@ class GLContextEGL final : public GLContext {
 
   virtual bool IsANGLE() const override { return mEgl->mLib->IsANGLE(); }
   virtual bool IsWARP() const override { return mEgl->mIsWARP; }
+  virtual bool IsD3DANGLE() const override { return mEgl->mLib->IsD3DANGLE(); }
+  virtual bool IsMetalANGLE() const override {
+    return mEgl->mLib->IsMetalANGLE();
+  }
 
   virtual bool BindTexImage() override;
 
@@ -122,7 +138,7 @@ class GLContextEGL final : public GLContext {
       const std::shared_ptr<EglDisplay> display,
       const GLContextCreateDesc& desc, nsACString* const out_failureId);
 
-  static EGLSurface CreateEGLSurfaceForCompositorWidget(
+  EGLSurface CreateEGLSurfaceForCompositorWidget(
       widget::CompositorWidget* aCompositorWidget, const EGLConfig aConfig);
 
   static void DestroySurface(EglDisplay&, const EGLSurface aSurface);

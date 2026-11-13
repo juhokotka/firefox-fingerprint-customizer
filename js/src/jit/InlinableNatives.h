@@ -7,13 +7,9 @@
 
 #include <stdint.h>  // For uint16_t
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-#  define INLINABLE_EXPLICIT_RESOURCE_MANAGEMENENT_LIST(_) \
-    _(IntrinsicGuardToAsyncDisposableStack)                \
-    _(IntrinsicGuardToDisposableStack)
-#else
-#  define INLINABLE_EXPLICIT_RESOURCE_MANAGEMENENT_LIST(_)
-#endif
+#define INLINABLE_EXPLICIT_RESOURCE_MANAGEMENENT_LIST(_) \
+  _(IntrinsicGuardToAsyncDisposableStack)                \
+  _(IntrinsicGuardToDisposableStack)
 
 #ifdef FUZZING_JS_FUZZILLI
 #  define INLINABLE_NATIVE_FUZZILLI_LIST(_) _(FuzzilliHash)
@@ -94,7 +90,20 @@
   _(DateNow)                                       \
   _(DateParse)                                     \
                                                    \
+  _(DurationYears)                                 \
+  _(DurationMonths)                                \
+  _(DurationWeeks)                                 \
+  _(DurationDays)                                  \
+  _(DurationHours)                                 \
+  _(DurationMinutes)                               \
+  _(DurationSeconds)                               \
+  _(DurationMilliseconds)                          \
+  _(DurationMicroseconds)                          \
+  _(DurationNanoseconds)                           \
+                                                   \
   _(FunctionBind)                                  \
+                                                   \
+  _(InstantEpochMilliseconds)                      \
                                                    \
   _(IntlGuardToSegments)                           \
   _(IntlGuardToSegmentIterator)                    \
@@ -146,6 +155,20 @@
   _(Number)                                        \
   _(NumberParseInt)                                \
   _(NumberToString)                                \
+                                                   \
+  _(PlainTimeHour)                                 \
+  _(PlainTimeMinute)                               \
+  _(PlainTimeSecond)                               \
+  _(PlainTimeMillisecond)                          \
+  _(PlainTimeMicrosecond)                          \
+  _(PlainTimeNanosecond)                           \
+                                                   \
+  _(PlainDateTimeHour)                             \
+  _(PlainDateTimeMinute)                           \
+  _(PlainDateTimeSecond)                           \
+  _(PlainDateTimeMillisecond)                      \
+  _(PlainDateTimeMicrosecond)                      \
+  _(PlainDateTimeNanosecond)                       \
                                                    \
   _(ReflectGetPrototypeOf)                         \
                                                    \
@@ -221,6 +244,8 @@
   _(WeakMapGet)                                    \
   _(WeakMapHas)                                    \
   _(WeakSetHas)                                    \
+                                                   \
+  _(ZonedDateTimeEpochMilliseconds)                \
                                                    \
   _(IntrinsicUnsafeSetReservedSlot)                \
   _(IntrinsicUnsafeGetReservedSlot)                \
@@ -298,6 +323,8 @@ INLINABLE_NATIVE_LIST(ADD_NATIVE)
 #undef ADD_NATIVE
 
 const JSClass* InlinableNativeGuardToClass(InlinableNative native);
+
+const char* InlinableNativeToString(InlinableNative native);
 
 bool CanInlineNativeCrossRealm(InlinableNative native);
 

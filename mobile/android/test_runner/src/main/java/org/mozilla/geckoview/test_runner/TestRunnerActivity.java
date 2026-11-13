@@ -26,7 +26,6 @@ import java.util.Objects;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.mozilla.geckoview.AllowOrDeny;
-import org.mozilla.geckoview.BuildConfig;
 import org.mozilla.geckoview.ContentBlocking;
 import org.mozilla.geckoview.ExperimentDelegate;
 import org.mozilla.geckoview.GeckoDisplay;
@@ -231,6 +230,12 @@ public class TestRunnerActivity extends Activity {
         @Override
         public GeckoResult<GeckoSession> onNewTab(
             final WebExtension source, final WebExtension.CreateTabDetails details) {
+
+          // TODO bug 1372178: extensions cannot set (non-)privateness.
+          // NOTE: If we ever introduce support for private browsing in
+          // TestRunnerActivity, we need to have similar checks as
+          // GeckoWebExtension.kt (registerTabHandler, onNewTab).
+
           GeckoSessionSettings settings = null;
           if (details.cookieStoreId != null) {
             settings = new GeckoSessionSettings.Builder().contextId(details.cookieStoreId).build();
@@ -493,7 +498,6 @@ public class TestRunnerActivity extends Activity {
                   .safeBrowsingProviders(google, googleLegacy, google5)
                   .build())
           .lowMemoryDetection(false) // Avoid unpredictability in tests
-          .isolatedProcessEnabled(BuildConfig.MOZ_ANDROID_CONTENT_SERVICE_ISOLATED_PROCESS)
           .appZygoteProcessEnabled(
               Objects.equals(
                   System.getenv("MOZ_ANDROID_CONTENT_SERVICE_ISOLATED_WITH_ZYGOTE"), "1"));

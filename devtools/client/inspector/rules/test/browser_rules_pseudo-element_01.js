@@ -10,7 +10,6 @@ const PSEUDO_PREF = "devtools.inspector.show_pseudo_elements";
 
 add_task(async function () {
   await pushPref(PSEUDO_PREF, true);
-  await pushPref("dom.text_fragments.enabled", true);
   await pushPref("layout.css.modern-range-pseudos.enabled", true);
   await pushPref("dom.select.customizable_select.enabled", true);
   await pushPref("full-screen-api.transition-duration.enter", "0 0");
@@ -184,6 +183,11 @@ async function testTopRight(inspector, view) {
     !getPseudoElementContainer(view).hidden,
     "Pseudo Elements are shown again after clicking twisty"
   );
+  expander.click();
+  ok(
+    getPseudoElementContainer(view).hidden,
+    "Pseudo Elements are hidden again after re-clicking twisty"
+  );
 }
 
 async function testBottomRight(inspector, view) {
@@ -313,6 +317,14 @@ async function testListItem(inspector, view) {
 
 async function testBackdrop(inspector, view) {
   info("Test ::backdrop for dialog element");
+  const onMarkupMutation = inspector.once("markupmutation");
+  await SpecialPowers.spawn(gBrowser.selectedBrowser, [], () => {
+    // This is the only way to have the ::backdrop style to be applied
+    content.document.querySelector("dialog").showModal();
+    content.document.querySelector("#in-dialog").showPopover();
+  });
+  await onMarkupMutation;
+
   await assertPseudoElementRulesNumbersForSelector("dialog", inspector, view, {
     elementRules: 3,
     backdropRules: 1,
@@ -497,6 +509,11 @@ async function testCustomizableSelect(inspector, view) {
       header: "Pseudo-elements",
     },
     {
+      selector: `#customizable-select::picker(select)`,
+      ancestorRulesData: null,
+      declarations: [{ name: "border", value: "1px solid purple" }],
+    },
+    {
       selector: `#customizable-select::picker-icon`,
       ancestorRulesData: null,
       declarations: [{ name: "color", value: "purple" }],
@@ -509,6 +526,11 @@ async function testCustomizableSelect(inspector, view) {
       ancestorRulesData: null,
       selectorEditable: false,
       declarations: [],
+    },
+    {
+      selector: `#customizable-select`,
+      ancestorRulesData: null,
+      declarations: [{ name: "appearance", value: "base-select" }],
     },
     {
       selector: `*`,
@@ -568,6 +590,47 @@ async function testCustomizableSelect(inspector, view) {
     }
   );
   assertHeaders(view);
+
+  info("Check Rule View content when selecting the ::checkmark element");
+  const optionNodeFront = await getNodeFront(
+    "#customizable-select option",
+    inspector
+  );
+  // The ::checkmark pseudo element only exists when the select is opened, so show the
+  // picker so we can see them
+  await showCustomizableSelectPicker(inspector, "#customizable-select");
+  const { nodes: optionChildren } =
+    await inspector.walker.children(optionNodeFront);
+  const optionCheckmarkNodeFront = optionChildren[0];
+  await selectNode(optionCheckmarkNodeFront, inspector, "test");
+  await checkRuleViewContent(view, [
+    {
+      selector: `#customizable-select option::checkmark`,
+      ancestorRulesData: null,
+      declarations: [
+        { name: "color", value: "tomato" },
+        { name: "content", value: `"-"` },
+      ],
+    },
+    {
+      header: "Inherited from option#customizable-select-option",
+    },
+    {
+      selector: `*`,
+      ancestorRulesData: null,
+      inherited: true,
+      declarations: [{ name: "cursor", value: "default" }],
+    },
+    {
+      header: "Inherited from body",
+    },
+    {
+      selector: `body`,
+      ancestorRulesData: null,
+      inherited: true,
+      declarations: [{ name: "color", value: "#333", overridden: true }],
+    },
+  ]);
 }
 
 function convertTextPropsToString(textProps) {

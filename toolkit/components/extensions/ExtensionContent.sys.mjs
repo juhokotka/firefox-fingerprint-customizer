@@ -162,12 +162,14 @@ class CacheMap extends DefaultMap {
   }
 }
 
+/** @typedef {Promise<PrecompiledScript> & { script?: PrecompiledScript }} PromisedScript */
+
 class ScriptCache extends CacheMap {
   constructor(options, extension) {
     super(
       SCRIPT_EXPIRY_TIMEOUT_MS,
       url => {
-        /** @type {Promise<PrecompiledScript> & { script?: PrecompiledScript }} */
+        /** @type {PromisedScript} */
         let promise = ChromeUtils.compileScript(url, options);
         promise.then(script => {
           promise.script = script;
@@ -393,12 +395,16 @@ class Script {
 
     // If set jsDynamicScripts takes precedence over js.
     // Requires scriptCache and world to be set.
-    /** @type {Array<Promise<PrecompiledScript> & {script?: PrecompiledScript}>} */
+    /** @type {PromisedScript[]} */
     this.jsDynamicScripts = this.matcher.jsExecuteScriptSources?.map(s =>
       this.#compileScriptSource(s)
     );
 
-    /** @type {WeakSet<Document>} A set of documents injected into. */
+    /**
+     * A set of documents injected into.
+     *
+     * @type {WeakSet<Document>}
+     */
     this.injectedInto = new WeakSet();
   }
 
@@ -443,7 +449,7 @@ class Script {
       };
       // Note: this logic is similar to this.scriptCaches.get(...), but we are
       // not using scriptCaches because we don't want the URL to be cached.
-      /** @type {Promise<PrecompiledScript> & {script?: PrecompiledScript}} */
+      /** @type {PromisedScript} */
       const promisedScript = ChromeUtils.compileScript(dataUrl, options);
       promisedScript.then(script => {
         promisedScript.script = script;
@@ -470,6 +476,7 @@ class Script {
         );
       },
     };
+    /** @type {PromisedScript} */
     const promisedScript = Promise.resolve(precompiledScriptImitation);
     promisedScript.script = precompiledScriptImitation;
     return promisedScript;
@@ -952,6 +959,7 @@ class UserScript extends Script {
       sandboxPrototype: contentWindow,
       sameZoneAs: contentWindow,
       wantXrays: true,
+      isWebExtensionContentScript: true,
       wantGlobalProperties: [
         "XMLHttpRequest",
         "fetch",
@@ -975,9 +983,10 @@ class UserScript extends Script {
   }
 }
 
+/** @type {WeakMap<WebExtensionContentScript, UserScript | Script>} */
 var contentScripts = new DefaultWeakMap(matcher => {
-  const extension = lazy.ExtensionProcessScript.extensions.get(
-    matcher.extension
+  const extension = /** @type {ExtensionChild & ExtensionChildContent} */ (
+    lazy.ExtensionProcessScript.extensions.get(matcher.extension)
   );
 
   if ("userScriptOptions" in matcher) {

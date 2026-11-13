@@ -44,10 +44,14 @@ module.exports = {
     `${projectRoot}/browser/components/webrtc/content/**/*.stories.mjs`,
     // AI Window components stories
     `${projectRoot}/browser/components/aiwindow/ui/**/*.stories.mjs`,
+    // Genai components stories
+    `${projectRoot}/browser/components/genai/content/**/*.stories.mjs`,
     // Multiline editor components stories
     `${projectRoot}/browser/components/multilineeditor/**/*.stories.@(mjs|md)`,
     // Trust Panel components stories
     `${projectRoot}/browser/components/controlcenter/content/components/**/*.stories.mjs`,
+    // Widget components stories
+    `${projectRoot}/browser/components/widgets/content/**/*.stories.@(mjs|md)`,
     // Everything else
     "../stories/**/*.stories.@(js|jsx|mjs|ts|tsx|md)",
     // Design system files
@@ -135,7 +139,15 @@ module.exports = {
 
     // Replace the default CSS rule with a rule to emit a separate CSS file and
     // export the URL. This allows us to rewrite the source to use CSS imports
-    // via the moz-styles-loader.
+    // via the moz-styles-loader. CSS module script imports (`import styles
+    // from "some.css" with { type: "css" }`) are rewritten by the
+    // moz-styles-loader to reference the same file with a `?css-module`
+    // resourceQuery instead, so they're run through css-loader's
+    // `exportType: "css-style-sheet"` to produce a CSSStyleSheet default
+    // export like a real CSS module script would, rather than a URL.
+    // `import: false` disables css-loader's handling of `@import` rules,
+    // since it otherwise fails to build for stylesheets that `@import` a
+    // chrome:// or moz-src:/// URI (see bug 1851043).
     let cssFileTest = /\.css$/.toString();
     let cssRuleIndex = config.module.rules.findIndex(
       rule => rule.test.toString() === cssFileTest
@@ -143,10 +155,23 @@ module.exports = {
     config.module.rules[cssRuleIndex] = {
       test: /\.css$/,
       exclude: [/\.storybook/, /node_modules/],
-      type: "asset/resource",
-      generator: {
-        filename: "[name].[contenthash].css",
-      },
+      oneOf: [
+        {
+          resourceQuery: /css-module/,
+          use: [
+            {
+              loader: "css-loader",
+              options: { import: false, exportType: "css-style-sheet" },
+            },
+          ],
+        },
+        {
+          type: "asset/resource",
+          generator: {
+            filename: "[name].[contenthash].css",
+          },
+        },
+      ],
     };
 
     // We're adding a rule for files matching this pattern in order to support

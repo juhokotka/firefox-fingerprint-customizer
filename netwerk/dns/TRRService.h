@@ -5,16 +5,16 @@
 #ifndef TRRService_h_
 #define TRRService_h_
 
+#include "TRR.h"
+#include "TRRServiceBase.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/DataMutex.h"
 #include "nsHostResolver.h"
+#include "nsICaptivePortalService.h"
 #include "nsIObserver.h"
 #include "nsITimer.h"
-#include "nsWeakReference.h"
-#include "TRRServiceBase.h"
-#include "nsICaptivePortalService.h"
 #include "nsTHashSet.h"
-#include "TRR.h"
+#include "nsWeakReference.h"
 
 class nsDNSService;
 class nsIPrefBranch;
@@ -132,9 +132,8 @@ class TRRService : public TRRServiceBase,
 
   void RebuildSuffixList(nsTArray<nsCString>&& aSuffixList);
 
-  nsresult DispatchTRRRequestInternal(TRR* aTrrRequest, bool aWithLock);
   already_AddRefed<nsIThread> TRRThread_locked();
-  already_AddRefed<nsIThread> MainThreadOrTRRThread(bool aWithLock = true);
+  already_AddRefed<nsIEventTarget> MainThreadOrTRRTarget(bool aWithLock = true);
 
   // This method will process the URI and try to set mPrivateURI to that value.
   // Will return true if performed the change (if the value was different)

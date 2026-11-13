@@ -6,10 +6,10 @@
 
 use log::{debug, error, trace};
 use pkcs11_bindings::*;
-use rsclientcerts::manager::{IsSearchingForClientCerts, Manager};
+use rsclientcerts::manager::Manager;
 use rsclientcerts::{
     declare_pkcs11_find_functions, declare_pkcs11_informational_functions,
-    declare_pkcs11_session_functions, declare_pkcs11_sign_functions,
+    declare_pkcs11_pin_functions, declare_pkcs11_session_functions, declare_pkcs11_sign_functions,
     declare_unsupported_pkcs11_functions, log_with_thread_id,
 };
 use std::convert::TryInto;
@@ -21,7 +21,7 @@ use backend::Backend;
 
 /// The singleton `Manager` that handles state with respect to PKCS #11. Only one thread
 /// may use it at a time, but there is no restriction on which threads may use it.
-static MANAGER: Mutex<Option<Manager<Backend, IsGeckoSearchingForClientCerts>>> = Mutex::new(None);
+static MANAGER: Mutex<Option<Manager<Backend>>> = Mutex::new(None);
 
 // Obtaining a handle on the manager is a two-step process. First the mutex must be locked, which
 // (if successful), results in a mutex guard object. We must then get a mutable refence to the
@@ -46,18 +46,6 @@ macro_rules! manager_guard_to_manager {
             None => return CKR_DEVICE_ERROR,
         }
     };
-}
-
-extern "C" {
-    fn IsGeckoSearchingForClientAuthCertificates() -> bool;
-}
-
-struct IsGeckoSearchingForClientCerts;
-
-impl IsSearchingForClientCerts for IsGeckoSearchingForClientCerts {
-    fn is_searching_for_client_certs() -> bool {
-        unsafe { IsGeckoSearchingForClientAuthCertificates() }
-    }
 }
 
 /// This gets called to initialize the module. For this implementation, this consists of
@@ -89,6 +77,7 @@ declare_pkcs11_informational_functions!();
 declare_pkcs11_session_functions!();
 declare_pkcs11_find_functions!();
 declare_pkcs11_sign_functions!();
+declare_pkcs11_pin_functions!();
 declare_unsupported_pkcs11_functions!();
 
 /// To be a valid PKCS #11 module, this list of functions must be supported. At least cryptoki 2.2

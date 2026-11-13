@@ -6,11 +6,11 @@
 #define CacheFileMetadata_h_
 
 #include "CacheFileIOManager.h"
-#include "CacheStorageService.h"
 #include "CacheHashUtils.h"
 #include "CacheObserver.h"
-#include "mozilla/EndianUtils.h"
+#include "CacheStorageService.h"
 #include "mozilla/BasePrincipal.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/NotNull.h"
 #include "nsString.h"
 

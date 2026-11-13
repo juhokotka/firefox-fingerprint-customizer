@@ -659,16 +659,21 @@ nsresult VP8TrackEncoder::Encode(VideoSegment* aSegment) {
 }
 
 nsresult VP8TrackEncoder::PrepareRawFrame(VideoChunk& aChunk) {
-  const gfx::IntSize intrinsicSize = aChunk.mFrame.GetIntrinsicSize();
   RefPtr<Image> img;
   if (aChunk.mFrame.GetForceBlack() || aChunk.IsNull()) {
-    if (!mMuteFrame || mMuteFrame->GetSize() != intrinsicSize) {
-      mMuteFrame = aChunk.mFrame.CloneAsBlackImage();
+    // Generate the black frame at the source image's size, or the encoder's
+    // coded size when the chunk carries no image, matching the real-frame path.
+    Image* chunkImage = aChunk.mFrame.GetImage();
+    const gfx::IntSize blackImageSize =
+        chunkImage ? chunkImage->GetSize()
+                   : gfx::IntSize(mFrameWidth, mFrameHeight);
+    if (!mMuteFrame || mMuteFrame->GetSize() != blackImageSize) {
+      mMuteFrame = aChunk.mFrame.CloneAsBlackImage(blackImageSize);
     }
     if (!mMuteFrame) {
       VP8LOG(LogLevel::Warning, "Failed to allocate black image of size {}x{}",
-             intrinsicSize.width, intrinsicSize.height);
-      return NS_OK;
+             blackImageSize.width, blackImageSize.height);
+      return NS_ERROR_FAILURE;
     }
     img = mMuteFrame;
   } else {

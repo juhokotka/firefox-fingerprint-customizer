@@ -5,6 +5,7 @@
 #ifndef nsPKCS12Blob_h
 #define nsPKCS12Blob_h
 
+#include "ScopedNSSTypes.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
 #include "nsCOMPtr.h"
@@ -13,7 +14,6 @@
 #include "nsTArray.h"
 #include "p12.h"
 #include "prerror.h"
-#include "ScopedNSSTypes.h"
 #include "seccomon.h"
 
 class nsIFile;

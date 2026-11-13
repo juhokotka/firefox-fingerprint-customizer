@@ -6,10 +6,9 @@ import {
   UrlbarProvider,
   UrlbarUtils,
 } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
   UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
   UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
@@ -36,10 +35,10 @@ export class UrlbarProviderClipboard extends UrlbarProvider {
   }
 
   /**
-   * @returns {Values<typeof UrlbarUtils.PROVIDER_TYPE>}
+   * @returns {Values<typeof lazy.UrlbarShared.PROVIDER_TYPE>}
    */
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.PROFILE;
+    return lazy.UrlbarShared.PROVIDER_TYPE.PROFILE;
   }
 
   setPreviousClipboardValue(newValue) {
@@ -67,8 +66,10 @@ export class UrlbarProviderClipboard extends UrlbarProvider {
     ) {
       return false;
     }
-    textFromClipboard =
-      UrlbarUtils.sanitizeTextFromClipboard(textFromClipboard);
+    textFromClipboard = lazy.UrlbarShared.sanitizeTextFromClipboard(
+      textFromClipboard,
+      UrlbarUtils.getFixupPrimitives(textFromClipboard, queryContext.isPrivate)
+    );
     const validUrl = this.#validUrl(textFromClipboard);
     if (!validUrl) {
       return false;
@@ -120,9 +121,12 @@ export class UrlbarProviderClipboard extends UrlbarProvider {
       type: lazy.UrlbarShared.RESULT_TYPE.URL,
       source: lazy.UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
       payload: {
-        title: UrlbarUtils.prepareUrlForDisplay(this.#previousClipboard.value, {
-          trimURL: false,
-        }),
+        title: lazy.UrlbarShared.prepareUrlForDisplay(
+          this.#previousClipboard.value,
+          {
+            trimURL: false,
+          }
+        ),
         url: this.#previousClipboard.value,
         icon: "chrome://global/skin/icons/clipboard.svg",
         isBlockable: true,
@@ -132,24 +136,30 @@ export class UrlbarProviderClipboard extends UrlbarProvider {
     addCallback(this, result);
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   */
   onEngagement(queryContext, controller, details) {
     this.#previousClipboard.impressionsLeft = 0; // User has picked the suggested clipboard result
     // Handle commands.
-    this.#handlePossibleCommand(
-      controller.view,
-      details.result,
-      details.selType
-    );
+    this.#handlePossibleCommand(controller, details.result, details.selType);
   }
 
   onImpression() {
     this.#previousClipboard.impressionsLeft--;
   }
 
-  #handlePossibleCommand(view, result, selType) {
+  /**
+   * @param {UrlbarParentController} controller
+   * @param {UrlbarResult} result
+   * @param {string} selType
+   */
+  #handlePossibleCommand(controller, result, selType) {
     switch (selType) {
       case RESULT_MENU_COMMANDS.DISMISS:
-        view.controller.removeResult(result);
+        controller.removeResult(result);
         this.#previousClipboard.impressionsLeft = 0;
         break;
     }

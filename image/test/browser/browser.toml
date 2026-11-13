@@ -38,6 +38,9 @@ skip-if = [
 ]
 
 ["browser_mozicon_file.js"]
+skip-if = [
+  "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && display == 'wayland'", # Bug 2057880
+]
 
 ["browser_mozicon_file_sandbox_headless.js"]
 run-if = [
@@ -47,6 +50,15 @@ run-if = [
 ["browser_offscreen_image_in_out_of_process_iframe.js"]
 https_first_disabled = true
 support-files = ["empty.html"]
+
+["browser_remote_image_size.js"]
+support-files = [
+  "firebird_200x100.png",
+  "intrinsic_size_100x3000.svg",
+  "intrinsic_size_3000x100.svg",
+  "intrinsic_size_none.svg",
+  "intrinsic_size_none_viewBox_3000x100.svg",
+]
 
 ["browser_remote_image_svg.js"]
 support-files = ["file_light_dark.svg"]

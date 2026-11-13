@@ -21,7 +21,6 @@
 #include "wasm/WasmMemory.h"
 
 #include "jit/MacroAssembler-inl.h"
-
 #include "wasm/WasmBCClass-inl.h"
 #include "wasm/WasmBCCodegen-inl.h"
 #include "wasm/WasmBCRegDefs-inl.h"
@@ -32,6 +31,7 @@ namespace js {
 namespace wasm {
 
 using mozilla::Nothing;
+using mozilla::Some;
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -466,8 +466,6 @@ void BaseCompiler::prepareMemoryAccess(MemoryAccessDesc* access,
     trap(Trap::OutOfBounds);
     masm.bind(&ok);
   }
-
-  ToValidIndex(masm, ptr);
 }
 
 template <typename RegAddressType>
@@ -558,22 +556,59 @@ RegPtr BaseCompiler::maybeLoadInstanceForAccess(const MemoryAccessDesc* access,
 
 //////////////////////////////////////////////////////////////////////////////
 //
+// Stackmap creation helpers for loads and stores.
+
+// For debug compilation only, create a stackmap and register it at
+// `fcr.resumeOffset()`, assuming that it is for a trapping instruction of kind
+// Trap::OutOfBounds.  Note that `fcr` might be invalid due to a preceding OOM,
+// and so we have to check it at this point.
+static void MaybeAddDebugStackMapForTrapOOB(BaseCompiler* bc,
+                                            FaultingCodeRange fcr) {
+  if (MOZ_UNLIKELY(bc->compilerEnv_.debugEnabled()) && fcr.isValid()) {
+    bc->masm.propagateOOM(bc->createStackMap(Some(Trap::OutOfBounds), fcr,
+                                             HasDebugFrameWithLiveRefs::Maybe));
+  }
+}
+
+#if !defined(JS_64BIT) && !defined(JS_CODEGEN_NONE)
+// The same for a pair of offsets.
+static void MaybeAddDebugStackMapPairForTrapOOB(BaseCompiler* bc,
+                                                FaultingCodeRangePair fcrp) {
+  if (MOZ_UNLIKELY(bc->compilerEnv_.debugEnabled())) {
+    if (fcrp.first.isValid()) {
+      bc->masm.propagateOOM(
+          bc->createStackMap(Some(Trap::OutOfBounds), fcrp.first,
+                             HasDebugFrameWithLiveRefs::Maybe));
+    }
+    if (fcrp.second.isValid()) {
+      bc->masm.propagateOOM(
+          bc->createStackMap(Some(Trap::OutOfBounds), fcrp.second,
+                             HasDebugFrameWithLiveRefs::Maybe));
+    }
+  }
+}
+#endif
+
+//////////////////////////////////////////////////////////////////////////////
+//
 // Load and store.
 
-void BaseCompiler::executeLoad(MemoryAccessDesc* access, AccessCheck* check,
-                               RegPtr instance, RegPtr memoryBase, RegI32 ptr,
-                               AnyReg dest, RegI32 temp) {
+void BaseCompiler::executeLoad(MemoryAccessDesc* access, RegPtr instance,
+                               RegPtr memoryBase, RegI32 ptr, AnyReg dest,
+                               RegI32 temp, ZeroExtendIndex zeroExtend) {
   // Emit the load. At this point, 64-bit offsets will have been folded away by
   // prepareMemoryAccess.
 #if defined(JS_CODEGEN_X64)
   MOZ_ASSERT(temp.isInvalid());
   Operand srcAddr(memoryBase, ptr, TimesOne, access->offset32());
 
+  FaultingCodeRange fcr;
   if (dest.tag == AnyReg::I64) {
-    masm.wasmLoadI64(*access, srcAddr, dest.i64());
+    fcr = masm.wasmLoadI64(*access, srcAddr, dest.i64());
   } else {
-    masm.wasmLoad(*access, srcAddr, dest.any());
+    fcr = masm.wasmLoad(*access, srcAddr, dest.any());
   }
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 #elif defined(JS_CODEGEN_X86)
   MOZ_ASSERT(memoryBase.isInvalid() && temp.isInvalid());
   masm.addPtr(
@@ -583,68 +618,90 @@ void BaseCompiler::executeLoad(MemoryAccessDesc* access, AccessCheck* check,
 
   if (dest.tag == AnyReg::I64) {
     MOZ_ASSERT(dest.i64() == specific_.abiReturnRegI64);
-    masm.wasmLoadI64(*access, srcAddr, dest.i64());
+    FaultingCodeRangePair fcrp =
+        masm.wasmLoadI32x2(*access, srcAddr, dest.i64());
+    MaybeAddDebugStackMapPairForTrapOOB(this, fcrp);
   } else {
     // For 8 bit loads, this will generate movsbl or movzbl, so
     // there's no constraint on what the output register may be.
-    masm.wasmLoad(*access, srcAddr, dest.any());
+    FaultingCodeRange fcr = masm.wasmLoad(*access, srcAddr, dest.any());
+    MaybeAddDebugStackMapForTrapOOB(this, fcr);
   }
 #elif defined(JS_CODEGEN_MIPS64)
+  if (zeroExtend == ZeroExtendIndex::Yes) {
+    ToValidIndex(masm, ptr);
+  }
+  FaultingCodeRange fcr;
   if (IsUnaligned(*access)) {
     switch (dest.tag) {
       case AnyReg::I64:
-        masm.wasmUnalignedLoadI64(*access, memoryBase, ptr, ptr, dest.i64(),
-                                  temp);
+        fcr = masm.wasmUnalignedLoadI64(*access, memoryBase, ptr, ptr,
+                                        dest.i64(), temp);
         break;
       case AnyReg::F32:
-        masm.wasmUnalignedLoadFP(*access, memoryBase, ptr, ptr, dest.f32(),
-                                 temp);
+        fcr = masm.wasmUnalignedLoadFP(*access, memoryBase, ptr, ptr,
+                                       dest.f32(), temp);
         break;
       case AnyReg::F64:
-        masm.wasmUnalignedLoadFP(*access, memoryBase, ptr, ptr, dest.f64(),
-                                 temp);
+        fcr = masm.wasmUnalignedLoadFP(*access, memoryBase, ptr, ptr,
+                                       dest.f64(), temp);
         break;
       case AnyReg::I32:
-        masm.wasmUnalignedLoad(*access, memoryBase, ptr, ptr, dest.i32(), temp);
+        fcr = masm.wasmUnalignedLoad(*access, memoryBase, ptr, ptr, dest.i32(),
+                                     temp);
         break;
       default:
         MOZ_CRASH("Unexpected type");
     }
   } else {
     if (dest.tag == AnyReg::I64) {
-      masm.wasmLoadI64(*access, memoryBase, ptr, ptr, dest.i64());
+      fcr = masm.wasmLoadI64(*access, memoryBase, ptr, ptr, dest.i64());
     } else {
-      masm.wasmLoad(*access, memoryBase, ptr, ptr, dest.any());
+      fcr = masm.wasmLoad(*access, memoryBase, ptr, ptr, dest.any());
     }
   }
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 #elif defined(JS_CODEGEN_ARM)
   MOZ_ASSERT(temp.isInvalid());
   if (dest.tag == AnyReg::I64) {
-    masm.wasmLoadI64(*access, memoryBase, ptr, ptr, dest.i64());
+    FaultingCodeRangePair fcrp =
+        masm.wasmLoadI32x2(*access, memoryBase, ptr, ptr, dest.i64());
+    MaybeAddDebugStackMapPairForTrapOOB(this, fcrp);
   } else {
-    masm.wasmLoad(*access, memoryBase, ptr, ptr, dest.any());
+    FaultingCodeRange fcr =
+        masm.wasmLoad(*access, memoryBase, ptr, ptr, dest.any());
+    MaybeAddDebugStackMapForTrapOOB(this, fcr);
   }
 #elif defined(JS_CODEGEN_ARM64)
   MOZ_ASSERT(temp.isInvalid());
+  FaultingCodeRange fcr;
   if (dest.tag == AnyReg::I64) {
-    masm.wasmLoadI64(*access, memoryBase, ptr, dest.i64());
+    fcr = masm.wasmLoadI64(*access, memoryBase, ptr, dest.i64());
   } else {
-    masm.wasmLoad(*access, memoryBase, ptr, dest.any());
+    fcr = masm.wasmLoad(*access, memoryBase, ptr, dest.any());
   }
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 #elif defined(JS_CODEGEN_LOONG64)
   MOZ_ASSERT(temp.isInvalid());
-  if (dest.tag == AnyReg::I64) {
-    masm.wasmLoadI64(*access, memoryBase, ptr, ptr, dest.i64());
-  } else {
-    masm.wasmLoad(*access, memoryBase, ptr, ptr, dest.any());
+  if (zeroExtend == ZeroExtendIndex::Yes) {
+    ToValidIndex(masm, ptr);
   }
+  FaultingCodeRange fcr;
+  if (dest.tag == AnyReg::I64) {
+    fcr = masm.wasmLoadI64(*access, memoryBase, ptr, ptr, dest.i64());
+  } else {
+    fcr = masm.wasmLoad(*access, memoryBase, ptr, ptr, dest.any());
+  }
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 #elif defined(JS_CODEGEN_RISCV64)
   MOZ_ASSERT(temp.isInvalid());
+  FaultingCodeRange fcr;
   if (dest.tag == AnyReg::I64) {
-    masm.wasmLoadI64(*access, memoryBase, ptr, dest.i64());
+    fcr = masm.wasmLoadI64(*access, memoryBase, ptr, dest.i64(), zeroExtend);
   } else {
-    masm.wasmLoad(*access, memoryBase, ptr, dest.any());
+    fcr = masm.wasmLoad(*access, memoryBase, ptr, dest.any(), zeroExtend);
   }
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 #else
   MOZ_CRASH("BaseCompiler platform hook: load");
 #endif
@@ -656,7 +713,8 @@ void BaseCompiler::load(MemoryAccessDesc* access, AccessCheck* check,
                         RegPtr instance, RegPtr memoryBase, RegI32 ptr,
                         AnyReg dest, RegI32 temp) {
   prepareMemoryAccess(access, check, instance, ptr);
-  executeLoad(access, check, instance, memoryBase, ptr, dest, temp);
+  executeLoad(access, instance, memoryBase, ptr, dest, temp,
+              ZeroExtendIndex::Yes);
 }
 
 void BaseCompiler::load(MemoryAccessDesc* access, AccessCheck* check,
@@ -664,44 +722,35 @@ void BaseCompiler::load(MemoryAccessDesc* access, AccessCheck* check,
                         AnyReg dest, RegI64 temp) {
   prepareMemoryAccess(access, check, instance, ptr);
 
-#if !defined(JS_64BIT)
+#ifndef JS_64BIT
   // On 32-bit systems we have a maximum 2GB heap and bounds checking has
   // been applied to ensure that the 64-bit pointer is valid.
-  return executeLoad(access, check, instance, memoryBase, RegI32(ptr.low), dest,
-                     maybeFromI64(temp));
-#elif defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64)
-  // On x64 and arm64 the 32-bit code simply assumes that the high bits of the
-  // 64-bit pointer register are zero and performs a 64-bit add.  Thus the code
-  // generated is the same for the 64-bit and the 32-bit case.
-  return executeLoad(access, check, instance, memoryBase, RegI32(ptr.reg), dest,
-                     maybeFromI64(temp));
-#elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64)
-  // On mips64 and loongarch64, the 'prepareMemoryAccess' function will make
-  // sure that ptr holds a valid 64-bit index value. Thus the code generated in
-  // 'executeLoad' is the same for the 64-bit and the 32-bit case.
-  return executeLoad(access, check, instance, memoryBase, RegI32(ptr.reg), dest,
-                     maybeFromI64(temp));
-#elif defined(JS_CODEGEN_RISCV64)
-  // RISCV the 'prepareMemoryAccess' function will make
-  // sure that ptr holds a valid 64-bit index value. Thus the code generated in
-  // 'executeLoad' is the same for the 64-bit and the 32-bit case.
-  return executeLoad(access, check, instance, memoryBase, RegI32(ptr.reg), dest,
-                     maybeFromI64(temp));
+  RegI32 ptr32 = RegI32(ptr.low);
 #else
-  MOZ_CRASH("Missing platform hook");
+  // On x64 and arm64 the 32-bit code simply assumes that the high bits of the
+  // 64-bit pointer register are zero and performs a 64-bit add.
+  //
+  // On mips64/loongarch64/riscv64, the ZeroExtendIndex parameter describes
+  // when to modify ptr so it holds a valid 64-bit index value.
+  //
+  // Thus the code generated is the same for the 64-bit and the 32-bit case.
+  RegI32 ptr32 = RegI32(ptr.reg);
 #endif
+  return executeLoad(access, instance, memoryBase, ptr32, dest,
+                     maybeFromI64(temp), ZeroExtendIndex::No);
 }
 
-void BaseCompiler::executeStore(MemoryAccessDesc* access, AccessCheck* check,
-                                RegPtr instance, RegPtr memoryBase, RegI32 ptr,
-                                AnyReg src, RegI32 temp) {
+void BaseCompiler::executeStore(MemoryAccessDesc* access, RegPtr instance,
+                                RegPtr memoryBase, RegI32 ptr, AnyReg src,
+                                RegI32 temp, ZeroExtendIndex zeroExtend) {
   // Emit the store. At this point, 64-bit offsets will have been folded away by
   // prepareMemoryAccess.
 #if defined(JS_CODEGEN_X64)
   MOZ_ASSERT(temp.isInvalid());
   Operand dstAddr(memoryBase, ptr, TimesOne, access->offset32());
 
-  masm.wasmStore(*access, src.any(), dstAddr);
+  FaultingCodeRange fcr = masm.wasmStore(*access, src.any(), dstAddr);
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 #elif defined(JS_CODEGEN_X86)
   MOZ_ASSERT(memoryBase.isInvalid() && temp.isInvalid());
   masm.addPtr(
@@ -710,7 +759,9 @@ void BaseCompiler::executeStore(MemoryAccessDesc* access, AccessCheck* check,
   Operand dstAddr(ptr, access->offset32());
 
   if (access->type() == Scalar::Int64) {
-    masm.wasmStoreI64(*access, src.i64(), dstAddr);
+    FaultingCodeRangePair fcrp =
+        masm.wasmStoreI32x2(*access, src.i64(), dstAddr);
+    MaybeAddDebugStackMapPairForTrapOOB(this, fcrp);
   } else {
     AnyRegister value;
     ScratchI8 scratch(*this);
@@ -728,66 +779,88 @@ void BaseCompiler::executeStore(MemoryAccessDesc* access, AccessCheck* check,
       value = src.any();
     }
 
-    masm.wasmStore(*access, value, dstAddr);
+    FaultingCodeRange fcr = masm.wasmStore(*access, value, dstAddr);
+    MaybeAddDebugStackMapForTrapOOB(this, fcr);
   }
 #elif defined(JS_CODEGEN_ARM)
   MOZ_ASSERT(temp.isInvalid());
   if (access->type() == Scalar::Int64) {
-    masm.wasmStoreI64(*access, src.i64(), memoryBase, ptr, ptr);
+    FaultingCodeRangePair fcrp =
+        masm.wasmStoreI32x2(*access, src.i64(), memoryBase, ptr, ptr);
+    MaybeAddDebugStackMapPairForTrapOOB(this, fcrp);
   } else if (src.tag == AnyReg::I64) {
-    masm.wasmStore(*access, AnyRegister(src.i64().low), memoryBase, ptr, ptr);
+    FaultingCodeRange fcr = masm.wasmStore(*access, AnyRegister(src.i64().low),
+                                           memoryBase, ptr, ptr);
+    MaybeAddDebugStackMapForTrapOOB(this, fcr);
   } else {
-    masm.wasmStore(*access, src.any(), memoryBase, ptr, ptr);
+    FaultingCodeRange fcr =
+        masm.wasmStore(*access, src.any(), memoryBase, ptr, ptr);
+    MaybeAddDebugStackMapForTrapOOB(this, fcr);
   }
 #elif defined(JS_CODEGEN_MIPS64)
+  if (zeroExtend == ZeroExtendIndex::Yes) {
+    ToValidIndex(masm, ptr);
+  }
+  FaultingCodeRange fcr;
   if (IsUnaligned(*access)) {
     switch (src.tag) {
       case AnyReg::I64:
-        masm.wasmUnalignedStoreI64(*access, src.i64(), memoryBase, ptr, ptr,
-                                   temp);
+        fcr = masm.wasmUnalignedStoreI64(*access, src.i64(), memoryBase, ptr,
+                                         ptr, temp);
         break;
       case AnyReg::F32:
-        masm.wasmUnalignedStoreFP(*access, src.f32(), memoryBase, ptr, ptr,
-                                  temp);
+        fcr = masm.wasmUnalignedStoreFP(*access, src.f32(), memoryBase, ptr,
+                                        ptr, temp);
         break;
       case AnyReg::F64:
-        masm.wasmUnalignedStoreFP(*access, src.f64(), memoryBase, ptr, ptr,
-                                  temp);
+        fcr = masm.wasmUnalignedStoreFP(*access, src.f64(), memoryBase, ptr,
+                                        ptr, temp);
         break;
       case AnyReg::I32:
-        masm.wasmUnalignedStore(*access, src.i32(), memoryBase, ptr, ptr, temp);
+        fcr = masm.wasmUnalignedStore(*access, src.i32(), memoryBase, ptr, ptr,
+                                      temp);
         break;
       default:
         MOZ_CRASH("Unexpected type");
     }
   } else {
     if (src.tag == AnyReg::I64) {
-      masm.wasmStoreI64(*access, src.i64(), memoryBase, ptr, ptr);
+      fcr = masm.wasmStoreI64(*access, src.i64(), memoryBase, ptr, ptr);
     } else {
-      masm.wasmStore(*access, src.any(), memoryBase, ptr, ptr);
+      fcr = masm.wasmStore(*access, src.any(), memoryBase, ptr, ptr);
     }
   }
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 #elif defined(JS_CODEGEN_ARM64)
   MOZ_ASSERT(temp.isInvalid());
+  FaultingCodeRange fcr;
   if (access->type() == Scalar::Int64) {
-    masm.wasmStoreI64(*access, src.i64(), memoryBase, ptr);
+    fcr = masm.wasmStoreI64(*access, src.i64(), memoryBase, ptr);
   } else {
-    masm.wasmStore(*access, src.any(), memoryBase, ptr);
+    fcr = masm.wasmStore(*access, src.any(), memoryBase, ptr);
   }
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 #elif defined(JS_CODEGEN_LOONG64)
   MOZ_ASSERT(temp.isInvalid());
-  if (access->type() == Scalar::Int64) {
-    masm.wasmStoreI64(*access, src.i64(), memoryBase, ptr, ptr);
-  } else {
-    masm.wasmStore(*access, src.any(), memoryBase, ptr, ptr);
+  if (zeroExtend == ZeroExtendIndex::Yes) {
+    ToValidIndex(masm, ptr);
   }
+  FaultingCodeRange fcr;
+  if (access->type() == Scalar::Int64) {
+    fcr = masm.wasmStoreI64(*access, src.i64(), memoryBase, ptr, ptr);
+  } else {
+    fcr = masm.wasmStore(*access, src.any(), memoryBase, ptr, ptr);
+  }
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 #elif defined(JS_CODEGEN_RISCV64)
   MOZ_ASSERT(temp.isInvalid());
+  FaultingCodeRange fcr;
   if (access->type() == Scalar::Int64) {
-    masm.wasmStoreI64(*access, src.i64(), memoryBase, ptr);
+    fcr = masm.wasmStoreI64(*access, src.i64(), memoryBase, ptr, zeroExtend);
   } else {
-    masm.wasmStore(*access, src.any(), memoryBase, ptr);
+    fcr = masm.wasmStore(*access, src.any(), memoryBase, ptr, zeroExtend);
   }
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 #else
   MOZ_CRASH("BaseCompiler platform hook: store");
 #endif
@@ -799,7 +872,8 @@ void BaseCompiler::store(MemoryAccessDesc* access, AccessCheck* check,
                          RegPtr instance, RegPtr memoryBase, RegI32 ptr,
                          AnyReg src, RegI32 temp) {
   prepareMemoryAccess(access, check, instance, ptr);
-  executeStore(access, check, instance, memoryBase, ptr, src, temp);
+  executeStore(access, instance, memoryBase, ptr, src, temp,
+               ZeroExtendIndex::Yes);
 }
 
 void BaseCompiler::store(MemoryAccessDesc* access, AccessCheck* check,
@@ -807,17 +881,13 @@ void BaseCompiler::store(MemoryAccessDesc* access, AccessCheck* check,
                          AnyReg src, RegI64 temp) {
   prepareMemoryAccess(access, check, instance, ptr);
   // See comments in load()
-#if !defined(JS_64BIT)
-  return executeStore(access, check, instance, memoryBase, RegI32(ptr.low), src,
-                      maybeFromI64(temp));
-#elif defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64) ||    \
-    defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
-    defined(JS_CODEGEN_RISCV64)
-  return executeStore(access, check, instance, memoryBase, RegI32(ptr.reg), src,
-                      maybeFromI64(temp));
+#ifndef JS_64BIT
+  RegI32 ptr32 = RegI32(ptr.low);
 #else
-  MOZ_CRASH("Missing platform hook");
+  RegI32 ptr32 = RegI32(ptr.reg);
 #endif
+  return executeStore(access, instance, memoryBase, ptr32, src,
+                      maybeFromI64(temp), ZeroExtendIndex::No);
 }
 
 template <typename RegType>
@@ -879,7 +949,7 @@ void BaseCompiler::doLoadCommon(MemoryAccessDesc* access, AccessCheck check,
       free(rp);
       break;
     }
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
     case ValType::V128: {
       RegType rp = popMemoryAccess<RegType>(access, &check);
       RegV128 rv = needV128();
@@ -969,7 +1039,7 @@ void BaseCompiler::doStoreCommon(MemoryAccessDesc* access, AccessCheck check,
       free(rv);
       break;
     }
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
     case ValType::V128: {
       RegV128 rv = popV128();
       RegType rp = popMemoryAccess<RegType>(access, &check);
@@ -1041,6 +1111,7 @@ Address BaseCompiler::prepareAtomicMemoryAccess(MemoryAccessDesc* access,
                                                 RegAddressType ptr) {
   MOZ_ASSERT(needInstanceForAccess(access, *check) == instance.isValid());
   prepareMemoryAccess(access, check, instance, ptr);
+  ToValidIndex(masm, ptr);
 
 #ifdef WASM_HAS_HEAPREG
   if (access->memoryIndex() == 0) {
@@ -1117,11 +1188,12 @@ void BaseCompiler::atomicLoad64(MemoryAccessDesc* access) {
 
   AccessCheck check;
   RegAddressType rp = popMemoryAccess<RegAddressType>(access, &check);
+  FaultingCodeRange fcr;
 
 #  ifdef WASM_HAS_HEAPREG
   RegPtr instance = maybeLoadInstanceForAccess(access, check);
   auto memaddr = prepareAtomicMemoryAccess(access, &check, instance, rp);
-  masm.wasmAtomicLoad64(*access, memaddr, temp, rd);
+  fcr = masm.wasmAtomicLoad64(*access, memaddr, temp, rd);
 #    ifndef RABALDR_PIN_INSTANCE
   maybeFree(instance);
 #    endif
@@ -1130,9 +1202,11 @@ void BaseCompiler::atomicLoad64(MemoryAccessDesc* access) {
   RegPtr instance =
       maybeLoadInstanceForAccess(access, check, RegIntptrToRegPtr(scratch));
   auto memaddr = prepareAtomicMemoryAccess(access, &check, instance, rp);
-  masm.wasmAtomicLoad64(*access, memaddr, temp, rd);
+  fcr = masm.wasmAtomicLoad64(*access, memaddr, temp, rd);
   MOZ_ASSERT(instance == scratch);
 #  endif
+
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 
   free(rp);
   atomic_load64::Deallocate(this, temp);
@@ -1258,7 +1332,9 @@ static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access, T srcAddr,
     temp = scratch;
   }
 #  endif
-  bc->masm.wasmAtomicFetchOp(access, op, rv, srcAddr, temp, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmAtomicFetchOp(access, op, rv, srcAddr, temp, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps& temps) {
@@ -1287,7 +1363,9 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, AtomicOp op, RegI32 rv, RegI32 rd,
                     const Temps& temps) {
-  bc->masm.wasmAtomicFetchOp(access, op, rv, srcAddr, temps.t0, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmAtomicFetchOp(access, op, rv, srcAddr, temps.t0, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps& temps) {
@@ -1295,7 +1373,47 @@ static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps& temps) {
   bc->freeI32(temps.t0);
 }
 
-#elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64)
+#elif defined(JS_CODEGEN_LOONG64)
+
+struct Temps {
+  RegI32 t0, t1, t2;
+};
+
+static void PopAndAllocate(BaseCompiler* bc, ValType type,
+                           Scalar::Type viewType, AtomicOp op, RegI32* rd,
+                           RegI32* rv, Temps* temps) {
+  *rv = type == ValType::I64 ? bc->popI64ToI32() : bc->popI32();
+  if (type == ValType::I64) {
+    // Architecture-specific i64-to-i32.
+    bc->masm.move64To32(Register64(*rv), *rv);
+  }
+  const bool needsLlScLoop = Scalar::byteSize(viewType) < 4 &&
+                             !(LOONG64Flags::HasLamBhExtension() &&
+                               (op == AtomicOp::Add || op == AtomicOp::Sub));
+  if (needsLlScLoop) {
+    temps->t0 = bc->needI32();
+    temps->t1 = bc->needI32();
+    temps->t2 = bc->needI32();
+  }
+  *rd = bc->needI32();
+}
+
+static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
+                    Address srcAddr, AtomicOp op, RegI32 rv, RegI32 rd,
+                    const Temps& temps) {
+  FaultingCodeRange fcr = bc->masm.wasmAtomicFetchOp(
+      access, op, rv, srcAddr, temps.t0, temps.t1, temps.t2, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
+}
+
+static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps& temps) {
+  bc->freeI32(rv);
+  bc->maybeFree(temps.t0);
+  bc->maybeFree(temps.t1);
+  bc->maybeFree(temps.t2);
+}
+
+#elif defined(JS_CODEGEN_MIPS64)
 
 struct Temps {
   RegI32 t0, t1, t2;
@@ -1320,8 +1438,9 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, AtomicOp op, RegI32 rv, RegI32 rd,
                     const Temps& temps) {
-  bc->masm.wasmAtomicFetchOp(access, op, rv, srcAddr, temps.t0, temps.t1,
-                             temps.t2, rd);
+  FaultingCodeRange fcr = bc->masm.wasmAtomicFetchOp(
+      access, op, rv, srcAddr, temps.t0, temps.t1, temps.t2, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps& temps) {
@@ -1352,8 +1471,9 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, AtomicOp op, RegI32 rv, RegI32 rd,
                     const Temps& temps) {
-  bc->masm.wasmAtomicFetchOp(access, op, rv, srcAddr, temps.t0, temps.t1,
-                             temps.t2, rd);
+  FaultingCodeRange fcr = bc->masm.wasmAtomicFetchOp(
+      access, op, rv, srcAddr, temps.t0, temps.t1, temps.t2, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps& temps) {
@@ -1429,7 +1549,9 @@ static void PopAndAllocate(BaseCompiler* bc, AtomicOp op, RegI64* rd,
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, AtomicOp op, RegI64 rv, RegI64 temp,
                     RegI64 rd) {
-  bc->masm.wasmAtomicFetchOp64(access, op, rv, srcAddr, temp, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmAtomicFetchOp64(access, op, rv, srcAddr, temp, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, AtomicOp op, RegI64 rv, RegI64 temp) {
@@ -1471,8 +1593,10 @@ static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
   bc->fr.pushGPR(rv.low);
   Address value(StackPointer, 0);
 
-  bc->masm.wasmAtomicFetchOp64(access, op, value, srcAddr,
-                               bc->specific_.ecx_ebx, rd);
+  FaultingCodeRangePair fcrp = bc->masm.wasmAtomicFetchOp32x2(
+      access, op, value, srcAddr, bc->specific_.ecx_ebx, rd);
+
+  MaybeAddDebugStackMapPairForTrapOOB(bc, fcrp);
 
   bc->fr.popBytes(8);
 }
@@ -1495,7 +1619,9 @@ static void PopAndAllocate(BaseCompiler* bc, AtomicOp op, RegI64* rd,
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, AtomicOp op, RegI64 rv, RegI64 temp,
                     RegI64 rd) {
-  bc->masm.wasmAtomicFetchOp64(access, op, rv, srcAddr, temp, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmAtomicFetchOp64(access, op, rv, srcAddr, temp, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, AtomicOp op, RegI64 rv, RegI64 temp) {
@@ -1503,8 +1629,7 @@ static void Deallocate(BaseCompiler* bc, AtomicOp op, RegI64 rv, RegI64 temp) {
   bc->freeI64(temp);
 }
 
-#elif defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_MIPS64) || \
-    defined(JS_CODEGEN_LOONG64)
+#elif defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_MIPS64)
 
 static void PopAndAllocate(BaseCompiler* bc, AtomicOp op, RegI64* rd,
                            RegI64* rv, RegI64* temp) {
@@ -1516,31 +1641,62 @@ static void PopAndAllocate(BaseCompiler* bc, AtomicOp op, RegI64* rd,
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, AtomicOp op, RegI64 rv, RegI64 temp,
                     RegI64 rd) {
-  bc->masm.wasmAtomicFetchOp64(access, op, rv, srcAddr, temp, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmAtomicFetchOp64(access, op, rv, srcAddr, temp, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, AtomicOp op, RegI64 rv, RegI64 temp) {
   bc->freeI64(rv);
   bc->freeI64(temp);
 }
+
+#elif defined(JS_CODEGEN_LOONG64)
+
+static void PopAndAllocate(BaseCompiler* bc, AtomicOp op, RegI64* rd,
+                           RegI64* rv, RegI64* temp) {
+  *rv = bc->popI64();
+  if (op == AtomicOp::Sub) {
+    // Only Sub needs a temporary register to store the negated operand.  Others
+    // have matching AMO instructions.
+    *temp = bc->needI64();
+  }
+  *rd = bc->needI64();
+}
+
+static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
+                    Address srcAddr, AtomicOp op, RegI64 rv, RegI64 temp,
+                    RegI64 rd) {
+  FaultingCodeRange fcr =
+      bc->masm.wasmAtomicFetchOp64(access, op, rv, srcAddr, temp, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
+}
+
+static void Deallocate(BaseCompiler* bc, AtomicOp op, RegI64 rv, RegI64 temp) {
+  bc->freeI64(rv);
+  bc->maybeFree(temp);
+}
+
 #elif defined(JS_CODEGEN_RISCV64)
 
 static void PopAndAllocate(BaseCompiler* bc, AtomicOp op, RegI64* rd,
                            RegI64* rv, RegI64* temp) {
   *rv = bc->popI64();
-  *temp = bc->needI64();
   *rd = bc->needI64();
+  // temp not used for riscv64.
 }
 
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, AtomicOp op, RegI64 rv, RegI64 temp,
                     RegI64 rd) {
-  bc->masm.wasmAtomicFetchOp64(access, op, rv, srcAddr, temp, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmAtomicFetchOp64(access, op, rv, srcAddr, temp, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, AtomicOp op, RegI64 rv, RegI64 temp) {
   bc->freeI64(rv);
-  bc->freeI64(temp);
+  MOZ_ASSERT(temp.isInvalid());
 }
 
 #elif defined(JS_CODEGEN_NONE) || defined(JS_CODEGEN_WASM32)
@@ -1627,7 +1783,8 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
 
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI32 rv, RegI32 rd, const Temps&) {
-  bc->masm.wasmAtomicExchange(access, srcAddr, rv, rd);
+  FaultingCodeRange fcr = bc->masm.wasmAtomicExchange(access, srcAddr, rv, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32, const Temps&) {}
@@ -1646,14 +1803,16 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
 
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI32 rv, RegI32 rd, const Temps&) {
+  FaultingCodeRange fcr;
   if (access.type() == Scalar::Uint8 && !bc->ra.isSingleByteI32(rd)) {
     ScratchI8 scratch(*bc);
     // The output register must have a byte persona.
-    bc->masm.wasmAtomicExchange(access, srcAddr, rv, scratch);
+    fcr = bc->masm.wasmAtomicExchange(access, srcAddr, rv, scratch);
     bc->masm.movl(scratch, rd);
   } else {
-    bc->masm.wasmAtomicExchange(access, srcAddr, rv, rd);
+    fcr = bc->masm.wasmAtomicExchange(access, srcAddr, rv, rd);
   }
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32, const Temps&) {}
@@ -1671,14 +1830,53 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
 
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI32 rv, RegI32 rd, const Temps&) {
-  bc->masm.wasmAtomicExchange(access, srcAddr, rv, rd);
+  FaultingCodeRange fcr = bc->masm.wasmAtomicExchange(access, srcAddr, rv, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps&) {
   bc->freeI32(rv);
 }
 
-#elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64)
+#elif defined(JS_CODEGEN_LOONG64)
+
+struct Temps {
+  RegI32 t0, t1, t2;
+};
+
+static void PopAndAllocate(BaseCompiler* bc, ValType type,
+                           Scalar::Type viewType, RegI32* rd, RegI32* rv,
+                           Temps* temps) {
+  *rv = (type == ValType::I64) ? bc->popI64ToI32() : bc->popI32();
+  if (type == ValType::I64) {
+    // Architecture-specific i64-to-i32.
+    bc->masm.move64To32(Register64(*rv), *rv);
+  }
+  const bool needsLlScLoop =
+      Scalar::byteSize(viewType) < 4 && !LOONG64Flags::HasLamBhExtension();
+  if (needsLlScLoop) {
+    temps->t0 = bc->needI32();
+    temps->t1 = bc->needI32();
+    temps->t2 = bc->needI32();
+  }
+  *rd = bc->needI32();
+}
+
+static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
+                    Address srcAddr, RegI32 rv, RegI32 rd, const Temps& temps) {
+  FaultingCodeRange fcr = bc->masm.wasmAtomicExchange(
+      access, srcAddr, rv, temps.t0, temps.t1, temps.t2, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
+}
+
+static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps& temps) {
+  bc->freeI32(rv);
+  bc->maybeFree(temps.t0);
+  bc->maybeFree(temps.t1);
+  bc->maybeFree(temps.t2);
+}
+
+#elif defined(JS_CODEGEN_MIPS64)
 
 struct Temps {
   RegI32 t0, t1, t2;
@@ -1702,8 +1900,9 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
 
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI32 rv, RegI32 rd, const Temps& temps) {
-  bc->masm.wasmAtomicExchange(access, srcAddr, rv, temps.t0, temps.t1, temps.t2,
-                              rd);
+  FaultingCodeRange fcr = bc->masm.wasmAtomicExchange(
+      access, srcAddr, rv, temps.t0, temps.t1, temps.t2, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps& temps) {
@@ -1733,8 +1932,9 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
 
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI32 rv, RegI32 rd, const Temps& temps) {
-  bc->masm.wasmAtomicExchange(access, srcAddr, rv, temps.t0, temps.t1, temps.t2,
-                              rd);
+  FaultingCodeRange fcr = bc->masm.wasmAtomicExchange(
+      access, srcAddr, rv, temps.t0, temps.t1, temps.t2, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps& temps) {
@@ -1897,12 +2097,13 @@ void BaseCompiler::atomicXchg64(MemoryAccessDesc* access,
 
   AccessCheck check;
   RegAddressType rp = popMemoryAccess<RegAddressType>(access, &check);
+  FaultingCodeRange fcr;
 
 #ifdef WASM_HAS_HEAPREG
   RegPtr instance = maybeLoadInstanceForAccess(access, check);
   auto memaddr =
       prepareAtomicMemoryAccess<RegAddressType>(access, &check, instance, rp);
-  masm.wasmAtomicExchange64(*access, memaddr, rv, rd);
+  fcr = masm.wasmAtomicExchange64(*access, memaddr, rv, rd);
 #  ifndef RABALDR_PIN_INSTANCE
   maybeFree(instance);
 #  endif
@@ -1912,9 +2113,11 @@ void BaseCompiler::atomicXchg64(MemoryAccessDesc* access,
       maybeLoadInstanceForAccess(access, check, RegIntptrToRegPtr(scratch));
   Address memaddr = prepareAtomicMemoryAccess(access, &check, instance, rp);
   atomic_xchg64::Setup(this, &rv, &rd, scratch);
-  masm.wasmAtomicExchange64(*access, memaddr, rv, rd);
+  fcr = masm.wasmAtomicExchange64(*access, memaddr, rv, rd);
   MOZ_ASSERT(instance == scratch);
 #endif
+
+  MaybeAddDebugStackMapForTrapOOB(this, fcr);
 
   free(rp);
   if (wantResult) {
@@ -1981,7 +2184,9 @@ static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access, T srcAddr,
     }
   }
 #  endif
-  bc->masm.wasmCompareExchange(access, srcAddr, rexpect, rnew, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmCompareExchange(access, srcAddr, rexpect, rnew, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32, RegI32 rnew, const Temps&) {
@@ -2008,7 +2213,9 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI32 rexpect, RegI32 rnew, RegI32 rd,
                     const Temps&) {
-  bc->masm.wasmCompareExchange(access, srcAddr, rexpect, rnew, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmCompareExchange(access, srcAddr, rexpect, rnew, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32 rexpect, RegI32 rnew,
@@ -2017,7 +2224,52 @@ static void Deallocate(BaseCompiler* bc, RegI32 rexpect, RegI32 rnew,
   bc->freeI32(rexpect);
 }
 
-#elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64)
+#elif defined(JS_CODEGEN_LOONG64)
+
+struct Temps {
+  RegI32 t0, t1, t2;
+};
+
+static void PopAndAllocate(BaseCompiler* bc, ValType type,
+                           Scalar::Type viewType, RegI32* rexpect, RegI32* rnew,
+                           RegI32* rd, Temps* temps) {
+  if (type == ValType::I64) {
+    *rnew = bc->popI64ToI32();
+    *rexpect = bc->popI64ToI32();
+    // Architecture-specific i64-to-i32.
+    bc->masm.move64To32(Register64(*rexpect), *rexpect);
+  } else {
+    *rnew = bc->popI32();
+    *rexpect = bc->popI32();
+  }
+  const bool needsLlScLoop =
+      Scalar::byteSize(viewType) < 4 && !LOONG64Flags::HasLamcasExtension();
+  if (needsLlScLoop) {
+    temps->t0 = bc->needI32();
+    temps->t1 = bc->needI32();
+    temps->t2 = bc->needI32();
+  }
+  *rd = bc->needI32();
+}
+
+static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
+                    Address srcAddr, RegI32 rexpect, RegI32 rnew, RegI32 rd,
+                    const Temps& temps) {
+  FaultingCodeRange fcr = bc->masm.wasmCompareExchange(
+      access, srcAddr, rexpect, rnew, temps.t0, temps.t1, temps.t2, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
+}
+
+static void Deallocate(BaseCompiler* bc, RegI32 rexpect, RegI32 rnew,
+                       const Temps& temps) {
+  bc->freeI32(rnew);
+  bc->freeI32(rexpect);
+  bc->maybeFree(temps.t0);
+  bc->maybeFree(temps.t1);
+  bc->maybeFree(temps.t2);
+}
+
+#elif defined(JS_CODEGEN_MIPS64)
 
 struct Temps {
   RegI32 t0, t1, t2;
@@ -2046,8 +2298,9 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI32 rexpect, RegI32 rnew, RegI32 rd,
                     const Temps& temps) {
-  bc->masm.wasmCompareExchange(access, srcAddr, rexpect, rnew, temps.t0,
-                               temps.t1, temps.t2, rd);
+  FaultingCodeRange fcr = bc->masm.wasmCompareExchange(
+      access, srcAddr, rexpect, rnew, temps.t0, temps.t1, temps.t2, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32 rexpect, RegI32 rnew,
@@ -2071,6 +2324,9 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
   if (type == ValType::I64) {
     *rnew = bc->popI64ToI32();
     *rexpect = bc->popI64ToI32();
+    // Architecture-specific i64-to-i32 (not needed when "amocas.w" from Zacas
+    // extension is supported).
+    bc->masm.move64To32(Register64(*rexpect), *rexpect);
   } else {
     *rnew = bc->popI32();
     *rexpect = bc->popI32();
@@ -2086,8 +2342,9 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI32 rexpect, RegI32 rnew, RegI32 rd,
                     const Temps& temps) {
-  bc->masm.wasmCompareExchange(access, srcAddr, rexpect, rnew, temps.t0,
-                               temps.t1, temps.t2, rd);
+  FaultingCodeRange fcr = bc->masm.wasmCompareExchange(
+      access, srcAddr, rexpect, rnew, temps.t0, temps.t1, temps.t2, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 static void Deallocate(BaseCompiler* bc, RegI32 rexpect, RegI32 rnew,
@@ -2169,7 +2426,9 @@ static void PopAndAllocate(BaseCompiler* bc, RegI64* rexpect, RegI64* rnew,
 
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI64 rexpect, RegI64 rnew, RegI64 rd) {
-  bc->masm.wasmCompareExchange64(access, srcAddr, rexpect, rnew, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmCompareExchange64(access, srcAddr, rexpect, rnew, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 template <typename RegAddressType>
@@ -2207,8 +2466,9 @@ void Perform<RegI32>(BaseCompiler* bc, const MemoryAccessDesc& access,
   MOZ_ASSERT(Register(scratch) == js::jit::ebx);
   MOZ_ASSERT(rnew.high == bc->specific_.ecx);
   bc->masm.move32(rnew.low, ebx);
-  bc->masm.wasmCompareExchange64(access, srcAddr, rexpect,
-                                 bc->specific_.ecx_ebx, rd);
+  FaultingCodeRange fcr = bc->masm.wasmCompareExchange64(
+      access, srcAddr, rexpect, bc->specific_.ecx_ebx, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 template <>
@@ -2254,7 +2514,9 @@ void Perform<RegI64>(BaseCompiler* bc, const MemoryAccessDesc& access,
   rnew = bc->specific_.ecx_ebx;
 
   bc->unstashI64(RegPtr(Register(bc->specific_.ecx)), rnew);
-  bc->masm.wasmCompareExchange64(access, srcAddr, rexpect, rnew, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmCompareExchange64(access, srcAddr, rexpect, rnew, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 template <>
@@ -2277,7 +2539,9 @@ static void PopAndAllocate(BaseCompiler* bc, RegI64* rexpect, RegI64* rnew,
 
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI64 rexpect, RegI64 rnew, RegI64 rd) {
-  bc->masm.wasmCompareExchange64(access, srcAddr, rexpect, rnew, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmCompareExchange64(access, srcAddr, rexpect, rnew, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 template <typename RegAddressType>
@@ -2299,7 +2563,9 @@ static void PopAndAllocate(BaseCompiler* bc, RegI64* rexpect, RegI64* rnew,
 
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI64 rexpect, RegI64 rnew, RegI64 rd) {
-  bc->masm.wasmCompareExchange64(access, srcAddr, rexpect, rnew, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmCompareExchange64(access, srcAddr, rexpect, rnew, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 template <typename RegAddressType>
@@ -2320,7 +2586,9 @@ static void PopAndAllocate(BaseCompiler* bc, RegI64* rexpect, RegI64* rnew,
 
 static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
                     Address srcAddr, RegI64 rexpect, RegI64 rnew, RegI64 rd) {
-  bc->masm.wasmCompareExchange64(access, srcAddr, rexpect, rnew, rd);
+  FaultingCodeRange fcr =
+      bc->masm.wasmCompareExchange64(access, srcAddr, rexpect, rnew, rd);
+  MaybeAddDebugStackMapForTrapOOB(bc, fcr);
 }
 
 template <typename RegAddressType>
@@ -2479,7 +2747,7 @@ void BaseCompiler::memCopyInlineM32() {
 
   // Compute the number of copies of each width we will need to do
   size_t remainder = length;
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
   size_t numCopies16 = 0;
   if (MacroAssembler::SupportsFastUnalignedFPAccesses()) {
     numCopies16 = remainder / sizeof(V128);
@@ -2502,7 +2770,7 @@ void BaseCompiler::memCopyInlineM32() {
   bool omitBoundsCheck = false;
   size_t offset = 0;
 
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
   for (uint32_t i = 0; i < numCopies16; i++) {
     RegI32 temp = needI32();
     moveI32(src, temp);
@@ -2657,7 +2925,7 @@ void BaseCompiler::memCopyInlineM32() {
   }
 #endif
 
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
   for (uint32_t i = 0; i < numCopies16; i++) {
     offset -= sizeof(V128);
 
@@ -2698,7 +2966,7 @@ void BaseCompiler::memFillInlineM32() {
 
   // Compute the number of copies of each width we will need to do
   size_t remainder = length;
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
   size_t numCopies16 = 0;
   if (MacroAssembler::SupportsFastUnalignedFPAccesses()) {
     numCopies16 = remainder / sizeof(V128);
@@ -2718,7 +2986,7 @@ void BaseCompiler::memFillInlineM32() {
   MOZ_ASSERT(numCopies2 <= 1 && numCopies1 <= 1);
 
   // Generate splatted definitions for wider fills as needed
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
   V128 val16(value);
 #endif
 #ifdef JS_64BIT
@@ -2803,7 +3071,7 @@ void BaseCompiler::memFillInlineM32() {
   }
 #endif
 
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
   for (uint32_t i = 0; i < numCopies16; i++) {
     offset -= sizeof(V128);
 
@@ -2829,7 +3097,7 @@ void BaseCompiler::memFillInlineM32() {
 //
 // SIMD and Relaxed SIMD.
 
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
 void BaseCompiler::loadSplat(MemoryAccessDesc* access) {
   // We can implement loadSplat mostly as load + splat because the push of the
   // result onto the value stack in loadCommon normally will not generate any
@@ -2973,7 +3241,7 @@ void BaseCompiler::storeLane(MemoryAccessDesc* access, uint32_t laneIndex) {
 
   storeCommon(access, AccessCheck(), type);
 }
-#endif  // ENABLE_WASM_SIMD
+#endif  // ENABLE_JIT_SIMD
 
 }  // namespace wasm
 }  // namespace js

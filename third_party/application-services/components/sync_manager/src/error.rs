@@ -4,12 +4,15 @@
 
 use interrupt_support::Interrupted;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+#[uniffi(flat_error)]
 pub enum SyncManagerError {
     #[error("Unknown engine: {0}")]
     UnknownEngine(String),
     #[error("Manager was compiled without support for {0:?}")]
     UnsupportedFeature(String),
+    #[error("Another sync is already in progress")]
+    Busy,
     // Used for things like 'failed to decode the provided sync key because it's
     // completely the wrong format', etc.
     #[error("Sync error: {0}")]

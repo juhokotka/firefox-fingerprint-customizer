@@ -5,9 +5,9 @@
 #ifndef GLCONTEXTEAGL_H_
 #define GLCONTEXTEAGL_H_
 
-#include "GLContext.h"
-
 #include <CoreGraphics/CoreGraphics.h>
+
+#include "GLContext.h"
 #ifdef __OBJC__
 #  include <OpenGLES/EAGL.h>
 #else

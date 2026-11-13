@@ -6,8 +6,9 @@
 #define ACCESSIBLE_ATK_DOMTOATK_H_
 
 #include <glib.h>
-#include "mozilla/a11y/HyperTextAccessibleBase.h"
+
 #include "mozilla/Utf16.h"
+#include "mozilla/a11y/HyperTextAccessibleBase.h"
 #include "nsString.h"
 
 /**

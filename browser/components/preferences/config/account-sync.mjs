@@ -25,9 +25,13 @@ const { SCOPE_APP_SYNC } = ChromeUtils.importESModule(
 const XPCOMUtils = ChromeUtils.importESModule(
   "resource://gre/modules/XPCOMUtils.sys.mjs"
 ).XPCOMUtils;
+const { Referrals } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/referrals/Referrals.sys.mjs"
+);
 const lazy = XPCOMUtils.declareLazy({
-  BackupService: "resource:///modules/backup/BackupService.sys.mjs",
+  BackupService: "moz-src:///browser/components/backup/BackupService.sys.mjs",
   Weave: "resource://services-sync/main.sys.mjs",
+
   SelectableProfileService:
     "resource:///modules/profiles/SelectableProfileService.sys.mjs",
 });
@@ -171,13 +175,12 @@ export var SyncHelpers = new (class SyncHelpers {
               });
             }
           }
-          // When the modal closes we want to remove any query params
-          // so it doesn't open on subsequent visits (and will reload)
-          const browser = window.docShell.chromeEventHandler;
-          browser.loadURI(Services.io.newURI("about:preferences#sync"), {
-            triggeringPrincipal:
-              Services.scriptSecurityManager.getSystemPrincipal(),
-          });
+          // Drop any query params (e.g. action=choose-what-to-sync) so the
+          // dialog doesn't reopen on reloads. replaceState avoids the
+          // visible page reload loadURI would cause.
+          const url = new URL(location.href);
+          url.search = "";
+          window.history.replaceState(history.state, document.title, url.href);
         },
       },
       params /* aParams */
@@ -208,6 +211,7 @@ export var SyncHelpers = new (class SyncHelpers {
           return;
         }
         const url = await window.FxAccounts.config.promiseConnectAccountURI(
+          "sync",
           this.getEntryPoint()
         );
         this.replaceTabWithUrl(url);
@@ -224,6 +228,7 @@ export var SyncHelpers = new (class SyncHelpers {
       return;
     }
     const url = await window.FxAccounts.config.promiseConnectAccountURI(
+      "sync",
       this.getEntryPoint()
     );
     this.replaceTabWithUrl(url);
@@ -238,8 +243,10 @@ export var SyncHelpers = new (class SyncHelpers {
    *        different entrypoints to accounts
    */
   async reSignIn(entrypoint) {
-    const url =
-      await window.FxAccounts.config.promiseConnectAccountURI(entrypoint);
+    const url = await window.FxAccounts.config.promiseConnectAccountURI(
+      "sync",
+      entrypoint
+    );
     this.replaceTabWithUrl(url);
   }
 
@@ -273,7 +280,10 @@ export var SyncHelpers = new (class SyncHelpers {
           { features: "resizable=no" }
         );
       } else if (location.href.includes("action=choose-what-to-sync")) {
-        this._chooseWhatToSync(false, "callToAction");
+        // Pass the real configured state: an already-syncing user who merely
+        // toggled an engine off should take the configured path (queue a sync,
+        // offer disconnect), not be re-run through first-time setup.
+        this._chooseWhatToSync(this.isSyncEnabled, "callToAction");
       }
     }
   }
@@ -657,7 +667,7 @@ Preferences.addSetting({
   },
   setup(emitChange) {
     window.FxAccounts.config
-      .promiseConnectDeviceURI(SyncHelpers.getEntryPoint())
+      .promiseConnectDeviceURI("sync", SyncHelpers.getEntryPoint())
       .then(connectURI => {
         SyncHelpers.connectAnotherDeviceHref = connectURI;
         emitChange();
@@ -809,7 +819,25 @@ Preferences.addSetting({
   },
 });
 
+// Referrals section
+Preferences.addSetting({
+  id: "referrals-link",
+  setup() {
+    Referrals.getReferralCode();
+  },
+  visible() {
+    return Referrals.isEnabled;
+  },
+  onUserClick: () => {
+    Referrals.openReferralsTab(window, "preferences");
+  },
+});
+
 let accountsEnabled = Services.prefs.getBoolPref("identity.fxaccounts.enabled");
+let perDeviceSyncEnabled = Services.prefs.getBoolPref(
+  "services.sync.perDeviceEngineChoices",
+  false
+);
 
 SettingGroupManager.registerGroups({
   defaultBrowserSync: window.createDefaultBrowserConfig({
@@ -827,9 +855,7 @@ SettingGroupManager.registerGroups({
         l10nId: "account-disabled-group",
         iconSrc: "chrome://browser/skin/preferences/mozilla-logo.svg",
         supportPage: "managed-browser-firefox",
-        controlAttrs: {
-          headinglevel: 2,
-        },
+        headingLevel: 2,
       },
     ],
   },
@@ -937,6 +963,7 @@ SettingGroupManager.registerGroups({
     headingLevel: 2,
     iconSrc: "chrome://browser/skin/sync.svg",
     hidden: !accountsEnabled,
+    subcategory: "sync",
     items: [
       {
         id: "syncNoFxaSignIn",
@@ -989,7 +1016,9 @@ SettingGroupManager.registerGroups({
       },
       {
         id: "syncNotConfigured",
-        l10nId: "prefs-syncing-off-2",
+        l10nId: perDeviceSyncEnabled
+          ? "prefs-syncing-off-3"
+          : "prefs-syncing-off-2",
         control: "moz-box-item",
         iconSrc: "chrome://global/skin/icons/warning.svg",
         items: [
@@ -1005,9 +1034,7 @@ SettingGroupManager.registerGroups({
         id: "fxaDeviceNameSection",
         l10nId: "sync-device-name-header-2",
         control: "moz-fieldset",
-        controlAttrs: {
-          ".headingLevel": 3,
-        },
+        headingLevel: 3,
         items: [
           {
             id: "fxaDeviceNameGroup",
@@ -1037,6 +1064,7 @@ SettingGroupManager.registerGroups({
     l10nId: "preferences-data-migration-group",
     headingLevel: 2,
     iconSrc: "chrome://browser/skin/import.svg",
+    subcategory: "importBrowserData",
     items: [
       {
         id: "data-migration",
@@ -1112,6 +1140,19 @@ SettingGroupManager.registerGroups({
       {
         id: "backupSettings",
         control: "backup-settings",
+      },
+    ],
+  },
+  referrals: {
+    l10nId: "referrals-section-header2",
+    headingLevel: 2,
+    iconSrc: "chrome://browser/content/logos/share-firefox.svg",
+    hidden: !Referrals.isEnabled,
+    items: [
+      {
+        id: "referrals-link",
+        control: "moz-box-button",
+        l10nId: "referrals-link2",
       },
     ],
   },

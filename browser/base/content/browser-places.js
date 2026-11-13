@@ -36,7 +36,7 @@ ChromeUtils.defineESModuleGetters(this, {
   PanelMultiView:
     "moz-src:///browser/components/customizableui/PanelMultiView.sys.mjs",
   RecentlyClosedTabsAndWindowsMenuUtils:
-    "resource:///modules/sessionstore/RecentlyClosedTabsAndWindowsMenuUtils.sys.mjs",
+    "moz-src:///browser/components/sessionstore/RecentlyClosedTabsAndWindowsMenuUtils.sys.mjs",
   UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
 });
 
@@ -582,6 +582,16 @@ var PlacesCommandHook = {
     });
   },
 
+  async searchTabs(searchModeEntry) {
+    let win =
+      BrowserWindowTracker.getTopWindow() ??
+      (await BrowserWindowTracker.promiseOpenWindow());
+    win.focus();
+    win.gURLBar.search(UrlbarShared.RESTRICT_TOKENS.OPENPAGE, {
+      searchModeEntry,
+    });
+  },
+
   async searchHistory() {
     let win =
       BrowserWindowTracker.getTopWindow() ??
@@ -608,6 +618,7 @@ class HistoryMenu extends PlacesMenu {
       hiddenTabsMenu: "hiddenTabsMenu",
       undoWindowMenu: "historyUndoWindowMenu",
       syncTabsMenuitem: "sync-tabs-menuitem",
+      remoteTabsPromo: "historyRemoteTabsPromo",
     };
     for (let [key, elemId] of Object.entries(elements)) {
       this[key] = document.getElementById(elemId);
@@ -703,6 +714,21 @@ class HistoryMenu extends PlacesMenu {
     // by HistoryMenu do not have this menuitem.
     if (!this.syncTabsMenuitem) {
       return;
+    }
+
+    // Show the promo to users who can't yet see remote tabs (see
+    // getSyncPromoState). Clicking it performs the state-specific action, which
+    // we stash in a data-action attribute for the command handler. When it
+    // applies we hide the synced-tabs menuitem, so only one is ever visible.
+    if (this.remoteTabsPromo) {
+      const promoState = gSync.getSyncPromoState(["tabs"]);
+      if (promoState) {
+        this.remoteTabsPromo.dataset.action = promoState;
+        this.remoteTabsPromo.hidden = false;
+        this.syncTabsMenuitem.hidden = true;
+        return;
+      }
+      this.remoteTabsPromo.hidden = true;
     }
 
     if (!PlacesUIUtils.shouldShowTabsFromOtherComputersMenuitem()) {
@@ -842,12 +868,23 @@ var BookmarksEventHandler = {
    */
   onCommand: function BEH_onCommand(aEvent) {
     var target = aEvent.originalTarget;
+    var eventAction = target.dataset.action;
+
     if (target._placesNode) {
       PlacesUIUtils.openNodeWithEvent(target._placesNode, aEvent);
       // Only record interactions through the Bookmarks Toolbar
       if (target.closest("#PersonalToolbar")) {
         Glean.browserEngagement.bookmarksToolbarBookmarkOpened.add(1);
+        if (
+          gBookmarksToolbarVisibility == "newtab" &&
+          AIWindow.isAIWindowActive(window) &&
+          AIWindow.isAIWindowNewTabPage(gBrowser.currentURI)
+        ) {
+          Glean.smartWindow.bookmarkbar.opened.add(1);
+        }
       }
+    } else if (eventAction) {
+      gSync.handleSyncPromoAction(eventAction, "bookmarks-top-menu");
     }
   },
 
@@ -874,6 +911,24 @@ var BookmarksEventHandler = {
       } else {
         // This is a static non-Places node.
         targetURI = tooltipNode.getAttribute("targetURI");
+      }
+      // bhTooltip is only attached (directly or via popupsinherittooltip) to
+      // toolbarbuttons on the bookmarks toolbar/appmenu and to menu/menuitem
+      // entries in places popups. The croppable label is the child generated
+      // by the custom element fragment. crop=end labels clip via overflow on
+      // the element itself, so scrollWidth/clientWidth reflect cropping.
+      let isLabelCropped = label =>
+        !!label && label.scrollWidth > label.clientWidth;
+      switch (tooltipNode.localName) {
+        case "toolbarbutton":
+          cropped = isLabelCropped(
+            tooltipNode.querySelector(".toolbarbutton-text")
+          );
+          break;
+        case "menu":
+        case "menuitem":
+          cropped = isLabelCropped(tooltipNode.querySelector(".menu-text"));
+          break;
       }
     }
 
@@ -1509,8 +1564,12 @@ var BookmarkingUI = {
     if (PrivateBrowsingUtils.isWindowPrivate(window)) {
       newTabURLs.push("about:privatebrowsing");
     }
-    return newTabURLs.some(newTabUriString =>
-      this._newTabURI(newTabUriString)?.equalsExceptRef(uri)
+    // In a Smart Window, the new tab is a chrome document rather than
+    // about:newtab; isAIWindowNewTabPage matches it (and excludes firstrun).
+    return (
+      newTabURLs.some(newTabUriString =>
+        this._newTabURI(newTabUriString)?.equalsExceptRef(uri)
+      ) || AIWindow.isAIWindowNewTabPage(uri)
     );
   },
 
@@ -1948,14 +2007,14 @@ var BookmarkingUI = {
         if (shortcutElem) {
           let shortcut = ShortcutUtils.prettifyShortcut(shortcutElem);
           let contextItemL10nId = isStarred
-            ? "main-context-menu-edit-bookmark-with-shortcut"
-            : "main-context-menu-bookmark-page-with-shortcut";
+            ? "main-context-menu-edit-bookmark-with-shortcut-2"
+            : "main-context-menu-bookmark-page-with-shortcut-2";
           let l10nArgs = { shortcut };
           document.l10n.setAttributes(contextItem, contextItemL10nId, l10nArgs);
         } else {
           let contextItemL10nId = isStarred
-            ? "main-context-menu-edit-bookmark"
-            : "main-context-menu-bookmark-page";
+            ? "main-context-menu-edit-bookmark-2"
+            : "main-context-menu-bookmark-page-2";
           document.l10n.setAttributes(contextItem, contextItemL10nId);
         }
       }
@@ -1995,6 +2054,12 @@ var BookmarkingUI = {
     if (event.target.id != "bookmarksMenuPopup") {
       return;
     }
+
+    var promoState = gSync.getSyncPromoState(["bookmarks"]);
+    var remoteTabsPromo = document.getElementById("bookmarksRemoteTabsPromo");
+
+    remoteTabsPromo.dataset.action = promoState;
+    remoteTabsPromo.hidden = !promoState;
 
     document.getElementById("menu_mobileBookmarks").hidden =
       !SHOW_MOBILE_BOOKMARKS;
@@ -2107,12 +2172,13 @@ var BookmarkingUI = {
     for (let ev of aEvents) {
       switch (ev.type) {
         case "bookmark-added":
-          // Only need to update the UI if it wasn't marked as starred before:
-          if (this._itemGuids.size == 0) {
-            if (ev.url && ev.url == this._uri.spec) {
-              // If a new bookmark has been added to the tracked uri, register it.
-              if (!this._itemGuids.has(ev.guid)) {
-                this._itemGuids.add(ev.guid);
+          if (!ev.isTagging && ev.url && ev.url == this._uri.spec) {
+            // If a new bookmark has been added to the tracked uri, register it.
+            if (!this._itemGuids.has(ev.guid)) {
+              // Only need to update the UI if it wasn't marked as starred before:
+              let wasStarred = this._itemGuids.size > 0;
+              this._itemGuids.add(ev.guid);
+              if (!wasStarred) {
                 isStarUpdateNeeded = true;
               }
             }

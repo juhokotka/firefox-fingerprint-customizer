@@ -4,7 +4,6 @@
 
 package mozilla.components.concept.engine.request
 
-import mozilla.components.browser.errorpages.ErrorType
 import mozilla.components.concept.engine.EngineSession
 import mozilla.components.concept.engine.request.RequestInterceptor.InterceptionResponse
 import org.junit.Assert.assertEquals
@@ -30,7 +29,7 @@ class RequestInterceptorTest {
     @Test
     fun `interceptor has default methods`() {
         val engineSession = mock(EngineSession::class.java)
-        val interceptor = object : RequestInterceptor { }
+        val interceptor = object : RequestInterceptor {}
         interceptor.onLoadRequest(engineSession, "url", null, false, false, false, false, false)
         interceptor.onErrorRequest(engineSession, ErrorType.ERROR_UNKNOWN_SOCKET_TYPE, null)
     }

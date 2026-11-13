@@ -3,17 +3,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsAndroidNetworkLinkService.h"
-#include "nsServiceManagerUtils.h"
-
-#include "nsIObserverService.h"
-#include "mozilla/StaticPrefs_network.h"
-#include "mozilla/IntegerPrintfMacros.h"
-#include "mozilla/Services.h"
-#include "mozilla/Logging.h"
 
 #include "AndroidBridge.h"
+#include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/Logging.h"
+#include "mozilla/Services.h"
+#include "mozilla/StaticPrefs_network.h"
 #include "mozilla/java/GeckoAppShellWrappers.h"
+#include "mozilla/java/GeckoNetworkManagerWrappers.h"
 #include "mozilla/jni/Utils.h"
+#include "nsCharSeparatedTokenizer.h"
+#include "nsIObserverService.h"
+#include "nsServiceManagerUtils.h"
 
 namespace java = mozilla::java;
 namespace jni = mozilla::jni;
@@ -173,7 +174,23 @@ nsAndroidNetworkLinkService::GetNativeResolvers(
 NS_IMETHODIMP
 nsAndroidNetworkLinkService::GetPlatformDNSIndications(
     uint32_t* aPlatformDNSIndications) {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  NS_ENSURE_ARG_POINTER(aPlatformDNSIndications);
+
+  *aPlatformDNSIndications = nsINetworkLinkService::NONE_DETECTED;
+
+  if (!jni::IsAvailable()) {
+    NS_WARNING("GetPlatformDNSIndications is not supported without JNI");
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  // When Android has a private DNS (DNS-over-TLS) provider active, the system
+  // resolver may return split-horizon results, so we should not enable DoH.
+  // GeckoNetworkManager keeps this value up to date via a network callback.
+  if (java::GeckoNetworkManager::IsPrivateDnsActive()) {
+    *aPlatformDNSIndications |= nsINetworkLinkService::PRIVATE_DNS_DETECTED;
+  }
+
+  return NS_OK;
 }
 
 void nsAndroidNetworkLinkService::OnNetworkChanged() {

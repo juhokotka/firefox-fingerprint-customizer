@@ -30,9 +30,11 @@ tasks:
             build-fat-aar: build-fat-aar-android-geckoview-fat-aar/opt
         description: 'Focus debug build from source code'
         run:
+            clone-with: hg
             gradle-build-type: debug
             gradle-build-name: focusDebug
             gradle-build: focus
+            track-build-times: true
         source-project-name: "focus-android"
         treeherder:
             symbol: focus-debug(Bf)
@@ -43,6 +45,7 @@ tasks:
             build-fat-aar: build-fat-aar-android-geckoview-fat-aar/opt
         description: 'Klar debug build from source code'
         run:
+            clone-with: hg
             gradle-build-type: debug
             gradle-build-name: klarDebug
             gradle-build: klar
@@ -56,12 +59,14 @@ tasks:
             build-fat-aar: build-fat-aar-android-geckoview-fat-aar/opt
         description: 'Fenix debug build from source code'
         run:
+            clone-with: hg
             gradle-build-type: debug
             gradle-build-name: debug
             gradle-build: fenix
             gradle-extra-options:
                 - -PdisableLeakCanary
             track-apk-size: true
+            track-build-times: true
         source-project-name: "fenix"
         treeherder:
             symbol: fenix-debug(Bf)
@@ -84,9 +89,11 @@ tasks:
         include-shippable-secrets: true
         include-release-version: true
         run:
+            clone-with: hg
             gradle-build-type: release
             gradle-build-name: focusRelease
             gradle-build: focus
+            track-build-times: true
         run-on-projects: []
         shipping-phase: promote
         source-project-name: "focus-android"
@@ -104,6 +111,7 @@ tasks:
         include-shippable-secrets: true
         include-release-version: true
         run:
+            clone-with: hg
             gradle-build-type: release
             gradle-build-name: klarRelease
             gradle-build: klar
@@ -129,10 +137,12 @@ tasks:
         include-shippable-secrets: true
         include-release-version: true
         run:
+            clone-with: hg
             gradle-build-type: release
             gradle-build-name: release
             gradle-build: fenix
             track-apk-size: true
+            track-build-times: true
             baseline-profile-path: /builds/worker/fetches/baselineProfiles
         run-on-projects: []
         shipping-phase: promote
@@ -155,9 +165,11 @@ tasks:
         include-shippable-secrets: true
         include-nightly-version: true
         run:
+            clone-with: hg
             gradle-build-type: nightly
             gradle-build-name: focusNightly
             gradle-build: focus
+            track-build-times: true
         run-on-projects: []
         source-project-name: "focus-android"
         treeherder:
@@ -177,14 +189,40 @@ tasks:
         include-nightly-version: true
         source-project-name: "fenix"
         run:
+            clone-with: hg
             gradle-build-type: nightly
             gradle-build-name: nightly
             gradle-build: fenix
             track-apk-size: true
+            track-build-times: true
             baseline-profile-path: /builds/worker/fetches/baselineProfiles
         run-on-projects: []
         treeherder:
             symbol: fenix-nightly(B)
+            platform: fenix-android-all/opt
+        worker:
+            artifacts:
+                - path: /builds/worker/perfherder-data-apk-size.json
+                  name: public/build/perfherder-data-apk-size.json
+                  type: file
+            env:
+                MOZ_PERFHERDER_UPLOAD: /builds/worker/perfherder-data-apk-size.json
+
+    fenix-nightly-nobp:
+        description: 'Nightly Fenix build without a baseline profile'
+        dependencies:
+            build-fat-aar: build-fat-aar-android-geckoview-fat-aar/opt
+        include-nightly-version: true
+        source-project-name: "fenix"
+        run:
+            gradle-build-type: nightly
+            gradle-build-name: nightly
+            gradle-build: fenix
+            track-apk-size: true
+            track-build-times: true
+        run-on-projects: []
+        treeherder:
+            symbol: fenix-nightly-nobp(B)
             platform: fenix-android-all/opt
         worker:
             artifacts:
@@ -204,9 +242,11 @@ tasks:
         include-shippable-secrets: true
         include-release-version: true
         run:
+            clone-with: hg
             gradle-build-type: beta
             gradle-build-name: focusBeta
             gradle-build: focus
+            track-build-times: true
         run-on-projects: []
         shipping-phase: promote
         source-project-name: "focus-android"
@@ -229,10 +269,12 @@ tasks:
         include-shippable-secrets: true
         include-release-version: true
         run:
+            clone-with: hg
             gradle-build-type: beta
             gradle-build-name: beta
             gradle-build: fenix
             track-apk-size: true
+            track-build-times: true
             baseline-profile-path: /builds/worker/fetches/baselineProfiles
         run-on-projects: []
         shipping-phase: promote
@@ -254,6 +296,7 @@ tasks:
             build-fat-aar: build-fat-aar-android-geckoview-fat-aar/opt
         disable-optimization: true
         run:
+            clone-with: hg
             gradle-build-type: nightly
             gradle-build-name: focusNightly
             gradle-build: focus
@@ -270,6 +313,7 @@ tasks:
             build-fat-aar: build-fat-aar-android-geckoview-fat-aar/opt
         disable-optimization: true
         run:
+            clone-with: hg
             gradle-build-type: nightly
             gradle-build-name: nightly
             gradle-build: fenix
@@ -286,6 +330,7 @@ tasks:
             build-fat-aar: build-fat-aar-android-geckoview-fat-aar-shippable/opt
         disable-optimization: true
         run:
+            clone-with: hg
             gradle-build-type: beta
             gradle-build-name: focusBeta
             gradle-build: focus
@@ -302,6 +347,7 @@ tasks:
             build-fat-aar: build-fat-aar-android-geckoview-fat-aar-shippable/opt
         disable-optimization: true
         run:
+            clone-with: hg
             gradle-build-type: beta
             gradle-build-name: beta
             gradle-build: fenix
@@ -317,6 +363,7 @@ tasks:
         dependencies:
             build-fat-aar: build-fat-aar-android-geckoview-fat-aar/opt
         run:
+            clone-with: hg
             gradle-build-type: androidTest
             gradle-build-name: androidTest
             gradle-build: focus
@@ -333,6 +380,7 @@ tasks:
         dependencies:
             build-fat-aar: build-fat-aar-android-geckoview-fat-aar/opt
         run:
+            clone-with: hg
             gradle-build-type: androidTest
             gradle-build-name: androidTest
             gradle-build: fenix
@@ -358,6 +406,7 @@ tasks:
             build-fat-aar: build-fat-aar-android-geckoview-fat-aar/opt
         disable-optimization: true
         run:
+            clone-with: hg
             gradle-build-type: androidTest
             gradle-build-name: androidTest
             gradle-build: focus
@@ -391,6 +440,7 @@ tasks:
             path: '/builds/worker/workspace/obj-build/gradle/build/mobile/android/fenix/app/outputs/apk/androidTest/nightly/app-nightly-androidTest.apk'
         disable-optimization: true
         run:
+            clone-with: hg
             gradle-build-type: androidTest
             gradle-build-name: androidTest
             gradle-build: fenix
@@ -407,6 +457,7 @@ tasks:
             build-fat-aar: build-fat-aar-android-geckoview-fat-aar-shippable/opt
         disable-optimization: true
         run:
+            clone-with: hg
             gradle-build-type: androidTest
             gradle-build-name: androidTest
             gradle-build: focus
@@ -431,6 +482,7 @@ tasks:
             path: '/builds/worker/workspace/obj-build/gradle/build/mobile/android/fenix/app/outputs/apk/androidTest/beta/app-beta-androidTest.apk'
         disable-optimization: true
         run:
+            clone-with: hg
             gradle-build-type: androidTest
             gradle-build-name: androidTest
             gradle-build: fenix
@@ -454,6 +506,7 @@ tasks:
         run-on-projects: []
         disable-optimization: true
         run:
+            clone-with: hg
             gradle-build-type: androidTest
             gradle-build-name: androidTest
             gradle-build: fenix
@@ -480,6 +533,7 @@ tasks:
         include-shippable-secrets: true
         run-on-projects: []
         run:
+            clone-with: hg
             gradle-build-type: nightly
             gradle-build-name: nightly
             gradle-build: fenix
@@ -487,6 +541,35 @@ tasks:
         source-project-name: "fenix"
         treeherder:
             symbol: fenix-nightlySim(B)
+            platform: fenix-android-all/opt
+
+    # This task builds Fenix Nightly with the nightly-as-release GeckoView
+    # fat AAR. android nightly as release Browsertime use this APK. Analagous
+    # to fenix-nightly-simulation config.
+    fenix-nightlyasrelease-simulation:
+        description: 'Fenix Nightly-As-Release Simulation'
+        dependencies:
+            build-fat-aar: build-fat-aar-android-geckoview-fat-aar-nightlyasrelease/opt
+            baseline-profile: generate-baseline-profile-firebase-fenix
+        fetches:
+            baseline-profile:
+                - artifact: baselineProfile.tar.zst
+                  dest: baselineProfiles
+        attributes:
+            nightly: false
+        include-nightly-version: true
+        # Use dummy secrets on all levels. No secret exists for this task
+        # name, and this perf-only APK does not need real tokens.
+        include-shippable-secrets: false
+        run-on-projects: []
+        run:
+            gradle-build-type: nightly
+            gradle-build-name: nightly
+            gradle-build: fenix
+            baseline-profile-path: /builds/worker/fetches/baselineProfiles
+        source-project-name: "fenix"
+        treeherder:
+            symbol: fenix-nightlyAsReleaseSim(B)
             platform: fenix-android-all/opt
 
     fenix-beta-mozillaonline:
@@ -499,6 +582,7 @@ tasks:
         include-release-version: true
         include-shippable-secrets: true
         run:
+            clone-with: hg
             gradle-build-type: beta
             gradle-build-name: beta
             gradle-build: fenix
@@ -525,6 +609,7 @@ tasks:
         include-release-version: true
         include-shippable-secrets: true
         run:
+            clone-with: hg
             gradle-build-type: release
             gradle-build-name: release
             gradle-build: fenix

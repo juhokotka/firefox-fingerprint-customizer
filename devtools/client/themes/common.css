@@ -13,7 +13,7 @@
   font: message-box;
   font-size: var(--theme-body-font-size);
 
-  --tab-line-hover-color: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
+  --tab-line-hover-color: light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.2));
 
   --tab-line-selected-color: var(--blue-50);
   --toggle-thumb-color: light-dark(white, var(--grey-40));
@@ -416,7 +416,7 @@ iframe {
 .devtools-button.devtools-button-standalone {
   min-height: 28px;
   padding: 4px 6px;
-  border: 1px solid light-dark(rgba(138, 161, 180, 0.2), var(--grey-50));
+  border: 1px solid light-dark(rgb(138 161 180 / 0.2), var(--grey-50));
   background: var(--toolbarbutton-background);
   /* prettier-ignore */
   color: light-dark(
@@ -584,6 +584,7 @@ iframe {
 
 /* Display an outline on the container when the child input is focused. If another element
    is focused (e.g. a button), we only want the outline on that element */
+/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
 .devtools-searchbox:focus-within:has(input:focus-visible) {
   outline: var(--theme-focus-outline);
   outline-color: var(--theme-focus-textinput-outline-color);
@@ -597,6 +598,12 @@ iframe {
 .devtools-searchbox-no-match {
   background-color: var(--searchbox-no-match-background-color);
   border-color: var(--searchbox-no-match-stroke-color);
+}
+
+/* Checkbox input */
+
+.devtools-checkbox-label {
+  user-select: none;
 }
 
 /* Clear icon within the searchbox */
@@ -779,6 +786,7 @@ iframe {
   transform: scaleX(1);
 }
 
+/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
 .devtools-tab.selected .devtools-tab-line,
 /* don't show the line when focus is visible to prevent overlapping with the outline */
 .tabs-menu-item.is-active .devtools-tab-line:not(:has(+ [role="tab"]:focus-visible)) {

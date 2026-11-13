@@ -19,7 +19,7 @@
   --chip-selected-border-color: var(--color-violet-20);
   --chip-selected-text-color: var(--chip-text-color);
 
-  --chip-label-mask-size: 1em;
+  --chip-label-mask-size: var(--space-large);
 
   --chip-remove-border-radius: var(--border-radius-small);
   --chip-remove-size: var(--size-item-small);
@@ -38,7 +38,6 @@
 
   --context-chip-label-color: light-dark(var(--color-violet-90), var(--color-violet-10));
   --context-chip-label-hover-color: var(--context-chip-label-color);
-  --context-chip-label-hover-margin-inline-end: 0;
   --context-chip-label-hover-text-decoration: none;
 
   --context-chip-remove-hover-background-color: light-dark(transparent, var(--color-violet-80));
@@ -79,7 +78,6 @@
     --context-chip-remove-initial-display: flex;
 
     --context-chip-label-color: light-dark(var(--color-violet-desaturated-90, #14092b), var(--color-violet-desaturated-0, #f2f0f8));
-    --context-chip-label-hover-margin-inline-end: var(--space-xlarge);
     --context-chip-label-hover-text-decoration: underline;
 
     --context-chip-icon-hover-display: flex;
@@ -87,15 +85,19 @@
 
   :host([type="context-chip"]) .chip[data-removable] {
     &:hover .chip-remove {
+      inset-inline-end: var(--space-small);
       opacity: 1;
     }
 
     .chip-remove {
-      inset-inline-end: var(--space-small);
+      inset-inline-end: calc(-1 * var(--space-small));
       opacity: 0;
       position: absolute;
-      transition: all ease 150ms;
       z-index: 1;
+
+      @media not (prefers-reduced-motion) {
+        transition: all ease 150ms;
+      }
     }
   }
 }
@@ -138,7 +140,6 @@
   position: relative;
   align-items: center;
   gap: var(--space-small, 8px);
-  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   border-radius: var(--chip-border-radius);
   box-sizing: border-box;
   cursor: pointer;
@@ -155,8 +156,8 @@ button.chip {
 }
 
 .chip-icon {
-  width: var(--size-item-small);
-  height: var(--size-item-small);
+  width: var(--icon-size);
+  height: var(--icon-size);
   border-radius: var(--border-radius-xsmall);
   flex-shrink: 0;
   -moz-context-properties: fill;
@@ -184,7 +185,8 @@ button.chip {
   }
 }
 
-:host([type="in-line"]) .chip-icon {
+:host([type="in-line"]) .chip-icon,
+:host([type="in-line"]) tab-group-icon {
   align-self: center;
   transition: opacity 120ms ease;
 }
@@ -223,7 +225,6 @@ button.chip {
   --background-color-box: var(--context-chip-background-color);
 
   padding: var(--space-small);
-  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   border: var(--context-chip-border-width) solid var(--context-chip-border-color);
   background-color: var(--background-color-box);
 
@@ -233,7 +234,6 @@ button.chip {
 
   &:active,
   &:focus-visible {
-    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
     border: var(--context-chip-border-width) solid var(--context-chip-active-border-color);
     outline: none;
   }
@@ -241,7 +241,6 @@ button.chip {
 
 /* context chips inside the chat bubble */
 :host([type="context-chip"]) .chip:not([data-removable]) {
-  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   border-end-end-radius: var(--chip-border-radius-end-end);
 
   &:hover {
@@ -253,13 +252,29 @@ button.chip {
 
 /* context chips in the smartbar */
 :host([type="context-chip"]) .chip[data-removable] {
-  .chip-label {
-    margin-inline-end: var(--context-chip-label-hover-margin-inline-end);
-  }
-
   &:hover {
     --background-color-box: var(--context-chip-hover-background-color);
     border-color: var(--context-chip-hover-border-color);
+
+    @media -moz-pref("browser.nova.enabled") {
+      .chip-label {
+        clip-path: inset(0 var(--chip-remove-size) 0 0);
+        mask-image: linear-gradient(
+          to left,
+          transparent var(--chip-remove-size),
+          var(--color-black) calc(var(--chip-remove-size) + var(--chip-label-mask-size))
+        );
+
+        &:dir(rtl) {
+          clip-path: inset(0 0 0 var(--chip-remove-size));
+          mask-image: linear-gradient(
+            to right,
+            transparent var(--chip-remove-size),
+            var(--color-black) calc(var(--chip-remove-size) + var(--chip-label-mask-size))
+          );
+        }
+      }
+    }
 
     .chip-icon {
       display: var(--context-chip-icon-hover-display);
@@ -300,20 +315,30 @@ button.chip {
   padding: 0;
 
   &:hover {
-    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
     background-color: var(--context-chip-remove-hover-background-color);
   }
 }
 
 :host([type="context-chip"]) .chip-label {
   --text-color: var(--context-chip-label-color);
-
+  /* clip path is needed to trigger the transition animation when hovered */
+  clip-path: inset(0 0 0 0);
   color: var(--text-color);
   font-size: var(--font-size-small);
   height: var(--size-item-small);
+  line-height: var(--size-item-small);
   mask-image: linear-gradient(to left, transparent, var(--color-black) var(--chip-label-mask-size));
-  transition: margin-inline-end ease 150ms;
   white-space: nowrap;
+
+  &:dir(rtl) {
+    mask-image: linear-gradient(to right, transparent, var(--color-black) var(--chip-label-mask-size));
+  }
+
+  @media not (prefers-reduced-motion) {
+    transition:
+      mask-image ease 150ms,
+      clip-path ease 150ms;
+  }
 }
 
 /* Hover state for selected - must come after type-specific rules to override borders */
@@ -321,4 +346,28 @@ button.chip {
   background-color: var(--chip-selected-background-color);
   border-color: var(--chip-selected-border-color);
   color: var(--chip-selected-text-color);
+}
+
+:host([size="small"]) .chip {
+  --chip-border-radius: var(--border-radius-large);
+  --chip-border-radius-end-end: var(--border-radius-large);
+
+  font-size: var(--font-size-small);
+  gap: var(--space-xsmall);
+  padding: var(--space-xxsmall) var(--space-small);
+}
+
+:host([size="small"]) .chip-icon {
+  height: var(--icon-size-xsmall);
+  width: var(--icon-size-xsmall);
+}
+
+:host([size="small"]) tab-group-icon {
+  --tab-group-icon-size: var(--icon-size-xsmall);
+}
+
+:host([size="small"]) .chip-label {
+  mask-image: none;
+  min-width: 0;
+  text-overflow: ellipsis;
 }

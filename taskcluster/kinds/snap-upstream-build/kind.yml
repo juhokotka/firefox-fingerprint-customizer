@@ -14,7 +14,6 @@ transforms:
     - gecko_taskgraph.transforms.task:transforms
 
 task-defaults:
-    run-on-repo-type: [hg]
     attributes:
         cron: true
     treeherder:
@@ -38,6 +37,7 @@ task-defaults:
     fetches:
         toolchain:
             - linux64-minidump-stackwalk
+            - newtab-node-modules
 
 tasks:
     amd64-nightly/opt:

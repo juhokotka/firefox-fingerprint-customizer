@@ -2,33 +2,34 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::ImageBufferKind;
 use api::FontInstanceFlags;
+use api::euclid::{Box2D, Scale};
 use api::units::*;
 use crate::command_buffer::PrimitiveCommand;
 use crate::pattern::PatternKind;
-use crate::spatial_tree::SpatialNodeIndex;
+use crate::renderer::GpuBufferAddress;
+use crate::spatial_tree::{SpatialNodeIndex, SpatialTree};
 use glyph_rasterizer::{GlyphFormat, SubpixelDirection};
-use crate::gpu_types::{BrushFlags, PrimitiveHeaders, ZBufferId, ZBufferIdGenerator};
+use crate::gpu_types::{PrimitiveHeaders, ZBufferId, ZBufferIdGenerator};
 use crate::gpu_types::SplitCompositeInstance;
 use crate::gpu_types::{PrimitiveInstanceData, GlyphInstance};
 use crate::gpu_types::{PrimitiveHeader, PrimitiveHeaderIndex};
-use crate::gpu_types::MaskInstance;
+use crate::gpu_types::{MaskInstance, QuadSegment};
 use crate::internal_types::{FastHashMap, FrameAllocator, FrameMemory, FrameVec, Swizzle, TextureSource};
-use crate::picture::PictureCompositeMode;
 use crate::prim_store::PrimitiveKind;
 use crate::prim_store::PrimitiveInstance;
 use crate::prim_store::{ClipMaskKind, ClipTaskIndex};
+use crate::path_tiler::PathTileInstance;
 use crate::quad;
 use crate::render_target::RenderTargetContext;
 use crate::render_task_graph::{RenderTaskId, RenderTaskGraph};
 use crate::render_task::RenderTaskAddress;
-use crate::renderer::{BlendMode, GpuBufferAddress, GpuBufferBuilder, ShaderColorMode};
+use crate::renderer::{BlendMode, GpuBufferBuilder, ShaderColorMode};
 use crate::resource_cache::GlyphFetchResult;
 use crate::space::SpaceMapper;
 use crate::transform::TransformPalette;
 use crate::visibility::{PrimitiveVisibilityFlags, DrawState};
-use std::{f32, i32, usize};
+use std::fmt;
 
 
 // Special sentinel value recognized by the shader. It is considered to be
@@ -41,21 +42,9 @@ pub const INVALID_SEGMENT_INDEX: i32 = 0xffff;
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-pub enum BrushBatchKind {
-    Image(ImageBufferKind),
-    MixBlend {
-        task_id: RenderTaskId,
-        backdrop_id: RenderTaskId,
-    },
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum BatchKind {
     SplitComposite,
     TextRun(GlyphFormat),
-    Brush(BrushBatchKind),
     Quad(PatternKind),
 }
 
@@ -247,15 +236,45 @@ impl BatchKey {
     }
 }
 
+/// Map a rect into the device space of the surface being batched.
+///
+/// Mirrors `SurfaceInfo::map_to_device_rect`, which is what produced the device
+/// rects the commands carry, so that a rect derived here is comparable to them.
+///
+/// `bounds`, in raster space, limits how far a projected rect may extend; it
+/// matters when the source space reaches the raster node through a perspective
+/// transform, where an unbounded projection can blow up near the horizon.
+fn map_to_device<F: fmt::Debug>(
+    rect: &Box2D<f32, F>,
+    from_spatial_node_index: SpatialNodeIndex,
+    raster_spatial_node_index: SpatialNodeIndex,
+    bounds: RasterRect,
+    device_pixel_scale: DevicePixelScale,
+    spatial_tree: &SpatialTree,
+) -> Option<DeviceRect> {
+    let map_to_raster: SpaceMapper<F, RasterPixel> = SpaceMapper::new_with_target(
+        raster_spatial_node_index,
+        from_spatial_node_index,
+        bounds,
+        spatial_tree,
+    );
+
+    Some(map_to_raster.map(rect)? * raster_to_device(device_pixel_scale))
+}
+
+fn raster_to_device(device_pixel_scale: DevicePixelScale) -> Scale<f32, RasterPixel, DevicePixel> {
+    Scale::new(device_pixel_scale.0)
+}
+
 pub struct BatchRects {
     /// Union of all of the batch's item rects.
     ///
     /// Very often we can skip iterating over item rects by testing against
     /// this one first.
-    batch: PictureRect,
+    batch: DeviceRect,
     /// When the batch rectangle above isn't a good enough approximation, we
     /// store per item rects.
-    items: Option<FrameVec<PictureRect>>,
+    items: Option<FrameVec<DeviceRect>>,
     // TODO: batch rects don't need to be part of the frame but they currently
     // are. It may be cleaner to remove them from the frame's final data structure
     // and not use the frame's allocator.
@@ -265,14 +284,14 @@ pub struct BatchRects {
 impl BatchRects {
     fn new(allocator: FrameAllocator) -> Self {
         BatchRects {
-            batch: PictureRect::zero(),
+            batch: DeviceRect::zero(),
             items: None,
             allocator,
         }
     }
 
     #[inline]
-    fn add_rect(&mut self, rect: &PictureRect) {
+    fn add_rect(&mut self, rect: &DeviceRect) {
         let union = self.batch.union(rect);
         // If we have already started storing per-item rects, continue doing so.
         // Otherwise, check whether only storing the batch rect is a good enough
@@ -290,7 +309,7 @@ impl BatchRects {
     }
 
     #[inline]
-    fn intersects(&mut self, rect: &PictureRect) -> bool {
+    fn intersects(&mut self, rect: &DeviceRect) -> bool {
         if !self.batch.intersects(rect) {
             return false;
         }
@@ -341,7 +360,7 @@ impl AlphaBatchList {
         features: BatchFeatures,
         // The bounding box of everything at this Z plane. We expect potentially
         // multiple primitive segments coming with the same `z_id`.
-        z_bounding_rect: &PictureRect,
+        z_bounding_rect: &DeviceRect,
         z_id: ZBufferId,
     ) -> &mut PrimitiveBatch {
         if z_id != self.current_z_id ||
@@ -437,7 +456,7 @@ impl OpaqueBatchList {
         // The bounding box of everything at the current Z, whatever it is. We expect potentially
         // multiple primitive segments produced by a primitive, which we allow to check
         // `current_batch_index` instead of iterating the batches.
-        z_bounding_rect: &PictureRect,
+        z_bounding_rect: &DeviceRect,
     ) -> &mut PrimitiveBatch {
         // If the area of this primitive is larger than the given threshold,
         // then it is large enough to warrant breaking a batch for. In this
@@ -631,8 +650,8 @@ impl AlphaBatchBuilder {
         render_task_address: RenderTaskAddress,
         memory: &FrameMemory,
     ) -> Self {
-        // The threshold for creating a new batch is
-        // one quarter the screen size.
+        // The threshold for creating a new batch is one quarter of the screen
+        // area, in device pixels - the same units the item rects are in.
         let batch_area_threshold = (screen_size.width * screen_size.height) as f32 / 4.0;
 
         AlphaBatchBuilder {
@@ -676,7 +695,7 @@ impl AlphaBatchBuilder {
         &mut self,
         key: BatchKey,
         features: BatchFeatures,
-        bounding_rect: &PictureRect,
+        bounding_rect: &DeviceRect,
         z_id: ZBufferId,
         instance: PrimitiveInstanceData,
     ) {
@@ -689,7 +708,7 @@ impl AlphaBatchBuilder {
         key: BatchKey,
         features: BatchFeatures,
         readback: Option<&InlineReadback>,
-        bounding_rect: &PictureRect,
+        bounding_rect: &DeviceRect,
         z_id: ZBufferId,
     ) -> &mut FrameVec<PrimitiveInstanceData> {
         let batch = match key.blend_mode {
@@ -747,7 +766,7 @@ impl BatchBuilder {
         &mut self,
         batch_key: BatchKey,
         features: BatchFeatures,
-        bounding_rect: &PictureRect,
+        bounding_rect: &DeviceRect,
         z_id: ZBufferId,
         prim_header_index: PrimitiveHeaderIndex,
         polygons_address: i32,
@@ -788,17 +807,18 @@ impl BatchBuilder {
         transforms: &mut TransformPalette,
         root_spatial_node_index: SpatialNodeIndex,
         surface_spatial_node_index: SpatialNodeIndex,
+        device_pixel_scale: DevicePixelScale,
         z_generator: &mut ZBufferIdGenerator,
         prim_instances: &[PrimitiveInstance],
         gpu_buffer_builder: &mut GpuBufferBuilder,
-        segments: &[RenderTaskId],
+        segments: &[QuadSegment],
     ) {
-        let draw_index = match cmd {
-            PrimitiveCommand::Simple { draw_index } => {
-                draw_index
+        let (draw_index, bounding_rect) = match cmd {
+            PrimitiveCommand::Simple { draw_index, device_rect } => {
+                (draw_index, device_rect)
             }
-            PrimitiveCommand::SplitComposite { draw_index, polygons_address, transform_id, src_task_id, local_rect } => {
-                let prim_info = &ctx.scratch.frame.draws[draw_index.0 as usize];
+            PrimitiveCommand::SplitComposite { draw_index, device_rect, polygons_address, transform_id, src_task_id, pattern_rect } => {
+                let prim_info = ctx.scratch.frame.draw(*draw_index);
 
                 let (clip_task_address, clip_mask_texture_id) = ctx.get_prim_clip_task_and_texture(
                     prim_info.clip_task_index,
@@ -811,15 +831,15 @@ impl BatchBuilder {
                 let z_id = z_generator.next();
 
                 let prim_header = PrimitiveHeader {
-                    local_rect: *local_rect,
-                    local_clip_rect: prim_info.clip_chain.local_clip_rect,
-                    specific_prim_address: ctx.globals.default_image_data.as_int(),
+                    pattern_rect: *pattern_rect,
+                    bounds: prim_info.clip_chain.local_clip_rect,
+                    specific_prim_address: GpuBufferAddress::INVALID.as_int(),
                     transform_id: *transform_id,
                     z: z_id,
                     render_task_address: self.batcher.render_task_address,
                     user_data: [
                         uv_rect_address.as_int(),
-                        BrushFlags::PERSPECTIVE_INTERPOLATION.bits() as i32,
+                        0,
                         0,
                         clip_task_address.0 as i32,
                     ],
@@ -835,7 +855,7 @@ impl BatchBuilder {
                 self.add_split_composite_instance_to_batches(
                     key,
                     BatchFeatures::CLIP_MASK,
-                    &prim_info.clip_chain.pic_coverage_rect,
+                    device_rect,
                     z_id,
                     prim_header_index,
                     polygons_address.as_int(),
@@ -843,12 +863,11 @@ impl BatchBuilder {
 
                 return;
             }
-            PrimitiveCommand::Instance { draw_index, .. } => {
-                draw_index
+            PrimitiveCommand::Instance { draw_index, device_rect, .. } => {
+                (draw_index, device_rect)
             }
-            PrimitiveCommand::Quad { pattern, pattern_input, draw_index, gpu_buffer_address, quad_flags, edge_flags, transform_id, src_color_task_ids, blend_mode } => {
-                let prim_info = &ctx.scratch.frame.draws[draw_index.0 as usize];
-                let bounding_rect = &prim_info.clip_chain.pic_coverage_rect;
+            PrimitiveCommand::Quad { pattern, pattern_input, device_rect, gpu_buffer_address, quad_flags, edge_flags, transform_id, src_color_task_ids, blend_mode } => {
+                let bounding_rect = device_rect;
                 let render_task_address = self.batcher.render_task_address;
 
                 let mut readback = None;
@@ -889,11 +908,23 @@ impl BatchBuilder {
                         },
                     );
                 } else {
-                    for (i, task_id) in segments.iter().enumerate() {
+                    for (i, segment) in segments.iter().enumerate() {
                         // TODO(gw): edge_flags should be per-segment, when used for more than composites
                         debug_assert!(edge_flags.is_empty());
 
                         let z_id = z_generator.next();
+
+                        // Each segment covers only its own part of the quad, so batch
+                        // it against that rather than the whole quad: segments of one
+                        // quad routinely fit between the segments of another.
+                        // An empty rect would never report an overlap, so fall back to
+                        // the quad's own rect rather than let the instance sink into a
+                        // batch it is drawn on top of.
+                        let segment_rect = if segment.rect.is_empty() {
+                            *bounding_rect
+                        } else {
+                            segment.rect.cast_unit()
+                        };
 
                         quad::add_to_batch(
                             *pattern,
@@ -904,7 +935,7 @@ impl BatchBuilder {
                             *quad_flags,
                             *edge_flags,
                             i as u8,
-                            [*task_id, src_color_task_ids[1], src_color_task_ids[2]],
+                            [segment.task_id, src_color_task_ids[1], src_color_task_ids[2]],
                             z_id,
                             *blend_mode,
                             readback.map(|rb| rb.readback_task_id),
@@ -915,7 +946,7 @@ impl BatchBuilder {
                                     key,
                                     BatchFeatures::empty(),
                                     readback.as_ref(),
-                                    bounding_rect,
+                                    &segment_rect,
                                     z_id,
                                 );
                                 batch.push(instance);
@@ -928,10 +959,7 @@ impl BatchBuilder {
             }
         };
 
-        let prim_instance = &prim_instances[draw_index.0 as usize];
-        let is_anti_aliased = ctx.data_stores.prim_has_anti_aliasing(prim_instance);
-
-        let vis_flags = match ctx.scratch.frame.draws[draw_index.0 as usize].state {
+        let vis_flags = match ctx.scratch.frame.draw(*draw_index).state {
             DrawState::Culled => {
                 return;
             }
@@ -949,6 +977,8 @@ impl BatchBuilder {
         // use the backdrop color as a clear color, and so we can drop this
         // primitive and any prior primitives from the batch lists for this
         // picture cache slice.
+        // TODO: This isn't reachable anymore, and the optimization was lost in
+        // the transition to quad shaders.
         if vis_flags.contains(PrimitiveVisibilityFlags::IS_BACKDROP) {
             self.clear_batches();
             return;
@@ -960,101 +990,34 @@ impl BatchBuilder {
             ctx.spatial_tree,
         );
 
-        let prim_info = &ctx.scratch.frame.draws[draw_index.0 as usize];
-        let bounding_rect = &prim_info.clip_chain.pic_coverage_rect;
+        let prim_info = ctx.scratch.frame.draw(*draw_index);
 
         let z_id = z_generator.next();
 
-        let prim_rect = ctx.data_stores.get_local_prim_rect(
-            prim_instance,
-            prim_info.snapped_local_rect,
-            &ctx.prim_store.pictures,
-            ctx.surfaces,
-        );
-
         let mut batch_features = BatchFeatures::empty();
-        let may_need_repetition = match prim_instance.kind {
-            PrimitiveKind::Image { .. } => {
-                let idx = prim_info.kind_scratch.unwrap_image();
-                ctx.scratch.frame.images[idx].may_need_repetition
-            }
-            // Image borders always go through brush_image and may tile
-            // their mid sections, so request the repetition-capable
-            // shader.
-            PrimitiveKind::ImageBorder { .. } => true,
-            // Patterned line decorations (Dashed / Dotted / Wavy) batch
-            // as `BrushBatchKind::Image` over a cached pattern tile and
-            // rely on shader-level repetition to span the segment. The
-            // REPETITION flag is harmless for solid lines.
-            PrimitiveKind::LineDecoration { .. } => true,
-            // Other prim kinds don't reach the brush_image consumer of
-            // BatchFeatures::REPETITION; the flag is dead state for
-            // them.
-            _ => false,
-        };
-        if may_need_repetition {
-            batch_features |= BatchFeatures::REPETITION;
-        }
-
-        if !transform_id.is_2d_axis_aligned() || is_anti_aliased {
-            batch_features |= BatchFeatures::ANTIALIASING;
-        }
-
         // Check if the primitive might require a clip mask.
         if prim_info.clip_task_index != ClipTaskIndex::INVALID {
             batch_features |= BatchFeatures::CLIP_MASK;
         }
 
         if !bounding_rect.is_empty() {
+            // The command's device rect was mapped out of the picture-space
+            // coverage rect, so the clip chain has to have been built in the
+            // surface's picture space for the two to describe the same region.
             debug_assert_eq!(prim_info.clip_chain.pic_spatial_node_index, surface_spatial_node_index,
                 "The primitive's bounding box is specified in a different coordinate system from the current batch!");
         }
 
-        if let PrimitiveKind::Picture { pic_index, .. } = prim_instance.kind {
-            let picture = &ctx.prim_store.pictures[pic_index.0];
-
-            let Some(ref raster_config) = picture.raster_config else {
-                return;
-            };
-
-            // Pictures are composited elsewhere: filters, opacity, mix-blend and
-            // blit go through the quad path, and 3D-context planes go through the
-            // split-composite command (handled at the top of add_prim_to_batch).
-            // The only composite modes that reach here are TileCache (a top-level
-            // primitive, effectively never encountered during batching) and
-            // IntermediateSurface (consumed as an input by another primitive);
-            // neither emits a batch instance.
-            match raster_config.composite_mode {
-                PictureCompositeMode::TileCache { .. }
-                | PictureCompositeMode::IntermediateSurface { .. } => {}
-                PictureCompositeMode::Filter(..)
-                | PictureCompositeMode::ComponentTransferFilter(..)
-                | PictureCompositeMode::MixBlend(..)
-                | PictureCompositeMode::Blit(..)
-                | PictureCompositeMode::SVGFEGraph(..) => unreachable!(
-                    "picture composite modes are handled by the quad or split-composite paths, not the brush path"
-                ),
-            }
-
-            return;
-        }
-
-        let base_prim_header = PrimitiveHeader {
-            local_rect: prim_rect,
-            local_clip_rect: prim_info.clip_chain.local_clip_rect,
-            transform_id,
-            z: z_id,
-            render_task_address: self.batcher.render_task_address,
-            specific_prim_address: GpuBufferAddress::INVALID.as_int(), // Will be overridden by most uses
-            user_data: [0; 4], // Will be overridden by most uses
-        };
+        // A draw index is not a primitive instance index; the header carries the
+        // back-reference.
+        let prim_instance = &prim_instances[prim_info.prim_instance_index.0 as usize];
 
         match prim_instance.kind {
             PrimitiveKind::TextRun { data_handle, .. } => {
                 let text_run_scratch_handle = prim_info.kind_scratch.unwrap_text_run();
                 let run_scratch = &ctx.scratch.frame.text_runs[text_run_scratch_handle];
                 let subpx_dir = run_scratch.used_font.get_subpx_dir();
-                let prim_data = &ctx.data_stores.text_run[data_handle];
+                let prim_data = &ctx.data_stores.text_run[data_handle].kind;
 
                 let glyph_keys = &ctx.scratch.frame.glyph_keys[run_scratch.glyph_keys_range];
 
@@ -1065,7 +1028,21 @@ impl BatchBuilder {
                 // local-raster mode's raster -> local mapping) and the mode flag
                 // (0 = device, 1 = local raster).
                 let prim_header = PrimitiveHeader {
-                    local_rect: run_scratch.local_rect,
+                    // A text run's prim rect situates the glyphs but does not
+                    // bound them: the shader only reads `pattern_rect.min` as
+                    // the run anchor, and glyph ink routinely extends past the
+                    // authored rect. Do not fold the prim rect into `bounds` -
+                    // that would start clipping glyphs by it.
+                    pattern_rect: run_scratch.pattern_rect,
+                    // Quantised to the glyph grid on the snapped axes - see
+                    // `TextRunScratch::snapped_clip_rect`. The shader clamps the
+                    // glyph quad to this, and that clamp is a hard pixel-centre
+                    // test, so it is only lossless when the clip and the glyphs
+                    // share a grid.
+                    bounds: run_scratch.snapped_clip_rect,
+                    transform_id,
+                    z: z_id,
+                    render_task_address: self.batcher.render_task_address,
                     specific_prim_address: run_scratch.gpu_address.as_int(),
                     user_data: [
                         (run_scratch.raster_scale * 65535.0).round() as i32,
@@ -1073,7 +1050,6 @@ impl BatchBuilder {
                         0,
                         0,
                     ],
-                    ..base_prim_header
                 };
                 let prim_header_index = prim_headers.push(&prim_header);
                 let base_instance = GlyphInstance::new(
@@ -1099,6 +1075,18 @@ impl BatchBuilder {
                         debug_assert_ne!(texture_id, TextureSource::Invalid);
 
                         let subpx_dir = subpx_dir.limit_by(glyph_format);
+
+                        // A glyph that rasterized from a bitmap strike ignored the
+                        // sub-pixel offset its key asked for and landed on the device
+                        // grid, so its pen rounds to nearest rather than flooring with
+                        // the sub-pixel bias (bug 2056856). Only known once the glyph is
+                        // rasterized, which is why it is resolved here rather than in
+                        // `request_resources`. Batches are keyed by glyph format, so this
+                        // is uniform across the batch.
+                        let is_bitmap_strike = matches!(
+                            glyph_format,
+                            GlyphFormat::Bitmap | GlyphFormat::ColorBitmap
+                        );
 
                         let textures = BatchTextures::prim_textured(
                             texture_id,
@@ -1151,28 +1139,37 @@ impl BatchBuilder {
                         // branch's `raster_text_offset` then reduces to the reference-frame
                         // device snap that `request_resources` applies.
                         let tight_bounding_rect = {
-                            let snap_bias = match subpx_dir {
-                                SubpixelDirection::None => DeviceVector2D::new(0.5, 0.5),
-                                SubpixelDirection::Horizontal => DeviceVector2D::new(0.125, 0.5),
-                                SubpixelDirection::Vertical => DeviceVector2D::new(0.5, 0.125),
+                            let snap_bias = if is_bitmap_strike {
+                                DeviceVector2D::new(0.5, 0.5)
+                            } else {
+                                match subpx_dir {
+                                    SubpixelDirection::None => DeviceVector2D::new(0.5, 0.5),
+                                    SubpixelDirection::Horizontal => DeviceVector2D::new(0.125, 0.5),
+                                    SubpixelDirection::Vertical => DeviceVector2D::new(0.5, 0.125),
+                                    SubpixelDirection::Mixed => DeviceVector2D::new(0.125, 0.125),
+                                }
                             };
                             let text_offset = LayoutVector2D::zero();
 
-                            let pic_bounding_rect = if run_scratch.used_font.flags.contains(FontInstanceFlags::TRANSFORM_GLYPHS) {
+                            let device_tight_rect = if run_scratch.used_font.flags.contains(FontInstanceFlags::TRANSFORM_GLYPHS) {
                                 let mut device_bounding_rect = DeviceRect::default();
 
+                                // The relative transform lands in raster space, so fold in
+                                // the raster -> device scale: the snapping below floors
+                                // against the device pixel grid, not the raster one.
                                 let glyph_transform = ctx.spatial_tree.get_relative_transform(
                                     prim_spatial_node_index,
                                     root_spatial_node_index,
-                                ).into_transform()
-                                    .with_destination::<WorldPixel>()
-                                    .then(&euclid::Transform3D::from_scale(ctx.global_device_pixel_scale));
+                                )
+                                    .into_transform()
+                                    .then_scale(device_pixel_scale.0, device_pixel_scale.0, 1.0)
+                                    .with_destination::<DevicePixel>();
 
                                 let glyph_translation = DeviceVector2D::new(glyph_transform.m41, glyph_transform.m42);
 
                                 let mut use_tight_bounding_rect = true;
                                 for glyph in glyphs {
-                                    let glyph_offset = prim_data.glyphs[glyph.index_in_text_run as usize].point + prim_header.local_rect.min.to_vector();
+                                    let glyph_offset = prim_data.glyphs[glyph.index_in_text_run as usize].point + prim_header.pattern_rect.min.to_vector();
 
                                     let transformed_offset = match glyph_transform.transform_point2d(glyph_offset) {
                                         Some(transformed_offset) => transformed_offset,
@@ -1197,27 +1194,17 @@ impl BatchBuilder {
                                 }
 
                                 if use_tight_bounding_rect {
-                                    let map_device_to_surface: SpaceMapper<PicturePixel, DevicePixel> = SpaceMapper::new_with_target(
-                                        root_spatial_node_index,
-                                        surface_spatial_node_index,
-                                        device_bounding_rect,
-                                        ctx.spatial_tree,
-                                    );
-
-                                    match map_device_to_surface.unmap(&device_bounding_rect) {
-                                        Some(r) => r.intersection(bounding_rect),
-                                        None => Some(*bounding_rect),
-                                    }
+                                    Some(device_bounding_rect)
                                 } else {
-                                    Some(*bounding_rect)
+                                    None
                                 }
                             } else {
                                 let mut local_bounding_rect = LayoutRect::default();
 
-                                let glyph_raster_scale = run_scratch.raster_scale * ctx.global_device_pixel_scale.get();
+                                let glyph_raster_scale = run_scratch.raster_scale;
 
                                 for glyph in glyphs {
-                                    let glyph_offset = prim_data.glyphs[glyph.index_in_text_run as usize].point + prim_header.local_rect.min.to_vector();
+                                    let glyph_offset = prim_data.glyphs[glyph.index_in_text_run as usize].point + prim_header.pattern_rect.min.to_vector();
                                     let glyph_scale = LayoutToDeviceScale::new(glyph_raster_scale / glyph.scale);
                                     let raster_glyph_offset = (glyph_offset * LayoutToDeviceScale::new(glyph_raster_scale) + snap_bias).floor() / glyph.scale;
                                     let local_glyph_rect = LayoutRect::from_origin_and_size(
@@ -1228,25 +1215,24 @@ impl BatchBuilder {
                                     local_bounding_rect = local_bounding_rect.union(&local_glyph_rect);
                                 }
 
-                                let map_prim_to_surface: SpaceMapper<LayoutPixel, PicturePixel> = SpaceMapper::new_with_target(
-                                    surface_spatial_node_index,
+                                map_to_device(
+                                    &local_bounding_rect,
                                     prim_spatial_node_index,
-                                    *bounding_rect,
+                                    root_spatial_node_index,
+                                    *bounding_rect / raster_to_device(device_pixel_scale),
+                                    device_pixel_scale,
                                     ctx.spatial_tree,
-                                );
-                                map_prim_to_surface.map(&local_bounding_rect)
+                                )
                             };
 
-                            let intersected = match pic_bounding_rect {
+                            match device_tight_rect {
                                 // The text run may have been clipped, for example if part of it is offscreen.
                                 // So intersect our result with the original bounding rect.
-                                Some(rect) => rect.intersection(bounding_rect).unwrap_or_else(PictureRect::zero),
+                                Some(rect) => rect.intersection(bounding_rect).unwrap_or_else(DeviceRect::zero),
                                 // If space mapping went off the rails, fall back to the old behavior.
                                 //TODO: consider skipping the glyph run completely in this case.
                                 None => *bounding_rect,
-                            };
-
-                            intersected
+                            }
                         };
 
                         let key = BatchKey::new(kind, blend_mode, textures);
@@ -1269,6 +1255,7 @@ impl BatchBuilder {
                                 glyph.subpx_offset_x,
                                 glyph.subpx_offset_y,
                                 glyph.is_packed_glyph,
+                                is_bitmap_strike,
                             ));
                         }
                     },
@@ -1284,24 +1271,33 @@ impl BatchBuilder {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct ClipMaskInstanceList {
     pub mask_instances_fast: FrameVec<MaskInstance>,
+    pub mask_instances_superellipse: FrameVec<MaskInstance>,
     pub mask_instances_slow: FrameVec<MaskInstance>,
 
     pub mask_instances_fast_with_scissor: FastHashMap<DeviceIntRect, FrameVec<MaskInstance>>,
+    pub mask_instances_superellipse_with_scissor: FastHashMap<DeviceIntRect, FrameVec<MaskInstance>>,
     pub mask_instances_slow_with_scissor: FastHashMap<DeviceIntRect, FrameVec<MaskInstance>>,
 
     pub image_mask_instances: FastHashMap<TextureSource, FrameVec<PrimitiveInstanceData>>,
     pub image_mask_instances_with_scissor: FastHashMap<(DeviceIntRect, TextureSource), FrameVec<PrimitiveInstanceData>>,
+
+    /// Drawn with the premultiplied dest-out blend mode. Positioned relative
+    /// to their render task by the shader, so they never need a scissor rect.
+    pub path_tiles: FrameVec<PathTileInstance>,
 }
 
 impl ClipMaskInstanceList {
     pub fn new(memory: &FrameMemory) -> Self {
         ClipMaskInstanceList {
             mask_instances_fast: memory.new_vec(),
+            mask_instances_superellipse: memory.new_vec(),
             mask_instances_slow: memory.new_vec(),
             mask_instances_fast_with_scissor: FastHashMap::default(),
+            mask_instances_superellipse_with_scissor: FastHashMap::default(),
             mask_instances_slow_with_scissor: FastHashMap::default(),
             image_mask_instances: FastHashMap::default(),
             image_mask_instances_with_scissor: FastHashMap::default(),
+            path_tiles: memory.new_vec(),
         }
     }
 
@@ -1310,19 +1306,25 @@ impl ClipMaskInstanceList {
         // a new member is added.
         let ClipMaskInstanceList {
             mask_instances_fast,
+            mask_instances_superellipse,
             mask_instances_slow,
             mask_instances_fast_with_scissor,
+            mask_instances_superellipse_with_scissor,
             mask_instances_slow_with_scissor,
             image_mask_instances,
             image_mask_instances_with_scissor,
+            path_tiles,
         } = self;
 
         mask_instances_fast.is_empty()
+            && mask_instances_superellipse.is_empty()
             && mask_instances_slow.is_empty()
             && mask_instances_fast_with_scissor.is_empty()
+            && mask_instances_superellipse_with_scissor.is_empty()
             && mask_instances_slow_with_scissor.is_empty()
             && image_mask_instances.is_empty()
             && image_mask_instances_with_scissor.is_empty()
+            && path_tiles.is_empty()
     }
 }
 

@@ -77,9 +77,16 @@ $ds-width: 936px;
   }
 }
 
+// The feed and Highlights, each grouped so the side-by-side layouts have one element
+// to place and frame (see _Grid.scss). No box otherwise. "layout" here is the page
+// layout (PageLayoutVariants.mjs), not the .ds-layout kind.
+:is(.layout-content-column, .layout-highlights-column) {
+  display: contents;
+}
+
 // Nova Grid Overrides
 // @nova-cleanup(remove-conditional): Remove .nova-enabled selector and display: contents wrappers
-.nova-enabled .content .ds-layout:not(.discovery-stream) {
+.nova-enabled :is(.content, .content-full-width) .ds-layout:not(.discovery-stream) {
   display: contents;
 
   > div {
@@ -88,7 +95,7 @@ $ds-width: 936px;
 }
 
 // @nova-cleanup(remove-conditional): Remove .nova-enabled selector, make default behavior
-.nova-enabled .content .discovery-stream.ds-layout {
+.nova-enabled :is(.content, .content-full-width) .discovery-stream.ds-layout {
   display: contents;
   grid-column: 1 / -1;
 
@@ -119,13 +126,13 @@ $ds-width: 936px;
 // @nova-cleanup(remove-conditional): Remove .nova-enabled selector, make default behavior.
 // ds-section-wrapper is the centering grid: auto-fill with 4-column tracks
 // so that section headings and card grids share the same width and alignment.
-.nova-enabled .content .ds-section-wrapper {
+.nova-enabled :is(.content, .content-full-width) .ds-section-wrapper {
   @include nova-centering-grid(4);
 }
 
 // @nova-cleanup(remove-conditional): Remove .nova-enabled selector, make default behavior.
 // ds-card-grid-container is the centering grid: auto-fill with 4-column tracks
 // so that ds-header and ds-card-grid share the same width and alignment.
-.nova-enabled .content .ds-card-grid-container {
+.nova-enabled :is(.content, .content-full-width) .ds-card-grid-container {
   @include nova-centering-grid(4);
 }

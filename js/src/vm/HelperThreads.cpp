@@ -27,6 +27,7 @@
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
 #include "threading/CpuCount.h"
+#include "util/Denormals.h"
 #include "vm/ErrorReporting.h"
 #include "vm/HelperThreadState.h"
 #include "vm/InternalThreadPool.h"
@@ -516,8 +517,8 @@ void GlobalHelperThreadState::trace(JSTracer* trc) {
 
 #ifdef DEBUG
     // Since we hold the helper thread lock here we must disable GCMarker's
-    // checking of the atom marking bitmap since that also relies on taking the
-    // lock.
+    // checking of the atom reference bitmap since that also relies on taking
+    // the lock.
     GCMarker* marker = nullptr;
     if (trc->isMarkingTracer()) {
       marker = GCMarker::fromTracer(trc);
@@ -663,6 +664,7 @@ void GlobalHelperThreadState::runTaskLocked(HelperThreadTask* task,
 
   {
     JS::AutoSuppressGCAnalysis nogc;
+    AutoAssertDenormalsEnabled denormals;
     task->runHelperThreadTask(locked);
   }
 
@@ -1647,7 +1649,10 @@ void GlobalHelperThreadState::createAndSubmitCompressionTasks(
   size_t currentBatchLength = 0;
 
   rt->pendingCompressions().eraseIf([&](const auto& entry) {
-    MOZ_ASSERT(entry.source()->hasUncompressedSource());
+    ScriptSource::DataReader reader(entry.source());
+
+    MOZ_ASSERT(reader.hasSourceText());
+    MOZ_ASSERT(reader->hasUncompressedSource());
 
     // If the script source has no other references then remove it from the
     // vector and don't compress it.
@@ -1664,7 +1669,7 @@ void GlobalHelperThreadState::createAndSubmitCompressionTasks(
 
     // Add this entry to the current batch if the total length doesn't exceed
     // MaxBatchLength.
-    size_t length = entry.source()->length();
+    size_t length = reader->length();
     if (currentBatch && currentBatchLength + length <= MaxBatchLength) {
       if (!currentBatch->addEntry(entry.source())) {
         return false;

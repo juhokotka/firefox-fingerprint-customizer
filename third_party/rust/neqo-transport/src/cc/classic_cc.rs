@@ -23,7 +23,7 @@ use crate::{
     recovery::sent,
     rtt::RttEstimate,
     sender::PACING_BURST_SIZE,
-    stats::{CongestionControlStats, SlowStartExitReason},
+    stats::{CongestionControlStats, SlowStartExitReason, SlowStartExitStats},
 };
 
 pub const CWND_INITIAL_PKTS: usize = 10;
@@ -294,10 +294,6 @@ where
             .first()
             .expect("`acked_pkts.first().is_some()` is checked in `Loss::on_ack_received`");
 
-        // Initialize the stat to the initial congestion window value. If we early return on
-        // `is_app_limited` the stat is never set on very short connections otherwise.
-        cc_stats.cwnd.get_or_insert(self.current.congestion_window);
-
         // Supplying `true` for `rtt_est.pto(true)` here is best effort not to have to track
         // `recovery::Loss::confirmed()` all the way down to the congestion controller. Having too
         // big a PTO does no harm here.
@@ -371,10 +367,14 @@ where
                 now,
             ) {
                 qdebug!("Exited slow start by algorithm");
+                cc_stats.slow_start_exit = Some(SlowStartExitStats {
+                    reason: SlowStartExitReason::Heuristic,
+                    detection_cwnd: self.current.congestion_window,
+                    exit_cwnd,
+                    bytes_in_flight: self.bytes_in_flight,
+                });
                 self.current.congestion_window = exit_cwnd;
                 self.current.ssthresh = Some(exit_cwnd);
-                cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
-                cc_stats.slow_start_exit_reason = Some(SlowStartExitReason::Heuristic);
                 self.set_phase(Phase::CongestionAvoidance, None, now);
             } else {
                 let cwnd_increase = self
@@ -405,8 +405,8 @@ where
             .ssthresh
             .is_some_and(|s| self.current.congestion_window >= s)
         {
-            // The following function return the amount acked bytes a controller needs
-            // to collect to be allowed to increase its cwnd by MAX_DATAGRAM_SIZE.
+            // The following function returns the amount of acked bytes a controller
+            // needs to collect to be allowed to increase its cwnd by one datagram.
             let bytes_for_increase = self.congestion_control.bytes_for_cwnd_increase(
                 self.current.congestion_window,
                 new_acked,
@@ -415,24 +415,15 @@ where
                 now,
             );
             debug_assert!(bytes_for_increase > 0);
-            // If enough credit has been accumulated already, apply them gradually.
-            // If we have sudden increase in allowed rate we actually increase cwnd gently.
-            if self.current.acked_bytes >= bytes_for_increase {
-                self.current.acked_bytes = 0;
-                self.current.congestion_window += self.max_datagram_size();
-            }
-            self.current.acked_bytes += new_acked;
-            if self.current.acked_bytes >= bytes_for_increase {
-                self.current.acked_bytes -= bytes_for_increase;
-                self.current.congestion_window += self.max_datagram_size(); // or is this the current MTU?
-            }
-            // The number of bytes we require can go down over time with Cubic.
-            // That might result in an excessive rate of increase, so limit the number of unused
-            // acknowledged bytes after increasing the congestion window twice.
-            self.current.acked_bytes = min(bytes_for_increase, self.current.acked_bytes);
+            // Cap prior credit to one increment (in case bytes_for_increase dropped between
+            // calls), then apply all increments earned, allowing >1 MSS of growth when a large
+            // burst is acknowledged (RFC 9002 has no 2-MSS cap; RFC 3465 §2.3 is TCP-only).
+            let acked = min(self.current.acked_bytes, bytes_for_increase) + new_acked;
+            let n = acked / bytes_for_increase;
+            self.current.acked_bytes = acked % bytes_for_increase;
+            self.current.congestion_window += n * self.max_datagram_size();
         }
 
-        cc_stats.cwnd = Some(self.current.congestion_window);
         qlog::metrics_updated(
             &mut self.qlog,
             [
@@ -466,6 +457,9 @@ where
             return false;
         }
 
+        let bif_at_detection = self.bytes_in_flight;
+        let maybe_lost_before = self.maybe_lost_packets.len();
+
         for pkt in lost_packets {
             if pkt.cc_in_flight() {
                 qdebug!(
@@ -495,6 +489,8 @@ where
             }
         }
 
+        let lost_packets_count = self.maybe_lost_packets.len() - maybe_lost_before;
+
         qlog::metrics_updated(
             &mut self.qlog,
             [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
@@ -511,7 +507,13 @@ where
             return false;
         };
 
-        let congestion = self.on_congestion_event(last_lost_packet, Loss, now, cc_stats);
+        let congestion = self.on_congestion_event(
+            last_lost_packet,
+            Loss(lost_packets_count),
+            bif_at_detection,
+            now,
+            cc_stats,
+        );
         // Persistent congestion checks still need to see lost packets that are not in-flight for
         // continuity checks. That is why only the closure to filter out lost PMTUD probes is used.
         let persistent_congestion = self.detect_persistent_congestion(
@@ -520,7 +522,6 @@ where
             pto,
             lost_packets_no_pmtud(),
             now,
-            cc_stats,
         );
         qdebug!(
             "on_packets_lost this={self:p}, bytes_in_flight={}, cwnd={}, phase={:?}",
@@ -541,7 +542,7 @@ where
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
-        self.on_congestion_event(largest_acked_pkt, Ecn, now, cc_stats)
+        self.on_congestion_event(largest_acked_pkt, Ecn, self.bytes_in_flight, now, cc_stats)
     }
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
@@ -566,7 +567,7 @@ where
         );
     }
 
-    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant, pacing_limited: bool) {
+    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
         // Record the recovery time and exit any transient phase.
         if self.current.phase.transient() {
             self.current.recovery_start = Some(pkt.pn());
@@ -583,15 +584,17 @@ where
             self.slow_start.on_packet_sent(pkt.pn(), pkt.len());
         }
 
-        // RFC 9002 §7.8: "A sender SHOULD NOT consider itself application
-        // limited if it would have fully utilized the congestion window without
-        // pacing delay."  When the pacer is the reason we cannot send more
-        // right now, cwnd underutilization is from pacing, not the application.
-        if pacing_limited || !self.app_limited() {
+        // Update bytes in flight first; a fully consumed congestion window is not app-limited.
+        self.bytes_in_flight += pkt.len();
+
+        if !self.app_limited() {
+            // Given the current non-app-limited condition, we're fully utilizing the congestion
+            // window. Assume that all in-flight packets up to this one are NOT app-limited.
+            // However, subsequent packets might be app-limited. Set `first_app_limited` to the
+            // next packet number.
             self.first_app_limited = Some(pkt.pn() + 1);
         }
 
-        self.bytes_in_flight += pkt.len();
         qdebug!(
             "packet_sent this={self:p}, pn={}, ps={}",
             pkt.pn(),
@@ -783,8 +786,7 @@ where
 
         // If we are restoring back to slow start then we should undo the stat recording.
         if self.current.phase.in_slow_start() {
-            cc_stats.slow_start_exit_cwnd = None;
-            cc_stats.slow_start_exit_reason = None;
+            cc_stats.slow_start_exit = None;
         }
         qinfo!("[{self}] Spurious cong event -> RESTORED;");
     }
@@ -796,7 +798,6 @@ where
         pto: Duration,
         lost_packets: impl IntoIterator<Item = &'a sent::Packet>,
         now: Instant,
-        cc_stats: &mut CongestionControlStats,
     ) -> bool {
         if first_rtt_sample_time.is_none() {
             return false;
@@ -843,7 +844,6 @@ where
                     // state leftover from initial slow start to have it perform correctly.
                     self.slow_start.reset();
 
-                    cc_stats.cwnd = Some(self.current.congestion_window);
                     qlog::metrics_updated(
                         &mut self.qlog,
                         [
@@ -887,6 +887,7 @@ where
         &mut self,
         last_packet: &sent::Packet,
         congestion_trigger: CongestionTrigger,
+        bif_at_detection: usize,
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
@@ -906,6 +907,7 @@ where
             self.congestion_control.save_undo_state();
         }
 
+        let detection_cwnd = self.current.congestion_window;
         let (cwnd, acked_bytes) = self.congestion_control.reduce_cwnd(
             self.current.congestion_window,
             self.current.acked_bytes,
@@ -923,15 +925,18 @@ where
         );
 
         match congestion_trigger {
-            Loss => cc_stats.congestion_events.loss += 1,
+            Loss(_) => cc_stats.congestion_events.loss += 1,
             Ecn => cc_stats.congestion_events.ecn += 1,
         }
-        cc_stats.cwnd = Some(self.current.congestion_window);
         // If we were in slow start when `on_congestion_event` was called we will exit slow start
-        // and should record the exit congestion window.
+        // and should record the exit stats.
         if self.current.phase.in_slow_start() {
-            cc_stats.slow_start_exit_cwnd = Some(self.current.congestion_window);
-            cc_stats.slow_start_exit_reason = Some(SlowStartExitReason::CongestionEvent);
+            cc_stats.slow_start_exit = Some(SlowStartExitStats {
+                reason: SlowStartExitReason::CongestionEvent(congestion_trigger),
+                detection_cwnd,
+                exit_cwnd: self.current.congestion_window,
+                bytes_in_flight: bif_at_detection,
+            });
         }
 
         qlog::metrics_updated(
@@ -973,10 +978,13 @@ where
 mod tests {
     use std::time::{Duration, Instant};
 
-    use neqo_common::qinfo;
+    use neqo_common::{qinfo, to_u64};
     use test_fixture::{new_neqo_qlog, now};
 
-    use super::{ClassicCongestionController, PERSISTENT_CONG_THRESH, SlowStart, WindowAdjustment};
+    use super::{
+        ClassicCongestionController, PACING_BURST_SIZE, PERSISTENT_CONG_THRESH, SlowStart,
+        WindowAdjustment,
+    };
     use crate::{
         MIN_INITIAL_PACKET_SIZE, Pmtud,
         cc::{
@@ -998,10 +1006,11 @@ mod tests {
     const EPSILON: Duration = Duration::from_nanos(1);
     const GAP: Duration = Duration::from_secs(1);
     /// The largest time between packets without causing persistent congestion.
-    const SUB_PC: Duration = Duration::from_millis(100 * PERSISTENT_CONG_THRESH as u64);
+    const SUB_PC: Duration = Duration::from_millis(100 * to_u64(PERSISTENT_CONG_THRESH as usize));
     /// The minimum time between packets to cause persistent congestion.
     /// Uses an odd expression because `Duration` arithmetic isn't `const`.
-    const PC: Duration = Duration::from_nanos(100_000_000 * (PERSISTENT_CONG_THRESH as u64) + 1);
+    const PC: Duration =
+        Duration::from_nanos(100_000_000 * to_u64(PERSISTENT_CONG_THRESH as usize) + 1);
 
     fn cwnd_is_default(cc: &ClassicCongestionController<ClassicSlowStart, NewReno>) {
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
@@ -1033,7 +1042,7 @@ mod tests {
         let mut cc_stats = CongestionControlStats::default();
 
         for p in lost_packets {
-            cc.on_packet_sent(p, now(), false);
+            cc.on_packet_sent(p, now());
         }
 
         cc.on_packets_lost(Some(now()), None, PTO, lost_packets, now(), &mut cc_stats);
@@ -1219,7 +1228,7 @@ mod tests {
             .map(|(i, &t)| {
                 sent::Packet::new(
                     packet::Type::Short,
-                    u64::try_from(i).unwrap(),
+                    to_u64(i),
                     by_pto(t),
                     true,
                     recovery::Tokens::new(),
@@ -1240,18 +1249,17 @@ mod tests {
     ) -> bool {
         let now = now();
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
-        let mut cc_stats = CongestionControlStats::default();
 
         let last_ack = Some(by_pto(last_ack));
         let rtt_time = Some(by_pto(rtt_time));
 
         // Persistent congestion is never declared if the RTT time is `None`.
-        cc.detect_persistent_congestion(None, None, PTO, lost.iter(), now, &mut cc_stats);
+        cc.detect_persistent_congestion(None, None, PTO, lost.iter(), now);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
-        cc.detect_persistent_congestion(None, last_ack, PTO, lost.iter(), now, &mut cc_stats);
+        cc.detect_persistent_congestion(None, last_ack, PTO, lost.iter(), now);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
 
-        cc.detect_persistent_congestion(rtt_time, last_ack, PTO, lost.iter(), now, &mut cc_stats);
+        cc.detect_persistent_congestion(rtt_time, last_ack, PTO, lost.iter(), now);
         cc.cwnd() == cc.cwnd_min()
     }
 
@@ -1348,15 +1356,7 @@ mod tests {
     fn persistent_congestion_no_prev_ack_newreno() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         let mut cc = make_cc_newreno();
-        let mut cc_stats = CongestionControlStats::default();
-        cc.detect_persistent_congestion(
-            Some(by_pto(0)),
-            None,
-            PTO,
-            lost.iter(),
-            now(),
-            &mut cc_stats,
-        );
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
@@ -1364,15 +1364,7 @@ mod tests {
     fn persistent_congestion_no_prev_ack_cubic() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         let mut cc = make_cc_cubic();
-        let mut cc_stats = CongestionControlStats::default();
-        cc.detect_persistent_congestion(
-            Some(by_pto(0)),
-            None,
-            PTO,
-            lost.iter(),
-            now(),
-            &mut cc_stats,
-        );
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
@@ -1399,7 +1391,8 @@ mod tests {
 
     #[test]
     fn app_limited_slow_start() {
-        const BELOW_APP_LIMIT_PKTS: usize = 5;
+        // The threshold is half the window, so the largest app-limited burst is one short.
+        const BELOW_APP_LIMIT_PKTS: usize = CWND_INITIAL_PKTS / 2 - 1;
         const ABOVE_APP_LIMIT_PKTS: usize = BELOW_APP_LIMIT_PKTS + 1;
         let mut cc = make_cc_newreno();
         let cwnd = cc.current.congestion_window;
@@ -1412,22 +1405,16 @@ mod tests {
             // always stay below app_limit during sent.
             let mut pkts = Vec::new();
             for _ in 0..packet_burst_size {
-                let p = sent::Packet::new(
-                    packet::Type::Short,
-                    next_pn,
-                    now,
-                    true,
-                    recovery::Tokens::new(),
-                    cc.max_datagram_size(),
-                );
+                let p = sent::make_packet(next_pn, now, cc.max_datagram_size());
                 next_pn += 1;
-                cc.on_packet_sent(&p, now, false);
+                cc.on_packet_sent(&p, now);
                 pkts.push(p);
             }
             assert_eq!(
                 cc.bytes_in_flight(),
                 packet_burst_size * cc.max_datagram_size()
             );
+            assert!(cc.app_limited(), "burst must stay below the threshold");
             now += RTT;
             cc.on_packets_acked(
                 &pkts,
@@ -1445,22 +1432,16 @@ mod tests {
         // have `bytes_in_flight` above the `app_limited` threshold.
         let mut pkts = Vec::new();
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
-            let p = sent::Packet::new(
-                packet::Type::Short,
-                next_pn,
-                now,
-                true,
-                recovery::Tokens::new(),
-                cc.max_datagram_size(),
-            );
+            let p = sent::make_packet(next_pn, now, cc.max_datagram_size());
             next_pn += 1;
-            cc.on_packet_sent(&p, now, false);
+            cc.on_packet_sent(&p, now);
             pkts.push(p);
         }
         assert_eq!(
             cc.bytes_in_flight(),
             ABOVE_APP_LIMIT_PKTS * cc.max_datagram_size()
         );
+        assert!(!cc.app_limited(), "burst must fill `cwnd`");
         now += RTT;
         // Check if congestion window gets increased for all packets currently in flight
         for (i, pkt) in pkts.into_iter().enumerate() {
@@ -1489,14 +1470,35 @@ mod tests {
         }
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "A lot of multiline function calls due to formatting"
-    )]
+    /// Filling `cwnd` is congestion-limited, not app-limited, so `cwnd` must still grow.
+    #[test]
+    fn not_app_limited_when_one_packet_fills_cwnd() {
+        let mut cc = make_cc_newreno();
+        let cwnd = cc.cwnd();
+        let mut cc_stats = CongestionControlStats::default();
+        let now = now();
+
+        // Fill `cwnd` in a single send.
+        let p = sent::make_packet(0, now, cwnd);
+        cc.on_packet_sent(&p, now);
+        assert_eq!(cc.bytes_in_flight(), cwnd);
+
+        cc.on_packets_acked(
+            &[p],
+            &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
+            now + RTT,
+            &mut cc_stats,
+        );
+
+        assert_eq!(cc.bytes_in_flight(), 0);
+        assert_eq!(cc.cwnd(), 2 * cwnd, "cwnd must double when filled");
+    }
+
     #[test]
     fn app_limited_congestion_avoidance() {
         const CWND_PKTS_CA: usize = CWND_INITIAL_PKTS / 2;
-        const BELOW_APP_LIMIT_PKTS: usize = CWND_PKTS_CA - 2;
+        // The threshold adds a pacing burst, so the largest app-limited burst is one short.
+        const BELOW_APP_LIMIT_PKTS: usize = CWND_PKTS_CA - PACING_BURST_SIZE - 1;
         const ABOVE_APP_LIMIT_PKTS: usize = BELOW_APP_LIMIT_PKTS + 1;
 
         let mut cc = make_cc_newreno();
@@ -1505,28 +1507,14 @@ mod tests {
 
         // Change phase to congestion avoidance by introducing loss.
 
-        let p_lost = sent::Packet::new(
-            packet::Type::Short,
-            1,
-            now,
-            true,
-            recovery::Tokens::new(),
-            cc.max_datagram_size(),
-        );
-        cc.on_packet_sent(&p_lost, now, false);
+        let p_lost = sent::make_packet(1, now, cc.max_datagram_size());
+        cc.on_packet_sent(&p_lost, now);
         cwnd_is_default(&cc);
         now += PTO;
         cc.on_packets_lost(Some(now), None, PTO, &[p_lost], now, &mut cc_stats);
         cwnd_is_halved(&cc);
-        let p_not_lost = sent::Packet::new(
-            packet::Type::Short,
-            2,
-            now,
-            true,
-            recovery::Tokens::new(),
-            cc.max_datagram_size(),
-        );
-        cc.on_packet_sent(&p_not_lost, now, false);
+        let p_not_lost = sent::make_packet(2, now, cc.max_datagram_size());
+        cc.on_packet_sent(&p_not_lost, now);
         now += RTT;
         cc.on_packets_acked(
             &[p_not_lost],
@@ -1546,22 +1534,16 @@ mod tests {
             // always stay below app_limit during sent.
             let mut pkts = Vec::new();
             for _ in 0..packet_burst_size {
-                let p = sent::Packet::new(
-                    packet::Type::Short,
-                    next_pn,
-                    now,
-                    true,
-                    recovery::Tokens::new(),
-                    cc.max_datagram_size(),
-                );
+                let p = sent::make_packet(next_pn, now, cc.max_datagram_size());
                 next_pn += 1;
-                cc.on_packet_sent(&p, now, false);
+                cc.on_packet_sent(&p, now);
                 pkts.push(p);
             }
             assert_eq!(
                 cc.bytes_in_flight(),
                 packet_burst_size * cc.max_datagram_size()
             );
+            assert!(cc.app_limited(), "burst must stay below the threshold");
             now += RTT;
             for (i, pkt) in pkts.into_iter().enumerate() {
                 cc.on_packets_acked(
@@ -1584,22 +1566,16 @@ mod tests {
         // have `bytes_in_flight` above the `app_limited` threshold.
         let mut pkts = Vec::new();
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
-            let p = sent::Packet::new(
-                packet::Type::Short,
-                next_pn,
-                now,
-                true,
-                recovery::Tokens::new(),
-                cc.max_datagram_size(),
-            );
+            let p = sent::make_packet(next_pn, now, cc.max_datagram_size());
             next_pn += 1;
-            cc.on_packet_sent(&p, now, false);
+            cc.on_packet_sent(&p, now);
             pkts.push(p);
         }
         assert_eq!(
             cc.bytes_in_flight(),
             ABOVE_APP_LIMIT_PKTS * cc.max_datagram_size()
         );
+        assert!(!cc.app_limited(), "burst must fill `cwnd`");
         now += RTT;
         let mut last_acked_bytes = 0;
         // Check if congestion window gets increased for all packets currently in flight
@@ -1637,7 +1613,7 @@ mod tests {
             recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
-        cc.on_packet_sent(&p_ce, now, false);
+        cc.on_packet_sent(&p_ce, now);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
         assert_eq!(cc.ssthresh(), None);
         assert_eq!(cc.current.phase, Phase::SlowStart);
@@ -1670,8 +1646,8 @@ mod tests {
         // 1. Send packets (1, 2) --> `SlowStart`, no events
         let pkt1 = sent::make_packet(1, now, 1000);
         let pkt2 = sent::make_packet(2, now, 1000);
-        cc.on_packet_sent(&pkt1, now, false);
-        cc.on_packet_sent(&pkt2, now, false);
+        cc.on_packet_sent(&pkt1, now);
+        cc.on_packet_sent(&pkt2, now);
         assert_eq!(cc.current.phase, Phase::SlowStart);
         assert_eq!(cc_stats.congestion_events.loss, 0);
         assert_eq!(cc_stats.congestion_events.spurious, 0);
@@ -1692,11 +1668,7 @@ mod tests {
             &mut cc_stats,
         );
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
-        assert!(cc_stats.slow_start_exit_cwnd.is_some());
-        assert_eq!(
-            cc_stats.slow_start_exit_reason,
-            Some(SlowStartExitReason::CongestionEvent)
-        );
+        assert!(cc_stats.slow_start_exit.is_some());
         assert_eq!(cc_stats.congestion_events.loss, 1);
         #[expect(
             clippy::cast_sign_loss,
@@ -1712,7 +1684,7 @@ mod tests {
 
         // 3. Send packet (3)     --> `Recovery`, 1 event
         let pkt3 = sent::make_packet(3, now, 1000);
-        cc.on_packet_sent(&pkt3, now, false);
+        cc.on_packet_sent(&pkt3, now);
         assert_eq!(cc.current.phase, Phase::Recovery);
         assert_eq!(cc_stats.congestion_events.loss, 1);
 
@@ -1747,8 +1719,7 @@ mod tests {
             &mut cc_stats,
         );
         assert_eq!(cc.current.phase, Phase::SlowStart);
-        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
-        assert_eq!(cc_stats.slow_start_exit_reason, None);
+        assert_eq!(cc_stats.slow_start_exit, None);
         assert_eq!(cc_stats.congestion_events.loss, 1);
         assert_eq!(cc_stats.congestion_events.spurious, 1);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
@@ -1772,8 +1743,8 @@ mod tests {
         // 1. Send packets (1, 2) --> `SlowStart`
         let pkt1 = sent::make_packet(1, now, 1000);
         let pkt2 = sent::make_packet(2, now, 1000);
-        cc.on_packet_sent(&pkt1, now, false);
-        cc.on_packet_sent(&pkt2, now, false);
+        cc.on_packet_sent(&pkt1, now);
+        cc.on_packet_sent(&pkt2, now);
         assert_eq!(cc.current.phase, Phase::SlowStart);
 
         // 2. Lose packets (1, 2) --> `RecoveryStart` and reduced cwnd
@@ -1792,11 +1763,11 @@ mod tests {
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
         assert_eq!(cc_stats.congestion_events.loss, 1);
         let cwnd_after_loss = cc.cwnd();
-        assert!(cc_stats.slow_start_exit_cwnd.is_some());
+        assert!(cc_stats.slow_start_exit.is_some());
 
         // 3. Send packet (3) --> `Recovery`
         let pkt3 = sent::make_packet(3, now, 1000);
-        cc.on_packet_sent(&pkt3, now, false);
+        cc.on_packet_sent(&pkt3, now);
         assert_eq!(cc.current.phase, Phase::Recovery);
 
         // 4. Ack packet (3) --> `CongestionAvoidance`
@@ -1828,8 +1799,7 @@ mod tests {
         assert_eq!(cc_stats.congestion_events.spurious, 1);
         assert_eq!(cc.cwnd(), cwnd_after_loss);
         assert_eq!(cc.current.phase, Phase::CongestionAvoidance);
-        assert!(cc_stats.slow_start_exit_cwnd.is_some());
-        assert!(cc_stats.slow_start_exit_reason.is_some());
+        assert!(cc_stats.slow_start_exit.is_some());
         assert!(cc_stats.w_max.is_some());
     }
 
@@ -1845,14 +1815,14 @@ mod tests {
 
         // Cause congestion event
         let pkt = sent::make_packet(1, now, 1000);
-        cc.on_packet_sent(&pkt, now, false);
+        cc.on_packet_sent(&pkt, now);
         let pkt_lost = pkt.clone();
         cc.on_packets_lost(Some(now), None, PTO, &[pkt_lost], now, &mut cc_stats);
         assert!(cc.cwnd() < cc.cwnd_initial(), "cwnd should have decreased");
 
         // Send recovery packet
         let pkt_recovery = sent::make_packet(2, now, 1000);
-        cc.on_packet_sent(&pkt_recovery, now, false);
+        cc.on_packet_sent(&pkt_recovery, now);
         cc.on_packets_acked(&[pkt_recovery], &rtt_estimate, now, &mut cc_stats);
 
         // Grow cwnd back naturally.
@@ -1861,7 +1831,7 @@ mod tests {
             let mut sent_packets = Vec::new();
             while cc.bytes_in_flight < cc.cwnd() {
                 let pkt = sent::make_packet(next_pn_to_send, now, cc.max_datagram_size());
-                cc.on_packet_sent(&pkt, now, false);
+                cc.on_packet_sent(&pkt, now);
                 sent_packets.push(pkt);
                 next_pn_to_send += 1;
             }
@@ -1914,8 +1884,8 @@ mod tests {
         let pkt1 = sent::make_packet(1, now, 1000);
         let pkt2 = sent::make_packet(2, now, 1000);
 
-        cc.on_packet_sent(&pkt1, now, false);
-        cc.on_packet_sent(&pkt2, now, false);
+        cc.on_packet_sent(&pkt1, now);
+        cc.on_packet_sent(&pkt2, now);
 
         assert_eq!(cc.current.phase, Phase::SlowStart);
         assert_eq!(cc_stats.congestion_events.loss, 0);
@@ -1940,7 +1910,7 @@ mod tests {
 
         // Step 3: Send packet 3 → enter Recovery phase
         let pkt3 = sent::make_packet(3, now, 1000);
-        cc.on_packet_sent(&pkt3, now, false);
+        cc.on_packet_sent(&pkt3, now);
         assert_eq!(cc.current.phase, Phase::Recovery);
 
         // Step 4: Ack packet 1 → spurious event #1 detected
@@ -1984,7 +1954,7 @@ mod tests {
         let rtt_estimate = RttEstimate::new(crate::DEFAULT_INITIAL_RTT);
 
         let pkt1 = sent::make_packet(1, now, 1000);
-        cc.on_packet_sent(&pkt1, now, false);
+        cc.on_packet_sent(&pkt1, now);
 
         cc.on_packets_lost(
             Some(now),
@@ -2003,7 +1973,7 @@ mod tests {
 
         // The cleanup is called when we ack packets, so we send and ack a new one.
         let pkt2 = sent::make_packet(2, now, 1000);
-        cc.on_packet_sent(&pkt2, now, false);
+        cc.on_packet_sent(&pkt2, now);
         cc.on_packets_acked(&[pkt2], &rtt_estimate, now, &mut cc_stats);
 
         // The packet is exactly the maximum age, so it shouldn't be removed yet. This assert makes
@@ -2015,7 +1985,7 @@ mod tests {
 
         // Send and ack another packet to trigger cleanup.
         let pkt3 = sent::make_packet(3, now, 1000);
-        cc.on_packet_sent(&pkt3, now, false);
+        cc.on_packet_sent(&pkt3, now);
         cc.on_packets_acked(&[pkt3], &rtt_estimate, now, &mut cc_stats);
 
         // Now the packet should be removed.
@@ -2028,18 +1998,19 @@ mod tests {
         let mut cc_stats = CongestionControlStats::default();
         let rtt_estimate = RttEstimate::new(RTT);
 
+        let initial_cwnd = cc.cwnd();
+
         assert!(cc.current.phase.in_slow_start());
-        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
-        assert_eq!(cc_stats.slow_start_exit_reason, None);
+        assert_eq!(cc_stats.slow_start_exit, None);
 
         let pkt1 = sent::make_packet(1, now, 1000);
-        cc.on_packet_sent(&pkt1, now, false);
+        cc.on_packet_sent(&pkt1, now);
 
         match congestion_trigger {
             Ecn => {
                 cc.on_ecn_ce_received(&pkt1, now, &mut cc_stats);
             }
-            Loss => {
+            Loss(_) => {
                 cc.on_packets_lost(
                     Some(now),
                     None,
@@ -2051,33 +2022,38 @@ mod tests {
             }
         }
 
-        // Should have exited slow start with cwnd captured AFTER reduction.
+        // Should have exited slow start and recorded stats.
         assert!(!cc.current.phase.in_slow_start());
-        assert_eq!(cc_stats.slow_start_exit_cwnd, Some(cc.cwnd()));
+        let exit_stats = cc_stats
+            .slow_start_exit
+            .as_ref()
+            .expect("slow_start_exit must be set after congestion exit");
+        assert_eq!(exit_stats.exit_cwnd, cc.cwnd());
+        assert_eq!(exit_stats.detection_cwnd, initial_cwnd);
+        assert_eq!(exit_stats.bytes_in_flight, 1000);
         assert_eq!(
-            cc_stats.slow_start_exit_reason,
-            Some(SlowStartExitReason::CongestionEvent)
+            exit_stats.reason,
+            SlowStartExitReason::CongestionEvent(congestion_trigger)
         );
 
         // For loss, test that a spurious congestion event resets the stats.
-        if congestion_trigger == Loss {
+        if matches!(congestion_trigger, Loss(_)) {
             // Send recovery packet and ack it to exit recovery.
             let pkt2 = sent::make_packet(2, now, 1000);
-            cc.on_packet_sent(&pkt2, now, false);
+            cc.on_packet_sent(&pkt2, now);
             cc.on_packets_acked(&[pkt2], &rtt_estimate, now, &mut cc_stats);
 
             // Late ack of pkt1 triggers spurious congestion detection - should reset to None.
             cc.on_packets_acked(&[pkt1], &rtt_estimate, now, &mut cc_stats);
 
             assert!(cc.current.phase.in_slow_start());
-            assert_eq!(cc_stats.slow_start_exit_cwnd, None);
-            assert_eq!(cc_stats.slow_start_exit_reason, None);
+            assert_eq!(cc_stats.slow_start_exit, None);
         }
     }
 
     #[test]
     fn slow_start_exit_stats_loss() {
-        slow_start_exit_stats(Loss);
+        slow_start_exit_stats(Loss(1));
     }
 
     #[test]
@@ -2110,26 +2086,24 @@ mod tests {
         let mut sent_packets = Vec::new();
         while cc.bytes_in_flight < cc.cwnd() {
             let pkt = sent::make_packet(next_pn, now, cc.max_datagram_size());
-            cc.on_packet_sent(&pkt, now, false);
+            cc.on_packet_sent(&pkt, now);
             sent_packets.push(pkt);
             next_pn += 1;
         }
         cc.on_packets_acked(&sent_packets, &rtt_estimate, now, &mut cc_stats);
         let cwnd_after_growth = cc.cwnd();
         assert!(cwnd_after_growth > cwnd_initial);
-        assert_eq!(cc_stats.cwnd, Some(cwnd_after_growth));
 
-        // Tracks cwnd after congestion event reduction
+        // cwnd shrinks after congestion event
         let pkt_lost = sent::make_packet(next_pn, now, 1000);
-        cc.on_packet_sent(&pkt_lost, now, false);
+        cc.on_packet_sent(&pkt_lost, now);
         cc.on_packets_lost(Some(now), None, PTO, &[pkt_lost], now, &mut cc_stats);
-        assert_eq!(cc_stats.cwnd, Some(cc.cwnd()));
-        assert!(cc_stats.cwnd.is_some_and(|cwnd| cwnd < cwnd_after_growth));
+        assert!(cc.cwnd() < cwnd_after_growth);
 
-        // Tracks cwnd after persistent congestion
+        // cwnd resets to minimum after persistent congestion
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
-        cc.detect_persistent_congestion(Some(now), None, PTO, lost.iter(), now, &mut cc_stats);
-        assert_eq!(cc_stats.cwnd, Some(cc.cwnd_min()));
+        cc.detect_persistent_congestion(Some(now), None, PTO, lost.iter(), now);
+        assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
     #[test]
@@ -2147,11 +2121,10 @@ mod tests {
 
         // Send and ack a single packet — not enough to fill cwnd, so app-limited.
         let pkt = sent::make_packet(0, now, cc.max_datagram_size());
-        cc.on_packet_sent(&pkt, now, false);
+        cc.on_packet_sent(&pkt, now);
         cc.on_packets_acked(&[pkt], &rtt_estimate, now, &mut cc_stats);
 
         assert_eq!(cc.cwnd(), cwnd_initial);
-        assert_eq!(cc_stats.cwnd, Some(cwnd_initial));
     }
 
     #[test]
@@ -2165,14 +2138,7 @@ mod tests {
             .on_packets_acked(&RttEstimate::new(RTT), 0, cc.cwnd(), &mut cc_stats, now());
         assert!(cc.slow_start.current_round_min_rtt().is_some());
 
-        cc.detect_persistent_congestion(
-            Some(by_pto(0)),
-            None,
-            PTO,
-            lost.iter(),
-            now(),
-            &mut cc_stats,
-        );
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
 
         // HyStart state should be reset, so current_round_min_rtt is None again.
@@ -2216,7 +2182,7 @@ mod tests {
                 recovery::Tokens::new(),
                 cc.max_datagram_size(),
             );
-            cc.on_packet_sent(&p_ce, now, false);
+            cc.on_packet_sent(&p_ce, now);
             cc.on_ecn_ce_received(&p_ce, now, stats);
         });
     }
@@ -2229,7 +2195,7 @@ mod tests {
         assert_congestion_state_trigger("persistent_congestion", |cc, stats| {
             let lost_pkts = [lost(1, true, ZERO), lost(2, true, PC)];
             for p in &lost_pkts {
-                cc.on_packet_sent(p, now(), false);
+                cc.on_packet_sent(p, now());
             }
             assert_ne!(cc.cwnd(), cc.cwnd_min());
             cc.on_packets_lost(Some(now()), None, PTO, &lost_pkts, now(), stats);
@@ -2267,49 +2233,6 @@ mod tests {
 
         // there should be no reaction to the non-ack-eliciting packet
         assert_eq!(cc.cwnd(), initial_cwnd);
-        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
-    }
-
-    fn send_single_packet_and_ack(pacing_limited: bool) -> (usize, usize) {
-        let mut cc = make_cc_newreno();
-        let now = now();
-        let mut cc_stats = CongestionControlStats::default();
-        let cwnd_before = cc.cwnd();
-
-        let p = sent::Packet::new(
-            packet::Type::Short,
-            0,
-            now,
-            true,
-            recovery::Tokens::new(),
-            cc.max_datagram_size(),
-        );
-        cc.on_packet_sent(&p, now, pacing_limited);
-
-        cc.on_packets_acked(
-            &[p],
-            &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
-            now + RTT,
-            &mut cc_stats,
-        );
-        (cwnd_before, cc.cwnd())
-    }
-
-    #[test]
-    fn pacing_limited_overrides_app_limited() {
-        let (before, after) = send_single_packet_and_ack(true);
-        assert!(
-            after > before,
-            "cwnd should grow when pacing-limited: {after} vs {before}"
-        );
-    }
-
-    #[test]
-    fn genuinely_app_limited_no_pacing() {
-        let (before, after) = send_single_packet_and_ack(false);
-        assert_eq!(
-            after, before,
-            "cwnd should not grow when genuinely app-limited"
-        );
+        assert_eq!(cc_stats.slow_start_exit, None);
     }
 }

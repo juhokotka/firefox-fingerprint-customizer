@@ -3,7 +3,6 @@
 add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["test.wait300msAfterTabSwitch", true],
       ["extensions.formautofill.addresses.capture.enabled", true],
       ["extensions.formautofill.addresses.supported", "on"],
       ["extensions.formautofill.addresses.capture.requiredFields", ""],
@@ -123,6 +122,50 @@ add_task(async function test_update_doorhanger_shown_add_email_field() {
   const addresses = await expectSavedAddressesCount(1);
   is(addresses[0].email, "test@mozilla.org", "Email field is saved");
 
+  await removeAllRecords();
+});
+
+add_task(async function test_save_doorhanger_never_save() {
+  const ADDRESS_ENABLED_PREF = "extensions.formautofill.addresses.enabled";
+  const ADDRESS_CAPTURE_ENABLED_PREF =
+    "extensions.formautofill.addresses.capture.enabled";
+  await expectSavedAddressesCount(0);
+
+  await BrowserTestUtils.withNewTab(
+    { gBrowser, url: ADDRESS_FORM_URL },
+    async function (browser) {
+      let onPopupShown = waitForPopupShown();
+
+      await focusUpdateSubmitForm(browser, {
+        focusSelector: "#given-name",
+        newValues: {
+          "#given-name": "John",
+          "#family-name": "Doe",
+          "#organization": "Sesame Street",
+          "#street-address": "123 Sesame Street",
+          "#tel": "1-345-345-3456",
+        },
+      });
+
+      await onPopupShown;
+      await clickDoorhangerButton(MENU_BUTTON, 0);
+    }
+  );
+
+  await expectSavedAddressesCount(0);
+  is(
+    SpecialPowers.getBoolPref(ADDRESS_CAPTURE_ENABLED_PREF),
+    false,
+    "Address capture prompt is disabled"
+  );
+  is(
+    SpecialPowers.getBoolPref(ADDRESS_ENABLED_PREF),
+    true,
+    "Address autofill remains enabled so saved addresses can still be filled"
+  );
+
+  // Restore the capture state for following tests.
+  Services.prefs.setBoolPref(ADDRESS_CAPTURE_ENABLED_PREF, true);
   await removeAllRecords();
 });
 

@@ -3,29 +3,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsBaseDragService.h"
-#include "nsITransferable.h"
 
-#include "nsArrayUtils.h"
-#include "nsITransferable.h"
-#include "nsSize.h"
-#include "nsXPCOM.h"
-#include "nsCOMPtr.h"
-#include "nsIContentInlines.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "nsIFrame.h"
-#include "nsFrameLoaderOwner.h"
-#include "nsIContent.h"
-#include "nsINode.h"
-#include "nsPresContext.h"
-#include "nsIImageLoadingContent.h"
+#include <algorithm>
+
+#include "ImageRegion.h"
+#include "MockDragServiceController.h"
+#include "gfxContext.h"
+#include "gfxPlatform.h"
 #include "imgIContainer.h"
 #include "imgIRequest.h"
-#include "ImageRegion.h"
-#include "nsQueryObject.h"
-#include "nsRegion.h"
-#include "nsXULPopupManager.h"
-#include "nsMenuPopupFrame.h"
-#include "nsTreeBodyFrame.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/PresShell.h"
@@ -37,22 +23,36 @@
 #include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/DataTransferItemList.h"
 #include "mozilla/dom/DataTransfer.h"
+#include "mozilla/dom/DataTransferItemList.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/DragEvent.h"
 #include "mozilla/dom/NodeList.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/gfx/2D.h"
+#include "nsArrayUtils.h"
+#include "nsCOMPtr.h"
 #include "nsFrameLoader.h"
+#include "nsFrameLoaderOwner.h"
+#include "nsGlobalWindowInner.h"
+#include "nsIContent.h"
+#include "nsIContentInlines.h"
+#include "nsIFrame.h"
+#include "nsIImageLoadingContent.h"
+#include "nsIInterfaceRequestorUtils.h"
 #include "nsIMutableArray.h"
-#include "gfxContext.h"
-#include "gfxPlatform.h"
+#include "nsINode.h"
+#include "nsITransferable.h"
+#include "nsMenuPopupFrame.h"
+#include "nsPresContext.h"
+#include "nsQueryObject.h"
+#include "nsRegion.h"
+#include "nsSize.h"
+#include "nsTreeBodyFrame.h"
+#include "nsXPCOM.h"
+#include "nsXULPopupManager.h"
 #include "nscore.h"
-#include "MockDragServiceController.h"
-
-#include <algorithm>
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -366,7 +366,7 @@ nsresult nsBaseDragSession::InvokeDragSession(
       nsCOMPtr<nsITransferable> trans =
           do_CreateInstance("@mozilla.org/widget/transferable;1");
       trans->Init(nullptr);
-      trans->SetDataPrincipal(mSourceNode->NodePrincipal());
+      trans->SetDataPrincipal(mTriggeringPrincipal);
       trans->SetContentPolicyType(mContentPolicyType);
       trans->SetCookieJarSettings(aCookieJarSettings);
       mutableArray->AppendElement(trans);
@@ -377,7 +377,7 @@ nsresult nsBaseDragSession::InvokeDragSession(
           do_QueryElementAt(aTransferableArray, i);
       if (trans) {
         // Set the dataPrincipal on the transferable.
-        trans->SetDataPrincipal(mSourceNode->NodePrincipal());
+        trans->SetDataPrincipal(mTriggeringPrincipal);
         trans->SetContentPolicyType(mContentPolicyType);
         trans->SetCookieJarSettings(aCookieJarSettings);
       }
@@ -685,6 +685,7 @@ NS_IMETHODIMP nsBaseDragService::StartDragSessionForTests(
     nsISupports* aWidgetProvider, uint32_t aAllowedEffect) {
   // This method must set mSessionIsSynthesizedForTests
   MOZ_ASSERT(!mNeverAllowSessionIsSynthesizedForTests);
+  NS_ENSURE_TRUE(mSuppressLevel == 0, NS_ERROR_NOT_AVAILABLE);
 
   RefPtr<nsIDragSession> session = StartDragSession(aWidgetProvider);
   MOZ_ASSERT(session);
@@ -757,6 +758,8 @@ nsresult nsBaseDragSession::EndDragSessionImpl(bool aDoneDrag,
     FireDragEventAtSource(eDragEnd, aKeyModifiers);
   }
 
+  nsGlobalWindowInner::MouseButtonReleased();
+
   if (mDragPopup) {
     nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
     if (pm) {
@@ -769,8 +772,8 @@ nsresult nsBaseDragSession::EndDragSessionImpl(bool aDoneDrag,
     dropEffect = mDataTransfer->DropEffectInt();
   }
 
-  for (nsWeakPtr& browser : mBrowsers) {
-    nsCOMPtr<BrowserParent> bp = do_QueryReferent(browser);
+  for (const WeakPtr<BrowserParent>& browser : mBrowsers) {
+    RefPtr<BrowserParent> bp = browser.get();
     if (NS_WARN_IF(!bp)) {
       continue;
     }
@@ -1162,6 +1165,13 @@ nsBaseDragService::Suppress() {
 
 NS_IMETHODIMP
 nsBaseDragService::Unsuppress() {
+  MOZ_ASSERT(mSuppressLevel > 0, "Unbalanced call to unsuppress()");
+  if (!mSuppressLevel) {
+    // Decrementing here would wrap the level around and leave drag and drop
+    // disabled for the rest of the session.
+    return NS_ERROR_UNEXPECTED;
+  }
+
   --mSuppressLevel;
   LOGI(
       "[%p] %s | mSuppressLevel (after decrement): %u | "
@@ -1169,6 +1179,8 @@ nsBaseDragService::Unsuppress() {
       this, __FUNCTION__, mSuppressLevel);
   return NS_OK;
 }
+
+bool nsBaseDragService::GetIsSuppressed() { return mSuppressLevel > 0; }
 
 NS_IMETHODIMP
 nsBaseDragSession::UserCancelled() {
@@ -1200,14 +1212,15 @@ nsBaseDragSession::DragEventDispatchedToChildProcess() {
   return NS_OK;
 }
 
-static bool MaybeAddBrowser(nsTArray<nsWeakPtr>& aBrowsers,
+static bool MaybeAddBrowser(nsTArray<WeakPtr<BrowserParent>>& aBrowsers,
                             BrowserParent* aBP) {
-  nsWeakPtr browser = do_GetWeakReference(aBP);
+  WeakPtr<BrowserParent> browser(aBP);
 
   // Equivalent to `InsertElementSorted`, avoiding inserting a duplicate
   // element. See bug 1896166.
-  size_t index = aBrowsers.IndexOfFirstElementGt(browser);
-  if (index == 0 || aBrowsers[index - 1] != browser) {
+  WeakPtr<BrowserParent>::StableOrdering comparator;
+  size_t index = aBrowsers.IndexOfFirstElementGt(browser, comparator);
+  if (index == 0 || !comparator.Equals(aBrowsers[index - 1], browser)) {
     LOGD("%s | adding PBrowser %p to drag session", __FUNCTION__, aBP);
     aBrowsers.InsertElementAt(index, browser);
     return true;
@@ -1215,9 +1228,9 @@ static bool MaybeAddBrowser(nsTArray<nsWeakPtr>& aBrowsers,
   return false;
 }
 
-static bool RemoveAllBrowsers(nsTArray<nsWeakPtr>& aBrowsers) {
-  for (auto& weakBrowser : aBrowsers) {
-    nsCOMPtr<BrowserParent> browser = do_QueryReferent(weakBrowser);
+static bool RemoveAllBrowsers(nsTArray<WeakPtr<BrowserParent>>& aBrowsers) {
+  for (const auto& weakBrowser : aBrowsers) {
+    RefPtr<BrowserParent> browser = weakBrowser.get();
     if (NS_WARN_IF(!browser)) {
       continue;
     }

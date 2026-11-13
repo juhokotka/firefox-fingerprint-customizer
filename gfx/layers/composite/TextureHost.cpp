@@ -4,40 +4,38 @@
 
 #include "TextureHost.h"
 
+#include <limits>
+
+#include "../opengl/CompositorOGL.h"
 #include "CompositableHost.h"  // for CompositableHost
-#include "mozilla/gfx/2D.h"    // for DataSourceSurface, Factory
+#include "gfxUtils.h"
+#include "mozilla/RefPtr.h"  // for nsRefPtr
+#include "mozilla/StaticPrefs_layers.h"
+#include "mozilla/gfx/2D.h"  // for DataSourceSurface, Factory
 #include "mozilla/gfx/CanvasManagerParent.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/ipc/Shmem.h"  // for Shmem
 #include "mozilla/layers/AsyncImagePipelineManager.h"
 #include "mozilla/layers/BufferTexture.h"
 #include "mozilla/layers/CompositableTransactionParent.h"  // for CompositableParentManager
+#include "mozilla/layers/Compositor.h"                     // for Compositor
 #include "mozilla/layers/CompositorBridgeParent.h"
-#include "mozilla/layers/Compositor.h"         // for Compositor
+#include "mozilla/layers/GPUVideoTextureHost.h"
 #include "mozilla/layers/ISurfaceAllocator.h"  // for ISurfaceAllocator
 #include "mozilla/layers/ImageBridgeParent.h"  // for ImageBridgeParent
-#include "mozilla/layers/LayersSurfaces.h"     // for SurfaceDescriptor, etc
-#include "mozilla/layers/RemoteTextureMap.h"
-#include "mozilla/layers/TextureHostOGL.h"  // for TextureHostOGL
 #include "mozilla/layers/ImageDataSerializer.h"
+#include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor, etc
+#include "mozilla/layers/PTextureParent.h"
+#include "mozilla/layers/RemoteTextureMap.h"
 #include "mozilla/layers/TextureClient.h"
-#include "mozilla/layers/GPUVideoTextureHost.h"
+#include "mozilla/layers/TextureHostOGL.h"  // for TextureHostOGL
 #include "mozilla/layers/VideoBridgeParent.h"
 #include "mozilla/layers/WebRenderTextureHost.h"
-#include "mozilla/StaticPrefs_layers.h"
-#include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/webrender/RenderBufferTextureHost.h"
-#include "mozilla/webrender/RenderExternalTextureHost.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "nsAString.h"
-#include "mozilla/RefPtr.h"   // for nsRefPtr
 #include "nsPrintfCString.h"  // for nsPrintfCString
-#include "mozilla/layers/PTextureParent.h"
-#include <limits>
-#include "../opengl/CompositorOGL.h"
-
-#include "gfxUtils.h"
 
 #ifdef XP_MACOSX
 #  include "../opengl/MacIOSurfaceTextureHostOGL.h"
@@ -49,6 +47,11 @@
 #  ifdef MOZ_WMF_MEDIA_ENGINE
 #    include "mozilla/layers/DcompSurfaceImage.h"
 #  endif
+#endif
+
+#ifdef MOZ_WAYLAND
+#  include "mozilla/WidgetUtilsGtk.h"
+#  include "mozilla/webrender/RenderWaylandTextureHost.h"
 #endif
 
 #if 0
@@ -180,10 +183,15 @@ already_AddRefed<TextureHost> CreateDummyBufferTextureHost(
   aFlags |= TextureFlags::DUMMY_TEXTURE;
   UniquePtr<TextureData> textureData(BufferTextureData::Create(
       gfx::IntSize(1, 1), gfx::SurfaceFormat::B8G8R8A8, gfx::ColorSpace2::SRGB,
-      gfx::TransferFunction::SRGB, gfx::BackendType::SKIA, aBackend, aFlags,
-      TextureAllocationFlags::ALLOC_DEFAULT, nullptr));
+      gfx::TransferFunction::SRGB, gfx::BackendType::SKIA, aBackend,
+      TextureFlags::NO_FLAGS, TextureAllocationFlags::ALLOC_DEFAULT, nullptr));
+  if (!textureData) {
+    return nullptr;
+  }
   SurfaceDescriptor surfDesc;
-  textureData->Serialize(surfDesc);
+  if (!textureData->Serialize(surfDesc)) {
+    return nullptr;
+  }
   const SurfaceDescriptorBuffer& bufferDesc =
       surfDesc.get_SurfaceDescriptorBuffer();
   const MemoryOrShmem& data = bufferDesc.data();
@@ -268,10 +276,10 @@ already_AddRefed<TextureHost> CreateBackendIndependentTextureHost(
             // We failed to map the shmem so we can't verify its size.
             // Attempting to construct a ShmemTextureHost with it will succeed,
             // but the resulting object will have a null shmem and can't ever be
-            // locked or mapped -- it's not useful at all. We just return
-            // nullptr instead.
-            gfxCriticalError() << "Failed texture host with unmappable shmem.";
-            return nullptr;
+            // locked or mapped -- it's not useful at all. We return a dummy
+            // texture host of the appropriate size instead.
+            gfxCriticalNote << "Failed texture host with unmappable shmem.";
+            return CreateDummyBufferTextureHost(aBackend, aFlags);
           }
 
           size_t bufSize = shmem.Size<char>();
@@ -491,13 +499,9 @@ BufferTextureHost::BufferTextureHost(const BufferDescriptor& aDesc,
       MOZ_CRASH("GFX: Bad descriptor");
   }
 
-#ifdef XP_MACOSX
-  const int kMinSize = 1024;
-  const int kMaxSize = 4096;
+#ifdef MOZ_WAYLAND
   mUseExternalTextures =
-      kMaxSize >= mSize.width && mSize.width >= kMinSize &&
-      kMaxSize >= mSize.height && mSize.height >= kMinSize &&
-      StaticPrefs::gfx_webrender_enable_client_storage_AtStartup();
+      widget::GdkIsWaylandDisplay() && gfx::gfxVars::UseWebRenderCompositor();
 #else
   mUseExternalTextures = false;
 #endif
@@ -516,11 +520,13 @@ void BufferTextureHost::CreateRenderTexture(
   MOZ_ASSERT(mExternalImageId.isSome());
 
   RefPtr<wr::RenderTextureHost> texture;
-
+#ifdef MOZ_WAYLAND
   if (UseExternalTextures()) {
-    texture = MakeRefPtr<wr::RenderExternalTextureHost>(GetBuffer(),
-                                                        GetBufferDescriptor());
-  } else {
+    texture = MakeRefPtr<wr::RenderWaylandTextureHost>(GetBuffer(),
+                                                       GetBufferDescriptor());
+  } else
+#endif
+  {
     texture = MakeRefPtr<wr::RenderBufferTextureHost>(GetBuffer(),
                                                       GetBufferDescriptor());
   }
@@ -994,6 +1000,7 @@ bool TextureParent::Init(const SurfaceDescriptor& aSharedData,
                          ReadLockDescriptor&& aReadLock,
                          const LayersBackend& aBackend,
                          const TextureFlags& aFlags) {
+  MOZ_ASSERT(mSurfaceAllocator);
   mTextureHost =
       TextureHost::Create(aSharedData, std::move(aReadLock), mSurfaceAllocator,
                           aBackend, aFlags, mExternalImageId);
@@ -1037,9 +1044,8 @@ mozilla::ipc::IPCResult TextureParent::RecvRecycleTexture(
 }
 
 void TextureParent::ActorDestroy(ActorDestroyReason aWhy) {
-  auto* manager = Manager();
-  if (manager->GetProtocolId() == ipc::ProtocolId::PVideoBridgeMsgStart) {
-    static_cast<VideoBridgeParent*>(manager)->RemoveTexture(mSerial);
+  if (VideoBridgeParent* manager = ActorDynCast<VideoBridgeParent>(Manager())) {
+    manager->RemoveTexture(mSerial);
   }
   Destroy();
 }

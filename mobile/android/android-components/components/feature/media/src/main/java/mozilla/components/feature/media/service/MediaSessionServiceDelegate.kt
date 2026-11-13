@@ -13,8 +13,11 @@ import android.media.AudioManager
 import android.os.Build
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
+import androidx.annotation.MainThread
 import androidx.annotation.VisibleForTesting
 import androidx.core.content.ContextCompat
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -25,6 +28,7 @@ import mozilla.components.concept.base.crash.CrashReporting
 import mozilla.components.concept.engine.mediasession.MediaSession
 import mozilla.components.concept.engine.mediasession.MediaSession.PlaybackState.PAUSED
 import mozilla.components.concept.engine.mediasession.MediaSession.PlaybackState.PLAYING
+import mozilla.components.feature.media.ext.MS_PER_SECOND
 import mozilla.components.feature.media.ext.getArtistOrUrl
 import mozilla.components.feature.media.ext.getNonPrivateIcon
 import mozilla.components.feature.media.ext.getTitleOrUrl
@@ -44,8 +48,6 @@ import mozilla.components.support.base.ids.SharedIdsHelper
 import mozilla.components.support.base.log.logger.Logger
 import mozilla.components.support.utils.ext.registerReceiverCompat
 import mozilla.components.support.utils.ext.stopForegroundCompat
-import kotlin.coroutines.CoroutineContext
-import kotlin.coroutines.EmptyCoroutineContext
 
 @VisibleForTesting
 internal class BecomingNoisyReceiver(private val controller: MediaSession.Controller?) : BroadcastReceiver() {
@@ -77,45 +79,59 @@ internal class MediaSessionServiceDelegate(
 ) : MediaSessionDelegate {
     private val logger = Logger("MediaSessionService")
 
-    @VisibleForTesting
-    internal var notificationHelper = MediaNotification(context, service::class.java)
+    @VisibleForTesting internal var notificationHelper = MediaNotification(context, service::class.java)
+
+    @VisibleForTesting internal var mediaSession = MediaSessionCompat(context, "MozacMediaSession")
 
     @VisibleForTesting
-    internal var mediaSession = MediaSessionCompat(context, "MozacMediaSession")
-
-    @VisibleForTesting
-    internal var audioFocus = AudioFocus(
-        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager,
-        store,
-        onTransientFocusLoss = { isTransientAudioFocusLoss = it },
-    )
+    internal var audioFocus =
+        AudioFocus(
+            context.getSystemService(Context.AUDIO_SERVICE) as AudioManager,
+            store,
+            onTransientFocusLoss = { isTransientAudioFocusLoss = it },
+        )
 
     @VisibleForTesting
     internal val notificationId by lazy {
         SharedIdsHelper.getIdForTag(context, AbstractMediaSessionService.NOTIFICATION_TAG)
     }
 
-    @VisibleForTesting
-    internal var controller: MediaSession.Controller? = null
+    @VisibleForTesting internal var controller: MediaSession.Controller? = null
 
-    @VisibleForTesting
-    internal var notificationScope: CoroutineScope? = null
+    @VisibleForTesting internal var notificationScope: CoroutineScope? = null
 
-    @VisibleForTesting
-    internal val intentFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+    @VisibleForTesting internal val intentFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
 
-    @VisibleForTesting
-    internal var noisyAudioStreamReceiver: BecomingNoisyReceiver? = null
+    @VisibleForTesting internal var noisyAudioStreamReceiver: BecomingNoisyReceiver? = null
 
-    @VisibleForTesting
-    internal var isForegroundService: Boolean = false
+    @VisibleForTesting internal var isForegroundService: Boolean = false
 
-    @VisibleForTesting
-    internal var isTransientAudioFocusLoss: Boolean = false
+    @VisibleForTesting internal var isTransientAudioFocusLoss: Boolean = false
+
+    // The tab and audio-session type that audio focus was last granted (or not needed) for while
+    // playing. Further updates for the same pair must not request again: after the system takes
+    // focus away, a page can keep reporting that it is playing, and requesting again would take
+    // focus back. The system returns focus after a transient loss on its own.
+    private var focusRequestKey: Pair<String, MediaSession.AudioSessionType>? = null
+
+    // Bumped when playback pauses, stops or shuts down, and when startForeground() is called, so only
+    // the latest startForeground() requests audio focus, and only if playback has not paused or
+    // stopped since. Like focusRequestKey, it is only read and written on the main thread: the media
+    // session feature and callbacks call in there, and the startForeground() coroutine runs on
+    // mainScope.
+    private var focusRequestGeneration = 0
+
+    // On a track change the page often keeps reporting the previous track's positionState for a
+    // short while before pushing a fresh one. While that stale value persists we report a position
+    // of 0 instead of the outgoing track's position. hasTrackedMedia lets the very first update
+    // through, where a non-zero start position is legitimate.
+    private var hasTrackedMedia: Boolean = false
+    private var lastTitle: String? = null
+    private var stalePositionState: MediaSession.PositionState? = null
 
     fun onCreate() {
         logger.debug("Service created")
-        mediaSession.setCallback(MediaSessionCallback(store))
+        mediaSession.setCallback(MediaSessionCallback(store, onMediaSessionPlay = ::onMediaSessionPlay))
         notificationScope = mainScope
     }
 
@@ -170,11 +186,7 @@ internal class MediaSessionServiceDelegate(
             // Audio focus must be requested only while a foreground service is running.
             // On Android 15+, requesting audio focus from the background without one
             // silently returns AUDIOFOCUS_REQUEST_FAILED.
-            audioFocus.request(
-                sessionState.id,
-                sessionState.mediaSessionState?.audioSessionType
-                    ?: MediaSession.AudioSessionType.AUTO,
-            )
+            requestAudioFocusIfNeeded(sessionState)
             updateNotification(sessionState)
         } else {
             // startForeground() requests audio focus once the service is started, ensuring
@@ -187,6 +199,7 @@ internal class MediaSessionServiceDelegate(
     override fun handleMediaPaused(sessionState: SessionState) {
         emitStatePauseFact()
 
+        resetFocusRequest()
         updateMediaSession(sessionState)
         // Capture and clear the flag in a single pass. If the pause was triggered by a transient
         // audio focus loss (e.g. a notification sound), keep the foreground service alive so its
@@ -212,6 +225,7 @@ internal class MediaSessionServiceDelegate(
         stopForeground()
         // Playback has ended permanently; release audio focus so other apps can acquire it.
         audioFocus.abandon()
+        resetFocusRequest()
 
         updateNotification(sessionState)
     }
@@ -224,7 +238,8 @@ internal class MediaSessionServiceDelegate(
     internal fun updateNotification(sessionState: SessionState) {
         notificationScope?.launch {
             when (sessionState.mediaSessionState?.playbackState) {
-                PLAYING, PAUSED -> {
+                PLAYING,
+                PAUSED -> {
                     val notification = notificationHelper.create(sessionState, mediaSession)
                     notificationsDelegate.notify(
                         notificationId = notificationId,
@@ -244,15 +259,13 @@ internal class MediaSessionServiceDelegate(
         sessionState: SessionState,
         coroutineContext: CoroutineContext = EmptyCoroutineContext,
     ) {
+        val generation = ++focusRequestGeneration
         notificationScope?.launch(coroutineContext) {
             val notification = notificationHelper.create(sessionState, mediaSession)
             try {
                 service.startForeground(notificationId, notification)
             } catch (e: Exception) {
-                if (
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                    e is ForegroundServiceStartNotAllowedException
-                ) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && e is ForegroundServiceStartNotAllowedException) {
                     // We should not encounter this exception if `android:foregroundServiceType="mediaPlayback"`
                     // is added to the service. The crash reporter loses the stack trace for this
                     // exception so we want to be able to track this crash independently to ensure
@@ -271,31 +284,91 @@ internal class MediaSessionServiceDelegate(
             // the Android 15+ requirement that audio focus requests must come from an app that
             // is either visible or running a foreground service with WIU (While In Use)
             // capabilities, i.e. one that was started while the app was visible to the user.
-            audioFocus.request(sessionState.id)
+            if (generation == focusRequestGeneration) {
+                requestAudioFocusIfNeeded(sessionState)
+            }
         }
+    }
+
+    @MainThread
+    private fun requestAudioFocusIfNeeded(sessionState: SessionState): Boolean {
+        val type = sessionState.mediaSessionState?.audioSessionType ?: MediaSession.AudioSessionType.AUTO
+        val key = sessionState.id to type
+        if (focusRequestKey == key) {
+            logger.debug("Audio focus already requested for tab ${sessionState.id} with type $type, skipping")
+            return true
+        }
+        val granted = audioFocus.request(sessionState.id, type)
+        logger.debug("Audio focus requested for tab ${sessionState.id} with type $type, granted=$granted")
+        focusRequestKey = if (granted) key else null
+        return granted
+    }
+
+    // Play sent through the Android media session comes from the user, never from the page. After a
+    // permanent focus loss the page can keep reporting that it is playing, so this is where focus is
+    // requested again. Focus can only be requested while the service is in the foreground; before
+    // that, play goes ahead and startForeground() requests it.
+    @MainThread
+    private fun onMediaSessionPlay(sessionState: SessionState): Boolean {
+        focusRequestKey = null
+        val shouldPlay = !isForegroundService || requestAudioFocusIfNeeded(sessionState)
+        logger.debug(
+            "Media session play for tab ${sessionState.id}, foreground=$isForegroundService, shouldPlay=$shouldPlay"
+        )
+        return shouldPlay
+    }
+
+    @MainThread
+    private fun resetFocusRequest() {
+        focusRequestKey = null
+        focusRequestGeneration++
+        logger.debug("Audio focus request reset, generation=$focusRequestGeneration")
     }
 
     @VisibleForTesting
     internal fun updateMediaSession(sessionState: SessionState) {
-        mediaSession.setPlaybackState(sessionState.mediaSessionState?.toPlaybackState())
+        val mss = sessionState.mediaSessionState
+
+        val newTitle = mss?.metadata?.title
+        val currentPositionState = mss?.positionState
+        if (hasTrackedMedia && newTitle != lastTitle) {
+            stalePositionState = currentPositionState
+        }
+        hasTrackedMedia = true
+        lastTitle = newTitle
+        val resetPosition: Boolean =
+            if (stalePositionState != null && currentPositionState == stalePositionState) {
+                true
+            } else {
+                stalePositionState = null
+                false
+            }
+
+        mediaSession.setPlaybackState(mss?.toPlaybackState(resetPosition))
         mediaSession.isActive = true
+        val duration =
+            mss?.positionState?.duration?.takeIf { it > 0 } ?: mss?.elementMetadata?.duration?.takeIf { it > 0 }
+        val durationMs = duration?.times(MS_PER_SECOND)?.toLong() ?: -1L
         notificationScope?.launch {
             mediaSession.setMetadata(
                 MediaMetadataCompat.Builder()
                     .putString(
                         MediaMetadataCompat.METADATA_KEY_TITLE,
-                        sessionState.getTitleOrUrl(context, sessionState.mediaSessionState?.metadata?.title),
+                        sessionState.getTitleOrUrl(context, mss?.metadata?.title),
                     )
                     .putString(
                         MediaMetadataCompat.METADATA_KEY_ARTIST,
-                        sessionState.getArtistOrUrl(sessionState.mediaSessionState?.metadata?.artist),
+                        sessionState.getArtistOrUrl(mss?.metadata?.artist),
                     )
                     .putBitmap(
                         MediaMetadataCompat.METADATA_KEY_ART,
-                        sessionState.getNonPrivateIcon(sessionState.mediaSessionState?.metadata?.getArtwork),
+                        sessionState.getNonPrivateIcon(mss?.metadata?.getArtwork),
                     )
-                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, -1)
-                    .build(),
+                    .putLong(
+                        MediaMetadataCompat.METADATA_KEY_DURATION,
+                        durationMs,
+                    )
+                    .build()
             )
         }
     }
@@ -338,6 +411,7 @@ internal class MediaSessionServiceDelegate(
     @VisibleForTesting
     internal fun shutdown() {
         mediaSession.release()
+        resetFocusRequest()
         // Explicitly cancel media notification.
         // Otherwise, when media is paused, with [STOP_FOREGROUND_DETACH] notification behavior,
         // the notification will persist even after service is stopped and destroyed.

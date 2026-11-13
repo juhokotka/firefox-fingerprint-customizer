@@ -26,6 +26,8 @@ skip-if = [
 
 ["browser_autoshow_bookmarks_toolbar.js"]
 
+["browser_bhTooltip_folder_cropping.js"]
+
 ["browser_bookmarkMenu_hiddenWindow.js"]
 run-if = [
   "os == 'mac'", # Mac-only functionality
@@ -50,19 +52,15 @@ run-if = [
 ["browser_bookmarkProperties_readOnlyRoot.js"]
 
 ["browser_bookmarkProperties_remember_folders.js"]
-skip-if = [
-  "os == 'mac' && os_version == '14.70' && arch == 'x86_64' && debug", # Bug 1869782
-]
 
 ["browser_bookmarkProperties_speculativeConnection.js"]
 
 ["browser_bookmarkProperties_xulStore.js"]
 
+["browser_bookmarkStar_multipleBookmarks.js"]
+
 ["browser_bookmark_add_tags.js"]
 https_first_disabled = true
-skip-if = [
-  "os == 'mac' && os_version == '15.30' && arch == 'aarch64'", # Bug 1775656
-]
 
 ["browser_bookmark_backup_export_import.js"]
 
@@ -83,18 +81,17 @@ tags = "os_integration"
 
 ["browser_bookmark_menu_ctrl_click.js"]
 
+["browser_bookmark_open_all_in_tabs.js"]
+
 ["browser_bookmark_popup.js"]
 
 ["browser_bookmark_private_window.js"]
-skip-if = [
-  "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && opt", # Bug 1937891
-]
 
 ["browser_bookmark_remove_tags.js"]
 
 ["browser_bookmark_titles.js"]
 https_first_disabled = true
-support-files = ["../../../../base/content/test/general/dummy_page.html"]
+support-files = ["../../../../base/content/test/browser-general/dummy_page.html"]
 
 ["browser_bookmarklet_windowOpen.js"]
 support-files = ["bookmarklet_windowOpen_dummy.html"]
@@ -180,6 +177,8 @@ https_first_disabled = true
 
 ["browser_library_commands.js"]
 
+["browser_library_container_menu.js"]
+
 ["browser_library_delete.js"]
 
 ["browser_library_delete_bookmarks_in_tags.js"]
@@ -239,9 +238,6 @@ https_first_disabled = true
 ["browser_remove_bookmarks.js"]
 
 ["browser_sidebar_bookmarks_glean.js"]
-skip-if = [
-  "os == 'mac' && os_version == '15.30' && arch == 'aarch64' && debug", # Bug 2036783
-]
 
 ["browser_sidebar_bookmarks_telemetry.js"]
 

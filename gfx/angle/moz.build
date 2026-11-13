@@ -3,10 +3,15 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DIRS += [
-    "targets/angle_common",
-    "targets/translator",
+    "/third_party/angle",
 ]
 
-# Only build libEGL/libGLESv2 on Windows
-if CONFIG["MOZ_WIDGET_TOOLKIT"] == "windows":
-    DIRS += ["targets/libEGL", "targets/libGLESv2"]
+LICENSES += ["angle"]
+LICENSES["angle"].title = "ANGLE License"
+LICENSES["angle"].notice = """
+<p>This license applies to files in the directory <code>gfx/angle/</code>.</p>
+"""
+
+LICENSED_UNDER += [
+    "angle",
+]

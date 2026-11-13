@@ -9,6 +9,10 @@ ChromeUtils.defineLazyGetter(this, "PlacesFrecencyRecalculator", () => {
   ).wrappedJSObject;
 });
 
+ChromeUtils.defineESModuleGetters(this, {
+  UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
+});
+
 Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/browser/components/urlbar/tests/browser/head-common.js",
   this
@@ -97,6 +101,7 @@ async function adaptiveAutofillSetup() {
       ["browser.urlbar.autoFill.adaptiveHistory.enabled", true],
       ["browser.urlbar.autoFill.adaptiveHistory.minCharsThreshold", 0],
       ["browser.urlbar.autoFill.adaptiveHistory.useCountThreshold", 0],
+      ["browser.urlbar.autoFill.adaptiveHistory.urlMinPicks", 1],
     ],
   });
 

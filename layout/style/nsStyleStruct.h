@@ -43,6 +43,7 @@ class ComputedStyle;
 struct AnchorPosResolutionCache;
 class AnchorPosReferenceData;
 struct IntrinsicSize;
+class LogicalMargin;
 struct SizeComputationInput;
 
 }  // namespace mozilla
@@ -145,6 +146,11 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleFont {
 
   nsAtom* GetFontPaletteAtom() const { return mFontPalette._0.AsAtom(); }
 
+  nsAtom* GetLangAtom() const {
+    auto* atom = mLanguage.AsAtom();
+    return atom == nsGkAtoms::empty ? nullptr : atom;
+  }
+
   nsFont mFont;
 
   // Our "computed size". Can be different from mFont.size which is our "actual
@@ -183,7 +189,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleFont {
   // The value mSize would have had if scriptminsize had never been applied
   mozilla::NonNegativeLength mScriptUnconstrainedSize;
   mozilla::Length mScriptMinSize;
-  RefPtr<nsAtom> mLanguage;
+  mozilla::StyleXLang mLanguage;
 };
 
 struct nsStyleImageLayers {
@@ -212,7 +218,6 @@ struct nsStyleImageLayers {
     }
 
     bool operator==(const Repeat& aOther) const = default;
-    bool operator!=(const Repeat& aOther) const = default;
   };
 
   struct Layer {
@@ -225,7 +230,7 @@ struct nsStyleImageLayers {
     mozilla::Position mPosition;
     StyleBackgroundSize mSize;
     StyleBackgroundClip mClip;
-    MOZ_INIT_OUTSIDE_CTOR StyleGeometryBox mOrigin;
+    MOZ_INIT_OUTSIDE_CTOR mozilla::StyleBackgroundOrigin mOrigin;
 
     // This property is used for background layer only.
     // For a mask layer, it should always be the initial value, which is
@@ -272,10 +277,7 @@ struct nsStyleImageLayers {
     // Compute the change hint required by changes in just this layer.
     nsChangeHint CalcDifference(const Layer& aNewLayer) const;
 
-    // An equality operator that compares the images using URL-equality
-    // rather than pointer-equality.
-    bool operator==(const Layer& aOther) const;
-    bool operator!=(const Layer& aOther) const = default;
+    bool operator==(const Layer&) const = default;
   };
 
   // The (positive) number of computed values of each property, since
@@ -517,6 +519,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleMargin {
   // TODO: Add support per-axis/side clipping, see
   // https://github.com/w3c/csswg-drafts/issues/7245
   mozilla::StyleOverflowClipMargin mOverflowClipMargin;
+
+  mozilla::StyleMarginTrim mMarginTrim;
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePadding {
@@ -1042,7 +1046,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   StyleImplicitGridTracks mGridAutoRows;
   mozilla::StyleAspectRatio mAspectRatio;
   mozilla::StyleGridAutoFlow mGridAutoFlow;
-  mozilla::StyleMasonryAutoFlow mMasonryAutoFlow;
 
   mozilla::StyleContentDistribution mAlignContent;
   mozilla::StyleItemPlacement mAlignItems;
@@ -1055,8 +1058,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   mozilla::StyleObjectFit mObjectFit;
   mozilla::StyleBoxSizing mBoxSizing;
   int32_t mOrder;
-  float mFlexGrow;
-  float mFlexShrink;
+  mozilla::StyleNonNegativeNumber mFlexGrow;
+  mozilla::StyleNonNegativeNumber mFlexShrink;
   mozilla::StyleZIndex mZIndex;
 
   mozilla::StyleGridTemplateComponent mGridTemplateColumns;
@@ -1519,8 +1522,7 @@ struct StyleTransition {
   const StyleTransitionProperty& GetProperty() const { return mProperty; }
   StyleTransitionBehavior GetBehavior() const { return mBehavior; }
 
-  bool operator==(const StyleTransition& aOther) const;
-  bool operator!=(const StyleTransition&) const = default;
+  bool operator==(const StyleTransition&) const = default;
 
  private:
   StyleComputedTimingFunction mTimingFunction{
@@ -1551,8 +1553,7 @@ struct StyleAnimation {
   const StyleAnimationRangeStart& GetRangeStart() const { return mRangeStart; }
   const StyleAnimationRangeEnd& GetRangeEnd() const { return mRangeEnd; }
 
-  bool operator==(const StyleAnimation& aOther) const;
-  bool operator!=(const StyleAnimation&) const = default;
+  bool operator==(const StyleAnimation&) const = default;
 
  private:
   StyleComputedTimingFunction mTimingFunction{
@@ -1575,11 +1576,10 @@ struct StyleScrollTimeline {
   StyleScrollTimeline() = default;
   explicit StyleScrollTimeline(const StyleScrollTimeline& aCopy) = default;
 
-  nsAtom* GetName() const { return mName.value.AsAtom(); }
+  const StyleTimelineName& GetName() const { return mName; }
   StyleScrollAxis GetAxis() const { return mAxis; }
 
   bool operator==(const StyleScrollTimeline&) const = default;
-  bool operator!=(const StyleScrollTimeline&) const = default;
 
  private:
   StyleTimelineName mName;
@@ -1590,12 +1590,11 @@ struct StyleViewTimeline {
   StyleViewTimeline() = default;
   explicit StyleViewTimeline(const StyleViewTimeline& aCopy) = default;
 
-  nsAtom* GetName() const { return mName.value.AsAtom(); }
+  const StyleTimelineName& GetName() const { return mName; }
   StyleScrollAxis GetAxis() const { return mAxis; }
   const StyleViewTimelineInset& GetInset() const { return mInset; }
 
   bool operator==(const StyleViewTimeline&) const = default;
-  bool operator!=(const StyleViewTimeline&) const = default;
 
  private:
   StyleTimelineName mName;
@@ -1668,6 +1667,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   mozilla::StyleScrollSnapAlign mScrollSnapAlign;
   mozilla::StyleScrollSnapStop mScrollSnapStop;
   mozilla::StyleScrollSnapType mScrollSnapType;
+  mozilla::StyleScrollbarInset mScrollbarInsetBlock;
+  mozilla::StyleScrollbarInset mScrollbarInsetInline;
 
   mozilla::StyleBackfaceVisibility mBackfaceVisibility;
   mozilla::StyleTransformStyle mTransformStyle;
@@ -1705,6 +1706,10 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
 
   // The margin around a shape-outside: <image>.
   mozilla::NonNegativeLengthPercentage mShapeMargin;
+
+  // TODO: This is a grid-lanes container property, so it belongs in
+  // nsStylePosition, but that struct is at its size limit.
+  mozilla::StyleFitTolerance mFitTolerance;
 
   mozilla::StyleShapeOutside mShapeOutside;
 
@@ -1853,6 +1858,12 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
     return mOverflowX == mozilla::StyleOverflow::Visible &&
            mOverflowY == mozilla::StyleOverflow::Visible;
   }
+
+  // How much to shorten each scrollbar by at each of its ends. Each side holds
+  // the inset measured from it, so the block-axis pair shortens the scrollbar
+  // running along the block axis. Defined in WritingModes.h.
+  inline mozilla::LogicalMargin GetScrollbarInset(
+      mozilla::WritingMode aWM) const;
 
   bool IsContainPaint() const {
     // Short circuit for no containment whatsoever
@@ -2025,6 +2036,14 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleContent {
     return mozilla::Span(items.items).From(items.alt_start);
   }
 
+  /**
+   * True if the 'content' change from aOld to aNew can be applied by rewriting
+   * the existing generated text nodes in place rather than reframing the full
+   * subtree.
+   */
+  static bool CanUpdateGeneratedContentText(const nsStyleContent& aOld,
+                                            const nsStyleContent& aNew);
+
   mozilla::StyleContent mContent;
   mozilla::StyleCounterIncrement mCounterIncrement;
   mozilla::StyleCounterReset mCounterReset;
@@ -2119,14 +2138,15 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUIReset {
     return mAnimations[aIndex % mAnimationRangeEndCount].GetRangeEnd();
   }
 
-  nsAtom* GetScrollTimelineName(uint32_t aIndex) const {
+  const mozilla::StyleTimelineName& GetScrollTimelineName(
+      uint32_t aIndex) const {
     return mScrollTimelines[aIndex % mScrollTimelineNameCount].GetName();
   }
   mozilla::StyleScrollAxis GetScrollTimelineAxis(uint32_t aIndex) const {
     return mScrollTimelines[aIndex % mScrollTimelineAxisCount].GetAxis();
   }
 
-  nsAtom* GetViewTimelineName(uint32_t aIndex) const {
+  const mozilla::StyleTimelineName& GetViewTimelineName(uint32_t aIndex) const {
     return mViewTimelines[aIndex % mViewTimelineNameCount].GetName();
   }
   mozilla::StyleScrollAxis GetViewTimelineAxis(uint32_t aIndex) const {
@@ -2143,6 +2163,10 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUIReset {
   mozilla::StyleWindowDragging mWindowDragging;
   mozilla::StyleWindowShadow mWindowShadow;
   mozilla::StyleFieldSizing mFieldSizing;
+
+  // How far one line scrolls this scroll container, when it doesn't want the
+  // font-derived amount. See ScrollContainerFrame::GetLineScrollAmount().
+  mozilla::NonNegativeLengthOrAuto mMozLineScrollAmount;
 
   // The margin of the window region that should be transparent to events.
   mozilla::StyleLength mMozWindowInputRegionMargin;
@@ -2237,7 +2261,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleXUL {
   STYLE_STRUCT(nsStyleXUL)
   nsStyleXUL();
 
-  float mBoxFlex;
+  mozilla::StyleNonNegativeNumber mBoxFlex;
   int32_t mBoxOrdinal;
   mozilla::StyleBoxAlign mBoxAlign;
   mozilla::StyleBoxDirection mBoxDirection;
@@ -2292,7 +2316,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
   mozilla::StyleSVGWidth mStrokeWidth;
 
   mozilla::StyleSVGOpacity mFillOpacity;
-  float mStrokeMiterlimit;
+  mozilla::StyleNonNegativeNumber mStrokeMiterlimit;
   mozilla::StyleSVGOpacity mStrokeOpacity;
 
   mozilla::StyleFillRule mClipRule;
@@ -2476,5 +2500,18 @@ struct nsSize_Simple {
 STATIC_ASSERT_TYPE_LAYOUTS_MATCH(nsSize, nsSize_Simple);
 STATIC_ASSERT_FIELD_OFFSET_MATCHES(nsSize, nsSize_Simple, width);
 STATIC_ASSERT_FIELD_OFFSET_MATCHES(nsSize, nsSize_Simple, height);
+
+/**
+ * <div rustbindgen="true" replaces="mozilla::gfx::Rect">
+ */
+struct Rect_Simple {  // note that this is gfx::Rect, NOT gfxRect!
+  float x, y, width, height;
+};
+
+STATIC_ASSERT_TYPE_LAYOUTS_MATCH(mozilla::gfx::Rect, Rect_Simple);
+STATIC_ASSERT_FIELD_OFFSET_MATCHES(mozilla::gfx::Rect, Rect_Simple, x);
+STATIC_ASSERT_FIELD_OFFSET_MATCHES(mozilla::gfx::Rect, Rect_Simple, y);
+STATIC_ASSERT_FIELD_OFFSET_MATCHES(mozilla::gfx::Rect, Rect_Simple, width);
+STATIC_ASSERT_FIELD_OFFSET_MATCHES(mozilla::gfx::Rect, Rect_Simple, height);
 
 #endif /* nsStyleStruct_h_ */

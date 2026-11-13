@@ -27,6 +27,7 @@
 
   .description-wrapper {
     grid-area: description;
+    overflow-wrap: anywhere;
   }
 
   &.has-support-page .label,
@@ -89,6 +90,8 @@ slot[name="actions-start"] {
   word-wrap: normal;
 }
 
+/* Small subtree */
+/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
 .actions:has(> slot:not(:has-slotted)) {
   display: none;
 }

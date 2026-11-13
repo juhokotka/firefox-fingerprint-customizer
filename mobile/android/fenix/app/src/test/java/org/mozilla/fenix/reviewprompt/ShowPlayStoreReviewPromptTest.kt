@@ -5,33 +5,32 @@
 package org.mozilla.fenix.reviewprompt
 
 import android.app.Activity
-import androidx.navigation.NavDirections
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.mockk.coVerify
 import io.mockk.mockk
+import java.lang.ref.WeakReference
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import mozilla.components.support.test.middleware.CaptureActionsMiddleware
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.mozilla.fenix.NavGraphDirections
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.PlayStoreReviewPromptController
 import org.mozilla.fenix.components.appstate.AppAction
 import org.mozilla.fenix.components.appstate.AppAction.ReviewPromptAction.ReviewPromptShown
 import org.mozilla.fenix.components.appstate.AppState
 import org.mozilla.fenix.reviewprompt.ReviewPromptState.NotEligible
-import java.lang.ref.WeakReference
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
 class ShowPlayStoreReviewPromptTest {
 
     private val testDispatcher = StandardTestDispatcher()
-    var navDirection: NavDirections? = null
+    private var customPromptShown = false
     lateinit var promptController: PlayStoreReviewPromptController
     lateinit var mockActivity: Activity
     lateinit var activityRef: WeakReference<Activity>
@@ -41,25 +40,26 @@ class ShowPlayStoreReviewPromptTest {
         promptController = mockk(relaxed = true)
         mockActivity = mockk(relaxed = true)
         activityRef = WeakReference(mockActivity)
-        navDirection = null
+        customPromptShown = false
     }
 
     @Test
     fun `GIVEN observing review prompt state WHEN eligible for custom prompt THEN custom prompt shown`() =
         runTest(testDispatcher) {
-            val appStore = AppStore(
-                initialState = AppState(
-                    reviewPrompt = ReviewPromptState.Eligible(ReviewPromptState.Eligible.Type.Custom),
-                ),
-            )
-            val feature = ShowReviewPromptBinding(
-                appStore,
-                promptController,
-                activityRef,
-                uiScope = this,
-                { navDirection = it },
-                mainDispatcher = testDispatcher,
-            )
+            val appStore =
+                AppStore(
+                    initialState =
+                        AppState(reviewPrompt = ReviewPromptState.Eligible(ReviewPromptState.Eligible.Type.Custom))
+                )
+            val feature =
+                ShowReviewPromptBinding(
+                    appStore,
+                    promptController,
+                    activityRef,
+                    uiScope = this,
+                    { customPromptShown = true },
+                    mainDispatcher = testDispatcher,
+                )
 
             feature.start()
             testDispatcher.scheduler.advanceUntilIdle()
@@ -69,10 +69,7 @@ class ShowPlayStoreReviewPromptTest {
             }
 
             // We show the custom prompt..
-            assertEquals(
-                NavGraphDirections.actionGlobalCustomReviewPromptDialogFragment(),
-                navDirection,
-            )
+            assertTrue(customPromptShown)
             // ..then we cleared out the eligible state.
             assertEquals(NotEligible, appStore.state.reviewPrompt)
         }
@@ -81,20 +78,20 @@ class ShowPlayStoreReviewPromptTest {
     fun `GIVEN observing review prompt state WHEN state is unknown THEN does nothing`() =
         runTest(testDispatcher) {
             val captureMiddleware = CaptureActionsMiddleware<AppState, AppAction>()
-            val appStore = AppStore(
-                initialState = AppState(
-                    reviewPrompt = ReviewPromptState.Unknown,
-                ),
-                middlewares = listOf(captureMiddleware),
-            )
-            val feature = ShowReviewPromptBinding(
-                appStore,
-                promptController,
-                activityRef,
-                uiScope = this,
-                { navDirection = it },
-                mainDispatcher = testDispatcher,
-            )
+            val appStore =
+                AppStore(
+                    initialState = AppState(reviewPrompt = ReviewPromptState.Unknown),
+                    middlewares = listOf(captureMiddleware),
+                )
+            val feature =
+                ShowReviewPromptBinding(
+                    appStore,
+                    promptController,
+                    activityRef,
+                    uiScope = this,
+                    { customPromptShown = true },
+                    mainDispatcher = testDispatcher,
+                )
 
             feature.start()
             testDispatcher.scheduler.advanceUntilIdle()
@@ -110,20 +107,20 @@ class ShowPlayStoreReviewPromptTest {
     fun `GIVEN observing review prompt state WHEN not eligible THEN does nothing`() =
         runTest(testDispatcher) {
             val captureMiddleware = CaptureActionsMiddleware<AppState, AppAction>()
-            val appStore = AppStore(
-                initialState = AppState(
-                    reviewPrompt = NotEligible,
-                ),
-                middlewares = listOf(captureMiddleware),
-            )
-            val feature = ShowReviewPromptBinding(
-                appStore,
-                promptController,
-                activityRef,
-                uiScope = this,
-                { navDirection = it },
-                mainDispatcher = testDispatcher,
-            )
+            val appStore =
+                AppStore(
+                    initialState = AppState(reviewPrompt = NotEligible),
+                    middlewares = listOf(captureMiddleware),
+                )
+            val feature =
+                ShowReviewPromptBinding(
+                    appStore,
+                    promptController,
+                    activityRef,
+                    uiScope = this,
+                    { customPromptShown = true },
+                    mainDispatcher = testDispatcher,
+                )
 
             feature.start()
             testDispatcher.scheduler.advanceUntilIdle()
@@ -135,29 +132,31 @@ class ShowPlayStoreReviewPromptTest {
         }
 
     @Test
-    fun `GIVEN observing review prompt state WHEN eligible for play store prompt THEN show it`() = runTest(testDispatcher) {
-        val captureMiddleware = CaptureActionsMiddleware<AppState, AppAction>()
-        val appStore = AppStore(
-            initialState = AppState(
-                reviewPrompt = ReviewPromptState.Eligible(ReviewPromptState.Eligible.Type.PlayStore),
-            ),
-            middlewares = listOf(captureMiddleware),
-        )
-        val feature = ShowReviewPromptBinding(
-            appStore,
-            promptController,
-            activityRef,
-            uiScope = this,
-            { navDirection = it },
-            mainDispatcher = testDispatcher,
-        )
+    fun `GIVEN observing review prompt state WHEN eligible for play store prompt THEN show it`() =
+        runTest(testDispatcher) {
+            val captureMiddleware = CaptureActionsMiddleware<AppState, AppAction>()
+            val appStore =
+                AppStore(
+                    initialState =
+                        AppState(reviewPrompt = ReviewPromptState.Eligible(ReviewPromptState.Eligible.Type.PlayStore)),
+                    middlewares = listOf(captureMiddleware),
+                )
+            val feature =
+                ShowReviewPromptBinding(
+                    appStore,
+                    promptController,
+                    activityRef,
+                    uiScope = this,
+                    { customPromptShown = true },
+                    mainDispatcher = testDispatcher,
+                )
 
-        feature.start()
-        testDispatcher.scheduler.advanceUntilIdle()
+            feature.start()
+            testDispatcher.scheduler.advanceUntilIdle()
 
-        coVerify(exactly = 1) {
-            promptController.tryPromptReview(mockActivity)
+            coVerify(exactly = 1) {
+                promptController.tryPromptReview(mockActivity)
+            }
+            captureMiddleware.assertLastAction(ReviewPromptShown::class)
         }
-        captureMiddleware.assertLastAction(ReviewPromptShown::class)
-    }
 }

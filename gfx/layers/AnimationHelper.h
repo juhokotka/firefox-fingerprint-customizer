@@ -5,13 +5,13 @@
 #ifndef mozilla_layers_AnimationHelper_h
 #define mozilla_layers_AnimationHelper_h
 
+#include "X11UndefineNone.h"
+#include "mozilla/TimeStamp.h"  // for TimeStamp
+#include "mozilla/TimingParams.h"
 #include "mozilla/dom/Nullable.h"
 #include "mozilla/layers/AnimationStorageData.h"
 #include "mozilla/layers/LayersMessages.h"     // for TransformData, etc
 #include "mozilla/webrender/WebRenderTypes.h"  // for RenderRoot
-#include "mozilla/TimeStamp.h"                 // for TimeStamp
-#include "mozilla/TimingParams.h"
-#include "X11UndefineNone.h"
 
 namespace mozilla::layers {
 class Animation;
@@ -31,6 +31,7 @@ class AnimationHelper {
  public:
   struct SampleResult {
     enum class Type : uint8_t { None, Skipped, Sampled };
+    // TODO(bug 2064481): Check if we need ScrollToDelayPhase anymore.
     enum class Reason : uint8_t { None, ScrollToDelayPhase };
     Type mType = Type::None;
     Reason mReason = Reason::None;

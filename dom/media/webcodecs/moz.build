@@ -8,6 +8,8 @@ with Files("*"):
 MOCHITEST_MANIFESTS += ["test/mochitest.toml"]
 CRASHTEST_MANIFESTS += ["crashtests/crashtests.list"]
 
+TEST_DIRS += ["gtest"]
+
 # For mozilla/layers/ImageBridgeChild.h
 LOCAL_INCLUDES += [
     "!/ipc/ipdl/_ipdlheaders",
@@ -65,3 +67,7 @@ if CONFIG["MOZ_WAYLAND"]:
     CFLAGS += CONFIG["MOZ_WAYLAND_CFLAGS"]
 
 FINAL_LIBRARY = "xul"
+
+SOURCE_HEADERS += [
+    "ImageDecoderReadRequest.h",
+]

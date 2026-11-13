@@ -6,6 +6,7 @@
 
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/FocusModel.h"
+#include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/HTMLAnchorElementBinding.h"
@@ -90,36 +91,10 @@ bool HTMLAnchorElement::IsHTMLFocusable(IsFocusableFlags aFlags,
     return true;
   }
 
-  // cannot focus links if there is no link handler
-  if (!OwnerDoc()->LinkHandlingEnabled()) {
-    *aTabIndex = -1;
-    *aIsFocusable = false;
-    return false;
-  }
+  Focusable focusable = Link::IsLinkFocusableWithoutStyle(aFlags);
+  *aIsFocusable = focusable.mFocusable;
+  *aTabIndex = focusable.mTabIndex;
 
-  // Links that are in an editable region should never be focusable, even if
-  // they are in a contenteditable="false" region.
-  if (nsContentUtils::IsNodeInEditableRegion(this)) {
-    *aTabIndex = -1;
-    *aIsFocusable = false;
-    return true;
-  }
-
-  if (GetTabIndexAttrValue().isNothing()) {
-    // check whether we're actually a link
-    if (!IsLink()) {
-      // Not tabbable or focusable without href (bug 17605), unless
-      // forced to be via presence of nonnegative tabindex attribute
-      *aTabIndex = -1;
-      *aIsFocusable = false;
-      return false;
-    }
-  }
-
-  if (!FocusModel::IsTabFocusable(TabFocusableType::Links)) {
-    *aTabIndex = -1;
-  }
-  *aIsFocusable = true;
   return false;
 }
 
@@ -171,6 +146,20 @@ already_AddRefed<nsIURI> HTMLAnchorElement::GetHrefURI() const {
   return GetHrefURIForAnchors();
 }
 
+bool HTMLAnchorElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
+                                       const nsAString& aValue,
+                                       nsIPrincipal* aMaybeScriptedPrincipal,
+                                       nsAttrValue& aResult) {
+  if (aNamespaceID == kNameSpaceID_None) {
+    if (aAttribute == nsGkAtoms::referrerpolicy) {
+      return ParseReferrerAttribute(aValue, aResult);
+    }
+  }
+
+  return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
+                                              aMaybeScriptedPrincipal, aResult);
+}
+
 void HTMLAnchorElement::BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
                                       const nsAttrValue* aValue, bool aNotify) {
   if (aNamespaceID == kNameSpaceID_None && aName == nsGkAtoms::href) {
@@ -194,8 +183,17 @@ void HTMLAnchorElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
     }
   }
 
-  return nsGenericHTMLElement::AfterSetAttr(
-      aNamespaceID, aName, aValue, aOldValue, aSubjectPrincipal, aNotify);
+  nsGenericHTMLElement::AfterSetAttr(aNamespaceID, aName, aValue, aOldValue,
+                                     aSubjectPrincipal, aNotify);
+
+  // https://html.spec.whatwg.org/#link-type-expect
+  // A changed name can change the target of a rel=expect link. Do this after
+  // nsGenericHTMLElement::AfterSetAttr, which updates HasName(). Only an
+  // element in the document tree can be a target.
+  if (aNamespaceID == kNameSpaceID_None && aName == nsGkAtoms::name &&
+      IsInUncomposedDoc() && StaticPrefs::dom_element_blocking_enabled()) {
+    OwnerDoc()->ProcessInternalResourceLinksWhenSafe();
+  }
 }
 
 void HTMLAnchorElement::AddSizeOfExcludingThis(nsWindowSizes& aSizes,

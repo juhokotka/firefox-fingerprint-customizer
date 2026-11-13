@@ -32,7 +32,11 @@ nsHtml5StringParser::~nsHtml5StringParser() { ClearCaches(); }
 nsresult nsHtml5StringParser::ParseFragment(
     const nsAString& aSourceBuffer, nsIContent* aTargetNode,
     nsAtom* aContextLocalName, int32_t aContextNamespace, bool aQuirks,
-    bool aPreventScriptExecution, bool aAllowDeclarativeShadowRoots) {
+    bool aPreventScriptExecution, bool aAllowDeclarativeShadowRoots,
+    mozilla::Maybe<RefPtr<mozilla::dom::CustomElementRegistry>>
+        aCustomElementRegistry,
+    mozilla::dom::Sanitizer* aSanitizer,
+    nsContentUtils::SanitizerMode aSanitizerMode) {
   NS_ENSURE_TRUE(aSourceBuffer.Length() <= INT32_MAX, NS_ERROR_OUT_OF_MEMORY);
 
   Document* doc = aTargetNode->OwnerDoc();
@@ -40,10 +44,19 @@ nsresult nsHtml5StringParser::ParseFragment(
   NS_ENSURE_TRUE(uri, NS_ERROR_NOT_AVAILABLE);
 
   // Steps 1-3. Set up the document mode, and step 5, set the tokenizer state,
-  // based on the context element. Step 4 (create a new HTML parser) is this
-  // object itself.
+  // based on the context element.
   mTreeBuilder->setFragmentContext(aContextLocalName, aContextNamespace,
                                    aTargetNode, aQuirks);
+  // Step 4 (create a new HTML parser, whose "parser sanitizer configuration" is
+  // aSanitizer and whose "remove javascript navigation URLs" is true iff
+  // aSanitizerMode is Safe) is this object itself.
+  mTreeBuilder->SetSanitizer(
+      aSanitizer, aSanitizerMode == nsContentUtils::SanitizerMode::Safe);
+
+  // Step 12 of the spec asks to look up the registry from aTargetNode, but this
+  // is often a DocumentFragment which has no registry. So instead it's passed
+  // directly as an arg.
+  mTreeBuilder->SetCustomElementRegistry(std::move(aCustomElementRegistry));
 
 #ifdef DEBUG
   if (!aPreventScriptExecution) {
@@ -63,18 +76,30 @@ nsresult nsHtml5StringParser::ParseFragment(
   // inserted into the input stream."
   // Step 13. "Return root's children, in tree order." (Nodes are appended
   // directly into aTargetNode by the tree builder.)
-  return Tokenize(aSourceBuffer, doc, true, aAllowDeclarativeShadowRoots);
+  nsresult rv =
+      Tokenize(aSourceBuffer, doc, true, aAllowDeclarativeShadowRoots);
+
+  // This parser is a process-wide singleton, so drop the strong reference to
+  // the context's custom element registry now that parsing is done; otherwise
+  // it (and the document it belongs to) would stay pinned until the next parse.
+  mTreeBuilder->SetCustomElementRegistry(mozilla::Nothing());
+  return rv;
 }
 
 nsresult nsHtml5StringParser::ParseDocument(
     const nsAString& aSourceBuffer, Document* aTargetDoc,
-    bool aScriptingEnabledForNoscriptParsing) {
+    bool aScriptingEnabledForNoscriptParsing,
+    mozilla::dom::Sanitizer* aSanitizer,
+    nsContentUtils::SanitizerMode aSanitizerMode) {
   MOZ_ASSERT(!aTargetDoc->GetFirstChild());
 
   NS_ENSURE_TRUE(aSourceBuffer.Length() <= INT32_MAX, NS_ERROR_OUT_OF_MEMORY);
 
   mTreeBuilder->setFragmentContext(nullptr, kNameSpaceID_None, nullptr, false);
+  mTreeBuilder->SetCustomElementRegistry(mozilla::Nothing());
 
+  mTreeBuilder->SetSanitizer(
+      aSanitizer, aSanitizerMode == nsContentUtils::SanitizerMode::Safe);
   mTreeBuilder->SetPreventScriptExecution(true);
 
   return Tokenize(aSourceBuffer, aTargetDoc,
@@ -150,6 +175,8 @@ nsresult nsHtml5StringParser::Tokenize(const nsAString& aSourceBuffer,
 
   mTokenizer->end();
   mBuilder->Finish();
+  MOZ_ASSERT(!mTreeBuilder->HasSanitizer(),
+             "Sanitizer should have cleared at mTokenizer-end()");
   mAtomTable.Clear();
   TryCache();
   return rv;

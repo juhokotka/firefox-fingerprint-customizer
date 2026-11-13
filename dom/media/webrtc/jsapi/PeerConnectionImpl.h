@@ -175,7 +175,7 @@ class PeerConnectionImpl final
   struct RtpExtensionHeader {
     JsepMediaType mMediaType;
     SdpDirectionAttribute::Direction direction;
-    std::string extensionname;
+    nsCString extensionname;
   };
 
   JSObject* WrapObject(JSContext* aCx,
@@ -185,11 +185,6 @@ class PeerConnectionImpl final
   static already_AddRefed<PeerConnectionImpl> Constructor(
       const dom::GlobalObject& aGlobal);
 
-  static DefaultCodecPreferences GetDefaultCodecPreferences(
-      const OverrideRtxPreference aOverrideRtxPreference =
-          OverrideRtxPreference::NoOverride) {
-    return DefaultCodecPreferences(aOverrideRtxPreference);
-  }
   // DataConnection observers
   void NotifyDataChannel(already_AddRefed<DataChannel> aChannel,
                          const nsACString& aLabel, bool aOrdered,
@@ -204,7 +199,7 @@ class PeerConnectionImpl final
 
   void NotifyDataChannelClosed(DataChannel*) override;
 
-  void NotifySctpConnected() override;
+  void NotifySctpConnected(Maybe<uint16_t> aMaxChannels) override;
 
   void NotifySctpClosed() override;
 
@@ -217,8 +212,9 @@ class PeerConnectionImpl final
   virtual const std::string& GetName();
 
   // ICE events
-  void IceConnectionStateChange(const std::string& aTransportId,
-                                dom::RTCIceTransportState state);
+  void IceConnectionStateChange(
+      const std::string& aTransportId, dom::RTCIceTransportState state,
+      const Maybe<dom::IceCandidateAttributePair>& aSelectedPair);
   void IceGatheringStateChange(const std::string& aTransportId,
                                dom::RTCIceGathererState state);
   void OnCandidateFound(const std::string& aTransportId,
@@ -488,6 +484,12 @@ class PeerConnectionImpl final
   RefPtr<dom::RTCRtpTransceiver> GetTransceiver(
       const std::string& aTransceiverId);
 
+  // See JsepSession::LocalOfferedRecvParamsChanged.
+  bool LocalOfferedRecvParamsChanged(const std::string& aMid) {
+    MOZ_ASSERT(NS_IsMainThread());
+    return mJsepSession && mJsepSession->LocalOfferedRecvParamsChanged(aMid);
+  }
+
   // Gets the RTC Signaling State of the JSEP session
   dom::RTCSignalingState GetSignalingState() const;
 
@@ -577,24 +579,13 @@ class PeerConnectionImpl final
 
   bool LongTermStatsIsDisabled() const { return mDisableLongTermStats; }
 
-  static void GetDefaultVideoCodecs(
-      std::vector<UniquePtr<JsepCodecDescription>>& aSupportedCodecs,
-      const OverrideRtxPreference aOverrideRtxPreference);
-
-  static void GetDefaultAudioCodecs(
-      std::vector<UniquePtr<JsepCodecDescription>>& aSupportedCodecs);
-
   static void GetDefaultRtpExtensions(
-      std::vector<RtpExtensionHeader>& aRtpExtensions);
+      const JsepCodecPreferences& aPrefs,
+      nsTArray<RtpExtensionHeader>* aRtpExtensions);
 
   static void GetCapabilities(const nsAString& aKind,
                               dom::Nullable<dom::RTCRtpCapabilities>& aResult,
                               sdp::Direction aDirection);
-  static void SetupPreferredCodecs(
-      std::vector<UniquePtr<JsepCodecDescription>>& aPreferredCodecs);
-
-  static void SetupPreferredRtpExtensions(
-      std::vector<RtpExtensionHeader>& aPreferredheaders);
 
   void BreakCycles();
 
@@ -821,14 +812,20 @@ class PeerConnectionImpl final
   void EnsureTransports(const JsepSession& aSession);
 
   void UpdateRTCDtlsTransports();
+  // Creates/updates mSctpTransport based on whether a data section has
+  // appeared in an SDP. May run in have-remote-offer, where the
+  // RTCSctpTransport has a null transport until UpdateRTCDtlsTransports fills
+  // it in.
+  void UpdateRTCSctpTransport();
   void SaveStateForRollback();
   void RestoreStateForRollback();
   std::set<RefPtr<dom::RTCDtlsTransport>> GetActiveTransports() const;
 
-  // Activate ICE transports at the conclusion of offer/answer,
-  // or when rollback occurs.
-  nsresult UpdateTransports(const JsepSession& aSession,
-                            const bool forceIceTcp);
+  // Activate ICE transports at the conclusion of offer/answer, or when
+  // rollback occurs. A provisional answer activates its transports too, but
+  // does not remove the ones it leaves unused.
+  nsresult UpdateTransports(const JsepSession& aSession, const bool forceIceTcp,
+                            const bool aProvisional);
 
   void ResetStunAddrsForIceRestart() { mStunAddrs.Clear(); }
 
@@ -866,6 +863,10 @@ class PeerConnectionImpl final
 
   RefPtr<WebrtcCallWrapper> mCall;
 
+ public:
+  const DefaultCodecPreferences mPrefs;
+
+ private:
   // See Bug 1642419, this can be removed when all sites are working with RTX.
   bool mRtxIsAllowed = true;
 
@@ -878,6 +879,8 @@ class PeerConnectionImpl final
   std::set<std::pair<std::string, std::string>> mLocalIceCredentialsToReplace;
 
   nsTArray<RefPtr<dom::RTCRtpTransceiver>> mTransceivers;
+  // The lifecycle of worker datachannels is managed in RTCDataChannel
+  nsTArray<RefPtr<dom::RTCDataChannel>> mMainthreadDatachannels;
   RTCDtlsTransportMap mTransportIdToRTCDtlsTransport;
   RefPtr<dom::RTCSctpTransport> mSctpTransport;
   // This is similar to [[LastStableStateSender/ReceiverTransport]], but for
@@ -893,6 +896,11 @@ class PeerConnectionImpl final
 
   // Set if prefs dictate that we should force the use of a web proxy.
   bool mForceProxy = false;
+
+  // Set if the window's Connection Allowlists block WebRTC, which makes every
+  // local address, remote candidate and ICE server administratively
+  // prohibited.
+  bool mBlockedByConnectionAllowlists = false;
 
   // Used to cancel incoming stun addrs response
   RefPtr<net::StunAddrsRequestChild> mStunAddrsRequest;
@@ -923,9 +931,9 @@ class PeerConnectionImpl final
   // web-compat stopgap
   bool mAllowOldSetParameters = false;
 
-  // Used to store the mDNS hostnames that we have queried
+  // For candidates that require an mDNS query before they can be used.
   struct PendingIceCandidate {
-    std::vector<std::string> mTokenizedCandidate;
+    std::string mCandidate;
     std::string mTransportId;
     std::string mUfrag;
   };

@@ -115,13 +115,15 @@ nsresult GetJSValFromKeyPathString(
         // only through getters but we still want to support them for key
         // extraction. So they need to be handled manually.
         Blob* blob;
-        if (NS_SUCCEEDED(UNWRAP_OBJECT(Blob, &obj, blob))) {
+        // UNWRAP_OBJECT calls might mutate this.
+        JS::Rooted<JSObject*> blobObj(aCx, obj);
+        if (NS_SUCCEEDED(UNWRAP_OBJECT(Blob, &blobObj, blob))) {
           if (token.EqualsLiteral("size")) {
             ErrorResult rv;
             uint64_t size = blob->GetSize(rv);
             MOZ_ALWAYS_TRUE(!rv.Failed());
 
-            intermediate = JS_NumberValue(size);
+            intermediate = JS::NumberValue(size);
             hasProp = true;
           } else if (token.EqualsLiteral("type")) {
             nsString type;
@@ -149,7 +151,7 @@ nsresult GetJSValFromKeyPathString(
                 int64_t lastModifiedDate = file->GetLastModified(rv);
                 MOZ_ALWAYS_TRUE(!rv.Failed());
 
-                intermediate = JS_NumberValue(lastModifiedDate);
+                intermediate = JS::NumberValue(lastModifiedDate);
                 hasProp = true;
               }
               // The spec also lists "lastModifiedDate", but we deprecated and

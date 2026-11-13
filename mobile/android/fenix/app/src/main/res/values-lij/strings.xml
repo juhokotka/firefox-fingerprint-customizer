@@ -23,8 +23,6 @@
   <string name="about_content" tools:ignore="BrandUsage">%1$s o l\'é svilupou da Mozilla.</string>
   <!-- Private Browsing -->
   <string name="private_browsing_common_myths">Miti comuin in sciâ navegaçion privâ</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!--
     Home screen icons - Long press shortcuts
 
@@ -33,11 +31,7 @@
   <string name="home_screen_shortcut_open_new_tab_2">Neuvo feuggio</string>
   <!-- Shortcut action to open new private tab -->
   <string name="home_screen_shortcut_open_new_private_tab_2">Neuvo feuggio privou</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Inderê</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Avanti</string>
@@ -99,10 +93,6 @@
   <string name="search_suggestions_onboarding_title">Permette i conseggi de riçerca inte sescioin privæ?</string>
   <!-- Search suggestion onboarding hint description text, %s is the name of the app (for example "Firefox"). -->
   <string name="search_suggestions_onboarding_text">Tutto quello che scrivi inta bara di indirissi de %s saiâ condivizo co-o motô de riçerca predefinio.</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!-- Text preview for smaller sized widgets -->
   <string name="search_widget_text_short">Çerca</string>
   <!-- Text preview for larger sized widgets -->
@@ -115,7 +105,11 @@
     Title for the settings page
   -->
   <string name="settings">Inpostaçioin</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">Generale</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Informaçioin</string>
@@ -314,8 +308,6 @@
   <string name="pwa_site_controls_title_private">%1$s (mòddo navegaçion privâ)</string>
   <!-- Text for the button to clear all history -->
   <string name="history_delete_all">Scancella stöia</string>
-  <!-- Text for the snackbar to confirm that multiple browsing history items has been deleted -->
-  <string name="history_delete_multiple_items_snackbar">Stöia scancelâ</string>
   <!-- Text for the snackbar to confirm that a single browsing history item has been deleted. %1$s is the shortened URL of the deleted history item. -->
   <string name="history_delete_single_item_snackbar">%1$s scancelou</string>
   <!-- Context description text for the button to delete a single history item -->
@@ -325,12 +317,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d seleçionæ</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Urtimi 7 giorni</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Urtimi 30 giorni</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Ciù vegio</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">No gh\'é stöia</string>
   <!--
@@ -385,12 +371,6 @@
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">Vanni a-a Inpostaçioin</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">Feuggio inpostaçioin leste</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">Consegiou</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -619,10 +599,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">Preferense proteçion</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">Proteçion anti-traciamento avansâ</string>
   <!-- Text displayed that links to website about enhanced tracking protection -->
   <string name="preference_enhanced_tracking_protection_explanation_learn_more">Atre informaçioin</string>
@@ -664,8 +642,6 @@
   <string name="preference_enhanced_tracking_protection_custom_cryptominers">Cryptominer</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">Blocæ</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">Permisso</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">Traciatoî di social media</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -682,10 +658,6 @@
   <string name="etp_tracking_content_title">Contegnui che tracian</string>
   <!-- Description of tracking content that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_description">Blòcca o caregamento de anonçi esterni, video e atri contegnui che gh\'an do còdice traciante. O peu infloî in sce quarche fonçion do scito.</string>
-  <!-- Enhanced Tracking Protection message that protection is currently on for this site -->
-  <string name="etp_panel_on">E proteçioin en ative pe sto scito</string>
-  <!-- Enhanced Tracking Protection message that protection is currently off for this site -->
-  <string name="etp_panel_off">E proteçioin no en ative pe sto scito</string>
   <!-- Header for exceptions list for which sites enhanced tracking protection is always off -->
   <string name="enhanced_tracking_protection_exceptions">A proteçion anti-traciamento avansâ a l\'é asmortâ pe sti sciti</string>
   <!--
@@ -736,8 +708,6 @@
   <string name="add_to_homescreen_cancel">Anulla</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">Azonzi</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">Vanni a-o scito</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">Nomme scorsaieu</string>
   <!-- Preference option for asking to save passwords in Fenix -->
@@ -812,11 +782,6 @@
   <string name="confirm_clear_permission_site">Te seguo de scancelâ sto permisso pe sto scito?</string>
   <!-- label shown when there are not site exceptions to show in the site exception settings -->
   <string name="no_site_exceptions">Nisciunn-a eceçion pe-i sciti</string>
-  <!--
-    text shown before the issuer name to indicate who its verified by, %1$s is the name of
-    the certificate authority that verified the ticket
-  -->
-  <string name="certificate_info_verified_by">Verificou da: %1$s</string>
   <!-- Positive action of a dialog asking to delete -->
   <string name="dialog_delete_positive">Scancella</string>
   <!-- Voice search button content description -->
@@ -841,13 +806,4 @@
   <string name="synced_tabs_sign_in_button">Acedi a Sync</string>
   <!-- Confirmation dialog button text when top sites limit is reached. -->
   <string name="top_sites_max_limit_confirmation_button">Va ben, ò capio</string>
-  <!-- Translations feature -->
-
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

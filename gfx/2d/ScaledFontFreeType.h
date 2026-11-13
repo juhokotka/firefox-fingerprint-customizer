@@ -5,9 +5,9 @@
 #ifndef MOZILLA_GFX_SCALEDFONTCAIRO_H_
 #define MOZILLA_GFX_SCALEDFONTCAIRO_H_
 
-#include "ScaledFontBase.h"
-
 #include <cairo-ft.h>
+
+#include "ScaledFontBase.h"
 
 namespace mozilla {
 namespace gfx {
@@ -40,7 +40,7 @@ class ScaledFontFreeType : public ScaledFontBase {
   bool GetWRFontInstanceOptions(
       Maybe<wr::FontInstanceOptions>* aOutOptions,
       Maybe<wr::FontInstancePlatformOptions>* aOutPlatformOptions,
-      std::vector<FontVariation>* aOutVariations) override;
+      std::vector<wr::FontVariation>* aOutVariations) override;
 
   bool HasVariationSettings() override;
 

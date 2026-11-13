@@ -5,15 +5,16 @@
 #ifndef _nsClipboard_h_
 #define _nsClipboard_h_
 
+#include <gtk/gtk.h>
+
+#include "GUniquePtr.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Span.h"
 #include "mozilla/widget/WebCustomFormatUtils.h"
 #include "nsBaseClipboard.h"
+#include "nsCOMPtr.h"
 #include "nsIClipboard.h"
 #include "nsIObserver.h"
-#include "nsCOMPtr.h"
-#include "GUniquePtr.h"
-#include <gtk/gtk.h>
 
 namespace mozilla {
 

@@ -22,12 +22,13 @@ function above(ratio) {
   return String(ratio * 2);
 }
 
-// The auto-compact height check is REFERENCE_HEIGHT / innerHeight > threshold.
-// Compute the ratio for the given window so we can pick thresholds that
-// deterministically flip the trigger regardless of the window's real size.
+// The auto-compact height check is REFERENCE_HEIGHT / referenceHeight >
+// threshold. Compute the ratio for the given window so we can pick thresholds
+// that deterministically flip the trigger regardless of the window's real size.
 function heightRatio(win) {
   return (
-    win.gUIDensity.AUTO_COMPACT_REFERENCE_TABSTRIP_HEIGHT / win.innerHeight
+    win.gUIDensity.AUTO_COMPACT_REFERENCE_TABSTRIP_HEIGHT /
+    win.gUIDensity._densityReferenceSize().height
   );
 }
 
@@ -50,6 +51,33 @@ function cssVar(win, name) {
     .getComputedStyle(win.document.documentElement)
     .getPropertyValue(name)
     .trim();
+}
+
+// Runs `callback` with only the collapsed-launcher width branch of
+// _shouldAutoCompact() able to activate compact mode, so compact tracks the launcher
+// state alone. Resizing the window narrow enough to cross the width threshold
+// naturally isn't an option (resizeTo below the WM minimum width is unreliable
+// in CI), so instead:
+//   - zero out the tabstrip height, which makes the height ratio 0 so
+//     that check can never exceed a threshold, and
+//   - increase the launcher width to the window's width, making the
+//     width ratio exactly 1, then pick a threshold below it.
+async function withLauncherWidthCheckOnly(win, callback) {
+  let { gUIDensity } = win;
+  let originalRefHeight = gUIDensity.AUTO_COMPACT_REFERENCE_TABSTRIP_HEIGHT;
+  let originalRefWidth =
+    gUIDensity.AUTO_COMPACT_REFERENCE_SIDEBAR_LAUNCHER_WIDTH;
+  gUIDensity.AUTO_COMPACT_REFERENCE_TABSTRIP_HEIGHT = 0;
+  gUIDensity.AUTO_COMPACT_REFERENCE_SIDEBAR_LAUNCHER_WIDTH =
+    gUIDensity._densityReferenceSize().width;
+  Services.prefs.setCharPref(PREF_THRESHOLD, below(1));
+  try {
+    await callback();
+  } finally {
+    gUIDensity.AUTO_COMPACT_REFERENCE_TABSTRIP_HEIGHT = originalRefHeight;
+    gUIDensity.AUTO_COMPACT_REFERENCE_SIDEBAR_LAUNCHER_WIDTH = originalRefWidth;
+    Services.prefs.clearUserPref(PREF_THRESHOLD);
+  }
 }
 
 add_task(async function test_auto_compact_engages_in_small_window() {
@@ -372,10 +400,6 @@ add_task(async function test_sidebar_launcher_collapsed_requires_revamp() {
   });
 });
 
-// In a narrow, tall window the collapsed sidebar.revamp launcher width takes a
-// larger share of the window than the tabstrip height, so we can pick a
-// threshold that only the launcher-width check crosses. This isolates the
-// width branch of _shouldAutoCompact() from the height branch.
 add_task(async function test_collapsed_launcher_width_triggers_compact() {
   await SpecialPowers.pushPrefEnv({
     set: [
@@ -394,7 +418,7 @@ add_task(async function test_collapsed_launcher_width_triggers_compact() {
 
     // Put the launcher in its visible-but-collapsed state explicitly rather
     // than relying on the default, which can be overridden by persisted state.
-    win.SidebarController._state.launcherVisible = true;
+    win.SidebarController._state.userLauncherVisible = true;
     win.SidebarController._state.launcherExpanded = false;
 
     Assert.ok(
@@ -402,31 +426,7 @@ add_task(async function test_collapsed_launcher_width_triggers_compact() {
       "The launcher is visible and collapsed"
     );
 
-    // Isolate the collapsed-launcher width check from the tabstrip-height
-    // check without depending on the window manager honoring a tiny window
-    // size (resizeTo below the WM minimum width is unreliable in CI).
-    // Temporarily inflate the reference launcher width so its ratio comfortably
-    // exceeds the height ratio, then pick a threshold between the two so only
-    // the width check can engage.
-    let originalRefWidth =
-      win.gUIDensity.AUTO_COMPACT_REFERENCE_SIDEBAR_LAUNCHER_WIDTH;
-    win.gUIDensity.AUTO_COMPACT_REFERENCE_SIDEBAR_LAUNCHER_WIDTH =
-      win.innerWidth;
-    try {
-      let hRatio =
-        win.gUIDensity.AUTO_COMPACT_REFERENCE_TABSTRIP_HEIGHT / win.innerHeight;
-      let wRatio =
-        win.gUIDensity.AUTO_COMPACT_REFERENCE_SIDEBAR_LAUNCHER_WIDTH /
-        win.innerWidth;
-      Assert.greater(
-        wRatio,
-        hRatio,
-        "Launcher-width ratio isolates the width check from the height check"
-      );
-
-      // A threshold between the two ratios: the height check stays below it, so
-      // only the collapsed-launcher width check can engage compact.
-      Services.prefs.setCharPref(PREF_THRESHOLD, String((hRatio + wRatio) / 2));
+    await withLauncherWidthCheckOnly(win, async () => {
       win.gUIDensity.update();
       Assert.ok(
         isCompact(win),
@@ -434,7 +434,7 @@ add_task(async function test_collapsed_launcher_width_triggers_compact() {
       );
 
       // Expanding the launcher removes the collapsed condition, so compact
-      // should disengage since the height check stays below the threshold.
+      // should disengage since the height check can't engage it.
       win.SidebarController._state.launcherExpanded = true;
       win.gUIDensity.update();
       Assert.ok(
@@ -443,76 +443,103 @@ add_task(async function test_collapsed_launcher_width_triggers_compact() {
       );
 
       win.SidebarController._state.launcherExpanded = false;
-    } finally {
-      win.gUIDensity.AUTO_COMPACT_REFERENCE_SIDEBAR_LAUNCHER_WIDTH =
-        originalRefWidth;
-      Services.prefs.clearUserPref(PREF_THRESHOLD);
-    }
+    });
   });
 
   await SpecialPowers.popPrefEnv();
 });
 
-// The auto-compact width check uses a fixed reference launcher width, so the
-// launcher must visibly shrink in compact mode for the trigger to stay stable.
-// Verify the CSS custom property that drives the launcher button padding.
-add_task(async function test_compact_shrinks_launcher_padding() {
-  await withNewWindow(async win => {
-    let medium = cssVar(win, "--space-medium");
-    let xsmall = cssVar(win, "--space-xsmall");
-    let roundedMedium = `round(${medium}, 0.5px)`;
-    let roundedXsmall = `round(${xsmall}, 0.5px)`;
-    isnot(medium, xsmall, "Sanity: the space tokens have different values");
-
-    win.gUIDensity.update(win.gUIDensity.MODE_NORMAL);
-    is(
-      cssVar(win, "--sidebar-launcher-button-padding-inline"),
-      roundedMedium,
-      "Launcher button padding matches --space-medium in normal density"
-    );
-
-    win.gUIDensity.update(win.gUIDensity.MODE_COMPACT);
-    is(
-      cssVar(win, "--sidebar-launcher-button-padding-inline"),
-      roundedXsmall,
-      "Launcher button padding shrinks to --space-xsmall in compact density"
-    );
-
-    win.gUIDensity.update(win.gUIDensity.MODE_NORMAL);
-  });
-});
-
-// Compact mode also shrinks the inline margin around vertical tabs so they fit
-// inside the shrunk launcher.
-add_task(async function test_compact_shrinks_vertical_tab_margin() {
+add_task(async function test_hiding_launcher_disengages_compact() {
   await SpecialPowers.pushPrefEnv({
     set: [
+      [PREF_NOVA, true],
       ["sidebar.revamp", true],
-      ["sidebar.verticalTabs", true],
+      ["sidebar.verticalTabs", false],
+      ["sidebar.visibility", "hide-on-close"],
     ],
+    clear: [[PREF_UI_DENSITY]],
   });
 
   await withNewWindow(async win => {
-    let xsmall = cssVar(win, "--space-xsmall");
-
-    win.gUIDensity.update(win.gUIDensity.MODE_NORMAL);
-    let normalMargin = cssVar(win, "--tab-inner-inline-margin");
-
-    win.gUIDensity.update(win.gUIDensity.MODE_COMPACT);
-    let compactMargin = cssVar(win, "--tab-inner-inline-margin");
-
-    is(
-      compactMargin,
-      xsmall,
-      "Vertical tab inner inline margin is --space-xsmall in compact density"
-    );
-    isnot(
-      compactMargin,
-      normalMargin,
-      "Vertical tab inner inline margin changes in compact density"
+    await TestUtils.waitForCondition(
+      () => win.SidebarController?.initialized,
+      "SidebarController is initialized"
     );
 
-    win.gUIDensity.update(win.gUIDensity.MODE_NORMAL);
+    // Start from the STR's state: sidebar closed, launcher not showing.
+    win.SidebarController._state.userLauncherVisible = false;
+
+    await withLauncherWidthCheckOnly(win, async () => {
+      await TestUtils.waitForCondition(
+        () => !isCompact(win),
+        "Window starts non-compact with the launcher hidden"
+      );
+      Assert.ok(!isCompact(win), "Not compact while the launcher is hidden");
+
+      // Showing the launcher is the user's call in this mode - opening a panel
+      // doesn't do it - so use the toolbar button as a user would.
+      await win.SidebarController.handleToolbarButtonClick();
+      await TestUtils.waitForCondition(
+        () => isCompact(win),
+        "Compact engages when the collapsed launcher is revealed"
+      );
+      Assert.ok(isCompact(win), "Compact engages when the launcher shows");
+
+      await win.SidebarController.handleToolbarButtonClick();
+      await TestUtils.waitForCondition(
+        () => !isCompact(win),
+        "Compact disengages once the launcher is hidden again"
+      );
+      Assert.ok(!isCompact(win), "Compact disengages when the launcher hides");
+    });
+  });
+
+  await SpecialPowers.popPrefEnv();
+});
+
+// The expand-on-hover launcher is absolutely positioned while expanded, so it
+// keeps reserving only its collapsed width. Compact must not flip on and off as
+// the pointer enters and leaves the launcher.
+add_task(async function test_expand_on_hover_keeps_compact() {
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      [PREF_NOVA, true],
+      ["sidebar.revamp", true],
+      ["sidebar.verticalTabs", true],
+      ["sidebar.visibility", "expand-on-hover"],
+    ],
+    clear: [[PREF_UI_DENSITY]],
+  });
+
+  await withNewWindow(async win => {
+    await TestUtils.waitForCondition(
+      () => win.SidebarController?.initialized,
+      "SidebarController is initialized"
+    );
+
+    win.SidebarController._state.userLauncherVisible = true;
+    win.SidebarController._state.launcherExpanded = false;
+
+    await withLauncherWidthCheckOnly(win, async () => {
+      await TestUtils.waitForCondition(
+        () => isCompact(win),
+        "Compact engages via the collapsed-launcher width check"
+      );
+
+      win.SidebarController._state.launcherExpanded = true;
+      await TestUtils.waitForCondition(
+        () => win.SidebarController._state.launcherExpanded,
+        "The launcher reports itself expanded"
+      );
+      Assert.ok(
+        win.gUIDensity._isSidebarLauncherCollapsed(),
+        "A hover-expanded launcher still counts as collapsed"
+      );
+      Assert.ok(isCompact(win), "Compact stays engaged while hover-expanded");
+
+      win.SidebarController._state.launcherExpanded = false;
+      Assert.ok(isCompact(win), "Compact stays engaged once un-hovered");
+    });
   });
 
   await SpecialPowers.popPrefEnv();

@@ -3,24 +3,28 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { UrlbarShared } from "chrome://browser/content/urlbar/UrlbarShared.mjs";
+import { UrlbarQueryContext } from "chrome://browser/content/urlbar/UrlbarQueryContext.mjs";
+import { UrlbarChildTelemetry } from "chrome://browser/content/urlbar/UrlbarChildTelemetry.mjs";
+import { UrlbarParentControllerProxy } from "chrome://browser/content/urlbar/UrlbarParentControllerProxy.mjs";
+import { UrlbarContentUtils } from "chrome://browser/content/urlbar/UrlbarContentUtils.mjs";
+import UrlbarPrefs from "chrome://browser/content/urlbar/UrlbarContentPrefs.mjs";
+import { SearchEngineStore } from "chrome://browser/content/urlbar/SearchEngineStore.mjs";
 
-const { AppConstants } = ChromeUtils.importESModule(
-  "resource://gre/modules/AppConstants.sys.mjs"
-);
+const { XPCOMUtils } =
+  typeof ChromeUtils == "undefined"
+    ? { XPCOMUtils: null }
+    : ChromeUtils.importESModule("resource://gre/modules/XPCOMUtils.sys.mjs");
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
-  UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
+const lazy = XPCOMUtils?.declareLazy({
+  UrlbarParentController:
+    "moz-src:///browser/components/urlbar/UrlbarParentController.sys.mjs",
 });
 
 /**
- * @import {UrlbarChild} from "../../../actors/UrlbarChild.sys.mjs"
- * @import {UrlbarInput} from "chrome://browser/content/urlbar/UrlbarInput.mjs"
- * @import {UrlbarParentController} from "moz-src:///browser/components/urlbar/UrlbarParentController.sys.mjs"
+ * @import {TelemetryEvent} from "moz-src:///browser/components/urlbar/UrlbarParentController.sys.mjs"
  * @import {UrlbarView} from "chrome://browser/content/urlbar/UrlbarView.mjs"
  * @import {SmartbarInput} from "moz-src:///browser/components/urlbar/content/SmartbarInput.mjs"
+ * @import {UrlbarParent} from "moz-src:///browser/components/urlbar/actors/UrlbarParent.sys.mjs"
  */
 
 /**
@@ -31,16 +35,22 @@ ChromeUtils.defineESModuleGetters(lazy, {
  * per-instance bookkeeping (instance id, lifetime); this wrapper just
  * holds the controller it hands back.
  *
- * Today both chrome `<moz-urlbar>` instances live in the parent process,
- * so the actor pair hands the real `UrlbarParentController` reference
- * back and method calls happen synchronously. The wrapper exists so that
- * a future content-process `<moz-urlbar>` (e.g. on about:newtab) can
- * swap in async/message-passing implementations of the same surface
- * without touching `UrlbarInput`, `UrlbarView`, or other callers.
+ * The wrapper abstracts the transport: on the direct path (chrome `<moz-urlbar>`)
+ * the actor pair hands back the real `UrlbarParentController` and calls happen
+ * synchronously, while on the message path (a content-process `<moz-urlbar>`, or
+ * chrome with the pref) it gets a proxy implementing the same surface. Callers
+ * (`UrlbarInput`, `UrlbarView`) don't distinguish them.
  */
 export class UrlbarChildController {
   /** @type {Console} */
   static #logger;
+
+  /**
+   * Whether this is a UrlbarChildController or a UrlbarChildControllerProxy.
+   *
+   * @type {false}
+   */
+  isProxy = false;
 
   get logger() {
     if (!UrlbarChildController.#logger) {
@@ -51,22 +61,45 @@ export class UrlbarChildController {
     return UrlbarChildController.#logger;
   }
 
-  /** @type {UrlbarParentController} */
-  #parent;
+  #parentController;
 
   #input;
 
   /** @type {UrlbarView} */
   #view = null;
 
-  // Listeners (the view, the event bufferer, the search one-offs) live here,
-  // on the input's side, rather than on the parent controller. The parent
-  // delegates its notifications to us via setChild(). This keeps dispatch on
-  // the side where the listeners are, which is required once `<moz-urlbar>`
-  // runs in a content process.
+  /**
+   * Listeners (the view, the event bufferer, the search one-offs) live here, on
+   * the child's side; the parent delegates its notifications to us via
+   * setChild(). Keeping dispatch where the listeners are is what lets
+   * `<moz-urlbar>` run in a content process.
+   */
   #listeners = new Set();
 
-  #userSelectionBehavior = /** @type {"arrow"|"tab"|"none"} */ ("none");
+  /** @type {"arrow"|"tab"|"none"} */
+  #userSelectionBehavior = "none";
+
+  /**
+   * The id of the query the listeners are still hearing about. Notifications
+   * carrying an older id belong to a query nobody is waiting for anymore.
+   */
+  #queryId = 0;
+
+  /**
+   * Whether the query identified by `#queryId` was cancelled. Only meaningful
+   * while it's held back waiting for the engine store; a cancel can't be taken
+   * as a statement about in-flight results, since the view cancels for reasons
+   * of its own (freezing the list, closing on a stale query's completion).
+   */
+  #queryCancelled = false;
+
+  /**
+   * The content-side engagement-telemetry collector, created lazily on the
+   * message path (where the parent stand-in has no `engagementEvent`).
+   *
+   * @type {UrlbarChildTelemetry}
+   */
+  #childTelemetry = null;
 
   /**
    * @param {object} options
@@ -77,30 +110,54 @@ export class UrlbarChildController {
       throw new Error("Missing options: input");
     }
     this.#input = options.input;
-    let actor = /** @type {UrlbarChild} */ (
-      /** @type {unknown} */ (
-        options.input.window.windowGlobalChild.getActor("Urlbar")
-      )
-    );
-    this.#parent = actor.getOrCreateController(options.input);
-    this.#parent.setChild(this);
+
+    this.#parentController = UrlbarContentUtils.usesMessagePath()
+      ? new UrlbarParentControllerProxy(options.input)
+      : new lazy.UrlbarParentController({
+          sapName: options.input.sapName,
+          isPrivate: options.input.isPrivate,
+          actor: /** @type {UrlbarParent} */ (
+            options.input.browserWindow.windowGlobalChild.parentActor.getActor(
+              "Urlbar"
+            )
+          ),
+        });
+    this.#parentController.setChild(this);
+
+    this.engineStore = new SearchEngineStore(this);
   }
 
   get input() {
     return this.#input;
   }
-  get browserWindow() {
-    return this.#input.window;
-  }
+
   get view() {
     return this.#view;
   }
+
+  /**
+   * The paired parent controller -- the real `UrlbarParentController` on the
+   * direct path, or the `UrlbarParentControllerProxy` on the message path.
+   *
+   * @type {UrlbarParentController | UrlbarParentControllerProxy}
+   */
+  get parentController() {
+    return this.#parentController;
+  }
+
+  /**
+   * Direct path: the real parent controller's recorder. Message path: the
+   * parent stand-in has none, so use a content-side collector that ships
+   * engagements to the parent recorder.
+   *
+   * @type {UrlbarChildTelemetry|TelemetryEvent}
+   */
   get engagementEvent() {
-    return this.#parent.engagementEvent;
+    return this.#parentController instanceof UrlbarParentControllerProxy
+      ? (this.#childTelemetry ??= new UrlbarChildTelemetry(this))
+      : this.#parentController.engagementEvent;
   }
-  get platform() {
-    return AppConstants.platform;
-  }
+
   /**
    * The selection behavior that the user has used to select a result. The
    * setter ignores a change to "arrow" once "tab" has been recorded, since we
@@ -120,41 +177,86 @@ export class UrlbarChildController {
     }
     this.#userSelectionBehavior = behavior;
   }
-  get _lastQueryContextWrapper() {
-    return this.#parent._lastQueryContextWrapper;
-  }
 
   setView(view) {
     this.#view = view;
   }
-  getViewTemplate(result) {
-    return this.#parent.getViewTemplate(result);
+
+  async resolveFallbackNavigation(details) {
+    // The result this hands back is picked like a query's, and paste-and-go
+    // suppresses the query that would otherwise have waited for the store.
+    await this.#engineStoreReady();
+    return this.#parentController.resolveFallbackNavigation(details);
   }
-  getViewUpdate(result, idsByName) {
-    return this.#parent.getViewUpdate(result, idsByName);
-  }
-  onBeforeSelection(result, element) {
-    return this.#parent.onBeforeSelection(result, element);
-  }
-  onSelection(result, element) {
-    return this.#parent.onSelection(result, element);
-  }
-  getResultCommands(result, isPrivate) {
-    return this.#parent.getResultCommands(result, isPrivate);
-  }
-  getHeuristicResult(queryContext) {
-    return this.#parent.getHeuristicResult(queryContext);
-  }
+
   addListener(listener) {
     if (!listener || typeof listener != "object") {
       throw new TypeError("Expected listener to be an object");
     }
     this.#listeners.add(listener);
   }
+
   removeListener(listener) {
     this.#listeners.delete(listener);
   }
+
+  /**
+   * Takes a notification off the wire, building the query context in this realm
+   * before anything reads it.
+   *
+   * @param {string} notification
+   *   The notification, one of `UrlbarShared.NOTIFICATIONS`.
+   * @param {...any} params
+   *   The notification's arguments, the query context in its wire form.
+   */
+  notifyFromWire(notification, ...params) {
+    this.notify(
+      notification,
+      ...params.map(param =>
+        param?.serializedQueryContext
+          ? UrlbarQueryContext.fromWire(param.serializedQueryContext)
+          : param
+      )
+    );
+  }
+
+  /**
+   * Hands a notification to the listeners, dropping the results and the end of
+   * a query they have moved on from.
+   *
+   * @param {string} notification
+   *   The notification, one of `UrlbarShared.NOTIFICATIONS`.
+   * @param {...any} params
+   *   The notification's arguments. The query lifecycle ones take the query
+   *   context.
+   */
   notify(notification, ...params) {
+    // Drop the results and the end of a query nobody is waiting for anymore.
+    // Its end, read against results the listeners never saw, would tell the
+    // view that the query produced nothing: the view would clear its rows and
+    // close, cancelling the query that took over. QUERY_STARTED still goes
+    // through -- it carries the per-query state the listeners reset, and the
+    // query they do track resets it again when it starts.
+    if (
+      (notification === UrlbarShared.NOTIFICATIONS.QUERY_FIRST_RESULT ||
+        notification === UrlbarShared.NOTIFICATIONS.QUERY_RESULTS ||
+        notification === UrlbarShared.NOTIFICATIONS.QUERY_FINISHED) &&
+      params[0].id < this.#queryId
+    ) {
+      return;
+    }
+    // When the first results arrive, pre-warm a connection to the heuristic
+    // result.
+    if (
+      notification === UrlbarShared.NOTIFICATIONS.QUERY_RESULTS &&
+      params[0].firstResultChanged
+    ) {
+      this.#parentController.speculativeConnect(
+        params[0].results[0],
+        params[0],
+        "resultsadded"
+      );
+    }
     for (let listener of this.#listeners) {
       // Can't use "in" because some tests proxify these.
       if (typeof listener[notification] != "undefined") {
@@ -166,24 +268,103 @@ export class UrlbarChildController {
       }
     }
   }
+
+  /**
+   * Starts a query and returns the parent controller's promise so callers (the
+   * input's `lastQueryContextPromise`, which tests await) can track completion.
+   *
+   * A query that would run before the engine store is populated is held back
+   * until it is. Results are produced by the providers in the parent, which use
+   * the search service directly, so a query dispatched before the store is
+   * ready can deliver results to a UI that has no engines to look up. Holding
+   * the query back is what keeps every result-handling path downstream of a
+   * populated store.
+   *
+   * @param {UrlbarQueryContext} queryContext
+   * @returns {Promise<UrlbarQueryContext>}
+   *   Resolves with the finished context, or with the untouched one if the
+   *   query was cancelled or superseded while waiting for the engine store.
+   */
   startQuery(queryContext) {
-    return this.#parent.startQuery(queryContext);
+    this.#queryId = queryContext.id;
+    this.#queryCancelled = false;
+
+    if (this.engineStore.initialized || this.engineStore.failed) {
+      return this.#dispatchQuery(queryContext);
+    }
+
+    // Arm the bufferer up front so an Enter typed during the wait is deferred
+    // too. Nothing can tear down the previous query in the meantime, which is
+    // the only thing #dispatchQuery's arm-after-dispatch ordering guards
+    // against.
+    this.#input.eventBufferer.queryStarting(queryContext);
+
+    return this.#engineStoreReady().then(() =>
+      this.#queryId == queryContext.id && !this.#queryCancelled
+        ? this.#dispatchQuery(queryContext)
+        : queryContext
+    );
   }
+
+  /**
+   * Hands a query to the parent controller.
+   *
+   * @param {UrlbarQueryContext} queryContext
+   * @returns {Promise<UrlbarQueryContext>} Resolves with the finished context.
+   */
+  #dispatchQuery(queryContext) {
+    let queryContextPromise = this.#parentController.startQuery(queryContext);
+    // Arm the event bufferer as the query starts so a just-typed Enter is
+    // deferred until results arrive; it can't wait for the QUERY_STARTED
+    // notification, which arrives a round-trip late over the message path, after
+    // the key event. Arm after dispatching so the parent's synchronous teardown
+    // of the previous query (in-process) can't clobber the freshly-armed state.
+    this.#input.eventBufferer.queryStarting(queryContext);
+    return queryContextPromise;
+  }
+
+  /**
+   * Waits for the engine store to be populated.
+   *
+   * @returns {Promise<void>}
+   *   Resolves once the store holds engines, or immediately if it never will
+   *   because the search service failed. It doesn't reject: waiting on a store
+   *   that can't be populated would keep the input from producing results at
+   *   all.
+   */
+  async #engineStoreReady() {
+    if (this.engineStore.initialized || this.engineStore.failed) {
+      return;
+    }
+    try {
+      await this.engineStore.init();
+    } catch {
+      // The search service failed.
+    }
+  }
+
   cancelQuery() {
-    return this.#parent.cancelQuery();
+    // A query still waiting for the engine store must not be dispatched at all.
+    this.#queryCancelled = true;
+    return this.#parentController.cancelQuery();
   }
-  receiveResults(queryContext) {
-    return this.#parent.receiveResults(queryContext);
+
+  /**
+   * Takes the running query away from the listeners, reporting it to them as
+   * cancelled: nothing more of it reaches them, results or end. The input calls
+   * this when it takes the query over after the first result -- entering search
+   * mode and restarting it -- since the results are about to be replaced. The
+   * query keeps running until the restart cancels it, which over the message
+   * path takes a round trip.
+   *
+   * @param {UrlbarQueryContext} queryContext
+   *   The context of the query being discarded.
+   */
+  discardResults(queryContext) {
+    this.#queryId++;
+    this.notify(UrlbarShared.NOTIFICATIONS.QUERY_CANCELLED, queryContext);
   }
-  removeResult(result) {
-    return this.#parent.removeResult(result);
-  }
-  setLastQueryContextCache(queryContext) {
-    return this.#parent.setLastQueryContextCache(queryContext);
-  }
-  clearLastQueryContextCache() {
-    return this.#parent.clearLastQueryContextCache();
-  }
+
   /**
    * Receives keyboard events from the input and handles those that should
    * navigate within the view or pick the currently selected item.
@@ -198,12 +379,11 @@ export class UrlbarChildController {
    */
   // eslint-disable-next-line complexity
   handleKeyNavigation(event, executeAction = true) {
-    // If the resultMenu is open then let them handle any key events.
-    if (this.view.resultMenu.hasAttribute("open")) {
+    if (this.view.isResultMenuOpen()) {
       return;
     }
 
-    const isMac = AppConstants.platform == "macosx";
+    const isMac = UrlbarContentUtils.getPlatform() == "macosx";
     // Handle readline/emacs-style navigation bindings on Mac.
     if (
       isMac &&
@@ -231,10 +411,13 @@ export class UrlbarChildController {
       }
 
       let handled = false;
-      if (lazy.UrlbarPrefs.get("scotchBonnet.enableOverride")) {
+      if (UrlbarPrefs.get("scotchBonnet.enableOverride")) {
         handled = this.input.searchModeSwitcher.handleKeyDown(event);
-      } else if (this.view.isOpen && this._lastQueryContextWrapper) {
-        let { queryContext } = this._lastQueryContextWrapper;
+      } else if (
+        this.view.isOpen &&
+        this.#parentController._lastQueryContextWrapper
+      ) {
+        let { queryContext } = this.#parentController._lastQueryContextWrapper;
         handled = this.view.oneOffSearchButtons?.handleKeyDown(
           event,
           this.view.visibleRowCount,
@@ -253,17 +436,27 @@ export class UrlbarChildController {
           if (this.view.isOpen) {
             this.view.close();
           } else if (
-            lazy.UrlbarPrefs.get("focusContentDocumentOnEsc") &&
+            // An in-page urlbar returns focus to the host page.
+            !this.#input.browserWindow?.gBrowser &&
+            UrlbarPrefs.get("focusContentDocumentOnEsc") &&
+            !this.input.searchMode &&
+            this.input.value == ""
+          ) {
+            this.input.blur();
+          } else if (
+            // A chrome urlbar moves focus into the content document instead.
+            this.#input.browserWindow?.gBrowser &&
+            UrlbarPrefs.get("focusContentDocumentOnEsc") &&
             !this.input.searchMode &&
             (this.input.sapName == "searchbar"
               ? this.input.value == ""
               : this.input.getAttribute("pageproxystate") == "valid" ||
                 (this.input.value == "" &&
-                  this.browserWindow.isBlankPageURL(
-                    this.browserWindow.gBrowser.currentURI.spec
+                  this.#input.browserWindow.isBlankPageURL(
+                    this.#input.browserWindow.gBrowser.currentURI.spec
                   )))
           ) {
-            this.browserWindow.gBrowser.selectedBrowser.focus();
+            this.#input.browserWindow.gBrowser.selectedBrowser.focus();
           } else {
             this.input.handleRevert();
           }
@@ -328,7 +521,7 @@ export class UrlbarChildController {
 
         // Change the tab behavior when urlbar view is open.
         if (
-          lazy.UrlbarPrefs.get("scotchBonnet.enableOverride") &&
+          UrlbarPrefs.get("scotchBonnet.enableOverride") &&
           this.view.isOpen &&
           !event.ctrlKey &&
           !event.altKey
@@ -414,7 +607,7 @@ export class UrlbarChildController {
             this.view.selectBy(
               event.keyCode == KeyEvent.DOM_VK_PAGE_DOWN ||
                 event.keyCode == KeyEvent.DOM_VK_PAGE_UP
-                ? lazy.UrlbarUtils.PAGE_UP_DOWN_DELTA
+                ? UrlbarShared.PAGE_UP_DOWN_DELTA
                 : 1,
               {
                 reverse:
@@ -493,11 +686,11 @@ export class UrlbarChildController {
    *   heuristic, since the heuristic result cannot be dismissed.
    */
   #dismissSelectedResult(event) {
-    if (!this._lastQueryContextWrapper) {
+    if (!this.#parentController._lastQueryContextWrapper) {
       console.error("Cannot dismiss selected result, last query not present");
       return false;
     }
-    let { queryContext } = this._lastQueryContextWrapper;
+    let { queryContext } = this.#parentController._lastQueryContextWrapper;
 
     let { selectedElement } = this.input.view;
     if (selectedElement?.classList.contains("urlbarView-button")) {
@@ -541,7 +734,10 @@ export class UrlbarChildController {
     if (this.view.isOpen) {
       return false;
     }
-    if (AppConstants.platform != "macosx" && AppConstants.platform != "linux") {
+    if (
+      UrlbarContentUtils.getPlatform() != "macosx" &&
+      UrlbarContentUtils.getPlatform() != "linux"
+    ) {
       return false;
     }
     let isArrowUp = event.keyCode == KeyEvent.DOM_VK_UP;
@@ -561,16 +757,90 @@ export class UrlbarChildController {
     return false;
   }
 
-  speculativeConnect(result, context, reason) {
-    return this.#parent.speculativeConnect(result, context, reason);
+  /**
+   * Returns whether the passed-in event represents a canonization request.
+   *
+   * @param {Event} event
+   *   An Event to examine.
+   * @returns {boolean}
+   *   Whether the event is a KeyboardEvent that triggers canonization.
+   */
+  isCanonizeKeyboardEvent(event) {
+    if (this.#input.sapName == "searchbar") {
+      return false;
+    }
+    if (!UrlbarShared.isInstance(event, KeyboardEvent)) {
+      return false;
+    }
+    let keyEvent = /** @type {KeyboardEvent} */ (event);
+    return (
+      keyEvent.keyCode == KeyEvent.DOM_VK_RETURN &&
+      (UrlbarContentUtils.getPlatform() == "macosx"
+        ? keyEvent.metaKey
+        : keyEvent.ctrlKey) &&
+      !(/** @type {any} */ (event)._disableCanonization) &&
+      UrlbarPrefs.get("ctrlCanonizesURLs")
+    );
   }
+
+  /**
+   * Determines where a URL/page picked in `<moz-urlbar>` should be opened. Only
+   * the call to `BrowserUtils.whereToOpenLink` (a system module the content-web
+   * scope can't import) goes through `UrlbarContentUtils`; everything else,
+   * including the guarded empty-tab read, is content-safe and stays here.
+   *
+   * @param {Event} event
+   *   The event that triggered the opening.
+   * @returns {"current" | "tabshifted" | "tab" | "save" | "window"}
+   */
+  whereToOpen(event) {
+    const isKeyboardEvent = UrlbarShared.isInstance(event, KeyboardEvent);
+    let reuseEmpty = isKeyboardEvent;
+    /** @type {"current" | "tabshifted" | "tab" | "save" | "window"} */
+    let where;
+    if (
+      isKeyboardEvent &&
+      (event.altKey || event.getModifierState("AltGraph"))
+    ) {
+      // We support using 'alt' to open in a tab, because ctrl/shift
+      // might be used for canonizing URLs:
+      where = event.shiftKey ? "tabshifted" : "tab";
+    } else if (this.isCanonizeKeyboardEvent(event)) {
+      // If we're allowing canonization, and this is a canonization key event,
+      // open in current tab to avoid handling as new tab modifier.
+      where = "current";
+    } else {
+      where = UrlbarContentUtils.whereToOpenLink(event);
+    }
+    let openInTabPref =
+      this.#input.sapName == "searchbar"
+        ? UrlbarPrefs.get("browser.search.openintab")
+        : UrlbarPrefs.get("openintab");
+    if (openInTabPref) {
+      if (where == "current") {
+        where = "tab";
+      } else if (where == "tab") {
+        where = "current";
+      }
+      reuseEmpty = true;
+    }
+    // The browser window exists only in chrome; a content-process input has no
+    // tab to reuse, so `gBrowser` is absent and the reuse is skipped.
+    if (
+      where == "tab" &&
+      reuseEmpty &&
+      this.#input.browserWindow?.gBrowser?.selectedTab.isEmpty
+    ) {
+      where = "current";
+    }
+    return where;
+  }
+
   focusOnUnifiedSearchButton() {
     this.input.setUnifiedSearchButtonAvailability(true);
 
     /** @type {HTMLElement} */
     const switcher = this.input.querySelector(".searchmode-switcher");
-    // Set tabindex to be focusable.
-    switcher.setAttribute("tabindex", "-1");
     // Remove blur listener to avoid closing urlbar view panel.
     this.input.inputField.removeEventListener("blur", this.input);
     // Move the focus.
@@ -581,8 +851,6 @@ export class UrlbarChildController {
       "blur",
       /** @type {(e: FocusEvent) => void} */
       e => {
-        switcher.removeAttribute("tabindex");
-
         let relatedTarget = /** @type {HTMLElement} */ (e.relatedTarget);
         if (
           this.input.hasAttribute("focused") &&
@@ -600,5 +868,20 @@ export class UrlbarChildController {
       },
       { once: true }
     );
+  }
+
+  maybeInitEngineStore() {
+    if (this.#parentController instanceof UrlbarParentControllerProxy) {
+      // Synchronous initialization isn't supported in the message path.
+      return false;
+    }
+    return this.#parentController.maybeInitEngineStore();
+  }
+
+  /**
+   * @type {typeof SearchEngineStore.prototype.receive}
+   */
+  updateEngineStore(...args) {
+    this.engineStore.receive(...args);
   }
 }

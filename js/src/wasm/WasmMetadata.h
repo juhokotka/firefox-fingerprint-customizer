@@ -208,6 +208,9 @@ struct CodeMetadata : public ShareableBase<CodeMetadata> {
     return *tags[tagIndex].type;
   }
 
+  // Gets the type of the item at `index` in the index space for `kind`.
+  CoreExternType getExternType(DefinitionKind kind, uint32_t index) const;
+
   BuiltinModuleFuncId knownFuncImport(uint32_t funcIndex) const {
     if (knownFuncImports.empty()) {
       return BuiltinModuleFuncId::None;
@@ -261,6 +264,10 @@ struct CodeMetadata : public ShareableBase<CodeMetadata> {
   uint32_t offsetOfSuperTypeVector(uint32_t typeIndex) const {
     return offsetOfTypeDefInstanceData(typeIndex) +
            offsetof(TypeDefInstanceData, superTypeVector);
+  }
+  uint32_t offsetOfContBaseFrameStub(uint32_t typeIndex) const {
+    return offsetOfTypeDefInstanceData(typeIndex) +
+           TypeDefInstanceData::offsetOfContBaseFrameStub();
   }
 
   uint32_t offsetOfMemoryInstanceData(uint32_t memoryIndex) const {
@@ -460,14 +467,15 @@ struct ModuleMetadata : public ShareableBase<ModuleMetadata> {
     return !!codeMeta && codeMeta->init();
   }
 
-  bool addDefinedFunc(ValTypeVector&& params, ValTypeVector&& results,
-                      bool declareForRef = false,
-                      mozilla::Maybe<CacheableName>&& optionalExportedName =
-                          mozilla::Nothing());
-  bool addDefinedFuncWithType(uint32_t funcTypeIndex,
-                              bool declareForRef = false,
-                              mozilla::Maybe<CacheableName>&&
-                                  optionalExportedName = mozilla::Nothing());
+  [[nodiscard]] bool addDefinedFunc(
+      ValTypeVector&& params, ValTypeVector&& results,
+      bool declareForRef = false,
+      mozilla::Maybe<CacheableName>&& optionalExportedName =
+          mozilla::Nothing());
+  [[nodiscard]] bool addDefinedFuncWithType(
+      uint32_t funcTypeIndex, bool declareForRef = false,
+      mozilla::Maybe<CacheableName>&& optionalExportedName =
+          mozilla::Nothing());
   bool addImportedFunc(ValTypeVector&& params, ValTypeVector&& results,
                        CacheableName&& importModName,
                        CacheableName&& importFieldName);
@@ -488,6 +496,8 @@ struct ModuleMetadata : public ShareableBase<ModuleMetadata> {
     }
     return mozilla::Nothing();
   }
+
+  [[nodiscard]] bool buildModuleType(SharedCoreModuleType* result) const;
 
   size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 };

@@ -60,6 +60,10 @@ topic.
 : Optionally, the git commit corresponding to the head_rev when it's in a Mercurial
   repository.
 
+`head_git_ref`
+
+: Optionally, the git ref associated with `head_git_rev`.
+
 `base_ref`
 
 : Reference where `head_rev` got merged into. It is usually a branch or a tag.
@@ -122,6 +126,12 @@ topic.
 `dontbuild`
 
 : Set (to `true`) when the commit message requested that no tasks run on this push.
+
+`shipping`
+
+: Set (to `true`) when the commit message contains `SHIPPING`, indicating the push
+  is intended to be shipped. This can be used to alter properties of tasks, such as
+  their priority.
 
 ## Tree Information
 
@@ -274,14 +284,6 @@ syntax or reading a project-specific configuration file).
 `release_product`
 
 : The product that is being released.
-
-`required_signoffs`
-
-: A list of signoffs that are required for this release promotion flavor. If specified, and if the corresponding `signoff_urls` url isn't specified, tasks that require these signoffs will not be scheduled.
-
-`signoff_urls`
-
-: A dictionary of signoff keys to url values. These are the urls marking the corresponding `required_signoffs` as signed off.
 
 `partial_versions`
 

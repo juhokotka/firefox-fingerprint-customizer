@@ -20,6 +20,7 @@ pluginManagement {
     includeBuild("${rootProject.projectDir.absolutePath}/mobile/android/fenix/plugins/apksize")
     includeBuild("${rootProject.projectDir.absolutePath}/mobile/android/gradle/plugins/apilint")
     includeBuild("${rootProject.projectDir.absolutePath}/mobile/android/gradle/plugins/nimbus-gradle-plugin")
+    includeBuild("${rootProject.projectDir.absolutePath}/mobile/android/gradle/plugins/android-test-keep-rules")
 }
 
 plugins {
@@ -55,6 +56,8 @@ project(':android-components').projectDir = new File("${gradle.mozconfig.topsrcd
 if (!gradle.mozconfig.substs.MOZ_ANDROID_SUBPROJECT || gradle.mozconfig.substs.MOZ_ANDROID_SUBPROJECT == "fenix") {
     include ':fenix'
     project(':fenix').projectDir = new File("${gradle.mozconfig.topsrcdir}/mobile/android/fenix/app")
+    include ':mozilla-detekt-rules'
+    project(':mozilla-detekt-rules').projectDir = new File("${gradle.mozconfig.topsrcdir}/mobile/android/fenix/mozilla-detekt-rules")
     include ':fenix:longfox'
     project(':fenix:longfox').projectDir = new File("${gradle.mozconfig.topsrcdir}/mobile/android/fenix/app/longfox")
     include ':fenix:benchmark'

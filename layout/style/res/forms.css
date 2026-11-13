@@ -51,6 +51,9 @@
   align-items: inherit;
   justify-content: inherit;
   justify-items: inherit;
+  /* Text box */
+  text-box-trim: inherit;
+  text-box-edge: inherit;
 }
 
 /* Miscellaneous form elements */
@@ -255,9 +258,31 @@ select::picker-icon {
   vertical-align: top;
 }
 
+/* NOTE(emilio): The :not(:-moz-select-list-box) is needed, for now, because
+ * this rule otherwise would be less specific than the [popover] rules.
+ * We should probably find a better solution than this (probably ::picker()
+ * should be more specific? Or we could use cascade layers). See also
+ * https://github.com/w3c/csswg-drafts/issues/13108 */
 /* stylelint-disable-next-line selector-pseudo-element-no-unknown */
-select:-moz-select-list-box::picker-icon {
-  display: none;
+select:not(:-moz-select-list-box)::picker(select) {
+  box-sizing: border-box;
+  border: 1px solid;
+  padding: 0;
+  /* color intentionally inherits here so that options into the picker inherit
+   * the <select>'s colours in legacy appearance. */
+  color: inherit;
+  background-color: transparent;
+  margin: 0;
+  inset: auto;
+  min-inline-size: anchor-size(self-inline);
+  max-block-size: -moz-available;
+  overflow: auto;
+  position-area: self-block-end span-self-inline-end;
+  position-try-order: most-block-size;
+  position-try-fallbacks:
+    self-block-start span-self-inline-end,
+    self-block-end span-self-inline-start,
+    self-block-start span-self-inline-start;
 }
 
 select:-moz-select-list-box {
@@ -269,21 +294,23 @@ select:-moz-select-list-box {
   vertical-align: text-bottom;
   appearance: auto;
   -moz-default-appearance: listbox;
+  align-content: normal;
 
   @media (-moz-platform: macos) {
     scrollbar-width: thin;
   }
 }
 
+select:-moz-select-list-box::-moz-select-content,
 /* stylelint-disable-next-line selector-pseudo-element-no-unknown */
-select::picker(select) {
-  /* TODO(custom-select): Remove when making the picker a proper popover */
-  display: none;
+select:-moz-select-list-box::picker-icon {
+  display: none !important;
 }
 
 /* stylelint-disable-next-line selector-pseudo-element-no-unknown */
 select:-moz-select-list-box::picker(select) {
   display: contents !important;
+  color: inherit;
 }
 
 select > button:first-child {
@@ -325,7 +352,7 @@ option:read-write {
   user-select: text;
 }
 
-select > option {
+select option:where(:not(optgroup option)) {
   padding-inline: 4px;
 }
 
@@ -351,13 +378,13 @@ optgroup {
   word-wrap: normal !important;
 }
 
-optgroup > option {
+optgroup option {
   padding-inline-start: 20px;
   font-style: normal;
   font-weight: normal;
 }
 
-optgroup:before {
+optgroup[label]::before {
   display: block;
   content: "\200b" attr(label);
 }
@@ -489,8 +516,14 @@ input:where([type="color"], [type="reset"], [type="button"], [type="submit"]) {
   background-color: ButtonFace;
   cursor: default;
   box-sizing: border-box;
-  user-select: none;
   break-inside: avoid;
+}
+
+/* Disable text-selection by default, for button-flavored input elements
+   (including the file-selector button for input[type="file"]) */
+::file-selector-button,
+input:where([type="color"], [type="reset"], [type="button"], [type="submit"]) {
+  user-select: none;
 }
 
 /* Text-related properties for buttons: these ones are not shared with
@@ -888,6 +921,8 @@ textarea:autofill {
   background-color: -moz-autofill-background !important;
   background-image: none !important;
   color: FieldText !important;
+  /* TODO(bug 2081328): Probably need appearance: auto as well or so? */
+  field-sizing: fixed !important;
 }
 
 @media -moz-pref("layout.css.appearance-base.enabled") {
@@ -980,6 +1015,60 @@ textarea:autofill {
       color: color-mix(currentColor 50%, transparent);
     }
 
+    /* https://html.spec.whatwg.org/#the-select-element-2 */
+    select {
+      letter-spacing: unset;
+      word-spacing: unset;
+      text-shadow: unset;
+    }
+
+    select:disabled {
+      background-color: transparent;
+    }
+
+    select option {
+      /* These min-size rules ensure accessibility by following WCAG rules:
+       * https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html */
+      min-inline-size: 24px;
+      min-block-size: max(24px, 1lh);
+      padding-inline: 0.5em;
+      /* The spec only resets padding-block-end, but the legacy option rule
+       * above sets padding-block: 2px on both sides. */
+      padding-block: 0;
+      display: flex;
+      align-items: center;
+      gap: 0.5em;
+    }
+
+    select option:enabled:hover {
+      background-color: color-mix(currentColor 10%, transparent);
+    }
+
+    select option:enabled:active {
+      background-color: color-mix(currentColor 20%, transparent);
+    }
+
+    select option:disabled {
+      color: color-mix(currentColor 50%, transparent);
+    }
+
+    select optgroup {
+      font-weight: bolder;
+      font-style: unset;
+    }
+
+    select optgroup option {
+      font-style: unset;
+    }
+
+    /* The spec renders the label attribute in an anonymous label element,
+     * which is what optgroup::before is for us. */
+    select optgroup legend,
+    select optgroup::before {
+      padding-inline: 0.5em;
+      min-block-size: 1lh;
+    }
+
     /* stylelint-disable-next-line selector-pseudo-element-no-unknown */
     select option::checkmark {
       content: "\2713" / "";
@@ -997,6 +1086,12 @@ textarea:autofill {
       content: counter(fake-counter-name, disclosure-open) / "";
       display: block;
       margin-inline-start: auto;
+    }
+
+    /* stylelint-disable-next-line selector-pseudo-element-no-unknown */
+    select:not(:-moz-select-list-box)::picker(select) {
+      color: CanvasText;
+      background-color: Canvas;
     }
   }
 }

@@ -4,10 +4,21 @@
 requestLongerTimeout(3);
 
 ChromeUtils.defineESModuleGetters(globalThis, {
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
 });
 
 const NEVER_REMEMBER_HISTORY_PREF = "browser.privatebrowsing.autostart";
+
+// Different strings used for Nova UI.
+let isNovaEnabled = Services.prefs.getBoolPref("browser.nova.enabled", false);
+let NEVER_REMEMBER_HEADER_L10N_ID = isNovaEnabled
+  ? "firefoxview-dont-remember-history-empty-header-3"
+  : "firefoxview-dont-remember-history-empty-header-2";
+let NEVER_REMEMBER_DESCRIPTION_L10N_ID = isNovaEnabled
+  ? "firefoxview-dont-remember-history-empty-description-2"
+  : "firefoxview-dont-remember-history-empty-description-one";
+
 const RECENTLY_CLOSED_EVENT = [
   ["firefoxview_next", "recently_closed", "tabs", undefined],
 ];
@@ -48,7 +59,7 @@ async function tabTestCleanup() {
 async function prepareSingleClosedTab() {
   Services.obs.notifyObservers(null, "browser:purge-session-history");
   is(
-    SessionStore.getClosedTabCount(window),
+    SessionStore.getClosedTabCount({ sourceWindow: window }),
     0,
     "Closed tab count after purging session history"
   );
@@ -61,7 +72,7 @@ async function prepareSingleClosedTab() {
 async function prepareClosedTabs() {
   Services.obs.notifyObservers(null, "browser:purge-session-history");
   is(
-    SessionStore.getClosedTabCount(window),
+    SessionStore.getClosedTabCount({ sourceWindow: window }),
     0,
     "Closed tab count after purging session history"
   );
@@ -406,7 +417,7 @@ add_task(async function test_dismiss_tab() {
     listItems = listElem.rowEls;
     expectedURLs.pop(); // we expect to have removed the last URL from the list
     let actualClosedTabCount =
-      SessionStore.getClosedTabCount(window) +
+      SessionStore.getClosedTabCount({ sourceWindow: window }) +
       SessionStore.getClosedTabCountFromClosedWindows();
     Assert.equal(
       actualClosedTabCount,
@@ -425,7 +436,7 @@ add_task(async function test_dismiss_tab() {
 add_task(async function test_empty_states() {
   Services.obs.notifyObservers(null, "browser:purge-session-history");
   is(
-    SessionStore.getClosedTabCount(window),
+    SessionStore.getClosedTabCount({ sourceWindow: window }),
     0,
     "Closed tab count after purging session history"
   );
@@ -449,14 +460,15 @@ add_task(async function test_empty_states() {
       "Waiting for the recently closed component to be in the empty state"
     );
     let emptyStateCard = recentlyClosedComponent.emptyState;
-    ok(
-      emptyStateCard.headerEl.textContent.includes("Closed a tab too soon"),
+    Assert.equal(
+      document.l10n.getAttributes(emptyStateCard.headerEl.querySelector("span"))
+        .id,
+      "firefoxview-recentlyclosed-empty-header",
       "Initial empty state header has the expected text."
     );
-    ok(
-      emptyStateCard.descriptionEls[0].textContent.includes(
-        "Here you’ll find the tabs you recently closed"
-      ),
+    Assert.equal(
+      document.l10n.getAttributes(emptyStateCard.descriptionEls[0]).id,
+      "firefoxview-recentlyclosed-empty-description",
       "Initial empty state description has the expected text."
     );
 
@@ -470,14 +482,15 @@ add_task(async function test_empty_states() {
       "The recently closed component to be fully updated"
     );
     emptyStateCard = recentlyClosedComponent.emptyState;
-    ok(
-      emptyStateCard.headerEl.textContent.includes("You’re in control"),
+    Assert.equal(
+      document.l10n.getAttributes(emptyStateCard.headerEl.querySelector("span"))
+        .id,
+      NEVER_REMEMBER_HEADER_L10N_ID,
       "Empty state with never remember history header has the expected text."
     );
-    ok(
-      emptyStateCard.descriptionEls[0].textContent.includes(
-        "does not remember your browsing activity"
-      ),
+    Assert.equal(
+      document.l10n.getAttributes(emptyStateCard.descriptionEls[0]).id,
+      NEVER_REMEMBER_DESCRIPTION_L10N_ID,
       "Empty state with never remember history description has the expected text."
     );
     // Reset History mode to Remember

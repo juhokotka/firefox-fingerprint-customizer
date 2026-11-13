@@ -5,10 +5,10 @@
 #ifndef MOZILLA_GFX_RECORDEDEVENT_H_
 #define MOZILLA_GFX_RECORDEDEVENT_H_
 
-#include <ostream>
-#include <sstream>
 #include <cstring>
 #include <functional>
+#include <ostream>
+#include <sstream>
 
 #include "RecordingTypes.h"
 #include "mozilla/PodOperations.h"
@@ -60,25 +60,7 @@ struct ReferencePtr {
 
   // Implement some operators so this class can be used as a key in
   // stdlib classes.
-  bool operator<(const ReferencePtr& aOther) const {
-    return mLongPtr < aOther.mLongPtr;
-  }
-
-  bool operator>(const ReferencePtr& aOther) const {
-    return mLongPtr > aOther.mLongPtr;
-  }
-
-  bool operator==(const ReferencePtr& aOther) const {
-    return mLongPtr == aOther.mLongPtr;
-  }
-
-  bool operator!=(const ReferencePtr& aOther) const {
-    return !(*this == aOther);
-  }
-
-  bool operator>=(const ReferencePtr& aOther) const {
-    return mLongPtr >= aOther.mLongPtr;
-  }
+  auto operator<=>(const ReferencePtr& aOther) const = default;
 
   uint64_t mLongPtr;
 };
@@ -127,7 +109,7 @@ class Translator {
   }
   virtual already_AddRefed<SourceSurface>
   LookupSourceSurfaceFromSurfaceDescriptor(
-      const layers::SurfaceDescriptor& aDesc) {
+      DrawTarget* aDT, const layers::SurfaceDescriptor& aDesc) {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     return nullptr;
   }

@@ -3,16 +3,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/net/DNSRequestParent.h"
+
+#include "DNSAdditionalInfo.h"
+#include "mozilla/Components.h"
 #include "mozilla/net/DNSRequestChild.h"
-#include "nsIDNSService.h"
-#include "nsNetCID.h"
-#include "nsThreadUtils.h"
+#include "nsHostResolver.h"
 #include "nsICancelable.h"
 #include "nsIDNSRecord.h"
-#include "nsHostResolver.h"
-#include "mozilla/Components.h"
-#include "DNSAdditionalInfo.h"
+#include "nsIDNSService.h"
+#include "nsNetCID.h"
 #include "nsServiceManagerUtils.h"
+#include "nsThreadUtils.h"
 
 using namespace mozilla::ipc;
 
@@ -101,6 +102,7 @@ DNSRequestHandler::OnLookupComplete(nsICancelable* request,
     if (byTypeRec) {
       IPCTypeRecord result;
       byTypeRec->GetResults(&result.mData);
+      byTypeRec->GetFromStaleCache(&result.mFromStaleCache);
       if (nsCOMPtr<nsIDNSHTTPSSVCRecord> rec = do_QueryInterface(aRecord)) {
         rec->GetTtl(&result.mTTL);
         rec->IsTRR(&result.mIsTRR);
@@ -141,11 +143,14 @@ DNSRequestHandler::OnLookupComplete(nsICancelable* request,
     TimeStamp lastUpdate;
     rec->GetLastUpdate(&lastUpdate);
 
+    bool fromStaleCache = false;
+    rec->GetFromStaleCache(&fromStaleCache);
+
     SendLookupCompletedHelper(
         mIPCActor,
-        DNSRequestResponse(DNSRecord(cname, array, trrFetchDuration,
-                                     trrFetchDurationNetworkOnly, isTRR,
-                                     effectiveTRRMode, ttl, lastUpdate)));
+        DNSRequestResponse(DNSRecord(
+            cname, array, trrFetchDuration, trrFetchDurationNetworkOnly, isTRR,
+            effectiveTRRMode, ttl, lastUpdate, fromStaleCache)));
   } else {
     SendLookupCompletedHelper(mIPCActor, DNSRequestResponse(status));
   }

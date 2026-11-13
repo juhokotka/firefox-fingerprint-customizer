@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <new>
 #include <utility>
+
 #include "mozilla/AbstractThread.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Logging.h"
@@ -147,10 +148,10 @@ class Watchable : public WatchTarget {
     return *this;
   }
 
- private:
   Watchable(const Watchable& aOther) = delete;
   Watchable& operator=(const Watchable& aOther) = delete;
 
+ private:
   T mValue;
 };
 

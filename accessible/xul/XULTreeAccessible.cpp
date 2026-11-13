@@ -4,28 +4,27 @@
 
 #include "XULTreeAccessible.h"
 
-#include "LocalAccessible-inl.h"
 #include "DocAccessible-inl.h"
-#include "nsAccCache.h"
-#include "nsAccUtils.h"
-#include "nsCoreUtils.h"
-#include "nsEventShell.h"
 #include "DocAccessible.h"
+#include "LocalAccessible-inl.h"
 #include "Relation.h"
-#include "mozilla/a11y/Role.h"
 #include "States.h"
 #include "XULTreeGridAccessible.h"
-#include "nsQueryObject.h"
-
+#include "mozilla/PresShell.h"
+#include "mozilla/a11y/Role.h"
+#include "mozilla/dom/XULTreeElementBinding.h"
+#include "nsAccCache.h"
+#include "nsAccUtils.h"
 #include "nsComponentManagerUtils.h"
+#include "nsCoreUtils.h"
+#include "nsEventShell.h"
 #include "nsIAutoCompletePopup.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "nsITreeSelection.h"
+#include "nsQueryObject.h"
 #include "nsTreeBodyFrame.h"
 #include "nsTreeColumns.h"
 #include "nsTreeUtils.h"
-#include "mozilla/PresShell.h"
-#include "mozilla/dom/XULTreeElementBinding.h"
 
 using namespace mozilla::a11y;
 
@@ -203,7 +202,7 @@ LocalAccessible* XULTreeAccessible::CurrentItem() const {
   return nullptr;
 }
 
-void XULTreeAccessible::SetCurrentItem(const LocalAccessible* aItem) {
+void XULTreeAccessible::SetCurrentItem(const LocalAccessible* /*aItem*/) {
   NS_ERROR("XULTreeAccessible::SetCurrentItem not implemented");
 }
 
@@ -952,14 +951,14 @@ role XULTreeItemAccessible::NativeRole() const {
 ////////////////////////////////////////////////////////////////////////////////
 // XULTreeItemAccessible: XULTreeItemAccessibleBase implementation
 
-void XULTreeItemAccessible::RowInvalidated(int32_t aStartColIdx,
-                                           int32_t aEndColIdx) {
+void XULTreeItemAccessible::RowInvalidated(int32_t /*aStartColIdx*/,
+                                           int32_t /*aEndColIdx*/) {
   nsAutoString name;
   Name(name);
 
   if (name != mCachedName) {
     nsEventShell::FireEvent(nsIAccessibleEvent::EVENT_NAME_CHANGE, this);
-    mCachedName = name;
+    mCachedName = std::move(name);
   }
 }
 

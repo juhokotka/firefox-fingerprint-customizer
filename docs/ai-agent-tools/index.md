@@ -7,4 +7,6 @@ with and test Firefox during development.
 :maxdepth: 2
 
 firefox-devtools-mcp
+code-review-context
+skills
 ```

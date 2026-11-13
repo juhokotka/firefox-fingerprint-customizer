@@ -31,6 +31,8 @@
   <string name="history_search_hint">Historiju pśepytaś</string>
   <!-- Placeholder text shown in search bar when using bookmarks search -->
   <string name="bookmark_search_hint">Cytańske znamjenja pśepytaś</string>
+  <!-- Content description for the toolbar back button while searching bookmarks -->
+  <string name="bookmark_close_search_description">Slědk a pytanje zacyniś</string>
   <!-- Placeholder text shown in search bar when using tabs search -->
   <string name="tab_search_hint">Rejtariki pśepytaś</string>
   <!-- Placeholder text shown in the search bar when using application search engines -->
@@ -75,7 +77,11 @@
   <string name="about_content" tools:ignore="BrandUsage">%1$s se pśez Mozilla zgótujo.</string>
   <!-- Private Browsing -->
   <string name="private_browsing_common_myths">Ceste myty wó priwatnem modusu</string>
-  <!-- Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active. -->
+  <!--
+    Private Browsing
+
+    Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active.
+  -->
   <string name="private_browsing_a11y_session_announcement">Priwatne pósejźenje</string>
   <!--
     True Private Browsing Mode
@@ -104,14 +110,6 @@
   <string name="open_in_app_cfr_positive_button_text">K nastajenjam</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">Zachyśiś</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
-  <!--
-    Address bar swipe "contextual feature recommendation" (CFR)
-
-    Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar.
-  -->
-  <string name="address_bar_swipe_cfr_message_2">Trějśo symbolowu rědku dolěwa abo dopšawa, aby rejtariki pśešaltował.</string>
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">Pśistup ku kamerje trjebny. Wócyńśo nastajenja Android, pótusniśo zapisk Pšawa a pótusniśo zapisk Dowóliś.</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -154,13 +152,11 @@
   <!--
     Recent Tabs
 
-    Header text for jumping back into the recent tab in the home screen
+    Header text on the homescreen for continuing to browse the most recent browser tab
   -->
-  <string name="recent_tabs_header">Slědk skócyś</string>
+  <string name="recent_tabs_header_2">Dalej</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">Wšykne pokazaś</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">Tłocašk „Njedawno wócynjone rejtariki“ pokazaś</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">Synchronizěrowane rejtariki pokazaś</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -189,8 +185,10 @@
   <!--
     Browser Fragment
 
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
+    Label for popup button that appears when long-pressing the main menu. Tapping it allows the user to customize the main menu layout.
   -->
+  <string name="customize_menu">Meni pśiměriś</string>
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Slědk</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Doprědka</string>
@@ -217,6 +215,10 @@
   <string name="browser_menu_no_extensions_installed_description">Žedne rozšyrjenja zmóžnjone</string>
   <!-- The description of the browser menu appears when the user hasn't installed any extensions and there are recommended extensions. -->
   <string name="browser_menu_try_a_recommended_extension_description">Wopytajśo dopórucone rozšyrjenje</string>
+  <!-- In the browser menu: Message under the Extensions menu item, displayed when one or more extensions have updates that require approving changes to their permission settings. %1$s is a comma-separated list of one or more extension names. -->
+  <string name="browser_menu_extensions_review_update_description">Aktualizaciju za %1$s pśeglědaś</string>
+  <!-- In the browser menu: Message under an extension name, displayed when the update requires approving changes to extension settings. -->
+  <string name="browser_menu_extension_review_update_description">Nastajenja za aktualizaciju pśeglědaś</string>
   <!-- Browser menu button that opens account settings -->
   <string name="browser_menu_account_settings">Kontowe informacije</string>
   <!-- Browser menu button that opens the settings menu -->
@@ -281,6 +283,10 @@
   <string name="browser_main_menu_content_description_navigation_header">Nawigacija</string>
   <!-- Content description (not visible, for screen readers etc.) for bottom sheet handlebar custom tab menu. -->
   <string name="browser_custom_tab_menu_handlebar_content_description">Swójski meni rejtarikow zacyniś</string>
+  <!-- URL bar indicator shown on a cached version of the website, when the tab is reloading, but the content is not live yet -->
+  <string name="browser_toolbar_cached_page_indicator">Pufrowany</string>
+  <!-- Message shown when a cached website has finished reloading and the tab is now showing the live version of the page -->
+  <string name="browser_toolbar_live_page_toast">Bok live</string>
   <!-- Browser menu label that bookmarks the currently visited page -->
   <string name="browser_menu_bookmark_this_page_2">Bok ako cytańske znamje składowaś</string>
   <!-- Browser menu label that navigates to the edit bookmark screen for the current bookmarked page -->
@@ -295,8 +301,12 @@
   <string name="browser_menu_summarize_page">Bok zespominaś</string>
   <!-- Browser menu badge text for summarization feature -->
   <string name="browser_menu_summarize_page_badge">Nowy</string>
+  <!-- Browser menu badge text for new, highlighted feature -->
+  <string name="browser_menu_page_badge_text">Nowy</string>
   <!-- Browser menu label for navigating to the Web Compat Reporter feature, which provides users the ability to send bug reports for broken sites. -->
   <string name="browser_menu_webcompat_reporter_2">Wobškóźone sedło k wěsći daś</string>
+  <!-- Browser menu label for adding a tab to a tab group -->
+  <string name="browser_menu_add_to_tab_group">Kupce pśidaś</string>
   <!-- Browser menu label that is displayed when the current page has been translated by the translation feature. -->
   <string name="browser_menu_translated">Pśełožony</string>
   <!-- Browser menu label for the print feature -->
@@ -313,18 +323,8 @@
   <string name="browser_menu_default_banner_title">Cyńśo %1$s k swójomu standardoju</string>
   <!-- Label text within the set as default banner -->
   <string name="browser_menu_default_banner_subtitle_2">Malsny, priwatny a za was gótowany.</string>
-  <!-- Content description (not visible, for screen readers etc.) for the button that dismisses the set as default banner in the menu -->
-  <string name="browser_menu_default_banner_dismiss_promotion">Wabjenje zacyniś</string>
   <!-- Content description (not visible, for screen readers etc.) for recommended extensions in main menu -->
   <string name="browser_menu_recommended_extensions_content_description">Dalšne informacije</string>
-  <!--
-    Menu "contextual feature recommendation" (CFR)
-
-    Text for the title in the contextual feature recommendation popup promoting the menu feature.
-  -->
-  <string name="menu_cfr_title">Nowy: zjadnorjony meni</string>
-  <!-- Text for the message in the contextual feature recommendation popup promoting the menu feature. -->
-  <string name="menu_cfr_body">Namakajśo, což malsnjej trjebaśo, wót priwatnego pśeglědowanja do składowańskich akcijow.</string>
   <!--
     Extensions management fragment
 
@@ -555,8 +555,6 @@
   <string name="onboarding_marketing_body_1" tools:ignore="BrandUsage,UnusedResources">Dajśo marketingowym partnarjam Mozilla k wěsći, kak sćo namakał Firefox a až jen wužywaśo. Tos te daty se nigda njepśedawaju.</string>
   <!-- Marketing onboarding page button label variant. Button to confirm choice and start browsing. -->
   <string name="onboarding_marketing_positive_button_1" tools:ignore="UnusedResources">Pśizwóliś a pśeglědowanje zachopiś</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
   <!-- "Continue" onboarding button. -->
   <string name="nova_onboarding_continue_button">Dalej</string>
   <!-- "Continue browsing" onboarding button. -->
@@ -626,7 +624,7 @@
   -->
   <string name="nova_onboarding_marketing_body" tools:ignore="BrandUsage,UnusedResources">Dajśo marketingowym partnarjam Mozilla k wěsći, kak sćo namakał Firefox a až jen wužywaśo. Tos te daty se nigda njepśedawaju. %1$s</string>
   <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
-  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage">Dajśo marketingowym partnarjam Mozilla k wěsći, kak sćo namakał Firefox a až jen wužywaśo. Tos te daty se nigda njepśedawaju.</string>
+  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage,UnusedResources">Dajśo marketingowym partnarjam Mozilla k wěsći, kak sćo namakał Firefox a až jen wužywaśo. Tos te daty se nigda njepśedawaju.</string>
   <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
   <string name="nova_onboarding_marketing_body_3" tools:ignore="BrandUsage,UnusedResources">Dowólśo Mozilla kanale informěrowaś, źož Firefox spěchujomy, až sćo wužywaŕ Firefox, aby my mógli wěcej luźi dostaś.</string>
   <!--
@@ -666,8 +664,6 @@
   <string name="nova_onboarding_marketing_primary_button_text" tools:ignore="BrandUsage,UnusedResources">Pomoc Firefox</string>
   <!-- Marketing onboarding primary button text. -->
   <string name="nova_onboarding_marketing_primary_button_text_3">Jo</string>
-  <!-- Marketing onboarding primary button text. -->
-  <string name="nova_onboarding_marketing_primary_button_text_2">Dowóliś a pókšacowaś</string>
   <!-- Marketing onboarding secondary button text. -->
   <string name="nova_onboarding_marketing_secondary_button_text" tools:ignore="UnusedResources">Ně, źěkujom se</string>
   <!-- Marketing onboarding secondary button text. -->
@@ -705,8 +701,6 @@
   <string name="nova_onboarding_app_icon_prompt_title" tools:ignore="UnusedResources">Wubjeŕśo swójski nałožeński symbol</string>
   <!-- App icon onboarding body. -->
   <string name="nova_onboarding_app_icon_prompt_body" tools:ignore="UnusedResources">Dajśo swójej startowej wobrazowce wósobinski raz.</string>
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Widget Picker
 
@@ -725,13 +719,25 @@
   <string name="search_widget_text_long">Web pśepytaś</string>
   <!-- Content description (not visible, for screen readers etc.): Voice search -->
   <string name="search_widget_voice">Powědane pytanje</string>
+  <!-- Content description (not visible, for screen readers etc.): Button in the search widget that starts a search in a private tab -->
+  <string name="search_widget_private_search">Priwatne pytanje</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for private search and for voice search -->
+  <string name="search_bar_widget_description">Pytańska rědka z priwatnym a głosowym pytanim</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for image search, private search and voice search -->
+  <string name="search_bar_with_lens_widget_description">Pytańska rědka z wobrazowym, priwatnym a głosowym pytanim</string>
+  <!-- Widget description in the widget picker screen for the compact search bar widget -->
+  <string name="compact_search_bar_widget_description">Kompaktna pytańska rědka</string>
   <!--
     Preferences
 
     Title for the settings page
   -->
   <string name="settings">Nastajenja</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">Powšykne</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Wó</string>
@@ -794,40 +800,6 @@
   <string name="preferences_pbm_lock_screen_title">Wužywajśo zawěru wobrazowki, aby rejtariki w priwatnem modusu schował</string>
   <!-- Informs the user how to access the tabs when "Use screen lock to hide tabs in private browsing" is enabled -->
   <string name="preferences_pbm_lock_screen_summary_3">Woglědajśo se rejtariki ze swójim palcowym wótśišćom, PIN abo wótwórjanim pśez woblico. Gaž to zmóžnjaśo, se fotam wobrazowki a źělenjeju zajźujo.</string>
-  <!-- Label for cookie banner section in quick settings panel. -->
-  <string name="cookie_banner_blocker">Blokěrowak cookiejowych chórgojow</string>
-  <!-- Preference for removing cookie/consent banners from sites automatically in private mode. See reduce_cookie_banner_summary for additional context. -->
-  <string name="preferences_cookie_banner_reduction_private_mode">Blokěrowak cookiejowych chórgojow w priwatnem modusu</string>
-  <!-- Text for indicating cookie banner handling is off this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_off_for_site">Za toś to sedło znjemóžnjony</string>
-  <!-- Text for cancel button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_cancel_button">Pśetergnuś</string>
-  <!-- Text for request support button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_request_support_button_2">Napšašowanje pósłaś</string>
-  <!-- Text for title indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_title_2">Wó pódpěru za toś to sedło pšosyś?</string>
-  <!-- Label for the snackBar, after the user reports with success a website where cookie banner reducer did not work -->
-  <string name="cookie_banner_handling_report_site_snack_bar_text_2">Napšašowanje pósłane</string>
-  <!-- Text for indicating cookie banner handling is on this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_on_for_site">Za toś to sedło zmóžnjony</string>
-  <!-- Text for indicating that a request for unsupported site was sent to Nimbus (it's a Mozilla library for experiments), this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site_request_submitted_2">Pšosba wó pódpěru pósłana</string>
-  <!-- Text for indicating cookie banner handling is currently not supported for this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site">Sedło se tuchylu njepódpěra</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is on this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_on_for_site_1">Blokěrowak cookiejowych chórgojow za %1$s zmóžniś?</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is off this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_off_for_site_1">Blokěrowak cookiejowych chórgojow za %1$s znjemóžniś?</string>
-  <!-- Title text for a detail explanation indicating cookie banner reducer didn't work for the current site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_title_unsupported_site_request_2">%1$s njamóžo cookiejowe napšašowanja na toś tom sedle awtomatiski wótpokazaś. Móžośo pšosbu wó pódpěru toś togo sedła w pśichoźe pósłaś.</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is off for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_off_for_site_1">Pśi znjemóžnjanju %1$s cookieje lašujo a toś to sedło znowego zacytajo. To móžo was wótzjawiś abo nakupowańske kórbiki wuprozniś.</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is on for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_on_for_site_3">Zmóžniśo toś to nastajenje a %1$s wopytajo, wšykne cookiejowe chórgoje na toś tom sedle awtomatiski wótpokazaś.</string>
-  <!-- Title for the cookie banner re-engagement CFR, the placeholder is replaced with app name. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="cookie_banner_cfr_title">%1$s jo rowno wótpokazał cookieje za was</string>
-  <!-- Message for the cookie banner re-engagement CFR -->
-  <string name="cookie_banner_cfr_message">Mjenjej wótchylenjow, mjenjej cookiejow, kótarež was na sedle pśeslěduju.</string>
   <!-- Description of the preference to enable "HTTPS-Only" mode. -->
   <string name="preferences_https_only_summary">Wopytujo z pomocu koděrowańskego protokola HTTPS za pówušonu wěstotu awtomatiski ze sedłami zwězaś.</string>
   <!-- Summary of https only preference if https only is set to off -->
@@ -856,6 +828,8 @@
   <string name="preferences_override_sync_tokenserver">Swójski synchronizěrowański serwer</string>
   <!-- Preference category for account information -->
   <string name="preferences_category_account">Konto</string>
+  <!-- Preference category for sync controls. Sync can be translated, it's just short for ”Synchronization” in English. -->
+  <string name="preferences_category_sync_controls">Synchronizěrowaś</string>
   <!-- Preference for changing where the AddressBar is positioned -->
   <string name="preferences_toolbar_2">Městno adresowego póla</string>
   <!-- Preference for changing toolbar layout -->
@@ -872,6 +846,10 @@
   <string name="preferences_toolbar_shortcut">Zwězanje symboloweje rědki</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_toolbar_select_shortcut">Wubjeŕśo zwězanje</string>
+  <!-- Title of a menu option allowing to change the shortcut button shown in the toolbar -->
+  <string name="toolbar_shortcut_menu_edit_option">Zwězanje wobźěłaś</string>
+  <!-- Preference category for menu customization -->
+  <string name="preferences_menu">Meni</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_gestures">Gesty</string>
   <!-- Preference for settings related to visual options -->
@@ -910,6 +888,8 @@
   <string name="preferences_search_synced_tabs">Synchronizěrowane rejtariki pytaś</string>
   <!-- Preference for account settings -->
   <string name="preferences_account_settings">Kontowe nastajenja</string>
+  <!-- Preference for account and sync settings -->
+  <string name="preferences_account_and_sync_settings">Konto a synchronizacija</string>
   <!-- Preference for enabling url autocomplete -->
   <string name="preferences_enable_autocomplete_urls">URL awtomatiski wudopołniś</string>
   <!-- Preference title for switch preference to show sponsored Firefox Suggest search suggestions -->
@@ -946,6 +926,10 @@
   <string name="preferences_open_links_in_apps_ask">Pśed wócynjenim se pšašaś</string>
   <!-- Preference for open links in third party apps never open in apps option -->
   <string name="preferences_open_links_in_apps_never">Nigda</string>
+  <!-- Preference category header for media related open links in apps settings -->
+  <string name="preferences_media_category">Medije</string>
+  <!-- Preference label for choosing whether links open in the YouTube app -->
+  <string name="preferences_open_links_in_youtube">Wótkaze w nałoženju YouTube wócyniś</string>
   <!-- Preference category for file storage. -->
   <string name="preferences_category_file_storage">Datajowy składowak</string>
   <!-- Preference title for downloads default location. -->
@@ -957,6 +941,8 @@
   <string name="preference_downloads_folder_permission_lost" tools:ignore="UnusedResources">Njamaśo pšawo toś ten zarědnik wužywaś. Wopytajśo drugi wubraś.</string>
   <!-- Preference title for choosing an app to handle downloads -->
   <string name="preferences_choose_app_for_downloads">Ześěgnjenja z drugim nałoženim zastojaś</string>
+  <!-- Message shown when no app is available to let the user pick a download folder. -->
+  <string name="preferences_downloads_no_folder_picker_available">Njejo móžno, wuběrak zarědnikow na toś tom rěźe wócyniś.</string>
   <!-- Preference category for deleting or removing downloads -->
   <string name="preferences_category_delete_or_remove_downloads">Ześěgnjenja wulašowaś abo wótwónoźeś</string>
   <string name="preferences_downloads_delete_from_device">Z rěda wulašowaś</string>
@@ -980,6 +966,12 @@
   <string name="notifications_allowed_summary">Dowólony</string>
   <!-- Summary for notification preference indicating notifications are not allowed -->
   <string name="notifications_not_allowed_summary">Njedowólony</string>
+  <!-- Preference for local network access / nearby devices in Android 17 -->
+  <string name="preferences_local_network_access">Pśistup lokalneje seśi / Rědy w bliskosći</string>
+  <!-- Summary for local network access preference indicating access is allowed -->
+  <string name="local_network_access_allowed_summary">Dowólony</string>
+  <!-- Summary for local network access preference indicating access is not allowed -->
+  <string name="local_network_access_not_allowed_summary">Njedowólony</string>
   <!--
     Add-on Permissions
 
@@ -1024,8 +1016,8 @@
     Title for the customize home screen section with privacy report.
   -->
   <string name="customize_toggle_privacy_report">Rozpšawa priwatnosći</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">Slědk skócyś</string>
+  <!-- Title for a customize home screen section. Continue is a section that displays the most recent browser tab, so users can continue browsing where they left off. -->
+  <string name="customize_toggle_continue">Dalej</string>
   <!-- Title for the customize home screen section with bookmarks. -->
   <string name="customize_toggle_bookmarks">Cytańske znamjenja</string>
   <!--
@@ -1039,12 +1031,10 @@
   <string name="customize_toggle_pocket_sponsored">Sponserowane tšojeńka</string>
   <!-- Title for the opening wallpaper settings screen -->
   <string name="customize_wallpapers">Slězynowe wobraze</string>
-  <!-- Label for the menu item that opens the wallpaper settings screen. -->
-  <string name="browser_menu_change_wallpaper">Slězynowy wobraz změniś</string>
+  <!-- Label for the menu item that opens the customize homepage settings screen. -->
+  <string name="browser_menu_customize_homepage">Startowy bok pśiměriś</string>
   <!-- Title for the customize home screen section with sponsored shortcuts. -->
   <string name="customize_toggle_contile">Sponserowane zwězanja</string>
-  <!-- Title for the customize home screen section that toggles the Homepage sports widget. -->
-  <string name="customize_toggle_world_cup">Swětowe mejstaŕstwo</string>
   <!--
     Wallpapers
 
@@ -1169,6 +1159,8 @@
   <string name="extension_process_crash_dialog_retry_button_text" tools:ignore="UnusedResources">Wopytajśo rozšyrjenja znowego startowaś</string>
   <!-- Button text on the extension crash dialog to prompt the user to continue with all extensions disabled. -->
   <string name="extension_process_crash_dialog_disable_extensions_button_text">Ze znjemóžnjonymi rozšyrjenjami pókšacowaś</string>
+  <!-- Text shown in the snackbar action button that lets the user retry an add-on operation that just failed. -->
+  <string name="addon_failure_retry_action">Hyšći raz wopytaś</string>
   <!--
     Account Preferences
 
@@ -1181,6 +1173,12 @@
   <string name="preferences_sync_now">Něnto synchronizěrowaś</string>
   <!-- Preference category for sync -->
   <string name="preferences_sync_category">Wubjeŕśo, což ma se synchronizěrowaś</string>
+  <!-- Preference category for sync controls -->
+  <string name="preferences_category_sync">Synchronizěrowane daty</string>
+  <!-- Summary for the sync preference category. -->
+  <string name="preferences_sync_category_summary">Zastojśo daty synchronizacijow na wšych wašych zwězanych rědach</string>
+  <!-- Summary for the sync preference category, when user has disabled all synchronisation items. -->
+  <string name="preferences_sync_category_no_engine_selected_summary">Njesynchronizěrujośo nic. Wubjeŕśo, což ma na wšych wašych rědach synchrone byś.</string>
   <!-- Preference for syncing history -->
   <string name="preferences_sync_history">Historija</string>
   <!-- Preference for syncing bookmarks -->
@@ -1193,6 +1191,10 @@
   <string name="preferences_sign_out">Wótzjawiś</string>
   <!-- Preference displays and allows changing current FxA device name -->
   <string name="preferences_sync_device_name">Rědowe mě</string>
+  <!-- Preference category for Device name -->
+  <string name="preferences_device_name_category">Rědowe mě</string>
+  <!-- Label for the Preference that displays and allows changing current device name on Mozilla Account -->
+  <string name="preferences_sync_change_device_name">Mě rěda změniś</string>
   <!-- Text shown when user enters empty device name -->
   <string name="empty_device_name_error">Rědowe mě njamóžo prozne byś.</string>
   <!-- Label indicating that sync is in progress -->
@@ -1312,8 +1314,12 @@
   <string name="preference_simple_toolbar">Jadnory</string>
   <!-- Preference for using expanded toolbar -->
   <string name="preference_expanded_toolbar">Rozłožony</string>
-  <!-- Preference description indicating the toolbar location preference is disabled when the tab strip is enabled -->
-  <string name="preference_toolbar_pref_disabled_explanation">Adresowe pólo musy górjejce byś, gaž se rědka rejtarikow pokazujo.</string>
+  <!-- Preference for changing where the search bar is positioned on the homepage, shown when the user has set the address bar to be displayed at the top of the screen -->
+  <string name="preferences_homepage_search_location">Městno pytanja na startowem boku</string>
+  <!-- Preference for showing the homepage search bar in the middle of the homepage -->
+  <string name="preference_homepage_search_location_middle">Wesrjejź</string>
+  <!-- Preference for showing the homepage search bar at the top of the homepage (combined with the address bar, already displayed at the top) -->
+  <string name="preference_homepage_search_location_top">Górjejce</string>
   <!-- New tab shortcut in toolbar customization -->
   <string name="toolbar_customize_shortcut_new_tab">Nowy rejtarik wócyniś</string>
   <!-- Share shortcut in toolbar customization -->
@@ -1342,6 +1348,11 @@
   <string name="preference_light_theme">Swětły</string>
   <!-- Preference for using dark theme -->
   <string name="preference_dark_theme">Śamny</string>
+  <!--
+    Preference for using the OLED theme. For localization, this can be translated as "True Black", "Maximum Darkness",
+    or "Full dark" if needed.
+  -->
+  <string name="preference_oled_theme">Nejwěcej śamny</string>
   <!-- Preference for using using dark or light theme automatically set by battery -->
   <string name="preference_auto_battery_theme">Pó zažarjeńskich nastajenjach baterije</string>
   <!-- Preference for using following device theme -->
@@ -1352,6 +1363,12 @@
     Preferences for showing tab strip
   -->
   <string name="preference_tab_strip_show">Rědku rejtarikow pokazaś</string>
+  <!-- Preference for tab bar placement (top or bottom of the screen) -->
+  <string name="preference_tab_strip_location_header">Městno rědki rejtarikow</string>
+  <!-- Preference for using top tab strip -->
+  <string name="preference_top_tab_strip">Górjejce</string>
+  <!-- Preference for using bottom tab strip -->
+  <string name="preference_bottom_tab_strip">Dołojce</string>
   <!--
     Gestures Preferences
 
@@ -1384,6 +1401,8 @@
   <string name="library_desktop_bookmarks_unfiled">Druge cytańske znamjenja</string>
   <!-- Option in Library to open History page -->
   <string name="library_history">Historija</string>
+  <!-- Content description (not visible, for screen readers etc.) for the check mark that replaces a site's icon in History and Recently closed tabs when the item is selected -->
+  <string name="library_item_selected_content_description">Wubrany</string>
   <!-- Settings Page Title -->
   <string name="settings_title">Nastajenja</string>
   <!-- Content description (not visible, for screen readers etc.): "Close button for library settings" -->
@@ -1434,8 +1453,8 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">Rejtariki</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">Rejtarikowy naglěd</string>
+  <!-- Title of preference that allows a user to specify the tab layout -->
+  <string name="preferences_tab_layout">Wugótowanje rejtarikow</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">Lisćina</string>
   <!-- Option for a grid tab view -->
@@ -1454,6 +1473,8 @@
   <string name="preference_auto_close_tabs" tools:ignore="UnusedResources">Rejtariki awtomatiski zacyniś</string>
   <!-- Content description (not visible, for screen readers etc.): Close tab button -->
   <string name="tab_manager_close_tabs">Zacyniś</string>
+  <!-- Content description for the media playback indicator in the tabs tray. -->
+  <string name="tab_indicator_media_playing">Medije wótgraś</string>
   <!--
     Opening screen
 
@@ -1481,13 +1502,27 @@
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">Pó styrich góźinach na startowem boku wócyniś</string>
   <!--
-    Inactive tabs
+    Tab organization
 
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
+    Category header for the preferences that control how tabs are organized
   -->
-  <string name="preferences_inactive_tabs">Stare rejtariki do „inaktiwne“ pśesunuś</string>
-  <!-- Title of inactive tabs preference -->
+  <string name="preferences_tab_organization">Organizacija rejtarikow</string>
+  <!-- Title of the preference that allows a user to enable or disable the inactive tabs feature -->
+  <string name="preferences_inactive_tabs_toggle_title">Inaktiwne rejtariki</string>
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">Rejtariki, kótarež njejsćo se woglědał dwa tyźenja, se do inaktiwnego wótrězka pśesunu.</string>
+  <!-- Title of the preference that allows a user to enable or disable the tab groups feature -->
+  <string name="preferences_tab_groups_title">Kupki rejtarikow</string>
+  <!-- Summary of the preference that allows a user to enable or disable the tab groups feature -->
+  <string name="preferences_tab_groups_description">Organizěrujśo swóje rejtariki w kupkach, kótarež móžośo pomjeniś a składowaś.</string>
+  <!--
+    Privacy report
+
+    Category header of a preference that allows a user to enable or disable the privacy report feature
+  -->
+  <string name="preferences_privacy_report">Rozpšawa priwatnosći</string>
+  <!-- Title of the privacy report preference that allows a user to enable or disable the feature -->
+  <string name="preferences_privacy_report_title">Rozpšawu priwatnosći zmóžniś</string>
   <!--
     Studies
 
@@ -1545,6 +1580,8 @@
   <string name="add_tab">Rejtarik pśidaś</string>
   <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
   <string name="add_private_tab">Priwatny rejtarik pśidaś</string>
+  <!-- Content description (not visible, for screen readers etc.): Create tab group button. Opens the create tab group sheet when pressed -->
+  <string name="create_tab_group_content_description">Rejtarikowu kupku napóraś</string>
   <!-- Text for the tab search bar placeholder -->
   <string name="tab_manager_search_bar_placeholder">Pśepytajśo swóje rejtariki</string>
   <!-- Text shown in the menu to view recently closed tabs -->
@@ -1671,17 +1708,6 @@
     <item quantity="few">Kupce rejtarikow %1$s pśidaś, %2$d rejtariki, barwa %3$s</item>
     <item quantity="other">Kupce rejtarikow %1$s pśidaś, %2$d rejtarikow, barwa %3$s</item>
   </plurals>
-  <plurals name="share_tab_group_button_content_description">
-    <!--
-      Content Description for share tab group button.
-      %1$s is the name of the tab group.
-      %2$d is the number of tabs in a tab group.
-    -->
-    <item quantity="one">Kupku rejtarikow %1$s z %2$d rejtarikom źěliś.</item>
-    <item quantity="two">Kupku rejtarikow %1$s z %2$d rejtarikoma źěliś.</item>
-    <item quantity="few">Kupku rejtarikow %1$s z %2$d rejtarikami źěliś.</item>
-    <item quantity="other">Kupku rejtarikow %1$s z %2$d rejtarikami źěliś.</item>
-  </plurals>
   <!-- Content description for the grabber/handle of the tab group bottom sheet. -->
   <string name="tab_group_sheet_dismiss_description">Kupku rejtarikow pokazaś, śěgaty pśimk schowaś</string>
   <plurals name="expanded_tab_group_header_description">
@@ -1710,6 +1736,41 @@
   <string name="close_tab_and_delete_group_confirmation_dialog_confirm">Kupku lašowaś</string>
   <!-- Text shown on the cancel button in the Close last tab and delete tab group confirmation dialog. -->
   <string name="close_tab_and_delete_group_confirmation_dialog_cancel">Pśetergnuś</string>
+  <!-- Content description for the three dot button next to a tab group" -->
+  <string name="tab_group_three_dot_button_content_description">Dalšne nastajenja</string>
+  <!--
+    Content description for the Expand button on the contracted menu for a tab group:
+    when tapped, tabs are displayed in an expanded grid or list view, taking up the full screen.
+  -->
+  <string name="tab_groups_strip_expand_group_content_description">Wócyniś, aby rejtariki w połnej wobrazowce pokazał</string>
+  <!-- Text shown on the edit button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_edit">Wobźěłaś</string>
+  <!-- Text shown on the ungroup button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_ungroup">Kupku wótpóraś</string>
+  <!-- Text shown on the delete button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_delete">Lašowaś</string>
+  <!-- Text shown on the share button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_share">Źěliś</string>
+  <!-- Text shown on the close button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_close">Zacyniś</string>
+  <!-- Title for the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_title">Kupku rejtarikow wótpóraś?</string>
+  <!-- Text shown in the body of the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_body">Rejtariki na toś tom rěźe wócynjone wóstawaju, ale kupka se wulašujo.</string>
+  <!-- Text shown on the Don't Ask Again checkbox button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_dont_ask_again">Wěcej se njepšašaś</string>
+  <!-- Text shown on the confirm button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_confirm">Kupku wótpóraś</string>
+  <!-- Text shown on the cancel button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_cancel">Pśetergnuś</string>
+  <!-- Custom accessibility action to reorder a tab up rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_up">Rejtarik górjej pśesunuś</string>
+  <!-- Custom accessibility action to reorder a tab left rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_left">Rejtarik nalěwo pśesunuś</string>
+  <!-- Custom accessibility action to reorder a tab right rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_right">Rejtarik napšawo pśesunuś</string>
+  <!-- Custom accessibility action to reorder a tab down rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_down">Rejtarik dołoj pśesunuś</string>
   <!--
     Color labels for tab groups, used for accessibility and selection UI.
 
@@ -1724,8 +1785,6 @@
   <string name="tab_group_color_pink">Pink</string>
   <!-- Tab group color: Purple -->
   <string name="tab_group_color_purple">Purpurowy</string>
-  <!-- Tab group color: Violet -->
-  <string name="tab_group_color_violet">Wioletny</string>
   <!-- Tab group color: Blue -->
   <string name="tab_group_color_blue">Módry</string>
   <!-- Tab group color: Cyan -->
@@ -1742,8 +1801,6 @@
   <string name="history_search_1">Pytańske wuraze zapódaś</string>
   <!-- Text for the button to clear all history -->
   <string name="history_delete_all">Historiju wulašowaś</string>
-  <!-- Text for the snackbar to confirm that multiple browsing history items has been deleted -->
-  <string name="history_delete_multiple_items_snackbar">Historija jo se wulašowała</string>
   <!-- Text for the snackbar to confirm that a single browsing history item has been deleted. %1$s is the shortened URL of the deleted history item. -->
   <string name="history_delete_single_item_snackbar">%1$s jo se wulašował</string>
   <!-- Context description text for the button to delete a single history item -->
@@ -1753,16 +1810,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">Wubrane: %1$d</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">Źinsa</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">Cora</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Zachadne 7 dnjow</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Zachadne 30 dnjow</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Starše</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">How žedna historija njejo</string>
   <!--
@@ -1943,6 +1990,8 @@
   <string name="download_search_no_results_found">Žedne wuslědki namakane</string>
   <!-- Text for the "Select all" button, which selects all downloaded items in the downloads list. -->
   <string name="download_select_all_items">Wšykne wubraś</string>
+  <!-- Shown in the downloads list in place of a website name when a file came from a data: or blob: URL that has no website address. "data" refers to the data: URL scheme. -->
+  <string name="download_item_source_data">(daty)</string>
   <!--
     Downloads Content Type Filters
 
@@ -1987,40 +2036,24 @@
   <string name="webcompat_reporter_clear_reason_content_description">Wubranu pśicynu lašowaś</string>
   <!-- The error message of the description when the user selects "Something else" as the reason, but left the description empty or too short. -->
   <string name="webcompat_reporter_description_error">Pšosym zapódajśo nanejmjenjej 10 znamuškow</string>
-  <!-- The label/title of a field in the Web Compat Reporter feature for explaining a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_label_whats_broken_2">Co jo wobškóźone?</string>
-  <!-- The placeholder text for the dropdown where a user selects a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_2">Wubjeŕśo pśicynu</string>
-  <!-- The error message of the dropdown, prompting the user to select a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_error">Pšosym wubjeŕśo pśicynu</string>
-  <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
-  <string name="webcompat_reporter_label_description_2">Wopišćo problem nadrobnje, aby nam pomagał, problem pśespytowaś (na žycenje)</string>
-  <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
-  <string name="webcompat_reporter_label_description">Wopišćo problem (na žycenje)</string>
-  <!-- The button text for navigating away from the feature to provide more information on the broken site's bug report. -->
-  <string name="webcompat_reporter_add_more_info">Dalšne informacije pśidaś</string>
+  <!-- The label/title of a mandatory field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_mandatory_description">Wopišćo problem nadrobnje, aby nam pomagał, problem pśespytowaś</string>
+  <!-- The label/title of a optional field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_optional_description">Wopišćo problem nadrobnje, aby nam pomagał, problem pśespytowaś (na žycenje)</string>
   <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
   <string name="webcompat_reporter_cancel">Pśetergnuś</string>
   <!-- The button text for the send button to submit the provided form data. -->
-  <string name="webcompat_reporter_send">Pósłaś</string>
+  <string name="webcompat_reporter_send_report">Rozpšawu pósłaś</string>
   <!-- Text for a snackbar to confirm the successful submission of a WebCompat report. -->
   <string name="webcompat_reporter_success_snackbar_text_2">Rozpšawa jo se pósłała</string>
   <!-- Placeholder text for the description field to prompt the user on what they should type. -->
   <string name="webcompat_reporter_problem_description_placeholder_text_2">Co jo se stało? Co ma se staś? Pšosym pódajśo kšace za reprodukciju problema.</string>
-  <!-- Placeholder text for the description field to prompt the user on what they should type. -->
-  <string name="webcompat_reporter_problem_description_placeholder_text">Co jo se stało? Co měło se staś?</string>
   <!-- Label of the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. -->
   <string name="webcompat_reporter_etp_checkbox_text_2">Lisćinu zapiskow pósłaś, kótarež su se blokěrowali pśez pśeslědowański šćit</string>
-  <!-- Label of the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. -->
-  <string name="webcompat_reporter_etp_checkbox_text">URL pósłaś, kótarež su se blokěrowali pśez pśeslědowański šćit</string>
-  <!-- Description text for the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. It informs the user when checked, the report will include the list of URLs that were blocked by Enhanced Tracking Protection on the current page. -->
-  <string name="webcompat_reporter_etp_checkbox_description">Pólěpšony pśeslědowański šćit móžo pśeslědowaki a skripty blokěrowaś, aby někotare websedła korektnje funkcioněrowali.</string>
   <!-- The button text for the preview report button to view a preview of the report. -->
   <string name="webcompat_reporter_preview_report">Pśeglěd rozpšawy pokazaś</string>
   <!-- The title shown at the top of the WebCompat Report preview panel. This appears after the user taps the “Preview” button before sending a report. -->
   <string name="webcompat_reporter_preview_bottom_sheet_header">Pśeglěd rozpšawy</string>
-  <!-- Label for the “Send” button shown in the WebCompat Report preview panel, which the user taps to submit the report. -->
-  <string name="webcompat_reporter_preview_bottom_sheet_send">Pósłaś</string>
   <!-- Title for the Edit URL confirmation dialog in the WebCompatReporter -->
   <string name="webcompat_reporter_edit_url_dialog_title">URL websedła wobźěłaś</string>
   <!-- Text shown on the save button for the Edit URL confirmation dialog in the WebCompatReporter. -->
@@ -2049,8 +2082,6 @@
   <string name="webcompat_reporter_reason_notsupported_2">Wobglědowak se blokěrujo abo njepódpěra</string>
   <!-- Broken site reason text for the site being deceptive -->
   <string name="webcompat_reporter_reason_site_is_deceptive">Toś to sedło jo wobšudne</string>
-  <!-- Broken site reason text for browser isn’t supported or blocked -->
-  <string name="webcompat_reporter_reason_notsupported">Wobglědowak se njepódpěra abo njeblokěrujo</string>
   <!-- Broken site reason text for something else -->
   <string name="webcompat_reporter_reason_other">Něco druge</string>
   <!--
@@ -2212,18 +2243,16 @@
   <string name="bookmark_select_folder_new_folder_button_title">Nowy zarědnik</string>
   <!-- Bookmark snackbar message for moving a single item. %1$s is the title of the item being moved and %2$s is the new parent folder of the bookmark -->
   <string name="bookmark_moved_single_item">%1$s do %2$s pśesunjony</string>
+  <!-- Text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results">Žedne wótpowědniki namakane.</string>
+  <!-- Additional text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results_additional_text">Wopytajśo druge pytanje!</string>
   <!--
     Site Permissions
 
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">K nastajenjam</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">Malsne nastajenja</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">Dopórucony</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -2415,6 +2444,10 @@
   <string name="sync_send_to_all">Na wše rědy pósłaś</string>
   <!-- An option from the share dialog to reconnect to sync -->
   <string name="sync_reconnect">Zasej ze Sync zwězaś</string>
+  <!-- Label for the button in the share dialog that sends the tab to the selected sync devices -->
+  <string name="sync_send_to_selected_devices">Pósłaś</string>
+  <!-- Content description announced when a device is selected in the share dialog -->
+  <string name="send_to_devices_device_selected_content_description">Wubrany</string>
   <!-- Text displayed when sync is offline and cannot be accessed -->
   <string name="sync_offline">Offline</string>
   <!-- An option to connect additional devices -->
@@ -2437,6 +2470,24 @@
   <string name="sent_from_firefox_template" tools:ignore="UnusedResources">%1$s\n\nPśez %2$s pósłany 🦊 Wopytajśo mobilny wobglědowak: %3$s</string>
   <!-- A short message template for the shared link with a footer. %1$s is the shared link, %2$s is the app name (e.g. Firefox) and %3$s is a download link for the app. -->
   <string name="sent_from_firefox_template_short" tools:ignore="UnusedResources">%1$s\n\nPśez %2$s pósłany 🦊 %3$s</string>
+  <!-- Send tab to synced devices: Authentication error title - Message asking the user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_title">Pśizjawśo se zasej, aby rejtariki mjazy rědami pósłał</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_button">Pśizjawiś</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to remove the currently connected account -->
+  <string name="sync_send_tab_error_auth_remove_account">Konto wótwónoźeś</string>
+  <!-- Send tab to synced devices: Empty state title - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_title">Žedne rědy zwězane</string>
+  <!-- Send tab to synced devices: Empty state message - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_description" tools:ignore="BrandUsage">Aby rejtarik pósłał, pśizjawśo se pla Firefox na nanejmjenjej jadnom dalšnem rěźe.</string>
+  <!-- Send tab to synced devices: Empty state link - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_link">Zgóńśo, kak móžośo rěd zwězaś</string>
+  <!-- Send tab to synced devices: Connectivity Error title -->
+  <string name="sync_send_tab_error_connection_title">Pśeglědujśo swój internetny zwisk</string>
+  <!-- Send tab to synced devices: Connectivity Error message - Suggested user action after internet connection has been established -->
+  <string name="sync_send_tab_error_connection_text">Wopytajśo pón swój rejtarik znowego słaś.</string>
+  <!-- Send tab to synced devices: Connectivity Error button - When tapped, refreshes the list of connected devices. -->
+  <string name="sync_send_tab_error_connection_button">Hyšći raz wopytaś</string>
   <!--
     Notifications
 
@@ -2458,6 +2509,18 @@
     The app name is in the text, due to limitations with localizing Nimbus experiments
   -->
   <string name="nimbus_notification_default_browser_text" tools:ignore="BrandUsage,UnusedResources">Firefox k wašomu standardnemu wobglědowakej cyniś</string>
+  <!--
+    Privacy report notification
+
+    Name of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app.
+  -->
+  <string name="notification_privacy_report_channel_name">Rozpšawa priwatnosći</string>
+  <!-- Description of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_channel_description">%1$s pokazujo, wjele pśeslědowakow se blokěrujo, mjaztym až sćo pśeglědował.</string>
+  <!-- Body text for the weekly privacy report notification for when trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_body_has_trackers">Pśeglědujśo dalej. %1$s buźo dalej blokěrowaś.</string>
+  <!-- Headline text of the weekly privacy report notification for when no trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_headline_no_trackers">%1$s pśeslědowaki blokěrujo, gaž pśeglědujośo. Buźośo je how wiźeś.</string>
   <!--
     Survey
 
@@ -2607,6 +2670,12 @@
   <string name="sign_in_create_account_text" tools:ignore="BrandUsage"><![CDATA[Žedno konto? <u>Załožćo take</u>, aby Firefox mjazy rědami synchronizěrował.]]></string>
   <!-- Text shown in confirmation dialog to sign out of account. %s is the name of the app (for example "Firefox"). -->
   <string name="sign_out_confirmation_message_2">%s pśestanjo z wašym kontom synchronizěrowaś, ale njewulašujo pśeglědowańske daty na toś tom rěźe.</string>
+  <!-- Title of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_title">Wót wašogo konta wótzjawiś?</string>
+  <!-- Body of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_message">Synchronizěrowane daty we wašom konśe skłaźone wóstanu.</string>
+  <!-- Text for the primary action button of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_confirm_button">Wótzjawiś</string>
   <!-- Option to continue signing out of account shown in confirmation dialog to sign out of account -->
   <string name="sign_out_disconnect">Zwisk źěliś</string>
   <!-- Option to cancel signing out shown in confirmation dialog to sign out of account -->
@@ -2616,10 +2685,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">Šćitowe nastajenja</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">Pólěpšony slědowański šćit</string>
   <!-- Preference summary for enhanced tracking protection settings on/off switch -->
   <string name="preference_enhanced_tracking_protection_summary">Něnto z dospołnm šćitom pśeśiwo cookiejam, našeju nejmócnjejšeju barieru pśeśiwo sedła pśesegajucym slědowakam.</string>
@@ -2628,17 +2695,6 @@
   <!-- Text displayed that links to website about enhanced tracking protection -->
   <string name="preference_enhanced_tracking_protection_explanation_learn_more">Dalšne informacije</string>
   <plurals name="trackers_blocked_count_2">
-    <!--
-      Trackers blocked card on homepage
-
-      Text shown on the trackers blocked card. %d is the number of trackers blocked.
-    -->
-    <item quantity="one">%d pśeslědowak blokěrowany</item>
-    <item quantity="two">%d pśeslědowaka blokěrowanej</item>
-    <item quantity="few">%d pśeslědowaki blokěrowane</item>
-    <item quantity="other">%d pśeslědowakow blokěrowane</item>
-  </plurals>
-  <plurals name="trackers_blocked_count">
     <!--
       Trackers blocked card on homepage
 
@@ -2721,12 +2777,8 @@
   <string name="preference_enhanced_tracking_protection_custom_cryptominers">Kryptokopaki</string>
   <!-- Preference for enhanced tracking protection for the custom protection settings -->
   <string name="preference_enhanced_tracking_protection_custom_known_fingerprinters">Znate zběrarje palcowych wótśišćow</string>
-  <!-- Button label for navigating to the Enhanced Tracking Protection details -->
-  <string name="enhanced_tracking_protection_details">Drobnostki</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">Zablokěrowane</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">Dowólone</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">Pśeslědowaki socialnych medijow</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -2749,10 +2801,6 @@
   <string name="etp_tracking_content_title">Slědujuce wopśimjeśe</string>
   <!-- Description of tracking content that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_description">Zaźujo zacytanjeju wabjenja, wideo a drugego wopśimjeśa, kótarež slědowański kod wopśimuju. Móžo někotare funkcije websedłow kazyś.</string>
-  <!-- Enhanced Tracking Protection message that protection is currently on for this site -->
-  <string name="etp_panel_on">Šćit jo zmóžnjony za toś to sedło</string>
-  <!-- Enhanced Tracking Protection message that protection is currently off for this site -->
-  <string name="etp_panel_off">Šćit jo znjemóžnjony za toś to sedło</string>
   <!-- Header for exceptions list for which sites enhanced tracking protection is always off -->
   <string name="enhanced_tracking_protection_exceptions">Pólěpšony slědowański šćit jo znjemóžnjony za toś te sedła</string>
   <!--
@@ -2777,13 +2825,6 @@
   <string name="etp_suspected_fingerprinters_description">Zmóžnja šćit pśeśiwo zběrarjam palcowych wótśišćow, aby suspektne zběrarje palcowych wótśišćow blokěrował.</string>
   <!-- Category of trackers (fingerprinters) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_known_fingerprinters_title">Znate zběrarje palcowych wótśišćow</string>
-  <!--
-    Description of the SmartBlock Enhanced Tracking Protection feature. The * symbol is intentionally hardcoded here,
-    as we use it on the UI to indicate which trackers have been partially unblocked.
-  -->
-  <string name="preference_etp_smartblock_description">Blokěrowanje někotarych dołojce markěrowanych pśeslědowakow jo se pó zdźělach wótpórało na toś tom boku, dokulaž sćo interagěrował z nimi *.</string>
-  <!-- Text displayed that links to website about enhanced tracking protection SmartBlock -->
-  <string name="preference_etp_smartblock_learn_more">Dalšne informacije</string>
   <!--
     Content description (not visible, for screen readers etc.):
     Enhanced tracking protection exception preference icon for ETP settings.
@@ -2913,12 +2954,8 @@
   <string name="add_to_homescreen_cancel">Pśetergnuś</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">Pśidaś</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">Dalej k websedłoju</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">Mě skrotconki</string>
-  <!-- Describes the add to homescreen functionality -->
-  <string name="add_to_homescreen_description_2">Móžośo startowej wobrazowce swójogo rěda toś to websedło lažko pśidaś, aby direktny pśistup měł a malsnjej z dožywjenim nałoženja pśeglědował.</string>
   <!-- Preference for managing the settings for logins and passwords in Fenix -->
   <string name="preferences_passwords_logins_and_passwords_2">Gronidła</string>
   <!-- Preference for managing the saving of logins and passwords in Fenix -->
@@ -3060,14 +3097,14 @@
   <!-- Label for the BETA badge for the browser VPN entry in the settings list -->
   <string name="preferences_ip_protection_beta_badge_label">BETA</string>
   <!-- Title for the browser VPN settings screen (displayed in the app bar) -->
-  <string name="ip_protection_title">VPN</string>
+  <string name="ip_protection_settings_title">Zatwarjony VPN</string>
   <!-- Label for the browser VPN toggle on the settings screen -->
   <string name="ip_protection_toggle_label">VPN</string>
   <!-- Content description for the browser VPN settings screen top bar back button -->
   <string name="ip_protection_navigate_back_button_content_description">Slědk nawigěrowaś</string>
   <!-- Headline for the browser VPN promo card. %s is the name of the app (for example "Firefox"). -->
   <string name="ip_protection_promo_headline">Zatwarjony VPN %s</string>
-  <!-- Body text for the browser VPN promo card . %s is a learn more link using ip_protection_learn_more as text. -->
+  <!-- Body text for the browser VPN settings header, shown when no promo is running. %s is a learn more link using ip_protection_learn_more as text. -->
   <string name="ip_protection_promo_body_2">Schowajśo swójo stojnišćo, aby z pśidatnym šćit pśeglědował, samo w zjawnem WLAN. %s</string>
   <!-- Link text that opens additional information about the browser VPN -->
   <string name="ip_protection_learn_more">Dalšne informacije</string>
@@ -3088,8 +3125,6 @@
   <string name="ip_protection_location_section">Stojnišćo</string>
   <!-- Label for the recommended automatic location option on the browser VPN settings screen -->
   <string name="ip_protection_location_recommended_label">Dopórucony</string>
-  <!-- Description for the recommended automatic location option on the browser VPN settings screen -->
-  <string name="ip_protection_location_recommended_description">Wuběra nejmalsnjejše stojnišćo VPN za was.</string>
   <!-- Badge label shown in the menu item when the browser VPN is active -->
   <string name="preferences_ip_protection_on">Zašaltowany</string>
   <!-- Badge label shown in the menu item when the browser VPN is off -->
@@ -3100,8 +3135,8 @@
   <string name="ip_protection_menu_paused">Zastajony</string>
   <!-- Badge label shown in the menu item when the browser VPN has an error -->
   <string name="ip_protection_menu_error">Zmólka</string>
-  <!-- Badge label shown in the menu item when the user is eligible to use the browser VPN but should authenticate or authorize it first. -->
-  <string name="ip_protection_menu_auth_required">Wopytajśo jen</string>
+  <!-- Badge label shown in the VPN menu item when the user is eligible for the feature but needs to authenticate / authorize to enable it -->
+  <string name="ip_protection_menu_try_vpn_cta">Dermo testowaś</string>
   <!-- Content description for the chevron button that opens the browser VPN settings screen -->
   <string name="ip_protection_navigate_settings">Nastajenja VPN wócyniś</string>
   <!--
@@ -3118,6 +3153,10 @@
   <string name="ip_protection_toolbar_pill_label">VPN aktiwny</string>
   <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has been activated -->
   <string name="ip_protection_toolbar_pill_description">VPN jo aktiwny.</string>
+  <!-- Label shown next to the browser protection icon in the address bar when the browser VPN turns off -->
+  <string name="ip_protection_toolbar_pill_label_off">VPN znjemóžnjony</string>
+  <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has turned off -->
+  <string name="ip_protection_toolbar_pill_description_off">VPN jo znjemóžnjony.</string>
   <!-- Label for the button that starts the browser VPN authentication or authorization flow on the settings screen -->
   <string name="ip_protection_get_started">Prědne kšace</string>
   <!-- Label for the "connecting" state of the button that starts the browser VPN authentication or authorization flow on the settings screen -->
@@ -3144,13 +3183,45 @@
   <string name="ip_protection_onboarding_not_now_button">Nic něnto</string>
   <!-- Snackbar (in-app pop-up notification) text to signal the browser VPN connection error -->
   <string name="ip_protection_connection_error_snackbar">Njejo móžno z VPN zwězaś. Wopytajśo za mało minutow hyšći raz.</string>
+  <!-- Snackbar (in-app pop-up notification) text to signal the VPN location has been reset due to the previously selected VPN location being no longer available. -->
+  <string name="ip_protection_location_selection_reset_snackbar">Wubrane stojnišćo VPN njejo k dispoziciji. Jo se pśejšło k dopóruconemu stojnišćoju.</string>
   <!--
     Snackbar (in-app pop-up notification) text to signal the browser VPN has reached the monthly data limit.
     %1$d is the total monthly allowance in GB (for example "50").
   -->
   <string name="ip_protection_data_limit_reached_snackbar">%1$d GB datow VPN jo se pśetrjebało. Pśistup se w pśiducem mjasecu slědk stajijo.</string>
   <!-- Snackbar (in-app pop-up notification) action button text that takes the user to the VPN settings screen. -->
-  <string name="ip_protection_data_limit_reached_snackbar_action">Nastajenja</string>
+  <string name="ip_protection_open_settings_snackbar_action">Nastajenja</string>
+  <!-- Description shown on the browser VPN settings screen prompting the user to turn the VPN on. -->
+  <string name="ip_protection_settings_description" tools:ignore="UnusedResources">Zmóžniśo VPN, aby swójo pśeglědowanje priwatnjejše cynił a śěše slědujobne.</string>
+  <!-- Title shown on the browser VPN settings screen for location selection section. -->
+  <string name="ip_protection_location_title" tools:ignore="UnusedResources">Stojnišćo</string>
+  <!-- Label for the Recommended server location option which is automatically selected by the browser. -->
+  <string name="ip_protection_recommended_location" tools:ignore="UnusedResources">Dopórucony</string>
+  <!-- Headline for the card that promotes the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_headline" tools:ignore="UnusedResources,BrandUsage">Šćitajśo wěcej z Mozilla VPN</string>
+  <!-- Body for the card that promotes the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_body" tools:ignore="UnusedResources">Wubjeŕśo z wěcej ako 300 stojnišćow a šćitajśo wšykne swóje nałoženja na až do 5 rědach.</string>
+  <!-- Label for the button that takes the user to get the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_button" tools:ignore="UnusedResources,BrandUsage">Mozilla VPN wobstaraś</string>
+  <!-- Title for the browser VPN location picker screen. -->
+  <string name="ip_protection_location_picker_title" tools:ignore="UnusedResources">Stojnišćo VPN wubraś</string>
+  <!-- Description for what it means to use the Recommended setting and let the app automatically pick the best server location. -->
+  <string name="ip_protection_location_fastest_description" tools:ignore="BrandUsage">Firefox namakajo nejmalsnjejše stojnišćo</string>
+  <!-- Description for an unavailable VPN location in the location list. -->
+  <string name="ip_protection_location_unavailable_description">Njejo k dispoziciji</string>
+  <!-- Error message shown when the selected browser VPN location is unavailable. -->
+  <string name="ip_protection_location_unavailable" tools:ignore="UnusedResources">Stojnišćo njejo k dispoziciji. Wubjeŕśo druge stojnišćo.</string>
+  <!-- Snackbar (in-app pop-up notification) text shown when the previously selected browser VPN location is unavailable and the recommended location was used instead. -->
+  <string name="ip_protection_location_unavailable_recommended_snackbar" tools:ignore="UnusedResources">Wubrane stojnišćo VPN njejo k dispoziciji. Zwězany z dopóruconym stojnišćom.</string>
+  <!-- Title for the card shown to the user when we are unable to fetch server locations -->
+  <string name="ip_protection_locations_unavailable_title">Stojnišća njejsu k dispoziciji</string>
+  <!-- Description for the card shown to the user when we are unable to fetch server locations -->
+  <string name="ip_protection_locations_unavailable_description">K dopóruconemu stojnišćoju pśejšeł.</string>
+  <!-- Title for the browser VPN location selection screen (displayed in the app bar) -->
+  <string name="ip_protection_locations_title">Stojnišćo VPN wubraś</string>
+  <!-- Content description for the browser VPN location selection screen top bar back button -->
+  <string name="ip_protection_locations_navigate_back_button_content_description">Slědk nawigěrowaś</string>
   <!--
     Autofill
 
@@ -3231,6 +3302,14 @@
   <string name="credit_cards_warning_dialog_set_up_now">Něnto konfigurěrowaś</string>
   <!-- Negative button to ignore warning dialog if users have no device authentication set up -->
   <string name="credit_cards_warning_dialog_later">Pózdźej</string>
+  <!-- Title of the dialog shown on Android Automotive OS (in cars) when users have no device authentication set up and try to access their saved passwords, payment methods, or sign in to their account -->
+  <string name="automotive_authentication_setup_dialog_title">Zawěsććo swóje sensibelne daty</string>
+  <!-- Message of the dialog shown on Android Automotive OS (in cars) when users have no device authentication set up and try to access their saved passwords, payment methods, or sign in to their account -->
+  <string name="automotive_authentication_setup_dialog_message">Nastajśo rědowy zastajeński muster, PIN abo gronidło, aby pśistupoju k swójim skłaźonym sensibelnym datam zajźował, jolic něchten drugi wašo awto wóźi.</string>
+  <!-- Primary button on the dialog shown on Android Automotive OS (in cars). Tapping it directs users to the device settings to set up a device lock -->
+  <string name="automotive_authentication_setup_dialog_set_up_now">Něnto konfigurěrowaś</string>
+  <!-- Secondary button of the dialog shown on Android Automotive OS (in cars). Tapping closes the dialogue and cancels the action that triggered the dialogue. -->
+  <string name="automotive_authentication_setup_dialog_cancel">Pśetergnuś</string>
   <!-- Title of PIN verification dialog to direct users to re-enter their device credentials to access their credit cards -->
   <string name="credit_cards_biometric_prompt_message_pin">Wótwóŕśo swój rěd</string>
   <!-- Message displayed in biometric prompt for authentication, before allowing users to use their stored payment method information -->
@@ -3303,8 +3382,6 @@
   <string name="addresses_save_button">Składowaś</string>
   <!-- The text for the "Cancel" button for cancelling adding, updating or deleting an address -->
   <string name="addresses_cancel_button">Pśetergnuś</string>
-  <!-- The text for the "Delete address" button for deleting an address -->
-  <string name="addressess_delete_address_button">Adresu lašowaś</string>
   <!-- The title for the "Delete address" confirmation dialog -->
   <string name="addressess_confirm_dialog_message_2">Toś tu adresu lašowaś?</string>
   <!-- The text for the positive button on "Delete address" dialog -->
@@ -3359,16 +3436,8 @@
   <string name="phone_feature_blocked_step_permissions"><![CDATA[2. Pótusniśo zapisk <b>Berechtigungen</b> (Pšawa)]]></string>
   <!-- Third step for the allowing a permission (%1$s is the permission name, for example "Camera"). -->
   <string name="phone_feature_blocked_step_feature"><![CDATA[3. ZAŠALTUJŚO <b>%1$s</b>]]></string>
-  <!-- Label that indicates a site is using a secure connection -->
-  <string name="quick_settings_sheet_secure_connection_2">Zwisk jo wěsty</string>
-  <!-- Label that indicates a site is using a insecure connection -->
-  <string name="quick_settings_sheet_insecure_connection_2">Zwisk njejo wěsty</string>
-  <!-- Label that indicates a site is displaying a local document -->
-  <string name="quick_settings_sheet_local_page">Toś ten bok se na wašom rěźe składujo.</string>
   <!-- Label to clear site data -->
   <string name="clear_site_data">Cookieje a sedłowe daty wulašowaś</string>
-  <!-- Confirmation message for a dialog confirming if the user wants to delete all data for current site. %s is the domain of the site. -->
-  <string name="confirm_clear_site_data"><![CDATA[Cośo napšawdu wšykne cookieje a daty za sedło <b>%s</b> lašowaś?]]></string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for all sites -->
   <string name="confirm_clear_permissions_on_all_sites">Cośo napšawdu wšykne pšawa za wšykne sedła lašowaś?</string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for a site -->
@@ -3381,11 +3450,6 @@
   <string name="browser_menu_add_to_shortcuts">Zwězanjam pśidaś</string>
   <!-- Browser menu button that removes a shortcut from the home fragment -->
   <string name="browser_menu_remove_from_shortcuts">Ze zwězanjow wótwónoźeś</string>
-  <!--
-    text shown before the issuer name to indicate who its verified by, %1$s is the name of
-    the certificate authority that verified the ticket
-  -->
-  <string name="certificate_info_verified_by">Pśeglědany wót: %1$s</string>
   <!-- Message in delete confirmation dialog for password -->
   <string name="login_deletion_confirmation_2">Cośo napšawdu toś to gronidło lašowaś?</string>
   <!-- Positive action of a dialog asking to delete -->
@@ -3449,6 +3513,16 @@
     which navigates the user to a screen displaying all the shortcuts.
   -->
   <string name="homepage_shortcuts_show_all_content_description">Wšykne skrotconki pokazaś</string>
+  <!--
+    Label for the button in the shortcuts home screen section that expands the section to show
+    every shortcut.
+  -->
+  <string name="homepage_shortcuts_show_all">Wšykne pokazaś</string>
+  <!--
+    Label for the button in the shortcuts home screen section that collapses the section back
+    to showing only the first shortcuts.
+  -->
+  <string name="homepage_shortcuts_show_less">Mjenjej pokazaś</string>
   <!-- Label for the "Add shortcut" button displayed as a tile. -->
   <string name="homepage_shortcuts_add_shortcut">Zwězanje pśidaś</string>
   <!-- Title for the "Add to homepage" bottom sheet. -->
@@ -3580,8 +3654,6 @@
   <string name="a11y_action_label_expand">pokazaś</string>
   <!-- Action label for links to a website containing documentation about a wallpaper collection. Talkback will append this to say "Double tap to open link to learn more about this collection". -->
   <string name="a11y_action_label_wallpaper_collection_learn_more">wocyńśo wótkaz, aby wěcej wó toś tej zběrce zgónił</string>
-  <!-- Translations feature -->
-
   <!--
     Translation request dialog
 
@@ -3861,8 +3933,6 @@
     and there are no trackers blocked.
   -->
   <string name="protection_panel_banner_protected_no_blocked_trackers_description">Sćo šćitany.</string>
-  <!-- Description text for the protection panel banner when tracking protection is enabled. -->
-  <string name="protection_panel_banner_protected_description">Sćo šćitany. Jolic něco namakajomy, dajomy wam to k wěsći.</string>
   <!-- Label text for the Enhanced Tracking Protection toggle. -->
   <string name="protection_panel_etp_toggle_label">Pólěpšony slědowański šćit</string>
   <!-- Toggle if Enhanced Tracking Protection is turned on -->
@@ -3878,8 +3948,6 @@
     %d is a placeholder for the number of trackers blocked.
   -->
   <string name="protection_panel_num_trackers_blocked">Pśeslědowaki blokěrowane: %d</string>
-  <!-- Text for when no trackers have been blocked. -->
-  <string name="protection_panel_no_trackers_blocked">Žedne pśeslědowaki namakane</string>
   <!-- Text for when tracking protection is disabled and no trackers are blocked. -->
   <string name="protection_panel_etp_disabled_no_trackers_blocked">Pśeslědowaki se njeblokěruju</string>
   <!-- Link text to navigate to privacy and security settings from the protection panel. -->
@@ -3956,17 +4024,6 @@
     <item quantity="few">%1$d pśeslědowaki, kótarež su se blokěrowali toś ten tyźeń</item>
     <item quantity="other">%1$d pśeslědowakow, kótarež jo se blokěrowało toś ten tyźeń</item>
   </plurals>
-  <!--
-    Text for displaying the total number of trackers blocked in the trackers blocked panel.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_total_num_trackers_blocked">Pśeslědowaki blokěrowane: %d</string>
-  <!--
-    Text for displaying the number of trackers blocked for a specific tracker category in the trackers blocked panel.
-    %s is a placeholder for the name of the tracker category.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_categorical_num_trackers_blocked">%s: %d</string>
   <!--
     Description text for a dialog confirming whether the user wants to delete all data for current site.
     %s is a placeholder for the base domain of website.
@@ -4119,17 +4176,17 @@
   -->
   <string name="microsurvey_uninstall_survey_title">Wašo měnjenje jo wažne. Cogodla wótinstalěrujośo?</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_1">Problemy z webbokami</string>
+  <string name="uninstall_survey_option_1_v2">Jo pómały abo njespušćobny</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_2">Problemy z wideo a ześěgnjenjami</string>
+  <string name="uninstall_survey_option_2_v2">Websedła korektnje njefunkcioněruju</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_3">Problemy z wugbaśim</string>
+  <string name="uninstall_survey_option_3_v2">Felujuce funkcije, kótarež trjebam</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_4">Problemy z funkcijami a designom</string>
+  <string name="uninstall_survey_option_4_v2">Wideo, ześěgnjenja abo medije njefunkcioněruju</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_5">Problemy z priwatnosću</string>
+  <string name="uninstall_survey_option_5_v2">Dajo se śěžko wužywaś abo jo špatnje nacerjony</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_6">Problemy z płaśenim a abonementom</string>
+  <string name="uninstall_survey_option_6_v2">Wobmyslenja priwatnosći abo wěstoty</string>
   <!-- Button label shown at the bottom of the uninstall survey -->
   <string name="uninstall_survey_button_label">Měnjenje zapódaś a wótinstalěrowaś</string>
   <!--
@@ -4280,8 +4337,6 @@
   <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">Aktualizěrujśo do 14. měrca, aby dodanki a druge funkcije dalej wužywał.</string>
   <!-- Push notification message about old Firefox version -->
   <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">Někotare funkcije witśe wěcej njebudu funkcioněrowaś.</string>
-  <!-- TextField Design System Component -->
-
   <!--
     Setup checklist feature
 
@@ -4440,8 +4495,6 @@
   <string name="settings_search_no_results_message">Snaź druge pytanje wopytaś?</string>
   <!-- Content Description for the button to open Settings Search (to search through settings). -->
   <string name="settings_search_button_content_description">Tłocašk za pytanje nastajenjow</string>
-  <!-- ==== Terms of use pop up prompt ==== -->
-
   <!-- Title for the pop up prompt -->
   <string name="terms_of_use_prompt_title">Mamy aktualizaciju</string>
   <!--
@@ -4466,8 +4519,6 @@
   <string name="terms_of_use_prompt_accept">Akceptěrowaś</string>
   <!-- Label for a button to postpone accepting the terms of use -->
   <string name="terms_of_use_prompt_postpone">Pózdźej dopomnjeś</string>
-  <!-- ==== Experiment strings. ==== -->
-
   <!-- A title for the popup prompt. -->
   <string name="terms_of_use_prompt_title_option_a" tools:ignore="UnusedResources">Wužywańske wuměnjenja</string>
   <!--
@@ -4485,220 +4536,36 @@
   <!--
     Sports widget
 
-    Title text shown at the top of the sports widget country selector, encouraging the user to pick a national team to follow.
+    Label shown on the sports widget scoreboard when a match is currently being played live.
   -->
-  <string name="sports_widget_country_selector_title">Wašomu mustwoju slědowaś</string>
-  <!-- Section header for the North America region in the sports widget country selector. -->
-  <string name="sports_widget_confederation_north_america">Pódpołnocna Amerika</string>
-  <!-- Section header for the Africa confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_africa">Afrika</string>
-  <!-- Section header for the Asia confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_asia">Azija</string>
-  <!-- Section header for the CONCACAF confederation group in the sports widget country selector. "CONCACAF" is the abbreviation for "Confederation of North, Central America and Caribbean Association Football". -->
-  <string name="sports_widget_confederation_concacaf">CONCACAF</string>
-  <!-- Section header for the Europe confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_europe">Europa</string>
-  <!-- Section header for the Oceania confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_oceania">Oceaniska</string>
-  <!-- Section header for the South America confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_south_america">Pódpołdnjowa Amerika</string>
-  <!-- Country name for England in the sports widget. England cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_england">Engelska</string>
-  <!-- Country name for Scotland in the sports widget. Scotland cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_scotland">Šotiska</string>
-  <!-- Label shown on the sports widget scoreboard when a match is currently being played live. -->
-  <string name="sports_widget_match_live">LIVE</string>
-  <!-- Title shown on the sports widget champion scoreboard row celebrating the soccer tournament winner. -->
-  <string name="sports_widget_champions_title">Swětowe mejstarje 2026</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament runners-up. Runners-up means second place. -->
-  <string name="sports_widget_runner_up_title" tools:ignore="UnusedResources">Druge městna</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament third place winners. -->
-  <string name="sports_widget_third_place_title">Tśeśe městno</string>
-  <!-- Round name shown on the sports widget for the Round of 32 stage in the soccer tournament. -->
-  <string name="sports_widget_round_of_32">Koło z 32</string>
-  <!-- Round name shown on the sports widget for the Round of 16 stage in the soccer tournament. -->
-  <string name="sports_widget_round_of_16">Koło z 16</string>
-  <!-- Round name shown on the sports widget for the quarter-finals stage in the soccer tournament. -->
-  <string name="sports_widget_quarter_final">Běrtylfinale</string>
-  <!-- Round name shown on the sports widget for the semi-finals stage in the soccer tournament. -->
-  <string name="sports_widget_semi_final">Połfinale</string>
-  <!-- Round name shown on the sports widget for the final stage in the soccer tournament. -->
-  <string name="sports_widget_final">Finale</string>
-  <!-- Round name shown on the sports widget for the bronze final stage in the soccer tournament. -->
-  <string name="sports_widget_bronze_final">Graśe wó městno 3</string>
-  <!-- Sports widget error card message shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed" tools:ignore="UnusedResources">Informacije wó graśu tuchylu k dispoziciji njejsu. Wopytajśo za mało minutow aktualizěrowaś.</string>
-  <!-- Sports widget error card message shown when the network connection is interrupted and live updates pause. -->
-  <string name="sports_widget_error_connection_interrupted" tools:ignore="UnusedResources">Zwisk pśetergnjony – aktualizacije live zastajone.</string>
-  <!-- Sports widget action label to refresh match data after an error. -->
-  <string name="sports_widget_error_refresh">Aktualizěrowaś</string>
-  <!-- Sports widget group stage label for group A in the soccer tournament. -->
-  <string name="sports_widget_group_a">Kupka A</string>
-  <!-- Sports widget group stage label for group B in the soccer tournament. -->
-  <string name="sports_widget_group_b">Kupka B</string>
-  <!-- Sports widget group stage label for group C in the soccer tournament. -->
-  <string name="sports_widget_group_c">Kupka C</string>
-  <!-- Sports widget group stage label for group D in the soccer tournament. -->
-  <string name="sports_widget_group_d">Kupka D</string>
-  <!-- Sports widget group stage label for group E in the soccer tournament. -->
-  <string name="sports_widget_group_e">Kupka E</string>
-  <!-- Sports widget group stage label for group F in the soccer tournament. -->
-  <string name="sports_widget_group_f">Kupka F</string>
-  <!-- Sports widget group stage label for group G in the soccer tournament. -->
-  <string name="sports_widget_group_g">Kupka G</string>
-  <!-- Sports widget group stage label for group H in the soccer tournament. -->
-  <string name="sports_widget_group_h">Kupka H</string>
-  <!-- Sports widget group stage label for group I in the soccer tournament. -->
-  <string name="sports_widget_group_i">Kupka I</string>
-  <!-- Sports widget group stage label for group J in the soccer tournament. -->
-  <string name="sports_widget_group_j">Kupka J</string>
-  <!-- Sports widget group stage label for group K in the soccer tournament. -->
-  <string name="sports_widget_group_k">Kupka K</string>
-  <!-- Sports widget group stage label for group L in the soccer tournament. -->
-  <string name="sports_widget_group_l">Kupka L</string>
-  <!-- Sports widget button label to see match results. -->
-  <string name="sports_widget_see_results" tools:ignore="UnusedResources">Wuslědki se woglědaś</string>
-  <!-- Sports widget button label to view details of a soccer match results. -->
-  <string name="sports_widget_view_match_details" tools:ignore="UnusedResources">Drobnostki graśa pokazaś</string>
-  <!-- Sports widget section header for related soccer matches in the same group. -->
-  <string name="sports_widget_related_matches" tools:ignore="UnusedResources">Pódobne graśa</string>
-  <!-- Sports widget section header for a list of upcoming soccer matches that have not yet started. -->
-  <string name="sports_widget_upcoming" tools:ignore="UnusedResources">Pśiduce</string>
-  <!-- Sports widget match status suffix appended to match scores (e.g., "3 - 2 (Full time)") to indicate the match has been completed. -->
-  <string name="sports_widget_match_full_time_suffix">(Wšen cas)</string>
-  <!-- Sports widget match status to indicate the match has been completed. -->
-  <string name="sports_widget_match_full_time_2">Wšen cas</string>
-  <!--
-    Sports widget card title encouraging the user to follow the soccer tournament. “Keep tabs on” is an informal expression
-    meaning to stay updated on or regularly follow something (in this case, World Cup matches and updates).
-    It’s playfully related to Firefox in that “tabs” are a browser feature.
-    It suggests ongoing awareness rather than active monitoring or control. Not to be translated literally as physical “tabs”
-    or tracking in a technical sense; the meaning is about staying informed.
-  -->
-  <string name="sports_widget_card_title">Wobchowajśo swětowe mejstaŕstwo we wócyma</string>
-  <!-- Sports widget card description shown below the title on the homepage entry point. -->
-  <string name="sports_widget_card_description">Dostańśo aktualizacije live a wěcej.</string>
-  <!-- Sports widget menu item to change the selected team. -->
-  <string name="sports_widget_change_team">Mustwo změniś</string>
-  <!-- Sports widget menu item to get a custom wallpaper for the widget. -->
-  <string name="sports_widget_get_custom_wallpaper">Wobstarajśo se swójski slězynowy wobraz</string>
+  <string name="wrex_widget_match_live">LIVE</string>
+  <!-- Label shown on the sports widget match status badge when the start of a match has been delayed. -->
+  <string name="wrex_widget_match_delayed">Wokomuźony</string>
+  <!-- Label shown on the sports widget match status badge when a match has been suspended after it started. -->
+  <string name="wrex_widget_match_suspended">Wótgronjony</string>
+  <!-- Label shown on the sports widget match status badge when a match has been postponed to a later date. -->
+  <string name="wrex_widget_match_postponed">Wótstarcony</string>
+  <!-- Sports widget menu item to view the team's match results. -->
+  <string name="wrex_widget_results">Wuslědki</string>
+  <!-- Sports widget menu item to view the league standings table. -->
+  <string name="wrex_widget_standings">Stawy graśa</string>
+  <!-- Sports widget menu item to browse the team's wallpapers. -->
+  <string name="wrex_widget_wallpapers">Slězynowe wobraze</string>
   <!-- Sports widget menu item to remove the widget from the homepage. -->
-  <string name="sports_widget_remove">Wótwónoźeś</string>
-  <!-- Sports widget card title shown after a team is eliminated, asking if the user still wants to continue following the soccer tournament. -->
-  <string name="sports_widget_still_want_to_follow">Cośo dalej slědowaś?</string>
-  <!-- Sports widget card description shown after a team is eliminated, suggesting to choose another team. -->
-  <string name="sports_widget_choose_another_team">Wubjeŕśo druge mustwo, aby wó swětowem mejstaŕstwje na běžnem wóstał.</string>
-  <!-- Sports widget button label to follow another team after the current team is eliminated. -->
-  <string name="sports_widget_follow_another_team">Drugemu mustwoju slědowaś</string>
-  <!-- Sports widget card title shown before the soccer tournament begins on top of a timer that is counting down. -->
-  <string name="sports_widget_countdown_to_world_cup">Countdown k swětowemu mejstaŕstwoju</string>
-  <!-- Sports widget button label that navigates the user to the full soccer tournament match schedule. -->
-  <string name="sports_widget_view_schedule">Grajny plan pokazaś</string>
-  <!-- Sports widget button label that dismisses the step of choosing a team to follow. -->
-  <string name="sports_widget_skip">Pśeskócyś</string>
-  <!-- Sports widget match status label shown during halftime of a match. -->
-  <string name="sports_widget_halftime" tools:ignore="UnusedResources">Połcas</string>
-  <!-- Sports widget match status label shown during extra time of a match. -->
-  <string name="sports_widget_extra_time">Pódlejšenje</string>
-  <!-- Sports widget match status label shown during penalties of a match. -->
-  <string name="sports_widget_penalties">Pokutne kopy</string>
-  <!--
-    Sports widget countdown label for days. D is short for Day. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that (e.g. T for German).
-    Your translation will be automatically truncated at 2 characters to avoid layout issues.
-  -->
-  <string name="sports_widget_countdown_days">Ź</string>
-  <!--
-    Sports widget countdown pill abbreviated label for hours. H is short for Hour. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that (e.g. S for German).
-    Your translation will be automatically truncated at 2 characters to avoid layout issues.
-  -->
-  <string name="sports_widget_countdown_hours">G</string>
-  <!--
-    Sports widget countdown pill abbreviated label for minutes. M is short for Minute. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that.
-    Your translation will be automatically truncated at 2 characters to avoid layout issues
-  -->
-  <string name="sports_widget_countdown_minutes">M</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget team / country selector. -->
-  <string name="sports_widget_close_team_selection_sheet_content_description">Tabelu za wuběranje mustwa zacyniś</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget card. -->
-  <string name="sports_widget_close_content_description">Zacyniś</string>
+  <string name="wrex_widget_remove_widget">Asistent wótwónoźeś</string>
   <!-- Content description (for accessibility, not displayed) for the overflow (more options) menu button on the sports widget card. -->
-  <string name="sports_widget_more_options_content_description">Dalšne nastajenja</string>
+  <string name="wrex_widget_more_options_content_description">Dalšne nastajenja</string>
   <!--
-    Content description (for accessibility, not displayed) announcing the time remaining until the soccer tournament kickoff.
-    %1$d is the number of days, %2$d is the number of hours, and %3$d is the number of minutes.
+    Content description (for accessibility, not displayed) used for the sports widget card header announcing a live match.
+    %s is the name of the competition the match belongs to (e.g. "FA Cup").
   -->
-  <string name="sports_widget_countdown_remaining_content_description">Zbytny cas. Dny: %1$d. Góźiny: %2$d. Minuty: %3$d.</string>
-  <!-- Content description (for accessibility, not displayed)  for the action that navigates to the World Cup website. -->
-  <string name="sports_widget_go_to_world_cup_site_content_description" tools:ignore="UnusedResources">K sedłoju swětowego mejstaŕstwa</string>
-  <!--
-    Content description (for accessibility, not displayed)  announcing an upcoming soccer match.
-    %1$s is the home team name, %2$s is the away team name, %3$s is the match date, %4$s is the kickoff time.
-  -->
-  <string name="sports_widget_upcoming_match_content_description">Pśiducy: %1$s pśeśiwo %2$s, %3$s %4$s</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing a soccer match.
-    %1$s is the home team name, %2$s is the away team name, %3$s is trailing context
-    (e.g. formatted score "1 - 2 (Full time)", upcoming match info "Jun 19 5:00 PM",
-    or a match status like "Full time").
-  -->
-  <string name="sports_widget_match_content_description">%1$s pśeśiwo %2$s, %3$s</string>
-  <!--
-    Content description (for accessibility, not displayed)  used for the sports widget card header announcing a live match for a group or stage.
-    %s is the soccer tournament group name or stage (e.g. Group A represented by sports_widget_group_a, Round of 32 represented by sports_widget_round_of_32,
-    or Final represented by sports_widget_final).
-  -->
-  <string name="sports_widget_live_game_content_description">%s, graśe live</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing a live score.
-    %1$s is the home team name, %2$d is the home team score, %3$s is the away team name, %4$d is the away team score,
-    and %5$s is the match elapsed time (e.g. 72 minutes).
-  -->
-  <string name="sports_widget_live_score_content_description">%1$s %2$d, %3$s %4$d, %5$s, live</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing the elapsed minutes of a live match.
-    %1$s is the clock value, which may be a plain number (e.g. "72") or include extra time (e.g. "90+3").
-  -->
-  <string name="sports_widget_match_elapsed_minutes">Zajźony cas w minutach: %1$s</string>
+  <string name="wrex_widget_live_game_content_description">%s, graśe live</string>
   <!--
     Content description (for accessibility, not displayed) for a paginated item.
-    %1$s is the soccer tournament group name or stage (e.g. Group A represented by sports_widget_group_a, Round of 32 represented by sports_widget_round_of_32),
+    %1$s is the name of the competition the match belongs to (e.g. "FA Cup"),
     %2$d is the current page number, and %3$d is the total number of pages.
   -->
-  <string name="sports_widget_page_position_content_description">%1$s, bok %2$d z %3$d</string>
-  <!--
-    Content description (for accessibility, not displayed) for a page within the World Cup final results carousel.
-    %1$d is the current page number, and %2$d is the total number of pages.
-  -->
-  <string name="sports_widget_final_results_page_content_description" tools:ignore="UnusedResources">Kóńcne wuslědki swětowego mejstaŕstwa, bok %1$d z %2$d</string>
-  <!-- Content description (for accessibility, not displayed) for the World Cup final results page. -->
-  <string name="sports_widget_final_results_content_description">Kóńcne wuslědki swětowego mejstaŕstwa</string>
-  <!-- Content description (for accessibility, not displayed) for the remove button that removes the sports widget from the homepage. -->
-  <string name="sports_widget_remove_content_description" tools:ignore="UnusedResources">Swětowe mejstaŕstwo ze startowego boka wótwónoźeś</string>
-  <!-- Title shown on the sports widget immediately after the user has followed a team. %s is the selected team (e.g., "USA"). -->
-  <string name="sports_widget_team_followed_title">Slědujo: \n%s</string>
-  <!-- Description shown on the sports widget immediately after the user has followed a team -->
-  <string name="sports_widget_team_followed_description">Glědajśo za informacijami wó graśu, gaž se turněr bližy.</string>
-  <!-- Sports widget match status label shown during first half of a match. -->
-  <string name="sports_widget_first_half" tools:ignore="UnusedResources">Prědny połcas</string>
-  <!-- Sports widget match status label shown during second half of a match. -->
-  <string name="sports_widget_second_half" tools:ignore="UnusedResources">Drugi połcas</string>
-  <!-- Sports widget error card title shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_title">Zda se, až sćo offline.</string>
-  <!-- Sports widget error card description shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_description">Pśeglědujśo swój internetny zwisk a wopytajśo hyšći raz.</string>
-  <!-- Sports widget general group stage label in the soccer tournament. -->
-  <string name="sports_widget_group_stage">Kupkowa faza</string>
-  <!-- Sports widget error card title shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed_title">Informacije wó graśu njejsu tuchylu k dispoziciji.</string>
-  <!-- Sports widget error card description shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed_description">Aktualizěrujśo za mało minutow hyšći raz.</string>
-  <!-- Content description (for accessibility, not displayed) for teams which have not yet been determined in the match schedule. -->
-  <string name="sports_widget_team_to_be_determined">Mustwo, kótarež se ma póstajiś</string>
-  <!-- ==== End of Terms of use popup prompt. ==== -->
-
+  <string name="wrex_widget_page_position_content_description">%1$s, bok %2$d z %3$d</string>
   <!--
     Privacy notice homepage banner
 
@@ -4711,6 +4578,16 @@
   <string name="privacy_notice_updated_homepage_message_privacy_notice" tools:ignore="UnusedResources">powěźeńku priwatnosći</string>
   <!-- The second active link used in privacy_notice_updated_homepage_message -->
   <string name="privacy_notice_updated_homepage_message_learn_more" tools:ignore="UnusedResources">Dalšne informacije</string>
+  <!--
+    Collections migration homepage card
+
+    Title shown on the collections to tab groups migration card on the homepage.
+  -->
+  <string name="collections_migration_homepage_banner_title">Zběrki su něnto kupki</string>
+  <!-- Message shown on the collections to tab groups migration card on the homepage. -->
+  <string name="collections_migration_homepage_card_message">Dajo jadnorjejšy nałog, waše rejtariki zorganizěrowane wobchowaś</string>
+  <!-- Link text shown on the collections to tab groups migration card that opens the tab groups page in the tab manager. -->
+  <string name="collections_migration_homepage_card_link">Móje kupki rejtarikow pokazaś</string>
   <!-- Google Lens prototype related strings -->
   <string name="preferences_debug_settings_google_lens_integration">Integraciju Google Lens zmóžniś</string>
   <!-- Lens image search button content description -->
@@ -4723,16 +4600,50 @@
   <string name="context_menu_open_image_with_google_lens">Z Google Lens pytaś</string>
   <!-- Toast shown when the user denies the camera permission requested by the Lens camera screen -->
   <string name="lens_camera_permission_denied">Dowólnosć zapowěźona</string>
-  <!-- Title for the Google Lens AI feature toggle -->
-  <string name="ai_controls_google_lens_title">Google Lens</string>
-  <!-- Description for the Google Lens AI feature toggle -->
-  <string name="ai_controls_google_lens_description">Sćelo wobraze a fota na Google za wizuelne pytanje.</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the photo they capture will be sent to Google Lens for a visual search.
+  -->
+  <string name="lens_camera_title_lens">Google Lens</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the camera is being used to scan a QR code.
+  -->
+  <string name="lens_camera_title_qr">QR-kod</string>
+  <!-- Title for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_title">Pytanje Google Lens zmóžniś</string>
+  <!-- Description for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_description">Sćelo wobraze a fota na Google za wizuelne pytanje.</string>
+  <!-- Caption shown under the Google Lens toggle clarifying when the feature is available -->
+  <string name="preferences_google_lens_availability_caption">Jano k dispoziciji, gaž Google jo górjejce zmóžnjony a jo waša aktiwna pytnica, mjaztym až pśeglědujośo.</string>
   <!-- Content description for the Google Lens half of the camera mode toggle -->
   <string name="lens_camera_mode_lens">Google Lens</string>
   <!-- Content description for the QR scanner half of the camera mode toggle -->
   <string name="lens_camera_mode_qr">QR-scanner</string>
   <!-- Toast shown when the user picks an image from the gallery in QR mode but no QR code is found in it -->
   <string name="lens_camera_qr_no_code_found">Žeden QR-kod we wobrazu namakany</string>
+  <!-- Status shown under an image picked from the gallery or taken with the camera while it is being sent to Google Lens for a visual search -->
+  <string name="lens_camera_loading_status">Pyta se</string>
+  <!-- Button shown under an image picked from the gallery or taken with the camera while it is being sent to Google Lens. Tapping it stops the search and returns to the camera. -->
+  <string name="lens_camera_loading_cancel_button">Pśetergnuś</string>
+  <!-- Snackbar message shown when an image picked from the gallery or taken with the camera could not be opened or read, so it was never sent to Google Lens. Shown after returning to the camera. -->
+  <string name="lens_camera_image_load_failed_v2">Toś ten wobraz njedajo se zacytaś.</string>
+  <!-- Snackbar message shown when an image picked from the gallery could not be opened or read, so it was never sent to Google Lens. Shown after returning to the camera. -->
+  <string name="lens_camera_image_load_failed">Toś ten wobraz njedajo se zacytaś. Wopytajśo drugi.</string>
+  <!-- Snackbar message shown when an image picked from the gallery or taken with the camera could not be searched because of a network problem or an error from Google Lens. Shown after returning to the camera, next to the lens_camera_upload_failed_retry_button action. -->
+  <string name="lens_camera_upload_failed">Njemóžno, wuslědki z Google Lens dostaś</string>
+  <!-- Action in the snackbar shown when an image picked from the gallery or taken with the camera could not be searched with Google Lens. Tapping it searches the same image again. -->
+  <string name="lens_camera_upload_failed_retry_button">Hyšći raz wopytaś</string>
+  <!-- Title of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
+  <string name="lens_opt_out_title">Namakajśo jen z Google Lens</string>
+  <!-- Description of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
+  <string name="lens_opt_out_description">Wubjeŕśo wobraz abo wužywajśo swóju kameru, aby wuslědki z Google Lens dostał.</string>
+  <!-- Text of the link in the first-run Google Lens bottom sheet that opens the Search settings page -->
+  <string name="lens_opt_out_settings_link">Nastajenja Google Lens</string>
+  <!-- Button in the first-run Google Lens bottom sheet that dismisses it and starts the camera -->
+  <string name="lens_opt_out_try_it_now_button">Wopytajśo to něnto</string>
+  <!-- Button in the first-run Google Lens bottom sheet that leaves Google Lens without using it -->
+  <string name="lens_opt_out_not_now_button">Nic něnto</string>
   <!--
     Firefox Labs
 
@@ -4773,4 +4684,60 @@
   <string name="firefox_labs_feature_conflict">Funkcija njedajo se tuchylu wopytaś.</string>
   <!-- Text displayed on the Firefox Labs screen when there are no Labs experimental features present. -->
   <string name="firefox_labs_no_labs_available_description">Tuchylu njedajo eksperimentalne funkcije za testowanje</string>
+  <!-- Title of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_title" tools:ignore="UnusedResources">Izolacija websedła</string>
+  <!-- Description of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_description" tools:ignore="UnusedResources">Pśidatna bariera mjazy websedłami, kótaraž pomaga, waše daty na wšych rejtarikach šćitaś. Móžo wugbaśe, stabilnosć, kompatibelnosć websedła a nałog składowanja historije pśeglědowanja wobwliwowaś.</string>
+  <!--
+    PDF viewer toolbar and buttons
+
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description_2">Signaturu pśidaś</string>
+  <!--
+    PDF viewer toolbar and buttons
+
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description">PDF signěrowaś</string>
+  <!-- Content description for accessibility (used by screen readers): Description of the button that downloads the PDF displayed on the screen to the user's device. -->
+  <string name="pdf_tools_download_content_description">PDF ześěgnuś</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the printing dialogue window for the PDF displayed on the screen. -->
+  <string name="pdf_tools_print_content_description">PDF śišćaś</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the sharing options for the PDF being displayed on the screen. -->
+  <string name="pdf_tools_share_content_description">PDF źěliś</string>
+  <!--
+    PDF viewer add a signature dialog
+
+    The title of the dialog for adding a signature to a PDF.
+  -->
+  <string name="pdf_tools_signature_title">Signaturu pśidaś</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that closes the dialog for adding a signature to a PDF. -->
+  <string name="pdf_tools_signature_close_content_description">Zacyńśo wobceŕk signatury PDF</string>
+  <!-- The placeholder text shown in the empty text input field where users can enter the signature they wish to add to a PDF. -->
+  <string name="pdf_tools_signature_placeholder">Zapódajśo signaturu</string>
+  <!-- The text for the button that erases the text the user entered in the "add a signature" field. -->
+  <string name="pdf_tools_signature_clear_button">Lašowaś</string>
+  <!-- The text for the button that adds the signature the user has typed to the PDF. -->
+  <string name="pdf_tools_signature_add_button">Pśidaś</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the loading indicator when a signature is in the process of being added to a PDF. -->
+  <string name="pdf_tools_signature_adding_content_description">Signaturu pśidaś</string>
+  <!--
+    Listen to page
+
+    Content description for the reader view panel: a group of buttons floating over the content, which allow customizing the reader view or activating the Listen to Page feature
+  -->
+  <string name="reader_mode_panel_content_description_2">Nastajenja cytańskego naglěda</string>
+  <!--
+    Listen to page
+
+    Content description for the reader mode panel: a group of buttons floating over the content
+  -->
+  <string name="reader_mode_panel_content_description">Nastajenja cytańskego modusa</string>
+  <!-- Content description for the button in the reader view panel that turns on the Listen to Page feature (playback of content begins when button is pressed) -->
+  <string name="reader_mode_panel_listen_content_description">Głosnje cytaś</string>
+  <!-- Content description for media player displayed in Reader view when the Listen to Page (Read Aloud) feature is selected -->
+  <string name="reader_mode_panel_media_player_content_description">Medijowy wótgrawak</string>
+  <!-- Content description for the reader view button Reader view facilitates readability and has a Listen to Page feature. Button icon is a document with headphones, and is displayed next to the page URL when the feature is available. -->
+  <string name="browser_menu_read_or_listen">Cytański naglěd, bok cytaś abo na nju słuchaś</string>
 </resources>

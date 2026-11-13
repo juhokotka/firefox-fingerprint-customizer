@@ -10,39 +10,55 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import mozilla.components.feature.ipprotection.store.IPProtectionStore
+import mozilla.components.feature.ipprotection.store.state.AccountStatus
 import mozilla.components.feature.ipprotection.store.state.EligibilityStatus
 import mozilla.components.feature.ipprotection.store.state.IPProtectionState
 import mozilla.components.lib.state.helpers.AbstractBinding
-import mozilla.components.support.utils.DateTimeProvider
 
 /**
- * Triggers the IP protection onboarding bottom sheet when the user first becomes
- * eligible and meets our required heuristic provided by [IPProtectionPromptRepository].
+ * Triggers the IP protection onboarding bottom sheet when the user first becomes eligible and meets our required
+ * heuristic provided by [IPProtectionPromptRepository].
  *
- * @param repository Source of truth for whether the onboarding prompt is still allowed to appear
- * (feature flag, install age, prior dismissals, prior VPN usage).
+ * @param repository Source of truth for whether the onboarding prompt is still allowed to appear (feature flag, install
+ *   age, prior dismissals, prior VPN usage).
  * @param onShowOnboarding Callback invoked when the prompt should be presented to the user.
- * @param timeProvider Supplies the current time.
+ * @param onIneligible Callback invoked when the user is not eligible for the IP Protection feature.
+ * @param onAlreadySatisfied Callback invoked when the user is eligible but [repository] no longer allows the prompt,
+ *   e.g. it was already shown or the user has already used the VPN.
  * @param mainDispatcher [CoroutineDispatcher] on which [onShowOnboarding] is invoked.
  * @param store the singleton instance of [IPProtectionStore].
  */
 class IPProtectionOnboardingPrompt(
     private val repository: IPProtectionPromptRepository,
     private val onShowOnboarding: () -> Unit,
-    private val timeProvider: DateTimeProvider,
+    private val onIneligible: () -> Unit = {},
+    private val onAlreadySatisfied: () -> Unit = {},
     mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     store: IPProtectionStore,
 ) : AbstractBinding<IPProtectionState>(store, mainDispatcher) {
     override suspend fun onState(flow: Flow<IPProtectionState>) {
-        flow.map { it.eligibilityStatus }
+        flow
+            .map { Pair(it.eligibilityStatus, it.accountState.status) }
             .distinctUntilChanged()
-            .collect { eligibilityStatus ->
-                if (eligibilityStatus != EligibilityStatus.Eligible) {
+            .collect { (eligibilityStatus, accountStatus) ->
+                if (
+                    eligibilityStatus == EligibilityStatus.Ineligible ||
+                        eligibilityStatus == EligibilityStatus.UnsupportedRegion
+                ) {
+                    onIneligible()
                     return@collect
                 }
 
-                if (repository.canShowIPProtectionPrompt(timeProvider.currentTimeMillis())) {
+                val accountInitializing =
+                    accountStatus == AccountStatus.Uninitialized || accountStatus == AccountStatus.WarmingUp
+                if (eligibilityStatus != EligibilityStatus.Eligible || accountInitializing) {
+                    return@collect
+                }
+
+                if (repository.canShowIPProtectionPrompt()) {
                     onShowOnboarding()
+                } else {
+                    onAlreadySatisfied()
                 }
             }
     }

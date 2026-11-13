@@ -3,39 +3,40 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsIWinTaskbar.h"
 #include "WinTaskbar.h"
-#include "TaskbarPreview.h"
-#include "nsITaskbarPreviewController.h"
 
-#include "mozilla/RefPtr.h"
-#include "mozilla/StaticPtr.h"
-#include "mozilla/widget/JumpListBuilder.h"
-#include <nsError.h>
+#include <io.h>
 #include <nsCOMPtr.h>
-#include <nsIWidget.h>
+#include <nsError.h>
 #include <nsIBaseWindow.h>
+#include <nsIWidget.h>
 #include <nsServiceManagerUtils.h>
-#include "nsIXULAppInfo.h"
-#include "nsWindow.h"
-#include "WinUtils.h"
+#include <propkey.h>
+#include <propvarutil.h>
+#include <shellapi.h>
+
+#include "TaskbarPreview.h"
 #include "TaskbarTabPreview.h"
 #include "TaskbarWindowPreview.h"
-#include "nsWidgetsCID.h"
-#include "nsPIDOMWindow.h"
-#include "nsPIDOMWindowInlines.h"
-#include "nsAppDirectoryServiceDefs.h"
+#include "WinUtils.h"
 #include "mozilla/Preferences.h"
-#include "nsAppRunner.h"
-#include "nsXREDirProvider.h"
-#include "mozilla/widget/WinRegistry.h"
-#include "nsIWindowMediator.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/SimpleEnumerator.h"
-#include <io.h>
-#include <propvarutil.h>
-#include <propkey.h>
-#include <shellapi.h>
+#include "mozilla/StaticPtr.h"
+#include "mozilla/widget/JumpListBuilder.h"
+#include "mozilla/widget/WinRegistry.h"
+#include "nsAppDirectoryServiceDefs.h"
+#include "nsAppRunner.h"
+#include "nsITaskbarPreviewController.h"
+#include "nsIWinTaskbar.h"
+#include "nsIWindowMediator.h"
+#include "nsIXULAppInfo.h"
+#include "nsPIDOMWindow.h"
+#include "nsPIDOMWindowInlines.h"
+#include "nsWidgetsCID.h"
+#include "nsWindow.h"
+#include "nsXREDirProvider.h"
 
 namespace {
 
@@ -113,7 +114,7 @@ nsresult SetWindowAppUserModelProp(mozIDOMWindow* aParent,
 // default nsITaskbarPreviewController
 
 class DefaultController final : public nsITaskbarPreviewController {
-  ~DefaultController() {}
+  ~DefaultController() = default;
   HWND mWnd;
 
  public:
@@ -210,8 +211,6 @@ bool WinTaskbar::Initialize() {
   }
   return true;
 }
-
-WinTaskbar::WinTaskbar() : mTaskbar(nullptr) {}
 
 WinTaskbar::~WinTaskbar() {
   if (mTaskbar) {  // match successful Initialize() call
@@ -527,6 +526,52 @@ WinTaskbar::SetAllWindowIcons(uint16_t aIconResourceId) {
         windowAumid.Equals(expectedAumid)) {
       win->SetIconFromExeResource(aIconResourceId);
     }
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+WinTaskbar::RefreshTaskbarButtons() {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!Initialize()) {
+    return NS_OK;
+  }
+
+  nsAutoString expectedAumid;
+  if (!GetAppUserModelID(expectedAumid, /* aPrivateBrowsing */ false)) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  nsCOMPtr<nsIWindowMediator> wm = do_GetService(NS_WINDOWMEDIATOR_CONTRACTID);
+  if (!wm) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsISimpleEnumerator> windows;
+  if (NS_FAILED(wm->GetEnumerator(nullptr, getter_AddRefs(windows)))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  AutoTArray<HWND, 8> hwnds;
+  for (const auto& outer : SimpleEnumerator<nsPIDOMWindowOuter>(windows)) {
+    HWND hwnd = GetHWNDFromDocShell(outer->GetDocShell());
+    if (!hwnd) {
+      continue;
+    }
+    nsAutoString windowAumid;
+    if (GetWindowAumid(hwnd, windowAumid) &&
+        windowAumid.Equals(expectedAumid)) {
+      hwnds.AppendElement(hwnd);
+    }
+  }
+
+  for (HWND hwnd : hwnds) {
+    mTaskbar->DeleteTab(hwnd);
+  }
+  for (HWND hwnd : hwnds) {
+    mTaskbar->AddTab(hwnd);
   }
 
   return NS_OK;

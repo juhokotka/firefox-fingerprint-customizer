@@ -20,13 +20,12 @@ support-files = ["simple.html", "tracing.html"]
 support-files = ["simple.html", "test_dedup_script.js"]
 
 ["browser_test_feature_js_sources_retrieval.js"]
-skip-if = [
-  "os == 'win' && os_version == '11.26200' && asan", # Bug 2019745
-]
 support-files = [
   "simple.html",
   "page_with_external_js.html",
-  "external_script.js"
+  "external_script.js",
+  "page_with_utf8_external_js.html",
+  "utf8_external_script.js",
 ]
 
 ["browser_test_feature_js_sources_shutdown_process.js"]
@@ -63,9 +62,8 @@ skip-if = [
 ["browser_test_feature_multiprocess_capture_with_signal.js"]
 support-files = ["do_work_500ms.html"]
 skip-if = [
-  "ccov", #            The signals for the profiler conflict with the ccov signals
-  "os == 'win'", # than these tests, so we're disabling them for now. See Bug 1904897.
-  "debug && verify",
+  "ccov", # The signals for the profiler conflict with the ccov signals
+  "os == 'win'", # Signals are not yet supported on Windows - Bug 1867328
 ]
 
 ["browser_test_feature_nostacksampling.js"]
@@ -73,6 +71,9 @@ support-files = ["do_work_500ms.html"]
 
 ["browser_test_marker_network_cancel.js"]
 support-files = ["simple.html"]
+
+["browser_test_marker_network_prefetch.js"]
+support-files = ["simple.html", "speculation_rules_prefetch.html"]
 
 ["browser_test_marker_network_private_browsing.js"]
 support-files = ["simple.html"]

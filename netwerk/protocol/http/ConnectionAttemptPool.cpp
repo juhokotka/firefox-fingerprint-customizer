@@ -15,8 +15,8 @@
 #include "ConnectionEntry.h"
 #include "DnsAndConnectSocket.h"
 #include "HappyEyeballsConnectionAttempt.h"
-#include "nsHttpHandler.h"
 #include "nsHttpConnectionMgr.h"
+#include "nsHttpHandler.h"
 
 namespace mozilla::net {
 

@@ -5,7 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 #define HIDDEN_WINDOW
 
-<?csp script-src chrome: moz-src: resource:; ?>
+<?csp script-src chrome: moz-src: resource:; frame-src chrome:; object-src 'none'; ?>
 
 <window id="main-window"
         xmlns:html="http://www.w3.org/1999/xhtml"
@@ -28,8 +28,8 @@
          the application. -->
     <menuitem data-l10n-id="menu-file-new-window"
               id="macDockMenuNewWindow" />
-    <!--menuitem data-l10n-id="menu-file-new-private-window"
-              id="macDockMenuNewPrivateWindow" /-->
+    <menuitem data-l10n-id="menu-file-new-private-window"
+              id="macDockMenuNewPrivateWindow" />
   </menupopup>
 </popupset>
 

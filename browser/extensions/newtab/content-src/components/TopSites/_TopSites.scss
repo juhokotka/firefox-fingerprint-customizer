@@ -26,9 +26,13 @@ $calculated-max-width-twice-widest: $break-point-widest + 2 * $card-width;
   }
 
   &:not(.dnd-active) {
+    // Reveal on keyboard focus, not any :focus-within. A pointer click can
+    // leave focus on the menu button, and :focus-within would then keep the
+    // tile showing hover once the pointer leaves.
     .top-site-outer:is(
     .active,
-    :has(.top-site-inner:is(:hover, :focus-within))
+    :has(.top-site-inner:hover),
+    :has(.top-site-inner :focus-visible)
   ) {
       @include wallpaper-contrast-fix;
 
@@ -246,10 +250,15 @@ $calculated-max-width-twice-widest: $break-point-widest + 2 * $card-width;
   // Gated to :not(.dnd-active) so a drag never shows hover chrome — macOS
   // freezes :hover on the dragged tile and we can't use pointer-events (the
   // placeholder is the drop target). Keep new tile-hover styling behind this.
-  .top-sites-list:not(.dnd-active) &:has(.top-site-inner:is(:hover, :focus-within)) {
+  // Keyboard focus rather than :focus-within, so focus left on the menu button
+  // by a pointer click doesn't leave the "..." button stuck visible.
+  .top-sites-list:not(.dnd-active) &:is(:has(.top-site-inner:hover), :has(.top-site-inner :focus-visible)) {
     .context-menu-button {
       opacity: 1;
-      transition: opacity 200ms;
+
+      @media (prefers-reduced-motion: no-preference) {
+        transition: opacity 200ms;
+      }
     }
 
     .tile {
@@ -326,6 +335,9 @@ $calculated-max-width-twice-widest: $break-point-widest + 2 * $card-width;
     }
   }
 
+  // The "..." menu trigger stays a plain button while Bug 2062844 is pending,
+  // so it carries its own icon and hover/focus styling rather than inheriting
+  // moz-button's. See the comment on the button in TopSite.jsx.
   .context-menu-button {
     background-image: url('chrome://global/skin/icons/more.svg');
     border: 0;
@@ -554,8 +566,12 @@ $calculated-max-width-twice-widest: $break-point-widest + 2 * $card-width;
     transition-delay: 200ms;
   }
 
-  // Reveal on keyboard focus anywhere within the shortcuts row.
-  .top-sites-list:focus-within & {
+  // Show it when someone tabs through the row. We can't just use :focus-within,
+  // since a mouse click leaves focus behind and the button would stay visible.
+  // The second line is for the add button itself: it's a moz-button, and
+  // :focus-visible can't see inside those (Bug 2062844).
+  .top-sites-list:has(:focus-visible) &,
+  &:focus-within {
     opacity: 1;
   }
 
@@ -702,13 +718,6 @@ $calculated-max-width-twice-widest: $break-point-widest + 2 * $card-width;
       }
     }
 
-    .enable-custom-image-input {
-      display: inline-block;
-      font-size: var(--font-size-small);
-      margin-block-start: var(--space-xsmall);
-      cursor: pointer;
-    }
-
     .custom-image-input-container {
       margin-block-start: var(--space-xsmall);
 
@@ -805,6 +814,19 @@ $calculated-max-width-twice-widest: $break-point-widest + 2 * $card-width;
   .actions {
     justify-content: flex-end;
     padding: var(--space-large) var(--space-xlarge);
+  }
+
+  // "Use a custom image" and the action buttons share one padded row.
+  .topsite-form-footer {
+    display: flex;
+    align-items: center;
+    padding: var(--space-large) var(--space-xlarge);
+
+    .actions {
+      margin-inline-start: auto;
+      padding: 0;
+      border-block-start: none;
+    }
   }
 
   @media (max-width: $break-point-medium) {

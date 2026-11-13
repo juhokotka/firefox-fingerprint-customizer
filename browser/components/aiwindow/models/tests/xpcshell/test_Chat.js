@@ -15,6 +15,9 @@ const { Chat, executeToolByName } = ChromeUtils.importESModule(
 const { RunSearch, GetPageContent, toolFns } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/Tools.sys.mjs"
 );
+const { AuthProvider } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/models/AuthProvider.sys.mjs"
+);
 const {
   MODEL_FEATURES,
   openAIEngine,
@@ -200,7 +203,7 @@ add_task(async function test_Chat_fetchWithHistory_streams_and_forwards_args() {
       },
     };
 
-    sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+    sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
     const conversation = new ChatConversation({
       title: "chat title",
@@ -208,11 +211,11 @@ add_task(async function test_Chat_fetchWithHistory_streams_and_forwards_args() {
       pageUrl: new URL("https://www.firefox.com"),
       pageMeta: {},
     });
-    conversation.addSystemMessage(
-      SYSTEM_PROMPT_TYPE.TEXT,
-      "You are helpful",
-      0
-    );
+    conversation.setSystemMessage({
+      type: SYSTEM_PROMPT_TYPE.TEXT,
+      body: "You are helpful",
+      version: 0,
+    });
     conversation.addUserMessage("Hi there", "https://www.firefox.com", 0);
     conversation.addAssistantMessage("text", "");
 
@@ -283,7 +286,7 @@ add_task(async function test_Chat_fetchWithHistory_sends_compacted_args() {
         return {};
       },
     };
-    sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+    sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
     const conversation = new ChatConversation({
       title: "t",
@@ -291,7 +294,11 @@ add_task(async function test_Chat_fetchWithHistory_sends_compacted_args() {
       pageUrl: new URL("https://example.test"),
       pageMeta: {},
     });
-    conversation.addSystemMessage(SYSTEM_PROMPT_TYPE.TEXT, "sys", 0);
+    conversation.setSystemMessage({
+      type: SYSTEM_PROMPT_TYPE.TEXT,
+      body: "sys",
+      version: 0,
+    });
     conversation.addUserMessage("Read this", "https://example.test", 0);
     conversation.addAssistantMessage("text", "");
 
@@ -358,7 +365,7 @@ add_task(async function test_Chat_fetchWithHistory_handles_tool_calls() {
       .stub(toolFns, "searchBrowsingHistory")
       .resolves("tool result");
 
-    sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+    sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
     const conversation = new ChatConversation({
       title: "chat title",
@@ -443,7 +450,7 @@ add_task(
         },
       };
 
-      sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+      sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
       const conversation = new ChatConversation({
         title: "chat title",
@@ -514,7 +521,7 @@ add_task(
         .stub(toolFns, "searchBrowsingHistory")
         .resolves("should not be called");
 
-      sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+      sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
       const conversation = new ChatConversation({
         title: "chat title",
@@ -588,7 +595,7 @@ add_task(
       };
 
       sb.stub(toolFns, "getOpenTabs").resolves([]);
-      sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+      sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
       const conversation = new ChatConversation({
         title: "chat title",
@@ -693,14 +700,18 @@ add_task(
           const secProps = conversation.securityProperties;
           if (secProps.untrustedInput && secProps.privateData) {
             return [
-              `get_page_content is not available for ${_params?.url} when the conversation involves both untrusted input and private data.`,
+              {
+                url: _params?.url,
+                ok: false,
+                content: `get_page_content is not available for ${_params?.url} when the conversation involves both untrusted input and private data.`,
+              },
             ];
           }
           secProps.setUntrustedInput();
           secProps.setPrivateData();
-          return ["page content"];
+          return [{ url: _params?.url, ok: true, content: "page content" }];
         });
-      sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+      sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
       const conversation = new ChatConversation({
         title: "flags test",
@@ -803,7 +814,7 @@ add_task(async function test_Chat_fetchWithHistory_uses_modelId_from_pref() {
     const createEngineStub = sb
       .stub(openAIEngine, "_createEngine")
       .resolves(fakeEngineInstance);
-    sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+    sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
     const conversation = new ChatConversation({
       title: "chat title",
@@ -844,8 +855,14 @@ add_task(async function test_Chat_fetchWithHistory_uses_modelId_from_pref() {
 });
 
 add_task(
-  async function test_Chat_fetchWithHistory_run_search_executes_only_once() {
+  async function test_Chat_fetchWithHistory_search_the_web_escalates_to_handoff() {
+    // A repeat search_the_web in the same turn escalates: runSearchTheWeb
+    // returns { requiresSearchHandoff: true }, the Chat loop reroutes to
+    // executeToolByName(RUN_SEARCH), fires the handoff, and ends the turn —
+    // while the tool-result stays labeled search_the_web.
     const sb = sinon.createSandbox();
+    Services.fog.initializeFOG();
+    Services.fog.testResetFOG();
     try {
       let callCount = 0;
       const fakeEngine = {
@@ -858,22 +875,8 @@ add_task(
                   {
                     id: "call_search_001",
                     function: {
-                      name: "run_search",
+                      name: "search_the_web",
                       arguments: JSON.stringify({ query: "test query" }),
-                    },
-                  },
-                ],
-              };
-            } else if (callCount === 2) {
-              yield {
-                toolCalls: [
-                  {
-                    id: "call_search_002",
-                    function: {
-                      name: "run_search",
-                      arguments: JSON.stringify({
-                        query: "second search query",
-                      }),
                     },
                   },
                 ],
@@ -889,10 +892,11 @@ add_task(
         },
       };
 
+      // The escalation reroutes to run_search under the hood.
       const runSearchStub = sb
         .stub(RunSearch, "runSearch")
         .resolves("search result");
-      sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+      sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
       const mockBrowser = {
         documentGlobal: {
@@ -911,7 +915,7 @@ add_task(
       origLazy.AIWindow.openSidebarAndContinue = openSidebarStub;
 
       const conversation = new ChatConversation({
-        title: "search guard test",
+        title: "search handoff test",
         description: "desc",
         pageUrl: new URL("https://www.firefox.com"),
         pageMeta: {},
@@ -932,6 +936,11 @@ add_task(
         model: TEST_MODEL,
         engine: fakeEngine,
       });
+
+      // A grounded search_the_web has already run this turn, so the model's
+      // next search_the_web call escalates (HANDOFF returns before retrieval).
+      conversation._searchTheWebTurn = conversation.currentTurnIndex();
+
       await Chat.fetchWithHistory({
         conversation,
         browsingContext: context.browsingContext,
@@ -939,53 +948,252 @@ add_task(
 
       Assert.ok(
         runSearchStub.calledOnce,
-        "run_search should be called exactly once"
+        "The escalation reroutes to run_search exactly once"
       );
-
-      // Simulate openSidebarAndContinue calling fetchWithHistory again
-      // on the same conversation (same turn). The guard should block
-      // execution and the model continues generating text.
-      callCount = 1;
-      conversation.addAssistantMessage("text", "");
-      await Chat.fetchWithHistory({
-        conversation,
-        browsingContext: context.browsingContext,
-      });
-
       Assert.ok(
-        runSearchStub.calledOnce,
-        "run_search should still be called exactly once after second fetchWithHistory"
+        openSidebarStub.calledOnce,
+        "The handoff opens the sidebar and continues the conversation"
       );
       Assert.equal(
-        getLastAssistantResponse(conversation).content.body,
-        "Final answer.",
-        "Model should continue generating text after blocked search"
+        callCount,
+        1,
+        "The turn ends at the handoff — the model is not re-invoked"
       );
 
-      // Verify guard message is in conversation with correct text
-      const toolMessages = conversation.messages.filter(
-        msg => msg.role === MESSAGE_ROLE.TOOL
-      );
-      const guardMessage = toolMessages.find(msg =>
-        String(msg.content?.body).includes("ERROR: run_search tool call error:")
-      );
-      Assert.ok(guardMessage, "Guard tool result should be in conversation");
-
-      // Simulate user sending "Go ahead" (new turn). Guard should allow.
-      conversation.addUserMessage("Go ahead", "https://www.firefox.com", 0);
-      conversation.addAssistantMessage("text", "");
-      callCount = 0;
-      await Chat.fetchWithHistory({
-        conversation,
-        browsingContext: context.browsingContext,
-      });
-
-      Assert.ok(
-        runSearchStub.calledTwice,
-        "run_search should be called twice total (once per turn)"
+      // run_search reports failures in its returned string rather than an
+      // `error` property, so the search-specific check must not fire here.
+      const toolCalls = Glean.smartWindow.toolCall.testGetValue();
+      Assert.equal(toolCalls?.length, 1, "One tool_call event is recorded");
+      Assert.equal(
+        toolCalls[0].extra.error,
+        "",
+        "A handoff is not reported as a failed search"
       );
 
       origLazy.AIWindow.openSidebarAndContinue = origOpenSidebar;
+    } finally {
+      sb.restore();
+    }
+  }
+);
+
+add_task(
+  async function test_Chat_fetchWithHistory_search_the_web_emits_pending_tool_message() {
+    // Feature-gated handlers (search_the_web) do long-running internal work
+    // before returning, so the tool message is emitted up front with a
+    // placeholder body to render the pending action log row, then reconciled
+    // with the real result in place (no duplicate row). Use the handoff path
+    // (deterministic) and inspect the conversation from inside the run_search
+    // stub, which runs before the tool result is finalized.
+    const sb = sinon.createSandbox();
+    try {
+      let callCount = 0;
+      const fakeEngine = {
+        runWithGenerator(_options) {
+          callCount++;
+          async function* gen() {
+            if (callCount === 1) {
+              yield {
+                toolCalls: [
+                  {
+                    id: "call_search_pending_001",
+                    function: {
+                      name: "search_the_web",
+                      arguments: JSON.stringify({ query: "test query" }),
+                    },
+                  },
+                ],
+              };
+            } else {
+              yield { text: "Final answer." };
+            }
+          }
+          return gen();
+        },
+        getConfig() {
+          return {};
+        },
+      };
+
+      const conversation = new ChatConversation({
+        title: "search pending test",
+        description: "desc",
+        pageUrl: new URL("https://www.firefox.com"),
+        pageMeta: {},
+      });
+
+      // Capture the tool-message state while the tool is still running.
+      let pendingSnapshot = null;
+      const runSearchStub = sb.stub(RunSearch, "runSearch").callsFake(() => {
+        const toolMessages = conversation.messages.filter(
+          m => m.role === MESSAGE_ROLE.TOOL
+        );
+        pendingSnapshot = {
+          count: toolMessages.length,
+          body: toolMessages[0]?.content?.body,
+          name: toolMessages[0]?.content?.name,
+        };
+        return Promise.resolve("search result");
+      });
+      sb.stub(AuthProvider, "getToken").resolves("mock_token");
+
+      const mockBrowser = {
+        documentGlobal: {
+          closed: false,
+          gBrowser: {
+            getTabForBrowser: () => ({ selected: true }),
+            selectedTab: null,
+          },
+        },
+      };
+      const origLazy = ChromeUtils.importESModule(
+        "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs"
+      );
+      const origOpenSidebar = origLazy.AIWindow.openSidebarAndContinue;
+      origLazy.AIWindow.openSidebarAndContinue = sb.stub().callsFake(() => {});
+
+      conversation.addUserMessage(
+        "Search for something",
+        "https://www.firefox.com",
+        0
+      );
+      conversation.addAssistantMessage("text", "");
+
+      setupConversationForChat(conversation, {
+        model: TEST_MODEL,
+        engine: fakeEngine,
+      });
+
+      // Force the handoff path so run_search (our probe) is invoked.
+      conversation._searchTheWebTurn = conversation.currentTurnIndex();
+
+      await Chat.fetchWithHistory({
+        conversation,
+        browsingContext: { embedderElement: mockBrowser },
+      });
+
+      Assert.ok(runSearchStub.calledOnce, "run_search ran once");
+      Assert.ok(
+        pendingSnapshot,
+        "run_search observed the conversation mid-tool-call"
+      );
+      Assert.equal(
+        pendingSnapshot.count,
+        1,
+        "A pending tool message exists before the tool result is finalized"
+      );
+      Assert.deepEqual(
+        pendingSnapshot.body,
+        { pending: true },
+        "The pending tool message carries a body marked pending"
+      );
+      Assert.equal(
+        pendingSnapshot.name,
+        "search_the_web",
+        "The pending tool message is labeled search_the_web"
+      );
+
+      const toolMessages = conversation.messages.filter(
+        m => m.role === MESSAGE_ROLE.TOOL
+      );
+      Assert.equal(
+        toolMessages.length,
+        1,
+        "Reconciliation updates the same row rather than duplicating it"
+      );
+      Assert.equal(
+        toolMessages[0].content.body,
+        "search result",
+        "The placeholder body is reconciled with the real tool result"
+      );
+
+      origLazy.AIWindow.openSidebarAndContinue = origOpenSidebar;
+    } finally {
+      sb.restore();
+    }
+  }
+);
+
+add_task(
+  async function test_Chat_fetchWithHistory_failed_tool_omits_action_log_name() {
+    // A tool that throws should not surface as a completed action-log step. The
+    // tool message is stored without a `name`, so ai-window.mjs drops the
+    // action-log event (getActionLogConfigForTool(undefined) -> show: false),
+    // preserving the pre-existing behavior of rendering nothing for a failed
+    // call. Only tools that showed a pending row up front carry a name on
+    // failure (so that row can resolve).
+    const sb = sinon.createSandbox();
+    try {
+      let callCount = 0;
+      const fakeEngine = {
+        runWithGenerator(_options) {
+          callCount++;
+          async function* gen() {
+            if (callCount === 1) {
+              yield {
+                toolCalls: [
+                  {
+                    id: "call_get_user_memories_err",
+                    function: {
+                      name: "get_user_memories",
+                      arguments: JSON.stringify({}),
+                    },
+                  },
+                ],
+              };
+            } else {
+              yield { text: "Final answer." };
+            }
+          }
+          return gen();
+        },
+        getConfig() {
+          return {};
+        },
+      };
+
+      sb.stub(toolFns, "getUserMemories").rejects(new Error("boom"));
+      sb.stub(AuthProvider, "getToken").resolves("mock_token");
+
+      const conversation = new ChatConversation({
+        title: "failed tool",
+        description: "desc",
+        pageUrl: new URL("https://www.firefox.com"),
+        pageMeta: {},
+      });
+      conversation.addUserMessage(
+        "What memories have you saved about me?",
+        "https://www.firefox.com",
+        { memoriesEnabled: true }
+      );
+      conversation.addAssistantMessage("text", "");
+
+      setupConversationForChat(conversation, {
+        model: TEST_MODEL,
+        engine: fakeEngine,
+      });
+
+      await Chat.fetchWithHistory({ conversation });
+
+      const toolMessages = conversation.messages.filter(
+        msg => msg.role === MESSAGE_ROLE.TOOL
+      );
+      Assert.equal(
+        toolMessages.length,
+        1,
+        "The failed tool call still records a tool message"
+      );
+      Assert.ok(
+        String(toolMessages[0].content?.body?.error).includes(
+          "Tool execution failed"
+        ),
+        "The tool message body carries the execution error"
+      );
+      Assert.equal(
+        toolMessages[0].content?.name,
+        undefined,
+        "A failed non-pending tool omits name, so no action-log card renders"
+      );
     } finally {
       sb.restore();
     }
@@ -1025,7 +1233,7 @@ add_task(
       };
 
       sb.stub(toolFns, "getUserMemories").resolves("list of memories");
-      sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+      sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
       const conversation = new ChatConversation({
         title: "memories are enabled",
@@ -1103,7 +1311,7 @@ add_task(
       };
 
       sb.stub(toolFns, "getUserMemories").resolves("list of memories");
-      sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+      sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
       const conversation = new ChatConversation({
         title: "memories are enabled",
@@ -1168,7 +1376,7 @@ add_task(
         },
       };
 
-      sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+      sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
       const conversation = new ChatConversation({
         title: "chat title",
@@ -1176,11 +1384,11 @@ add_task(
         pageUrl: new URL("https://www.firefox.com"),
         pageMeta: {},
       });
-      conversation.addSystemMessage(
-        SYSTEM_PROMPT_TYPE.TEXT,
-        "You are helpful",
-        0
-      );
+      conversation.setSystemMessage({
+        type: SYSTEM_PROMPT_TYPE.TEXT,
+        body: "You are helpful",
+        version: 0,
+      });
       conversation.addUserMessage("Hi there", "https://www.firefox.com", 0);
       conversation.addAssistantMessage("text", "");
 
@@ -1241,7 +1449,7 @@ add_task(
         abortController.abort();
         return "tool result";
       });
-      sb.stub(openAIEngine, "getFxAccountToken").resolves("mock_token");
+      sb.stub(AuthProvider, "getToken").resolves("mock_token");
 
       const conversation = new ChatConversation({
         title: "chat title",

@@ -36,6 +36,8 @@
 
 ["include:../../../../../dom/cache/test/marionette/manifest.toml"]
 
+["include:../../../../../dom/fs/test/marionette/manifest.toml"]
+
 ["include:../../../../../dom/indexedDB/test/marionette/manifest.toml"]
 
 ["include:../../../../../dom/notification/test/marionette/manifest.toml"]
@@ -47,6 +49,10 @@
 # extensions tests
 
 ["include:../../../../../extensions/pref/autoconfig/test/marionette/manifest.toml"]
+
+# ipc tests
+
+["include:../../../../../ipc/glue/test/marionette/manifest.toml"]
 
 # js tests
 

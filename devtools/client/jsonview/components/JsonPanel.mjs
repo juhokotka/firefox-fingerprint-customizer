@@ -20,6 +20,7 @@ import {
   MODE,
 } from "resource://devtools/client/shared/components/reps/reps/constants.mjs";
 import { Rep } from "resource://devtools/client/shared/components/reps/reps/rep.mjs";
+import { JsonlLineError } from "resource://devtools/client/shared/jsonl-utils.mjs";
 
 const TreeView = createFactory(TreeViewClass);
 const { JsonToolbar } = createFactories(JsonToolbarClass);
@@ -164,6 +165,13 @@ class JsonPanel extends Component {
     // Hide value for bucket nodes (they show ranges like [0…99])
     if (member.type === "bucket") {
       return null;
+    }
+
+    if (JsonlLineError.isInstance(member.value)) {
+      return div(
+        { className: "jsonlLineError" },
+        `${member.value.message}: ${member.value.raw}`
+      );
     }
 
     // Hide object summary when non-empty object is expanded (bug 1244912).

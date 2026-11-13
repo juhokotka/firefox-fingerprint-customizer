@@ -58,7 +58,8 @@ class nsCSSProps {
     return Servo_Property_LookupEnabledForAllContent(&aProperty);
   }
 
-  // As above, but looked up using a property's IDL name.
+  // As above, but looked up using a property's IDL name, and resolves
+  // aliases to return the aliased property.
   // eCSSPropertyExtra_variable won't be returned from this method.
   static NonCustomCSSPropertyId LookupPropertyByIDLName(
       const nsACString& aPropertyIDLName, EnabledState aEnabled);
@@ -125,12 +126,13 @@ class nsCSSProps {
   static const NonCustomCSSPropertyId* const
       kSubpropertyTable[eCSSProperty_COUNT - eCSSProperty_COUNT_no_shorthands];
 
+  static bool IsPropertyExposedToJS(NonCustomCSSPropertyId, JSContext*,
+                                    JSObject*);
+
  public:
-  /**
-   * Returns true if the backdrop-filter pref and the gfx blocklist are enabled.
-   */
-  static bool IsBackdropFilterAvailable(JSContext*, JSObject*) {
-    return IsEnabled(eCSSProperty_backdrop_filter, EnabledState::ForAllContent);
+  template <NonCustomCSSPropertyId aId>
+  static bool IsPropertyExposedToJS(JSContext* aCx, JSObject* aObj) {
+    return IsPropertyExposedToJS(aId, aCx, aObj);
   }
 
   /**
@@ -157,8 +159,9 @@ class nsCSSProps {
  private:
   static bool gPropertyEnabled[eCSSProperty_COUNT_with_aliases];
   // Defined in the generated nsCSSPropsGenerated.inc.
-  static const char* const kIDLNameTable[eCSSProperty_COUNT];
-  static const int32_t kIDLNameSortPositionTable[eCSSProperty_COUNT];
+  static const char* const kIDLNameTable[eCSSProperty_COUNT_with_aliases];
+  static const int32_t
+      kIDLNameSortPositionTable[eCSSProperty_COUNT_with_aliases];
 
  public:
   /**
@@ -172,9 +175,8 @@ class nsCSSProps {
    * property.  nullptr is returned for internal properties.
    */
   static const char* PropertyIDLName(NonCustomCSSPropertyId aProperty) {
-    MOZ_ASSERT(
-        aProperty != eCSSProperty_UNKNOWN && aProperty < eCSSProperty_COUNT,
-        "out of range");
+    MOZ_ASSERT(aProperty != eCSSProperty_UNKNOWN);
+    MOZ_ASSERT(aProperty < eCSSProperty_COUNT_with_aliases);
     return kIDLNameTable[aProperty];
   }
 
@@ -183,17 +185,15 @@ class nsCSSProps {
    * properties sorted by their IDL name.
    */
   static int32_t PropertyIDLNameSortPosition(NonCustomCSSPropertyId aProperty) {
-    MOZ_ASSERT(
-        aProperty != eCSSProperty_UNKNOWN && aProperty < eCSSProperty_COUNT,
-        "out of range");
+    MOZ_ASSERT(aProperty != eCSSProperty_UNKNOWN);
+    MOZ_ASSERT(aProperty < eCSSProperty_COUNT_with_aliases);
     return kIDLNameSortPositionTable[aProperty];
   }
 
   static bool IsEnabled(NonCustomCSSPropertyId aProperty,
                         EnabledState aEnabled) {
-    MOZ_ASSERT(aProperty != eCSSProperty_UNKNOWN &&
-                   aProperty < eCSSProperty_COUNT_with_aliases,
-               "out of range");
+    MOZ_ASSERT(aProperty != eCSSProperty_UNKNOWN);
+    MOZ_ASSERT(aProperty < eCSSProperty_COUNT_with_aliases);
     // In the child process, assert that we're not trying to parse stylesheets
     // before we've gotten all our prefs.
     MOZ_ASSERT_IF(!XRE_IsParentProcess(),

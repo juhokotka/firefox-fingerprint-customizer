@@ -21,6 +21,7 @@ import mozpack.path as mozpath
 import requests
 
 from mozbuild.base import MozbuildObject
+from mozbuild.vendor.host_base import TagNotFound
 from mozbuild.vendor.rewrite_mozbuild import (
     MozBuildRewriteException,
     add_file_to_moz_build_file,
@@ -28,7 +29,7 @@ from mozbuild.vendor.rewrite_mozbuild import (
 )
 
 DEFAULT_EXCLUDE_FILES = [".git*", ".git*/**", "**/.cvsignore"]
-DEFAULT_KEEP_FILES = ["**/moz.build", "**/moz.yaml"]
+DEFAULT_KEEP_FILES = ["**/moz.build", "**/moz.yaml", "**/LICENSE-NOTICE.txt"]
 DEFAULT_INCLUDE_FILES = []
 
 
@@ -102,6 +103,34 @@ def list_of_paths_to_readable_string(paths):
     return final_string + "]"
 
 
+def safe_extract_tar(tar, path=".", *, numeric_owner=False):
+    def validate_tar_member(member, path):
+        def is_within_directory(directory, target):
+            real_directory = os.path.realpath(directory)
+            real_target = os.path.realpath(target)
+            prefix = os.path.commonprefix([real_directory, real_target])
+            return prefix == real_directory
+
+        member_path = os.path.join(path, member.name)
+        if not is_within_directory(path, member_path):
+            raise Exception("Attempted path traversal in tar file: " + member.name)
+        if member.issym():
+            link_path = os.path.join(os.path.dirname(member_path), member.linkname)
+            if not is_within_directory(path, link_path):
+                raise Exception(
+                    "Attempted link path traversal in tar file: " + member.name
+                )
+        if member.mode & (stat.S_ISUID | stat.S_ISGID):
+            raise Exception("Attempted setuid or setgid in tar file: " + member.name)
+
+    def _files(tar, path):
+        for member in tar:
+            validate_tar_member(member, path)
+            yield member
+
+    tar.extractall(path, members=_files(tar, path), numeric_owner=numeric_owner)
+
+
 class VendorManifest(MozbuildObject):
     def should_perform_step(self, step):
         return step not in self.manifest["vendoring"].get("skip-vendoring-steps", [])
@@ -152,7 +181,16 @@ class VendorManifest(MozbuildObject):
             # This case allows us to force-update a tag-tracking library to master
             new_revision, timestamp = self.source_host.upstream_commit("HEAD")
         elif ref_type == "tag":
-            new_revision, timestamp = self.source_host.upstream_tag(revision)
+            try:
+                new_revision, timestamp = self.source_host.upstream_tag(revision)
+            except TagNotFound:
+                # A tag-tracking library can be pinned to a specific commit hash
+                # (e.g. an untagged post-release fix on its release branch), which
+                # is not a tag; fall back to resolving it as a commit when the
+                # revision looks like a hash.
+                if not re.fullmatch(r"[0-9a-fA-F]{7,40}", revision):
+                    raise
+                new_revision, timestamp = self.source_host.upstream_commit(revision)
         else:
             new_revision, timestamp = self.source_host.upstream_commit(revision)
 
@@ -439,35 +477,6 @@ class VendorManifest(MozbuildObject):
     def fetch_and_unpack(self, revision):
         """Fetch and unpack upstream source"""
 
-        def validate_tar_member(member, path):
-            def is_within_directory(directory, target):
-                real_directory = os.path.realpath(directory)
-                real_target = os.path.realpath(target)
-                prefix = os.path.commonprefix([real_directory, real_target])
-                return prefix == real_directory
-
-            member_path = os.path.join(path, member.name)
-            if not is_within_directory(path, member_path):
-                raise Exception("Attempted path traversal in tar file: " + member.name)
-            if member.issym():
-                link_path = os.path.join(os.path.dirname(member_path), member.linkname)
-                if not is_within_directory(path, link_path):
-                    raise Exception(
-                        "Attempted link path traversal in tar file: " + member.name
-                    )
-            if member.mode & (stat.S_ISUID | stat.S_ISGID):
-                raise Exception(
-                    "Attempted setuid or setgid in tar file: " + member.name
-                )
-
-        def safe_extract(tar, path=".", *, numeric_owner=False):
-            def _files(tar, path):
-                for member in tar:
-                    validate_tar_member(member, path)
-                    yield member
-
-            tar.extractall(path, members=_files(tar, path), numeric_owner=numeric_owner)
-
         release_artifact = self.manifest["vendoring"].get("release-artifact", False)
 
         if release_artifact:
@@ -485,6 +494,7 @@ class VendorManifest(MozbuildObject):
                         tmptarfile.write(tarinput.read())
                 else:
                     req = requests.get(url, stream=True)
+                    req.raise_for_status()
                     for data in req.iter_content(4096):
                         tmptarfile.write(data)
                 tmptarfile.seek(0)
@@ -506,10 +516,10 @@ class VendorManifest(MozbuildObject):
 
                 self.logInfo({"vd": vendor_dir}, "Cleaning {vd} to import changes.")
                 # We use double asterisk wildcard here to get complete list of recursive contents
-                for file in self.convert_patterns_to_paths(vendor_dir, ["**"]):
-                    file = mozpath.normsep(file)
-                    if file not in to_keep:
-                        mozfile.remove(file)
+                for path in self.convert_patterns_to_paths(vendor_dir, ["**"]):
+                    norm_path = mozpath.normsep(path)
+                    if norm_path not in to_keep:
+                        mozfile.remove(norm_path)
 
                 self.logInfo({"vd": vendor_dir}, "Unpacking upstream files for {vd}.")
 
@@ -535,7 +545,7 @@ class VendorManifest(MozbuildObject):
                         mozfile.remove(zipdir)
                 else:
                     with tarfile.open(tmptarfile.name) as tar:
-                        safe_extract(tar, tmpextractdir.name)
+                        safe_extract_tar(tar, tmpextractdir.name)
 
                         one_prefix = get_first_dir(tar.getnames()[0])
                         has_prefix = all(
@@ -676,10 +686,17 @@ class VendorManifest(MozbuildObject):
             for r in replacements:
                 if r[0] in l:
                     print("Found " + l)
-                    replaced += 1
-                    yaml[i] = re.sub(r[0] + r" [v\.a-f0-9]+.*$", r[0] + r[1], yaml[i])
+                    # Replace the whole value, including any surrounding quotes
+                    # (e.g. revision: "v1.3.0"), and count the actual
+                    # substitution so a silent no-op fails the assert below
+                    # instead of leaving a stale field behind.
+                    yaml[i], count = re.subn(r[0] + r".*$", r[0] + r[1], yaml[i])
+                    replaced += count
 
-        assert len(replacements) == replaced
+        assert len(replacements) == replaced, (
+            f"update_yaml expected to update {len(replacements)} fields "
+            f"but updated {replaced} in {self.yaml_file}"
+        )
 
         with open(self.yaml_file, "wb") as f:
             f.write(("".join(yaml)).encode("utf-8"))
@@ -853,19 +870,18 @@ class VendorManifest(MozbuildObject):
 
         # If you edit this (especially for header files) you should double check
         # rewrite_mozbuild.py around 'assignment_type'
-        source_suffixes = [".cc", ".c", ".cpp", ".S", ".asm"]
-        header_suffixes = [".h", ".hpp"]
+        source_suffixes = (".cc", ".c", ".cpp", ".S", ".asm")
+        header_suffixes = (".h", ".hpp")
+        tracked_suffixes = source_suffixes + header_suffixes
 
         files_removed = self.repository.get_changed_files(diff_filter="D")
         files_added = self.repository.get_changed_files(diff_filter="A")
 
         # Filter the files added to just source files we track in moz.build files.
-        files_added = [
-            f for f in files_added if any([f.endswith(s) for s in source_suffixes])
-        ]
-        header_files_to_add = [
-            f for f in files_added if any([f.endswith(s) for s in header_suffixes])
-        ]
+        files_added = [f for f in files_added if f.endswith(source_suffixes)]
+        # Filter the files removed to just files we track in moz.build files.
+        files_removed = [f for f in files_removed if f.endswith(tracked_suffixes)]
+        header_files_to_add = [f for f in files_added if f.endswith(header_suffixes)]
         if add_to_exports:
             files_added += header_files_to_add
         elif header_files_to_add:
@@ -946,6 +962,12 @@ class VendorManifest(MozbuildObject):
                         os.path.abspath(patch),
                         "--no-backup-if-mismatch",
                         "--batch",
+                        # --forward makes patch skip (and exit nonzero on) a
+                        # patch that looks already-applied or reversed, rather
+                        # than silently applying its reverse. Without it,
+                        # re-vendoring after a local patch was upstreamed could
+                        # quietly undo the upstreamed change.
+                        "--forward",
                     ]
                     self.run_process(
                         args=script,

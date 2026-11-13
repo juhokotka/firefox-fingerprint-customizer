@@ -15,48 +15,21 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlin.test.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.fenix.R
 import org.mozilla.fenix.home.ui.HomepageTestTag.HOMEPAGE_WORDMARK_LOGO
-import kotlin.test.assertEquals
 
 @RunWith(AndroidJUnit4::class)
 class WordmarkTest {
-    @get:Rule
-    val composeTestRule = createComposeRule()
+    @get:Rule val composeTestRule = createComposeRule()
 
     @Test
-    fun `When sports widget is enabled for normal theme, then the sports widget wordmark is found and displayed`() {
+    fun `When the normal theme is rendered, then the fenix wordmark is found and displayed`() {
         composeTestRule.setContent {
-            ComposableUnderTest(themeId = R.style.NormalTheme, sportsWidgetEnabled = true)
-        }
-
-        composeTestRule.onNodeWithTag(HOMEPAGE_WORDMARK_LOGO).assertIsDisplayed()
-        assertEquals(
-            expected = R.attr.fenixWordmarkSportLogo,
-            actual = composeTestRule.onNodeWithTag(HOMEPAGE_WORDMARK_LOGO).semanticResourceId(),
-        )
-    }
-
-    @Test
-    fun `When sports widget is enabled for private theme, then the sports widget wordmark is found and displayed`() {
-        composeTestRule.setContent {
-            ComposableUnderTest(themeId = R.style.PrivateTheme, sportsWidgetEnabled = true)
-        }
-
-        composeTestRule.onNodeWithTag(HOMEPAGE_WORDMARK_LOGO).assertIsDisplayed()
-        assertEquals(
-            expected = R.attr.fenixWordmarkSportLogo,
-            actual = composeTestRule.onNodeWithTag(HOMEPAGE_WORDMARK_LOGO).semanticResourceId(),
-        )
-    }
-
-    @Test
-    fun `When sports widget is disabled for normal theme, then the fenix wordmark is found and displayed`() {
-        composeTestRule.setContent {
-            ComposableUnderTest(themeId = R.style.NormalTheme, sportsWidgetEnabled = false)
+            ComposableUnderTest(themeId = R.style.NormalTheme)
         }
 
         composeTestRule.onNodeWithTag(HOMEPAGE_WORDMARK_LOGO).assertIsDisplayed()
@@ -67,9 +40,9 @@ class WordmarkTest {
     }
 
     @Test
-    fun `When sports widget is disabled for private theme, then the fenix wordmark is found and displayed`() {
+    fun `When the private theme is rendered, then the fenix wordmark is found and displayed`() {
         composeTestRule.setContent {
-            ComposableUnderTest(themeId = R.style.PrivateTheme, sportsWidgetEnabled = false)
+            ComposableUnderTest(themeId = R.style.PrivateTheme)
         }
 
         composeTestRule.onNodeWithTag(HOMEPAGE_WORDMARK_LOGO).assertIsDisplayed()
@@ -80,9 +53,9 @@ class WordmarkTest {
     }
 
     /**
-     * [androidx.appcompat.view.ContextThemeWrapper] layers a theme resource on top of a base context.
-     * For this case, we want to test if a resource is missing from the base theme, so we need to create a
-     * theme from scratch with the appropriate style resource.
+     * [androidx.appcompat.view.ContextThemeWrapper] layers a theme resource on top of a base context. For this case, we
+     * want to test if a resource is missing from the base theme, so we need to create a theme from scratch with the
+     * appropriate style resource.
      */
     private fun Context.withIsolatedTheme(themeId: Int): Context =
         object : ContextWrapper(this) {
@@ -92,13 +65,10 @@ class WordmarkTest {
         }
 
     @Composable
-    private fun ComposableUnderTest(themeId: Int, sportsWidgetEnabled: Boolean) {
+    private fun ComposableUnderTest(themeId: Int) {
         val theme = LocalContext.current.withIsolatedTheme(themeId)
         CompositionLocalProvider(LocalContext provides theme) {
-            WordmarkLogo(
-                onLogoClicked = {},
-                isSportsWidgetEnabled = sportsWidgetEnabled,
-            )
+            Logo()
         }
     }
 

@@ -18,8 +18,6 @@ static uint64_t sNextFontFileKey = 0;
 MOZ_RUNINIT static std::unordered_map<uint64_t, gfxDWriteFontFileStream*>
     sFontFileStreams;
 
-IDWriteFontFileLoader* gfxDWriteFontFileLoader::mInstance = nullptr;
-
 IFACEMETHODIMP_(ULONG) gfxDWriteFontFileStream::Release() {
   MOZ_ASSERT(0 != mRefCnt, "dup release");
   uint32_t count = --mRefCnt;
@@ -35,16 +33,9 @@ IFACEMETHODIMP_(ULONG) gfxDWriteFontFileStream::Release() {
   return count;
 }
 
-gfxDWriteFontFileStream::gfxDWriteFontFileStream(const uint8_t* aData,
-                                                 uint32_t aLength,
+gfxDWriteFontFileStream::gfxDWriteFontFileStream(FontData* aData,
                                                  uint64_t aFontFileKey)
-    : mFontFileKey(aFontFileKey) {
-  // If this fails, mData will remain empty. That's OK: GetFileSize()
-  // will then return 0, etc., and the font just won't load.
-  if (!mData.AppendElements(aData, aLength, fallible_t())) {
-    NS_WARNING("Failed to store data in gfxDWriteFontFileStream");
-  }
-}
+    : mData(aData), mFontFileKey(aFontFileKey) {}
 
 gfxDWriteFontFileStream::~gfxDWriteFontFileStream() {
   sFontFileStreams.erase(mFontFileKey);
@@ -52,7 +43,7 @@ gfxDWriteFontFileStream::~gfxDWriteFontFileStream() {
 
 HRESULT STDMETHODCALLTYPE
 gfxDWriteFontFileStream::GetFileSize(UINT64* fileSize) {
-  *fileSize = mData.Length();
+  *fileSize = mData->Length();
   return S_OK;
 }
 
@@ -65,11 +56,11 @@ HRESULT STDMETHODCALLTYPE gfxDWriteFontFileStream::ReadFileFragment(
     const void** fragmentStart, UINT64 fileOffset, UINT64 fragmentSize,
     void** fragmentContext) {
   // We are required to do bounds checking.
-  if (fileOffset + fragmentSize > (UINT64)mData.Length()) {
+  if (fileOffset + fragmentSize > (UINT64)mData->Length()) {
     return E_FAIL;
   }
   // We should be alive for the duration of this.
-  *fragmentStart = &mData[fileOffset];
+  *fragmentStart = mData->Data() + fileOffset;
   *fragmentContext = nullptr;
   return S_OK;
 }
@@ -98,9 +89,20 @@ HRESULT STDMETHODCALLTYPE gfxDWriteFontFileLoader::CreateStreamFromKey(
 }
 
 /* static */
+IDWriteFontFileLoader* gfxDWriteFontFileLoader::Instance() {
+  // Wait for registration to finish before other threads can use the loader.
+  static IDWriteFontFileLoader* sInstance = [] {
+    IDWriteFontFileLoader* loader = new gfxDWriteFontFileLoader();
+    gfx::Factory::GetDWriteFactory()->RegisterFontFileLoader(loader);
+    return loader;
+  }();
+  return sInstance;
+}
+
+/* static */
 HRESULT
 gfxDWriteFontFileLoader::CreateCustomFontFile(
-    const uint8_t* aFontData, uint32_t aLength, IDWriteFontFile** aFontFile,
+    FontData* aFontData, IDWriteFontFile** aFontFile,
     gfxDWriteFontFileStream** aFontFileStream) {
   MOZ_ASSERT(aFontFile);
   MOZ_ASSERT(aFontFileStream);
@@ -115,7 +117,7 @@ gfxDWriteFontFileLoader::CreateCustomFontFile(
   sFontFileStreamsMutex.Lock();
   uint64_t fontFileKey = sNextFontFileKey++;
   RefPtr<gfxDWriteFontFileStream> ffsRef =
-      new gfxDWriteFontFileStream(aFontData, aLength, fontFileKey);
+      new gfxDWriteFontFileStream(aFontData, fontFileKey);
   sFontFileStreams[fontFileKey] = ffsRef;
   sFontFileStreamsMutex.Unlock();
 
@@ -136,7 +138,7 @@ gfxDWriteFontFileLoader::CreateCustomFontFile(
 size_t gfxDWriteFontFileLoader::SizeOfIncludingThis(
     MallocSizeOf mallocSizeOf) const {
   // We are a singleton type that is effective owner of sFontFileStreams.
-  MOZ_ASSERT(this == mInstance);
+  MOZ_ASSERT(this == Instance());
 
   size_t sizes = mallocSizeOf(this);
 

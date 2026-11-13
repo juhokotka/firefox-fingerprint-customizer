@@ -39,13 +39,13 @@ System colors are colors queried from the operating system. They help Firefox ad
 
 Lastly, if we explicitly turn on HCM (`document_color_use=2`) AND we are _not_ styling Firefox chrome AND we are _not_ `resistFingerprinting`, we'll use colors-dialog colors to style web content.
 
-By default, `browser.display.document_color_use` is set to `2` on Windows. If a user turns on the OS HCM Firefox will automatically go into HCM mode as well.
+By default, `browser.display.document_color_use` is set to `0` on Windows. If a user turns on the OS HCM Firefox will automatically go into HCM mode as well.
  > Note: This is intentional. Windows HCM is the most robust HCM offered among the operating systems we support, and so we cater to it here :)
 
 Users on non-Windows platforms have HCM disabled by default (`document_color_use=1`). In order to enable Firefox HCM, they will either need to turn
 it on explicitly (`document_color_use=2`), or set it to use the OS HCM mode and palette (`document_color_use=0`).
 
-For a simplified flow chart of this decision tree, check out our [HCM Settings page](HCMSettings.html)
+For a simplified flow chart of this decision tree, check out our [HCM Settings page](HCMSettings.md)
 
 ## High Contrast Mode
 

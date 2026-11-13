@@ -16,9 +16,7 @@ import org.json.JSONObject
  *
  * @param jsonString A string that is converted into a JSONObject and used when getting WebCompat info.
  */
-internal class FakeEngineSession(
-    private val jsonString: String,
-) : EngineSession() {
+internal class FakeEngineSession(private val jsonString: String) : EngineSession() {
 
     override val settings: Settings
         get() = DefaultSettings()
@@ -28,6 +26,19 @@ internal class FakeEngineSession(
         onException: (Throwable) -> Unit,
     ) {
         onResult(JSONObject(jsonString))
+    }
+
+    override fun sendGleanBrokenSiteReport(
+        details: JSONObject?,
+        description: String?,
+        reason: String,
+        url: String,
+        sendTabSpecificInfo: Boolean,
+        sendBlockedUrls: Boolean,
+        onResult: () -> Unit,
+        onException: (Throwable) -> Unit,
+    ) {
+        onResult()
     }
 
     override fun getWebCompatInfo(
@@ -70,7 +81,9 @@ internal class FakeEngineSession(
 
     override fun goToHistoryIndex(index: Int) {}
 
-    override fun restoreState(state: EngineSessionState): Boolean { return false }
+    override fun restoreState(state: EngineSessionState): Boolean {
+        return false
+    }
 
     override fun flushSessionState() {}
 
@@ -78,13 +91,14 @@ internal class FakeEngineSession(
 
     override fun toggleDesktopMode(enable: Boolean, reload: Boolean) {}
 
-    override fun hasCookieBannerRuleForSession(
+    override fun checkForPdfViewer(
         onResult: (Boolean) -> Unit,
         onException: (Throwable) -> Unit,
     ) {}
 
-    override fun checkForPdfViewer(
-        onResult: (Boolean) -> Unit,
+    override fun addSignatureToPdf(
+        text: String,
+        onResult: () -> Unit,
         onException: (Throwable) -> Unit,
     ) {}
 

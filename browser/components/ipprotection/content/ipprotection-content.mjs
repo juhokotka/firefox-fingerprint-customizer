@@ -24,6 +24,10 @@ import "chrome://browser/content/ipprotection/ipprotection-status-card.mjs";
 import "chrome://browser/content/ipprotection/ipprotection-status-box.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://global/content/elements/moz-toggle.mjs";
+// eslint-disable-next-line import/no-unassigned-import
+import "chrome://global/content/elements/moz-promo.mjs";
+
+const SITE_RULES_SETTINGS_PANE = "privacy-vpnsiterules";
 
 /**
  * Custom element that implements a message bar and status card for IP protection.
@@ -40,6 +44,8 @@ export default class IPProtectionContentElement extends MozLitElement {
     siteExclusionControlEl: "#site-exclusion-control",
     siteExclusionToggleEl: "#site-exclusion-toggle",
     siteExclusionDescriptionEl: '#site-exclusion-toggle > [slot="description"]',
+    siteRulesEl: "#site-rules-control",
+    siteInclusionPromptEl: "#site-inclusion-prompt",
     settingsButtonEl: "#vpn-settings-button",
   };
 
@@ -102,6 +108,14 @@ export default class IPProtectionContentElement extends MozLitElement {
 
   get hasSiteExclusion() {
     return this.state?.siteData?.isExclusion ?? false;
+  }
+
+  get hasSiteInclusion() {
+    return this.state?.siteData?.isInclusion ?? false;
+  }
+
+  get hasSiteRule() {
+    return this.state?.siteData?.hasSiteRule ?? false;
   }
 
   get #hasErrors() {
@@ -192,6 +206,25 @@ export default class IPProtectionContentElement extends MozLitElement {
     }
   }
 
+  handleClickSiteRulesLink(event) {
+    event.preventDefault();
+    const win = event.target.documentGlobal;
+    Glean.ipprotection.rulesPageOpened.record({ entrypoint: "panel" });
+    win.openPreferences(SITE_RULES_SETTINGS_PANE);
+    this.dispatchEvent(
+      new CustomEvent("IPProtection:Close", { bubbles: true, composed: true })
+    );
+  }
+
+  handleDismissSiteInclusionPrompt() {
+    this.dispatchEvent(
+      new CustomEvent("IPProtection:DismissSiteInclusionPrompt", {
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
   handleClickSettingsButton(event) {
     event.preventDefault();
     const win = event.target.documentGlobal;
@@ -274,7 +307,8 @@ export default class IPProtectionContentElement extends MozLitElement {
   }
 
   statusCardTemplate() {
-    let hasExclusion = this.hasSiteExclusion;
+    let hasExclusion =
+      !this.state.isSiteInclusionsEnabled && this.hasSiteExclusion;
 
     return html`
       <ipprotection-status-card
@@ -283,7 +317,8 @@ export default class IPProtectionContentElement extends MozLitElement {
         .bandwidthUsage=${ifDefined(this.state.bandwidthUsage)}
         .hasExclusion=${hasExclusion}
         .isActivating=${this.state.isActivating}
-        .showLocationButtonBadge=${this.state.showLocationButtonBadge}
+        .isPremium=${ifDefined(this.state.isPremium)}
+        .hasUpgraded=${this.state.hasUpgraded}
       ></ipprotection-status-card>
     `;
   }
@@ -323,12 +358,14 @@ export default class IPProtectionContentElement extends MozLitElement {
   errorTemplate() {
     const isNetworkError = this.state.error === ERRORS.NETWORK;
     const isCatastrophicError = this.state.error === ERRORS.CATASTROPHIC;
+    const isRestrictedGeoError = this.state.error === ERRORS.VPN_UNAVAILABLE;
 
     let headerL10nId = "ipprotection-connection-status-generic-error-title-1";
     let descriptionL10nId =
       "ipprotection-connection-status-generic-error-description";
     let errorType = ERRORS.GENERIC;
     let imageSrc = null;
+    let supportSlug = null;
 
     if (isNetworkError) {
       headerL10nId = "ipprotection-connection-status-network-error-title-1";
@@ -344,12 +381,19 @@ export default class IPProtectionContentElement extends MozLitElement {
       errorType = ERRORS.CATASTROPHIC;
       imageSrc =
         "chrome://browser/content/ipprotection/assets/states/ipprotection-error.svg";
+    } else if (isRestrictedGeoError) {
+      headerL10nId = "ipprotection-connection-status-blocked-error-title-1";
+      descriptionL10nId =
+        "ipprotection-connection-status-blocked-error-description-1";
+      errorType = ERRORS.VPN_UNAVAILABLE;
+      supportSlug = LINKS.NO_ACCESS_SUPPORT_SLUG;
     }
 
     return html`
       <ipprotection-status-box
         .headerL10nId=${headerL10nId}
         .descriptionL10nId=${descriptionL10nId}
+        .descriptionSupportSlug=${ifDefined(supportSlug)}
         .type=${errorType}
       >
         ${imageSrc
@@ -387,9 +431,103 @@ export default class IPProtectionContentElement extends MozLitElement {
     `;
   }
 
+  siteRulesStatusTemplate() {
+    if (
+      !this.state.isSiteInclusionsEnabled ||
+      !this.state.siteData ||
+      this.#hasErrors ||
+      !this.hasSiteRule
+    ) {
+      return null;
+    }
+
+    // Check to see if the rule is actually taking effect i.e. is it opposite of the state of the global VPN
+    if (
+      (this.hasSiteInclusion && this.state.isProtectionEnabled) ||
+      (this.hasSiteExclusion && !this.state.isProtectionEnabled)
+    ) {
+      return null;
+    }
+
+    let dataL10nId;
+    let imgSrc;
+    let imgId;
+
+    // hasSiteRule can be set without a rule that classifies this site, so the
+    // rule type has to be resolved before we commit to rendering anything.
+    if (this.hasSiteInclusion) {
+      dataL10nId = "site-rules-description-inclusion";
+      imgSrc =
+        "chrome://browser/content/ipprotection/assets/states/ipprotection-on.svg";
+      imgId = "ipprotection-on";
+    } else if (this.hasSiteExclusion) {
+      dataL10nId = "site-rules-description-exclusion";
+      imgSrc =
+        "chrome://browser/content/ipprotection/assets/states/ipprotection-excluded.svg";
+      imgId = "ipprotection-excluded";
+    } else {
+      return null;
+    }
+
+    return html`<div id="site-rule-status-container">
+      <div id="site-rule-status-text-container">
+        <span
+          id="site-rule-heading"
+          data-l10n-id="site-rules-status-heading"
+          class="text-deemphasized"
+        ></span>
+        <span id="site-rule-description" data-l10n-id=${dataL10nId}></span>
+      </div>
+      <img src=${imgSrc} alt="" id=${imgId} />
+    </div>`;
+  }
+
+  siteInclusionPromptTemplate() {
+    if (
+      !this.state.isSiteInclusionsEnabled ||
+      !this.state.showSiteInclusionPrompt ||
+      !this.state.siteData ||
+      this.hasSiteInclusion ||
+      !this.canEnableConnection
+    ) {
+      return null;
+    }
+
+    return html`<moz-promo
+      id="site-inclusion-prompt"
+      type="vibrant"
+      data-l10n-id="site-rules-inclusion-prompt"
+      data-l10n-args=${JSON.stringify({
+        website: this.state.siteData.host,
+      })}
+      dismissable
+      @promo:user-dismissed=${this.handleDismissSiteInclusionPrompt}
+    ></moz-promo>`;
+  }
+
+  siteRulesSettingsLinkTemplate() {
+    if (
+      !this.state.isSiteInclusionsEnabled ||
+      !this.state.siteData ||
+      this.#hasErrors
+    ) {
+      return null;
+    }
+
+    return html` <moz-button
+      id="site-rules-control"
+      type="ghost"
+      data-l10n-id="site-rules-manage-rules-link-text"
+      iconsrc="chrome://browser/skin/permissions.svg"
+      @click=${this.handleClickSiteRulesLink}
+    >
+    </moz-button>`;
+  }
+
   exclusionToggleTemplate() {
     if (
       !this.state.isSiteExceptionsEnabled ||
+      this.state.isSiteInclusionsEnabled ||
       !this.state.siteData ||
       !this.state.isProtectionEnabled ||
       this.#hasErrors
@@ -423,17 +561,15 @@ export default class IPProtectionContentElement extends MozLitElement {
 
   footerTemplate() {
     return html`
-      <div class="vpn-bottom-content">
-        <moz-button
-          type="ghost"
-          data-l10n-id="ipprotection-settings-link"
-          iconsrc="chrome://global/skin/icons/settings.svg"
-          id="vpn-settings-button"
-          @click=${this.handleClickSettingsButton}
-        >
-          ></moz-button
-        >
-      </div>
+      <moz-button
+        type="ghost"
+        data-l10n-id="ipprotection-settings-link"
+        iconsrc="chrome://global/skin/icons/settings.svg"
+        id="vpn-settings-button"
+        @click=${this.handleClickSettingsButton}
+      >
+        ></moz-button
+      >
     `;
   }
 
@@ -465,16 +601,29 @@ export default class IPProtectionContentElement extends MozLitElement {
     }
 
     if (this.#hasErrors) {
-      return html` ${this.errorTemplate()}${this.footerTemplate()}`;
+      return html` ${this.errorTemplate()}
+        <div class="vpn-bottom-content">${this.footerTemplate()}</div>`;
     }
 
     if (this.state.paused) {
-      return html` ${this.pausedTemplate()} ${this.footerTemplate()}`;
+      return html` ${this.pausedTemplate()}
+        <div class="vpn-bottom-content">${this.footerTemplate()}</div>`;
+    }
+
+    if (this.state.isSiteInclusionsEnabled) {
+      return html`
+        ${this.statusCardTemplate()}
+        <div class="vpn-bottom-content">
+          ${this.siteRulesStatusTemplate()}
+          ${this.siteInclusionPromptTemplate()}
+          ${this.siteRulesSettingsLinkTemplate()} ${this.footerTemplate()}
+        </div>
+      `;
     }
 
     return html`
       ${this.statusCardTemplate()} ${this.exclusionToggleTemplate()}
-      ${this.footerTemplate()}
+      <div class="vpn-bottom-content">${this.footerTemplate()}</div>
     `;
   }
 

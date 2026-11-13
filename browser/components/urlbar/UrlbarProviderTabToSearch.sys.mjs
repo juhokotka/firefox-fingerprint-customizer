@@ -11,10 +11,9 @@ import {
   UrlbarProvider,
   UrlbarUtils,
 } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   ActionsProviderContextualSearch:
     "moz-src:///browser/components/urlbar/ActionsProviderContextualSearch.sys.mjs",
   UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
@@ -101,10 +100,10 @@ export class UrlbarProviderTabToSearch extends UrlbarProvider {
   }
 
   /**
-   * @returns {Values<typeof UrlbarUtils.PROVIDER_TYPE>}
+   * @returns {Values<typeof lazy.UrlbarShared.PROVIDER_TYPE>}
    */
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.PROFILE;
+    return lazy.UrlbarShared.PROVIDER_TYPE.PROFILE;
   }
 
   /**
@@ -113,8 +112,9 @@ export class UrlbarProviderTabToSearch extends UrlbarProvider {
    * with this provider, to save on resources.
    *
    * @param {UrlbarQueryContext} queryContext The query context object
+   * @param {UrlbarParentController} controller
    */
-  async isActive(queryContext) {
+  async isActive(queryContext, controller) {
     return (
       queryContext.searchString &&
       queryContext.tokens.length == 1 &&
@@ -124,7 +124,7 @@ export class UrlbarProviderTabToSearch extends UrlbarProvider {
         (await this.queryInstance
           .getProvider(lazy.UrlbarProviderGlobalActions.name)
           ?.isActive(queryContext)) &&
-        lazy.ActionsProviderContextualSearch.isActive(queryContext)
+        lazy.ActionsProviderContextualSearch.isActive(queryContext, controller)
       )
     );
   }
@@ -143,9 +143,7 @@ export class UrlbarProviderTabToSearch extends UrlbarProvider {
   }
 
   /**
-   * This is called only for dynamic result types, when the urlbar view updates
-   * the view of one of the results of the provider.  It should return an object
-   * describing the view update.
+   * This is called only for dynamic result types.
    *
    * @param {UrlbarResult} result The result whose view will be updated.
    * @returns {object} An object describing the view update.
@@ -220,19 +218,6 @@ export class UrlbarProviderTabToSearch extends UrlbarProvider {
     }
   }
 
-  onEngagement(queryContext, controller, details) {
-    let { result, element } = details;
-    if (result.type == lazy.UrlbarShared.RESULT_TYPE.DYNAMIC) {
-      // Confirm search mode, but only for the onboarding (dynamic) result. The
-      // input will handle confirming search mode for the non-onboarding
-      // `RESULT_TYPE.SEARCH` result since it sets `providesSearchMode`.
-      element.documentGlobal.gURLBar.maybeConfirmSearchModeFromResult({
-        result,
-        checkValue: false,
-      });
-    }
-  }
-
   /**
    * Defines whether the view should defer user selection events while waiting
    * for the first result from this provider.
@@ -255,7 +240,7 @@ export class UrlbarProviderTabToSearch extends UrlbarProvider {
     // enginesForDomainPrefix only matches against engine domains.
     // Remove trailing slashes and www. from the search string and check if the
     // resulting string is worth matching.
-    let [searchStr] = UrlbarUtils.stripPrefixAndTrim(
+    let [searchStr] = lazy.UrlbarShared.stripPrefixAndTrim(
       queryContext.searchString,
       {
         stripWww: true,
@@ -306,9 +291,12 @@ export class UrlbarProviderTabToSearch extends UrlbarProvider {
     for (let engine of engines) {
       // Trim the engine host. This will also be set as the result url, so the
       // Muxer can use it to filter.
-      let [host] = UrlbarUtils.stripPrefixAndTrim(engine.searchUrlDomain, {
-        stripWww: true,
-      });
+      let [host] = lazy.UrlbarShared.stripPrefixAndTrim(
+        engine.searchUrlDomain,
+        {
+          stripWww: true,
+        }
+      );
       // Check if the host may be autofilled.
       if (host.startsWith(searchStr.toLocaleLowerCase())) {
         if (onboardingInteractionsLeft > 0) {
@@ -362,7 +350,7 @@ function makeOnboardingResult(engine, satisfiesAutofillThreshold = false) {
       engine: engine.name,
       searchUrlDomainWithoutSuffix: searchUrlDomainWithoutSuffix(engine),
       providesSearchMode: true,
-      icon: UrlbarUtils.ICON.SEARCH_GLASS,
+      icon: lazy.UrlbarShared.ICON.SEARCH_GLASS,
       dynamicType: DYNAMIC_RESULT_TYPE,
       satisfiesAutofillThreshold,
     },
@@ -379,7 +367,7 @@ function makeResult(context, engine, satisfiesAutofillThreshold = false) {
       isGeneralPurposeEngine: engine.isGeneralPurposeEngine,
       searchUrlDomainWithoutSuffix: searchUrlDomainWithoutSuffix(engine),
       providesSearchMode: true,
-      icon: UrlbarUtils.ICON.SEARCH_GLASS,
+      icon: lazy.UrlbarShared.ICON.SEARCH_GLASS,
       query: "",
       satisfiesAutofillThreshold,
     },
@@ -387,7 +375,7 @@ function makeResult(context, engine, satisfiesAutofillThreshold = false) {
 }
 
 function searchUrlDomainWithoutSuffix(engine) {
-  let [value] = UrlbarUtils.stripPrefixAndTrim(engine.searchUrlDomain, {
+  let [value] = lazy.UrlbarShared.stripPrefixAndTrim(engine.searchUrlDomain, {
     stripWww: true,
   });
   return value.substr(0, value.length - engine.searchUrlPublicSuffix.length);

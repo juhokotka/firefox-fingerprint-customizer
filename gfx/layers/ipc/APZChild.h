@@ -6,8 +6,8 @@
 #define mozilla_layers_APZChild_h
 
 #include "mozilla/ipc/ProtocolUtils.h"
-#include "mozilla/layers/PAPZChild.h"
 #include "mozilla/layers/APZTaskRunnable.h"
+#include "mozilla/layers/PAPZChild.h"
 
 namespace mozilla {
 namespace layers {
@@ -26,24 +26,12 @@ class APZChild final : public PAPZChild {
 
   explicit APZChild(RefPtr<GeckoContentController> aController);
 
-  mozilla::ipc::IPCResult RecvLayerTransforms(
-      nsTArray<MatrixMessage>&& aTransforms);
-
   mozilla::ipc::IPCResult RecvRequestContentRepaint(
       const RepaintRequest& aRequest);
 
-  mozilla::ipc::IPCResult RecvUpdateOverscrollVelocity(
-      const ScrollableLayerGuid& aGuid, const float& aX, const float& aY,
-      const bool& aIsRootContent);
-
-  mozilla::ipc::IPCResult RecvUpdateOverscrollOffset(
-      const ScrollableLayerGuid& aGuid, const float& aX, const float& aY,
-      const bool& aIsRootContent);
-
-  mozilla::ipc::IPCResult RecvHideDynamicToolbar();
-
-  mozilla::ipc::IPCResult RecvNotifyMozMouseScrollEvent(const ViewID& aScrollId,
-                                                        const nsString& aEvent);
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY mozilla::ipc::IPCResult
+  RecvNotifyMozMouseScrollEvent(const ViewID& aScrollId,
+                                const nsString& aEvent);
 
   mozilla::ipc::IPCResult RecvNotifyAPZStateChange(
       const ScrollableLayerGuid& aGuid, const APZStateChange& aChange,

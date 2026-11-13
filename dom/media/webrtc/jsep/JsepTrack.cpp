@@ -4,8 +4,11 @@
 
 #include "jsep/JsepTrack.h"
 
+#include <fmt/format.h>
+
 #include <algorithm>
 
+#include "common/RtpHeaderExtensions.h"
 #include "jsep/JsepCodecDescription.h"
 #include "jsep/JsepTrackEncoding.h"
 #include "transport/logging.h"
@@ -100,13 +103,50 @@ std::vector<uint32_t> JsepTrack::GetRtxSsrcs() const {
   return result;
 }
 
+void JsepTrack::PopulatePreferredCodecs(
+    const nsTArray<UniquePtr<JsepCodecDescription>>& aPreferredCodecs,
+    bool aUsePreferredCodecsOrder) {
+  mUsePreferredCodecsOrder = aUsePreferredCodecsOrder;
+  if (!aUsePreferredCodecsOrder) {
+    // aPreferredCodecs is just the full default list here; no real
+    // preference order to apply.
+    return;
+  }
+
+  // Unlike PopulateCodecs(), this reorders mPrototypeCodecs to put
+  // aPreferredCodecs first (in their given order), without discarding any
+  // existing codec that isn't in aPreferredCodecs. A negotiated answer may
+  // still legitimately select one of those codecs for sending, even if it
+  // was excluded by setCodecPreferences() (RFC 8829 5.3.1 allows the answer
+  // to list codecs absent from the offer).
+  auto preferredIndex =
+      [&](const UniquePtr<JsepCodecDescription>& aCodec) -> size_t {
+    for (size_t i = 0; i < aPreferredCodecs.Length(); ++i) {
+      const auto& preferred = aPreferredCodecs[i];
+      if (aCodec->Type() == preferred->Type() &&
+          aCodec->mName == preferred->mName &&
+          aCodec->mClock == preferred->mClock &&
+          aCodec->mChannels == preferred->mChannels) {
+        return i;
+      }
+    }
+    return aPreferredCodecs.Length();
+  };
+
+  std::stable_sort(mPrototypeCodecs.begin(), mPrototypeCodecs.end(),
+                   [&](const UniquePtr<JsepCodecDescription>& aLhs,
+                       const UniquePtr<JsepCodecDescription>& aRhs) {
+                     return preferredIndex(aLhs) < preferredIndex(aRhs);
+                   });
+}
+
 void JsepTrack::PopulateCodecs(
-    const std::vector<UniquePtr<JsepCodecDescription>>& prototype,
+    const nsTArray<UniquePtr<JsepCodecDescription>>& aPreferredCodecs,
     bool aUsePreferredCodecsOrder) {
   mPrototypeCodecs.clear();
   mUsePreferredCodecsOrder = aUsePreferredCodecsOrder;
-  for (const auto& prototypeCodec : prototype) {
-    if (prototypeCodec->Type() == mType) {
+  for (const auto& prototypeCodec : aPreferredCodecs) {
+    if (prototypeCodec->Type() == mType.type) {
       mPrototypeCodecs.emplace_back(prototypeCodec->Clone());
       mPrototypeCodecs.back()->mDirection = mDirection;
     }
@@ -123,6 +163,13 @@ void JsepTrack::AddToOffer(SsrcGenerator& ssrcGenerator,
     uint16_t pt;
     if (SdpHelper::GetPtAsInt(codec->mDefaultPt, &pt)) {
       mReceivePayloadTypes.push_back(pt);
+    }
+  }
+
+  if (mDirection == sdp::kRecv) {
+    mEarlyRecvCodecs.clear();
+    for (const auto& codec : mPrototypeCodecs) {
+      mEarlyRecvCodecs.emplace_back(codec->Clone());
     }
   }
 
@@ -266,12 +313,23 @@ void JsepTrack::RecvTrackSetLocal(const SdpMediaSection& aMsection) {
   // TODO: Should more stuff live in here? Anything that needs to happen when we
   // decide we're ready to receive packets should probably go in here.
   mReceptive = aMsection.IsReceiving();
+
+  mEarlyRtpExtensions.clear();
+  if (aMsection.GetAttributeList().HasAttribute(
+          SdpAttribute::kExtmapAttribute)) {
+    for (const auto& extmap :
+         aMsection.GetAttributeList().GetExtmap().mExtmaps) {
+      if (extmap.direction & sdp::kRecv) {
+        mEarlyRtpExtensions.push_back(extmap);
+      }
+    }
+  }
 }
 
 void JsepTrack::SendTrackSetRemote(SsrcGenerator& aSsrcGenerator,
                                    const SdpMediaSection& aRemoteMsection) {
   mInHaveRemote = true;
-  if (mType == SdpMediaSection::kApplication) {
+  if (mType.type == SdpMediaSection::kApplication) {
     return;
   }
 
@@ -279,7 +337,7 @@ void JsepTrack::SendTrackSetRemote(SsrcGenerator& aSsrcGenerator,
 
   // TODO: Current language in webrtc-pc is completely broken, and so I will
   // not be quoting it here.
-  if ((mType == SdpMediaSection::kVideo) &&
+  if ((mType.type == SdpMediaSection::kVideo) &&
       aRemoteMsection.GetAttributeList().HasAttribute(
           SdpAttribute::kSimulcastAttribute)) {
     // Note: webrtc-pc does not appear to support the full IETF simulcast
@@ -333,7 +391,7 @@ void JsepTrack::SendTrackSetRemote(SsrcGenerator& aSsrcGenerator,
 void JsepTrack::AddToMsection(
     const std::vector<UniquePtr<JsepCodecDescription>>& codecs,
     SdpMediaSection* msection) const {
-  if (msection->GetMediaType() != mType) {
+  if (msection->GetMediaType() != mType.type) {
     MOZ_MTLOG(ML_ERROR, "AddToMsection called on wrong media section type");
     MOZ_ASSERT(false);
     return;
@@ -347,8 +405,8 @@ void JsepTrack::AddToMsection(
     codec->AddToMediaSection(*msection);
   }
 
-  if ((mDirection == sdp::kSend) && (mType != SdpMediaSection::kApplication) &&
-      msection->IsSending()) {
+  if ((mDirection == sdp::kSend) &&
+      (mType.type != SdpMediaSection::kApplication) && msection->IsSending()) {
     if (mStreamIds.empty()) {
       msection->AddMsid("-", mTrackId);
     } else {
@@ -365,7 +423,7 @@ void JsepTrack::UpdateSsrcs(SsrcGenerator& ssrcGenerator, size_t encodings) {
     MOZ_ASSERT(false);
     return;
   }
-  if (mType == SdpMediaSection::kApplication) {
+  if (mType.type == SdpMediaSection::kApplication) {
     MOZ_MTLOG(ML_ERROR, "UpdateSsrcs called on application media section");
     MOZ_ASSERT(false);
     return;
@@ -439,7 +497,7 @@ void JsepTrack::AddToMsection(const std::vector<std::string>& aRids,
 
   bool requireRtxSsrcs = rtxEnabled && msection->IsSending();
 
-  if (mType != SdpMediaSection::kApplication && mDirection == sdp::kSend) {
+  if (mType.type != SdpMediaSection::kApplication && mDirection == sdp::kSend) {
     UpdateSsrcs(ssrcGenerator, aRids.size());
 
     if (requireRtxSsrcs) {
@@ -804,6 +862,8 @@ nsresult JsepTrack::Negotiate(const SdpMediaSection& answer,
 
   CreateEncodings(remote, negotiatedCodecs, negotiatedDetails.get());
 
+  const bool extmapAllowMixed =
+      negotiatedDetails->mRtpRtcpConf.GetExtmapAllowMixed();
   if (answer.GetAttributeList().HasAttribute(SdpAttribute::kExtmapAttribute)) {
     for (auto& extmapAttr : answer.GetAttributeList().GetExtmap().mExtmaps) {
       SdpDirectionAttribute::Direction direction = extmapAttr.direction;
@@ -813,6 +873,23 @@ nsresult JsepTrack::Negotiate(const SdpMediaSection& answer,
       }
 
       if (direction & mDirection) {
+        // For historical reasons extamp-allow-mixed gates sending any two-byte
+        // headers, even if zero one byte headers are used.
+        //
+        // The peer must signal extmap-allow-mixed before we may send a two-byte
+        // header. Otherwise we drop extensions that would need two bytes from
+        // send tracks (which would would crash libwebrtc's packetizer, weee).
+        // Receiving two-byte extensions is always safe.
+        if (mDirection == sdp::kSend && !extmapAllowMixed &&
+            RequiresTwoByteForm(extmapAttr.entry, extmapAttr.extensionname)) {
+          MOZ_MTLOG(ML_WARNING,
+                    fmt::format("Sending multibyte RTP Header extention {} "
+                                "with id {} requires that "
+                                "extmap-allow-mixed be negotiated.",
+                                extmapAttr.extensionname, extmapAttr.entry));
+          continue;
+        }
+
         negotiatedDetails->mExtmap[extmapAttr.extensionname] = extmapAttr;
       }
     }

@@ -6,8 +6,6 @@
  * JS atom table.
  */
 
-#include "vm/JSAtomUtils-inl.h"
-
 #include "mozilla/HashFunctions.h"  // mozilla::HashString
 #include "mozilla/RangedPtr.h"
 
@@ -29,7 +27,9 @@
 #include "vm/StringType.h"
 #include "vm/SymbolType.h"
 #include "vm/WellKnownAtom.h"  // WellKnownAtomInfo, WellKnownAtomId, wellKnownAtomInfos
+
 #include "gc/AtomMarking-inl.h"
+#include "vm/JSAtomUtils-inl.h"
 #include "vm/JSContext-inl.h"
 #include "vm/Realm-inl.h"
 #include "vm/StringType-inl.h"
@@ -93,7 +93,7 @@ MOZ_ALWAYS_INLINE bool js::AtomHasher::match(const WeakHeapPtr<JSAtom*>& entry,
   if (lookup.atom) {
     return lookup.atom == key;
   }
-  if (key->length() != lookup.length || key->hash() != lookup.hash) {
+  if (key->length() != lookup.length) {
     return false;
   }
 
@@ -379,13 +379,13 @@ AtomizeAndCopyCharsNonStaticValidLengthFromLookup(
   AtomCacheHashTable* atomCache = zone->atomCache();
 
   // Try the per-Zone cache first. If we find the atom there we can avoid the
-  // markAtom call, and the multiple HashSet lookups below.
+  // recordRef call, and the multiple HashSet lookups below.
   if (MOZ_LIKELY(atomCache)) {
     JSAtom* const cachedAtom = atomCache->lookupForAdd(lookup);
     if (cachedAtom) {
       // The cache is purged on GC so if we're in the middle of an incremental
       // GC we should have barriered the atom when we put it in the cache.
-      MOZ_ASSERT(AtomIsMarked(zone, cachedAtom));
+      MOZ_ASSERT(ZoneHasRef(zone, cachedAtom));
       return cachedAtom;
     }
   }
@@ -408,7 +408,7 @@ AtomizeAndCopyCharsNonStaticValidLengthFromLookup(
   }
 
   if (MOZ_UNLIKELY(
-          !cx->atomMarking().inlinedMarkAtomFallible(cx->zone(), atom))) {
+          !cx->atomReferences().inlinedRecordRefFallible(cx->zone(), atom))) {
     ReportOutOfMemory(cx);
     return nullptr;
   }
@@ -682,10 +682,10 @@ JSAtom* js::AtomizeStringSlow(JSContext* cx, JSString* str) {
       if (JSAtom* atom = cx->caches().stringToAtomCache.lookupWithRopeChars(
               flattenRope, length, key)) {
         // Since this cache lookup is based on a string comparison, not object
-        // identity, need to mark atom explicitly in this case. And this is
+        // identity, need to record the atom reference explicitly. And this is
         // not done in lookup() itself, because #including JSContext.h there
         // causes some non-trivial #include ordering issues.
-        cx->markAtom(atom);
+        cx->recordRef(atom);
         str->tryReplaceWithAtomRef(atom);
         return atom;
       }

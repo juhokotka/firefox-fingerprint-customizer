@@ -3,12 +3,19 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CompositorOGL.h"
-#include <stddef.h>             // for size_t
-#include <stdint.h>             // for uint32_t, uint8_t
-#include <stdlib.h>             // for free, malloc
-#include "GLContextProvider.h"  // for GLContextProvider
+
+#include <stddef.h>  // for size_t
+#include <stdint.h>  // for uint32_t, uint8_t
+#include <stdlib.h>  // for free, malloc
+
+#include "GLBlitHelper.h"
 #include "GLContext.h"          // for GLContext
+#include "GLContextProvider.h"  // for GLContextProvider
+#include "GLReadTexImageHelper.h"
 #include "GLUploadHelpers.h"
+#include "HeapCopyOfStackArray.h"
+#include "OGLShaderProgram.h"  // for ShaderProgramOGL, etc
+#include "ScopedGLHelpers.h"
 #include "gfxCrashReporterUtils.h"  // for ScopedGfxFeatureReporter
 #include "gfxEnv.h"                 // for gfxEnv
 #include "gfxPlatform.h"            // for gfxPlatform
@@ -21,18 +28,19 @@
 #include "mozilla/StaticPrefs_nglayout.h"
 #include "mozilla/gfx/BasePoint.h"  // for BasePoint
 #include "mozilla/gfx/Matrix.h"     // for Matrix4x4, Matrix
-#include "mozilla/gfx/Triangle.h"   // for Triangle
-#include "mozilla/gfx/gfxVars.h"    // for gfxVars
+#include "mozilla/gfx/Swizzle.h"
+#include "mozilla/gfx/Triangle.h"  // for Triangle
+#include "mozilla/gfx/gfxVars.h"   // for gfxVars
+#include "mozilla/layers/CompositingRenderTargetOGL.h"
+#include "mozilla/layers/Effects.h"  // for EffectChain, TexturedEffect, etc
 #include "mozilla/layers/ImageDataSerializer.h"
 #include "mozilla/layers/NativeLayer.h"
-#include "mozilla/layers/CompositingRenderTargetOGL.h"
-#include "mozilla/layers/Effects.h"      // for EffectChain, TexturedEffect, etc
-#include "mozilla/layers/TextureHost.h"  // for TextureSource, etc
-#include "mozilla/layers/TextureHostOGL.h"  // for TextureSourceOGL, etc
 #include "mozilla/layers/PTextureParent.h"  // for OtherPid() on PTextureParent
+#include "mozilla/layers/TextureHost.h"     // for TextureSource, etc
+#include "mozilla/layers/TextureHostOGL.h"  // for TextureSourceOGL, etc
 #include "mozilla/mozalloc.h"               // for operator delete, etc
-#include "nsAppRunner.h"
 #include "nsAString.h"
+#include "nsAppRunner.h"
 #include "nsClassHashtable.h"
 #include "nsIConsoleService.h"      // for nsIConsoleService, etc
 #include "nsIWidget.h"              // for nsIWidget
@@ -41,12 +49,6 @@
 #include "nsRect.h"                 // for mozilla::gfx::IntRect
 #include "nsServiceManagerUtils.h"  // for do_GetService
 #include "nsString.h"               // for nsString, nsAutoCString, etc
-#include "OGLShaderProgram.h"       // for ShaderProgramOGL, etc
-#include "ScopedGLHelpers.h"
-#include "GLReadTexImageHelper.h"
-#include "HeapCopyOfStackArray.h"
-#include "GLBlitHelper.h"
-#include "mozilla/gfx/Swizzle.h"
 #ifdef MOZ_WIDGET_GTK
 #  include "mozilla/widget/GtkCompositorWidget.h"
 #endif
@@ -152,18 +154,17 @@ bool AsyncReadbackBufferOGL::MapAndCopyInto(DataSourceSurface* aSurface,
     return false;
   }
 
-  int32_t srcStride = mSize.width * 4;
+  // Swizzle to the destination format and flip vertically in one pass.
   DataSourceSurface::ScopedMap map(aSurface, DataSourceSurface::WRITE);
-  uint8_t* destData = map.GetData();
-  int32_t destStride = map.GetStride();
-  SurfaceFormat destFormat = aSurface->GetFormat();
-  for (int32_t destRow = 0; destRow < aReadSize.height; destRow++) {
-    // Turn srcData upside down during the copy.
-    int32_t srcRow = aReadSize.height - 1 - destRow;
-    const uint8_t* src = &srcData[srcRow * srcStride];
-    uint8_t* dest = &destData[destRow * destStride];
-    SwizzleData(src, srcStride, SurfaceFormat::R8G8B8A8, dest, destStride,
-                destFormat, IntSize(aReadSize.width, 1));
+  if (!map.IsMapped()) {
+    return false;
+  }
+
+  if (!SwizzleYFlipData(srcData, mSize.width * 4, SurfaceFormat::R8G8B8A8,
+                        map.GetData(), map.GetStride(), aSurface->GetFormat(),
+                        aReadSize)) {
+    MOZ_ASSERT_UNREACHABLE("Swizzle not supported?");
+    return false;
   }
 
   mGL->fUnmapBuffer(LOCAL_GL_PIXEL_PACK_BUFFER);
@@ -194,9 +195,6 @@ CompositorOGL::CompositorOGL(widget::CompositorWidget* aWidget,
       mFrameInProgress(false),
       mDestroyed(false),
       mViewportSize(0, 0) {
-  // If we render into native layers, our GLContext won't have a usable default
-  // framebuffer.
-  mCanRenderToDefaultFramebuffer = !aWidget->GetNativeLayerRoot();
   MOZ_COUNT_CTOR(CompositorOGL);
 }
 
@@ -759,15 +757,8 @@ Maybe<IntRect> CompositorOGL::BeginFrame(const nsIntRegion& aInvalidRegion,
                                  LOCAL_GL_ONE, LOCAL_GL_ONE_MINUS_SRC_ALPHA);
   mGLContext->fEnable(LOCAL_GL_BLEND);
 
-  RefPtr<CompositingRenderTarget> rt;
-  if (mCanRenderToDefaultFramebuffer) {
-    rt = CompositingRenderTargetOGL::CreateForWindow(this, rect.Size());
-  } else if (mTarget) {
-    rt = CreateRenderTarget(rect, INIT_MODE_CLEAR);
-  } else {
-    MOZ_CRASH("Unexpected call");
-  }
-
+  RefPtr<CompositingRenderTarget> rt =
+      CompositingRenderTargetOGL::CreateForWindow(this, rect.Size());
   if (!rt) {
     return Nothing();
   }
@@ -1230,7 +1221,6 @@ void CompositorOGL::DrawGeometry(const Geometry& aGeometry,
 
       BindAndDrawGeometryWithTextureRect(
           program, aGeometry, texturedEffect->mTextureCoords, source);
-      source->AsSourceOGL()->MaybeFenceTexture();
     } break;
     case EffectTypes::YCBCR: {
       EffectYCbCr* effectYCbCr =
@@ -1264,9 +1254,6 @@ void CompositorOGL::DrawGeometry(const Geometry& aGeometry,
       BindAndDrawGeometryWithTextureRect(program, aGeometry,
                                          effectYCbCr->mTextureCoords,
                                          sourceYCbCr->GetSubSource(Y));
-      sourceY->MaybeFenceTexture();
-      sourceCb->MaybeFenceTexture();
-      sourceCr->MaybeFenceTexture();
     } break;
     case EffectTypes::NV12: {
       EffectNV12* effectNV12 =
@@ -1299,8 +1286,6 @@ void CompositorOGL::DrawGeometry(const Geometry& aGeometry,
       BindAndDrawGeometryWithTextureRect(program, aGeometry,
                                          effectNV12->mTextureCoords,
                                          sourceNV12->GetSubSource(Y));
-      sourceY->MaybeFenceTexture();
-      sourceCbCr->MaybeFenceTexture();
     } break;
     default:
       MOZ_ASSERT(false, "Unhandled effect type");
@@ -1495,7 +1480,7 @@ void CompositorOGL::InsertFrameDoneSync() {
 
   EGLSync sync = nullptr;
   if (AndroidHardwareBufferManager::Get()) {
-    sync = egl->fCreateSync(LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
+    sync = egl->fCreateSyncKHR(LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
   }
   if (sync) {
     int fenceFd = egl->fDupNativeFenceFDANDROID(sync);

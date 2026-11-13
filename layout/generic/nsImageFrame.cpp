@@ -31,6 +31,7 @@
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/LargestContentfulPaint.h"
 #include "mozilla/dom/NameSpaceConstants.h"
+#include "mozilla/dom/PerformanceContainerTiming.h"
 #include "mozilla/dom/ReferrerInfo.h"
 #include "mozilla/dom/ResponsiveImageSelector.h"
 #include "mozilla/dom/ViewTransition.h"
@@ -76,6 +77,7 @@
 #include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/HTMLAnchorElement.h"
 #include "mozilla/dom/Link.h"
+#include "mozilla/dom/Range.h"
 #include "mozilla/dom/Selection.h"
 #include "nsBidiPresUtils.h"
 #include "nsBidiUtils.h"
@@ -86,7 +88,6 @@
 #include "nsIContent.h"
 #include "nsIURIMutator.h"
 #include "nsLayoutUtils.h"
-#include "nsRange.h"
 #include "nsStyleStructInlines.h"
 
 using namespace mozilla;
@@ -119,11 +120,10 @@ class nsDisplayGradient final : public nsPaintedDisplayItem {
 
   void Paint(nsDisplayListBuilder*, gfxContext* aCtx) final;
 
-  bool CreateWebRenderCommands(wr::DisplayListBuilder&,
-                               wr::IpcResourceUpdateQueue&,
-                               const StackingContextHelper&,
-                               layers::RenderRootStateManager*,
-                               nsDisplayListBuilder*) final;
+  WebRenderCommandsResult CreateWebRenderCommands(
+      wr::DisplayListBuilder&, wr::IpcResourceUpdateQueue&,
+      const StackingContextHelper&, layers::RenderRootStateManager*,
+      nsDisplayListBuilder*) final;
 
   NS_DISPLAY_DECL_NAME("Gradient", TYPE_GRADIENT)
 };
@@ -148,7 +148,7 @@ void nsDisplayGradient::Paint(nsDisplayListBuilder* aBuilder,
   (void)result;
 }
 
-bool nsDisplayGradient::CreateWebRenderCommands(
+WebRenderCommandsResult nsDisplayGradient::CreateWebRenderCommands(
     wr::DisplayListBuilder& aBuilder, wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc, layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
@@ -168,10 +168,10 @@ bool nsDisplayGradient::CreateWebRenderCommands(
         dest, dest.TopLeft(), dest, dest.Size(),
         /* aOpacity = */ 1.0f);
     if (result == ImgDrawResult::NOT_SUPPORTED) {
-      return false;
+      return Err("gradient image layer is not supported");
     }
   }
-  return true;
+  return Ok();
 }
 
 // sizes (pixels) for image icon, padding and border frame
@@ -1896,7 +1896,7 @@ class nsDisplayAltFeedback final : public nsPaintedDisplayItem {
                                 ToReferenceFrame(), flags);
   }
 
-  bool CreateWebRenderCommands(
+  WebRenderCommandsResult CreateWebRenderCommands(
       wr::DisplayListBuilder& aBuilder, wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
       layers::RenderRootStateManager* aManager,
@@ -1910,7 +1910,10 @@ class nsDisplayAltFeedback final : public nsPaintedDisplayItem {
         this, aBuilder, aResources, aSc, aManager, aDisplayListBuilder,
         ToReferenceFrame(), flags);
 
-    return result == ImgDrawResult::SUCCESS;
+    if (result != ImgDrawResult::SUCCESS) {
+      return Err("alt feedback could not be fully drawn");
+    }
+    return Ok();
   }
 
   NS_DISPLAY_DECL_NAME("AltFeedback", TYPE_ALT_FEEDBACK)
@@ -2186,17 +2189,19 @@ ImgDrawResult nsImageFrame::DisplayAltFeedbackWithoutLayer(
 
       SVGImageContext svgContext;
       Maybe<ImageIntRegion> region;
+      bool rasterizedForDest = false;
       IntSize decodeSize =
           nsLayoutUtils::ComputeImageContainerDrawingParameters(
-              imgCon, this, destRect, destRect, aSc, aFlags, svgContext,
-              region);
+              imgCon, this, destRect, destRect, aBuilder, aSc, aFlags,
+              svgContext, region, &rasterizedForDest);
       RefPtr<image::WebRenderImageProvider> provider;
       result = imgCon->GetImageProvider(aManager->LayerManager(), decodeSize,
                                         svgContext, region, aFlags,
                                         getter_AddRefs(provider));
       if (provider) {
         bool wrResult = aManager->CommandBuilder().PushImageProvider(
-            aItem, provider, result, aBuilder, aResources, destRect, bounds);
+            aItem, provider, result, aBuilder, aResources, destRect, bounds,
+            rasterizedForDest && !region);
         result &= wrResult ? ImgDrawResult::SUCCESS : ImgDrawResult::NOT_READY;
       } else {
         // We don't use &= here because we want the result to be NOT_READY so
@@ -2221,7 +2226,7 @@ ImgDrawResult nsImageFrame::DisplayAltFeedbackWithoutLayer(
       auto borderWidths = wr::ToBorderWidths(1.0, 1.0, 1.0, 1.0);
       wr::BorderSide side = {color, wr::BorderStyle::Solid};
       wr::BorderSide sides[4] = {side, side, side, side};
-      Range<const wr::BorderSide> sidesRange(sides, 4);
+      mozilla::Range<const wr::BorderSide> sidesRange(sides, 4);
       aBuilder.PushBorder(dest, wrBounds, isBackfaceVisible, borderWidths,
                           sidesRange, wr::EmptyBorderRadius());
 
@@ -2233,7 +2238,7 @@ ImgDrawResult nsImageFrame::DisplayAltFeedbackWithoutLayer(
           rect, PresContext()->AppUnitsPerDevPixel());
       dest = wr::ToLayoutRect(devPxRect);
 
-      aBuilder.PushRoundedRect(dest, wrBounds, isBackfaceVisible, color);
+      aBuilder.PushEllipse(dest, wrBounds, isBackfaceVisible, color);
     }
 
     // Reduce the inner rect by the width of the icon, and leave an
@@ -2452,7 +2457,7 @@ void nsDisplayImage::MaybeCreateWebRenderCommandsForViewTransition(
                      /* aForceAntiAliasing = */ false, rendering, key);
 }
 
-bool nsDisplayImage::CreateWebRenderCommands(
+WebRenderCommandsResult nsDisplayImage::CreateWebRenderCommands(
     wr::DisplayListBuilder& aBuilder, wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc, RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
@@ -2461,13 +2466,13 @@ bool nsDisplayImage::CreateWebRenderCommands(
   if (!image) {
     MaybeCreateWebRenderCommandsForViewTransition(
         aBuilder, aResources, aSc, aManager, aDisplayListBuilder);
-    return true;
+    return Ok();
   }
 
   if (nsImageMap* map = frame->GetImageMap(); map && map->HasFocus()) {
     // We can't draw some of the focus areas (in particular, PolyArea would be
     // somewhat hard to do).
-    return false;
+    return Err("focused image map area cannot be drawn");
   }
 
   auto* prevImage = frame->mPrevImage.get();
@@ -2492,8 +2497,10 @@ bool nsDisplayImage::CreateWebRenderCommands(
 
   SVGImageContext svgContext;
   Maybe<ImageIntRegion> region;
+  bool rasterizedForDest = false;
   IntSize decodeSize = nsLayoutUtils::ComputeImageContainerDrawingParameters(
-      image, mFrame, destRect, destRect, aSc, flags, svgContext, region);
+      image, mFrame, destRect, destRect, aBuilder, aSc, flags, svgContext,
+      region, &rasterizedForDest);
 
   RefPtr<image::WebRenderImageProvider> provider;
   ImgDrawResult drawResult =
@@ -2501,10 +2508,14 @@ bool nsDisplayImage::CreateWebRenderCommands(
                               region, flags, getter_AddRefs(provider));
 
   if (nsCOMPtr<imgIRequest> currentRequest = frame->GetCurrentRequest()) {
+    Element* element = frame->GetContent()->AsElement();
+    nsRect rectRelativeToSelf = destAppUnits - ToReferenceFrame();
+
+    ContainerTimingHelpers::MaybeProcessPaintForContainer(element, frame,
+                                                          rectRelativeToSelf);
     LCPHelpers::FinalizeLCPEntryForImage(
-        frame->GetContent()->AsElement(),
-        static_cast<imgRequestProxy*>(currentRequest.get()),
-        destAppUnits - ToReferenceFrame());
+        element, static_cast<imgRequestProxy*>(currentRequest.get()),
+        rectRelativeToSelf);
   }
 
   // While we got a container, it may not contain a fully decoded surface. If
@@ -2548,7 +2559,7 @@ bool nsDisplayImage::CreateWebRenderCommands(
       }
       break;
     case ImgDrawResult::NOT_SUPPORTED:
-      return false;
+      return Err("image provider is not supported");
     default:
       updatePrevImage = prevImage != image;
       break;
@@ -2565,8 +2576,9 @@ bool nsDisplayImage::CreateWebRenderCommands(
   // failure will be due to resource constraints and fallback is unlikely to
   // help us. Hence we can ignore the return value from PushImage.
   aManager->CommandBuilder().PushImageProvider(
-      this, provider, drawResult, aBuilder, aResources, destRect, destRect);
-  return true;
+      this, provider, drawResult, aBuilder, aResources, destRect, destRect,
+      rasterizedForDest && !region);
+  return Ok();
 }
 
 ImgDrawResult nsImageFrame::PaintImage(gfxContext& aRenderingContext,
@@ -2652,11 +2664,12 @@ void nsImageFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   if (!clipAxes.isEmpty()) {
     nsRect clipRect;
     nsRectCornerRadii radii;
+    nsMargin inset;
     bool haveRadii =
-        ComputeOverflowClipRectRelativeToSelf(clipAxes, clipRect, radii);
+        ComputeOverflowClipRectRelativeToSelf(clipAxes, clipRect, radii, inset);
     clipState.ClipContainingBlockDescendants(
         clipRect + aBuilder->ToReferenceFrame(this),
-        haveRadii ? &radii : nullptr);
+        haveRadii ? &radii : nullptr, haveRadii ? &inset : nullptr);
   }
 
   if (!mComputedSize.IsEmpty()) {

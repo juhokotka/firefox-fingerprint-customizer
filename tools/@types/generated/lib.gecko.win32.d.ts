@@ -105,13 +105,20 @@ declare enum nsIWindowsShellService_LaunchOnLoginEnabledEnumerator {
   LAUNCH_ON_LOGIN_ENABLED_BY_POLICY = 3,
 }
 
+declare enum nsIWindowsShellService_PinResult {
+  PINNED = 0,
+  REJECTED = 1,
+  UNKNOWN = 2,
+}
+
 declare global {
 
 namespace nsIWindowsShellService {
   type LaunchOnLoginEnabledEnumerator = nsIWindowsShellService_LaunchOnLoginEnabledEnumerator;
+  type PinResult = nsIWindowsShellService_PinResult;
 }
 
-interface nsIWindowsShellService extends nsIShellService, Enums<typeof nsIWindowsShellService_LaunchOnLoginEnabledEnumerator> {
+interface nsIWindowsShellService extends nsIShellService, Enums<typeof nsIWindowsShellService_LaunchOnLoginEnabledEnumerator & typeof nsIWindowsShellService_PinResult> {
   readonly OPEN_WITH_SUPPRESS_OPEN?: 4;
   readonly OPEN_WITH_PROTOCOL_MESSAGING?: 8;
   readonly OPEN_WITH_OPEN_ONCE?: 64;
@@ -121,14 +128,14 @@ interface nsIWindowsShellService extends nsIShellService, Enums<typeof nsIWindow
   createShortcut(aBinary: nsIFile, aArguments: string[], aDescription: string, aIconFile: nsIFile, aIconIndex: u16, aAppUserModelId: string, aShortcutFolder: string, aShortcutRelativePath: string): Promise<any>;
   deleteShortcut(aShortcutFolder: string, aShortcutRelativePath: string): Promise<any>;
   getLaunchOnLoginShortcuts(): string[];
-  pinCurrentAppToStartMenuAsync(aCheckOnly: boolean): Promise<any>;
-  isCurrentAppPinnedToStartMenuAsync(): Promise<any>;
-  enableLaunchOnLoginMSIXAsync(aTaskId: string): Promise<any>;
-  disableLaunchOnLoginMSIXAsync(aTaskId: string): Promise<any>;
-  getLaunchOnLoginEnabledMSIXAsync(aTaskId: string): Promise<any>;
-  pinCurrentAppToTaskbarAsync(aPrivateBrowsing: boolean, aFireAndForget?: boolean): Promise<any>;
-  checkPinCurrentAppToTaskbarAsync(aPrivateBrowsing: boolean): Promise<any>;
-  isCurrentAppPinnedToTaskbarAsync(aumid: string): Promise<any>;
+  pinCurrentAppToStartMenu(): Promise<any>;
+  isCurrentAppPinnedToStartMenu(): Promise<any>;
+  enableLaunchOnLoginMSIX(aTaskId: string): Promise<any>;
+  disableLaunchOnLoginMSIX(aTaskId: string): Promise<any>;
+  getLaunchOnLoginEnabledMSIX(aTaskId: string): Promise<any>;
+  pinCurrentAppToTaskbar(aPrivateBrowsing: boolean, aFireAndForget?: boolean): Promise<any>;
+  canPinToTaskbar(): void;
+  isCurrentAppPinnedToTaskbar(aumid: string): Promise<any>;
   pinShortcutToTaskbar(aAppUserModelId: string, aShortcutFolder: string, aShortcutRelativePath: string): Promise<any>;
   unpinShortcutFromTaskbar(aShortcutFolder: string, aShortcutRelativePath: string): void;
   launchSetDefaultAppPicker(aTarget: string, aFlags: i32): void;
@@ -344,7 +351,7 @@ interface nsIXPCComponents_Interfaces {
   nsIDefaultAgent: nsJSIID<nsIDefaultAgent>;
   nsIWindowsMutex: nsJSIID<nsIWindowsMutex>;
   nsIWindowsMutexFactory: nsJSIID<nsIWindowsMutexFactory>;
-  nsIWindowsShellService: nsJSIID<nsIWindowsShellService, typeof nsIWindowsShellService_LaunchOnLoginEnabledEnumerator>;
+  nsIWindowsShellService: nsJSIID<nsIWindowsShellService, typeof nsIWindowsShellService_LaunchOnLoginEnabledEnumerator & typeof nsIWindowsShellService_PinResult>;
   nsIWinTaskSchedulerService: nsJSIID<nsIWinTaskSchedulerService>;
   nsIJumpListBuilder: nsJSIID<nsIJumpListBuilder>;
   nsITaskbarOverlayIconController: nsJSIID<nsITaskbarOverlayIconController>;

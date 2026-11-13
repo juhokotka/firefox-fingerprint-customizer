@@ -11,6 +11,10 @@
 
 requestLongerTimeout(8);
 
+registerCleanupFunction(() => {
+  Services.prefs.clearUserPref("browser.download.save_converter_index");
+});
+
 let types = {
   text: "text/plain",
   html: "text/html",
@@ -156,6 +160,13 @@ function checkShortenedFilename(actual, expected) {
 }
 
 add_setup(async function () {
+  // This test is about filenames, not about the downloads panel, which would
+  // otherwise open on one of the downloads and stay open until the end of the
+  // file, covering the browser for the remaining tasks.
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.download.alwaysOpenPanel", false]],
+  });
+
   const { HttpServer } = ChromeUtils.importESModule(
     "resource://testing-common/httpd.sys.mjs"
   );
@@ -626,7 +637,10 @@ add_task(async function save_links() {
       attachmentlink.href = elem.localName == "object" ? elem.data : elem.src;
       attachmentlink.textContent = elem.dataset.filename;
       insertPos.appendChild(attachmentlink);
-      insertPos.appendChild(doc.createTextNode("  "));
+      // Each link gets its own line so a very long, unbreakable filename
+      // (e.g. the long .lnk test case) can't push later links off-screen
+      // and cause synthesizeMouse to click the wrong element.
+      insertPos.appendChild(doc.createElement("br"));
 
       elem = elem.nextElementSibling;
       idx++;
@@ -643,7 +657,12 @@ add_task(async function save_links() {
 
     let downloadFinishedPromise = promiseDownloadFinished(list);
 
-    BrowserTestUtils.synthesizeMouse(
+    await SpecialPowers.spawn(gBrowser.selectedBrowser, [idx], async elIdx => {
+      content.document
+        .getElementById("attachmentlink" + elIdx)
+        .scrollIntoView();
+    });
+    await BrowserTestUtils.synthesizeMouse(
       "#attachmentlink" + idx,
       5,
       5,
@@ -683,6 +702,10 @@ add_task(async function save_links() {
     } catch (ex) {}
   }
 
+  await SpecialPowers.spawn(gBrowser.selectedBrowser, [], () => {
+    content.document.scrollTop = 0;
+  });
+
   sendAsAttachment = false;
 });
 
@@ -698,6 +721,13 @@ add_task(async function saveas_image_links() {
     for (let idx = 0; idx < links.length; idx++) {
       let menu = document.getElementById("contentAreaContextMenu");
       let popupShown = BrowserTestUtils.waitForEvent(menu, "popupshown");
+      await SpecialPowers.spawn(
+        gBrowser.selectedBrowser,
+        [idx],
+        async elIdx => {
+          content.document.getElementById("link" + elIdx).scrollIntoView();
+        }
+      );
       BrowserTestUtils.synthesizeMouse(
         "#link" + idx,
         5,
@@ -767,6 +797,9 @@ add_task(async function save_download_links() {
   for (let idx = 0; idx < downloads.length; idx++) {
     let downloadFinishedPromise = promiseDownloadFinished(list);
 
+    await SpecialPowers.spawn(gBrowser.selectedBrowser, [idx], async elIdx => {
+      content.document.getElementById("download" + elIdx).scrollIntoView();
+    });
     BrowserTestUtils.synthesizeMouse(
       "#download" + idx,
       2,

@@ -11,15 +11,15 @@
 #include <unordered_set>
 #include <utility>
 
-#include "mozilla/gfx/MacIOSurface.h"
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPrefs_gfx.h"
+#include "mozilla/gfx/MacIOSurface.h"
 
 #ifdef XP_IOS
-#  include "GLContextEAGL.h"
 #  include <OpenGLES/EAGLIOSurface.h>
+#  include "GLContextEAGL.h"
 #endif
 
 #include "GLContext.h"
@@ -390,7 +390,7 @@ SurfacePoolCA::LockedPool::CreateFramebufferForTexture(GLContext* aGL,
   // new depth buffer and store a weak pointer to the new depth buffer in
   // mDepthBuffers.
   UniquePtr<gl::MozFramebuffer> fb = gl::MozFramebuffer::CreateForBacking(
-      aGL, aSize, 0, aNeedsDepthBuffer, aTarget, aTexture);
+      aGL, aSize, 0, aNeedsDepthBuffer, aNeedsDepthBuffer, aTarget, aTexture);
   if (fb && fb->GetDepthAndStencilBuffer()) {
     mDepthBuffers.AppendElement(
         DepthBufferEntry{aGL, aSize, fb->GetDepthAndStencilBuffer().get()});

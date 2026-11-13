@@ -3,14 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CookieParser.h"
+
 #include "CookieLogging.h"
 #include "CookieValidation.h"
-
 #include "mozilla/CheckedInt.h"
-#include "mozilla/glean/NetwerkMetrics.h"
-#include "mozilla/net/Cookie.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/TextUtils.h"
+#include "mozilla/glean/NetwerkMetrics.h"
+#include "mozilla/net/Cookie.h"
 #include "nsIConsoleReportCollector.h"
 #include "nsIScriptError.h"
 #include "nsIURI.h"
@@ -446,7 +446,7 @@ void CookieParser::FixPath(CookieStruct& aCookieData, nsIURI* aHostURI) {
   if (aCookieData.path().IsEmpty() || aCookieData.path().First() != '/') {
     nsAutoCString path = GetPathFromURI(aHostURI);
     if (CheckAttributeSize(aCookieData.path(), ATTRIBUTE_PATH, path)) {
-      aCookieData.path() = path;
+      aCookieData.path() = std::move(path);
     }
   }
 }
@@ -586,7 +586,7 @@ void CookieParser::FixDomain(CookieStruct& aCookieData, nsIURI* aHostURI,
 
   // no domain specified, use hostFromURI
   if (aCookieData.host().IsEmpty()) {
-    aCookieData.host() = hostFromURI;
+    aCookieData.host() = std::move(hostFromURI);
     return;
   }
 
@@ -621,7 +621,7 @@ void CookieParser::FixDomain(CookieStruct& aCookieData, nsIURI* aHostURI,
       CookieCommons::IsSubdomainOf(hostFromURI, cookieHost)) {
     // prepend a dot to indicate a domain cookie
     cookieHost.InsertLiteral(".", 0);
-    aCookieData.host() = cookieHost;
+    aCookieData.host() = std::move(cookieHost);
   }
 
   /*
@@ -676,7 +676,6 @@ void CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
   }
 
   FixDomain(mCookieData, mHostURI, aBaseDomain, aRequireHostMatch);
-  FixPath(mCookieData, mHostURI);
 
   // If the cookie is on the 3pcd exception list, we apply partitioned
   // attribute to the cookie.
@@ -716,6 +715,13 @@ void CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
   if (mValidation->Result() != nsICookieValidation::eOK) {
     return;
   }
+
+  // FixPath() MUST NOT run before the validation, because the "__Host-" prefix
+  // is about the Path attribute the server sent, not about the path the cookie
+  // ends up with. A cookie that arrives already built, as in
+  // CookieService::SetCookiesFromIPC(), has no attribute left to look at and is
+  // checked against its final path instead.
+  FixPath(mCookieData, mHostURI);
 }
 
 void CookieParser::RejectCookie(Rejection aRejection) {

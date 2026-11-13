@@ -14,7 +14,7 @@ use crate::invalidation::compare::{PrimitiveComparer, PrimitiveDependency, Color
 use crate::invalidation::{InvalidationReason, PrimitiveCompareResult, quadtree::TileNode};
 use crate::invalidation::vert_buffer::{CornersCache, VertRange};
 use crate::intern::ItemUid;
-use crate::picture::{PictureCompositeMode, SurfaceIndex, clampf};
+use crate::picture::clampf;
 use crate::print_tree::PrintTreePrinter;
 use crate::resource_cache::ResourceCache;
 use crate::space::SpaceMapper;
@@ -32,7 +32,6 @@ pub struct CachedSurface {
     pub root: TileNode,
     pub background_color: Option<ColorF>,
     pub invalidation_reason: Option<InvalidationReason>,
-    pub sub_graphs: Vec<(PictureRect, Vec<(PictureCompositeMode, SurfaceIndex)>)>,
 }
 
 impl CachedSurface {
@@ -47,7 +46,6 @@ impl CachedSurface {
             root: TileNode::new_leaf(Vec::new()),
             background_color: None,
             invalidation_reason: None,
-            sub_graphs: Vec::new(),
         }
     }
 
@@ -73,7 +71,6 @@ impl CachedSurface {
             PicturePoint::new(-1.0e32, -1.0e32),
         );
         self.invalidation_reason  = None;
-        self.sub_graphs.clear();
 
         // If the tile isn't visible, early exit, skipping the normal set up to
         // validate dependencies. Instead, we will only compare the current tile
@@ -198,6 +195,16 @@ impl CachedSurface {
             );
         }
 
+        if info.raster_space_animating {
+            dep_count += 1;
+            poke_into_vec(
+                &PrimitiveDependency::AnimatedRasterSpace {
+                    animating: true,
+                },
+                &mut self.current_descriptor.dep_data,
+            );
+        }
+
         self.current_descriptor.prims.push(PrimitiveDescriptor {
             prim_clip_box,
             dep_offset,
@@ -306,10 +313,7 @@ impl CachedSurface {
 // Immutable context passed to picture cache tiles during update_dirty_and_valid_rects
 pub struct TileUpdateDirtyContext<'a> {
     /// Maps from picture cache coords -> world space coords.
-    pub pic_to_world_mapper: SpaceMapper<PicturePixel, WorldPixel>,
-
-    /// Global scale factor from world -> device pixels.
-    pub global_device_pixel_scale: DevicePixelScale,
+    pub pic_to_device_mapper: SpaceMapper<PicturePixel, DevicePixel>,
 
     /// Information about opacity bindings from the picture cache.
     pub opacity_bindings: &'a FastHashMap<PropertyBindingId, OpacityBindingInfo>,
@@ -351,11 +355,14 @@ pub struct PrimitiveDependencyInfo {
     /// Color binding this primitive depends on.
     pub color_binding: Option<ColorBinding>,
     /// Intern uid for this primitive instance. Stable across frames and across
-    /// content-side scroll events: scene building normalises each primitive's
-    /// prim_rect by the accumulated external_scroll_offset before interning,
-    /// so the key (and therefore this uid) does not change when the scroll
-    /// position changes. If external_scroll_offset is ever removed, this
-    /// stability guarantee would need to be preserved by another mechanism.
+    /// content-side scroll events: the primitive's key includes its local
+    /// prim_rect, and the display-list builder subtracts the accumulated
+    /// external scroll offset from every coordinate in whole app units before
+    /// the item is recorded, so the rect - and therefore this uid - does not
+    /// change when the scroll position does. That normalisation must stay exact:
+    /// unlike the raster-space corners below, which are quantized to a quarter
+    /// device pixel, a uid compare is bit-exact, so sub-pixel drift in the
+    /// round-trip would invalidate tiles on every scroll offset.
     pub prim_uid: ItemUid,
     /// Scratch range for the primitive's rect corners in raster space (unquantized).
     /// Quantized into per-tile vert_data inside add_prim_dependency.
@@ -371,6 +378,11 @@ pub struct PrimitiveDependencyInfo {
     /// Per-clip data: (clip intern uid, scratch range for clip corners).
     /// The uid covers the clip's shape/mode; position is captured in the scratch range.
     pub clips: SmallVec<[(ItemUid, VertRange); 4]>,
+    /// Set for a text run whose spatial node (or an ancestor) has an animated
+    /// transform, so it is rasterized in local space (bug 2056306). Encoded as
+    /// an `AnimatedRasterSpace` dep only when true, so the tile invalidates when
+    /// the animation ends and the text returns to the crisp device path.
+    pub raster_space_animating: bool,
 }
 
 impl PrimitiveDependencyInfo {
@@ -384,6 +396,7 @@ impl PrimitiveDependencyInfo {
             prim_scratch: VertRange::INVALID,
             cov_scratch: VertRange::INVALID,
             clips: smallvec::SmallVec::new(),
+            raster_space_animating: false,
         }
     }
 }

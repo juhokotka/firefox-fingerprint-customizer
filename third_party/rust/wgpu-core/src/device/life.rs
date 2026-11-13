@@ -177,7 +177,7 @@ impl WaitIdleError {
 ///     2)  `handle_mapping` drains `self.ready_to_map` and actually maps the
 ///         buffers, collecting a list of notification closures to call.
 ///
-/// Only calling `Global::buffer_map_async` clones a new `Arc` for the
+/// Only calling [`Buffer::map_async`] clones a new `Arc` for the
 /// buffer. This new `Arc` is only dropped by `handle_mapping`.
 pub(crate) struct LifetimeTracker {
     /// Resources used by queue submissions still in flight. One entry per
@@ -425,7 +425,7 @@ impl LifetimeTracker {
             Vec::with_capacity(self.ready_to_compact.len());
 
         for blas in self.ready_to_compact.drain(..) {
-            match blas.read_back_compact_size() {
+            match blas.read_back_compact_size(blas.compacted_state.lock()) {
                 Some(cb) => pending_callbacks.push(cb),
                 None => continue,
             }

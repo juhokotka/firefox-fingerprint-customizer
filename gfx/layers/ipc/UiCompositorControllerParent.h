@@ -4,10 +4,10 @@
 #ifndef include_gfx_ipc_UiCompositorControllerParent_h
 #define include_gfx_ipc_UiCompositorControllerParent_h
 
-#include "mozilla/layers/PUiCompositorControllerParent.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/layers/CompositorScrollUpdate.h"
 #include "mozilla/layers/LayersTypes.h"
-#include "mozilla/RefPtr.h"
+#include "mozilla/layers/PUiCompositorControllerParent.h"
 
 namespace mozilla {
 namespace layers {
@@ -38,7 +38,6 @@ class UiCompositorControllerParent final
                                               const int32_t& aWidth,
                                               bool* aOutResumed);
   mozilla::ipc::IPCResult RecvInvalidateAndRender();
-  mozilla::ipc::IPCResult RecvMaxToolbarHeight(const int32_t& aHeight);
   mozilla::ipc::IPCResult RecvFixedBottomOffset(const int32_t& aOffset);
   mozilla::ipc::IPCResult RecvDefaultClearColor(const uint32_t& aColor);
   mozilla::ipc::IPCResult RecvRequestScreenPixels(
@@ -55,7 +54,8 @@ class UiCompositorControllerParent final
   // necessary.
   void NotifyLayersUpdated();
   void NotifyFirstPaint();
-  void NotifyCompositorScrollUpdate(const CompositorScrollUpdate& aUpdate);
+  void NotifyCompositorScrollUpdates(
+      nsTArray<CompositorScrollUpdate>&& aUpdates);
 
  private:
   explicit UiCompositorControllerParent(const LayersId& aRootLayerTreeId);
@@ -73,8 +73,6 @@ class UiCompositorControllerParent final
                                         // is expecting to be notified when a
                                         // layer has been updated
 #endif                                  // defined(MOZ_WIDGET_ANDROID)
-
-  int32_t mMaxToolbarHeight;
 };
 
 }  // namespace layers

@@ -24,8 +24,7 @@ import org.mozilla.fenix.theme.FirefoxTheme
 @RunWith(AndroidJUnit4::class)
 class TabGroupListTest {
 
-    @get:Rule
-    val composeTestRule = createComposeRule()
+    @get:Rule val composeTestRule = createComposeRule()
 
     @Test
     fun verifyTabGroupClick() {
@@ -41,14 +40,14 @@ class TabGroupListTest {
                         groupClicked = true
                         clickedGroup = it
                     },
-                    onDeleteTabGroupClick = {},
                     onEditTabGroupClick = {},
+                    onShareTabGroupClick = {},
+                    onDeleteTabGroupClick = {},
                 )
             }
         }
 
-        composeTestRule.onNodeWithTag("${TabsTrayTestTag.TAB_GROUP_ROOT}.${group.id}")
-            .performClick()
+        composeTestRule.onNodeWithTag("${TabsTrayTestTag.TAB_GROUP_ROOT}.${group.id}").performClick()
 
         assertTrue(groupClicked)
         assertEquals(group, clickedGroup)
@@ -70,17 +69,35 @@ class TabGroupListTest {
                         clickedGroup = it
                     },
                     onEditTabGroupClick = {},
+                    onShareTabGroupClick = {},
                 )
             }
         }
 
-        composeTestRule.onAllNodesWithTag(TabsTrayTestTag.TAB_GROUP_THREE_DOT_BUTTON)[0]
-            .performClick()
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.DELETE_TAB_GROUP)
-            .performClick()
+        composeTestRule.onAllNodesWithTag(TabsTrayTestTag.TAB_GROUP_THREE_DOT_BUTTON)[0].performClick()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.DELETE_TAB_GROUP).performClick()
 
         assertTrue(deleteClicked)
         assertEquals(group, clickedGroup)
+    }
+
+    @Test
+    fun verifyUngroupTabGroupNotDisplayed() {
+        composeTestRule.setContent {
+            FirefoxTheme {
+                TabGroupList(
+                    groups = listOf(createTabGroup(title = "Group 1")),
+                    onTabGroupClick = {},
+                    onDeleteTabGroupClick = {},
+                    onEditTabGroupClick = {},
+                    onShareTabGroupClick = {},
+                )
+            }
+        }
+
+        composeTestRule.onAllNodesWithTag(TabsTrayTestTag.TAB_GROUP_THREE_DOT_BUTTON)[0].performClick()
+
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.UNGROUP_TAB_GROUP).assertDoesNotExist()
     }
 
     @Test
@@ -99,14 +116,13 @@ class TabGroupListTest {
                         editClicked = true
                         clickedGroup = it
                     },
+                    onShareTabGroupClick = {},
                 )
             }
         }
 
-        composeTestRule.onAllNodesWithTag(TabsTrayTestTag.TAB_GROUP_THREE_DOT_BUTTON)[0]
-            .performClick()
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.EDIT_TAB_GROUP)
-            .performClick()
+        composeTestRule.onAllNodesWithTag(TabsTrayTestTag.TAB_GROUP_THREE_DOT_BUTTON)[0].performClick()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.EDIT_TAB_GROUP).performClick()
 
         assertTrue(editClicked)
         assertEquals(group, clickedGroup)
@@ -121,13 +137,13 @@ class TabGroupListTest {
                 TabGroupList(
                     groups = listOf(group),
                     onTabGroupClick = {},
-                    onDeleteTabGroupClick = {},
                     onEditTabGroupClick = {},
+                    onShareTabGroupClick = {},
+                    onDeleteTabGroupClick = {},
                 )
             }
         }
 
-        composeTestRule.onNodeWithTag("${TabsTrayTestTag.TAB_GROUP_ROOT}.${group.id}")
-            .assertIsSelected()
+        composeTestRule.onNodeWithTag("${TabsTrayTestTag.TAB_GROUP_ROOT}.${group.id}").assertIsSelected()
     }
 }

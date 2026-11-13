@@ -10,6 +10,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   clearTimeout: "resource://gre/modules/Timer.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
 
+  AnimationFramePromise: "chrome://remote/content/shared/Sync.sys.mjs",
   AppInfo: "chrome://remote/content/shared/AppInfo.sys.mjs",
   assert: "chrome://remote/content/shared/webdriver/Assert.sys.mjs",
   AsyncQueue: "chrome://remote/content/shared/AsyncQueue.sys.mjs",
@@ -19,7 +20,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   keyData: "chrome://remote/content/shared/webdriver/KeyData.sys.mjs",
   Log: "chrome://remote/content/shared/Log.sys.mjs",
   pprint: "chrome://remote/content/shared/Format.sys.mjs",
-  Sleep: "chrome://remote/content/marionette/sync.sys.mjs",
+  Sleep: "chrome://remote/content/shared/Sync.sys.mjs",
 });
 
 ChromeUtils.defineLazyGetter(lazy, "logger", () => lazy.Log.get());
@@ -42,6 +43,9 @@ export const actions = {};
 // Max interval between two clicks that should result in a dblclick or a tripleclick (in ms)
 export const CLICK_INTERVAL = 640;
 
+// Interval between transitions in ms, matching a common 60Hz vsync
+const FP60_INTERVAL = 1000 / 60;
+
 /** Map from normalized key value to UI Events modifier key name */
 const MODIFIER_NAME_LOOKUP = {
   Alt: "alt",
@@ -55,6 +59,14 @@ XPCOMUtils.defineLazyPreferenceGetter(
   actions,
   "useAsyncMouseEvents",
   "remote.events.async.mouse.enabled",
+  false
+);
+
+// Flag, that indicates if an async widget event should be used when dispatching a touch event.
+XPCOMUtils.defineLazyPreferenceGetter(
+  actions,
+  "useAsyncTouchEvents",
+  "remote.events.async.touch.enabled",
   false
 );
 
@@ -1656,6 +1668,7 @@ class PointerMoveAction extends PointerAction {
       [[inputSource.x, inputSource.y]],
       [moveCoordinates],
       this.duration ?? tickDuration,
+      context,
       async _target =>
         await this.performPointerMoveStep(state, inputSource, _target, options)
     );
@@ -1926,8 +1939,9 @@ class WheelScrollAction extends WheelAction {
       [[startX, startY]],
       [[this.deltaX, this.deltaY]],
       this.duration ?? tickDuration,
+      context,
       async deltaTarget =>
-        await this.performOneWheelScroll(
+        await this.performWheelScrollStep(
           state,
           scrollCoordinates,
           deltaPosition,
@@ -1953,7 +1967,7 @@ class WheelScrollAction extends WheelAction {
    *
    * @returns {Promise}
    */
-  async performOneWheelScroll(
+  async performWheelScrollStep(
     state,
     scrollCoordinates,
     deltaPosition,
@@ -1980,7 +1994,7 @@ class WheelScrollAction extends WheelAction {
     eventData.update(state);
 
     lazy.logger.trace(
-      `WheelScrollAction.performOneWheelScrollStep [${deltaX},${deltaY}]`
+      `WheelScrollAction.performWheelScrollStep [${deltaX},${deltaY}]`
     );
 
     await dispatchEvent("synthesizeWheelAtPoint", context, {
@@ -2056,6 +2070,45 @@ class TouchActionGroup {
 }
 
 /**
+ * Calculate and convert coordinates for a touch action.
+ *
+ * @param {PointerAction} action
+ *     The action containing x, y, and origin properties.
+ * @param {InputSource} actionInputSource
+ *     The input source for this action.
+ * @param {ActionsOptions} options
+ *     Configuration of actions dispatch.
+ *
+ * @returns {Promise<Array<number>>}
+ *     Array of [x, y] coordinates, converted if necessary.
+ */
+async function getTouchCoordinates(action, actionInputSource, options) {
+  const { assertInViewPort, context, toBrowserWindowCoordinates } = options;
+
+  let target = await action.origin.getTargetCoordinates(
+    actionInputSource,
+    [action.x, action.y],
+    options
+  );
+
+  await assertInViewPort(target, context);
+
+  // Only convert coordinates if these are for a content process, and are not
+  // relative to an already initialized pointer source.
+  if (
+    !(
+      action.origin instanceof PointerOrigin && actionInputSource.initialized
+    ) &&
+    context.isContent &&
+    actions.useAsyncTouchEvents
+  ) {
+    target = await toBrowserWindowCoordinates(target, context);
+  }
+
+  return target;
+}
+
+/**
  * Group of actions representing behavior of all touch pointers
  * depressed during a single tick.
  */
@@ -2078,13 +2131,7 @@ class PointerDownTouchActionGroup extends TouchActionGroup {
    *     Promise that is resolved once the action is complete.
    */
   async dispatch(state, inputSource, tickDuration, options) {
-    const { context, dispatchEvent } = options;
-
-    lazy.logger.trace(
-      `Dispatch ${this.constructor.name} with ${Array.from(
-        this.actions.values()
-      ).map(x => x[1].id)}`
-    );
+    const { context, dispatchEvent, toBrowserWindowCoordinates } = options;
 
     if (inputSource !== null) {
       throw new Error(
@@ -2098,10 +2145,29 @@ class PointerDownTouchActionGroup extends TouchActionGroup {
         !actionInputSource.isPressed(action.button)
     );
 
+    lazy.logger.trace(
+      `Dispatch ${this.constructor.name} with ${filteredActions.map(x => x[1].id)} async: ${actions.useAsyncTouchEvents}`
+    );
+
     if (filteredActions.length) {
-      const eventData = new MultiTouchEventData("touchstart");
+      const eventData = new TouchEventData("touchstart");
 
       for (const [actionInputSource, action] of filteredActions) {
+        // If the pointer hasn't been moved yet, its initial (0, 0) viewport
+        // coordinates need to be converted to browser window space for async
+        // touch dispatch in a content process.
+        if (
+          !actionInputSource.initialized &&
+          context.isContent &&
+          actions.useAsyncTouchEvents
+        ) {
+          const target = await toBrowserWindowCoordinates(
+            [actionInputSource.x, actionInputSource.y],
+            context
+          );
+          actionInputSource.moveTo(target[0], target[1]);
+        }
+
         eventData.addPointerEventData(actionInputSource, action);
         actionInputSource.press(action.button);
         eventData.update(state, actionInputSource);
@@ -2121,68 +2187,12 @@ class PointerDownTouchActionGroup extends TouchActionGroup {
         }
       }
 
-      await dispatchEvent("synthesizeMultiTouch", context, { eventData });
+      await dispatchEvent("synthesizeTouchAtPoint", context, { eventData });
 
       for (const [, action] of filteredActions) {
         // Append a copy of |action| with pointerUp subtype if event dispatched
         state.inputsToCancel.push(new PointerUpAction(action.id, action));
       }
-    }
-  }
-}
-
-/**
- * Group of actions representing behavior of all touch pointers
- * released during a single tick.
- */
-class PointerUpTouchActionGroup extends TouchActionGroup {
-  static type = "pointerUp";
-
-  /**
-   * Dispatch a pointerup touch action.
-   *
-   * @param {State} state
-   *     The {@link State} of the action.
-   * @param {InputSource} inputSource
-   *     Current input device.
-   * @param {number} tickDuration
-   *     [unused] Length of the current tick, in ms.
-   * @param {ActionsOptions} options
-   *     Configuration of actions dispatch.
-   *
-   * @returns {Promise}
-   *     Promise that is resolved once the action is complete.
-   */
-  async dispatch(state, inputSource, tickDuration, options) {
-    const { context, dispatchEvent } = options;
-
-    lazy.logger.trace(
-      `Dispatch ${this.constructor.name} with ${Array.from(
-        this.actions.values()
-      ).map(x => x[1].id)}`
-    );
-
-    if (inputSource !== null) {
-      throw new Error(
-        "Expected null inputSource for PointerUpTouchActionGroup.dispatch"
-      );
-    }
-
-    // Only include pointers that are not already depressed
-    const filteredActions = Array.from(this.actions.values()).filter(
-      ([actionInputSource, action]) =>
-        actionInputSource.isPressed(action.button)
-    );
-
-    if (filteredActions.length) {
-      const eventData = new MultiTouchEventData("touchend");
-      for (const [actionInputSource, action] of filteredActions) {
-        eventData.addPointerEventData(actionInputSource, action);
-        actionInputSource.release(action.button);
-        eventData.update(state, actionInputSource);
-      }
-
-      await dispatchEvent("synthesizeMultiTouch", context, { eventData });
     }
   }
 }
@@ -2210,30 +2220,31 @@ class PointerMoveTouchActionGroup extends TouchActionGroup {
    *     Promise that is resolved once the action is complete.
    */
   async dispatch(state, inputSource, tickDuration, options) {
-    const { assertInViewPort, context } = options;
+    const { context } = options;
 
-    lazy.logger.trace(
-      `Dispatch ${this.constructor.name} with ${Array.from(this.actions).map(
-        x => x[1].id
-      )}`
-    );
     if (inputSource !== null) {
       throw new Error(
         "Expected null inputSource for PointerMoveTouchActionGroup.dispatch"
       );
     }
 
+    const moveActions = Array.from(this.actions.values());
+
+    lazy.logger.trace(
+      `Dispatch ${this.constructor.name} with ${moveActions.map(
+        x => x[1].id
+      )} async: ${actions.useAsyncTouchEvents}`
+    );
+
     let startCoords = [];
     let targetCoords = [];
 
-    for (const [actionInputSource, action] of this.actions.values()) {
-      const target = await action.origin.getTargetCoordinates(
+    for (const [actionInputSource, action] of moveActions) {
+      const target = await getTouchCoordinates(
+        action,
         actionInputSource,
-        [action.x, action.y],
         options
       );
-
-      await assertInViewPort(target, context);
 
       startCoords.push([actionInputSource.x, actionInputSource.y]);
       targetCoords.push(target);
@@ -2261,6 +2272,7 @@ class PointerMoveTouchActionGroup extends TouchActionGroup {
       startCoords,
       targetCoords,
       this.duration ?? tickDuration,
+      context,
       async currentTargetCoords =>
         await this.performPointerMoveStep(
           state,
@@ -2311,7 +2323,13 @@ class PointerMoveTouchActionGroup extends TouchActionGroup {
       return;
     }
 
-    const eventData = new MultiTouchEventData("touchmove");
+    lazy.logger.trace(
+      `PointerMoveTouchActionGroup.performPointerMoveStep ${targetCoords.map(
+        ([x, y]) => `[${x},${y}]`
+      )}`
+    );
+
+    const eventData = new TouchEventData("touchmove");
     for (const [inputSource, action, target] of perPointerData) {
       inputSource.moveTo(target[0], target[1]);
       eventData.addPointerEventData(inputSource, action);
@@ -2323,7 +2341,61 @@ class PointerMoveTouchActionGroup extends TouchActionGroup {
       eventData.update(state, inputSource);
     }
 
-    await dispatchEvent("synthesizeMultiTouch", context, { eventData });
+    await dispatchEvent("synthesizeTouchAtPoint", context, { eventData });
+  }
+}
+
+/**
+ * Group of actions representing behavior of all touch pointers
+ * released during a single tick.
+ */
+class PointerUpTouchActionGroup extends TouchActionGroup {
+  static type = "pointerUp";
+
+  /**
+   * Dispatch a pointerup touch action.
+   *
+   * @param {State} state
+   *     The {@link State} of the action.
+   * @param {InputSource} inputSource
+   *     Current input device.
+   * @param {number} tickDuration
+   *     [unused] Length of the current tick, in ms.
+   * @param {ActionsOptions} options
+   *     Configuration of actions dispatch.
+   *
+   * @returns {Promise}
+   *     Promise that is resolved once the action is complete.
+   */
+  async dispatch(state, inputSource, tickDuration, options) {
+    const { context, dispatchEvent } = options;
+
+    if (inputSource !== null) {
+      throw new Error(
+        "Expected null inputSource for PointerUpTouchActionGroup.dispatch"
+      );
+    }
+
+    // Only include pointers that are not already depressed
+    const filteredActions = Array.from(this.actions.values()).filter(
+      ([actionInputSource, action]) =>
+        actionInputSource.isPressed(action.button)
+    );
+
+    lazy.logger.trace(
+      `Dispatch ${this.constructor.name} with ${filteredActions.map(x => x[1].id)} async: ${actions.useAsyncTouchEvents}`
+    );
+
+    if (filteredActions.length) {
+      const eventData = new TouchEventData("touchend");
+      for (const [actionInputSource, action] of filteredActions) {
+        eventData.addPointerEventData(actionInputSource, action);
+        actionInputSource.release(action.button);
+        eventData.update(state, actionInputSource);
+      }
+
+      await dispatchEvent("synthesizeTouchAtPoint", context, { eventData });
+    }
   }
 }
 
@@ -2355,16 +2427,21 @@ for (const cls of [
  *     in the move.
  * @param {number} duration
  *     Time in ms the move will take.
+ * @param {BrowsingContext} context
+ *     The browsing context the move is dispatched to. Used to retrieve the
+ *     window that drives the incremental transitions via animation frames.
  * @param {Function} callback
  *     Function that actually performs the move. This takes a single parameter
  *     which is an array of [x, y] coordinates corresponding to the move
  *     targets.
  */
-async function moveOverTime(startCoords, targetCoords, duration, callback) {
-  lazy.logger.trace(
-    `moveOverTime start: ${startCoords} target: ${targetCoords} duration: ${duration}`
-  );
-
+async function moveOverTime(
+  startCoords,
+  targetCoords,
+  duration,
+  context,
+  callback
+) {
   if (startCoords.length !== targetCoords.length) {
     throw new Error(
       "Expected equal number of start coordinates and target coordinates"
@@ -2380,56 +2457,60 @@ async function moveOverTime(startCoords, targetCoords, duration, callback) {
     );
   }
 
+  lazy.logger.trace(
+    `moveOverTime start: ${startCoords} target: ${targetCoords} duration: ${duration}`
+  );
+
   if (duration === 0) {
     // transition to destination in one step
     await callback(targetCoords);
     return;
   }
 
-  const timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-  // interval between transitions in ms, based on common vsync
-  const fps60 = 17;
-
   const distances = targetCoords.map((targetCoord, i) => {
     const startCoord = startCoords[i];
     return [targetCoord[0] - startCoord[0], targetCoord[1] - startCoord[1]];
   });
-  const ONE_SHOT = Ci.nsITimer.TYPE_ONE_SHOT;
+
+  // Use the chrome window because its animation frames should be scheduled
+  // reliably, unlike content windows where the renderer could be blocked.
+  const win = context.topChromeWindow;
+
+  // Split the transition into 60 Hz steps. Animation frames only schedule
+  // dispatching, keeping event timing consistent while honoring |duration|.
+  const steps = Math.max(1, Math.round(duration / FP60_INTERVAL));
+
   const startTime = Date.now();
-  const transitions = (async () => {
-    // wait |fps60| ms before performing first incremental transition
-    await new Promise(resolveTimer =>
-      timer.initWithCallback(resolveTimer, fps60, ONE_SHOT)
-    );
+  let dispatched = 0;
 
-    let durationRatio = Math.floor(Date.now() - startTime) / duration;
-    const epsilon = fps60 / duration / 10;
-    while (1 - durationRatio > epsilon) {
-      const intermediateTargets = startCoords.map((startCoord, i) => {
-        let distance = distances[i];
-        return [
-          Math.floor(durationRatio * distance[0] + startCoord[0]),
-          Math.floor(durationRatio * distance[1] + startCoord[1]),
-        ];
-      });
+  while (true) {
+    // wait for the next animation frame before performing the transition
+    await lazy.AnimationFramePromise(win);
 
-      await Promise.all([
-        callback(intermediateTargets),
-
-        // wait |fps60| ms before performing next transition
-        new Promise(resolveTimer =>
-          timer.initWithCallback(resolveTimer, fps60, ONE_SHOT)
-        ),
-      ]);
-
-      durationRatio = Math.floor(Date.now() - startTime) / duration;
+    const ratio = Math.min(1, (Date.now() - startTime) / duration);
+    if (ratio === 1) {
+      break;
     }
-  })();
 
-  await transitions;
+    // Round to the nearest step, capping at |steps - 1|.
+    // The final step is dispatched outside the loop.
+    const due = Math.min(steps - 1, Math.round(ratio * steps));
+    if (due <= dispatched) {
+      continue;
+    }
+    dispatched = due;
 
-  // perform last transition after all incremental moves are resolved and
-  // durationRatio is close enough to 1
+    const intermediateTargets = startCoords.map((startCoord, i) => {
+      const distance = distances[i];
+      return [
+        Math.floor((dispatched / steps) * distance[0] + startCoord[0]),
+        Math.floor((dispatched / steps) * distance[1] + startCoord[1]),
+      ];
+    });
+    await callback(intermediateTargets);
+  }
+
+  // perform the last transition once the full duration has elapsed
   await callback(targetCoords);
 }
 
@@ -2547,11 +2628,9 @@ class MousePointer extends Pointer {
     });
     mouseEvent.update(state, inputSource);
 
-    if (mouseEvent.ctrlKey) {
-      if (lazy.AppInfo.isMac) {
-        mouseEvent.button = 2;
-        state.clickTracker.reset();
-      }
+    if (mouseEvent.ctrlKey && lazy.AppInfo.isMac) {
+      mouseEvent.button = 2;
+      state.clickTracker.reset();
     } else {
       mouseEvent.clickCount = state.clickTracker.count + 1;
     }
@@ -3091,13 +3170,13 @@ class WheelEventData extends InputEventData {
 }
 
 /**
- * Representation of a multi touch event.
+ * Representation of one or more touch events.
  */
-class MultiTouchEventData extends PointerEventData {
+class TouchEventData extends PointerEventData {
   #setGlobalState;
 
   /**
-   * Creates a new {@link MultiTouchEventData} instance.
+   * Creates a new {@link TouchEventData} instance.
    *
    * @param {string} type
    *     The event type.

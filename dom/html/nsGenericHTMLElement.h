@@ -100,6 +100,18 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
   void SetPopover(const nsAString& aPopover, mozilla::ErrorResult& aError) {
     SetOrRemoveNullableStringAttr(nsGkAtoms::popover, aPopover, aError);
   }
+  void GetContainerTiming(mozilla::dom::DOMString& aValue) const {
+    GetHTMLAttr(nsGkAtoms::containertiming, aValue);
+  }
+  void SetContainerTiming(const nsAString& aValue) {
+    SetHTMLAttr(nsGkAtoms::containertiming, aValue);
+  }
+  bool ContainerTimingIgnore() const {
+    return GetBoolAttr(nsGkAtoms::containerTimingIgnore);
+  }
+  void SetContainerTimingIgnore(bool aValue) {
+    SetBoolAttr(nsGkAtoms::containerTimingIgnore, aValue);
+  }
 
   void GetHidden(mozilla::dom::Nullable<
                  mozilla::dom::OwningBooleanOrUnrestrictedDoubleOrString>&
@@ -235,6 +247,8 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
                                                 ErrorResult& aRv) override;
 
   MOZ_CAN_RUN_SCRIPT void FocusCandidate(Element*, bool aClearUpFocus);
+
+  Element* FindShadowPseudo(mozilla::PseudoStyleType aType) const;
 
   void SetNonce(const nsAString& aNonce) {
     SetProperty(nsGkAtoms::nonce, new nsString(aNonce),
@@ -409,8 +423,6 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
   bool IsHTMLLink(nsIURI** aURI) const;
 
   // HTML element methods
-  void Compact() { mAttrs.Compact(); }
-
   void UpdateEditableState(bool aNotify) override;
 
   bool ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
@@ -421,7 +433,7 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
   bool ParseBackgroundAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
                                 const nsAString& aValue, nsAttrValue& aResult);
 
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
+  bool IsNoNamespaceAttrMapped(const nsAtom* aAttribute) const override;
   nsMapRuleToAttributesFunc GetAttributeMappingFunction() const override;
 
   /**
@@ -494,9 +506,6 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
    */
   static bool ParseImageAttribute(nsAtom* aAttribute, const nsAString& aString,
                                   nsAttrValue& aResult);
-
-  static bool ParseReferrerAttribute(const nsAString& aString,
-                                     nsAttrValue& aResult);
 
   /**
    * Convert a frameborder string to value (yes/no/1/0)
@@ -681,28 +690,6 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
    */
   static bool InNavQuirksMode(Document*);
 
-  /**
-   * Gets the absolute URI value of an attribute, by resolving any relative
-   * URIs in the attribute against the baseuri of the element. If the attribute
-   * isn't a relative URI the value of the attribute is returned as is. Only
-   * works for attributes in null namespace.
-   *
-   * @param aAttr      name of attribute.
-   * @param aBaseAttr  name of base attribute.
-   * @param aResult    result value [out]
-   */
-  void GetURIAttr(nsAtom* aAttr, nsAtom* aBaseAttr, nsAString& aResult) const;
-  void GetURIAttr(nsAtom* aAttr, nsAtom* aBaseAttr, nsACString& aResult) const;
-
-  /**
-   * Gets the absolute URI values of an attribute, by resolving any relative
-   * URIs in the attribute against the baseuri of the element. If a substring
-   * isn't a relative URI, the substring is returned as is. Only works for
-   * attributes in null namespace.
-   */
-  const nsAttrValue* GetURIAttr(nsAtom* aAttr, nsAtom* aBaseAttr,
-                                nsIURI** aURI) const;
-
   bool IsHidden() const { return HasAttr(nsGkAtoms::hidden); }
 
   bool IsLabelable() const override;
@@ -715,22 +702,28 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
 
   static bool LegacyTouchAPIEnabled(JSContext* aCx, JSObject* aObj);
 
+  // The common set of:
   // https://html.spec.whatwg.org/#dom-window-nameditem-filter
+  // https://html.spec.whatwg.org/#dom-document-nameditem-filter
   static inline bool CanHaveName(nsAtom* aTag) {
     return aTag == nsGkAtoms::img || aTag == nsGkAtoms::form ||
-           aTag == nsGkAtoms::embed || aTag == nsGkAtoms::object;
+           aTag == nsGkAtoms::embed || aTag == nsGkAtoms::object ||
+           aTag == nsGkAtoms::iframe;
   }
   static inline bool ShouldExposeNameAsWindowProperty(Element* aElement) {
-    return aElement->IsHTMLElement() &&
-           CanHaveName(aElement->NodeInfo()->NameAtom());
+    if (!aElement->IsHTMLElement()) {
+      return false;
+    }
+    auto* nodeName = aElement->NodeInfo()->NameAtom();
+    return CanHaveName(nodeName) && nodeName != nsGkAtoms::iframe;
   }
   // https://html.spec.whatwg.org/#dom-document-nameditem-filter
   static inline bool ShouldExposeIdAsHTMLDocumentProperty(Element* aElement) {
     if (!aElement->HasID() || aElement->IsInNativeAnonymousSubtree()) {
       return false;
     }
-    // XXX Not all objects is exposed per spec, but other browsers doesn't check
-    // if object is exposed, either.
+    // XXX Not all objects should be exposed per spec, but other browsers don't
+    // check if object is exposed, either.
     if (aElement->IsHTMLElement(nsGkAtoms::object)) {
       return true;
     }
@@ -744,11 +737,10 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
     if (!aElement->HasName() || aElement->IsInNativeAnonymousSubtree()) {
       return false;
     }
-    // XXX Not all embeds/objects are exposed per spec, but other browser
-    // doesn't check if embeds/objects are exposed.
-    return aElement->IsAnyOfHTMLElements(nsGkAtoms::embed, nsGkAtoms::form,
-                                         nsGkAtoms::iframe, nsGkAtoms::img,
-                                         nsGkAtoms::object);
+    // XXX Not all embeds/objects should be exposed per spec, but other browsers
+    // don't check if embeds/objects are exposed.
+    return aElement->IsHTMLElement() &&
+           CanHaveName(aElement->NodeInfo()->NameAtom());
   }
 
   virtual inline void ResultForDialogSubmit(nsAString& aResult) {
@@ -800,7 +792,7 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
   MOZ_CAN_RUN_SCRIPT void AfterSetPopoverAttr();
 
   mozilla::EventListenerManager* GetEventListenerManagerForAttr(
-      nsAtom* aAttrName, bool* aDefer) override;
+      nsAtom* aAttrName) override;
 
   /**
    * Handles dispatching a simulated click on `this` on space or enter.
@@ -838,7 +830,8 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
   }
 
   void SetHTMLAttr(nsAtom* aName, const nsAString& aValue) {
-    SetAttr(kNameSpaceID_None, aName, aValue, true);
+    SetAttr(kNameSpaceID_None, aName, aValue, true,
+            mozilla::dom::IsKnownNewAttr::No);
   }
   void SetHTMLAttr(nsAtom* aName, const nsAString& aValue,
                    mozilla::ErrorResult& aError) {
@@ -963,20 +956,20 @@ class nsGenericHTMLElement : public nsGenericHTMLElementBase {
   }
 
   /**
-   * Locates the EditorBase associated with this node.  In general this is
-   * equivalent to GetEditorInternal(), but for designmode or contenteditable,
-   * this may need to get an editor that's not actually on this element's
-   * associated TextControlFrame.  This is used by the spellchecking routines
-   * to get the editor affected by changing the spellcheck attribute on this
-   * node.
+   * Return an associated editor for this element.
+   * If this is an HTMLBodyElement and it's the primary one in the document,
+   * this returns HTMLEditor if the document is in the designMode or there is
+   * an element has `contenteditable`.
+   * If this is a TextControlElement, returns **extant** TextEditor.
+   * Otherwise, returns nullptr.
    */
-  virtual already_AddRefed<mozilla::EditorBase> GetAssociatedEditor();
+  mozilla::EditorBase* GetAssociatedExtantEditor() const;
 
   /**
    * Ensures all editors associated with a subtree are synced, for purposes of
    * spellchecking.
    */
-  static void SyncEditorsOnSubtree(nsIContent* content);
+  static void SyncSpellCheckerStateOfExtantEditorsOnSubtree(nsIContent&);
 
   [[nodiscard]] inline static bool IsEditableState(
       ContentEditableState aState) {
@@ -1067,7 +1060,9 @@ class nsGenericHTMLFormElement : public nsGenericHTMLElement {
    */
   virtual void FieldSetDisabledChanged(bool aNotify);
 
-  void FieldSetFirstLegendChanged(bool aNotify) { UpdateFieldSet(aNotify); }
+  void FieldSetFirstLegendChanged(bool aNotify) {
+    FieldSetDisabledChanged(aNotify);
+  }
 
   /**
    * This callback is called by a fieldset on all it's elements when it's being
@@ -1114,6 +1109,7 @@ class nsGenericHTMLFormElement : public nsGenericHTMLElement {
    * state to decide whether our disabled flag should be toggled.
    */
   virtual void UpdateDisabledState(bool aNotify);
+  bool IsDisabledByAncestorFieldSet() const;
   bool IsReadOnlyInternal() const final;
 
   virtual void SetFormInternal(mozilla::dom::HTMLFormElement* aForm,
@@ -1121,6 +1117,10 @@ class nsGenericHTMLFormElement : public nsGenericHTMLElement {
 
   virtual mozilla::dom::HTMLFormElement* GetFormInternal() const {
     return nullptr;
+  }
+
+  mozilla::dom::HTMLFormElement* GetFormIfRegistered() const {
+    return HasFlag(ADDED_TO_FORM) ? GetFormInternal() : nullptr;
   }
 
   virtual mozilla::dom::HTMLFieldSetElement* GetFieldSetInternal() const {
@@ -1206,6 +1206,8 @@ class nsGenericHTMLFormControlElement : public nsGenericHTMLFormElement,
       already_AddRefed<mozilla::dom::NodeInfo> aNodeInfo, FormControlType);
 
   NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsGenericHTMLFormControlElement,
+                                           nsGenericHTMLFormElement);
 
   NS_IMPL_FROMNODE_HELPER(nsGenericHTMLFormControlElement,
                           IsHTMLFormControlElement())
@@ -1266,7 +1268,7 @@ class nsGenericHTMLFormControlElement : public nsGenericHTMLFormElement,
   void SetFormAutofillState(const nsAString& aState);
 
   /** The form that contains this control */
-  mozilla::dom::HTMLFormElement* mForm;
+  RefPtr<mozilla::dom::HTMLFormElement> mForm;
 
   /* This is a pointer to our closest fieldset parent if any */
   mozilla::dom::HTMLFieldSetElement* mFieldSet;

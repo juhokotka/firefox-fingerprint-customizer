@@ -6,17 +6,17 @@
 
 /* ::::: menupopup ::::: */
 
+*|*:root {
+  --panel-icon-fill: currentColor;
+}
+
 :is(menupopup, panel):where(:not([type="arrow"])) {
+  --panel-icon-fill: currentColor;
   --panel-background-color: Menu;
   --panel-text-color: MenuText;
   --panel-padding: var(--panel-padding-block) 0;
-
-  /* Nova's design tokens already provide a larger --panel-border-radius, so
-     only apply the platform default when Nova is disabled. */
-  @media not -moz-pref("browser.nova.enabled") {
-    /* This should match GetMenuCornerRadius() on macOS, or be overridden below */
-    --panel-border-radius: 6px;
-  }
+  /* This should match GetMenuCornerRadius() on macOS, or be overridden below */
+  --panel-border-radius: 6px;
 
   @media (-moz-platform: macos) {
     --panel-background-color: none;
@@ -36,6 +36,8 @@
   min-width: 1px;
   -moz-window-input-region-margin: var(--panel-box-shadow-margin);
   margin: calc(-1 * var(--panel-box-shadow-margin));
+
+  --button-icon-fill: var(--panel-icon-fill);
 
   /* Panel design token theming */
   --background-color-canvas: var(--panel-background-color);
@@ -67,9 +69,6 @@
     padding: var(--panel-padding);
     color: var(--panel-text-color);
     background: var(--panel-background-color);
-    /* The values chosen for the border radius should match OS values, not necessarily
-     * design system values. */
-    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
     border-radius: var(--panel-border-radius);
     border: 1px solid var(--panel-border-color);
     width: var(--panel-width);
@@ -92,6 +91,13 @@
 
   &[orient="vertical"]::part(content) {
     flex-direction: column;
+  }
+
+  /* A submenu is part of the same menu as its parent popup, so it must not
+   * widen a color scheme that the parent narrowed. */
+  menupopup,
+  panel {
+    color-scheme: inherit;
   }
 }
 
@@ -116,21 +122,23 @@ panel[type="arrow"] {
     transition-duration: 0.18s;
   }
 
-  @media not (-moz-platform: macos) {
+  /* On Windows / GTK, prefers-reduced-motion is derived from a more general
+   * "enable animations" setting (Animation Effects / gtk-enable-animations
+   * respectively). So we disable the opacity transition there too even though
+   * it's not quite a motion effect. */
+  @media (not (-moz-platform: macos)) and (not (prefers-reduced-motion)) {
     transition-property: transform, opacity;
     will-change: transform, opacity;
     opacity: 0;
-    @media not (prefers-reduced-motion) {
-      transform: translateY(-70px);
+    transform: translateY(-70px);
 
-      &:where([side="bottom"]) {
-        transform: translateY(70px);
-      }
-      /* On some platforms we can't animate the panel position easily, see
-       * bug 1385079, bug 1800368, bug 1800442 */
-      @media not (-moz-panel-animations) {
-        transform: none;
-      }
+    &:where([side="bottom"]) {
+      transform: translateY(70px);
+    }
+    /* On some platforms we can't animate the panel position easily, see
+    * bug 1385079, bug 1800368, bug 1800442 */
+    @media not (-moz-panel-animations) {
+      transform: none;
     }
   }
 

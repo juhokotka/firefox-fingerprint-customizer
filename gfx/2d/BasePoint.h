@@ -9,8 +9,9 @@
 #include <ostream>
 #include <tuple>
 #include <type_traits>
-#include "mozilla/Attributes.h"
+
 #include "Coord.h"
+#include "mozilla/Attributes.h"
 
 namespace mozilla {
 namespace gfx {

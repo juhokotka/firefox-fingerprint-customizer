@@ -11,7 +11,8 @@
 
 #include <stddef.h>  // for size_t
 
-#include "NamespaceImports.h"   // for Value, MutableHandleValue, HandleObject
+#include "NamespaceImports.h"  // for Value, MutableHandleValue, HandleObject
+
 #include "debugger/DebugAPI.h"  // for ResumeMode
 #include "debugger/Debugger.h"  // for ResumeMode, Handler, Debugger
 #include "gc/Barrier.h"         // for HeapPtr

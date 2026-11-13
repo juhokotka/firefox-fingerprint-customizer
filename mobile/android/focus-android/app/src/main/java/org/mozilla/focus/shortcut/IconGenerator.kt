@@ -13,20 +13,17 @@ import android.util.TypedValue
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.net.toUri
+import mozilla.components.support.ktx.android.content.pixelSizeFor
 import mozilla.components.support.ktx.kotlin.stripCommonSubdomains
 import org.mozilla.focus.R
 import org.mozilla.focus.shortcut.IconGenerator.generateAdaptiveLauncherIcon
 
-/**
- * Utility for generating launcher icons for web shortcuts.
- */
+/** Utility for generating launcher icons for web shortcuts. */
 object IconGenerator {
     private const val TEXT_SIZE_DP = 36f
     private const val DEFAULT_ICON_CHAR = '?'
 
-    /**
-     * See [generateAdaptiveLauncherIcon] for more details.
-     */
+    /** See [generateAdaptiveLauncherIcon] for more details. */
     @JvmStatic
     fun generateLauncherIcon(context: Context, url: String?): Bitmap {
         val startingChar = getRepresentativeCharacter(url)
@@ -34,19 +31,18 @@ object IconGenerator {
     }
 
     /**
-     * Generate an icon with the given character. The icon will be drawn
-     * on top of a generic launcher icon shape that we provide.
+     * Generate an icon with the given character. The icon will be drawn on top of a generic launcher icon shape that we
+     * provide.
      */
     private fun generateCharacterIcon(context: Context, character: Char) =
-            generateAdaptiveLauncherIcon(context, character)
+        generateAdaptiveLauncherIcon(context, character)
 
     /**
      * Generates a launcher icon for versions of Android that support Adaptive Icons (Oreo+):
      * https://developer.android.com/guide/practices/ui_guidelines/icon_design_adaptive.html
      */
     private fun generateAdaptiveLauncherIcon(context: Context, character: Char): Bitmap {
-        val res = context.resources
-        val adaptiveIconDimen = res.getDimensionPixelSize(R.dimen.adaptive_icon_drawable_dimen)
+        val adaptiveIconDimen = context.pixelSizeFor(R.dimen.adaptive_icon_drawable_dimen)
 
         val bitmap = createBitmap(adaptiveIconDimen, adaptiveIconDimen)
         val canvas = Canvas(bitmap)
@@ -64,11 +60,12 @@ object IconGenerator {
 
         val paint = Paint()
 
-        val textSize = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP,
-            TEXT_SIZE_DP,
-            context.resources.displayMetrics,
-        )
+        val textSize =
+            TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP,
+                TEXT_SIZE_DP,
+                context.resources.displayMetrics,
+            )
 
         paint.color = Color.WHITE
         paint.textAlign = Paint.Align.CENTER
@@ -105,15 +102,16 @@ object IconGenerator {
         if (url == null || url.isEmpty()) return null
 
         val uri = url.toUri()
-        val snippet = if (uri.host.isNullOrEmpty()) {
-            if (uri.path.isNullOrEmpty()) {
-                return null
-            } else { // The uri may not have a host for e.g. file:// uri
-                uri.path // cached by Uri class.
+        val snippet =
+            if (uri.host.isNullOrEmpty()) {
+                if (uri.path.isNullOrEmpty()) {
+                    return null
+                } else { // The uri may not have a host for e.g. file:// uri
+                    uri.path // cached by Uri class.
+                }
+            } else {
+                uri.host // cached by Uri class.
             }
-        } else {
-            uri.host // cached by Uri class.
-        }
 
         // Strip common prefixes that we do not want to use to determine the representative characters
         return snippet?.stripCommonSubdomains()

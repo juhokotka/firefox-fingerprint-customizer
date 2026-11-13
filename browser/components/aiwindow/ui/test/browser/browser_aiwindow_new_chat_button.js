@@ -86,22 +86,26 @@ add_task(async function test_new_chat_button_in_fullpage() {
     const result = await SpecialPowers.spawn(browser, [], async () => {
       const aiWindowElement = content.document.querySelector("ai-window");
 
-      await new Promise(resolve => content.setTimeout(resolve, 100));
-
+      // In fullpage the New chat button lives inside the
+      // <smartwindow-history-menu> top-actions row.
       await ContentTaskUtils.waitForCondition(
-        () => aiWindowElement && aiWindowElement.shadowRoot,
-        "Wait for AI Window to be rendered with shadow root"
+        () =>
+          aiWindowElement?.shadowRoot?.querySelector("smartwindow-history-menu")
+            ?.shadowRoot,
+        "Wait for AI Window and history menu to render"
       );
 
-      const mode = aiWindowElement.mode;
-      const newChatButton = aiWindowElement.shadowRoot.querySelector(
-        ".new-chat-icon-button"
+      const historyMenu = aiWindowElement.shadowRoot.querySelector(
+        "smartwindow-history-menu"
+      );
+      const newChatButton = historyMenu.shadowRoot.querySelector(
+        "[data-l10n-id='aiwindow-fullpage-new-chat']"
       );
       const fullpageHeader =
         aiWindowElement.shadowRoot.querySelector(".fullpage-header");
 
       return {
-        mode,
+        mode: aiWindowElement.mode,
         hasButton: !!newChatButton,
         hasFullpageHeader: !!fullpageHeader,
       };

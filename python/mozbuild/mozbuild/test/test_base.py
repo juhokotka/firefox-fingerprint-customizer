@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from io import StringIO
+from unittest import mock
 
 import mozpack.path as mozpath
 from buildconfig import topobjdir, topsrcdir
@@ -22,8 +23,10 @@ from mozbuild.base import (
     MachCommandBase,
     MozbuildObject,
     PathArgument,
+    split_job_flags,
 )
 from mozbuild.test.common import prepare_tmp_topsrcdir
+from mozbuild.util import cpu_count
 
 curdir = os.path.dirname(__file__)
 log_manager = LoggingManager()
@@ -182,45 +185,80 @@ class TestMozbuildObject(unittest.TestCase):
             os.chdir(self._old_cwd)
             shutil.rmtree(d)
 
+    def _mach_context_in_tmpdir(self, d, log_manager=None, handler=None):
+        """Lay out a throwaway srcdir/objdir under d and return a mach context."""
+        topobjdir = os.path.join(d, "objdir")
+        os.makedirs(topobjdir)
+
+        topsrcdir = os.path.join(d, "srcdir")
+        prepare_tmp_topsrcdir(topsrcdir)
+
+        mozinfo = os.path.join(topobjdir, "mozinfo.json")
+        with open(mozinfo, "w") as fh:
+            json.dump(
+                dict(
+                    topsrcdir=topsrcdir,
+                ),
+                fh,
+            )
+
+        os.chdir(topobjdir)
+
+        class MockMachContext:
+            pass
+
+        context = MockMachContext()
+        context.cwd = topobjdir
+        context.topdir = topsrcdir
+        context.settings = None
+        context.log_manager = log_manager
+        context.handler = handler
+        context.detect_virtualenv_mozinfo = False
+
+        return context
+
     def test_mach_command_base_inside_objdir(self):
         """Ensure a MachCommandBase constructed from inside the objdir works."""
 
         d = os.path.realpath(tempfile.mkdtemp())
 
         try:
-            topobjdir = os.path.join(d, "objdir")
-            os.makedirs(topobjdir)
-
-            topsrcdir = os.path.join(d, "srcdir")
-            prepare_tmp_topsrcdir(topsrcdir)
-
-            mozinfo = os.path.join(topobjdir, "mozinfo.json")
-            with open(mozinfo, "w") as fh:
-                json.dump(
-                    dict(
-                        topsrcdir=topsrcdir,
-                    ),
-                    fh,
-                )
-
-            os.chdir(topobjdir)
-
-            class MockMachContext:
-                pass
-
-            context = MockMachContext()
-            context.cwd = topobjdir
-            context.topdir = topsrcdir
-            context.settings = None
-            context.log_manager = None
-            context.detect_virtualenv_mozinfo = False
+            context = self._mach_context_in_tmpdir(d)
 
             o = MachCommandBase(context, None)
 
-            self.assertEqual(o.topobjdir, mozpath.normsep(topobjdir))
-            self.assertEqual(o.topsrcdir, mozpath.normsep(topsrcdir))
+            self.assertEqual(o.topobjdir, mozpath.normsep(context.cwd))
+            self.assertEqual(o.topsrcdir, mozpath.normsep(context.topdir))
 
         finally:
+            os.chdir(self._old_cwd)
+            shutil.rmtree(d)
+
+    def test_auto_log_without_tty_for_coding_agent(self):
+        """A coding agent gets a log even though its stdout is not a tty."""
+
+        mock.patch("mozbuild.base.os.isatty", lambda _: False).start()
+        mock.patch("mozbuild.base.is_running_under_coding_agent", lambda: True).start()
+        self.addCleanup(mock.patch.stopall)
+
+        d = os.path.realpath(tempfile.mkdtemp())
+        log_manager = LoggingManager()
+
+        try:
+            handler = mock.Mock()
+            handler.name = "dummy-command"
+            context = self._mach_context_in_tmpdir(d, log_manager, handler)
+
+            obj = MachCommandBase(context, None)
+
+            self.assertIsNotNone(obj.logfile)
+            self.assertTrue(obj.logfile.endswith(".log"))
+            self.assertTrue(os.path.exists(obj.logfile))
+
+        finally:
+            # StreamHandler.close() leaves the stream open; Windows won't rmtree it.
+            for log_handler in log_manager.file_handlers:
+                log_handler.stream.close()
             os.chdir(self._old_cwd)
             shutil.rmtree(d)
 
@@ -401,6 +439,63 @@ class TestMozbuildObject(unittest.TestCase):
             self.assertTrue(p.endswith("foobar.exe"))
         else:
             self.assertTrue(p.endswith("foobar"))
+
+
+class FakeMozbuildObject(MozbuildObject):
+    def __init__(self, make_flags=None, make_extra=None):
+        super().__init__(topsrcdir, None, log_manager)
+        self._mozconfig = {"make_flags": make_flags, "make_extra": make_extra}
+
+    @property
+    def mozconfig(self):
+        return self._mozconfig
+
+    @property
+    def substs(self):
+        return {}
+
+
+class TestSplitJobFlags(unittest.TestCase):
+    def test_split_job_flags(self):
+        for make_flags, expected in (
+            (None, (0, [])),
+            ([], (0, [])),
+            (["-j8", "-s"], (8, ["-s"])),
+            (["-j", "8", "-s"], (8, ["-s"])),
+            (["-j", "-s"], (0, ["-s"])),
+            (["-j"], (0, [])),
+            (["-j", "-j8", "-s"], (8, ["-s"])),
+            (["-jFOO", "-j8", "-s"], (8, ["-s"])),
+            (["-s", "FOO=bar"], (0, ["-s", "FOO=bar"])),
+            (["-j4", "-j8"], (8, [])),
+            (["-j8", "-j"], (0, [])),
+            (["-j8", "-j", "-s"], (0, ["-s"])),
+        ):
+            with self.subTest(make_flags=make_flags):
+                self.assertEqual(split_job_flags(make_flags), expected)
+
+
+class TestResolveNumJobs(unittest.TestCase):
+    def test_explicit_num_jobs_wins(self):
+        base = FakeMozbuildObject(
+            make_flags=["-j8"], make_extra=["MOZ_PARALLEL_BUILD=4"]
+        )
+        self.assertEqual(base.resolve_num_jobs(2), 2)
+
+    def test_moz_parallel_build_beats_make_flags(self):
+        base = FakeMozbuildObject(
+            make_flags=["-j8"], make_extra=["MOZ_PARALLEL_BUILD=4"]
+        )
+        self.assertEqual(base.resolve_num_jobs(), 4)
+
+    def test_make_flags_beat_heuristic(self):
+        base = FakeMozbuildObject(make_flags=["-j8"])
+        self.assertEqual(base.resolve_num_jobs(), 8)
+
+    def test_heuristic_when_nothing_configured(self):
+        base = FakeMozbuildObject()
+        with mock.patch("mozbuild.base.psutil", None):
+            self.assertEqual(base.resolve_num_jobs(), cpu_count())
 
 
 class TestPathArgument(unittest.TestCase):

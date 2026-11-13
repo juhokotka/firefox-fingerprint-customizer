@@ -8,25 +8,28 @@
 #include "mozilla/EnumSet.h"
 #include "mozilla/EventTargetAndLockCapability.h"
 #include "mozilla/LinkedList.h"
-#include "mozilla/MemoryReporting.h"
+#include "mozilla/loader/AutoMemMap.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MaybeOneOf.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/Range.h"
 #include "mozilla/Result.h"
 #include "mozilla/SPSCQueue.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Vector.h"
-#include "mozilla/loader/AutoMemMap.h"
+
+#include <prio.h>
+
 #include "MainThreadUtils.h"
 #include "nsClassHashtable.h"
-#include "nsThreadUtils.h"
 #include "nsIAsyncShutdown.h"
 #include "nsIFile.h"
 #include "nsIMemoryReporter.h"
 #include "nsIObserver.h"
 #include "nsIThread.h"
 #include "nsITimer.h"
+#include "nsThreadUtils.h"
 
 #include "js/CompileOptions.h"  // JS::DecodeOptions, JS::ReadOnlyDecodeOptions
 #include "js/experimental/CompileScript.h"  // JS::FrontendContext
@@ -36,12 +39,11 @@
 #include "js/Transcoding.h"  // for TranscodeBuffer, TranscodeRange, TranscodeSource
 #include "js/TypeDecls.h"  // for HandleObject, HandleScript
 
-#include <prio.h>
-
 namespace mozilla {
 namespace dom {
 class ContentParent;
-}
+struct RemoteType;
+}  // namespace dom
 namespace ipc {
 class FileDescriptor;
 }
@@ -97,7 +99,7 @@ class ScriptPreloader : public nsIObserver,
   static void DeleteSingleton();
   static void DeleteCacheDataSingleton();
 
-  static ProcessType GetChildProcessType(const nsACString& remoteType);
+  static ProcessType GetChildProcessType(const dom::RemoteType& remoteType);
 
   // Fill some options that should be consistent across all scripts stored
   // into preloader cache.

@@ -15,7 +15,7 @@
 #include "sandbox/win/src/sandbox_nt_util.h"
 #include "sandbox/win/src/sharedmem_ipc_client.h"
 #include "sandbox/win/src/target_services.h"
-#include "mozilla/sandboxing/sandboxLogging.h"
+#include "sandbox/win/TargetGeckoClient.h"
 
 namespace sandbox {
 
@@ -65,7 +65,6 @@ NTSTATUS CallNtOpenProcessTokenEx(NTSTATUS status,
     return status;
   }
 
-  mozilla::sandboxing::LogBlocked("NtOpenProcessToken(Ex)");
   if (!SandboxFactory::GetTargetServices()->GetState()->InitCalled()) {
     return status;
   }
@@ -99,7 +98,6 @@ NTSTATUS CallNtOpenProcessTokenEx(NTSTATUS status,
     return status;
   }
 
-  mozilla::sandboxing::LogAllowed("NtOpenProcessTokenEx");
   return answer.nt_status;
 }
 
@@ -118,7 +116,8 @@ NTSTATUS WINAPI TargetNtOpenThread(NtOpenThreadFunction orig_OpenThread,
     return status;
   }
 
-  mozilla::sandboxing::LogBlocked("NtOpenThread");
+  SYSCALL_BROKERING();
+
   if (!SandboxFactory::GetTargetServices()->GetState()->InitCalled()) {
     return status;
   }
@@ -167,11 +166,11 @@ NTSTATUS WINAPI TargetNtOpenThread(NtOpenThreadFunction orig_OpenThread,
   __try {
     // Write the output parameters.
     *thread = answer.handle;
+    SYSCALL_BROKERED();
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     return status;
   }
 
-  mozilla::sandboxing::LogAllowed("NtOpenThread");
   return answer.nt_status;
 }
 
@@ -244,6 +243,8 @@ HANDLE WINAPI TargetCreateThread(CreateThreadFunction orig_CreateThread,
 
   DWORD original_error = ::GetLastError();
   do {
+    SYSCALL_BROKERING();
+
     if (!target_services)
       break;
 
@@ -287,6 +288,7 @@ HANDLE WINAPI TargetCreateThread(CreateThreadFunction orig_CreateThread,
     __try {
       if (thread_id)
         *thread_id = ::GetThreadId(answer.handle);
+      SYSCALL_BROKERED();
       return answer.handle;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
       break;

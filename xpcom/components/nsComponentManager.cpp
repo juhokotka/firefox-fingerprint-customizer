@@ -2,75 +2,46 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <stdlib.h>
-#include "nscore.h"
-#include "nsISupports.h"
-#include "nspr.h"
-#include "nsCRT.h"  // for atoll
-
-#include "StaticComponents.h"
-
-#include "nsCategoryManager.h"
-#include "nsCOMPtr.h"
 #include "nsComponentManager.h"
-#include "nsDirectoryService.h"
-#include "nsDirectoryServiceDefs.h"
-#include "nsCategoryManager.h"
-#include "nsLayoutModule.h"
-#include "mozilla/MemoryReporting.h"
-#include "nsIObserverService.h"
-#include "nsIStringEnumerator.h"
-#include "nsXPCOM.h"
-#include "nsXPCOMPrivate.h"
-#include "nsISupportsPrimitives.h"
-#include "nsLocalFile.h"
-#include "nsReadableUtils.h"
-#include "nsString.h"
-#include "prcmon.h"
-#include "nsThreadManager.h"
-#include "nsThreadUtils.h"
-#include "prthread.h"
-#include "private/pprthred.h"
-#include "nsTArray.h"
-#include "prio.h"
-#include "ManifestParser.h"
-#include "nsNetUtil.h"
-#include "mozilla/Services.h"
 
-#include "mozilla/GenericFactory.h"
-#include "nsSupportsPrimitives.h"
-#include "nsArray.h"
-#include "nsIMutableArray.h"
+#include <stdlib.h>
+
+#include "LogModulePrefWatcher.h"
+#include "ManifestParser.h"
+#include "StaticComponents.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/FileUtils.h"
+#include "mozilla/Logging.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/Omnijar.h"
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/Services.h"
 #include "mozilla/URLPreloader.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Variant.h"
-
-#include <new>  // for placement new
-
-#include "mozilla/Omnijar.h"
-
-#include "mozilla/Logging.h"
-#include "LogModulePrefWatcher.h"
+#include "nsArray.h"
+#include "nsCOMPtr.h"
+#include "nsCategoryManager.h"
+#include "nsDirectoryService.h"
+#include "nsDirectoryServiceDefs.h"
+#include "nsIMutableArray.h"
+#include "nsIObserverService.h"
+#include "nsIStringEnumerator.h"
+#include "nsISupports.h"
+#include "nsLayoutModule.h"
+#include "nsNetUtil.h"
+#include "nsString.h"
+#include "nsTArray.h"
+#include "nsXPCOM.h"
+#include "nscore.h"
+#include "prthread.h"
 #include "xpcpublic.h"
-
-#ifdef MOZ_MEMORY
-#  include "mozmemory.h"
-#endif
 
 using namespace mozilla;
 using namespace mozilla::xpcom;
 
 static LazyLogModule nsComponentManagerLog("nsComponentManager");
-
-#if 0
-#  define SHOW_DENIED_ON_SHUTDOWN
-#  define SHOW_CI_ON_EXISTING_SERVICE
-#endif
 
 namespace {
 
@@ -158,20 +129,16 @@ class MOZ_STACK_CLASS EntryWrapper final {
 
   explicit EntryWrapper(const StaticModule* aEntry) : mEntry(aEntry) {}
 
-#define MATCH(type, ifFactory, ifStatic)                     \
-  struct Matcher {                                           \
-    type operator()(nsFactoryEntry* entry) { ifFactory; }    \
-    type operator()(const StaticModule* entry) { ifStatic; } \
-  };                                                         \
-  return mEntry.match((Matcher()))
-
-  const nsID& CID() {
-    MATCH(const nsID&, return entry->mCID, return entry->CID());
+  const nsID& CID() const {
+    return mEntry.match([](const auto* e) -> const nsID& { return e->CID(); });
   }
 
-  already_AddRefed<nsIFactory> GetFactory() {
-    MATCH(already_AddRefed<nsIFactory>, return entry->GetFactory(),
-          return entry->GetFactory());
+  already_AddRefed<nsIFactory> GetFactory() const {
+    return mEntry.match([](const auto* e) { return e->GetFactory(); });
+  }
+
+  bool IsSingleton() const {
+    return mEntry.match([](const auto* e) { return e->IsSingleton(); });
   }
 
   /**
@@ -180,35 +147,28 @@ class MOZ_STACK_CLASS EntryWrapper final {
    * side-steps the necessity of creating a nsIFactory instance for static
    * modules.
    */
-  nsresult CreateInstance(const nsIID& aIID, void** aResult) {
-    if (mEntry.is<nsFactoryEntry*>()) {
-      return mEntry.as<nsFactoryEntry*>()->CreateInstance(aIID, aResult);
-    }
-    return mEntry.as<const StaticModule*>()->CreateInstance(aIID, aResult);
+  nsresult CreateInstance(const nsIID& aIID, void** aResult) const {
+    return mEntry.match(
+        [&](const auto* e) { return e->CreateInstance(aIID, aResult); });
   }
 
   /**
    * Returns the cached service instance for this entry, if any. This should
    * only be accessed while mLock is held.
    */
-  nsISupports* ServiceInstance() {
-    MATCH(nsISupports*, return entry->mServiceObject,
-          return entry->ServiceInstance());
+  nsISupports* ServiceInstance() const {
+    return mEntry.match([](const auto* e) { return e->ServiceInstance(); });
   }
   void SetServiceInstance(already_AddRefed<nsISupports> aInst) {
-    if (mEntry.is<nsFactoryEntry*>()) {
-      mEntry.as<nsFactoryEntry*>()->mServiceObject = aInst;
-    } else {
-      return mEntry.as<const StaticModule*>()->SetServiceInstance(
-          std::move(aInst));
-    }
+    mEntry.match(
+        [&](const auto& e) { e->SetServiceInstance(std::move(aInst)); });
   }
 
   /**
    * Returns the description string for the module this entry belongs to.
    * Currently always returns "<unknown module>".
    */
-  nsCString ModuleDescription() { return "<unknown module>"_ns; }
+  nsCString ModuleDescription() const { return "<unknown module>"_ns; }
 
  private:
   Variant<nsFactoryEntry*, const StaticModule*> mEntry;
@@ -459,46 +419,6 @@ nsresult nsComponentManagerImpl::Init() {
   return NS_OK;
 }
 
-template <typename T>
-static void AssertNotMallocAllocated(T* aPtr) {
-#if defined(DEBUG) && defined(MOZ_MEMORY)
-  jemalloc_ptr_info_t info;
-  jemalloc_ptr_info((void*)aPtr, &info);
-  MOZ_ASSERT(info.tag == TagUnknown);
-#endif
-}
-
-template <typename T>
-static void AssertNotStackAllocated(T* aPtr) {
-  // On all of our supported platforms, the stack grows down. Any address
-  // located below the address of our argument is therefore guaranteed not to be
-  // stack-allocated by the caller.
-  //
-  // For addresses above our argument, things get trickier. The main thread
-  // stack is traditionally placed at the top of the program's address space,
-  // but that is becoming less reliable as more and more systems adopt address
-  // space layout randomization strategies, so we have to guess how much space
-  // above our argument pointer we need to care about.
-  //
-  // On most systems, we're guaranteed at least several KiB at the top of each
-  // stack for TLS. We'd probably be safe assuming at least 4KiB in the stack
-  // segment above our argument address, but safer is... well, safer.
-  //
-  // For threads with huge stacks, it's theoretically possible that we could
-  // wind up being passed a stack-allocated string from farther up the stack,
-  // but this is a best-effort thing, so we'll assume we only care about the
-  // immediate caller. For that case, max 2KiB per stack frame is probably a
-  // reasonable guess most of the time, and is less than the ~4KiB that we
-  // expect for TLS, so go with that to avoid the risk of bumping into heap
-  // data just above the stack.
-#ifdef DEBUG
-  static constexpr size_t kFuzz = 2048;
-
-  MOZ_ASSERT(uintptr_t(aPtr) < uintptr_t(&aPtr) ||
-             uintptr_t(aPtr) > uintptr_t(&aPtr) + kFuzz);
-#endif
-}
-
 static void DoRegisterManifest(NSLocationType aType, FileLocation& aFile,
                                bool aChromeOnly) {
   auto result = URLPreloader::Read(aFile);
@@ -630,92 +550,11 @@ Maybe<EntryWrapper> nsComponentManagerImpl::LookupByContractID(
     // UnregisterFactory might have left a stale nsFactoryEntry in
     // mContractIDs, so we should check to see whether this entry has
     // anything useful.
-    if (entry->mFactory || entry->mServiceObject) {
+    if (entry->mFactory || entry->ServiceInstance()) {
       return Some(EntryWrapper(entry));
     }
   }
   return Nothing();
-}
-
-already_AddRefed<nsIFactory> nsComponentManagerImpl::FindFactory(
-    const nsCID& aClass) {
-  Maybe<EntryWrapper> e = LookupByCID(aClass);
-  if (!e) {
-    return nullptr;
-  }
-
-  return e->GetFactory();
-}
-
-already_AddRefed<nsIFactory> nsComponentManagerImpl::FindFactory(
-    const char* aContractID, uint32_t aContractIDLen) {
-  Maybe<EntryWrapper> entry =
-      LookupByContractID(nsDependentCString(aContractID, aContractIDLen));
-  if (!entry) {
-    return nullptr;
-  }
-
-  return entry->GetFactory();
-}
-
-/**
- * GetClassObject()
- *
- * Given a classID, this finds the singleton ClassObject that implements the
- * CID. Returns an interface of type aIID off the singleton classobject.
- */
-NS_IMETHODIMP
-nsComponentManagerImpl::GetClassObject(const nsCID& aClass, const nsIID& aIID,
-                                       void** aResult) {
-  nsresult rv;
-
-  if (MOZ_LOG_TEST(nsComponentManagerLog, LogLevel::Debug)) {
-    char buf[NSID_LENGTH];
-    aClass.ToProvidedString(buf);
-    PR_LogPrint("nsComponentManager: GetClassObject(%s)", buf);
-  }
-
-  MOZ_ASSERT(aResult != nullptr);
-
-  nsCOMPtr<nsIFactory> factory = FindFactory(aClass);
-  if (!factory) {
-    return NS_ERROR_FACTORY_NOT_REGISTERED;
-  }
-
-  rv = factory->QueryInterface(aIID, aResult);
-
-  MOZ_LOG(
-      nsComponentManagerLog, LogLevel::Warning,
-      ("\t\tGetClassObject() %s", NS_SUCCEEDED(rv) ? "succeeded" : "FAILED"));
-
-  return rv;
-}
-
-NS_IMETHODIMP
-nsComponentManagerImpl::GetClassObjectByContractID(const char* aContractID,
-                                                   const nsIID& aIID,
-                                                   void** aResult) {
-  if (NS_WARN_IF(!aResult) || NS_WARN_IF(!aContractID)) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  nsresult rv;
-
-  MOZ_LOG(nsComponentManagerLog, LogLevel::Debug,
-          ("nsComponentManager: GetClassObjectByContractID(%s)", aContractID));
-
-  nsCOMPtr<nsIFactory> factory = FindFactory(aContractID, strlen(aContractID));
-  if (!factory) {
-    return NS_ERROR_FACTORY_NOT_REGISTERED;
-  }
-
-  rv = factory->QueryInterface(aIID, aResult);
-
-  MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
-          ("\t\tGetClassObjectByContractID() %s",
-           NS_SUCCEEDED(rv) ? "succeeded" : "FAILED"));
-
-  return rv;
 }
 
 /**
@@ -728,17 +567,10 @@ nsComponentManagerImpl::GetClassObjectByContractID(const char* aContractID,
 NS_IMETHODIMP
 nsComponentManagerImpl::CreateInstance(const nsCID& aClass, const nsIID& aIID,
                                        void** aResult) {
-  // test this first, since there's no point in creating a component during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Creating new instance on shutdown. Denied.\n"
-            "         CID: %s\n         IID: %s\n",
-            AutoIDString(aClass).get(), AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't CreateInstance during shutdown. CID: %s; IID: %s",
+             AutoIDString(aClass).get(), AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -753,14 +585,12 @@ nsComponentManagerImpl::CreateInstance(const nsCID& aClass, const nsIID& aIID,
     return NS_ERROR_FACTORY_NOT_REGISTERED;
   }
 
-#ifdef SHOW_CI_ON_EXISTING_SERVICE
-  if (entry->ServiceInstance()) {
-    nsAutoCString message;
-    message = "You are calling CreateInstance \""_ns + AutoIDString(aClass) +
-              "\" when a service for this CID already exists!"_ns;
-    NS_ERROR(message.get());
+  if (NS_WARN_IF(entry->IsSingleton())) {
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Error,
+            ("Not allowed to CreateInstance for singleton %s",
+             AutoIDString(aClass).get()));
+    return NS_ERROR_NOT_IMPLEMENTED;
   }
-#endif
 
   nsresult rv;
   nsCOMPtr<nsIFactory> factory = entry->GetFactory();
@@ -775,13 +605,10 @@ nsComponentManagerImpl::CreateInstance(const nsCID& aClass, const nsIID& aIID,
     rv = NS_ERROR_FACTORY_NOT_REGISTERED;
   }
 
-  if (MOZ_LOG_TEST(nsComponentManagerLog, LogLevel::Warning)) {
-    char buf[NSID_LENGTH];
-    aClass.ToProvidedString(buf);
-    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
-            ("nsComponentManager: CreateInstance(%s) %s", buf,
-             NS_SUCCEEDED(rv) ? "succeeded" : "FAILED"));
-  }
+  MOZ_LOG(
+      nsComponentManagerLog, LogLevel::Warning,
+      ("nsComponentManager: CreateInstance(%s) %s", AutoIDString(aClass).get(),
+       NS_SUCCEEDED(rv) ? "succeeded" : "FAILED"));
 
   return rv;
 }
@@ -804,17 +631,11 @@ nsComponentManagerImpl::CreateInstanceByContractID(const char* aContractID,
     return NS_ERROR_INVALID_ARG;
   }
 
-  // test this first, since there's no point in creating a component during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Creating new instance on shutdown. Denied.\n"
-            "  ContractID: %s\n         IID: %s\n",
-            aContractID, AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't CreateInstanceByContractID during shutdown. ContractID: "
+             "%s; IID: %s",
+             aContractID, AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -830,18 +651,12 @@ nsComponentManagerImpl::CreateInstanceByContractID(const char* aContractID,
     return NS_ERROR_FACTORY_NOT_REGISTERED;
   }
 
-#ifdef SHOW_CI_ON_EXISTING_SERVICE
-  if (entry->ServiceInstance()) {
-    nsAutoCString message;
-    message =
-        "You are calling CreateInstance \""_ns +
-        nsDependentCString(aContractID) +
-        nsLiteralCString(
-            "\" when a service for this CID already exists! "
-            "Add it to abusedContracts to track down the service consumer.");
-    NS_ERROR(message.get());
+  if (NS_WARN_IF(entry->IsSingleton())) {
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Error,
+            ("Not allowed to CreateInstanceByContractID for singleton %s",
+             aContractID));
+    return NS_ERROR_NOT_IMPLEMENTED;
   }
-#endif
 
   nsresult rv;
   nsCOMPtr<nsIFactory> factory = entry->GetFactory();
@@ -873,7 +688,7 @@ nsresult nsComponentManagerImpl::FreeServices() {
 
   for (nsFactoryEntry* entry : mFactories.Values()) {
     entry->mFactory = nullptr;
-    entry->mServiceObject = nullptr;
+    entry->SetServiceInstance(nullptr);
   }
 
   for (const auto& module : gStaticModules) {
@@ -1014,17 +829,10 @@ nsresult nsComponentManagerImpl::GetServiceLocked(Maybe<MonitorAutoLock>& aLock,
 NS_IMETHODIMP
 nsComponentManagerImpl::GetService(const nsCID& aClass, const nsIID& aIID,
                                    void** aResult) {
-  // test this first, since there's no point in returning a service during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Getting service on shutdown. Denied.\n"
-            "         CID: %s\n         IID: %s\n",
-            AutoIDString(aClass).get(), AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't GetService during shutdown. CID: %s; IID: %s",
+             AutoIDString(aClass).get(), AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1041,18 +849,10 @@ nsComponentManagerImpl::GetService(const nsCID& aClass, const nsIID& aIID,
 nsresult nsComponentManagerImpl::GetService(ModuleID aId, const nsIID& aIID,
                                             void** aResult) {
   const auto& entry = gStaticModules[size_t(aId)];
-
-  // test this first, since there's no point in returning a service during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Getting service on shutdown. Denied.\n"
-            "         CID: %s\n         IID: %s\n",
-            AutoIDString(entry.CID()).get(), AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't GetService during shutdown. CID: %s; IID: %s",
+             AutoIDString(entry.CID()).get(), AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1078,20 +878,11 @@ NS_IMETHODIMP
 nsComponentManagerImpl::IsServiceInstantiated(const nsCID& aClass,
                                               const nsIID& aIID,
                                               bool* aResult) {
-  // Now we want to get the service if we already got it. If not, we don't want
-  // to create an instance of it. mmh!
-
-  // test this first, since there's no point in returning a service during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Checking for service on shutdown. Denied.\n"
-            "         CID: %s\n         IID: %s\n",
-            AutoIDString(aClass).get(), AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(
+        nsComponentManagerLog, LogLevel::Warning,
+        ("Can't call IsServiceInstantiated during shutdown. CID: %s; IID: %s",
+         AutoIDString(aClass).get(), AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1111,20 +902,11 @@ nsComponentManagerImpl::IsServiceInstantiated(const nsCID& aClass,
 NS_IMETHODIMP
 nsComponentManagerImpl::IsServiceInstantiatedByContractID(
     const char* aContractID, const nsIID& aIID, bool* aResult) {
-  // Now we want to get the service if we already got it. If not, we don't want
-  // to create an instance of it. mmh!
-
-  // test this first, since there's no point in returning a service during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Checking for service on shutdown. Denied.\n"
-            "  ContractID: %s\n         IID: %s\n",
-            aContractID, AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't call IsServiceInstantiatedByContractID during shutdown. "
+             "ContractID: %s; IID: %s",
+             aContractID, AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1146,17 +928,11 @@ NS_IMETHODIMP
 nsComponentManagerImpl::GetServiceByContractID(const char* aContractID,
                                                const nsIID& aIID,
                                                void** aResult) {
-  // test this first, since there's no point in returning a service during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Getting service on shutdown. Denied.\n"
-            "  ContractID: %s\n         IID: %s\n",
-            aContractID, AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't call GetServiceByContractID during shutdown. "
+             "ContractID: %s; IID: %s",
+             aContractID, AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1326,8 +1102,10 @@ nsComponentManagerImpl::CollectReports(nsIHandleReportCallback* aHandleReport,
 }
 
 size_t nsComponentManagerImpl::SizeOfIncludingThis(
-    mozilla::MallocSizeOf aMallocSizeOf) const {
+    mozilla::MallocSizeOf aMallocSizeOf) {
   size_t n = aMallocSizeOf(this);
+
+  MonitorAutoLock lock(mLock);
 
   n += mFactories.ShallowSizeOfExcludingThis(aMallocSizeOf);
   for (const auto& data : mFactories.Values()) {
@@ -1362,14 +1140,15 @@ size_t nsComponentManagerImpl::SizeOfIncludingThis(
 nsFactoryEntry::nsFactoryEntry(const nsCID& aCID, nsIFactory* aFactory)
     : mCID(aCID), mFactory(aFactory) {}
 
-already_AddRefed<nsIFactory> nsFactoryEntry::GetFactory() {
+already_AddRefed<nsIFactory> nsFactoryEntry::GetFactory() const {
   nsComponentManagerImpl::gComponentManager->mLock.AssertNotCurrentThreadOwns();
 
   nsCOMPtr<nsIFactory> factory = mFactory;
   return factory.forget();
 }
 
-nsresult nsFactoryEntry::CreateInstance(const nsIID& aIID, void** aResult) {
+nsresult nsFactoryEntry::CreateInstance(const nsIID& aIID,
+                                        void** aResult) const {
   nsCOMPtr<nsIFactory> factory = GetFactory();
   NS_ENSURE_TRUE(factory, NS_ERROR_FAILURE);
   return factory->CreateInstance(aIID, aResult);

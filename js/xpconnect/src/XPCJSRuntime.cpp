@@ -4,48 +4,72 @@
 
 /* Per JSRuntime object */
 
-#include "mozilla/ArrayUtils.h"
-#include "mozilla/AutoRestore.h"
 #include "mozilla/AppShutdown.h"
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/AutoRestore.h"
+#include "mozilla/BasePrincipal.h"
+#include "mozilla/dom/AbortSignalBinding.h"
+#include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/FetchUtil.h"
+#include "mozilla/dom/GeneratedAtomList.h"
+#include "mozilla/dom/NodeBinding.h"
+#include "mozilla/dom/ScriptLoader.h"
+#include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/WindowBinding.h"
+#include "mozilla/glean/JsXpconnectMetrics.h"
+#include "mozilla/glean/XpcomMetrics.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/ProcessHangMonitor.h"
+#include "mozilla/ProfilerLabels.h"
+#include "mozilla/Services.h"
+#include "mozilla/Sprintf.h"
 #include "mozilla/UniquePtr.h"
 
-#include "xpcprivate.h"
-#include "xpcpublic.h"
-#include "XPCMaps.h"
-#include "XPCJSMemoryReporter.h"
-#include "XrayWrapper.h"
-#include "WrapperFactory.h"
-#include "mozJSModuleLoader.h"
-#include "nsNetUtil.h"
-#include "nsContentSecurityUtils.h"
+#include <memory>
 
+#include "AccessCheck.h"
+#include "ExpandedPrincipal.h"
+#include "jsapi.h"
+#include "mozJSModuleLoader.h"
+#include "NodeUbiReporting.h"
+#include "nsAboutProtocolUtils.h"
+#include "nsCCUncollectableMarker.h"
+#include "nsContentSecurityUtils.h"
+#include "nsContentUtils.h"
+#include "nsCycleCollectionNoteRootCallback.h"
+#include "nsCycleCollector.h"
 #include "nsExceptionHandler.h"
+#include "nsGlobalWindowInner.h"
+#include "nsIInputStream.h"
 #include "nsIMemoryInfoDumper.h"
 #include "nsIMemoryReporter.h"
 #include "nsIObserverService.h"
-#include "mozilla/dom/Document.h"
-#include "mozilla/dom/NodeBinding.h"
 #include "nsIRunnable.h"
+#include "nsJSEnvironment.h"
+#include "nsJSPrincipals.h"
+#include "nsNetUtil.h"
 #include "nsPIDOMWindow.h"
 #include "nsPrintfCString.h"
 #include "nsScriptSecurityManager.h"
 #include "nsWindowSizes.h"
-#include "mozilla/BasePrincipal.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/Services.h"
-#include "mozilla/dom/ScriptLoader.h"
-#include "mozilla/dom/ScriptSettings.h"
-#include "mozilla/glean/JsXpconnectMetrics.h"
-#include "mozilla/glean/XpcomMetrics.h"
+#include "WrapperFactory.h"
+#include "XPCInlines.h"
+#include "XPCJSMemoryReporter.h"
+#include "XPCMaps.h"
+#include "xpcprivate.h"
+#include "xpcpublic.h"
+#include "XrayWrapper.h"
 
-#include "nsContentUtils.h"
-#include "nsCCUncollectableMarker.h"
-#include "nsCycleCollectionNoteRootCallback.h"
-#include "nsCycleCollector.h"
-#include "jsapi.h"
 #include "js/BuildId.h"  // JS::BuildIdCharVector, JS::SetProcessBuildIdOp
 #include "js/experimental/SourceHook.h"  // js::{,Set}SourceHook
+#include "js/friend/UsageStatistics.h"  // JSMetric, JS_SetAccumulateTelemetryCallback
+#include "js/friend/WindowProxy.h"  // js::SetWindowProxyClass
+#include "js/friend/Wrapper.h"      // js::NukeCrossCompartmentWrappers
+#include "js/friend/XrayJitInfo.h"  // JS::SetXrayJitInfo
 #include "js/GCAPI.h"
 #include "js/MemoryFunctions.h"
 #include "js/MemoryMetrics.h"
@@ -54,31 +78,7 @@
 #include "js/SliceBudget.h"
 #include "js/UbiNode.h"
 #include "js/UbiNodeUtils.h"
-#include "js/friend/UsageStatistics.h"  // JSMetric, JS_SetAccumulateTelemetryCallback
-#include "js/friend/WindowProxy.h"  // js::SetWindowProxyClass
-#include "js/friend/Wrapper.h"      // js::NukeCrossCompartmentWrappers
-#include "js/friend/XrayJitInfo.h"  // JS::SetXrayJitInfo
-#include "js/Utility.h"             // JS::UniqueTwoByteChars
-#include "mozilla/dom/AbortSignalBinding.h"
-#include "mozilla/dom/GeneratedAtomList.h"
-#include "mozilla/dom/BindingUtils.h"
-#include "mozilla/dom/Element.h"
-#include "mozilla/dom/FetchUtil.h"
-#include "mozilla/dom/WindowBinding.h"
-#include "mozilla/Attributes.h"
-#include "mozilla/ProcessHangMonitor.h"
-#include "mozilla/ProfilerLabels.h"
-#include "mozilla/Sprintf.h"
-#include "AccessCheck.h"
-#include "nsGlobalWindowInner.h"
-#include "nsAboutProtocolUtils.h"
-
-#include "NodeUbiReporting.h"
-#include "ExpandedPrincipal.h"
-#include "nsIInputStream.h"
-#include "nsJSPrincipals.h"
-#include "nsJSEnvironment.h"
-#include "XPCInlines.h"
+#include "js/Utility.h"  // JS::UniqueTwoByteChars
 
 #ifdef XP_WIN
 #  include <windows.h>
@@ -135,10 +135,8 @@ const char* const XPCJSRuntime::mStrings[] = {
     "indexedDB",        // IDX_INDEXEDDB
     "structuredClone",  // IDX_STRUCTUREDCLONE
     "locks",            // IDX_LOCKS
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-    "suppressed",  // IDX_SUPPRESSED
-    "error",       // IDX_ERROR
-#endif
+    "suppressed",       // IDX_SUPPRESSED
+    "error",            // IDX_ERROR
 };
 
 /***************************************************************************/
@@ -157,7 +155,7 @@ class AsyncFreeSnowWhite : public Runnable {
     auto timerId =
         glean::cycle_collector::async_snow_white_freeing.ProcessGet().Start();
     // 2 ms budget, given that kICCSliceBudget is only 3 ms
-    SliceBudget budget = SliceBudget(TimeBudget(2));
+    SliceBudget budget = SliceBudget(TimeDuration::FromMilliseconds(2));
     bool hadSnowWhiteObjects =
         nsCycleCollector_doDeferredDeletionWithBudget(budget);
     glean::cycle_collector::async_snow_white_freeing.ProcessGet()
@@ -652,6 +650,28 @@ JSObject* SandboxPrototypeOrNull(JSContext* aCx, JSObject* aObj) {
   }
 
   return js::CheckedUnwrapDynamic(proto, aCx, /* stopAtWindowProxy = */ false);
+}
+
+already_AddRefed<nsGlobalWindowInner> SandboxAssociatedWindowOrNull(
+    JSObject* aObj) {
+  MOZ_ASSERT(aObj);
+
+  if (!IsSandbox(aObj)) {
+    return nullptr;
+  }
+
+  SandboxPrivate* priv = SandboxPrivate::GetPrivate(aObj);
+  if (!priv) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsPIDOMWindowInner> window = priv->GetAssociatedWindow();
+  if (!window) {
+    return nullptr;
+  }
+
+  RefPtr<nsGlobalWindowInner> win = nsGlobalWindowInner::Cast(window);
+  return win.forget();
 }
 
 nsGlobalWindowInner* CurrentWindowOrNull(JSContext* cx) {
@@ -1458,9 +1478,6 @@ static void ReportZoneStats(const JS::ZoneStats& zStats,
 
   ZRREPORT_BYTES(pathPrefix + "jit-zone"_ns, zStats.jitZone, "The JIT zone.");
 
-  ZRREPORT_BYTES(pathPrefix + "cacheir-stubs"_ns, zStats.cacheIRStubs,
-                 "The JIT's IC stubs (excluding code).");
-
   ZRREPORT_BYTES(pathPrefix + "object-fuses"_ns, zStats.objectFuses,
                  "Information about constant object properties.");
 
@@ -1817,6 +1834,10 @@ static void ReportRealmStats(const JS::RealmStats& realmStats,
 
   ZRREPORT_BYTES(realmJSPathPrefix + "alloc-sites"_ns, realmStats.allocSites,
                  "GC allocation site data associated with IC stubs.");
+
+  ZRREPORT_BYTES(realmJSPathPrefix + "cacheir-stubs"_ns,
+                 realmStats.cacheIRStubs,
+                 "The JIT's IC stubs (excluding code).");
 
   ZRREPORT_BYTES(realmJSPathPrefix + "ion-data"_ns, realmStats.ionData,
                  "The IonMonkey JIT's compilation data (IonScripts).");
@@ -2700,6 +2721,14 @@ static void AccumulateTelemetryCallback(JSMetric id,
       glean::javascript_gc::effectiveness.AccumulateSingleSample(
           sample.as<size_t>());
       break;
+    case JSMetric::GC_BUFFER_ALLOC_HEAP_BYTES:
+      glean::javascript_gc::buffer_alloc_heap_bytes.ProcessGet().Accumulate(
+          sample.as<size_t>());
+      break;
+    case JSMetric::GC_BUFFER_ALLOC_HEAP_DENSITY:
+      glean::javascript_gc::buffer_alloc_heap_density.AccumulateSingleSample(
+          sample.as<size_t>());
+      break;
     case JSMetric::GC_ZONE_COUNT:
       glean::javascript_gc::zone_count.AccumulateSingleSample(
           sample.as<size_t>());
@@ -2710,6 +2739,10 @@ static void AccumulateTelemetryCallback(JSMetric id,
       break;
     case JSMetric::GC_PRETENURE_COUNT_2:
       glean::javascript_gc::pretenure_count.AccumulateSingleSample(
+          sample.as<size_t>());
+      break;
+    case JSMetric::GC_MARK_STACK_MAX_CAPACITY:
+      glean::javascript_gc::mark_stack_max_capacity.ProcessGet().Accumulate(
           sample.as<size_t>());
       break;
     case JSMetric::GC_MARK_RATE_2:
@@ -2916,19 +2949,6 @@ static void SetUseCounterCallback(JSObject* obj, JSUseCounter counter) {
       return;
     case JSUseCounter::DATEPARSE_IMPL_DEF:
       SetUseCounter(obj, eUseCounter_custom_JS_dateparse_impl_def);
-      return;
-    case JSUseCounter::GENERATOR_FUNCTION_CREATED:
-      SetUseCounter(obj, eUseCounter_custom_JS_generatorFunctionCreated);
-      return;
-    case JSUseCounter::ASYNC_GENERATOR_FUNCTION_CREATED:
-      SetUseCounter(obj, eUseCounter_custom_JS_asyncGeneratorFunctionCreated);
-      return;
-    case JSUseCounter::GENERATOR_FUNCTION_ION_ELIGIBLE:
-      SetUseCounter(obj, eUseCounter_custom_JS_generatorFunctionIonEligible);
-      return;
-    case JSUseCounter::ASYNC_GENERATOR_FUNCTION_ION_ELIGIBLE:
-      SetUseCounter(obj,
-                    eUseCounter_custom_JS_asyncGeneratorFunctionIonEligible);
       return;
     case JSUseCounter::COUNT:
       break;
@@ -3252,7 +3272,8 @@ void XPCJSRuntime::Initialize(JSContext* cx) {
   // isRunOnce mode and compiled function bodies (from
   // JS::CompileFunction). In practice, this means content scripts and event
   // handlers.
-  mozilla::UniquePtr<XPCJSSourceHook> hook(new XPCJSSourceHook);
+  mozilla::UniquePtr<XPCJSSourceHook> hook =
+      std::make_unique<XPCJSSourceHook>();
   js::SetSourceHook(cx, std::move(hook));
 
   // Register memory reporters and distinguished amount functions.
@@ -3307,6 +3328,10 @@ bool XPCJSRuntime::DescribeCustomObjects(JSObject* obj, const JSClass* clasp,
   }
 
   XPCWrappedNativeProto* p = XPCWrappedNativeProto::Get(obj);
+  if (!p) {
+    // Can be null if XPC shutdown has already happened.
+    return false;
+  }
   // Nothing here can GC. The analysis would otherwise think that ~nsCOMPtr
   // could GC, but that's only possible if nsIXPCScriptable::GetJSClass()
   // somehow released a reference to the nsIXPCScriptable, which isn't going to

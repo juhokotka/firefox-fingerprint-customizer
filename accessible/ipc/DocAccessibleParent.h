@@ -5,10 +5,12 @@
 #ifndef mozilla_a11y_DocAccessibleParent_h
 #define mozilla_a11y_DocAccessibleParent_h
 
-#include "nsAccessibilityService.h"
+#include <utility>
+
 #include "mozilla/a11y/PDocAccessibleParent.h"
 #include "mozilla/a11y/RemoteAccessible.h"
 #include "mozilla/dom/BrowserBridgeParent.h"
+#include "nsAccessibilityService.h"
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
 #include "nsIMemoryReporter.h"
@@ -16,8 +18,11 @@
 
 namespace mozilla {
 namespace dom {
+class BrowserParent;
 class CanonicalBrowsingContext;
-}
+class WindowContext;
+class WindowGlobalParent;
+}  // namespace dom
 
 namespace a11y {
 
@@ -32,7 +37,10 @@ class DocAccessibleParent : public RemoteAccessible,
                             public PDocAccessibleParent,
                             public nsIMemoryReporter {
  public:
-  NS_DECL_ISUPPORTS
+  // AddRef/Release are inherited from RemoteAccessible rather than declared
+  // here, so that this class has only one mRefCnt (RemoteAccessible's); see
+  // NS_IMPL_ADDREF_INHERITED/NS_IMPL_RELEASE_INHERITED in the .cpp.
+  NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIMEMORYREPORTER
 
  private:
@@ -88,15 +96,28 @@ class DocAccessibleParent : public RemoteAccessible,
   void MarkAsShutdown() {
     MOZ_ASSERT(mChildDocs.IsEmpty());
     MOZ_ASSERT(mAccessibles.Count() == 0);
-    MOZ_ASSERT(!mBrowsingContext);
     mShutdown = true;
   }
 
-  void SetBrowsingContext(dom::CanonicalBrowsingContext* aBrowsingContext);
+  /**
+   * Return the BrowsingContext of the WindowGlobal which manages this
+   * document, or null if this document has been shut down.
+   */
+  dom::CanonicalBrowsingContext* GetBrowsingContext() const;
 
-  dom::CanonicalBrowsingContext* GetBrowsingContext() const {
-    return mBrowsingContext;
-  }
+  /**
+   * Return our manager as a WindowGlobalParent. This document's manager is
+   * always a WindowGlobalParent since PDocAccessible is managed by
+   * PWindowGlobal.
+   */
+  dom::WindowGlobalParent* Manager() const;
+
+  /**
+   * Return the BrowserParent for the PBrowser connection hosting this
+   * document's content process, regardless of how deeply this document is
+   * nested via in-process iframes.
+   */
+  dom::BrowserParent* GetBrowserParent() const;
 
   /*
    * Called when a message from a document in a child process notifies the main
@@ -150,7 +171,7 @@ class DocAccessibleParent : public RemoteAccessible,
       const uint64_t& aID, nsTArray<TextRangeData>&& aSelection);
 
   mozilla::ipc::IPCResult RecvRoleChangedEvent(
-      const a11y::role& aRole, const uint8_t& aRoleMapEntryIndex);
+      const uint8_t& aRoleMapEntryIndex);
 
   mozilla::ipc::IPCResult RecvBindChildDoc(
       NotNull<PDocAccessibleParent*> aChildDoc, const uint64_t& aID);
@@ -196,6 +217,11 @@ class DocAccessibleParent : public RemoteAccessible,
     mPendingOOPChildDocs.Remove(aBridge);
   }
 
+  /**
+   * Drop this document's reference to aAccessible. This does not necessarily
+   * destroy it; e.g. it might still be referenced by another node's
+   * mChildren.
+   */
   void RemoveAccessible(RemoteAccessible* aAccessible) {
     MOZ_DIAGNOSTIC_ASSERT(mAccessibles.GetEntry(aAccessible->ID()));
     mAccessibles.RemoveEntry(aAccessible->ID());
@@ -208,7 +234,7 @@ class DocAccessibleParent : public RemoteAccessible,
     if (!aID) return this;
 
     ProxyEntry* e = mAccessibles.GetEntry(aID);
-    return e ? e->mProxy : nullptr;
+    return e ? e->mProxy.get() : nullptr;
   }
 
   const RemoteAccessible* GetAccessible(uintptr_t aID) const {
@@ -310,7 +336,8 @@ class DocAccessibleParent : public RemoteAccessible,
   Maybe<LayoutDeviceIntRect> mFocusedAccBounds;
 #endif
 
-  static DocAccessibleParent* GetFrom(dom::BrowsingContext* aBrowsingContext);
+  static DocAccessibleParent* GetFrom(dom::WindowContext* aWindowContext,
+                                      bool aAllowShutdown = false);
 
   size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) override;
 
@@ -336,9 +363,14 @@ class DocAccessibleParent : public RemoteAccessible,
    */
   bool RequestDomainsIfInactive(uint64_t aRequiredCacheDomains);
 
-#ifdef MOZ_ENABLE_SKIA_PDF
   mozilla::ipc::IPCResult RecvPrinting();
-#endif
+
+  enum class AllowConstruction {
+    Disallow,
+    Allow,
+    AllowButIgnore,
+  };
+  AllowConstruction ShouldAllowConstruction() const;
 
  private:
   ~DocAccessibleParent();
@@ -346,10 +378,7 @@ class DocAccessibleParent : public RemoteAccessible,
   class ProxyEntry : public PLDHashEntryHdr {
    public:
     explicit ProxyEntry(const void*) : mProxy(nullptr) {}
-    ProxyEntry(ProxyEntry&& aOther) : mProxy(aOther.mProxy) {
-      aOther.mProxy = nullptr;
-    }
-    ~ProxyEntry() { delete mProxy; }
+    ProxyEntry(ProxyEntry&& aOther) : mProxy(std::move(aOther.mProxy)) {}
 
     typedef uint64_t KeyType;
     typedef const void* KeyTypePointer;
@@ -364,7 +393,9 @@ class DocAccessibleParent : public RemoteAccessible,
 
     enum { ALLOW_MEMMOVE = true };
 
-    RemoteAccessible* mProxy;
+    // A strong reference. See the comment on RemoveAccessible for how this
+    // interacts with the tree's own mChildren/mParent references.
+    RefPtr<RemoteAccessible> mProxy;
   };
 
   RemoteAccessible* CreateAcc(const AccessibleData& aAccData);
@@ -416,7 +447,6 @@ class DocAccessibleParent : public RemoteAccessible,
   bool mShutdown : 1;
   bool mIsPrintDoc : 1 = false;
   bool mIsInitialTreeDone : 1 = false;
-  RefPtr<dom::CanonicalBrowsingContext> mBrowsingContext;
 
   nsTHashSet<RefPtr<dom::BrowserBridgeParent>> mPendingOOPChildDocs;
 

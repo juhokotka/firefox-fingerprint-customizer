@@ -102,6 +102,7 @@ struct AnimationProperty {
 namespace dom {
 
 class Animation;
+class CSSAnimationKeyframeEffect;
 class Document;
 
 class KeyframeEffect : public AnimationEffect {
@@ -120,6 +121,9 @@ class KeyframeEffect : public AnimationEffect {
                                JS::Handle<JSObject*> aGivenProto) override;
 
   KeyframeEffect* AsKeyframeEffect() override { return this; }
+  virtual CSSAnimationKeyframeEffect* AsCSSAnimationKeyframeEffect() {
+    return nullptr;
+  }
 
   bool IsValidTransition() const {
     return Properties().Length() == 1 &&
@@ -169,6 +173,9 @@ class KeyframeEffect : public AnimationEffect {
 
   void GetKeyframes(JSContext* aCx, nsTArray<JSObject*>& aResult,
                     ErrorResult& aRv);
+  virtual bool GetComputedKeyframes(nsTArray<Keyframe>& aKeyframes) const {
+    return false;
+  }
   void GetProperties(nsTArray<AnimationPropertyDetails>& aProperties,
                      ErrorResult& aRv) const;
 
@@ -439,9 +446,10 @@ class KeyframeEffect : public AnimationEffect {
 
   // The specified keyframes.
   nsTArray<Keyframe> mKeyframes;
-  // The preprocess extra info for |mKeyframes|, to avoid any unnecessary
-  // passes of |mKeyframes|.
-  KeyframesOffsetHasAny mKeyframesOffsetInfo;
+  // The into about whether there are any range-based keyframes in |mKeyframes|,
+  // to avoid any unnecessary passes of |mKeyframes|.
+  KeyframeOffsetsHasRangeOffset mKeyframeOffsetsHasRangeOffset =
+      KeyframeOffsetsHasRangeOffset::No;
 
   // A set of per-property value arrays, derived from |mKeyframes|.
   nsTArray<AnimationProperty> mProperties;
@@ -485,13 +493,16 @@ class KeyframeEffect : public AnimationEffect {
     bool mOverflow : 1;
     // True if there is any current-color for background color.
     bool mHasBackgroundColorCurrentColor : 1;
+    // Whether the display property is changing.
+    bool mDisplay : 1;
 
     CumulativeChanges()
         : mOpacity(false),
           mVisibility(false),
           mLayout(false),
           mOverflow(false),
-          mHasBackgroundColorCurrentColor(false) {}
+          mHasBackgroundColorCurrentColor(false),
+          mDisplay(false) {}
   };
   CumulativeChanges mCumulativeChanges;
 
@@ -509,6 +520,13 @@ class KeyframeEffect : public AnimationEffect {
   // Returns the frame which is used for styling.
   nsIFrame* GetStyleFrame() const;
 
+  // Returns true if this effect can skip its main-thread restyle for this tick,
+  // e.g. because it has no visible result (no frame, invisible, or scrolled out
+  // of view) or is running entirely on the compositor.
+  //
+  // Special Case: when animating from `display:none`, the animation might
+  // animate back to a non-none display value, so we must not throttle so the
+  // result can reappear.
   bool CanThrottle() const;
   bool CanThrottleOverflowChanges(const nsIFrame& aFrame) const;
   bool CanThrottleOverflowChangesInScrollable(nsIFrame& aFrame) const;

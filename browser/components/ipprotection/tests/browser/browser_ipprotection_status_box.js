@@ -145,7 +145,8 @@ add_task(async function test_paused_content_upgraded() {
 
 /**
  * Tests that opening the panel while paused re-checks usage, showing the
- * loading state until the refresh completes and then the paused screen.
+ * paused screen immediately (not a loading state) while the refresh is in
+ * flight and keeping it once the refresh completes.
  */
 add_task(async function test_showing_refreshes_usage_when_paused() {
   setupService({
@@ -175,12 +176,12 @@ add_task(async function test_showing_refreshes_usage_when_paused() {
     "Usage should be refreshed when opening the panel while paused"
   );
   Assert.ok(
-    content.shadowRoot.querySelector("#enrolling-container"),
-    "Loading state should be shown while usage is refreshing"
+    content.statusBoxEl,
+    "Paused screen should be shown immediately while usage is refreshing"
   );
   Assert.ok(
-    !content.statusBoxEl,
-    "Paused screen should be hidden while usage is refreshing"
+    !content.shadowRoot.querySelector("#enrolling-container"),
+    "Loading state should not be shown while usage is refreshing"
   );
 
   resolve();
@@ -189,10 +190,6 @@ add_task(async function test_showing_refreshes_usage_when_paused() {
   await TestUtils.waitForCondition(
     () => content.statusBoxEl,
     "Paused screen should be shown once the usage refresh completes"
-  );
-  Assert.ok(
-    !content.shadowRoot.querySelector("#enrolling-container"),
-    "Loading state should be hidden once the usage refresh completes"
   );
 
   await setPanelState();
@@ -304,4 +301,74 @@ add_task(async function test_catastrophic_error() {
   Assert.ok(footerButton, "Settings button should be present in footer");
 
   await closePanel();
+});
+
+/**
+ * Tests the locale unavailable error type in the status box component.
+ */
+add_task(async function test_unavailable_error() {
+  let content = await openPanel({
+    unauthenticated: false,
+    error: ERRORS.VPN_UNAVAILABLE,
+  });
+
+  let statusBox = content.statusBoxEl;
+  Assert.ok(statusBox, "Status box should be shown when there is an error");
+
+  let errorTitle = statusBox.titleEl;
+  let errorDescription = statusBox.descriptionEl;
+  let supportLink = errorDescription.querySelector("a");
+
+  Assert.ok(errorTitle, "Error title should be present");
+  Assert.ok(errorDescription, "Error description should be present");
+  Assert.ok(supportLink, "Support link should be present");
+  await checkStatusBoxAriaLabel(statusBox);
+  Assert.equal(
+    supportLink.href,
+    Services.urlFormatter.formatURLPref("app.support.baseURL") +
+      LINKS.NO_ACCESS_SUPPORT_SLUG,
+    "Correct support link should be used"
+  );
+
+  Assert.equal(
+    statusBox.type,
+    ERRORS.VPN_UNAVAILABLE,
+    "Status box type should be vpn-unavailable"
+  );
+
+  Assert.ok(!content.statusCardEl, "Status card should be hidden when error");
+
+  let footerButton = content.settingsButtonEl;
+  Assert.ok(footerButton, "Settings button should be present in footer");
+
+  await closePanel();
+});
+
+/**
+ * Tests that clicking the support link in the unavailable error closes the panel.
+ */
+add_task(async function test_unavailable_error_support_link_closes_panel() {
+  let content = await openPanel({
+    unauthenticated: false,
+    error: ERRORS.VPN_UNAVAILABLE,
+  });
+
+  let supportLink = content.statusBoxEl.descriptionEl.querySelector("a");
+  Assert.ok(supportLink, "Support link should be present");
+
+  let newTabPromise = BrowserTestUtils.waitForNewTab(
+    gBrowser,
+    Services.urlFormatter.formatURLPref("app.support.baseURL") +
+      LINKS.NO_ACCESS_SUPPORT_SLUG
+  );
+  let panelHiddenPromise = waitForPanelEvent(document, "popuphidden");
+  supportLink.click();
+  info("after click");
+  let newTab = await newTabPromise;
+  info("after newTabPromise");
+  await panelHiddenPromise;
+  info("afterpanelHiddenPromise");
+  await setPanelState();
+  info("after setPanelState");
+  BrowserTestUtils.removeTab(newTab);
 });

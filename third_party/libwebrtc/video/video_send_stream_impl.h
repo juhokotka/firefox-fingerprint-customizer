@@ -37,7 +37,6 @@
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "api/video/encoded_image.h"
-#include "api/video/video_bitrate_allocation.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_layers_allocation.h"
 #include "api/video/video_source_interface.h"
@@ -137,9 +136,6 @@ class VideoSendStreamImpl : public webrtc::VideoSendStream,
 
   std::map<uint32_t, RtpPayloadState> GetRtpPayloadStates() const;
 
-  const std::optional<float>& configured_pacing_factor() const {
-    return configured_pacing_factor_;
-  }
 
  private:
   friend class test::VideoSendStreamPeer;
@@ -163,7 +159,6 @@ class VideoSendStreamImpl : public webrtc::VideoSendStream,
     SendDelayStats& send_delay_stats_;
   };
 
-  std::optional<float> GetPacingFactorOverride() const;
   // Implements BitrateAllocatorObserver.
   uint32_t OnBitrateUpdated(BitrateAllocationUpdate update) override;
   std::optional<DataRate> GetUsedRate() const override;
@@ -175,8 +170,6 @@ class VideoSendStreamImpl : public webrtc::VideoSendStream,
       VideoEncoderConfig::ContentType content_type,
       int min_transmit_bitrate_bps) override;
 
-  void OnBitrateAllocationUpdated(
-      const VideoBitrateAllocation& allocation) override;
   void OnVideoLayersAllocationUpdated(
       VideoLayersAllocation allocation) override;
 
@@ -246,21 +239,14 @@ class VideoSendStreamImpl : public webrtc::VideoSendStream,
   DataRate configured_max_bitrate_ RTC_GUARDED_BY(thread_checker_);
   DataRate encoder_target_rate_ RTC_GUARDED_BY(thread_checker_);
   double encoder_bitrate_priority_ RTC_GUARDED_BY(thread_checker_);
-  const int encoder_av1_priority_bitrate_override_bps_
+
+  // Resources added via AddAdaptationResource(). Only used to implement
+  // GetAdaptationResources(); the encoder owns its own list of resources,
+  // which includes internally created ones.
+  std::vector<scoped_refptr<Resource>> adaptation_resources_
       RTC_GUARDED_BY(thread_checker_);
 
   ScopedTaskSafety worker_queue_safety_;
-
-  // Context for the most recent and last sent video bitrate allocation. Used to
-  // throttle sending of similar bitrate allocations.
-  struct VbaSendContext {
-    VideoBitrateAllocation last_sent_allocation;
-    std::optional<VideoBitrateAllocation> throttled_allocation;
-    int64_t last_send_time_ms;
-  };
-  std::optional<VbaSendContext> video_bitrate_allocation_context_
-      RTC_GUARDED_BY(thread_checker_);
-  const std::optional<float> configured_pacing_factor_;
 };
 }  // namespace internal
 }  // namespace webrtc

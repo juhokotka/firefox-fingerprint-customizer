@@ -19,6 +19,7 @@
 
 #include "jstypes.h"
 #include "mozmemory.h"
+
 #include "js/TypeDecls.h"
 
 /* The public JS engine namespace. */
@@ -308,7 +309,7 @@ namespace js {
 struct MOZ_RAII JS_PUBLIC_DATA AutoEnterOOMUnsafeRegion {
   [[noreturn]] MOZ_COLD void crash(const char* reason) { crash_impl(reason); }
   [[noreturn]] MOZ_COLD void crash(size_t size, const char* reason) {
-    crash_impl(reason);
+    crash_impl(size, reason);
   }
 
   using AnnotateOOMAllocationSizeCallback = void (*)(size_t);

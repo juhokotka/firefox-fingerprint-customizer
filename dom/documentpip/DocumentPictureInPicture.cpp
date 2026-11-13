@@ -11,6 +11,7 @@
 #include "mozilla/dom/DocumentPictureInPictureEvent.h"
 #include "mozilla/dom/WindowContext.h"
 #include "mozilla/widget/Screen.h"
+#include "nsCRT.h"
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
 #include "nsDocShellLoadState.h"
@@ -77,8 +78,10 @@ void DocumentPictureInPicture::OnPiPResized() {
 
   int x = innerWindow->GetScreenLeft(CallerType::System, IgnoreErrors());
   int y = innerWindow->GetScreenTop(CallerType::System, IgnoreErrors());
-  int width = static_cast<int>(innerWindow->GetInnerWidth(IgnoreErrors()));
-  int height = static_cast<int>(innerWindow->GetInnerHeight(IgnoreErrors()));
+  int width = static_cast<int>(std::round(
+      innerWindow->GetInnerWidth(dom::CallerType::System, IgnoreErrors())));
+  int height = static_cast<int>(std::round(
+      innerWindow->GetInnerHeight(dom::CallerType::System, IgnoreErrors())));
 
   mPreviousExtent = Some(CSSIntRect(x, y, width, height));
 
@@ -117,6 +120,7 @@ nsGlobalWindowInner* DocumentPictureInPicture::GetWindow() const {
 const CSSIntSize DocumentPictureInPicture::sDefaultSize = {400, 300};
 const CSSIntSize DocumentPictureInPicture::sMinSize = {240, 50};
 
+MOZ_CAN_RUN_SCRIPT
 static nsresult OpenPiPWindowUtility(nsPIDOMWindowOuter* aParent,
                                      const CSSIntRect& aExtent, bool aPrivate,
                                      bool aDisallowReturnToOpener,
@@ -138,6 +142,9 @@ static nsresult OpenPiPWindowUtility(nsPIDOMWindowOuter* aParent,
   RefPtr<nsDocShellLoadState> loadState =
       nsWindowWatcher::CreateLoadState(uri, aParent);
 
+  // Ensure we load with this's relevant global object's principal
+  loadState->SetTriggeringPrincipal(aParent->GetExtantDoc()->NodePrincipal());
+
   // pictureinpicture, disallow_return_to_oopener are non-standard window
   // features not available from JS
   nsPrintfCString features("pictureinpicture,top=%d,left=%d,width=%d,height=%d",
@@ -146,7 +153,7 @@ static nsresult OpenPiPWindowUtility(nsPIDOMWindowOuter* aParent,
     features += ",disallow_return_to_opener";
   }
 
-  rv = pww->OpenWindow2(aParent, uri, "_blank"_ns, features,
+  rv = pww->OpenWindow2(aParent, uri, u"_blank"_ns, features,
                         mozilla::dom::UserActivation::Modifiers::None(), false,
                         false, true, nullptr, false, false, false,
                         nsPIWindowWatcher::PrintKind::PRINT_NONE, loadState,
@@ -246,14 +253,7 @@ CSSIntRect DocumentPictureInPicture::DetermineExtent(
 }
 
 already_AddRefed<Promise> DocumentPictureInPicture::RequestWindow(
-    const DocumentPictureInPictureOptions& aOptions,
-    nsIPrincipal& aCallerPrincipal, ErrorResult& aRv) {
-  if (aCallerPrincipal.GetIsExpandedPrincipal()) {
-    aRv.ThrowNotAllowedError(
-        "Document Picture-in-Picture is not available in isolated world");
-    return nullptr;
-  }
-
+    const DocumentPictureInPictureOptions& aOptions, ErrorResult& aRv) {
   // Not part of the spec, but check the document is active
   RefPtr<nsPIDOMWindowInner> ownerWin = GetOwnerWindow();
   if (!ownerWin || !ownerWin->IsFullyActive()) {
@@ -294,6 +294,8 @@ already_AddRefed<Promise> DocumentPictureInPicture::RequestWindow(
 
   // 8. Possibly close last opened window
   if (RefPtr<nsPIDOMWindowInner> lastOpenedWindow = mLastOpenedWindow) {
+    // Hack: Clean up synchronously before we open the next window
+    OnPiPClosed();
     lastOpenedWindow->Close();
   }
 
@@ -318,14 +320,23 @@ already_AddRefed<Promise> DocumentPictureInPicture::RequestWindow(
   // 9. Optionally, close any existing PIP windows
   // I think it's useful to have multiple PiP windows from different top pages.
 
+  // Mark opener as controlling PiP before opening, since window creation
+  // can change activeness and the opener must be active when setting the flag.
+  MOZ_ASSERT(!bc->GetControlsDocumentPiP());
+  nsresult rv = bc->SetControlsDocumentPiP(true);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+
   // 10. Create a new top-level traversable for target _blank
   // 15. aOptions.mDisallowReturnToOpener
   // 16. Configure PIP to float on top via window features
   RefPtr<BrowsingContext> pipTraversable;
-  nsresult rv = OpenPiPWindowUtility(
-      ownerWin->GetOuterWindow(), extent, bc->UsePrivateBrowsing(),
-      aOptions.mDisallowReturnToOpener, getter_AddRefs(pipTraversable));
+  RefPtr outer = ownerWin->GetOuterWindow();
+  rv = OpenPiPWindowUtility(outer, extent, bc->UsePrivateBrowsing(),
+                            aOptions.mDisallowReturnToOpener,
+                            getter_AddRefs(pipTraversable));
   if (NS_FAILED(rv)) {
+    rv = bc->SetControlsDocumentPiP(false);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
     aRv.ThrowUnknownError("Failed to create PIP window");
     return nullptr;
   }
@@ -336,10 +347,6 @@ already_AddRefed<Promise> DocumentPictureInPicture::RequestWindow(
 
   // 12. Set PIP's IsDocumentPIP flag
   rv = pipTraversable->SetIsDocumentPiP(true);
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
-
-  MOZ_ASSERT(!bc->GetControlsDocumentPiP());
-  rv = bc->SetControlsDocumentPiP(true);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   // 16. Set mLastOpenedWindow

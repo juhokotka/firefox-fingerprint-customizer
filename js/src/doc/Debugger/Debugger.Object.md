@@ -284,13 +284,6 @@ resolved by calling its `resolve` or `reject` resolving functions from
 script. If the referent is not a [`Promise`][promise], throw a `TypeError`
 exception.
 
-### `promiseID`
-If the referent is a [`Promise`][promise], this is a process-unique
-identifier for the [`Promise`][promise]. With e10s, the same id can
-potentially be assigned to multiple [`Promise`][promise] instances, if
-those instances were created in different processes. If the referent is
-not a [`Promise`][promise], throw a `TypeError` exception.
-
 ### `promiseDependentPromises`
 If the referent is a [`Promise`][promise], this is an `Array` of
 `Debugger.Objects` referring to the promises directly depending on the
@@ -378,6 +371,13 @@ if by code scoped to the debugger's global object (and is thus in the
 debugger's compartment); and its `value`, `get`, and `set` properties,
 if present, are debuggee values.)
 
+<i>key</i> may also be a `Debugger.PrivateName` returned by
+[`getOwnPrivateProperties`](#getownprivateproperties) (see below), in
+which case the descriptor of the corresponding private field is
+returned. This is the only supported way to read the value of a private
+field, since the underlying private name is never exposed to the
+debugger as a usable key.
+
 ### `getOwnPropertyNames()`
 Return an array of strings naming all the referent's own properties, as
 if <code>Object.getOwnPropertyNames(<i>referent</i>)</code> had been
@@ -392,6 +392,28 @@ Return an array of strings naming all the referent's own symbols, as
 if <code>Object.getOwnPropertySymbols(<i>referent</i>)</code> had been
 called in the debuggee, and the result copied in the scope of the
 debugger's global object.
+
+### `getOwnPrivateProperties()`
+Return an array of `Debugger.PrivateName` objects, one for each private
+field (e.g. `#x`) declared on the referent. Static private fields are
+reported on the class constructor's `Debugger.Object`; instance private
+fields are reported on the instance's `Debugger.Object`.
+
+Each element is an opaque `Debugger.PrivateName` wrapper rather than the
+private field's name directly.
+
+A `Debugger.PrivateName` exposes a single accessor:
+
+* `description`: A string giving the field's source name, including the
+  leading `#` (e.g. `"#x"`). This is for display only; because two
+  distinct private fields (for instance a base class and a subclass field
+  that share a spelling) can have the same description, it is not a
+  usable property key and must not be used to look the field up.
+
+To read the value of a private field, pass its `Debugger.PrivateName`
+back to [`getOwnPropertyDescriptor`](#getownpropertydescriptorkey). A
+`Debugger.PrivateName` obtained from one `Debugger` may be used with a
+different `Debugger` viewing the same debuggee.
 
 ### `defineProperty(key, attributes)`
 Define a property on the referent named <i>key</i>, as described by
@@ -543,6 +565,10 @@ object.
 
 The <i>options</i> argument is as for [`Debugger.Frame.prototype.eval`][fr eval].
 
+This method also accepts an `allowRedeclaringExistingLexicalBinding` option;
+see the [`allowRedeclaringExistingLexicalBinding` option](#allowredeclaringexistinglexicalbinding-option)
+section, under `executeInGlobalWithBindings` below, for details.
+
 Note: If this method is called on an object whose owner
 [Debugger object][debugger-object] has an onNativeCall handler, only hooks
 on objects associated with that debugger will be called during the evaluation.
@@ -587,9 +613,37 @@ declarative environment, which is the eval code's `LexicalEnvironment`.)
 
 The <i>options</i> argument is as for [`Debugger.Frame.prototype.eval`][fr eval].
 
+This method also accepts an `allowRedeclaringExistingLexicalBinding` option.
+This option is incompatible with `useInnerBindings` and throws if both are
+set.
+
 Note: If this method is called on an object whose owner
 [Debugger object][debugger-object] has an onNativeCall handler, only hooks
 on objects associated with that debugger will be called during the evaluation.
+
+#### `allowRedeclaringExistingLexicalBinding` option
+This option is only recognized by `executeInGlobal` and
+`executeInGlobalWithBindings` (without `useInnerBindings`); passing it to
+`Debugger.Frame.prototype.eval` and its variants throws an error, as does
+setting it together with `useInnerBindings`.
+
+When true, redeclaring an existing global **lexical** binding (`let`,
+`const`, or `class`) with another lexical declaration of the same name
+reinitializes that binding instead of throwing a redeclaration error. This
+lets console-like consumers re-run a `let`/`const` declaration across
+separate evaluations.
+
+This does not relax any other kind of conflict:
+
+* A lexical declaration can still not be introduced where a `var` or
+  function declaration (including a block-level function declaration, which
+  creates a `var`-like global binding via Annex B semantics) of the same
+  name already exists, and vice versa. Both directions still throw.
+* A redeclaration that changes a binding's const-ness still throws:
+  `let x = 1;` followed by `const x = 2;`, or vice versa, is an error even
+  with this option set.
+* Two declarations of the same name within the *same* evaluation are still
+  a parse-time redeclaration error, regardless of this option.
 
 ### `createSource(options)`
 If the referent is a global object, return a new JavaScript source in the

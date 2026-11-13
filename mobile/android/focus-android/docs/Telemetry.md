@@ -1,4 +1,4 @@
-# Telemetry
+# Focus telemetry
 
 For clients that have "send anonymous usage data" enabled Focus sends a "core" ping and an "event" ping to Mozilla's telemetry service. Sending telemetry can be disabled in the app's settings. Builds of "Focus for Android" have telemetry enabled by default ("opt-out") while builds of "Klar for Android" have telemetry disabled by default.
 
@@ -38,7 +38,7 @@ As part of the event ping the most recent state of the user's setting is sent (d
 
 ### Events
 
-The event ping contains a list of events ([see event format on readthedocs.io](https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/telemetry/collection/events.html)) for the following actions:
+The event ping contains a list of events ({doc}`see event format </toolkit/components/telemetry/obsolete/collection/events>`) for the following actions:
 
 #### Sessions
 

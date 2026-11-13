@@ -43,6 +43,12 @@ class MediaSink {
   // both the AudioSink and VideoSink.
   typedef MozPromise<bool, nsresult, /* IsExclusive = */ false> EndedPromise;
 
+  // Why playback is being stopped. Lets a sink treat a seek's stop/restart
+  // cycle differently from a real stop, for example by preserving resources it
+  // would otherwise tear down.
+  MOZ_DEFINE_ENUM_CLASS_WITH_TOSTRING_AT_CLASS_SCOPE(StopReason,
+                                                     (Regular, Seeking));
+
   // Return a promise which is resolved when the track finishes
   // or null if no such track.
   // Must be called after Start().
@@ -89,8 +95,10 @@ class MediaSink {
   // Can be called in any state.
   virtual void SetPreservesPitch(bool aPreservesPitch) {}
 
-  // Pause/resume the playback. Only work after playback starts.
-  virtual void SetPlaying(bool aPlaying) = 0;
+  // Pause/resume the playback. Only work after playback starts. aReason lets a
+  // pause that is part of a seek be distinguished from a regular pause.
+  virtual void SetPlaying(bool aPlaying,
+                          StopReason aReason = StopReason::Regular) = 0;
 
   // Set the audio output device.  aDevice == nullptr indicates the default
   // device.  The returned promise is resolved when the previous device is no
@@ -128,8 +136,9 @@ class MediaSink {
                          StartType aStartType = StartType::Initial) = 0;
 
   // Finish a playback session.
-  // Must be called after playback starts.
-  virtual void Stop() = 0;
+  // Must be called after playback starts. aReason lets a stop that is part of a
+  // seek be distinguished from a real stop.
+  virtual void Stop(StopReason aReason = StopReason::Regular) = 0;
 
   // Return true if playback has started.
   // Can be called in any state.

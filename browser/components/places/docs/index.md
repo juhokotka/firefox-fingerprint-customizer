@@ -22,7 +22,7 @@ For more specific, technical details of implementation, read {doc}`architecture-
 
 ## Governance
 
-See [Bookmarks & History (Places)](https://firefox-source-docs.mozilla.org/mots/index.html#bookmarks-history)
+See [Bookmarks & History (Places)](/mots/index.md#bookmarks--history)
 
 ## Table of Contents
 
@@ -31,6 +31,10 @@ See [Bookmarks & History (Places)](https://firefox-source-docs.mozilla.org/mots/
 
 nontechnical-overview
 architecture-overview
+API for managing bookmarks <Bookmarks>
+API for managing history <History>
+Transactions Manager <PlacesTransactions>
+Observer Notifications <notifyObservers>
 ```
 
 [rdf format]: https://en.wikipedia.org/wiki/Resource_Description_Framework

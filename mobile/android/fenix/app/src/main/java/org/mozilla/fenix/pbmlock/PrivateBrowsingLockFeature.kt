@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -42,13 +43,9 @@ import org.mozilla.fenix.settings.biometric.BiometricPromptFeature
 import org.mozilla.fenix.settings.biometric.BiometricUtils
 import org.mozilla.fenix.settings.biometric.DefaultBiometricUtils
 
-/**
- * An interface to access and observe the enabled/disabled state of the Private Browsing Lock feature.
- */
+/** An interface to access and observe the enabled/disabled state of the Private Browsing Lock feature. */
 interface PrivateBrowsingLockStorage {
-    /**
-     * Returns the current enabled state of the private browsing lock feature.
-     */
+    /** Returns the current enabled state of the private browsing lock feature. */
     val isFeatureEnabled: Boolean
 
     /**
@@ -61,8 +58,8 @@ interface PrivateBrowsingLockStorage {
     /**
      * Starts observing shared preferences for changes in the feature flag.
      *
-     * NB: some devices may garbage collect preference listeners very aggressively,
-     * so this method should be invoked each time the feature becomes active.
+     * NB: some devices may garbage collect preference listeners very aggressively, so this method should be invoked
+     * each time the feature becomes active.
      */
     fun startObservingSharedPrefs()
 }
@@ -97,8 +94,8 @@ class DefaultPrivateBrowsingLockStorage(
 }
 
 /**
- * A lifecycle-aware feature that locks private browsing mode behind authentication
- * when certain conditions are met (e.g., switching modes or backgrounding the app).
+ * A lifecycle-aware feature that locks private browsing mode behind authentication when certain conditions are met
+ * (e.g., switching modes or backgrounding the app).
  */
 class PrivateBrowsingLockFeature(
     private val appStore: AppStore,
@@ -109,14 +106,12 @@ class PrivateBrowsingLockFeature(
     private var browserStoreScope: CoroutineScope? = null
     private var appStoreScope: CoroutineScope? = null
     private var isFeatureEnabled = false
-    private var openInFirefoxRequested = false
 
     init {
         isFeatureEnabled = storage.isFeatureEnabled
 
         // Use our app state during feature init which can happen after Activity recreation.
-        val isLocked =
-            browserStore.state.privateTabs.isNotEmpty() && appStore.state.isPrivateScreenLocked
+        val isLocked = browserStore.state.privateTabs.isNotEmpty() && appStore.state.isPrivateScreenLocked
 
         updateFeatureState(
             isFeatureEnabled = isFeatureEnabled,
@@ -132,8 +127,7 @@ class PrivateBrowsingLockFeature(
 
             updateFeatureState(
                 isFeatureEnabled = isFeatureEnabled,
-                isLocked = appStore.state.mode == BrowsingMode.Normal &&
-                        browserStore.state.privateTabs.isNotEmpty(),
+                isLocked = appStore.state.mode == BrowsingMode.Normal && browserStore.state.privateTabs.isNotEmpty(),
             )
         }
     }
@@ -151,72 +145,78 @@ class PrivateBrowsingLockFeature(
 
     private fun activate(isLocked: Boolean) {
         observePrivateTabsClosure()
-        observeOpenInFirefoxRequest()
+        observeAppStoreUpdates()
 
-        appStore.dispatch(
-            PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(
-                isLocked = isLocked,
-            ),
-        )
+        if (appStore.state.isPrivateScreenLocked != isLocked) {
+            appStore.dispatch(PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(isLocked = isLocked))
+        }
     }
 
     private fun deactivate() {
-        browserStoreScope?.cancel()
-        browserStoreScope = null
+        cancelScopes()
 
-        appStoreScope?.cancel()
-        appStoreScope = null
-
-        appStore.dispatch(
-            PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(
-                isLocked = false,
-            ),
-        )
+        appStore.dispatch(PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(isLocked = false))
     }
 
     private fun observePrivateTabsClosure() {
-        browserStoreScope = browserStore.flowScoped(dispatcher = mainDispatcher) { flow ->
-            flow
-                .map { it.privateTabs.size }
-                .distinctUntilChanged()
-                .filter { it == 0 }
-                .collect {
-                    // When all private tabs are closed, we don't need to lock the private mode.
-                    appStore.dispatch(
-                        PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(
-                            isLocked = false,
-                        ),
-                    )
+        browserStoreScope =
+            browserStore.flowScoped(dispatcher = mainDispatcher) { flow ->
+                flow
+                    .map { it.privateTabs.size }
+                    .distinctUntilChanged()
+                    .filter { it == 0 }
+                    .collect {
+                        // When all private tabs are closed, we don't need to lock the private mode.
+                        appStore.dispatch(PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(isLocked = false))
+                    }
+            }
+    }
+
+    private fun observeAppStoreUpdates() {
+        appStoreScope =
+            appStore.flowScoped(dispatcher = mainDispatcher) { flow ->
+                coroutineScope {
+                    // The code below is handling a specific use-case. When users want to open a private custom tab
+                    // in the browser via "Open in Firefox" button, while already having open private tabs in the
+                    // browser, we should not ask them to unlock the tab when we open it in the browser. On the
+                    // technical level it means that we should avoid locking private mode if there was a request to
+                    // open the custom tab in firefox. [AppState.openInFirefoxRequested] is the global parameter
+                    // that the app is using for responding to such a request. [OpenInFirefoxBinding] handles the
+                    // request by launching a new task and killing the custom tab, which means that by the time the
+                    // custom tab activity is closing, the app state has already been reset.
+                    // Hence, we observe the app store to record the request locally.
+                    launch {
+                        flow
+                            .map { it.openInFirefoxRequested }
+                            .distinctUntilChanged()
+                            .filter { it }
+                            .collect { openInFirefoxRequested = true }
+                    }
+
+                    // Observe mode changes to lock private mode when switching to normal mode.
+                    launch {
+                        flow
+                            .map { it.mode }
+                            .distinctUntilChanged()
+                            .filter { it != BrowsingMode.Private }
+                            .collect { maybeLockPrivateMode() }
+                    }
+
+                    // Observe tray visibility to lock the private tabs when leaving the tabstray unless it’s private
+                    // mode.
+                    launch {
+                        flow
+                            .map { it.isTabsTrayVisible }
+                            .distinctUntilChanged()
+                            .filter { !it }
+                            .collect {
+                                if (appStore.state.mode != BrowsingMode.Private) {
+                                    maybeLockPrivateMode()
+                                }
+                            }
+                    }
                 }
-        }
-    }
-
-    // The code below is handling a specific use-case. When users want to open a private custom tab
-    // in the browser via "Open in Firefox" button, while already having open private tabs in the
-    // browser, we should not ask them to unlock the tab when we open it in the browser. On the
-    // technical level it means that we should avoid locking private mode if there was a request to
-    // open the custom tab in firefox. [AppState.openInFirefoxRequested] is the global parameter
-    // that the app is using for responding to such a request. [OpenInFirefoxBinding] handles the
-    // request by launching a new task and killing the custom tab, which means that by the time the
-    // custom tab activity is closing, the app state has already been reset.
-    // Hence, we observe the app store to record the request locally.
-    private fun observeOpenInFirefoxRequest() {
-        appStoreScope = appStore.flowScoped(dispatcher = mainDispatcher) { flow ->
-            flow.map { it.openInFirefoxRequested }
-                .distinctUntilChanged()
-                .filter { it }
-                .collect { openInFirefoxRequested = true }
-        }
-    }
-
-    override fun onStart(owner: LifecycleOwner) {
-        super.onStart(owner)
-
-        // We want to persist the request only within a single "user session" - between 'onStart'
-        // and 'onStop' calls. 'onStart' and 'onResume' calls are significantly different within
-        // this feature, because system dialogs (like permission requests) will trigger the
-        // 'onPause' lifecycle event, but not the 'onStop'.
-        openInFirefoxRequested = false
+            }
     }
 
     override fun onStop(owner: LifecycleOwner) {
@@ -227,7 +227,7 @@ class PrivateBrowsingLockFeature(
         // Lock when the activity hits onStop unless it's a config-change restart or comes from
         // a custom tab.
         if (owner is Activity && !owner.isChangingConfigurations && !openInFirefoxRequested) {
-            maybeLockPrivateModeOnStop()
+            maybeLockPrivateMode()
         }
     }
 
@@ -236,15 +236,36 @@ class PrivateBrowsingLockFeature(
         storage.startObservingSharedPrefs()
     }
 
-    private fun maybeLockPrivateModeOnStop() {
-        // When the app gets inactive with opened tabs, we lock the private mode.
-        if (browserStore.state.privateTabs.isNotEmpty()) {
-            appStore.dispatch(
-                PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(
-                    isLocked = true,
-                ),
-            )
+    override fun onDestroy(owner: LifecycleOwner) {
+        cancelScopes()
+
+        // Clear the flag when the Activity is permanently destroyed,so it doesn't affect future browsing sessions.
+        if (owner is Activity && !owner.isChangingConfigurations) {
+            openInFirefoxRequested = false
         }
+
+        super.onDestroy(owner)
+    }
+
+    private fun maybeLockPrivateMode() {
+        if (appStore.state.isPrivateScreenLocked || browserStore.state.privateTabs.isEmpty()) {
+            return
+        }
+
+        appStore.dispatch(PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(isLocked = true))
+    }
+
+    private fun cancelScopes() {
+        browserStoreScope?.cancel()
+        browserStoreScope = null
+
+        appStoreScope?.cancel()
+        appStoreScope = null
+    }
+
+    companion object {
+        // Static flag to bridge suppression signal between activities during "Open in Firefox"
+        @VisibleForTesting internal var openInFirefoxRequested = false
     }
 }
 
@@ -255,21 +276,17 @@ class PrivateBrowsingLockFeature(
  */
 class PrivateBrowsingLockUseCases(appStore: AppStore) {
 
-    /**
-     * Use case to be called at the end of a successful authentication.
-     */
+    /** Use case to be called at the end of a successful authentication. */
     class AuthenticatedUseCase internal constructor(private val appStore: AppStore) {
         /**
          * Handles a successful authentication event by unlocking the private browsing mode.
          *
-         * This should be called by biometric or password authentication mechanisms (e.g., fingerprint,
-         * face unlock, or PIN entry) once the user has successfully authenticated. It updates the app state
-         * to reflect that private browsing tabs are now accessible.
+         * This should be called by biometric or password authentication mechanisms (e.g., fingerprint, face unlock, or
+         * PIN entry) once the user has successfully authenticated. It updates the app state to reflect that private
+         * browsing tabs are now accessible.
          */
         operator fun invoke() {
-            appStore.dispatch(
-                PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(isLocked = false),
-            )
+            appStore.dispatch(PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(isLocked = false))
         }
     }
 
@@ -312,16 +329,14 @@ internal suspend fun observePrivateModeLock(
 }
 
 /**
- * Registers an [ActivityResultLauncher] that wraps handling of unlocking access to private mode
- * using the pin, pattern or password verification. This should be used in combination with
- * [verifyUser] to authenticate the user when private browsing mode is locked.
+ * Registers an [ActivityResultLauncher] that wraps handling of unlocking access to private mode using the pin, pattern
+ * or password verification. This should be used in combination with [verifyUser] to authenticate the user when private
+ * browsing mode is locked.
  *
  * @param onVerified an optional callback triggered on a successful authentication.
  * @return The configured [ActivityResultLauncher] to handle the pin, pattern or password verification.
  */
-fun Fragment.registerForVerification(
-    onVerified: (() -> Unit)? = null,
-): ActivityResultLauncher<Intent> {
+fun Fragment.registerForVerification(onVerified: (() -> Unit)? = null): ActivityResultLauncher<Intent> {
     return registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             handleVerificationSuccess(requireContext(), onVerified)
@@ -334,8 +349,8 @@ fun Fragment.registerForVerification(
 /**
  * Triggers user verification to unlock access to private mode.
  *
- * Attempts biometric authentication first; falls back to launching the pin, pattern or password
- * verification. Upon success, records the telemetry and updates [AppState.isPrivateScreenLocked]
+ * Attempts biometric authentication first; falls back to launching the pin, pattern or password verification. Upon
+ * success, records the telemetry and updates [AppState.isPrivateScreenLocked]
  *
  * @param biometricUtils A [BiometricPromptFeature] feature wrapper.
  * @param fallbackVerification The [ActivityResultLauncher] to handle the fallback verification.

@@ -7,24 +7,22 @@
 #include "CacheConstants.h"
 #include "DocAccessible-inl.h"
 #include "LocalAccessible-inl.h"
-#include "nsAccUtils.h"
-#include "nsEventShell.h"
-#include "nsTextEquivUtils.h"
 #include "Relation.h"
-#include "mozilla/a11y/Role.h"
 #include "States.h"
 #include "TextLeafAccessible.h"
-
-#include "mozilla/dom/ContentList.h"
-#include "mozilla/dom/HTMLInputElement.h"
-#include "mozilla/dom/HTMLMeterElement.h"
-#include "mozilla/dom/HTMLTextAreaElement.h"
-#include "mozilla/dom/HTMLFormControlsCollection.h"
-#include "nsIFormControl.h"
-
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TextEditor.h"
+#include "mozilla/a11y/Role.h"
+#include "mozilla/dom/ContentList.h"
+#include "mozilla/dom/HTMLFormControlsCollection.h"
+#include "mozilla/dom/HTMLInputElement.h"
+#include "mozilla/dom/HTMLMeterElement.h"
+#include "mozilla/dom/HTMLTextAreaElement.h"
+#include "nsAccUtils.h"
+#include "nsEventShell.h"
+#include "nsIFormControl.h"
+#include "nsTextEquivUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -124,14 +122,14 @@ Relation HTMLRadioButtonAccessible::ComputeGroupAttributes(
   }
   NS_ENSURE_TRUE(inputElms, rel);
 
-  uint32_t inputCount = inputElms->Length(false);
+  uint32_t inputCount = inputElms->Length();
 
   // Compute posinset and setsize.
   int32_t indexOf = 0;
   int32_t count = 0;
 
   for (uint32_t index = 0; index < inputCount; index++) {
-    nsIContent* inputElm = inputElms->Item(index, false);
+    nsIContent* inputElm = inputElms->Item(index);
     if (inputElm->AsElement()->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
                                            type, eCaseMatters) &&
         inputElm->AsElement()->AttrValueIs(kNameSpaceID_None, nsGkAtoms::name,
@@ -187,8 +185,9 @@ void HTMLButtonAccessible::Value(nsString& aValue) const {
         nsAutoString rs(NS_ConvertUTF8toUTF16(r.toString()));
         nsAutoString gs(NS_ConvertUTF8toUTF16(g.toString()));
         nsAutoString bs(NS_ConvertUTF8toUTF16(b.toString()));
-        Accessible::TranslateString(u"inputColorValue"_ns, aValue,
-                                    {rs, gs, bs});
+        Accessible::TranslateString(
+            u"inputColorValue"_ns, aValue,
+            {std::move(rs), std::move(gs), std::move(bs)});
         return;
       }
     }
@@ -862,7 +861,7 @@ double HTMLProgressAccessible::CurValue() const {
   return NS_FAILED(error) ? UnspecifiedNaN<double>() : value;
 }
 
-bool HTMLProgressAccessible::SetCurValue(double aValue) {
+bool HTMLProgressAccessible::SetCurValue(double /*aValue*/) {
   return false;  // progress meters are readonly.
 }
 
@@ -989,7 +988,7 @@ double HTMLMeterAccessible::CurValue() const {
   return value;
 }
 
-bool HTMLMeterAccessible::SetCurValue(double aValue) {
+bool HTMLMeterAccessible::SetCurValue(double /*aValue*/) {
   return false;  // meters are readonly.
 }
 

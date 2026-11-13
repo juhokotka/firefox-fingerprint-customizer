@@ -5,35 +5,27 @@
 #ifndef nsComponentManager_h_
 #define nsComponentManager_h_
 
-#include "nsXPCOM.h"
-
-#include "nsIComponentManager.h"
-#include "nsIComponentRegistrar.h"
-#include "nsIMemoryReporter.h"
-#include "nsIServiceManager.h"
-#include "nsIFile.h"
-#include "mozilla/ArenaAllocator.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/Components.h"
+#include "mozilla/FileLocation.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Module.h"
 #include "mozilla/Monitor.h"
-#include "nsXULAppAPI.h"
-#include "nsIFactory.h"
-#include "nsIInterfaceRequestor.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "PLDHashTable.h"
-#include "prtime.h"
 #include "nsCOMPtr.h"
-#include "nsWeakReference.h"
-#include "nsCOMArray.h"
-#include "nsTHashMap.h"
-#include "nsInterfaceHashtable.h"
-#include "nsClassHashtable.h"
+#include "nsHashKeys.h"
+#include "nsIComponentManager.h"
+#include "nsIComponentRegistrar.h"
+#include "nsIFactory.h"
+#include "nsIFile.h"
+#include "nsIInterfaceRequestor.h"
+#include "nsIMemoryReporter.h"
+#include "nsIServiceManager.h"
 #include "nsTArray.h"
-
-#include "mozilla/Components.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/Omnijar.h"
-#include "mozilla/Attributes.h"
+#include "nsTHashMap.h"
+#include "nsWeakReference.h"
+#include "nsXPCOM.h"
+#include "nsXULAppAPI.h"
 
 struct nsFactoryEntry;
 struct PRThread;
@@ -89,10 +81,6 @@ class nsComponentManagerImpl final : public nsIComponentManager,
   nsresult Shutdown(void);
 
   nsresult FreeServices();
-
-  already_AddRefed<nsIFactory> FindFactory(const nsCID& aClass);
-  already_AddRefed<nsIFactory> FindFactory(const char* aContractID,
-                                           uint32_t aContractIDLen);
 
   already_AddRefed<nsIFactory> LoadFactory(nsFactoryEntry* aEntry);
 
@@ -171,7 +159,7 @@ class nsComponentManagerImpl final : public nsIComponentManager,
 
   bool mJSLoaderReady = false;
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
  private:
   ~nsComponentManagerImpl();
@@ -181,21 +169,26 @@ class nsComponentManagerImpl final : public nsIComponentManager,
                             void** aResult);
 };
 
-#define NS_MAX_FILENAME_LEN 1024
-
-#define NS_ERROR_IS_DIR NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_XPCOM, 24)
-
 struct nsFactoryEntry {
   // nsIComponentRegistrar.registerFactory support
   nsFactoryEntry(const nsCID& aClass, nsIFactory* aFactory);
 
   ~nsFactoryEntry() = default;
 
-  already_AddRefed<nsIFactory> GetFactory();
+  already_AddRefed<nsIFactory> GetFactory() const;
 
-  nsresult CreateInstance(const nsIID& aIID, void** aResult);
+  nsresult CreateInstance(const nsIID& aIID, void** aResult) const;
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
+
+  const nsCID& CID() const { return mCID; }
+
+  nsISupports* ServiceInstance() const { return mServiceObject; }
+  void SetServiceInstance(already_AddRefed<nsISupports> aInst) {
+    mServiceObject = std::move(aInst);
+  }
+
+  bool IsSingleton() const { return false; }
 
   const nsCID mCID;
 

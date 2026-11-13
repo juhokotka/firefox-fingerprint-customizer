@@ -6,8 +6,6 @@
  * JS object implementation.
  */
 
-#include "vm/JSObject-inl.h"
-
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Try.h"
 
@@ -66,12 +64,14 @@
 #include "vm/TypedArrayObject.h"
 #include "vm/Watchtower.h"
 #include "vm/WrapperObject.h"
+
 #include "gc/StableCellHasher-inl.h"
 #include "vm/BooleanObject-inl.h"
 #include "vm/EnvironmentObject-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/JSAtomUtils-inl.h"  // AtomToId, PrimitiveValueToId, IndexToId
 #include "vm/JSContext-inl.h"
+#include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/NumberObject-inl.h"
 #include "vm/ObjectFlags-inl.h"
@@ -1778,13 +1778,14 @@ JS_PUBLIC_API bool js::ShouldIgnorePropertyDefinition(JSContext* cx,
          id == NameToId(cx->names().zipKeyed))) {
       return true;
     }
+    if (!JS::Prefs::experimental_promise_allkeyed() &&
+        (id == NameToId(cx->names().allKeyed) ||
+         id == NameToId(cx->names().allSettledKeyed))) {
+      return true;
+    }
   }
 
 #ifdef JS_HAS_INTL_API
-  if (key == JSProto_Date && !JS::Prefs::experimental_temporal() &&
-      id == NameToId(cx->names().toTemporalInstant)) {
-    return true;
-  }
   if (key == JSProto_Locale && !JS::Prefs::experimental_intl_locale_info()) {
     if (id == NameToId(cx->names().firstDayOfWeek) ||
         id == NameToId(cx->names().getTextInfo) ||
@@ -1806,11 +1807,6 @@ JS_PUBLIC_API bool js::ShouldIgnorePropertyDefinition(JSContext* cx,
   if (key == JSProto_Function) {
     if (!JS::Prefs::experimental_iterator_range() &&
         (id == NameToId(cx->names().range))) {
-      return true;
-    }
-    if (!JS::Prefs::experimental_promise_allkeyed() &&
-        (id == NameToId(cx->names().allKeyed) ||
-         id == NameToId(cx->names().allSettledKeyed))) {
       return true;
     }
   }
@@ -2125,6 +2121,9 @@ bool js::IsPrototypeOf(JSContext* cx, HandleObject protoObj, JSObject* obj,
 JSObject* js::PrimitiveToObject(JSContext* cx, const Value& v) {
   MOZ_ASSERT(v.isPrimitive());
 
+  // Note: if a new primitive type is added here, its constructor
+  // should also be resolved in the JSOp::FunctionThis case in
+  // WarpScriptOracle::createScriptSnapshot.
   switch (v.type()) {
     case ValueType::String: {
       Rooted<JSString*> str(cx, v.toString());
@@ -2315,6 +2314,22 @@ void GetObjectSlotNameFunctor::operator()(JS::TracingContext* tcx,
             } else if (slot == WithEnvironmentObject::thisSlot()) {
               slotname = "with_this";
             }
+          }
+        } else if (obj->is<JSFunction>()) {
+          if (slot == JSFunction::FlagsAndArgCountSlot) {
+            slotname = "flags_and_arg_count";
+          } else if (slot == JSFunction::NativeFuncOrInterpretedEnvSlot) {
+            slotname = "native_func_or_env";
+          } else if (slot == JSFunction::NativeJitInfoOrInterpretedScriptSlot) {
+            slotname = "native_jit_info_or_script";
+          } else if (slot == JSFunction::AtomSlot) {
+            slotname = "atom";
+          } else if (slot == FunctionExtended::FirstExtendedSlot) {
+            slotname = "extended_slot_0";
+          } else if (slot == FunctionExtended::SecondExtendedSlot) {
+            slotname = "extended_slot_1";
+          } else if (slot == FunctionExtended::ThirdExtendedSlot) {
+            slotname = "extended_slot_2";
           }
         }
       }
@@ -2948,20 +2963,6 @@ void JSObject::traceChildren(JSTracer* trc) {
       JS::AutoTracingDetails ctx(trc, func);
       TraceRange(trc, nslots - nfixed, nobj->slots_.get(),
                  "objectDynamicSlots");
-
-#if defined(JS_GC_CONCURRENT_MARKING) && defined(DEBUG)
-      // Any unused dynamic slots that should be undefined.
-      if (nobj->hasDynamicSlots()) {
-        uint32_t nfixed = nobj->numFixedSlots();
-        uint32_t start = nslots;
-        uint32_t end = nfixed + nobj->numDynamicSlots();
-        MOZ_ASSERT(start >= nobj->numFixedSlots());
-        HeapSlot* dynamicSlots = nobj->getSlotAddressUnchecked(start);
-        for (uint32_t i = 0; i < end - start; i++) {
-          MOZ_ASSERT(dynamicSlots[i].isUndefined());
-        }
-      }
-#endif
     }
 
     TraceRange(trc, nobj->getDenseInitializedLength(),

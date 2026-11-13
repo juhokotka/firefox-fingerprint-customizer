@@ -264,6 +264,7 @@ impl Runner for FirefoxRunner {
                 | Arg::Other(_)
                 | Arg::RemoteAllowHosts
                 | Arg::RemoteAllowOrigins
+                | Arg::RemoteAllowSystemAccess
                 | Arg::RemoteDebuggingPort => {}
             }
         }
@@ -276,9 +277,10 @@ impl Runner for FirefoxRunner {
             cmd.arg("-no-remote");
         }
         if let Some(ref profile) = self.profile
-            && !seen_profile {
-                cmd.arg("-profile").arg(&profile.path);
-            }
+            && !seen_profile
+        {
+            cmd.arg("-profile").arg(&profile.path);
+        }
 
         info!("Running command: {:?}", cmd);
         let process = cmd.spawn()?;
@@ -393,9 +395,9 @@ pub mod platform {
 pub mod platform {
     use crate::path::{find_binary, is_binary};
     use std::io::Error;
-    use std::path::PathBuf;
-    use winreg::enums::*;
+    use std::path::{Path, PathBuf};
     use winreg::RegKey;
+    use winreg::enums::*;
 
     pub fn resolve_binary_path(path: &mut PathBuf) -> &PathBuf {
         path
@@ -411,6 +413,17 @@ pub mod platform {
             }
         };
         find_binary("firefox.exe")
+    }
+
+    /// Other Gecko applications, such as Thunderbird, register themselves under
+    /// `HKLM\SOFTWARE\Mozilla` with the same `GeckoVer` as the Firefox build of
+    /// the same Gecko version, so matching on the version alone is not enough to
+    /// tell them apart. Firefox ships a `browser` application directory next to
+    /// the executable, which non-browser applications do not, and which keeps
+    /// Firefox forks discoverable.
+    fn is_browser_dir(path: &Path) -> bool {
+        path.parent()
+            .is_some_and(|install_dir| install_dir.join("browser").is_dir())
     }
 
     fn firefox_registry_path() -> Result<Option<PathBuf>, Error> {
@@ -436,7 +449,7 @@ pub mod platform {
                             let path_to_exe: Result<String, _> = bin_subtree.get_value("PathToExe");
                             if let Ok(path_to_exe) = path_to_exe {
                                 let path = PathBuf::from(path_to_exe);
-                                if is_binary(&path) {
+                                if is_browser_dir(&path) && is_binary(&path) {
                                     return Ok(Some(path));
                                 }
                             }

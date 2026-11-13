@@ -392,6 +392,8 @@ class VideoSessionConduit : public MediaSessionConduit {
 
   virtual Maybe<Ssrc> GetAssociatedLocalRtxSSRC(Ssrc aSsrc) const = 0;
 
+  virtual Maybe<Ssrc> GetAssociatedRemoteRtxSSRC() const = 0;
+
   virtual Maybe<gfx::IntSize> GetLastResolution() const = 0;
   virtual AbstractCanonical<Maybe<gfx::IntSize>>* CanonicalReceivingSize() = 0;
 

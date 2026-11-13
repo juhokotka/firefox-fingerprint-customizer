@@ -28,6 +28,7 @@
 #include "builtin/Eval.h"
 #include "builtin/JSON.h"
 #include "builtin/Math.h"
+#include "builtin/ModuleObject.h"
 #include "builtin/Promise.h"
 #include "builtin/Symbol.h"
 #include "frontend/FrontendContext.h"  // AutoReportFrontendContext
@@ -434,6 +435,13 @@ JS::ContextOptions& JS::ContextOptions::setFuzzing(bool flag) {
   return *this;
 }
 
+JS::ContextOptions& JS::ContextOptions::setWasmDisablesDenormals() {
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+  wasmDisablesDenormals_ = true;
+#endif
+  return *this;
+}
+
 JS_PUBLIC_API const char* JS_GetImplementationVersion(void) {
   return "JavaScript-C" MOZILLA_VERSION;
 }
@@ -546,12 +554,10 @@ JS_PUBLIC_API void* JS_GetCompartmentPrivate(JS::Compartment* compartment) {
   return compartment->data;
 }
 
-JS_PUBLIC_API void JS_MarkCrossZoneId(JSContext* cx, jsid id) {
-  cx->markId(id);
-}
-
-JS_PUBLIC_API void JS_MarkCrossZoneIdValue(JSContext* cx, const Value& value) {
-  cx->markAtomValue(value);
+JS_PUBLIC_API bool JS_WrapId(JSContext* cx, MutableHandleId id) {
+  AssertHeapIsIdle();
+  CHECK_THREAD(cx);
+  return cx->wrapOrRecordRefToId(id);
 }
 
 JS_PUBLIC_API void JS_SetZoneUserData(JS::Zone* zone, void* data) {
@@ -803,9 +809,16 @@ JS_PUBLIC_API void js::RemapRemoteWindowProxies(
     target.set(targetCompartmentProxy);
   }
 
+  gc::GCRuntime* gc = &cx->runtime()->gc;
   RootedField<JSObject*, 2> deadWrapper(roots);
   for (JSObject*& obj : otherProxies) {
     deadWrapper = obj;
+
+    if (!gc->relocateFinalizationObserverTarget(ObjectValue(*deadWrapper),
+                                                ObjectValue(*target))) {
+      oomUnsafe.crash("js::RemapRemoteWindowProxies");
+    }
+
     js::RemapDeadWrapper(cx, deadWrapper, target);
   }
 }
@@ -829,12 +842,18 @@ struct JSStdName {
 
 static const JSStdName* LookupStdName(const JSAtomState& names, JSAtom* name,
                                       const JSStdName* table) {
+  // Every name in the table is a permanent atom.
+  if (!name->isPermanent()) {
+    return nullptr;
+  }
+
   for (unsigned i = 0; !table[i].isSentinel(); i++) {
     if (table[i].isDummy()) {
       continue;
     }
     JSAtom* atom = AtomStateOffsetToName(names, table[i].atomOffset);
     MOZ_ASSERT(atom);
+    MOZ_ASSERT(atom->isPermanent());
     if (name == atom) {
       return &table[i];
     }
@@ -2507,6 +2526,8 @@ void JS::TransitiveCompileOptions::copyPODTransitiveOptions(
   sourceIsLazy = rhs.sourceIsLazy;
   allowHTMLComments = rhs.allowHTMLComments;
   nonSyntacticScope = rhs.nonSyntacticScope;
+  allowRedeclaringExistingLexicalBinding =
+      rhs.allowRedeclaringExistingLexicalBinding;
 
   topLevelAwait = rhs.topLevelAwait;
 
@@ -2761,12 +2782,16 @@ JS_PUBLIC_API JSString* JS_DecompileScript(JSContext* cx, HandleScript script) {
   if (fun) {
     return JS_DecompileFunction(cx, fun);
   }
-  bool haveSource;
-  if (!ScriptSource::loadSource(cx, script->scriptSource(), &haveSource)) {
+
+  bool loaded;
+  Maybe<ScriptSource::DataReader> reader;
+  if (!script->scriptSource()->tryLoadSource(cx, reader, &loaded)) {
     return nullptr;
   }
-  return haveSource ? JSScript::sourceData(cx, script)
-                    : NewStringCopyZ<CanGC>(cx, "[no source]");
+  MOZ_ASSERT_IF(loaded, (*reader).hasSourceText());
+  return loaded ? (*reader)->substring(cx, script->sourceStart(),
+                                       script->sourceEnd())
+                : NewStringCopyZ<CanGC>(cx, "[no source]");
 }
 
 JS_PUBLIC_API JSString* JS_DecompileFunction(JSContext* cx,
@@ -2780,6 +2805,11 @@ JS_PUBLIC_API JSString* JS_DecompileFunction(JSContext* cx,
 
 JS_PUBLIC_API void JS::SetScriptPrivate(JSScript* script,
                                         const JS::Value& value) {
+  // The referrer passed to the HostLoadImportedModule hook is either a module
+  // record or a classic script's private value, so a module object must not be
+  // used as a script private. See JS::GetReferrerPrivate.
+  MOZ_ASSERT_IF(value.isObject(), !value.toObject().is<js::ModuleObject>());
+
   JSRuntime* rt = script->zone()->runtimeFromMainThread();
   script->sourceObject()->setPrivate(rt, value);
 }
@@ -3052,9 +3082,12 @@ JS_PUBLIC_API bool JS::RejectPromise(JSContext* cx, JS::HandleObject promiseObj,
   return ResolveOrRejectPromise(cx, promiseObj, rejectionValue, true);
 }
 
-#ifdef NIGHTLY_BUILD
 JS_PUBLIC_API bool JS::SafeResolve(JSContext* cx, JS::HandleObject promiseObj,
-                                   JS::HandleValue resolutionValue) {
+                                   JS::HandleValue resolutionValue,
+                                   bool* deferred) {
+  if (deferred) {
+    *deferred = false;
+  }
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
   cx->check(promiseObj, resolutionValue);
@@ -3078,9 +3111,8 @@ JS_PUBLIC_API bool JS::SafeResolve(JSContext* cx, JS::HandleObject promiseObj,
     promise = promiseObj.as<PromiseObject>();
   }
 
-  return js::SafeResolvePromise(cx, promise, resolution);
+  return js::SafeResolvePromise(cx, promise, resolution, deferred);
 }
-#endif  // NIGHTLY_BUILD
 
 JS_PUBLIC_API JSObject* JS::CallOriginalPromiseThen(
     JSContext* cx, JS::HandleObject promiseObj, JS::HandleObject onFulfilled,
@@ -3712,8 +3744,13 @@ JS_PUBLIC_API JS::Symbol* JS::GetSymbolFor(JSContext* cx, HandleString key) {
   return Symbol::for_(cx, key);
 }
 
-JS_PUBLIC_API JSString* JS::GetSymbolDescription(HandleSymbol symbol) {
-  return symbol->description();
+JS_PUBLIC_API JSString* JS::GetSymbolDescription(JSContext* cx,
+                                                 HandleSymbol symbol) {
+  JSAtom* description = symbol->description();
+  if (description) {
+    cx->recordRef(description);
+  }
+  return description;
 }
 
 JS_PUBLIC_API JS::SymbolCode JS::GetSymbolCode(Handle<Symbol*> symbol) {
@@ -4142,11 +4179,9 @@ void JS::AutoSaveExceptionState::drop() {
 }
 
 void JS::AutoSaveExceptionState::restore() {
-  context->status = status;
-  context->unwrappedException() = exceptionValue;
-  if (exceptionStack) {
-    context->unwrappedExceptionStack() = &exceptionStack->as<SavedFrame>();
-  }
+  SavedFrame* stack =
+      exceptionStack ? &exceptionStack->as<SavedFrame>() : nullptr;
+  context->restorePendingExceptionState(status, exceptionValue, stack);
   drop();
 }
 
@@ -4210,10 +4245,6 @@ void JSErrorBase::freeMessage() {
   }
   message_ = JS::ConstUTF8CharsZ();
 }
-
-JSErrorNotes::JSErrorNotes() = default;
-
-JSErrorNotes::~JSErrorNotes() = default;
 
 static UniquePtr<JSErrorNotes::Note> CreateErrorNoteVA(
     FrontendContext* fc, const char* filename, unsigned sourceId,

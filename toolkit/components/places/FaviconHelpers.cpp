@@ -303,16 +303,19 @@ nsresult FetchMostFrecentSubPageIcon(const UniquePtr<ConnectionAdapter>& aConn,
                                      const nsACString& aPageRoot,
                                      const nsACString& aPageHost,
                                      IconData& aIconData) {
+  // width is a uint16, so packing it under frecency makes the single max()
+  // rank rows exactly like ORDER BY frecency DESC, width DESC, without a sort.
+  // The HAVING avoids the all-NULL row a bare aggregate returns on no match.
   nsCOMPtr<mozIStorageStatement> stmt = aConn->GetStatement(
-      "SELECT i.icon_url, i.id, i.expire_ms, i.data, i.width, i.root "
+      "SELECT i.icon_url, i.id, i.expire_ms, i.data, i.width, i.root, "
+      "max(p.frecency * 65536 + i.width) "
       "FROM moz_pages_w_icons pwi "
-      "JOIN moz_icons_to_pages itp ON pwi.id = itp.page_id "
-      "JOIN moz_icons i ON itp.icon_id = i.id "
+      "JOIN moz_icons_to_pages itp ON itp.page_id = pwi.id "
+      "JOIN moz_icons i ON i.id = itp.icon_id "
       "JOIN moz_places p ON p.url_hash = pwi.page_url_hash "
       "WHERE p.rev_host = get_unreversed_host(:pageHost || '.') || '.' "
       "AND p.url BETWEEN :pageRoot || '/' AND :pageRoot || '/'  || X'FFFF' "
-      "ORDER BY p.frecency DESC, i.width DESC "
-      "LIMIT 1"_ns);
+      "HAVING count(*) > 0"_ns);
   NS_ENSURE_STATE(stmt);
   mozStorageStatementScoper scoperFallback(stmt);
 
@@ -943,8 +946,9 @@ AsyncGetFaviconForPageRunnable::Run() {
   UniquePtr<ConnectionAdapter> adapter;
   if (!mOnConcurrentConn) {
     RefPtr<Database> DB = Database::GetDatabase();
-    MOZ_ASSERT(DB);
-    adapter = MakeUnique<ConnectionAdapter>(DB);
+    if (DB) {
+      adapter = MakeUnique<ConnectionAdapter>(DB);
+    }
   } else {
     auto conn = ConcurrentConnection::GetInstance();
     MOZ_ASSERT(conn);
@@ -952,8 +956,8 @@ AsyncGetFaviconForPageRunnable::Run() {
       adapter = MakeUnique<ConnectionAdapter>(conn.value());
     }
   }
-  // In certain circumstances, like when ConcurrentConnection is initialized
-  // during shutdown, we may not have a connection.
+  // In certain circumstances, like when the database or ConcurrentConnection
+  // is being shut down, we may not have a connection.
   if (!adapter) {
     return (rv = NS_ERROR_UNEXPECTED);
   }
@@ -1078,6 +1082,68 @@ NS_IMETHODIMP AsyncTryCopyFaviconsRunnable::Run() {
   // Setting this will make us send pageChanged notifications.
   // The scope exit will take care of the callback and notifications.
   fromIconData.status |= ICON_STATUS_ASSOCIATED;
+
+  return NS_OK;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//// AsyncExpireFaviconsForPage
+
+AsyncExpireFaviconsForPage::AsyncExpireFaviconsForPage(
+    const nsCOMPtr<nsIURI>& aPageURI, dom::Promise* aPromise)
+    : Runnable("places::AsyncExpireFaviconsForPage"),
+      mPageURI(aPageURI),
+      mPromise(new nsMainThreadPtrHolder<dom::Promise>(
+          "AsyncExpireFaviconsForPage::Promise", aPromise, false)) {}
+
+NS_IMETHODIMP
+AsyncExpireFaviconsForPage::Run() {
+  MOZ_ASSERT(!NS_IsMainThread());
+
+  nsresult rv = NS_OK;
+  auto guard = MakeScopeExit([&]() {
+    NS_DispatchToMainThread(
+        NS_NewRunnableFunction("AsyncExpireFaviconsForPage::Promise",
+                               [rv, promise = std::move(mPromise)]() {
+                                 if (NS_SUCCEEDED(rv)) {
+                                   promise->MaybeResolveWithUndefined();
+                                 } else {
+                                   promise->MaybeReject(rv);
+                                 }
+                               }));
+  });
+
+  RefPtr<Database> DB = Database::GetDatabase();
+  if (MOZ_UNLIKELY(!DB)) {
+    return (rv = NS_ERROR_UNEXPECTED);
+  }
+
+  // Delete all icon associations for the given page, using the same page
+  // lookup logic as FetchIconInfo: match the exact URL and, if it has a
+  // fragment, also match the fragment-stripped URL (since bookmarks typically
+  // point to the URL without fragment).
+  nsCOMPtr<mozIStorageStatement> stmt = DB->GetStatement(
+      "DELETE FROM moz_icons_to_pages WHERE page_id IN ( "
+      "  SELECT id FROM moz_pages_w_icons "
+      "  WHERE (page_url_hash = hash(:page_url) AND page_url = :page_url) "
+      "  OR (:hash_idx AND page_url_hash = hash(substr(:page_url, 0, "
+      ":hash_idx)) "
+      "      AND page_url = substr(:page_url, 0, :hash_idx)) "
+      ")");
+  if (MOZ_UNLIKELY(!stmt)) {
+    return (rv = NS_ERROR_UNEXPECTED);
+  }
+  mozStorageStatementScoper scoper(stmt);
+  nsAutoCString spec;
+  rv = mPageURI->GetSpec(spec);
+  NS_ENSURE_SUCCESS(rv, rv);
+  int32_t hashIdx = spec.RFind("#") + 1;
+  rv = URIBinder::Bind(stmt, "page_url"_ns, spec);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = stmt->BindInt32ByName("hash_idx"_ns, hashIdx);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = stmt->Execute();
+  NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
 }

@@ -3,12 +3,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SandboxBroker.h"
-#include "SandboxInfo.h"
-
-#include "SandboxProfilerParent.h"
-#include "SandboxLogging.h"
-
-#include "SandboxBrokerUtils.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -26,6 +20,10 @@
 #include <utility>
 
 #include "GeckoProfiler.h"
+#include "SandboxBrokerUtils.h"
+#include "SandboxInfo.h"
+#include "SandboxLogging.h"
+#include "SandboxProfilerParent.h"
 #include "SpecialSystemDirectory.h"
 #include "base/strings/string_util.h"
 #include "mozilla/Assertions.h"
@@ -629,28 +627,22 @@ nsCString SandboxBroker::ReverseSymlinks(const nsACString& aPath) {
   }
 }
 
-int SandboxBroker::SymlinkPermissions(const char* aPath,
-                                      const size_t aPathLen) {
-  // Work on a temporary copy, so we can reverse it.
-  // Because we bail on a writable dir, SymlinkPath
-  // might not restore the callers' path exactly.
-  char pathBufSymlink[kMaxPathLen + 1];
-  strcpy(pathBufSymlink, aPath);
-
-  nsCString orig =
-      ReverseSymlinks(nsDependentCString(pathBufSymlink, aPathLen));
-  if (!orig.IsEmpty()) {
+int SandboxBroker::SymlinkPermissions(const nsACString& aPath) {
+  nsCString path = ReverseSymlinks(aPath);
+  if (path.IsEmpty()) {
+    path = aPath;
+  } else {
     if (SandboxInfo::Get().Test(SandboxInfo::kVerbose)) {
-      SANDBOX_LOG("Reversing %s -> %s", aPath, orig.get());
+      SANDBOX_LOG("Reversing %s -> %s", PromiseFlatCString(aPath).get(),
+                  path.get());
     }
-    base::strlcpy(pathBufSymlink, orig.get(), sizeof(pathBufSymlink));
   }
 
   int perms = 0;
   // Resolve relative paths, propagate permissions and
   // fail if a symlink is in a writable path. The output is in perms.
-  char* result = SandboxBroker::SymlinkPath(mPolicy.get(), pathBufSymlink,
-                                            nullptr, &perms);
+  char* result =
+      SandboxBroker::SymlinkPath(mPolicy.get(), path.get(), nullptr, &perms);
   if (result != nullptr) {
     free(result);
     // We finished the translation, so we have a usable return in "perms".
@@ -801,7 +793,8 @@ void SandboxBroker::ThreadMain(void) {
         // Then try to figure out the original path and see if that is
         // readable. Work on the original path, this reverses
         // ConvertRelative above.
-        int symlinkPerms = SymlinkPermissions(recvBuf, first_len);
+        int symlinkPerms =
+            SymlinkPermissions(nsDependentCString(recvBuf, first_len));
         if (symlinkPerms > 0) {
           perms = symlinkPerms;
         }

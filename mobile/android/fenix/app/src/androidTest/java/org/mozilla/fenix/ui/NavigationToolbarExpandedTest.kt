@@ -7,8 +7,10 @@
 package org.mozilla.fenix.ui
 
 import android.content.pm.ActivityInfo
+import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 import org.junit.Rule
 import org.junit.Test
+import org.mozilla.fenix.customannotations.Converted
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.AppAndSystemHelper.enableOrDisableBackGestureNavigationOnDevice
 import org.mozilla.fenix.helpers.AppAndSystemHelper.setScreenOrientation
@@ -25,68 +27,50 @@ import org.mozilla.fenix.ui.robots.browserScreen
 import org.mozilla.fenix.ui.robots.composeBookmarksMenu
 import org.mozilla.fenix.ui.robots.homeScreen
 import org.mozilla.fenix.ui.robots.navigationToolbar
-import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 
 /**
- *  Tests for verifying basic functionality of browser navigation in expanded toolbar layout and page related interactions
+ * Tests for verifying basic functionality of browser navigation in expanded toolbar layout and page related
+ * interactions
  *
- *  Including:
- *  - Visiting a URL
- *  - Back and Forward navigation
- *  - Refresh
- *  - Find in page
+ * Including:
+ * - Visiting a URL
+ * - Back and Forward navigation
+ * - Refresh
+ * - Find in page
  */
-
 class NavigationToolbarExpandedTest {
-    @get:Rule(order = 0)
-    val fenixTestRule: FenixTestRule = FenixTestRule()
+    @get:Rule(order = 0) val fenixTestRule: FenixTestRule = FenixTestRule()
 
-    private val mockWebServer get() = fenixTestRule.mockWebServer
+    private val mockWebServer
+        get() = fenixTestRule.mockWebServer
 
     @get:Rule(order = 1)
     val composeTestRule =
         AndroidComposeTestRuleV2(
             HomeActivityIntentTestRule(
-                isPWAsPromptEnabled = false,
                 isWallpaperOnboardingEnabled = false,
                 isOpenInAppBannerEnabled = false,
                 isMicrosurveyEnabled = false,
                 isTermsOfServiceAccepted = true,
                 shouldUseExpandedToolbar = true,
-            ),
-        ) { it.activity }
-
-    @get:Rule(order = 2)
-    val memoryLeaksRule = DetectMemoryLeaksRule(composeTestRule = { composeTestRule })
-
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333205
-    @Test
-    fun verifyTheExpandedToolbarHomepageItemsTest() {
-        homeScreen(composeTestRule) {
-            verifyHomeWordmark()
-            verifyToolbarPosition(bottomPosition = false)
+            )
+        ) {
+            it.activity
         }
-        navigationToolbar(composeTestRule) {
-            verifyNavBarPosition()
-            verifyTheNavigationBarAddBookmarkButton()
-            verifyTheNavigationBarShareButton()
-            verifyTheNewTabButton()
-            verifyTheTabCounter("0")
-            verifyTheMainMenuButton()
-        }
-    }
+
+    @get:Rule(order = 2) val memoryLeaksRule = DetectMemoryLeaksRule(composeTestRule = { composeTestRule })
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333207
     @Test
     fun verifyTheExpandedToolbarItemsWebsiteViewTest() {
         val website = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(website.url) {
-            verifyPageContent(website.content)
-            verifyUrl(website.url.toString())
-            verifyETPShieldIconIsDisplayed(composeTestRule)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(website.url) {
+                verifyPageContent(website.content)
+                verifyUrl(website.url.toString())
+                verifyETPShieldIconIsDisplayed(composeTestRule)
+            }
         homeScreen(composeTestRule) {
             verifyToolbarPosition(bottomPosition = false)
         }
@@ -101,14 +85,20 @@ class NavigationToolbarExpandedTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333211
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.NavigationToolbarExpandedTest#verifyTheExpandedToolbarAddBookmarkButtonTest"
+            ],
+        bug = 2060480,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyTheExpandedToolbarAddBookmarkButtonTest() {
         val website = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(website.url) {
-        }
+        navigationToolbar(composeTestRule) {}.enterURLAndEnterToBrowser(website.url) {}
         navigationToolbar(composeTestRule) {
             clickTheNavigationBarAddBookmarkButton()
         }
@@ -128,6 +118,14 @@ class NavigationToolbarExpandedTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333212
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.NavigationToolbarExpandedTest#verifyTheExpandedToolbarShareButtonTest"
+            ],
+        bug = 2060480,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyTheExpandedToolbarShareButtonTest() {
@@ -136,63 +134,78 @@ class NavigationToolbarExpandedTest {
         // Disable the back gesture from the edge of the screen on the device.
         enableOrDisableBackGestureNavigationOnDevice(backGestureNavigationEnabled = false)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(website.url) {
-        }
-        navigationToolbar(composeTestRule) {
-        }.clickTheNavigationBarShareButton {
-            verifyShareTabLayout()
-            verifySharingWithSelectedApp(
-                appName = "Gmail",
-                content = website.url.toString(),
-                subject = website.title,
-            )
-        }
+        navigationToolbar(composeTestRule) {}.enterURLAndEnterToBrowser(website.url) {}
+        navigationToolbar(composeTestRule) {}
+            .clickTheNavigationBarShareButton {
+                verifyShareTabLayout()
+                verifySharingWithSelectedApp(
+                    appName = "Gmail",
+                    content = website.url.toString(),
+                    subject = website.title,
+                )
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333213
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.ToolbarTest#verifyTheExpandedToolbarNewTabButtonTest"],
+        bug = 2057957,
+        since = "2026-07",
+    )
     @SmokeTest
     @Test
     fun verifyTheExpandedToolbarNewTabButtonTest() {
         val website = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(website.url) {
-            verifyPageContent(website.content)
-        }
-        navigationToolbar(composeTestRule) {
-        }.clickTheNewTabButton {
-            verifySearchBarPlaceholder("Search or enter address")
-            verifyKeyboardVisibility(true)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(website.url) {
+                verifyPageContent(website.content)
+            }
+        navigationToolbar(composeTestRule) {}
+            .clickTheNewTabButton {
+                verifySearchBarPlaceholder("Search or enter address")
+                verifyKeyboardVisibility(true)
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333214
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.ToolbarTest#verifyTheExpandedToolbarTabTrayButtonTest"],
+        bug = 2057419,
+        since = "2026-07",
+    )
     @SmokeTest
     @Test
     fun verifyTheExpandedToolbarTabTrayButtonTest() {
         val website = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(website.url) {
-            verifyPageContent(website.content)
-        }.openTabDrawer(composeTestRule) {
-            verifyExistingOpenTabs(website.title)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(website.url) {
+                verifyPageContent(website.content)
+            }
+            .openTabDrawer(composeTestRule) {
+                verifyExistingOpenTabs(website.title)
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333215
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.ToolbarTest#verifyTheExpandedToolbarMainMenuButtonTest"],
+        bug = 2057419,
+        since = "2026-07",
+    )
     @SmokeTest
     @Test
     fun verifyTheExpandedToolbarMainMenuButtonTest() {
         val website = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(website.url) {
-            verifyPageContent(website.content)
-        }.openThreeDotMenu {
-            verifyPageMainMenuItems()
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(website.url) {
+                verifyPageContent(website.content)
+            }
+            .openThreeDotMenu {
+                verifyPageMainMenuItems()
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333220
@@ -200,16 +213,17 @@ class NavigationToolbarExpandedTest {
     fun verifyTheExpandedToolbarTabsCounterShortcutMenuNewTabTest() {
         val defaultWebPage = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(defaultWebPage.url) {}
-        navigationToolbar(composeTestRule) {
-        }.openTabButtonShortcutsMenu {
-            verifyTabButtonShortcutMenuItems()
-        }.openNewTabFromShortcutsMenu {
-            verifySearchBarPlaceholder("Search or enter address")
-        }.dismissSearchBar {
-            verifyIfInPrivateOrNormalMode(privateBrowsingEnabled = false)
-        }
+        navigationToolbar(composeTestRule) {}.enterURLAndEnterToBrowser(defaultWebPage.url) {}
+        navigationToolbar(composeTestRule) {}
+            .openTabButtonShortcutsMenu {
+                verifyTabButtonShortcutMenuItems()
+            }
+            .openNewTabFromShortcutsMenu {
+                verifySearchBarPlaceholder("Search or enter address")
+            }
+            .dismissSearchBar {
+                verifyIfInPrivateOrNormalMode(privateBrowsingEnabled = false)
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333221
@@ -217,16 +231,17 @@ class NavigationToolbarExpandedTest {
     fun verifyTheExpandedToolbarTabsCounterShortcutMenuNewPrivateTabTest() {
         val defaultWebPage = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(defaultWebPage.url) {}
-        navigationToolbar(composeTestRule) {
-        }.openTabButtonShortcutsMenu {
-            verifyTabButtonShortcutMenuItems()
-        }.openNewPrivateTabFromShortcutsMenu {
-            verifySearchBarPlaceholder("Search or enter address")
-        }.dismissSearchBar {
-            verifyIfInPrivateOrNormalMode(privateBrowsingEnabled = true)
-        }
+        navigationToolbar(composeTestRule) {}.enterURLAndEnterToBrowser(defaultWebPage.url) {}
+        navigationToolbar(composeTestRule) {}
+            .openTabButtonShortcutsMenu {
+                verifyTabButtonShortcutMenuItems()
+            }
+            .openNewPrivateTabFromShortcutsMenu {
+                verifySearchBarPlaceholder("Search or enter address")
+            }
+            .dismissSearchBar {
+                verifyIfInPrivateOrNormalMode(privateBrowsingEnabled = true)
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333222
@@ -234,17 +249,17 @@ class NavigationToolbarExpandedTest {
     fun verifyTheExpandedToolbarTabsCounterShortcutMenuCloseTabTest() {
         val defaultWebPage = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(defaultWebPage.url) {}
-        navigationToolbar(composeTestRule) {
-        }.openTabButtonShortcutsMenu {
-            verifyTabButtonShortcutMenuItems()
-        }.closeTabFromShortcutsMenu {
-            verifySnackBarText(composeTestRule, "Tab closed")
-        }
+        navigationToolbar(composeTestRule) {}.enterURLAndEnterToBrowser(defaultWebPage.url) {}
+        navigationToolbar(composeTestRule) {}
+            .openTabButtonShortcutsMenu {
+                verifyTabButtonShortcutMenuItems()
+            }
+            .closeTabFromShortcutsMenu {
+                verifySnackBarText(composeTestRule, "Tab closed")
+            }
     }
 
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333172
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3911787
     @Test
     fun verifyTheExpandedToolbarHomepageItemsInLandscapeModeTest() {
         homeScreen(composeTestRule) {
@@ -265,15 +280,23 @@ class NavigationToolbarExpandedTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333175
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.NavigationToolbarExpandedTest#verifyTheExpandedToolbarItemsInLandscapeModeTest"
+            ],
+        bug = 2060480,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyTheExpandedToolbarItemsInLandscapeModeTest() {
         val defaultWebPage = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(defaultWebPage.url) {
-            verifyPageContent(defaultWebPage.content)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(defaultWebPage.url) {
+                verifyPageContent(defaultWebPage.content)
+            }
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
         homeScreen(composeTestRule) {
             verifyToolbarPosition(bottomPosition = false)
@@ -294,58 +317,82 @@ class NavigationToolbarExpandedTest {
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
     }
 
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333183
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333213
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.NavigationToolbarExpandedTest#verifyTheExpandedToolbarNewTabButtonInLandscapeModeTest"
+            ],
+        bug = 2060480,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyTheExpandedToolbarNewTabButtonInLandscapeModeTest() {
         val website = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(website.url) {
-            verifyPageContent(website.content)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(website.url) {
+                verifyPageContent(website.content)
+            }
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
-        navigationToolbar(composeTestRule) {
-        }.clickTheNewTabButton {
-            verifySearchBarPlaceholder("Search or enter address")
-            verifyKeyboardVisibility(true)
-        }
+        navigationToolbar(composeTestRule) {}
+            .clickTheNewTabButton {
+                verifySearchBarPlaceholder("Search or enter address")
+                verifyKeyboardVisibility(true)
+            }
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
     }
 
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333184
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333214
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.NavigationToolbarExpandedTest#verifyTheExpandedToolbarTabTrayButtonInLandscapeModeTest"
+            ],
+        bug = 2060480,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyTheExpandedToolbarTabTrayButtonInLandscapeModeTest() {
         val website = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(website.url) {
-            verifyPageContent(website.content)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(website.url) {
+                verifyPageContent(website.content)
+            }
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
-        homeScreen(composeTestRule) {
-        }.openTabDrawer {
-            verifyExistingOpenTabs(website.title)
-        }
+        homeScreen(composeTestRule) {}
+            .openTabDrawer {
+                verifyExistingOpenTabs(website.title)
+            }
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
     }
 
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333185
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333178
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.NavigationToolbarExpandedTest#verifyTheExpandedToolbarMainMenuButtonInLandscapeModeTest"
+            ],
+        bug = 2060480,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyTheExpandedToolbarMainMenuButtonInLandscapeModeTest() {
         val website = mockWebServer.getGenericAsset(1)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(website.url) {
-            verifyPageContent(website.content)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(website.url) {
+                verifyPageContent(website.content)
+            }
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-            verifyPageMainMenuItemsInLandscapeMode()
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {
+                verifyPageMainMenuItemsInLandscapeMode()
+            }
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
     }
 
@@ -354,10 +401,10 @@ class NavigationToolbarExpandedTest {
     fun verifyTheExpandedToolbarRefreshButtonInLandscapeModeTest() {
         val refreshWebPage = mockWebServer.refreshAsset
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(refreshWebPage.url) {
-            verifyPageContent("DEFAULT")
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(refreshWebPage.url) {
+                verifyPageContent("DEFAULT")
+            }
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
         navigationToolbar(composeTestRule) {
             clickTheNavigationBarRefreshButton()
@@ -368,7 +415,7 @@ class NavigationToolbarExpandedTest {
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
     }
 
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333182
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333212
     @Test
     fun verifyTheExpandedToolbarShareButtonInLandscapeModeTest() {
         val website = mockWebServer.getGenericAsset(1)
@@ -376,35 +423,40 @@ class NavigationToolbarExpandedTest {
         // Disable the back gesture from the edge of the screen on the device.
         enableOrDisableBackGestureNavigationOnDevice(backGestureNavigationEnabled = false)
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(website.url) {
-        }
+        navigationToolbar(composeTestRule) {}.enterURLAndEnterToBrowser(website.url) {}
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
-        navigationToolbar(composeTestRule) {
-        }.clickTheNavigationBarShareButton {
-            verifyShareTabLayoutInLandscapeMode()
-            verifySharingWithSelectedApp(
-                appName = "Gmail",
-                content = website.url.toString(),
-                subject = website.title,
-            )
-        }
+        navigationToolbar(composeTestRule) {}
+            .clickTheNavigationBarShareButton {
+                verifyShareTabLayoutInLandscapeMode()
+                verifySharingWithSelectedApp(
+                    appName = "Gmail",
+                    content = website.url.toString(),
+                    subject = website.title,
+                )
+            }
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333206
+    @Converted(
+        replacedBy =
+            ["org.mozilla.fenix.ui.efficiency.tests.NavigationToolbarExpandedTest#verifyHomepageItemsWithTabStripTest"],
+        bug = 2060482,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyHomepageItemsWithTabStripTest() {
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openCustomizeSubMenu {
-            clickShowTabBarToggle()
-        }.goBack {
-        }.goBack(composeTestRule) {
-            verifyToolbarPosition(bottomPosition = false)
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openCustomizeSubMenu {
+                clickShowTabBarToggle()
+            }
+            .goBack {}
+            .goBack(composeTestRule) {
+                verifyToolbarPosition(bottomPosition = false)
+            }
         navigationToolbar(composeTestRule) {
             verifyNavBarPosition()
             verifyTheNavigationBarAddBookmarkButton()
@@ -416,25 +468,30 @@ class NavigationToolbarExpandedTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333193
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.NavigationToolbarExpandedTest#verifyTheTabStripUITest"],
+        bug = 2060482,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyTheTabStripUITest() {
         val defaultWebPage = mockWebServer.getGenericAsset(1)
 
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openCustomizeSubMenu {
-            clickShowTabBarToggle()
-        }.goBack {
-        }.goBack(composeTestRule) {
-        }
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(defaultWebPage.url) {
-            verifyPageContent(defaultWebPage.content)
-            verifyUrl(defaultWebPage.url.toString())
-            verifyETPShieldIconIsDisplayed(composeTestRule)
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openCustomizeSubMenu {
+                clickShowTabBarToggle()
+            }
+            .goBack {}
+            .goBack(composeTestRule) {}
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(defaultWebPage.url) {
+                verifyPageContent(defaultWebPage.content)
+                verifyUrl(defaultWebPage.url.toString())
+                verifyETPShieldIconIsDisplayed(composeTestRule)
+            }
         homeScreen(composeTestRule) {
             verifyToolbarPosition(bottomPosition = false)
         }
@@ -451,63 +508,82 @@ class NavigationToolbarExpandedTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333194
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.NavigationToolbarExpandedTest#verifyTheNewTabButtonWithTabStripEnabledTest"
+            ],
+        bug = 2060482,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyTheNewTabButtonWithTabStripEnabledTest() {
         val defaultWebPage = mockWebServer.getGenericAsset(1)
 
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openCustomizeSubMenu {
-            clickShowTabBarToggle()
-        }.goBack {
-        }.goBack(composeTestRule) {
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openCustomizeSubMenu {
+                clickShowTabBarToggle()
+            }
+            .goBack {}
+            .goBack(composeTestRule) {}
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(defaultWebPage.url) {
+                verifyTabCounter("1")
+            }
         navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(defaultWebPage.url) {
-            verifyTabCounter("1")
-        }
-        navigationToolbar(composeTestRule) {
-            verifyTheNewTabButton(false)
-        }.clickTheNewTabButton(false) {
-            verifySearchBarPlaceholder("Search or enter address")
-        }
+                verifyTheNewTabButton(false)
+            }
+            .clickTheNewTabButton(false) {
+                verifySearchBarPlaceholder("Search or enter address")
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333195
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.NavigationToolbarExpandedTest#verifyTabsTrayWithTabStripEnabledTest"
+            ],
+        bug = 2060482,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyTabsTrayWithTabStripEnabledTest() {
         val defaultWebPage = mockWebServer.getGenericAsset(1)
 
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openCustomizeSubMenu {
-            clickShowTabBarToggle()
-        }.goBack {
-        }.goBack(composeTestRule) {
-            navigationToolbar(composeTestRule) {
-            }.enterURLAndEnterToBrowser(defaultWebPage.url) {
-            }.openTabDrawer(composeTestRule) {
-                verifyExistingOpenTabs(defaultWebPage.title)
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openCustomizeSubMenu {
+                clickShowTabBarToggle()
             }
-        }
+            .goBack {}
+            .goBack(composeTestRule) {
+                navigationToolbar(composeTestRule) {}
+                    .enterURLAndEnterToBrowser(defaultWebPage.url) {}
+                    .openTabDrawer(composeTestRule) {
+                        verifyExistingOpenTabs(defaultWebPage.title)
+                    }
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333173
     @Test
     fun verifyHomepageItemsWithTabStripLandscapeTest() {
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openCustomizeSubMenu {
-            clickShowTabBarToggle()
-        }.goBack {
-        }.goBack(composeTestRule) {
-            verifyToolbarPosition(bottomPosition = false)
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openCustomizeSubMenu {
+                clickShowTabBarToggle()
+            }
+            .goBack {}
+            .goBack(composeTestRule) {
+                verifyToolbarPosition(bottomPosition = false)
+            }
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
         homeScreen(composeTestRule) {
             verifyToolbarPosition(bottomPosition = false)
@@ -526,18 +602,18 @@ class NavigationToolbarExpandedTest {
     fun verifyTheTabStripUILandscapeTest() {
         val defaultWebPage = mockWebServer.getGenericAsset(1)
 
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openCustomizeSubMenu {
-            clickShowTabBarToggle()
-        }.goBack {
-        }.goBack(composeTestRule) {
-        }
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(defaultWebPage.url) {
-            verifyPageContent(defaultWebPage.content)
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openCustomizeSubMenu {
+                clickShowTabBarToggle()
+            }
+            .goBack {}
+            .goBack(composeTestRule) {}
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(defaultWebPage.url) {
+                verifyPageContent(defaultWebPage.content)
+            }
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
         browserScreen(composeTestRule) {
             verifyUrl(defaultWebPage.url.toString())
@@ -561,7 +637,7 @@ class NavigationToolbarExpandedTest {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3911787
     @Test
-    fun verifyTheExpandedToolbarHomepageItemsWithEdgeToEdgeTest() {
+    fun verifyTheExpandedToolbarHomepageItemsTest() {
         homeScreen(composeTestRule) {
             verifyEdgeToEdgeWallpaperApplied(composeTestRule)
             verifyHomeWordmark()
@@ -575,14 +651,14 @@ class NavigationToolbarExpandedTest {
             verifyTheTabCounter("0")
             verifyTheMainMenuButton()
         }
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openCustomizeSubMenu {
-            clickBottomToolbarToggle()
-            verifyAddressBarPositionPreference("Bottom")
-            exitMenu()
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openCustomizeSubMenu {
+                clickBottomToolbarToggle()
+                verifyAddressBarPositionPreference("Bottom")
+                exitMenu()
+            }
         navigationToolbar(composeTestRule) {
             verifyNavBarPositionForEdgeToEdge()
             verifyTheNavigationBarAddBookmarkButton()

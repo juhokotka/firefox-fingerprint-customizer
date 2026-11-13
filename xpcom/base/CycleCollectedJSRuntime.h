@@ -5,6 +5,9 @@
 #ifndef mozilla_CycleCollectedJSRuntime_h
 #define mozilla_CycleCollectedJSRuntime_h
 
+#include "js/TypeDecls.h"
+#include "jsapi.h"
+#include "jsfriendapi.h"
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/DeferredFinalize.h"
 #include "mozilla/HashTable.h"
@@ -13,14 +16,10 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/SegmentedVector.h"
 #include "mozilla/Variant.h"
-#include "jsapi.h"
-#include "jsfriendapi.h"
-#include "js/TypeDecls.h"
-
 #include "nsCycleCollectionParticipant.h"
-#include "nsTHashMap.h"
 #include "nsHashKeys.h"
 #include "nsStringFwd.h"
+#include "nsTHashMap.h"
 #include "nsTHashSet.h"
 
 class nsCycleCollectionNoteRootCallback;
@@ -91,7 +90,7 @@ class JSHolderMap {
  public:
   class Iter;
 
-  JSHolderMap();
+  JSHolderMap() = default;
   ~JSHolderMap() { MOZ_RELEASE_ASSERT(!mHasIterator); }
 
   bool Has(void* aHolder) const;
@@ -103,13 +102,13 @@ class JSHolderMap {
 
  private:
   struct Entry {
-    void* mHolder;
-    nsScriptObjectTracer* mTracer;
+    void* mHolder = nullptr;
+    nsScriptObjectTracer* mTracer = nullptr;
 #ifdef DEBUG
-    JS::Zone* mZone;
+    JS::Zone* mZone = nullptr;
 #endif
 
-    Entry();
+    Entry() = default;
     Entry(void* aHolder, nsScriptObjectTracer* aTracer, JS::Zone* aZone);
   };
 
@@ -127,7 +126,7 @@ class JSHolderMap {
   bool RemoveEntry(EntryVector& aJSHolders, Entry* aEntry);
 
   // A map from a holder pointer to a pointer to an entry in a vector.
-  EntryMap mJSHolderMap;
+  EntryMap mJSHolderMap{256};
 
   // A vector of holders not associated with a particular zone or that can
   // contain pointers to GC things in more than one zone.
@@ -585,12 +584,19 @@ class CycleCollectedJSRuntime {
   using DeferredFinalizerTable = nsTHashMap<DeferredFinalizeFunction, void*>;
   DeferredFinalizerTable mDeferredFinalizerTable;
 
+  // Memoizes the last mDeferredFinalizerTable lookup. Must be cleared when the
+  // table is drained, which only happens in FinalizeDeferredThings().
+  DeferredFinalizeFunction mLastDeferredFinalizeFunction = nullptr;
+  void* mLastDeferredFinalizeData = nullptr;
+
   RefPtr<IncrementalFinalizeRunnable> mFinalizeRunnable;
 
   OOMState mOutOfMemoryState;
   OOMState mLargeAllocationFailureState;
 
-  static const size_t kSegmentSize = 512;
+  // Keeps sizeof(Segment) within mozjemalloc's largest bin size class (3840);
+  // past that each segment gets its own page run.
+  static const size_t kSegmentSize = 3800;
   using NurseryObjectsVector =
       SegmentedVector<nsWrapperCache*, kSegmentSize, InfallibleAllocPolicy>;
   NurseryObjectsVector mNurseryObjects;

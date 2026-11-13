@@ -10,6 +10,13 @@ add_task(async function testPseudo() {
 
   const { inspector } = await openInspectorForURL(TEST_URL);
 
+  // Count actual mutations received during the test.
+  let mutationsCounter = 0;
+  const countMutations = mutations => {
+    mutationsCounter += mutations.length;
+  };
+  inspector.on("markupmutation", countMutations);
+
   await selectNode("ul", inspector);
 
   const ulNodeFront = await getNodeFront("ul", inspector);
@@ -113,6 +120,10 @@ add_task(async function testPseudo() {
     content.document.querySelector("dialog").showModal();
   });
   await onMarkupMutation;
+  await waitFor(() => mutationsCounter === 3, {
+    toString: () =>
+      "Expected mutationsCounter to be 3, was " + mutationsCounter,
+  });
 
   info(
     "Check that both the ::backdrop and ::before element are now displayed under <dialog>"
@@ -137,6 +148,10 @@ add_task(async function testPseudo() {
     content.document.querySelector("dialog").close();
   });
   await onMarkupMutation;
+  await waitFor(() => mutationsCounter === 6, {
+    toString: () =>
+      "Expected mutationsCounter to be 6, was " + mutationsCounter,
+  });
 
   info(
     "Check that both the <dialog> ::backdrop and ::before children gets removed"
@@ -152,6 +167,8 @@ add_task(async function testPseudo() {
         select!ignore-children
       `.trim();
   await assertMarkupViewAsTree(tree, "html", inspector);
+  inspector.off("markupmutation", countMutations);
+  is(mutationsCounter, 6, "Expected number of mutations");
 
   info("Test ::picker-icon pseudo element");
   await selectNode("select", inspector);
@@ -162,14 +179,13 @@ add_task(async function testPseudo() {
     inspector
   );
   is(
-    ulContainer.expander.style.visibility,
+    selectContainer.expander.style.visibility,
     "visible",
     "Expander button is visible for <select>"
   );
 
   info("Click on the <select> parent expander and wait for children");
   await toggleContainerByClick(inspector, selectContainer);
-
   tree = `
     html
       head!ignore-children
@@ -181,6 +197,46 @@ add_task(async function testPseudo() {
           option
           option
           option
+          ::picker-icon
+      `.trim();
+  await assertMarkupViewAsTree(tree, "html", inspector);
+
+  info("Test ::checkmark pseudo element");
+
+  // The ::checkmark pseudo element only exists when the select is opened, so show the
+  // picker so we can see them
+  await showCustomizableSelectPicker(inspector, "select");
+
+  const optionNodeFront = await getNodeFront("option", inspector);
+  await selectNode(optionNodeFront, inspector);
+
+  const optionContainer = await getContainerForNodeFront(
+    optionNodeFront,
+    inspector
+  );
+  is(
+    optionContainer.expander.style.visibility,
+    "visible",
+    "Expander button is visible for <option>"
+  );
+
+  tree = `
+    html
+      head!ignore-children
+      body
+        article!ignore-children
+        ul!ignore-children
+        dialog!ignore-children
+        select
+          option
+            ::checkmark
+            Apricot
+          option
+            ::checkmark
+            Banana
+          option
+            ::checkmark
+            Cherry
           ::picker-icon
       `.trim();
   await assertMarkupViewAsTree(tree, "html", inspector);

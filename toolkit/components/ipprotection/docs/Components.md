@@ -35,6 +35,7 @@ flowchart LR
       IPPOnboardingMessage["Onboarding Message"]
       IPPOptOutHelper["Opt-Out Helper"]
       IPPUsageHelper["Usage Helper"]
+      IPPL10nHelper["L10n Coverage Helper"]
       IPProtectionAlertManager["Alert Manager"]
       IPProtectionInfobarManager["Infobar Manager"]
     end
@@ -49,18 +50,16 @@ flowchart LR
       IPPStartupCache["Startup Cache Helper"]
       IPProtectionServerlist
       IPPProxyManager
-      IPPAutoStart["Auto-Start Helper"]
-      IPPAutoRestoreHelper["Auto-Restore Helper"]
+      IPPAutoActivation["Auto-Activation Helper"]
       IPPNimbusHelper["Nimbus Eligibility Helper"]
       IPPSessionPrefManager["Session Pref Manager"]
-      IPPExceptionsManager
+      IPPSiteRuleManager
     end
 
     subgraph FxaAuth["FxA Authentication (fxa/)"]
       IPPAuthProvider
       IPPFxaActivateAuthProvider["Activate Auth Provider"]
       IPPSignInWatcher["Sign-in Observer"]
-      IPPEnrollAndEntitleManager["Enroll & Entitle Manager"]
       GuardianClient
     end
 
@@ -95,7 +94,6 @@ flowchart LR
   %% FxA auth wiring
   IPPFxaActivateAuthProvider -->|extends| IPPAuthProvider
   IPPFxaActivateAuthProvider --> IPPSignInWatcher
-  IPPFxaActivateAuthProvider --> IPPEnrollAndEntitleManager
   IPPFxaActivateAuthProvider --> GuardianClient
 
   %% Android auth wiring
@@ -124,11 +122,14 @@ GuardianClient
 IPPChannelFilter
 
 : Main network component. It processes network requests and decides which ones
-  should go through the proxy.
+  should go through the proxy, applying the mode it was given by
+  `IPPProxyManager`.
 
 IPPProxyManager
 
 : Implements the proxy activation/deactivation and exposes the current status.
+  It owns a connection's country and mode: both can be passed to `start()`, and
+  changed on a live connection with `switch()` and `setMode()`.
 
 IPProtectionService
 
@@ -143,10 +144,11 @@ IPProtectionActivator
   browser-specific helpers before `init()` is called. It also exposes
   `setAuthProvider()` to set the active authentication provider.
 
-IPPExceptionsManager
+IPPSiteRuleManager
 
-: Manages the exceptions logic (for example, domain exclusions) in coordination
-  with the panel and preferences.
+: Classifies a principal as included/excluded/default for the proxy, and is the
+  single source of truth for that decision. It consults multiple rule-providers like permissions, prefs, enterprise-policies and others.
+  `getRule(principal, browserId)` takes an optional `browserId`; when it is given, tab-specific rules are applied too.
 
 ### Additional proxy/telemetry components
 
@@ -163,13 +165,14 @@ IPPNetworkErrorObserver
 
 The core helper list is defined in `IPProtectionActivator.sys.mjs` (toolkit).
 
-IPPAutoStart
+IPPAutoActivation
 
-: Activates the proxy at startup time when auto-start is enabled.
-
-IPPAutoRestoreHelper
-
-: Restores the proxy state after a crash or restart when auto-restore is enabled.
+: Brings the proxy up on its own on desktop: auto-start at startup,
+  auto-restore of a session the user left the VPN on for, and a connection in
+  inclusion mode while at least one site is marked as always using the VPN.
+  `IPProtectionActivator` picks the activation helper per build: this one on
+  desktop, `IPPAlwaysOn` on enterprise, and none on Android, where the embedder
+  decides through `IPProtectionController`.
 
 IPPStartupCache
 
@@ -179,7 +182,9 @@ IPPStartupCache
 IPPNimbusHelper
 
 : Monitors the Nimbus feature (`NimbusFeatures.ipProtection`) and triggers a
-  state recomputation on updates.
+  state recomputation on updates. Exposes a `hidesFeature()` veto that
+  `#computeState()` consults to return `UNAVAILABLE` when the device is not
+  eligible.
 
 ### FxA authentication (`toolkit/components/ipprotection/fxa`)
 
@@ -202,22 +207,12 @@ IPPFxaActivateAuthProvider
   OAuth tokens from `fxAccounts` via `getToken()`, passes them to
   `GuardianClient` for all Guardian HTTP calls, and enrolls the user by sending
   the FxA Bearer token directly to Guardian's activate endpoint, without using a
-  hidden tab or window. It also lists the FxA endpoint prefs whose URL values
-  should bypass the proxy. Its `helpers` getter exposes `IPPSignInWatcher`
-  and `IPPEnrollAndEntitleManager` so they can be registered as service helpers.
-  The provider and its helpers are wired up from `IPProtectionHelpers.sys.mjs`
-  in the browser layer via `IPProtectionActivator.setAuthProvider()` and
-  `IPProtectionActivator.addHelpers()`.
+  hidden tab or window.
 
 IPPSignInWatcher
 
 : Observes user authentication state. It informs the state machine when the
   user signs in or out.
-
-IPPEnrollAndEntitleManager
-
-: Orchestrates the FxA-based enrollment flow with Guardian and updates the
-  service when enrollment or entitlement status changes.
 
 IPPSessionPrefManager
 
@@ -275,14 +270,30 @@ IPProtectionPanel
 IPProtectionHelpers
 
 : Registers browser-specific helpers with `IPProtectionActivator` via
-  `addHelpers()`: `UIHelper`, `IPPOnboardingMessage`, `IPPOptOutHelper`,
-  `IPPUsageHelper`, `IPProtectionAlertManager`, and `IPProtectionInfobarManager`.
-  It also registers `IPPFxaActivateAuthProvider` (and its FxA helpers) via
-  `setAuthProvider()` and `addHelpers()`.
+  `addHelpers()`: `IPPL10nHelper`, `UIHelper`, `IPPOnboardingMessage`,
+  `IPPOptOutHelper`, `IPPUsageHelper`, `IPProtectionAlertManager`, and
+  `IPProtectionInfobarManager`. It also registers `IPPFxaActivateAuthProvider`
+  (and its FxA helpers) via `setAuthProvider()` and `addHelpers()`.
 
 UIHelper
 
 : Shows and hides the UI based on the current state machine state.
+
+IPPL10nHelper
+
+: Gates the UI on localization coverage. A user who never saw the feature does
+  not see it until `browser/ipProtection.ftl` is localized enough in the locale
+  Firefox is effectively displaying (`mozILocaleService.isLocalizedEnough`).
+  Exposes a `hidesFeature()` veto that `IPProtectionService.#computeState()`
+  consults to return `UNAVAILABLE`. As soon as the state machine reaches a state
+  where the UI is shown, it sets `browser.ipProtection.hasSeenFeature`, so a
+  later version adding untranslated strings never takes the feature away from a
+  user who already saw it. The gate is also bound to a single release cycle: the
+  Firefox major version is recorded in `browser.ipProtection.l10nGateVersion`
+  the first time the UI is hidden, and the gate gives up once the browser is
+  updated to a different major version. Being a browser helper, the gate only
+  exists on desktop. Set `browser.ipProtection.hasSeenFeature` to `true` to
+  bypass the gate while testing in a locale below the threshold.
 
 IPPOptOutHelper
 

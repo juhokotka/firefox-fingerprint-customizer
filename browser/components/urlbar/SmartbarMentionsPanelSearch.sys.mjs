@@ -2,11 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const lazy = {};
+/**
+ * @import {TabGroupColor} from "chrome://browser/content/tabbrowser/tabgroup.mjs"
+ */
 
-ChromeUtils.defineESModuleGetters(lazy, {
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
+
+const lazy = XPCOMUtils.declareLazy({
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
+  tabManagementService:
+    "moz-src:///browser/components/aiwindow/ui/modules/TabManagementService.sys.mjs",
+  UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
   UrlbarTokenizer:
     "moz-src:///browser/components/urlbar/UrlbarTokenizer.sys.mjs",
 });
@@ -23,7 +30,7 @@ const ADDITIONAL_EXCLUDED_MENTION_URLS = new Set(["about:aichatcontent"]);
 /**
  * Whether a tab URL should be excluded from the mention suggestions.
  *
- * @param {Window} browserWindow
+ * @param {BrowserWindow} browserWindow
  * @param {string} url
  * @returns {boolean}
  */
@@ -58,9 +65,18 @@ function isExcludedMentionUrl(browserWindow, url) {
  * intended for standalone use within the Smartbar mentions feature.
  */
 export class SmartbarMentionsPanelSearch {
-  #tabs = null;
+  /** @type {TabResult[]} */
+  #tabs;
 
+  /** @type {BrowserWindow} */
+  #browserWindow;
+
+  /**
+   * @param {BrowserWindow} browserWindow - Browser window to read tabs and tab groups
+   *   from
+   */
   constructor(browserWindow) {
+    this.#browserWindow = browserWindow;
     this.#tabs = this.#getOpenAndClosedTabs(browserWindow);
   }
 
@@ -76,6 +92,19 @@ export class SmartbarMentionsPanelSearch {
     );
   }
 
+  /**
+   * Return the open tab groups in the window, read-only. Grouped tabs are
+   * filtered by TabManagementService using the same rules as the tab list, and
+   * groups left with no visible tabs are omitted.
+   *
+   * @returns {Array<{id: string, label: string, color: TabGroupColor}>}
+   */
+  getTabGroups() {
+    return lazy.tabManagementService.getTabGroups({
+      window: this.#browserWindow,
+    });
+  }
+
   #filterTabs(searchString) {
     if (!this.#tabs) {
       return [];
@@ -87,7 +116,7 @@ export class SmartbarMentionsPanelSearch {
 
     const truncatedSearch = searchString.substring(
       0,
-      lazy.UrlbarUtils.MAX_TEXT_LENGTH
+      lazy.UrlbarShared.MAX_TEXT_LENGTH
     );
     const tokens = lazy.UrlbarTokenizer.tokenize({
       searchString: truncatedSearch,
@@ -101,7 +130,7 @@ export class SmartbarMentionsPanelSearch {
     return this.#tabs.filter(tab => {
       const normalizedUrl = this.#normalizeUrl(tab.url);
       const searchText = `${tab.title} ${normalizedUrl}`
-        .substring(0, lazy.UrlbarUtils.MAX_TEXT_LENGTH)
+        .substring(0, lazy.UrlbarShared.MAX_TEXT_LENGTH)
         .toLowerCase();
 
       // Check if ALL tokens appear in the search text
@@ -129,7 +158,7 @@ export class SmartbarMentionsPanelSearch {
         icon:
           tab.image && !tab.image.startsWith("http")
             ? tab.image
-            : lazy.UrlbarUtils.getIconForUrl(url),
+            : lazy.UrlbarShared.getIconForUrl(url),
         type: MENTION_TYPE.TAB_OPEN,
         timestamp: tab.lastAccessed,
       });
@@ -159,7 +188,7 @@ export class SmartbarMentionsPanelSearch {
         results.push({
           url,
           title: entry.title || url,
-          icon: lazy.UrlbarUtils.getIconForUrl(url),
+          icon: lazy.UrlbarShared.getIconForUrl(url),
           type: MENTION_TYPE.TAB_RECENTLY_CLOSED,
           timestamp: closedTab.closedAt,
         });
@@ -173,7 +202,7 @@ export class SmartbarMentionsPanelSearch {
 
   #normalizeUrl(url) {
     try {
-      const [stripped] = lazy.UrlbarUtils.stripPrefixAndTrim(url, {
+      const [stripped] = lazy.UrlbarShared.stripPrefixAndTrim(url, {
         stripHttp: true,
         stripHttps: true,
         trimSlash: true,

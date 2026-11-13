@@ -7,6 +7,7 @@ package org.mozilla.fenix.home.topsites.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -23,15 +24,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.PreviewParameter
-import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import androidx.compose.ui.unit.dp
 import mozilla.components.compose.base.annotation.FlexibleWindowLightDarkPreview
 import mozilla.components.compose.base.button.IconButton
 import mozilla.components.compose.base.utils.BackInvokedHandler
+import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.home.fake.FakeHomepagePreview
 import org.mozilla.fenix.home.topsites.AddShortcutSource
+import org.mozilla.fenix.home.topsites.TopSiteColors
+import org.mozilla.fenix.home.topsites.getMenuItems
 import org.mozilla.fenix.home.topsites.interactor.TopSiteInteractor
 import org.mozilla.fenix.home.topsites.store.DialogState
 import org.mozilla.fenix.home.topsites.store.PopularSite
@@ -39,7 +41,6 @@ import org.mozilla.fenix.home.topsites.store.ShortcutsAction
 import org.mozilla.fenix.home.topsites.store.ShortcutsState
 import org.mozilla.fenix.home.topsites.store.ShortcutsStore
 import org.mozilla.fenix.theme.FirefoxTheme
-import mozilla.components.ui.icons.R as iconsR
 
 /**
  * The shortcuts screen.
@@ -81,16 +82,17 @@ fun ShortcutsScreen(
                     ) {
                         Icon(
                             painter = painterResource(iconsR.drawable.mozac_ic_back_24),
-                            contentDescription = "",
+                            contentDescription = null,
                         )
                     }
                 },
-                windowInsets = WindowInsets(
-                    top = 0.dp,
-                    bottom = 0.dp,
-                ),
+                windowInsets =
+                    WindowInsets(
+                        top = 0.dp,
+                        bottom = 0.dp,
+                    ),
             )
-        },
+        }
     ) { paddingValues ->
         ShortcutsScreenContent(
             state = state,
@@ -111,7 +113,7 @@ fun ShortcutsScreen(
                     title = title,
                     url = url,
                     source = AddShortcutSource.MANUAL,
-                ),
+                )
             )
         },
         onAddPopularSiteClick = { site ->
@@ -120,7 +122,7 @@ fun ShortcutsScreen(
                     title = site.title,
                     url = site.url,
                     source = AddShortcutSource.POPULAR,
-                ),
+                )
             )
         },
     )
@@ -134,16 +136,32 @@ private fun ShortcutsScreenContent(
     onAddShortcutClicked: () -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .padding(paddingValues)
-            .imePadding(),
+        modifier = Modifier.padding(paddingValues).imePadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Shortcuts(
             topSites = state.topSites,
-            interactor = interactor,
-            showAddShortcut = state.showAddShortcut,
+            topSiteColors = TopSiteColors.colors(),
+            showAddShortcut = true,
+            scrollable = true,
+            menuItems = { topSite ->
+                getMenuItems(
+                    topSite = topSite,
+                    onOpenInPrivateTabClicked = interactor::onOpenInPrivateTabClicked,
+                    onEditTopSiteClicked = interactor::onEditTopSiteClicked,
+                    onRemoveTopSiteClicked = interactor::onRemoveTopSiteClicked,
+                    onSettingsClicked = interactor::onSettingsClicked,
+                    onSponsorPrivacyClicked = interactor::onSponsorPrivacyClicked,
+                )
+            },
+            onTopSiteClick = { topSite ->
+                interactor.onSelectTopSite(topSite = topSite, position = state.topSites.indexOf(topSite))
+            },
+            onTopSiteLongClick = interactor::onTopSiteLongClicked,
+            onTopSiteImpression = interactor::onTopSiteImpression,
+            onTopSitesItemBound = {},
             onAddShortcutClicked = onAddShortcutClicked,
+            modifier = Modifier.fillMaxSize().padding(FirefoxTheme.layout.space.static200),
         )
     }
 }
@@ -180,27 +198,12 @@ private fun ShortcutsDialog(
 
 @Composable
 @FlexibleWindowLightDarkPreview
-private fun ShortcutsScreenPreviews(
-    @PreviewParameter(ShortcutsScreenParameterProvider::class) state: ShortcutsState,
-) {
+private fun ShortcutsScreenPreview() {
     FirefoxTheme {
         ShortcutsScreen(
-            store = ShortcutsStore(initialState = state),
+            store = ShortcutsStore(initialState = ShortcutsState(topSites = FakeHomepagePreview.topSites())),
             interactor = FakeHomepagePreview.topSitesInteractor,
             onNavigationIconClick = {},
         )
     }
-}
-
-private class ShortcutsScreenParameterProvider : PreviewParameterProvider<ShortcutsState> {
-    override val values: Sequence<ShortcutsState> = sequenceOf(
-        ShortcutsState(
-            topSites = FakeHomepagePreview.topSites(),
-            showAddShortcut = false,
-        ),
-        ShortcutsState(
-            topSites = FakeHomepagePreview.topSites(),
-            showAddShortcut = true,
-        ),
-    )
 }

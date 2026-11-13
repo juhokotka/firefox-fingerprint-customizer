@@ -25,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <utility>
@@ -46,7 +47,6 @@
 #include "api/scoped_refptr.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/transport/bitrate_settings.h"
-#include "api/transport/rtp/rtp_source.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "api/video/video_frame.h"
@@ -117,9 +117,8 @@ class FakeAudioSendStream final : public AudioSendStream {
 
 class FakeAudioReceiveStream final : public AudioReceiveStreamInterface {
  public:
-  explicit FakeAudioReceiveStream(
-      int id,
-      const AudioReceiveStreamInterface::Config& config);
+  explicit FakeAudioReceiveStream(int id,
+                                  AudioReceiveStreamInterface::Config config);
 
   int id() const { return id_; }
   const AudioReceiveStreamInterface::Config& GetConfig() const;
@@ -155,17 +154,18 @@ class FakeAudioReceiveStream final : public AudioReceiveStreamInterface {
       bool get_and_clear_legacy_stats) const override;
   void SetSink(AudioSinkInterface* sink) override;
   void SetGain(float gain) override;
-  void SetJitterBufferMaxPackets(size_t max_packets) override {}
-  void SetJitterBufferFastAccelerate(bool fast_accelerate) override {}
+  void SetJitterBufferMaxPackets(size_t max_packets) override {
+    config_.jitter_buffer_max_packets = max_packets;
+  }
+  void SetJitterBufferFastAccelerate(bool fast_accelerate) override {
+    config_.jitter_buffer_fast_accelerate = fast_accelerate;
+  }
   bool SetBaseMinimumPlayoutDelayMs(int delay_ms) override {
     base_mininum_playout_delay_ms_ = delay_ms;
     return true;
   }
   int GetBaseMinimumPlayoutDelayMs() const override {
     return base_mininum_playout_delay_ms_;
-  }
-  std::vector<RtpSource> GetSources() const override {
-    return std::vector<RtpSource>();
   }
   AudioMixer::Source* source() override {
     // TODO(b/397376626): Add a Fake AudioMixer::Source
@@ -277,10 +277,6 @@ class FakeVideoReceiveStream final : public VideoReceiveStreamInterface {
 
   void SetStats(const VideoReceiveStreamInterface::Stats& stats);
 
-  std::vector<RtpSource> GetSources() const override {
-    return std::vector<RtpSource>();
-  }
-
   int base_mininum_playout_delay_ms() const {
     return base_mininum_playout_delay_ms_;
   }
@@ -330,6 +326,14 @@ class FakeVideoReceiveStream final : public VideoReceiveStreamInterface {
       std::map<int, int> associated_payload_types) override {
     config_.rtp.rtx_associated_payload_types =
         std::move(associated_payload_types);
+  }
+
+  void SetDecoders(std::vector<Decoder> decoders) override {
+    config_.decoders = std::move(decoders);
+  }
+
+  void SetRawPayloadTypes(std::set<int> raw_payload_types) override {
+    config_.rtp.raw_payload_types = std::move(raw_payload_types);
   }
 
   void Start() override;
@@ -439,7 +443,7 @@ class FakeCall final : public Call, public PacketReceiver {
   void DestroyAudioSendStream(AudioSendStream* send_stream) override;
 
   AudioReceiveStreamInterface* CreateAudioReceiveStream(
-      const AudioReceiveStreamInterface::Config& config) override;
+      AudioReceiveStreamInterface::Config config) override;
   void DestroyAudioReceiveStream(
       AudioReceiveStreamInterface* receive_stream) override;
 
@@ -492,8 +496,6 @@ class FakeCall final : public Call, public PacketReceiver {
   TaskQueueBase* worker_thread() const override;
 
   void SignalChannelNetworkState(MediaType media, NetworkState state) override;
-  void OnAudioTransportOverheadChanged(
-      int transport_overhead_per_packet) override;
   void OnUpdateSyncGroup(AudioReceiveStreamInterface& stream,
                          absl::string_view sync_group) override;
   void OnSentPacket(const SentPacketInfo& sent_packet) override;

@@ -17,6 +17,8 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 const lazy = XPCOMUtils.declareLazy({
   SearchStaticData:
     "moz-src:///toolkit/components/search/SearchStaticData.sys.mjs",
+  shouldExtractYouTube:
+    "moz-src:///toolkit/components/pageextractor/YouTubeExtraction.sys.mjs",
 });
 
 const WHITESPACE_REGEX = /\s+/g;
@@ -24,17 +26,36 @@ const MARKDOWN_TEXT_ESCAPE_REGEX = /[\[\]()]/g;
 const OPEN_PAREN_REGEX = /\(/g;
 const CLOSE_PAREN_REGEX = /\)/g;
 
-const DEFAULT_STRATEGY = Object.freeze({
+const DEFAULT_STRATEGY = {
+  name: null,
   filterSelector: null,
   formatBlockAnchorsAsMarkdown: false,
   formatBlockAnchorSelector: null,
-});
+};
 
-const GOOGLE_SEARCH_STRATEGY = Object.freeze({
+const GOOGLE_SEARCH_STRATEGY = {
+  name: "google-search",
   filterSelector: "cite",
   formatBlockAnchorsAsMarkdown: true,
   formatBlockAnchorSelector: "cite",
-});
+};
+
+const YOUTUBE_STRATEGY = {
+  name: "youtube",
+  filterSelector: [
+    "transcript-segment-view-model",
+    "ytd-transcript-segment-renderer",
+    "ytd-video-description-transcript-section-renderer",
+    'button[aria-label="Show transcript"]',
+    'button[aria-label="Transcript"]',
+    "ytd-masthead",
+    "ytd-watch-next-secondary-results-renderer",
+    "ytd-comments",
+    "ytd-merch-shelf-renderer",
+  ].join(", "),
+  formatBlockAnchorsAsMarkdown: false,
+  formatBlockAnchorSelector: null,
+};
 
 /**
  * The context for extracting text content from the DOM.
@@ -128,6 +149,13 @@ class ExtractionContext {
     if (options.sourceUrl) {
       this.#strategy = getStrategyForUrl(URL.parse(options.sourceUrl));
     }
+  }
+
+  /**
+   * @returns {string | null}
+   */
+  get siteStrategy() {
+    return this.#strategy.name;
   }
 
   /**
@@ -421,7 +449,11 @@ class ExtractionContext {
 
       // Wrap as markdown link if block is inside an ancestor anchor.
       // Only format once per anchor to avoid duplicate links
-      if (this.#strategy.formatBlockAnchorsAsMarkdown && innerText) {
+      if (
+        !this.#options.useSimpleText &&
+        this.#strategy.formatBlockAnchorsAsMarkdown &&
+        innerText
+      ) {
         const ancestorAnchor = this.#getAncestorAnchor(element);
         const selector = this.#strategy.formatBlockAnchorSelector;
         if (
@@ -569,7 +601,7 @@ class ExtractionContext {
     // Use anchor.href which provides the resolved (absolute) URL.
     // Empty href resolves to the current document URL, which is valid.
     const href = anchor.href;
-    if (!href) {
+    if (this.#options.useSimpleText || !href) {
       return linkText;
     }
 
@@ -669,10 +701,15 @@ export function extractTextFromDOM(document, rootNode, options) {
 
   subdivideAndExtractText(rootNode, context);
 
+  const text = options.useSimpleText
+    ? collapseWhitespace(context.textContent).replaceAll("\n\n", "\n").trim()
+    : context.textContent.trim();
+
   return {
-    text: context.textContent.trim(),
+    text,
     links: context.links,
     canvases: context.canvases,
+    siteStrategy: context.siteStrategy,
   };
 }
 
@@ -768,6 +805,10 @@ function getStrategyForUrl(url) {
 
   if (isGoogleSearch) {
     return GOOGLE_SEARCH_STRATEGY;
+  }
+
+  if (lazy.shouldExtractYouTube(url)) {
+    return YOUTUBE_STRATEGY;
   }
 
   return DEFAULT_STRATEGY;

@@ -3,8 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DMABUFTextureClientOGL.h"
-#include "mozilla/widget/DMABufSurface.h"
+
 #include "gfxPlatform.h"
+#include "mozilla/widget/DMABufSurface.h"
 
 namespace mozilla::layers {
 
@@ -20,15 +21,6 @@ DMABUFTextureData::~DMABUFTextureData() = default;
 
 bool DMABUFTextureData::Serialize(SurfaceDescriptor& aOutDescriptor) {
   return mSurface->Serialize(aOutDescriptor);
-}
-
-void DMABUFTextureData::GetSubDescriptor(
-    RemoteDecoderVideoSubDescriptor* const aOutDesc) {
-  SurfaceDescriptor desc;
-  if (!mSurface->Serialize(desc)) {
-    return;
-  }
-  *aOutDesc = static_cast<SurfaceDescriptorDMABuf>(desc);
 }
 
 void DMABUFTextureData::FillInfo(TextureData::Info& aInfo) const {

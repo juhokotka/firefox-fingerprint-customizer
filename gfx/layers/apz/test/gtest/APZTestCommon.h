@@ -10,24 +10,24 @@
  * writing APZ gtests.
  */
 
-#include "gtest/gtest.h"
-#include "gmock/gmock.h"
-
-#include "mozilla/layers/GeckoContentController.h"
-#include "mozilla/layers/CompositorBridgeParent.h"
-#include "mozilla/layers/DoubleTapToZoom.h"
-#include "mozilla/layers/APZThreadUtils.h"
-#include "mozilla/layers/MatrixMessage.h"
-#include "mozilla/StaticPrefs_layout.h"
-#include "mozilla/TypedEnumBits.h"
-#include "mozilla/UniquePtr.h"
+#include "TestWRScrollData.h"
+#include "UnitTransforms.h"
+#include "Units.h"
 #include "apz/src/APZCTreeManager.h"
 #include "apz/src/AsyncPanZoomController.h"
 #include "apz/src/HitTestingTreeNode.h"
 #include "base/task.h"
 #include "gfxPlatform.h"
-#include "TestWRScrollData.h"
-#include "UnitTransforms.h"
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+#include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/TypedEnumBits.h"
+#include "mozilla/UniquePtr.h"
+#include "mozilla/layers/APZThreadUtils.h"
+#include "mozilla/layers/CompositorBridgeParent.h"
+#include "mozilla/layers/DoubleTapToZoom.h"
+#include "mozilla/layers/GeckoContentController.h"
+#include "mozilla/layers/MatrixMessage.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -69,11 +69,11 @@ inline SingleTouchData CreateSingleTouchData(int32_t aIdentifier,
 
 inline PinchGestureInput CreatePinchGestureInput(
     PinchGestureInput::PinchGestureType aType, const ScreenPoint& aFocus,
-    float aCurrentSpan, float aPreviousSpan, TimeStamp timestamp) {
+    float aCurrentSpan, float aPreviousSpan, TimeStamp timestamp,
+    PinchGestureInput::PinchGestureSource aSource = PinchGestureInput::TOUCH) {
   ParentLayerPoint localFocus(aFocus.x, aFocus.y);
-  PinchGestureInput result(aType, PinchGestureInput::UNKNOWN, timestamp,
-                           ExternalPoint(0, 0), aFocus, aCurrentSpan,
-                           aPreviousSpan, 0);
+  PinchGestureInput result(aType, aSource, timestamp, ExternalPoint(0, 0),
+                           aFocus, aCurrentSpan, aPreviousSpan, 0);
   return result;
 }
 
@@ -236,9 +236,12 @@ class MockContentControllerDelayed : public MockContentController {
 
 class TestAPZCTreeManager : public APZCTreeManager {
  public:
-  explicit TestAPZCTreeManager(MockContentControllerDelayed* aMcc,
-                               UniquePtr<IAPZHitTester> aHitTester = nullptr)
-      : APZCTreeManager(LayersId{0}, std::move(aHitTester)), mcc(aMcc) {
+  explicit TestAPZCTreeManager(
+      MockContentControllerDelayed* aMcc,
+      const CSSToLayoutDeviceScale& aWidgetScale = CSSToLayoutDeviceScale{1.0F},
+      UniquePtr<IAPZHitTester> aHitTester = nullptr)
+      : APZCTreeManager(LayersId{0}, aWidgetScale, std::move(aHitTester)),
+        mcc(aMcc) {
     Init();
   }
 
@@ -296,16 +299,43 @@ class TestAsyncPanZoomController : public AsyncPanZoomController {
         mWaitForMainThread(false),
         mcc(aMcc) {}
 
-  APZEventResult ReceiveInputEvent(
-      InputData& aEvent,
-      const Maybe<nsTArray<uint32_t>>& aTouchBehaviors = Nothing()) {
-    // This is a function whose signature matches exactly the ReceiveInputEvent
-    // on APZCTreeManager. This allows us to templates for functions like
-    // TouchDown, TouchUp, etc so that we can reuse the code for dispatching
-    // events into both APZC and APZCTM.
+  // Stop reporting the default allowed touch behaviors for new touch blocks.
+  // Tests that care which behaviors a touch block has should call this, and
+  // then supply the behaviors themselves via SetAllowedTouchBehavior(), the
+  // way the main thread does.
+  void DisableDefaultTouchBehaviors() { mUseDefaultTouchBehaviors = false; }
+
+  // Returns the allowed touch behaviors to report for |aEvent| if the caller
+  // did not specify any. This mimics APZCTreeManager, which reports the
+  // behaviors it derives from the hit test result as part of dispatching a
+  // touch-start. Reporting "everything allowed" by default saves tests that
+  // don't exercise touch-action from having to simulate a main-thread
+  // response just to get their touch events out of the input queue.
+  Maybe<nsTArray<TouchBehaviorFlags>> DefaultTouchBehaviors(
+      const InputData& aEvent) const {
+    if (!mUseDefaultTouchBehaviors || aEvent.mInputType != MULTITOUCH_INPUT) {
+      return Nothing();
+    }
+    const MultiTouchInput& touchEvent = aEvent.AsMultiTouchInput();
+    if (touchEvent.mType != MultiTouchInput::MULTITOUCH_START) {
+      return Nothing();
+    }
+    nsTArray<TouchBehaviorFlags> behaviors;
+    behaviors.SetLength(touchEvent.mTouches.Length());
+    for (TouchBehaviorFlags& behavior : behaviors) {
+      behavior = kDefaultTouchBehavior;
+    }
+    return Some(std::move(behaviors));
+  }
+
+  APZEventResult ReceiveInputEvent(InputData& aEvent) {
+    // This function is signature-compatible with
+    // APZCTreeManager::ReceiveInputEvent. This allows us to use templates for
+    // functions like TouchDown, TouchUp, etc so that we can reuse the code for
+    // dispatching events into both APZC and APZCTM.
     APZEventResult result = GetInputQueue()->ReceiveInputEvent(
         this, TargetConfirmationFlags{!mWaitForMainThread}, aEvent,
-        aTouchBehaviors);
+        DefaultTouchBehaviors(aEvent));
 
     if (aEvent.mInputType == PANGESTURE_INPUT &&
         aEvent.AsPanGestureInput().AllowsSwipe()) {
@@ -480,11 +510,17 @@ class TestAsyncPanZoomController : public AsyncPanZoomController {
 
  private:
   bool mWaitForMainThread;
+  bool mUseDefaultTouchBehaviors = true;
   MockContentControllerDelayed* mcc;
 };
 
 class APZCTesterBase : public ::testing::Test {
  public:
+  // Convenience aliases so that derived classes can refer to these names
+  // without qualification.
+  using ViewID = ScrollableLayerGuid::ViewID;
+  static constexpr auto START_SCROLL_ID = ScrollableLayerGuid::START_SCROLL_ID;
+
   APZCTesterBase() { mcc = new NiceMock<MockContentControllerDelayed>(); }
 
   void SetUp() override {
@@ -725,6 +761,15 @@ void APZCTesterBase::Pan(const RefPtr<InputReceiver>& aTarget,
       overcomeTouchToleranceX = panThreshold;
     } else if (aTouchStart.y != aTouchEnd.y) {
       overcomeTouchToleranceY = panThreshold;
+    }
+    // For a negative-direction gesture we add the offset and subtract it for a
+    // positive-direction one, so the touch-down is "behind" the start
+    // coordinate along the gesture direction.
+    if (aTouchEnd.x > aTouchStart.x) {
+      overcomeTouchToleranceX = -overcomeTouchToleranceX;
+    }
+    if (aTouchEnd.y > aTouchStart.y) {
+      overcomeTouchToleranceY = -overcomeTouchToleranceY;
     }
   }
 
@@ -1053,25 +1098,26 @@ void APZCTesterBase::PinchWithPinchInput(
       TimeDuration::FromMilliseconds(50);
 
   auto event = CreatePinchGestureInput(PinchGestureInput::PINCHGESTURE_START,
-                                       aFocus, 10.0, 10.0, mcc->Time());
+                                       aFocus, 10.0, 10.0, mcc->Time(),
+                                       PinchGestureInput::UNKNOWN);
   APZEventResult actual = aTarget->ReceiveInputEvent(event);
   if (aOutEventStatuses) {
     (*aOutEventStatuses)[0] = actual.GetStatus();
   }
   mcc->AdvanceBy(TIME_BETWEEN_PINCH_INPUT);
 
-  event =
-      CreatePinchGestureInput(PinchGestureInput::PINCHGESTURE_SCALE,
-                              aSecondFocus, 10.0 * aScale, 10.0, mcc->Time());
+  event = CreatePinchGestureInput(PinchGestureInput::PINCHGESTURE_SCALE,
+                                  aSecondFocus, 10.0 * aScale, 10.0,
+                                  mcc->Time(), PinchGestureInput::UNKNOWN);
   actual = aTarget->ReceiveInputEvent(event);
   if (aOutEventStatuses) {
     (*aOutEventStatuses)[1] = actual.GetStatus();
   }
   mcc->AdvanceBy(TIME_BETWEEN_PINCH_INPUT);
 
-  event =
-      CreatePinchGestureInput(PinchGestureInput::PINCHGESTURE_END, aSecondFocus,
-                              10.0 * aScale, 10.0 * aScale, mcc->Time());
+  event = CreatePinchGestureInput(PinchGestureInput::PINCHGESTURE_END,
+                                  aSecondFocus, 10.0 * aScale, 10.0 * aScale,
+                                  mcc->Time(), PinchGestureInput::UNKNOWN);
   actual = aTarget->ReceiveInputEvent(event);
   if (aOutEventStatuses) {
     (*aOutEventStatuses)[2] = actual.GetStatus();

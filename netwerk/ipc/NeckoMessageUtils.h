@@ -12,6 +12,7 @@
 #include "mozilla/net/ClassOfService.h"
 #include "mozilla/net/DNS.h"
 #include "mozilla/net/HttpTrafficAnalyzer.h"
+#include "mozilla/net/HttpTransactionShell.h"
 #include "nsExceptionHandler.h"
 #include "nsICacheInfoChannel.h"
 #include "nsIDNSService.h"
@@ -20,7 +21,6 @@
 #include "nsPrintfCString.h"
 #include "nsString.h"
 #include "prio.h"
-#include "mozilla/net/HttpTransactionShell.h"
 
 namespace IPC {
 

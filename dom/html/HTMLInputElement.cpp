@@ -2,10 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/HTMLInputElement.h"
+#include "HTMLInputElement.h"
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 #include "HTMLDataListElement.h"
 #include "HTMLFormSubmissionConstants.h"
@@ -35,6 +36,7 @@
 #include "mozilla/dom/AutocompleteInfoBinding.h"
 #include "mozilla/dom/BlobImpl.h"
 #include "mozilla/dom/CustomEvent.h"
+#include "mozilla/dom/DirectionalityUtils.h"
 #include "mozilla/dom/Directory.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentInlines.h"
@@ -248,21 +250,18 @@ class DispatchChangeEventCallback final : public GetFilesCallback {
     (void)NS_WARN_IF(NS_FAILED(DispatchEvents()));
   }
 
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY
-  nsresult DispatchEvents() {
-    RefPtr<HTMLInputElement> inputElement(mInputElement);
-    nsresult rv = nsContentUtils::DispatchInputEvent(inputElement);
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY nsresult DispatchEvents() {
+    nsresult rv = nsContentUtils::DispatchInputEvent(mInputElement);
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to dispatch input event");
     mInputElement->SetUserInteracted(true);
-    rv = nsContentUtils::DispatchTrustedEvent(mInputElement->OwnerDoc(),
-                                              mInputElement, u"change"_ns,
+    rv = nsContentUtils::DispatchTrustedEvent(mInputElement, u"change"_ns,
                                               CanBubble::eYes, Cancelable::eNo);
 
     return rv;
   }
 
  private:
-  RefPtr<HTMLInputElement> mInputElement;
+  MOZ_KNOWN_LIVE const RefPtr<HTMLInputElement> mInputElement;
 };
 
 struct HTMLInputElement::FileData {
@@ -334,7 +333,8 @@ HTMLInputElement::nsFilePickerShownCallback::nsFilePickerShownCallback(
 NS_IMPL_ISUPPORTS(UploadLastDir::ContentPrefCallback, nsIContentPrefCallback2)
 
 NS_IMETHODIMP
-UploadLastDir::ContentPrefCallback::HandleCompletion(uint16_t aReason) {
+UploadLastDir::ContentPrefCallback::HandleCompletion(uint16_t aReason)
+    MOZ_CAN_RUN_SCRIPT_BOUNDARY {
   nsCOMPtr<nsIFile> localFile;
   nsAutoString prefStr;
 
@@ -453,10 +453,8 @@ HTMLInputElement::nsFilePickerShownCallback::Done(
   mInput->PickerClosed();
 
   if (aResult == nsIFilePicker::returnCancel) {
-    RefPtr<HTMLInputElement> inputElement(mInput);
     return nsContentUtils::DispatchTrustedEvent(
-        inputElement->OwnerDoc(), inputElement, u"cancel"_ns, CanBubble::eYes,
-        Cancelable::eNo);
+        mInput, u"cancel"_ns, CanBubble::eYes, Cancelable::eNo);
   }
 
   mInput->OwnerDoc()->NotifyUserGestureActivation();
@@ -643,7 +641,7 @@ class nsColorPickerShownCallback final : public nsIColorPickerShownCallback {
   MOZ_CAN_RUN_SCRIPT
   nsresult UpdateInternal(const nsAString& aColor, bool aTrustedUpdate);
 
-  RefPtr<HTMLInputElement> mInput;
+  MOZ_KNOWN_LIVE const RefPtr<HTMLInputElement> mInput;
   nsCOMPtr<nsIColorPicker> mColorPicker;
   bool mValueChanged;
 };
@@ -705,9 +703,8 @@ nsColorPickerShownCallback::Done(const nsAString& aColor) {
 
   if (mValueChanged) {
     mInput->SetUserInteracted(true);
-    rv = nsContentUtils::DispatchTrustedEvent(
-        mInput->OwnerDoc(), static_cast<Element*>(mInput.get()), u"change"_ns,
-        CanBubble::eYes, Cancelable::eNo);
+    rv = nsContentUtils::DispatchTrustedEvent(mInput, u"change"_ns,
+                                              CanBubble::eYes, Cancelable::eNo);
   }
 
   return rv;
@@ -834,9 +831,9 @@ nsTArray<nsString> HTMLInputElement::GetColorsFromList() {
   nsTArray<nsString> colors;
 
   RefPtr<ContentList> options = dataList->Options();
-  uint32_t length = options->Length(true);
+  uint32_t length = options->Length();
   for (uint32_t i = 0; i < length; ++i) {
-    auto* option = HTMLOptionElement::FromNodeOrNull(options->Item(i, false));
+    auto* option = HTMLOptionElement::FromNodeOrNull(options->Item(i));
     if (!option) {
       continue;
     }
@@ -1163,8 +1160,7 @@ HTMLInputElement::HTMLInputElement(already_AddRefed<dom::NodeInfo> aNodeInfo,
       mHasBeenTypePassword(false),
       mHasPatternAttribute(false),
       mUserChangedSinceFocus(false),
-      mIsUserInteracting(false),
-      mRadioGroupContainer(nullptr) {
+      mIsUserInteracting(false) {
   // If size is above 512, mozjemalloc allocates 1kB, see
   // memory/build/mozjemalloc.cpp
   static_assert(sizeof(HTMLInputElement) <= 512,
@@ -1217,7 +1213,15 @@ void HTMLInputElement::FreeData(TextControlStateDisposition aStateDisposition) {
 void HTMLInputElement::EnsureEditorState() {
   MOZ_ASSERT(IsSingleLineTextControl(false));
   if (!mInputData.mState) {
-    mInputData.mState = TextControlState::Construct(this);
+    nsAutoString value;
+    GetAttr(nsGkAtoms::value, value);
+    // Skip sanitization before DoneCreatingElement; Clone() can call
+    // SetValueInternal (and thus EnsureEditorState) before mDoneCreating
+    // is true, and DoneCreatingElement will sanitize the value later.
+    if (mDoneCreating) {
+      SanitizeValue(value, SanitizationKind::ForValueGetter);
+    }
+    mInputData.mState = TextControlState::Construct(this, value);
   }
 }
 
@@ -1245,6 +1249,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLInputElement,
                                                   TextControlElement)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mValidity)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mControllers)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRadioGroupContainer)
   if (tmp->IsSingleLineTextControl(false) && tmp->mInputData.mState) {
     tmp->mInputData.mState->Traverse(cb);
   }
@@ -1258,6 +1263,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLInputElement,
                                                 TextControlElement)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mValidity)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mControllers)
+  // We don't need to unlink mRadioGroupContainer here, as it will call
+  // DisconnectRadioGroupContainer on us when it is unlinked. Otherwise we may
+  // end up re-added to the radio group before we've been properly removed.
   if (tmp->IsSingleLineTextControl(false) && tmp->mInputData.mState) {
     tmp->mInputData.mState->Unlink();
   }
@@ -1378,7 +1386,9 @@ void HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
       // is the default value. So if the elements value didn't change from the
       // default, we have to re-set it.
       if (!mValueChanged && GetValueMode() == VALUE_MODE_VALUE) {
-        SetDefaultValueAsValue();
+        if (mDoneCreating) {
+          SetDefaultValueAsValue();
+        }
       } else if (GetValueMode() == VALUE_MODE_DEFAULT) {
         ResetDirFormAssociatedElement(this, aNotify, HasDirAuto());
       }
@@ -1487,7 +1497,7 @@ void HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
       // call above or else the following assert will not be valid.
       // We don't assert the state of underflow during creation since
       // DoneCreatingElement sanitizes.
-      UpdateRangeOverflowValidityState();
+      UpdateRangeValidityStates();
       needValidityUpdate = true;
       MOZ_ASSERT(!mDoneCreating || mType != FormControlType::InputRange ||
                      !GetValidityState(VALIDITY_STATE_RANGE_UNDERFLOW),
@@ -1496,7 +1506,7 @@ void HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
       UpdateHasRange(aNotify);
       mInputType->MinMaxStepAttrChanged();
       // See corresponding @max comment
-      UpdateRangeUnderflowValidityState();
+      UpdateRangeValidityStates();
       UpdateStepMismatchValidityState();
       needValidityUpdate = true;
       MOZ_ASSERT(!mDoneCreating || mType != FormControlType::InputRange ||
@@ -1768,8 +1778,10 @@ void HTMLInputElement::GetNonFileValueInternal(nsAString& aValue) const {
         if (mInputData.mState) {
           mInputData.mState->GetValue(aValue, /* aForDisplay = */ false);
         } else {
-          // Value hasn't been set yet.
-          aValue.Truncate();
+          GetAttr(nsGkAtoms::value, aValue);
+          if (mDoneCreating) {
+            SanitizeValue(aValue, SanitizationKind::ForValueGetter);
+          }
         }
       } else if (!aValue.Assign(mInputData.mValue, fallible)) {
         aValue.Truncate();
@@ -2475,8 +2487,7 @@ void HTMLInputElement::OpenDateTimePicker(const DateTimeValue& aInitialValue) {
   }
 
   mDateTimeInputBoxValue = MakeUnique<DateTimeValue>(aInitialValue);
-  nsContentUtils::DispatchChromeEvent(OwnerDoc(), this,
-                                      u"MozOpenDateTimePicker"_ns,
+  nsContentUtils::DispatchChromeEvent(this, u"MozOpenDateTimePicker"_ns,
                                       CanBubble::eYes, Cancelable::eYes);
 }
 
@@ -2484,9 +2495,7 @@ void HTMLInputElement::CloseDateTimePicker() {
   if (NS_WARN_IF(!IsDateTimeInputType(mType))) {
     return;
   }
-
-  nsContentUtils::DispatchChromeEvent(OwnerDoc(), this,
-                                      u"MozCloseDateTimePicker"_ns,
+  nsContentUtils::DispatchChromeEvent(this, u"MozCloseDateTimePicker"_ns,
                                       CanBubble::eYes, Cancelable::eYes);
 }
 
@@ -2498,10 +2507,8 @@ void HTMLInputElement::OpenColorPicker() {
   if (NS_WARN_IF(mType != FormControlType::InputColor)) {
     return;
   }
-
-  nsContentUtils::DispatchChromeEvent(OwnerDoc(), this,
-                                      u"MozOpenColorPicker"_ns, CanBubble::eYes,
-                                      Cancelable::eYes);
+  nsContentUtils::DispatchChromeEvent(this, u"MozOpenColorPicker"_ns,
+                                      CanBubble::eYes, Cancelable::eYes);
 }
 
 void HTMLInputElement::SetFocusState(bool aIsFocused) {
@@ -2810,9 +2817,9 @@ void HTMLInputElement::FireChangeEventIfNeeded() {
     return;
   }
   // Dispatch the change event.
-  nsContentUtils::DispatchTrustedEvent(
-      OwnerDoc(), static_cast<nsIContent*>(this), u"change"_ns, CanBubble::eYes,
-      Cancelable::eNo);
+  nsContentUtils::DispatchTrustedEvent(static_cast<nsIContent*>(this),
+                                       u"change"_ns, CanBubble::eYes,
+                                       Cancelable::eNo);
 }
 
 FileList* HTMLInputElement::GetFiles() {
@@ -2870,15 +2877,10 @@ nsresult HTMLInputElement::SetValueInternal(
   MOZ_ASSERT(GetValueMode() != VALUE_MODE_FILENAME,
              "Don't call SetValueInternal for file inputs");
 
-  // We want to remember if the SetValueInternal() call is being made for a XUL
-  // element.  We do that by looking at the parent node here, and if that node
-  // is a XUL node, we consider our control a XUL control. XUL controls preserve
-  // edit history across value setters.
-  //
-  // TODO(emilio): Rather than doing this maybe add an attribute instead and
-  // read it only on chrome docs or something? That'd allow front-end code to
-  // move away from xul without weird side-effects.
-  const bool forcePreserveUndoHistory = mParent && mParent->IsXULElement();
+  // An input carrying preserveundohistory keeps its edit history across value
+  // setters, in a chrome: document or an about: page such as about:newtab.
+  const bool forcePreserveUndoHistory = OwnerDoc()->ChromeRulesEnabled() &&
+                                        HasAttr(nsGkAtoms::preserveundohistory);
 
   if (aOptions.contains(ValueSetterOption::BySetUserInputAPI)) {
     mUserChangedSinceFocus = true;
@@ -2998,7 +3000,8 @@ nsresult HTMLInputElement::SetValueInternal(
 
       // Treat value == defaultValue for other input elements.
       return nsGenericHTMLFormControlElementWithState::SetAttr(
-          kNameSpaceID_None, nsGkAtoms::value, aValue, true);
+          kNameSpaceID_None, nsGkAtoms::value, aValue, true,
+          IsKnownNewAttr::No);
 
     case VALUE_MODE_FILENAME:
       return NS_ERROR_UNEXPECTED;
@@ -3587,9 +3590,10 @@ void HTMLInputElement::FinishRangeThumbDrag(WidgetGUIEvent* aEvent) {
     PresShell::ReleaseCapturingContent();
   }
   if (aEvent) {
-    nsRangeFrame* rangeFrame = do_QueryFrame(GetPrimaryFrame());
-    SetValueOfRangeForUserEvent(rangeFrame->GetValueAtEventPoint(aEvent),
-                                SnapToTickMarks::Yes);
+    if (nsRangeFrame* rangeFrame = do_QueryFrame(GetPrimaryFrame())) {
+      SetValueOfRangeForUserEvent(rangeFrame->GetValueAtEventPoint(aEvent),
+                                  SnapToTickMarks::Yes);
+    }
   }
   mIsDraggingRange = false;
   FireChangeEventIfNeeded();
@@ -4135,16 +4139,66 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
               aVisitor.mEvent->IsTrusted() &&
               aVisitor.mEvent->AsMouseEvent()->mButton ==
                   MouseButton::ePrimary) {
+            const auto IsClickedOn = [&](const Element* aButton) {
+              if (!aButton) {
+                return false;
+              }
+              if (aButton == aVisitor.mEvent->mOriginalTarget) {
+                return true;
+              }
+              // During the button click, the button may have been recreated.
+              // First, check whether the mouseup occurred on the new button.
+              nsIContent* mouseUpContent =
+                  aVisitor.mPresContext->EventStateManager()
+                      ->GetMouseUpTargetContent(MouseButton::ePrimary);
+              if (!mouseUpContent) [[unlikely]] {
+                return false;
+              }
+              if (!mouseUpContent->IsElement()) {
+                // FYI: We don't use shadow DOM in the native anonymous subtree.
+                // Therefore, it should be fine not to use
+                // GetFlattenedTreeParentElement() here.
+                mouseUpContent = mouseUpContent->GetAsElementOrParentElement();
+              }
+              if (aButton != mouseUpContent) {
+                return false;
+              }
+              // Then, check whether the mousedown target is disconnected and
+              // the same button as the new button.
+              nsIContent* mouseDownContent =
+                  aVisitor.mPresContext->EventStateManager()
+                      ->GetMouseDownTargetContent(MouseButton::ePrimary);
+              if (!mouseDownContent || mouseDownContent->IsInComposedDoc()) {
+                return false;
+              }
+              if (!mouseDownContent->IsElement()) {
+                // FYI: We don't use shadow DOM in the native anonymous subtree.
+                // Therefore, it should be fine not to use
+                // GetFlattenedTreeParentElement() here.
+                mouseDownContent =
+                    mouseDownContent->GetAsElementOrParentElement();
+                if (!mouseDownContent) [[unlikely]] {
+                  return false;
+                }
+              }
+              MOZ_ASSERT_IF(
+                  mouseDownContent->AsElement()->GetPseudoElementType() ==
+                      mouseUpContent->AsElement()->GetPseudoElementType(),
+                  mouseDownContent->NodeInfo()->NameAtom() ==
+                      mouseUpContent->NodeInfo()->NameAtom());
+              return mouseDownContent->AsElement()->GetPseudoElementType() ==
+                     mouseUpContent->AsElement()->GetPseudoElementType();
+            };
             // TODO(emilio): Handling this should ideally not move focus.
             if (mType == FormControlType::InputSearch) {
               Element* button = GetTextEditorButton();
-              if (button && aVisitor.mEvent->mOriginalTarget == button) {
+              if (IsClickedOn(button)) {
                 SetUserInput(EmptyString(),
                              *nsContentUtils::GetSystemPrincipal());
               }
             } else if (mType == FormControlType::InputPassword) {
               Element* button = GetTextEditorButton();
-              if (button && aVisitor.mEvent->mOriginalTarget == button) {
+              if (IsClickedOn(button)) {
                 SetRevealPassword(!RevealPassword());
               }
             }
@@ -4190,7 +4244,7 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
   return NS_OK;
 }
 
-void EndSubmitClick(EventChainPostVisitor& aVisitor) {
+MOZ_CAN_RUN_SCRIPT void EndSubmitClick(EventChainPostVisitor& aVisitor) {
   if (aVisitor.mItemFlags & NS_IN_SUBMIT_CLICK) {
     nsCOMPtr<nsIContent> content(do_QueryInterface(aVisitor.mItemData));
     RefPtr<HTMLFormElement> form = HTMLFormElement::FromNodeOrNull(content);
@@ -4210,7 +4264,8 @@ void EndSubmitClick(EventChainPostVisitor& aVisitor) {
 void HTMLInputElement::ActivationBehavior(EventChainPostVisitor& aVisitor) {
   auto oldType = FormControlType(NS_CONTROL_TYPE(aVisitor.mItemFlags));
 
-  auto endSubmit = MakeScopeExit([&] { EndSubmitClick(aVisitor); });
+  auto endSubmit = MakeScopeExit(
+      [&]() MOZ_CAN_RUN_SCRIPT_BOUNDARY { EndSubmitClick(aVisitor); });
 
   if (IsDisabled() && oldType != FormControlType::InputCheckbox &&
       oldType != FormControlType::InputRadio) {
@@ -4233,7 +4288,7 @@ void HTMLInputElement::ActivationBehavior(EventChainPostVisitor& aVisitor) {
 
     // FIXME: Why is this different than every other change event?
     nsContentUtils::DispatchTrustedEvent<WidgetEvent>(
-        OwnerDoc(), static_cast<Element*>(this), eFormChange, CanBubble::eYes,
+        static_cast<Element*>(this), eFormChange, CanBubble::eYes,
         Cancelable::eNo);
   }
 
@@ -4599,7 +4654,8 @@ void HTMLInputElement::MaybeDispatchLoginManagerEvents(HTMLFormElement* aForm) {
     } else {
       nsAutoString autocompleteValue;
       GetAutocomplete(autocompleteValue);
-      if (!autocompleteValue.EqualsASCII("username")) {
+      if (!autocompleteValue.EqualsASCII("username") &&
+          !autocompleteValue.EqualsASCII("webauthn")) {
         return;
       }
       target = GetComposedDoc();
@@ -4665,6 +4721,8 @@ static bool SetRangeTextApplies(FormControlType aType) {
 
 void HTMLInputElement::HandleTypeChange(FormControlType aNewType,
                                         bool aNotify) {
+  MOZ_ASSERT(!nsContentUtils::IsSafeToRunScript());
+
   FormControlType oldType = mType;
   MOZ_ASSERT(oldType != aNewType);
 
@@ -4687,7 +4745,7 @@ void HTMLInputElement::HandleTypeChange(FormControlType aNewType,
   if (aNewType == FormControlType::InputFile ||
       oldType == FormControlType::InputFile) {
     if (aNewType == FormControlType::InputFile) {
-      mFileData.reset(new FileData());
+      mFileData = std::make_unique<FileData>();
     } else {
       mFileData->Unlink();
       mFileData = nullptr;
@@ -4740,6 +4798,7 @@ void HTMLInputElement::HandleTypeChange(FormControlType aNewType,
   UpdateReadOnlyState(aNotify);
   UpdateCheckedState(aNotify);
   UpdateIndeterminateState(aNotify);
+  UpdateHasRange(aNotify);
   const bool isDefault = IsRadioOrCheckbox()
                              ? DefaultChecked()
                              : (mForm && mForm->IsDefaultSubmitElement(this));
@@ -4756,7 +4815,8 @@ void HTMLInputElement::HandleTypeChange(FormControlType aNewType,
       //    mode, then set the element's value content attribute to the
       //    element's value.
       if (oldValueMode == VALUE_MODE_VALUE && !oldValue.IsEmpty()) {
-        SetAttr(kNameSpaceID_None, nsGkAtoms::value, oldValue, true);
+        SetAttr(kNameSpaceID_None, nsGkAtoms::value, oldValue, true,
+                IsKnownNewAttr::No);
       }
       break;
     case VALUE_MODE_VALUE: {
@@ -4827,8 +4887,6 @@ void HTMLInputElement::HandleTypeChange(FormControlType aNewType,
     RemoveStates(ElementState::REQUIRED_STATES, aNotify);
   }
 
-  UpdateHasRange(aNotify);
-
   // Update validity states, but not element state.  We'll update
   // element state later, as part of this attribute change.
   UpdateAllValidityStatesButNotElementState();
@@ -4838,9 +4896,9 @@ void HTMLInputElement::HandleTypeChange(FormControlType aNewType,
   UpdateBarredFromConstraintValidation();
 
   // Changing type might change auto directionality of this or the assigned slot
-  const bool autoDirAssociated = IsAutoDirectionalityAssociated(mType);
-  if (IsAutoDirectionalityAssociated(oldType) != autoDirAssociated) {
-    ResetDirFormAssociatedElement(this, aNotify, true);
+  if (IsAutoDirectionalityAssociated(oldType) !=
+      IsAutoDirectionalityAssociated(mType)) {
+    ResetDirFormAssociatedElement(this, aNotify, HasDirAuto());
   }
   // Special case for <input type=tel> as specified in
   // https://html.spec.whatwg.org/multipage/dom.html#the-directionality
@@ -4890,25 +4948,25 @@ void HTMLInputElement::HandleTypeChange(FormControlType aNewType,
 
   if (IsInComposedDoc()) {
     if (mDoneCreating) {
-      const auto oldNotifiesUAWidget = NotifiesUAWidget(oldType);
+      const auto notifiedOldUAWidget = NotifiesUAWidget(oldType);
       if (CreatesUAShadowTree()) {
         if (wasTextControl && isTextControl) {
           // Keep existing shadow
           UpdateTextEditorShadowTree();
         } else {
-          const auto notifiesUAWidget = NotifiesUAWidget();
-          if (oldNotifiesUAWidget == notifiesUAWidget &&
-              notifiesUAWidget == NotifyUAWidget::Yes) {
-            NotifyUAWidgetSetupOrChange();
+          const auto notifyNewUAWidget = NotifiesUAWidget();
+          if (notifiedOldUAWidget == notifyNewUAWidget &&
+              notifyNewUAWidget == NotifyUAWidget::Yes) {
+            AddScriptRunnerToNotifyUAWidgetSetupOrChange();
           } else {
-            TeardownUAShadowRoot(oldNotifiesUAWidget);
-            if (notifiesUAWidget == NotifyUAWidget::Yes) {
+            TeardownUAShadowRoot(notifiedOldUAWidget);
+            if (notifyNewUAWidget == NotifyUAWidget::Yes) {
               SetupShadowTree(aNotify);
             }
           }
         }
       } else {
-        TeardownUAShadowRoot(oldNotifiesUAWidget);
+        TeardownUAShadowRoot(notifiedOldUAWidget);
       }
     }
     // If we're becoming a text control and have focus, make sure to show focus
@@ -5674,8 +5732,7 @@ nsChangeHint HTMLInputElement::GetAttributeChangeHint(
   return retval;
 }
 
-NS_IMETHODIMP_(bool)
-HTMLInputElement::IsAttributeMapped(const nsAtom* aAttribute) const {
+bool HTMLInputElement::IsNoNamespaceAttrMapped(const nsAtom* aAttribute) const {
   static const MappedAttributeEntry attributes[] = {
       {nsGkAtoms::align},
       {nullptr},
@@ -6032,8 +6089,7 @@ void HTMLInputElement::ShowPicker(ErrorResult& aRv) {
     if (CreatesDateTimeWidget()) {
       if (RefPtr<Element> dateTimeBoxElement = GetDateTimeBoxElement()) {
         // Event is dispatched to closed-shadow tree and doesn't bubble.
-        RefPtr<Document> doc = OwnerDoc();
-        nsContentUtils::DispatchTrustedEvent(doc, dateTimeBoxElement,
+        nsContentUtils::DispatchTrustedEvent(dateTimeBoxElement,
                                              u"MozDateTimeShowPickerForJS"_ns,
                                              CanBubble::eNo, Cancelable::eNo);
       }
@@ -6356,20 +6412,31 @@ void HTMLInputElement::DoneCreatingElement() {
   // Sanitize the value and potentially set mFocusedValue.
   if (GetValueMode() == VALUE_MODE_VALUE) {
     nsAutoString value;
-    GetValue(value, CallerType::System);
-    // TODO: What should we do if SetValueInternal fails?  (The allocation
-    // may potentially be big, but most likely we've failed to allocate
-    // before the type change.)
-    SetValueInternal(value, ValueSetterOption::ByInternalAPI);
+    if (mValueChanged) {
+      GetValue(value, CallerType::System);
+      SetValueInternal(value, ValueSetterOption::ByInternalAPI);
+    } else {
+      GetDefaultValue(value);
+      if (mType == FormControlType::InputText && !mInputData.mState) {
+        SanitizeValue(value, SanitizationKind::ForValueSetter);
+        OnValueChanged(ValueChangeKind::Internal, value.IsEmpty(), &value);
+      } else {
+        // TODO: What should we do if SetValueInternal fails?  (The allocation
+        // may potentially be big, but most likely we've failed to allocate
+        // before the type change.)
+        SetValueInternal(value, ValueSetterOption::ByInternalAPI);
+      }
+    }
 
     if (CreatesDateTimeWidget()) {
       // mFocusedValue has to be set here, so that `FireChangeEventIfNeeded` can
       // fire a change event if necessary.
-      mFocusedValue = value;
+      GetValue(mFocusedValue, CallerType::System);
     }
   }
 
   if (CreatesDateTimeWidget() && IsInComposedDoc()) {
+    const nsAutoScriptBlocker scriptBlocker;
     SetupShadowTree(/* aNotify = */ false);
   }
 
@@ -6783,7 +6850,7 @@ bool HTMLInputElement::DoesMinMaxApply() const {
     case FormControlType::InputColor:
       return false;
     default:
-      MOZ_ASSERT_UNREACHABLE("Unexpected input type in DoesRequiredApply()");
+      MOZ_ASSERT_UNREACHABLE("Unexpected input type in DoesMinMaxApply()");
       return false;
 #else   // DEBUG
     default:
@@ -6868,42 +6935,40 @@ void HTMLInputElement::SetCustomValidity(const nsAString& aError) {
 }
 
 bool HTMLInputElement::IsTooLong() {
-  if (!mValueChanged || !mLastValueChangeWasInteractive) {
-    return false;
-  }
-
-  return mInputType->IsTooLong();
+  return WasValueChangedInteractively() && mInputType->IsTooLong();
 }
 
 bool HTMLInputElement::IsTooShort() {
-  if (!mValueChanged || !mLastValueChangeWasInteractive) {
-    return false;
-  }
-
-  return mInputType->IsTooShort();
+  return WasValueChangedInteractively() && mInputType->IsTooShort();
 }
 
 bool HTMLInputElement::IsValueMissing() const {
   // Should use UpdateValueMissingValidityStateForRadio() for type radio.
   MOZ_ASSERT(mType != FormControlType::InputRadio);
 
-  return mInputType->IsValueMissing();
+  MOZ_ASSERT_IF(!IsRequired(), !mInputType->IsValueMissing());
+  return IsRequired() && mInputType->IsValueMissing();
 }
 
 bool HTMLInputElement::HasTypeMismatch() const {
-  return mInputType->HasTypeMismatch();
+  MOZ_ASSERT_IF(!DoesTypeMismatchApply(), !mInputType->HasTypeMismatch());
+  return DoesTypeMismatchApply() && mInputType->HasTypeMismatch();
 }
 
 Maybe<bool> HTMLInputElement::HasPatternMismatch() const {
-  return mInputType->HasPatternMismatch();
+  MOZ_ASSERT_IF(!mHasPatternAttribute,
+                mInputType->HasPatternMismatch() == Some(false));
+  return mHasPatternAttribute ? mInputType->HasPatternMismatch() : Some(false);
 }
 
 bool HTMLInputElement::IsRangeOverflow() const {
-  return mInputType->IsRangeOverflow();
+  MOZ_ASSERT_IF(!mHasRange, !mInputType->IsRangeOverflow());
+  return mHasRange && mInputType->IsRangeOverflow();
 }
 
 bool HTMLInputElement::IsRangeUnderflow() const {
-  return mInputType->IsRangeUnderflow();
+  MOZ_ASSERT_IF(!mHasRange, !mInputType->IsRangeUnderflow());
+  return mHasRange && mInputType->IsRangeUnderflow();
 }
 
 bool HTMLInputElement::ValueIsStepMismatch(const Decimal& aValue) const {
@@ -6923,10 +6988,14 @@ bool HTMLInputElement::ValueIsStepMismatch(const Decimal& aValue) const {
 }
 
 bool HTMLInputElement::HasStepMismatch() const {
-  return mInputType->HasStepMismatch();
+  MOZ_ASSERT_IF(!DoesStepApply(), !mInputType->HasStepMismatch());
+  return DoesStepApply() && mInputType->HasStepMismatch();
 }
 
-bool HTMLInputElement::HasBadInput() const { return mInputType->HasBadInput(); }
+bool HTMLInputElement::HasBadInput() const {
+  MOZ_ASSERT_IF(!DoesBadInputApply(), !mInputType->HasBadInput());
+  return DoesBadInputApply() && mInputType->HasBadInput();
+}
 
 void HTMLInputElement::UpdateTooLongValidityState() {
   SetValidityState(VALIDITY_STATE_TOO_LONG, IsTooLong());
@@ -7003,14 +7072,16 @@ void HTMLInputElement::UpdatePatternMismatchValidityState() {
   }
 }
 
-void HTMLInputElement::UpdateRangeOverflowValidityState() {
+void HTMLInputElement::UpdateRangeValidityStates() {
+  const bool wasOutOfRange = GetValidityState(VALIDITY_STATE_RANGE_OVERFLOW) ||
+                             GetValidityState(VALIDITY_STATE_RANGE_UNDERFLOW);
   SetValidityState(VALIDITY_STATE_RANGE_OVERFLOW, IsRangeOverflow());
-  UpdateInRange(true);
-}
-
-void HTMLInputElement::UpdateRangeUnderflowValidityState() {
   SetValidityState(VALIDITY_STATE_RANGE_UNDERFLOW, IsRangeUnderflow());
-  UpdateInRange(true);
+  const bool isOutOfRange = GetValidityState(VALIDITY_STATE_RANGE_OVERFLOW) ||
+                            GetValidityState(VALIDITY_STATE_RANGE_UNDERFLOW);
+  if (wasOutOfRange != isOutOfRange) {
+    UpdateInRange(true);
+  }
 }
 
 void HTMLInputElement::UpdateStepMismatchValidityState() {
@@ -7035,8 +7106,7 @@ void HTMLInputElement::UpdateAllValidityStatesButNotElementState() {
   UpdateValueMissingValidityState();
   UpdateTypeMismatchValidityState();
   UpdatePatternMismatchValidityState();
-  UpdateRangeOverflowValidityState();
-  UpdateRangeUnderflowValidityState();
+  UpdateRangeValidityStates();
   UpdateStepMismatchValidityState();
   UpdateBadInputValidityState();
 }
@@ -7216,14 +7286,13 @@ void HTMLInputElement::SetRevealPassword(bool aValue) {
   if (aValue == State().HasState(ElementState::REVEALED)) {
     return;
   }
-  RefPtr doc = OwnerDoc();
   // We allow chrome code to prevent this. This is important for about:logins,
   // which may need to run some OS-dependent authentication code before
   // revealing the saved passwords.
   bool defaultAction = true;
-  nsContentUtils::DispatchEventOnlyToChrome(
-      doc, this, u"MozWillToggleReveal"_ns, CanBubble::eYes, Cancelable::eYes,
-      &defaultAction);
+  nsContentUtils::DispatchEventOnlyToChrome(this, u"MozWillToggleReveal"_ns,
+                                            CanBubble::eYes, Cancelable::eYes,
+                                            &defaultAction);
   if (NS_WARN_IF(!defaultAction)) {
     return;
   }

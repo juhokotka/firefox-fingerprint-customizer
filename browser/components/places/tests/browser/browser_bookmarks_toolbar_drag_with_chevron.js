@@ -154,6 +154,7 @@ async function testForDndFromChevron(chevronMenu) {
         BrowserTestUtils.isVisible(c)
     )
   );
+  let srcRect = srcElement.getBoundingClientRect();
 
   let destElement = document.getElementById(
     gBrowser.tabContainer.overflowing ? "new-tab-button" : "tabs-newtab-button"
@@ -166,6 +167,8 @@ async function testForDndFromChevron(chevronMenu) {
   info("Start DnD");
   await EventUtils.synthesizePlainDragAndDrop({
     srcElement,
+    srcX: Math.floor(srcRect.width / 2),
+    srcY: Math.floor(srcRect.height / 2),
     destElement,
   });
 

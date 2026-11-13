@@ -11,17 +11,19 @@ import org.mozilla.fenix.NavGraphDirections
 import org.mozilla.fenix.ext.nav
 import org.mozilla.fenix.utils.Settings
 
-/**
- * When the open password manager shortcut is tapped, Fenix should open to the logins list fragment.
- */
+/** When the open password manager shortcut is tapped, Fenix should open to the logins list fragment. */
 class OpenPasswordManagerIntentProcessor : HomeIntentProcessor {
 
     override fun process(intent: Intent, navController: NavController, out: Intent, settings: Settings): Boolean {
         return if (intent.extras?.getBoolean(HomeActivity.OPEN_PASSWORD_MANAGER) == true) {
             out.removeExtra(HomeActivity.OPEN_PASSWORD_MANAGER)
 
-            val directions = NavGraphDirections.actionLoginsListFragment()
-            navController.nav(null, directions)
+            // The shortcut is declared statically in the manifest and cannot be removed at runtime, so devices without
+            // password management support are simply left on the homepage.
+            if (settings.isAutofillSupported) {
+                val directions = NavGraphDirections.actionLoginsListFragment()
+                navController.nav(null, directions)
+            }
             true
         } else {
             false

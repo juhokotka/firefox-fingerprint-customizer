@@ -36,6 +36,8 @@ class OpenPasswordManagerIntentProcessorTest {
         navController = mockk(relaxed = true)
         out = mockk(relaxed = true)
         processor = OpenPasswordManagerIntentProcessor()
+
+        every { settings.isAutofillSupported } returns true
     }
 
     @Test
@@ -49,9 +51,10 @@ class OpenPasswordManagerIntentProcessorTest {
 
     @Test
     fun `GIVEN an intent with wrong action WHEN it is processed THEN nothing should happen`() {
-        val intent = Intent().apply {
-            action = TEST_WRONG_ACTION
-        }
+        val intent =
+            Intent().apply {
+                action = TEST_WRONG_ACTION
+            }
 
         assertFalse(processor.process(intent, navController, out, settings))
 
@@ -62,14 +65,31 @@ class OpenPasswordManagerIntentProcessorTest {
 
     @Test
     fun `GIVEN an intent with correct action and extra boolean WHEN it is processed THEN navigates to password list fragment`() {
-        val intent = Intent().apply {
-            action = PasswordManagerIntentProcessor.Companion.ACTION_OPEN_PASSWORD_MANAGER
-            putExtra(HomeActivity.OPEN_PASSWORD_MANAGER, true)
-        }
+        val intent =
+            Intent().apply {
+                action = PasswordManagerIntentProcessor.Companion.ACTION_OPEN_PASSWORD_MANAGER
+                putExtra(HomeActivity.OPEN_PASSWORD_MANAGER, true)
+            }
 
         assertTrue(processor.process(intent, navController, out, settings))
 
         verify { navController.navigate(NavGraphDirections.actionLoginsListFragment(), null) }
+        verify { out.removeExtra(HomeActivity.OPEN_PASSWORD_MANAGER) }
+    }
+
+    @Test
+    fun `GIVEN autofill is unsupported WHEN the intent is processed THEN it does not navigate to the password list fragment`() {
+        every { settings.isAutofillSupported } returns false
+
+        val intent =
+            Intent().apply {
+                action = PasswordManagerIntentProcessor.Companion.ACTION_OPEN_PASSWORD_MANAGER
+                putExtra(HomeActivity.OPEN_PASSWORD_MANAGER, true)
+            }
+
+        assertTrue(processor.process(intent, navController, out, settings))
+
+        verify(exactly = 0) { navController.navigate(NavGraphDirections.actionLoginsListFragment(), null) }
         verify { out.removeExtra(HomeActivity.OPEN_PASSWORD_MANAGER) }
     }
 

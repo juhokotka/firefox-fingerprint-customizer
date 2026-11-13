@@ -6,7 +6,7 @@ const { PromptTestUtils } = ChromeUtils.importESModule(
 
 const TEST_PATH_HTTP = getRootDirectory(gTestPath).replace(
   "chrome://mochitests/content",
-  // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+  // eslint-disable-next-line sdl/no-insecure-url
   "http://nocert.example.com/"
 );
 /*
@@ -36,7 +36,6 @@ const TEST_PATH_HTTP = getRootDirectory(gTestPath).replace(
 add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["test.wait300msAfterTabSwitch", true],
       ["dom.security.https_first", true],
       ["dom.require_user_interaction_for_beforeunload", true],
     ],
@@ -132,7 +131,7 @@ async function openPage() {
       // And then navigate away to another site which proves that user won't be asked twice to permit a reload (otherwise the test get timed out)
       BrowserTestUtils.startLoadingURIString(
         browser,
-        // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+        // eslint-disable-next-line sdl/no-insecure-url
         "http://self-signed.example.com/"
       );
       await BrowserTestUtils.browserLoaded(browser);

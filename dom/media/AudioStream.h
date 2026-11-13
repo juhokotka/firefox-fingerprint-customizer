@@ -40,6 +40,10 @@ struct CallbackInfo {
   CallbackInfo() = default;
   CallbackInfo(uint32_t aServiced, uint32_t aUnderrun, uint32_t aOutputRate)
       : mServiced(aServiced), mUnderrun(aUnderrun), mOutputRate(aOutputRate) {}
+
+  // Every frame this callback handed to the backend, serviced and underrun.
+  uint32_t TotalFrames() const { return mServiced + mUnderrun; }
+
   uint32_t mServiced = 0;
   uint32_t mUnderrun = 0;
   uint32_t mOutputRate = 0;
@@ -47,12 +51,31 @@ struct CallbackInfo {
 
 class AudioClock {
  public:
+  // Whether a rebase should carry the audio the backend has been handed but has
+  // not played yet. It must not when that audio will never be played.
+  enum class CarryUnplayed { No, Yes };
+
   explicit AudioClock(uint32_t aInRate);
+  // Out-of-line so FrameHistory only needs to be a complete type in
+  // AudioStream.cpp; this lets other translation units construct and destroy an
+  // AudioClock without FrameHistory's definition, e.g. gtest.
+  ~AudioClock();
 
   // Update the number of samples that has been written in the audio backend.
   // Called on the audio thread only.
   void UpdateFrameHistory(uint32_t aServiced, uint32_t aUnderrun,
                           bool aAudioThreadChanged);
+
+  // Rebase the clock for a stream reused across a seek so the reported position
+  // resumes from zero. |aBaseOffset| is the current raw engine frame count.
+  // With |aCarry| set, audio handed over but not yet played is carried across
+  // as worth no media time; pass No when that audio will never be played.
+  //
+  // Safe to call with the audio callback still running. On macOS it must run on
+  // the same thread as GetPosition; elsewhere mMutex makes the thread
+  // immaterial. Must run before any post-seek audio reaches the data source, or
+  // that audio loses its media time permanently.
+  void Rebase(int64_t aBaseOffset, CarryUnplayed aCarry);
 
   /**
    * @param aFrames The playback position in frames of the audio engine.
@@ -86,6 +109,40 @@ class AudioClock {
   uint32_t GetOutputRate() const { return mOutRate; }
 
  private:
+#  ifdef XP_MACOSX
+  // Apply the callback info the audio thread has queued to the frame history.
+  // Claims the single-consumer role on the queue, so owner thread only, which
+  // Dequeue asserts. A callback that found the queue full keeps its frames
+  // until a later call collects them, so the history can trail the write
+  // cursor by an unbounded amount while nothing drains the queue, and an item
+  // can arrive after a rebase has already accounted for its frames.
+  void ApplyQueuedCallbackInfo();
+#  endif
+
+  // Three positions on one axis, the count of frames handed to the backend.
+  // Comparing them is how a callback item that arrives after a rebase is
+  // recognised as describing frames the anchor has already moved past.
+  struct FrameHandoff {
+    // The write cursor: everything handed over, serviced and underrun alike.
+    // Counted here rather than summed from the callback items because a
+    // callback that finds the queue full keeps its item on the audio thread,
+    // so mSeen can trail this by an unbounded amount. Bumped on the audio
+    // thread, read on the owner thread.
+    Atomic<uint64_t> mTotal{0};
+#  ifdef XP_MACOSX
+    // How far the reader has got, counting every item it takes off the queue,
+    // including the ones it drops: the count is only comparable to mTotal if
+    // nothing is missed. Owner thread only.
+    uint64_t mSeen = 0;
+
+    // Where mTotal stood at the last rebase. An item landing at or below it
+    // was handed over earlier, so appending it would put frames the anchor has
+    // passed in front of it. Owner thread only.
+    uint64_t mRebasedThrough = 0;
+#  endif
+  };
+  FrameHandoff mHandoff;
+
   // Output rate in Hz (characteristic of the playback rate). Written on the
   // audio thread, read on either thread.
   Atomic<uint32_t> mOutRate;
@@ -191,10 +248,45 @@ class AudioBufferWriter : public AudioBufferCursor {
   using AudioBufferCursor::Available;
 };
 
+// AudioStream owns a single cubeb output stream and runs a small state machine
+// over the cubeb lifetime (see the StreamState enum):
+//
+//   INITIALIZED --Start()--> STARTED <==Resume()/Pause()==> STOPPED
+//        |                       |                             |
+//        | Start() fails         | cubeb stop/start fails      |
+//        |                       | or StateCallback(ERROR)     |
+//        v                       v                             v
+//        +---------------------> ERRORED <-------------------- +
+//
+//   STARTED/STOPPED --StateCallback(end-of-stream)--> DRAINED
+//   any state ---------------ShutDown()-------------> SHUTDOWN  (terminal)
+//
+// DRAINED and ERRORED are terminal for playback; only ShutDown() leaves them.
+// SHUTDOWN is final.
+//
+// AudioStream runs in one of two modes, the standard mode and the keep-running
+// mode, both exercised in normal playback.
+//
+// In the standard mode mState mirrors the physical cubeb stream: Pause() calls
+// cubeb_stream_stop, Resume() calls cubeb_stream_start, and re-pausing an
+// already stopped stream (or re-resuming an already started one) is disallowed.
+//
+// The keep-running mode, toggled by SetKeepRunningMode(), reuses the stream
+// across a seek instead of destroying it. When it is on and cubeb is physically
+// running, Pause()/Resume() update just the STARTED/STOPPED value and do NOT
+// stop or start cubeb, so mState becomes a logical view that can differ from
+// the still-running physical stream, and re-entering the same state is a
+// harmless no-op. If cubeb is not running, pause/resume fall back to the
+// standard stop/start path. Skipping the backend calls is safe because playback
+// is driven by the ring buffer and the frame-counter clock, never by mState.
+//
 // Access to a single instance of this class must be synchronized by
-// callers, or made from a single thread.  One exception is that access to
-// GetPosition, GetPositionInFrames, SetVolume, and Get{Rate,Channels},
-// SetMicrophoneActive is thread-safe without external synchronization.
+// callers, or made from a single thread.  SetVolume, Get{Rate,Channels} and
+// SetMicrophoneActive are thread-safe without external synchronization.
+// GetPosition, GetPositionInFrames and RebaseLive are not: on macOS they claim
+// the single-consumer role on the clock's callback-info queue and drive
+// owner-thread-only state, so all three must run on one thread. Elsewhere a
+// mutex guards that state on both sides.
 class AudioStream final {
   virtual ~AudioStream();
 
@@ -224,6 +316,10 @@ class AudioStream final {
                                bool aAudioThreadChanged) = 0;
     // Return true if no more data will be added to the source.
     virtual bool Ended() const = 0;
+    // Return true when a shortfall from PopFrames is deliberate rather than a
+    // glitch. Such frames are still accounted as underrun, which is what stops
+    // them advancing the reported position; this only suppresses the reporting.
+    virtual bool IsIntentionallySilent() const { return false; }
 
    protected:
     virtual ~DataSource() = default;
@@ -240,6 +336,22 @@ class AudioStream final {
 
   // Closes the stream. All future use of the stream is an error.
   void ShutDown();
+
+  // Turn the keep-running mode on or off. When on, a pause across a seek keeps
+  // the audio stream alive and reusable instead of tearing it down.
+  void SetKeepRunningMode(bool aKeepRunning);
+
+  bool IsCubebStarted() const { return mCubebStarted; }
+
+  // Rebase the clock of the reused stream so the reported time resumes from the
+  // seek target. Does not touch the ended promise.
+  void RebaseLive();
+
+  // Re-arm the ended promise for a reused stream: resolve any outstanding one
+  // and return a fresh promise, or a rejected one if the stream errored while
+  // it stayed running. Kept separate from RebaseLive() because re-arming the
+  // end signal and rebasing the clock are unrelated concerns.
+  RefPtr<MediaSink::EndedPromise> ReinitEndedPromise();
 
   // Set the current volume of the audio playback. This is a value from
   // 0 (meaning muted) to 1 (meaning full volume).  Thread-safe.
@@ -372,6 +484,21 @@ class AudioStream final {
   // Audio thread only
   bool mAudioThreadChanged = false;
   Atomic<bool> mCallbacksStarted;
+
+  // The keep-running mode. When on, a pause across a seek leaves the cubeb
+  // stream running and pause/resume only track the logical playing state, so
+  // the stream can be reused instead of being torn down and recreated.
+  Atomic<bool> mKeepRunning{false};
+
+  // Whether the cubeb stream is currently physically running, i.e. started and
+  // not yet stopped. Only read and written on the owner thread, so it needs no
+  // synchronization.
+  bool mCubebStarted = false;
+
+  // Whether the last Resume() found the cubeb stream still running, so the
+  // frames handed over before the seek are still queued in the device. A
+  // restart discards them. Owner thread only.
+  bool mResumeKeptCubebRunning = false;
 };
 
 }  // namespace mozilla

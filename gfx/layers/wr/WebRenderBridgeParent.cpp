@@ -4,32 +4,33 @@
 
 #include "mozilla/layers/WebRenderBridgeParent.h"
 
-#include "mozmemory.h"
 #include "CompositableHost.h"
-#include "gfxEnv.h"
-#include "gfxPlatform.h"
-#include "gfxOTSUtils.h"
-#include "GeckoProfiler.h"
 #include "GLContext.h"
 #include "GLContextProvider.h"
 #include "GLLibraryLoader.h"
-#include "nsExceptionHandler.h"
+#include "GeckoProfiler.h"
+#include "gfxEnv.h"
+#include "gfxOTSUtils.h"
+#include "gfxPlatform.h"
 #include "mozilla/CheckedInt.h"
-#include "mozilla/Range.h"
 #include "mozilla/EnumeratedRange.h"
+#include "mozilla/ProfilerMarkerTypes.h"
+#include "mozilla/Range.h"
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/StaticPrefs_webgl.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/GPUParent.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/glean/GfxMetrics.h"
-#include "mozilla/layers/AnimationHelper.h"
 #include "mozilla/layers/APZSampler.h"
 #include "mozilla/layers/APZUpdater.h"
+#include "mozilla/layers/AnimationHelper.h"
+#include "mozilla/layers/AsyncImagePipelineManager.h"
 #include "mozilla/layers/Compositor.h"
+#include "mozilla/layers/CompositorAnimationStorage.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorManagerParent.h"
-#include "mozilla/layers/CompositorAnimationStorage.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/CompositorVsyncScheduler.h"
 #include "mozilla/layers/ContentCompositorBridgeParent.h"
@@ -40,15 +41,14 @@
 #include "mozilla/layers/RemoteTextureMap.h"
 #include "mozilla/layers/SharedSurfacesParent.h"
 #include "mozilla/layers/TextureHost.h"
-#include "mozilla/layers/AsyncImagePipelineManager.h"
 #include "mozilla/layers/UiCompositorControllerParent.h"
 #include "mozilla/layers/WebRenderImageHost.h"
 #include "mozilla/layers/WebRenderTextureHost.h"
-#include "mozilla/ProfilerMarkerTypes.h"
-#include "mozilla/TimeStamp.h"
 #include "mozilla/webrender/RenderTextureHostSWGL.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/widget/CompositorWidget.h"
+#include "mozmemory.h"
+#include "nsExceptionHandler.h"
 
 #ifdef XP_WIN
 #  include "mozilla/gfx/DeviceManagerDx.h"
@@ -616,6 +616,39 @@ static bool ReadRawFont(const OpAddRawFont& aOp, wr::ShmSegmentsReader& aReader,
   return true;
 }
 
+already_AddRefed<WebRenderBridgeParent>
+WebRenderBridgeParent::FindSnapshotSourceBridge(
+    const wr::IdNamespace& aNamespace) {
+  // The source namespace is this bridge's own, so no lookup is needed.
+  if (aNamespace == mLateInit->mIdNamespace) {
+    return do_AddRef(this);
+  }
+  RefPtr<WebRenderBridgeParent> source;
+  bool done = false;
+  CompositorBridgeParent::WithIndirectLayerTreesLock(
+      [&](const StaticMonitorAutoLock& aLock) {
+        CompositorBridgeParent::ForEachLayerTreeStateUnderLock(
+            aLock,
+            [&](LayersId, CompositorBridgeParent::LayerTreeState& aState) {
+              WebRenderBridgeParent* bridge = aState.mWrBridge;
+              if (done || !bridge || bridge == this || !bridge->mLateInit ||
+                  !(bridge->mLateInit->mIdNamespace == aNamespace)) {
+                return;
+              }
+              // Namespaces are unique, so no other bridge can match.
+              done = true;
+              // Unlike pids, child ids are never reused. Each WebRender window
+              // has its own resource cache.
+              if (bridge->OtherChildID() == OtherChildID() &&
+                  bridge->mLateInit->mApi->GetId() ==
+                      mLateInit->mApi->GetId()) {
+                source = bridge;
+              }
+            });
+      });
+  return source.forget();
+}
+
 bool WebRenderBridgeParent::UpdateResources(
     const nsTArray<OpUpdateResource>& aResourceUpdates,
     const nsTArray<RefCountedShmem>& aSmallShmems,
@@ -632,6 +665,10 @@ bool WebRenderBridgeParent::UpdateResources(
       break;
     }
   }
+
+  // The snapshots of one adoption come from one bridge. Find it only once.
+  Maybe<wr::IdNamespace> adoptSourceNamespace;
+  bool adoptSourceFound = false;
 
   bool success = true;
   for (const auto& cmd : aResourceUpdates) {
@@ -721,6 +758,33 @@ bool WebRenderBridgeParent::UpdateResources(
           break;
         }
         aUpdates.AddSnapshotImage(op.key());
+        break;
+      }
+      case OpUpdateResource::TOpAdoptSnapshotImage: {
+        const auto& op = cmd.get_OpAdoptSnapshotImage();
+        if (NS_WARN_IF(!MatchesNamespace(wr::AsImageKey(op.key())))) {
+          break;
+        }
+        const wr::IdNamespace fromNamespace =
+            wr::AsImageKey(op.fromKey()).mNamespace;
+        if (adoptSourceNamespace != Some(fromNamespace)) {
+          adoptSourceNamespace = Some(fromNamespace);
+          RefPtr<WebRenderBridgeParent> source =
+              FindSnapshotSourceBridge(fromNamespace);
+          adoptSourceFound = !!source;
+          // The transaction that captured the snapshots can still wait in
+          // the queue of the source bridge, for example for remote textures.
+          // Send it to WebRender before the adoption.
+          if (source && source != this) {
+            source->FlushPendingWrTransactionEventsWithWait();
+          }
+        }
+        // The source bridge can already be gone if the old document was torn
+        // down before the restored document adopted the snapshots.
+        if (NS_WARN_IF(!adoptSourceFound)) {
+          break;
+        }
+        aUpdates.AdoptSnapshotImage(op.fromKey(), op.key());
         break;
       }
       case OpUpdateResource::TOpDeleteSnapshotImage: {
@@ -1147,9 +1211,17 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvDeleteCompositorAnimations(
       wr::AsUint64(mPipelineId), wr::AsUint64(mLateInit->mApi->GetId()),
       IsRootWebRenderBridgeParent());
 
+  nsTArray<uint64_t> ids;
+  ids.SetCapacity(aIds.Length());
+  for (uint64_t id : aIds) {
+    if (OwnsCompositorAnimationsId(id)) {
+      ids.AppendElement(id);
+    }
+  }
+
   // Once mWrEpoch has been rendered, we can delete these compositor animations
   mCompositorAnimationsToDelete.push(
-      CompositorAnimationIdsForEpoch(mWrEpoch, std::move(aIds)));
+      CompositorAnimationIdsForEpoch(mWrEpoch, std::move(ids)));
   return IPC_OK();
 }
 
@@ -1295,7 +1367,7 @@ void WebRenderBridgeParent::SetAPZSampleTime() {
 
 bool WebRenderBridgeParent::SetDisplayList(
     const LayoutDeviceRect& aRect, ipc::ByteBuf&& aDLItems,
-    ipc::ByteBuf&& aSpatialTreeDL,
+    ipc::ByteBuf&& aSpatialTreeDL, ipc::ByteBuf&& aInternerDelta,
     const wr::BuiltDisplayListDescriptor& aDLDesc,
     const nsTArray<OpUpdateResource>& aResourceUpdates,
     const nsTArray<RefCountedShmem>& aSmallShmems,
@@ -1307,6 +1379,7 @@ bool WebRenderBridgeParent::SetDisplayList(
 
   wr::Vec<uint8_t> dlItems(std::move(aDLItems));
   wr::Vec<uint8_t> dlSpatialTreeData(std::move(aSpatialTreeDL));
+  wr::Vec<uint8_t> dlInternerDelta(std::move(aInternerDelta));
 
   if (IsRootWebRenderBridgeParent()) {
     LayoutDeviceIntSize widgetSize = mWidget->GetClientSize();
@@ -1320,8 +1393,11 @@ bool WebRenderBridgeParent::SetDisplayList(
     pipelineId = gfx::GetTemporaryWebRenderPipelineId(pipelineId);
   }
 
-  aTxn.SetDisplayList(aWrEpoch, pipelineId, aDLDesc, dlItems,
-                      dlSpatialTreeData);
+  if (StaticPrefs::gfx_webrender_enforce_embed_policy_AtStartup()) {
+    aTxn.SetEmbedPolicy(pipelineId, ComputeEmbedPolicy());
+  }
+  aTxn.SetDisplayList(aWrEpoch, mLateInit->mIdNamespace, pipelineId, aDLDesc,
+                      dlItems, dlSpatialTreeData, dlInternerDelta);
 
   if (aRenderOffscreen) {
     aTxn.RenderOffscreen(pipelineId);
@@ -1344,6 +1420,68 @@ bool WebRenderBridgeParent::SetDisplayList(
   return success;
 }
 
+// Clear every referent id that the parent process's own record of the frame
+// tree doesn't confirm as embedded by aOwnLayersId. An unregistered referent
+// is cleared too: it may just be stale, but LayersIds are allocated
+// predictably, so it may also name one that isn't allocated yet.
+static void ClearUnconfirmedReferentIds(WebRenderScrollData& aScrollData,
+                                        LayersId aOwnLayersId) {
+  for (size_t i = 0; i < aScrollData.GetLayerCount(); i++) {
+    WebRenderLayerScrollData* layer = aScrollData.GetLayerData(i);
+    Maybe<LayersId> referent = layer->GetReferentId();
+    if (!referent) {
+      continue;
+    }
+    LayersId embedder;
+    bool found = CompositorBridgeParent::CallWithLayerTreeState(
+        *referent, [&](CompositorBridgeParent::LayerTreeState& aState) {
+          embedder = aState.mEmbedderLayersId;
+        });
+    if (!found || embedder != aOwnLayersId) {
+      layer->ClearReferentId();
+    }
+  }
+}
+
+// Edit out of the incoming scroll data anything the parent process can tell is
+// wrong, so that what's left is safe to use even if the sender is compromised.
+// A root WebRenderBridgeParent has nothing to check: its transactions come
+// from the parent process, and its referents can legitimately be unregistered
+// while layer trees re-register after a GPU process restart.
+void WebRenderBridgeParent::SanitizeScrollData(
+    WebRenderScrollData& aScrollData) {
+  if (IsRootWebRenderBridgeParent()) {
+    return;
+  }
+  ClearUnconfirmedReferentIds(aScrollData, GetLayersId());
+}
+
+Maybe<nsTArray<uint32_t>> WebRenderBridgeParent::ComputeEmbedPolicy() const {
+  if (IsRootWebRenderBridgeParent()) {
+    return Nothing();
+  }
+  nsTArray<uint32_t> namespaces;
+  if (mCompositorBridge) {
+    namespaces.AppendElement(mCompositorBridge->GetNamespace());
+  }
+  CompositorBridgeParent::CollectEmbeddedChildNamespaces(GetLayersId(),
+                                                         namespaces);
+  return Some(std::move(namespaces));
+}
+
+void WebRenderBridgeParent::RefreshEmbedPolicy() {
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+  // Before initialization no display list was sent, and the first one carries
+  // the policy.
+  if (mDestroyed || !mLateInit || IsRootWebRenderBridgeParent()) {
+    return;
+  }
+  wr::TransactionBuilder txn(mLateInit->mApi);
+  txn.SetLowPriority(true);
+  txn.SetEmbedPolicy(mPipelineId, ComputeEmbedPolicy());
+  mLateInit->mApi->SendTransaction(txn);
+}
+
 bool WebRenderBridgeParent::ProcessDisplayListData(
     DisplayListData& aDisplayList, wr::Epoch aWrEpoch,
     const TimeStamp& aTxnStartTime, bool aValidTransaction,
@@ -1352,13 +1490,18 @@ bool WebRenderBridgeParent::ProcessDisplayListData(
                              mRemoteTextureTxnScheduler, mFwdTransactionId);
   Maybe<wr::AutoTransactionSender> sender;
 
-  if (aDisplayList.mScrollData && !aDisplayList.mScrollData->Validate()) {
-    // If the scroll data is invalid, the entire transaction needs to be dropped
-    // because the scroll data and the display list cross-reference each other.
-    MOZ_ASSERT(
-        false,
-        "Content sent malformed scroll data (or validation check has a bug)");
-    aValidTransaction = false;
+  if (aDisplayList.mScrollData) {
+    if (!aDisplayList.mScrollData->ValidateShape()) {
+      // If the scroll data is malformed, the entire transaction needs to be
+      // dropped because the scroll data and the display list cross-reference
+      // each other.
+      MOZ_ASSERT(false,
+                 "Content sent malformed scroll data (or validation check "
+                 "has a bug)");
+      aValidTransaction = false;
+    } else {
+      SanitizeScrollData(*aDisplayList.mScrollData);
+    }
   }
 
   if (!aValidTransaction) {
@@ -1381,10 +1524,12 @@ bool WebRenderBridgeParent::ProcessDisplayListData(
   success =
       ProcessWebRenderParentCommands(aDisplayList.mCommands, txn) && success;
 
-  if (aDisplayList.mDLItems && aDisplayList.mDLSpatialTree) {
+  if (aDisplayList.mDLItems && aDisplayList.mDLSpatialTree &&
+      aDisplayList.mDLInternerDelta) {
     success = SetDisplayList(
                   aDisplayList.mRect, std::move(aDisplayList.mDLItems.ref()),
                   std::move(aDisplayList.mDLSpatialTree.ref()),
+                  std::move(aDisplayList.mDLInternerDelta.ref()),
                   aDisplayList.mDLDesc, aDisplayList.mResourceUpdates,
                   aDisplayList.mSmallShmems, aDisplayList.mLargeShmems,
                   aTxnStartTime, txn, aWrEpoch, aVsyncId, aRenderOffscreen) &&
@@ -1678,6 +1823,10 @@ bool WebRenderBridgeParent::ProcessWebRenderParentCommands(
       case WebRenderParentCommand::TOpAddPipelineIdForCompositable: {
         const OpAddPipelineIdForCompositable& op =
             cmd.get_OpAddPipelineIdForCompositable();
+        if (!GetCompositorBridge()->OwnsPipelineId(op.pipelineId())) {
+          MOZ_ASSERT_UNREACHABLE("Invalid PipelineId!");
+          break;
+        }
 
         AddPipelineIdForCompositable(op.pipelineId(), op.handle(), op.owner(),
                                      aTxn, txnForImageBridge);
@@ -1686,6 +1835,10 @@ bool WebRenderBridgeParent::ProcessWebRenderParentCommands(
       case WebRenderParentCommand::TOpRemovePipelineIdForCompositable: {
         const OpRemovePipelineIdForCompositable& op =
             cmd.get_OpRemovePipelineIdForCompositable();
+        if (!GetCompositorBridge()->OwnsPipelineId(op.pipelineId())) {
+          MOZ_ASSERT_UNREACHABLE("Invalid PipelineId!");
+          break;
+        }
 
         auto* pendingOps =
             mLateInit->mApi->GetPendingAsyncImagePipelineOps(aTxn);
@@ -1701,6 +1854,10 @@ bool WebRenderBridgeParent::ProcessWebRenderParentCommands(
       case WebRenderParentCommand::TOpUpdateAsyncImagePipeline: {
         const OpUpdateAsyncImagePipeline& op =
             cmd.get_OpUpdateAsyncImagePipeline();
+        if (!GetCompositorBridge()->OwnsPipelineId(op.pipelineId())) {
+          MOZ_ASSERT_UNREACHABLE("Invalid PipelineId!");
+          break;
+        }
 
         auto* pendingOps =
             mLateInit->mApi->GetPendingAsyncImagePipelineOps(aTxn);
@@ -1719,6 +1876,10 @@ bool WebRenderBridgeParent::ProcessWebRenderParentCommands(
       case WebRenderParentCommand::TOpUpdatedAsyncImagePipeline: {
         const OpUpdatedAsyncImagePipeline& op =
             cmd.get_OpUpdatedAsyncImagePipeline();
+        if (!GetCompositorBridge()->OwnsPipelineId(op.pipelineId())) {
+          MOZ_ASSERT_UNREACHABLE("Invalid PipelineId!");
+          break;
+        }
 
         aTxn.InvalidateRenderedFrame(wr::RenderReasons::ASYNC_IMAGE);
 
@@ -1743,10 +1904,7 @@ bool WebRenderBridgeParent::ProcessWebRenderParentCommands(
         const OpAddCompositorAnimations& op =
             cmd.get_OpAddCompositorAnimations();
         CompositorAnimations data(std::move(op.data()));
-        // AnimationHelper::GetNextCompositorAnimationsId() encodes the child
-        // process PID in the upper 32 bits of the id, verify that this is as
-        // expected.
-        if ((data.id() >> 32) != (uint64_t)OtherPid()) {
+        if (!OwnsCompositorAnimationsId(data.id())) {
           gfxCriticalNote << "TOpAddCompositorAnimations bad id";
           success = false;
           continue;
@@ -2100,6 +2258,17 @@ void WebRenderBridgeParent::AddPipelineIdForCompositable(
     return;
   }
 
+  // The AsyncImagePipelineManager is shared by every bridge composited into
+  // this window, including the window's root pipeline. A pipeline id must not
+  // collide with one that is already live there, possibly registered by
+  // another bridge. Pipeline ids are never legitimately reused, so reject
+  // collisions outright.
+  if (mLateInit->mAsyncImageManager->HasLivePipeline(aPipelineId)) {
+    gfxCriticalNote << "Content attempted AddPipelineIdForCompositable with "
+                       "pipelineId already registered";
+    return;
+  }
+
   wrHost->SetWrBridge(aPipelineId, this);
   mAsyncCompositables.emplace(wr::AsUint64(aPipelineId), wrHost);
   mLateInit->mAsyncImageManager->AddAsyncImagePipeline(aPipelineId, wrHost);
@@ -2206,7 +2375,7 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvClearCachedResources() {
   // Clear resources
   wr::TransactionBuilder txn(mLateInit->mApi);
   txn.SetLowPriority(true);
-  txn.ClearDisplayList(GetNextWrEpoch(), mPipelineId);
+  txn.ClearDisplayList(GetNextWrEpoch(), mLateInit->mIdNamespace, mPipelineId);
   MaybeNotifyOfLayers(txn, false);
   mLateInit->mApi->SendTransaction(txn);
 
@@ -2319,6 +2488,9 @@ void WebRenderBridgeParent::ScheduleForcedGenerateFrame(
 }
 
 mozilla::ipc::IPCResult WebRenderBridgeParent::RecvCapture() {
+  if (!IsRootWebRenderBridgeParent()) {
+    return IPC_FAIL(this, "Capture is only allowed on the root bridge");
+  }
   if (EnsureInitialized()) {
     mLateInit->mApi->Capture();
   }
@@ -2327,6 +2499,10 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvCapture() {
 
 mozilla::ipc::IPCResult WebRenderBridgeParent::RecvStartCaptureSequence(
     const uint32_t& aFlags) {
+  if (!IsRootWebRenderBridgeParent()) {
+    return IPC_FAIL(this,
+                    "StartCaptureSequence is only allowed on the root bridge");
+  }
   if (EnsureInitialized()) {
     mLateInit->mApi->StartCaptureSequence(aFlags);
   }
@@ -2334,6 +2510,10 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvStartCaptureSequence(
 }
 
 mozilla::ipc::IPCResult WebRenderBridgeParent::RecvStopCaptureSequence() {
+  if (!IsRootWebRenderBridgeParent()) {
+    return IPC_FAIL(this,
+                    "StopCaptureSequence is only allowed on the root bridge");
+  }
   if (EnsureInitialized()) {
     mLateInit->mApi->StopCaptureSequence();
   }
@@ -2419,7 +2599,9 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvGetAnimationValue(
     return IPC_FAIL_NO_REASON(this);
   }
 
-  if (RefPtr<OMTASampler> sampler = GetOMTASampler()) {
+  if (!OwnsCompositorAnimationsId(aCompositorAnimationsId)) {
+    *aValue = mozilla::null_t();
+  } else if (RefPtr<OMTASampler> sampler = GetOMTASampler()) {
     Maybe<TimeStamp> testingTimeStamp;
     if (CompositorBridgeParent* cbp = GetRootCompositorBridgeParent()) {
       testingTimeStamp = cbp->GetTestingTimeStamp();
@@ -3030,7 +3212,7 @@ void WebRenderBridgeParent::ClearResources() {
 
   wr::TransactionBuilder txn(mLateInit->mApi);
   txn.SetLowPriority(true);
-  txn.ClearDisplayList(wrEpoch, mPipelineId);
+  txn.ClearDisplayList(wrEpoch, mLateInit->mIdNamespace, mPipelineId);
 
   for (const auto& entry : mAsyncCompositables) {
     wr::PipelineId pipelineId = wr::AsPipelineId(entry.first);
@@ -3137,6 +3319,14 @@ TextureFactoryIdentifier WebRenderBridgeParent::GetTextureFactoryIdentifier() {
       mLateInit->mAsyncImageManager->UseCompositorWnd(), false, false, false,
       supportsD3D11NV12, mLateInit->mApi->GetSyncHandle());
   return ident;
+}
+
+Maybe<TextureFactoryIdentifier>
+WebRenderBridgeParent::MaybeGetTextureFactoryIdentifier() {
+  if (mDestroyed || mLateInit.isNothing() || !mLateInit->mApi) {
+    return Nothing();
+  }
+  return Some(GetTextureFactoryIdentifier());
 }
 
 wr::Epoch WebRenderBridgeParent::GetNextWrEpoch() {

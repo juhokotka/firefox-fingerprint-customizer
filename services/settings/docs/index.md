@@ -181,7 +181,7 @@ The JSON dump will serve as the default dataset for `.get()`, instead of doing a
 
    ```
    CID="your-collection"
-   curl "https://firefox.settings.services.mozilla.com/v1/buckets/main/collections/${CID}/changeset?_expected=0" | jq '{"data": .changes, "timestamp": .timestamp}' > services/settings/dumps/main/${CID}.json``
+   curl "https://firefox.settings.services.mozilla.com/v2/buckets/main/collections/${CID}/changeset?_expected=0" | jq '{"data": .changes, "timestamp": .timestamp}' > services/settings/dumps/main/${CID}.json``
    ```
 
 2. Add the filename to the relevant `FINAL_TARGET_FILES` list in `services/settings/dumps/main/moz.build`

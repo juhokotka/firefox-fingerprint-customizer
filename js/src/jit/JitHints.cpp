@@ -2,12 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/JitHints-inl.h"
-
 #include "gc/Pretenuring.h"
 #include "jit/BaselineIC.h"
 #include "jit/JitScript.h"
 
+#include "jit/JitHints-inl.h"
 #include "vm/BytecodeLocation-inl.h"
 #include "vm/JSScript-inl.h"
 
@@ -186,19 +185,20 @@ bool JitHintsMap::addMonomorphicInlineLocation(JSScript* script,
   return hint->addMonomorphicInlineOffset(offset);
 }
 
-bool JitHintsMap::hasMonomorphicInlineHintAtOffset(JSScript* script,
-                                                   uint32_t offset) {
+mozilla::Span<const uint32_t> JitHintsMap::getMonomorphicInlineOffsets(
+    JSScript* script) const {
   ScriptKey key = getScriptKey(script);
   if (!key) {
-    return false;
+    return {};
   }
 
   auto p = ionHintMap_.lookup(key);
   if (p) {
-    return p->value()->hasMonomorphicInlineOffset(offset);
+    const auto& offsets = p->value()->monomorphicInlineOffsets;
+    return mozilla::Span(offsets.begin(), offsets.length());
   }
 
-  return false;
+  return {};
 }
 
 bool JitHintsMap::shouldTransitionMegamorphic(JSScript* script,

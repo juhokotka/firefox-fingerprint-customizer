@@ -5,20 +5,17 @@
 #include "ARIAMap.h"
 
 #include "AccAttributes.h"
-#include "nsAccUtils.h"
-#include "nsCoreUtils.h"
-#include "mozilla/a11y/Role.h"
 #include "States.h"
-
-#include "nsAttrName.h"
-#include "nsGenericHTMLElement.h"
-#include "nsWhitespaceTokenizer.h"
-
 #include "mozilla/BinarySearch.h"
+#include "mozilla/a11y/Role.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
-
+#include "nsAccUtils.h"
+#include "nsAttrName.h"
+#include "nsCoreUtils.h"
+#include "nsGenericHTMLElement.h"
 #include "nsUnicharUtils.h"
+#include "nsWhitespaceTokenizer.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -47,7 +44,7 @@ static const nsRoleMapEntry sWAIRoleMaps[] = {
     kUseMapRole,
     eNoValue,
     eNoAction,
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined (ANDROID)
     eAssertiveLiveAttr,
 #else
     eNoLiveAttr,
@@ -778,7 +775,7 @@ static const nsRoleMapEntry sWAIRoleMaps[] = {
     eTableCell,
     kNoReqStates,
     eARIAExpanded,
-    eARIASelectable,
+    eARIASelectableIfDefined,
     eARIAReadonly
   },
   { // group
@@ -1643,22 +1640,6 @@ bool aria::IsValidARIAHidden(nsIContent* aContent) {
                                      nsGkAtoms::aria_hidden, nsGkAtoms::_true,
                                      eCaseMatters) &&
          !ShouldIgnoreARIAHidden(aContent);
-}
-
-bool aria::IsValidARIAHidden(DocAccessible* aDocAcc) {
-  nsCOMPtr<nsIContent> docContent = aDocAcc->GetContent();
-  // First, check if our Doc Accessible has aria-hidden set on its content
-  bool isValid = IsValidARIAHidden(docContent);
-
-  // If our Doc Accessible was created using an element other than the
-  // root element, we need to verify the validity of any aria-hidden on
-  // the root element as well.
-  auto* rootElement = aDocAcc->DocumentNode()->GetRootElement();
-  if (docContent != rootElement) {
-    isValid |= IsValidARIAHidden(rootElement);
-  }
-
-  return isValid;
 }
 
 bool aria::ShouldIgnoreARIAHidden(nsIContent* aContent) {

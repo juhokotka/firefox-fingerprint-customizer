@@ -2,30 +2,31 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <queue>
+#include "WinWindowOcclusionTracker.h"
+
 #include <windows.h>
 #include <winuser.h>
 #include <wtsapi32.h>
 
-#include "WinWindowOcclusionTracker.h"
+#include <queue>
 
-#include "base/thread.h"
-#include "base/message_loop.h"
-#include "base/platform_thread.h"
-#include "gfxConfig.h"
-#include "nsThreadUtils.h"
-#include "mozilla/DataMutex.h"
-#include "mozilla/gfx/Logging.h"
-#include "mozilla/TimeStamp.h"
-#include "mozilla/Logging.h"
-#include "mozilla/StaticPrefs_widget.h"
-#include "mozilla/StaticMonitor.h"
-#include "mozilla/StaticPtr.h"
-#include "nsIWidget.h"
-#include "nsWindow.h"
-#include "transport/runnable_utils.h"
 #include "WinEventObserver.h"
 #include "WinUtils.h"
+#include "base/message_loop.h"
+#include "base/platform_thread.h"
+#include "base/thread.h"
+#include "gfxConfig.h"
+#include "mozilla/DataMutex.h"
+#include "mozilla/Logging.h"
+#include "mozilla/StaticMonitor.h"
+#include "mozilla/StaticPrefs_widget.h"
+#include "mozilla/StaticPtr.h"
+#include "mozilla/TimeStamp.h"
+#include "mozilla/gfx/Logging.h"
+#include "nsIWidget.h"
+#include "nsThreadUtils.h"
+#include "nsWindow.h"
+#include "transport/runnable_utils.h"
 
 namespace mozilla::widget {
 

@@ -3,21 +3,20 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/SandboxSettings.h"
-#include "mozISandboxSettings.h"
-#include "nsServiceManagerUtils.h"
-#include "nsAppRunner.h"
 
+#include "mozISandboxSettings.h"
 #include "mozilla/Components.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPrefs_media.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/StaticPrefs_security.h"
-
+#include "nsAppRunner.h"
+#include "nsServiceManagerUtils.h"
 #include "prenv.h"
 
 #ifdef XP_WIN
-#  include "nsExceptionHandler.h"
 #  include "PDMFactory.h"
+#  include "nsExceptionHandler.h"
 #endif  // XP_WIN
 
 using namespace mozilla;
@@ -173,9 +172,7 @@ int GetEffectiveContentSandboxLevel() {
 
 bool IsContentSandboxEnabled() { return GetEffectiveContentSandboxLevel() > 0; }
 
-bool IsGPUSandboxEnabled() {
-  return Preferences::GetInt("security.sandbox.gpu.level") > 0;
-}
+bool IsGPUSandboxEnabled() { return GetEffectiveGpuSandboxLevel() > 0; }
 
 int GetEffectiveSocketProcessSandboxLevel() {
   if (PR_GetEnv("MOZ_DISABLE_SOCKET_PROCESS_SANDBOX")) {
@@ -196,6 +193,10 @@ int GetEffectiveSocketProcessSandboxLevel() {
 }
 
 int GetEffectiveGpuSandboxLevel() {
+  if (PR_GetEnv("MOZ_DISABLE_GPU_SANDBOX")) {
+    return 0;
+  }
+
   return StaticPrefs::security_sandbox_gpu_level();
 }
 

@@ -52,66 +52,6 @@ ChromeUtils.defineLazyGetter(this, "PlacesFrecencyRecalculator", () => {
   ).wrappedJSObject;
 });
 
-async function addTopSites(url) {
-  for (let i = 0; i < 5; i++) {
-    await PlacesTestUtils.addVisits(url);
-  }
-  await updateTopSites(sites => {
-    return sites && sites[0] && sites[0].url == url;
-  });
-}
-
-function assertAbandonmentTelemetry(expectedExtraList) {
-  assertGleanTelemetry("abandonment", expectedExtraList);
-}
-
-function assertEngagementTelemetry(expectedExtraList) {
-  assertGleanTelemetry("engagement", expectedExtraList);
-}
-
-function assertExposureTelemetry(expectedExtraList) {
-  assertGleanTelemetry("exposure", expectedExtraList);
-}
-
-function assertDisableTelemetry(expectedExtraList) {
-  assertGleanTelemetry("disable", expectedExtraList);
-}
-
-function assertBounceTelemetry(expectedExtraList) {
-  assertGleanTelemetry("bounce", expectedExtraList);
-}
-
-function assertGleanTelemetry(telemetryName, expectedExtraList) {
-  const camelName = telemetryName.replaceAll(/_(.)/g, (match, p1) =>
-    p1.toUpperCase()
-  );
-  const telemetries = Glean.urlbar[camelName].testGetValue() ?? [];
-  info(
-    "Asserting Glean telemetry is correct, actual events are: " +
-      JSON.stringify(telemetries)
-  );
-  Assert.equal(
-    telemetries.length,
-    expectedExtraList.length,
-    "Telemetry event length matches expected event length."
-  );
-
-  for (let i = 0; i < telemetries.length; i++) {
-    const telemetry = telemetries[i];
-    Assert.equal(telemetry.category, "urlbar");
-    Assert.equal(telemetry.name, telemetryName);
-
-    const expectedExtra = expectedExtraList[i];
-    for (const key of Object.keys(expectedExtra)) {
-      Assert.equal(
-        telemetry.extra[key],
-        expectedExtra[key],
-        `${key} is correct`
-      );
-    }
-  }
-}
-
 async function ensureQuickSuggestInit({ ...args } = {}) {
   return lazy.QuickSuggestTestUtils.ensureQuickSuggestInit({
     remoteSettingsRecords: [
@@ -231,8 +171,7 @@ async function doPasteAndGo(data) {
   await SimpleTest.promiseClipboardChange(data, () => {
     clipboardHelper.copyString(data);
   });
-  const inputBox = gURLBar.querySelector("moz-input-box");
-  const contextMenu = inputBox.menupopup;
+  const contextMenu = window.EditContextMenu.popup;
   const onPopup = BrowserTestUtils.waitForEvent(contextMenu, "popupshown");
   EventUtils.synthesizeMouseAtCenter(gURLBar.inputField, {
     type: "contextmenu",
@@ -240,7 +179,9 @@ async function doPasteAndGo(data) {
   });
   await onPopup;
   const onLoad = BrowserTestUtils.browserLoaded(browser);
-  const menuitem = inputBox.getMenuItem("paste-and-go");
+  const menuitem = contextMenu.querySelector(
+    '[anonid="paste-and-go"]:not([hidden])'
+  );
   contextMenu.activateItem(menuitem);
   await onLoad;
 }
@@ -367,7 +308,7 @@ async function loadRemoteTab(url) {
         type: "tab",
         title: "tesrt",
         url,
-        icon: UrlbarUtils.ICON.DEFAULT,
+        icon: UrlbarShared.ICON.DEFAULT,
         client: "test",
         lastUsed: Math.floor(Date.now() / 1000),
       },

@@ -1,7 +1,7 @@
 # Symbolicating TreeHerder stacks locally
 
-When using tools like the {ref}`Dark Matter Detector (DMD)` or
-{ref}`refcount logging<Refcount Tracing and Balancing>` to
+When using tools like the {doc}`/performance/memory/dmd` or
+{doc}`refcount logging </performance/memory/refcount_tracing_and_balancing>` to
 investigate issues occurring on TreeHerder that you can't reproduce locally, you
 can often end up with unsymbolicated stacks. Fortunately, there is a way to
 symbolicate these stacks on your own machine.
@@ -40,10 +40,14 @@ the Firefox source directory. You need to add these two lines to the function
 `is_missing_newline`.
 
 ```python
-line_str = line_str.replace("/builds/worker/workspace/build/application/firefox/firefox",
-                            "<TARGET_DIR>/firefox/firefox-bin")
-line_str = line_str.replace("/builds/worker/workspace/build/application/firefox/libxul.so",
-                            "<TARGET_DIR>/firefox/libxul.so")
+line_str = line_str.replace(
+    "/builds/worker/workspace/build/application/firefox/firefox",
+    "<TARGET_DIR>/firefox/firefox-bin",
+)
+line_str = line_str.replace(
+    "/builds/worker/workspace/build/application/firefox/libxul.so",
+    "<TARGET_DIR>/firefox/libxul.so",
+)
 ```
 
 The initial locations should appear verbatim in the stack you are trying to

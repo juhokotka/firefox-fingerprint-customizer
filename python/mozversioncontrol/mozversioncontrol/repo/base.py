@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this,
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import abc
 import os
 import re
@@ -10,7 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Optional, Union
 
-from mach.util import to_optional_path
+from mach.util import batch_paths, to_optional_path
 from mozfile import which
 
 from mozversioncontrol.errors import MissingVCSInfo, MissingVCSTool
@@ -96,6 +98,10 @@ class Repository(abc.ABC):
                 return ""
             raise
 
+    def _run_batched(self, *args, paths: list[Union[str, Path]], **runargs):
+        for batch in batch_paths(paths):
+            self._run(*args, *batch, **runargs)
+
     def _pipefrom(self, *args, encoding="utf-8"):
         cmd = (str(self._tool),) + args
         return subprocess.Popen(
@@ -138,6 +144,11 @@ class Repository(abc.ABC):
     @abc.abstractmethod
     def head_rev(self):
         """Head revision."""
+
+    @property
+    @abc.abstractmethod
+    def is_shallow(self) -> bool:
+        """Whether this repo is a shallow clone."""
 
     @property
     @abc.abstractmethod
@@ -470,6 +481,11 @@ class Repository(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def configure(self, state_dir: Path, update_only: bool = False):
+    def configure(
+        self,
+        state_dir: Path,
+        update_only: bool = False,
+        no_system_changes: bool = False,
+    ):
         """Perform initial VCS setup, applying sensible defaults for configuration."""
         pass

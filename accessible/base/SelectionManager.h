@@ -5,9 +5,9 @@
 #ifndef mozilla_a11y_SelectionManager_h_
 #define mozilla_a11y_SelectionManager_h_
 
+#include "mozilla/WeakPtr.h"
 #include "nsISelectionController.h"
 #include "nsISelectionListener.h"
-#include "mozilla/WeakPtr.h"
 
 namespace mozilla {
 
@@ -111,7 +111,7 @@ class SelectionManager : public nsISelectionListener {
   static bool SelectionRangeChanged(SelectionType aType,
                                     const dom::AbstractRange& aRange);
 
-  ~SelectionManager();
+  ~SelectionManager() = default;
 
  protected:
   SelectionManager();

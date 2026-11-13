@@ -84,7 +84,7 @@ void MIRGenerator::spewBeginFunction(JSScript* function) {
     graphSpewer_->beginFunction(function);
   }
 #endif
-  perfSpewer().startRecording();
+  perfSpewer().startRecording(runtime);
 }
 
 void MIRGenerator::spewBeginWasmFunction(unsigned funcIndex) {
@@ -95,7 +95,7 @@ void MIRGenerator::spewBeginWasmFunction(unsigned funcIndex) {
     graphSpewer_->beginWasmFunction(funcIndex);
   }
 #endif
-  perfSpewer().startRecording(wasmCodeMeta_);
+  perfSpewer().startRecording(/* runtime = */ nullptr, wasmCodeMeta_);
 }
 
 void MIRGenerator::spewPass(const char* name, BacktrackingAllocator* ra) {
@@ -1629,6 +1629,24 @@ void jit::AssertBasicGraphCoherency(MIRGraph& graph, bool force) {
     for (size_t i = 0; i < block->numPredecessors(); i++) {
       MOZ_ASSERT(
           CheckPredecessorImpliesSuccessor(*block, block->getPredecessor(i)));
+    }
+
+    if (block->isLoopHeader() && block->hasGeneratorResumeEntry()) {
+      // For loops with a generator resume entry, we currently don't allow
+      // hoisting instructions into the preheader. See bug 2073268.
+      MBasicBlock* preheader = block->loopPredecessor();
+      for (MInstructionIterator ins(preheader->begin());
+           ins != preheader->end(); ins++) {
+        MOZ_ASSERT(ins->isGoto() || ins->isBox() || ins->isConstant() ||
+                   ins->isBeta() || ins->isAssertRange());
+      }
+      // Similarly, the loop header itself must only branch to the resume
+      // dispatch block. See WarpBuilder::startResumePath.
+      for (MInstructionIterator ins(block->begin()); ins != block->end();
+           ins++) {
+        MOZ_ASSERT(ins->isIsResumingGenerator() || ins->isTest() ||
+                   ins->isGoto() || ins->isConstant() || ins->isAssertRange());
+      }
     }
 
     if (MResumePoint* resume = block->entryResumePoint()) {

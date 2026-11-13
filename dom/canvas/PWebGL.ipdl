@@ -25,7 +25,7 @@ using mozilla::webgl::LinkResult from "mozilla/dom/WebGLIpdl.h";
 using mozilla::webgl::OpaqueFramebufferOptions from "mozilla/dom/WebGLIpdl.h";
 using mozilla::webgl::PackingInfo from "mozilla/dom/WebGLIpdl.h";
 using mozilla::webgl::ReadPixelsDesc from "mozilla/dom/WebGLIpdl.h";
-using mozilla::webgl::ReadPixelsResultIpc from "mozilla/dom/WebGLIpdl.h";
+[MoveOnly] using mozilla::webgl::ReadPixelsResultIpc from "mozilla/dom/WebGLIpdl.h";
 using mozilla::webgl::ShaderPrecisionFormat from "mozilla/dom/WebGLIpdl.h";
 [MoveOnly] using mozilla::webgl::TexUnpackBlobDesc from "mozilla/dom/WebGLIpdl.h";
 
@@ -69,6 +69,8 @@ parent:
   sync GetBufferSubData(uint32_t target, uint64_t srcByteOffset, uint64_t byteSize) returns (Shmem ret);
   sync GetFrontBufferSnapshot() returns (FrontBufferSnapshotIpc ret);
   sync ReadPixels(ReadPixelsDesc desc, ReadPixelsBuffer buffer) returns (ReadPixelsResultIpc ret);
+  async ReadPixelsAsync(ReadPixelsDesc desc, uint64_t byteSize)
+      returns (ReadPixelsResultIpc ret);
 
   // -
 

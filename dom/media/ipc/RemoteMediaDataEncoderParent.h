@@ -55,10 +55,10 @@ class RemoteMediaDataEncoderParent final
 
   std::map<uint32_t, RefPtr<ShmemRecycleTicket>> mTickets;
   uint32_t mTicketCounter = 0;
-  bool mShutdown = false;
-
- private:
-  const RefPtr<nsISerialEventTarget> mManagerThread;
+  bool mConstructAttempted : 1 = false;
+  bool mInitAttempted : 1 = false;
+  bool mInitialized : 1 = false;
+  bool mShutdown : 1 = false;
 };
 
 }  // namespace mozilla

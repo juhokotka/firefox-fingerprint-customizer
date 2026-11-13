@@ -325,7 +325,9 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   void GetType(nsAString& aType);
   void GetHref(nsAString& aHref, ErrorResult& aRv);
   // GetOwnerNode is defined above.
-  StyleSheet* GetParentStyleSheet() const { return GetParentSheet(); }
+  already_AddRefed<StyleSheet> GetParentStyleSheet() const {
+    return do_AddRef(GetParentSheet());
+  }
   void GetTitle(nsAString& aTitle);
   dom::MediaList* Media();
   bool Disabled() const { return bool(mState & State::Disabled); }
@@ -339,7 +341,7 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   // Can't be inline because we can't include ImportRule here.  And can't be
   // called GetOwnerRule because that would be ambiguous with the ImportRule
   // version.
-  css::Rule* GetDOMOwnerRule() const;
+  already_AddRefed<css::Rule> GetDOMOwnerRule() const;
   dom::CSSRuleList* GetCssRules(nsIPrincipal& aSubjectPrincipal, ErrorResult&);
   uint32_t InsertRule(const nsACString& aRule, uint32_t aIndex,
                       nsIPrincipal& aSubjectPrincipal, ErrorResult& aRv);
@@ -384,6 +386,9 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   bool ConstructorDocumentMatches(const dom::Document& aDocument) const {
     return mConstructorDocument == &aDocument;
   }
+
+  // Whether the given doc or shadow root adopts this sheet.
+  bool IsAdoptedBy(const dom::DocumentOrShadowRoot&) const;
 
   // Add a document or shadow root to the list of adopters.
   // Adopters will be notified when styles are changed.
@@ -576,26 +581,21 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
 
   RefPtr<URLExtraData> mURLData;
   RefPtr<nsIURI> mOriginalSheetURI;
-  State mState;
 
+  State mState;
   Atomic<uint32_t, ReleaseAcquire> mAsyncParseBlockers{0};
+  // Index within mInner->mSheets.
+  uint32_t mInnerSheetIndex = 0;
 
   // Core information we get from parsed sheets, which are shared amongst
-  // StyleSheet clones.
-  //
-  // Always nonnull until LastRelease().
+  // StyleSheet clones. Always nonnull until LastRelease().
   StyleSheetInfo* mInner;
 
   nsTArray<ServoStyleSet*> mStyleSets;
-
   RefPtr<ServoCSSRuleList> mRuleList;
-
   MozPromiseHolder<StyleSheetParsePromise> mParsePromise;
-
   nsTArray<dom::DocumentOrShadowRoot*> mAdopters;
 
-  // Make StyleSheetInfo and subclasses into friends so they can use
-  // ChildSheetListBuilder.
   friend struct StyleSheetInfo;
 };
 

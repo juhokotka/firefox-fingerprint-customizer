@@ -10,6 +10,11 @@
 #include "nsISupportsImpl.h"
 #include "nsStringFwd.h"
 
+namespace content_analysis::sdk {
+class ContentAnalysisRequest;
+class ContentAnalysisResponse;
+}  // namespace content_analysis::sdk
+
 namespace mozilla::contentanalysis {
 
 class ContentAnalysisDiagnosticInfo;
@@ -85,6 +90,22 @@ class ContentAnalysisBackend {
 
  protected:
   virtual ~ContentAnalysisBackend() = default;
+
+  // Build most of an SDK protobuf request from the framework request,
+  // covering everything except print data, file path, and text content.
+  // Backends that need to ship that content in the protobuf (currently just
+  // ExternalAgentBackend) override this, call the base implementation, and
+  // add it afterwards.
+  virtual nsresult ConvertRequestToProtobuf(
+      nsIContentAnalysisRequest* aRequest,
+      content_analysis::sdk::ContentAnalysisRequest* aOut);
+
+  // Build a framework ContentAnalysisResponse from an SDK protobuf. Returns
+  // nullptr if the SDK response could not be interpreted (e.g. a result has a
+  // non-SUCCESS status).
+  static already_AddRefed<ContentAnalysisResponse> ConvertResponseFromProtobuf(
+      content_analysis::sdk::ContentAnalysisResponse&& aResponse,
+      const nsCString& aUserActionId);
 };
 
 // Create the backend appropriate for the current platform. The concrete type

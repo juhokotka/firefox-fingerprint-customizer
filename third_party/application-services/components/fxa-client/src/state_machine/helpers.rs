@@ -151,14 +151,12 @@ impl<'a> RetryingAccount<'a> {
         self.with_retry(|a| a.initialize_device(name, device_type, capabilities))
     }
 
-    /// Auth errors propagate so the FSM can drive its own recovery via
-    /// `CheckAuthorizationStatus`. See
-    /// <https://bugzilla.mozilla.org/show_bug.cgi?id=1868418>.
-    pub fn ensure_capabilities(
-        &mut self,
-        capabilities: &[DeviceCapability],
-    ) -> Result<LocalDevice> {
-        self.with_retry(|a| a.ensure_capabilities(capabilities))
+    /// Finish initializing a connected account
+    pub fn finish_initialize(&mut self, capabilities: &[DeviceCapability]) -> Result<()> {
+        self.with_auth_recovery(|a| {
+            a.ensure_capabilities(capabilities)?;
+            Ok(())
+        })
     }
 
     pub fn check_authorization_status(&mut self) -> Result<bool> {
@@ -250,6 +248,19 @@ impl<'a> RetryingAccount<'a> {
                 }
             }
         }
+    }
+
+    /// Checks if enough time has passed since the last auth attempt that we should try checking the
+    /// auth again.
+    pub fn should_recheck_auth(&self) -> bool {
+        self.inner.should_recheck_auth()
+    }
+
+    /// Set the last time we re-checked our authentication after a failure to the current time.
+    ///
+    /// **💾 This method alters the persisted account state.**
+    pub fn reset_auth_recheck_timer(&mut self) {
+        self.inner.reset_auth_recheck_timer();
     }
 }
 

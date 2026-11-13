@@ -23,6 +23,7 @@ using SVGPathElementBase = SVGGeometryElement;
 
 class SVGPathElement final : public SVGPathElementBase {
   using Path = mozilla::gfx::Path;
+  using Element::UnsetAttr;
 
  protected:
   friend nsresult(::NS_NewSVGPathElement(
@@ -31,13 +32,13 @@ class SVGPathElement final : public SVGPathElementBase {
   JSObject* WrapNode(JSContext* cx, JS::Handle<JSObject*> aGivenProto) override;
   explicit SVGPathElement(already_AddRefed<mozilla::dom::NodeInfo> aNodeInfo);
 
-  void GetAsSimplePath(SimplePath* aSimplePath) override;
+  void GetAsSimpleShape(SimpleShape* aShape) override;
 
  public:
   NS_DECL_ADDSIZEOFEXCLUDINGTHIS
 
   // nsIContent interface
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* name) const override;
+  bool IsNoNamespaceAttrMapped(const nsAtom* name) const override;
 
   // SVGSVGElement methods:
   bool HasValidDimensions() const override;
@@ -74,7 +75,7 @@ class SVGPathElement final : public SVGPathElementBase {
   // nsIContent interface
   nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
-  SVGAnimatedPathSegList* GetAnimPathSegList() override { return &mD; }
+  SVGAnimatedPathSegList* GetAnimatedPathSegList() override { return &mD; }
 
   nsStaticAtom* GetPathDataAttrName() const override { return nsGkAtoms::d; }
 

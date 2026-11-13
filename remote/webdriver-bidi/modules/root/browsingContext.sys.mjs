@@ -14,11 +14,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
   capture: "chrome://remote/content/shared/Capture.sys.mjs",
   ContextDescriptorType:
     "chrome://remote/content/shared/messagehandler/MessageHandler.sys.mjs",
+  Downloads: "resource://gre/modules/Downloads.sys.mjs",
   error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
   EventPromise: "chrome://remote/content/shared/Sync.sys.mjs",
   generateUUID: "chrome://remote/content/shared/UUID.sys.mjs",
   getTimeoutMultiplier: "chrome://remote/content/shared/AppInfo.sys.mjs",
-  getWebDriverSessionById:
+  getWebDriverSessionByInternalSessionId:
     "chrome://remote/content/shared/webdriver/Session.sys.mjs",
   isWebdriverSafeNavigationURL:
     "chrome://remote/content/shared/BrowsingContextUtils.sys.mjs",
@@ -399,6 +400,16 @@ class BrowsingContextModule extends RootBiDiModule {
    */
 
   /**
+   * Used as an argument for the browsingContext.captureScreenshot command to
+   * represent the maximum dimensions of the output image.
+   *
+   * @typedef ImageSize
+   *
+   * @property {number=} maxHeight
+   * @property {number=} maxWidth
+   */
+
+  /**
    * Used as an argument for browsingContext.captureScreenshot command
    * to represent an element which is going to be a target of the command.
    *
@@ -420,6 +431,8 @@ class BrowsingContextModule extends RootBiDiModule {
    * @param {OriginType=} options.origin
    * @param {ImageFormat=} options.format
    *    Configuration options for the output image.
+   * @param {ImageSize=} options.imageSize
+   *    Maximum dimensions of the output image.
    *
    * @throws {NoSuchFrameError}
    *     If the browsing context cannot be found.
@@ -430,13 +443,16 @@ class BrowsingContextModule extends RootBiDiModule {
       context: contextId,
       origin = OriginType.viewport,
       format = { type: "image/png", quality: undefined },
+      imageSize = null,
     } = options;
 
     lazy.assert.string(
       contextId,
       lazy.pprint`Expected "context" to be a string, got ${contextId}`
     );
-    const context = this._getNavigable(contextId);
+    const context = this._getNavigable(contextId, {
+      supportsPrivilegedScope: true,
+    });
 
     const originTypeValues = Object.values(OriginType);
     lazy.assert.that(
@@ -467,6 +483,24 @@ class BrowsingContextModule extends RootBiDiModule {
         imageQuality => imageQuality >= 0 && imageQuality <= 1,
         lazy.pprint`Expected "quality" to be in the range of 0 to 1, got ${quality}`
       )(quality);
+    }
+
+    let maxHeight, maxWidth;
+    if (imageSize !== null) {
+      lazy.assert.object(
+        imageSize,
+        lazy.pprint`Expected "imageSize" to be an object, got ${imageSize}`
+      );
+
+      maxHeight = imageSize.maxHeight;
+      maxWidth = imageSize.maxWidth;
+      for (const [name, value] of Object.entries({ maxHeight, maxWidth })) {
+        if (value !== undefined && value !== null) {
+          const errorMessage = lazy.pprint`Expected "imageSize.${name}" to be an integer greater than 0, got ${value}`;
+          lazy.assert.integer(value, errorMessage);
+          lazy.assert.that(size => size >= 1, errorMessage)(value);
+        }
+      }
     }
 
     if (clip !== null) {
@@ -546,7 +580,8 @@ class BrowsingContextModule extends RootBiDiModule {
       rect.x,
       rect.y,
       rect.width,
-      rect.height
+      rect.height,
+      { maxHeight, maxWidth }
     );
 
     return {
@@ -582,7 +617,9 @@ class BrowsingContextModule extends RootBiDiModule {
       lazy.pprint`Expected "promptUnload" to be a boolean, got ${promptUnload}`
     );
 
-    const context = this._getNavigable(contextId);
+    const context = this._getNavigable(contextId, {
+      skipPrivilegeCheck: true,
+    });
     lazy.assert.topLevel(
       context,
       lazy.pprint`Browsing context with id ${contextId} is not top-level`
@@ -649,13 +686,9 @@ class BrowsingContextModule extends RootBiDiModule {
         lazy.pprint`Expected "referenceContext" to be a string, got ${referenceContextId}`
       );
 
-      referenceContext =
-        lazy.NavigableManager.getBrowsingContextById(referenceContextId);
-      if (!referenceContext) {
-        throw new lazy.error.NoSuchFrameError(
-          `Browsing Context with id ${referenceContextId} not found`
-        );
-      }
+      referenceContext = this._getNavigable(referenceContextId, {
+        skipPrivilegeCheck: true,
+      });
 
       if (referenceContext.parent) {
         throw new lazy.error.InvalidArgumentError(
@@ -664,7 +697,8 @@ class BrowsingContextModule extends RootBiDiModule {
       }
     }
 
-    let userContext = lazy.UserContextManager.defaultUserContextId;
+    let userContext =
+      this._sessionUserContext ?? lazy.UserContextManager.defaultUserContextId;
     if (referenceContext !== null) {
       userContext =
         lazy.UserContextManager.getIdByBrowsingContext(referenceContext);
@@ -676,11 +710,7 @@ class BrowsingContextModule extends RootBiDiModule {
         lazy.pprint`Expected "userContext" to be a string, got ${userContextId}`
       );
 
-      if (!lazy.UserContextManager.hasUserContextId(userContextId)) {
-        throw new lazy.error.NoSuchUserContextError(
-          `User Context with id ${userContextId} was not found`
-        );
-      }
+      this._assertUserContextId(userContextId);
 
       userContext = userContextId;
 
@@ -907,6 +937,9 @@ class BrowsingContextModule extends RootBiDiModule {
    *     Tree of browsing context information.
    * @throws {NoSuchFrameError}
    *     If the browsing context cannot be found.
+   * @throws {UnsupportedOperationError}
+   *     If "moz:scope" is "chrome" and system access is not allowed, or the
+   *     session is restricted to a single user context.
    */
   getTree(options = {}) {
     const {
@@ -929,6 +962,12 @@ class BrowsingContextModule extends RootBiDiModule {
         `Expected "moz:scope" to be one of ${contextScopes}, ` +
           lazy.pprint`got ${scope}`
       )(scope);
+
+      if (scope == MozContextScope.CHROME && this._isSessionRestricted) {
+        throw new lazy.error.UnsupportedOperationError(
+          `"moz:scope" "${scope}" is not supported in a session restricted to a single user context`
+        );
+      }
 
       if (scope != MozContextScope.CONTENT) {
         // By default only content browsing contexts are allowed.
@@ -953,7 +992,9 @@ class BrowsingContextModule extends RootBiDiModule {
         );
       }
 
-      contexts = [this._getNavigable(rootId, { supportsChromeScope: true })];
+      contexts = [
+        this._getNavigable(rootId, { supportsPrivilegedScope: true }),
+      ];
     } else {
       switch (scope) {
         case MozContextScope.CHROME: {
@@ -963,9 +1004,9 @@ class BrowsingContextModule extends RootBiDiModule {
         }
         default: {
           // Return all top-level browsing contexts.
-          contexts = lazy.TabManager.getBrowsers().map(
-            browser => browser.browsingContext
-          );
+          contexts = lazy.TabManager.getBrowsers({
+            userContext: this._sessionUserContext,
+          }).map(browser => browser.browsingContext);
         }
       }
     }
@@ -1198,7 +1239,9 @@ class BrowsingContextModule extends RootBiDiModule {
       lazy.pprint`Expected "context" to be a string, got ${navigableId}`
     );
 
-    const context = this._getNavigable(navigableId);
+    const context = this._getNavigable(navigableId, {
+      supportsPrivilegedScope: true,
+    });
 
     lazy.assert.object(
       locator,
@@ -1381,7 +1424,11 @@ class BrowsingContextModule extends RootBiDiModule {
       );
     }
 
-    const context = this._getNavigable(contextId);
+    // Skip the privilege check here since navigate needs to work regardless of
+    // the current page. The URL safety check below handles destination restrictions.
+    const context = this._getNavigable(contextId, {
+      skipPrivilegeCheck: true,
+    });
 
     // webProgress will be stable even if the context navigates, retrieve it
     // immediately before doing any asynchronous call.
@@ -1395,6 +1442,8 @@ class BrowsingContextModule extends RootBiDiModule {
         id: context.id,
       },
       retryOnAbort: true,
+      // Reading the base URL is safe and must work while navigating a privileged page.
+      skipPrivilegeCheck: true,
     });
 
     let targetURI;
@@ -1579,14 +1628,11 @@ class BrowsingContextModule extends RootBiDiModule {
       lazy.pprint`Expected "pageRanges" to be an array, got ${settings.pageRanges}`
     );
 
-    const printSettings = await lazy.print.getPrintSettings(settings);
-    const binaryString = await lazy.print.printToBinaryString(
-      context,
-      printSettings
-    );
+    const printSettings = lazy.print.getPrintSettings(settings);
+    const bytes = await lazy.print.printToBytes(context, printSettings);
 
     return {
-      data: btoa(binaryString),
+      data: bytes.toBase64(),
     };
   }
 
@@ -1636,7 +1682,11 @@ class BrowsingContextModule extends RootBiDiModule {
       );
     }
 
-    const context = this._getNavigable(contextId);
+    // Skip the privilege check here since reload needs to work regardless of
+    // the current page. The URL safety check below handles destination restrictions.
+    const context = this._getNavigable(contextId, {
+      skipPrivilegeCheck: true,
+    });
 
     // Disallow refreshing privileged URLs
     // unless system access is enabled.
@@ -1658,9 +1708,16 @@ class BrowsingContextModule extends RootBiDiModule {
         const { sessionHistory } = context;
         const flags = Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
 
-        // Bug 2026546: As workaround use sessionHistory if available to avoid
-        // issues with frames.
-        if (sessionHistory?.count && sessionHistory?.index >= 0) {
+        // Bug 2026546: If available, use sessionHistory to properly reload
+        // top-level contexts which contain frames. Note that sessionHistory
+        // always belongs to the top-level context, so it must only be used
+        // for top-level navigables, otherwise reloading a child navigable
+        // would reload the whole tab.
+        if (
+          context.parent === null &&
+          sessionHistory?.count &&
+          sessionHistory?.index >= 0
+        ) {
           sessionHistory.reload(flags);
         } else {
           context.reload(flags);
@@ -1718,14 +1775,7 @@ class BrowsingContextModule extends RootBiDiModule {
           lazy.pprint`Expected elements of "userContexts" to be a string, got ${userContextId}`
         );
 
-        const internalId =
-          lazy.UserContextManager.getInternalIdById(userContextId);
-
-        if (internalId === null) {
-          throw new lazy.error.NoSuchUserContextError(
-            `User context with id: ${userContextId} doesn't exist`
-          );
-        }
+        const internalId = this._getUserContextInternalId(userContextId);
 
         userContexts.add(internalId);
       }
@@ -1888,6 +1938,9 @@ class BrowsingContextModule extends RootBiDiModule {
    * @param {object=} options
    * @param {string} options.context
    *     Id of the top-level browsing context to record.
+   * @param {string=} options.destinationFolder
+   *     The path of an existing directory to write the recording
+   *     file. Defaults to the preferred downloads directory.
    * @param {MediaTrackConstraints=} options.video
    *     An object describing the desired video track.
    * @param {boolean=} options.audio
@@ -1911,6 +1964,7 @@ class BrowsingContextModule extends RootBiDiModule {
   async startScreencast(options = {}) {
     const {
       context: contextId,
+      destinationFolder = NULL,
       mimeType = "video/webm",
       video = NULL,
       audio = false,
@@ -1927,6 +1981,28 @@ class BrowsingContextModule extends RootBiDiModule {
       navigable,
       lazy.pprint`Browsing context with id ${contextId} is not top-level`
     );
+
+    if (destinationFolder !== NULL) {
+      lazy.assert.string(
+        destinationFolder,
+        lazy.pprint`Expected "destinationFolder" to be a string, got ${destinationFolder}`
+      );
+
+      let destinationFolderInfo;
+      try {
+        destinationFolderInfo = await IOUtils.stat(destinationFolder);
+      } catch {
+        throw new lazy.error.InvalidArgumentError(
+          `Expected "destinationFolder" to be a valid directory, got ${destinationFolder} which could not be accessed on the file system.`
+        );
+      }
+
+      if (destinationFolderInfo?.type !== "directory") {
+        throw new lazy.error.InvalidArgumentError(
+          `Expected "destinationFolder" to be a valid directory, got ${destinationFolder} which exists but is not a directory.`
+        );
+      }
+    }
 
     lazy.assert.string(
       mimeType,
@@ -2000,7 +2076,10 @@ class BrowsingContextModule extends RootBiDiModule {
       },
     });
 
-    const downloadsDir = Services.dirsvc.get("DfltDwnld", Ci.nsIFile).path;
+    const recordingDir =
+      destinationFolder === NULL
+        ? await lazy.Downloads.getPreferredDownloadsDirectory()
+        : destinationFolder;
     const screencast = lazy.generateUUID();
 
     // Extract video file extension from mimeType.
@@ -2014,7 +2093,7 @@ class BrowsingContextModule extends RootBiDiModule {
     }
 
     const path = PathUtils.join(
-      downloadsDir,
+      recordingDir,
       `screencast-${screencast}.${fileExtension}`
     );
 
@@ -2153,7 +2232,12 @@ class BrowsingContextModule extends RootBiDiModule {
       lazy.pprint`Expected "context" to be a string, got ${contextId}`
     );
 
-    const context = this._getNavigable(contextId);
+    // Skip the privilege check here since traverseHistory needs to work
+    // regardless of the current page. The URL safety check below handles
+    // destination restrictions.
+    const context = this._getNavigable(contextId, {
+      skipPrivilegeCheck: true,
+    });
 
     lazy.assert.topLevel(
       context,
@@ -2508,6 +2592,7 @@ class BrowsingContextModule extends RootBiDiModule {
       const {
         canceled,
         contextId,
+        downloadId,
         filepath,
         navigableId,
         navigationId,
@@ -2517,6 +2602,7 @@ class BrowsingContextModule extends RootBiDiModule {
 
       const browsingContextInfo = {
         context: navigableId,
+        download: downloadId,
         navigation: navigationId,
         status: canceled
           ? DownloadEndStatus.canceled
@@ -2544,6 +2630,7 @@ class BrowsingContextModule extends RootBiDiModule {
     if (this.#subscribedEvents.has("browsingContext.downloadWillBegin")) {
       const {
         contextId,
+        downloadId,
         navigationId,
         navigableId,
         suggestedFilename,
@@ -2553,6 +2640,7 @@ class BrowsingContextModule extends RootBiDiModule {
 
       const browsingContextInfo = {
         context: navigableId,
+        download: downloadId,
         navigation: navigationId,
         suggestedFilename,
         timestamp,
@@ -2666,8 +2754,8 @@ class BrowsingContextModule extends RootBiDiModule {
       const navigableId =
         lazy.NavigableManager.getIdForBrowsingContext(browsingContext);
 
-      const session = lazy.getWebDriverSessionById(
-        this.messageHandler.sessionId
+      const session = lazy.getWebDriverSessionByInternalSessionId(
+        this.messageHandler.internalSessionId
       );
       const handlerConfig = session.userPromptHandler.getPromptHandler(
         type == "beforeunload" ? "beforeUnload" : type
@@ -2897,7 +2985,12 @@ class BrowsingContextModule extends RootBiDiModule {
       "_awaitVisibilityState",
       browsingContext.id,
       { value: expectedState, timeout },
-      { retryOnAbort: true }
+      {
+        retryOnAbort: true,
+        // Awaiting the visibility state is safe and can target a context
+        // (e.g. a previously selected tab) regardless of its privilege level.
+        skipPrivilegeCheck: true,
+      }
     );
   }
 
@@ -3009,13 +3102,36 @@ class BrowsingContextModule extends RootBiDiModule {
           height: targetHeight,
           width: targetWidth,
         },
-        { retryOnAbort: true }
+        {
+          retryOnAbort: true,
+          // Awaiting the resized viewport dimensions is safe
+          // regardless of the context's privilege level.
+          skipPrivilegeCheck: true,
+        }
       );
     }
   }
 
   static get supportedCommandsFromContent() {
     return ["_onConfigurationComplete"];
+  }
+
+  static get supportedCommandsInRestrictedSession() {
+    return [
+      "activate",
+      "captureScreenshot",
+      "close",
+      "create",
+      "getTree",
+      "handleUserPrompt",
+      "locateNodes",
+      "navigate",
+      "reload",
+      "setViewport",
+      "startScreencast",
+      "stopScreencast",
+      "traverseHistory",
+    ];
   }
 
   static get supportedEvents() {

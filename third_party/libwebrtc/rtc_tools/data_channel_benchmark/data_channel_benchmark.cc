@@ -61,8 +61,8 @@ ABSL_FLAG(std::string,
           force_fieldtrials,
           "",
           "Field trials control experimental feature code which can be forced. "
-          "E.g. running with --force_fieldtrials=WebRTC-FooFeature/Enable/"
-          " will assign the group Enable to field trial WebRTC-FooFeature.");
+          "E.g. running with --force_fieldtrials=WebRTC-FooFeature/Enabled/"
+          " will assign the group Enabled to field trial WebRTC-FooFeature.");
 
 struct SetupMessage {
   size_t packet_size;
@@ -395,10 +395,12 @@ int main(int argc, char** argv) {
 
   // Make sure that higher severity number means more logs by reversing the
   // webrtc::LoggingSeverity values.
-  auto logging_severity =
-      std::max(0, webrtc::LS_NONE - absl::GetFlag(FLAGS_verbose));
-  webrtc::LogMessage::LogToDebug(
-      static_cast<webrtc::LoggingSeverity>(logging_severity));
+  auto logging_severity = static_cast<webrtc::LoggingSeverity>(
+      std::max(0, webrtc::LS_NONE - absl::GetFlag(FLAGS_verbose)));
+  webrtc::LoggingConfig config;
+  config.set_min_severity(logging_severity);
+  config.set_debug_severity(logging_severity);
+  webrtc::InitializeLogging(std::move(config));
 
   bool is_server = absl::GetFlag(FLAGS_server);
 

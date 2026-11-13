@@ -5,9 +5,10 @@
 #ifndef mozilla_Sandbox_h
 #define mozilla_Sandbox_h
 
+#include <sys/sysctl.h>
+
 #include <cstring>
 #include <string>
-#include <sys/sysctl.h>
 #include <vector>
 
 #include "mozilla/ipc/UtilityProcessSandboxing.h"

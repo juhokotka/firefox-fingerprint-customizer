@@ -7,6 +7,7 @@
 #define mozilla_image_FrameTimeout_h
 
 #include <stdint.h>
+
 #include "mozilla/Assertions.h"
 
 namespace mozilla {
@@ -57,13 +58,7 @@ struct FrameTimeout {
     return FrameTimeout(aRawMilliseconds);
   }
 
-  bool operator==(const FrameTimeout& aOther) const {
-    return mTimeout == aOther.mTimeout;
-  }
-
-  bool operator!=(const FrameTimeout& aOther) const {
-    return !(*this == aOther);
-  }
+  bool operator==(const FrameTimeout& aOther) const = default;
 
   FrameTimeout operator+(const FrameTimeout& aOther) {
     if (*this == Forever() || aOther == Forever()) {

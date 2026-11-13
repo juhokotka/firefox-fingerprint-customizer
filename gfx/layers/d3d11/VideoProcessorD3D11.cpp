@@ -8,10 +8,10 @@
 #include <d3d11_1.h>
 
 #include "gfxPlatform.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/layers/TextureD3D11.h"
-#include "mozilla/Maybe.h"
 
 namespace mozilla {
 namespace layers {
@@ -207,7 +207,7 @@ VideoProcessorD3D11::VideoProcessorD3D11(ID3D11Device* aDevice,
       mVideoContext(aVideoContext),
       mVideoContext1(aVideoContext1) {}
 
-VideoProcessorD3D11::~VideoProcessorD3D11() {}
+VideoProcessorD3D11::~VideoProcessorD3D11() = default;
 
 HRESULT VideoProcessorD3D11::Init(const gfx::IntSize& aSize) {
   if (mSize == aSize) {

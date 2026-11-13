@@ -13,13 +13,17 @@ import io.mockk.impl.annotations.MockK
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.CoroutineScope
 import mozilla.components.concept.sync.AccountObserver
 import mozilla.components.concept.sync.AuthType
 import mozilla.components.concept.sync.OAuthAccount
+import mozilla.components.concept.sync.SyncEngine
 import mozilla.components.service.nimbus.NimbusApi
 import mozilla.components.support.base.observer.ObserverRegistry
 import mozilla.components.support.test.robolectric.testContext
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -27,6 +31,7 @@ import org.junit.runner.RunWith
 import org.mozilla.fenix.GleanMetrics.SyncAuth
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.helpers.FenixGleanTestRule
+import org.mozilla.fenix.helpers.perf.TestStrictModeManager
 import org.mozilla.fenix.utils.Settings
 import org.robolectric.RobolectricTestRunner
 
@@ -34,17 +39,13 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class BackgroundServicesTest {
 
-    @get:Rule
-    val gleanTestRule = FenixGleanTestRule(testContext)
+    @get:Rule val gleanTestRule = FenixGleanTestRule(testContext)
 
-    @MockK
-    private lateinit var context: Context
+    @MockK private lateinit var context: Context
 
-    @MockK
-    private lateinit var settings: Settings
+    @MockK private lateinit var settings: Settings
 
-    @MockK
-    private lateinit var nimbus: NimbusApi
+    @MockK private lateinit var nimbus: NimbusApi
 
     private lateinit var observer: TelemetryAccountObserver
     private lateinit var registry: ObserverRegistry<AccountObserver>
@@ -56,10 +57,11 @@ class BackgroundServicesTest {
 
         val mockComponents: Components = mockk()
         every { mockComponents.settings } returns settings
-        every { mockComponents.nimbus } returns mockk {
-            every { sdk } returns nimbus
-            every { events } returns nimbus
-        }
+        every { mockComponents.nimbus } returns
+            mockk {
+                every { sdk } returns nimbus
+                every { events } returns nimbus
+            }
         every { context.components } returns mockComponents
         every { nimbus.recordEvent(any()) } just Runs
 
@@ -150,4 +152,39 @@ class BackgroundServicesTest {
         }
         confirmVerified(nimbus)
     }
+
+    @Test
+    fun `GIVEN Android Automotive is unavailable WHEN background services are created THEN passwords and credit cards are syncable`() {
+        val supportedEngines = createBackgroundServices(isAndroidAutomotiveAvailable = false).supportedEngines
+
+        assertTrue(supportedEngines.contains(SyncEngine.Passwords))
+        assertTrue(supportedEngines.contains(SyncEngine.CreditCards))
+    }
+
+    @Test
+    fun `GIVEN Android Automotive is available WHEN background services are created THEN passwords and credit cards are not syncable`() {
+        val supportedEngines = createBackgroundServices(isAndroidAutomotiveAvailable = true).supportedEngines
+
+        assertFalse(supportedEngines.contains(SyncEngine.Passwords))
+        assertFalse(supportedEngines.contains(SyncEngine.CreditCards))
+        assertTrue(supportedEngines.contains(SyncEngine.History))
+        assertTrue(supportedEngines.contains(SyncEngine.Bookmarks))
+        assertTrue(supportedEngines.contains(SyncEngine.Tabs))
+    }
+
+    private fun createBackgroundServices(isAndroidAutomotiveAvailable: Boolean) =
+        BackgroundServices(
+            context = testContext,
+            push = mockk(relaxed = true),
+            settings = mockk(relaxed = true),
+            crashReporter = mockk(relaxed = true),
+            historyStorage = mockk(relaxed = true),
+            bookmarkStorage = mockk(relaxed = true),
+            passwordsStorage = mockk(relaxed = true),
+            remoteTabsStorage = mockk(relaxed = true),
+            creditCardsStorage = mockk(relaxed = true),
+            strictMode = TestStrictModeManager(),
+            applicationScope = mockk<CoroutineScope>(relaxed = true),
+            isAndroidAutomotiveAvailable = isAndroidAutomotiveAvailable,
+        )
 }

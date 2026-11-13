@@ -11,18 +11,20 @@
 #include "mozilla/ContentBlockingNotifier.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs_beacon.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/dom/BodyExtractor.h"
 #include "mozilla/dom/FetchBinding.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/Serial.h"
+#include "mozilla/glean/DomMediaMetrics.h"
+#include "mozilla/glean/DomMetrics.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsContentPolicyUtils.h"
 #include "nsContentUtils.h"
 #include "nsIClassOfService.h"
 #include "nsIContentPolicy.h"
 #include "nsIHttpProtocolHandler.h"
-#include "nsIPrivateAttributionService.h"
 #include "nsISupportsPriority.h"
 #include "nsIWebProtocolHandlerRegistrar.h"
 #include "nsIXULAppInfo.h"
@@ -47,7 +49,6 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/CredentialsContainer.h"
 #include "mozilla/dom/Event.h"  // for Event
-#include "mozilla/dom/FeaturePolicyUtils.h"
 #include "mozilla/dom/GamepadServiceTest.h"
 #include "mozilla/dom/LockManager.h"
 #include "mozilla/dom/MIDIAccessManager.h"
@@ -57,7 +58,7 @@
 #include "mozilla/dom/ModelContext.h"
 #include "mozilla/dom/NavigatorLogin.h"
 #include "mozilla/dom/Permissions.h"
-#include "mozilla/dom/PrivateAttribution.h"
+#include "mozilla/dom/PermissionsPolicyUtils.h"
 #include "mozilla/dom/ServiceWorkerContainer.h"
 #include "mozilla/dom/StorageManager.h"
 #include "mozilla/dom/TCPSocket.h"
@@ -67,6 +68,7 @@
 #include "mozilla/dom/VRDisplayEvent.h"
 #include "mozilla/dom/VRServiceTest.h"
 #include "mozilla/dom/WakeLockJS.h"
+#include "mozilla/dom/WindowContext.h"
 #include "mozilla/dom/XRSystem.h"
 #include "mozilla/dom/power/PowerManagerService.h"
 #include "mozilla/dom/workerinternals/RuntimeService.h"
@@ -160,7 +162,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLocks)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLogin)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mModelContext)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPrivateAttribution)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mUserActivation)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWakeLock)
 
@@ -261,8 +262,6 @@ void Navigator::Invalidate() {
 
   mModelContext = nullptr;
 
-  mPrivateAttribution = nullptr;
-
   mUserActivation = nullptr;
 
   mSharePromise = nullptr;
@@ -272,38 +271,27 @@ void Navigator::Invalidate() {
   mClipboard = nullptr;
 }
 
-void Navigator::GetUserAgent(nsAString& aUserAgent, CallerType aCallerType,
+void Navigator::GetUserAgent(nsACString& aUserAgent, CallerType aCallerType,
                              ErrorResult& aRv) const {
-  nsCOMPtr<nsPIDOMWindowInner> window;
+  if (nsIDocShell* docshell = mWindow->GetDocShell()) {
+    BrowsingContext* bc = docshell->GetBrowsingContext();
+    bc->GetCustomUserAgent(aUserAgent);
+    if (!aUserAgent.IsEmpty()) {
+      return;
+    }
 
-  if (mWindow) {
-    window = mWindow;
-    nsIDocShell* docshell = window->GetDocShell();
-    nsString customUserAgent;
-    if (docshell) {
-      docshell->GetBrowsingContext()->GetCustomUserAgent(customUserAgent);
-
-      if (!customUserAgent.IsEmpty()) {
-        aUserAgent = std::move(customUserAgent);
-        return;
-      }
-
-      // Fallback: if the BrowsingContext override hasn't been synced yet,
-      // try the profile cache (content process side).
-      BrowsingContext* bc = docshell->GetBrowsingContext();
-      if (bc) {
-        uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
-        if (userContextId != 0) {
-          ProfileArgs profile;
-          if (WindowGlobalChild::GetProfileForUserContextId(
-                  userContextId, &profile) &&
-              profile.device().isSome()) {
-            const auto& ua = profile.device().ref().userAgent();
-            if (!ua.IsEmpty()) {
-              aUserAgent = NS_ConvertUTF8toUTF16(ua);
-              return;
-            }
-          }
+    // Fallback: if the BrowsingContext override hasn't been synced yet,
+    // try the profile cache (content process side).
+    uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
+    if (userContextId != 0) {
+      ProfileArgs profile;
+      if (WindowGlobalChild::GetProfileForUserContextId(userContextId,
+                                                        &profile) &&
+          profile.device().isSome()) {
+        const auto& ua = profile.device().ref().userAgent();
+        if (!ua.IsEmpty()) {
+          aUserAgent = ua;
+          return;
         }
       }
     }
@@ -345,10 +333,9 @@ void Navigator::GetAppVersion(nsAString& aAppVersion, CallerType aCallerType,
   if (mWindow) {
     nsIDocShell* docshell = mWindow->GetDocShell();
     if (docshell) {
-      nsAutoString customUA;
-      docshell->GetBrowsingContext()->GetCustomUserAgent(customUA);
-      if (!customUA.IsEmpty()) {
-        NS_ConvertUTF16toUTF8 ua8(customUA);
+      nsAutoCString ua8;
+      docshell->GetBrowsingContext()->GetCustomUserAgent(ua8);
+      if (!ua8.IsEmpty()) {
         aAppVersion.AssignLiteral("5.0 (");
         if (ua8.Find("Macintosh") != kNotFound) {
           aAppVersion.AppendLiteral("Macintosh");
@@ -786,8 +773,7 @@ bool Navigator::GlobalPrivacyControl() {
     gpcStatus = loadContext && loadContext->UsePrivateBrowsing() &&
                 StaticPrefs::privacy_globalprivacycontrol_pbmode_enabled();
   }
-  return StaticPrefs::privacy_globalprivacycontrol_functionality_enabled() &&
-         gpcStatus;
+  return gpcStatus;
 }
 
 uint64_t Navigator::HardwareConcurrency() {
@@ -1237,6 +1223,19 @@ void Navigator::RegisterProtocolHandler(const nsAString& aScheme,
     return;
   }
 
+  if (WindowContext* wc = mWindow->GetWindowContext()) {
+    nsLiteralCString frame =
+        wc->IsTop() ? "top_level"_ns
+        : CredentialsContainer::IsSameOriginWithAncestors(mWindow)
+            ? "same_origin_iframe"_ns
+            : "cross_origin_iframe"_ns;
+    glean::dom::register_protocol_handler_calls
+        .Get(frame, wc->HasValidTransientUserGestureActivation()
+                        ? "activated"_ns
+                        : "not_activated"_ns)
+        .Add(1);
+  }
+
   // Determine a title from the document URI.
   nsAutoCString docDisplayHostPort;
   docURI->GetDisplayHostPort(docDisplayHostPort);
@@ -1296,7 +1295,7 @@ class BeaconStreamListener final : public nsIStreamListener {
   ~BeaconStreamListener() = default;
 
  public:
-  BeaconStreamListener() : mLoadGroup(nullptr) {}
+  BeaconStreamListener() = default;
 
   void SetLoadGroup(nsILoadGroup* aLoadGroup) { mLoadGroup = aLoadGroup; }
 
@@ -1305,7 +1304,7 @@ class BeaconStreamListener final : public nsIStreamListener {
   NS_DECL_NSIREQUESTOBSERVER
 
  private:
-  nsCOMPtr<nsILoadGroup> mLoadGroup;
+  nsCOMPtr<nsILoadGroup> mLoadGroup{};
 };
 
 NS_IMPL_ISUPPORTS(BeaconStreamListener, nsIStreamListener, nsIRequestObserver)
@@ -1336,6 +1335,21 @@ bool Navigator::SendBeacon(const nsAString& aUrl,
                            ErrorResult& aRv) {
   if (aData.IsNull()) {
     return SendBeaconInternal(aUrl, nullptr, eBeaconTypeOther, aRv);
+  }
+
+  // A beacon request has keepalive set, and extracting a body from a
+  // ReadableStream with keepalive throws.
+  // https://fetch.spec.whatwg.org/#concept-bodyinit-extract step 10
+  if (StaticPrefs::dom_fetch_streaming_upload()) {
+    if (aData.Value().IsReadableStream()) {
+      aRv.ThrowTypeError("sendBeacon cannot send a ReadableStream body");
+      return false;
+    }
+  } else if (aData.Value().IsReadableStream()) {
+    // Preserve previous behaviour when the pref is false.
+    nsAutoString stringified(u"[object ReadableStream]"_ns);
+    BodyExtractor<const nsAString> body(&stringified);
+    return SendBeaconInternal(aUrl, &body, eBeaconTypeOther, aRv);
   }
 
   if (aData.Value().IsArrayBuffer()) {
@@ -1430,6 +1444,12 @@ bool Navigator::SendBeaconInternal(const nsAString& aUrl,
     securityFlags |= nsILoadInfo::SEC_REQUIRE_CORS_INHERITS_SEC_CONTEXT;
   } else {
     securityFlags |= nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_INHERITS_SEC_CONTEXT;
+  }
+
+  // Bail out only after the spec-mandated validation above, so that a disabled
+  // beacon is indistinguishable from a successful one to content.
+  if (!StaticPrefs::beacon_enabled()) {
+    return true;
   }
 
   nsCOMPtr<nsIChannel> channel;
@@ -1605,8 +1625,8 @@ already_AddRefed<Promise> Navigator::Share(const ShareData& aData,
     return nullptr;
   }
 
-  if (!FeaturePolicyUtils::IsFeatureAllowed(mWindow->GetExtantDoc(),
-                                            u"web-share"_ns)) {
+  if (!PermissionsPolicyUtils::IsFeatureAllowed(mWindow->GetExtantDoc(),
+                                                u"web-share"_ns)) {
     aRv.ThrowNotAllowedError(
         "Document's Permissions Policy does not allow calling "
         "share() from this context.");
@@ -1680,13 +1700,18 @@ already_AddRefed<Promise> Navigator::Share(const ShareData& aData,
       GetCurrentSerialEventTarget(), __func__,
       [self = RefPtr{this}](
           PWindowGlobalChild::SharePromise::ResolveOrRejectValue&& aResult) {
+        if (!self->mSharePromise) {
+          // Navigator is deactivated, no one to report to.
+          return;
+        }
         if (aResult.IsResolve()) {
           if (NS_SUCCEEDED(aResult.ResolveValue())) {
             self->mSharePromise->MaybeResolveWithUndefined();
           } else {
             self->mSharePromise->MaybeReject(aResult.ResolveValue());
           }
-        } else if (self->mSharePromise) {
+        }
+        {
           // IPC died
           self->mSharePromise->MaybeReject(NS_BINDING_ABORTED);
         }
@@ -1703,8 +1728,8 @@ bool Navigator::CanShare(const ShareData& aData) {
     return false;
   }
 
-  if (!FeaturePolicyUtils::IsFeatureAllowed(mWindow->GetExtantDoc(),
-                                            u"web-share"_ns)) {
+  if (!PermissionsPolicyUtils::IsFeatureAllowed(mWindow->GetExtantDoc(),
+                                                u"web-share"_ns)) {
     return false;
   }
 
@@ -1778,8 +1803,8 @@ void Navigator::GetGamepads(nsTArray<RefPtr<Gamepad>>& aGamepads,
   NS_ENSURE_TRUE_VOID(mWindow->GetDocShell());
   nsGlobalWindowInner* win = nsGlobalWindowInner::Cast(mWindow);
 
-  if (!FeaturePolicyUtils::IsFeatureAllowed(win->GetExtantDoc(),
-                                            u"gamepad"_ns)) {
+  if (!PermissionsPolicyUtils::IsFeatureAllowed(win->GetExtantDoc(),
+                                                u"gamepad"_ns)) {
     aRv.ThrowSecurityError(
         "Document's Permission Policy does not allow calling "
         "getGamepads() from this context.");
@@ -1829,8 +1854,8 @@ already_AddRefed<Promise> Navigator::GetVRDisplays(ErrorResult& aRv) {
     return nullptr;
   }
 
-  if (!FeaturePolicyUtils::IsFeatureAllowed(mWindow->GetExtantDoc(),
-                                            u"vr"_ns)) {
+  if (!PermissionsPolicyUtils::IsFeatureAllowed(mWindow->GetExtantDoc(),
+                                                u"vr"_ns)) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return nullptr;
   }
@@ -2243,7 +2268,7 @@ void Navigator::ClearOscpuCache() {
 nsresult Navigator::GetUserAgent(nsPIDOMWindowInner* aWindow,
                                  Document* aCallerDoc,
                                  Maybe<bool> aShouldResistFingerprinting,
-                                 nsAString& aUserAgent) {
+                                 nsACString& aUserAgent) {
   MOZ_ASSERT(NS_IsMainThread());
 
   /*
@@ -2269,9 +2294,9 @@ nsresult Navigator::GetUserAgent(nsPIDOMWindowInner* aWindow,
   // We will skip the override and pass to httpHandler to get spoofed userAgent
   // when 'privacy.resistFingerprinting' is true.
   if (!shouldResistFingerprinting) {
-    nsAutoString override;
-    nsresult rv =
-        mozilla::Preferences::GetString("general.useragent.override", override);
+    nsAutoCString override;
+    nsresult rv = mozilla::Preferences::GetCString("general.useragent.override",
+                                                   override);
 
     if (NS_SUCCEEDED(rv)) {
       aUserAgent = std::move(override);
@@ -2283,9 +2308,7 @@ nsresult Navigator::GetUserAgent(nsPIDOMWindowInner* aWindow,
   // return a spoofed userAgent which reveals the platform but not the
   // specific OS version, etc.
   if (shouldResistFingerprinting) {
-    nsAutoCString spoofedUA;
-    nsRFPService::GetSpoofedUserAgent(spoofedUA);
-    CopyASCIItoUTF16(spoofedUA, aUserAgent);
+    nsRFPService::GetSpoofedUserAgent(aUserAgent);
     return NS_OK;
   }
 
@@ -2296,13 +2319,10 @@ nsresult Navigator::GetUserAgent(nsPIDOMWindowInner* aWindow,
     return rv;
   }
 
-  nsAutoCString ua;
-  rv = service->GetUserAgent(ua);
+  rv = service->GetUserAgent(aUserAgent);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
-
-  CopyASCIItoUTF16(ua, aUserAgent);
 
   if (!aWindow) {
     return NS_OK;
@@ -2322,12 +2342,10 @@ nsresult Navigator::GetUserAgent(nsPIDOMWindowInner* aWindow,
     // Do not return user agent from the request
     // if the user agent of the channel is outdated.
     if (!IsUserAgentHeaderOutdated) {
-      nsAutoCString userAgent;
-      rv = httpChannel->GetRequestHeader("User-Agent"_ns, userAgent);
+      rv = httpChannel->GetRequestHeader("User-Agent"_ns, aUserAgent);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
-      CopyASCIItoUTF16(userAgent, aUserAgent);
     }
   }
   return NS_OK;
@@ -2369,7 +2387,7 @@ already_AddRefed<Promise> Navigator::RequestMediaKeySystemAccess(
 
   Document* doc = mWindow->GetExtantDoc();
   if (doc &&
-      !FeaturePolicyUtils::IsFeatureAllowed(doc, u"encrypted-media"_ns)) {
+      !PermissionsPolicyUtils::IsFeatureAllowed(doc, u"encrypted-media"_ns)) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return nullptr;
   }
@@ -2417,6 +2435,7 @@ dom::MediaSession* Navigator::MediaSession() {
 dom::AudioSession* Navigator::AudioSession() {
   if (!mAudioSession) {
     mAudioSession = new dom::AudioSession(GetWindow());
+    glean::media_audio_session::api_used.Add(1);
   }
   return mAudioSession;
 }
@@ -2478,30 +2497,23 @@ dom::ModelContext* Navigator::ModelContext() {
   return mModelContext;
 }
 
-dom::PrivateAttribution* Navigator::PrivateAttribution() {
-  if (!mPrivateAttribution) {
-    mPrivateAttribution = new dom::PrivateAttribution(GetWindow()->AsGlobal());
-  }
-  return mPrivateAttribution;
-}
-
 /* static */
 bool Navigator::Webdriver() {
 #ifdef ENABLE_WEBDRIVER
   nsCOMPtr<nsIMarionette> marionette = do_GetService(NS_MARIONETTE_CONTRACTID);
   if (marionette) {
-    bool marionetteRunning = false;
-    marionette->GetRunning(&marionetteRunning);
-    if (marionetteRunning) {
+    bool isBrowserAutomationRunning = false;
+    marionette->GetIsBrowserAutomationRunning(&isBrowserAutomationRunning);
+    if (isBrowserAutomationRunning) {
       return true;
     }
   }
 
   nsCOMPtr<nsIRemoteAgent> agent = do_GetService(NS_REMOTEAGENT_CONTRACTID);
   if (agent) {
-    bool remoteAgentRunning = false;
-    agent->GetRunning(&remoteAgentRunning);
-    if (remoteAgentRunning) {
+    bool isBrowserAutomationRunning = false;
+    agent->GetIsBrowserAutomationRunning(&isBrowserAutomationRunning);
+    if (isBrowserAutomationRunning) {
       return true;
     }
   }

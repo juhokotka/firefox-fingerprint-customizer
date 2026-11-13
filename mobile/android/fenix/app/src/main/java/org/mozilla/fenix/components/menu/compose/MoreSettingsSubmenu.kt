@@ -8,10 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -19,14 +17,14 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import mozilla.components.compose.base.badge.StatusBadge
+import mozilla.components.compose.base.theme.PreviewThemeProvider
+import mozilla.components.compose.base.theme.Theme
 import mozilla.components.compose.base.theme.information
+import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.menu.store.SummarizationMenuState
 import org.mozilla.fenix.components.menu.store.TranslationInfo
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.PreviewThemeProvider
-import org.mozilla.fenix.theme.Theme
-import mozilla.components.ui.icons.R as iconsR
 
 @Suppress("LongParameterList", "CognitiveComplexMethod")
 @Composable
@@ -41,9 +39,11 @@ internal fun MoreSettingsSubmenu(
     isOpenInAppMenuHighlighted: Boolean,
     translationInfo: TranslationInfo,
     showShortcuts: Boolean,
+    showSaveToCollection: Boolean,
     isAndroidAutomotiveAvailable: Boolean,
     summarizationMenuState: SummarizationMenuState,
     isPrivate: Boolean,
+    showTabGroupsInMenu: Boolean,
     onWebCompatReporterClick: () -> Unit,
     onSummarizePageMenuExposed: () -> Unit,
     onSummarizePageClick: () -> Unit,
@@ -54,11 +54,10 @@ internal fun MoreSettingsSubmenu(
     onPrintMenuClick: () -> Unit,
     onOpenInAppMenuClick: () -> Unit,
     onMoveToNonPrivateTabMenuClick: () -> Unit,
+    onAddToTabGroupClick: () -> Unit,
 ) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        TranslationSection(
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        TranslationMenuItem(
             translationInfo = translationInfo,
             isReaderViewActive = isReaderViewActive,
         )
@@ -85,7 +84,11 @@ internal fun MoreSettingsSubmenu(
             isInstallable = isInstallable,
             onAddToHomeScreenMenuClick = onAddToHomeScreenMenuClick,
         )
+        if (showTabGroupsInMenu) {
+            AddToTabGroupMenuItem(onAddToTabGroupClick = onAddToTabGroupClick)
+        }
         SaveToCollectionMenuItem(
+            showSaveToCollection = showSaveToCollection,
             onSaveToCollectionMenuClick = onSaveToCollectionMenuClick,
         )
         OpenInAppMenuItem(
@@ -94,77 +97,10 @@ internal fun MoreSettingsSubmenu(
             isOpenInAppMenuHighlighted = isOpenInAppMenuHighlighted,
             onOpenInAppMenuClick = onOpenInAppMenuClick,
         )
-        SaveAsPdfMenuItem(
-            onSaveAsPDFMenuClick = onSaveAsPDFMenuClick,
-        )
+        SaveAsPdfMenuItem(onSaveAsPDFMenuClick = onSaveAsPDFMenuClick)
         PrintMenuItem(
             isAndroidAutomotiveAvailable = isAndroidAutomotiveAvailable,
             onPrintMenuClick = onPrintMenuClick,
-        )
-    }
-}
-
-@Composable
-private fun TranslationSection(
-    translationInfo: TranslationInfo,
-    isReaderViewActive: Boolean,
-) {
-    if (translationInfo.isTranslationSupported) {
-        TranslationMenuItem(
-            translationInfo = translationInfo,
-            isReaderViewActive = isReaderViewActive,
-        )
-    }
-}
-
-/**
- * Summarization menu item.
- *
- * @param summarizationMenuState The state of the summarization menu.
- * @param onSummarizePageMenuExposed A callback to be executed when the menu is exposed to the user.
- * it will be used to know when to remove the highlight.
- * @param onSummarizePageClick A callback to be executed when the menu item is clicked.
- */
-@Composable
-private fun SummarizationMenuItem(
-    summarizationMenuState: SummarizationMenuState,
-    onSummarizePageMenuExposed: () -> Unit,
-    onSummarizePageClick: () -> Unit,
-) {
-    if (summarizationMenuState.visible) {
-        LaunchedEffect(Unit) {
-            if (summarizationMenuState.highlighted) {
-                onSummarizePageMenuExposed()
-            }
-        }
-        val state: MenuItemState = if (summarizationMenuState.enabled) {
-            MenuItemState.ENABLED
-        } else {
-            MenuItemState.DISABLED
-        }
-
-        val containerColor = if (summarizationMenuState.enabled) {
-            MaterialTheme.colorScheme.information
-        } else {
-            MaterialTheme.colorScheme.information.copy(alpha = 0.38f)
-        }
-
-        MenuItem(
-            label = stringResource(id = R.string.browser_menu_summarize_page),
-            labelModifier = Modifier.wrapContentWidth(),
-            beforeIconPainter = painterResource(id = iconsR.drawable.mozac_ic_lightning_24),
-            isBeforeIconHighlighted = summarizationMenuState.highlighted,
-            onClick = onSummarizePageClick,
-            state = state,
-            afterContent = {
-                if (summarizationMenuState.showNewFeatureBadge) {
-                    StatusBadge(
-                        containerColor = containerColor,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        status = stringResource(R.string.browser_menu_summarize_page_badge),
-                    )
-                }
-            },
         )
     }
 }
@@ -179,6 +115,25 @@ private fun WebCompatReporterMenuItem(
         beforeIconPainter = painterResource(id = iconsR.drawable.mozac_ic_lightbulb_24),
         state = if (isWebCompatEnabled) MenuItemState.ENABLED else MenuItemState.DISABLED,
         onClick = onWebCompatReporterClick,
+    )
+}
+
+@Composable
+private fun AddToTabGroupMenuItem(onAddToTabGroupClick: () -> Unit) {
+    MenuItem(
+        label = stringResource(id = R.string.browser_menu_add_to_tab_group),
+        stateDescription = stringResource(id = R.string.browser_menu_page_badge_text),
+        beforeIconPainter = painterResource(id = iconsR.drawable.mozac_ic_tab_group_24),
+        state = MenuItemState.ENABLED,
+        isBeforeIconHighlighted = true,
+        onClick = onAddToTabGroupClick,
+        afterContent = {
+            StatusBadge(
+                containerColor = MaterialTheme.colorScheme.information,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                status = stringResource(R.string.browser_menu_page_badge_text),
+            )
+        },
     )
 }
 
@@ -204,11 +159,12 @@ private fun AddToHomeScreenMenuItem(
 ) {
     if (isAddToHomeScreenSupported) {
         MenuItem(
-            label = if (isInstallable) {
-                stringResource(id = R.string.browser_menu_add_app_to_homescreen)
-            } else {
-                stringResource(id = R.string.browser_menu_add_to_homescreen)
-            },
+            label =
+                if (isInstallable) {
+                    stringResource(id = R.string.browser_menu_add_app_to_homescreen)
+                } else {
+                    stringResource(id = R.string.browser_menu_add_to_homescreen)
+                },
             beforeIconPainter = painterResource(id = iconsR.drawable.mozac_ic_add_to_homescreen_24),
             onClick = onAddToHomeScreenMenuClick,
         )
@@ -217,13 +173,16 @@ private fun AddToHomeScreenMenuItem(
 
 @Composable
 private fun SaveToCollectionMenuItem(
+    showSaveToCollection: Boolean,
     onSaveToCollectionMenuClick: () -> Unit,
 ) {
-    MenuItem(
-        label = stringResource(id = R.string.browser_menu_save_to_collection_2),
-        beforeIconPainter = painterResource(id = iconsR.drawable.mozac_ic_collection_24),
-        onClick = onSaveToCollectionMenuClick,
-    )
+    if (showSaveToCollection) {
+        MenuItem(
+            label = stringResource(id = R.string.browser_menu_save_to_collection_2),
+            beforeIconPainter = painterResource(id = iconsR.drawable.mozac_ic_collection_24),
+            onClick = onSaveToCollectionMenuClick,
+        )
+    }
 }
 
 @Composable
@@ -249,11 +208,12 @@ private fun OpenInAppMenuItem(
 ) {
     if (hasExternalApp) {
         MenuItem(
-            label = if (externalAppName != "") {
-                stringResource(id = R.string.browser_menu_open_in_fenix, externalAppName)
-            } else {
-                stringResource(id = R.string.browser_menu_open_app_link)
-            },
+            label =
+                if (externalAppName != "") {
+                    stringResource(id = R.string.browser_menu_open_in_fenix, externalAppName)
+                } else {
+                    stringResource(id = R.string.browser_menu_open_app_link)
+                },
             beforeIconPainter = painterResource(id = iconsR.drawable.mozac_ic_more_grid_24),
             isBeforeIconHighlighted = isOpenInAppMenuHighlighted,
             state = MenuItemState.ENABLED,
@@ -269,9 +229,7 @@ private fun OpenInAppMenuItem(
 }
 
 @Composable
-private fun SaveAsPdfMenuItem(
-    onSaveAsPDFMenuClick: () -> Unit,
-) {
+private fun SaveAsPdfMenuItem(onSaveAsPDFMenuClick: () -> Unit) {
     MenuItem(
         label = stringResource(id = R.string.browser_menu_save_as_pdf_2),
         beforeIconPainter = painterResource(id = iconsR.drawable.mozac_ic_save_file_24),
@@ -294,67 +252,41 @@ private fun PrintMenuItem(
 }
 
 @Composable
-private fun TranslationMenuItem(
-    translationInfo: TranslationInfo,
-    isReaderViewActive: Boolean,
-) {
-    if (translationInfo.isTranslated) {
-        MenuItem(
-            label = stringResource(id = R.string.browser_menu_translated),
-            beforeIconPainter = painterResource(id = iconsR.drawable.mozac_ic_translate_active_24),
-            state = MenuItemState.ACTIVE,
-            onClick = translationInfo.onTranslatePageMenuClick,
-        ) {
-            Badge(
-                badgeText = translationInfo.translatedLanguage,
-                state = MenuItemState.ACTIVE,
-            )
-        }
-    } else {
-        MenuItem(
-            label = stringResource(id = R.string.browser_menu_translate_page_2),
-            beforeIconPainter = painterResource(id = iconsR.drawable.mozac_ic_translate_24),
-            state = if (isReaderViewActive || translationInfo.isPdf) MenuItemState.DISABLED else MenuItemState.ENABLED,
-            onClick = translationInfo.onTranslatePageMenuClick,
-        )
-    }
-}
-
-@Composable
 private fun ShortcutsMenuItem(
     isPinned: Boolean,
     onShortcutsMenuClick: () -> Unit,
 ) {
     MenuItem(
-        label = if (isPinned) {
-            stringResource(id = R.string.browser_menu_remove_from_shortcuts)
-        } else {
-            stringResource(id = R.string.browser_menu_add_to_shortcuts)
-        },
-        beforeIconPainter = if (isPinned) {
-            painterResource(id = iconsR.drawable.mozac_ic_pin_fill_24)
-        } else {
-            painterResource(id = iconsR.drawable.mozac_ic_pin_24)
-        },
-        state = if (isPinned) {
-            MenuItemState.ACTIVE
-        } else {
-            MenuItemState.ENABLED
-        },
+        label =
+            if (isPinned) {
+                stringResource(id = R.string.browser_menu_remove_from_shortcuts)
+            } else {
+                stringResource(id = R.string.browser_menu_add_to_shortcuts)
+            },
+        beforeIconPainter =
+            if (isPinned) {
+                painterResource(id = iconsR.drawable.mozac_ic_pin_fill_24)
+            } else {
+                painterResource(id = iconsR.drawable.mozac_ic_pin_24)
+            },
+        state =
+            if (isPinned) {
+                MenuItemState.ACTIVE
+            } else {
+                MenuItemState.ENABLED
+            },
         onClick = onShortcutsMenuClick,
     )
 }
 
 @Preview
 @Composable
-private fun MoreSettingsSubmenuPreview(
-    @PreviewParameter(PreviewThemeProvider::class) theme: Theme,
-) {
+private fun MoreSettingsSubmenuPreview(@PreviewParameter(PreviewThemeProvider::class) theme: Theme) {
     FirefoxTheme(theme) {
         Column(
-            modifier = Modifier
-                .background(color = MaterialTheme.colorScheme.surface)
-                .padding(all = FirefoxTheme.layout.space.static200),
+            modifier =
+                Modifier.background(color = MaterialTheme.colorScheme.surface)
+                    .padding(all = FirefoxTheme.layout.space.static200)
         ) {
             MenuGroup {
                 MoreSettingsSubmenu(
@@ -366,21 +298,25 @@ private fun MoreSettingsSubmenuPreview(
                     isReaderViewActive = false,
                     isWebCompatEnabled = true,
                     isOpenInAppMenuHighlighted = false,
-                    translationInfo = TranslationInfo(
-                        isTranslationSupported = true,
-                        isPdf = false,
-                        isTranslated = true,
-                        translatedLanguage = "English",
-                        onTranslatePageMenuClick = {},
-                    ),
+                    translationInfo =
+                        TranslationInfo(
+                            isTranslationSupported = true,
+                            isPdf = false,
+                            isTranslated = true,
+                            translatedLanguage = "English",
+                            onTranslatePageMenuClick = {},
+                        ),
                     showShortcuts = true,
+                    showSaveToCollection = true,
                     isAndroidAutomotiveAvailable = false,
-                    summarizationMenuState = SummarizationMenuState.Default.copy(
-                        visible = true,
-                        highlighted = true,
-                        showNewFeatureBadge = true,
-                    ),
+                    summarizationMenuState =
+                        SummarizationMenuState.Default.copy(
+                            visible = true,
+                            highlighted = true,
+                            showNewFeatureBadge = true,
+                        ),
                     isPrivate = true,
+                    showTabGroupsInMenu = true,
                     onWebCompatReporterClick = {},
                     onSummarizePageMenuExposed = {},
                     onSummarizePageClick = {},
@@ -391,6 +327,7 @@ private fun MoreSettingsSubmenuPreview(
                     onPrintMenuClick = {},
                     onOpenInAppMenuClick = {},
                     onMoveToNonPrivateTabMenuClick = {},
+                    onAddToTabGroupClick = {},
                 )
             }
         }
@@ -399,14 +336,12 @@ private fun MoreSettingsSubmenuPreview(
 
 @Preview
 @Composable
-private fun MoreSettingsSubmenuDisabledOpenPreview(
-    @PreviewParameter(PreviewThemeProvider::class) theme: Theme,
-) {
+private fun MoreSettingsSubmenuDisabledOpenPreview(@PreviewParameter(PreviewThemeProvider::class) theme: Theme) {
     FirefoxTheme(theme) {
         Column(
-            modifier = Modifier
-                .background(color = MaterialTheme.colorScheme.surface)
-                .padding(all = FirefoxTheme.layout.space.static200),
+            modifier =
+                Modifier.background(color = MaterialTheme.colorScheme.surface)
+                    .padding(all = FirefoxTheme.layout.space.static200)
         ) {
             MenuGroup {
                 MoreSettingsSubmenu(
@@ -418,17 +353,20 @@ private fun MoreSettingsSubmenuDisabledOpenPreview(
                     isReaderViewActive = false,
                     isWebCompatEnabled = true,
                     isOpenInAppMenuHighlighted = true,
-                    translationInfo = TranslationInfo(
-                        isTranslationSupported = true,
-                        isPdf = false,
-                        isTranslated = false,
-                        translatedLanguage = "English",
-                        onTranslatePageMenuClick = {},
-                    ),
+                    translationInfo =
+                        TranslationInfo(
+                            isTranslationSupported = true,
+                            isPdf = false,
+                            isTranslated = false,
+                            translatedLanguage = "English",
+                            onTranslatePageMenuClick = {},
+                        ),
                     showShortcuts = true,
+                    showSaveToCollection = true,
                     isAndroidAutomotiveAvailable = false,
                     summarizationMenuState = SummarizationMenuState.Default,
                     isPrivate = false,
+                    showTabGroupsInMenu = false,
                     onWebCompatReporterClick = {},
                     onSummarizePageMenuExposed = {},
                     onSummarizePageClick = {},
@@ -439,6 +377,7 @@ private fun MoreSettingsSubmenuDisabledOpenPreview(
                     onPrintMenuClick = {},
                     onOpenInAppMenuClick = {},
                     onMoveToNonPrivateTabMenuClick = {},
+                    onAddToTabGroupClick = {},
                 )
             }
         }

@@ -6,11 +6,12 @@
 #define mozilla_layers_OverscrollHandoffChain_h
 
 #include <vector>
-#include "mozilla/RefPtr.h"   // for RefPtr
-#include "nsISupportsImpl.h"  // for NS_INLINE_DECL_THREADSAFE_REFCOUNTING
-#include "APZUtils.h"         // for CancelAnimationFlags
-#include "mozilla/layers/LayersTypes.h"  // for Layer::ScrollDirection
+
+#include "APZUtils.h"                    // for CancelAnimationFlags
 #include "Units.h"                       // for ScreenPoint
+#include "mozilla/RefPtr.h"              // for RefPtr
+#include "mozilla/layers/LayersTypes.h"  // for Layer::ScrollDirection
+#include "nsISupportsImpl.h"  // for NS_INLINE_DECL_THREADSAFE_REFCOUNTING
 
 namespace mozilla {
 
@@ -29,7 +30,7 @@ class AsyncPanZoomController;
 class OverscrollHandoffChain {
  protected:
   // Reference-counted classes cannot have public destructors.
-  ~OverscrollHandoffChain();
+  ~OverscrollHandoffChain() = default;
 
  public:
   // Threadsafe so that the controller and sampler threads can both maintain
@@ -68,6 +69,10 @@ class OverscrollHandoffChain {
   // Clear overscroll all the way up the chain.
   void ClearOverscroll() const;
 
+  // Clear the handed-off gesture flag all the way up the chain, to be called
+  // when the gesture driving the handoff ends.
+  void ClearScrolledByHandedOffGesture() const;
+
   // Snap back the APZC that is overscrolled on the subset of the chain from
   // |aStart| onwards, if any.
   void SnapBackOverscrolledApzc(const AsyncPanZoomController* aStart) const;
@@ -98,14 +103,24 @@ class OverscrollHandoffChain {
   // Determine whether any APZC along this handoff chain is autoscroll.
   bool HasAutoscrollApzc() const;
 
-  // Find the first APZC in this handoff chain that can be scrolled by |aInput|.
-  // Since overscroll-behavior can restrict handoff in some directions,
-  // |aOutAllowedScrollDirections| is populated with the scroll directions
-  // in which scrolling of the returned APZC is allowed.
-  // |aIncludeOverscroll| is an optional flag whether to consider overscrollable
-  // as scrollable or not.
+  // Determine whether any APZC along this handoff chain has an animation
+  // running.
+  bool HasAnimatingApzc() const;
+
+  // Find the APZC in this handoff chain that |aInput| should be applied to.
+  // The chain is scanned from the innermost APZC outwards for the first one
+  // that can be scrolled by |aInput|. If none can, and |aIncludeOverscroll| is
+  // Yes, the APZCs the scan reached are examined again, this time from the
+  // outermost inwards, for the first one that can show an overscroll effect
+  // instead. That second pass currently only runs for pan gestures.
+  // |aOutAllowedScrollDirections| is populated with the overscroll-behavior
+  // handoff restrictions of the APZCs that precede the returned one: the
+  // caller rebuilds the handoff chain from the returned APZC, so those APZCs
+  // drop out of it and can no longer enforce their own restrictions when the
+  // scroll is dispatched. Nothing drops out of the chain when nullptr is
+  // returned, so both directions are reported in that case.
   enum class IncludeOverscroll : bool { No, Yes };
-  RefPtr<AsyncPanZoomController> FindFirstScrollable(
+  RefPtr<AsyncPanZoomController> FindScrollTarget(
       const InputData& aInput, ScrollDirections* aOutAllowedScrollDirections,
       IncludeOverscroll aIncludeOverscroll = IncludeOverscroll::Yes) const;
 
@@ -141,6 +156,8 @@ struct OverscrollHandoffState {
         mChainIndex(0),
         mPanDistance(aPanDistance),
         mScrollSource(aScrollSource) {}
+
+  bool IsScrolledByHandedOffGesture() const;
 
   // The chain of APZCs along which we hand off scroll.
   // This is const to indicate that the chain does not change over the

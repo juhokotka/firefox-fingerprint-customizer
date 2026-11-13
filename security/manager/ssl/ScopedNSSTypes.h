@@ -11,6 +11,7 @@
 #include <limits>
 #include <memory>
 
+#include "NSSErrorsService.h"
 #include "cert.h"
 #include "cms.h"
 #include "cryptohi.h"
@@ -18,7 +19,6 @@
 #include "mozilla/Likely.h"
 #include "nsDebug.h"
 #include "nsError.h"
-#include "NSSErrorsService.h"
 #include "pk11hpke.h"
 #include "pk11pub.h"
 #include "pkcs12.h"

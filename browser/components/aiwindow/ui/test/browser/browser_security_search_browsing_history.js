@@ -109,6 +109,37 @@ function assertUiChannelCarriesThumbnailFavicon(conversation, expectedUrls) {
 }
 
 /**
+ * The other half of the UI/model split: spotlighting is a prompt-facing
+ * transform, so it must be applied where the model payload is built and nowhere
+ * earlier. The history grid renders record.title verbatim, so sanitizing at row
+ * construction instead leaks `(Untrusted webpage data)` - plus the wrapper
+ * quotes and backslash escaping - straight into chrome UI. Asserting the exact
+ * seeded titles (rather than just the absence of the tag) also pins the
+ * decision that the UI channel is neither truncated nor escaped.
+ *
+ * @param {ChatConversation} conversation
+ * @param {Map<string, string>} expectedTitleByUrl - Raw seeded title per URL.
+ */
+function assertUiChannelTitlesNotSpotlighted(conversation, expectedTitleByUrl) {
+  const byUrl = new Map(
+    conversation.getHistoryResultsSnapshot().map(r => [r.url, r])
+  );
+  for (const [url, expectedTitle] of expectedTitleByUrl) {
+    const record = byUrl.get(url);
+    Assert.ok(record, `UI history grid received a record for ${url}.`);
+    Assert.equal(
+      record.title,
+      expectedTitle,
+      `UI-channel title for ${url} is the unmodified page title.`
+    );
+    Assert.ok(
+      !record.title.includes("(Untrusted webpage data)"),
+      "UI-channel title carries no spotlighting tag."
+    );
+  }
+}
+
+/**
  * The leak tripwire: inspect the search_browsing_history tool message exactly as
  * it is serialized for the model and fail if a record carries a field the model
  * must never see. searchBrowsingHistory builds the body from an allowlist, so
@@ -376,7 +407,17 @@ add_task(async function test_search_browsing_history_returns_sanitized_data() {
     noTitleUrl,
   ]);
 
-  mockEngineManager.rejectAllRequests();
+  assertUiChannelTitlesNotSpotlighted(
+    conversation,
+    new Map([
+      [shortUrl, shortTitle],
+      [longUrl, longTitle],
+      [trickyUrl, trickyTitle],
+      [noTitleUrl, noTitleUrl],
+    ])
+  );
+
+  await mockEngineManager.rejectAllRequests();
   mockEngineManager.cleanupMocks();
   await BrowserTestUtils.closeWindow(win);
 });
@@ -474,7 +515,7 @@ add_task(
 
     assertModelHistoryPayloadSanitized(conversation);
 
-    mockEngineManager.rejectAllRequests();
+    await mockEngineManager.rejectAllRequests();
     mockEngineManager.cleanupMocks();
     await BrowserTestUtils.closeWindow(win);
   }
@@ -545,7 +586,7 @@ add_task(async function test_search_browsing_history_no_results_shape() {
     "untrustedInput stays false when there are no results."
   );
 
-  mockEngineManager.rejectAllRequests();
+  await mockEngineManager.rejectAllRequests();
   mockEngineManager.cleanupMocks();
   await BrowserTestUtils.closeWindow(win);
 });
@@ -621,7 +662,7 @@ add_task(async function test_search_browsing_history_caps_results() {
   // Even at the cap, no record reaches the model with thumbnail/favicon.
   assertModelHistoryPayloadSanitized(conversation);
 
-  mockEngineManager.rejectAllRequests();
+  await mockEngineManager.rejectAllRequests();
   mockEngineManager.cleanupMocks();
   await BrowserTestUtils.closeWindow(win);
 });
@@ -691,7 +732,7 @@ add_task(
       );
     }
 
-    mockEngineManager.rejectAllRequests();
+    await mockEngineManager.rejectAllRequests();
     mockEngineManager.cleanupMocks();
     await BrowserTestUtils.closeWindow(win);
   }

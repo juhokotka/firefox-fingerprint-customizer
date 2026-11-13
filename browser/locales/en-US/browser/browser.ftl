@@ -21,10 +21,20 @@ browser-main-private-suffix-for-content = Private Browsing
 # "PRIVATE_BROWSING_SHORTCUT_TITLE" in custom.properties
 private-browsing-shortcut-text-2 = { -brand-shortcut-name } Private Browsing
 
+# This MUST match the translation of "BRIEF_APP_DESC" in custom.properties
+browser-shortcut-description = Fast and private web browsing
+
 ##
 
-urlbar-identity-button =
-    .aria-label = View site information
+# Variables
+#   $count (number) - The number of blocked trackers on this page. Please leave the mention of blocked trackers out when there are none.
+urlbar-identity-button2 =
+    .aria-label =
+        { $count ->
+            [0] View site information
+            [1] View site information (1 tracker blocked)
+           *[other] View site information ({ $count } trackers blocked)
+        }
 
 ## Tooltips for images appearing in the address bar
 
@@ -89,6 +99,8 @@ urlbar-result-menu-tip-get-help2 = Get help
     .accesskey = h
 urlbar-result-menu-dismiss-suggestion2 = Dismiss this suggestion
     .accesskey = D
+urlbar-result-menu-remove-top-site = Remove this top site
+    .accesskey = T
 urlbar-result-menu-manage-firefox-suggest2 = Manage { -firefox-suggest-brand-name }
     .accesskey = M
 # Some urlbar suggestions show the user's approximate location as automatically
@@ -99,6 +111,17 @@ urlbar-result-menu-manage-firefox-suggest2 = Manage { -firefox-suggest-brand-nam
 urlbar-result-menu-report-inaccurate-location2 = Report inaccurate location
 urlbar-result-menu-show-less-frequently2 = Show less frequently
 urlbar-result-menu-dont-show-weather-suggestions2 = Don’t show weather suggestions
+
+# Shown in the urlbar input field context menu to dismiss an adaptive autofill
+# suggestion.
+urlbar-input-dismiss-autofill =
+    .label = Dismiss this suggestion
+    .accesskey = i
+# Shown in the urlbar input field context menu to remove an adaptive autofill
+# URL from history.
+urlbar-input-remove-from-history =
+    .label = Remove from history
+    .accesskey = e
 
 # Used for Split Button.
 urlbar-splitbutton-dropmarker =
@@ -177,6 +200,15 @@ urlbar-star-add-bookmark =
 urlbar-split-view-button =
     .tooltiptext = Split view
     .aria-label = Split view
+
+## URLbar context menu
+
+urlbar-menuitem-paste-and-go =
+    .label = Paste and Go
+    .accesskey = G
+urlbar-menuitem-paste-and-search =
+    .label = Paste and Search
+    .accesskey = S
 
 ## Searchbar context menu
 
@@ -406,8 +438,9 @@ bookmark-panel-remove =
 bookmark-panel-show-editor-checkbox =
     .label = Show editor when saving
     .accesskey = S
-bookmark-panel-save-button =
+bookmark-panel-save-button2 =
     .label = Save
+    .accesskey = a
 
 # Width of the bookmark panel.
 # Should be large enough to fully display the Done and
@@ -458,8 +491,8 @@ identity-clear-site-data =
     .label = Clear cookies and site data…
 identity-connection-not-secure-security-view = You are not securely connected to this site.
 identity-connection-verified = You are securely connected to this site.
-identity-ev-owner-label = Certificate issued to:
-identity-verifier-label = Verified by:
+identity-ev-owner-label2 = Certificate issued to
+identity-verifier-label2 = Verified by
 # "qualified" here refers to the qualified website authentication certificate presented by the site.
 identity-etsi = Qualified as specified in Regulation (EU) 2024/1183.
 identity-description-custom-root2 = Mozilla does not recognize this certificate issuer. It may have been added from your operating system or by an administrator.
@@ -476,6 +509,8 @@ identity-description-passive-loaded-insecure2 = This website contains content th
 identity-description-passive-loaded-mixed2 = Although { -brand-short-name } has blocked some content, there is still content on the page that is not secure (such as images).
 identity-description-active-loaded = This website contains content that is not secure (such as scripts) and your connection to it is not private.
 identity-description-active-loaded-insecure = Information you share with this site could be viewed by others (like passwords, messages, credit cards, etc.).
+identity-description-tls-key-logging-heading = Your connection may not be private
+identity-description-tls-key-logging-message = An app or service may see your encrypted traffic from this site.
 identity-more-info-link-text =
     .label = More information
 
@@ -680,35 +715,13 @@ urlbar-result-action-undefined-calculator-result = undefined
 #   $date (string) - A localized relative date string
 urlbar-result-explanation-last-visited-relative-2 = Last visited { $date }
 
-# This explanation is used when the last-visited date is a small number of days
-# in the past.
+# This explanation is used when the last-visited date is a small number of days,
+# weeks, or months in the past.
 # Variables:
-#   $daysAgo (number) - The number of days ago
-urlbar-result-explanation-last-visited-days-2 =
-    { $daysAgo ->
-        [one] Last visited { $daysAgo } day ago
-        *[other] Last visited { $daysAgo } days ago
-    }
-
-# This explanation is used when the last-visited date is a small number of weeks
-# in the past.
-# Variables:
-#   $weeksAgo (number) - The number of weeks ago
-urlbar-result-explanation-last-visited-weeks-2 =
-    { $weeksAgo ->
-        [one] Last visited { $weeksAgo } week ago
-        *[other] Last visited { $weeksAgo } weeks ago
-    }
-
-# This explanation is used when the last-visited date is a small number of
-# months in the past.
-# Variables:
-#   $monthsAgo (number) - The number of months ago
-urlbar-result-explanation-last-visited-months-2 =
-    { $monthsAgo ->
-        [one] Last visited { $monthsAgo } month ago
-        *[other] Last visited { $monthsAgo } months ago
-    }
+#   $date (string) - A localized relative date string like one of the following:
+#                    "6 days ago", "1 week ago", "4 weeks ago", "1 month ago",
+#                    "11 months ago"
+urlbar-result-explanation-last-visited-days-weeks-months-ago = Last visited { $date }
 
 # This explanation is used when the last-visited date is further in the past.
 # The date will be formatted as an absolute date like: "11 May", "11 May 2026"
@@ -871,11 +884,11 @@ urlbar-searchmode-no-keyword2 =
     .title = Keyword search is disabled
 
 urlbar-searchmode-dropmarker2 =
-    .title = Pick a Search Engine
-urlbar-searchmode-bookmarks2 = Bookmarks
-urlbar-searchmode-tabs2 = Tabs
-urlbar-searchmode-history2 = History
-urlbar-searchmode-actions2 = Actions
+    .title = Pick a search engine
+urlbar-searchmode-bookmarks4 = Bookmarks
+urlbar-searchmode-tabs4 = Tabs
+urlbar-searchmode-history4 = History
+urlbar-searchmode-actions4 = Actions
 urlbar-searchmode-exit-button2 =
     .title = Close
 urlbar-searchmode-default2 =
@@ -893,8 +906,8 @@ urlbar-searchmode-popup-one-off-header = This time search with:
 # Label shown on the top of Searchmode Switcher popup when the search engine won't automatically
 # reset after submitting.
 urlbar-searchmode-popup-header = Search with:
-urlbar-searchmode-popup-search-settings-panelitem = Search Settings
-urlbar-searchmode-popup-settings-panelitem = Settings
+urlbar-searchmode-popup-search-settings2 = Search Settings
+urlbar-searchmode-popup-settings2 = Settings
 
 # Label prompting user to search with a particular search engine.
 #  $engine (String): the name of a search engine that searches a specific site
@@ -927,20 +940,23 @@ urlbar-result-action-switch-to-tabgroup = Switch to { $group }
 #  $group (String): the name of the tab group to re-open
 urlbar-result-action-open-saved-tabgroup = Open { $group }
 
-## Used in the context menu in urlbar view.
+## Used in the menu of a urlbar result.
 
-urlbar-view-context-menu-open-in-tab =
-  .label = Open in New Tab
-  .accesskey = w
-urlbar-view-context-menu-open-in-container-tab =
-  .label = Open in New Container Tab
-  .accesskey = i
-urlbar-view-context-menu-open-in-window =
-  .label = Open in New Window
-  .accesskey = N
-urlbar-view-context-menu-open-in-private-window =
-  .label = Open in New Private Window
-  .accesskey = P
+urlbar-view-context-menu-open-in-tab2 = Open in New Tab
+    .accesskey = w
+urlbar-view-context-menu-open-in-container-tab2 = Open in New Container Tab
+    .accesskey = i
+urlbar-view-context-menu-open-in-window2 = Open in New Window
+    .accesskey = N
+urlbar-view-context-menu-open-in-private-window2 = Open in New Private Window
+    .accesskey = P
+
+# A checkable menu item that controls whether pressing the Tab key while
+# navigating the address bar results stops on each result's menu button. When
+# checked, the Tab key moves straight from one result to the next, skipping the
+# menu button that opens this menu.
+urlbar-view-context-menu-skip-menu-with-tab = Skip this menu when using the tab key
+    .accesskey = S
 
 ## Labels shown above groups of urlbar results
 
@@ -1155,14 +1171,13 @@ qrcode-image =
 qrcode-close-button =
     .aria-label = Close
 
-# Variables:
-#  $shortcut (String): keyboard shortcut to save a copy of the page
+## Variables:
+##  $shortcut (String): keyboard shortcut to perform the action
+
 toolbar-button-save-page =
   .label = Save page
   .tooltiptext = Save this page ({ $shortcut })
 
-# Variables:
-#  $shortcut (String): keyboard shortcut to open a local file
 toolbar-button-open-file =
   .label = Open file
   .tooltiptext = Open a file ({ $shortcut })
@@ -1175,8 +1190,6 @@ toolbar-button-send-tab =
   .label = Send tab
   .tooltiptext = Send current tab to another device
 
-# Variables
-# $shortcut (string) - Keyboard shortcut to open a new private browsing window
 toolbar-button-new-private-window =
   .label = New private window
   .tooltiptext = Open a new private browsing window ({ $shortcut })
@@ -1189,6 +1202,52 @@ toolbar-button-tab-groups =
   .label = Tab groups
   .tooltiptext = Show your tab groups
 
+toolbar-button-history =
+  .label = History
+  .tooltiptext = Show your history ({ $shortcut })
+
+toolbar-button-find =
+  .label = Find
+  .tooltiptext = Find in this page ({ $shortcut })
+
+toolbar-button-developer =
+  .label = Developer
+  .tooltiptext = Open Web developer tools ({ $shortcut })
+
+toolbar-button-forget =
+  .label = Forget
+  .tooltiptext = Forget about some browsing history
+
+toolbar-zoom-controls =
+  .label = Zoom Controls
+  .title = Zoom controls
+
+toolbar-button-zoom-out =
+  .label = Zoom out
+  .tooltiptext = Zoom out ({ $shortcut })
+
+toolbar-button-zoom-reset-tooltip = Reset zoom level ({ $shortcut })
+
+toolbar-button-zoom-in =
+  .label = Zoom in
+  .tooltiptext = Zoom in ({ $shortcut })
+
+toolbar-edit-controls =
+  .label = Edit controls
+  .title = Edit controls
+
+toolbar-button-cut =
+  .label = Cut
+  .tooltiptext = Cut ({ $shortcut })
+
+toolbar-button-copy =
+  .label = Copy
+  .tooltiptext = Copy ({ $shortcut })
+
+toolbar-button-paste =
+  .label = Paste
+  .tooltiptext = Paste ({ $shortcut })
+
 ## EME notification panel
 
 eme-notifications-drm-content-playing = Some audio or video on this site uses DRM software, which may limit what { -brand-short-name } can let you do with it.
@@ -1196,6 +1255,35 @@ eme-notifications-drm-content-playing-manage = Manage settings
 eme-notifications-drm-content-playing-manage-accesskey = M
 eme-notifications-drm-content-playing-dismiss = Dismiss
 eme-notifications-drm-content-playing-dismiss-accesskey = D
+
+## Notification bars for media playback issues
+
+eme-notifications-drm-content-disabled-message = You must enable DRM to play some audio or video on this page.
+eme-notifications-drm-content-disabled-button =
+    .label = Enable DRM
+    .accesskey = E
+eme-notifications-drm-content-cdm-installing-message = { -brand-short-name } is installing components needed to play the audio or video on this page. Please try again later.
+
+decoder-doctor-no-codecs-linux-message = To play video, you may need to install the required video codecs.
+decoder-doctor-no-hw-acceleration-message = To improve video quality, you may need to install Microsoft’s Media Feature Pack.
+decoder-doctor-no-pulse-audio-message = To play audio, you may need to install the required PulseAudio software.
+decoder-doctor-unsupported-libavcodec-message = libavcodec may be vulnerable or is not supported, and should be updated to play video.
+decoder-doctor-decode-error-message = An error occurred while decoding a media resource.
+decoder-doctor-decode-warning-message = A recoverable error occurred while decoding a media resource.
+decoder-doctor-learn-how-link = Learn how
+decoder-doctor-report-issue-button =
+    .label = Report site issue
+    .accesskey = R
+
+# Variables:
+#   $pluginName (String) - The name of the media plugin that crashed (for example, “Widevine Content Decryption Module”).
+plugin-crashed-notification-message = The { $pluginName } plugin has crashed.
+plugin-crashed-notification-reload-button =
+    .label = Reload page
+    .accesskey = R
+plugin-crashed-notification-submit-button =
+    .label = Submit a crash report
+    .accesskey = S
 
 ## Password save/update panel
 
@@ -1206,11 +1294,33 @@ panel-save-update-password-2 =
 
 ##
 
-# "More" item in macOS share menu
-menu-share-more =
-    .label = More…
-menu-share-windows =
-    .label = More Options
+# Caption shown in the native macOS share picker for the items being shared.
+# Variables:
+#   $count (Number) - The number of links being shared.
+menu-share-links =
+    .label =
+        { $count ->
+            [one] { $count } Link
+           *[other] { $count } Links
+        }
+# macOS-only item that opens the system share picker, used when a single link
+# is shared. "AirDrop" and "Messages" are names of macOS apps, so they should
+# match the macOS translation of those names where possible.
+menu-share-mac-picker-single =
+    .label = AirDrop, Messages, and More…
+    .accesskey = M
+# macOS-only item that opens the system share picker, used when more than one
+# link is shared. AirDrop is not mentioned here because it can only share a
+# single URL. "Messages" and "Mail" are names of macOS apps, so they should
+# match the macOS translation of those names where possible.
+menu-share-mac-picker-multiple =
+    .label = Messages, Mail, and More…
+    .accesskey = M
+# Share entry in the addressbar context menu. Opens the macOS share picker
+# directly, hence the ellipsis.
+urlbar-share-url =
+    .label = Share…
+    .accesskey = h
 # Variables:
 #   $count (Number) - The number of links that will be copied.
 menu-share-copy-links =
@@ -1220,6 +1330,8 @@ menu-share-copy-links =
            *[other] Copy { $count } Links
         }
     .accesskey = L
+menu-share-windows =
+    .label = More Options
 ui-tour-info-panel-close =
     .tooltiptext = Close
 
@@ -1297,23 +1409,28 @@ tabs-toolbar =
 tabs-toolbar-new-tab =
     .label = New Tab
 
-tabs-toolbar-list-all-tabs =
-    .label = List all tabs
-    .tooltiptext = List all tabs
+tabs-toolbar-list-all-tabs-2 =
+    .label = Search and manage tabs
+    .tooltiptext = Search and manage tabs
 
 ## Drop indicator text for pinned tabs when no tabs are pinned.
 
 pinned-tabs-drop-indicator = Drop tab here to pin
 
-## Infobar shown at startup to suggest session-restore
-
-# <img data-l10n-name="icon"/> will be replaced by the application menu icon
-restore-session-startup-suggestion-message = <strong>Open previous tabs?</strong> You can restore your previous session from the { -brand-short-name } application menu <img data-l10n-name="icon"/>, under History.
-restore-session-startup-suggestion-button = Show me how
-
 ## Infobar shown when the user tries to open a file picker and file pickers are blocked by enterprise policy
 
 filepicker-blocked-infobar = Your organization has blocked access to local files on this computer
+
+## Address bar result shown when someone who used the Extensions and Themes
+## keyboard shortcut presses that shortcut after it moved to Search Tabs.
+## Variables:
+##   $searchTabsShortcut (String) - The Search Tabs keyboard shortcut, e.g. "Ctrl+Shift+A".
+##   $addonsShortcut (String) - The Extensions and Themes keyboard shortcut, e.g. "Ctrl+Shift+F".
+
+urlbar-addons-shortcut-moved-title = { $searchTabsShortcut } now searches tabs
+urlbar-addons-shortcut-moved-description = To open extensions and themes, use { $addonsShortcut }.
+urlbar-addons-shortcut-moved-change-shortcuts = Manage shortcuts
+urlbar-addons-shortcut-moved-dismiss = Got it
 
 ## Mozilla data reporting notification (Telemetry, Firefox Health Report, etc)
 
@@ -1329,15 +1446,26 @@ private-browsing-indicator-label = Private browsing
 private-browsing-indicator-tooltip =
     .tooltiptext = Private browsing
 
+# Tooltip for the private browsing indicator button that opens the info panel.
+private-browsing-indicator-button =
+    .tooltiptext = Private browsing info
+
+# Title shown in the private browsing info panel.
+private-browsing-info-panel-title = You’re in a Private Window
+
+# Body copy shown in the private browsing info panel. The learn-more link text
+# is embedded in the sentence.
+private-browsing-info-panel-description = This helps keep your browsing hidden from others on this device, but doesn’t make you invisible online. <a data-l10n-name="learn-more">Who might be able to see my activity?</a>
+
 # Tooltip for the indicator shown in the window titlebar when content analysis is active.
 # Variables:
 #   $agentName (String): The name of the DLP agent that is connected
 content-analysis-indicator-tooltip =
-    .tooltiptext = Data loss prevention (DLP) by { $agentName }. Click for more info.
-content-analysis-panel-title = Data protection
+    .tooltiptext = Data Loss Prevention (DLP) by { $agentName }. Click for more info.
+content-analysis-panel-title2 = Data loss prevention
 # Variables:
 #   $agentName (String): The name of the DLP agent that is connected
-content-analysis-panel-text-styled = Your organization uses <b>{ $agentName }</b> to protect against data loss. <a data-l10n-name="info">Learn more</a>
+content-analysis-panel-text-styled2 = Your organization uses <b>{ $agentName }</b> to control how sensitive data may be shared. <a data-l10n-name="info">Learn more</a>
 
 ## Unified extensions (toolbar) button
 
@@ -1375,8 +1503,8 @@ unified-extensions-button-blocklisted =
 ## Private browsing reset button
 
 reset-pbm-toolbar-button2 =
-    .label = Clear Private Session
-    .tooltiptext = Clear Private Session
+    .label = Clear private session
+    .tooltiptext = Clear private session
 reset-pbm-panel-heading2 = Clear data and start a fresh private session?
 reset-pbm-panel-description2 = This deletes history, cookies, and all other site data without closing your Private Window.
 reset-pbm-panel-always-ask-checkbox =
@@ -1389,6 +1517,27 @@ reset-pbm-panel-confirm-button2 =
     .label = Clear private session
     .accesskey = l
 reset-pbm-panel-complete = Private session data deleted
+
+## Fire button. Clears the whole browsing session, then closes every window and
+## opens a new one.
+
+fire-button-toolbar-button =
+    .label = Delete some or all of your browsing data
+    .tooltiptext = Delete some or all of your browsing data
+fire-button-panel-heading = Delete all browsing data?
+fire-button-panel-description = This deletes history, cookies, and site data. You’ll be signed out of sites. This window will close, and { -brand-short-name } will open a new one.
+fire-button-panel-choose-description = If you don’t want to delete everything, choose specific data instead.
+# Opens the "Delete browsing data" dialog, where the user picks
+# which kinds of data to delete. The trailing ellipsis marks that a dialog
+# follows rather than the action happening immediately.
+fire-button-panel-choose-link = Choose…
+fire-button-panel-cancel-button =
+    .label = Cancel
+    .accesskey = C
+fire-button-panel-confirm-button =
+    .label = Delete all
+    .accesskey = D
+fire-button-panel-complete = Browsing data deleted
 
 ## Autorefresh blocker
 
@@ -1521,6 +1670,14 @@ onboarding-checklist-button-label = Finish setup
 # Keep this string as short as possible, this is displayed in the URL bar
 # use a synonym for "safe" or "private" if "secure" is too long.
 urlbar-trust-icon-notsecure-label = Not Secure
+
+# Keep this string as short as possible, this is displayed in the URL bar
+# Variables
+#  $count (number): the number of trackers blocked.
+urlbar-trust-icon-trackers-blocked-longform-label = { $count ->
+  [one] { $count } tracker blocked
+  *[other] { $count } trackers blocked
+}
 
 trustpanel-etp-label-enabled = Enhanced Tracking Protection is on
 trustpanel-etp-label-disabled = Enhanced Tracking Protection is off

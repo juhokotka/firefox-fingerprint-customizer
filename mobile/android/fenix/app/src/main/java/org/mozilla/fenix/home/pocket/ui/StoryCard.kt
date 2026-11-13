@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import mozilla.components.compose.base.modifier.skeletonLoader
 import mozilla.components.service.pocket.PocketStory
 import mozilla.components.service.pocket.PocketStory.ContentRecommendation
@@ -36,7 +37,7 @@ import org.mozilla.fenix.compose.Favicon
 import org.mozilla.fenix.compose.Image
 import org.mozilla.fenix.home.fake.FakeHomepagePreview
 import org.mozilla.fenix.theme.FirefoxTheme
-import kotlin.math.roundToInt
+import org.mozilla.fenix.wallpapers.WallpaperTheme
 
 private val defaultCardContentPadding = 8.dp
 private val imageWidth = 345.dp
@@ -48,14 +49,15 @@ internal fun StoryCard(
     onClick: (story: PocketStory, position: Triple<Int, Int, Int>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val imageUrl = story.imageUrl.replace(
-        "{wh}",
-        with(LocalDensity.current) {
-            "${imageWidth.toPx().roundToInt()}x${
+    val imageUrl =
+        story.imageUrl.replace(
+            "{wh}",
+            with(LocalDensity.current) {
+                "${imageWidth.toPx().roundToInt()}x${
                 imageWidth.toPx().roundToInt()
             }"
-        },
-    )
+            },
+        )
 
     Card(
         onClick = {
@@ -64,17 +66,13 @@ internal fun StoryCard(
         modifier = modifier,
         shape = MaterialTheme.shapes.small,
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceBright),
+        colors = CardDefaults.cardColors(containerColor = WallpaperTheme.cardBackgroundColor),
     ) {
-        Column(
-            modifier = Modifier.padding(all = defaultCardContentPadding),
-        ) {
+        Column(modifier = Modifier.padding(all = defaultCardContentPadding)) {
             Image(
                 url = imageUrl,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(imageWidth / imageHeight)
-                    .clip(MaterialTheme.shapes.small),
+                modifier =
+                    Modifier.fillMaxWidth().aspectRatio(imageWidth / imageHeight).clip(MaterialTheme.shapes.small),
                 private = false,
                 targetSize = imageWidth,
                 contentScale = ContentScale.Crop,
@@ -105,8 +103,7 @@ internal fun StoryCard(
                     }
 
                     is PocketRecommendedStory,
-                    is PocketSponsoredStory,
-                        -> {
+                    is PocketSponsoredStory -> {
                         // no-op, don't handle these [PocketStory] types as they are no longer
                         // supported after the Merino recommendation migration.
                     }
@@ -133,11 +130,7 @@ internal fun StoryCard(
 
 @Composable
 private fun Placeholder() {
-    Box(
-        modifier = Modifier
-            .aspectRatio(imageWidth / imageHeight)
-            .skeletonLoader(),
-    )
+    Box(modifier = Modifier.aspectRatio(imageWidth / imageHeight).skeletonLoader())
 }
 
 @PreviewLightDark

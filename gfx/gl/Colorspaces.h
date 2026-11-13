@@ -965,7 +965,7 @@ inline void DequantizeMonotonic(const Span<float> vals) {
   // => f(x) = f(x0) + (x-x0) * (f(x1) - f(x0)) / (x1-x0)
   // => f(x) = f(x0) + (x-x0) * dfdx
 
-  const auto head_end = *body_first;
+  const auto& head_end = *body_first;
   const auto head = vals.subspan(0, head_end - vals.begin());
   const auto tail_begin = *body_last + 1;
   const auto tail = vals.subspan(tail_begin - vals.begin());
@@ -978,7 +978,10 @@ inline void DequantizeMonotonic(const Span<float> vals) {
   while (next_part_first != tail_begin) {
     const auto part_first = next_part_first;
     // print("part_first: %f\n", *part_first);
-    next_part_first = *SeekNeq(*part_first, part_first, tail_begin);
+    auto next_part_first_opt = SeekNeq(*part_first, part_first, tail_begin);
+    MOZ_ASSERT(next_part_first_opt,
+               "at least one element different from *part_first");
+    next_part_first = *next_part_first_opt;
     // print("next_part_first: %f\n", *next_part_first);
     const auto part =
         Span<float>{part_first, size_t(next_part_first - part_first)};
@@ -1039,7 +1042,7 @@ inline void DequantizeMonotonic(const Span<float> vals) {
 }
 
 template <class In, class Out>
-static void InvertLut(const In& lut, Out* const out_invertedLut) {
+void InvertLut(const In& lut, Out* const out_invertedLut) {
   MOZ_ASSERT(IsMonotonic(lut));
   auto plut = &lut;
   auto vec = std::vector<float>{};

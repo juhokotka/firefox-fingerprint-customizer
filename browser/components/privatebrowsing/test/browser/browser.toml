@@ -31,24 +31,17 @@ tags = "trackingprotection"
 
 ["browser_privatebrowsing_aboutSessionRestore.js"]
 
-["browser_privatebrowsing_about_cookie_banners_promo.js"]
-
 ["browser_privatebrowsing_about_default_pin_promo.js"]
 skip-if = [
   "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && display == 'wayland'",
   "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11'",
-  "os == 'mac' && os_version == '10.15' && arch == 'x86_64'",
-  "os == 'mac' && os_version == '14.70' && arch == 'x86_64'",
   "os == 'mac' && os_version == '15.30' && arch == 'aarch64'",
   "os == 'win' && msix", # We don't support private pinning in MSIX builds
 ]
 
 ["browser_privatebrowsing_about_default_promo.js"]
 
-["browser_privatebrowsing_about_focus_promo.js"]
-skip-if = [
-  "os == 'win' && standalone", # Bug 2028646
-]
+["browser_privatebrowsing_about_kit_intro.js"]
 
 ["browser_privatebrowsing_about_nimbus_dismiss.js"]
 
@@ -90,6 +83,8 @@ skip-if = [
 
 ["browser_privatebrowsing_history_shift_click.js"]
 
+["browser_privatebrowsing_indicator.js"]
+
 ["browser_privatebrowsing_last_private_browsing_context_exited.js"]
 
 ["browser_privatebrowsing_lastpbcontextexited.js"]
@@ -113,6 +108,8 @@ skip-if = [
 ["browser_privatebrowsing_placestitle.js"]
 
 ["browser_privatebrowsing_protocolhandler.js"]
+
+["browser_privatebrowsing_redesign_telemetry.js"]
 
 ["browser_privatebrowsing_rememberprompt.js"]
 tags = "geolocation xr"

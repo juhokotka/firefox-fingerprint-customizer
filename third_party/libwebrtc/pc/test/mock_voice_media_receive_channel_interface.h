@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "absl/functional/any_invocable.h"
-#include "api/audio_options.h"
 #include "api/call/audio_sink.h"
 #include "api/crypto/frame_decryptor_interface.h"
 #include "api/frame_transformer_interface.h"
@@ -25,7 +24,6 @@
 #include "api/rtp_headers.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
-#include "api/transport/rtp/rtp_source.h"
 #include "media/base/media_channel.h"
 #include "media/base/stream_params.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
@@ -49,15 +47,12 @@ class MockVoiceMediaReceiveChannelInterface
               GetRtpReceiverParameters,
               (uint32_t ssrc),
               (const, override));
-  MOCK_METHOD(std::vector<RtpSource>,
-              GetSources,
-              (uint32_t ssrc),
-              (const, override));
   MOCK_METHOD(RtpParameters,
               GetDefaultRtpReceiveParameters,
               (),
               (const, override));
   MOCK_METHOD(void, SetReceive, (bool receive), (override));
+  MOCK_METHOD(void, EnableSframe, (), (override));
   MOCK_METHOD(bool,
               SetOutputVolume,
               (uint32_t ssrc, double volume),
@@ -79,11 +74,9 @@ class MockVoiceMediaReceiveChannelInterface
               GetStatsTask,
               (bool reset_legacy),
               (override));
-  MOCK_METHOD(::webrtc::RtcpMode, RtcpMode, (), (const, override));
   MOCK_METHOD(void, SetRtcpMode, (::webrtc::RtcpMode mode), (override));
   MOCK_METHOD(void, SetReceiveNackEnabled, (bool enabled), (override));
   MOCK_METHOD(void, SetReceiveNonSenderRttEnabled, (bool enabled), (override));
-  MOCK_METHOD(bool, SetOptions, (const AudioOptions& options), (override));
 
   // MediaReceiveChannelInterface
   MOCK_METHOD(VideoMediaReceiveChannelInterface*,

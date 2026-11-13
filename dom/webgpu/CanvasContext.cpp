@@ -4,6 +4,8 @@
 
 #include "CanvasContext.h"
 
+#include <memory>
+
 #include "LayerUserData.h"
 #include "Utility.h"
 #include "gfxUtils.h"
@@ -19,6 +21,7 @@
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/CanvasRenderer.h"
 #include "mozilla/layers/CompositableForwarder.h"
+#include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/ImageDataSerializer.h"
 #include "mozilla/layers/LayersSurfaces.h"
 #include "mozilla/layers/RenderRootStateManager.h"
@@ -114,7 +117,14 @@ void CanvasContext::Configure(const dom::GPUCanvasConfiguration& aConfig,
       return;
   }
 
-  mConfiguration.reset(new dom::GPUCanvasConfiguration(aConfig));
+  if (aConfig.mUsage & dom::GPUTextureUsage_Binding::TRANSIENT_ATTACHMENT) {
+    aRv.ThrowTypeError(
+        "`GPUTextureUsage.TRANSIENT_ATTACHMENT` may not be used "
+        "with canvas textures.");
+    return;
+  }
+
+  mConfiguration = std::make_unique<dom::GPUCanvasConfiguration>(aConfig);
   mRemoteTextureOwnerId = Some(layers::RemoteTextureOwnerId::GetNext());
   mUseSharedTextureInSwapChain =
       aConfig.mDevice->mSupportSharedTextureInSwapChain;
@@ -171,6 +181,13 @@ void CanvasContext::Configure(const dom::GPUCanvasConfiguration& aConfig,
 
 void CanvasContext::Unconfigure() {
   if (mChild && mChild->CanSend() && mRemoteTextureOwnerId) {
+    if (mOffscreenCanvas) {
+      if (RefPtr<layers::ImageBridgeChild> imageBridge =
+              layers::ImageBridgeChild::GetSingleton()) {
+        // Ensure FwdTransactionTracker is updated by ImageBridgeChild.
+        imageBridge->WaitFlushTasks();
+      }
+    }
     auto txn_type = layers::ToRemoteTextureTxnType(mFwdTransactionTracker);
     auto txn_id = layers::ToRemoteTextureTxnId(mFwdTransactionTracker);
     ffi::wgpu_client_swap_chain_drop(

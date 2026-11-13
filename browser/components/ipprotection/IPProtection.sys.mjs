@@ -242,7 +242,7 @@ class IPProtectionWidget {
     let { documentGlobal } = event.target;
     if (this.#panels.has(documentGlobal)) {
       let panel = this.#panels.get(documentGlobal);
-      panel.showing(event.target);
+      event.detail.addBlocker(panel.showing(event.target));
     }
   }
 
@@ -312,6 +312,22 @@ class IPProtectionWidget {
       "IPProtectionService:StateChanged",
       this.handleEvent
     );
+  }
+
+  /**
+   * Uninits and forgets the panel and toolbar button for a closed window.
+   *
+   * @param {Window} window - the window being closed.
+   */
+  onWindowClosed(window) {
+    if (this.#panels.has(window)) {
+      this.#panels.get(window).uninit();
+      this.#panels.delete(window);
+    }
+    if (this.#toolbarButtons.has(window)) {
+      this.#toolbarButtons.get(window).uninit();
+      this.#toolbarButtons.delete(window);
+    }
   }
 
   async onWidgetRemoved(widgetId) {

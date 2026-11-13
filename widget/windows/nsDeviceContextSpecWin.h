@@ -5,13 +5,14 @@
 #ifndef nsDeviceContextSpecWin_h_
 #define nsDeviceContextSpecWin_h_
 
-#include "nsCOMPtr.h"
-#include "nsIDeviceContextSpec.h"
-#include "nsPrinterListBase.h"
-#include "nsIPrintSettings.h"
 #include <windows.h>
+
 #include "mozilla/RefPtr.h"
 #include "mozilla/gfx/PrintPromise.h"
+#include "nsCOMPtr.h"
+#include "nsIDeviceContextSpec.h"
+#include "nsIPrintSettings.h"
+#include "nsPrinterListBase.h"
 
 class nsIFile;
 class nsIWidget;
@@ -25,13 +26,11 @@ class nsDeviceContextSpecWin : public nsIDeviceContextSpec {
   already_AddRefed<PrintTarget> MakePrintTarget() final;
   NS_IMETHOD BeginDocument(const nsAString& aTitle,
                            const nsAString& aPrintToFileName,
-                           uint64_t aBrowsingContextId, int32_t aStartPage,
+                           mozilla::dom::WindowContext*, int32_t aStartPage,
                            int32_t aEndPage) override {
     return NS_OK;
   }
   RefPtr<mozilla::gfx::PrintEndDocumentPromise> EndDocument() override;
-  NS_IMETHOD BeginPage(const IntSize& aSizeInPoints) override { return NS_OK; }
-  NS_IMETHOD EndPage() override { return NS_OK; }
 
   NS_IMETHOD Init(nsIPrintSettings* aPS, bool aIsPrintPreview) override;
 

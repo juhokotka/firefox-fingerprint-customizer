@@ -191,7 +191,6 @@ const PRIVILEGED_PERMS = new Set([
   "activityLog",
   "mozillaAddons",
   "networkStatus",
-  "normandyAddonStudy",
   "telemetry",
 ]);
 
@@ -201,20 +200,9 @@ const PRIVILEGED_PERMS_ANDROID_ONLY = new Set([
   "nativeMessaging",
 ]);
 
-const PRIVILEGED_PERMS_DESKTOP_ONLY = new Set(["normandyAddonStudy"]);
-
 if (AppConstants.platform == "android") {
   for (const perm of PRIVILEGED_PERMS_ANDROID_ONLY) {
     PRIVILEGED_PERMS.add(perm);
-  }
-}
-
-if (
-  AppConstants.MOZ_APP_NAME != "firefox" ||
-  AppConstants.platform == "android"
-) {
-  for (const perm of PRIVILEGED_PERMS_DESKTOP_ONLY) {
-    PRIVILEGED_PERMS.delete(perm);
   }
 }
 
@@ -911,7 +899,11 @@ export class ExtensionData {
    * Note: These fields are only available and meant to be used on Extension
    * instances, declared here because methods from this class reference them.
    */
-  /** @type {object} TODO: move to the Extension class, bug 1871094. */
+  /**
+   * TODO: move to the Extension class, bug 1871094.
+   *
+   * @type {object}
+   */
   addonData;
   /** @type {nsIURI} */
   baseURI;
@@ -2165,6 +2157,20 @@ export class ExtensionData {
         });
       }
 
+      if (manifest.builtin_widget && !isPrivileged) {
+        if (this.temporarilyInstalled) {
+          this.manifestError(
+            `Using 'builtin_widget' requires a privileged add-on. ` +
+              PRIVILEGED_ADDONS_DEVDOCS_MESSAGE
+          );
+        } else {
+          this.manifestWarning(
+            `Ignoring 'builtin_widget': requires a privileged add-on.`
+          );
+        }
+        manifest.builtin_widget = null;
+      }
+
       if (manifest.experiment_apis) {
         if (this.canUseAPIExperiment()) {
           let parentModules = {};
@@ -3266,7 +3272,6 @@ const PROXIED_EVENTS = new Set([
   "test-harness-message",
   "background-script-suspend",
   "background-script-suspend-canceled",
-  "background-script-suspend-ignored",
 ]);
 
 const PROXIED_TEST_EVENTS = new Set([
@@ -3412,7 +3417,7 @@ export class Extension extends ExtensionData {
   /** @type {Map<string, Map<string, any>>} */
   persistentListeners;
 
-  /** @type {import("ExtensionShortcuts.sys.mjs").ExtensionShortcuts} */
+  /** @type {import("./ExtensionShortcuts.sys.mjs").ExtensionShortcuts} */
   shortcuts;
 
   /**

@@ -11,7 +11,6 @@
 #include <stdint.h>
 
 #include "jit/shared/Architecture-shared.h"
-
 #include "js/Utility.h"
 
 #if defined(_MIPS_SIM)

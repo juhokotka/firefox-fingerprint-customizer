@@ -1,4 +1,4 @@
-# Preferences
+# Remote protocol preferences
 
 There are a couple of preferences associated with the Remote Agent:
 
@@ -50,6 +50,16 @@ The user preference file takes precedence over the recommended
 preferences, meaning any user-defined preference value will not be
 overridden.
 
+### `remote.print.printer_name`
+
+Testing aid for the platform printing code. When set to the name of a system
+printer, WebDriver and Marionette print commands, as well as print reftests,
+print through that printer instead of Firefox's built-in PDF output, and return
+the file it produces. The printer must produce PDF files, like "Microsoft Print
+to PDF" on Windows.
+
+Defaults to an empty string, which uses the built-in PDF output.
+
 ### `remote.retry-on-abort`
 
 This preference defines whether certain IPC calls from the parent process to
@@ -58,13 +68,31 @@ to cross-origin navigation, or made inactive when a page moved into BFCache.
 
 Introduced in Firefox 132, the preference is set to `true` by default.
 
+### `remote.screenshot.use_readback`
+
+Debugging aid for investigating WebRender rendering. When set to `true`,
+WebDriver and Marionette screenshots are captured by reading back the actual
+WebRender composited framebuffer (the real on-screen pixels) instead of
+re-rendering the document through the software `drawSnapshot` path. This makes
+captured screenshots reflect WebRender-specific rendering (snapping, blending,
+compositing) that the default path cannot show.
+
+Because readback can only return the pixels currently composited on screen, every
+capture degrades to the full content area of the foreground tab: full-document
+screenshots, clip regions and element screenshots all return the viewport
+instead. Captures with no content area to read back, such as those taken while
+the session is in chrome (privileged) scope, keep using the `drawSnapshot` path.
+
+Defaults to `false`.
+
 ### `remote.system-access-check.enabled`
 
 Temporary preference to allow WebDriver clients to disable the system access checks
 when trying to switch with Marionette into chrome scope (parent process) testing.
 
 Instead of switching the preference value, the client should ideally fix the breakage
-by passing `-remote-allow-system-access` as an argument to the Firefox binary.
+by setting the `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS` environment variable to `1` when
+starting the Firefox binary.
 
 This preference was introduced in Firefox 138 with a default value of `true`
 and was removed in Firefox 141.

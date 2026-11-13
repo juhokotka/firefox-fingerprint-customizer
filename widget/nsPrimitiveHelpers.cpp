@@ -20,13 +20,13 @@
 #include "nsPrimitiveHelpers.h"
 
 #include "mozilla/UniquePtr.h"
-#include "nsComponentManagerUtils.h"
 #include "nsCOMPtr.h"
-#include "nsXPCOM.h"
+#include "nsComponentManagerUtils.h"
 #include "nsISupportsPrimitives.h"
 #include "nsITransferable.h"
 #include "nsLinebreakConverter.h"
 #include "nsReadableUtils.h"
+#include "nsXPCOM.h"
 
 //
 // CreatePrimitiveForData

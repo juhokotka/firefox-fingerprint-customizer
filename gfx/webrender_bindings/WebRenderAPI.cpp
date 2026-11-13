@@ -4,25 +4,24 @@
 
 #include "WebRenderAPI.h"
 
+#include "GLContext.h"
+#include "TextDrawTarget.h"
+#include "malloc_decls.h"
 #include "mozilla/Logging.h"
-#include "mozilla/ipc/ByteBuf.h"
-#include "mozilla/webrender/RendererOGL.h"
-#include "mozilla/gfx/gfxVars.h"
-#include "mozilla/layers/CompositorThread.h"
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/StaticPrefs_webgl.h"
 #include "mozilla/ToString.h"
-#include "mozilla/webrender/RenderCompositor.h"
-#include "mozilla/widget/CompositorWidget.h"
-#include "mozilla/layers/CompositorBridgeParent.h"
-#include "mozilla/layers/SynchronousTask.h"
 #include "mozilla/XREAppData.h"
+#include "mozilla/gfx/gfxVars.h"
+#include "mozilla/ipc/ByteBuf.h"
+#include "mozilla/layers/CompositorBridgeParent.h"
+#include "mozilla/layers/CompositorThread.h"
+#include "mozilla/layers/SynchronousTask.h"
+#include "mozilla/webrender/RenderCompositor.h"
+#include "mozilla/webrender/RendererOGL.h"
+#include "mozilla/widget/CompositorWidget.h"
 #include "nsDisplayList.h"
 #include "nsThreadUtils.h"
-#include "TextDrawTarget.h"
-#include "malloc_decls.h"
-#include "GLContext.h"
-
 #include "source-repo.h"
 
 #ifdef MOZ_WIDGET_ANDROID
@@ -109,17 +108,31 @@ void TransactionBuilder::RemovePipeline(PipelineId aPipelineId) {
   wr_transaction_remove_pipeline(mTxn, aPipelineId);
 }
 
+void TransactionBuilder::SetEmbedPolicy(
+    PipelineId aPipelineId, const Maybe<nsTArray<uint32_t>>& aNamespaces) {
+  if (aNamespaces) {
+    wr_transaction_set_embed_policy(mTxn, aPipelineId, true,
+                                    aNamespaces->Elements(),
+                                    aNamespaces->Length());
+  } else {
+    wr_transaction_set_embed_policy(mTxn, aPipelineId, false, nullptr, 0);
+  }
+}
+
 void TransactionBuilder::SetDisplayList(
-    Epoch aEpoch, wr::WrPipelineId pipeline_id,
+    Epoch aEpoch, wr::IdNamespace aIdNamespace, wr::WrPipelineId pipeline_id,
     wr::BuiltDisplayListDescriptor dl_descriptor,
-    wr::Vec<uint8_t>& dl_items_data, wr::Vec<uint8_t>& dl_spatial_tree) {
-  wr_transaction_set_display_list(mTxn, aEpoch, pipeline_id, dl_descriptor,
-                                  &dl_items_data.inner, &dl_spatial_tree.inner);
+    wr::Vec<uint8_t>& dl_items_data, wr::Vec<uint8_t>& dl_spatial_tree,
+    wr::Vec<uint8_t>& dl_interner_delta) {
+  wr_transaction_set_display_list(
+      mTxn, aEpoch, aIdNamespace, pipeline_id, dl_descriptor,
+      &dl_items_data.inner, &dl_spatial_tree.inner, &dl_interner_delta.inner);
 }
 
 void TransactionBuilder::ClearDisplayList(Epoch aEpoch,
+                                          wr::IdNamespace aIdNamespace,
                                           wr::WrPipelineId aPipelineId) {
-  wr_transaction_clear_display_list(mTxn, aEpoch, aPipelineId);
+  wr_transaction_clear_display_list(mTxn, aEpoch, aIdNamespace, aPipelineId);
 }
 
 void TransactionBuilder::GenerateFrame(const VsyncId& aVsyncId, bool aPresent,
@@ -278,6 +291,13 @@ RefPtr<WebRenderAPI::CreatePromise> WebRenderAPI::Create(
               "Failed to make GL context current"_ns, __func__);
         }
 
+        bool limitSdrYuvExternalComposites = false;
+#ifdef XP_WIN
+        // Limit SDR YUV external compositing on non-Intel hardware adapters.
+        limitSdrYuvExternalComposites =
+            !swgl && !gfx::gfxVars::AdapterVendorID().EqualsLiteral("0x8086");
+#endif
+
         if (!wr_window_new(
                 aWindowId, aSize.width, aSize.height,
                 aWindowKind == WindowKind::MAIN, supportLowPriorityTransactions,
@@ -287,6 +307,7 @@ RefPtr<WebRenderAPI::CreatePromise> WebRenderAPI::Create(
                 renderThread->ThreadPool().Raw(),
                 renderThread->ThreadPoolLP().Raw(),
                 renderThread->MemoryChunkPool(),
+                renderThread->GetRenderBackendPool(),
                 renderThread->GlyphRasterThread().Raw(), &WebRenderMallocSizeOf,
                 &WebRenderMallocEnclosingSizeOf, 0, compositor.get(),
                 compositor->ShouldUseNativeCompositor(),
@@ -300,7 +321,8 @@ RefPtr<WebRenderAPI::CreatePromise> WebRenderAPI::Create(
                 StaticPrefs::gfx_webrender_low_quality_pinch_zoom_AtStartup(),
                 StaticPrefs::gfx_webrender_max_shared_surface_size_AtStartup(),
                 StaticPrefs::gfx_webrender_enable_subpixel_aa_AtStartup(),
-                compositor->ShouldUseLayerCompositor())) {
+                compositor->ShouldUseLayerCompositor(),
+                limitSdrYuvExternalComposites)) {
           // wr_window_new puts a message into gfxCriticalNote if it returns
           // false
           MOZ_ASSERT(errorMessage);
@@ -574,15 +596,28 @@ void WebRenderAPI::FlushPendingWrTransactionEventsWithWait() {
 void WebRenderAPI::HandleWrTransactionEvents(RemoteTextureWaitType aType) {
   auto& events = mPendingWrTransactionEvents;
 
+  // Events can be flushed asynchronously (e.g. from a RemoteTextureMap
+  // readiness callback that holds a reference to this api), so re-check what
+  // SendTransaction checked when they were queued. Once the renderer is gone
+  // there is nothing left to submit to: drain the queue without waiting on
+  // remote textures, and without sending anything to the render backend.
+  const bool rendererDestroyed = mRootApi && mRootApi->mRendererDestroyed;
+  if (rendererDestroyed) {
+    aType = RemoteTextureWaitType::FlushWithoutWait;
+  }
+
   while (!events.empty()) {
     auto& front = events.front();
     switch (front.mTag) {
       case WrTransactionEvent::Tag::Transaction:
-        wr_api_send_transaction(mDocHandle, front.RawTransaction(),
-                                front.UseSceneBuilderThread());
-        if (front.GetTransactionBuilder()->mRemoteTextureTxnScheduler) {
-          front.GetTransactionBuilder()->mRemoteTextureTxnScheduler->NotifyTxn(
-              front.GetTransactionBuilder()->mRemoteTextureTxnId);
+        if (!rendererDestroyed) {
+          wr_api_send_transaction(mDocHandle, front.RawTransaction(),
+                                  front.UseSceneBuilderThread());
+          if (front.GetTransactionBuilder()->mRemoteTextureTxnScheduler) {
+            front.GetTransactionBuilder()
+                ->mRemoteTextureTxnScheduler->NotifyTxn(
+                    front.GetTransactionBuilder()->mRemoteTextureTxnId);
+          }
         }
         break;
       case WrTransactionEvent::Tag::PendingRemoteTextures: {
@@ -1122,6 +1157,11 @@ void TransactionBuilder::DeleteSnapshotImage(wr::SnapshotImageKey aKey) {
   wr_resource_updates_delete_snapshot_image(mTxn, aKey);
 }
 
+void TransactionBuilder::AdoptSnapshotImage(wr::SnapshotImageKey aFrom,
+                                            wr::SnapshotImageKey aTo) {
+  wr_resource_updates_adopt_snapshot_image(mTxn, aFrom, aTo);
+}
+
 void TransactionBuilder::AddRawFont(wr::FontKey aKey, wr::Vec<uint8_t>& aBytes,
                                     uint32_t aIndex) {
   wr_resource_updates_add_raw_font(mTxn, aKey, &aBytes.inner, aIndex);
@@ -1216,8 +1256,9 @@ void DisplayListBuilder::DumpSerializedDisplayList() {
   wr_dump_serialized_display_list(mWrState);
 }
 
-void DisplayListBuilder::Begin() {
-  wr_api_begin_builder(mWrState);
+void DisplayListBuilder::Begin(int32_t aAppUnitsPerDevPixel) {
+  MOZ_ASSERT(aAppUnitsPerDevPixel > 0);
+  wr_api_begin_builder(mWrState, aAppUnitsPerDevPixel);
 
   mASRToSpatialIdMap.clear();
   mCurrentSpaceAndClipChain = wr::RootScrollNodeWithChain();
@@ -1229,22 +1270,28 @@ void DisplayListBuilder::Begin() {
 void DisplayListBuilder::End(BuiltDisplayList& aOutDisplayList) {
   wr_api_end_builder(mWrState, &aOutDisplayList.dl_desc,
                      &aOutDisplayList.dl_items.inner,
-                     &aOutDisplayList.dl_spatial_tree.inner);
+                     &aOutDisplayList.dl_spatial_tree.inner,
+                     &aOutDisplayList.dl_interner_delta.inner);
 }
 
 void DisplayListBuilder::End(layers::DisplayListData& aOutTransaction) {
-  wr::VecU8 dlItems, dlSpatialTree;
+  wr::VecU8 dlItems, dlSpatialTree, dlInternerDelta;
   wr_api_end_builder(mWrState, &aOutTransaction.mDLDesc, &dlItems.inner,
-                     &dlSpatialTree.inner);
+                     &dlSpatialTree.inner, &dlInternerDelta.inner);
   aOutTransaction.mDLItems.emplace(dlItems.inner.data, dlItems.inner.length,
                                    dlItems.inner.capacity);
   aOutTransaction.mDLSpatialTree.emplace(dlSpatialTree.inner.data,
                                          dlSpatialTree.inner.length,
                                          dlSpatialTree.inner.capacity);
+  aOutTransaction.mDLInternerDelta.emplace(dlInternerDelta.inner.data,
+                                           dlInternerDelta.inner.length,
+                                           dlInternerDelta.inner.capacity);
   dlItems.inner.capacity = 0;
   dlItems.inner.data = nullptr;
   dlSpatialTree.inner.capacity = 0;
   dlSpatialTree.inner.data = nullptr;
+  dlInternerDelta.inner.capacity = 0;
+  dlInternerDelta.inner.data = nullptr;
 }
 
 Maybe<wr::WrSpatialId> DisplayListBuilder::PushStackingContext(
@@ -1315,29 +1362,19 @@ wr::WrClipId DisplayListBuilder::DefineImageMaskClip(
 }
 
 wr::WrClipId DisplayListBuilder::DefineRoundedRectClip(
-    Maybe<wr::WrSpatialId> aSpace, const wr::ComplexClipRegion& aComplex) {
-  WrClipId clipId;
-  if (aSpace) {
-    clipId = wr_dp_define_rounded_rect_clip(mWrState, *aSpace, aComplex);
-  } else {
-    clipId = wr_dp_define_rounded_rect_clip(
-        mWrState, mCurrentSpaceAndClipChain.space, aComplex);
-  }
-
-  return clipId;
+    Maybe<wr::WrSpatialId> aSpace, const wr::ComplexClipRegion& aComplex,
+    bool aAntiAliased) {
+  return wr_dp_define_rounded_rect_clip(
+      mWrState, aSpace.valueOr(mCurrentSpaceAndClipChain.space), aComplex,
+      aAntiAliased);
 }
 
 wr::WrClipId DisplayListBuilder::DefineRectClip(Maybe<wr::WrSpatialId> aSpace,
-                                                wr::LayoutRect aClipRect) {
-  WrClipId clipId;
-  if (aSpace) {
-    clipId = wr_dp_define_rect_clip(mWrState, *aSpace, aClipRect);
-  } else {
-    clipId = wr_dp_define_rect_clip(mWrState, mCurrentSpaceAndClipChain.space,
-                                    aClipRect);
-  }
-
-  return clipId;
+                                                wr::LayoutRect aClipRect,
+                                                bool aAntiAliased) {
+  return wr_dp_define_rect_clip(mWrState,
+                                aSpace.valueOr(mCurrentSpaceAndClipChain.space),
+                                aClipRect, aAntiAliased);
 }
 
 wr::WrSpatialId DisplayListBuilder::DefineStickyFrame(
@@ -1367,6 +1404,11 @@ wr::WrSpatialId DisplayListBuilder::DefineStickyFrame(
            ToString(aAppliedOffset).c_str());
 
   return spatialId;
+}
+
+wr::LayoutVector2D DisplayListBuilder::CurrentAccumulatedScrollOffset() {
+  return wr_dp_get_accumulated_scroll_offset(mWrState,
+                                             mCurrentSpaceAndClipChain.space);
 }
 
 Maybe<wr::WrSpatialId> DisplayListBuilder::GetSpatialIdForDefinedLayer(
@@ -1427,13 +1469,23 @@ void DisplayListBuilder::PushRect(const wr::LayoutRect& aBounds,
                   &mCurrentSpaceAndClipChain, aColor);
 }
 
+void DisplayListBuilder::PushEllipse(const wr::LayoutRect& aBounds,
+                                     const wr::LayoutRect& aClip,
+                                     bool aIsBackfaceVisible,
+                                     const wr::ColorF& aColor) {
+  PushRoundedRect(aBounds, aClip, aIsBackfaceVisible,
+                  wr::LayoutSize{aBounds.width() / 2, aBounds.height() / 2},
+                  aColor);
+}
+
 void DisplayListBuilder::PushRoundedRect(const wr::LayoutRect& aBounds,
                                          const wr::LayoutRect& aClip,
                                          bool aIsBackfaceVisible,
+                                         const wr::LayoutSize& aRadii,
                                          const wr::ColorF& aColor) {
-  WRDL_LOG("PushRoundedRect b=%s cl=%s c=%s\n", mWrState,
+  WRDL_LOG("PushRoundedRect b=%s cl=%s r=%s c=%s\n", mWrState,
            ToString(aBounds).c_str(), ToString(aClip).c_str(),
-           ToString(aColor).c_str());
+           ToString(aRadii).c_str(), ToString(aColor).c_str());
 
   // Draw the rounded rectangle as a border with rounded corners. We could also
   // draw this as a rectangle clipped to a rounded rectangle, but:
@@ -1447,13 +1499,15 @@ void DisplayListBuilder::PushRoundedRect(const wr::LayoutRect& aBounds,
   float h = aBounds.width() * 0.6f;
   float v = aBounds.height() * 0.6f;
   wr::LayoutSideOffsets widths = {v, h, v, h};
-  wr::BorderRadius radii = {{h, v}, {h, v}, {h, v}, {h, v},
+  wr::BorderRadius radii = {aRadii, aRadii, aRadii, aRadii,
                             1.0f,   1.0f,   1.0f,   1.0f};
+  wr::LayoutSideOffsets inset = EmptyLayoutSideOffsets();
 
   // Anti-aliased borders are required for rounded borders.
   wr_dp_push_border(mWrState, aBounds, aClip, aIsBackfaceVisible,
+                    /* force_antialiasing = */ false,
                     &mCurrentSpaceAndClipChain, wr::AntialiasBorder::Yes,
-                    widths, side, side, side, side, radii);
+                    widths, side, side, side, side, radii, inset);
 }
 
 void DisplayListBuilder::PushHitTest(
@@ -1509,37 +1563,40 @@ void DisplayListBuilder::PushBackdropFilter(
 
 void DisplayListBuilder::PushLinearGradient(
     const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
-    bool aIsBackfaceVisible, const wr::LayoutPoint& aStartPoint,
-    const wr::LayoutPoint& aEndPoint, const nsTArray<wr::GradientStop>& aStops,
-    wr::ExtendMode aExtendMode, const wr::LayoutSize aTileSize,
-    const wr::LayoutSize aTileSpacing) {
-  wr_dp_push_linear_gradient(mWrState, aBounds, aClip, aIsBackfaceVisible,
-                             &mCurrentSpaceAndClipChain, aStartPoint, aEndPoint,
-                             aStops.Elements(), aStops.Length(), aExtendMode,
-                             aTileSize, aTileSpacing);
+    bool aIsBackfaceVisible, const wr::LayoutVector2D& aStartPoint,
+    const wr::LayoutVector2D& aEndPoint,
+    const nsTArray<wr::GradientStop>& aStops, wr::ExtendMode aExtendMode,
+    const wr::LayoutSize aTileSize, const wr::LayoutSize aTileSpacing,
+    bool aForceAntiAliasing, wr::AlphaMode aAlphaMode) {
+  wr_dp_push_linear_gradient(
+      mWrState, aBounds, aClip, aIsBackfaceVisible, aForceAntiAliasing,
+      &mCurrentSpaceAndClipChain, aStartPoint, aEndPoint, aStops.Elements(),
+      aStops.Length(), aExtendMode, aAlphaMode, aTileSize, aTileSpacing);
 }
 
 void DisplayListBuilder::PushRadialGradient(
     const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
-    bool aIsBackfaceVisible, const wr::LayoutPoint& aCenter,
+    bool aIsBackfaceVisible, const wr::LayoutVector2D& aCenter,
     const wr::LayoutSize& aRadius, const nsTArray<wr::GradientStop>& aStops,
     wr::ExtendMode aExtendMode, const wr::LayoutSize aTileSize,
-    const wr::LayoutSize aTileSpacing) {
-  wr_dp_push_radial_gradient(mWrState, aBounds, aClip, aIsBackfaceVisible,
-                             &mCurrentSpaceAndClipChain, aCenter, aRadius,
-                             aStops.Elements(), aStops.Length(), aExtendMode,
-                             aTileSize, aTileSpacing);
+    const wr::LayoutSize aTileSpacing, bool aForceAntiAliasing,
+    wr::AlphaMode aAlphaMode) {
+  wr_dp_push_radial_gradient(
+      mWrState, aBounds, aClip, aIsBackfaceVisible, aForceAntiAliasing,
+      &mCurrentSpaceAndClipChain, aCenter, aRadius, aStops.Elements(),
+      aStops.Length(), aExtendMode, aAlphaMode, aTileSize, aTileSpacing);
 }
 
 void DisplayListBuilder::PushConicGradient(
     const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
-    bool aIsBackfaceVisible, const wr::LayoutPoint& aCenter, const float aAngle,
-    const nsTArray<wr::GradientStop>& aStops, wr::ExtendMode aExtendMode,
-    const wr::LayoutSize aTileSize, const wr::LayoutSize aTileSpacing) {
+    bool aIsBackfaceVisible, const wr::LayoutVector2D& aCenter,
+    const float aAngle, const nsTArray<wr::GradientStop>& aStops,
+    wr::ExtendMode aExtendMode, const wr::LayoutSize aTileSize,
+    const wr::LayoutSize aTileSpacing, wr::AlphaMode aAlphaMode) {
   wr_dp_push_conic_gradient(mWrState, aBounds, aClip, aIsBackfaceVisible,
                             &mCurrentSpaceAndClipChain, aCenter, aAngle,
                             aStops.Elements(), aStops.Length(), aExtendMode,
-                            aTileSize, aTileSpacing);
+                            aAlphaMode, aTileSize, aTileSpacing);
 }
 
 void DisplayListBuilder::PushImage(
@@ -1547,13 +1604,14 @@ void DisplayListBuilder::PushImage(
     bool aIsBackfaceVisible, bool aForceAntiAliasing,
     wr::ImageRendering aFilter, wr::ImageKey aImage, bool aPremultipliedAlpha,
     const wr::ColorF& aColor, bool aPreferCompositorSurface,
-    bool aSupportsExternalCompositing) {
+    bool aSupportsExternalCompositing, bool aRasterizedForRect) {
   WRDL_LOG("PushImage b=%s cl=%s\n", mWrState, ToString(aBounds).c_str(),
            ToString(aClip).c_str());
   wr_dp_push_image(mWrState, aBounds, aClip, aIsBackfaceVisible,
                    aForceAntiAliasing, &mCurrentSpaceAndClipChain, aFilter,
                    aImage, aPremultipliedAlpha, aColor,
-                   aPreferCompositorSurface, aSupportsExternalCompositing);
+                   aPreferCompositorSurface, aSupportsExternalCompositing,
+                   aRasterizedForRect);
 }
 
 void DisplayListBuilder::PushRepeatingImage(
@@ -1669,20 +1727,20 @@ void DisplayListBuilder::PushIFrame(const LayoutDeviceRect& aDevPxBounds,
                     aIgnoreMissingPipeline);
 }
 
-void DisplayListBuilder::PushBorder(const wr::LayoutRect& aBounds,
-                                    const wr::LayoutRect& aClip,
-                                    bool aIsBackfaceVisible,
-                                    const wr::LayoutSideOffsets& aWidths,
-                                    const Range<const wr::BorderSide>& aSides,
-                                    const wr::BorderRadius& aRadius,
-                                    wr::AntialiasBorder aAntialias) {
+void DisplayListBuilder::PushBorder(
+    const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
+    bool aIsBackfaceVisible, const wr::LayoutSideOffsets& aWidths,
+    const Range<const wr::BorderSide>& aSides, const wr::BorderRadius& aRadius,
+    const wr::LayoutSideOffsets& aInset, wr::AntialiasBorder aAntialias,
+    bool aForceAntiAliasing) {
   MOZ_ASSERT(aSides.length() == 4);
   if (aSides.length() != 4) {
     return;
   }
   wr_dp_push_border(mWrState, aBounds, aClip, aIsBackfaceVisible,
-                    &mCurrentSpaceAndClipChain, aAntialias, aWidths, aSides[0],
-                    aSides[1], aSides[2], aSides[3], aRadius);
+                    aForceAntiAliasing, &mCurrentSpaceAndClipChain, aAntialias,
+                    aWidths, aSides[0], aSides[1], aSides[2], aSides[3],
+                    aRadius, aInset);
 }
 
 void DisplayListBuilder::PushBorderImage(const wr::LayoutRect& aBounds,
@@ -1697,9 +1755,9 @@ void DisplayListBuilder::PushBorderGradient(
     const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
     bool aIsBackfaceVisible, const wr::LayoutSideOffsets& aWidths,
     const int32_t aWidth, const int32_t aHeight, bool aFill,
-    const wr::DeviceIntSideOffsets& aSlice, const wr::LayoutPoint& aStartPoint,
-    const wr::LayoutPoint& aEndPoint, const nsTArray<wr::GradientStop>& aStops,
-    wr::ExtendMode aExtendMode) {
+    const wr::DeviceIntSideOffsets& aSlice,
+    const wr::LayoutVector2D& aStartPoint, const wr::LayoutVector2D& aEndPoint,
+    const nsTArray<wr::GradientStop>& aStops, wr::ExtendMode aExtendMode) {
   wr_dp_push_border_gradient(mWrState, aBounds, aClip, aIsBackfaceVisible,
                              &mCurrentSpaceAndClipChain, aWidths, aWidth,
                              aHeight, aFill, aSlice, aStartPoint, aEndPoint,
@@ -1709,7 +1767,7 @@ void DisplayListBuilder::PushBorderGradient(
 void DisplayListBuilder::PushBorderRadialGradient(
     const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
     bool aIsBackfaceVisible, const wr::LayoutSideOffsets& aWidths, bool aFill,
-    const wr::LayoutPoint& aCenter, const wr::LayoutSize& aRadius,
+    const wr::LayoutVector2D& aCenter, const wr::LayoutSize& aRadius,
     const nsTArray<wr::GradientStop>& aStops, wr::ExtendMode aExtendMode) {
   wr_dp_push_border_radial_gradient(
       mWrState, aBounds, aClip, aIsBackfaceVisible, &mCurrentSpaceAndClipChain,
@@ -1720,7 +1778,7 @@ void DisplayListBuilder::PushBorderRadialGradient(
 void DisplayListBuilder::PushBorderConicGradient(
     const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
     bool aIsBackfaceVisible, const wr::LayoutSideOffsets& aWidths, bool aFill,
-    const wr::LayoutPoint& aCenter, const float aAngle,
+    const wr::LayoutVector2D& aCenter, const float aAngle,
     const nsTArray<wr::GradientStop>& aStops, wr::ExtendMode aExtendMode) {
   wr_dp_push_border_conic_gradient(mWrState, aBounds, aClip, aIsBackfaceVisible,
                                    &mCurrentSpaceAndClipChain, aWidths, aFill,

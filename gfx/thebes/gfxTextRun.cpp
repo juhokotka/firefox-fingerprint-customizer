@@ -4,6 +4,8 @@
 
 #include "gfxTextRun.h"
 
+#include "SharedFontList-impl.h"
+#include "TextDrawTarget.h"
 #include "gfx2DGlue.h"
 #include "gfxContext.h"
 #include "gfxFontConstants.h"
@@ -13,14 +15,8 @@
 #include "gfxPlatformFontList.h"
 #include "gfxTextFingerprint.h"
 #include "gfxUserFontSet.h"
+#include "mozilla/CheckedInt.h"
 #include "mozilla/ClearOnShutdown.h"
-#include "mozilla/dom/WorkerCommon.h"
-#include "mozilla/gfx/2D.h"
-#include "mozilla/gfx/Logging.h"  // for gfxCriticalError
-#include "mozilla/gfx/PathHelpers.h"
-#include "mozilla/intl/Locale.h"
-#include "mozilla/intl/String.h"
-#include "mozilla/intl/UnicodeProperties.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MruCache.h"
 #include "mozilla/ServoStyleSet.h"
@@ -28,12 +24,18 @@
 #include "mozilla/StaticPresData.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Utf16.h"
+#include "mozilla/dom/WorkerCommon.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/Logging.h"  // for gfxCriticalError
+#include "mozilla/gfx/PathHelpers.h"
+#include "mozilla/intl/Locale.h"
+#include "mozilla/intl/String.h"
+#include "mozilla/intl/UnicodeProperties.h"
 #include "nsLayoutUtils.h"
+#include "nsReadableUtils.h"
 #include "nsStyleConsts.h"
 #include "nsStyleUtil.h"
 #include "nsUnicodeProperties.h"
-#include "SharedFontList-impl.h"
-#include "TextDrawTarget.h"
 
 #ifdef XP_WIN
 #  include "gfxWindowsPlatform.h"
@@ -129,7 +131,9 @@ bool gfxTextRun::NeedsGlyphExtents() const {
 void* gfxTextRun::AllocateStorageForTextRun(size_t aSize, uint32_t aLength) {
   // Allocate the storage we need, returning nullptr on failure rather than
   // throwing an exception (because web content can create huge runs).
-  void* storage = malloc(aSize + aLength * sizeof(CompressedGlyph));
+  CheckedInt<size_t> storageSize =
+      CheckedInt<size_t>(aLength) * sizeof(CompressedGlyph) + aSize;
+  void* storage = storageSize.isValid() ? malloc(storageSize.value()) : nullptr;
   if (!storage) {
     NS_WARNING("failed to allocate storage for text run!");
     return nullptr;
@@ -137,7 +141,7 @@ void* gfxTextRun::AllocateStorageForTextRun(size_t aSize, uint32_t aLength) {
 
   // Initialize the glyph storage (beyond aSize) to zero
   memset(reinterpret_cast<char*>(storage) + aSize, 0,
-         aLength * sizeof(CompressedGlyph));
+         storageSize.value() - aSize);
 
   return storage;
 }
@@ -413,15 +417,82 @@ bool gfxTextRun::ShrinkToLigatureBoundaries(Range* aRange) const {
   return adjusted;
 }
 
+// Converts aText to UTF-8 in aUTF8, which must be empty, and fills aCharToByte
+// with the byte offset in aUTF8 of the source text for each UTF-16 code unit in
+// aText, followed by the length of aUTF8. The low half of a surrogate pair
+// shares the offset of the high half. Returns false if the conversion fails.
+static bool ConvertSourceTextToUTF8(const nsAString& aText, nsACString& aUTF8,
+                                    nsTArray<uint32_t>& aCharToByte) {
+  MOZ_ASSERT(aUTF8.IsEmpty());
+  aCharToByte.SetCapacity(aText.Length() + 1);
+  // Convert one code point at a time so we know where each one starts.
+  for (uint32_t unit = 0; unit < aText.Length();) {
+    uint32_t unitCount = 1;
+    if (unit + 1 < aText.Length() &&
+        IsSurrogatePair(aText[unit], aText[unit + 1])) {
+      unitCount = 2;
+    }
+    aCharToByte.AppendElement(aUTF8.Length());
+    if (unitCount == 2) {
+      // The low surrogate shares the offset of the high surrogate.
+      aCharToByte.AppendElement(aUTF8.Length());
+    }
+    if (!AppendUTF16toUTF8(Span<const char16_t>(aText).Subspan(unit, unitCount),
+                           aUTF8, fallible)) {
+      return false;
+    }
+    unit += unitCount;
+  }
+  aCharToByte.AppendElement(aUTF8.Length());
+  return true;
+}
+
 void gfxTextRun::DrawGlyphs(gfxFont* aFont, Range aRange, gfx::Point* aPt,
                             const PropertyProvider* aProvider,
-                            Range aSpacingRange, TextRunDrawParams& aParams,
+                            Range aProviderRange, TextRunDrawParams& aParams,
                             imgDrawingParams& aImgParams,
                             gfx::ShapedTextFlags aOrientation) const {
   AutoTArray<PropertyProvider::Spacing, 200> spacingBuffer;
-  bool haveSpacing =
-      GetAdjustedSpacingArray(aRange, aProvider, aSpacingRange, &spacingBuffer);
+  bool haveSpacing = GetAdjustedSpacingArray(aRange, aProvider, aProviderRange,
+                                             &spacingBuffer);
   aParams.spacing = haveSpacing ? spacingBuffer.Elements() : nullptr;
+  nsString sourceText16;
+  nsCString sourceText;
+  nsTArray<uint32_t> sourceCharToByte;
+  bool haveSourceText = aParams.needsSourceText && aProvider &&
+                        aProvider->GetSourceText(aProviderRange, sourceText16);
+  if (haveSourceText) {
+    MOZ_ASSERT(sourceText16.Length() == aProviderRange.Length());
+    sourceCharToByte.SetCapacity(aRange.Length() + 1);
+    haveSourceText =
+        sourceText16.Length() == aProviderRange.Length() &&
+        ConvertSourceTextToUTF8(sourceText16, sourceText, sourceCharToByte);
+    if (haveSourceText) {
+      // aProviderRange may be narrower than aRange. DrawPartialLigature
+      // always asks to draw the glyph for the full range of a ligature, but
+      // aProvider (e.g. an nsTextFrame) may only be able to supply source
+      // text for part of that range if the ligature is split across
+      // multiple providers. Map characters outside aProviderRange to the
+      // nearest edge of the provider's source text. Otherwise, we would read
+      // past the edge.
+      const uint32_t startPad = aProviderRange.start - aRange.start;
+      if (startPad > 0) {
+        // Copy the value first because InsertElementAt takes a reference and
+        // we're referencing a value in the array we're mutating.
+        const uint32_t firstByte = sourceCharToByte[0];
+        sourceCharToByte.InsertElementsAt(0, startPad, firstByte);
+      }
+      const uint32_t endPad = aRange.end - aProviderRange.end;
+      if (endPad > 0) {
+        const uint32_t lastByte = sourceCharToByte.LastElement();
+        sourceCharToByte.InsertElementsAt(sourceCharToByte.Length(), endPad,
+                                          lastByte);
+      }
+    }
+  }
+  aParams.sourceText = haveSourceText ? &sourceText : nullptr;
+  aParams.sourceCharToByte =
+      haveSourceText ? sourceCharToByte.Elements() : nullptr;
   aFont->Draw(this, aRange.start, aRange.end, aPt, aParams, aImgParams,
               aOrientation);
 }
@@ -607,7 +678,7 @@ void gfxTextRun::Draw(const Range aRange, const gfx::Point aPt,
 
   // Set up parameters that will be constant across all glyph runs we need
   // to draw, regardless of the font used.
-  TextRunDrawParams params(aParams.paletteCache);
+  TextRunDrawParams params(aParams.paletteValueSet);
   params.context = aParams.context;
   params.devPerApp = 1.0 / double(GetAppUnitsPerDevUnit());
   params.isVerticalRun = IsVertical();
@@ -625,6 +696,8 @@ void gfxTextRun::Draw(const Range aRange, const gfx::Point aPt,
   params.paintSVGGlyphs =
       !aParams.callbacks || aParams.callbacks->mShouldPaintSVGGlyphs;
   params.dt = aParams.context->GetDrawTarget();
+  params.needsSourceText =
+      aParams.provider && params.dt->SupportsGlyphSourceText();
   params.textDrawer = textDrawer;
   if (textDrawer) {
     params.clipRect = textDrawer->GeckoClipRect();
@@ -707,14 +780,15 @@ void gfxTextRun::Draw(const Range aRange, const gfx::Point aPt,
 }
 
 // This method is mostly parallel to Draw().
-void gfxTextRun::DrawEmphasisMarks(
-    gfxContext* aContext, gfxTextRun* aMark, gfxFloat aMarkAdvance,
-    gfx::Point aPt, Range aRange, const PropertyProvider* aProvider,
-    mozilla::gfx::PaletteCache& aPaletteCache,
-    mozilla::image::imgDrawingParams& aImgParams) const {
+void gfxTextRun::DrawEmphasisMarks(gfxContext* aContext, gfxTextRun* aMark,
+                                   gfxFloat aMarkAdvance, gfx::Point aPt,
+                                   Range aRange,
+                                   const PropertyProvider* aProvider,
+                                   gfx::FontPaletteValueSet* aPaletteValueSet,
+                                   image::imgDrawingParams& aImgParams) const {
   MOZ_ASSERT(aRange.end <= GetLength());
 
-  EmphasisMarkDrawParams params(aContext, aPaletteCache);
+  EmphasisMarkDrawParams params(aContext, aPaletteValueSet);
   params.mark = aMark;
   params.advance = aMarkAdvance;
   params.direction = GetDirection();
@@ -945,14 +1019,22 @@ uint32_t gfxTextRun::BreakAndMeasureText(
   AutoTArray<HyphenType, 4096> hyphenBuffer;
   HyphenationState wordState;
   wordState.mostRecentBoundary = aStart;
+  // GetHyphensOption() is a virtual call returning a value that is constant
+  // for the whole measurement, so fetch it once instead of on every use.
+  const StyleHyphens hyphensOption = aProvider.GetHyphensOption();
+  // Hyphenation data is only consulted in the break-detection block below,
+  // which is skipped entirely when all breaks are suppressed. In that case we
+  // avoid fetching and classifying hyphenation data (which can involve per-word
+  // dictionary lookups) since it would never be used.
   bool haveHyphenation =
-      (aProvider.GetHyphensOption() == StyleHyphens::Auto ||
-       (aProvider.GetHyphensOption() == StyleHyphens::Manual &&
+      aSuppressBreak != eSuppressAllBreaks &&
+      (hyphensOption == StyleHyphens::Auto ||
+       (hyphensOption == StyleHyphens::Manual &&
         !!(mFlags & gfx::ShapedTextFlags::TEXT_ENABLE_HYPHEN_BREAKS)));
   if (haveHyphenation) {
     if (hyphenBuffer.AppendElements(bufferRange.Length(), fallible)) {
       aProvider.GetHyphenationBreaks(bufferRange, hyphenBuffer.Elements());
-      if (aProvider.GetHyphensOption() == StyleHyphens::Auto) {
+      if (hyphensOption == StyleHyphens::Auto) {
         ClassifyAutoHyphenations(aStart, bufferRange, hyphenBuffer, &wordState);
       }
     } else {
@@ -981,6 +1063,15 @@ uint32_t gfxTextRun::BreakAndMeasureText(
   Range ligatureRange(aStart, end);
   ShrinkToLigatureBoundaries(&ligatureRange);
 
+  // Cache the glyph array pointer in a local so the compiler doesn't reload
+  // the member on every iteration across the calls made in the loop below;
+  // it does not change while we're measuring.
+  const CompressedGlyph* charGlyphs = mCharacterGlyphs;
+
+  // LetterSpacing() is a virtual call returning a value that is constant for
+  // the whole measurement, so hoist it out of the per-character loop.
+  const nscoord letterSpacing = aProvider.LetterSpacing();
+
   // We may need to move `i` backwards in the following loop, and re-scan
   // part of the textrun; we'll use `rescanLimit` so we can tell when that
   // is happening: if `i < rescanLimit` then we're rescanning.
@@ -1008,7 +1099,7 @@ uint32_t gfxTextRun::BreakAndMeasureText(
         if (hyphenBuffer.AppendElements(bufferRange.Length(), fallible)) {
           aProvider.GetHyphenationBreaks(
               bufferRange, hyphenBuffer.Elements() + oldHyphenBufferLength);
-          if (aProvider.GetHyphensOption() == StyleHyphens::Auto) {
+          if (hyphensOption == StyleHyphens::Auto) {
             uint32_t prevMostRecentWordBoundary = wordState.mostRecentBoundary;
             ClassifyAutoHyphenations(aStart, bufferRange, hyphenBuffer,
                                      &wordState);
@@ -1034,7 +1125,7 @@ uint32_t gfxTextRun::BreakAndMeasureText(
     // would trigger an infinite loop.
     if (aSuppressBreak != eSuppressAllBreaks &&
         (aSuppressBreak != eSuppressInitialBreak || i > aStart)) {
-      bool atNaturalBreak = mCharacterGlyphs[i].CanBreakBefore() ==
+      bool atNaturalBreak = charGlyphs[i].CanBreakBefore() ==
                             CompressedGlyph::FLAG_BREAK_TYPE_NORMAL;
       // atHyphenationBreak indicates we're at a "soft" hyphen, where an extra
       // hyphen glyph will need to be painted. It is NOT set for breaks at an
@@ -1052,15 +1143,15 @@ uint32_t gfxTextRun::BreakAndMeasureText(
       bool wordWrapping =
           (aCanWordWrap ||
            (aCanWhitespaceWrap &&
-            mCharacterGlyphs[i].CanBreakBefore() ==
+            charGlyphs[i].CanBreakBefore() ==
                 CompressedGlyph::FLAG_BREAK_TYPE_EMERGENCY_WRAP)) &&
-          mCharacterGlyphs[i].IsClusterStart() &&
+          charGlyphs[i].IsClusterStart() &&
           aBreakPriority <= gfxBreakPriority::eWordWrapBreak;
 
       bool whitespaceWrapping = false;
       if (i > aStart) {
         // The spec says the breaking opportunity is *after* whitespace.
-        auto const& g = mCharacterGlyphs[i - 1];
+        auto const& g = charGlyphs[i - 1];
         whitespaceWrapping =
             aIsBreakSpaces &&
             (g.CharIsSpace() || g.CharIsTab() || g.CharIsNewline());
@@ -1122,8 +1213,7 @@ uint32_t gfxTextRun::BreakAndMeasureText(
 
     gfxFloat charAdvance;
     if (i >= ligatureRange.start && i < ligatureRange.end) {
-      charAdvance =
-          GetAdvanceForGlyphs(Range(i, i + 1), aProvider.LetterSpacing());
+      charAdvance = GetAdvanceForGlyph(i, letterSpacing);
       if (haveSpacing) {
         PropertyProvider::Spacing* space =
             &spacingBuffer[i - bufferRange.start];
@@ -1135,7 +1225,7 @@ uint32_t gfxTextRun::BreakAndMeasureText(
 
     advance += charAdvance;
     if (aOutTrimmableWhitespace) {
-      if (mCharacterGlyphs[i].CharIsSpace()) {
+      if (charGlyphs[i].CharIsSpace()) {
         ++trimmableChars;
         trimmableAdvance += charAdvance;
       } else {
@@ -1417,8 +1507,8 @@ void gfxTextRun::SanitizeGlyphRuns() {
     // ligature glyphs from wrong font (seen with U+FEFF in reftest 474417-1, as
     // Core Text eliminates the glyph, which makes it appear as if a ligature
     // has been formed)
-    while (charGlyphs[aRun.mCharacterOffset].IsLigatureContinuation() &&
-           aRun.mCharacterOffset < GetLength()) {
+    while (aRun.mCharacterOffset < GetLength() &&
+           charGlyphs[aRun.mCharacterOffset].IsLigatureContinuation()) {
       aRun.mCharacterOffset++;
     }
 
@@ -1452,9 +1542,10 @@ void gfxTextRun::CopyGlyphDataFrom(gfxShapedWord* aShapedWord,
     for (uint32_t i = 0; i < wordLen; ++i, ++aOffset) {
       const CompressedGlyph& g = wordGlyphs[i];
       if (!g.IsSimpleGlyph()) {
+        uint32_t count = g.GetGlyphCount();
         const DetailedGlyph* details =
-            g.GetGlyphCount() > 0 ? aShapedWord->GetDetailedGlyphs(i) : nullptr;
-        SetDetailedGlyphs(aOffset, g.GetGlyphCount(), details);
+            count > 0 ? aShapedWord->GetDetailedGlyphs(i, count) : nullptr;
+        SetDetailedGlyphs(aOffset, count, details);
       }
       charGlyphs[aOffset] = g;
     }
@@ -1483,11 +1574,10 @@ void gfxTextRun::CopyGlyphDataFrom(gfxTextRun* aSource, Range aRange,
                             ? CompressedGlyph::FLAG_BREAK_TYPE_NONE
                             : dstGlyphs[i].CanBreakBefore());
     if (!g.IsSimpleGlyph()) {
-      uint32_t count = g.GetGlyphCount();
-      if (count > 0) {
+      if (uint32_t count = g.GetGlyphCount()) {
         // DetailedGlyphs allocation is infallible, so this should never be
         // null unless the source textrun is somehow broken.
-        DetailedGlyph* src = aSource->GetDetailedGlyphs(i + aRange.start);
+        const auto* src = aSource->GetDetailedGlyphs(i + aRange.start, count);
         MOZ_ASSERT(src, "missing DetailedGlyphs?");
         if (src) {
           DetailedGlyph* dst = AllocateDetailedGlyphs(i + aDest, count);
@@ -1647,15 +1737,12 @@ void gfxTextRun::FetchGlyphExtents(DrawTarget* aRefDrawTarget) const {
           }
         }
       } else if (!glyphData->IsMissing()) {
-        uint32_t glyphCount = glyphData->GetGlyphCount();
-        if (glyphCount == 0) {
+        uint32_t count = glyphData->GetGlyphCount();
+        if (count == 0) {
           continue;
         }
-        const gfxTextRun::DetailedGlyph* details = GetDetailedGlyphs(j);
-        if (!details) {
-          continue;
-        }
-        for (uint32_t k = 0; k < glyphCount; ++k, ++details) {
+        const auto* details = GetDetailedGlyphs(j, count);
+        for (uint32_t k = 0; k < count; ++k, ++details) {
           uint32_t glyphIndex = details->mGlyphID;
           if (!extents->IsGlyphKnownWithTightExtentsLocked(glyphIndex)) {
 #ifdef DEBUG_TEXT_RUN_STORAGE_METRICS
@@ -1775,19 +1862,19 @@ void gfxTextRun::Dump(FILE* out) {
       line.AppendPrintf(" id=%d adv=%d", glyphData.GetSimpleGlyph(),
                         glyphData.GetSimpleAdvance());
     } else {
-      uint32_t count = glyphData.GetGlyphCount();
-      if (count) {
+      if (uint32_t count = glyphData.GetGlyphCount()) {
+        const auto* glyphs = GetDetailedGlyphs(i, count);
         line += " ids=";
         for (uint32_t j = 0; j < count; j++) {
-          line.AppendPrintf(j ? ",%d" : "%d", GetDetailedGlyphs(i)[j].mGlyphID);
+          line.AppendPrintf(j ? ",%d" : "%d", glyphs[j].mGlyphID);
         }
         line += " advs=";
         for (uint32_t j = 0; j < count; j++) {
-          line.AppendPrintf(j ? ",%d" : "%d", GetDetailedGlyphs(i)[j].mAdvance);
+          line.AppendPrintf(j ? ",%d" : "%d", glyphs[j].mAdvance);
         }
         line += " offsets=";
         for (uint32_t j = 0; j < count; j++) {
-          auto offset = GetDetailedGlyphs(i)[j].mOffset;
+          auto offset = glyphs[j].mOffset;
           line.AppendPrintf(j ? ",(%g,%g)" : "(%g,%g)", offset.x.value,
                             offset.y.value);
         }
@@ -2132,8 +2219,7 @@ bool gfxFontGroup::FamilyFace::EqualsUserFont(
   gfxFontEntry* fe = FontEntry();
   // if there's a font, the entry is the underlying platform font
   if (mFontCreated) {
-    gfxFontEntry* pfe = aUserFont->GetPlatformFontEntry();
-    if (pfe == fe) {
+    if (aUserFont->PlatformFontEntryEquals(fe)) {
       return true;
     }
   } else if (fe == aUserFont) {
@@ -2577,6 +2663,9 @@ static Script ResolveScriptForLang(const nsAtom* aLanguage, Script aDefault) {
       : public MruCache<const nsAtom*, std::pair<const nsAtom*, Script>,
                         LangScriptCache> {
    public:
+    static bool IsEmpty(const std::pair<const nsAtom*, Script>& aValue) {
+      return !aValue.first;
+    }
     static HashNumber Hash(const nsAtom* const& aKey) { return aKey->hash(); }
     static bool Match(const nsAtom* const& aKey,
                       const std::pair<const nsAtom*, Script>& aValue) {
@@ -2641,7 +2730,7 @@ void gfxFontGroup::InitTextRunLog(LogModule* aLog, const uint8_t* aString,
   MOZ_LOG(
       aLog, LogLevel::Warning,
       ("(%s) fontgroup: [%s] default: %s lang: %s script: %d "
-       "len %d weight: %g stretch: %g%% style: %s size: %6.2f "
+       "len %d weight: %g width: %g%% style: %s size: %6.2f "
        "%d-byte TEXTRUN [%s] ENDTEXTRUN\n",
        (mStyle.systemFont ? "textrunui" : "textrun"),
        FamilyListToString(mFamilyList).get(),
@@ -2651,7 +2740,7 @@ void gfxFontGroup::InitTextRunLog(LogModule* aLog, const uint8_t* aString,
                    ? "sans-serif"
                    : "none")),
        lang.get(), static_cast<int>(aRun.mScript), aRun.mLength,
-       mStyle.weight.ToFloat(), mStyle.stretch.ToFloat(), styleString.get(),
+       mStyle.weight.ToFloat(), mStyle.width.ToFloat(), styleString.get(),
        mStyle.size, aString ? 1 : 2,
        aTextPtr
            ? NS_ConvertUTF16toUTF8(aTextPtr + aRun.mOffset, aRun.mLength).get()
@@ -2904,7 +2993,7 @@ void gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget, gfxTextRun* aTextRun,
       bool syntheticLower = false;
       bool syntheticUpper = false;
 
-      if (mStyle.variantSubSuper != NS_FONT_VARIANT_POSITION_NORMAL &&
+      if (mStyle.variantSubSuper != StyleFontVariantPosition::Normal &&
           mStyle.useSyntheticPosition &&
           (aTextRun->GetShapingState() ==
                gfxTextRun::eShapingState_ForceFallbackFeature ||
@@ -2934,7 +3023,7 @@ void gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget, gfxTextRun* aTextRun,
           // glyph layout failed! treat as missing glyphs
           matchedFont = nullptr;
         }
-      } else if (mStyle.variantCaps != NS_FONT_VARIANT_CAPS_NORMAL &&
+      } else if (mStyle.variantCaps != StyleFontVariantCaps::Normal &&
                  mStyle.allowSyntheticSmallCaps &&
                  !matchedFont->SupportsVariantCaps(
                      aRunScript, mStyle.variantCaps, petiteToSmallCaps,
@@ -3424,7 +3513,7 @@ already_AddRefed<gfxFont> gfxFontGroup::FindFontForChar(
           loading = true;
         }
 
-        gfxFontEntry* pfe = ufe->GetPlatformFontEntry();
+        RefPtr<gfxFontEntry> pfe = ufe->GetPlatformFontEntry();
         if (pfe && (pfe->HasCharacter(aCh) ||
                     (fallbackChar && pfe->HasCharacter(fallbackChar)))) {
           font = GetFontAt(i, aCh, &loading);

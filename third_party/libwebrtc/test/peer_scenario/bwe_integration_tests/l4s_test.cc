@@ -9,31 +9,43 @@
  */
 
 #include <atomic>
+#include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "api/audio_options.h"
 #include "api/jsep.h"
+#include "api/media_types.h"
 #include "api/peer_connection_interface.h"
 #include "api/rtc_error.h"
+#include "api/rtp_parameters.h"
+#include "api/rtp_transceiver_direction.h"
+#include "api/rtp_transceiver_interface.h"
 #include "api/scoped_refptr.h"
 #include "api/stats/rtc_stats_report.h"
+#include "api/test/network_emulation/network_config_schedule.pb.h"
 #include "api/test/network_emulation/network_emulation_interfaces.h"
+#include "api/test/network_emulation/schedulable_network_node_builder.h"
 #include "api/test/network_emulation_manager.h"
 #include "api/transport/ecn_marking.h"
 #include "api/transport/stun.h"
 #include "api/units/data_rate.h"
+#include "api/units/data_size.h"
 #include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/congestion_control_feedback.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/rtpfb.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
 #include "modules/rtp_rtcp/source/rtp_util.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/network_constants.h"
 #include "test/create_frame_generator_capturer.h"
 #include "test/gmock.h"
@@ -49,15 +61,21 @@ namespace {
 
 using test::GetAvailableSendBitrate;
 using test::GetAverageRoundTripTime;
+using test::GetPacketsLost;
 using test::GetPacketsReceived;
 using test::GetPacketsReceivedWithCe;
 using test::GetPacketsReceivedWithEct1;
+using test::GetPacketsSent;
 using test::GetPacketsSentWithEct1;
 using test::GetStatsAndProcess;
 using test::PeerScenario;
 using test::PeerScenarioClient;
+using ::testing::AllOf;
 using ::testing::ContainsRegex;
+using ::testing::Ge;
+using ::testing::Gt;
 using ::testing::HasSubstr;
+using ::testing::Lt;
 using ::testing::TestWithParam;
 
 // RTC event logs can be gathered from these tests.
@@ -123,6 +141,26 @@ class RtcpFeedbackCounter {
   int ect1_ = 0;
   int ce_ = 0;
 };
+
+// Creates a network node that changes its one way delay from
+// `initial_one_way_delay` to `final_one_way_delay` `change_after` after the
+// first packet is sent on it.
+EmulatedNetworkNode* CreateNodeWithDelayChange(PeerScenario& s,
+                                               TimeDelta initial_one_way_delay,
+                                               TimeDelta final_one_way_delay,
+                                               TimeDelta change_after) {
+  // A scheduled network node requires a finite link capacity.
+  constexpr DataRate kLinkCapacity = DataRate::KilobitsPerSec(3000);
+  network_behaviour::NetworkConfigSchedule schedule;
+  network_behaviour::NetworkConfigScheduleItem* item = schedule.add_item();
+  item->set_link_capacity_kbps(kLinkCapacity.kbps());
+  item->set_queue_delay_ms(initial_one_way_delay.ms());
+  item = schedule.add_item();
+  item->set_time_since_first_sent_packet_ms(change_after.ms());
+  item->set_link_capacity_kbps(kLinkCapacity.kbps());
+  item->set_queue_delay_ms(final_one_way_delay.ms());
+  return SchedulableNetworkNodeBuilder(*s.net(), std::move(schedule)).Build();
+}
 
 TEST(L4STest, NegotiateAndUseCcfbIfEnabled) {
   PeerScenario s(*test_info_);
@@ -454,6 +492,152 @@ TEST(L4STest, SendsEct1WithScream) {
   EXPECT_EQ(feedback_counter.not_ect(), 0);
 }
 
+TEST(L4STest, StopsSendingEct1IfEct1MarkedPacketsAreDropped) {
+  PeerScenario s(*test_info_);
+  PeerScenarioClient::Config config;
+  config.field_trials.Set("WebRTC-RFC8888CongestionControlFeedback",
+                          "Enabled,offer:true");
+  config.field_trials.Set("WebRTC-Bwe-ScreamV2", "Enabled");
+  config.disable_encryption = true;
+  PeerScenarioClient* caller = s.CreateClient(config);
+  PeerScenarioClient* callee = s.CreateClient(config);
+  EmulatedNetworkNode* caller_to_callee = s.net()->NodeBuilder().Build().node;
+  EmulatedNetworkNode* callee_to_caller = s.net()->NodeBuilder().Build().node;
+  // A middlebox that drops ECT(1) marked packets instead of bleaching them.
+  // STUN is Not-ECT, so ICE stays writable and nothing else notices.
+  caller_to_callee->router()->SetFilter([](const EmulatedIpPacket& packet) {
+    return packet.ecn != EcnMarking::kEct1;
+  });
+
+  PeerScenarioClient::VideoSendTrackConfig video_conf;
+  video_conf.generator.squares_video->framerate = 15;
+  caller->CreateVideo("VIDEO_1", video_conf);
+  s.SimpleConnection(caller, callee, {caller_to_callee}, {callee_to_caller});
+  s.ProcessMessages(TimeDelta::Seconds(3));
+
+  // No ECT(1) marked packet ever arrived, but media recovered as Not-ECT.
+  scoped_refptr<const RTCStatsReport> callee_stats =
+      GetStatsAndProcess(s, callee);
+  EXPECT_EQ(GetPacketsReceivedWithEct1(callee_stats), 0);
+  EXPECT_GT(GetPacketsReceived(callee_stats), 0);
+}
+
+TEST(L4STest, KeepsSendingEct1AfterTransientOutage) {
+  PeerScenario s(*test_info_);
+  PeerScenarioClient::Config config;
+  config.field_trials.Set("WebRTC-RFC8888CongestionControlFeedback",
+                          "Enabled,offer:true");
+  config.field_trials.Set("WebRTC-Bwe-ScreamV2", "Enabled");
+  config.disable_encryption = true;
+  PeerScenarioClient* caller = s.CreateClient(config);
+  PeerScenarioClient* callee = s.CreateClient(config);
+  EmulatedNetworkNode* caller_to_callee = s.net()->NodeBuilder().Build().node;
+  EmulatedNetworkNode* callee_to_caller = s.net()->NodeBuilder().Build().node;
+  RtcpFeedbackCounter feedback_counter;
+  callee_to_caller->router()->SetWatcher(
+      [&](const EmulatedIpPacket& packet) { feedback_counter.Count(packet); });
+
+  PeerScenarioClient::VideoSendTrackConfig video_conf;
+  video_conf.generator.squares_video->framerate = 15;
+  caller->CreateVideo("VIDEO_1", video_conf);
+  s.SimpleConnection(caller, callee, {caller_to_callee}, {callee_to_caller});
+  s.ProcessMessages(TimeDelta::Seconds(2));
+  ASSERT_GT(feedback_counter.ect1(), 0);
+
+  // A total uplink outage, such as a Wi-Fi scan, stops all feedback. It is
+  // shorter than the timeout used once ECT(1) is known to work, so it must not
+  // be mistaken for a path that drops the marking.
+  caller_to_callee->router()->SetFilter(
+      [](const EmulatedIpPacket& /*packet*/) { return false; });
+  s.ProcessMessages(TimeDelta::Seconds(1));
+  caller_to_callee->router()->SetFilter(nullptr);
+
+  int ect1_before_recovery = feedback_counter.ect1();
+  scoped_refptr<const RTCStatsReport> stats_after_outage =
+      GetStatsAndProcess(s, caller);
+  int64_t packets_sent_after_outage = GetPacketsSent(stats_after_outage);
+  int64_t ect1_sent_after_outage = GetPacketsSentWithEct1(stats_after_outage);
+
+  s.ProcessMessages(TimeDelta::Seconds(2));
+
+  // Note that the feedback counter can not be used to verify that no Not-ECT
+  // packet was sent, since RFC 8888 reports packets that were lost during the
+  // outage with a Not-ECT marking. Compare the sender side counters instead.
+  scoped_refptr<const RTCStatsReport> stats = GetStatsAndProcess(s, caller);
+  EXPECT_EQ(GetPacketsSent(stats) - packets_sent_after_outage,
+            GetPacketsSentWithEct1(stats) - ect1_sent_after_outage);
+  EXPECT_GT(feedback_counter.ect1(), ect1_before_recovery);
+}
+
+TEST(L4STest, SendsEct1OnHighRttPath) {
+  PeerScenario s(*test_info_);
+  PeerScenarioClient::Config config;
+  config.field_trials.Set("WebRTC-RFC8888CongestionControlFeedback",
+                          "Enabled,offer:true");
+  config.field_trials.Set("WebRTC-Bwe-ScreamV2", "Enabled");
+  config.disable_encryption = true;
+  PeerScenarioClient* caller = s.CreateClient(config);
+  PeerScenarioClient* callee = s.CreateClient(config);
+  // 400ms RTT. Feedback for the first ECT(1) packet must arrive before the
+  // path is assumed to drop the marking.
+  EmulatedNetworkNode* caller_to_callee =
+      s.net()->NodeBuilder().delay_ms(200).Build().node;
+  EmulatedNetworkNode* callee_to_caller =
+      s.net()->NodeBuilder().delay_ms(200).Build().node;
+  PeerScenarioClient::VideoSendTrackConfig video_conf;
+  video_conf.generator.squares_video->framerate = 15;
+  caller->CreateVideo("VIDEO_1", video_conf);
+  s.SimpleConnection(caller, callee, {caller_to_callee}, {callee_to_caller});
+  s.ProcessMessages(TimeDelta::Seconds(2));
+  scoped_refptr<const RTCStatsReport> first_stats =
+      GetStatsAndProcess(s, caller);
+  int64_t packets_sent = GetPacketsSent(first_stats);
+  int64_t ect1_sent = GetPacketsSentWithEct1(first_stats);
+
+  s.ProcessMessages(TimeDelta::Seconds(2));
+
+  scoped_refptr<const RTCStatsReport> stats = GetStatsAndProcess(s, caller);
+  EXPECT_GT(GetPacketsSent(stats) - packets_sent, 0);
+  EXPECT_EQ(GetPacketsSent(stats) - packets_sent,
+            GetPacketsSentWithEct1(stats) - ect1_sent);
+  EXPECT_GT(GetPacketsReceivedWithEct1(GetStatsAndProcess(s, callee)), 0);
+}
+
+TEST(L4STest, SendsEct1AfterRoundTripTimeDecrease) {
+  PeerScenario s(*test_info_);
+  PeerScenarioClient::Config config;
+  config.field_trials.Set("WebRTC-RFC8888CongestionControlFeedback",
+                          "Enabled,offer:true");
+  config.field_trials.Set("WebRTC-Bwe-ScreamV2", "Enabled");
+  config.disable_encryption = true;
+  PeerScenarioClient* caller = s.CreateClient(config);
+  PeerScenarioClient* callee = s.CreateClient(config);
+  // The RTT starts at 600ms, which is longer than the time the first ECT(1)
+  // packet is allowed to go unacknowledged, so ECT(1) is disabled. It then
+  // drops to 30ms and the retry done 10s later succeeds.
+  EmulatedNetworkNode* caller_to_callee = CreateNodeWithDelayChange(
+      s, TimeDelta::Millis(300), TimeDelta::Millis(15), TimeDelta::Seconds(3));
+  EmulatedNetworkNode* callee_to_caller = CreateNodeWithDelayChange(
+      s, TimeDelta::Millis(300), TimeDelta::Millis(15), TimeDelta::Seconds(3));
+  PeerScenarioClient::VideoSendTrackConfig video_conf;
+  video_conf.generator.squares_video->framerate = 15;
+  caller->CreateVideo("VIDEO_1", video_conf);
+  s.SimpleConnection(caller, callee, {caller_to_callee}, {callee_to_caller});
+  s.ProcessMessages(TimeDelta::Seconds(13));
+  scoped_refptr<const RTCStatsReport> first_stats =
+      GetStatsAndProcess(s, caller);
+  int64_t packets_sent = GetPacketsSent(first_stats);
+  int64_t ect1_sent = GetPacketsSentWithEct1(first_stats);
+
+  s.ProcessMessages(TimeDelta::Seconds(2));
+
+  scoped_refptr<const RTCStatsReport> stats = GetStatsAndProcess(s, caller);
+  EXPECT_GT(GetPacketsSent(stats) - packets_sent, 0);
+  EXPECT_EQ(GetPacketsSent(stats) - packets_sent,
+            GetPacketsSentWithEct1(stats) - ect1_sent);
+  EXPECT_GT(GetPacketsReceivedWithEct1(GetStatsAndProcess(s, callee)), 0);
+}
+
 TEST(L4STest, SendsEct1AfterRouteChangeEvenIfBleached) {
   PeerScenario s(*test_info_);
 
@@ -741,7 +925,7 @@ TEST(L4STest, RtcpSentAsNotEctIfRtpEcnBleached) {
       });
 
   PeerScenarioClient::VideoSendTrackConfig video_conf;
-  video_conf.generator.squares_video->framerate = 15;
+  video_conf.generator.squares_video->framerate = 30;
   caller->CreateAudio("AUDIO_1", AudioOptions());
   caller->CreateVideo("VIDEO_1", video_conf);
   s.SimpleConnection(caller, callee, {caller_to_callee_node},
@@ -751,6 +935,219 @@ TEST(L4STest, RtcpSentAsNotEctIfRtpEcnBleached) {
   EXPECT_EQ(rtcp_ecn_count, 0);
   EXPECT_GT(rtcp_not_ect_count, 0);
 }
+
+#if !defined(WEBRTC_IOS)
+// TODO(bugs.webrtc.org/42225697): investigate why CcFbSendRateAdaptation fails
+// on iOS bots.
+enum class TestVariant { kCcfbWithGoogCc, kCcfbWithScreamV2 };
+
+// These tests that the bitrate used by Congestion Control feedback is reduced
+// at extremely low available bandwidths. If the sender stops utilizing the
+// capacity, the bitrate may increase again.
+class CcFbSendRateAdaptation : public TestWithParam<TestVariant> {
+ protected:
+  struct TestParticipants {
+    PeerScenarioClient* caller;
+    PeerScenarioClient* callee;
+    EmulatedNetworkNode* caller_to_callee;
+    EmulatedNetworkNode* callee_to_caller;
+    std::optional<PeerScenarioClient::AudioSendTrack> caller_audio;
+  };
+
+  TestParticipants SetupSendAudioOnLowCapacityUplink(
+      PeerScenario& s,
+      TestVariant variant,
+      bool caller_sends_audio = true) {
+    PeerScenarioClient::Config caller_config;
+    PeerScenarioClient::Config callee_config;
+
+    if (variant == TestVariant::kCcfbWithGoogCc) {
+      caller_config.field_trials.Set(
+          "WebRTC-RFC8888CongestionControlFeedback",
+          "Enabled,offer:true,feedback_fraction:0.1");
+      callee_config.field_trials.Set("WebRTC-RFC8888CongestionControlFeedback",
+                                     "Enabled,feedback_fraction:0.1");
+    } else if (variant == TestVariant::kCcfbWithScreamV2) {
+      caller_config.field_trials.Set(
+          "WebRTC-RFC8888CongestionControlFeedback",
+          "Enabled,offer:true,feedback_fraction:0.1");
+      caller_config.field_trials.Set("WebRTC-Bwe-ScreamV2", "Enabled");
+      callee_config.field_trials.Set("WebRTC-RFC8888CongestionControlFeedback",
+                                     "Enabled,feedback_fraction:0.1");
+      callee_config.field_trials.Set("WebRTC-Bwe-ScreamV2", "Enabled");
+    }
+
+    PeerScenarioClient* caller = s.CreateClient(caller_config);
+    PeerScenarioClient* callee = s.CreateClient(callee_config);
+
+    EmulatedNetworkNode* caller_to_callee = s.net()
+                                                ->NodeBuilder()
+                                                .capacity_kbps(50)
+                                                .delay_ms(50)
+                                                .packet_queue_length(20)
+                                                .Build()
+                                                .node;
+    EmulatedNetworkNode* callee_to_caller =
+        s.net()->NodeBuilder().delay_ms(50).capacity_kbps(100000).Build().node;
+
+    std::optional<PeerScenarioClient::AudioSendTrack> caller_audio;
+    // Caller maybe sends AUDIO only, but wants to receive VIDEO from callee.
+    if (caller_sends_audio) {
+      caller_audio = caller->CreateAudio("AUDIO", AudioOptions());
+      RtpParameters caller_audio_params = caller_audio->sender->GetParameters();
+      for (auto& encoding : caller_audio_params.encodings) {
+        // Adaptive frame length allow audio to adapt to BWE.
+        encoding.adaptive_ptime = true;
+      }
+      caller_audio->sender->SetParameters(caller_audio_params);
+    } else {
+      RTCErrorOr<scoped_refptr<RtpTransceiverInterface>> audio_transceiver =
+          caller->pc()->AddTransceiver(MediaType::AUDIO);
+      RTC_CHECK(audio_transceiver.ok());
+      audio_transceiver.value()->SetDirectionWithError(
+          RtpTransceiverDirection::kRecvOnly);
+    }
+    RTCErrorOr<scoped_refptr<RtpTransceiverInterface>> transceiver =
+        caller->pc()->AddTransceiver(MediaType::VIDEO);
+    RTC_CHECK(transceiver.ok());
+    transceiver.value()->SetDirectionWithError(
+        RtpTransceiverDirection::kRecvOnly);
+
+    // Callee sends AUDIO and VIDEO.
+    PeerScenarioClient::VideoSendTrackConfig video_conf;
+    video_conf.generator.squares_video->framerate = 30;
+    video_conf.generator.squares_video->width = 1280;
+    video_conf.generator.squares_video->height = 720;
+    callee->CreateVideo("VIDEO", video_conf);
+    PeerScenarioClient::AudioSendTrack callee_audio =
+        callee->CreateAudio("AUDIO", AudioOptions());
+    RtpParameters callee_audio_params = callee_audio.sender->GetParameters();
+    for (auto& encoding : callee_audio_params.encodings) {
+      encoding.adaptive_ptime = true;
+    }
+    callee_audio.sender->SetParameters(callee_audio_params);
+
+    s.SimpleConnection(caller, callee, {caller_to_callee}, {callee_to_caller});
+
+    // Allow 10S for BWE convergence and leaving ALR.
+    s.ProcessMessages(TimeDelta::Seconds(10));
+
+    if (caller_sends_audio) {
+      EXPECT_THAT(GetAvailableSendBitrate(GetStatsAndProcess(s, caller)).kbps(),
+                  AllOf(Ge(20), Lt(80)));
+    }
+
+    // Callee has unlimited capacity (100 Mbps). BWE should be high, but due to
+    // very infrequent feedback, we can not expect it to adapt very fast.
+    EXPECT_THAT(GetAvailableSendBitrate(GetStatsAndProcess(s, callee)).kbps(),
+                Gt(500));
+
+    return TestParticipants{
+        .caller = caller,
+        .callee = callee,
+        .caller_to_callee = caller_to_callee,
+        .callee_to_caller = callee_to_caller,
+        .caller_audio = caller_audio,
+    };
+  }
+};
+
+TEST_P(CcFbSendRateAdaptation, RtcpRateReducedWhenLinkIsUtilized) {
+  const TestVariant variant = GetParam();
+  PeerScenario s(*testing::UnitTest::GetInstance()->current_test_info());
+
+  TestParticipants setup = SetupSendAudioOnLowCapacityUplink(s, variant);
+
+  Timestamp start_time = s.net()->Now();
+  std::atomic<int64_t> total_rtcp_bytes = 0;
+  setup.caller_to_callee->router()->SetWatcher(
+      [&](const EmulatedIpPacket& packet) {
+        if (IsRtcpPacket(packet.data)) {
+          total_rtcp_bytes += packet.ip_packet_size();
+        }
+      });
+  s.ProcessMessages(TimeDelta::Seconds(10));
+  TimeDelta duration = s.net()->Now() - start_time;
+
+  DataRate average_rtcp_bitrate =
+      DataSize::Bytes(total_rtcp_bytes.load()) / duration;
+  RTC_LOG(LS_INFO) << "Average RTCP traffic bitrate: " << average_rtcp_bitrate;
+
+  // Allow RTCP to take up to 15% of the link capacity. (Feedback, NACK and SR
+  // RR)
+  EXPECT_LT(average_rtcp_bitrate, DataRate::KilobitsPerSec(50) * 0.15);
+}
+
+TEST_P(CcFbSendRateAdaptation, RtcpRateIncreaseWhenAudioStopSending) {
+  const TestVariant variant = GetParam();
+  PeerScenario s(*testing::UnitTest::GetInstance()->current_test_info());
+
+  TestParticipants setup = SetupSendAudioOnLowCapacityUplink(s, variant);
+
+  // Stop sending audio. Bwe should enter ALR and thus allow more RTCP traffic.
+  EXPECT_TRUE(setup.caller_audio->sender->SetTrack(nullptr));
+
+  Timestamp start_time = s.net()->Now();
+  std::atomic<int64_t> total_rtcp_bytes = 0;
+  setup.caller_to_callee->router()->SetWatcher(
+      [&](const EmulatedIpPacket& packet) {
+        if (IsRtcpPacket(packet.data)) {
+          total_rtcp_bytes += packet.ip_packet_size();
+        }
+      });
+
+  s.ProcessMessages(TimeDelta::Seconds(15));
+  TimeDelta duration = s.net()->Now() - start_time;
+
+  DataRate average_rtcp_bitrate =
+      DataSize::Bytes(total_rtcp_bytes.load()) / duration;
+  RTC_LOG(LS_INFO) << "Average RTCP traffic bitrate when audio sender stops: "
+                   << average_rtcp_bitrate;
+
+  EXPECT_GT(average_rtcp_bitrate, DataRate::KilobitsPerSec(50) * 0.15);
+}
+
+TEST_P(CcFbSendRateAdaptation, RtcpRateHigherWhenCallerNeverSendsMedia) {
+  const TestVariant variant = GetParam();
+  PeerScenario s(*testing::UnitTest::GetInstance()->current_test_info());
+
+  TestParticipants setup = SetupSendAudioOnLowCapacityUplink(
+      s, variant, /*caller_sends_audio=*/false);
+
+  Timestamp start_time = s.net()->Now();
+  std::atomic<int64_t> total_rtcp_bytes = 0;
+  setup.caller_to_callee->router()->SetWatcher(
+      [&](const EmulatedIpPacket& packet) {
+        if (IsRtcpPacket(packet.data)) {
+          total_rtcp_bytes += packet.ip_packet_size();
+        }
+      });
+  s.ProcessMessages(TimeDelta::Seconds(10));
+  TimeDelta duration = s.net()->Now() - start_time;
+
+  DataRate average_rtcp_bitrate =
+      DataSize::Bytes(total_rtcp_bytes.load()) / duration;
+  RTC_LOG(LS_INFO)
+      << "Average RTCP traffic bitrate when caller does not send media: "
+      << average_rtcp_bitrate;
+
+  EXPECT_GT(average_rtcp_bitrate, DataRate::KilobitsPerSec(50) * 0.15);
+}
+
+INSTANTIATE_TEST_SUITE_P(L4STest,
+                         CcFbSendRateAdaptation,
+                         testing::Values(TestVariant::kCcfbWithGoogCc,
+                                         TestVariant::kCcfbWithScreamV2),
+                         [](const testing::TestParamInfo<TestVariant>& info) {
+                           switch (info.param) {
+                             case TestVariant::kCcfbWithGoogCc:
+                               return "CcfbWithGoogCc";
+                             case TestVariant::kCcfbWithScreamV2:
+                               return "CcfbWithScreamV2";
+                           }
+                           RTC_CHECK_NOTREACHED();
+                         });
+#endif  // !defined(WEBRTC_IOS)
 
 }  // namespace
 }  // namespace webrtc

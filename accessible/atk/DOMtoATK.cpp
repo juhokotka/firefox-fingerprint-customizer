@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DOMtoATK.h"
+
 #include "nsUTF8Utils.h"
 
 namespace mozilla::a11y::DOMtoATK {

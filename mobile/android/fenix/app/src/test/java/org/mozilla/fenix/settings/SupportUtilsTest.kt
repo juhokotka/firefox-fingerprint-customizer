@@ -9,9 +9,9 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import io.mockk.every
 import io.mockk.mockk
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import java.util.Locale
 
 class SupportUtilsTest {
 
@@ -43,6 +43,14 @@ class SupportUtilsTest {
             ),
         )
         assertEquals(
+            "https://support.mozilla.org/1/mobile/1.6/Android/en-US/configure-dns-over-https-protection-levels-firefox-android#w_what-is-a-local-provider",
+            SupportUtils.getSumoURLForTopic(
+                mockContext("1.6"),
+                SupportUtils.SumoTopic.DNS_OVER_HTTPS_LOCAL_PROVIDER,
+                Locale.Builder().setLanguage("en").setRegion("US").build(),
+            ),
+        )
+        assertEquals(
             "https://www.mozilla.org/firefox/android/notes",
             SupportUtils.WHATS_NEW_URL,
         )
@@ -52,7 +60,17 @@ class SupportUtilsTest {
     fun getGenericSumoURLForTopic() {
         assertEquals(
             "https://support.mozilla.org/en-GB/kb/faq-android",
-            SupportUtils.getGenericSumoURLForTopic(SupportUtils.SumoTopic.HELP, Locale.Builder().setLanguage("en").setRegion("GB").build()),
+            SupportUtils.getGenericSumoURLForTopic(
+                SupportUtils.SumoTopic.HELP,
+                Locale.Builder().setLanguage("en").setRegion("GB").build(),
+            ),
+        )
+        assertEquals(
+            "https://support.mozilla.org/en-US/kb/configure-dns-over-https-protection-levels-firefox-android#w_what-is-a-local-provider",
+            SupportUtils.getGenericSumoURLForTopic(
+                SupportUtils.SumoTopic.DNS_OVER_HTTPS_LOCAL_PROVIDER,
+                Locale.Builder().setLanguage("en").setRegion("US").build(),
+            ),
         )
         assertEquals(
             "https://support.mozilla.org/de/kb/your-rights",
@@ -64,7 +82,10 @@ class SupportUtilsTest {
     fun getMozillaPageUrl() {
         assertEquals(
             "https://www.mozilla.org/en-US/about/manifesto/",
-            SupportUtils.getMozillaPageUrl(SupportUtils.MozillaPage.MANIFESTO, Locale.Builder().setLanguage("en").setRegion("US").build()),
+            SupportUtils.getMozillaPageUrl(
+                SupportUtils.MozillaPage.MANIFESTO,
+                Locale.Builder().setLanguage("en").setRegion("US").build(),
+            ),
         )
         assertEquals(
             "https://www.mozilla.org/zh/privacy/firefox/",

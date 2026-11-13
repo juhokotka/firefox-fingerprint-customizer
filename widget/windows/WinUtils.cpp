@@ -5,65 +5,63 @@
 #include "WinUtils.h"
 
 #include <knownfolders.h>
+#include <pathcch.h>
 #include <psapi.h>
 #include <winioctl.h>
 
-#include "gfxPlatform.h"
-#include "gfxUtils.h"
-#include "nsWindow.h"
-#include "nsWindowDefs.h"
 #include "InputDeviceUtils.h"
 #include "KeyboardLayout.h"
+#include "WindowsUIUtils.h"
+#include "gfxPlatform.h"
+#include "gfxUtils.h"
+#include "imgIContainer.h"
+#include "imgITools.h"
 #include "mozilla/BackgroundHangMonitor.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Logging.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/ProfilerThreadSleep.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/SchedulerGroup.h"
 #include "mozilla/StaticPrefs_widget.h"
+#include "mozilla/WinHeaderOnlyUtils.h"
+#include "mozilla/WindowsVersion.h"
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
 #include "mozilla/gfx/DisplayConfigWindows.h"
 #include "mozilla/gfx/Logging.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/ProfilerThreadSleep.h"
-#include "mozilla/RefPtr.h"
-#include "mozilla/SchedulerGroup.h"
 #include "mozilla/widget/WinRegistry.h"
-#include "mozilla/WindowsVersion.h"
-#include "mozilla/WinHeaderOnlyUtils.h"
+#include "nsContentUtils.h"
+#include "nsDirectoryServiceUtils.h"
 #include "nsIContentPolicy.h"
+#include "nsIOutputStream.h"
 #include "nsIReferrerInfo.h"
 #include "nsIURIMutator.h"
-#include "WindowsUIUtils.h"
-#include "nsContentUtils.h"
 #include "nsLookAndFeel.h"
-
-#include "mozilla/Logging.h"
-
-#include "nsString.h"
-#include "nsDirectoryServiceUtils.h"
-#include "imgIContainer.h"
-#include "imgITools.h"
-#include "nsNetUtil.h"
-#include "nsIOutputStream.h"
 #include "nsNetCID.h"
+#include "nsNetUtil.h"
+#include "nsString.h"
+#include "nsWindow.h"
+#include "nsWindowDefs.h"
 #include "prtime.h"
 #ifdef MOZ_PLACES
 #  include "mozilla/places/nsFaviconService.h"
 #endif
-#include "nsIDownloader.h"
-#include "nsIChannel.h"
-#include "nsIThread.h"
-#include "MainThreadUtils.h"
-#include "nsLookAndFeel.h"
-#include "nsUnicharUtils.h"
-#include "nsWindowsHelpers.h"
-#include "WinWindowOcclusionTracker.h"
-
-#include <textstor.h>
-#include "TSFUtils.h"
-
 #include <shellscalingapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>
+#include <textstor.h>
+
+#include "MainThreadUtils.h"
+#include "TSFUtils.h"
+#include "WinWindowOcclusionTracker.h"
+#include "nsIChannel.h"
+#include "nsIDownloader.h"
+#include "nsIThread.h"
+#include "nsLookAndFeel.h"
+#include "nsUnicharUtils.h"
+#include "nsWindowsHelpers.h"
 
 mozilla::LazyLogModule gWindowsLog("Widget");
 
@@ -631,6 +629,15 @@ uint16_t WinUtils::GetMouseInputSource() {
 /* static */
 uint16_t WinUtils::GetMousePointerID() {
   LPARAM lParamExtraInfo = ::GetMessageExtraInfo();
+
+  // The low bits of the extra info are only a tablet cursor ID when the
+  // tablet signature is present. Otherwise, they may contain unrelated data
+  // (e.g. changing values from tablet drivers with Windows Ink disabled),
+  // which must not be used as the pointer ID. Fall back to the mouse ID.
+  if ((lParamExtraInfo & TABLET_INK_SIGNATURE) != TABLET_INK_CHECK) {
+    return 0;
+  }
+
   return lParamExtraInfo & TABLET_INK_ID_MASK;
 }
 
@@ -764,7 +771,7 @@ static nsresult CacheFavicon(
     }
 
     RefPtr<DrawTarget> dt = Factory::CreateDrawTargetForData(
-        BackendType::CAIRO, map.mData, dataSurface->GetSize(), map.mStride,
+        BackendType::SKIA, map.mData, dataSurface->GetSize(), map.mStride,
         dataSurface->GetFormat());
     if (!dt) {
       gfxWarning() << "CreateDrawTargetForData failed in CacheFavicon";
@@ -946,8 +953,6 @@ NS_IMETHODIMP AsyncDeleteAllFaviconsFromDisk::Run() {
 
   return NS_OK;
 }
-
-AsyncDeleteAllFaviconsFromDisk::~AsyncDeleteAllFaviconsFromDisk() {}
 
 /*
  * (static) If the data is available, will return the path on disk where
@@ -1714,8 +1719,9 @@ bool WinUtils::RunningFromANetworkDrive() {
 /* static */
 bool WinUtils::CanonicalizePath(nsAString& aPath) {
   wchar_t tempPath[MAX_PATH + 1];
-  if (!PathCanonicalizeW(tempPath,
-                         (char16ptr_t)PromiseFlatString(aPath).get())) {
+  HRESULT hr = PathCchCanonicalize(tempPath, std::size(tempPath),
+                                   (char16ptr_t)PromiseFlatString(aPath).get());
+  if (FAILED(hr)) {
     return false;
   }
   aPath = tempPath;
@@ -1759,10 +1765,13 @@ bool WinUtils::UnexpandEnvVars(nsAString& aPath) {
 WinUtils::WhitelistVec WinUtils::BuildWhitelist() {
   WhitelistVec result;
 
+  // When no substitution is required, set the void flag
   (void)result.emplaceBack(
       std::make_pair(nsString(u"%ProgramFiles%"_ns), nsDependentString()));
+  result.back().second.SetIsVoid(true);
 
-  // When no substitution is required, set the void flag
+  (void)result.emplaceBack(std::make_pair(nsString(u"%ProgramFiles% (x86)"_ns),
+                                          nsDependentString()));
   result.back().second.SetIsVoid(true);
 
   (void)result.emplaceBack(
@@ -1913,7 +1922,9 @@ bool WinUtils::PreparePathForTelemetry(nsAString& aPath,
   for (uint32_t i = 0; i < whitelistedPaths.length(); ++i) {
     const nsString& testPath = whitelistedPaths[i].first;
     const nsDependentString& substitution = whitelistedPaths[i].second;
-    if (StringBeginsWith(aPath, testPath, nsCaseInsensitiveStringComparator)) {
+    if (StringBeginsWith(aPath, testPath, nsCaseInsensitiveStringComparator) &&
+        (aPath.Length() == testPath.Length() ||
+         aPath.CharAt(testPath.Length()) == u'\\')) {
       if (!substitution.IsVoid()) {
         aPath.Replace(0, testPath.Length(), substitution);
       }

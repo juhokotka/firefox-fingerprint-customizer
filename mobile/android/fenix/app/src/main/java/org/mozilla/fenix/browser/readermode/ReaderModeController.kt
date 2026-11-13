@@ -9,18 +9,24 @@ import android.widget.Button
 import android.widget.RadioButton
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.content.res.AppCompatResources
+import mozilla.components.feature.readerview.R as readerviewR
 import mozilla.components.feature.readerview.ReaderViewFeature
 import mozilla.components.support.base.feature.ViewBoundFeatureWrapper
 import org.mozilla.fenix.R
-import mozilla.components.feature.readerview.R as readerviewR
 
-/**
- * An interface that exposes the hide and show reader view functions of a ReaderViewFeature
- */
+/** An interface that exposes the hide and show reader view functions of a ReaderViewFeature */
 interface ReaderModeController {
     fun hideReaderView()
+
     fun showReaderView()
+
     fun showControls()
+
+    /**
+     * Forces reader view to be displayed with [colorScheme], leaving the user's own choice untouched. Pass `null` to go
+     * back to that choice.
+     */
+    fun setColorSchemeOverride(colorScheme: ReaderViewFeature.ColorScheme?)
 }
 
 class DefaultReaderModeController(
@@ -32,17 +38,19 @@ class DefaultReaderModeController(
 
     @VisibleForTesting
     internal val privateButtonColor
-        get() = AppCompatResources.getColorStateList(
-            readerViewControlsBar.context,
-            R.color.readerview_private_button_color,
-        )
+        get() =
+            AppCompatResources.getColorStateList(
+                readerViewControlsBar.context,
+                R.color.readerview_private_button_color,
+            )
 
     @VisibleForTesting
     internal val privateRadioButtonColor
-        get() = AppCompatResources.getColorStateList(
-            readerViewControlsBar.context,
-            R.color.readerview_private_radio_color,
-        )
+        get() =
+            AppCompatResources.getColorStateList(
+                readerViewControlsBar.context,
+                R.color.readerview_private_radio_color,
+            )
 
     override fun hideReaderView() {
         onReaderModeChanged()
@@ -57,6 +65,10 @@ class DefaultReaderModeController(
         readerViewFeature.withFeature { it.showReaderView() }
     }
 
+    override fun setColorSchemeOverride(colorScheme: ReaderViewFeature.ColorScheme?) {
+        readerViewFeature.withFeature { it.colorSchemeOverride = colorScheme }
+    }
+
     override fun showControls() {
         readerViewFeature.withFeature { it.showControls() }
         if (isPrivate) {
@@ -66,23 +78,28 @@ class DefaultReaderModeController(
         }
     }
 
-    private fun themeReaderViewControlsForPrivateMode(view: View) = with(view) {
-        listOf(
-            readerviewR.id.mozac_feature_readerview_font_size_decrease,
-            readerviewR.id.mozac_feature_readerview_font_size_increase,
-        ).map {
-            findViewById<Button>(it)
-        }.forEach {
-            it.setTextColor(privateButtonColor)
-        }
+    private fun themeReaderViewControlsForPrivateMode(view: View) =
+        with(view) {
+            listOf(
+                    readerviewR.id.mozac_feature_readerview_font_size_decrease,
+                    readerviewR.id.mozac_feature_readerview_font_size_increase,
+                )
+                .map {
+                    findViewById<Button>(it)
+                }
+                .forEach {
+                    it.setTextColor(privateButtonColor)
+                }
 
-        listOf(
-            readerviewR.id.mozac_feature_readerview_font_serif,
-            readerviewR.id.mozac_feature_readerview_font_sans_serif,
-        ).map {
-            findViewById<RadioButton>(it)
-        }.forEach {
-            it.setTextColor(privateRadioButtonColor)
+            listOf(
+                    readerviewR.id.mozac_feature_readerview_font_serif,
+                    readerviewR.id.mozac_feature_readerview_font_sans_serif,
+                )
+                .map {
+                    findViewById<RadioButton>(it)
+                }
+                .forEach {
+                    it.setTextColor(privateRadioButtonColor)
+                }
         }
-    }
 }

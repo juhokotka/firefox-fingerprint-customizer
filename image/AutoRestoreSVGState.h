@@ -5,16 +5,16 @@
 #ifndef mozilla_image_AutoRestoreSVGState_h
 #define mozilla_image_AutoRestoreSVGState_h
 
+#include "SVGDocumentWrapper.h"
+#include "SVGDrawingParameters.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/SVGContextPaint.h"
-#include "mozilla/dom/SVGSVGElement.h"
-#include "nsPresContext.h"
-#include "SVGDrawingParameters.h"
-#include "SVGDocumentWrapper.h"
+#include "mozilla/dom/BrowsingContextBinding.h"
 #include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/SVGDocument.h"
-#include "mozilla/dom/BrowsingContextBinding.h"
+#include "mozilla/dom/SVGSVGElement.h"
+#include "nsPresContext.h"
 
 namespace mozilla::image {
 
@@ -32,11 +32,14 @@ class MOZ_STACK_CLASS AutoRestoreSVGState final {
       : mIsDrawing(aSVGDocumentWrapper->mIsDrawing),
         // Apply any 'preserveAspectRatio' override (if specified) to the root
         // element:
-        mPAR(aSVGContext, aSVGDocumentWrapper->GetSVGRootElement()),
-        // Set the animation time:
-        mTime(aSVGDocumentWrapper->GetSVGRootElement(), aAnimationTime) {
+        mPAR(aSVGContext, aSVGDocumentWrapper->GetSVGRootElement()) {
     MOZ_ASSERT(!mIsDrawing.SavedValue());
     MOZ_ASSERT(aSVGDocumentWrapper->GetDocument());
+
+    // Setting the animation time flushes the document, so the re-entrancy
+    // guard has to be in place first.
+    aSVGDocumentWrapper->mIsDrawing = true;
+    mTime.emplace(aSVGDocumentWrapper->GetSVGRootElement(), aAnimationTime);
 
     if (auto* pc = aSVGDocumentWrapper->GetDocument()->GetPresContext()) {
       pc->SetLinkParametersOverride(aSVGContext.GetLinkParameters());
@@ -51,8 +54,6 @@ class MOZ_STACK_CLASS AutoRestoreSVGState final {
       }());
     }
 
-    aSVGDocumentWrapper->mIsDrawing = true;
-
     // Set context paint (if specified) on the document:
     if (aContextPaint) {
       MOZ_ASSERT(aSVGContext.GetContextPaint());
@@ -64,7 +65,7 @@ class MOZ_STACK_CLASS AutoRestoreSVGState final {
  private:
   AutoRestore<bool> mIsDrawing;
   AutoPreserveAspectRatioOverride mPAR;
-  AutoSVGTimeSetRestore mTime;
+  Maybe<AutoSVGTimeSetRestore> mTime;
   Maybe<AutoSetRestoreSVGContextPaint> mContextPaint;
 };
 

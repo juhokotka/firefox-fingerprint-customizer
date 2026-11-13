@@ -5,8 +5,8 @@
 #ifndef nsHttpNTLMAuth_h_
 #define nsHttpNTLMAuth_h_
 
-#include "nsIHttpAuthenticator.h"
 #include "mozilla/StaticPtr.h"
+#include "nsIHttpAuthenticator.h"
 
 namespace mozilla {
 namespace net {
@@ -22,10 +22,6 @@ class nsHttpNTLMAuth : public nsIHttpAuthenticator {
 
  private:
   virtual ~nsHttpNTLMAuth() = default;
-
-  // This flag indicates whether we are using the native NTLM implementation
-  // or the internal one.
-  bool mUseNative{false};
 
   static StaticRefPtr<nsHttpNTLMAuth> gSingleton;
 };

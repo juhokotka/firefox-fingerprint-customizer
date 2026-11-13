@@ -213,11 +213,8 @@ static EffectOffsets ComputeEffectOffset(
   // if we want aParams.ctx to be in user space, we first need to subtract the
   // frame's position so that SVG painting can later add it again and the
   // frame is painted in the right place.
-  gfxPoint toUserSpaceGfx =
-      SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(aFrame);
-  nsPoint toUserSpace =
-      nsPoint(nsPresContext::CSSPixelsToAppUnits(float(toUserSpaceGfx.x)),
-              nsPresContext::CSSPixelsToAppUnits(float(toUserSpaceGfx.y)));
+  nsPoint toUserSpace = CSSPoint::ToAppUnits(
+      SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(aFrame));
 
   result.offsetToUserSpace = result.offsetToBoundingBox - toUserSpace;
 
@@ -366,7 +363,7 @@ nsRect SVGIntegrationUtils::ComputePostEffectsInkOverflowRect(
   }
 
   // Return overflowRect relative to aFrame, rather than "user space":
-  return overflowRect.value() -
+  return *overflowRect -
          (aFrame->GetOffsetTo(firstFrame) + firstFrameToBoundingBox);
 }
 
@@ -517,8 +514,7 @@ static MaskPaintResult CreateAndPaintMaskSurface(
         ctx.GetDrawTarget(), aParams.frame, cssPxToDevPxMatrix, aOpacity,
         svgReset->mMask.mLayers[0].mMaskMode, aParams.imgParams);
     paintResult.maskSurface = aMaskFrames[0]->GetMaskForMaskedFrame(params);
-    paintResult.maskTransform = ctx.CurrentMatrix();
-    paintResult.maskTransform.Invert();
+    paintResult.maskTransform = ctx.CurrentMatrix().Inverse();
     if (!paintResult.maskSurface) {
       paintResult.transparentBlackMask = true;
     }
@@ -528,7 +524,7 @@ static MaskPaintResult CreateAndPaintMaskSurface(
 
   const LayoutDeviceRect& maskSurfaceRect =
       aParams.maskRect.valueOr(LayoutDeviceRect());
-  if (aParams.maskRect.isSome() && maskSurfaceRect.IsEmpty()) {
+  if (aParams.maskRect && maskSurfaceRect.IsEmpty()) {
     // XXX: Is this ever true?
     paintResult.transparentBlackMask = true;
     return paintResult;
@@ -829,8 +825,7 @@ void PaintMaskAndClipPathInternal(const PaintFramesParams& aParams,
     if (shouldPushMask) {
       // We want the mask to be untransformed so use the inverse of the
       // current transform as the maskTransform to compensate.
-      Matrix maskTransform = context.CurrentMatrix();
-      maskTransform.Invert();
+      Matrix maskTransform = context.CurrentMatrix().Inverse();
 
       autoGroupForBlend.PushGroupForBlendBack(
           gfxContentType::COLOR_ALPHA,
@@ -1006,7 +1001,8 @@ WrFiltersStatus SVGIntegrationUtils::CreateWebRenderCSSFilters(
             aFrame->PresContext()->AppUnitsPerDevPixel();
         float radius = NSAppUnitsToFloatPixels(filter.AsBlur().ToAppUnits(),
                                                appUnitsPerDevPixel);
-        wrFilters.AppendElement(wr::FilterOp::Blur(radius, radius));
+        wrFilters.AppendElement(
+            wr::FilterOp::Blur(radius, radius, /* should_inflate */ true));
         break;
       }
       case StyleFilter::Tag::DropShadow: {
@@ -1097,7 +1093,8 @@ bool PaintFrameCallback::operator()(gfxContext* aContext,
                                     const gfxRect& aFillRect,
                                     const SamplingFilter aSamplingFilter,
                                     const gfxMatrix& aTransform) {
-  if (mFrame->HasAnyStateBits(NS_FRAME_DRAWING_AS_PAINTSERVER)) {
+  if (mFrame->HasAnyStateBits(NS_FRAME_DRAWING_AS_PAINTSERVER) ||
+      aTransform.IsSingular()) {
     return false;
   }
 
@@ -1108,11 +1105,7 @@ bool PaintFrameCallback::operator()(gfxContext* aContext,
   // Clip to aFillRect so that we don't paint outside.
   aContext->Clip(aFillRect);
 
-  gfxMatrix invmatrix = aTransform;
-  if (!invmatrix.Invert()) {
-    return false;
-  }
-  aContext->Multiply(invmatrix);
+  aContext->Multiply(aTransform.Inverse());
 
   // nsLayoutUtils::PaintFrame will anchor its painting at mFrame. But we want
   // to have it anchored at the top left corner of the bounding box of all of

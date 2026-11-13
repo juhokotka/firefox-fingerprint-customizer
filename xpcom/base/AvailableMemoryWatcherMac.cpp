@@ -9,6 +9,7 @@
 #include "AvailableMemoryWatcher.h"
 #include "Logging.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/ipc/CrashReporterHost.h"
 #include "nsICrashReporter.h"
 #include "nsISupports.h"
 #include "nsITimer.h"
@@ -73,7 +74,7 @@ class nsAvailableMemoryWatcher final : public nsITimerCallback,
       const UniquePtr<ipc::CrashReporterHost>& aCrashReporter) override;
 
  private:
-  ~nsAvailableMemoryWatcher() {};
+  ~nsAvailableMemoryWatcher() = default;
 
   void OnMemoryPressureChangedInternal(MacMemoryPressureLevel aNewLevel,
                                        bool aIsInitialLevel);

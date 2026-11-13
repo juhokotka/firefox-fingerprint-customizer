@@ -4,10 +4,10 @@
 
 #include <string>
 
-#include "gtest/gtest.h"
-#include "gtest/MozGTestBench.h"  // For MOZ_GTEST_BENCH
-#include "nss.h"
 #include "ScopedNSSTypes.h"
+#include "gtest/MozGTestBench.h"  // For MOZ_GTEST_BENCH
+#include "gtest/gtest.h"
+#include "nss.h"
 
 namespace nss_test {
 
@@ -199,7 +199,7 @@ class BenchECDHRunner : public BenchRunner {
  public:
   void Warmup() override { mozilla::UniquePK11SymKey(this->DeriveKey()); }
 
-  void RunWithSize(size_t size) override {
+  void RunWithSize(size_t /*size*/) override {
     mozilla::UniquePK11SymKey key = nullptr;
     mozilla::GTestBench(SuiteName(), "derive",
                         ([this, &key] { key.reset(this->DeriveKey()); }));

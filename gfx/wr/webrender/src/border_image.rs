@@ -6,14 +6,13 @@ use euclid::point2;
 use api::{ColorF, ImageBufferKind, RepeatMode};
 use api::units::*;
 use crate::border::compute_border_repetition_1d;
-use crate::clip::{ClipChainInstance, ClipIntern};
 use crate::command_buffer::CommandBufferIndex;
-use crate::frame_builder::{FrameBuildingContext, FrameBuildingState, PictureContext};
-use crate::intern::DataStore;
-use crate::pattern::{PatternBuilder, PatternBuilderContext, PatternBuilderState};
+use crate::frame_builder::{FrameBuildingContext, FrameBuildingState};
+use crate::pattern::{PatternBuilder, PatternBuilderState};
 use crate::pattern::image::ImagePattern;
-use crate::quad::{QuadTransformState, prepare_repeatable_quad};
-use crate::prim_store::{NinePatchDescriptor, PrimitiveInstanceIndex, PrimitiveScratchBuffer};
+use crate::quad::{QuadDescriptor, QuadTransformState, prepare_repeatable_quad};
+use crate::quad_clip::QuadClipStack;
+use crate::prim_store::{NinePatchDescriptor, PrimitiveScratchBuffer};
 use crate::segment::EdgeMask;
 
 
@@ -21,39 +20,26 @@ pub fn prepare_border_image_nine_patch(
     nine_patch: &NinePatchDescriptor,
     src_image: &ImagePattern,
     src_image_size: DeviceIntSize,
-    local_rect: &LayoutRect,
-    aligned_aa_edges: EdgeMask,
-    transfomed_aa_edges: EdgeMask,
-    prim_instance_index: PrimitiveInstanceIndex,
-    clip_chain: &ClipChainInstance,
+    desc: &QuadDescriptor,
+    clips: &QuadClipStack,
     transform: &mut QuadTransformState,
 
     frame_context: &FrameBuildingContext,
-    pic_context: &PictureContext,
     targets: &[CommandBufferIndex],
-    interned_clips: &DataStore<ClipIntern>,
 
     frame_state: &mut FrameBuildingState,
     scratch: &mut PrimitiveScratchBuffer,
 ) {
-    let pattern_ctx = PatternBuilderContext {
-        spatial_tree: frame_context.spatial_tree,
-        fb_config: frame_context.fb_config,
-        prim_origin: local_rect.min,
-    };
-
     let img_pattern = src_image.build(
-        None,
-        LayoutVector2D::zero(),
-        &pattern_ctx,
+        &desc.pattern_rect,
         &mut PatternBuilderState {
             frame_gpu_data: frame_state.frame_gpu_data,
             transforms: frame_state.transforms,
         },
     );
 
-    for_each_border_image_segment(nine_patch, local_rect, src_image_size, &mut|src_rect, dst_rect, side, stretch_size, spacing, offset| {
-        let segment_src = frame_state.rg_builder.add_sub_rect(src_image.src_task_id, &src_rect);
+    for_each_border_image_segment(nine_patch, &desc.pattern_rect, src_image_size, &mut|src_rect, dst_rect, side, stretch_size, spacing, offset| {
+        let segment_src = frame_state.rg_builder.add_sub_rect(src_image.src_task_id, &src_rect.to_f32());
 
         let segment_pattern = ImagePattern {
             src_task_id: segment_src,
@@ -69,26 +55,25 @@ pub fn prepare_border_image_nine_patch(
         // For centered (Repeat) tiling we expand the rect leftwards/upwards
         // so a partial tile spans the gap; clip back to the original dst_rect
         // so the fill doesn't bleed into the surrounding edges and corners.
-        let local_clip_rect = clip_chain.local_clip_rect
-            .intersection(dst_rect)
-            .unwrap_or(LayoutRect::zero());
+        let segment_bounds = desc.bounds
+            .intersection_unchecked(dst_rect)
+            .intersection_unchecked(&segment_local_rect);
 
         prepare_repeatable_quad(
             &segment_pattern,
-            &segment_local_rect,
-            &local_clip_rect,
+            &QuadDescriptor {
+                pattern_rect: segment_local_rect,
+                bounds: segment_bounds,
+                aligned_aa_edges: desc.aligned_aa_edges & side,
+                transformed_aa_edges: desc.transformed_aa_edges & side,
+            },
             stretch_size,
             spacing,
-            aligned_aa_edges & side,
-            transfomed_aa_edges & side,
-            prim_instance_index,
             &None,
-            clip_chain,
+            clips,
             transform,
-            frame_context,
-            pic_context,
+            frame_context.spatial_tree,
             targets,
-            interned_clips,
             frame_state,
             scratch,
         );
@@ -268,25 +253,32 @@ pub fn for_each_border_image_segment(
         let mut spacing = LayoutSize::zero();
         let mut offset = LayoutVector2D::zero();
 
+        // Unscaled size of the middle image, in the nine-patch's units rather
+        // than in source texels.
+        let natural_size = DeviceSize::new(
+            center_src.width() as f32 / sx,
+            center_src.height() as f32 / sy,
+        );
+
         // Per spec:
         // The middle image’s width is scaled by the same factor as the top
         // image unless that factor is zero or infinity, in which case the
         // scaling factor of the bottom is substituted, and failing that,
         // the width is not scaled.
         let (src_size, dst_size, repeat) = if let Some((src_rect, dst_rect)) = center_v_rects {
-            (src_rect.size(), dst_rect.size(), nine_patch.repeat_horizontal)
+            (src_rect.size().to_f32(), dst_rect.size(), nine_patch.repeat_horizontal)
         } else {
             // No top/bottom edge to inherit a scale factor from, so the middle
             // image is not scaled (scale factor 1). compute_border_repetition_1d
             // derives the tile size from dst_cross / src_cross, so matching the
             // destination cross-size to the source's yields a unit scale; the
             // repeat mode then tiles the natural-size pattern across the area.
-            let dst = LayoutSize::new(center_dst.width(), center_src.size().height as f32);
-            (center_src.size(), dst, nine_patch.repeat_horizontal)
+            let dst = LayoutSize::new(center_dst.width(), natural_size.height);
+            (natural_size, dst, nine_patch.repeat_horizontal)
         };
         compute_border_repetition_1d(
             dst_size,
-            src_size.to_f32(),
+            src_size,
             repeat,
             &mut stretch_size.width,
             &mut spacing.width,
@@ -299,17 +291,17 @@ pub fn for_each_border_image_segment(
         // case the scaling factor of the right image is substituted, and
         // failing that, the height is not scaled.
         let (src_size, dst_size, repeat) = if let Some((src_rect, dst_rect)) = center_h_rects {
-            (src_rect.size(), dst_rect.size(), nine_patch.repeat_vertical)
+            (src_rect.size().to_f32(), dst_rect.size(), nine_patch.repeat_vertical)
         } else {
             // As above: no left/right edge, so the middle image is not scaled
             // vertically. The height call swaps width/height, so matching the
             // destination width to the source width gives a unit vertical scale.
-            let dst = LayoutSize::new(center_src.size().width as f32, center_dst.height());
-            (center_src.size(), dst, nine_patch.repeat_vertical)
+            let dst = LayoutSize::new(natural_size.width, center_dst.height());
+            (natural_size, dst, nine_patch.repeat_vertical)
         };
         compute_border_repetition_1d(
             LayoutSize::new(dst_size.height, dst_size.width),
-            DeviceIntSize::new(src_size.height, src_size.width).to_f32(),
+            DeviceSize::new(src_size.height, src_size.width),
             repeat,
             &mut stretch_size.height,
             &mut spacing.height,

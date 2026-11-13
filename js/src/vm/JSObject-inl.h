@@ -16,6 +16,7 @@
 #include "vm/JSFunction.h"
 #include "vm/PropertyResult.h"
 #include "vm/TypedArrayObject.h"
+
 #include "gc/BufferAllocator-inl.h"
 #include "gc/GCContext-inl.h"
 #include "gc/ObjectKind-inl.h"

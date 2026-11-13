@@ -187,7 +187,7 @@ LOCAL_INCLUDES += [
 include("/ipc/chromium/chromium-config.mozbuild")
 
 
-USE_LIBS += ["translator"]  # Grab the Angle shader translator.
+USE_LIBS += ["translator_gn"]  # Grab the Angle shader translator.
 
 FINAL_LIBRARY = "xul"
 LOCAL_INCLUDES += [
@@ -196,7 +196,6 @@ LOCAL_INCLUDES += [
     "/dom/svg",
     "/dom/workers",
     "/dom/xul",
-    "/gfx/angle/checkout/include",
     "/gfx/cairo/cairo/src",
     "/gfx/gl",
     "/image",
@@ -205,6 +204,7 @@ LOCAL_INCLUDES += [
     "/layout/style",
     "/layout/xul",
     "/media/libyuv/libyuv/include",
+    "/third_party/angle/include",
 ]
 
 if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
@@ -224,3 +224,43 @@ if CONFIG["CC_TYPE"] == "gcc":
 
 # Add libFuzzer configuration directives
 include("/tools/fuzzing/libfuzzer-config.mozbuild")
+
+SOURCE_HEADERS += [
+    "CacheInvalidator.h",
+    "CanvasImageCache.h",
+    "ClientWebGLContext.h",
+    "ClientWebGLExtensions.h",
+    "DrawTargetWebglInternal.h",
+    "FilterNodeWebgl.h",
+    "HostWebGLContext.h",
+    "MurmurHash3.h",
+    "SourceSurfaceWebgl.h",
+    "TexUnpackBlob.h",
+    "WebGL2Context.h",
+    "WebGLBuffer.h",
+    "WebGLContext.h",
+    "WebGLContextLossHandler.h",
+    "WebGLExtensions.h",
+    "WebGLFormats.h",
+    "WebGLFramebuffer.h",
+    "WebGLInternalFormatsTable.h",
+    "WebGLMemoryTracker.h",
+    "WebGLMethodDispatcher.h",
+    "WebGLObjectModel.h",
+    "WebGLProgram.h",
+    "WebGLQuery.h",
+    "WebGLQueueParamTraits.h",
+    "WebGLRenderbuffer.h",
+    "WebGLSampler.h",
+    "WebGLShader.h",
+    "WebGLShaderValidator.h",
+    "WebGLStrongTypes.h",
+    "WebGLSync.h",
+    "WebGLTexture.h",
+    "WebGLTextureUpload.h",
+    "WebGLTransformFeedback.h",
+    "WebGLValidateStrings.h",
+    "WebGLVertexArray.h",
+    "WebGLVertexArrayFake.h",
+    "WebGLVertexArrayGL.h",
+]

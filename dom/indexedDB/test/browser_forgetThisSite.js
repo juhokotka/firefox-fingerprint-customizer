@@ -4,7 +4,7 @@
  */
 
 let { ForgetAboutSite } = ChromeUtils.importESModule(
-  "resource://gre/modules/ForgetAboutSite.sys.mjs"
+  "moz-src:///toolkit/components/forgetaboutsite/ForgetAboutSite.sys.mjs"
 );
 
 const domains = ["mochi.test:8888", "www.example.com"];
@@ -46,9 +46,8 @@ add_task(async function test2() {
 
 add_task(async function test3() {
   // Remove database from domain 2
-  ForgetAboutSite.removeDataFromBaseDomain(domains[1]).then(() => {
-    setPermission(testPageURL4, "indexedDB");
-  });
+  await ForgetAboutSite.removeDataFromBaseDomain(domains[1]);
+  setPermission(testPageURL4, "indexedDB");
 });
 
 add_task(async function test4() {

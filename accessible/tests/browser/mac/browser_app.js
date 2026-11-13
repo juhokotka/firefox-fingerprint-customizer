@@ -216,14 +216,14 @@ add_task(async () => {
   await BrowserTestUtils.withNewTab(
     {
       gBrowser,
-      // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+      // eslint-disable-next-line sdl/no-insecure-url
       url: "http://example.com",
     },
     async () => {
       let input = await getMacAccessible(gURLBar.inputField);
       is(
         input.getAttributeValue("AXValue"),
-        // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+        // eslint-disable-next-line sdl/no-insecure-url
         UrlbarTestUtils.trimURL("http://example.com"),
         "Location bar has correct value"
       );
@@ -238,7 +238,7 @@ add_task(async () => {
   await BrowserTestUtils.withNewTab(
     {
       gBrowser,
-      // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+      // eslint-disable-next-line sdl/no-insecure-url
       url: "http://example.com",
     },
     async () => {
@@ -489,4 +489,65 @@ add_task(async () => {
   }
   // await testPopover(true);
   await testPopover(false);
+});
+
+/**
+ * Test that a window stays exposed as an AXWindow after its document is
+ * replaced, and that its titlebar buttons are not exposed in its place.
+ */
+add_task(async () => {
+  if (Services.env.get("MOZ_HEADLESS")) {
+    todo(false, "Native windows aren't exposed in headless mode");
+    return;
+  }
+
+  const win = Services.ww.openWindow(
+    null,
+    "about:blank",
+    "_blank",
+    "chrome,dialog=no,all,width=400,height=300",
+    null
+  );
+  await TestUtils.waitForCondition(
+    () => win.document.readyState == "complete",
+    "Window loaded"
+  );
+
+  const app = (await getMacAccessible(document))
+    .getAttributeValue("AXParent")
+    .getAttributeValue("AXParent");
+  is(app.getAttributeValue("AXRole"), "AXApplication", "Found the application");
+
+  const appWindows = () =>
+    app.getAttributeValue("AXWindows").map(w => ({
+      role: w.getAttributeValue("AXRole"),
+      title: w.getAttributeValue("AXTitle"),
+    }));
+
+  // Make the window look up its accessible for the initial document.
+  await getMacAccessible(win.document);
+  appWindows();
+
+  const firstDocument = win.document;
+  win.location.replace("about:blank?second");
+  await TestUtils.waitForCondition(
+    () =>
+      win.document != firstDocument && win.document.readyState == "complete",
+    "Window document replaced"
+  );
+  win.document.title = "Replaced document";
+  await getMacAccessible(win.document);
+
+  const windows = appWindows();
+  const description = JSON.stringify(windows);
+  ok(
+    !windows.some(w => w.role == "AXButton"),
+    `No titlebar buttons in the application's windows: ${description}`
+  );
+  ok(
+    windows.some(w => w.role == "AXWindow" && w.title == "Replaced document"),
+    `The window is exposed as a window: ${description}`
+  );
+
+  await BrowserTestUtils.closeWindow(win);
 });

@@ -86,6 +86,9 @@ def generate_scenarios(config, tasks):
                 "fetches": deepcopy(task["fetches"]),
             }
 
+            if "clone-with" in task["run"]:
+                taskdesc["run"]["clone-with"] = task["run"]["clone-with"]
+
             use_taskcluster_python = task.get("use-python", "system")
             if use_taskcluster_python != "system":
                 taskdesc["use-python"] = use_taskcluster_python

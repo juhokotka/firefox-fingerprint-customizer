@@ -4,8 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsDragServiceProxy.h"
-#include "mozilla/dom/Document.h"
+
 #include "mozilla/dom/BrowserChild.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/net/CookieJarSettings.h"
 #include "mozilla/widget/WidgetLogging.h"
@@ -82,6 +83,7 @@ nsresult nsDragSessionProxy::InvokeDragSessionImpl(
       aArrayTransferables, transferables, false, nullptr);
 
   nsCOMPtr<nsIPrincipal> principal;
+  // XXX: Can this use mTriggeringPrincipal instead?
   if (mSourceNode) {
     principal = mSourceNode->NodePrincipal();
   }
@@ -115,19 +117,17 @@ nsresult nsDragSessionProxy::InvokeDragSessionImpl(
         int32_t stride;
         auto surfaceData =
             nsContentUtils::GetSurfaceData(*dataSurface, &length, &stride);
-        if (surfaceData.isNothing()) {
-          NS_WARNING("Failed to create shared memory for drag session.");
-          return NS_ERROR_FAILURE;
+        if (surfaceData) {
+          LOGI("[%p] %s | sending PBrowser::InvokeDragSession with image data",
+               this, __FUNCTION__);
+          (void)child->SendInvokeDragSession(
+              std::move(transferables), aActionType, std::move(surfaceData),
+              stride, dataSurface->GetFormat(), dragRect, principal,
+              policyContainer, csArgs, mSourceWindowContext,
+              mSourceTopWindowContext);
+          return NS_OK;
         }
-
-        LOGI("[%p] %s | sending PBrowser::InvokeDragSession with image data",
-             this, __FUNCTION__);
-        (void)child->SendInvokeDragSession(
-            std::move(transferables), aActionType, std::move(surfaceData),
-            stride, dataSurface->GetFormat(), dragRect, principal,
-            policyContainer, csArgs, mSourceWindowContext,
-            mSourceTopWindowContext);
-        return NS_OK;
+        NS_WARNING("Failed to create shared memory for drag session.");
       }
     }
   }

@@ -139,17 +139,18 @@ support-files = ["early_hint_preload_test_helper.sys.mjs",]
 ["browser_NetUtil.js"]
 
 ["browser_about_cache.js"]
-skip-if = [
-  "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11'", # Bug 1970244
-]
 
 ["browser_accept_language_override.js"]
+
+["browser_akamai_waf_telemetry.js"]
+support-files = ["!/netwerk/test/unit/http2-ca.pem"] # for node server
+
+["browser_alt_data_cross_origin.js"]
+support-files = ["alt_data_cross_origin.sjs"]
 
 ["browser_backgroundtask_purgeHTTPCache.js"]
 
 ["browser_bug968273.js"]
-
-["browser_bug1535877.js"]
 
 ["browser_bug1629307.js"]
 
@@ -248,14 +249,6 @@ skip-if = [
 
 ["browser_test_lna_insecure_context.js"]
 
-["browser_test_local_network_access_basic.js"]
-support-files = [
-  "head_local_network_access.js",
-  "page_with_non_trackers.html",
-  "page_with_non_trackers.html^headers^",
-  "fetch_from_tracker.sjs",
-]
-
 ["browser_test_lna_worker.js"]
 support-files = [
   "head_local_network_access.js",
@@ -265,6 +258,14 @@ support-files = [
   "worker_lna.js",
   "shared_worker_lna.js",
   "service_worker_lna.sjs",
+]
+
+["browser_test_local_network_access_basic.js"]
+support-files = [
+  "head_local_network_access.js",
+  "page_with_non_trackers.html",
+  "page_with_non_trackers.html^headers^",
+  "fetch_from_tracker.sjs",
 ]
 
 ["browser_test_local_network_access_feature_policy.js"]
@@ -283,6 +284,12 @@ support-files = [
   "head_local_network_access.js",
   "page_with_non_trackers.html",
   "page_with_non_trackers.html^headers^",
+]
+
+["browser_test_local_network_access_notification.js"]
+support-files = [
+  "head_local_network_access.js",
+  "page_notification_icon.html",
 ]
 
 ["browser_test_local_network_access_permissions.js"]
@@ -324,6 +331,7 @@ support-files = [
 
 ["browser_test_offline_tab.js"]
 skip-if = [
-  "os == 'win' && os_version == '11.26100' && arch == 'x86_64' && debug && verify-standalone",
   "os == 'win' && os_version == '11.26200' && arch == 'x86_64' && debug && verify-standalone",
 ]
+
+["browser_wallpaper_protocol_library.js"]

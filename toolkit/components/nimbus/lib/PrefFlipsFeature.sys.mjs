@@ -4,9 +4,9 @@
 
 /** @import { ExperimentManager } from "./ExperimentManager.sys.mjs" */
 
-const lazy = {};
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   ExperimentManager: "resource://nimbus/lib/ExperimentManager.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   PrefUtils: "moz-src:///toolkit/modules/PrefUtils.sys.mjs",
@@ -302,7 +302,7 @@ export class PrefFlipsFeature {
       } else {
         originalValues[pref] = Object.hasOwn(originalValues, pref)
           ? originalValues[pref]
-          : lazy.PrefUtils.getPref(pref, { branch });
+          : lazy.PrefUtils.getPrefStrict(pref, branch);
       }
     }
 
@@ -671,7 +671,7 @@ export class PrefFlipsFeature {
       // branch.
       return "user";
     } else if (expectedBranch === "default") {
-      const value = lazy.PrefUtils.getPref(pref, { branch: "default" });
+      const value = lazy.PrefUtils.getPrefStrict(pref, "default");
       if (value === expectedValue) {
         // The pref we control was set on the default branch and still matches
         // the expected value. Therefore, the user branch must have been

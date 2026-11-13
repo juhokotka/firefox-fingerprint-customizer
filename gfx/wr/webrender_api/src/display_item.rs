@@ -11,6 +11,7 @@ use crate::{APZScrollGeneration, HasScrollLinkedEffect, PipelineId, PropertyBind
 use crate::serde::{Serialize, Deserialize};
 use crate::color::ColorF;
 use crate::image::{ColorDepth, ImageKey};
+use crate::key_types::{EdgeMask, StretchSizeKey};
 use crate::units::*;
 use std::hash::{Hash, Hasher};
 
@@ -53,6 +54,11 @@ bitflags! {
         const ANTIALISED = 1 << 4;
         /// If true, this primitive is used as a background for checkerboarding
         const CHECKERBOARD_BACKGROUND = 1 << 5;
+        /// For an image primitive: the texture was rasterized at the device
+        /// size of the primitive rect. If the rect's snapped extent disagrees
+        /// with the texture by a device pixel, the texture is drawn 1:1 from
+        /// the snapped origin instead of being stretched to fit.
+        const RASTERIZED_FOR_RECT = 1 << 6;
     }
 }
 
@@ -145,12 +151,10 @@ pub enum DisplayItem {
     Line(LineDisplayItem),
     Border(BorderDisplayItem),
     BoxShadow(BoxShadowDisplayItem),
-    PushShadow(PushShadowDisplayItem),
     Gradient(GradientDisplayItem),
     RadialGradient(RadialGradientDisplayItem),
     ConicGradient(ConicGradientDisplayItem),
     Image(ImageDisplayItem),
-    RepeatingImage(RepeatingImageDisplayItem),
     YuvImage(YuvImageDisplayItem),
     BackdropFilter(BackdropFilterDisplayItem),
 
@@ -175,7 +179,6 @@ pub enum DisplayItem {
     // These marker items terminate a scope introduced by a previous item.
     PopReferenceFrame,
     PopStackingContext,
-    PopAllShadows,
 
     // For debugging purposes.
     DebugMarker(u32),
@@ -193,12 +196,10 @@ pub enum DebugDisplayItem {
     Line(LineDisplayItem),
     Border(BorderDisplayItem),
     BoxShadow(BoxShadowDisplayItem),
-    PushShadow(PushShadowDisplayItem),
     Gradient(GradientDisplayItem),
     RadialGradient(RadialGradientDisplayItem),
     ConicGradient(ConicGradientDisplayItem),
     Image(ImageDisplayItem),
-    RepeatingImage(RepeatingImageDisplayItem),
     YuvImage(YuvImageDisplayItem),
     BackdropFilter(BackdropFilterDisplayItem),
 
@@ -218,7 +219,6 @@ pub enum DebugDisplayItem {
 
     PopReferenceFrame,
     PopStackingContext,
-    PopAllShadows,
 
     DebugMarker(u32)
 }
@@ -236,6 +236,11 @@ pub struct RectClipDisplayItem {
     pub id: ClipId,
     pub spatial_id: SpatialId,
     pub clip_rect: LayoutRect,
+    /// Keep the clip at its exact position instead of snapping it to the
+    /// device pixel grid, like primitives with `PrimitiveFlags::ANTIALIASING`.
+    /// Used for clips defined in the same space as anti-aliased content (e.g.
+    /// SVG user space).
+    pub anti_aliased: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
@@ -243,6 +248,13 @@ pub struct RoundedRectClipDisplayItem {
     pub id: ClipId,
     pub spatial_id: SpatialId,
     pub clip: ComplexClipRegion,
+    /// Layout-space outset applied when snapping this clip's rect. Non-zero
+    /// only for the internal zero-blur box-shadow desugar, where the inner
+    /// ClipOut edge must stay a constant distance from the snapped element
+    /// (bug 2052033). All public callers leave this 0.
+    pub snap_outset: f32,
+    /// See `RectClipDisplayItem::anti_aliased`.
+    pub anti_aliased: bool,
 }
 
 /// The minimum and maximum allowable offset for a sticky frame in a single dimension.
@@ -318,9 +330,17 @@ pub struct ScrollFrameDescriptor {
 /// A solid or an animating color to draw (may not actually be a rectangle due to complex clips)
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
 pub struct RectangleDisplayItem {
-    pub common: CommonItemProperties,
-    pub bounds: LayoutRect,
-    pub color: PropertyBinding<ColorF>,
+    pub spatial_id: SpatialId,
+    pub clip_chain_id: ClipChainId,
+    /// Everything else - bounds, clip rect, flags, colour and the transformed
+    /// AA edge mask - lives in the interned entry. The mask is per rectangle
+    /// because the display list builder splits one primitive into abutting
+    /// rects (the solid margins around a clamped radial gradient) whose
+    /// interior edges must not be anti-aliased or they seam.
+    ///
+    /// `Handle::INVALID` marks a fully transparent checkerboard background,
+    /// recorded only so the scene builder can place its tile cache barrier.
+    pub rect: crate::interning::Handle<crate::interned_prims::RectangleKey>,
 }
 
 /// A minimal hit-testable item for the parent browser's convenience, and is
@@ -372,6 +392,25 @@ pub enum LineStyle {
     Wavy,
 }
 
+/// Identifies whether a text run is a normal (drawable) run or a shadow copy
+/// produced by desugaring a text-shadow, and if the latter whether the shadow
+/// is blurred. The scene builder maps this onto the two properties the old
+/// scene-builder shadow expansion baked into the shadow's `TextRun` key: the
+/// `shadow` flag (which makes color-bitmap glyphs sample alpha only), and the
+/// requested raster space (a blurred shadow rasterizes in `Local(1.0)` space,
+/// like the removed `TextRun::create_shadow`).
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, Eq, Hash, PeekPoke)]
+pub enum GlyphShadowMode {
+    /// Not a shadow: normal glyphs, raster space taken from the stack.
+    #[default]
+    None,
+    /// Shadow with no (noop) blur: shadow glyphs, raster space from the stack.
+    Unblurred,
+    /// Blurred shadow: shadow glyphs, raster space forced to `Local(1.0)`.
+    Blurred,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
 pub struct TextDisplayItem {
     pub common: CommonItemProperties,
@@ -386,6 +425,9 @@ pub struct TextDisplayItem {
     pub font_key: font::FontInstanceKey,
     pub color: ColorF,
     pub glyph_options: Option<font::GlyphOptions>,
+    /// Set by the display-list builder's shadow desugaring on the offset copies
+    /// of shadowed text. `None` for ordinary text.
+    pub shadow: GlyphShadowMode,
 } // IMPLICIT: glyphs: Vec<font::GlyphInstance>
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, MallocSizeOf, PartialEq, Serialize, PeekPoke)]
@@ -395,6 +437,17 @@ pub struct NormalBorder {
     pub top: BorderSide,
     pub bottom: BorderSide,
     pub radius: BorderRadius,
+
+    /// Accumulated inset from the reference shape, in case of inflation/deflation.
+    /// The inset is expected to be already baked in rect and radii, but is necessary
+    /// for the correct computation of corner shapes.
+    ///
+    /// As borders have widths, this value should be calculated for the *outer* edge
+    /// of the border. For instance, a regular shape with a border will have an inset
+    /// of zero, but an outline of 5px, of which the outer edge is 5px away from the
+    /// original border-box, will have an inset of -5px.
+    pub inset: LayoutSideOffsets,
+
     /// Whether to apply anti-aliasing on the border corners.
     ///
     /// Note that for this to be `false` and work, this requires the borders to
@@ -403,6 +456,18 @@ pub struct NormalBorder {
 }
 
 impl NormalBorder {
+    /// Return a copy of this border with every side's color replaced by
+    /// `color`, keeping styles, radius and anti-aliasing. Used to recolor a
+    /// border into its shadow.
+    pub fn with_color(&self, color: ColorF) -> Self {
+        let mut b = *self;
+        b.left.color = color;
+        b.right.color = color;
+        b.top.color = color;
+        b.bottom.color = color;
+        b
+    }
+
     fn can_disable_antialiasing(&self) -> bool {
         fn is_valid(style: BorderStyle) -> bool {
             style == BorderStyle::Solid || style == BorderStyle::None
@@ -591,24 +656,30 @@ pub enum BoxShadowClipMode {
     Inset = 1,
 }
 
+/// The blur shader samples `BLUR_SAMPLE_SCALE * blur_radius` surrounding texels.
+pub const BLUR_SAMPLE_SCALE: f32 = 3.0;
+
+/// Maximum blur radius for box-shadows (different than blur filters).
+/// Taken from nsCSSRendering.cpp in Gecko.
+pub const MAX_BLUR_RADIUS: f32 = 300.;
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
 pub struct BoxShadowDisplayItem {
     pub common: CommonItemProperties,
-    pub box_bounds: LayoutRect,
+    /// The shadow's local rect: the blur-inflated outer rect for `Outset`, the
+    /// element rect for `Inset`. `prepare_box_shadow` recovers the element rect
+    /// from this and the clip mode.
+    pub bounds: LayoutRect,
     pub offset: LayoutVector2D,
     pub color: ColorF,
+    /// Already clamped to `MAX_BLUR_RADIUS`.
     pub blur_radius: f32,
-    pub spread_radius: f32,
+    /// The authored spread radius, signed by the clip mode: inset shadows get
+    /// smaller as it increases, so this is `-spread_radius` for `Inset`.
+    pub spread_amount: f32,
     pub border_radius: BorderRadius,
     pub shadow_radius: BorderRadius,
     pub clip_mode: BoxShadowClipMode,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
-pub struct PushShadowDisplayItem {
-    pub space_and_clip: SpaceAndClipInfo,
-    pub shadow: Shadow,
-    pub should_inflate: bool,
 }
 
 #[repr(C)]
@@ -626,19 +697,32 @@ pub enum ExtendMode {
     Repeat,
 }
 
+/// Whether the colors of gradient stops are interpolated with premultiplied
+/// alpha (as CSS gradients require) or with unpremultiplied alpha (as SVG
+/// gradients require).
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, Hash, Eq, MallocSizeOf, PartialEq, Serialize, Deserialize, PeekPoke)]
+pub enum AlphaMode {
+    Premultiplied,
+    Unpremultiplied,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
 pub struct Gradient {
-    pub start_point: LayoutPoint,
-    pub end_point: LayoutPoint,
+    /// Relative to the primitive bounds.
+    pub start: LayoutVector2D,
+    /// Relative to the primitive bounds.
+    pub end: LayoutVector2D,
     pub extend_mode: ExtendMode,
+    pub alpha_mode: AlphaMode,
 } // IMPLICIT: stops: Vec<GradientStop>
 
 impl Gradient {
     pub fn is_valid(&self) -> bool {
-        self.start_point.x.is_finite() &&
-            self.start_point.y.is_finite() &&
-            self.end_point.x.is_finite() &&
-            self.end_point.y.is_finite()
+        self.start.x.is_finite() &&
+            self.start.y.is_finite() &&
+            self.end.x.is_finite() &&
+            self.end.y.is_finite()
     }
 }
 
@@ -667,11 +751,13 @@ pub struct GradientStop {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
 pub struct RadialGradient {
-    pub center: LayoutPoint,
+    /// Relative to the primitive bounds.
+    pub center: LayoutVector2D,
     pub radius: LayoutSize,
     pub start_offset: f32,
     pub end_offset: f32,
     pub extend_mode: ExtendMode,
+    pub alpha_mode: AlphaMode,
 } // IMPLICIT stops: Vec<GradientStop>
 
 impl RadialGradient {
@@ -685,11 +771,13 @@ impl RadialGradient {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
 pub struct ConicGradient {
-    pub center: LayoutPoint,
+    /// Relative to the primitive bounds.
+    pub center: LayoutVector2D,
     pub angle: f32,
     pub start_offset: f32,
     pub end_offset: f32,
     pub extend_mode: ExtendMode,
+    pub alpha_mode: AlphaMode,
 } // IMPLICIT stops: Vec<GradientStop>
 
 impl ConicGradient {
@@ -719,6 +807,10 @@ pub struct RadialGradientDisplayItem {
     pub gradient: RadialGradient,
     pub tile_size: LayoutSize,
     pub tile_spacing: LayoutSize,
+    /// Which edges get anti-aliased under a transform. Narrowed by
+    /// `optimize_radial_gradient` where the gradient abuts a solid margin it
+    /// split off; see `RectangleDisplayItem::rect`.
+    pub transformed_aa_edges: EdgeMask,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
@@ -888,8 +980,16 @@ pub struct StackingContext {
     pub transform_style: TransformStyle,
     pub mix_blend_mode: MixBlendMode,
     pub clip_chain_id: Option<ClipChainId>,
+    /// Raster space already resolved against the enclosing stacking contexts by
+    /// `DisplayListBuilder::push_stacking_context`, not the space its caller
+    /// requested. Resolving on the builder means one raster space stack rather
+    /// than two that have to agree.
     pub raster_space: RasterSpace,
     pub flags: StackingContextFlags,
+    /// Non-zero for a shadow emitted by the display list builder's shadow
+    /// desugaring: the offset its contents were translated by relative to the
+    /// shadowed content, so they can be snapped relative to it.
+    pub shadow_offset: LayoutVector2D,
 }
 // IMPLICIT: filters: Vec<FilterOp>, filter_datas: Vec<FilterData>, filter_primitives: Vec<FilterPrimitive>
 
@@ -1258,9 +1358,12 @@ pub enum FilterOp {
     /// CSS filter semantics - operates on previous picture, uses sRGB space (non-linear)
     Identity,
     /// apply blur effect
-    /// parameters: stdDeviationX, stdDeviationY
+    /// parameters: stdDeviationX, stdDeviationY, should_inflate
+    /// `should_inflate` controls whether WebRender inflates the blur surface by
+    /// the sample radius; callers that have already inflated the bounds (e.g.
+    /// text-shadow) pass false. CSS/SVG filter blurs pass true.
     /// CSS filter semantics - operates on previous picture, uses sRGB space (non-linear)
-    Blur(f32, f32),
+    Blur(f32, f32, bool),
     /// apply brightness effect
     /// parameters: amount
     /// CSS filter semantics - operates on previous picture, uses sRGB space (non-linear)
@@ -1323,175 +1426,175 @@ pub enum FilterOp {
     /// as the filter region must be applied before it is used.
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - no inputs, no linear
-    SVGFESourceGraphic{node: FilterOpGraphNode},
+    SVGFESourceGraphic { node: FilterOpGraphNode },
     /// Filter that copies the SourceAlpha image into the specified subregion,
     /// This is intentionally the only way to get SourceGraphic into the graph,
     /// as the filter region must be applied before it is used.
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - no inputs, no linear
-    SVGFESourceAlpha{node: FilterOpGraphNode},
+    SVGFESourceAlpha { node: FilterOpGraphNode },
     /// Filter that does no transformation of the colors, used for subregion
     /// cropping only.
-    SVGFEIdentity{node: FilterOpGraphNode},
+    SVGFEIdentity { node: FilterOpGraphNode },
     /// represents CSS opacity property as a graph node like the rest of the SVGFE* filters
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
-    SVGFEOpacity{node: FilterOpGraphNode, valuebinding: PropertyBinding<f32>, value: f32},
+    SVGFEOpacity { node: FilterOpGraphNode, valuebinding: PropertyBinding<f32>, value: f32 },
     /// convert a color image to an alpha channel - internal use; generated by
     /// SVGFilterInstance::GetOrCreateSourceAlphaIndex().
-    SVGFEToAlpha{node: FilterOpGraphNode},
+    SVGFEToAlpha { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_DARKEN
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feBlendElement
-    SVGFEBlendDarken{node: FilterOpGraphNode},
+    SVGFEBlendDarken { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_LIGHTEN
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feBlendElement
-    SVGFEBlendLighten{node: FilterOpGraphNode},
+    SVGFEBlendLighten { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_MULTIPLY
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feBlendElement
-    SVGFEBlendMultiply{node: FilterOpGraphNode},
+    SVGFEBlendMultiply { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_NORMAL
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feBlendElement
-    SVGFEBlendNormal{node: FilterOpGraphNode},
+    SVGFEBlendNormal { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_SCREEN
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feBlendElement
-    SVGFEBlendScreen{node: FilterOpGraphNode},
+    SVGFEBlendScreen { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_OVERLAY
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Source: https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
-    SVGFEBlendOverlay{node: FilterOpGraphNode},
+    SVGFEBlendOverlay { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_COLOR_DODGE
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Source: https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
-    SVGFEBlendColorDodge{node: FilterOpGraphNode},
+    SVGFEBlendColorDodge { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_COLOR_BURN
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Source: https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
-    SVGFEBlendColorBurn{node: FilterOpGraphNode},
+    SVGFEBlendColorBurn { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_HARD_LIGHT
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Source: https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
-    SVGFEBlendHardLight{node: FilterOpGraphNode},
+    SVGFEBlendHardLight { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_SOFT_LIGHT
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Source: https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
-    SVGFEBlendSoftLight{node: FilterOpGraphNode},
+    SVGFEBlendSoftLight { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_DIFFERENCE
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Source: https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
-    SVGFEBlendDifference{node: FilterOpGraphNode},
+    SVGFEBlendDifference { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_EXCLUSION
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Source: https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
-    SVGFEBlendExclusion{node: FilterOpGraphNode},
+    SVGFEBlendExclusion { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_HUE
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Source: https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
-    SVGFEBlendHue{node: FilterOpGraphNode},
+    SVGFEBlendHue { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_SATURATION
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Source: https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
-    SVGFEBlendSaturation{node: FilterOpGraphNode},
+    SVGFEBlendSaturation { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_COLOR
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Source: https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
-    SVGFEBlendColor{node: FilterOpGraphNode},
+    SVGFEBlendColor { node: FilterOpGraphNode },
     /// combine 2 images with SVG_FEBLEND_MODE_LUMINOSITY
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Source: https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
-    SVGFEBlendLuminosity{node: FilterOpGraphNode},
+    SVGFEBlendLuminosity { node: FilterOpGraphNode },
     /// transform colors of image through 5x4 color matrix (transposed for efficiency)
     /// parameters: FilterOpGraphNode, matrix[5][4]
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feColorMatrixElement
-    SVGFEColorMatrix{node: FilterOpGraphNode, values: [f32; 20]},
+    SVGFEColorMatrix { node: FilterOpGraphNode, values: [f32; 20] },
     /// transform colors of image through configurable gradients with component swizzle
     /// parameters: FilterOpGraphNode, FilterData
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feComponentTransferElement
-    SVGFEComponentTransfer{node: FilterOpGraphNode},
+    SVGFEComponentTransfer { node: FilterOpGraphNode },
     /// composite 2 images with chosen composite mode with parameters for that mode
     /// parameters: FilterOpGraphNode, k1, k2, k3, k4
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feCompositeElement
-    SVGFECompositeArithmetic{node: FilterOpGraphNode, k1: f32, k2: f32, k3: f32,
-        k4: f32},
+    SVGFECompositeArithmetic { node: FilterOpGraphNode, k1: f32, k2: f32, k3: f32,
+        k4: f32 },
     /// composite 2 images with chosen composite mode with parameters for that mode
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feCompositeElement
-    SVGFECompositeATop{node: FilterOpGraphNode},
+    SVGFECompositeATop { node: FilterOpGraphNode },
     /// composite 2 images with chosen composite mode with parameters for that mode
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feCompositeElement
-    SVGFECompositeIn{node: FilterOpGraphNode},
+    SVGFECompositeIn { node: FilterOpGraphNode },
     /// composite 2 images with chosen composite mode with parameters for that mode
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Docs: https://developer.mozilla.org/en-US/docs/Web/SVG/Element/feComposite
-    SVGFECompositeLighter{node: FilterOpGraphNode},
+    SVGFECompositeLighter { node: FilterOpGraphNode },
     /// composite 2 images with chosen composite mode with parameters for that mode
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feCompositeElement
-    SVGFECompositeOut{node: FilterOpGraphNode},
+    SVGFECompositeOut { node: FilterOpGraphNode },
     /// composite 2 images with chosen composite mode with parameters for that mode
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feCompositeElement
-    SVGFECompositeOver{node: FilterOpGraphNode},
+    SVGFECompositeOver { node: FilterOpGraphNode },
     /// composite 2 images with chosen composite mode with parameters for that mode
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feCompositeElement
-    SVGFECompositeXOR{node: FilterOpGraphNode},
+    SVGFECompositeXOR { node: FilterOpGraphNode },
     /// transform image through convolution matrix of up to 25 values (spec
     /// allows more but for performance reasons we do not)
     /// parameters: FilterOpGraphNode, orderX, orderY, kernelValues[25],
@@ -1500,10 +1603,10 @@ pub enum FilterOp {
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feConvolveMatrixElement
-    SVGFEConvolveMatrixEdgeModeDuplicate{node: FilterOpGraphNode, order_x: i32,
+    SVGFEConvolveMatrixEdgeModeDuplicate { node: FilterOpGraphNode, order_x: i32,
         order_y: i32, kernel: [f32; 25], divisor: f32, bias: f32, target_x: i32,
         target_y: i32, kernel_unit_length_x: f32, kernel_unit_length_y: f32,
-        preserve_alpha: i32},
+        preserve_alpha: i32 },
     /// transform image through convolution matrix of up to 25 values (spec
     /// allows more but for performance reasons we do not)
     /// parameters: FilterOpGraphNode, orderX, orderY, kernelValues[25],
@@ -1512,10 +1615,10 @@ pub enum FilterOp {
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feConvolveMatrixElement
-    SVGFEConvolveMatrixEdgeModeNone{node: FilterOpGraphNode, order_x: i32,
+    SVGFEConvolveMatrixEdgeModeNone { node: FilterOpGraphNode, order_x: i32,
         order_y: i32, kernel: [f32; 25], divisor: f32, bias: f32, target_x: i32,
         target_y: i32, kernel_unit_length_x: f32, kernel_unit_length_y: f32,
-        preserve_alpha: i32},
+        preserve_alpha: i32 },
     /// transform image through convolution matrix of up to 25 values (spec
     /// allows more but for performance reasons we do not)
     /// parameters: FilterOpGraphNode, orderX, orderY, kernelValues[25],
@@ -1524,10 +1627,10 @@ pub enum FilterOp {
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#feConvolveMatrixElement
-    SVGFEConvolveMatrixEdgeModeWrap{node: FilterOpGraphNode, order_x: i32,
+    SVGFEConvolveMatrixEdgeModeWrap { node: FilterOpGraphNode, order_x: i32,
         order_y: i32, kernel: [f32; 25], divisor: f32, bias: f32, target_x: i32,
         target_y: i32, kernel_unit_length_x: f32, kernel_unit_length_y: f32,
-        preserve_alpha: i32},
+        preserve_alpha: i32 },
     /// calculate lighting based on heightmap image with provided values for a
     /// distant light source with specified direction
     /// parameters: FilterOpGraphNode, surfaceScale, diffuseConstant,
@@ -1536,9 +1639,9 @@ pub enum FilterOp {
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEDiffuseLightingElement
     ///  https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEDistantLightElement
-    SVGFEDiffuseLightingDistant{node: FilterOpGraphNode, surface_scale: f32,
+    SVGFEDiffuseLightingDistant { node: FilterOpGraphNode, surface_scale: f32,
         diffuse_constant: f32, kernel_unit_length_x: f32,
-        kernel_unit_length_y: f32, azimuth: f32, elevation: f32},
+        kernel_unit_length_y: f32, azimuth: f32, elevation: f32 },
     /// calculate lighting based on heightmap image with provided values for a
     /// point light source at specified location
     /// parameters: FilterOpGraphNode, surfaceScale, diffuseConstant,
@@ -1547,9 +1650,9 @@ pub enum FilterOp {
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEDiffuseLightingElement
     ///  https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEPointLightElement
-    SVGFEDiffuseLightingPoint{node: FilterOpGraphNode, surface_scale: f32,
+    SVGFEDiffuseLightingPoint { node: FilterOpGraphNode, surface_scale: f32,
         diffuse_constant: f32, kernel_unit_length_x: f32,
-        kernel_unit_length_y: f32, x: f32, y: f32, z: f32},
+        kernel_unit_length_y: f32, x: f32, y: f32, z: f32 },
     /// calculate lighting based on heightmap image with provided values for a
     /// spot light source at specified location pointing at specified target
     /// location with specified hotspot sharpness and cone angle
@@ -1560,19 +1663,19 @@ pub enum FilterOp {
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEDiffuseLightingElement
     /// https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFESpotLightElement
-    SVGFEDiffuseLightingSpot{node: FilterOpGraphNode, surface_scale: f32,
+    SVGFEDiffuseLightingSpot { node: FilterOpGraphNode, surface_scale: f32,
         diffuse_constant: f32, kernel_unit_length_x: f32,
         kernel_unit_length_y: f32, x: f32, y: f32, z: f32, points_at_x: f32,
         points_at_y: f32, points_at_z: f32, cone_exponent: f32,
-        limiting_cone_angle: f32},
+        limiting_cone_angle: f32 },
     /// calculate a distorted version of first input image using offset values
     /// from second input image at specified intensity
-    /// parameters: FilterOpGraphNode, scale, xChannelSelector, yChannelSelector
+    /// parameters: FilterOpGraphNode, scale_x, scale_y, xChannelSelector, yChannelSelector
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEDisplacementMapElement
-    SVGFEDisplacementMap{node: FilterOpGraphNode, scale: f32,
-        x_channel_selector: u32, y_channel_selector: u32},
+    SVGFEDisplacementMap { node: FilterOpGraphNode, scale_x: f32, scale_y: f32,
+        x_channel_selector: u32, y_channel_selector: u32 },
     /// create and merge a dropshadow version of the specified image's alpha
     /// channel with specified offset and blur radius
     /// parameters: FilterOpGraphNode, flood_color, flood_opacity, dx, dy,
@@ -1580,47 +1683,47 @@ pub enum FilterOp {
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEDropShadowElement
-    SVGFEDropShadow{node: FilterOpGraphNode, color: ColorF, dx: f32, dy: f32,
-        std_deviation_x: f32, std_deviation_y: f32},
+    SVGFEDropShadow { node: FilterOpGraphNode, color: ColorF, dx: f32, dy: f32,
+        std_deviation_x: f32, std_deviation_y: f32 },
     /// synthesize a new image of specified size containing a solid color
     /// parameters: FilterOpGraphNode, color
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEFloodElement
-    SVGFEFlood{node: FilterOpGraphNode, color: ColorF},
+    SVGFEFlood { node: FilterOpGraphNode, color: ColorF },
     /// create a blurred version of the input image
     /// parameters: FilterOpGraphNode, stdDeviationX, stdDeviationY
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEGaussianBlurElement
-    SVGFEGaussianBlur{node: FilterOpGraphNode, std_deviation_x: f32, std_deviation_y: f32},
+    SVGFEGaussianBlur { node: FilterOpGraphNode, std_deviation_x: f32, std_deviation_y: f32 },
     /// synthesize a new image based on a url (i.e. blob image source)
     /// parameters: FilterOpGraphNode, sampling_filter (see SamplingFilter in Types.h), transform
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEImageElement
-    SVGFEImage{node: FilterOpGraphNode, sampling_filter: u32, matrix: [f32; 6]},
+    SVGFEImage { node: FilterOpGraphNode, sampling_filter: u32, matrix: [f32; 6] },
     /// create a new image based on the input image with the contour stretched
     /// outward (dilate operator)
     /// parameters: FilterOpGraphNode, radiusX, radiusY
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEMorphologyElement
-    SVGFEMorphologyDilate{node: FilterOpGraphNode, radius_x: f32, radius_y: f32},
+    SVGFEMorphologyDilate { node: FilterOpGraphNode, radius_x: f32, radius_y: f32 },
     /// create a new image based on the input image with the contour shrunken
     /// inward (erode operator)
     /// parameters: FilterOpGraphNode, radiusX, radiusY
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEMorphologyElement
-    SVGFEMorphologyErode{node: FilterOpGraphNode, radius_x: f32, radius_y: f32},
+    SVGFEMorphologyErode { node: FilterOpGraphNode, radius_x: f32, radius_y: f32 },
     /// create a new image that is a scrolled version of the input image, this
     /// is basically a no-op as we support offset in the graph node
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEOffsetElement
-    SVGFEOffset{node: FilterOpGraphNode, offset_x: f32, offset_y: f32},
+    SVGFEOffset { node: FilterOpGraphNode, offset_x: f32, offset_y: f32 },
     /// calculate lighting based on heightmap image with provided values for a
     /// distant light source with specified direction
     /// parameters: FilerData, surfaceScale, specularConstant, specularExponent,
@@ -1629,10 +1732,10 @@ pub enum FilterOp {
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFESpecularLightingElement
     /// https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEDistantLightElement
-    SVGFESpecularLightingDistant{node: FilterOpGraphNode, surface_scale: f32,
+    SVGFESpecularLightingDistant { node: FilterOpGraphNode, surface_scale: f32,
         specular_constant: f32, specular_exponent: f32,
         kernel_unit_length_x: f32, kernel_unit_length_y: f32, azimuth: f32,
-        elevation: f32},
+        elevation: f32 },
     /// calculate lighting based on heightmap image with provided values for a
     /// point light source at specified location
     /// parameters: FilterOpGraphNode, surfaceScale, specularConstant,
@@ -1641,10 +1744,10 @@ pub enum FilterOp {
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFESpecularLightingElement
     ///  https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFEPointLightElement
-    SVGFESpecularLightingPoint{node: FilterOpGraphNode, surface_scale: f32,
+    SVGFESpecularLightingPoint { node: FilterOpGraphNode, surface_scale: f32,
         specular_constant: f32, specular_exponent: f32,
         kernel_unit_length_x: f32, kernel_unit_length_y: f32, x: f32, y: f32,
-        z: f32},
+        z: f32 },
     /// calculate lighting based on heightmap image with provided values for a
     /// spot light source at specified location pointing at specified target
     /// location with specified hotspot sharpness and cone angle
@@ -1655,18 +1758,18 @@ pub enum FilterOp {
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFESpecularLightingElement
     ///  https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFESpotLightElement
-    SVGFESpecularLightingSpot{node: FilterOpGraphNode, surface_scale: f32,
+    SVGFESpecularLightingSpot { node: FilterOpGraphNode, surface_scale: f32,
         specular_constant: f32, specular_exponent: f32,
         kernel_unit_length_x: f32, kernel_unit_length_y: f32, x: f32, y: f32,
         z: f32, points_at_x: f32, points_at_y: f32, points_at_z: f32,
-        cone_exponent: f32, limiting_cone_angle: f32},
+        cone_exponent: f32, limiting_cone_angle: f32 },
     /// create a new image based on the input image, repeated throughout the
     /// output rectangle
     /// parameters: FilterOpGraphNode
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFETileElement
-    SVGFETile{node: FilterOpGraphNode},
+    SVGFETile { node: FilterOpGraphNode },
     /// synthesize a new image based on Fractal Noise (Perlin) with the chosen
     /// stitching mode
     /// parameters: FilterOpGraphNode, baseFrequencyX, baseFrequencyY,
@@ -1674,9 +1777,9 @@ pub enum FilterOp {
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFETurbulenceElement
-    SVGFETurbulenceWithFractalNoiseWithNoStitching{node: FilterOpGraphNode,
+    SVGFETurbulenceWithFractalNoiseWithNoStitching { node: FilterOpGraphNode,
         base_frequency_x: f32, base_frequency_y: f32, num_octaves: u32,
-        seed: u32},
+        seed: u32 },
     /// synthesize a new image based on Fractal Noise (Perlin) with the chosen
     /// stitching mode
     /// parameters: FilterOpGraphNode, baseFrequencyX, baseFrequencyY,
@@ -1684,26 +1787,26 @@ pub enum FilterOp {
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFETurbulenceElement
-    SVGFETurbulenceWithFractalNoiseWithStitching{node: FilterOpGraphNode,
+    SVGFETurbulenceWithFractalNoiseWithStitching { node: FilterOpGraphNode,
         base_frequency_x: f32, base_frequency_y: f32, num_octaves: u32,
-        seed: u32},
+        seed: u32 },
     /// synthesize a new image based on Turbulence Noise (offset vectors)
     /// parameters: FilterOpGraphNode, baseFrequencyX, baseFrequencyY,
     ///  numOctaves, seed
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFETurbulenceElement
-    SVGFETurbulenceWithTurbulenceNoiseWithNoStitching{node: FilterOpGraphNode,
+    SVGFETurbulenceWithTurbulenceNoiseWithNoStitching { node: FilterOpGraphNode,
         base_frequency_x: f32, base_frequency_y: f32, num_octaves: u32,
-        seed: u32},
+        seed: u32 },
     /// synthesize a new image based on Turbulence Noise (offset vectors)
     /// parameters: FilterOpGraphNode, baseFrequencyX, baseFrequencyY,
     ///  numOctaves, seed
     /// SVG filter semantics - selectable input(s), selectable between linear
     /// (default) and sRGB color space for calculations
     /// Spec: https://www.w3.org/TR/filter-effects-1/#InterfaceSVGFETurbulenceElement
-    SVGFETurbulenceWithTurbulenceNoiseWithStitching{node: FilterOpGraphNode,
-        base_frequency_x: f32, base_frequency_y: f32, num_octaves: u32, seed: u32},
+    SVGFETurbulenceWithTurbulenceNoiseWithStitching { node: FilterOpGraphNode,
+        base_frequency_x: f32, base_frequency_y: f32, num_octaves: u32, seed: u32 },
 }
 
 impl FilterOp {
@@ -1880,10 +1983,9 @@ pub struct IframeDisplayItem {
     pub ignore_missing_pipeline: bool,
 }
 
-/// This describes an image that fills the specified area. It stretches or shrinks
-/// the image as necessary. While RepeatingImageDisplayItem could otherwise provide
-/// a superset of the functionality, it has been problematic inferring the desired
-/// repetition properties when snapping changes the size of the primitive.
+/// An image drawn over `bounds`, either stretched to fill it or tiled across
+/// it. The builder's `push_image` and `push_repeating_image` both produce this
+/// item; which one it was is in `stretch_size`.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
 pub struct ImageDisplayItem {
     pub common: CommonItemProperties,
@@ -1891,24 +1993,10 @@ pub struct ImageDisplayItem {
     // FIXME: this should ideally just be `tile_origin` here, with the clip_rect
     // defining the bounds of the item. Needs non-trivial backend changes.
     pub bounds: LayoutRect,
-    pub image_key: ImageKey,
-    pub image_rendering: ImageRendering,
-    pub alpha_type: AlphaType,
-    /// A hack used by gecko to color a simple bitmap font used for tofu glyphs
-    pub color: ColorF,
-}
-
-/// This describes a background-image and its tiling. It repeats in a grid to fill
-/// the specified area.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
-pub struct RepeatingImageDisplayItem {
-    pub common: CommonItemProperties,
-    /// The area to tile the image over (first tile starts at origin of this rect)
-    // FIXME: this should ideally just be `tile_origin` here, with the clip_rect
-    // defining the bounds of the item. Needs non-trivial backend changes.
-    pub bounds: LayoutRect,
-    /// How large to make a single tile of the image (common case: bounds.size)
-    pub stretch_size: LayoutSize,
+    /// How large to make a single tile of the image. An axis that fills the
+    /// bounds is recorded as such rather than by its size, so a stretched
+    /// image's key does not depend on how big it is drawn.
+    pub stretch_size: StretchSizeKey,
     /// The space between tiles (common case: 0)
     pub tile_spacing: LayoutSize,
     pub image_key: ImageKey,
@@ -2008,6 +2096,19 @@ pub enum YuvData {
 }
 
 impl YuvData {
+    /// The planes actually referenced, padded with `ImageKey::DUMMY` to the
+    /// three a yuv primitive holds.
+    pub fn planes(&self) -> [ImageKey; 3] {
+        match *self {
+            YuvData::NV12(p0, p1)
+            | YuvData::P010(p0, p1)
+            | YuvData::NV16(p0, p1)
+            | YuvData::P210(p0, p1) => [p0, p1, ImageKey::DUMMY],
+            YuvData::PlanarYCbCr(p0, p1, p2) => [p0, p1, p2],
+            YuvData::InterleavedYCbCr(p0) => [p0, ImageKey::DUMMY, ImageKey::DUMMY],
+        }
+    }
+
     pub fn get_format(&self) -> YuvFormat {
         match *self {
             YuvData::NV12(..) => YuvFormat::NV12,
@@ -2093,6 +2194,12 @@ pub struct ComplexClipRegion {
     pub rect: LayoutRect,
     /// Border radii of this rectangle.
     pub radii: BorderRadius,
+    /// Accumulated inset from the reference shape, in case of inflation/deflation.
+    /// The inset is expected to be already baked in rect and radii, but is necessary
+    /// for the correct computation of corner shapes.
+    /// Example: a shape with a border of 10px should have a 10px inset applied on its
+    /// content mask.
+    pub inset: LayoutSideOffsets,
     /// Whether we are clipping inside or outside
     /// the region.
     pub mode: ClipMode,
@@ -2183,9 +2290,10 @@ impl ComplexClipRegion {
     pub fn new(
         rect: LayoutRect,
         radii: BorderRadius,
+        inset: LayoutSideOffsets,
         mode: ClipMode,
     ) -> Self {
-        ComplexClipRegion { rect, radii, mode }
+        ComplexClipRegion { rect, radii, inset, mode }
     }
 }
 
@@ -2341,12 +2449,9 @@ impl DisplayItem {
             DisplayItem::Gradient(..) => "gradient",
             DisplayItem::Iframe(..) => "iframe",
             DisplayItem::Image(..) => "image",
-            DisplayItem::RepeatingImage(..) => "repeating_image",
             DisplayItem::Line(..) => "line",
-            DisplayItem::PopAllShadows => "pop_all_shadows",
             DisplayItem::PopReferenceFrame => "pop_reference_frame",
             DisplayItem::PopStackingContext => "pop_stacking_context",
-            DisplayItem::PushShadow(..) => "push_shadow",
             DisplayItem::PushReferenceFrame(..) => "push_reference_frame",
             DisplayItem::PushStackingContext(..) => "push_stacking_context",
             DisplayItem::SetFilterOps => "set_filter_ops",
@@ -2386,6 +2491,7 @@ impl_default_for_enums! {
     BorderStyle => None,
     BoxShadowClipMode => Outset,
     ExtendMode => Clamp,
+    AlphaMode => Premultiplied,
     FilterOp => Identity,
     ComponentTransferFuncType => Identity,
     ClipMode => Clip,

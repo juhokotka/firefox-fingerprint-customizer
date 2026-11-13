@@ -6,14 +6,14 @@
 #ifndef MOZILLA_WIDGET_GTK_WINDOW_SURFACE_WAYLAND_MULTI_BUFFER_H
 #define MOZILLA_WIDGET_GTK_WINDOW_SURFACE_WAYLAND_MULTI_BUFFER_H
 
+#include "WaylandBuffer.h"
+#include "WindowSurface.h"
+#include "mozilla/Mutex.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Types.h"
-#include "mozilla/Mutex.h"
 #include "nsTArray.h"
 #include "nsWaylandDisplay.h"
 #include "nsWindow.h"
-#include "WaylandBuffer.h"
-#include "WindowSurface.h"
 
 namespace mozilla::widget {
 
@@ -44,11 +44,11 @@ class WindowSurfaceWaylandMB : public WindowSurface {
  private:
   void Commit(const WaylandSurfaceLock& aWaylandSurfaceLock,
               const LayoutDeviceIntRegion& aInvalidRegion);
-  RefPtr<WaylandBufferSHM> ObtainBufferFromPool(
+  RefPtr<WaylandBuffer> ObtainBufferFromPool(
       const WaylandSurfaceLock& aWaylandSurfaceLock,
       const LayoutDeviceIntSize& aSize);
   void ReturnBufferToPool(const WaylandSurfaceLock& aWaylandSurfaceLock,
-                          const RefPtr<WaylandBufferSHM>& aBuffer);
+                          const RefPtr<WaylandBuffer>& aBuffer);
   void EnforcePoolSizeLimit(const WaylandSurfaceLock& aWaylandSurfaceLock);
   void CollectPendingSurfaces(const WaylandSurfaceLock& aWaylandSurfaceLock);
   void HandlePartialUpdate(const WaylandSurfaceLock& aWaylandSurfaceLock,
@@ -65,14 +65,14 @@ class WindowSurfaceWaylandMB : public WindowSurface {
   GtkCompositorWidget* mCompositorWidget;
   LayoutDeviceIntSize mWindowSize;
 
-  RefPtr<WaylandBufferSHM> mInProgressBuffer;
-  RefPtr<WaylandBufferSHM> mFrontBuffer;
+  RefPtr<WaylandBuffer> mInProgressBuffer;
+  RefPtr<WaylandBuffer> mFrontBuffer;
   LayoutDeviceIntRegion mFrontBufferInvalidRegion;
 
   // buffer pool
-  nsTArray<RefPtr<WaylandBufferSHM>> mInUseBuffers;
-  nsTArray<RefPtr<WaylandBufferSHM>> mPendingBuffers;
-  nsTArray<RefPtr<WaylandBufferSHM>> mAvailableBuffers;
+  nsTArray<RefPtr<WaylandBuffer>> mInUseBuffers;
+  nsTArray<RefPtr<WaylandBuffer>> mPendingBuffers;
+  nsTArray<RefPtr<WaylandBuffer>> mAvailableBuffers;
 };
 
 }  // namespace mozilla::widget

@@ -5,14 +5,14 @@
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const kTaskbarTabsWindowFeatures =
-  "titlebar,close,toolbar,location,personalbar=no,status,menubar=no,resizable,minimizable,scrollbars";
+const kTaskbarTabsWindowFeatures = "titlebar,toolbar,resizable";
 
 let lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
-  TaskbarTabsUtils: "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs",
+  TaskbarTabsUtils:
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsUtils.sys.mjs",
 });
 
 XPCOMUtils.defineLazyServiceGetters(lazy, {

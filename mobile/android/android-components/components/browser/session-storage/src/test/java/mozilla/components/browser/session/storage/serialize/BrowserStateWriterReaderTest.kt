@@ -8,6 +8,10 @@ import android.util.AtomicFile
 import android.util.JsonReader
 import android.util.JsonWriter
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import java.io.File
+import java.util.UUID
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.EngineState
 import mozilla.components.browser.state.state.ExternalPackage
@@ -15,9 +19,8 @@ import mozilla.components.browser.state.state.LastMediaAccessState
 import mozilla.components.browser.state.state.PackageCategory
 import mozilla.components.browser.state.state.ReaderState
 import mozilla.components.browser.state.state.SessionState
-import mozilla.components.browser.state.state.TabGroup
-import mozilla.components.browser.state.state.TabPartition
 import mozilla.components.browser.state.state.TabSessionState
+import mozilla.components.browser.state.state.TranslationsBrowserState
 import mozilla.components.browser.state.state.createTab
 import mozilla.components.concept.engine.Engine
 import mozilla.components.concept.engine.EngineSessionState
@@ -32,10 +35,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
-import java.util.UUID
-import kotlin.test.assertIs
-import kotlin.test.assertNotNull
 
 @RunWith(AndroidJUnit4::class)
 class BrowserStateWriterReaderTest {
@@ -44,20 +43,18 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-        ).copy(
-            engineState = EngineState(engineSessionState = engineState),
-        )
+        val tab =
+            createTab(
+                    url = "https://www.mozilla.org",
+                    title = "Mozilla",
+                    contextId = "work",
+                )
+                .copy(engineState = EngineState(engineSessionState = engineState))
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -78,19 +75,18 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-            readerState = ReaderState(active = true, activeUrl = "https://www.example.org", scrollY = 1234),
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+                readerState = ReaderState(active = true, activeUrl = "https://www.example.org", scrollY = 1234),
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -110,9 +106,7 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
         val tab = createTab(url = "https://www.mozilla.org", title = "Mozilla")
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
         writeTabWithDeprecatedSource(tab, file)
 
         // When reading a tab that didn't have a source persisted, we just need to make sure
@@ -131,23 +125,23 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-            historyMetadata = HistoryMetadataKey(
-                "https://www.mozilla.org",
-                searchTerm = "test",
-                referrerUrl = "https://firefox.com",
-            ),
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+                historyMetadata =
+                    HistoryMetadataKey(
+                        "https://www.mozilla.org",
+                        searchTerm = "test",
+                        referrerUrl = "https://firefox.com",
+                    ),
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -163,21 +157,21 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-            source = SessionState.Source.External.CustomTab(
-                caller = ExternalPackage("com.mozilla.test", PackageCategory.PRODUCTIVITY),
-            ),
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+                source =
+                    SessionState.Source.External.CustomTab(
+                        caller = ExternalPackage("com.mozilla.test", PackageCategory.PRODUCTIVITY)
+                    ),
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -196,21 +190,21 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-            source = SessionState.Source.External.ActionView(
-                caller = ExternalPackage("com.mozilla.test", category = PackageCategory.UNKNOWN),
-            ),
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+                source =
+                    SessionState.Source.External.ActionView(
+                        caller = ExternalPackage("com.mozilla.test", category = PackageCategory.UNKNOWN)
+                    ),
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -229,19 +223,18 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-            source = SessionState.Source.External.ActionSend(caller = null),
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+                source = SessionState.Source.External.ActionSend(caller = null),
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -259,19 +252,18 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-            lastMediaAccessState = LastMediaAccessState("https://www.mozilla.org", lastMediaAccess = 333L, true),
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+                lastMediaAccessState = LastMediaAccessState("https://www.mozilla.org", lastMediaAccess = 333L, true),
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -289,19 +281,18 @@ class BrowserStateWriterReaderTest {
         val engine = createFakeEngine(engineState)
         val currentTime = System.currentTimeMillis()
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-            createdAt = currentTime,
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+                createdAt = currentTime,
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -317,18 +308,17 @@ class BrowserStateWriterReaderTest {
         val engine = createFakeEngine(engineState)
         val currentTime = System.currentTimeMillis()
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            lastVisibleAt = currentTime,
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                lastVisibleAt = currentTime,
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -343,18 +333,17 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -369,19 +358,18 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-            searchTerms = "test search",
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+                searchTerms = "test search",
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -396,18 +384,17 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -422,19 +409,18 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-            desktopMode = true,
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+                desktopMode = true,
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -449,18 +435,17 @@ class BrowserStateWriterReaderTest {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
-        val tab = createTab(
-            url = "https://www.mozilla.org",
-            title = "Mozilla",
-            contextId = "work",
-        )
+        val tab =
+            createTab(
+                url = "https://www.mozilla.org",
+                title = "Mozilla",
+                contextId = "work",
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.writeTab(tab, file))
 
@@ -471,26 +456,21 @@ class BrowserStateWriterReaderTest {
     }
 
     @Test
-    fun `Read and write tabs and tab partitions`() {
+    fun `Read and write tabs`() {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
         val tab = createTab(url = "https://www.mozilla.org", id = "mozilla")
-        val tabGroup = TabGroup(id = "group1", name = "Group 1", tabIds = setOf("mozilla"))
-        val tabPartition = TabPartition(id = "testFeaturePartition1", tabGroups = listOf(tabGroup))
-        val tabPartitions = mapOf("testFeaturePartition1" to tabPartition)
-        val state = BrowserState(
-            tabs = listOf(tab),
-            tabPartitions = tabPartitions,
-            selectedTabId = "mozilla",
-        )
+        val state =
+            BrowserState(
+                tabs = listOf(tab),
+                selectedTabId = "mozilla",
+            )
 
         val writer = BrowserStateWriter()
         val reader = BrowserStateReader()
 
-        val file = AtomicFile(
-            File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-        )
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
 
         assertTrue(writer.write(state, file))
 
@@ -498,15 +478,79 @@ class BrowserStateWriterReaderTest {
         assertNotNull(restoredState)
 
         assertEquals("https://www.mozilla.org", restoredState.tabs[0].state.url)
-        assertEquals(1, restoredState.tabPartitions.size)
+    }
 
-        val restoredPartition = restoredState.tabPartitions["testFeaturePartition1"]
-        assertNotNull(restoredPartition)
-        assertEquals("testFeaturePartition1", restoredPartition.id)
-        assertEquals(1, restoredPartition.tabGroups.size)
-        assertEquals("group1", restoredPartition.tabGroups[0].id)
-        assertEquals("Group 1", restoredPartition.tabGroups[0].name)
-        assertEquals(setOf("mozilla"), restoredPartition.tabGroups[0].tabIds)
+    @Test
+    fun `Read and write state with supported translations engine`() {
+        val engineState = createFakeEngineState()
+        val engine = createFakeEngine(engineState)
+
+        val state =
+            BrowserState(
+                tabs = listOf(createTab(url = "https://www.mozilla.org", id = "mozilla")),
+                selectedTabId = "mozilla",
+                translationEngine = TranslationsBrowserState(isEngineSupported = true),
+            )
+
+        val writer = BrowserStateWriter()
+        val reader = BrowserStateReader()
+
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
+
+        assertTrue(writer.write(state, file))
+
+        val restoredState = reader.read(engine, file)
+        assertNotNull(restoredState)
+        assertEquals(true, restoredState.isTranslationsEngineSupported)
+    }
+
+    @Test
+    fun `Read and write state with unsupported translations engine`() {
+        val engineState = createFakeEngineState()
+        val engine = createFakeEngine(engineState)
+
+        val state =
+            BrowserState(
+                tabs = listOf(createTab(url = "https://www.mozilla.org", id = "mozilla")),
+                selectedTabId = "mozilla",
+                translationEngine = TranslationsBrowserState(isEngineSupported = false),
+            )
+
+        val writer = BrowserStateWriter()
+        val reader = BrowserStateReader()
+
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
+
+        assertTrue(writer.write(state, file))
+
+        val restoredState = reader.read(engine, file)
+        assertNotNull(restoredState)
+        assertEquals(false, restoredState.isTranslationsEngineSupported)
+    }
+
+    @Test
+    fun `Read and write state with undetermined translations engine support`() {
+        val engineState = createFakeEngineState()
+        val engine = createFakeEngine(engineState)
+
+        val state =
+            BrowserState(
+                tabs = listOf(createTab(url = "https://www.mozilla.org", id = "mozilla")),
+                selectedTabId = "mozilla",
+                translationEngine = TranslationsBrowserState(isEngineSupported = null),
+            )
+
+        val writer = BrowserStateWriter()
+        val reader = BrowserStateReader()
+
+        val file = AtomicFile(File.createTempFile(UUID.randomUUID().toString(), UUID.randomUUID().toString()))
+
+        assertTrue(writer.write(state, file))
+
+        val restoredState = reader.read(engine, file)
+        assertNotNull(restoredState)
+        // An undetermined value should not be persisted and therefore stays null on restore.
+        assertNull(restoredState.isTranslationsEngineSupported)
     }
 }
 
@@ -535,9 +579,7 @@ private fun writeTabWithDeprecatedSource(tab: TabSessionState, file: AtomicFile)
     file.streamJSON { tabWithDeprecatedSource(tab) }
 }
 
-private fun JsonWriter.tabWithDeprecatedSource(
-    tab: TabSessionState,
-) {
+private fun JsonWriter.tabWithDeprecatedSource(tab: TabSessionState) {
     beginObject()
 
     name(Keys.SESSION_KEY)

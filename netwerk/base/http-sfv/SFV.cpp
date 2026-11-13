@@ -5,8 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SFV.h"
-#include "nsStringFwd.h"
+
 #include "nsError.h"
+#include "nsStringFwd.h"
 
 namespace mozilla {
 namespace net {
@@ -227,6 +228,15 @@ ItemResult InnerListResult::GetItemAt(size_t aIndex) const {
     return ItemResult(nullptr);
   }
   return ItemResult(item);
+}
+
+template <>
+nsresult InnerListResult::GetParam<Token>(const nsACString& aKey,
+                                          nsACString& aOutput) const {
+  if (!mInnerList) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  return sfv_inner_list_get_param_token(mInnerList, &aKey, &aOutput);
 }
 
 DictResult::DictResult(SFVDictHandle* aDict) : mDict(aDict) {}

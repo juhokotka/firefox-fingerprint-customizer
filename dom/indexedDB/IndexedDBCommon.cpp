@@ -16,7 +16,8 @@ EnumSet<ValidatePrincipalOptions> PrincipalValidationOptions() {
   EnumSet<ValidatePrincipalOptions> options;
   if (StaticPrefs::dom_indexedDB_testing_allowContentSystem() &&
       xpc::IsInAutomation()) {
-    options += ValidatePrincipalOptions::AllowSystem;
+    options += ValidatePrincipalOptions::AllowNotLoadedOrigin;
+    options += ValidatePrincipalOptions::AlwaysAllowSystem;
   }
   return options;
 }
@@ -32,6 +33,12 @@ nsresult ClampResultCode(nsresult aResultCode) {
       return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
     case NS_ERROR_STORAGE_CONSTRAINT:
       return NS_ERROR_DOM_INDEXEDDB_CONSTRAINT_ERR;
+    case NS_ERROR_CORRUPTED_CONTENT:
+    case NS_ERROR_FILE_CORRUPTED:
+    case NS_ERROR_FILE_NOT_FOUND:
+    case NS_ERROR_FILE_ACCESS_DENIED:
+    case NS_ERROR_STORAGE_IOERR:
+      return NS_ERROR_DOM_INDEXEDDB_NOT_READABLE_ERR;
     default:
 #ifdef DEBUG
       nsPrintfCString message("Converting non-IndexedDB error code (0x%" PRIX32

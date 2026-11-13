@@ -6,15 +6,17 @@
 #define jit_IonTypes_h
 
 #include "mozilla/HashFunctions.h"
+#include "mozilla/Maybe.h"
 
 #include <algorithm>
+#include <cstring>
 #include <stdint.h>
+#include <type_traits>
 
 #include "jstypes.h"
 #include "NamespaceImports.h"
 
 #include "jit/ABIFunctionType.h"
-
 #include "js/ScalarType.h"  // js::Scalar::Type
 #include "js/Value.h"
 
@@ -31,12 +33,7 @@ class IonCompilationId {
  public:
   explicit IonCompilationId(uint64_t id)
       : idLo_(id & UINT32_MAX), idHi_(id >> 32) {}
-  bool operator==(const IonCompilationId& other) const {
-    return idLo_ == other.idLo_ && idHi_ == other.idHi_;
-  }
-  bool operator!=(const IonCompilationId& other) const {
-    return !operator==(other);
-  }
+  bool operator==(const IonCompilationId& other) const = default;
 };
 
 namespace jit {
@@ -155,6 +152,11 @@ enum class BailoutKind : uint8_t {
   // An inevitable bailout (MBail instruction or type barrier that always bails)
   Inevitable,
 
+  // A JSOp::AfterYield Warp did not build a resume path for, because its
+  // suspend was in (or only reachable from) a catch-block. We fall back to
+  // running the generator in Baseline if this happens frequently.
+  UncompiledGeneratorResume,
+
   // Bailing out during a VM call. Many possible causes that are hard
   // to distinguish statically at snapshot construction time.
   // We just lump them together.
@@ -223,6 +225,8 @@ inline const char* BailoutKindString(BailoutKind kind) {
       return "UnboxFolding";
     case BailoutKind::Inevitable:
       return "Inevitable";
+    case BailoutKind::UncompiledGeneratorResume:
+      return "UncompiledGeneratorResume";
     case BailoutKind::DuringVMCall:
       return "DuringVMCall";
     case BailoutKind::TooManyArguments:
@@ -467,6 +471,39 @@ class SimdConstant {
   bool isOneBits() const {
     MOZ_ASSERT(defined());
     return ~u.i64x2[0] == 0 && ~u.i64x2[1] == 0;
+  }
+
+  // Returns the common lane value if every |T|-typed lane holds the same bit
+  // pattern.
+  template <typename T>
+  mozilla::Maybe<T> splatIntValue() const {
+    static_assert(std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
+                  std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t>);
+
+    MOZ_ASSERT(defined());
+
+    constexpr auto allEqual = [](const auto& lanes) {
+      return std::all_of(std::begin(lanes), std::end(lanes),
+                         [&](const auto& lane) { return lane == lanes[0]; });
+    };
+
+    if constexpr (std::is_same_v<T, int8_t>) {
+      I8x16 lanes;
+      memcpy(&lanes, bytes(), sizeof(lanes));
+      return allEqual(lanes) ? mozilla::Some(lanes[0]) : mozilla::Nothing();
+    } else if constexpr (std::is_same_v<T, int16_t>) {
+      I16x8 lanes;
+      memcpy(&lanes, bytes(), sizeof(lanes));
+      return allEqual(lanes) ? mozilla::Some(lanes[0]) : mozilla::Nothing();
+    } else if constexpr (std::is_same_v<T, int32_t>) {
+      I32x4 lanes;
+      memcpy(&lanes, bytes(), sizeof(lanes));
+      return allEqual(lanes) ? mozilla::Some(lanes[0]) : mozilla::Nothing();
+    } else {
+      I64x2 lanes;
+      memcpy(&lanes, bytes(), sizeof(lanes));
+      return allEqual(lanes) ? mozilla::Some(lanes[0]) : mozilla::Nothing();
+    }
   }
 
   // SimdConstant is a HashPolicy.  Currently we discriminate by type, but it

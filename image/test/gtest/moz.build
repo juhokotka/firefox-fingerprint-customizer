@@ -30,6 +30,8 @@ UNIFIED_SOURCES = [
 
 TEST_HARNESS_FILES.gtest += [
     "animated-with-extra-image-sub-blocks.gif",
+    "avif_420_film_grain.avif",
+    "avif_444_film_grain.avif",
     "blend.avif",
     "blend.gif",
     "blend.jxl",
@@ -41,6 +43,7 @@ TEST_HARNESS_FILES.gtest += [
     "corrupt-with-bad-ico-bpp.ico",
     "corrupt.jpg",
     "corrupt.jxl",
+    "downscaled-lossy.webp",
     "downscaled.avif",
     "downscaled.bmp",
     "downscaled.gif",
@@ -82,6 +85,7 @@ TEST_HARNESS_FILES.gtest += [
     "gray-235-8bit-limited-range-bt709.avif",
     "gray-235-8bit-limited-range-grayscale.avif",
     "green-1x1-truncated.gif",
+    "green-exif-orient6.jpg",
     "green-large-bmp.ico",
     "green-large-png.ico",
     "green-multiple-sizes.ico",
@@ -97,6 +101,7 @@ TEST_HARNESS_FILES.gtest += [
     "green.webp",
     "hdlr-nonzero-reserved-bug-1727033.avif",
     "invalid-truncated-metadata.bmp",
+    "large-jxl-reference.webp",
     "large.avif",
     "large.jxl",
     "large.webp",
@@ -120,6 +125,7 @@ TEST_HARNESS_FILES.gtest += [
     "perf_srgb_lossy.webp",
     "perf_ycbcr.jpg",
     "progressive.jxl",
+    "progressive_alpha_multigroup.jxl",
     "rle4.bmp",
     "rle8.bmp",
     "stackcheck.avif",
@@ -154,3 +160,7 @@ LOCAL_INCLUDES += [
 LOCAL_INCLUDES += CONFIG["SKIA_INCLUDES"]
 
 FINAL_LIBRARY = "xul-gtest"
+
+SOURCE_HEADERS += [
+    "Common.h",
+]

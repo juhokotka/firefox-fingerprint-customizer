@@ -170,17 +170,15 @@ function addHTMLContent(parent) {
 
 // Convenience function to make a data URI for a document that has the given
 // width and height declared in a @page size rule, and is filled with blue.
-function makeBlueRectDoc(width, height){
-  // If only one param is passed, use it for width and height:
-  if (height === undefined) {
-    height = width;
-  }
-  return `data:text/html,<style> \
+function makeBlueRectDoc(testName, width, height = width, numPages = 1){
+  let rects = '<div class="rect"></div>'.repeat(numPages);
+  return `data:text/html,<!-- ${testName} --><style> \
       @page{ size: ${width} ${height}; margin: 0; } \
       body { margin: 0; } \
       .rect{ background: blue; width: ${width}; height: ${height}; } \
+      .rect + .rect { break-before: page; } \
       </style> \
-      <div class="rect"></div>`;
+      ${rects}`;
 }
 
 async function startTest1() {
@@ -2032,7 +2030,7 @@ async function runTest66() {
 // Test for basic PDF rendering: 2in blue square (on larger default-sized paper)
 async function runTest67() {
   let test = "2in_blue.pdf";
-  let ref = makeBlueRectDoc("2in");
+  let ref = makeBlueRectDoc("ref67", "2in");
   await compareFiles(test, ref, { waitForMessageDuringPrintPreview: true });
   requestAnimationFrame(() => setTimeout(runTest68));
 }
@@ -2040,7 +2038,7 @@ async function runTest67() {
 // Test for basic PDF rendering: 2x3 blue square (on larger default-sized paper)
 async function runTest68() {
   let test = "2in_by_3in_blue.pdf";
-  let ref = makeBlueRectDoc("2in", "3in");
+  let ref = makeBlueRectDoc("ref68", "2in", "3in");
   await compareFiles(test, ref, { waitForMessageDuringPrintPreview: true });
   requestAnimationFrame(() => setTimeout(runTest69));
 }
@@ -2054,7 +2052,7 @@ async function runTest69() {
       { maxDifferent: 0, maxDifference: 0 };
 
   let test = "2in_by_4in_blue.pdf";
-  let ref = makeBlueRectDoc("1in", "2in");
+  let ref = makeBlueRectDoc("ref69", "1in", "2in");
   await compareFiles(test, ref, {
     maxDifferent: fuzz.maxDifferent,
     maxDifference: fuzz.maxDifference,
@@ -2067,6 +2065,189 @@ async function runTest69() {
     },
     waitForMessageDuringPrintPreview: true,
   });
+  requestAnimationFrame(() => setTimeout(runTest70));
+}
+
+// Test that when a PDF is scaled above 100% but it will not be larger than
+// the page being printed on, it will use the specified scale.
+async function runTest70() {
+  let test = "2in_blue.pdf#test70"
+  let ref = makeBlueRectDoc("ref70", "3in");
+  await compareFiles(test, ref, {
+    test: {
+      settings: {
+        paperWidth: 4,
+        paperHeight: 4,
+        paperSizeUnit: Ci.nsIPrintSettings.kPaperSizeInches,
+        scaling: 1.5,
+        shrinkToFit: false,
+        printBGColors: true,
+        honorPageRuleMargins: true,
+        usePageRuleSizeAsPaperSize: false,
+      },
+    },
+    ref: {
+      settings: {
+        paperWidth: 4,
+        paperHeight: 4,
+        paperSizeUnit: Ci.nsIPrintSettings.kPaperSizeInches,
+        scaling: 1.0,
+        shrinkToFit: false,
+        printBGColors: true,
+        honorPageRuleMargins: true,
+        usePageRuleSizeAsPaperSize: false,
+      },
+    },
+    waitForMessageDuringPrintPreview: true
+  });
+  requestAnimationFrame(() => setTimeout(runTest71));
+}
+
+// Test that when a PDF is scaled above 100% and it would be larger than
+// the page being printed on, it will only scale up to be the size of the page.
+async function runTest71() {
+  let test = "2in_blue.pdf#test71"
+  let ref = makeBlueRectDoc("ref71", "3in");
+  // See bug 1680838
+  const fuzz = navigator.platform.includes("Win") ?
+      { maxDifferent: 15936, maxDifference: 255 } :
+      { maxDifferent: 0, maxDifference: 0 };
+  // Use a page that has a different width/height, so that we can tell that
+  // the scale is actually being limited, rather than the content being
+  // clipped.
+  await compareFiles(test, ref, {
+    maxDifferent: fuzz.maxDifferent,
+    maxDifference: fuzz.maxDifference,
+    test: {
+      settings: {
+        paperWidth: 3,
+        paperHeight: 4,
+        paperSizeUnit: Ci.nsIPrintSettings.kPaperSizeInches,
+        scaling: 2.0,
+        shrinkToFit: false,
+        printBGColors: true,
+        honorPageRuleMargins: true,
+        usePageRuleSizeAsPaperSize: false,
+      },
+    },
+    ref: {
+      settings: {
+        paperWidth: 3,
+        paperHeight: 4,
+        paperSizeUnit: Ci.nsIPrintSettings.kPaperSizeInches,
+        scaling: 1.0,
+        shrinkToFit: false,
+        printBGColors: true,
+        honorPageRuleMargins: true,
+        usePageRuleSizeAsPaperSize: false,
+      },
+    },
+    waitForMessageDuringPrintPreview: true
+  });
+  requestAnimationFrame(() => setTimeout(runTest72));
+}
+
+async function runTest72() {
+  let test = "2in_blue.pdf#test72"
+  let ref = makeBlueRectDoc("ref72", "3in");
+  // See bug 1680838
+  const fuzz = navigator.platform.includes("Win") ?
+      { maxDifferent: 15936, maxDifference: 255 } :
+      { maxDifferent: 0, maxDifference: 0 };
+  await compareFiles(test, ref, {
+    maxDifferent: fuzz.maxDifferent,
+    maxDifference: fuzz.maxDifference,
+    test: {
+      settings: {
+        paperWidth: 4,
+        paperHeight: 3,
+        paperSizeUnit: Ci.nsIPrintSettings.kPaperSizeInches,
+        scaling: 2.0,
+        shrinkToFit: false,
+        printBGColors: true,
+        honorPageRuleMargins: true,
+        usePageRuleSizeAsPaperSize: false,
+      },
+    },
+    ref: {
+      settings: {
+        paperWidth: 4,
+        paperHeight: 3,
+        paperSizeUnit: Ci.nsIPrintSettings.kPaperSizeInches,
+        scaling: 1.0,
+        shrinkToFit: false,
+        printBGColors: true,
+        honorPageRuleMargins: true,
+        usePageRuleSizeAsPaperSize: false,
+      },
+    },
+    waitForMessageDuringPrintPreview: true
+  });
+  requestAnimationFrame(() => setTimeout(runTest73));
+}
+
+// Test that a multi-page PDF preserves the correct shrink-to-fit width.
+// Note: the test framework only screenshots the first page, which suffices
+// for this test.
+async function runTest73() {
+  let test = "2in_blue_3pages.pdf#test73";
+  let ref = makeBlueRectDoc("ref73", "2in", "2in", 3);
+  await compareFiles(test, ref, {
+    waitForMessageDuringPrintPreview: true,
+  });
+  requestAnimationFrame(() => setTimeout(runTest74));
+}
+
+// Test that CSS random() functions still resolve to the same values
+// in the print preview's static clone document (Bug 2072088).
+async function runTest74() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["layout.css.random.enabled", true]],
+  });
+
+  const iframeElement = document.getElementsByTagName("iframe")[0];
+  await new Promise(resolve => {
+    const onLoad = event => {
+      if (event.target == iframeElement.contentDocument) {
+        iframeElement.removeEventListener("load", onLoad, true);
+        resolve();
+      }
+    };
+    iframeElement.addEventListener("load", onLoad, true);
+    iframeElement.setAttribute("src", "printpreview_random.html");
+  });
+
+  const read = (window) => ({
+    elementScoped: window.getComputedStyle(window.document.querySelector('.element-scoped')).left,
+    dashedIdent: window.getComputedStyle(window.document.querySelector('.dashed-ident')).left,
+    auto: window.getComputedStyle(window.document.querySelector('.auto')).left,
+  });
+
+  const originalOuter = read(iframeElement.contentWindow);
+  const originalInner = read(iframeElement.contentWindow.iframe.contentWindow);
+
+  // Ensure random() has correctly resolved on the original documents.
+  isnot(originalOuter.elementScoped, "0px", "outer element-scoped resolved");
+  isnot(originalOuter.dashedIdent, "0px", "outer dashed-ident resolved");
+  isnot(originalOuter.auto, "0px", "outer auto resolved");
+  isnot(originalInner.elementScoped, "0px", "inner element-scoped resolved");
+  isnot(originalInner.dashedIdent, "0px", "inner dashed-ident resolved");
+  isnot(originalInner.auto, "0px", "inner auto resolved");
+
+  await printpreview();
+  const clonedOuter = read(gPrintPreviewWindow);
+  const clonedInner = read(gPrintPreviewWindow.iframe.contentWindow);
+  exitprintpreview();
+
+  // Validate that random() values are the same in the print preview.
+  is(clonedOuter.elementScoped, originalOuter.elementScoped, "outer element-scoped matches");
+  is(clonedOuter.dashedIdent, originalOuter.dashedIdent, "outer dashed-ident matches");
+  is(clonedOuter.auto, originalOuter.auto, "outer auto matches");
+  is(clonedInner.elementScoped, originalInner.elementScoped, "inner element-scoped matches");
+  is(clonedInner.dashedIdent, originalInner.dashedIdent, "inner dashed-ident matches");
+  is(clonedInner.auto, originalInner.auto, "inner auto matches");
+
+  await SpecialPowers.popPrefEnv();
   finish();
 }
 

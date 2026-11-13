@@ -120,7 +120,7 @@ export type PageContext =
   | "aboutprofiling"
   | "aboutprofiling-remote";
 
-export type PrefPostfix = "" | ".remote";
+export type PrefPostfix = "" | ".remote" | ".aboutlogging";
 
 export interface State {
   recordingState: RecordingState;

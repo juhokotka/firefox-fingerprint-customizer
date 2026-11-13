@@ -2,7 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { IPPAuthProvider } from "moz-src:///toolkit/components/ipprotection/IPPAuthProvider.sys.mjs";
+import {
+  AUTH_ERRORS,
+  IPPAuthProvider,
+} from "moz-src:///toolkit/components/ipprotection/IPPAuthProvider.sys.mjs";
 import {
   ProxyPass,
   ProxyUsage,
@@ -12,6 +15,11 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   EventDispatcher: "resource://gre/modules/Messaging.sys.mjs",
+  // GPI talks to the same Guardian service, so it shares its status semantics.
+  GuardianClient:
+    "moz-src:///toolkit/components/ipprotection/fxa/GuardianClient.sys.mjs",
+  IPProtectionActivator:
+    "moz-src:///toolkit/components/ipprotection/IPProtectionActivator.sys.mjs",
   IPProtectionService:
     "moz-src:///toolkit/components/ipprotection/IPProtectionService.sys.mjs",
   clearTimeout: "resource://gre/modules/Timer.sys.mjs",
@@ -23,6 +31,29 @@ const AUTH_JWT_EXPIRES_AT_PREF = "browser.ipProtection.gpi.authJwtExpiresAt";
 const AUTH_JWT_RENEW_AFTER_PREF = "browser.ipProtection.gpi.authJwtRenewAfter";
 const GUARDIAN_ENDPOINT_PREF = "browser.ipProtection.guardian.endpoint";
 const GUARDIAN_ENDPOINT_DEFAULT = "https://vpn.mozilla.com";
+
+/**
+ * Maps a Guardian error body to a reason category for telemetry.
+ *
+ * @param {string} bodyText
+ * @returns {string}
+ */
+function categorizeEnrollmentReason(bodyText) {
+  let serverReason = "";
+  try {
+    serverReason = JSON.parse(bodyText)?.reason ?? "";
+  } catch {
+    // non-JSON: return http_error_other.
+  }
+  switch (serverReason) {
+    case "missing-package-name":
+      return "missing_package_name";
+    case "integrity-api-error":
+      return "integrity_api_error";
+    default:
+      return "http_error_other";
+  }
+}
 
 /**
  * Google Play Integrity implementation of IPPAuthProvider.
@@ -38,7 +69,15 @@ class IPPGpiAuthProviderSingleton extends IPPAuthProvider {
   }
 
   init() {
-    this.#listener = { onEvent: () => this._onGpiWarmUpCompleted() };
+    this.#listener = {
+      onEvent: event => {
+        if (event === "GeckoView:IPProtection:GPI:WarmUpCompleted") {
+          this._onGpiWarmUpCompleted();
+        } else {
+          this._onGpiWarmUpFailed();
+        }
+      },
+    };
     this._registerGpiListener(this.#listener);
     this._dispatchGpiWarmUp();
 
@@ -64,20 +103,29 @@ class IPPGpiAuthProviderSingleton extends IPPAuthProvider {
     lazy.IPProtectionService.updateState();
   }
 
+  _onGpiWarmUpFailed() {
+    lazy.IPProtectionActivator.reinitWithFallback();
+  }
+
   _registerGpiListener(listener) {
     lazy.EventDispatcher.instance.registerListener(listener, [
-      "GPI:WarmUpCompleted",
+      "GeckoView:IPProtection:GPI:WarmUpCompleted",
+      "GeckoView:IPProtection:GPI:WarmUpFailed",
     ]);
   }
 
   _unregisterGpiListener(listener) {
     lazy.EventDispatcher.instance.unregisterListener(listener, [
-      "GPI:WarmUpCompleted",
+      "GeckoView:IPProtection:GPI:WarmUpCompleted",
+      "GeckoView:IPProtection:GPI:WarmUpFailed",
     ]);
   }
 
   _dispatchGpiWarmUp() {
-    lazy.EventDispatcher.instance.dispatch("GPI:WarmUp", {});
+    lazy.EventDispatcher.instance.dispatch(
+      "GeckoView:IPProtection:GPI:WarmUp",
+      {}
+    );
   }
 
   #scheduleRenewal() {
@@ -126,7 +174,7 @@ class IPPGpiAuthProviderSingleton extends IPPAuthProvider {
     const jwt = await this.#enroll();
     return {
       isEnrolledAndEntitled: !!jwt,
-      error: jwt ? null : "enrollment_failed",
+      error: jwt ? null : AUTH_ERRORS.ENROLLMENT_FAILED,
     };
   }
 
@@ -148,7 +196,7 @@ class IPPGpiAuthProviderSingleton extends IPPAuthProvider {
     if (needsEnrollment) {
       const { isEnrolledAndEntitled } = await this.enroll();
       if (!isEnrolledAndEntitled) {
-        return { error: "enrollment_failed" };
+        return { error: AUTH_ERRORS.ENROLLMENT_FAILED };
       }
     }
     return null;
@@ -171,6 +219,11 @@ class IPPGpiAuthProviderSingleton extends IPPAuthProvider {
 
     const gpiToken = await this._fetchGpiToken(abortSignal);
     if (!gpiToken) {
+      Glean.ipprotection.gpiEnrollment.record({
+        reason: "no_gpi_token",
+        httpStatus: 0,
+        hadPreviousJwt: !!Services.prefs.getCharPref(AUTH_JWT_PREF, ""),
+      });
       this.#clearAuthJwt();
       this.#enrollPromise = null;
       resolve(null);
@@ -213,7 +266,7 @@ class IPPGpiAuthProviderSingleton extends IPPAuthProvider {
     try {
       const tasks = [
         lazy.EventDispatcher.instance.sendRequestForResult(
-          "GPI:RequestToken",
+          "GeckoView:IPProtection:GPI:RequestToken",
           {}
         ),
       ];
@@ -256,26 +309,49 @@ class IPPGpiAuthProviderSingleton extends IPPAuthProvider {
       headers.Authorization = `Bearer ${previousJwt}`;
     }
 
+    const packageName = Services.env.get("MOZ_ANDROID_PACKAGE_NAME");
+
     let response;
     try {
       response = await fetch(url.href, {
         method: "POST",
         headers,
-        body: JSON.stringify({ integrityToken: gpiToken }),
+        body: JSON.stringify({ integrityToken: gpiToken, packageName }),
       });
     } catch {
+      Glean.ipprotection.gpiEnrollment.record({
+        reason: "network_error",
+        httpStatus: 0,
+        hadPreviousJwt: !!previousJwt,
+      });
       return null;
     }
 
     if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      Glean.ipprotection.gpiEnrollment.record({
+        reason: categorizeEnrollmentReason(text),
+        httpStatus: response.status,
+        hadPreviousJwt: !!previousJwt,
+      });
       return null;
     }
 
     try {
       const data = await response.json();
       const { deviceSessionJwt: jwt, expiresAt, renewAfter } = data ?? {};
+      Glean.ipprotection.gpiEnrollment.record({
+        reason: jwt ? "ok" : "bad_response",
+        httpStatus: response.status,
+        hadPreviousJwt: !!previousJwt,
+      });
       return jwt ? { jwt, expiresAt, renewAfter } : null;
     } catch {
+      Glean.ipprotection.gpiEnrollment.record({
+        reason: "bad_response",
+        httpStatus: response.status,
+        hadPreviousJwt: !!previousJwt,
+      });
       return null;
     }
   }
@@ -295,7 +371,7 @@ class IPPGpiAuthProviderSingleton extends IPPAuthProvider {
 
     const authJwt = Services.prefs.getCharPref(AUTH_JWT_PREF, "");
     if (!authJwt) {
-      return { error: "login_needed", usage: null };
+      return { error: AUTH_ERRORS.LOGIN_NEEDED, usage: null };
     }
 
     const url = new URL(this.#guardianEndpoint);
@@ -309,16 +385,16 @@ class IPPGpiAuthProviderSingleton extends IPPAuthProvider {
         signal: abortSignal,
       });
     } catch {
-      return { error: "login_needed", usage: null };
+      return { error: AUTH_ERRORS.LOGIN_NEEDED, usage: null };
     }
 
     if (response.status === 401) {
       if (!allowReenroll) {
-        return { status: 401, error: "unauthorized", usage: null };
+        return { status: 401, error: AUTH_ERRORS.UNAUTHORIZED, usage: null };
       }
       const newJwt = await this.#enroll(abortSignal);
       if (!newJwt) {
-        return { status: 401, error: "unauthorized", usage: null };
+        return { status: 401, error: AUTH_ERRORS.UNAUTHORIZED, usage: null };
       }
       return this.#fetchProxyPass(abortSignal, false);
     }
@@ -330,19 +406,21 @@ class IPPGpiAuthProviderSingleton extends IPPAuthProvider {
       usage = ProxyUsage.fromResponse(response);
     } catch {}
 
-    if (status === 429) {
-      const retryAfter = response.headers.get("Retry-After");
-      return { status, error: "quota_exceeded", usage, retryAfter };
+    const statusError = lazy.GuardianClient.toError(status);
+    if (statusError) {
+      const retryAfter =
+        status === 429 ? response.headers.get("Retry-After") : null;
+      return { status, error: statusError, usage, retryAfter };
     }
 
     try {
       const pass = await ProxyPass.fromResponse(response);
       if (!pass) {
-        return { status, error: "invalid_response", usage };
+        return { status, error: AUTH_ERRORS.INVALID_RESPONSE, usage };
       }
       return { pass, status, usage };
     } catch {
-      return { status, error: "parse_error", usage };
+      return { status, error: AUTH_ERRORS.PARSE_ERROR, usage };
     }
   }
 

@@ -14,14 +14,15 @@
 #  error "For the moment, perfprobe.h is defined only for Windows platforms"
 #endif
 
+#include <windows.h>
+
+#include "mozilla/Logging.h"
 #include "nsError.h"
 #include "nsString.h"
-#include "mozilla/Logging.h"
 #include "nsTArray.h"
-#include <windows.h>
 #undef GetStartupInfo  // Prevent Windows from polluting global namespace
-#include <wmistr.h>
 #include <evntrace.h>
+#include <wmistr.h>
 
 namespace mozilla {
 namespace probes {
@@ -45,7 +46,7 @@ class Probe {
   nsresult Trigger();
 
  protected:
-  ~Probe() {};
+  ~Probe() = default;
 
   Probe(const nsCID& aGUID, const nsACString& aName, ProbeManager* aManager);
   friend class ProbeManager;

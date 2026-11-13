@@ -5,7 +5,7 @@
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
-  BackupService: "resource:///modules/backup/BackupService.sys.mjs",
+  BackupService: "moz-src:///browser/components/backup/BackupService.sys.mjs",
   ERRORS: "chrome://browser/content/backup/backup-constants.mjs",
   E10SUtils: "resource://gre/modules/E10SUtils.sys.mjs",
 });
@@ -229,7 +229,11 @@ export class BackupUIParent extends JSWindowActorParent {
       let iconURL = this.#bs.getIconFromFilePath(path);
       let filename = PathUtils.filename(path);
 
-      if (!filter) {
+      if (filter) {
+        // Strictly update path picked from the file picker. No other message actions
+        // should be able to set the backup file to restore path.
+        this.#bs.setBackupFileToRestore(path);
+      } else {
         if (alsoDeleteLastBackup) {
           try {
             await this.#bs.deleteLastBackup();
@@ -249,13 +253,15 @@ export class BackupUIParent extends JSWindowActorParent {
         iconURL,
       };
     } else if (message.name == "GetBackupFileInfo") {
-      let { backupFile } = message.data;
-      try {
-        await this.#bs.getBackupFileInfo(backupFile);
-      } catch (e) {
-        /**
-         * TODO: (Bug 1905156) display a localized version of error in the restore dialog.
-         */
+      let backupFile = this.#bs.state.backupFileToRestore;
+      if (backupFile) {
+        try {
+          await this.#bs.loadBackupFileInfo(backupFile);
+        } catch (e) {
+          /**
+           * TODO: (Bug 1905156) display a localized version of error in the restore dialog.
+           */
+        }
       }
     } else if (message.name == "FindBackupsInWellKnownLocations") {
       let { source } = message.data;
@@ -264,7 +270,7 @@ export class BackupUIParent extends JSWindowActorParent {
       });
     } else if (message.name == "ProbeDefaultBackupDir") {
       let readAccessGranted = await this.#bs.probeDefaultDirAccess(
-        message.data?.parentDirPath
+        this.#bs.state.embeddedComponentPersistentData?.path || undefined
       );
       return { readAccessGranted };
     } else if (message.name == "PrepareRestoreDialog") {

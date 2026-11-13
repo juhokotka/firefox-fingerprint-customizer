@@ -4,17 +4,25 @@
 
 #include "KeyboardLayout.h"
 
+#include <windows.h>
+#include <winnls.h>
+#include <winuser.h>
+
+#include <algorithm>
+
+#include "WidgetUtils.h"
+#include "WinUtils.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/Logging.h"
-#include "mozilla/MouseEvents.h"
 #include "mozilla/MiscEvents.h"
+#include "mozilla/MouseEvents.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/StaticPrefs_ui.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TextEvents.h"
-#include "mozilla/widget/WinRegistry.h"
 #include "mozilla/Utf16.h"
-
+#include "mozilla/widget/WinRegistry.h"
+#include "npapi.h"
 #include "nsExceptionHandler.h"
 #include "nsGkAtoms.h"
 #include "nsIUserIdleServiceInternal.h"
@@ -25,16 +33,6 @@
 #include "nsTArray.h"
 #include "nsUnicharUtils.h"
 #include "nsWindowDbg.h"
-
-#include "WidgetUtils.h"
-#include "WinUtils.h"
-
-#include "npapi.h"
-
-#include <windows.h>
-#include <winnls.h>
-#include <winuser.h>
-#include <algorithm>
 
 #ifndef WINABLEAPI
 #  include <winable.h>
@@ -2348,6 +2346,9 @@ bool NativeKey::HandleAppCommandMessage() const {
         // We shouldn't consume the message always because if we don't handle
         // the message, the sender (typically, utility of keyboard or mouse)
         // may send other key messages which indicate well known shortcut key.
+        // XXX AppCommand event might be required to be dispatched via
+        // TextEventDispatcher if we start using the batch event dispatching of
+        // TextEventDispatcher on Windows.
         consumed = DispatchCommandEvent(appCommand);
         break;
 
@@ -2371,13 +2372,11 @@ bool NativeKey::HandleAppCommandMessage() const {
 
     if (contentCommandMessage) {
       MOZ_ASSERT(!mWidget->Destroyed());
-      WidgetContentCommandEvent contentCommandEvent(true, contentCommandMessage,
-                                                    mWidget);
       MOZ_LOG(
           gKeyLog, LogLevel::Info,
           ("%p   NativeKey::HandleAppCommandMessage(), dispatching %s event...",
            this, ToChar(contentCommandMessage)));
-      mWidget->DispatchWindowEvent(contentCommandEvent);
+      (void)mDispatcher->DispatchContentCommandEvent(contentCommandMessage);
       MOZ_LOG(gKeyLog, LogLevel::Info,
               ("%p   NativeKey::HandleAppCommandMessage(), dispatched %s event",
                this, ToChar(contentCommandMessage)));

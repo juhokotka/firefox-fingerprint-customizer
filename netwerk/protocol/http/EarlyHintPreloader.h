@@ -5,10 +5,10 @@
 #ifndef mozilla_net_EarlyHintPreloader_h
 #define mozilla_net_EarlyHintPreloader_h
 
-#include "mozilla/dom/ipc/IdType.h"
+#include "NeckoCommon.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/PreloadHashKey.h"
-#include "NeckoCommon.h"
+#include "mozilla/dom/ipc/IdType.h"
 #include "mozilla/net/NeckoChannelParams.h"
 #include "nsHashtablesFwd.h"
 #include "nsIChannelEventSink.h"
@@ -107,6 +107,10 @@ class EarlyHintPreloader final : public nsIStreamListener,
   // preloads from other origins
   bool IsFromContentParent(dom::ContentParentId aCpId) const;
 
+  // Returns true if the content channel request described by aURI and
+  // aLoadInfo is the request this preload was started for.
+  bool MatchesRequest(nsIURI* aURI, nsILoadInfo* aLoadInfo) const;
+
   // Should be called by the preloader service when the preload is not
   // needed after all, because the final response returns a non-2xx status
   // code. If aDeleteEntry is false, the calling function MUST make sure that
@@ -145,6 +149,8 @@ class EarlyHintPreloader final : public nsIStreamListener,
 
   nsCOMPtr<nsIChannel> mChannel;
   nsCOMPtr<nsIChannel> mRedirectChannel;
+  nsCOMPtr<nsIURI> mURI;
+  nsCOMPtr<nsILoadInfo> mLoadInfo;
 
   dom::ContentParentId mCpId;
   EarlyHintConnectArgs mConnectArgs;

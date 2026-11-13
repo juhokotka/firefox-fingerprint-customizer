@@ -22,6 +22,7 @@ import org.mozilla.focus.helpers.FeatureSettingsHelper
 import org.mozilla.focus.helpers.FocusTestRule
 import org.mozilla.focus.helpers.TestAssetHelper.genericAsset
 import org.mozilla.focus.helpers.TestAssetHelper.getGenericTabAsset
+import org.mozilla.focus.helpers.TestAssetHelper.windowOpenAsset
 import org.mozilla.focus.helpers.TestHelper.createCustomTabIntent
 import org.mozilla.focus.helpers.TestHelper.mDevice
 import org.mozilla.focus.helpers.TestHelper.waitingTime
@@ -33,23 +34,23 @@ class CustomTabTest {
     private val actionButtonDescription = "TestButton"
     private val featureSettingsHelper = FeatureSettingsHelper()
 
-    @get:Rule(order = 0)
-    val focusTestRule: FocusTestRule = FocusTestRule()
+    @get:Rule(order = 0) val focusTestRule: FocusTestRule = FocusTestRule()
 
-    private val webServerRule get() = focusTestRule.mockWebServerRule
+    private val webServerRule
+        get() = focusTestRule.mockWebServerRule
 
     @get:Rule
-    val activityTestRule = ActivityTestRule(
-        IntentReceiverActivity::class.java,
-        true,
-        false,
-    )
+    val activityTestRule =
+        ActivityTestRule(
+            IntentReceiverActivity::class.java,
+            true,
+            false,
+        )
 
     @Before
     fun setUp() {
         featureSettingsHelper.setCfrForTrackingProtectionEnabled(false)
         featureSettingsHelper.setShowStartBrowsingCfrEnabled(false)
-        featureSettingsHelper.setCookieBannerReductionEnabled(false)
     }
 
     @After
@@ -63,7 +64,7 @@ class CustomTabTest {
         val customTabPage = webServerRule.server.genericAsset
         val customTabActivity =
             launchActivity<IntentReceiverActivity>(
-                createCustomTabIntent(customTabPage.url, menuItemTestLabel, actionButtonDescription),
+                createCustomTabIntent(customTabPage.url, menuItemTestLabel, actionButtonDescription)
             )
 
         browserScreen {
@@ -95,9 +96,10 @@ class CustomTabTest {
             progressBar.waitUntilGone(waitingTime)
             verifyCustomTabUrl(customTabPage.url)
             openCustomTabMenu()
-        }.clickOpenInFocusButton {
-            verifyCustomTabUrl(customTabPage.url)
         }
+            .clickOpenInFocusButton {
+                verifyCustomTabUrl(customTabPage.url)
+            }
     }
 
     @SmokeTest
@@ -111,16 +113,38 @@ class CustomTabTest {
             verifyPageContent(firstPage.content)
             clickLinkMatchingText("Tab 2")
             verifyCustomTabUrl(secondPage.url)
-        }.openCustomTabMenu {
-        }.pressBack {
-            progressBar.waitUntilGone(waitingTime)
-            verifyCustomTabUrl(firstPage.url)
-        }.openMainMenu {
-        }.pressForward {
-            verifyCustomTabUrl(secondPage.url)
-        }.openMainMenu {
-        }.clickReloadButton {
-            verifyPageContent(secondPage.content)
+        }
+            .openCustomTabMenu {}
+            .pressBack {
+                progressBar.waitUntilGone(waitingTime)
+                verifyCustomTabUrl(firstPage.url)
+            }
+            .openMainMenu {}
+            .pressForward {
+                verifyCustomTabUrl(secondPage.url)
+            }
+            .openMainMenu {}
+            .clickReloadButton {
+                verifyPageContent(secondPage.content)
+            }
+    }
+
+    @Test
+    fun openNewWindowRequestsInNewCustomTabTest() {
+        val windowOpenPage = webServerRule.server.windowOpenAsset
+        val secondPage = webServerRule.server.getGenericTabAsset(2)
+        val thirdPage = webServerRule.server.getGenericTabAsset(3)
+
+        launchActivity<IntentReceiverActivity>(createCustomTabIntent(windowOpenPage.url))
+        customTab {
+            verifyPageTitle(windowOpenPage.title)
+            clickLinkMatchingText("Open link in new window")
+            verifyPageTitle(secondPage.title)
+
+            closeCustomTab()
+            verifyPageTitle(windowOpenPage.title)
+            clickLinkMatchingText("Open window with script")
+            verifyPageTitle(thirdPage.title)
         }
     }
 }

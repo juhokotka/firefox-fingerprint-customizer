@@ -34,8 +34,10 @@ struct IdleRequestOptions;
 struct MediaMetadataInit;
 class MozQueryInterface;
 class PrecompiledScript;
+class ProfilerCounter;
 class Promise;
 struct ProcessActorOptions;
+struct ProfilerCounterOptions;
 struct WindowActorOptions;
 class WindowProxyHolder;
 
@@ -99,6 +101,9 @@ class ChromeUtils {
   static void AddProfilerMarker(GlobalObject& aGlobal, const nsACString& aName,
                                 const ProfilerMarkerOptionsOrDouble& aOptions,
                                 const Optional<UTF8StringOrObject>& aData);
+
+  static already_AddRefed<ProfilerCounter> AddProfilerCounter(
+      GlobalObject& aGlobal, const ProfilerCounterOptions& aOptions);
 
   static void GetXPCOMErrorName(GlobalObject& aGlobal, uint32_t aErrorCode,
                                 nsACString& aRetval);
@@ -208,7 +213,6 @@ class ChromeUtils {
   static void GetCachedJavaScriptSource(GlobalObject& aGlobal,
                                         const nsACString& aKey,
                                         const nsACString& aURI,
-                                        const nsACString& aHintCharset,
                                         JS::MutableHandle<JS::Value> aRetval,
                                         ErrorResult& aRv);
 
@@ -339,6 +343,8 @@ class ChromeUtils {
 
   static double Now(GlobalObject&);
 
+  static double AwakeNow(GlobalObject&);
+
   static void EnsureJSOracleStarted(GlobalObject&);
 
   static unsigned AliveUtilityProcesses(const GlobalObject&);
@@ -374,6 +380,13 @@ class ChromeUtils {
                                       const PredictRemoteTypeOptions& aOptions,
                                       nsACString& aRemoteType,
                                       ErrorResult& aRv);
+
+  static bool IsBlobURLValid(GlobalObject& aGlobal, nsIPrincipal* aPrincipal,
+                             const nsACString& aURIString);
+
+  static void ValidateServiceWorkerScope(GlobalObject&,
+                                         nsIPrincipal* aPrincipal,
+                                         nsIURI* aScopeURI, ErrorResult& aRv);
 
 #ifdef MOZ_WMF_CDM
   static already_AddRefed<Promise> GetWMFContentDecryptionModuleInformation(

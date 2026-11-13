@@ -6,7 +6,6 @@
 #define mozilla_dom_workerscope_h_
 
 #include "js/TypeDecls.h"
-#include "js/loader/ModuleLoaderBase.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
@@ -34,6 +33,10 @@
 
 class nsAtom;
 class nsISerialEventTarget;
+
+namespace JS::loader {
+class ModuleLoaderBase;
+}  // namespace JS::loader
 
 namespace mozilla {
 class ErrorResult;
@@ -163,11 +166,7 @@ class WorkerGlobalScopeBase : public DOMEventTargetHelper,
 
   Console* GetConsoleIfExists() const { return mConsole; }
 
-  void InitModuleLoader(JS::loader::ModuleLoaderBase* aModuleLoader) {
-    if (!mModuleLoader) {
-      mModuleLoader = aModuleLoader;
-    }
-  }
+  void InitModuleLoader(JS::loader::ModuleLoaderBase* aModuleLoader);
 
   // The nullptr here is not used, but is required to make the override method
   // have the same signature as other GetModuleLoader methods on globals.
@@ -416,12 +415,7 @@ class WorkerGlobalScope : public WorkerGlobalScopeBase {
 
   WebTaskScheduler* Scheduler();
   WebTaskScheduler* GetExistingScheduler() const;
-  void SetWebTaskSchedulingState(WebTaskSchedulingState* aState) override;
   bool HasScheduledNormalOrHighPriorityWebTasks() const override;
-
-  WebTaskSchedulingState* GetWebTaskSchedulingState() const override {
-    return mWebTaskSchedulingState;
-  }
 
   bool WindowInteractionAllowed() const;
 
@@ -457,7 +451,6 @@ class WorkerGlobalScope : public WorkerGlobalScopeBase {
   RefPtr<cache::CacheStorage> mCacheStorage;
   RefPtr<DebuggerNotificationManager> mDebuggerNotificationManager;
   RefPtr<WebTaskSchedulerWorker> mWebTaskScheduler;
-  RefPtr<WebTaskSchedulingState> mWebTaskSchedulingState;
   RefPtr<TrustedTypePolicyFactory> mTrustedTypePolicyFactory;
   uint32_t mWindowInteractionsAllowed = 0;
   bool mIsEligibleForMessaging{true};

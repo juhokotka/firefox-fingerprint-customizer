@@ -68,6 +68,88 @@ add_task(async function test_tabs_browsing_pane_loads_setting_groups() {
   await BrowserTestUtils.removeTab(tab);
 });
 
+add_task(
+  async function test_tab_group_drag_to_create_hidden_when_groups_disabled() {
+    await SpecialPowers.pushPrefEnv({
+      set: [["browser.tabs.groups.enabled", true]],
+    });
+
+    let tab = await openPrefsTab("tabsBrowsing");
+    let doc = tab.linkedBrowser.contentDocument;
+    let win = doc.documentGlobal;
+
+    await BrowserTestUtils.waitForMutationCondition(
+      doc.getElementById("mainPrefPane"),
+      { childList: true, subtree: true },
+      () => doc.getElementById("tabGroupDragToCreate")
+    );
+
+    const setting = win.Preferences.getSetting("tabGroupDragToCreate");
+    const control = doc.getElementById("tabGroupDragToCreate");
+    is_element_visible(
+      control,
+      "Drag to create tab groups setting is visible when tab groups are enabled"
+    );
+
+    let settingChanged = waitForSettingChange(setting);
+    await SpecialPowers.pushPrefEnv({
+      set: [["browser.tabs.groups.enabled", false]],
+    });
+    await settingChanged;
+    await new Promise(r => win.requestAnimationFrame(r));
+    is_element_hidden(
+      control,
+      "Drag to create tab groups setting is hidden when tab groups are disabled"
+    );
+
+    settingChanged = waitForSettingChange(setting);
+    await SpecialPowers.pushPrefEnv({
+      set: [["browser.tabs.groups.enabled", true]],
+    });
+    await settingChanged;
+    await new Promise(r => win.requestAnimationFrame(r));
+    is_element_visible(
+      control,
+      "Drag to create tab groups setting is visible again when tab groups are re-enabled"
+    );
+
+    await BrowserTestUtils.removeTab(tab);
+  }
+);
+
+add_task(async function test_tabs_sub_fieldsets_have_heading_level() {
+  let tab = await openPrefsTab("tabsBrowsing");
+  let doc = tab.linkedBrowser.contentDocument;
+
+  await BrowserTestUtils.waitForMutationCondition(
+    doc.getElementById("mainPrefPane"),
+    { childList: true, subtree: true },
+    () => doc.getElementById("setting-control-tabsOpening")
+  );
+
+  for (let id of [
+    "tabsOpening",
+    "tabsInteraction",
+    "browserContainersbox",
+    "tabsClosing",
+  ]) {
+    let fieldset = doc.querySelector(`moz-fieldset#${id}`);
+    ok(fieldset, `${id} moz-fieldset is present`);
+    await fieldset.updateComplete;
+    is(
+      fieldset.headingLevel,
+      4,
+      `${id} moz-fieldset renders its legend as an h4`
+    );
+    ok(
+      fieldset.shadowRoot.querySelector("h4"),
+      `${id} legend is rendered as an <h4> in the shadow DOM`
+    );
+  }
+
+  await BrowserTestUtils.removeTab(tab);
+});
+
 add_task(async function test_tabs_browsing_pane_click_sidebar() {
   let tab = await openPrefsTab("");
   let doc = tab.linkedBrowser.contentDocument;

@@ -2,21 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "TestCommon.h"
-#include "gtest/gtest.h"
 #include "Http3ConnectUDPStream.h"
 #include "Http3Session.h"
-#include "nsIUDPSocket.h"
-#include "nsIIOService.h"
-#include "nsIProtocolProxyService.h"
-#include "nsIProtocolHandler.h"
-#include "nsThreadUtils.h"
-#include "nsStringStream.h"
-#include "nsProxyInfo.h"
-#include "nsHttpConnectionInfo.h"
-#include "nsHttpRequestHead.h"
-#include "nsHttpHandler.h"
+#include "TestCommon.h"
+#include "gtest/gtest.h"
 #include "mozilla/Components.h"
+#include "nsHttpConnectionInfo.h"
+#include "nsHttpHandler.h"
+#include "nsHttpRequestHead.h"
+#include "nsIIOService.h"
+#include "nsIProtocolHandler.h"
+#include "nsIProtocolProxyService.h"
+#include "nsIUDPSocket.h"
+#include "nsProxyInfo.h"
+#include "nsStringStream.h"
+#include "nsThreadUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::net;
@@ -74,15 +74,45 @@ class Http3SessionStub final : public Http3SessionBase {
     mReadyForWrite.AppendElement(aStream);
   }
 
-  nsresult CloseWebTransport(uint64_t aSessionId, uint32_t aError,
-                             const nsACString& aMessage) override {
-    return NS_OK;
+  bool CloseWebTransport(uint64_t aSessionId, uint32_t aError,
+                         const nsACString& aMessage,
+                         mozilla::dom::WebTransportStatsData& aStats) override {
+    return false;
+  }
+
+  void SetDatagramMaxBufferedDatagrams(
+      uint64_t aSessionId, uint32_t aMaxBufferedDatagrams) override {}
+
+  void SetDatagramMaxAge(uint64_t aSessionId, double aMaxAge) override {}
+  bool GetWebTransportSessionStats(
+      uint64_t aSessionId,
+      mozilla::dom::WebTransportStatsData& aStats) override {
+    return false;
   }
 
   void SendDatagram(Http3WebTransportSession* aSession,
-                    nsTArray<uint8_t>& aData, uint64_t aTrackingId) override {}
+                    nsTArray<uint8_t>& aData, uint64_t aTrackingId,
+                    uint64_t aSendGroupId, int64_t aSendOrder,
+                    TimeStamp aTimestamp) override {}
 
   uint64_t MaxDatagramSize(uint64_t aSessionId) override { return 0; }
+
+  nsresult ExportWebTransportKeyingMaterial(
+      uint64_t aSessionId, const nsTArray<uint8_t>& aLabel,
+      const nsTArray<uint8_t>& aContext, uint32_t aOutputLength,
+      nsTArray<uint8_t>& aKeyingMaterial) override {
+    return NS_OK;
+  }
+
+  nsresult RegisterWebTransportSendGroup(uint64_t aSessionId,
+                                         uint64_t aGroupId) override {
+    return NS_OK;
+  }
+
+  nsresult GetWebTransportSessionProtocol(uint64_t aSessionId,
+                                          nsACString& aProtocol) override {
+    return NS_OK;
+  }
 
   nsresult TryActivatingWebTransportStream(uint64_t* aStreamId,
                                            Http3StreamBase* aStream) override {
@@ -94,10 +124,11 @@ class Http3SessionStub final : public Http3SessionBase {
                                uint64_t aErrorCode) override {}
 
   void StreamStopSending(Http3WebTransportStream* aStream,
-                         uint8_t aErrorCode) override {}
+                         uint64_t aErrorCode) override {}
 
-  void SetSendOrder(Http3StreamBase* aStream,
-                    Maybe<int64_t> aSendOrder) override {}
+  void SetSendOrder(Http3StreamBase* aStream, int64_t aSendOrder) override {}
+
+  void SetSendGroup(Http3StreamBase* aStream, uint64_t aSendGroupId) override {}
 
   void ProcessOutput() {
     for (const auto& stream : mReadyForWrite) {

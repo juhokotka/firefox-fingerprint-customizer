@@ -3,22 +3,22 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ScriptLoadRequest.h"
-#include "GeckoProfiler.h"
 
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/ScriptLoadContext.h"
-#include "mozilla/dom/WorkerLoadContext.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/WorkerLoadContext.h"
+#include "mozilla/FlowMarkers.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/Utf8.h"  // mozilla::Utf8Unit
-#include "mozilla/FlowMarkers.h"
 
-#include "js/SourceText.h"
-
+#include "GeckoProfiler.h"
 #include "ModuleLoadRequest.h"
 #include "nsContentUtils.h"
 #include "nsIClassOfService.h"
 #include "nsISupportsPriority.h"
+
+#include "js/SourceText.h"
 
 using JS::SourceText;
 
@@ -82,10 +82,10 @@ NS_IMPL_CYCLE_COLLECTION(ScriptLoadRequest, mLoadContext)
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(ScriptLoadRequest)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
-ScriptLoadRequest::ScriptLoadRequest(ScriptKind aKind,
-                                     const SRIMetadata& aIntegrity,
-                                     nsIURI* aReferrer,
-                                     LoadContextBase* aContext)
+ScriptLoadRequest::ScriptLoadRequest(
+    ScriptKind aKind, const SRIMetadata& aIntegrity, nsIURI* aReferrer,
+    LoadContextBase* aContext,
+    const mozilla::Encoding* aClassicScriptHintEncoding)
     : mKind(aKind),
       mState(State::CheckingCache),
       mFetchSourceOnly(false),
@@ -98,7 +98,8 @@ ScriptLoadRequest::ScriptLoadRequest(ScriptKind aKind,
       mIntegrity(aIntegrity),
       mReferrer(aReferrer),
       mLoadContext(aContext),
-      mEarlyHintPreloaderId(0) {
+      mEarlyHintPreloaderId(0),
+      mClassicScriptHintEncoding(aClassicScriptHintEncoding) {
   if (mLoadContext) {
     mLoadContext->SetRequest(this);
   }
@@ -118,6 +119,7 @@ void ScriptLoadRequest::Cancel() {
   mState = State::Canceled;
   if (HasScriptLoadContext()) {
     GetScriptLoadContext()->MaybeCancelOffThreadScript();
+    GetScriptLoadContext()->MaybeUnblockOnload();
   }
 }
 

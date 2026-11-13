@@ -7,39 +7,26 @@ package org.mozilla.fenix.settings.creditcards.ui
 import mozilla.components.concept.storage.Address
 import mozilla.components.concept.storage.CreditCard
 import mozilla.components.concept.storage.CreditCardCrypto
-import mozilla.components.concept.storage.CreditCardNumber
 import mozilla.components.concept.storage.CreditCardsAddressesStorage
 import mozilla.components.concept.storage.ManagedKey
 import mozilla.components.concept.storage.NewCreditCardFields
 import mozilla.components.concept.storage.UpdatableAddressFields
 import mozilla.components.concept.storage.UpdatableCreditCardFields
 
-/**
- * Fake implementation of [CreditCardsAddressesStorage] that is used for testing credit cards feature
- */
+/** Fake implementation of [CreditCardsAddressesStorage] that is used for testing credit cards feature */
 class FakeCreditCardsStorage(
     var deletedCard: String? = null,
     var newAddedCard: NewCreditCardFields? = null,
     var updatedCard: Pair<String, UpdatableCreditCardFields>? = null,
 ) : CreditCardsAddressesStorage {
 
-    /**
-     * Plain card number
-     */
-    var expectedPlainCardNumber: String = ""
-
-    /**
-     * Encrypted card number
-     */
-    var expectedEncryptedCardNumber: String = "encrypted"
-
     override suspend fun addCreditCard(creditCardFields: NewCreditCardFields): CreditCard {
         newAddedCard = creditCardFields
         return CreditCard(
             guid = "new-card-id",
             billingName = creditCardFields.billingName,
-            encryptedCardNumber = CreditCardNumber.Encrypted(data = expectedEncryptedCardNumber),
-            cardNumberLast4 = creditCardFields.cardNumberLast4,
+            cardNumber = creditCardFields.cardNumber,
+            cardNumberLast4 = creditCardFields.cardNumber.takeLast(4),
             expiryMonth = creditCardFields.expiryMonth,
             expiryYear = creditCardFields.expiryYear,
             cardType = creditCardFields.cardType,
@@ -56,6 +43,7 @@ class FakeCreditCardsStorage(
     override suspend fun getCreditCard(guid: String): CreditCard? = null
 
     override suspend fun getAllCreditCards(): List<CreditCard> = emptyList()
+
     override suspend fun countAllCreditCards(): Long {
         return getAllCreditCards().count().toLong()
     }
@@ -69,20 +57,6 @@ class FakeCreditCardsStorage(
 
     override fun getCreditCardCrypto(): CreditCardCrypto {
         return object : CreditCardCrypto {
-            override fun encrypt(
-                key: ManagedKey,
-                plaintextCardNumber: CreditCardNumber.Plaintext,
-            ): CreditCardNumber.Encrypted {
-                return CreditCardNumber.Encrypted(data = expectedEncryptedCardNumber)
-            }
-
-            override fun decrypt(
-                key: ManagedKey,
-                encryptedCardNumber: CreditCardNumber.Encrypted,
-            ): CreditCardNumber.Plaintext {
-                return CreditCardNumber.Plaintext(data = expectedPlainCardNumber)
-            }
-
             override suspend fun getOrGenerateKey(): ManagedKey {
                 return ManagedKey(key = "key")
             }

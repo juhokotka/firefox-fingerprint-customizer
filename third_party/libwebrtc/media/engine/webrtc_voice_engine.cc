@@ -54,7 +54,9 @@
 #include "api/payload_type.h"
 #include "api/priority.h"
 #include "api/rtc_error.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_headers.h"
+#include "api/rtp_packet_infos.h"
 #include "api/rtp_parameters.h"
 #include "api/rtp_sender_interface.h"
 #include "api/rtp_transceiver_direction.h"
@@ -62,7 +64,6 @@
 #include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/transport/bitrate_settings.h"
-#include "api/transport/rtp/rtp_source.h"
 #include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
@@ -129,6 +130,21 @@ const int kMaxTelephoneEventCode = 255;
 const int kMinPayloadType = 0;
 const int kMaxPayloadType = 127;
 
+AudioOptions CreateDefaultAudioOptions() {
+  AudioOptions options;
+  options.echo_cancellation = true;
+  options.auto_gain_control = true;
+#if defined(WEBRTC_IOS)
+  // On iOS, VPIO provides built-in NS.
+  options.noise_suppression = false;
+#else
+  options.noise_suppression = true;
+#endif
+  options.highpass_filter = true;
+  options.stereo_swapping = false;
+  return options;
+}
+
 class ProxySink : public AudioSinkInterface {
  public:
   explicit ProxySink(AudioSinkInterface* sink) : sink_(sink) {
@@ -169,7 +185,7 @@ std::string ToString(const Codec& codec) {
   return ss.Release();
 }
 
-bool IsCodec(const Codec& codec, const char* ref_name) {
+bool IsCodec(const Codec& codec, absl::string_view ref_name) {
   return absl::EqualsIgnoreCase(codec.name, ref_name);
 }
 
@@ -332,7 +348,8 @@ bool CheckRedParameters(
 
   // Check the FMTP line for the empty parameter which should match
   // <primary codec>/<primary codec>[/...]
-  auto red_parameters = red_codec.params.find(kCodecParamNotInNameValueFormat);
+  auto red_parameters =
+      red_codec.params.find(std::string(kCodecParamNotInNameValueFormat));
   if (red_parameters == red_codec.params.end()) {
     RTC_LOG(LS_WARNING) << "audio/RED missing fmtp parameters.";
     return false;
@@ -375,7 +392,7 @@ std::vector<Codec> LegacyCollectCodecs(const std::vector<AudioCodecSpec>& specs,
   for (const auto& spec : specs) {
     Codec codec = CreateAudioCodec(spec.format);
     if (allocate_pt) {
-      auto pt_or_error = pt_mapper.SuggestMapping(codec, nullptr);
+      auto pt_or_error = pt_mapper.SuggestMapping(codec);
       // We need to do some extra stuff before adding the main codecs to out.
       if (!pt_or_error.ok()) {
         continue;
@@ -412,7 +429,7 @@ std::vector<Codec> LegacyCollectCodecs(const std::vector<AudioCodecSpec>& specs,
             absl::StrCat(codec.id) + "/" + absl::StrCat(codec.id);
         Codec red_codec = CreateAudioCodec(
             {kRedCodecName, codec.clockrate, codec.channels, {{"", red_fmtp}}});
-        red_codec.id = pt_mapper.SuggestMapping(red_codec, nullptr).value();
+        red_codec.id = pt_mapper.SuggestMapping(red_codec).value();
         out.push_back(red_codec);
       } else {
         // We don't know the PT to put into the RED fmtp parameter yet.
@@ -428,7 +445,7 @@ std::vector<Codec> LegacyCollectCodecs(const std::vector<AudioCodecSpec>& specs,
     if (cn.second) {
       Codec cn_codec = CreateAudioCodec({kCnCodecName, cn.first, 1});
       if (allocate_pt) {
-        cn_codec.id = pt_mapper.SuggestMapping(cn_codec, nullptr).value();
+        cn_codec.id = pt_mapper.SuggestMapping(cn_codec).value();
       }
       out.push_back(cn_codec);
     }
@@ -439,7 +456,7 @@ std::vector<Codec> LegacyCollectCodecs(const std::vector<AudioCodecSpec>& specs,
     if (dtmf.second) {
       Codec dtmf_codec = CreateAudioCodec({kDtmfCodecName, dtmf.first, 1});
       if (allocate_pt) {
-        dtmf_codec.id = pt_mapper.SuggestMapping(dtmf_codec, nullptr).value();
+        dtmf_codec.id = pt_mapper.SuggestMapping(dtmf_codec).value();
       }
       out.push_back(dtmf_codec);
     }
@@ -458,6 +475,28 @@ scoped_refptr<AudioDeviceModule> EnsureAudioDeviceModule(
   }
 #endif  // WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE
   return std::move(adm);
+}
+
+scoped_refptr<AudioState> CreateAudioState(
+    const Environment& env,
+    scoped_refptr<AudioMixer> audio_mixer,
+    AudioProcessing* apm,
+    AudioDeviceModule* adm,
+    std::unique_ptr<AudioFrameProcessor> audio_frame_processor) {
+  AudioState::Config config;
+  if (audio_mixer) {
+    config.audio_mixer = std::move(audio_mixer);
+  } else {
+    config.audio_mixer = AudioMixerImpl::Create();
+  }
+  config.audio_processing = apm;
+  config.audio_device_module = adm;
+  if (audio_frame_processor) {
+    config.async_audio_processing_factory =
+        make_ref_counted<AsyncAudioProcessing::Factory>(
+            std::move(audio_frame_processor), env.task_queue_factory());
+  }
+  return AudioState::Create(config);
 }
 
 }  // namespace
@@ -480,6 +519,11 @@ WebRtcVoiceEngine::WebRtcVoiceEngine(
       encoder_factory_(std::move(encoder_factory)),
       decoder_factory_(std::move(decoder_factory)),
       apm_(std::move(audio_processing)),
+      audio_state_(CreateAudioState(env,
+                                    std::move(audio_mixer),
+                                    apm_.get(),
+                                    adm_.get(),
+                                    std::move(audio_frame_processor))),
       legacy_send_codecs_(
           LegacyCollectCodecs(encoder_factory_->GetSupportedEncoders(),
                               !payload_types_in_transport_trial_enabled_)),
@@ -490,24 +534,6 @@ WebRtcVoiceEngine::WebRtcVoiceEngine(
   RTC_CHECK(adm_);
   RTC_DCHECK(decoder_factory_);
   RTC_DCHECK(encoder_factory_);
-
-  // Set up AudioState.
-  {
-    AudioState::Config config;
-    if (audio_mixer) {
-      config.audio_mixer = std::move(audio_mixer);
-    } else {
-      config.audio_mixer = AudioMixerImpl::Create();
-    }
-    config.audio_processing = apm_;
-    config.audio_device_module = adm_;
-    if (audio_frame_processor) {
-      config.async_audio_processing_factory =
-          make_ref_counted<AsyncAudioProcessing::Factory>(
-              std::move(audio_frame_processor), env_.task_queue_factory());
-    }
-    audio_state_ = AudioState::Create(config);
-  }
 
   // The rest of our initialization will happen in Init.
 }
@@ -530,23 +556,8 @@ void WebRtcVoiceEngine::Init() {
   adm_helpers::Init(adm());
 
   // Set default engine options.
-  {
-    AudioOptions options;
-    options.echo_cancellation = true;
-    options.auto_gain_control = true;
-#if defined(WEBRTC_IOS)
-    // On iOS, VPIO provides built-in NS.
-    options.noise_suppression = false;
-#else
-    options.noise_suppression = true;
-#endif
-    options.highpass_filter = true;
-    options.stereo_swapping = false;
-    options.audio_jitter_buffer_max_packets = 200;
-    options.audio_jitter_buffer_fast_accelerate = false;
-    options.audio_jitter_buffer_min_delay_ms = 0;
-    ApplyOptions(options);
-  }
+  AudioOptions options = CreateDefaultAudioOptions();
+  ApplyOptions(options);
 
   // Connect the ADM to our audio path. It's important to do this after applying
   // the configuration so that the audio callback receives calls with the
@@ -576,7 +587,6 @@ void WebRtcVoiceEngine::Terminate() {
 }
 
 scoped_refptr<AudioState> WebRtcVoiceEngine::GetAudioState() const {
-  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
   return audio_state_;
 }
 
@@ -594,13 +604,23 @@ WebRtcVoiceEngine::CreateSendChannel(
 }
 
 std::unique_ptr<VoiceMediaReceiveChannelInterface>
-WebRtcVoiceEngine::CreateReceiveChannel(const Environment& env,
-                                        Call* call,
-                                        const MediaConfig& config,
-                                        const AudioOptions& options,
-                                        const CryptoOptions& crypto_options) {
-  return std::make_unique<WebRtcVoiceReceiveChannel>(env, this, config, options,
-                                                     crypto_options, call);
+WebRtcVoiceEngine::CreateReceiveChannel(
+    const Environment& env,
+    Call* call,
+    const MediaConfig& config,
+    const AudioOptions& options,
+    const CryptoOptions& crypto_options,
+    absl::AnyInvocable<void(uint32_t ssrc)> on_first_packet,
+    absl::AnyInvocable<void(uint32_t ssrc, const RtpPacketInfos&, Timestamp)
+                           const> on_frame_delivered_callback) {
+  return std::make_unique<WebRtcVoiceReceiveChannel>(
+      env, this, config, options, crypto_options, call,
+      std::move(on_first_packet), std::move(on_frame_delivered_callback));
+}
+
+void WebRtcVoiceEngine::ApplyGlobalOptions(const AudioOptions& options) {
+  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
+  ApplyOptions(options);
 }
 
 void WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
@@ -759,11 +779,12 @@ WebRtcVoiceEngine::GetRtpHeaderExtensions(
   std::vector<RtpHeaderExtensionCapability> result;
   // id is *not* incremented for non-default extensions. Conflicting IDs
   // need to be resolved.
-  int id = 1;
+  RtpHeaderExtensionId id(1);
   for (const auto& uri :
        {RtpExtension::kAudioLevelUri, RtpExtension::kAbsSendTimeUri,
         RtpExtension::kTransportSequenceNumberUri, RtpExtension::kMidUri}) {
-    result.emplace_back(uri, id++, RtpTransceiverDirection::kSendRecv);
+    result.emplace_back(uri, id, RtpTransceiverDirection::kSendRecv);
+    id = RtpHeaderExtensionId(id.value() + 1);
   }
   for (const auto& uri : {RtpExtension::kAbsoluteCaptureTimeUri}) {
     result.emplace_back(uri, id, RtpTransceiverDirection::kStopped);
@@ -1149,6 +1170,23 @@ class WebRtcVoiceSendChannel::WebRtcAudioSendStream : public AudioSource::Sink {
     ReconfigureAudioSendStream(nullptr);
   }
 
+  void SetEncoderFactoryOverride(
+      absl_nonnull scoped_refptr<AudioEncoderFactory> encoder_factory) {
+    RTC_DCHECK_RUN_ON(&worker_thread_checker_);
+    RTC_DCHECK(!default_encoder_factory_);
+    default_encoder_factory_ = config_.encoder_factory;
+    config_.encoder_factory = std::move(encoder_factory);
+    ReconfigureAudioSendStream(nullptr);
+  }
+
+  void ResetEncoderFactoryOverride() {
+    RTC_DCHECK_RUN_ON(&worker_thread_checker_);
+    RTC_DCHECK(default_encoder_factory_);
+    config_.encoder_factory = std::move(default_encoder_factory_);
+    default_encoder_factory_ = nullptr;
+    ReconfigureAudioSendStream(nullptr);
+  }
+
  private:
   void UpdateSendState() {
     RTC_DCHECK_RUN_ON(&worker_thread_checker_);
@@ -1260,6 +1298,9 @@ class WebRtcVoiceSendChannel::WebRtcAudioSendStream : public AudioSource::Sink {
   // has been removed.
   std::optional<std::string> audio_network_adaptor_config_from_options_;
   std::atomic<int> num_encoded_channels_{-1};
+  // reference to the default encoder factory, stored here if an override is
+  // set.
+  scoped_refptr<AudioEncoderFactory> default_encoder_factory_;
 };
 
 WebRtcVoiceSendChannel::WebRtcVoiceSendChannel(
@@ -1302,7 +1343,6 @@ bool WebRtcVoiceSendChannel::SetOptions(const AudioOptions& options) {
   // on top.  This means there is no way to "clear" options such that
   // they go back to the engine default.
   options_.SetAll(options);
-  engine()->ApplyOptions(options_);
 
   std::optional<std::string> audio_network_adaptor_config =
       GetAudioNetworkAdaptorConfig(options_);
@@ -1566,8 +1606,6 @@ bool WebRtcVoiceSendChannel::SetSend(bool send) {
 
   // Apply channel specific options.
   if (send) {
-    engine()->ApplyOptions(options_);
-
     // Initialize the ADM for recording (this may take time on some platforms,
     // e.g. Android).
     if (options_.init_recording_on_send.value_or(true) &&
@@ -1709,6 +1747,12 @@ void WebRtcVoiceSendChannel::SetFrameEncryptor(
   }
 }
 
+void WebRtcVoiceSendChannel::EnableSframe() {
+  RTC_DCHECK_RUN_ON(worker_thread_);
+  sframe_options_.required = true;
+  // TODO(bugs.webrtc.org/479862368): Propagate Sframe options to the streams.
+}
+
 bool WebRtcVoiceSendChannel::InsertDtmf(uint32_t ssrc,
                                         int event,
                                         int duration) {
@@ -1748,8 +1792,6 @@ void WebRtcVoiceSendChannel::OnNetworkRouteChanged(
     absl::string_view transport_name,
     const NetworkRoute& network_route) {
   RTC_DCHECK_RUN_ON(&network_thread_checker_);
-
-  call_->OnAudioTransportOverheadChanged(network_route.packet_overhead);
 
   worker_thread_->PostTask(SafeTask(
       task_safety_.flag(),
@@ -1916,6 +1958,32 @@ void WebRtcVoiceSendChannel::SetEncoderToPacketizerFrameTransformer(
       std::move(frame_transformer));
 }
 
+bool WebRtcVoiceSendChannel::SetEncoderFactoryOverride(
+    uint32_t ssrc,
+    absl_nonnull scoped_refptr<AudioEncoderFactory> encoder_factory) {
+  RTC_DCHECK_RUN_ON(worker_thread_);
+  auto matching_stream = send_streams_.find(ssrc);
+  if (matching_stream == send_streams_.end()) {
+    RTC_LOG(LS_ERROR)
+        << "No stream found to set audio encoder factory override";
+    return false;
+  }
+  matching_stream->second->SetEncoderFactoryOverride(
+      std::move(encoder_factory));
+  return true;
+}
+
+void WebRtcVoiceSendChannel::ResetEncoderFactoryOverride(uint32_t ssrc) {
+  RTC_DCHECK_RUN_ON(worker_thread_);
+  auto matching_stream = send_streams_.find(ssrc);
+  if (matching_stream != send_streams_.end()) {
+    matching_stream->second->ResetEncoderFactoryOverride();
+  } else {
+    RTC_LOG(LS_ERROR)
+        << "No stream found to reset audio encoder factory override";
+  }
+}
+
 RtpParameters WebRtcVoiceSendChannel::GetRtpSendParameters(
     uint32_t ssrc) const {
   RTC_DCHECK_RUN_ON(worker_thread_);
@@ -2035,9 +2103,10 @@ class WebRtcVoiceReceiveChannel::WebRtcAudioReceiveStream {
  public:
   WebRtcAudioReceiveStream(AudioReceiveStreamInterface::Config config,
                            Call* call)
-      : call_(call), stream_(call_->CreateAudioReceiveStream(config)) {
-    RTC_DCHECK(call);
-    RTC_DCHECK(stream_);
+      : call_(call),
+        stream_(call_->CreateAudioReceiveStream(std::move(config))) {
+    RTC_DCHECK(call != nullptr);
+    RTC_DCHECK(stream_ != nullptr);
   }
 
   WebRtcAudioReceiveStream() = delete;
@@ -2136,11 +2205,6 @@ class WebRtcVoiceReceiveChannel::WebRtcAudioReceiveStream {
     stream_->SetJitterBufferFastAccelerate(fast_accelerate);
   }
 
-  std::vector<RtpSource> GetSources() {
-    RTC_DCHECK_RUN_ON(&worker_thread_checker_);
-    return stream_->GetSources();
-  }
-
   void SetDepacketizerToDecoderFrameTransformer(
       scoped_refptr<FrameTransformerInterface> frame_transformer) {
     RTC_DCHECK_RUN_ON(&worker_thread_checker_);
@@ -2161,7 +2225,10 @@ WebRtcVoiceReceiveChannel::WebRtcVoiceReceiveChannel(
     const MediaConfig& config,
     const AudioOptions& options,
     const CryptoOptions& crypto_options,
-    Call* absl_nonnull call)
+    Call* absl_nonnull call,
+    absl::AnyInvocable<void(uint32_t ssrc)> on_first_packet,
+    absl::AnyInvocable<void(uint32_t ssrc, const RtpPacketInfos&, Timestamp)
+                           const> on_frame_delivered_callback)
     : MediaChannelUtil(call->network_thread(), config.enable_dscp),
       env_(env),
       worker_thread_(call->worker_thread()),
@@ -2172,9 +2239,20 @@ WebRtcVoiceReceiveChannel::WebRtcVoiceReceiveChannel(
       options_(options),
       call_(call),
       audio_config_(config.audio),
-      crypto_options_(crypto_options) {
+      crypto_options_(crypto_options),
+      on_first_packet_(std::move(on_first_packet)),
+      on_frame_delivered_callback_(std::move(on_frame_delivered_callback)) {
   RTC_LOG(LS_VERBOSE) << "WebRtcVoiceReceiveChannel::WebRtcVoiceReceiveChannel";
   RTC_DCHECK(call);
+  RTC_DCHECK(on_frame_delivered_callback_ != nullptr);
+  if (options.audio_jitter_buffer_max_packets.has_value()) {
+    audio_config_.audio_jitter_buffer_max_packets =
+        std::max(20, *options.audio_jitter_buffer_max_packets);
+  }
+  if (options.audio_jitter_buffer_fast_accelerate.has_value()) {
+    audio_config_.audio_jitter_buffer_fast_accelerate =
+        *options.audio_jitter_buffer_fast_accelerate;
+  }
 }
 
 WebRtcVoiceReceiveChannel::~WebRtcVoiceReceiveChannel() {
@@ -2253,43 +2331,6 @@ RtpParameters WebRtcVoiceReceiveChannel::GetDefaultRtpReceiveParameters()
     rtp_params.codecs.push_back(codec.ToCodecParameters());
   }
   return rtp_params;
-}
-
-bool WebRtcVoiceReceiveChannel::SetOptions(const AudioOptions& options) {
-  RTC_DCHECK_RUN_ON(worker_thread_);
-  RTC_LOG(LS_INFO) << "Setting voice channel options: " << options.ToString();
-
-  // We retain all of the existing options, and apply the given ones
-  // on top.  This means there is no way to "clear" options such that
-  // they go back to the engine default.
-  options_.SetAll(options);
-  engine()->ApplyOptions(options_);
-
-  // Check if any options changed that should apply to receive streams.
-  if (options.audio_jitter_buffer_max_packets &&
-      std::max(20, *options.audio_jitter_buffer_max_packets) !=
-          audio_config_.audio_jitter_buffer_max_packets) {
-    audio_config_.audio_jitter_buffer_max_packets =
-        std::max(20, *options.audio_jitter_buffer_max_packets);
-    for (auto& [unused, stream] : recv_streams_) {
-      stream->SetJitterBufferMaxPackets(
-          audio_config_.audio_jitter_buffer_max_packets);
-    }
-  }
-  if (options.audio_jitter_buffer_fast_accelerate &&
-      *options.audio_jitter_buffer_fast_accelerate !=
-          audio_config_.audio_jitter_buffer_fast_accelerate) {
-    audio_config_.audio_jitter_buffer_fast_accelerate =
-        *options.audio_jitter_buffer_fast_accelerate;
-    for (auto& [unused, stream] : recv_streams_) {
-      stream->SetJitterBufferFastAccelerate(
-          audio_config_.audio_jitter_buffer_fast_accelerate);
-    }
-  }
-
-  RTC_LOG(LS_INFO) << "Set voice receive channel options. Current options: "
-                   << options_.ToString();
-  return true;
 }
 
 bool WebRtcVoiceReceiveChannel::SetRecvCodecs(
@@ -2460,6 +2501,18 @@ bool WebRtcVoiceReceiveChannel::AddRecvStream(const StreamParams& sp) {
       options_.audio_jitter_buffer_min_delay_ms.value_or(0),
       unsignaled_frame_decryptor_, crypto_options_,
       unsignaled_frame_transformer_);
+  RTC_DCHECK(on_frame_delivered_callback_ != nullptr);
+  config.on_frame_delivered_callback = [this, ssrc](const RtpPacketInfos& infos,
+                                                    Timestamp timestamp) {
+    on_frame_delivered_callback_(ssrc, infos, timestamp);
+  };
+
+  config.on_first_packet = [this](uint32_t ssrc) {
+    RTC_DCHECK_RUN_ON(worker_thread_);
+    if (on_first_packet_) {
+      on_first_packet_(ssrc);
+    }
+  };
 
   recv_streams_.insert(std::make_pair(
       ssrc, new WebRtcAudioReceiveStream(std::move(config), call_)));
@@ -2612,6 +2665,12 @@ void WebRtcVoiceReceiveChannel::SetFrameDecryptor(
   if (ssrc == 0) {
     unsignaled_frame_decryptor_ = frame_decryptor;
   }
+}
+
+void WebRtcVoiceReceiveChannel::EnableSframe() {
+  RTC_DCHECK_RUN_ON(worker_thread_);
+  sframe_options_.required = true;
+  // TODO(bugs.webrtc.org/479862368): Propagate Sframe options to the streams.
 }
 
 void WebRtcVoiceReceiveChannel::OnPacketReceived(RtpPacketReceived packet) {
@@ -2856,18 +2915,6 @@ void WebRtcVoiceReceiveChannel::SetDefaultRawAudioSink(
   default_sink_ = std::move(sink);
 }
 
-std::vector<RtpSource> WebRtcVoiceReceiveChannel::GetSources(
-    uint32_t ssrc) const {
-  RTC_DCHECK_RUN_ON(worker_thread_);
-  auto it = recv_streams_.find(ssrc);
-  if (it == recv_streams_.end()) {
-    RTC_LOG(LS_ERROR) << "Attempting to get contributing sources for SSRC:"
-                      << ssrc << " which doesn't exist.";
-    return std::vector<RtpSource>();
-  }
-  return it->second->GetSources();
-}
-
 void WebRtcVoiceReceiveChannel::SetDepacketizerToDecoderFrameTransformer(
     uint32_t ssrc,
     scoped_refptr<FrameTransformerInterface> frame_transformer) {
@@ -2887,11 +2934,6 @@ void WebRtcVoiceReceiveChannel::SetDepacketizerToDecoderFrameTransformer(
   }
   matching_stream->second->SetDepacketizerToDecoderFrameTransformer(
       std::move(frame_transformer));
-}
-
-RtcpMode WebRtcVoiceReceiveChannel::RtcpMode() const {
-  RTC_DCHECK_RUN_ON(worker_thread_);
-  return recv_rtcp_mode_;
 }
 
 bool WebRtcVoiceReceiveChannel::MaybeDeregisterUnsignaledRecvStream(

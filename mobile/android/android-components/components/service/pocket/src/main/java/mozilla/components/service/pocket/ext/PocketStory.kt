@@ -4,37 +4,36 @@
 
 package mozilla.components.service.pocket.ext
 
+import java.util.concurrent.TimeUnit
 import mozilla.components.service.pocket.PocketStory.SponsoredContent
 import mozilla.components.service.pocket.PocketStory.SponsoredContentFrequencyCaps
-import java.util.concurrent.TimeUnit
 
 /**
- * Returns a list of all sponsored content impressions (expressed in seconds from Epoch) in the
- * period between `now` down to [SponsoredContentFrequencyCaps.flightPeriod].
+ * Returns a list of all sponsored content impressions (expressed in seconds from Epoch) in the period between `now`
+ * down to [SponsoredContentFrequencyCaps.flightPeriod].
  */
-fun SponsoredContent.getCurrentFlightImpressions(): List<Long> {
-    val now = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis())
+fun SponsoredContent.getCurrentFlightImpressions(currentTimeMillis: Long = System.currentTimeMillis()): List<Long> {
+    val now = TimeUnit.MILLISECONDS.toSeconds(currentTimeMillis)
     return caps.currentImpressions.filter {
         now - it < caps.flightPeriod
     }
 }
 
 /**
- * Returns true if sponsored content has reached the maximum number of impressions in the period
- * specified by [SponsoredContentFrequencyCaps.flightPeriod] and false otherwise.
+ * Returns true if sponsored content has reached the maximum number of impressions in the period specified by
+ * [SponsoredContentFrequencyCaps.flightPeriod] and false otherwise.
  */
 fun SponsoredContent.hasFlightImpressionsLimitReached(): Boolean {
     return getCurrentFlightImpressions().size >= caps.flightCount
 }
 
 /**
- * Records a new impression and returns the [SponsoredContent] with the updated impressions
- * details. This only updates the in-memory data.
+ * Records a new impression and returns the [SponsoredContent] with the updated impressions details. This only updates
+ * the in-memory data.
  */
-fun SponsoredContent.recordNewImpression(): SponsoredContent {
+fun SponsoredContent.recordNewImpression(currentTimeMillis: Long = System.currentTimeMillis()): SponsoredContent {
     return this.copy(
-        caps = caps.copy(
-            currentImpressions = caps.currentImpressions + TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()),
-        ),
+        caps =
+            caps.copy(currentImpressions = caps.currentImpressions + TimeUnit.MILLISECONDS.toSeconds(currentTimeMillis))
     )
 }

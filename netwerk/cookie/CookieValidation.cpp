@@ -3,11 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CookieValidation.h"
+
 #include "CookieLogging.h"
-#include "CookieService.h"
 #include "CookiePrefixes.h"
-#include "mozilla/dom/nsMixedContentBlocker.h"
+#include "CookieService.h"
 #include "mozilla/StaticPrefs_network.h"
+#include "mozilla/dom/nsMixedContentBlocker.h"
 
 constexpr uint32_t kMaxBytesPerCookie = 4096;
 constexpr uint32_t kMaxBytesPerDomain = 1024;
@@ -156,8 +157,8 @@ void CookieValidation::ValidateForHostInternal(nsIURI* aHostURI,
   bool potentiallyTrustworthy =
       nsMixedContentBlocker::IsPotentiallyTrustworthyOrigin(aHostURI);
 
-  // FixDomain() and FixPath() from CookieParser MUST be run first to make sure
-  // invalid attributes are rejected and to regularlize them. In particular all
+  // FixDomain() from CookieParser MUST be run first to make sure invalid
+  // attributes are rejected and to regularlize them. In particular all
   // explicit domain attributes result in a host that starts with a dot, and if
   // the host doesn't start with a dot it correctly matches the true
   // host.

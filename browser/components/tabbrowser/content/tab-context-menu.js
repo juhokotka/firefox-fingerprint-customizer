@@ -5,6 +5,13 @@
 var TabContextMenu = {
   contextTab: null,
 
+  // Badge variants for menu items. Values map to the `tab-context-badge-*` l10n
+  // ids and, for NEW, the filled `badge-new` style.
+  BADGE_TYPE: {
+    NEW: "new",
+    BETA: "beta",
+  },
+
   /*
    * Declared layout for the tab context menu and its managed submenus, keyed by
    * mode. Each mode maps a popup id to the ordered sections describing that
@@ -76,6 +83,7 @@ var TabContextMenu = {
             "#context_askChat",
             "#context_aiSeparator",
             "#context_askChatSummarize",
+            "#context_createAITab",
           ],
         },
         {
@@ -138,6 +146,7 @@ var TabContextMenu = {
             "#context_moveToStart",
             "#context_moveToEnd",
             "#context_openTabInWindow",
+            "#context_openTabInMiniWindow",
             "#moveTabSeparator",
             "#context_moveTabToGroupSeparator",
             "#context_selectAllSeparator",
@@ -235,6 +244,7 @@ var TabContextMenu = {
             ["#context_bookmarkSelectedTabs", "#context_bookmarkTab"],
             ["#context_addNote", "#context_editNote"],
             "#context_askChatSummarize",
+            "#context_createAITab",
             "#context_tabToolsSeparator",
           ],
         },
@@ -309,6 +319,7 @@ var TabContextMenu = {
             "#context_moveToStart",
             "#context_moveToEnd",
             "#context_openTabInWindow",
+            "#context_openTabInMiniWindow",
             "#moveTabSeparator",
           ],
         },
@@ -507,12 +518,28 @@ var TabContextMenu = {
     // bug1973996: This call is not guaranteed to complete
     // before the saved groups menu is populated
     for (let tab of this.contextTabs) {
-      gBrowser.TabStateFlusher.flush(tab.linkedBrowser);
+      TabContextMenu.TabStateFlusher.flush(tab.linkedBrowser);
 
       // Add unique split views for count info below
       if (tab.splitview) {
         splitViews.add(tab.splitview);
       }
+    }
+
+    let miniWindowItem = document.getElementById("context_openTabInMiniWindow");
+    miniWindowItem.hidden = !Services.prefs.getBoolPref(
+      "browser.mini-window.enabled",
+      false
+    );
+
+    this.addBadge(miniWindowItem, this.BADGE_TYPE.BETA);
+    if (!miniWindowItem.hidden) {
+      miniWindowItem.setAttribute(
+        "data-l10n-args",
+        JSON.stringify({
+          tabCount: this.MiniWindowManager.tabsToPop(this.contextTabs).length,
+        })
+      );
     }
 
     let disabled = gBrowser.tabs.length == 1;
@@ -583,7 +610,7 @@ var TabContextMenu = {
     let openGroupsToMoveTo = [];
     let savedGroupsToMoveTo = [];
 
-    if (gBrowser._tabGroupsEnabled) {
+    if (TabContextMenu.Tabbrowser.prefs.tabGroupsEnabled) {
       let selectedGroupCount = new Set(
         // The filter removes the "null" group for ungrouped tabs.
         this.contextTabs.map(t => t.group).filter(g => g)
@@ -716,14 +743,14 @@ var TabContextMenu = {
     }
 
     this._updateMoveTabToFlattenedVisibility(
-      gBrowser._tabGroupsEnabled,
+      TabContextMenu.Tabbrowser.prefs.tabGroupsEnabled,
       !!openGroupsToMoveTo.length,
       !!savedGroupsToMoveTo.length
     );
 
     let contextAddNote = document.getElementById("context_addNote");
     let contextEditNote = document.getElementById("context_editNote");
-    if (gBrowser._tabNotesEnabled) {
+    if (this._tabNotesEnabled) {
       // Tab notes behaviour is disabled if a user has a selection of tabs that
       // contains more than one canonical URL.
       let multiselectingDiverseUrls =
@@ -736,11 +763,11 @@ var TabContextMenu = {
         multiselectingDiverseUrls || !this.TabNotes.isEligible(this.contextTab);
       contextEditNote.disabled = multiselectingDiverseUrls;
 
-      this.removeNewBadge(contextAddNote);
+      this.removeBadge(contextAddNote);
       if (
         Services.prefs.getBoolPref("browser.tabs.notes.newBadge.enabled", true)
       ) {
-        this.addNewBadge(contextAddNote);
+        this.addBadge(contextAddNote, this.BADGE_TYPE.NEW);
       }
 
       this.TabNotes.has(this.contextTab).then(hasNote => {
@@ -797,7 +824,7 @@ var TabContextMenu = {
     document.getElementById("context_reloadSelectedTabs").hidden =
       !this.multiselected;
     let unloadTabItem = document.getElementById("context_unloadTab");
-    if (gBrowser._unloadTabInContextMenu) {
+    if (this._unloadTabInContextMenu) {
       // linkedPanel is false if the tab is already unloaded
       // Cannot unload about: pages, etc., so skip browsers that are not remote
       let unloadableTabs = this.contextTabs.filter(
@@ -862,6 +889,12 @@ var TabContextMenu = {
       );
     }
 
+    document.getElementById("context_createAITab").hidden =
+      !TabContextMenu.AIWindowMenu.canShowAITabMenu(
+        window,
+        this.contextTabs.map(tab => tab.linkedBrowser.currentURI)
+      );
+
     // Move Tab items
     let contextMoveTabOptions = document.getElementById(
       "context_moveTabOptions"
@@ -894,7 +927,7 @@ var TabContextMenu = {
     let allSelectedTabsAdjacent = selectedTabs.every(
       (element, index, array) => {
         return array.length > index + 1
-          ? element._tPos + 1 == array[index + 1]._tPos
+          ? element.index + 1 == array[index + 1].index
           : true;
       }
     );
@@ -1023,7 +1056,7 @@ var TabContextMenu = {
     document.getElementById("context_shareSelectedTabsSeparator").hidden =
       hideContentSharing;
     if (!contentSharingShareTabs.hidden) {
-      this.addNewBadge(contentSharingShareTabs);
+      this.addBadge(contentSharingShareTabs, this.BADGE_TYPE.NEW);
     }
 
     let toggleMute = document.getElementById("context_toggleMuteTab");
@@ -1173,6 +1206,7 @@ var TabContextMenu = {
     createUserContextMenu(event, {
       isContextMenu: true,
       excludeUserContextId: this.contextTab.getAttribute("usercontextid"),
+      containerSource: "tab_context_menu",
     });
   },
   createSwitchContainerMenu(event) {
@@ -1182,7 +1216,7 @@ var TabContextMenu = {
     });
   },
   duplicateSelectedTabs() {
-    let newIndex = this.contextTabs.at(-1)._tPos + 1;
+    let newIndex = this.contextTabs.at(-1).index + 1;
     for (let tab of this.contextTabs) {
       let newTab = SessionStore.duplicateTab(window, tab);
       if (tab.group) {
@@ -1240,8 +1274,9 @@ var TabContextMenu = {
       let newTab = gBrowser.addTab(tab.linkedBrowser.currentURI.spec, {
         userContextId,
         pinned: tab.pinned,
-        tabIndex: tab._tPos + 1,
+        tabIndex: tab.index + 1,
         triggeringPrincipal,
+        eventDetail: { containerSource: "tab_context_menu" },
       });
 
       Glean.containers.tabAssignedContainer.record({
@@ -1382,7 +1417,7 @@ var TabContextMenu = {
 
   moveTabsToNewGroup() {
     let insertBefore = this.contextTab;
-    if (insertBefore._tPos < gBrowser.pinnedTabCount) {
+    if (insertBefore.index < gBrowser.pinnedTabCount) {
       let firstUnpinnedTab = gBrowser.tabs[gBrowser.pinnedTabCount];
       if (firstUnpinnedTab.splitview) {
         insertBefore = firstUnpinnedTab.splitview;
@@ -1410,7 +1445,7 @@ var TabContextMenu = {
 
   moveSplitViewToNewGroup() {
     let insertBefore = this.contextTab;
-    if (insertBefore._tPos < gBrowser.pinnedTabCount) {
+    if (insertBefore.index < gBrowser.pinnedTabCount) {
       insertBefore = gBrowser.tabs[gBrowser.pinnedTabCount];
     } else if (this.contextTab.group) {
       insertBefore = this.contextTab.group;
@@ -1547,27 +1582,65 @@ var TabContextMenu = {
   },
 
   /**
+   * Badge a menu item as a new or beta feature. NEW uses the filled style,
+   * BETA the default outlined one.
+   *
    * @param {MozMenuItem} menuItem
+   * @param {string} type - one of TabContextMenu.BADGE_TYPE.
    */
-  addNewBadge(menuItem) {
+  addBadge(menuItem, type) {
+    let l10nId;
+    switch (type) {
+      case this.BADGE_TYPE.NEW:
+        l10nId = "tab-context-badge-new";
+        break;
+      case this.BADGE_TYPE.BETA:
+        l10nId = "tab-context-badge-beta";
+        break;
+      default:
+        throw new Error(`Unknown badge type: ${type}`);
+    }
     menuItem.setAttribute(
       "badge",
-      gBrowser.tabLocalization.formatValueSync("tab-context-badge-new")
+      gBrowser.tabLocalization.formatValueSync(l10nId)
     );
-    menuItem.classList.add("badge-new");
+    menuItem.classList.toggle("badge-new", type === this.BADGE_TYPE.NEW);
   },
 
   /**
    * @param {MozMenuItem} menuItem
    */
-  removeNewBadge(menuItem) {
+  removeBadge(menuItem) {
     menuItem.removeAttribute("badge");
     menuItem.classList.remove("badge-new");
   },
 };
 
+XPCOMUtils.defineLazyPreferenceGetter(
+  TabContextMenu,
+  "_tabNotesEnabled",
+  "browser.tabs.notes.enabled",
+  false
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  TabContextMenu,
+  "_unloadTabInContextMenu",
+  "browser.tabs.unloadTabInContextMenu",
+  false
+);
+
 ChromeUtils.defineESModuleGetters(TabContextMenu, {
-  GenAI: "resource:///modules/GenAI.sys.mjs",
+  AIWindow:
+    "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
+  AIWindowMenu:
+    "moz-src:///browser/components/aiwindow/ui/modules/AIWindowMenu.sys.mjs",
+  GenAI: "moz-src:///browser/components/genai/GenAI.sys.mjs",
   MenuSectionLayout: "resource:///modules/MenuSectionLayout.sys.mjs",
+  MiniWindowManager:
+    "moz-src:///browser/components/miniwindow/MiniWindowManager.sys.mjs",
+  Tabbrowser: "moz-src:///browser/components/tabbrowser/Tabbrowser.sys.mjs",
   TabNotes: "moz-src:///browser/components/tabnotes/TabNotes.sys.mjs",
+  TabStateFlusher:
+    "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs",
 });

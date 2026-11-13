@@ -6,18 +6,18 @@
 
 #include "nsDataChannel.h"
 
+#include "../protocol/http/nsHttpHandler.h"
 #include "mozilla/Base64.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/MimeType.h"
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/NeckoCommon.h"
 #include "nsDataHandler.h"
-#include "nsIInputStream.h"
 #include "nsEscape.h"
+#include "nsIInputStream.h"
+#include "nsIObserverService.h"
 #include "nsISupports.h"
 #include "nsStringStream.h"
-#include "nsIObserverService.h"
-#include "mozilla/dom/ContentChild.h"
-#include "../protocol/http/nsHttpHandler.h"
 
 using namespace mozilla;
 using namespace mozilla::net;
@@ -188,7 +188,8 @@ nsDataChannel::ConnectParent(uint32_t aId) {
   }
 
   mozilla::dom::ContentChild* cc =
-      static_cast<mozilla::dom::ContentChild*>(gNeckoChild->Manager());
+      mozilla::ipc::ActorCast<mozilla::dom::ContentChild>(
+          gNeckoChild->Manager());
   if (cc->IsShuttingDown()) {
     return NS_ERROR_FAILURE;
   }

@@ -4,19 +4,22 @@
 
 #include "ImportMap.h"
 
-#include "js/Array.h"                 // IsArrayObject
-#include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
-#include "js/JSON.h"                  // JS_ParseJSON
-#include "js/PropertyDescriptor.h"    // JS::PropertyDescriptor
 #include "mozilla/StaticPrefs_dom.h"
+
 #include "LoadedScript.h"
-#include "ModuleLoaderBase.h"  // ScriptLoaderInterface
+#include "ModuleLoaderBase.h"
 #include "nsContentUtils.h"
 #include "nsIScriptElement.h"
 #include "nsIScriptError.h"
 #include "nsJSUtils.h"  // nsAutoJSString
 #include "nsNetUtil.h"  // NS_NewURI
+#include "ScriptLoaderInterface.h"
 #include "ScriptLoadRequest.h"
+
+#include "js/Array.h"                 // IsArrayObject
+#include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
+#include "js/JSON.h"                  // JS_ParseJSON
+#include "js/PropertyDescriptor.h"    // JS::PropertyDescriptor
 
 using JS::SourceText;
 using mozilla::Err;
@@ -915,7 +918,13 @@ ResolveResult ImportMap::ResolveModuleSpecifier(ImportMap* aImportMap,
   }
 
   // 6. Let serializedBaseURL be baseURL, serialized.
-  nsCString serializedBaseURL = baseURL->GetSpecOrDefault();
+  //
+  // Impl note: baseURL is null for scripts without a fetch info running in a
+  // loader without a base URI, such as precompiled scripts.
+  nsCString serializedBaseURL;
+  if (baseURL) {
+    serializedBaseURL = baseURL->GetSpecOrDefault();
+  }
 
   LOG(("ResolveModuleSpecifier baseURL:%s, specifier: %s",
        serializedBaseURL.get(), NS_ConvertUTF16toUTF8(aSpecifier).get()));

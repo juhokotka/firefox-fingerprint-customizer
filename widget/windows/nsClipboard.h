@@ -5,12 +5,12 @@
 #ifndef nsClipboard_h_
 #define nsClipboard_h_
 
+#include <ole2.h>
+#include <windows.h>
+
 #include "nsBaseClipboard.h"
 #include "nsIObserver.h"
 #include "nsIURI.h"
-
-#include <ole2.h>
-#include <windows.h>
 
 class nsITransferable;
 class nsIWidget;
@@ -22,7 +22,7 @@ struct IDataObject;
  */
 
 class nsClipboard final : public nsBaseClipboard, public nsIObserver {
-  virtual ~nsClipboard();
+  virtual ~nsClipboard() = default;
 
  public:
   nsClipboard();
@@ -64,6 +64,9 @@ class nsClipboard final : public nsBaseClipboard, public nsIObserver {
   template <typename GroupDesc>
   static bool FileGroupDescriptorHasItems(HGLOBAL aHGlobal,
                                           uint64_t aItemCount);
+
+  // True if aHGlobal reports DROPFILES data that fits in the global.
+  static bool IsValidDropFilesData(HGLOBAL aHGlobal);
 
   // This function returns the internal Windows clipboard format identifier
   // for a given Mime string. The default is to map kHTMLMime ("text/html")

@@ -148,7 +148,6 @@
 #endif
 
 #include "base/process_util.h"
-
 #include "mozilla/AutoRestore.h"
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/CycleCollectedJSRuntime.h"
@@ -161,10 +160,11 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include <memory>
 #include <utility>
 
-#include "js/friend/CycleCollector.h"
 #include "js/SliceBudget.h"
+#include "js/friend/CycleCollector.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Likely.h"
 #include "mozilla/LinkedList.h"
@@ -174,9 +174,9 @@
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/SegmentedVector.h"
-#include "mozilla/glean/XpcomMetrics.h"
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/glean/XpcomMetrics.h"
 #include "nsContentUtils.h"
 #include "nsCycleCollectionNoteRootCallback.h"
 #include "nsCycleCollectionParticipant.h"
@@ -497,12 +497,7 @@ class EdgePool {
       }
       return mPointer->ptrInfo;
     }
-    bool operator==(const Iterator& aOther) const {
-      return mPointer == aOther.mPointer;
-    }
-    bool operator!=(const Iterator& aOther) const {
-      return mPointer != aOther.mPointer;
-    }
+    bool operator==(const Iterator& aOther) const = default;
 
 #ifdef DEBUG_CC_GRAPH
     bool Initialized() const { return mPointer != nullptr; }
@@ -2048,7 +2043,7 @@ class CCGraphBuilder final : public nsCycleCollectionTraversalCallback,
   UniquePtr<NodePool::Enumerator> mCurrNode;
   uint32_t mNoteChildCount;
 
-  struct PtrInfoCache : public MruCache<void*, PtrInfo*, PtrInfoCache, 491> {
+  struct PtrInfoCache : public MruCache<void*, PtrInfo*, PtrInfoCache, 256> {
     static HashNumber Hash(const void* aKey) { return HashGeneric(aKey); }
     static bool Match(const void* aKey, const PtrInfo* aVal) {
       return aVal->mPointer == aKey;
@@ -4196,7 +4191,7 @@ void nsCycleCollector_startup() {
   CollectorData* data = new CollectorData;
   data->mCollector = new nsCycleCollector();
   data->mContext = nullptr;
-  data->mStats.reset(new mozilla::CycleCollectorStats());
+  data->mStats = std::make_unique<mozilla::CycleCollectorStats>();
 
   sCollectorData.set(data);
 }

@@ -18,8 +18,7 @@
 #include "mozilla/ipc/LaunchError.h"
 #include "mozilla/ipc/ScopedPort.h"
 #include "mozilla/ipc/UtilityProcessSandboxing.h"
-#include "mozilla/Atomics.h"
-#include "mozilla/LinkedList.h"
+#include "mozilla/Logging.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/RWLock.h"
@@ -58,8 +57,46 @@ namespace ipc {
 typedef mozilla::MozPromise<base::ProcessHandle, LaunchError, false>
     ProcessHandlePromise;
 
-class GeckoChildProcessHost : public SupportsWeakPtr,
-                              public LinkedListElement<GeckoChildProcessHost> {
+// Log of child process lifetimes, consumed by external auditing tools, so
+// please keep the format stable:
+//
+//   ++PROCESS [pid = 4208] [childID = 37] [type = tab]
+//   --PROCESS [pid = 4208] [childID = 37] [type = tab]
+//
+// The --PROCESS line is emitted once the parent has released the process, so
+// the operating system may reuse its pid from that point on. It may be
+// emitted while the child is still winding down, and it is not emitted at all
+// if the parent goes away first, so it means "no longer ours" rather than
+// "has exited".
+//
+// Content processes log the remote type they serve on a separate line, once
+// when they launch and again whenever it changes. A process launched for
+// preallocation only learns the remote type it ends up serving once it is
+// adopted, so it is logged twice:
+//
+//   REMOTETYPE [childID = 37] [remoteType = prealloc]
+//   REMOTETYPE [childID = 37] [remoteType = web]
+//
+// remoteType comes last and may itself contain brackets for IPv6 origins, so
+// it has to be parsed greedily to the end of the line.
+//
+// What a utility process actually does is decided by the actors bound into
+// it, and one process can host several of them, so utility processes log a
+// line per actor. These are logged as the actors connect, not at launch:
+//
+//   UTILITYACTOR [childID = 38] [actorName = audioDecoder_Generic]
+//   UTILITYACTOR [childID = 38] [actorName = jSOracle]
+//
+// actorName is a WebIDLUtilityActorName value, the same name about:processes
+// displays.
+//
+// The lines for one process are emitted from different threads and may arrive
+// in any order. Join on childID rather than pid, and treat the last
+// REMOTETYPE line as the current one.
+extern LazyLogModule gChildProcessLifecycleLog;
+
+class GeckoChildProcessHost
+    : public SupportsThreadSafeWeakPtr<GeckoChildProcessHost> {
  protected:
   typedef mozilla::Monitor Monitor;
   typedef std::vector<std::string> StringVector;
@@ -68,18 +105,10 @@ class GeckoChildProcessHost : public SupportsWeakPtr,
   using ProcessId = base::ProcessId;
   using ProcessHandle = base::ProcessHandle;
 
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(GeckoChildProcessHost)
+
   explicit GeckoChildProcessHost(GeckoProcessType aProcessType,
                                  bool aIsFileContent = false);
-
-  // Causes the object to be deleted, on the I/O thread, after any
-  // pending asynchronous work (like launching) is complete.  This
-  // method can be called from any thread.  If called from the I/O
-  // thread itself, deletion won't happen until the event loop spins;
-  // otherwise, it could happen immediately.
-  //
-  // GeckoChildProcessHost instances must not be deleted except
-  // through this method.
-  void Destroy();
 
   static uint32_t GetUniqueID();
 
@@ -190,20 +219,17 @@ class GeckoChildProcessHost : public SupportsWeakPtr,
   // blocked in child processes due to sandboxing.
   void DisableOSActivityMode();
 #endif  // defined(MOZ_SANDBOX) && defined(XP_MACOSX)
-  typedef std::function<void(GeckoChildProcessHost*)> GeckoProcessCallback;
 
-  // Iterates over all instances and calls aCallback with each one of them.
-  // This method will lock any addition/removal of new processes
-  // so you need to make sure the callback is as fast as possible.
-  //
-  // To reiterate: the callbacks are executed synchronously.
-  static void GetAll(const GeckoProcessCallback& aCallback);
+  // Captures a snapshot view of the list of all processes.
+  static nsTArray<RefPtr<GeckoChildProcessHost>> GetAll();
 
   friend class BaseProcessLauncher;
   friend class PosixProcessLauncher;
   friend class WindowsProcessLauncher;
 
  protected:
+  friend class SupportsThreadSafeWeakPtr<GeckoChildProcessHost>;
+
   virtual ~GeckoChildProcessHost();
   GeckoProcessType mProcessType;
   GeckoChildID mChildID;
@@ -301,21 +327,26 @@ class GeckoChildProcessHost : public SupportsWeakPtr,
  private:
   DISALLOW_EVIL_CONSTRUCTORS(GeckoChildProcessHost);
 
-  // Removes the instance from sGeckoChildProcessHosts
-  void RemoveFromProcessList();
-
   // Mac and Windows. Set this up before we're called from a different thread.
   nsCOMPtr<nsIFile> mProfileDir;
 
-  mozilla::Atomic<bool> mDestroying;
-
-  static uint32_t sNextUniqueID;
-  static StaticAutoPtr<LinkedList<GeckoChildProcessHost>>
-      sGeckoChildProcessHosts MOZ_GUARDED_BY(sMutex);
-  static StaticMutex sMutex;
+  static std::atomic<uint32_t> sNextUniqueID;
 };
 
 nsCOMPtr<nsISerialEventTarget> GetIPCLauncher();
+
+#ifdef MOZ_WIDGET_COCOA
+enum class MacOSChildProcessBundleType { EME, GPU, PKCS11, Default, Count };
+
+nsLiteralCString GetChildProcessBundleNameForTesting(
+    MacOSChildProcessBundleType aBundleType);
+
+// In order to catch cases during testing where the plist path resolution fails,
+// this function resolves the executable by reading the bundle's Info.plist
+// without falling back to the branding macros.
+bool ResolveChildProcessPathFromPlistForTesting(
+    MacOSChildProcessBundleType aBundleType, nsACString& aExecutablePath);
+#endif  // MOZ_WIDGET_COCOA
 
 } /* namespace ipc */
 } /* namespace mozilla */

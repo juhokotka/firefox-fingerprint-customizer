@@ -15,10 +15,9 @@
 #include "Navigator.h"
 #include "WindowDestroyedEvent.h"
 #include "WindowNamedPropertiesHandler.h"
-#include "mozilla/AntiTrackingUtils.h"
+#include "mozilla/AntiTrackingOpenerHeuristics.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Result.h"
-#include "mozilla/StorageAccessAPIHelper.h"
 #include "mozilla/dom/AutoPrintEventDispatcher.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/BrowserChild.h"
@@ -124,73 +123,25 @@
 #include "nsLayoutStatics.h"
 
 // Interfaces Needed
-#include "Crypto.h"
-#include "mozilla/EventDispatcher.h"
-#include "mozilla/EventStateManager.h"
-#include "mozilla/ScrollContainerFrame.h"
-#include "mozilla/dom/CustomEvent.h"
-#include "mozilla/dom/Document.h"
-#include "nsCSSProps.h"
-#include "nsCanvasFrame.h"
-#include "nsComputedDOMStyle.h"
-#include "nsContentUtils.h"
-#include "nsDOMCID.h"
-#include "nsDOMString.h"
-#include "nsDOMWindowUtils.h"
-#include "nsFocusManager.h"
-#include "nsGlobalWindowCommands.h"
-#include "nsIAppWindow.h"
-#include "nsIBaseWindow.h"
-#include "nsIClassifiedChannel.h"
-#include "nsIContent.h"
-#include "nsIControllers.h"
-#include "nsIDeviceSensors.h"
-#include "nsIDocShell.h"
-#include "nsIDocumentViewer.h"
-#include "nsIFrame.h"
-#include "nsILoadContext.h"
-#include "nsIObserverService.h"
-#include "nsIPrompt.h"
-#include "nsIPromptFactory.h"
-#include "nsIPromptService.h"
-#include "nsISHistory.h"
-#include "nsIScreenManager.h"
-#include "nsIScriptError.h"
-#include "nsIURIFixup.h"
-#include "nsIURIMutator.h"
-#include "nsIWebBrowserChrome.h"
-#include "nsIWebBrowserFind.h"  // For window.find()
-#include "nsIWebNavigation.h"
-#include "nsIWidget.h"
-#include "nsIWidgetListener.h"
-#include "nsIWindowWatcher.h"
-#include "nsIWritablePropertyBag2.h"
-#include "nsIXULRuntime.h"
-#include "nsPIWindowWatcher.h"
-#include "nsQueryObject.h"
-#include "nsServiceManagerUtils.h"
-#include "nsThreadUtils.h"
-#include "xpcprivate.h"
-
-#ifdef NS_PRINTING
-#  include "nsIPrintSettings.h"
-#  include "nsIPrintSettingsService.h"
-#  include "nsIWebBrowserPrint.h"
-#endif
-
 #include "AccessCheck.h"
+#include "Crypto.h"
 #include "FxRWindowManager.h"
 #include "VRShMem.h"
 #include "gfxVR.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStateManager.h"
 #include "mozilla/GlobalKeyListener.h"
 #include "mozilla/Logging.h"
 #include "mozilla/ProfilerMarkers.h"
+#include "mozilla/ScrollContainerFrame.h"
 #include "mozilla/Services.h"
 #include "mozilla/dom/AudioContext.h"
 #include "mozilla/dom/BrowsingContextGroup.h"
 #include "mozilla/dom/Console.h"
+#include "mozilla/dom/CustomEvent.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/FunctionBinding.h"
@@ -222,22 +173,66 @@
 #include "mozilla/dom/cache/CacheStorage.h"
 #include "mozilla/extensions/WebExtensionPolicy.h"
 #include "mozilla/glean/DomMetrics.h"
+#include "nsCSSProps.h"
+#include "nsCanvasFrame.h"
+#include "nsComputedDOMStyle.h"
+#include "nsContentUtils.h"
+#include "nsDOMCID.h"
+#include "nsDOMString.h"
+#include "nsDOMWindowUtils.h"
+#include "nsFocusManager.h"
 #include "nsFrameLoader.h"
 #include "nsFrameLoaderOwner.h"
+#include "nsGlobalWindowCommands.h"
 #include "nsHTMLDocument.h"
+#include "nsIAppWindow.h"
 #include "nsIArray.h"
+#include "nsIBaseWindow.h"
 #include "nsIBrowserChild.h"
+#include "nsIClassifiedChannel.h"
+#include "nsIContent.h"
+#include "nsIControllers.h"
 #include "nsIDOMXULCommandDispatcher.h"
+#include "nsIDeviceSensors.h"
+#include "nsIDocShell.h"
+#include "nsIDocumentViewer.h"
 #include "nsIDragService.h"
+#include "nsIFrame.h"
+#include "nsILoadContext.h"
+#include "nsIObserverService.h"
+#include "nsIPrintSettings.h"
+#include "nsIPrintSettingsService.h"
+#include "nsIPrompt.h"
+#include "nsIPromptFactory.h"
+#include "nsIPromptService.h"
+#include "nsISHistory.h"
+#include "nsIScreenManager.h"
+#include "nsIScriptError.h"
+#include "nsIURIFixup.h"
+#include "nsIURIMutator.h"
+#include "nsIWebBrowserChrome.h"
+#include "nsIWebBrowserFind.h"  // For window.find()
+#include "nsIWebBrowserPrint.h"
+#include "nsIWebNavigation.h"
+#include "nsIWidget.h"
+#include "nsIWidgetListener.h"
+#include "nsIWindowWatcher.h"
+#include "nsIWritablePropertyBag2.h"
+#include "nsIXULRuntime.h"
 #include "nsNetCID.h"
+#include "nsPIWindowWatcher.h"
+#include "nsQueryObject.h"
 #include "nsRefreshDriver.h"
 #include "nsSandboxFlags.h"
+#include "nsServiceManagerUtils.h"
+#include "nsThreadUtils.h"
 #include "nsWindowRoot.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsXPCOMCID.h"
 #include "nsXULControllers.h"
 #include "prenv.h"
 #include "prrng.h"
+#include "xpcprivate.h"
 
 #ifdef MOZ_WEBSPEECH
 #  include "mozilla/dom/SpeechSynthesis.h"
@@ -274,6 +269,16 @@ static inline nsGlobalWindowInner* GetCurrentInnerWindowInternal(
     return err_rval;                                       \
   }                                                        \
   return GetCurrentInnerWindowInternal(this)->method args; \
+  PR_END_MACRO
+
+#define FORWARD_TO_INNER_SAFE(method, args, err_rval)          \
+  PR_BEGIN_MACRO                                               \
+  if (!mInnerWindow) {                                         \
+    NS_WARNING("No inner window available!");                  \
+    return err_rval;                                           \
+  }                                                            \
+  const RefPtr innerWin = GetCurrentInnerWindowInternal(this); \
+  return innerWin->method args;                                \
   PR_END_MACRO
 
 #define FORWARD_TO_INNER_WITH_STRONG_REF(method, args, err_rval)           \
@@ -625,8 +630,12 @@ bool nsOuterWindowProxy::getOwnPropertyDescriptor(
       // for now.  That's what js::Wrapper expects, and since we're same-origin
       // anyway this is not changing any security behavior.
       JSAutoRealm ar(cx, proxy);
-      JS_MarkCrossZoneId(cx, id);
-      bool ok = js::Wrapper::getOwnPropertyDescriptor(cx, proxy, id, desc);
+      JS::Rooted<jsid> wrappedId(cx, id);
+      if (!JS_WrapId(cx, &wrappedId)) {
+        return false;
+      }
+      bool ok =
+          js::Wrapper::getOwnPropertyDescriptor(cx, proxy, wrappedId, desc);
       if (!ok) {
         return false;
       }
@@ -783,8 +792,10 @@ bool nsOuterWindowProxy::ownPropertyKeys(
         return false;
       }
     }
-    for (auto& id : innerProps) {
-      JS_MarkCrossZoneId(cx, id);
+    for (size_t i = 0; i < innerProps.length(); i++) {
+      if (!JS_WrapId(cx, innerProps[i])) {
+        return false;
+      }
     }
     return js::AppendUnique(cx, props, innerProps);
   }
@@ -844,8 +855,11 @@ bool nsOuterWindowProxy::delete_(JSContext* cx, JS::Handle<JSObject*> proxy,
   // Let's do that, just in case, to avoid cross-compartment issues in our
   // js::Wrapper caller..
   JSAutoRealm ar(cx, proxy);
-  JS_MarkCrossZoneId(cx, id);
-  return js::Wrapper::delete_(cx, proxy, id, result);
+  JS::Rooted<jsid> wrappedId(cx, id);
+  if (!JS_WrapId(cx, &wrappedId)) {
+    return false;
+  }
+  return js::Wrapper::delete_(cx, proxy, wrappedId, result);
 }
 
 JSObject* nsOuterWindowProxy::getSameOriginPrototype(JSContext* cx) const {
@@ -872,8 +886,11 @@ bool nsOuterWindowProxy::has(JSContext* cx, JS::Handle<JSObject*> proxy,
   // Just to be safe in terms of compartment asserts, enter the Realm of
   // "proxy".  We're same-origin with it, so this should be safe.
   JSAutoRealm ar(cx, proxy);
-  JS_MarkCrossZoneId(cx, id);
-  return js::Wrapper::has(cx, proxy, id, bp);
+  JS::Rooted<jsid> wrappedId(cx, id);
+  if (!JS_WrapId(cx, &wrappedId)) {
+    return false;
+  }
+  return js::Wrapper::has(cx, proxy, wrappedId, bp);
 }
 
 bool nsOuterWindowProxy::hasOwn(JSContext* cx, JS::Handle<JSObject*> proxy,
@@ -905,8 +922,11 @@ bool nsOuterWindowProxy::hasOwn(JSContext* cx, JS::Handle<JSObject*> proxy,
   // Just to be safe in terms of compartment asserts, enter the Realm of
   // "proxy".  We're same-origin with it, so this should be safe.
   JSAutoRealm ar(cx, proxy);
-  JS_MarkCrossZoneId(cx, id);
-  return js::Wrapper::hasOwn(cx, proxy, id, bp);
+  JS::Rooted<jsid> wrappedId(cx, id);
+  if (!JS_WrapId(cx, &wrappedId)) {
+    return false;
+  }
+  return js::Wrapper::hasOwn(cx, proxy, wrappedId, bp);
 }
 
 bool nsOuterWindowProxy::get(JSContext* cx, JS::Handle<JSObject*> proxy,
@@ -915,7 +935,7 @@ bool nsOuterWindowProxy::get(JSContext* cx, JS::Handle<JSObject*> proxy,
                              JS::MutableHandle<JS::Value> vp) const {
   if (id == GetJSIDByIndex(cx, XPCJSContext::IDX_WRAPPED_JSOBJECT) &&
       xpc::AccessCheck::isChrome(js::GetContextCompartment(cx))) {
-    vp.set(JS::ObjectValue(*proxy));
+    vp.setObject(*proxy);
     return MaybeWrapValue(cx, vp);
   }
 
@@ -941,7 +961,10 @@ bool nsOuterWindowProxy::get(JSContext* cx, JS::Handle<JSObject*> proxy,
     // safe.
     JSAutoRealm ar(cx, proxy);
 
-    JS_MarkCrossZoneId(cx, id);
+    JS::Rooted<jsid> wrappedId(cx, id);
+    if (!JS_WrapId(cx, &wrappedId)) {
+      return false;
+    }
 
     JS::Rooted<JS::Value> wrappedReceiver(cx, receiver);
     if (!MaybeWrapValue(cx, &wrappedReceiver)) {
@@ -949,7 +972,7 @@ bool nsOuterWindowProxy::get(JSContext* cx, JS::Handle<JSObject*> proxy,
     }
 
     // Fall through to js::Wrapper.
-    if (!js::Wrapper::get(cx, proxy, wrappedReceiver, id, vp)) {
+    if (!js::Wrapper::get(cx, proxy, wrappedReceiver, wrappedId, vp)) {
       return false;
     }
   }
@@ -983,9 +1006,13 @@ bool nsOuterWindowProxy::set(JSContext* cx, JS::Handle<JSObject*> proxy,
     return false;
   }
 
-  JS_MarkCrossZoneId(cx, id);
+  JS::Rooted<jsid> wrappedId(cx, id);
+  if (!JS_WrapId(cx, &wrappedId)) {
+    return false;
+  }
 
-  return js::Wrapper::set(cx, proxy, id, wrappedArg, wrappedReceiver, result);
+  return js::Wrapper::set(cx, proxy, wrappedId, wrappedArg, wrappedReceiver,
+                          result);
 }
 
 bool nsOuterWindowProxy::getOwnEnumerablePropertyKeys(
@@ -1020,8 +1047,10 @@ bool nsOuterWindowProxy::getOwnEnumerablePropertyKeys(
     }
   }
 
-  for (auto& id : innerProps) {
-    JS_MarkCrossZoneId(cx, id);
+  for (size_t i = 0; i < innerProps.length(); i++) {
+    if (!JS_WrapId(cx, innerProps[i])) {
+      return false;
+    }
   }
 
   return js::AppendUnique(cx, props, innerProps);
@@ -2068,6 +2097,10 @@ static nsresult CreateNativeGlobalForInner(
       aDocument->GetBrowsingContext()->Top()->GetLanguageOverride(),
       aDocument->GetBrowsingContext()->Top()->GetTimezoneOverride());
 
+  if (principal->IsSystemPrincipal()) {
+    creationOptions.setFreezeBuiltins(true);
+  }
+
   // Determine if we need the Components object.
   bool needComponents = principal->IsSystemPrincipal();
   uint32_t flags = needComponents ? 0 : xpc::OMIT_COMPONENTS_OBJECT;
@@ -2236,14 +2269,19 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
     // currentInner->RefreshRealmPrincipals() here because we haven't yet set
     // its mDoc to aDocument.
     JS::Realm* realm = js::GetNonCCWObjectRealm(newInnerGlobal);
+    nsJSPrincipals* existing =
+        nsJSPrincipals::get(JS::GetRealmPrincipals(realm));
+    nsJSPrincipals* jsPrincipals =
+        nsJSPrincipals::get(aDocument->NodePrincipal());
+    if (existing != jsPrincipals) {
+      newInnerWindow->HoldOldPrincipal(existing);
+    }
 #ifdef DEBUG
     bool sameOrigin = false;
-    nsIPrincipal* existing = nsJSPrincipals::get(JS::GetRealmPrincipals(realm));
     aDocument->NodePrincipal()->Equals(existing, &sameOrigin);
     MOZ_ASSERT(sameOrigin);
 #endif
-    JS::SetRealmPrincipals(realm,
-                           nsJSPrincipals::get(aDocument->NodePrincipal()));
+    JS::SetRealmPrincipals(realm, jsPrincipals);
   } else {
     if (aState) {
       newInnerWindow = wsh->GetInnerWindow();
@@ -2636,7 +2674,8 @@ void nsGlobalWindowOuter::DispatchDOMWindowCreated() {
   }
 
   // Fire DOMWindowCreated at chrome event listeners
-  nsContentUtils::DispatchChromeEvent(mDoc, mDoc, u"DOMWindowCreated"_ns,
+  const RefPtr<Document> doc = mDoc;
+  nsContentUtils::DispatchChromeEvent(doc, doc, u"DOMWindowCreated"_ns,
                                       CanBubble::eYes, Cancelable::eNo);
 
   nsCOMPtr<nsIObserverService> observerService =
@@ -2836,6 +2875,10 @@ bool nsGlobalWindowOuter::AreDialogsEnabled() {
   if (mDocShell) {
     nsCOMPtr<nsIDocumentViewer> viewer;
     mDocShell->GetDocViewer(getter_AddRefs(viewer));
+
+    if (!viewer) {
+      return false;
+    }
 
     bool isHidden;
     viewer->GetIsHidden(&isHidden);
@@ -3430,7 +3473,8 @@ CSSToLayoutDeviceScale nsGlobalWindowOuter::CSSToDevScaleForBaseWindow(
   return scale;
 }
 
-nsresult nsGlobalWindowOuter::GetInnerSize(CSSSize& aSize) {
+nsresult nsGlobalWindowOuter::GetInnerSize(CSSSize& aSize,
+                                           CallerType aCallerType) {
   if (mDoc && mDoc->IsTopLevelContentDocument() &&
       nsLayoutUtils::ShouldHandleMetaViewport(mDoc)) {
     // Window.inner{Width,Height} depend on minimum-scale size and to get the
@@ -3465,6 +3509,10 @@ nsresult nsGlobalWindowOuter::GetInnerSize(CSSSize& aSize) {
 
   aSize = CSSPixel::FromAppUnits(innerSize);
 
+  if (aCallerType == dom::CallerType::System) {
+    return NS_OK;
+  }
+
   switch (StaticPrefs::dom_innerSize_rounding()) {
     case 1:
       aSize.width = std::roundf(aSize.width);
@@ -3481,26 +3529,18 @@ nsresult nsGlobalWindowOuter::GetInnerSize(CSSSize& aSize) {
   return NS_OK;
 }
 
-double nsGlobalWindowOuter::GetInnerWidthOuter(ErrorResult& aError) {
+double nsGlobalWindowOuter::GetInnerWidthOuter(CallerType aCallerType,
+                                               ErrorResult& aError) {
   CSSSize size;
-  aError = GetInnerSize(size);
+  aError = GetInnerSize(size, aCallerType);
   return size.width;
 }
 
-nsresult nsGlobalWindowOuter::GetInnerWidth(double* aInnerWidth) {
-  FORWARD_TO_INNER_WITH_STRONG_REF(GetInnerWidth, (aInnerWidth),
-                                   NS_ERROR_UNEXPECTED);
-}
-
-double nsGlobalWindowOuter::GetInnerHeightOuter(ErrorResult& aError) {
+double nsGlobalWindowOuter::GetInnerHeightOuter(CallerType aCallerType,
+                                                ErrorResult& aError) {
   CSSSize size;
-  aError = GetInnerSize(size);
+  aError = GetInnerSize(size, aCallerType);
   return size.height;
-}
-
-nsresult nsGlobalWindowOuter::GetInnerHeight(double* aInnerHeight) {
-  FORWARD_TO_INNER_WITH_STRONG_REF(GetInnerHeight, (aInnerHeight),
-                                   NS_ERROR_UNEXPECTED);
 }
 
 CSSIntSize nsGlobalWindowOuter::GetOuterSize(CallerType aCallerType,
@@ -3840,11 +3880,11 @@ bool nsGlobalWindowOuter::DispatchCustomEvent(
   bool defaultActionEnabled = true;
 
   if (aChromeOnlyDispatch == ChromeOnlyDispatch::eYes) {
-    nsContentUtils::DispatchEventOnlyToChrome(mDoc, this, aEventName,
+    nsContentUtils::DispatchEventOnlyToChrome(this, this, aEventName,
                                               CanBubble::eYes, Cancelable::eYes,
                                               &defaultActionEnabled);
   } else {
-    nsContentUtils::DispatchTrustedEvent(mDoc, this, aEventName,
+    nsContentUtils::DispatchTrustedEvent(this, this, aEventName,
                                          CanBubble::eYes, Cancelable::eYes,
                                          &defaultActionEnabled);
   }
@@ -3857,10 +3897,8 @@ bool nsGlobalWindowOuter::WindowExists(const nsAString& aName,
                                        bool aLookForCallerOnJSStack) {
   MOZ_ASSERT(mDocShell, "Must have docshell");
 
-  if (aForceNoOpener) {
-    return aName.LowerCaseEqualsLiteral("_self") ||
-           aName.LowerCaseEqualsLiteral("_top") ||
-           aName.LowerCaseEqualsLiteral("_parent");
+  if (aForceNoOpener && !nsContentUtils::IsSpecialName(aName)) {
+    return false;
   }
 
   if (WindowGlobalChild* wgc = mInnerWindow->GetWindowGlobalChild()) {
@@ -3908,7 +3946,8 @@ nsresult nsGlobalWindowOuter::SetFullScreen(bool aFullscreen) {
                                aFullscreen);
 }
 
-static void FinishDOMFullscreenChange(Document* aDoc, bool aInDOMFullscreen) {
+MOZ_CAN_RUN_SCRIPT static void FinishDOMFullscreenChange(
+    Document* aDoc, bool aInDOMFullscreen) {
   if (aInDOMFullscreen) {
     // Ask the document to handle any pending DOM fullscreen change.
     if (!Document::HandlePendingFullscreenRequests(aDoc)) {
@@ -3956,7 +3995,7 @@ class FullscreenTransitionTask : public Runnable {
         mStage(eBeforeToggle),
         mFullscreen(aFullscreen) {}
 
-  NS_IMETHOD Run() override;
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY NS_IMETHOD Run() override;
 
  private:
   ~FullscreenTransitionTask() override = default;
@@ -4009,7 +4048,7 @@ class FullscreenTransitionTask : public Runnable {
    private:
     ~Observer() = default;
 
-    RefPtr<FullscreenTransitionTask> mTask;
+    MOZ_KNOWN_LIVE const RefPtr<FullscreenTransitionTask> mTask;
   };
 
   static const char* const kPaintedTopic;
@@ -4054,13 +4093,13 @@ FullscreenTransitionTask::Run() {
   } else if (stage == eToggleFullscreen) {
     PROFILER_MARKER_UNTYPED("Fullscreen toggle start", DOM);
     mFullscreenChangeStartTime = TimeStamp::Now();
-    // Toggle the fullscreen state on the widget
-    if (!mWindow->SetWidgetFullscreen(FullscreenReason::ForFullscreenAPI,
-                                      mFullscreen, mWidget)) {
-      // Fail to setup the widget, call FinishFullscreenChange to
-      // complete fullscreen change directly.
-      mWindow->FinishFullscreenChange(mFullscreen);
-    }
+    // Toggle the fullscreen state on the widget. If the widget refuses,
+    // TryMakeWidgetFullscreen() finishes the fullscreen change for us, but we
+    // still have to run the remaining stages to undo the transition effect.
+    const RefPtr<nsGlobalWindowOuter> win = mWindow;
+    const nsCOMPtr<nsIWidget> widget = mWidget;
+    win->TryMakeWidgetFullscreen(FullscreenReason::ForFullscreenAPI,
+                                 mFullscreen, widget);
     // Set observer for the next content paint.
     nsCOMPtr<nsIObserver> observer = new Observer(this);
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -4103,9 +4142,9 @@ FullscreenTransitionTask::Run() {
 NS_IMPL_ISUPPORTS(FullscreenTransitionTask::Observer, nsIObserver, nsINamed)
 
 NS_IMETHODIMP
-FullscreenTransitionTask::Observer::Observe(nsISupports* aSubject,
-                                            const char* aTopic,
-                                            const char16_t* aData) {
+FullscreenTransitionTask::Observer::Observe(
+    nsISupports* aSubject, const char* aTopic,
+    const char16_t* aData) MOZ_CAN_RUN_SCRIPT_BOUNDARY {
   bool shouldContinue = false;
   if (strcmp(aTopic, FullscreenTransitionTask::kPaintedTopic) == 0) {
     nsCOMPtr<nsPIDOMWindowInner> win(do_QueryInterface(aSubject));
@@ -4143,8 +4182,10 @@ FullscreenTransitionTask::Observer::GetName(nsACString& aName) {
   return NS_OK;
 }
 
-static bool MakeWidgetFullscreen(nsGlobalWindowOuter* aWindow,
-                                 FullscreenReason aReason, bool aFullscreen) {
+// Returns false if the request could not be handed over to the widget at all,
+// in which case the caller is responsible for finishing the fullscreen change.
+MOZ_CAN_RUN_SCRIPT static bool MakeWidgetFullscreen(
+    nsGlobalWindowOuter* aWindow, FullscreenReason aReason, bool aFullscreen) {
   nsCOMPtr<nsIWidget> widget = aWindow->GetMainWidget();
   if (!widget) {
     return false;
@@ -4162,7 +4203,8 @@ static bool MakeWidgetFullscreen(nsGlobalWindowOuter* aWindow,
   }
 
   if (!performTransition) {
-    return aWindow->SetWidgetFullscreen(aReason, aFullscreen, widget);
+    aWindow->TryMakeWidgetFullscreen(aReason, aFullscreen, widget);
+    return true;
   }
 
   nsCOMPtr<nsIRunnable> task = new FullscreenTransitionTask(
@@ -4194,7 +4236,8 @@ nsresult nsGlobalWindowOuter::ProcessWidgetFullscreenRequest(
     if (MakeWidgetFullscreen(this, aReason, aFullscreen)) {
       // The rest of code for switching fullscreen is in nsGlobalWindowOuter::
       // FinishFullscreenChange() which will be called after sizemodechange
-      // event is dispatched.
+      // event is dispatched, or directly by TryMakeWidgetFullscreen() if the
+      // widget refused the change.
       return NS_OK;
     }
   }
@@ -4306,7 +4349,8 @@ nsresult nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
       // If there is a in-process fullscreen request, FinishDOMFullscreenChange
       // will be called when the request is finished.
       if (!mInProcessFullscreenRequest.isSome()) {
-        FinishDOMFullscreenChange(mDoc, false);
+        const RefPtr<Document> doc = mDoc;
+        FinishDOMFullscreenChange(doc, false);
       }
       return NS_OK;
     }
@@ -4338,9 +4382,9 @@ void nsGlobalWindowOuter::ForceFullScreenInWidget() {
   mForceFullScreenInWidget = true;
 }
 
-bool nsGlobalWindowOuter::SetWidgetFullscreen(FullscreenReason aReason,
-                                              bool aIsFullscreen,
-                                              nsIWidget* aWidget) {
+bool nsGlobalWindowOuter::TryMakeWidgetFullscreen(FullscreenReason aReason,
+                                                  bool aIsFullscreen,
+                                                  nsIWidget* aWidget) {
   MOZ_ASSERT(this == GetInProcessTopInternal(),
              "Only topmost window should call this");
   MOZ_ASSERT(!GetFrameElementInternal(), "Content window should not call this");
@@ -4364,7 +4408,20 @@ bool nsGlobalWindowOuter::SetWidgetFullscreen(FullscreenReason aReason,
                     // the native system behavior.
                     aWidget->MakeFullScreenWithNativeTransition(aIsFullscreen)
                     : aWidget->MakeFullScreen(aIsFullscreen);
-  return NS_SUCCEEDED(rv);
+  if (NS_FAILED(rv)) {
+    if (!NS_WARN_IF(!IsChromeWindow())) {
+      if (RefPtr<PresShell> presShell =
+              do_QueryReferent(mChromeFields.mFullscreenPresShell)) {
+        if (nsRefreshDriver* rd = presShell->GetRefreshDriver()) {
+          rd->Thaw();
+        }
+        mChromeFields.mFullscreenPresShell = nullptr;
+      }
+    }
+    FinishFullscreenChange(!aIsFullscreen);
+    return false;
+  }
+  return true;
 }
 
 /* virtual */
@@ -4425,7 +4482,8 @@ void nsGlobalWindowOuter::FinishFullscreenChange(bool aIsFullscreen) {
   // of the document before dispatching the "fullscreen" event, so
   // that the chrome can distinguish between browser fullscreen mode
   // and DOM fullscreen.
-  FinishDOMFullscreenChange(mDoc, aIsFullscreen);
+  const RefPtr<Document> doc = mDoc;
+  FinishDOMFullscreenChange(doc, aIsFullscreen);
 
   // dispatch a "fullscreen" DOM event so that XUL apps can
   // respond visually if we are kicked into full screen mode
@@ -4661,8 +4719,10 @@ bool nsGlobalWindowOuter::CanMoveResizeWindows(CallerType aCallerType,
     nsCOMPtr<nsIDragService> ds =
         do_GetService("@mozilla.org/widget/dragservice;1");
     if (ds) {
-      nsGlobalWindowInner::sDragServiceDisabled = true;
+      // Suppress() ends the current drag session, which calls
+      // MouseButtonReleased(), so only mark the suppression as ours afterwards.
       ds->Suppress();
+      nsGlobalWindowInner::sDragServiceDisabled = true;
     }
   }
   return true;
@@ -4873,7 +4933,15 @@ void nsGlobalWindowOuter::FocusOuter(CallerType aCallerType,
   if (treeOwnerAsWin && (canFocus || isActive)) {
     bool isEnabled = true;
     if (NS_SUCCEEDED(treeOwnerAsWin->GetEnabled(&isEnabled)) && !isEnabled) {
-      NS_WARNING("Should not try to set the focus on a disabled window");
+      // A system caller is typically another application handing us an URL.
+      // It should bring us to the front.
+      if (aCallerType == CallerType::System) {
+        if (nsCOMPtr<nsIWidget> widget = treeOwnerAsWin->GetMainWidget()) {
+          widget->SetFocus(nsIWidget::Raise::Yes, aCallerType);
+        }
+      } else {
+        NS_WARNING("Should not try to set the focus on a disabled window");
+      }
       return;
     }
   }
@@ -4981,7 +5049,6 @@ void nsGlobalWindowOuter::PrintOuter(ErrorResult& aError) {
     }
   }
 
-#ifdef NS_PRINTING
   RefPtr<BrowsingContext> top =
       mBrowsingContext ? mBrowsingContext->Top() : nullptr;
   if (NS_WARN_IF(top && top->GetIsPrinting())) {
@@ -5002,7 +5069,6 @@ void nsGlobalWindowOuter::PrintOuter(ErrorResult& aError) {
                           !StaticPrefs::print_prefer_system_dialog();
   Print(nullptr, nullptr, nullptr, nullptr, IsPreview(forPreview),
         IsForWindowDotPrint::Yes, nullptr, nullptr, aError);
-#endif
 }
 
 class MOZ_RAII AutoModalState {
@@ -5025,7 +5091,6 @@ Nullable<WindowProxyHolder> nsGlobalWindowOuter::Print(
     IsPreview aIsPreview, IsForWindowDotPrint aForWindowDotPrint,
     PrintPreviewResolver&& aPrintPreviewCallback,
     RefPtr<BrowsingContext>* aCachedBrowsingContext, ErrorResult& aError) {
-#ifdef NS_PRINTING
   nsCOMPtr<nsIPrintSettingsService> printSettingsService =
       do_GetService("@mozilla.org/gfx/printsettings-service;1");
   if (!printSettingsService) {
@@ -5269,9 +5334,6 @@ Nullable<WindowProxyHolder> nsGlobalWindowOuter::Print(
   }
 
   return WindowProxyHolder(std::move(bc));
-#else
-  return nullptr;
-#endif  // NS_PRINTING
 }
 
 void nsGlobalWindowOuter::MoveToOuter(int32_t aXPos, int32_t aYPos,
@@ -5409,8 +5471,12 @@ void nsGlobalWindowOuter::ResizeByOuter(int32_t aWidthDif, int32_t aHeightDif,
   auto scale = CSSToDevScaleForBaseWindow(treeOwnerAsWin);
   CSSIntSize cssSize = RoundedToInt(size / scale);
 
-  cssSize.width += aWidthDif;
-  cssSize.height += aHeightDif;
+  // The deltas come from content and can be large enough to overflow a 32-bit
+  // add, so do the arithmetic in 64 bits and keep the result in range.
+  cssSize.width = int32_t(
+      std::clamp<int64_t>(int64_t(cssSize.width) + aWidthDif, 0, INT32_MAX));
+  cssSize.height = int32_t(
+      std::clamp<int64_t>(int64_t(cssSize.height) + aHeightDif, 0, INT32_MAX));
 
   if (mBrowsingContext->GetIsDocumentPiP()) {
     if (Maybe<CSSIntRect> screen =
@@ -5463,7 +5529,7 @@ void nsGlobalWindowOuter::SizeToContentOuter(
     return;
   }
 
-  if (mBrowsingContext->IsSubframe()) {
+  if (mBrowsingContext->IsSubframe() || mBrowsingContext->IsContent()) {
     return;
   }
 
@@ -5692,8 +5758,6 @@ Nullable<WindowProxyHolder> nsGlobalWindowOuter::OpenDialogOuter(
 }
 
 WindowProxyHolder nsGlobalWindowOuter::GetFramesOuter() {
-  RefPtr<nsPIDOMWindowOuter> frames(this);
-  FlushPendingNotifications(FlushType::ContentAndNotify);
   return WindowProxyHolder(mBrowsingContext);
 }
 
@@ -6027,6 +6091,17 @@ void nsGlobalWindowOuter::CloseOuter(bool aTrustedCaller) {
     return;
   }
 
+  // Check allow-top-navigation sandbox flags
+  if (RefPtr<nsGlobalWindowInner> callerInner =
+          nsContentUtils::IncumbentInnerWindow()) {
+    if (BrowsingContext* callerBC = callerInner->GetBrowsingContext()) {
+      if (NS_FAILED(mBrowsingContext->EnsureSourceSandboxAllowsNavigation(
+              callerBC, true))) {
+        return;
+      }
+    }
+  }
+
   // Don't allow scripts from content to close non-neterror windows that
   // were not opened by script.
   if (mDoc) {
@@ -6034,26 +6109,17 @@ void nsGlobalWindowOuter::CloseOuter(bool aTrustedCaller) {
     nsresult rv = mDoc->GetURL(url);
     NS_ENSURE_SUCCESS_VOID(rv);
 
-    RefPtr<ChildSHistory> csh =
-        nsDocShell::Cast(mDocShell)->GetSessionHistory();
-
     if (!StringBeginsWith(url, u"about:neterror"_ns) &&
-        !mBrowsingContext->GetTopLevelCreatedByWebContent() &&
-        !aTrustedCaller && csh && csh->Count() > 1) {
-      bool allowClose =
-          mAllowScriptsToClose ||
-          Preferences::GetBool("dom.allow_scripts_to_close_windows", true);
-      if (!allowClose) {
-        // We're blocking the close operation
-        // report localized error msg in JS console
-        nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                        "DOM Window"_ns,
-                                        mDoc,  // Better name for the category?
-                                        PropertiesFile::DOM_PROPERTIES,
-                                        "WindowCloseByScriptBlockedWarning");
-
-        return;
-      }
+        !mBrowsingContext->IsScriptClosable() && !aTrustedCaller &&
+        !mAllowScriptsToClose &&
+        !Preferences::GetBool("dom.allow_scripts_to_close_windows", true)) {
+      // We're blocking the close operation
+      // report localized error msg in JS console
+      nsContentUtils::ReportToConsole(
+          nsIScriptError::warningFlag, "DOM Window"_ns,
+          mDoc,  // Better name for the category?
+          PropertiesFile::DOM_PROPERTIES, "WindowCloseByScriptBlockedWarning");
+      return;
     }
   }
 
@@ -6672,9 +6738,7 @@ nsresult nsGlobalWindowOuter::GetInterfaceInternal(const nsIID& aIID,
   } else if (aIID.Equals(NS_GET_IID(nsIDocShell))) {
     nsCOMPtr<nsIDocShell> docShell = mDocShell;
     docShell.forget(aSink);
-  }
-#ifdef NS_PRINTING
-  else if (aIID.Equals(NS_GET_IID(nsIWebBrowserPrint))) {
+  } else if (aIID.Equals(NS_GET_IID(nsIWebBrowserPrint))) {
     if (mDocShell) {
       nsCOMPtr<nsIDocumentViewer> viewer;
       mDocShell->GetDocViewer(getter_AddRefs(viewer));
@@ -6683,9 +6747,7 @@ nsresult nsGlobalWindowOuter::GetInterfaceInternal(const nsIID& aIID,
         webBrowserPrint.forget(aSink);
       }
     }
-  }
-#endif
-  else if (aIID.Equals(NS_GET_IID(nsILoadContext))) {
+  } else if (aIID.Equals(NS_GET_IID(nsILoadContext))) {
     nsCOMPtr<nsILoadContext> loadContext(do_QueryInterface(mDocShell));
     loadContext.forget(aSink);
   }
@@ -6721,8 +6783,8 @@ bool nsGlobalWindowOuter::IsFrozen() const {
 }
 
 nsresult nsGlobalWindowOuter::FireDelayedDOMEvents(bool aIncludeSubWindows) {
-  FORWARD_TO_INNER(FireDelayedDOMEvents, (aIncludeSubWindows),
-                   NS_ERROR_UNEXPECTED);
+  FORWARD_TO_INNER_SAFE(FireDelayedDOMEvents, (aIncludeSubWindows),
+                        NS_ERROR_UNEXPECTED);
 }
 
 //*****************************************************************************
@@ -6911,8 +6973,6 @@ nsresult nsGlobalWindowOuter::OpenInternal(
       do_GetService(NS_WINDOWWATCHER_CONTRACTID, &rv);
   NS_ENSURE_TRUE(wwatch, rv);
 
-  NS_ConvertUTF16toUTF8 name(windowName);
-
   nsCOMPtr<nsPIWindowWatcher> pwwatch(do_QueryInterface(wwatch));
   NS_ENSURE_STATE(pwwatch);
 
@@ -6947,7 +7007,7 @@ nsresult nsGlobalWindowOuter::OpenInternal(
     if (!aCalledNoScript) {
       // We asserted at the top of this function that aNavigate is true for
       // !aCalledNoScript.
-      rv = pwwatch->OpenWindow2(this, uri, name, options, modifiers,
+      rv = pwwatch->OpenWindow2(this, uri, windowName, options, modifiers,
                                 /* aCalledFromScript = */ true, aDialog,
                                 aNavigate, aArguments, isPopupSpamWindow,
                                 forceNoOpener, forceNoReferrer, wwPrintKind,
@@ -6963,7 +7023,7 @@ nsresult nsGlobalWindowOuter::OpenInternal(
       // when it tries to compute the caller principal to associate with dialog
       // arguments. That whole setup just really needs to be rewritten. :-(
       AutoNoJSAPI nojsapi;
-      rv = pwwatch->OpenWindow2(this, uri, name, options, modifiers,
+      rv = pwwatch->OpenWindow2(this, uri, windowName, options, modifiers,
                                 /* aCalledFromScript = */ false, aDialog,
                                 aNavigate, aArguments, isPopupSpamWindow,
                                 forceNoOpener, forceNoReferrer, wwPrintKind,
@@ -6976,7 +7036,7 @@ nsresult nsGlobalWindowOuter::OpenInternal(
   // success!
 
   if (!aCalledNoScript && !windowExists && uri && !forceNoOpener) {
-    MaybeAllowStorageForOpenedWindow(uri);
+    MaybeAllowStorageForOpenedWindow(this, uri);
   }
 
   if (domReturn && aDoJSFixups) {
@@ -6997,42 +7057,6 @@ nsresult nsGlobalWindowOuter::OpenInternal(
 
   domReturn.forget(aReturn);
   return NS_OK;
-}
-
-void nsGlobalWindowOuter::MaybeAllowStorageForOpenedWindow(nsIURI* aURI) {
-  nsGlobalWindowInner* inner = GetCurrentInnerWindowInternal(this);
-  if (NS_WARN_IF(!inner)) {
-    return;
-  }
-
-  // Don't trigger the heuristic for third-party trackers.
-  if (StaticPrefs::
-          privacy_restrict3rdpartystorage_heuristic_exclude_third_party_trackers() &&
-      nsContentUtils::IsThirdPartyTrackingResourceWindow(inner)) {
-    return;
-  }
-
-  // No 3rd party URL/window.
-  if (!AntiTrackingUtils::IsThirdPartyWindow(inner, aURI)) {
-    return;
-  }
-
-  Document* doc = inner->GetDoc();
-  if (!doc) {
-    return;
-  }
-  nsCOMPtr<nsIPrincipal> principal = BasePrincipal::CreateContentPrincipal(
-      aURI, doc->NodePrincipal()->OriginAttributesRef());
-
-  // We don't care when the asynchronous work finishes here.
-  // Without e10s or fission enabled this is run in the parent process.
-  if (XRE_IsParentProcess()) {
-    (void)StorageAccessAPIHelper::AllowAccessForOnParentProcess(
-        principal, GetBrowsingContext(), ContentBlockingNotifier::eOpener);
-  } else {
-    (void)StorageAccessAPIHelper::AllowAccessForOnChildProcess(
-        principal, GetBrowsingContext(), ContentBlockingNotifier::eOpener);
-  }
 }
 
 //*****************************************************************************

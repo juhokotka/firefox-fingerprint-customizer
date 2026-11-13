@@ -6,80 +6,66 @@
 
 #include "gfxWindowsPlatform.h"
 
+#include <d2d1_1.h>
+#include <d3d10_1.h>
+#include <d3d11.h>
+#include <dwmapi.h>
+#include <dwrite.h>
+#include <winternl.h>
+
+#include "base/thread.h"
 #include "cairo.h"
-#include "mozilla/layers/CompositorBridgeChild.h"
-
+#include "d3dkmtQueryStatistics.h"
+#include "gfx2DGlue.h"
 #include "gfxBlur.h"
+#include "gfxCrashReporterUtils.h"
+#include "gfxDWriteCommon.h"
+#include "gfxDWriteFontList.h"
+#include "gfxDWriteFonts.h"
 #include "gfxImageSurface.h"
+#include "gfxTextRun.h"
+#include "gfxUserFontSet.h"
 #include "gfxWindowsSurface.h"
-
-#include "nsUnicharUtils.h"
-#include "nsUnicodeProperties.h"
-
+#include "imgLoader.h"
+#include "mozilla/Components.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/ProfilerThreadSleep.h"
-#include "mozilla/Components.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/WindowsVersion.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/gfxVars.h"
+#include "mozilla/glean/GfxMetrics.h"
+#include "mozilla/layers/CanvasChild.h"
+#include "mozilla/layers/CompositorBridgeChild.h"
+#include "mozilla/layers/CompositorThread.h"
 #include "nsIGfxInfo.h"
+#include "nsIMemoryReporter.h"
+#include "nsIXULRuntime.h"
 #include "nsServiceManagerUtils.h"
 #include "nsTArray.h"
 #include "nsThreadUtils.h"
-#include "mozilla/glean/GfxMetrics.h"
-
-#include "plbase64.h"
-#include "nsIXULRuntime.h"
-#include "imgLoader.h"
-
-#include "nsIGfxInfo.h"
-
-#include "gfxCrashReporterUtils.h"
-
-#include "mozilla/layers/CanvasChild.h"
-#include "mozilla/layers/CompositorThread.h"
-
-#include "gfxDWriteFontList.h"
-#include "gfxDWriteFonts.h"
-#include "gfxDWriteCommon.h"
-#include <dwrite.h>
-
-#include "gfxTextRun.h"
-#include "gfxUserFontSet.h"
+#include "nsUnicharUtils.h"
+#include "nsUnicodeProperties.h"
 #include "nsWindowsHelpers.h"
-#include "gfx2DGlue.h"
-
-#include <d3d10_1.h>
-
-#include "mozilla/gfx/2D.h"
-#include "mozilla/gfx/gfxVars.h"
-
-#include <dwmapi.h>
-#include <d3d11.h>
-#include <d2d1_1.h>
-
-#include "nsIMemoryReporter.h"
-#include <winternl.h>
-#include "d3dkmtQueryStatistics.h"
-
-#include "base/thread.h"
-#include "mozilla/StaticPrefs_gfx.h"
+#include "plbase64.h"
 #ifdef MOZ_WMF_CDM
 #  include "mozilla/StaticPrefs_media.h"
 #endif
-#include "mozilla/StaticPrefs_layers.h"
-#include "gfxConfig.h"
-#include "VsyncSource.h"
+#include "D3D11Checks.h"
 #include "DriverCrashGuard.h"
+#include "VsyncSource.h"
+#include "gfxConfig.h"
+#include "mozilla/ScreenHelperWin.h"
+#include "mozilla/StaticPrefs_layers.h"
+#include "mozilla/WindowsProcessMitigations.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/gfx/DisplayConfigWindows.h"
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/layers/DeviceAttachmentsD3D11.h"
-#include "mozilla/WindowsProcessMitigations.h"
-#include "D3D11Checks.h"
-#include "mozilla/ScreenHelperWin.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -111,7 +97,7 @@ class GPUAdapterReporter final : public nsIMemoryReporter {
     return result;
   }
 
-  ~GPUAdapterReporter() {}
+  ~GPUAdapterReporter() = default;
 
  public:
   NS_DECL_ISUPPORTS
@@ -209,7 +195,7 @@ Atomic<size_t> gfxWindowsPlatform::sD3D11SharedTextures;
 Atomic<size_t> gfxWindowsPlatform::sD3D9SharedTextures;
 
 class D3DSharedTexturesReporter final : public nsIMemoryReporter {
-  ~D3DSharedTexturesReporter() {}
+  ~D3DSharedTexturesReporter() = default;
 
  public:
   NS_DECL_ISUPPORTS
@@ -387,10 +373,109 @@ void gfxWindowsPlatform::InitPlatformHardwareVideoConfig() {
     featureEnc.ForceDisable(FeatureStatus::Unavailable, "Cannot use with WARP",
                             "FEATURE_FAILURE_D3D11_WARP_DEVICE"_ns);
   }
+
+  InitReuseDecoderDeviceConfig(dm);
+  InitD3D11FencesConfig(dm);
+}
+
+void gfxWindowsPlatform::InitReuseDecoderDeviceConfig(DeviceManagerDx* aDm) {
+  FeatureState& feature = gfxConfig::GetFeature(Feature::REUSE_DECODER_DEVICE);
+  feature.Reset();
+  feature.EnableByDefault();
+
+  nsCOMPtr<nsIGfxInfo> gfxInfo = components::GfxInfo::Service();
+
+  bool isAMD = false;
+  if (gfxInfo) {
+    nsAutoString adapterVendorId;
+    gfxInfo->GetAdapterVendorID(adapterVendorId);
+    isAMD = adapterVendorId.EqualsLiteral("0x1002");
+  }
+  // On hybrid GPU systems the compositor device may be on another adapter than
+  // the one gfxInfo reports, so also check it once its status is known.
+  if (aDm && aDm->GetCompositorAdapterVendorId() == Some(0x1002u)) {
+    isAMD = true;
+  }
+
+  bool blocked = true;
+  FeatureStatus blockedStatus = FeatureStatus::BlockedNoGfxInfo;
+  const char* blockedMessage = "gfxInfo is broken";
+  nsCString failureId;
+  int32_t status;
+  if (!gfxInfo ||
+      NS_FAILED(gfxInfo->GetFeatureStatus(
+          nsIGfxInfo::FEATURE_REUSE_DECODER_DEVICE, failureId, &status))) {
+    failureId = "FEATURE_FAILURE_NO_GFX_INFO"_ns;
+  } else if (status != nsIGfxInfo::FEATURE_STATUS_OK) {
+    blockedStatus = FeatureStatus::Blocked;
+    blockedMessage = "Blocklisted by gfxInfo";
+  } else {
+    blocked = false;
+  }
+
+  const bool prefEnabled =
+      StaticPrefs::gfx_direct3d11_reuse_decoder_device_AtStartup();
+  // AMD drivers are known to crash when using separate devices for decoding
+  // and compositing, so the decoder device is always reused there.
+  if (isAMD && (!prefEnabled || blocked)) {
+    feature.UserForceEnable("Always reused on AMD");
+  } else if (!prefEnabled) {
+    feature.UserDisable("Disabled via gfx.direct3d11.reuse-decoder-device",
+                        "FEATURE_FAILURE_PREF_OFF"_ns);
+  } else if (
+      StaticPrefs::
+          gfx_direct3d11_reuse_decoder_device_force_enabled_AtStartup()) {
+    feature.UserForceEnable("Force enabled by pref");
+  }
+
+  if (blocked) {
+    feature.Disable(blockedStatus, blockedMessage, failureId);
+  }
+
+  const bool forceDisabled = StaticPrefs::
+      gfx_direct3d11_reuse_decoder_device_force_disabled_AtStartup();
+  gfxVars::SetReuseDecoderDevice(feature.IsEnabled() && !forceDisabled);
+
+  // DeviceManagerDx checks the remaining conditions itself, and decoders still
+  // share one decoder device when they fail, so they only affect reporting.
+  if (forceDisabled) {
+    feature.ForceDisable(FeatureStatus::Disabled, "Force disabled by pref",
+                         "FEATURE_FAILURE_USER_FORCE_DISABLED"_ns);
+  } else if (!gfxConfig::IsEnabled(Feature::D3D11_COMPOSITING)) {
+    feature.SetFailed(FeatureStatus::Unavailable, "Requires D3D11 compositing",
+                      "FEATURE_FAILURE_REQUIRES_D3D11_COMPOSITING"_ns);
+  } else if (gfxVars::UseSoftwareWebRender()) {
+    feature.SetFailed(FeatureStatus::Unavailable, "Requires hardware WebRender",
+                      "FEATURE_FAILURE_REQUIRES_HW_WEBRENDER"_ns);
+  } else if (aDm && aDm->CompositorDeviceSupportsVideo() == Some(false)) {
+    feature.SetFailed(FeatureStatus::Unavailable,
+                      "Compositor device has no video support",
+                      "FEATURE_FAILURE_COMPOSITOR_NO_VIDEO"_ns);
+  }
+}
+
+void gfxWindowsPlatform::InitD3D11FencesConfig(DeviceManagerDx* aDm) {
+  FeatureState& feature = gfxConfig::GetFeature(Feature::D3D11_FENCES);
+  feature.Reset();
+  feature.EnableByDefault();
+
+  if (!StaticPrefs::gfx_direct3d11_fences_enabled_AtStartup()) {
+    feature.UserDisable("Disabled via gfx.direct3d11.fences-enabled",
+                        "FEATURE_FAILURE_PREF_OFF"_ns);
+  }
+
+  if (!gfxConfig::IsEnabled(Feature::D3D11_COMPOSITING)) {
+    feature.SetFailed(FeatureStatus::Unavailable, "Requires D3D11 compositing",
+                      "FEATURE_FAILURE_REQUIRES_D3D11_COMPOSITING"_ns);
+  } else if (aDm && aDm->CompositorDeviceSupportsFences() == Some(false)) {
+    feature.SetFailed(FeatureStatus::Unavailable,
+                      "Not supported by the compositor device",
+                      "FEATURE_FAILURE_NO_FENCE_SUPPORT"_ns);
+  }
 }
 
 #ifdef MOZ_WMF_CDM
-void gfxWindowsPlatform::InitPlatformHardwarDRMConfig() {
+void gfxWindowsPlatform::InitPlatformHardwareDRMConfig() {
   nsCString message, failureId;
   FeatureState& featureHWDRM = gfxConfig::GetFeature(Feature::WMF_HW_DRM);
   featureHWDRM.Reset();
@@ -1381,16 +1466,8 @@ void gfxWindowsPlatform::RecordStartupTelemetry() {
   }
 
   DeviceManagerDx* dx = DeviceManagerDx::Get();
-  nsTArray<DXGI_OUTPUT_DESC1> outputs = dx->EnumerateOutputs();
-
-  uint32_t allSupportedColorSpaces = 0;
-  for (auto& output : outputs) {
-    uint32_t colorSpace = 1 << output.ColorSpace;
-    allSupportedColorSpaces |= colorSpace;
-  }
-
   glean::gfx_hdr::windows_display_colorspace_bitfield.Set(
-      allSupportedColorSpaces);
+      dx->MonitorColorSpaceBitfield());
 }
 
 // Supports lazy device initialization on Windows, so that WebRender can avoid

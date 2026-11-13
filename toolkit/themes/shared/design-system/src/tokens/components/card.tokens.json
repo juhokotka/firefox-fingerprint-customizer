@@ -13,6 +13,7 @@
       "value": "{border.width}"
     },
     "color": {
+      "ignoreFigma": "color-mix with currentColor cannot be expressed in Figma",
       "value": {
         "light": "color-mix(in srgb, currentColor 10%, transparent)",
         "dark": "color-mix(in srgb, currentColor 6%, transparent)",
@@ -36,6 +37,40 @@
       },
       "hover": {
         "value": "{box-shadow.level-4}"
+      }
+    }
+  },
+  "cover": {
+    "image": {
+      "border": {
+        "radius": {
+          "value": "{border.radius.medium}"
+        }
+      },
+      "height": {
+        "default": {
+          "value": "160px"
+        }
+      },
+      "padding": {
+        "@base": {
+          "value": "{space.small}"
+        },
+        "compact": {
+          "value": "{space.xsmall}"
+        }
+      },
+      "object": {
+        "fit": {
+          "default": {
+            "value": "cover"
+          }
+        },
+        "position": {
+          "default": {
+            "value": "center"
+          }
+        }
       }
     }
   },

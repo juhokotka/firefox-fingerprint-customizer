@@ -9,21 +9,18 @@
  */
 
 import { UrlbarShared } from "chrome://browser/content/urlbar/UrlbarShared.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-ChromeUtils.defineESModuleGetters(lazy, {
+/**
+ * @import { SearchMode } from "chrome://browser/content/urlbar/UrlbarInputBase.mjs"
+ */
+
+const lazy = XPCOMUtils.declareLazy({
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
   UrlUtils: "resource://gre/modules/UrlUtils.sys.mjs",
-});
-
-ChromeUtils.defineLazyGetter(lazy, "logger", () =>
-  UrlbarShared.getLogger({ prefix: "Tokenizer" })
-);
-
-ChromeUtils.defineLazyGetter(lazy, "gFluentStrings", function () {
-  return new Localization(["browser/browser.ftl"]);
+  logger: () => UrlbarShared.getLogger({ prefix: "Tokenizer" }),
+  gFluentStrings: () => new Localization(["browser/browser.ftl"]),
 });
 
 /**
@@ -52,8 +49,8 @@ let tokenToKeywords = new Map();
 export var UrlbarTokenizer = {
   async loadL10nRestrictKeywords() {
     let l10nKeywords = await lazy.gFluentStrings.formatValues(
-      lazy.UrlbarUtils.LOCAL_SEARCH_MODES.map(mode => {
-        let name = lazy.UrlbarUtils.getResultSourceName(mode.source);
+      UrlbarShared.LOCAL_SEARCH_MODES.map(mode => {
+        let name = UrlbarShared.getResultSourceName(mode.source);
         return { id: `urlbar-search-mode-${name}` };
       })
     );
@@ -63,13 +60,13 @@ export var UrlbarTokenizer = {
     ]);
 
     let englishKeywords = await englishSearchStrings.formatValues(
-      lazy.UrlbarUtils.LOCAL_SEARCH_MODES.map(mode => {
-        let name = lazy.UrlbarUtils.getResultSourceName(mode.source);
+      UrlbarShared.LOCAL_SEARCH_MODES.map(mode => {
+        let name = UrlbarShared.getResultSourceName(mode.source);
         return { id: `urlbar-search-mode-${name}-en` };
       })
     );
 
-    for (let { restrict } of lazy.UrlbarUtils.LOCAL_SEARCH_MODES) {
+    for (let { restrict } of UrlbarShared.LOCAL_SEARCH_MODES) {
       let uniqueKeywords = [
         ...new Set([l10nKeywords.shift(), englishKeywords.shift()]),
       ];
@@ -95,7 +92,7 @@ export var UrlbarTokenizer = {
    *
    * @param {object} context
    * @param {string} context.searchString
-   * @param {string} [context.searchMode]
+   * @param {SearchMode} [context.searchMode]
    * @param {string} context.trimmedSearchString
    * @returns {UrlbarSearchStringTokenData[]}
    *  The tokens associated with the query.
@@ -140,7 +137,7 @@ const CHAR_TO_TYPE_MAP = new Map(
  *
  * @param {object} context
  * @param {string} context.searchString
- * @param {string} [context.searchMode]
+ * @param {SearchMode} [context.searchMode]
  * @returns {string[]} An array of string tokens.
  */
 function splitString({ searchString, searchMode }) {

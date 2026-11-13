@@ -15,14 +15,31 @@ class nsIFile;
 
 namespace mozilla {
 
+struct Ok;
+
 template <typename V, typename E>
 class Result;
 
-}
+}  // namespace mozilla
 
 namespace mozilla::dom::quota {
 
-struct OriginStateMetadata;
+struct FullOriginMetadata;
+
+namespace DirectoryMetadataFlags {
+
+// clang-format off
+enum : uint32_t {
+  None        = 0,
+  Initialized = 1 << 0,
+  Accessed    = 1 << 1,
+  Dirty       = 1 << 2,
+  Persisted   = 1 << 3,
+  Encrypted   = 1 << 4,
+};
+// clang-format on
+
+}  // namespace DirectoryMetadataFlags
 
 /**
  * Directory Metadata File Format (.metadata-v2)
@@ -39,12 +56,21 @@ struct OriginStateMetadata;
  *     eviction.
  * - uint32_t flags
  *     A bitfield of DirectoryMetadataFlags used to store boolean state flags.
- *     This field currently maps only to mAccessed. The defined flags are:
+ *     The defined flags are:
  *       - Initialized: Always set when writing metadata; indicates that this
  *         field contains valid flag bits. Older files written before this
  *         flag was introduced will have this field set to zero.
  *       - Accessed: Indicates whether the origin has been accessed by a quota
  *         client. This maps directly to the mAccessed field in memory.
+ *       - Dirty: Indicates the origin has uncommitted changes.
+ *       - Persisted: Indicates the origin is marked as persisted and should
+ *         survive eviction. When Initialized is set, this flag is
+ *         authoritative; the bool mPersisted byte is kept for backward
+ *         compatibility with older builds.
+ *       - Encrypted: Indicates the origin's data is encrypted at rest with
+ *         keys from the QuotaManager key store. Files written before this
+ *         flag existed have it unset, which correctly describes them as
+ *         plaintext.
  *
  *     If the Initialized flag is not set, the flags field is considered
  *     invalid and mAccessed is conservatively set to true to ensure a full
@@ -83,19 +109,13 @@ struct OriginStateMetadata;
  *   file.
  */
 
-Result<OriginStateMetadata, nsresult> ReadDirectoryMetadataHeader(
-    nsIBinaryInputStream& aStream);
+Result<Ok, nsresult> ReadDirectoryMetadataHeader(
+    nsIBinaryInputStream& aStream, FullOriginMetadata& aFullOriginMetadata);
 
 nsresult WriteDirectoryMetadataHeader(
     nsIBinaryOutputStream& aStream,
-    const OriginStateMetadata& aOriginStateMetadata);
-
-Result<OriginStateMetadata, nsresult> LoadDirectoryMetadataHeader(
-    nsIFile& aDirectory);
-
-nsresult SaveDirectoryMetadataHeader(
-    nsIFile& aDirectory, const OriginStateMetadata& aOriginStateMetadata);
+    const FullOriginMetadata& aFullOriginMetadata);
 
 }  // namespace mozilla::dom::quota
 
-#endif  // DOM_QUOTA_NOTIFYUTILS_H_
+#endif  // DOM_QUOTA_DIRECTORYMETADATA_H_

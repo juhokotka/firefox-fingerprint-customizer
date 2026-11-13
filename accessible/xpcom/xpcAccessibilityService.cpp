@@ -5,11 +5,10 @@
 #include "xpcAccessibilityService.h"
 
 #include "mozilla/dom/Document.h"
-
-#include "xpcAccessiblePivot.h"
 #include "nsAccessibilityService.h"
 #include "xpcAccessibleApplication.h"
 #include "xpcAccessibleDocument.h"
+#include "xpcAccessiblePivot.h"
 #include "xpcAccessibleTextLeafRange.h"
 
 #ifdef A11Y_LOG
@@ -26,7 +25,7 @@ xpcAccessibilityService* xpcAccessibilityService::gXPCAccessibilityService =
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports
 
-void xpcAccessibilityService::ShutdownCallback(nsITimer* aTimer,
+void xpcAccessibilityService::ShutdownCallback(nsITimer* /*aTimer*/,
                                                void* aClosure) {
   MaybeShutdownAccService(nsAccessibilityService::eXPCOM);
   xpcAccessibilityService* xpcAccService =

@@ -4,29 +4,8 @@
 
 /* High level class and public functions implementation. */
 
-#include "js/Transcoding.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Base64.h"
-#include "mozilla/Likely.h"
-
-#include "XPCWrapper.h"
-#include "jsfriendapi.h"
-#include "js/AllocationLogging.h"  // JS::SetLogCtorDtorFunctions
-#include "js/CompileOptions.h"     // JS::ReadOnlyCompileOptions
-#include "js/Initialization.h"
-#include "js/Object.h"  // JS::GetClass
-#include "js/Prefs.h"
-#include "js/ProfilingStack.h"
-#include "GeckoProfiler.h"
-#include "mozJSModuleLoader.h"
-#include "nsJSEnvironment.h"
-#include "nsThreadUtils.h"
-#include "nsDOMJSUtils.h"
-
-#include "WrapperFactory.h"
-#include "AccessCheck.h"
-#include "JSServices.h"
-
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/DOMException.h"
@@ -35,23 +14,41 @@
 #include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/glean/bindings/Glean.h"
 #include "mozilla/glean/bindings/GleanPings.h"
+#include "mozilla/Likely.h"
 #include "mozilla/ScriptPreloader.h"
 #include "mozilla/StaticPrefs_javascript.h"
 
+#include "AccessCheck.h"
+#include "GeckoProfiler.h"
+#include "jsfriendapi.h"
+#include "JSServices.h"
+#include "mozJSModuleLoader.h"
+#include "nsContentUtils.h"
+#include "nsCycleCollector.h"
+#include "nsDOMJSUtils.h"
 #include "nsDOMMutationObserver.h"
 #include "nsICycleCollectorListener.h"
-#include "nsCycleCollector.h"
-#include "nsIOService.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
-#include "nsScriptSecurityManager.h"
-#include "nsContentUtils.h"
-#include "nsScriptError.h"
+#include "nsIOService.h"
+#include "nsJSEnvironment.h"
 #include "nsJSUtils.h"
 #include "nsRFPService.h"
+#include "nsScriptError.h"
+#include "nsScriptSecurityManager.h"
+#include "nsThreadUtils.h"
 #include "prsystem.h"
-
+#include "WrapperFactory.h"
 #include "xpcprivate.h"
+#include "XPCWrapper.h"
+
+#include "js/AllocationLogging.h"  // JS::SetLogCtorDtorFunctions
+#include "js/CompileOptions.h"     // JS::ReadOnlyCompileOptions
+#include "js/Initialization.h"
+#include "js/Object.h"  // JS::GetClass
+#include "js/Prefs.h"
+#include "js/ProfilingStack.h"
+#include "js/Transcoding.h"
 
 #ifdef XP_WIN
 #  include "mozilla/WinHeaderOnlyUtils.h"
@@ -78,10 +75,6 @@ bool nsXPConnect::gOnceAliveNowDead = false;
 nsIScriptSecurityManager* nsXPConnect::gScriptSecurityManager = nullptr;
 nsIPrincipal* nsXPConnect::gSystemPrincipal = nullptr;
 
-const char XPC_EXCEPTION_CONTRACTID[] = "@mozilla.org/js/xpc/Exception;1";
-const char XPC_CONSOLE_CONTRACTID[] = "@mozilla.org/consoleservice;1";
-const char XPC_SCRIPT_ERROR_CONTRACTID[] = "@mozilla.org/scripterror;1";
-
 /***************************************************************************/
 
 #ifdef XP_IOS
@@ -97,15 +90,17 @@ static bool IsLockdownModeEnabled() {
 #endif
 
 static void InitJSEngine() {
-#if defined(ENABLE_WASM_SIMD) && \
+#if defined(ENABLE_JIT_SIMD) && \
     (defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86))
   // Update static engine preferences, such as AVX, before
   // `JS_InitWithFailureDiagnostic` is called.
   JS::SetAVXEnabled(mozilla::StaticPrefs::javascript_options_wasm_simd_avx());
 #endif
 
-  if (XRE_IsParentProcess() &&
-      mozilla::StaticPrefs::javascript_options_main_process_disable_jit()) {
+  if (XRE_IsParentProcess()
+          ? mozilla::StaticPrefs::javascript_options_main_process_disable_jit()
+          : mozilla::StaticPrefs::
+                javascript_options_other_processes_disable_jit()) {
     JS::DisableJitBackend();
   }
 #ifdef XP_IOS

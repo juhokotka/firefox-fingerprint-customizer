@@ -7,10 +7,12 @@ ChromeUtils.defineESModuleGetters(this, {
   FileTestUtils: "resource://testing-common/FileTestUtils.sys.mjs",
   sinon: "resource://testing-common/Sinon.sys.mjs",
   ShellService: "moz-src:///browser/components/shell/ShellService.sys.mjs",
-  TaskbarTabsPin: "resource:///modules/taskbartabs/TaskbarTabsPin.sys.mjs",
+  TaskbarTabsPin:
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsPin.sys.mjs",
   TaskbarTabsRegistry:
-    "resource:///modules/taskbartabs/TaskbarTabsRegistry.sys.mjs",
-  TaskbarTabsUtils: "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs",
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsRegistry.sys.mjs",
+  TaskbarTabsUtils:
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsUtils.sys.mjs",
   XPCOMUtils: "resource://gre/modules/XPCOMUtils.sys.mjs",
 });
 
@@ -43,10 +45,22 @@ registerCleanupFunction(() => {
   sinon.restore();
 });
 
+const registry = createInMemoryRegistry();
+
 // Favicons are written to the profile directory, ensure it exists.
 do_get_profile();
 
-function shellPinCalled(aTaskbarTab, destFolder, shortcutRelativePath) {
+async function attemptPin(aTaskbarTab, aDestFolder, aShortcutRelativePath) {
+  Assert.equal(
+    (
+      await TaskbarTabsPin.pinTaskbarTab(
+        aTaskbarTab,
+        await TaskbarTabsUtils.getDefaultIcon()
+      )
+    ).shortcut,
+    aShortcutRelativePath,
+    "pinTaskbarTab returned expected relative path."
+  );
   ok(
     ShellService.writeShortcutIcon.calledOnce,
     `Icon creation should have been called.`
@@ -57,12 +71,12 @@ function shellPinCalled(aTaskbarTab, destFolder, shortcutRelativePath) {
   );
   Assert.equal(
     kMockNativeShellService.createShortcut.firstCall.args[6],
-    destFolder,
+    aDestFolder,
     "The shortcut should go into the expected destination."
   );
   Assert.equal(
     kMockNativeShellService.createShortcut.firstCall.args[7],
-    shortcutRelativePath,
+    aShortcutRelativePath,
     "The shortcut path should match the expected result."
   );
   ok(
@@ -79,12 +93,6 @@ function shellPinCalled(aTaskbarTab, destFolder, shortcutRelativePath) {
     kMockNativeShellService.createShortcut.firstCall.args[7],
     `The created and pinned shortcuts should be the same file.`
   );
-  Assert.equal(
-    kMockNativeShellService.pinShortcutToTaskbar.firstCall.args[2],
-    aTaskbarTab.shortcutRelativePath,
-    `The pinned shortcut should be the saved shortcut.`
-  );
-  Assert.equal(patchedSpy.callCount, 1, "A single patched event was emitted");
 }
 
 function shellUnpinCalled(aShortcutRelativePath) {
@@ -108,30 +116,18 @@ function shellUnpinCalled(aShortcutRelativePath) {
   );
 }
 
-async function pinTaskbarTabDefaultIcon(aTaskbarTab, aRegistry) {
-  return TaskbarTabsPin.pinTaskbarTab(
-    aTaskbarTab,
-    aRegistry,
-    await TaskbarTabsUtils.getDefaultIcon()
-  );
-}
-
-const registry = new TaskbarTabsRegistry();
-
-const patchedSpy = sinon.stub();
-registry.on(TaskbarTabsRegistry.events.patched, patchedSpy);
-
 add_task(async function test_pin_location() {
   const parsedURI = Services.io.newURI("https://www.example.com");
   const taskbarTab = createTaskbarTab(registry, parsedURI, 0);
   sinon.resetHistory();
 
-  await pinTaskbarTabDefaultIcon(taskbarTab, registry);
-  shellPinCalled(
+  await attemptPin(
     taskbarTab,
     "Programs",
     `[formatValue_taskbar-tab-shortcut-folder]\\${taskbarTab.name}.lnk`
   );
+
+  registry.removeTaskbarTab(taskbarTab.id);
 });
 
 add_task(async function test_pin_location_dos_name() {
@@ -139,8 +135,7 @@ add_task(async function test_pin_location_dos_name() {
   const invalidTaskbarTab = createTaskbarTab(registry, parsedURI, 0);
   sinon.resetHistory();
 
-  await pinTaskbarTabDefaultIcon(invalidTaskbarTab, registry);
-  shellPinCalled(
+  await attemptPin(
     invalidTaskbarTab,
     "Programs",
     // 'Untitled' is the default selected by the MIME code, since
@@ -160,8 +155,7 @@ add_task(async function test_pin_location_bad_characters() {
   });
   sinon.resetHistory();
 
-  await pinTaskbarTabDefaultIcon(invalidTaskbarTab, registry);
-  shellPinCalled(
+  await attemptPin(
     invalidTaskbarTab,
     "Programs",
     "[formatValue_taskbar-tab-shortcut-folder]\\__ ____ __ __ Not a valid. filename__! __ __ ____ __..lnk"
@@ -179,8 +173,7 @@ add_task(async function test_pin_location_lnk_extension() {
   });
   sinon.resetHistory();
 
-  await pinTaskbarTabDefaultIcon(invalidTaskbarTab, registry);
-  shellPinCalled(
+  await attemptPin(
     invalidTaskbarTab,
     "Programs",
     "[formatValue_taskbar-tab-shortcut-folder]\\coolstartup.lnk.lnk"
@@ -197,13 +190,31 @@ add_task(async function test_unpin() {
   });
 
   sinon.resetHistory();
-  await TaskbarTabsPin.unpinTaskbarTab(tt, registry);
+  await TaskbarTabsPin.unpinTaskbarTab(tt);
 
   shellUnpinCalled("somewhere else\\shortcut name.lnk");
-  Assert.equal(
-    tt.shortcutRelativePath,
-    null,
-    "Shortcut relative path was removed from the taskbar tab"
+});
+
+add_task(async function test_pin_rejected() {
+  const parsedURI = Services.io.newURI("https://www.example.com");
+  const taskbarTab = createTaskbarTab(registry, parsedURI, 0);
+  const { pinShortcutToTaskbar } = kMockNativeShellService;
+
+  pinShortcutToTaskbar.resolves(Ci.nsIWindowsShellService.PINNED);
+  let result = await TaskbarTabsPin.pinTaskbarTab(
+    taskbarTab,
+    await TaskbarTabsUtils.getDefaultIcon()
   );
-  Assert.equal(patchedSpy.callCount, 1, "A single patched event was emitted");
+  Assert.equal(result.rejected, false, "An accepted pin is not rejected");
+
+  pinShortcutToTaskbar.resolves(Ci.nsIWindowsShellService.REJECTED);
+  result = await TaskbarTabsPin.pinTaskbarTab(
+    taskbarTab,
+    await TaskbarTabsUtils.getDefaultIcon()
+  );
+  Assert.equal(result.rejected, true, "A declined pin is reported");
+  Assert.ok(result.shortcut, "The shortcut path is still returned");
+
+  pinShortcutToTaskbar.resolves();
+  registry.removeTaskbarTab(taskbarTab.id);
 });

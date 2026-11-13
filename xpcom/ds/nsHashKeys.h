@@ -5,15 +5,6 @@
 #ifndef nsTHashKeys_h_
 #define nsTHashKeys_h_
 
-#include "nsID.h"
-#include "nsISupports.h"
-#include "nsCOMPtr.h"
-#include "PLDHashTable.h"
-
-#include "nsString.h"
-#include "nsUnicharUtils.h"
-#include "nsPointerHashKeys.h"
-
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,8 +12,14 @@
 #include <type_traits>
 #include <utility>
 
+#include "PLDHashTable.h"
 #include "mozilla/HashFunctions.h"
-#include "mozilla/ThreadSafeWeakPtr.h"
+#include "nsCOMPtr.h"
+#include "nsID.h"
+#include "nsISupports.h"
+#include "nsPointerHashKeys.h"
+#include "nsString.h"
+#include "nsUnicharUtils.h"
 
 namespace mozilla {
 
@@ -55,7 +52,6 @@ inline uint32_t HashString(const nsACString& aStr) {
  * nsVoidPtrHashKey (by nsPointerHashKeys.h)
  * nsISupportsHashKey
  * nsRefPtrHashKey
- * mozilla::ThreadSafeWeakPtrHashKey
  * nsFuncPtrHashKey
  * nsIDHashKey
  * nsIDPointerHashKey
@@ -393,46 +389,6 @@ class nsRefPtrHashKey : public PLDHashEntryHdr {
  private:
   RefPtr<T> mKey;
 };
-
-namespace mozilla {
-
-/**
- * hashkey wrapper using weakly-referenced KeyType
- *
- * The key is stored as a ThreadSafeWeakPtr<T>, so the referenced object is not
- * kept alive. GetKey() returns a non-null RefPtr<T> if the object is still
- * alive, or null otherwise.
- *
- * WARNING: Entries will NOT be automatically removed from the table as the
- * referenced object is destroyed, and the entry can no longer be looked up.
- * A component using this hash key must clear destroyed keys from long-lived
- * tables in order to avoid leaks.
- *
- * @see nsTHashtable::EntryType for specification
- */
-template <class T>
-class ThreadSafeWeakPtrHashKey : public PLDHashEntryHdr {
- public:
-  typedef RefPtr<T> KeyType;
-  typedef const T* KeyTypePointer;
-
-  explicit ThreadSafeWeakPtrHashKey(KeyTypePointer aKey)
-      : mKey(do_AddRef(const_cast<T*>(aKey))) {}
-
-  KeyType GetKey() const { return do_AddRef(mKey); }
-  bool KeyEquals(KeyTypePointer aKey) const { return mKey == aKey; }
-
-  static KeyTypePointer KeyToPointer(const KeyType& aKey) { return aKey.get(); }
-  static PLDHashNumber HashKey(KeyTypePointer aKey) {
-    return HashGeneric(aKey);
-  }
-  enum { ALLOW_MEMMOVE = true };
-
- private:
-  ThreadSafeWeakPtr<T> mKey;
-};
-
-}  // namespace mozilla
 
 template <class T>
 inline void ImplCycleCollectionTraverse(

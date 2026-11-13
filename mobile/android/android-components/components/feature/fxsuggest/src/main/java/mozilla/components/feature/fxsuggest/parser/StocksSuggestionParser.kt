@@ -4,7 +4,7 @@
 
 package mozilla.components.feature.fxsuggest.parser
 
-import mozilla.components.concept.awesomebar.AwesomeBar.StockItem
+import mozilla.components.feature.awesomebar.optimizedsuggestions.StockItem
 import mozilla.components.feature.fxsuggest.dto.PolygonPayloadDto
 import mozilla.components.feature.fxsuggest.dto.StockTickerDto
 
@@ -20,12 +20,13 @@ internal class StocksSuggestionParser {
     }
 }
 
-private fun StockTickerDto.toStockItem() = StockItem(
-    query = query,
-    name = name,
-    ticker = ticker,
-    todaysChangePerc = todaysChangePerc,
-    lastPrice = lastPrice,
-    exchange = exchange,
-    imageUrl = imageUrl,
-)
+private fun StockTickerDto.toStockItem() =
+    StockItem(
+        query = query,
+        name = name,
+        ticker = ticker,
+        todaysChangePerc = todaysChangePerc,
+        lastPrice = lastPrice,
+        exchange = exchange,
+        imageUrl = imageUrl,
+    )

@@ -11,6 +11,7 @@
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/Prefs.h"
 #include "js/Wrapper.h"
+
 #include "gc/WeakMap-inl.h"
 #include "vm/JSObject-inl.h"
 

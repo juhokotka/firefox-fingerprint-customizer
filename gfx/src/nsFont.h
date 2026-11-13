@@ -6,7 +6,8 @@
 #define nsFont_h_
 
 #include <cstdint>
-#include "gfxFontConstants.h"  // for NS_FONT_KERNING_AUTO, etc
+
+#include "gfxFontConstants.h"  // for NS_FONT_VARIANT_WIDTH_NORMAL, etc
 #include "gfxFontVariations.h"
 #include "mozilla/ServoStyleConsts.h"
 #include "mozilla/StyleColorInlines.h"  // for StyleAbsoluteColor
@@ -16,7 +17,7 @@ struct gfxFontStyle;
 
 // Font structure.
 struct nsFont final {
-  typedef mozilla::FontStretch FontStretch;
+  typedef mozilla::FontWidth FontWidth;
   typedef mozilla::FontSlantStyle FontSlantStyle;
   typedef mozilla::FontWeight FontWeight;
 
@@ -24,10 +25,10 @@ struct nsFont final {
   mozilla::StyleFontFamily family;
 
   // Font features from CSS font-feature-settings
-  CopyableTArray<gfxFontFeature> fontFeatureSettings;
+  mozilla::StyleFontFeatureSettings fontFeatureSettings;
 
   // Font variations from CSS font-variation-settings
-  CopyableTArray<gfxFontVariation> fontVariationSettings;
+  mozilla::StyleFontVariationSettings fontVariationSettings;
 
   // The logical size of the font, in CSS Pixels
   mozilla::NonNegativeLength size{0};
@@ -44,10 +45,10 @@ struct nsFont final {
   mozilla::StyleFontLanguageOverride languageOverride{0};
 
   // Font-selection/rendering properties corresponding to CSS font-style,
-  // font-weight, font-stretch. These are all 16-bit types.
+  // font-weight, font-width. These are all 16-bit types.
   FontSlantStyle style = FontSlantStyle::NORMAL;
   FontWeight weight = FontWeight::NORMAL;
-  FontStretch stretch = FontStretch::NORMAL;
+  FontWidth width = FontWidth::NORMAL;
 
   // Some font-variant-alternates property values require
   // font-specific settings defined via @font-feature-values rules.
@@ -60,22 +61,26 @@ struct nsFont final {
   mozilla::StyleFontVariantEastAsian variantEastAsian =
       mozilla::StyleFontVariantEastAsian::NORMAL;
 
-  uint8_t variantCaps = NS_FONT_VARIANT_CAPS_NORMAL;
+  mozilla::StyleFontVariantCaps variantCaps =
+      mozilla::StyleFontVariantCaps::Normal;
   mozilla::StyleFontVariantNumeric variantNumeric =
       mozilla::StyleFontVariantNumeric::NORMAL;
-  uint8_t variantPosition = NS_FONT_VARIANT_POSITION_NORMAL;
+  mozilla::StyleFontVariantPosition variantPosition =
+      mozilla::StyleFontVariantPosition::Normal;
   uint8_t variantWidth = NS_FONT_VARIANT_WIDTH_NORMAL;
-  StyleFontVariantEmoji variantEmoji = StyleFontVariantEmoji::Normal;
+  mozilla::StyleFontVariantEmoji variantEmoji =
+      mozilla::StyleFontVariantEmoji::Normal;
 
   // Smoothing - controls subpixel-antialiasing (currently OSX only)
-  uint8_t smoothing = NS_FONT_SMOOTHING_AUTO;
+  mozilla::StyleFontSmoothing smoothing = mozilla::StyleFontSmoothing::Auto;
 
   // Kerning
-  uint8_t kerning = NS_FONT_KERNING_AUTO;
+  mozilla::StyleFontKerning kerning = mozilla::StyleFontKerning::Auto;
 
   // Whether automatic optical sizing should be applied to variation fonts
   // that include an 'opsz' axis
-  uint8_t opticalSizing = NS_FONT_OPTICAL_SIZING_AUTO;
+  mozilla::StyleFontOpticalSizing opticalSizing =
+      mozilla::StyleFontOpticalSizing::Auto;
 
   // Synthesis setting, controls use of fake bolding/italics/small-caps
   mozilla::StyleFontSynthesis synthesisWeight =

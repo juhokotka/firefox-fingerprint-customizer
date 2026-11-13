@@ -1,5 +1,3 @@
-(crashes-crashmanager)=
-
 # Crash Manager
 
 The **Crash Manager** is a service and interface for managing crash
@@ -17,20 +15,20 @@ From there, you can access and manipulate crash data.
 The crash manager stores statistical information about crashes as well as
 detailed information for both browser and content crashes. The crash manager
 automatically detects new browser crashes at startup by scanning for
-{ref}`Crash Events`. Content process crash information on the other hand is
+{doc}`crash-events`. Content process crash information on the other hand is
 provided externally.
 
 ## Crash Pings
 
 The Crash Manager is responsible for sending crash pings when a crash occurs or when a crash event
-is found. Crash pings are sent using [Glean pings](../../glean/index.html). The Glean `crash`
+is found. Crash pings are sent using [Glean pings](../../glean/index.md). The Glean `crash`
 ping can be found [here](https://dictionary.telemetry.mozilla.org/apps/firefox_desktop/pings/crash).
 
 See [bug 1784069](https://bugzilla.mozilla.org/show_bug.cgi?id=1784069) for details.
 
 ### Lifecycle and Post-Processing
 
-The lifecycle of a crash ping can be viewed at {ref}`Crash Ping Lifecycle`.
+The lifecycle of a crash ping can be viewed at {doc}`crash-ping-lifecycle`.
 
 ## Other Documents
 

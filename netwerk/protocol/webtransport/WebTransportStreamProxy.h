@@ -5,11 +5,11 @@
 #ifndef mozilla_net_WebTransportStreamProxy_h
 #define mozilla_net_WebTransportStreamProxy_h
 
+#include "WebTransportStreamBase.h"
+#include "nsCOMPtr.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
 #include "nsIWebTransportStream.h"
-#include "nsCOMPtr.h"
-#include "WebTransportStreamBase.h"
 
 namespace mozilla::net {
 
@@ -22,9 +22,9 @@ class WebTransportStreamProxy final
 
   explicit WebTransportStreamProxy(WebTransportStreamBase* aStream);
 
-  NS_IMETHOD SendStopSending(uint8_t aError) override;
+  NS_IMETHOD SendStopSending(uint64_t aErrorCode) override;
   NS_IMETHOD SendFin() override;
-  NS_IMETHOD Reset(uint8_t aErrorCode) override;
+  NS_IMETHOD Reset(uint64_t aErrorCode) override;
   NS_IMETHOD GetSendStreamStats(
       nsIWebTransportStreamStatsCallback* aCallback) override;
   NS_IMETHOD GetReceiveStreamStats(
@@ -36,7 +36,8 @@ class WebTransportStreamProxy final
   NS_IMETHOD GetOutputStream(nsIAsyncOutputStream** aOut) override;
 
   NS_IMETHOD GetStreamId(uint64_t* aId) override;
-  NS_IMETHOD SetSendOrder(Maybe<int64_t> aSendOrder) override;
+  NS_IMETHOD SetSendOrder(int64_t aSendOrder) override;
+  NS_IMETHOD SetSendGroup(uint64_t aSendGroupId) override;
 
  private:
   virtual ~WebTransportStreamProxy();

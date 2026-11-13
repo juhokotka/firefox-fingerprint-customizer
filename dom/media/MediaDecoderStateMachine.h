@@ -323,7 +323,10 @@ class MediaDecoderStateMachine
   // Stops the media sink and shut it down.
   // The decoder monitor must be held with exactly one lock count.
   // Called on the state machine thread.
-  void StopMediaSink();
+  // aReason lets a stop that is part of a seek be distinguished from a real
+  // stop.
+  void StopMediaSink(
+      MediaSink::StopReason aReason = MediaSink::StopReason::Regular);
 
   // Create and start the media sink.
   // The decoder monitor must be held with exactly one lock count.
@@ -336,7 +339,10 @@ class MediaDecoderStateMachine
 
   // Sets internal state which causes playback of media to pause.
   // The decoder monitor must be held.
-  void StopPlayback();
+  // aReason lets a pause that is part of a seek be distinguished from a real
+  // one.
+  void StopPlayback(
+      MediaSink::StopReason aReason = MediaSink::StopReason::Regular);
 
   // If the conditions are right, sets internal state which causes playback
   // of media to begin or resume.

@@ -49,7 +49,9 @@ namespace mozilla::dom {
 #define LOGV(msg, ...) LOG_INTERNAL(Verbose, msg, ##__VA_ARGS__)
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(AudioEncoder, DOMEventTargetHelper,
-                                   mErrorCallback, mOutputCallback)
+                                   mErrorCallback, mOutputCallback,
+                                   mPendingFlushPromises,
+                                   mPendingDebugInfoPromises)
 NS_IMPL_ADDREF_INHERITED(AudioEncoder, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(AudioEncoder, DOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AudioEncoder)

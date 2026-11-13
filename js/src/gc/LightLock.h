@@ -7,7 +7,6 @@
 #define gc_LightLock_h
 
 #include "mozilla/Atomics.h"
-#include "mozilla/ThreadLocal.h"
 
 #include "js/TypeDecls.h"
 #include "threading/ConditionVariable.h"
@@ -21,17 +20,12 @@ extern void TSANMemoryAcquireFence(JSRuntime* runtime);
 extern void TSANMemoryReleaseFence(JSRuntime* runtime);
 #endif
 
-#ifdef DEBUG
-extern MOZ_THREAD_LOCAL(bool) TlsLightLockHeld;
-#endif
-
 // A lightweight lock modelled after rust's parking lot mutex.
 //
 // WARNING: This is not a general purpose mutex! There are the following
 // restrictions on use:
 //
 //  - only two threads are supported
-//  - a thread may hold at most one lock at a time
 //
 // This is intended for use in concurrent marking which only requires the
 // current feature set. This greatly simplifies the implementation.
@@ -42,7 +36,7 @@ extern MOZ_THREAD_LOCAL(bool) TlsLightLockHeld;
 //
 // The rust implementation can be found here:
 // https://docs.rs/parking_lot/latest/src/parking_lot/raw_mutex.rs.html
-class LightLock {
+class LightLock : public MutexBase {
   enum StateBits : uint32_t {
     // Whether the mutex is locked. Set and cleared by the locking thread.
     IsLocked = Bit(0),
@@ -56,47 +50,29 @@ class LightLock {
   static constexpr uint32_t LockedState = IsLocked;
   static constexpr uint32_t LockedWithWaiterState = IsLocked | HasWaiter;
 
-  mozilla::Atomic<uint32_t, mozilla::Relaxed> state;
-
-#ifdef DEBUG
-  ThreadId holdingThread_;
-#endif
+  // TODO: Our Atomic class doesn't give us a way to do compare_exchange_weak
+  // with relaxed ordering on failure, which is ideally what we would use here.
+  // It's unlikely to be a big deal but this could be improved in the future.
+  mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> state;
 
  public:
+  explicit LightLock(const MutexId& id) : MutexBase(id) {}
+
   void lock(JSRuntime* runtime) {
-    MOZ_ASSERT(!TlsLightLockHeld.get());
-    MOZ_ASSERT(holdingThread_ != ThreadId::ThisThreadId());
+    preLockChecks();
     if (MOZ_UNLIKELY(!state.compareExchange(UnlockedState, LockedState))) {
       lockSlow(runtime);
     }
-    // A separate fence is required because Atomic::compareExchange doesn't
-    // support separate memory order for success and failure.
-    acquireFence(runtime);
-#ifdef DEBUG
     MOZ_ASSERT(isLocked());
-    MOZ_ASSERT(holdingThread_ == ThreadId());
-    holdingThread_ = ThreadId::ThisThreadId();
-    TlsLightLockHeld.set(true);
-#endif
+    postLockChecks();
   }
   void lockSlow(JSRuntime* runtime);
 
   void unlock(JSRuntime* runtime) {
-#ifdef DEBUG
-    MOZ_ASSERT(isLocked());
-    MOZ_ASSERT(TlsLightLockHeld.get());
-    MOZ_ASSERT(holdingThread_ == ThreadId::ThisThreadId());
-    holdingThread_ = ThreadId();
-#endif
-    // A separate fence is required because Atomic::compareExchange doesn't
-    // support separate memory order for success and failure.
-    releaseFence(runtime);
+    preUnlockChecks();
     if (MOZ_UNLIKELY(!state.compareExchange(LockedState, UnlockedState))) {
       unlockSlow(runtime);
     }
-#ifdef DEBUG
-    TlsLightLockHeld.set(false);
-#endif
   }
   void unlockSlow(JSRuntime* runtime);
 
@@ -107,19 +83,6 @@ class LightLock {
   bool spin(uint32_t& counter);
   bool tryBlockUntilWoken(JSRuntime* runtime);
   void wakeOtherThread(JSRuntime* runtime, const LockGuard<Mutex>& lock);
-
-  void acquireFence(JSRuntime* runtime) {
-    std::atomic_thread_fence(std::memory_order_acquire);
-#ifdef MOZ_TSAN
-    TSANMemoryAcquireFence(runtime);
-#endif
-  }
-  void releaseFence(JSRuntime* runtime) {
-    std::atomic_thread_fence(std::memory_order_release);
-#ifdef MOZ_TSAN
-    TSANMemoryReleaseFence(runtime);
-#endif
-  }
 };
 
 class LightLockRuntime {

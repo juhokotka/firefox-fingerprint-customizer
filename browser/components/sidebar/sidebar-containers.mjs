@@ -6,7 +6,7 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   ContextualIdentityService:
-    "resource://gre/modules/ContextualIdentityService.sys.mjs",
+    "moz-src:///toolkit/components/contextualidentity/ContextualIdentityService.sys.mjs",
   FingerprintProfileStore:
     "resource://gre/modules/FingerprintProfileStore.sys.mjs",
 });
@@ -60,6 +60,61 @@ function getFingerprintSummary(userContextId) {
   }
 }
 
+function buildContainerItem(identity) {
+  let isOpen = hasOpenTabs(identity.userContextId);
+
+  let item = document.createElement("button");
+  item.type = "button";
+  item.className = "container-item";
+
+  // Leading icon: the same round, tinted identity badge used by every other
+  // container surface.
+  let badge = document.createElement("span");
+  badge.className =
+    "container-badge userContext-icon identity-icon-" +
+    identity.icon +
+    " identity-color-" +
+    identity.color;
+  item.appendChild(badge);
+
+  let text = document.createElement("span");
+  text.className = "container-text";
+
+  let name = document.createElement("span");
+  name.className = "container-name";
+  name.textContent =
+    identity.name ||
+    lazy.ContextualIdentityService.getUserContextLabel(identity.userContextId);
+  text.appendChild(name);
+
+  let summary = getFingerprintSummary(identity.userContextId);
+  if (summary) {
+    let fingerprint = document.createElement("span");
+    fingerprint.className = "container-fingerprint";
+    fingerprint.textContent = summary;
+    text.appendChild(fingerprint);
+  }
+  item.appendChild(text);
+
+  let status = document.createElement("span");
+  status.className = "container-status";
+  let dot = document.createElement("span");
+  dot.className = "status-dot " + (isOpen ? "status-on" : "status-off");
+  let statusLabel = document.createElement("span");
+  document.l10n.setAttributes(
+    statusLabel,
+    isOpen ? "sidebar-containers-in-use" : "sidebar-containers-idle"
+  );
+  status.append(dot, statusLabel);
+  item.appendChild(status);
+
+  item.addEventListener("click", () => {
+    openContainerTab(identity.userContextId);
+  });
+
+  return item;
+}
+
 function renderContainers() {
   let list = document.getElementById("containers-list");
   let empty = document.getElementById("containers-empty");
@@ -77,50 +132,7 @@ function renderContainers() {
   empty.hidden = true;
 
   for (let identity of identities) {
-    let item = document.createElement("div");
-    item.className = "container-item";
-
-    let isOpen = hasOpenTabs(identity.userContextId);
-
-    // Status dot
-    let dot = document.createElement("span");
-    dot.className = "status-dot " + (isOpen ? "status-on" : "status-off");
-
-    // Icon
-    let icon = document.createElement("img");
-    icon.className = "container-icon";
-    icon.src = lazy.ContextualIdentityService.getContainerIconURL(identity.icon);
-
-    // Name
-    let name = document.createElement("span");
-    name.className = "container-name";
-    name.textContent = identity.name ||
-      lazy.ContextualIdentityService.getUserContextLabel(identity.userContextId);
-
-    // Status text
-    let status = document.createElement("span");
-    status.className = "container-status";
-    status.textContent = isOpen ? "on" : "off";
-
-    item.appendChild(dot);
-    item.appendChild(icon);
-    item.appendChild(name);
-    item.appendChild(status);
-
-    // Fingerprint summary
-    let fpSummary = getFingerprintSummary(identity.userContextId);
-    if (fpSummary) {
-      let fp = document.createElement("div");
-      fp.className = "container-fingerprint";
-      fp.textContent = fpSummary;
-      item.appendChild(fp);
-    }
-
-    item.addEventListener("click", () => {
-      openContainerTab(identity.userContextId);
-    });
-
-    list.appendChild(item);
+    list.appendChild(buildContainerItem(identity));
   }
 }
 

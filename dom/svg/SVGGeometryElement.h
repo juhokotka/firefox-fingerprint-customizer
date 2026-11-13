@@ -5,6 +5,7 @@
 #ifndef DOM_SVG_SVGGEOMETRYELEMENT_H_
 #define DOM_SVG_SVGGEOMETRYELEMENT_H_
 
+#include "Units.h"
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/dom/SVGAnimatedNumber.h"
 #include "mozilla/dom/SVGGraphicsElement.h"
@@ -101,82 +102,81 @@ class SVGGeometryElement : public SVGGeometryElementBase {
    * non-scaling-stroke space.  (When all transforms involved are rectilinear
    * the bounds of the image of |aBounds| in non-scaling-stroke space will be
    * tight, but if there are non-rectilinear transforms involved then that may
-   * be impossible and this method will return false).
+   * be impossible and this method will return Nothing()).
    *
    * If |aToNonScalingStrokeSpace| is non-null then |*aToNonScalingStrokeSpace|
    * must be non-singular.
    */
-  virtual bool GetGeometryBounds(
-      Rect* aBounds, const StrokeOptions& aStrokeOptions,
-      const Matrix& aToBoundsSpace,
+  virtual Maybe<Rect> GetGeometryBounds(
+      const StrokeOptions& aStrokeOptions, const Matrix& aToBoundsSpace,
       const Matrix* aToNonScalingStrokeSpace = nullptr) {
-    return false;
+    return Nothing();
   }
 
   /**
-   * For use with GetAsSimplePath.
+   * Geometry in the element's user space that can be drawn without building a
+   * Path: axis aligned rectangles with optional elliptical corner radii (this
+   * includes circles and ellipses, whose radii equal half their size) and
+   * lines. Lines can have any orientation.
    */
-  class SimplePath {
+  class SimpleShape {
    public:
-    SimplePath()
-        : mX(0.0),
-          mY(0.0),
-          mWidthOrX2(0.0),
-          mHeightOrY2(0.0),
-          mType(Type::None) {}
-    bool IsPath() const { return mType != Type::None; }
-    void SetRect(Float x, Float y, Float width, Float height) {
-      mX = x;
-      mY = y;
-      mWidthOrX2 = width;
-      mHeightOrY2 = height;
-      mType = Type::Rect;
+    bool IsRoundedRect() const { return mType == Type::RoundedRect; }
+    bool IsLine() const { return mType == Type::Line; }
+    // A rounded rect whose radii are all zero.
+    bool IsRect() const {
+      return mType == Type::RoundedRect && mRadii == CSSSize();
     }
-    void SetRect(const gfx::Rect& rect) {
-      mX = rect.x;
-      mY = rect.y;
-      mWidthOrX2 = rect.width;
-      mHeightOrY2 = rect.height;
-      mType = Type::Rect;
+
+    void SetRoundedRect(const CSSRect& aRect, const CSSSize& aRadii) {
+      mRect = aRect;
+      mRadii = aRadii;
+      mType = Type::RoundedRect;
     }
-    Rect AsRect() const {
-      MOZ_ASSERT(mType == Type::Rect);
-      return Rect(mX, mY, mWidthOrX2, mHeightOrY2);
+    void SetEllipse(const CSSPoint& aCenter, const CSSSize& aRadii) {
+      SetRoundedRect(
+          CSSRect(aCenter - CSSPoint(aRadii.width, aRadii.height), aRadii * 2),
+          aRadii);
     }
-    bool IsRect() const { return mType == Type::Rect; }
-    void SetLine(Float x1, Float y1, Float x2, Float y2) {
-      mX = x1;
-      mY = y1;
-      mWidthOrX2 = x2;
-      mHeightOrY2 = y2;
+    void SetLine(const CSSPoint& aStart, const CSSPoint& aEnd) {
+      mRect = CSSRect(aStart.x, aStart.y, aEnd.x, aEnd.y);
       mType = Type::Line;
     }
-    Point Point1() const {
-      MOZ_ASSERT(mType == Type::Line);
-      return Point(mX, mY);
-    }
-    Point Point2() const {
-      MOZ_ASSERT(mType == Type::Line);
-      return Point(mWidthOrX2, mHeightOrY2);
-    }
-    bool IsLine() const { return mType == Type::Line; }
     void Reset() { mType = Type::None; }
 
+    const CSSRect& AsRect() const {
+      MOZ_ASSERT(IsRoundedRect());
+      return mRect;
+    }
+    const CSSSize& Radii() const {
+      MOZ_ASSERT(IsRoundedRect());
+      return mRadii;
+    }
+    CSSPoint Point1() const {
+      MOZ_ASSERT(IsLine());
+      return mRect.TopLeft();
+    }
+    CSSPoint Point2() const {
+      MOZ_ASSERT(IsLine());
+      return CSSPoint(mRect.width, mRect.height);
+    }
+
    private:
-    enum class Type { None, Rect, Line };
-    Float mX, mY, mWidthOrX2, mHeightOrY2;
-    Type mType;
+    enum class Type { None, RoundedRect, Line };
+    // For lines, the origin is the first point and the size holds the
+    // coordinates of the second point.
+    CSSRect mRect;
+    CSSSize mRadii;
+    Type mType = Type::None;
   };
 
   /**
    * For some platforms there is significant overhead to creating and painting
-   * a Moz2D Path object. For Rects and lines it is better to get the path data
+   * a Moz2D Path object. For simple shapes it is better to get the geometry
    * using this method and then use the optimized DrawTarget methods for
-   * filling/stroking rects and lines.
+   * filling/stroking rects and lines, or WebRender primitives.
    */
-  virtual void GetAsSimplePath(SimplePath* aSimplePath) {
-    aSimplePath->Reset();
-  }
+  virtual void GetAsSimpleShape(SimpleShape* aShape) { aShape->Reset(); }
 
   /**
    * Returns a Path that can be used to paint, hit-test or calculate bounds for
@@ -192,6 +192,28 @@ class SVGGeometryElement : public SVGGeometryElementBase {
    * this element. May return nullptr if there is no [valid] path.
    */
   virtual already_AddRefed<Path> BuildPath(PathBuilder* aBuilder) = 0;
+
+  /**
+   * Returns the bounds of this element's path, mapped into bounds
+   * space or Nothing() if no path could be built.
+   *
+   * aPathInUserSpace must be a Path for this element in its own user space.
+   * aPathTransform is applied to it.
+   */
+  Maybe<Rect> GetBounds(const Matrix& aPathTransform);
+
+  /**
+   * Returns the bounds of this element's stroked path, mapped into bounds
+   * space by aPathToBounds, or Nothing() if no path could be built.
+   *
+   * aPathTransform is applied to the path before stroking (the identity matrix
+   * unless the element has non-scaling-stroke, in which case it is the
+   * transform to the space the stroke is defined in), and aPathToBounds maps
+   * from that space to bounds space.
+   */
+  Maybe<Rect> GetStrokedBounds(const StrokeOptions& aStrokeOptions,
+                               const Matrix& aPathTransform,
+                               const Matrix& aPathToBounds);
 
   /**
    * Get the distances from the origin of the path segments.
@@ -280,6 +302,8 @@ class SVGGeometryElement : public SVGGeometryElementBase {
 
  private:
   already_AddRefed<Path> GetOrBuildPathForHitTest();
+
+  already_AddRefed<Path> GetTransformedPath(const Matrix& aPathTransform);
 
   float GetTotalLength();
 };

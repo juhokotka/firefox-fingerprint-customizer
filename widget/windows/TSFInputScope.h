@@ -8,13 +8,12 @@
 #include <inputscope.h>
 
 #include "WinUtils.h"
-
 #include "nsTArray.h"
 
 namespace mozilla::widget {
 
 class TSFInputScope final : public ITfInputScope {
-  ~TSFInputScope() {}
+  ~TSFInputScope() = default;
 
  public:
   explicit TSFInputScope(const nsTArray<InputScope>& aList);

@@ -276,11 +276,6 @@ class BranchDeadlineSet {
     return count;
   }
 
-  // Get the number of deadlines for the range with earliest deadline.
-  size_t earliestRangeSize() const {
-    return listForRange(earliestDeadlineRange()).size();
-  }
-
   // Get the first deadline that is still in the set.
   BufferOffset earliestDeadline() const {
     MOZ_ASSERT(!empty());
@@ -370,7 +365,6 @@ class BranchDeadlineSet<0u> {
   bool empty() const { return true; }
   size_t size() const { return 0; }
   size_t maxRangeSize() const { return 0; }
-  size_t earliestRangeSize() const { return 0; }
   BufferOffset earliestDeadline() const { MOZ_CRASH(); }
   unsigned earliestDeadlineRange() const { MOZ_CRASH(); }
   void addDeadline(unsigned rangeIdx, BufferOffset deadline) { MOZ_CRASH(); }
@@ -659,14 +653,12 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<Inst> {
         branchDeadlines_(this->lifoAlloc_),
         nopFill_(nopFill) {}
 
- private:
   size_t sizeExcludingCurrentPool() const {
     // Return the actual size of the buffer, excluding the current pending
     // pool.
     return this->nextOffset().getOffset();
   }
 
- public:
   size_t size() const {
     // Return the current actual size of the buffer. This is only accurate
     // if there are no pending pool entries to dump, check.
@@ -693,7 +685,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<Inst> {
   static const unsigned OOM_FAIL = unsigned(-1);
   static const unsigned DUMMY_INDEX = unsigned(-2);
 
-  size_t sizeOfPrimaryVeneers(unsigned numNewDeadlines = 0) const {
+  size_t sizeOfPrimaryVeneers() const {
     // When VeneerSize > 1, it is possible for branch deadlines to
     // expire faster than we can insert veneers. Suppose branches are 4 bytes
     // each and veneers are 8 bytes each, we could have the following deadline
@@ -710,10 +702,9 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<Inst> {
     //   48: veneer(48)
     //
     // This is a pretty conservative solution to the problem: We reserve space
-    // for all deadlines in the range with the earliest deadline, assuming worst
-    // case deadlines.
-    return (VeneerSize - 1) *
-           (branchDeadlines_.earliestRangeSize() + numNewDeadlines) * InstSize;
+    // for all deadlines in the range with the most pending deadlines, assuming
+    // worst case deadlines.
+    return (VeneerSize - 1) * branchDeadlines_.maxRangeSize() * InstSize;
   }
 
   size_t sizeOfSecondaryVeneers(unsigned numNewDeadlines = 0) const {
@@ -770,7 +761,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<Inst> {
       size_t deadline = branchDeadlines_.earliestDeadline().getOffset();
       size_t poolEnd = poolOffset + pool_.getPoolSize() +
                        numPoolEntries * sizeof(PoolAllocUnit);
-      size_t primaryVeneers = sizeOfPrimaryVeneers(numNewDeadlines);
+      size_t primaryVeneers = sizeOfPrimaryVeneers();
       size_t secondaryVeneers = sizeOfSecondaryVeneers(numNewDeadlines);
 
       if (deadline < poolEnd + primaryVeneers + secondaryVeneers) {
@@ -782,7 +773,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<Inst> {
   }
 
   unsigned insertEntryForwards(unsigned numInst, unsigned numPoolEntries,
-                               uint8_t* inst, uint8_t* data) {
+                               uint8_t* data) {
     if constexpr (UseConstantPools) {
       // If inserting pool entries then find a new limiter before we do the
       // range check.
@@ -805,7 +796,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<Inst> {
       if (this->oom()) {
         return OOM_FAIL;
       }
-      return insertEntryForwards(numInst, numPoolEntries, inst, data);
+      return insertEntryForwards(numInst, numPoolEntries, data);
     }
 
     if constexpr (UseConstantPools) {
@@ -870,7 +861,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<Inst> {
 #endif
 
     // Insert the pool value.
-    unsigned index = insertEntryForwards(numInst, numPoolEntries, inst, data);
+    unsigned index = insertEntryForwards(numInst, numPoolEntries, data);
     if (this->oom()) {
       return BufferOffset();
     }

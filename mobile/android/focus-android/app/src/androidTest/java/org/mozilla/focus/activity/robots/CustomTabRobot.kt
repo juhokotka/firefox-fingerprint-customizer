@@ -10,58 +10,49 @@ import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
-import androidx.test.espresso.matcher.ViewMatchers.withId
-import androidx.test.espresso.matcher.ViewMatchers.withSubstring
-import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.uiautomator.UiObject
 import androidx.test.uiautomator.UiSelector
 import junit.framework.TestCase.assertTrue
+import mozilla.components.feature.customtabs.R as customtabsR
 import org.junit.Assert
 import org.mozilla.focus.R
-import org.mozilla.focus.helpers.TestHelper.appName
+import org.mozilla.focus.helpers.TestHelper.getStringResource
 import org.mozilla.focus.helpers.TestHelper.mDevice
 import org.mozilla.focus.helpers.TestHelper.packageName
 import org.mozilla.focus.helpers.TestHelper.waitingTime
 import org.mozilla.focus.idlingResources.SessionLoadedIdlingResource
-import mozilla.components.browser.toolbar.R as toolbarR
-import mozilla.components.feature.customtabs.R as customtabsR
 
 class CustomTabRobot {
 
     private lateinit var sessionLoadedIdlingResource: SessionLoadedIdlingResource
 
-    val progressBar: UiObject =
-        mDevice.findObject(
-            UiSelector().resourceId("$packageName:id/progress"),
-        )
+    val progressBar: UiObject = mDevice.findObject(UiSelector().resourceId("$packageName:id/progress"))
 
     fun verifyCustomTabActionButton(buttonDescription: String) {
         actionButton(buttonDescription).check(matches(isDisplayed()))
     }
 
     fun verifyCustomMenuItem(buttonDescription: String) {
-        customMenuItem(buttonDescription).check(matches(isDisplayed()))
+        menuItem(buttonDescription)
     }
 
-    fun openCustomTabMenu(): ViewInteraction = menuButton.perform(click())
+    fun openCustomTabMenu() = menuButton.click()
 
     fun verifyShareButtonIsDisplayed(): ViewInteraction = shareButton.check(matches(isDisplayed()))
 
     fun verifyTheStandardMenuItems() {
-        onView(withText("Add to Home screen")).check(matches(isDisplayed()))
-        onView(withText("Find in Page")).check(matches(isDisplayed()))
-        onView(withText("Open in…")).check(matches(isDisplayed()))
-        openInFocusButton.check(matches(isDisplayed()))
-        onView(withSubstring("Desktop site")).check(matches(isDisplayed()))
+        menuItem(getStringResource(R.string.menu_add_to_home_screen))
+        menuItem(getStringResource(R.string.find_in_page))
+        menuItem(getStringResource(R.string.menu_open_with_a_browser2))
+        menuItem(getStringResource(R.string.menu_open_with_default_browser2))
+        menuItem(getStringResource(R.string.preference_performance_request_desktop_site2))
+        menuItem(getStringResource(R.string.menu_custom_tab_branding))
         // Removed until https://github.com/mozilla-mobile/android-components/issues/10791 is fixed
-        // onView(withText("Report site issue")).check(matches(isDisplayed()))
-        onView(withText("Powered by $appName")).check(matches(isDisplayed()))
+        // menuItem("Report broken site…")
     }
 
     fun closeCustomTab() {
-        closeCustomTabButton
-            .check(matches(isDisplayed()))
-            .perform(click())
+        closeCustomTabButton.check(matches(isDisplayed())).perform(click())
     }
 
     fun verifyCustomTabUrl(url: String) {
@@ -86,14 +77,17 @@ class CustomTabRobot {
     fun verifyPageContent(expectedText: String) {
         val sessionLoadedIdlingResource = SessionLoadedIdlingResource()
 
-        mDevice.findObject(UiSelector().resourceId("$packageName:id/engineView"))
-            .waitForExists(waitingTime)
+        mDevice.findObject(UiSelector().resourceId("$packageName:id/engineView")).waitForExists(waitingTime)
 
         runWithIdleRes(sessionLoadedIdlingResource) {
-            Assert.assertTrue(
-                mDevice.findObject(UiSelector().textContains(expectedText))
-                    .waitForExists(waitingTime),
-            )
+            Assert.assertTrue(mDevice.findObject(UiSelector().textContains(expectedText)).waitForExists(waitingTime))
+        }
+    }
+
+    fun verifyPageTitle(expectedTitle: String) {
+        val title = mDevice.findObject(UiSelector().resourceId(customTabTitleId).text(expectedTitle))
+        if (!title.waitForExists(waitingTime)) {
+            Assert.fail("Expected title: $expectedTitle, actual title: ${customTabTitle.text}")
         }
     }
 
@@ -104,16 +98,14 @@ class CustomTabRobot {
 
     class Transition {
         fun clickOpenInFocusButton(interact: BrowserRobot.() -> Unit): BrowserRobot.Transition {
-            openInFocusButton
-                .check(matches(isDisplayed()))
-                .perform(click())
+            menuItem(getStringResource(R.string.menu_open_with_default_browser2)).click()
 
             BrowserRobot().interact()
             return BrowserRobot.Transition()
         }
 
         fun openCustomTabMenu(interact: ThreeDotMainMenuRobot.() -> Unit): ThreeDotMainMenuRobot.Transition {
-            menuButton.perform(click())
+            menuButton.click()
 
             ThreeDotMainMenuRobot().interact()
             return ThreeDotMainMenuRobot.Transition()
@@ -128,15 +120,16 @@ fun customTab(interact: CustomTabRobot.() -> Unit): CustomTabRobot.Transition {
 
 private fun actionButton(description: String) = onView(withContentDescription(description))
 
-private val menuButton = onView(withId(toolbarR.id.mozac_browser_toolbar_menu))
+private val menuButton
+    get() = mDevice.findObject(UiSelector().description(getStringResource(R.string.content_description_menu)))
 
 private val shareButton = onView(withContentDescription("Share link"))
 
-private fun customMenuItem(description: String) = onView(withText(description))
+private val closeCustomTabButton =
+    onView(withContentDescription(customtabsR.string.mozac_feature_customtabs_exit_button))
 
-private val closeCustomTabButton = onView(withContentDescription(customtabsR.string.mozac_feature_customtabs_exit_button))
+private val customTabTitleId = "$packageName:id/mozac_browser_toolbar_title_view"
 
-private val openInFocusButton = onView(withText("Open in $appName"))
+private val customTabTitle = mDevice.findObject(UiSelector().resourceId(customTabTitleId))
 
-private val customTabUrl =
-    mDevice.findObject(UiSelector().resourceId("$packageName:id/mozac_browser_toolbar_url_view"))
+private val customTabUrl = mDevice.findObject(UiSelector().resourceId("$packageName:id/mozac_browser_toolbar_url_view"))

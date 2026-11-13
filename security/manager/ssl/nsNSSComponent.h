@@ -6,11 +6,6 @@
 #ifndef _nsNSSComponent_h_
 #define _nsNSSComponent_h_
 
-#include "nsINSSComponent.h"
-#ifdef ENABLE_TESTS
-#  include "nsISSLTokensCacheTest.h"
-#endif
-
 #include "EnterpriseRoots.h"
 #include "ScopedNSSTypes.h"
 #include "SharedCertVerifier.h"
@@ -18,6 +13,7 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/RefPtr.h"
 #include "nsCOMPtr.h"
+#include "nsINSSComponent.h"
 #include "nsIObserver.h"
 #include "nsISerialEventTarget.h"
 #include "nsNSSCallbacks.h"
@@ -26,9 +22,12 @@
 #include "sslt.h"
 
 #ifdef XP_WIN
-#  include <windows.h>  // this needs to be before the following includes
+// clang-format off
+// wincrypt.h depends on windows.h, so needs to go before
+#  include <windows.h>
 #  include <wincrypt.h>
-#endif  // XP_WIN
+// clang-format on
+#endif
 
 class nsIDOMWindow;
 class nsIPrompt;
@@ -53,20 +52,23 @@ bool HandleTLSPrefChange(const nsCString& aPref);
 void SetValidationOptionsCommon();
 void PrepareForShutdownInSocketProcess();
 
-// RAII helper class to indicate that gecko is searching for client auth
-// certificates. Will automatically stop indicating that a search is happening
-// when it goes out of scope.
+// RAII helper class to indicate that gecko is searching for certificates. Will
+// automatically stop indicating that a search is happening when it goes out of
+// scope.
+// remotecerts will call IsGeckoSearchingForCertificates() to determine if gecko
+// is searching for certificates. If so, it will refresh its list of
+// certificates and keys by querying the remote PKCS#11 module process.
+class AutoSearchingForCertificates {
+ public:
+  AutoSearchingForCertificates();
+  ~AutoSearchingForCertificates();
+};
+
+// Similarly, but just for client authentication certificates.
 // osclientcerts (or ipcclientcerts, in the socket process) will call
 // IsGeckoSearchingForClientAuthCertificates() to determine if gecko is
 // searching for client auth certificates. If so, the module knows to refresh
 // its list of certificates and keys (which can be costly).
-// In theory, two separate threads could both create a
-// AutoSearchingForClientAuthCertificates at overlapping times. If one goes out
-// of scope sooner than the other, IsGeckoSearchingForClientAuthCertificates()
-// could potentially incorrectly return false for the slower thread. However,
-// as long as the faster thread has ensured that osclientcerts/ipcclientcerts
-// has updated its list of known certificates, a second search would be
-// redundant anyway, so it doesn't matter.
 class AutoSearchingForClientAuthCertificates {
  public:
   AutoSearchingForClientAuthCertificates();
@@ -74,13 +76,7 @@ class AutoSearchingForClientAuthCertificates {
 };
 
 // Implementation of the PSM component interface.
-class nsNSSComponent final : public nsINSSComponent,
-                             public nsIObserver
-#ifdef ENABLE_TESTS
-    ,
-                             public nsISSLTokensCacheTest
-#endif
-{
+class nsNSSComponent final : public nsINSSComponent, public nsIObserver {
  public:
   // LoadLoadableCertsTask updates mLoadableCertsLoaded and
   // mLoadableCertsLoadedResult and then signals mLoadableCertsLoadedMonitor.
@@ -94,9 +90,6 @@ class nsNSSComponent final : public nsINSSComponent,
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSINSSCOMPONENT
   NS_DECL_NSIOBSERVER
-#ifdef ENABLE_TESTS
-  NS_DECL_NSISSLTOKENSCACHETEST
-#endif
 
   nsresult Init();
 
@@ -107,12 +100,6 @@ class nsNSSComponent final : public nsINSSComponent,
                                   SSLVersionRange defaults);
 
   static nsresult SetEnabledTLSVersions();
-
-  // This function does the actual work of clearing the session cache. It is to
-  // be used by the socket process (where there is no nsINSSComponent) and
-  // internally by nsNSSComponent.
-  // NB: NSS must have already been initialized before this is called.
-  static void DoClearSSLExternalAndInternalSessionCache();
 
  protected:
   ~nsNSSComponent();

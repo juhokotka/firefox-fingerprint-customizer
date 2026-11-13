@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SmoothScrollAnimation.h"
+
 #include "AsyncPanZoomController.h"
 #include "ScrollAnimationBezierPhysics.h"
 #include "ScrollAnimationMSDPhysics.h"
@@ -188,7 +189,7 @@ CSSPoint SmoothScrollAnimation::GetViewportOffset(
 bool SmoothScrollAnimation::DoSample(FrameMetrics& aFrameMetrics,
                                      const TimeDuration& aDelta) {
   TimeStamp now = mApzc.GetFrameTime().Time();
-  CSSToParentLayerScale zoom(aFrameMetrics.GetZoom());
+  const CSSToParentLayerScale& zoom = aFrameMetrics.GetZoom();
   if (zoom == CSSToParentLayerScale(0)) {
     return false;
   }

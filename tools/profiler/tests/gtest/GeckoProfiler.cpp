@@ -7,6 +7,7 @@
 // happens when calling these functions. They don't do much inspection of
 // profiler internals.
 
+#include "mozilla/ProfileChunkedBuffer.h"
 #include "mozilla/ProfilerPlatformMacros.h"
 #include "mozilla/ProfilerThreadPlatformData.h"
 #include "mozilla/ProfilerThreadRegistration.h"
@@ -49,6 +50,7 @@
 #include "NetworkMarker.h"
 #include "platform.h"
 #include "ProfileBuffer.h"
+#include "ProfiledThreadData.h"
 #include "ProfilerControl.h"
 
 #include "js/Initialization.h"
@@ -1946,17 +1948,17 @@ TEST(GeckoProfiler, GetBacktrace)
     static const int N = 100;
     {
       UniqueProfilerBacktrace u[N];
-      for (int i = 0; i < N; i++) {
-        u[i] = profiler_get_backtrace();
-        ASSERT_TRUE(u[i]);
+      for (auto& i : u) {
+        i = profiler_get_backtrace();
+        ASSERT_TRUE(i);
       }
     }
 
     // These will be destroyed after the profiler stops.
     UniqueProfilerBacktrace u[N];
-    for (int i = 0; i < N; i++) {
-      u[i] = profiler_get_backtrace();
-      ASSERT_TRUE(u[i]);
+    for (auto& i : u) {
+      i = profiler_get_backtrace();
+      ASSERT_TRUE(i);
     }
 
     profiler_stop();
@@ -2378,6 +2380,109 @@ struct GtestBaseMarkerTypeUniqueString
   }
 };
 
+// BaseMarkerType-based marker graphing two of its payload fields, one with an
+// explicit color and one without.
+struct GtestBaseMarkerTypeGraphs
+    : public mozilla::BaseMarkerType<GtestBaseMarkerTypeGraphs> {
+  static constexpr const char* Name = "markers-gtest-base-graphs";
+  using MS = mozilla::MarkerSchema;
+  static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
+                                               MS::Location::MarkerTable};
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"colored", MS::InputType::Double, "Colored", MS::Format::Decimal},
+      {"plain", MS::InputType::Double, "Plain", MS::Format::Decimal}};
+  static constexpr MS::GraphField GraphFields[] = {
+      {"colored", MS::GraphType::Bar, mozilla::Some(MS::GraphColor::Ink)},
+      {"plain", MS::GraphType::FilledLine}};
+};
+
+// User-defined marker type with different properties, and fake schema.
+struct GtestMarker : public mozilla::BaseMarkerType<GtestMarker> {
+  static constexpr const char* Name = "markers-gtest";
+  using MS = mozilla::MarkerSchema;
+  static constexpr MS::Location Locations[] = {
+      MS::Location::MarkerChart,      MS::Location::MarkerTable,
+      MS::Location::TimelineOverview, MS::Location::TimelineMemory,
+      MS::Location::TimelineIPC,      MS::Location::TimelineFileIO,
+      MS::Location::StackChart};
+  static constexpr const char* ChartLabel = "chart label";
+  static constexpr const char* TooltipLabel = "tooltip label";
+  static constexpr const char* TableLabel = "table label";
+  static constexpr const char* ColorField = "color";
+  static constexpr const char* Description = "static value";
+  // Note: This is a test schema that is not intended to actually match the
+  // StreamJSONMarkerData data below! Instead we only test that it outputs the
+  // expected JSON at the end.
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"key with url", MS::InputType::CString, nullptr, MS::Format::Url},
+      {"key with label filePath", MS::InputType::CString, "label filePath",
+       MS::Format::FilePath},
+      {"key with string", MS::InputType::CString, nullptr, MS::Format::String},
+      {"key with label duration", MS::InputType::TimeDuration, "label duration",
+       MS::Format::Duration},
+      {"key with time", MS::InputType::TimeStamp, nullptr, MS::Format::Time},
+      {"key with seconds", MS::InputType::Uint64, nullptr, MS::Format::Seconds},
+      {"key with milliseconds", MS::InputType::Uint64, nullptr,
+       MS::Format::Milliseconds},
+      {"key with microseconds", MS::InputType::Uint64, nullptr,
+       MS::Format::Microseconds},
+      {"key with nanoseconds", MS::InputType::Uint64, nullptr,
+       MS::Format::Nanoseconds},
+      {"key with bytes", MS::InputType::Uint64, nullptr, MS::Format::Bytes},
+      {"key with percentage", MS::InputType::Double, nullptr,
+       MS::Format::Percentage},
+      {"key with integer", MS::InputType::Uint64, nullptr, MS::Format::Integer},
+      {"key with decimal", MS::InputType::Double, nullptr, MS::Format::Decimal},
+      {"key with hexadecimal", MS::InputType::Uint64, nullptr,
+       MS::Format::Hexadecimal},
+      {"key with unique string", MS::InputType::CString, nullptr,
+       MS::Format::UniqueString},
+      {"key with sanitized string", MS::InputType::CString, nullptr,
+       MS::Format::SanitizedString},
+      {"key with label hidden", MS::InputType::CString, "label",
+       MS::Format::String, MS::PayloadFlags::Hidden},
+      {"key hidden", MS::InputType::CString, nullptr, MS::Format::String,
+       MS::PayloadFlags::Hidden},
+      {"color", MS::InputType::CString, nullptr, MS::Format::String,
+       MS::PayloadFlags::Hidden}};
+  static void StreamJSONMarkerData(
+      mozilla::baseprofiler::SpliceableJSONWriter& aWriter, int aInt,
+      double aDouble, const mozilla::ProfilerString8View& aText,
+      const mozilla::ProfilerString8View& aUniqueText,
+      const mozilla::TimeStamp& aTime) {
+    aWriter.NullProperty("null");
+    aWriter.BoolProperty("bool-false", false);
+    aWriter.BoolProperty("bool-true", true);
+    aWriter.IntProperty("int", aInt);
+    aWriter.DoubleProperty("double", aDouble);
+    aWriter.StringProperty("text", aText);
+    aWriter.UniqueStringProperty("unique text", aUniqueText);
+    aWriter.UniqueStringProperty("unique text again", aUniqueText);
+    aWriter.TimeProperty("time", aTime);
+    aWriter.StringProperty("color", "green");
+  }
+  // The fake schema cannot be filled from the arguments, so nothing is output
+  // to ETW.
+  static void TranslateMarkerInputToSchema(
+      void* aContext, int aInt, double aDouble,
+      const mozilla::ProfilerString8View& aText,
+      const mozilla::ProfilerString8View& aUniqueText,
+      const mozilla::TimeStamp& aTime) {}
+};
+
+// User-defined marker type with no data, special frontend schema.
+struct GtestSpecialMarker : public mozilla::BaseMarkerType<GtestSpecialMarker> {
+  static constexpr const char* Name = "markers-gtest-special";
+  static constexpr bool UseSpecialFrontendLocation = true;
+};
+
+// User-defined marker type that is never used, so it shouldn't appear in the
+// output.
+struct GtestUnusedMarker : public mozilla::BaseMarkerType<GtestUnusedMarker> {
+  static constexpr const char* Name = "markers-gtest-unused";
+  static constexpr bool UseSpecialFrontendLocation = true;
+};
+
 TEST(GeckoProfiler, Markers)
 {
   uint32_t features = ProfilerFeature::StackWalk;
@@ -2478,111 +2583,23 @@ TEST(GeckoProfiler, Markers)
       MarkerTiming::Interval(ts1, ts2), geckoprofiler::markers::TextMarker{},
       "First Marker"));
 
-  // User-defined marker type with different properties, and fake schema.
-  struct GtestMarker {
-    static constexpr Span<const char> MarkerTypeName() {
-      return MakeStringSpan("markers-gtest");
-    }
-    static void StreamJSONMarkerData(
-        mozilla::baseprofiler::SpliceableJSONWriter& aWriter, int aInt,
-        double aDouble, const mozilla::ProfilerString8View& aText,
-        const mozilla::ProfilerString8View& aUniqueText,
-        const mozilla::TimeStamp& aTime) {
-      aWriter.NullProperty("null");
-      aWriter.BoolProperty("bool-false", false);
-      aWriter.BoolProperty("bool-true", true);
-      aWriter.IntProperty("int", aInt);
-      aWriter.DoubleProperty("double", aDouble);
-      aWriter.StringProperty("text", aText);
-      aWriter.UniqueStringProperty("unique text", aUniqueText);
-      aWriter.UniqueStringProperty("unique text again", aUniqueText);
-      aWriter.TimeProperty("time", aTime);
-      aWriter.StringProperty("color", "green");
-    }
-    static mozilla::MarkerSchema MarkerTypeDisplay() {
-      // Note: This is an test function that is not intended to actually output
-      // that correctly matches StreamJSONMarkerData data above! Instead we only
-      // test that it outputs the expected JSON at the end.
-      using MS = mozilla::MarkerSchema;
-      MS schema{MS::Location::MarkerChart,      MS::Location::MarkerTable,
-                MS::Location::TimelineOverview, MS::Location::TimelineMemory,
-                MS::Location::TimelineIPC,      MS::Location::TimelineFileIO,
-                MS::Location::StackChart};
-      // All label functions.
-      schema.SetChartLabel("chart label");
-      schema.SetTooltipLabel("tooltip label");
-      schema.SetTableLabel("table label");
-      schema.SetColorField("color");
-      // All data functions, all formats.
-      schema.AddKeyFormat("key with url", MS::Format::Url);
-      schema.AddKeyLabelFormat("key with label filePath", "label filePath",
-                               MS::Format::FilePath);
-      schema.AddKeyFormat("key with string", MS::Format::String);
-      schema.AddKeyLabelFormat("key with label duration", "label duration",
-                               MS::Format::Duration);
-      schema.AddKeyFormat("key with time", MS::Format::Time);
-      schema.AddKeyFormat("key with seconds", MS::Format::Seconds);
-      schema.AddKeyFormat("key with milliseconds", MS::Format::Milliseconds);
-      schema.AddKeyFormat("key with microseconds", MS::Format::Microseconds);
-      schema.AddKeyFormat("key with nanoseconds", MS::Format::Nanoseconds);
-      schema.AddKeyFormat("key with bytes", MS::Format::Bytes);
-      schema.AddKeyFormat("key with percentage", MS::Format::Percentage);
-      schema.AddKeyFormat("key with integer", MS::Format::Integer);
-      schema.AddKeyFormat("key with decimal", MS::Format::Decimal);
-      schema.AddStaticLabelValue("static label", "static value");
-      schema.AddKeyFormat("key with unique string", MS::Format::UniqueString);
-      schema.AddKeyFormat("key with sanitized string",
-                          MS::Format::SanitizedString);
-      schema.AddKeyLabelFormat("key with label hidden", "label",
-                               MS::Format::String, MS::PayloadFlags::Hidden);
-      schema.AddKeyFormat("key hidden", MS::Format::String,
-                          MS::PayloadFlags::Hidden);
-      schema.AddKeyFormat("color", MS::Format::String,
-                          MS::PayloadFlags::Hidden);
-
-      return schema;
-    }
-  };
   EXPECT_TRUE(profiler_add_marker_impl(
       "Gtest custom marker", geckoprofiler::category::OTHER,
       MarkerTiming::Interval(ts1, ts2), GtestMarker{}, 42, 43.0, "gtest text",
       "gtest unique text", ts1));
 
-  // User-defined marker type with no data, special frontend schema.
-  struct GtestSpecialMarker {
-    static constexpr Span<const char> MarkerTypeName() {
-      return MakeStringSpan("markers-gtest-special");
-    }
-    static void StreamJSONMarkerData(
-        mozilla::baseprofiler::SpliceableJSONWriter& aWriter) {}
-    static mozilla::MarkerSchema MarkerTypeDisplay() {
-      return mozilla::MarkerSchema::SpecialFrontendLocation{};
-    }
-  };
   EXPECT_TRUE(profiler_add_marker_impl("Gtest special marker",
                                        geckoprofiler::category::OTHER, {},
                                        GtestSpecialMarker{}));
-
-  // User-defined marker type that is never used, so it shouldn't appear in the
-  // output.
-  struct GtestUnusedMarker {
-    static constexpr Span<const char> MarkerTypeName() {
-      return MakeStringSpan("markers-gtest-unused");
-    }
-    static void StreamJSONMarkerData(
-        mozilla::baseprofiler::SpliceableJSONWriter& aWriter) {}
-    static mozilla::MarkerSchema MarkerTypeDisplay() {
-      return mozilla::MarkerSchema::SpecialFrontendLocation{};
-    }
-  };
-
-  // Make sure the compiler doesn't complain about this unused struct.
-  (void)GtestUnusedMarker{};
 
   EXPECT_TRUE(profiler_add_marker_impl(
       "Gtest base marker type unique string", geckoprofiler::category::OTHER,
       {}, GtestBaseMarkerTypeUniqueString{}, "gtest unique field value",
       "gtest plain field value"));
+
+  EXPECT_TRUE(profiler_add_marker_impl("Gtest base marker type graphs",
+                                       geckoprofiler::category::OTHER, {},
+                                       GtestBaseMarkerTypeGraphs{}, 1.5, 2.5));
 
   // Test PROFILER_MARKER_SIMPLE_PAYLOAD with various data types.
   int testInt = 42;
@@ -2651,6 +2668,8 @@ TEST(GeckoProfiler, Markers)
       /* bool aIsPrivateBrowsing */ false,
       /* nsIClassOfService* aClassOfService */ classOfService2,
       /* nsresult aRequestStatus */ NS_BINDING_ABORTED,
+      /* const nsACString& aSecPurpose */ ""_ns,
+      /* bool aActivatedFromPrefetch */ false,
       /* const mozilla::net::TimingStruct* aTimings = nullptr */ nullptr,
       /* mozilla::UniquePtr<mozilla::ProfileChunkedBuffer> aSource =
          nullptr */
@@ -2686,6 +2705,8 @@ TEST(GeckoProfiler, Markers)
       /* bool aIsPrivateBrowsing */ false,
       /* nsIClassOfService* aClassOfService */ classOfService3,
       /* nsresult aRequestStatus */ NS_ERROR_UNEXPECTED,
+      /* const nsACString& aSecPurpose */ ""_ns,
+      /* bool aActivatedFromPrefetch */ false,
       /* const mozilla::net::TimingStruct* aTimings = nullptr */ nullptr,
       /* mozilla::UniquePtr<mozilla::ProfileChunkedBuffer> aSource =
          nullptr */
@@ -2720,6 +2741,8 @@ TEST(GeckoProfiler, Markers)
       /* bool aIsPrivateBrowsing */ false,
       /* nsIClassOfService* aClassOfService */ classOfService4,
       /* nsresult aRequestStatus */ NS_ERROR_DOCSHELL_DYING,
+      /* const nsACString& aSecPurpose */ ""_ns,
+      /* bool aActivatedFromPrefetch */ false,
       /* const mozilla::net::TimingStruct* aTimings = nullptr */ nullptr,
       /* mozilla::UniquePtr<mozilla::ProfileChunkedBuffer> aSource =
          nullptr */
@@ -2754,6 +2777,8 @@ TEST(GeckoProfiler, Markers)
       /* bool aIsPrivateBrowsing */ false,
       /* nsIClassOfService* aClassOfService */ classOfService5,
       /* nsresult aRequestStatus */ NS_ERROR_DOM_CORP_FAILED,
+      /* const nsACString& aSecPurpose */ ""_ns,
+      /* bool aActivatedFromPrefetch */ false,
       /* const mozilla::net::TimingStruct* aTimings = nullptr */ nullptr,
       /* mozilla::UniquePtr<mozilla::ProfileChunkedBuffer> aSource =
          nullptr */
@@ -2788,6 +2813,8 @@ TEST(GeckoProfiler, Markers)
       /* bool aIsPrivateBrowsing */ false,
       /* nsIClassOfService* aClassOfService */ classOfService6,
       /* nsresult aRequestStatus */ NS_ERROR_BLOCKED_BY_POLICY,
+      /* const nsACString& aSecPurpose */ ""_ns,
+      /* bool aActivatedFromPrefetch */ false,
       /* const mozilla::net::TimingStruct* aTimings = nullptr */ nullptr,
       /* mozilla::UniquePtr<mozilla::ProfileChunkedBuffer> aSource =
          nullptr */
@@ -2853,6 +2880,47 @@ TEST(GeckoProfiler, Markers)
       /* bool aIsPrivateBrowsing */ false,
       /* nsIClassOfService* aClassOfService */ classOfService8,
       /* nsresult aRequestStatus */ NS_OK);
+
+  // The speculative fetch, and then the navigation that consumes it. These
+  // two fields are mutually exclusive in production, so each gets its own
+  // marker.
+  RefPtr<MockClassOfService> classOfService9 =
+      new MockClassOfService(nsIClassOfService::Leader);
+  profiler_add_network_marker(
+      /* nsIURI* aURI */ uri,
+      /* const nsACString& aRequestMethod */ "GET"_ns,
+      /* int32_t aPriority */ 34,
+      /* uint64_t aChannelId */ 9,
+      /* NetworkLoadType aType */ net::NetworkLoadType::LOAD_START,
+      /* mozilla::TimeStamp aStart */ ts1,
+      /* mozilla::TimeStamp aEnd */ ts2,
+      /* int64_t aCount */ 56,
+      /* nsICacheInfoChannel::CacheDisposition aCacheDisposition */
+      nsICacheInfoChannel::kCacheHit,
+      /* uint64_t aInnerWindowID */ 78,
+      /* bool aIsPrivateBrowsing */ false,
+      /* nsIClassOfService* aClassOfService */ classOfService9,
+      /* nsresult aRequestStatus */ NS_OK,
+      /* const nsACString& aSecPurpose */ "prefetch;anonymous-client-ip"_ns,
+      /* bool aActivatedFromPrefetch */ false);
+
+  profiler_add_network_marker(
+      /* nsIURI* aURI */ uri,
+      /* const nsACString& aRequestMethod */ "GET"_ns,
+      /* int32_t aPriority */ 34,
+      /* uint64_t aChannelId */ 10,
+      /* NetworkLoadType aType */ net::NetworkLoadType::LOAD_START,
+      /* mozilla::TimeStamp aStart */ ts1,
+      /* mozilla::TimeStamp aEnd */ ts2,
+      /* int64_t aCount */ 56,
+      /* nsICacheInfoChannel::CacheDisposition aCacheDisposition */
+      nsICacheInfoChannel::kCacheHit,
+      /* uint64_t aInnerWindowID */ 78,
+      /* bool aIsPrivateBrowsing */ false,
+      /* nsIClassOfService* aClassOfService */ classOfService9,
+      /* nsresult aRequestStatus */ NS_OK,
+      /* const nsACString& aSecPurpose */ ""_ns,
+      /* bool aActivatedFromPrefetch */ true);
 
   EXPECT_TRUE(profiler_add_marker_impl(
       "Text in main thread with stack", geckoprofiler::category::OTHER,
@@ -2942,6 +3010,7 @@ TEST(GeckoProfiler, Markers)
     S_CustomMarker,
     S_SpecialMarker,
     S_BaseMarkerTypeUniqueString,
+    S_BaseMarkerTypeGraphs,
     S_SimplePayload_int,
     S_SimplePayload_double,
     S_SimplePayload_bool,
@@ -2955,6 +3024,8 @@ TEST(GeckoProfiler, Markers)
     S_NetworkMarkerPayload_redirect_internal_sts,
     S_NetworkMarkerPayload_private_browsing,
     S_NetworkMarkerPayload_priorityHeader,
+    S_NetworkMarkerPayload_prefetch,
+    S_NetworkMarkerPayload_prefetchActivation,
 
     S_TextWithStack,
     S_TextToMTWithStack,
@@ -3205,7 +3276,11 @@ TEST(GeckoProfiler, Markers)
                   ts2Double = marker[END_TIME].asDouble();
                   state = State(S_FirstMarker + 1);
                   EXPECT_EQ(typeString, "Text");
-                  EXPECT_EQ_JSON(payload["name"], String, "First Marker");
+                  // The Text marker's "name" field is a unique string.
+                  ASSERT_TRUE(payload["name"].isUInt());
+                  GET_JSON(firstMarkerName,
+                           stringTable[payload["name"].asUInt()], String);
+                  EXPECT_EQ(firstMarkerName.asString(), "First Marker");
 
                 } else if (nameString == "Gtest custom marker") {
                   EXPECT_EQ(state, S_CustomMarker);
@@ -3248,6 +3323,13 @@ TEST(GeckoProfiler, Markers)
                   // plainField should be stored as a regular string.
                   EXPECT_EQ_JSON(payload["plainField"], String,
                                  "gtest plain field value");
+
+                } else if (nameString == "Gtest base marker type graphs") {
+                  EXPECT_EQ(state, S_BaseMarkerTypeGraphs);
+                  state = State(S_BaseMarkerTypeGraphs + 1);
+                  EXPECT_EQ(typeString, "markers-gtest-base-graphs");
+                  EXPECT_EQ_JSON(payload["colored"], Double, 1.5);
+                  EXPECT_EQ_JSON(payload["plain"], Double, 2.5);
 
                 } else if (nameString == "SimplePayload with int") {
                   EXPECT_EQ(state, S_SimplePayload_int);
@@ -3306,6 +3388,8 @@ TEST(GeckoProfiler, Markers)
                   EXPECT_TRUE(payload["isHttpToHttpsRedirect"].isNull());
                   EXPECT_TRUE(payload["redirectId"].isNull());
                   EXPECT_TRUE(payload["contentType"].isNull());
+                  EXPECT_TRUE(payload["secPurpose"].isNull());
+                  EXPECT_TRUE(payload["deliveryType"].isNull());
 
                 } else if (nameString == "Load 2: http://mozilla.org/") {
                   EXPECT_EQ(state, S_NetworkMarkerPayload_stop);
@@ -3474,20 +3558,46 @@ TEST(GeckoProfiler, Markers)
                   EXPECT_FALSE(payload["priorityHeader"].isNull());
                   EXPECT_EQ_JSON(payload["priorityHeader"], String, "u=4, i");
 
+                } else if (nameString == "Load 9: http://mozilla.org/") {
+                  EXPECT_EQ(state, S_NetworkMarkerPayload_prefetch);
+                  state = State(S_NetworkMarkerPayload_prefetch + 1);
+                  EXPECT_EQ(typeString, "Network");
+                  EXPECT_EQ_JSON(payload["id"], Int64, 9);
+                  EXPECT_EQ_JSON(payload["secPurpose"], String,
+                                 "prefetch;anonymous-client-ip");
+                  EXPECT_TRUE(payload["deliveryType"].isNull());
+
+                } else if (nameString == "Load 10: http://mozilla.org/") {
+                  EXPECT_EQ(state, S_NetworkMarkerPayload_prefetchActivation);
+                  state = State(S_NetworkMarkerPayload_prefetchActivation + 1);
+                  EXPECT_EQ(typeString, "Network");
+                  EXPECT_EQ_JSON(payload["id"], Int64, 10);
+                  EXPECT_TRUE(payload["secPurpose"].isNull());
+                  EXPECT_EQ_JSON(payload["deliveryType"], String,
+                                 "navigational-prefetch");
+
                 } else if (nameString == "Text in main thread with stack") {
                   EXPECT_EQ(state, S_TextWithStack);
                   state = State(S_TextWithStack + 1);
                   EXPECT_EQ(typeString, "Text");
                   EXPECT_FALSE(payload["stack"].isNull());
                   EXPECT_TIMING_INTERVAL_AT(ts1Double, ts2Double);
-                  EXPECT_EQ_JSON(payload["name"], String, "");
+                  // The Text marker's "name" field is a unique string.
+                  ASSERT_TRUE(payload["name"].isUInt());
+                  GET_JSON(textName, stringTable[payload["name"].asUInt()],
+                           String);
+                  EXPECT_EQ(textName.asString(), "");
 
                 } else if (nameString == "Text from main thread with stack") {
                   EXPECT_EQ(state, S_TextToMTWithStack);
                   state = State(S_TextToMTWithStack + 1);
                   EXPECT_EQ(typeString, "Text");
                   EXPECT_FALSE(payload["stack"].isNull());
-                  EXPECT_EQ_JSON(payload["name"], String, "");
+                  // The Text marker's "name" field is a unique string.
+                  ASSERT_TRUE(payload["name"].isUInt());
+                  GET_JSON(textName, stringTable[payload["name"].asUInt()],
+                           String);
+                  EXPECT_EQ(textName.asString(), "");
 
                 } else if (nameString ==
                            "Text in registered thread with stack") {
@@ -3500,7 +3610,11 @@ TEST(GeckoProfiler, Markers)
                   state = State(S_RegThread_TextToMTWithStack + 1);
                   EXPECT_EQ(typeString, "Text");
                   EXPECT_FALSE(payload["stack"].isNull());
-                  EXPECT_EQ_JSON(payload["name"], String, "");
+                  // The Text marker's "name" field is a unique string.
+                  ASSERT_TRUE(payload["name"].isUInt());
+                  GET_JSON(textName, stringTable[payload["name"].asUInt()],
+                           String);
+                  EXPECT_EQ(textName.asString(), "");
 
                 } else if (nameString ==
                            "Text in unregistered thread with stack") {
@@ -3513,7 +3627,11 @@ TEST(GeckoProfiler, Markers)
                   state = State(S_UnregThread_TextToMTWithStack + 1);
                   EXPECT_EQ(typeString, "Text");
                   EXPECT_TRUE(payload["stack"].isNull());
-                  EXPECT_EQ_JSON(payload["name"], String, "");
+                  // The Text marker's "name" field is a unique string.
+                  ASSERT_TRUE(payload["name"].isUInt());
+                  GET_JSON(textName, stringTable[payload["name"].asUInt()],
+                           String);
+                  EXPECT_EQ(textName.asString(), "");
                 }
               }  // marker with payload
             }  // for (marker : data)
@@ -3556,7 +3674,7 @@ TEST(GeckoProfiler, Markers)
             ASSERT_TRUE(data[0u].isObject());
             EXPECT_EQ_JSON(data[0u]["key"], String, "name");
             EXPECT_EQ_JSON(data[0u]["label"], String, "Details");
-            EXPECT_EQ_JSON(data[0u]["format"], String, "string");
+            EXPECT_EQ_JSON(data[0u]["format"], String, "unique-string");
 
           } else if (nameString == "NoPayloadUserData") {
             // TODO: Remove this when bug 1646714 lands.
@@ -3678,7 +3796,7 @@ TEST(GeckoProfiler, Markers)
             EXPECT_EQ_JSON(schema["tableLabel"], String, "table label");
             EXPECT_EQ_JSON(schema["colorField"], String, "color");
 
-            ASSERT_EQ(data.size(), 19u);
+            ASSERT_EQ(data.size(), 20u);
 
             ASSERT_TRUE(data[0u].isObject());
             EXPECT_EQ_JSON(data[0u]["key"], String, "key with url");
@@ -3746,8 +3864,9 @@ TEST(GeckoProfiler, Markers)
             EXPECT_EQ_JSON(data[12u]["format"], String, "decimal");
 
             ASSERT_TRUE(data[13u].isObject());
-            EXPECT_EQ_JSON(data[13u]["label"], String, "static label");
-            EXPECT_EQ_JSON(data[13u]["value"], String, "static value");
+            EXPECT_EQ_JSON(data[13u]["key"], String, "key with hexadecimal");
+            EXPECT_TRUE(data[13u]["label"].isNull());
+            EXPECT_EQ_JSON(data[13u]["format"], String, "hexadecimal");
 
             ASSERT_TRUE(data[14u].isObject());
             EXPECT_EQ_JSON(data[14u]["key"], String, "key with unique string");
@@ -3778,6 +3897,10 @@ TEST(GeckoProfiler, Markers)
             EXPECT_EQ_JSON(data[18u]["format"], String, "string");
             EXPECT_EQ_JSON(data[18u]["hidden"], Bool, true);
 
+            ASSERT_TRUE(data[19u].isObject());
+            EXPECT_EQ_JSON(data[19u]["label"], String, "Description");
+            EXPECT_EQ_JSON(data[19u]["value"], String, "static value");
+
           } else if (nameString == "markers-gtest-base-unique-string") {
             EXPECT_EQ(display.size(), 2u);
             EXPECT_EQ(display[0u].asString(), "marker-chart");
@@ -3794,6 +3917,41 @@ TEST(GeckoProfiler, Markers)
             EXPECT_EQ_JSON(data[1u]["key"], String, "plainField");
             EXPECT_EQ_JSON(data[1u]["label"], String, "Plain Field");
             EXPECT_EQ_JSON(data[1u]["format"], String, "string");
+
+            EXPECT_TRUE(schema["graphs"].isNull())
+                << "A marker type without GraphFields should not emit a graphs "
+                   "array";
+
+          } else if (nameString == "markers-gtest-base-graphs") {
+            EXPECT_EQ(display.size(), 2u);
+            EXPECT_EQ(display[0u].asString(), "marker-chart");
+            EXPECT_EQ(display[1u].asString(), "marker-table");
+
+            ASSERT_EQ(data.size(), 2u);
+
+            ASSERT_TRUE(data[0u].isObject());
+            EXPECT_EQ_JSON(data[0u]["key"], String, "colored");
+            EXPECT_EQ_JSON(data[0u]["label"], String, "Colored");
+            EXPECT_EQ_JSON(data[0u]["format"], String, "decimal");
+
+            ASSERT_TRUE(data[1u].isObject());
+            EXPECT_EQ_JSON(data[1u]["key"], String, "plain");
+            EXPECT_EQ_JSON(data[1u]["label"], String, "Plain");
+            EXPECT_EQ_JSON(data[1u]["format"], String, "decimal");
+
+            GET_JSON(graphs, schema["graphs"], Array);
+            ASSERT_EQ(graphs.size(), 2u);
+
+            ASSERT_TRUE(graphs[0u].isObject());
+            EXPECT_EQ_JSON(graphs[0u]["key"], String, "colored");
+            EXPECT_EQ_JSON(graphs[0u]["type"], String, "bar");
+            EXPECT_EQ_JSON(graphs[0u]["color"], String, "ink");
+
+            ASSERT_TRUE(graphs[1u].isObject());
+            EXPECT_EQ_JSON(graphs[1u]["key"], String, "plain");
+            EXPECT_EQ_JSON(graphs[1u]["type"], String, "line-filled");
+            EXPECT_TRUE(graphs[1u]["color"].isNull())
+                << "A GraphField left without a color should not emit one";
 
           } else if (nameString == "markers-gtest-special") {
             EXPECT_EQ(display.size(), 0u);
@@ -5197,6 +5355,16 @@ TEST(GeckoProfiler, AllThreads)
   }
 }
 
+// User-defined marker type that generates a failure when streaming JSON.
+struct GtestFailingMarker : public mozilla::BaseMarkerType<GtestFailingMarker> {
+  static constexpr const char* Name = "markers-gtest-failing";
+  static constexpr bool UseSpecialFrontendLocation = true;
+  static void StreamJSONMarkerData(
+      mozilla::baseprofiler::SpliceableJSONWriter& aWriter) {
+    aWriter.SetFailure("boom!");
+  }
+};
+
 TEST(GeckoProfiler, FailureHandling)
 {
   profiler_init_main_thread_id();
@@ -5210,19 +5378,6 @@ TEST(GeckoProfiler, FailureHandling)
 
   ASSERT_EQ(WaitForSamplingState(), SamplingState::SamplingCompleted);
 
-  // User-defined marker type that generates a failure when streaming JSON.
-  struct GtestFailingMarker {
-    static constexpr Span<const char> MarkerTypeName() {
-      return MakeStringSpan("markers-gtest-failing");
-    }
-    static void StreamJSONMarkerData(
-        mozilla::baseprofiler::SpliceableJSONWriter& aWriter) {
-      aWriter.SetFailure("boom!");
-    }
-    static mozilla::MarkerSchema MarkerTypeDisplay() {
-      return mozilla::MarkerSchema::SpecialFrontendLocation{};
-    }
-  };
   EXPECT_TRUE(profiler_add_marker_impl("Gtest failing marker",
                                        geckoprofiler::category::OTHER, {},
                                        GtestFailingMarker{}));
@@ -5359,6 +5514,34 @@ TEST(GeckoProfiler, NoMarkerStacks)
   profiler_stop();
 
   ASSERT_TRUE(!profiler_get_profile());
+}
+
+TEST(GeckoProfiler, CaptureBacktraceIsRightSized)
+{
+  const char* filters[] = {"GeckoMain"};
+
+  profiler_start(PROFILER_DEFAULT_ENTRIES, PROFILER_DEFAULT_INTERVAL,
+                 ProfilerFeature::StackWalk, filters, std::size(filters), 0);
+
+  mozilla::UniquePtr<mozilla::ProfileChunkedBuffer> backtrace =
+      profiler_capture_backtrace();
+  ASSERT_TRUE(!!backtrace);
+
+  // Stacks are captured into a buffer that can hold the deepest possible stack,
+  // but callers may keep a captured backtrace alive for a long time, so it
+  // should only retain as much memory as the stack actually needed.
+  mozilla::Maybe<size_t> bufferLength = backtrace->BufferLength();
+  ASSERT_TRUE(bufferLength.isSome());
+  EXPECT_LT(
+      *bufferLength,
+      size_t(mozilla::ProfileBufferChunkManager::scExpectedMaximumStackSize));
+
+  // The backtrace should still contain the whole captured stack.
+  mozilla::ProfileChunkedBuffer::State state = backtrace->GetState();
+  EXPECT_GT(state.mRangeEnd, state.mRangeStart);
+  EXPECT_EQ(state.mFailedPutBytes, 0u);
+
+  profiler_stop();
 }
 
 // Microbenchmarks measuring marker insertion speed while the profiler is
@@ -5590,8 +5773,8 @@ struct LatencyHist {
 
   uint64_t Count() const {
     uint64_t count = 0;
-    for (int i = 0; i < kSlots; ++i) {
-      count += mBuckets[i];
+    for (unsigned long long mBucket : mBuckets) {
+      count += mBucket;
     }
     return count;
   }
@@ -5854,5 +6037,64 @@ DEFINE_HISTO_TESTS(GeckoProfilerMarkerBenchNoRecycle, "NoRecycle")
 DEFINE_HISTO_TESTS(GeckoProfilerMarkerBenchRecycle, "Recycle")
 
 #undef DEFINE_HISTO_TESTS
+
+// Verifies that when an OS thread id is recycled across several streaming
+// contexts, ProcessStreamingContext::SelectStreamingContextIndex routes a
+// sample to the context whose lifetime window covers its buffer position,
+// rather than the first context with a matching thread id. Regressions here
+// trip a MOZ_RELEASE_ASSERT in UniqueStacks::LookupFramesForJITAddressFrom
+// BufferPos, so this is exercised directly.
+TEST(GeckoProfiler, SelectStreamingContextIndex)
+{
+  using mozilla::Maybe;
+  using mozilla::Nothing;
+  using mozilla::Some;
+  using mozilla::Vector;
+  using PSC = ProcessStreamingContext;
+
+  const ProfilerThreadId tidA = ProfilerThreadId::FromNumber(1628);
+  const ProfilerThreadId tidOther = ProfilerThreadId::FromNumber(4242);
+  const ProfilerThreadId tidUnknown = ProfilerThreadId::FromNumber(999);
+
+  Vector<PSC::ThreadStreamingId> threadIds;
+  auto add = [&](ProfilerThreadId aTid, Maybe<uint64_t> aEnd) {
+    MOZ_RELEASE_ASSERT(threadIds.append(PSC::ThreadStreamingId{aTid, aEnd}));
+  };
+  auto selected = [&](ProfilerThreadId aTid, uint64_t aPos) -> int64_t {
+    Maybe<size_t> index =
+        PSC::SelectStreamingContextIndex(threadIds, aTid, aPos);
+    return index ? int64_t(*index) : -1;
+  };
+
+  // Two dead threads recycling tidA, with an unrelated thread interleaved.
+  add(tidA, Some(uint64_t(3658413)));   // 0: worker A, window [.., 3658413]
+  add(tidOther, Some(uint64_t(5000)));  // 1: unrelated thread id
+  add(tidA, Some(uint64_t(19904658)));  // 2: worker B, window [.., 19904658]
+
+  // A sample inside worker A's window resolves to A.
+  EXPECT_EQ(selected(tidA, 1000000u), 0);
+  // A sample inside worker B's window resolves to B, not the first match (A).
+  EXPECT_EQ(selected(tidA, 19845062u), 2);
+  // Boundary: exactly at A's unregistration position still belongs to A.
+  EXPECT_EQ(selected(tidA, 3658413u), 0);
+  // Just past A's window belongs to B.
+  EXPECT_EQ(selected(tidA, 3658414u), 2);
+  // The unrelated thread id resolves to its own context.
+  EXPECT_EQ(selected(tidOther, 4000u), 1);
+  // A thread id with no context yields no match.
+  EXPECT_EQ(selected(tidUnknown, 1u), -1);
+  // A position past every window for tidA (no live thread) yields no match.
+  EXPECT_EQ(selected(tidA, 20000000u), -1);
+
+  // A still-registered thread (Nothing() end) owns the latest window, but a
+  // dead thread still owns samples within its own earlier window.
+  const ProfilerThreadId tidLive = ProfilerThreadId::FromNumber(77);
+  add(tidLive, Some(uint64_t(100)));  // 3: dead, window [.., 100]
+  add(tidLive, Nothing());            // 4: still registered
+  EXPECT_EQ(selected(tidLive, 50u), 3);
+  EXPECT_EQ(selected(tidLive, 100u), 3);
+  EXPECT_EQ(selected(tidLive, 101u), 4);
+  EXPECT_EQ(selected(tidLive, 20000000u), 4);
+}
 
 }  // namespace

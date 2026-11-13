@@ -286,9 +286,9 @@
   <string name="mozac_feature_addons_permissions_dialog_heading_required_data_collection">Postulata kolekto de datumoj:</string>
   <!-- Heading for the optional settings section in the add-on install dialog. -->
   <string name="mozac_feature_addons_permissions_dialog_heading_optional_settings">Nedevigaj agordoj:</string>
-  <!-- Heading for the permissions section in the optional permissions request dialog. -->
+  <!-- Heading for the permissions section in the optional permissions request dialog, and in the confirmation dialog for updating an extension that needs new permissions. -->
   <string name="mozac_feature_addons_permissions_dialog_heading_optional_permissions">Novaj permesoj:</string>
-  <!-- Heading for the data collection permissions section in the optional permissions request dialog. -->
+  <!-- Heading for the data collection permissions section in the optional permissions request dialog, and in the confirmation dialog for updating an extension that needs new permissions. -->
   <string name="mozac_feature_addons_permissions_dialog_heading_optional_data_collection">Nova kolekto de datumoj:</string>
   <!-- This is a button to add (install) an add-on . -->
   <string name="mozac_feature_addons_permissions_dialog_add">Aldoni</string>
@@ -307,7 +307,7 @@
   <!-- This is the label of a button to cancel an ongoing add-on installation. -->
   <string name="mozac_feature_addons_install_addon_dialog_cancel">Nuligi</string>
   <!-- Indicates how many users have rated an add-on. %1$s will be replaced with number of reviews -->
-  <string name="mozac_feature_addons_user_rating_count_2">Revizioj: %1$s</string>
+  <string name="mozac_feature_addons_user_rating_count_2">Recenzoj: %1$s</string>
   <!-- Accessibility content description for the amount of stars that add-on has, where %1$.02f will be the amount of stars. -->
   <string name="mozac_feature_addons_rating_content_description_2">Noto: %1$.02f el 5</string>
   <!-- This is the title of page where all the add-ons are listed -->

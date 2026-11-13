@@ -13,32 +13,30 @@ import {
   UrlbarProvider,
   UrlbarUtils,
 } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
-  UrlbarProviderOpenTabs:
-    "moz-src:///browser/components/urlbar/UrlbarProviderOpenTabs.sys.mjs",
   UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
   UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
-});
-
-ChromeUtils.defineLazyGetter(lazy, "SQL_ADAPTIVE_QUERY", () => {
-  // Constants to support an alternative frecency algorithm.
-  const PAGES_USE_ALT_FRECENCY =
-    lazy.PlacesUtils.history.isAlternativeFrecencyEnabled;
-  const PAGES_FRECENCY_FIELD = PAGES_USE_ALT_FRECENCY
-    ? "alt_frecency"
-    : "frecency";
-  return `/* do not warn (bug 487789) */
+  SQL_ADAPTIVE_QUERY: () => {
+    // Constants to support an alternative frecency algorithm.
+    const PAGES_USE_ALT_FRECENCY =
+      lazy.PlacesUtils.history.isAlternativeFrecencyEnabled;
+    const PAGES_FRECENCY_FIELD = PAGES_USE_ALT_FRECENCY
+      ? "alt_frecency"
+      : "frecency";
+    return `/* do not warn (bug 487789) */
    SELECT h.url,
           h.title,
           EXISTS(SELECT 1 FROM moz_bookmarks WHERE fk = h.id) AS bookmarked,
           ( SELECT title FROM moz_bookmarks WHERE fk = h.id AND title NOTNULL
             ORDER BY lastModified DESC LIMIT 1
           ) AS bookmark_title,
+          ( SELECT dateAdded FROM moz_bookmarks WHERE fk = h.id
+            ORDER BY dateAdded DESC LIMIT 1
+          ) AS bookmarkDate,
           ( SELECT GROUP_CONCAT(t.title ORDER BY t.title)
             FROM moz_bookmarks b
             JOIN moz_bookmarks t ON t.id = +b.parent AND t.parent = :parent
@@ -66,6 +64,7 @@ ChromeUtils.defineLazyGetter(lazy, "SQL_ADAPTIVE_QUERY", () => {
                             NULL)
    ORDER BY rank DESC, ${PAGES_FRECENCY_FIELD} DESC
    LIMIT :maxResults`;
+  },
 });
 
 /**
@@ -73,10 +72,10 @@ ChromeUtils.defineLazyGetter(lazy, "SQL_ADAPTIVE_QUERY", () => {
  */
 export class UrlbarProviderInputHistory extends UrlbarProvider {
   /**
-   * @returns {Values<typeof UrlbarUtils.PROVIDER_TYPE>}
+   * @returns {Values<typeof lazy.UrlbarShared.PROVIDER_TYPE>}
    */
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.PROFILE;
+    return lazy.UrlbarShared.PROVIDER_TYPE.PROFILE;
   }
 
   /**
@@ -129,6 +128,10 @@ export class UrlbarProviderInputHistory extends UrlbarProvider {
       let lastVisit = lastVisitPRTime
         ? lazy.PlacesUtils.toDate(lastVisitPRTime).getTime()
         : undefined;
+      let bookmarkDatePRTime = row.getResultByName("bookmarkDate");
+      let bookmarkDateMs = bookmarkDatePRTime
+        ? lazy.PlacesUtils.toDate(bookmarkDatePRTime).getTime()
+        : undefined;
       let resultTitle = historyTitle;
 
       if (openPageCount > 0 && lazy.UrlbarPrefs.get("suggest.openpage")) {
@@ -143,16 +146,16 @@ export class UrlbarProviderInputHistory extends UrlbarProvider {
           payload: {
             url,
             title: resultTitle,
-            icon: UrlbarUtils.getIconForUrl(url),
-            userContextId,
+            icon: lazy.UrlbarShared.getIconForUrl(url),
+            userContext: UrlbarUtils.getUserContextData(userContextId),
             lastVisit,
             action: lazy.UrlbarPrefs.get("secondaryActions.switchToTab")
               ? UrlbarUtils.createTabSwitchSecondaryAction(userContextId)
               : undefined,
           },
           highlights: {
-            url: UrlbarUtils.HIGHLIGHT.TYPED,
-            title: UrlbarUtils.HIGHLIGHT.TYPED,
+            url: lazy.UrlbarShared.HIGHLIGHT.TYPED,
+            title: lazy.UrlbarShared.HIGHLIGHT.TYPED,
           },
         });
         addCallback(this, result);
@@ -185,7 +188,7 @@ export class UrlbarProviderInputHistory extends UrlbarProvider {
           url,
           title: resultTitle,
           tags: resultTags,
-          icon: UrlbarUtils.getIconForUrl(url),
+          icon: lazy.UrlbarShared.getIconForUrl(url),
           isBlockable,
           blockL10n: isBlockable
             ? { id: "urlbar-result-menu-remove-from-history2" }
@@ -195,17 +198,23 @@ export class UrlbarProviderInputHistory extends UrlbarProvider {
               "awesome-bar-result-menu"
             : undefined,
           lastVisit,
+          bookmarkDateMs,
         },
         highlights: {
-          url: UrlbarUtils.HIGHLIGHT.TYPED,
-          title: UrlbarUtils.HIGHLIGHT.TYPED,
-          tags: UrlbarUtils.HIGHLIGHT.TYPED,
+          url: lazy.UrlbarShared.HIGHLIGHT.TYPED,
+          title: lazy.UrlbarShared.HIGHLIGHT.TYPED,
+          tags: lazy.UrlbarShared.HIGHLIGHT.TYPED,
         },
       });
       addCallback(this, result);
     }
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   */
   onEngagement(queryContext, controller, details) {
     let { result } = details;
     if (
@@ -241,11 +250,10 @@ export class UrlbarProviderInputHistory extends UrlbarProvider {
         search_string: queryContext.lowerCaseSearchString,
         matchBehavior: Ci.mozIPlacesAutoComplete.MATCH_ANYWHERE,
         searchBehavior: lazy.UrlbarPrefs.get("defaultBehavior"),
-        userContextId:
-          lazy.UrlbarProviderOpenTabs.getUserContextIdForOpenPagesTable(
-            null,
-            queryContext.isPrivate
-          ),
+        userContextId: lazy.UrlbarShared.getUserContextIdForOpenPagesTable(
+          null,
+          queryContext.isPrivate
+        ),
         maxResults: queryContext.maxResults,
       },
     ];

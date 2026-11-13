@@ -7,6 +7,7 @@
 
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/NavigationBinding.h"
+#include "mozilla/dom/RemoteType.h"
 #include "mozilla/dom/SessionHistoryEntry.h"
 #include "mozilla/dom/UserNavigationInvolvement.h"
 #include "mozilla/dom/LoadURIOptionsBinding.h"
@@ -37,8 +38,16 @@ class FormData;
 class DocShellLoadStateInit;
 struct NavigationAPIMethodTracker;
 class SessionHistoryEntry;
+struct RemoteType;
 }  // namespace dom
 }  // namespace mozilla
+
+namespace mozilla::dom {
+
+bool ContentTriggeredURILoadIsAllowed(
+    nsIURI* aURI, const mozilla::dom::RemoteType& aEffectiveRemoteType);
+
+}
 
 /**
  * nsDocShellLoadState contains setup information used in a nsIDocShell::loadURI
@@ -125,10 +134,6 @@ class nsDocShellLoadState final {
 
   void SetTriggeringWindowId(uint64_t aTriggeringWindowId);
 
-  bool TriggeringStorageAccess() const;
-
-  void SetTriggeringStorageAccess(bool aTriggeringStorageAccess);
-
   mozilla::net::ClassificationFlags TriggeringClassificationFlags() const;
   void SetTriggeringClassificationFlags(
       mozilla::net::ClassificationFlags aFlags);
@@ -151,6 +156,15 @@ class nsDocShellLoadState final {
   bool NotifiedBeforeUnloadListeners() const;
 
   void SetNotifiedBeforeUnloadListeners(bool aNotifiedBeforeUnloadListeners);
+
+  // If true, the old document already fired pageswap for this navigation
+  // before the navigation had to start again as a new load. Do not fire it
+  // again.
+  bool PageSwapFired() const { return mPageSwapFired; }
+
+  void SetPageSwapFired(bool aPageSwapFired) {
+    mPageSwapFired = aPageSwapFired;
+  }
 
   bool ForceAllowDataURI() const;
 
@@ -363,11 +377,13 @@ class nsDocShellLoadState final {
 
   bool IsMetaRefresh() const { return mIsMetaRefresh; }
 
-  const mozilla::Maybe<nsCString>& GetRemoteTypeOverride() const {
+  const mozilla::Maybe<mozilla::dom::RemoteType>& GetRemoteTypeOverride()
+      const {
     return mRemoteTypeOverride;
   }
 
-  void SetRemoteTypeOverride(const nsCString& aRemoteTypeOverride);
+  void SetRemoteTypeOverride(
+      const mozilla::dom::RemoteType& aRemoteTypeOverride);
 
   void SetSchemelessInput(nsILoadInfo::SchemelessInputType aSchemelessInput) {
     mSchemelessInput = aSchemelessInput;
@@ -402,9 +418,10 @@ class nsDocShellLoadState final {
   // originally, however non-errorpage history loads are always considered to be
   // triggered by the parent process, as we can validate them against the
   // history entry.
-  const nsCString& GetEffectiveTriggeringRemoteType() const;
+  const mozilla::dom::RemoteType& GetEffectiveTriggeringRemoteType() const;
 
-  void SetTriggeringRemoteType(const nsACString& aTriggeringRemoteType);
+  void SetTriggeringRemoteType(
+      const mozilla::dom::RemoteType& aTriggeringRemoteType);
 
   // Diagnostic assert if this is a system-principal triggered load, and it is
   // trivial to determine that the effective triggering remote type would not be
@@ -549,11 +566,8 @@ class nsDocShellLoadState final {
   // SandboxFlags of the document that started the load.
   uint32_t mTriggeringSandboxFlags;
 
-  // The window ID and current "has storage access" value of the entity
-  // triggering the load. This allows the identification of self-initiated
-  // same-origin navigations that should propogate unpartitioned storage access.
+  // The window ID of the entity triggering the load.
   uint64_t mTriggeringWindowId;
-  bool mTriggeringStorageAccess;
 
   // The classification flags of the context responsible for causing
   // the load to start.
@@ -591,6 +605,8 @@ class nsDocShellLoadState final {
   // If this attribute is true, any potential unload listeners have been
   // notified if applicable.
   bool mNotifiedBeforeUnloadListeners;
+
+  bool mPageSwapFired = false;
 
   // Principal we're inheriting. If null, this means the principal should be
   // inherited from the current document. If set to NullPrincipal, the channel
@@ -675,8 +691,7 @@ class nsDocShellLoadState final {
   // When set, this is the Source Browsing Context for the navigation.
   MaybeDiscarded<BrowsingContext> mSourceBrowsingContext;
 
-  // Used for srcdoc loads to give view-source knowledge of the load's base URI
-  // as this information isn't embedded in the load's URI.
+  // BaseURI for the load, used when this information isn't clear from the URI.
   nsCOMPtr<nsIURI> mBaseURI;
 
   // Set of Load Flags, taken from nsDocShellLoadTypes.h and nsIWebNavigation
@@ -759,10 +774,10 @@ class nsDocShellLoadState final {
   nsCOMPtr<nsIURI> mUnstrippedURI;
 
   // If set, the remote type which the load should be completed within.
-  mozilla::Maybe<nsCString> mRemoteTypeOverride;
+  mozilla::Maybe<mozilla::dom::RemoteType> mRemoteTypeOverride;
 
   // Remote type of the process which originally requested the load.
-  nsCString mTriggeringRemoteType;
+  mozilla::dom::RemoteType mTriggeringRemoteType;
 
   // if the address had an intentional protocol
   nsILoadInfo::SchemelessInputType mSchemelessInput =

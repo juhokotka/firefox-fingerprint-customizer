@@ -6,7 +6,6 @@
 
 :host {
   padding-block: var(--space-large);
-  margin-block-start: calc(var(--space-large) * -1);
 }
 
 .sidebar-panel-heading {
@@ -18,6 +17,15 @@
   font-size: 15px;
 
   > h4 {
-    margin-block: var(--space-large);
+    margin-block: var(--sidebar-panel-header-heading-margin-block);
+  }
+}
+
+/* Horizontal-tabs "hide-launcher" mode has no launcher to switch panels with,
+   so the title is replaced by the sidebar-panel-switcher dropdown (which shows
+   itself in this mode). */
+@media -moz-pref("sidebar.visibility", "hide-launcher") {
+  .sidebar-panel-title {
+    display: none;
   }
 }

@@ -7,11 +7,11 @@
 
 #include "FrameTimeout.h"
 #include "Orientation.h"
-#include "mozilla/image/SurfaceFlags.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/ThreadSafeWeakPtr.h"
+#include "mozilla/image/SurfaceFlags.h"
 #include "nsString.h"
 #include "nsTArray.h"
 
@@ -131,7 +131,6 @@ class ImageUtils {
 
   static DecoderType GetDecoderType(const nsACString& aMimeType);
 
- private:
   ImageUtils() = delete;
   ~ImageUtils() = delete;
 };

@@ -42,16 +42,20 @@ void VideoFrame::TakeFrom(VideoFrame* aFrame) {
 }
 
 already_AddRefed<Image> VideoFrame::CloneAsBlackImage() const {
-  const gfx::IntSize size = GetIntrinsicSize();
+  return CloneAsBlackImage(GetIntrinsicSize());
+}
 
+/* static */ already_AddRefed<Image> VideoFrame::CloneAsBlackImage(
+    const gfx::IntSize& aSize) {
   // Cap on input dimensions. Without this, valid int32_t dimensions can produce
   // astronomically large-but-non-overflowing size_t values, causing the OS to
   // thrash or kill lower priority processes when there are too many page
   // faults. 16384 (16K) bounds the allocation to ~384 MB.
-  constexpr int32_t kMaxBlackImageDimension = 16384;
-  if (size.width <= 0 || size.height <= 0 ||
-      size.width > kMaxBlackImageDimension ||
-      size.height > kMaxBlackImageDimension) {
+  constexpr int32_t kMaxBlackImageDimension =
+      layers::PlanarYCbCrImage::MAX_DIMENSION;
+  if (aSize.width <= 0 || aSize.height <= 0 ||
+      aSize.width > kMaxBlackImageDimension ||
+      aSize.height > kMaxBlackImageDimension) {
     return nullptr;
   }
 
@@ -62,12 +66,12 @@ already_AddRefed<Image> VideoFrame::CloneAsBlackImage() const {
     return nullptr;
   }
 
-  auto checkedYLen = CheckedInt32(size.width) * size.height;
+  auto checkedYLen = CheckedInt32(aSize.width) * aSize.height;
   if (!checkedYLen.isValid()) {
     return nullptr;
   }
-  auto checkedCbCrWidth = (CheckedInt32(size.width) + 1) / 2;
-  auto checkedCbCrHeight = (CheckedInt32(size.height) + 1) / 2;
+  auto checkedCbCrWidth = (CheckedInt32(aSize.width) + 1) / 2;
+  auto checkedCbCrHeight = (CheckedInt32(aSize.height) + 1) / 2;
   auto checkedCbCrLen = checkedCbCrWidth * checkedCbCrHeight;
   if (!checkedCbCrLen.isValid()) {
     return nullptr;
@@ -87,11 +91,11 @@ already_AddRefed<Image> VideoFrame::CloneAsBlackImage() const {
 
   layers::PlanarYCbCrData data;
   data.mYChannel = frame.get();
-  data.mYStride = size.width;
+  data.mYStride = aSize.width;
   data.mCbCrStride = checkedCbCrWidth.value();
   data.mCbChannel = frame.get() + yLen;
   data.mCrChannel = data.mCbChannel + cbcrLen;
-  data.mPictureRect = gfx::IntRect(0, 0, size.width, size.height);
+  data.mPictureRect = gfx::IntRect(0, 0, aSize.width, aSize.height);
   data.mStereoMode = StereoMode::MONO;
   data.mYUVColorSpace = gfx::YUVColorSpace::BT601;
   // This could be made FULL once bug 1568745 is complete. A black pixel being
@@ -117,6 +121,7 @@ void VideoSegment::AppendFrame(const VideoChunk& aChunk,
   chunk->mWebrtcCaptureTime = aChunk.mWebrtcCaptureTime;
   chunk->mWebrtcReceiveTime = aChunk.mWebrtcReceiveTime;
   chunk->mRtpTimestamp = aChunk.mRtpTimestamp;
+  chunk->mRotation = aChunk.mRotation;
   VideoFrame frame(do_AddRef(aChunk.mFrame.GetImage()),
                    aChunk.mFrame.GetIntrinsicSize());
   MOZ_ASSERT_IF(!IsNull(), !aChunk.mTimeStamp.IsNull());
@@ -131,11 +136,13 @@ void VideoSegment::AppendFrame(already_AddRefed<Image> aImage,
                                const PrincipalHandle& aPrincipalHandle,
                                bool aForceBlack, TimeStamp aTimeStamp,
                                media::TimeUnit aProcessingDuration,
-                               media::TimeUnit aMediaTime) {
+                               media::TimeUnit aMediaTime,
+                               VideoRotation aRotation) {
   VideoChunk* chunk = AppendChunk(0);
   chunk->mTimeStamp = aTimeStamp;
   chunk->mProcessingDuration = aProcessingDuration;
   chunk->mMediaTime = aMediaTime;
+  chunk->mRotation = aRotation;
   VideoFrame frame(std::move(aImage), aIntrinsicSize);
   MOZ_ASSERT_IF(!IsNull(), !aTimeStamp.IsNull());
   frame.SetForceBlack(aForceBlack);
@@ -148,7 +155,7 @@ void VideoSegment::AppendWebrtcRemoteFrame(
     const PrincipalHandle& aPrincipalHandle, bool aForceBlack,
     TimeStamp aTimeStamp, media::TimeUnit aProcessingDuration,
     uint32_t aRtpTimestamp, int64_t aWebrtcCaptureTimeNtp,
-    int64_t aWebrtcReceiveTimeUs) {
+    int64_t aWebrtcReceiveTimeUs, VideoRotation aRotation) {
   VideoChunk* chunk = AppendChunk(0);
   chunk->mTimeStamp = aTimeStamp;
   chunk->mProcessingDuration = aProcessingDuration;
@@ -164,12 +171,14 @@ void VideoSegment::AppendWebrtcRemoteFrame(
   frame.SetForceBlack(aForceBlack);
   frame.SetPrincipalHandle(aPrincipalHandle);
   chunk->mFrame.TakeFrom(&frame);
+  chunk->mRotation = aRotation;
 }
 
 void VideoSegment::AppendWebrtcLocalFrame(
     already_AddRefed<Image> aImage, const IntSize& aIntrinsicSize,
     const PrincipalHandle& aPrincipalHandle, bool aForceBlack,
-    TimeStamp aTimeStamp, TimeStamp aWebrtcCaptureTime) {
+    TimeStamp aTimeStamp, TimeStamp aWebrtcCaptureTime,
+    VideoRotation aRotation) {
   VideoChunk* chunk = AppendChunk(0);
   chunk->mTimeStamp = aTimeStamp;
   chunk->mWebrtcCaptureTime = AsVariant(aWebrtcCaptureTime);
@@ -178,6 +187,7 @@ void VideoSegment::AppendWebrtcLocalFrame(
   frame.SetForceBlack(aForceBlack);
   frame.SetPrincipalHandle(aPrincipalHandle);
   chunk->mFrame.TakeFrom(&frame);
+  chunk->mRotation = aRotation;
 }
 
 VideoSegment::VideoSegment()
@@ -185,7 +195,5 @@ VideoSegment::VideoSegment()
 
 VideoSegment::VideoSegment(VideoSegment&& aSegment)
     : MediaSegmentBase<VideoSegment, VideoChunk>(std::move(aSegment)) {}
-
-VideoSegment::~VideoSegment() = default;
 
 }  // namespace mozilla

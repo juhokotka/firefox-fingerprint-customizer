@@ -47,7 +47,8 @@ class VideoSink : public MediaSink {
 
   void SetPreservesPitch(bool aPreservesPitch) override;
 
-  void SetPlaying(bool aPlaying) override;
+  void SetPlaying(bool aPlaying,
+                  StopReason aReason = StopReason::Regular) override;
 
   RefPtr<GenericPromise> SetAudioDevice(
       RefPtr<AudioDeviceInfo> aDevice) override;
@@ -59,7 +60,7 @@ class VideoSink : public MediaSink {
   nsresult Start(const media::TimeUnit& aStartTime, const MediaInfo& aInfo,
                  StartType aStartType = StartType::Initial) override;
 
-  void Stop() override;
+  void Stop(StopReason aReason = StopReason::Regular) override;
 
   bool IsStarted() const override;
 

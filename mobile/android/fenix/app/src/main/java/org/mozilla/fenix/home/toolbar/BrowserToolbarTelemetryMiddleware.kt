@@ -11,14 +11,18 @@ import mozilla.components.compose.browser.toolbar.store.BrowserToolbarState
 import mozilla.components.lib.state.Middleware
 import mozilla.components.lib.state.Store
 import org.mozilla.fenix.GleanMetrics.Toolbar
+import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.home.toolbar.DisplayActions.MenuClicked
 import org.mozilla.fenix.home.toolbar.TabCounterInteractions.AddNewPrivateTab
 import org.mozilla.fenix.home.toolbar.TabCounterInteractions.AddNewTab
 import org.mozilla.fenix.home.toolbar.TabCounterInteractions.TabCounterClicked
 import org.mozilla.fenix.home.toolbar.TabCounterInteractions.TabCounterLongClicked
+import org.mozilla.fenix.search.EditPageEndActionsInteractions.LensButtonClicked
+import org.mozilla.fenix.search.EditPageEndActionsInteractions.QrScannerClicked
 import org.mozilla.fenix.telemetry.ACTION_ADD_NEW_PRIVATE_TAB
 import org.mozilla.fenix.telemetry.ACTION_ADD_NEW_TAB
 import org.mozilla.fenix.telemetry.ACTION_MENU_CLICKED
+import org.mozilla.fenix.telemetry.ACTION_QR_CLICKED
 import org.mozilla.fenix.telemetry.ACTION_TAB_COUNTER_CLICKED
 import org.mozilla.fenix.telemetry.ACTION_TAB_COUNTER_LONG_CLICKED
 import org.mozilla.fenix.telemetry.SOURCE_ADDRESS_BAR
@@ -28,11 +32,23 @@ import org.mozilla.fenix.telemetry.SOURCE_NAVIGATION_BAR
 import org.mozilla.fenix.telemetry.SOURCE_PAGE_END
 import org.mozilla.fenix.telemetry.SOURCE_PAGE_START
 import org.mozilla.fenix.telemetry.SURFACE_HOME
+import org.mozilla.fenix.telemetry.recordAddressBarButtonTapped
+import org.mozilla.fenix.telemetry.recordLensButtonTapped
+import org.mozilla.fenix.utils.Settings
 
 /**
  * [Middleware] responsible for recording telemetry of actions triggered by compose toolbars.
+ *
+ * @param appStore [AppStore] used to determine the surface on which the search was started.
+ * @param settings [Settings] used to determine the last selected Lens camera mode.
  */
-class BrowserToolbarTelemetryMiddleware : Middleware<BrowserToolbarState, BrowserToolbarAction> {
+class BrowserToolbarTelemetryMiddleware(
+    private val appStore: AppStore,
+    private val settings: Settings,
+) : Middleware<BrowserToolbarState, BrowserToolbarAction> {
+    private val sourceTabId: String?
+        get() = appStore.state.searchState.sourceTabId
+
     override fun invoke(
         store: Store<BrowserToolbarState, BrowserToolbarAction>,
         next: (BrowserToolbarAction) -> Unit,
@@ -54,6 +70,8 @@ class BrowserToolbarTelemetryMiddleware : Middleware<BrowserToolbarState, Browse
             is MenuClicked -> {
                 trackToolbarEvent(ToolbarActionRecord.MenuClicked, action.source)
             }
+            is QrScannerClicked -> recordAddressBarButtonTapped(ACTION_QR_CLICKED, sourceTabId)
+            is LensButtonClicked -> recordLensButtonTapped(settings.lensCameraLastMode, sourceTabId)
             else -> {}
         }
         next(action)
@@ -62,9 +80,13 @@ class BrowserToolbarTelemetryMiddleware : Middleware<BrowserToolbarState, Browse
     @VisibleForTesting
     internal sealed class ToolbarActionRecord(val action: String) {
         data object MenuClicked : ToolbarActionRecord(ACTION_MENU_CLICKED)
+
         data object TabCounterClicked : ToolbarActionRecord(ACTION_TAB_COUNTER_CLICKED)
+
         data object TabCounterLongClicked : ToolbarActionRecord(ACTION_TAB_COUNTER_LONG_CLICKED)
+
         data object AddNewTab : ToolbarActionRecord(ACTION_ADD_NEW_TAB)
+
         data object AddNewPrivateTab : ToolbarActionRecord(ACTION_ADD_NEW_PRIVATE_TAB)
     }
 
@@ -80,7 +102,7 @@ class BrowserToolbarTelemetryMiddleware : Middleware<BrowserToolbarState, Browse
                         item = toolbarActionRecord.action,
                         extra = source.telemetryName(),
                         surface = SURFACE_HOME,
-                    ),
+                    )
                 )
 
             Source.NavigationBar ->
@@ -89,7 +111,7 @@ class BrowserToolbarTelemetryMiddleware : Middleware<BrowserToolbarState, Browse
                         source = SOURCE_NAVIGATION_BAR,
                         item = toolbarActionRecord.action,
                         surface = SURFACE_HOME,
-                    ),
+                    )
                 )
 
             Source.Unknown -> return

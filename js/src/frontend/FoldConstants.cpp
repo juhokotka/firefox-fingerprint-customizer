@@ -8,6 +8,7 @@
 #include "mozilla/Try.h"    // MOZ_TRY*
 
 #include "builtin/Math.h"
+#include "frontend/FrontendContext.h"  // FrontendContext
 #include "frontend/FullParseHandler.h"
 #include "frontend/ParseNode.h"
 #include "frontend/ParseNodeVisitor.h"
@@ -98,10 +99,8 @@ restart:
     // Non-global lexical declarations are block-scoped (ergo not hoistable).
     case ParseNodeKind::LetDecl:
     case ParseNodeKind::ConstDecl:
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
     case ParseNodeKind::UsingDecl:
     case ParseNodeKind::AwaitUsingDecl:
-#endif
       MOZ_ASSERT(node->is<ListNode>());
       *result = false;
       return true;
@@ -1583,5 +1582,9 @@ static bool Fold(FoldInfo info, ParseNode** pnp) {
 bool frontend::FoldConstants(FrontendContext* fc, ParserAtomsTable& parserAtoms,
                              BigIntStencilVector& bigInts, ParseNode** pnp,
                              FullParseHandler* handler) {
+  if (!fc->checkCompilationCancellation()) {
+    return false;
+  }
+
   return Fold(fc, parserAtoms, bigInts, handler, pnp);
 }

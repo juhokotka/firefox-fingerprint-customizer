@@ -13,7 +13,6 @@
 #include "jit/arm64/vixl/Cpu-Features-vixl.h"
 #include "jit/arm64/vixl/Instructions-vixl.h"
 #include "jit/shared/Architecture-shared.h"
-
 #include "js/Utility.h"
 
 #define JS_HAS_HIDDEN_SP

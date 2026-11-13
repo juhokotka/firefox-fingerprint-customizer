@@ -9,6 +9,14 @@ interface nsIRequestObserver;
 interface nsIInterfaceRequestor;
 interface nsIRequestContext;
 
+%{C++
+#include "mozilla/FunctionRef.h"
+
+using nsLoadGroupRequestVisitor = mozilla::FunctionRef<bool(nsIRequest*)>;
+%}
+
+native nsLoadGroupRequestVisitor(nsLoadGroupRequestVisitor);
+
 /**
  * A load group maintains a collection of nsIRequest objects.
  * This is used in lots of places where groups of requests need to be tracked.
@@ -66,6 +74,14 @@ interface nsILoadGroup : nsIRequest
     readonly attribute nsISimpleEnumerator requests;
 
     /**
+     * Calls aVisitor for each request in the group, stopping when it returns
+     * false. Unlike `requests` this doesn't copy the group, so aVisitor must
+     * not add or remove requests.
+     */
+    [noscript, notxpcom, nostdcall]
+    void visitRequests(in nsLoadGroupRequestVisitor aVisitor);
+
+    /**
     * Sum total of content length of all pending keepalive
     * requests in the fetch group group.
     * See https://fetch.spec.whatwg.org/#ref-for-request-keepalive-flag%E2%91%A0
@@ -100,6 +116,7 @@ interface nsILoadGroup : nsIRequest
      * flags (again, courtesy of setting nsIDocShell::defaultLoadFlags before
      * the docShell has created the default request.)
      */
+    [infallible]
     attribute nsLoadFlags defaultLoadFlags;
 
     /**
@@ -108,6 +125,21 @@ interface nsILoadGroup : nsIRequest
      */
     [infallible]
     readonly attribute boolean isBrowsingContextDiscarded;
+
+    /**
+     * The parent of this load group. It is stored with a nsIWeakReference so
+     * there is no requirement for the parentLoadGroup to outlive the child,
+     * nor will the child keep a reference count on the parent.
+     */
+    attribute nsILoadGroup parentLoadGroup;
+
+    /**
+     * The rootLoadGroup is the recursive parent of this load group where
+     * parent is defined as parentLoadGroup if set or loadGroup as a backup
+     * (i.e. parentLoadGroup takes precedence). This load group is the root if
+     * neither parentLoadGroup nor loadGroup are specified.
+     */
+    readonly attribute nsILoadGroup rootLoadGroup;
 
     /** Cancel a single request from the load group. */
     void cancelRequest(in nsIRequest aRequest, in ACString aReason, in nsresult aStatus);

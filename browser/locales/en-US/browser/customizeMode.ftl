@@ -31,8 +31,18 @@ customize-mode-uidensity-menu-compact-unsupported =
     .tooltiptext = Compact (not supported)
 customize-mode-undo-cmd =
     .label = Undo
-customize-mode-lwthemes-link = Manage Themes
+customize-mode-uidensity-link = Window density settings
+customize-mode-lwthemes-link-2 = Manage themes
 customize-mode-touchbar-cmd =
     .label = Customize Touch Bar…
 customize-mode-downloads-button-autohide =
     .label = Hide button when empty
+
+## Labels for the special items that can be added to toolbars in customize mode
+
+customize-mode-toolbarspring =
+    .title = Flexible Space
+customize-mode-toolbarseparator =
+    .title = Separator
+customize-mode-toolbarspacer =
+    .title = Space

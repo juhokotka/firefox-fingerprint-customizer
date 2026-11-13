@@ -4,15 +4,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsBidiKeyboard.h"
+
+#include <tchar.h>
+
 #include "WidgetUtils.h"
 #include "nsIWidget.h"
-#include <tchar.h>
 
 NS_IMPL_ISUPPORTS(nsBidiKeyboard, nsIBidiKeyboard)
 
 nsBidiKeyboard::nsBidiKeyboard() : nsIBidiKeyboard() { Reset(); }
-
-nsBidiKeyboard::~nsBidiKeyboard() {}
 
 NS_IMETHODIMP nsBidiKeyboard::Reset() {
   mInitialized = false;

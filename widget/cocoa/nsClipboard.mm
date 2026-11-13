@@ -4,26 +4,27 @@
 
 #include <algorithm>
 
-#include "mozilla/gfx/2D.h"
 #include "mozilla/Logging.h"
+#include "mozilla/gfx/2D.h"
 #include "mozilla/widget/WebCustomFormatUtils.h"
 
 #include "gfxPlatform.h"
+#include "imgIContainer.h"
 #include "nsArrayUtils.h"
 #include "nsCOMPtr.h"
+#include "nsClipboard.h"
+#include "nsCocoaUtils.h"
 #include "nsComponentManagerUtils.h"
 #include "nsContentUtils.h"
-#include "nsClipboard.h"
-#include "nsString.h"
-#include "nsISupportsPrimitives.h"
-#include "nsPrimitiveHelpers.h"
-#include "nsIFile.h"
-#include "nsStringStream.h"
 #include "nsEscape.h"
-#include "nsPrintfCString.h"
+#include "nsIFile.h"
+#include "nsIMutableArray.h"
+#include "nsISupportsPrimitives.h"
 #include "nsObjCExceptions.h"
-#include "imgIContainer.h"
-#include "nsCocoaUtils.h"
+#include "nsPrimitiveHelpers.h"
+#include "nsPrintfCString.h"
+#include "nsString.h"
+#include "nsStringStream.h"
 
 using mozilla::gfx::DataSourceSurface;
 using mozilla::gfx::SourceSurface;

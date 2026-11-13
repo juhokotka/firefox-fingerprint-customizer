@@ -19,7 +19,7 @@ class NoResponseTestProvider extends UrlbarTestUtils.TestProvider {
   }
 
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.HEURISTIC;
+    return UrlbarShared.PROVIDER_TYPE.HEURISTIC;
   }
 
   async startQuery(_context, _addCallback) {
@@ -44,7 +44,7 @@ class AnotherHeuristicProvider extends UrlbarTestUtils.TestProvider {
   }
 
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.HEURISTIC;
+    return UrlbarShared.PROVIDER_TYPE.HEURISTIC;
   }
 
   async startQuery(context, addCallback) {
@@ -117,7 +117,7 @@ add_task(async function engagement_before_showing_results() {
     // Type Enter key before showing any results.
     await doEnter();
 
-    assertEngagementTelemetry([
+    await assertEngagementTelemetry([
       {
         selected_result: "input_field",
         provider: undefined,
@@ -165,12 +165,12 @@ add_task(async function engagement_after_closing_results() {
         "The inputted text remains even if closing the results"
       );
       // The tested trigger should not record abandonment event.
-      assertAbandonmentTelemetry([]);
+      await assertAbandonmentTelemetry([]);
 
       // Endgagement.
       await doEnter();
 
-      assertEngagementTelemetry([
+      await assertEngagementTelemetry([
         {
           selected_result: "search_engine",
           provider: "UrlbarProviderHeuristicFallback",
@@ -197,7 +197,7 @@ add_task(async function enter_to_reload_current_url() {
     // Press Enter key to reload the page without selecting any suggestions.
     await doEnter();
 
-    assertEngagementTelemetry([
+    await assertEngagementTelemetry([
       {
         selected_result: "url",
         provider: "UrlbarProviderHeuristicFallback",

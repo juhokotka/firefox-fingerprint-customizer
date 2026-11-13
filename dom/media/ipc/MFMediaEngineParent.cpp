@@ -81,9 +81,14 @@ static void UnregisterMedieEngine(MFMediaEngineParent* aMediaEngine) {
 }
 
 /* static */
-MFMediaEngineParent* MFMediaEngineParent::GetMediaEngineById(uint64_t aId) {
+already_AddRefed<MFMediaEngineParent> MFMediaEngineParent::GetMediaEngineById(
+    uint64_t aId) {
   StaticMutexAutoLock lock(sMediaEnginesLock);
-  return sMediaEngines->Get(aId);
+  if (!sMediaEngines) {
+    return nullptr;
+  }
+  RefPtr<MFMediaEngineParent> engine = sMediaEngines->Get(aId);
+  return engine.forget();
 }
 
 MFMediaEngineParent::MFMediaEngineParent(RemoteMediaManagerParent* aManager,
@@ -104,14 +109,23 @@ MFMediaEngineParent::MFMediaEngineParent(RemoteMediaManagerParent* aManager,
 
 MFMediaEngineParent::~MFMediaEngineParent() {
   LOG("Destoryed MFMediaEngineParent");
-  DestroyEngineIfExists();
   UnregisterMedieEngine(this);
+  DestroyEngineIfExists();
+}
+
+void MFMediaEngineParent::ActorDestroy(ActorDestroyReason aWhy) {
+  AssertOnManagerThread();
+  LOG("ActorDestroy");
+  UnregisterMedieEngine(this);
+  DestroyEngineIfExists();
 }
 
 void MFMediaEngineParent::DestroyEngineIfExists(
     const Maybe<MediaResult>& aError) {
   LOG("DestroyEngineIfExists, hasError={}", aError.isSome());
   ENGINE_MARKER("MFMediaEngineParent::DestroyEngineIfExists");
+  mMediaEngineEventListener.DisconnectIfExists();
+  mRequestSampleListener.DisconnectIfExists();
   mMediaEngineNotify = nullptr;
   mMediaEngineExtension = nullptr;
   if (mMediaSource) {
@@ -130,8 +144,6 @@ void MFMediaEngineParent::DestroyEngineIfExists(
     LOG_IF_FAILED(mMediaEngine->Shutdown());
     mMediaEngine = nullptr;
   }
-  mMediaEngineEventListener.DisconnectIfExists();
-  mRequestSampleListener.DisconnectIfExists();
   if (mDXGIDeviceManager) {
     mDXGIDeviceManager = nullptr;
     wmf::MFUnlockDXGIDeviceManager();
@@ -546,6 +558,10 @@ mozilla::ipc::IPCResult MFMediaEngineParent::RecvInitMediaEngine(
     aResolver(0);
     return IPC_OK();
   }
+  if (MOZ_UNLIKELY(mIsMediaEngineInitialized)) {
+    MOZ_ASSERT_UNREACHABLE("MFMediaEngine must not be initialized twice");
+    return IPC_FAIL(this, "MFMediaEngine must not be initialized twice");
+  }
   // Metadata preload is controlled by content process side before creating
   // media engine.
   if (aInfo.preload()) {
@@ -554,6 +570,7 @@ mozilla::ipc::IPCResult MFMediaEngineParent::RecvInitMediaEngine(
   }
   RETURN_PARAM_IF_FAILED(
       SetMediaInfo(aInfo.mediaInfo(), aInfo.encryptedCustomIdent()), IPC_OK());
+  mIsMediaEngineInitialized = true;
   aResolver(mMediaEngineId);
   return IPC_OK();
 }
@@ -580,16 +597,22 @@ HRESULT MFMediaEngineParent::SetMediaInfo(const MediaInfoIPDL& aInfo,
 
   const bool isEncrypted = mMediaSource->IsEncrypted();
   ENGINE_MARKER("MFMediaEngineParent,CreatedMediaSource");
+  const gfx::IntSize videoImage =
+      aInfo.videoInfo() ? aInfo.videoInfo()->mImage : gfx::IntSize{};
+  const gfx::IntSize videoDisplay =
+      aInfo.videoInfo() ? aInfo.videoInfo()->mDisplay : gfx::IntSize{};
   nsPrintfCString message(
       "Created the media source, audio=%s, video=%s, encrypted-audio=%s, "
-      "encrypted-video=%s, aIsEncryptedCustomInit=%d, isEncrypted=%d",
+      "encrypted-video=%s, aIsEncryptedCustomInit=%d, isEncrypted=%d, "
+      "video-image=[%dx%d], video-display=[%dx%d]",
       aInfo.audioInfo() ? aInfo.audioInfo()->mMimeType.get() : "none",
       aInfo.videoInfo() ? aInfo.videoInfo()->mMimeType.get() : "none",
       aInfo.audioInfo() && aInfo.audioInfo()->mCrypto.IsEncrypted() ? "yes"
                                                                     : "no",
       aInfo.videoInfo() && aInfo.videoInfo()->mCrypto.IsEncrypted() ? "yes"
                                                                     : "no",
-      aIsEncryptedCustomInit, isEncrypted);
+      aIsEncryptedCustomInit, isEncrypted, videoImage.width, videoImage.height,
+      videoDisplay.width, videoDisplay.height);
   LOG("{}", message.get());
 
   if (aInfo.videoInfo()) {
@@ -613,7 +636,7 @@ HRESULT MFMediaEngineParent::SetMediaInfo(const MediaInfoIPDL& aInfo,
   }
 
   if (isEncrypted && mContentProtectionManager) {
-    auto* proxy = mContentProtectionManager->GetCDMProxy();
+    RefPtr<MFCDMProxy> proxy = mContentProtectionManager->GetCDMProxy();
     MOZ_ASSERT(proxy);
     mMediaSource->SetCDMProxy(proxy);
   }
@@ -788,8 +811,11 @@ mozilla::ipc::IPCResult MFMediaEngineParent::RecvSetCDMProxyId(
     LOG("WMFClearKey CDM detected, enabling frame server mode");
     mIsFrameServerMode = true;
   }
-  HRESULT rv =
-      MakeAndInitialize<MFContentProtectionManager>(&mContentProtectionManager);
+  if (mContentProtectionManager) {
+    mContentProtectionManager->Shutdown();
+  }
+  HRESULT rv = MakeAndInitialize<MFContentProtectionManager>(
+      &mContentProtectionManager, mManagerThread);
   CDM_SETUP_IPC_RETURN_IF_FAILED(rv,
                                  "Failed to create content protection manager");
 
@@ -835,8 +861,7 @@ mozilla::ipc::IPCResult MFMediaEngineParent::RecvSetCDMProxyId(
         if (self->CanSend() && self->mMediaEngine) {
           (void)self->SendNotifyWaitingForKey();
         }
-      },
-      mManagerThread);
+      });
 
   // TODO : is it possible to set CDM proxy before creating media source? If so,
   // handle that as well.

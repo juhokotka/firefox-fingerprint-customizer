@@ -11,10 +11,13 @@
 
 #include <sys/stat.h>
 
-#include "nscore.h"
 #include "nsString.h"
+#include "nscore.h"
 #ifdef MOZ_WIDGET_COCOA
 #  include "nsILocalFileMac.h"
+#else
+#  include "nsIFile.h"
+#  include "nsLocalFile.h"
 #endif
 
 // stat64 and lstat64 are deprecated on OS X. Normal stat and lstat are

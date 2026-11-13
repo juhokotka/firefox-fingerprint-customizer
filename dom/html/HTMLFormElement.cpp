@@ -33,6 +33,7 @@
 #include "nsDocShell.h"
 #include "nsDocShellLoadState.h"
 #include "nsError.h"
+#include "nsExternalHelperAppService.h"
 #include "nsFocusManager.h"
 #include "nsGkAtoms.h"
 #include "nsHTMLDocument.h"
@@ -48,6 +49,7 @@
 #include "mozilla/StaticPrefs_prompts.h"
 #include "mozilla/dom/FormData.h"
 #include "mozilla/dom/FormDataEvent.h"
+#include "mozilla/dom/Range.h"
 #include "mozilla/dom/SubmitEvent.h"
 #include "mozilla/glean/DomSecurityMetrics.h"
 #include "mozilla/intl/Localization.h"
@@ -61,7 +63,6 @@
 #include "nsISecurityUITelemetry.h"
 #include "nsISimpleEnumerator.h"
 #include "nsNetUtil.h"
-#include "nsRange.h"
 
 // radio buttons
 #include "RadioNodeList.h"
@@ -99,9 +100,6 @@ HTMLFormElement::HTMLFormElement(
     : nsGenericHTMLElement(std::move(aNodeInfo)),
       mControls(new HTMLFormControlsCollection(this)),
       mPendingSubmission(nullptr),
-      mDefaultSubmitElement(nullptr),
-      mFirstSubmitInElements(nullptr),
-      mFirstSubmitNotInElements(nullptr),
       mImageNameLookupTable(FORM_CONTROL_LIST_HASHTABLE_LENGTH),
       mPastNameLookupTable(FORM_CONTROL_LIST_HASHTABLE_LENGTH),
       mSubmitPopupState(PopupBlocker::openAbused),
@@ -137,12 +135,18 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLFormElement,
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPastNameLookupTable)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRelList)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTargetContext)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDefaultSubmitElement)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFirstSubmitInElements)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFirstSubmitNotInElements)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLFormElement,
                                                 nsGenericHTMLElement)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mRelList)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTargetContext)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDefaultSubmitElement)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFirstSubmitInElements)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFirstSubmitNotInElements)
   tmp->Clear();
   tmp->mExpandoAndGeneration.OwnerUnlinked();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -441,7 +445,8 @@ static void CollectOrphans(
       const auto* fc = nsIFormControl::FromNode(node);
       MOZ_ASSERT(fc);
       HTMLFormElement* form = fc->GetFormInternal();
-      NS_ASSERTION(form == aThisForm, "How did that happen?");
+      // form may be null if this is called during CC after node is unlinked.
+      NS_ASSERTION(!form || form == aThisForm, "How did that happen?");
     }
 #endif /* DEBUG */
   }
@@ -480,7 +485,8 @@ static void CollectOrphans(nsINode* aRemovalRoot,
 #ifdef DEBUG
     if (!removed) {
       HTMLFormElement* form = node->GetFormInternal();
-      NS_ASSERTION(form == aThisForm, "How did that happen?");
+      // form may be null if this is called during CC after node is unlinked.
+      NS_ASSERTION(!form || form == aThisForm, "How did that happen?");
     }
 #endif /* DEBUG */
   }
@@ -634,11 +640,6 @@ nsresult HTMLFormElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
 }
 
 nsresult HTMLFormElement::DoReset() {
-  // Make sure the presentation is up-to-date
-  if (Document* doc = GetComposedDoc()) {
-    doc->FlushPendingNotifications(FlushType::ContentAndNotify);
-  }
-
   // JBK walk the elements[] array instead of form frame controls - bug 34297
   uint32_t numElements = mControls->Length();
   for (uint32_t elementX = 0; elementX < numElements; ++elementX) {
@@ -665,11 +666,6 @@ nsresult HTMLFormElement::DoReset() {
 nsresult HTMLFormElement::DoSubmit(Event* aEvent) {
   Document* doc = GetComposedDoc();
   NS_ASSERTION(doc, "Should never get here without a current doc");
-
-  // Make sure the presentation is up-to-date
-  if (doc) {
-    doc->FlushPendingNotifications(FlushType::ContentAndNotify);
-  }
 
   // Don't submit if we're not in a document or if we're in
   // a sandboxed frame and form submit is disabled.
@@ -802,10 +798,14 @@ nsresult HTMLFormElement::SubmitSubmission(
   }
 
   // If there is no link handler, then we won't actually be able to submit.
-  Document* doc = GetComposedDoc();
+  RefPtr<Document> doc = GetComposedDoc();
   RefPtr<nsDocShell> container =
       doc ? nsDocShell::Cast(doc->GetDocShell()) : nullptr;
   if (!container || IsEditable()) {
+    return NS_OK;
+  }
+
+  if (doc->GetSandboxFlags() & SANDBOXED_FORMS) {
     return NS_OK;
   }
 
@@ -878,6 +878,19 @@ nsresult HTMLFormElement::SubmitSubmission(
     const bool hasValidUserGestureActivation =
         doc->HasValidTransientUserGestureActivation();
     loadState->SetHasValidUserGestureActivation(hasValidUserGestureActivation);
+
+    // For protocols that would launch without a prompt (e.g. mailto), consume
+    // the transient user gesture activation here, at the same point the
+    // activation value is captured on the load state, so a single gesture can't
+    // chain multiple launches. This keeps form submission consistent with link
+    // clicks (nsDocShell::OnLinkClick) and scripted navigation
+    // (BrowsingContext::Navigate). The pre-consume value is already recorded on
+    // the load state above. See bug 299116.
+    if (nsAutoCString scheme; NS_SUCCEEDED(actionURI->GetScheme(scheme))) {
+      nsExternalHelperAppService::MaybeConsumeUserActivationForExternalScheme(
+          doc->GetWindowContext(), loadState->TriggeringPrincipal(), scheme);
+    }
+
     loadState->SetTextDirectiveUserActivation(
         doc->ConsumeTextDirectiveUserActivation() ||
         hasValidUserGestureActivation);
@@ -1030,8 +1043,8 @@ nsresult HTMLFormElement::DispatchBeforeSubmitChromeOnlyEvent(
     bool* aCancelSubmit) {
   bool defaultAction = true;
   nsresult rv = nsContentUtils::DispatchEventOnlyToChrome(
-      OwnerDoc(), static_cast<nsINode*>(this), u"DOMFormBeforeSubmit"_ns,
-      CanBubble::eYes, Cancelable::eYes, &defaultAction);
+      static_cast<nsINode*>(this), u"DOMFormBeforeSubmit"_ns, CanBubble::eYes,
+      Cancelable::eYes, &defaultAction);
   *aCancelSubmit = !defaultAction;
   if (*aCancelSubmit) {
     return NS_OK;
@@ -1142,7 +1155,7 @@ nsresult HTMLFormElement::AddElement(nsGenericHTMLFormElement* aChild,
     // Update mDefaultSubmitElement, mFirstSubmitInElements,
     // mFirstSubmitNotInElements.
 
-    nsGenericHTMLFormElement** firstSubmitSlot =
+    RefPtr<nsGenericHTMLFormElement>* firstSubmitSlot =
         childInElements ? &mFirstSubmitInElements : &mFirstSubmitNotInElements;
 
     // The new child is the new first submit in its list if the firstSubmitSlot
@@ -1244,7 +1257,7 @@ nsresult HTMLFormElement::RemoveElement(nsGenericHTMLFormElement* aChild,
   controls.RemoveElementAt(index);
 
   // Update our mFirstSubmit* values.
-  nsGenericHTMLFormElement** firstSubmitSlot =
+  RefPtr<nsGenericHTMLFormElement>* firstSubmitSlot =
       childInElements ? &mFirstSubmitInElements : &mFirstSubmitNotInElements;
   if (aChild == *firstSubmitSlot) {
     *firstSubmitSlot = nullptr;
@@ -1655,7 +1668,8 @@ bool HTMLFormElement::CheckFormValidity(
     nsCOMPtr<nsIConstraintValidation> cvElmt =
         do_QueryObject(sortedControls[i]);
     bool defaultAction = true;
-    if (cvElmt && !cvElmt->CheckValidity(*sortedControls[i], &defaultAction)) {
+    if (cvElmt && !cvElmt->CheckValidity(MOZ_KnownLive(*sortedControls[i]),
+                                         &defaultAction)) {
       ret = false;
 
       // Add all unhandled invalid controls to aInvalidElements if the caller

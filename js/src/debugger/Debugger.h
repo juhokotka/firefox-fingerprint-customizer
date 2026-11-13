@@ -206,7 +206,7 @@ class Completion {
 
   // The JS::Result macros want to assign to an existing variable, so having a
   // default constructor is handy.
-  Completion() : variant(Terminate()) {}
+  Completion() = default;
 
   // Construct a completion from a specific variant.
   //
@@ -280,7 +280,7 @@ class Completion {
   struct BuildValueMatcher;
   struct ToResumeModeMatcher;
 
-  Variant variant;
+  Variant variant{Terminate()};
 };
 
 using WeakGlobalObjectSet =
@@ -426,24 +426,33 @@ class MOZ_RAII EvalOptions {
   unsigned lineno_ = 1;
   bool hideFromDebugger_ = false;
   bool bypassCSP_ = false;
+  bool allowRedeclaringExistingLexicalBinding_ = false;
   EnvKind kind_;
 
  public:
   explicit EvalOptions(EnvKind kind) : kind_(kind) {};
   ~EvalOptions() = default;
+
   const char* filename() const { return filename_.get(); }
   unsigned lineno() const { return lineno_; }
   bool hideFromDebugger() const { return hideFromDebugger_; }
   bool bypassCSP() const { return bypassCSP_; }
-  EnvKind kind() const { return kind_; }
-  void setUseInnerBindings() {
-    MOZ_ASSERT(kind_ == EvalOptions::EnvKind::GlobalWithExtraOuterBindings);
-    kind_ = EvalOptions::EnvKind::GlobalWithExtraInnerBindings;
+  bool allowRedeclaringExistingLexicalBinding() const {
+    return allowRedeclaringExistingLexicalBinding_;
   }
+  EnvKind kind() const { return kind_; }
+
   [[nodiscard]] bool setFilename(JSContext* cx, const char* filename);
   void setLineno(unsigned lineno) { lineno_ = lineno; }
   void setHideFromDebugger(bool hide) { hideFromDebugger_ = hide; }
   void setBypassCSP(bool bypass) { bypassCSP_ = bypass; }
+  void setAllowRedeclaringExistingLexicalBinding(bool allow) {
+    allowRedeclaringExistingLexicalBinding_ = allow;
+  }
+  void setUseInnerBindings() {
+    MOZ_ASSERT(kind_ == EvalOptions::EnvKind::GlobalWithExtraOuterBindings);
+    kind_ = EvalOptions::EnvKind::GlobalWithExtraInnerBindings;
+  }
 };
 
 /*
@@ -564,8 +573,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
     OnEnterFrame,
     OnNativeCall,
     OnNewGlobalObject,
-    OnNewPromise,
-    OnPromiseSettled,
     OnGarbageCollection,
     HookCount
   };
@@ -577,6 +584,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
     JSSLOT_DEBUG_SCRIPT_PROTO,
     JSSLOT_DEBUG_SOURCE_PROTO,
     JSSLOT_DEBUG_MEMORY_PROTO,
+    JSSLOT_DEBUG_PRIVATE_NAME_PROTO,
     JSSLOT_DEBUG_PROTO_STOP,
     JSSLOT_DEBUG_DEBUGGER = JSSLOT_DEBUG_PROTO_STOP,
     JSSLOT_DEBUG_HOOK_START,

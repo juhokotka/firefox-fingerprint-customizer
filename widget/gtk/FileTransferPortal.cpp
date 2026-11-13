@@ -6,15 +6,14 @@
 
 #include "FileTransferPortal.h"
 
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <gio/gio.h>
+#include <gio/gunixfdlist.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <dlfcn.h>
-
-#include <gio/gio.h>
-#include <gio/gunixfdlist.h>
 
 #include "AsyncDBus.h"
 #include "mozilla/GRefPtr.h"
@@ -178,8 +177,8 @@ RefPtr<AddFilesPromise> FileTransferPortal::AddFilesBatch(
       ->Then(
           GetCurrentSerialEventTarget(), __func__,
           [this, promise, keyCopy = std::move(keyCopy),
-           filesCopy = std::move(filesCopy),
-           nextStart](RefPtr<GVariant>&&) mutable {
+           filesCopy = std::move(filesCopy), nextStart](
+              std::pair<RefPtr<GVariant>, RefPtr<GUnixFDList>>&&) mutable {
             AddFilesBatch(keyCopy, filesCopy, nextStart)
                 ->Then(
                     GetCurrentSerialEventTarget(), __func__,

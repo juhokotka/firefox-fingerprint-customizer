@@ -4,7 +4,7 @@
 "use strict";
 
 const { MigratorBase } = ChromeUtils.importESModule(
-  "resource:///modules/MigratorBase.sys.mjs"
+  "moz-src:///browser/components/migration/MigratorBase.sys.mjs"
 );
 
 /**
@@ -19,11 +19,8 @@ add_task(async function test_enabled_migrator() {
     let selector = shadow.querySelector("#browser-profile-selector");
     EventUtils.synthesizeMouseAtCenter(selector, {}, prefsWin);
 
-    await new Promise(resolve => {
-      shadow
-        .querySelector("panel-list")
-        .addEventListener("shown", resolve, { once: true });
-    });
+    let panelList = shadow.querySelector("panel-list");
+    await waitForPanelListShown(panelList);
 
     let panelItem = shadow.querySelector(
       `panel-item[key="${InternalTestingProfileMigrator.key}"]`
@@ -108,7 +105,7 @@ class FakeMigrator extends MigratorBase {
   }
 
   static get displayNameL10nID() {
-    return "migration-wizard-migrator-display-name-firefox";
+    return "migration-wizard-migrator-display-name-self";
   }
 
   // We will create a single MigratorResource for each resource type that

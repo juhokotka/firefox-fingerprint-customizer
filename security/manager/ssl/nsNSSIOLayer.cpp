@@ -12,11 +12,14 @@
 #include "NSSCertDBTrustDomain.h"
 #include "NSSErrorsService.h"
 #include "NSSSocketControl.h"
+#include "PKCS11ModuleDB.h"
 #include "SSLServerCertVerification.h"
 #include "ScopedNSSTypes.h"
 #include "TLSClientAuthCertSelection.h"
+#include "brotli/decode.h"
 #include "keyhi.h"
 #include "mozilla/Base64.h"
+#include "mozilla/BaseProfiler.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/RandomNum.h"
@@ -25,10 +28,10 @@
 #include "mozilla/glean/SecurityManagerSslMetrics.h"
 #include "mozilla/net/SSLTokensCache.h"
 #include "mozilla/net/SocketProcessChild.h"
-#include "mozilla/psm/IPCClientCertsChild.h"
-#include "mozilla/psm/mozilla_abridged_certs_generated.h"
-#include "mozilla/psm/PIPCClientCertsChild.h"
 #include "mozilla/psm/EnabledSignatureSchemes.h"
+#include "mozilla/psm/IPCClientCertsChild.h"
+#include "mozilla/psm/PIPCClientCertsChild.h"
+#include "mozilla/psm/mozilla_abridged_certs_generated.h"
 #include "mozpkix/pkixnss.h"
 #include "mozpkix/pkixtypes.h"
 #include "mozpkix/pkixutil.h"
@@ -52,7 +55,6 @@
 #include "sslexp.h"
 #include "sslproto.h"
 #include "zlib.h"
-#include "brotli/decode.h"
 #include "zstd/zstd.h"
 
 #if defined(__arm__)
@@ -542,52 +544,42 @@ static_assert((mozilla::pkix::ERROR_BASE - mozilla::pkix::END_OF_LIST) < 31,
 static void reportHandshakeResult(int32_t bytesTransferred, bool wasReading,
                                   PRErrorCode err,
                                   NSSSocketControl* socketInfo) {
-  uint32_t bucket;
+  nsAutoCString result;
 
   // A negative bytesTransferred or a 0 read are errors.
   if (bytesTransferred > 0) {
-    bucket = 0;
+    result.Assign("Success");
   } else if ((bytesTransferred == 0) && !wasReading) {
     // PR_Write() is defined to never return 0, but let's make sure.
     // https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSPR/Reference/PR_Write.
     MOZ_ASSERT(false);
-    bucket = 671;
-  } else if (IS_SSL_ERROR(err)) {
-    bucket = err - SSL_ERROR_BASE;
-    MOZ_ASSERT(bucket > 0);  // SSL_ERROR_EXPORT_ONLY_SERVER isn't used.
-  } else if (IS_SEC_ERROR(err)) {
-    bucket = (err - SEC_ERROR_BASE) + 256;
-  } else if ((err >= PR_NSPR_ERROR_BASE) && (err < PR_MAX_ERROR)) {
-    bucket = (err - PR_NSPR_ERROR_BASE) + 512;
-  } else if ((err >= mozilla::pkix::ERROR_BASE) &&
-             (err < mozilla::pkix::ERROR_LIMIT)) {
-    bucket = (err - mozilla::pkix::ERROR_BASE) + 640;
+    result.Assign("PR_Write_returned_0");
   } else {
-    bucket = 671;
+    result.Assign(PR_ErrorToName(err));
   }
 
   uint32_t flags = socketInfo->GetProviderFlags();
   if (!(flags & nsISocketProvider::IS_RETRY)) {
-    glean::ssl_handshake::result_first_try.AccumulateSingleSample(bucket);
+    glean::tls_handshake::result.Get("first_try"_ns, result).Add();
   }
 
   if (flags & nsISocketProvider::BE_CONSERVATIVE) {
-    glean::ssl_handshake::result_conservative.AccumulateSingleSample(bucket);
+    glean::tls_handshake::result.Get("conservative"_ns, result).Add();
   }
 
   switch (socketInfo->GetEchExtensionStatus()) {
     case EchExtensionStatus::kGREASE:
-      glean::ssl_handshake::result_ech_grease.AccumulateSingleSample(bucket);
+      glean::tls_handshake::result.Get("ech_grease"_ns, result).Add();
       break;
     case EchExtensionStatus::kReal:
-      glean::ssl_handshake::result_ech.AccumulateSingleSample(bucket);
+      glean::tls_handshake::result.Get("ech"_ns, result).Add();
       break;
     default:
       break;
   }
-  glean::ssl_handshake::result.AccumulateSingleSample(bucket);
+  glean::tls_handshake::result.Get("all"_ns, result).Add();
 
-  if (bucket == 0) {
+  if (bytesTransferred > 0) {
     nsCOMPtr<nsITransportSecurityInfo> securityInfo;
     if (NS_FAILED(socketInfo->GetSecurityInfo(getter_AddRefs(securityInfo))) ||
         !securityInfo) {
@@ -619,7 +611,10 @@ static void reportHandshakeResult(int32_t bytesTransferred, bool wasReading,
       TLSPrivacyResult |= usedPrivateDNS << 2;
       TLSPrivacyResult |= usedECH << 3;
 
-      glean::ssl_handshake::privacy.AccumulateSingleSample(TLSPrivacyResult);
+      glean::tls_handshake::privacy
+          .EnumGet(
+              static_cast<glean::tls_handshake::PrivacyLabel>(TLSPrivacyResult))
+          .Add();
     }
   }
 }
@@ -826,7 +821,9 @@ static int32_t PSMRecv(PRFileDesc* fd, void* buf, int32_t amount, int flags,
 static int32_t PSMSend(PRFileDesc* fd, const void* buf, int32_t amount,
                        int flags, PRIntervalTime timeout) {
   NSSSocketControl* socketInfo = getSocketInfoIfRunning(fd, writing);
-  if (!socketInfo) return -1;
+  if (!socketInfo) {
+    return -1;
+  }
 
   if (flags != 0) {
     PR_SetError(PR_INVALID_ARGUMENT_ERROR, 0);
@@ -838,15 +835,13 @@ static int32_t PSMSend(PRFileDesc* fd, const void* buf, int32_t amount,
 #endif
 
   if (socketInfo->IsShortWritePending() && amount > 0) {
-    // We got "SSL short write" last time, try to flush the pending byte.
-#ifdef DEBUG
-    socketInfo->CheckShortWrittenBuffer(static_cast<const unsigned char*>(buf),
-                                        amount);
-#endif
-
-    buf = socketInfo->GetShortWritePendingByteRef();
+    // We got a "short write" last time, try to flush the pending byte.
+    buf = socketInfo->CheckShortWriteBuffer(buf, amount);
+    if (!buf) {
+      PR_SetError(PR_INVALID_ARGUMENT_ERROR, 0);
+      return -1;
+    }
     amount = 1;
-
     MOZ_LOG(gPIPNSSLog, LogLevel::Verbose,
             ("[%p] pushing 1 byte after SSL short write", fd));
   }
@@ -867,6 +862,10 @@ static int32_t PSMSend(PRFileDesc* fd, const void* buf, int32_t amount,
   // in the previous call. We then return the total number of bytes written,
   // which is the number that caused the short write plus the additional byte
   // we just wrote out.
+  // Note that the layer above *must* retry sending the exact same data. To do
+  // otherwise is a violation of NSS's expectations and is an error.
+  // Because early data can be truncated by libssl, only perform this
+  // optimization after the handshake has completed.
 
   // The 16384 value is based on libssl's maximum buffer size:
   //    MAX_FRAGMENT_LENGTH - 1
@@ -874,12 +873,11 @@ static int32_t PSMSend(PRFileDesc* fd, const void* buf, int32_t amount,
   // It's in a private header, though, filed bug 1394822 to expose it.
   static const int32_t kShortWrite16k = 16383;
 
-  if ((amount > 1 && bytesWritten == (amount - 1)) ||
-      (amount > kShortWrite16k && bytesWritten == kShortWrite16k)) {
-    // This is indication of an "SSL short write", block to force retry.
-    socketInfo->SetShortWritePending(
-        bytesWritten + 1,  // The amount to return after the flush
-        *(static_cast<const unsigned char*>(buf) + bytesWritten));
+  if (socketInfo->IsHandshakeCompleted() &&
+      ((amount > 1 && bytesWritten == (amount - 1)) ||
+       (amount > kShortWrite16k && bytesWritten == kShortWrite16k))) {
+    // This indicates a "short write", so block to force a retry.
+    socketInfo->SetShortWritePending(buf, bytesWritten + 1);
 
     MOZ_LOG(
         gPIPNSSLog, LogLevel::Verbose,
@@ -888,24 +886,17 @@ static int32_t PSMSend(PRFileDesc* fd, const void* buf, int32_t amount,
 
     bytesWritten = -1;
     PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
-
-#ifdef DEBUG
-    socketInfo->RememberShortWrittenBuffer(
-        static_cast<const unsigned char*>(buf));
-#endif
-
   } else if (socketInfo->IsShortWritePending() && bytesWritten == 1) {
-    // We have now flushed all pending data in the SSL socket
-    // after the indicated short write.  Tell the upper layer
-    // it has sent all its data now.
+    // We have now flushed all pending data in the SSL socket after the
+    // indicated short write. Tell the upper layer it has sent all the data
+    // from that write now.
     MOZ_LOG(gPIPNSSLog, LogLevel::Verbose,
             ("[%p] finished SSL short write", fd));
-
     bytesWritten = socketInfo->ResetShortWritePending();
   }
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Verbose,
-          ("[%p] wrote %d bytes\n", fd, bytesWritten));
+          ("[%p] wrote %d bytes", fd, bytesWritten));
 
   return checkHandshake(bytesWritten, false, fd, socketInfo);
 }
@@ -1009,6 +1000,14 @@ static int32_t PlaintextRecv(PRFileDesc* fd, void* buf, int32_t amount,
   return bytesRead;
 }
 
+static int16_t PlaintextPoll(PRFileDesc* fd, int16_t in_flags,
+                             int16_t* out_flags) {
+  // This thread may sleep as a result of this poll call - let the profiler
+  // know about it.
+  AutoProfilerThreadSleep _;
+  return fd->lower->methods->poll(fd->lower, in_flags, out_flags);
+}
+
 nsSSLIOLayerHelpers::~nsSSLIOLayerHelpers() {
   // Pref observers must have been removed before destruction, since the
   // destructor may run off the main thread.
@@ -1086,6 +1085,7 @@ nsresult nsSSLIOLayerHelpers::Init() {
     nsSSLPlaintextLayerIdentity = PR_GetUniqueIdentity("Plaintxext PSM layer");
     nsSSLPlaintextLayerMethods = *PR_GetDefaultIOMethods();
     nsSSLPlaintextLayerMethods.recv = PlaintextRecv;
+    nsSSLPlaintextLayerMethods.poll = PlaintextPoll;
   }
 
   loadVersionFallbackLimit();
@@ -1585,39 +1585,44 @@ static nsresult nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
   // Include a modest set of named groups in supported_groups and determine how
   // many key shares to send. Please change getKeaGroupName in
   // nsNSSCallbacks.cpp when changing the lists here.
-  unsigned int additional_shares =
-      StaticPrefs::security_tls_client_hello_send_p256_keyshare();
-  if (StaticPrefs::security_tls_enable_kyber() &&
-      range.max >= SSL_LIBRARY_VERSION_TLS_1_3) {
-    const SSLNamedGroup namedGroups[] = {
-        ssl_grp_kem_mlkem768x25519, ssl_grp_ec_curve25519, ssl_grp_ec_secp256r1,
-        ssl_grp_ec_secp384r1,       ssl_grp_ec_secp521r1,  ssl_grp_ffdhe_2048,
-        ssl_grp_ffdhe_3072};
-    if (SECSuccess !=
-        SSL_NamedGroupConfig(fd, namedGroups, std::size(namedGroups))) {
-      return NS_ERROR_FAILURE;
-    }
+  unsigned int additional_shares = 1;
+  bool tls13 = range.max >= SSL_LIBRARY_VERSION_TLS_1_3;
+
+  AutoTArray<SSLNamedGroup, 8> namedGroups;
+  if (StaticPrefs::security_tls_enable_kyber() && tls13) {
+    namedGroups.AppendElement(ssl_grp_kem_mlkem768x25519);
     additional_shares += 1;
-  } else {
-    const SSLNamedGroup namedGroups[] = {
-        ssl_grp_ec_curve25519, ssl_grp_ec_secp256r1, ssl_grp_ec_secp384r1,
-        ssl_grp_ec_secp521r1,  ssl_grp_ffdhe_2048,   ssl_grp_ffdhe_3072};
-    // Skip the |ssl_grp_kem_mlkem768x25519| entry.
-    if (SECSuccess !=
-        SSL_NamedGroupConfig(fd, namedGroups, std::size(namedGroups))) {
-      return NS_ERROR_FAILURE;
-    }
+  }
+  namedGroups.AppendElement(ssl_grp_ec_curve25519);
+  namedGroups.AppendElement(ssl_grp_ec_secp256r1);
+  namedGroups.AppendElement(ssl_grp_ec_secp384r1);
+  namedGroups.AppendElement(ssl_grp_ec_secp521r1);
+
+  // Only include named FFDHE shares if ciphersuites that can use FFDHE are
+  // enabled.
+  if (StaticPrefs::security_ssl3_dhe_rsa_aes_128_sha() ||
+      StaticPrefs::security_ssl3_dhe_rsa_aes_256_sha()) {
+    namedGroups.AppendElement(ssl_grp_ffdhe_2048);
+    namedGroups.AppendElement(ssl_grp_ffdhe_3072);
+  }
+
+  if (StaticPrefs::security_tls_enable_mlkem1024() && tls13) {
+    namedGroups.AppendElement(ssl_grp_kem_mlkem1024);
+  }
+
+  if (SECSuccess !=
+      SSL_NamedGroupConfig(fd, namedGroups.Elements(), namedGroups.Length())) {
+    return NS_ERROR_FAILURE;
   }
 
   // If additional_shares == 2, send mlkem768x25519, x25519, and p256.
-  // If additional_shares == 1, send {mlkem768x25519, x25519} or {x25519, p256}.
-  // If additional_shares == 0, send x25519.
+  // If additional_shares == 1, send x25519 and p256.
   if (SECSuccess != SSL_SendAdditionalKeyShares(fd, additional_shares)) {
     return NS_ERROR_FAILURE;
   }
 
   // Enabling Certificate Compression Decoding mechanisms.
-  if (range.max >= SSL_LIBRARY_VERSION_TLS_1_3 &&
+  if (tls13 &&
       !(infoObject->GetProviderFlags() &
         (nsISocketProvider::BE_CONSERVATIVE | nsISocketProvider::IS_RETRY))) {
     SSLCertificateCompressionAlgorithm zlibAlg = {1, "zlib", nullptr,
@@ -1888,6 +1893,11 @@ const uint8_t kIPCClientCertsObjectTypeCert = 1;
 const uint8_t kIPCClientCertsObjectTypeRSAKey = 2;
 const uint8_t kIPCClientCertsObjectTypeECKey = 3;
 
+using FindObjectsCallback = void (*)(uint8_t type, size_t id_len,
+                                     const uint8_t* id, size_t data_len,
+                                     const uint8_t* data, void* ctx);
+using SignCallback = void (*)(size_t data_len, const uint8_t* data, void* ctx);
+
 // This function is provided to the IPC client certs module so it can cause the
 // parent process to find certificates and keys and send identifying
 // information about them over IPC.
@@ -2031,4 +2041,134 @@ void AndroidDoSign(size_t certLen, const uint8_t* cert, size_t dataLen,
   }
 }
 #endif  // MOZ_WIDGET_ANDROID
+
+// Similar to `DoFindObjects`, this function implements searching for
+// certificates stored on remote PKCS#11 tokens.
+void RemoteCertsDoFindObjects(SearchingFor searchingFor, FindObjectsCallback cb,
+                              void* ctx) {
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_NO_SMART_CARDS)
+  MOZ_ASSERT(!NS_IsMainThread());
+  if (NS_IsMainThread()) {
+    return;
+  }
+
+  Monitor monitor{__func__};
+  bool done = false;
+  nsTArray<IPCClientCertObject> objects;
+  nsresult rv = NS_DispatchToMainThread(NS_NewRunnableFunction(
+      __func__, [searchingFor, &monitor, &done, &objects] {
+        RefPtr<PKCS11ModuleDB> pkcs11ModuleDB(PKCS11ModuleDB::GetSingleton());
+        if (!pkcs11ModuleDB) {
+          MonitorAutoLock lock(monitor);
+          done = true;
+          lock.Notify();
+          return;
+        }
+        pkcs11ModuleDB->FindObjects(searchingFor)
+            ->Then(GetCurrentSerialEventTarget(), __func__,
+                   [&monitor, &done,
+                    &objects](const PKCS11ModuleDB::FindObjectsPromise::
+                                  ResolveOrRejectValue& value) {
+                     MonitorAutoLock lock(monitor);
+                     if (value.IsResolve()) {
+                       objects.Assign(value.ResolveValue());
+                     }
+                     done = true;
+                     lock.Notify();
+                   });
+      }));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  MonitorAutoLock lock(monitor);
+  while (!done) {
+    lock.Wait();
+  }
+  for (const auto& object : objects) {
+    switch (object.type()) {
+      case IPCClientCertObject::TECKey:
+        cb(kIPCClientCertsObjectTypeECKey, object.get_ECKey().params().Length(),
+           object.get_ECKey().params().Elements(),
+           object.get_ECKey().cert().Length(),
+           object.get_ECKey().cert().Elements(), ctx);
+        break;
+      case IPCClientCertObject::TRSAKey:
+        cb(kIPCClientCertsObjectTypeRSAKey,
+           object.get_RSAKey().modulus().Length(),
+           object.get_RSAKey().modulus().Elements(),
+           object.get_RSAKey().cert().Length(),
+           object.get_RSAKey().cert().Elements(), ctx);
+        break;
+      case IPCClientCertObject::TCertificate: {
+        uint8_t serverAuthTrustAnchor =
+            object.get_Certificate().serverAuthTrustAnchor() ? 1 : 0;
+        cb(kIPCClientCertsObjectTypeCert,
+           object.get_Certificate().der().Length(),
+           object.get_Certificate().der().Elements(), 1, &serverAuthTrustAnchor,
+           ctx);
+        break;
+      }
+      default:
+        MOZ_ASSERT_UNREACHABLE("unhandled IPCClientCertObject type");
+        break;
+    }
+  }
+#endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
+}
+
+// Similar to `DoSign`, this function implements signing using private keys
+// stored on remote PKCS#11 tokens.
+void RemoteCertsDoSign(size_t certLen, const uint8_t* cert, size_t dataLen,
+                       const uint8_t* data, size_t paramsLen,
+                       const uint8_t* params, SignCallback cb, void* ctx) {
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_NO_SMART_CARDS)
+  MOZ_ASSERT(!NS_IsMainThread());
+  if (NS_IsMainThread()) {
+    return;
+  }
+
+  nsTArray<uint8_t> certificate(cert, certLen);
+  nsTArray<uint8_t> dataArray(data, dataLen);
+  nsTArray<uint8_t> paramsArray(params, paramsLen);
+
+  Monitor monitor{__func__};
+  bool done = false;
+  nsTArray<uint8_t> signature;
+  nsresult rv = NS_DispatchToMainThread(NS_NewRunnableFunction(
+      __func__,
+      [certificate(std::move(certificate)), data(std::move(dataArray)),
+       params(std::move(paramsArray)), &monitor, &done, &signature]() mutable {
+        RefPtr<PKCS11ModuleDB> pkcs11ModuleDB(PKCS11ModuleDB::GetSingleton());
+        if (!pkcs11ModuleDB) {
+          MonitorAutoLock lock(monitor);
+          done = true;
+          lock.Notify();
+          return;
+        }
+        pkcs11ModuleDB
+            ->Sign(std::move(certificate), std::move(data), std::move(params))
+            ->Then(GetCurrentSerialEventTarget(), __func__,
+                   [&monitor, &done, &signature](
+                       const PKCS11ModuleDB::SignPromise::ResolveOrRejectValue&
+                           value) {
+                     MonitorAutoLock lock(monitor);
+                     if (value.IsResolve()) {
+                       signature.Assign(value.ResolveValue());
+                     }
+                     done = true;
+                     lock.Notify();
+                   });
+      }));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  MonitorAutoLock lock(monitor);
+  while (!done) {
+    lock.Wait();
+  }
+  cb(signature.Length(), signature.Elements(), ctx);
+#endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
+}
 }  // extern "C"

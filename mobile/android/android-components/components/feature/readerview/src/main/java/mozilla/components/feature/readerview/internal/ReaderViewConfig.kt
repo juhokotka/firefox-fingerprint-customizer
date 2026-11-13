@@ -21,12 +21,11 @@ import mozilla.components.feature.readerview.ReaderViewFeature.Companion.SHARED_
 import org.json.JSONObject
 
 /**
- * Stores the user configuration for reader view in shared prefs.
- * All values are initialized lazily and cached.
+ * Stores the user configuration for reader view in shared prefs. All values are initialized lazily and cached.
+ *
  * @param context Used to lazily obtain shared preferences and to check dark mode status.
- * @param sendConfigMessage If the config changes, this method will be invoked
- * with a JSON object which should be sent to the content script so the new
- * config can be applied.
+ * @param sendConfigMessage If the config changes, this method will be invoked with a JSON object which should be sent
+ *   to the content script so the new config can be applied.
  */
 internal class ReaderViewConfig(
     context: Context,
@@ -39,25 +38,48 @@ internal class ReaderViewConfig(
     private var fontTypeCache: ReaderViewFeature.FontType? = null
     private var fontSizeCache: Int? = null
 
+    /**
+     * Takes precedence over the color scheme the user configured, without overwriting it. Set to `null` to go back to
+     * the user's own choice.
+     */
+    var colorSchemeOverride: ReaderViewFeature.ColorScheme? = null
+        set(value) {
+            if (field != value) {
+                field = value
+                sendMessage(ReaderViewFeature.ACTION_SET_COLOR_SCHEME) { put(ACTION_VALUE, colorScheme.name) }
+            }
+        }
+
     var colorScheme: ReaderViewFeature.ColorScheme
+        get() = colorSchemeOverride ?: userColorScheme
+        set(value) {
+            if (userColorScheme != value) {
+                userColorScheme = value
+                // While an override is in effect it is what is displayed, so there is nothing to apply yet. The new
+                // value is applied once the override is cleared.
+                if (colorSchemeOverride == null) {
+                    sendMessage(ReaderViewFeature.ACTION_SET_COLOR_SCHEME) { put(ACTION_VALUE, value.name) }
+                }
+            }
+        }
+
+    private var userColorScheme: ReaderViewFeature.ColorScheme
         get() {
             if (colorSchemeCache == null) {
                 // Default to a dark theme if either the system or local dark theme is active
-                val defaultColor = if (isNightMode()) {
-                    ReaderViewFeature.ColorScheme.DARK
-                } else {
-                    ReaderViewFeature.ColorScheme.LIGHT
-                }
+                val defaultColor =
+                    if (isNightMode()) {
+                        ReaderViewFeature.ColorScheme.DARK
+                    } else {
+                        ReaderViewFeature.ColorScheme.LIGHT
+                    }
                 colorSchemeCache = getEnumFromPrefs(COLOR_SCHEME_KEY, defaultColor)
             }
             return colorSchemeCache!!
         }
         set(value) {
-            if (colorSchemeCache != value) {
-                colorSchemeCache = value
-                prefs.edit { putString(COLOR_SCHEME_KEY, value.name) }
-                sendMessage(ReaderViewFeature.ACTION_SET_COLOR_SCHEME) { put(ACTION_VALUE, value.name) }
-            }
+            colorSchemeCache = value
+            prefs.edit { putString(COLOR_SCHEME_KEY, value.name) }
         }
 
     var fontType: ReaderViewFeature.FontType

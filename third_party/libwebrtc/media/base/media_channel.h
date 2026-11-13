@@ -22,12 +22,14 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "api/audio/audio_processing_statistics.h"
 #include "api/audio_codecs/audio_encoder.h"
+#include "api/audio_codecs/audio_encoder_factory.h"
 #include "api/audio_options.h"
 #include "api/call/audio_sink.h"
 #include "api/crypto/frame_decryptor_interface.h"
@@ -40,7 +42,6 @@
 #include "api/rtp_parameters.h"
 #include "api/rtp_sender_interface.h"
 #include "api/scoped_refptr.h"
-#include "api/transport/rtp/rtp_source.h"
 #include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
@@ -115,12 +116,14 @@ struct VideoOptions {
     SetFrom(&video_noise_reduction, change.video_noise_reduction);
     SetFrom(&screencast_min_bitrate_kbps, change.screencast_min_bitrate_kbps);
     SetFrom(&is_screencast, change.is_screencast);
+    SetFrom(&allow_zero_hertz_video, change.allow_zero_hertz_video);
   }
 
   bool operator==(const VideoOptions& o) const {
     return video_noise_reduction == o.video_noise_reduction &&
            screencast_min_bitrate_kbps == o.screencast_min_bitrate_kbps &&
-           is_screencast == o.is_screencast;
+           is_screencast == o.is_screencast &&
+           allow_zero_hertz_video == o.allow_zero_hertz_video;
   }
   bool operator!=(const VideoOptions& o) const { return !(*this == o); }
 
@@ -131,6 +134,7 @@ struct VideoOptions {
     ost << ToStringIfSet("screencast min bitrate kbps",
                          screencast_min_bitrate_kbps);
     ost << ToStringIfSet("is_screencast ", is_screencast);
+    ost << ToStringIfSet("allow_zero_hertz_video ", allow_zero_hertz_video);
     ost << "}";
     return ost.Release();
   }
@@ -151,6 +155,9 @@ struct VideoOptions {
   // youtube video have different needs.
   std::optional<bool> is_screencast;
   VideoTrackInterface::ContentHint content_hint;
+  // Allows the zero-hertz feature to be enabled for regular video, false by
+  // default.
+  std::optional<bool> allow_zero_hertz_video;
 
  private:
   template <typename T>
@@ -212,7 +219,6 @@ class MediaSendChannelInterface {
   // in the same stream. The setter and getter must only be called from
   // worker_thread.
   virtual void SetExtmapAllowMixed(bool extmap_allow_mixed) = 0;
-  virtual bool ExtmapAllowMixed() const = 0;
 
   // Starts or stops transmission (and potentially capture) of local media.
   virtual bool SetSend(bool send) = 0;
@@ -250,10 +256,15 @@ class MediaSendChannelInterface {
   // thread state may be torn down asynchronously.
   virtual absl::AnyInvocable<RtpParameters(uint32_t)>
   GetRtpSendParametersCallback() const = 0;
-  virtual bool SendCodecHasNack() const = 0;
   // Called whenever the list of sending SSRCs changes.
   virtual void SetSsrcListChangedCallback(
       absl::AnyInvocable<void(const std::set<uint32_t>&)> callback) = 0;
+  // Resets the encoder factory override for the given SSRC that was set via
+  // video/audio specific methods.
+  virtual void ResetEncoderFactoryOverride(uint32_t ssrc) = 0;
+
+  // Marks the channel as requiring Sframe encryption. Cannot be undone.
+  virtual void EnableSframe() = 0;
 };
 
 class MediaReceiveChannelInterface {
@@ -328,6 +339,9 @@ class MediaReceiveChannelInterface {
   // Returns current value of base minimum delay in milliseconds.
   virtual std::optional<int> GetBaseMinimumPlayoutDelayMs(
       uint32_t ssrc) const = 0;
+
+  // Marks the channel as requiring Sframe decryption. Cannot be undone.
+  virtual void EnableSframe() = 0;
 };
 
 // The stats information is structured as follows:
@@ -940,7 +954,15 @@ class VoiceMediaSendChannelInterface : public MediaSendChannelInterface {
   GetStatsTask() = 0;
   virtual bool SenderNackEnabled() const = 0;
   virtual bool SenderNonSenderRttEnabled() const = 0;
-  virtual bool SetOptions(const AudioOptions& options) = 0;
+  // Override encoder factory for a specific ssrc.
+  // Replaces the default encoder_factory in AudioSendStream::Config and
+  // Forces reconfiguration of the underlying AudioSendStream
+  virtual bool SetEncoderFactoryOverride(
+      uint32_t ssrc,
+      absl_nonnull scoped_refptr<AudioEncoderFactory> encoder_factory) {
+    return false;
+  }
+  void ResetEncoderFactoryOverride(uint32_t ssrc) override {}
 };
 
 class VoiceMediaReceiveChannelInterface : public MediaReceiveChannelInterface {
@@ -948,7 +970,6 @@ class VoiceMediaReceiveChannelInterface : public MediaReceiveChannelInterface {
   virtual bool SetReceiverParameters(const AudioReceiverParameters& params) = 0;
   // Get the receive parameters for the incoming stream identified by `ssrc`.
   virtual RtpParameters GetRtpReceiverParameters(uint32_t ssrc) const = 0;
-  virtual std::vector<RtpSource> GetSources(uint32_t ssrc) const = 0;
   // Retrieve the receive parameters for the default receive
   // stream, which is used when SSRCs are not signaled.
   virtual RtpParameters GetDefaultRtpReceiveParameters() const = 0;
@@ -969,11 +990,9 @@ class VoiceMediaReceiveChannelInterface : public MediaReceiveChannelInterface {
   // may be torn down asynchronously.
   virtual absl::AnyInvocable<std::optional<VoiceMediaReceiveInfo>()>
   GetStatsTask(bool reset_legacy) = 0;
-  virtual enum RtcpMode RtcpMode() const = 0;
   virtual void SetRtcpMode(enum RtcpMode mode) = 0;
   virtual void SetReceiveNackEnabled(bool enabled) = 0;
   virtual void SetReceiveNonSenderRttEnabled(bool enabled) = 0;
-  virtual bool SetOptions(const AudioOptions& options) = 0;
 };
 
 struct VideoSenderParameters : SenderParameters {
@@ -1006,7 +1025,6 @@ class VideoMediaSendChannelInterface : public MediaSendChannelInterface {
   virtual bool SetVideoSend(uint32_t ssrc,
                             const VideoOptions* options,
                             VideoSourceInterface<VideoFrame>* source) = 0;
-  virtual bool SetOptions(const VideoOptions& options) = 0;
   // Cause generation of a keyframe for `ssrc` on a sending channel.
   virtual void GenerateSendKeyFrame(uint32_t ssrc,
                                     const std::vector<std::string>& rids) = 0;
@@ -1027,6 +1045,15 @@ class VideoMediaSendChannelInterface : public MediaSendChannelInterface {
   // so that it's getting the send stream stats separately by calling
   // GetStats(), and merges with BandwidthEstimationInfo by itself.
   virtual void FillBitrateInfo(BandwidthEstimationInfo* bwe_info) = 0;
+  // Override encoder factory for a specific ssrc.
+  // Replaces the default encoder_factory in VideoSendStream::Config and
+  // forces reallocation of the underlying VideoSendStream
+  virtual bool SetEncoderFactoryOverride(
+      uint32_t ssrc,
+      absl_nonnull std::unique_ptr<VideoEncoderFactory> encoder_factory) {
+    return false;
+  }
+  void ResetEncoderFactoryOverride(uint32_t ssrc) override {}
 };
 
 class VideoMediaReceiveChannelInterface : public MediaReceiveChannelInterface {
@@ -1046,7 +1073,6 @@ class VideoMediaReceiveChannelInterface : public MediaReceiveChannelInterface {
   // RTCP feedback.
   virtual void RequestRecvKeyFrame(uint32_t ssrc) = 0;
 
-  virtual std::vector<RtpSource> GetSources(uint32_t ssrc) const = 0;
   // Set recordable encoded frame callback for `ssrc`
   virtual void SetRecordableEncodedFrameCallback(
       uint32_t ssrc,
@@ -1062,6 +1088,7 @@ class VideoMediaReceiveChannelInterface : public MediaReceiveChannelInterface {
   virtual absl::AnyInvocable<std::optional<VideoMediaReceiveInfo>()>
   GetStatsTask() = 0;
   virtual bool AddDefaultRecvStreamForTesting(const StreamParams& sp) = 0;
+  virtual void SetReceiveNonSenderRttEnabled(bool enabled) = 0;
 };
 
 }  // namespace webrtc

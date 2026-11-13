@@ -36,6 +36,71 @@ for a more detailed (albeit chromium-oriented) description of the feature and ho
     It should also talk about potential deviations from the spec.
 -->
 
+### Deviations from the spec
+
+#### Initial host of an extended navigation
+
+The spec's *process navigation start* algorithm derives the extended
+navigation's initial host from the navigation's source document. Because the
+initial host is exempt from classification, that lets a cross-site iframe which
+navigates the top level nominate itself as the initial host and escape being
+classified for its own bounce
+([Bug 2060310](https://bugzilla.mozilla.org/show_bug.cgi?id=2060310)).
+
+Gecko instead uses the site the extended navigation is leaving: the site of the most
+recent non-initial document committed in the context being navigated. A context which
+has never committed a document of its own is one the navigation opened
+(`window.open`, `target="_blank"`), so the opener's top level document is used
+instead. Both signals are read at commit time, so a navigation which starts before
+the current document has finished loading still attributes that document.
+
+Reading the opener rather than the navigation's initiator is load bearing. A context
+opened by a cross-site frame holds an initial `about:blank` whose principal is
+inherited from that frame, and the initiator can resolve back into the opened context
+itself, so either would let the frame name itself again through an empty popup.
+
+Because the derivation does not depend on the navigation having an initiator at all,
+a navigation started by the browser rather than by content — address bar, bookmark,
+session restore — also exempts the site it is leaving. This matches how the spec
+attributes user activation, which already uses the top level traversable's active
+document.
+
+#### Bounce candidate of a navigation without user activation
+
+For a navigation without transient activation, *process navigation start* adds
+the host of the navigation's initiator origin to the bounce set. For an ordinary
+client redirect the initiator is the document being navigated away from, but it
+can also sit outside the context being navigated: a script in another tab, or a
+cross-site frame allowed to navigate the top level without a gesture (e.g.
+`sandbox="allow-top-navigation"`). Such an initiator was credited with a bounce
+it never performed and could be classified and purged for it
+([Bug 2061167](https://bugzilla.mozilla.org/show_bug.cgi?id=2061167)).
+
+Gecko instead adds the site of the document currently committed in the context
+being navigated, the same site the initial host derivation above starts from. It
+deliberately does not fall back to the opener for a context which has nothing
+committed yet, since that would name the initiating tab again; such a navigation
+adds no candidate. A frame initiated top level navigation is therefore credited
+to the page hosting the frame, which is the site actually being left.
+
+#### Comparison with Chromium
+
+Chromium's implementation starts a redirect chain the same way. In
+[`btm_bounce_detector.cc`](https://source.chromium.org/chromium/chromium/src/+/main:content/browser/btm/btm_bounce_detector.cc),
+`BtmBounceDetector::DidStartNavigation` takes the chain start from the tab's last
+committed URL and only consults the navigation's initiator when the tab has nothing
+committed. `BtmServiceImpl::HandleRedirects` in
+[`btm_service_impl.cc`](https://source.chromium.org/chromium/chromium/src/+/main:content/browser/btm/btm_service_impl.cc)
+then skips a redirector whose site equals the chain's initial or final site, which is
+what `RecordStatefulBounces` does with the initial and final host. A client redirect
+is likewise recorded with the tab's last committed URL as the redirector, never the
+navigation's initiator, and only once the tab has committed something.
+
+Gecko is stricter in one case. Chromium's fallback is the initiator's origin as-is,
+so for a context opened by a cross-site frame it resolves to the frame's own site and
+the frame can still name itself. Gecko resolves the opener to its top level document
+instead.
+
 ## Gecko Implementation
 
 Work for the Gecko implementation in tracked under following meta-bug:
@@ -172,7 +237,7 @@ The snippets in the following section need to be executed in the [Browser
 Toolbox]. Note that while the toolbox looks like the regular devtools it's a
 special console used to debug Firefox itself rather than websites.
 
-[Browser Toolbox]: /devtools-user/browser_toolbox/index.rst
+[Browser Toolbox]: /devtools-user/browser_toolbox/index.md
 
 ### Print the list of classified bounce trackers
 

@@ -151,7 +151,7 @@ export default class RestoreFromBackup extends MozLitElement {
 
   handleEvent(event) {
     if (event.type == "BackupUI:SelectNewFilepickerPath") {
-      let { path, iconURL } = event.detail;
+      let { iconURL } = event.detail;
       this._fileIconURL = iconURL;
 
       // Check the backup info again even if it was the same file.
@@ -185,7 +185,7 @@ export default class RestoreFromBackup extends MozLitElement {
         Services.obs.notifyObservers(null, "browser-backup-glean-sent");
       });
 
-      this.getBackupFileInfo(path);
+      this.getBackupFileInfo();
     } else if (event.type == "BackupUI:StateWasUpdated") {
       this.#initializedResolvers.resolve();
       if (this.#backupFileReadPromise) {
@@ -213,8 +213,8 @@ export default class RestoreFromBackup extends MozLitElement {
     );
   }
 
-  getBackupFileInfo(pathToFile = null) {
-    let backupFile = pathToFile || this.backupServiceState?.backupFileToRestore;
+  getBackupFileInfo() {
+    let backupFile = this.backupServiceState?.backupFileToRestore;
     if (!backupFile || this.#lastBackupInfoFilename === backupFile) {
       return;
     }
@@ -224,9 +224,6 @@ export default class RestoreFromBackup extends MozLitElement {
       new CustomEvent("BackupUI:GetBackupFileInfo", {
         bubbles: true,
         composed: true,
-        detail: {
-          backupFile,
-        },
       })
     );
   }
@@ -345,7 +342,6 @@ export default class RestoreFromBackup extends MozLitElement {
         <fieldset id="backup-filepicker-controls">
           <label
             id="backup-filepicker-label"
-            class="heading-medium"
             for="backup-filepicker-input"
             data-l10n-id="restore-from-backup-filepicker-label"
           ></label>
@@ -538,11 +534,11 @@ export default class RestoreFromBackup extends MozLitElement {
 
   headerTemplate() {
     return html`
-      <h1
+      <h2
         id="restore-from-backup-header"
-        class="heading-large"
+        class="heading-medium"
         data-l10n-id="restore-from-backup-header"
-      ></h1>
+      ></h2>
     `;
   }
 

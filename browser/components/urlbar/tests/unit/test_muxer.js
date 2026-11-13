@@ -68,7 +68,7 @@ add_task(async function test_muxer() {
 
   let provider = registerBasicTestProvider(matches);
   let context = createContext(undefined, { providers: [provider.name] });
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
   /**
    * A test muxer.
    */
@@ -94,7 +94,7 @@ add_task(async function test_muxer() {
   context.muxer = "TestMuxer";
 
   info("Check results, the order should be: bookmark, history, tab");
-  await providersManager.startQuery(context, controller);
+  await providersManager.startQuery(context, controller.parentController);
   Assert.deepEqual(context.results, [matches[1], matches[2], matches[0]]);
 
   // Sanity check, should not throw.
@@ -126,12 +126,11 @@ add_task(async function test_preselectedHeuristic_singleProvider() {
   let context = createContext(undefined, {
     providers: [provider.name],
   });
-  let controller = UrlbarTestUtils.newMockController();
 
   info("Check results, the order should be: b (heuristic), a, c");
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.deepEqual(context.results, [matches[1], matches[0], matches[2]]);
 });
@@ -180,12 +179,11 @@ add_task(async function test_preselectedHeuristic_multiProviders() {
   let context = createContext(undefined, {
     providers: [provider1.name, provider2.name],
   });
-  let controller = UrlbarTestUtils.newMockController();
 
   info("Check results, the order should be: e (heuristic), a, b, c, d, f");
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.deepEqual(context.results, [
     matches2[1],
@@ -251,12 +249,11 @@ add_task(async function test_suggestions() {
   let context = createContext(undefined, {
     providers: [provider.name],
   });
-  let controller = UrlbarTestUtils.newMockController();
 
   info("Check results, the order should be: mozzarella, moz, a, b, @moz, c");
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.deepEqual(context.results, [
     matches[2],
@@ -283,7 +280,7 @@ add_task(async function test_deduplicate_for_unitConversion() {
   const searchProvider = registerBasicTestProvider(
     [searchSuggestion],
     null,
-    UrlbarUtils.PROVIDER_TYPE.PROFILE
+    UrlbarShared.PROVIDER_TYPE.PROFILE
   );
 
   const unitConversionSuggestion = new UrlbarResult({
@@ -300,17 +297,17 @@ add_task(async function test_deduplicate_for_unitConversion() {
   const unitConversion = registerBasicTestProvider(
     [unitConversionSuggestion],
     null,
-    UrlbarUtils.PROVIDER_TYPE.PROFILE,
+    UrlbarShared.PROVIDER_TYPE.PROFILE,
     "UrlbarProviderUnitConversion"
   );
 
   const context = createContext(undefined, {
     providers: [searchProvider.name, unitConversion.name],
   });
-  const controller = UrlbarTestUtils.newMockController();
+  const controller = UrlbarTestUtils.mockChildController();
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    controller.parentController
   );
   Assert.deepEqual(context.results, [unitConversionSuggestion]);
 });
@@ -359,11 +356,11 @@ add_task(async function test_badHeuristicGroups_multiple_0() {
       // 2 heuristics with child groups
       {
         maxResultCount: 2,
-        children: [{ group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST }],
+        children: [{ group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST }],
       },
       // infinite general
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
     ],
     [BAD_HEURISTIC_RESULTS_FIRST_HEURISTIC, ...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -375,11 +372,11 @@ add_task(async function test_badHeuristicGroups_multiple_1() {
     [
       // infinite heuristics with child groups
       {
-        children: [{ group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST }],
+        children: [{ group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST }],
       },
       // infinite general
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
     ],
     [BAD_HEURISTIC_RESULTS_FIRST_HEURISTIC, ...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -392,11 +389,11 @@ add_task(async function test_badHeuristicGroups_multiple_2() {
       // 2 heuristics
       {
         maxResultCount: 2,
-        group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST,
+        group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST,
       },
       // infinite general
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
     ],
     [BAD_HEURISTIC_RESULTS_FIRST_HEURISTIC, ...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -408,11 +405,11 @@ add_task(async function test_badHeuristicGroups_multiple_3() {
     [
       // infinite heuristics
       {
-        group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST,
+        group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST,
       },
       // infinite general
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
     ],
     [BAD_HEURISTIC_RESULTS_FIRST_HEURISTIC, ...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -425,16 +422,16 @@ add_task(async function test_badHeuristicGroups_multiple_4() {
       // 1 heuristic with child groups
       {
         maxResultCount: 1,
-        children: [{ group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST }],
+        children: [{ group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST }],
       },
       // infinite general
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
       // 1 heuristic with child groups
       {
         maxResultCount: 1,
-        children: [{ group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST }],
+        children: [{ group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST }],
       },
     ],
     [BAD_HEURISTIC_RESULTS_FIRST_HEURISTIC, ...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -446,15 +443,15 @@ add_task(async function test_badHeuristicGroups_multiple_5() {
     [
       // infinite heuristics with child groups
       {
-        children: [{ group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST }],
+        children: [{ group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST }],
       },
       // infinite general
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
       // infinite heuristics with child groups
       {
-        children: [{ group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST }],
+        children: [{ group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST }],
       },
     ],
     [BAD_HEURISTIC_RESULTS_FIRST_HEURISTIC, ...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -467,16 +464,16 @@ add_task(async function test_badHeuristicGroups_multiple_6() {
       // 1 heuristic
       {
         maxResultCount: 1,
-        group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST,
+        group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST,
       },
       // infinite general
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
       // 1 heuristic
       {
         maxResultCount: 1,
-        group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST,
+        group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST,
       },
     ],
     [BAD_HEURISTIC_RESULTS_FIRST_HEURISTIC, ...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -488,15 +485,15 @@ add_task(async function test_badHeuristicGroups_multiple_7() {
     [
       // infinite heuristics
       {
-        group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST,
+        group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST,
       },
       // infinite general
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
       // infinite heuristics
       {
-        group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST,
+        group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST,
       },
     ],
     [BAD_HEURISTIC_RESULTS_FIRST_HEURISTIC, ...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -508,12 +505,12 @@ add_task(async function test_badHeuristicsGroups_notFirst_0() {
     [
       // infinite general first
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
       // 1 heuristic with child groups second
       {
         maxResultCount: 1,
-        children: [{ group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST }],
+        children: [{ group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST }],
       },
     ],
     [...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -525,11 +522,11 @@ add_task(async function test_badHeuristicsGroups_notFirst_1() {
     [
       // infinite general first
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
       // infinite heuristics with child groups second
       {
-        children: [{ group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST }],
+        children: [{ group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST }],
       },
     ],
     [...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -541,12 +538,12 @@ add_task(async function test_badHeuristicsGroups_notFirst_2() {
     [
       // infinite general first
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
       // 1 heuristic second
       {
         maxResultCount: 1,
-        group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST,
+        group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST,
       },
     ],
     [...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -558,11 +555,11 @@ add_task(async function test_badHeuristicsGroups_notFirst_3() {
     [
       // infinite general first
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
       // infinite heuristics second
       {
-        group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST,
+        group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST,
       },
     ],
     [...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -575,15 +572,15 @@ add_task(async function test_badHeuristicsGroups_notFirst_4() {
       // 1 general first
       {
         maxResultCount: 1,
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
       // infinite heuristics second
       {
-        group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST,
+        group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST,
       },
       // infinite general third
       {
-        group: UrlbarUtils.RESULT_GROUP.GENERAL,
+        group: UrlbarShared.RESULT_GROUP.GENERAL,
       },
     ],
     [...BAD_HEURISTIC_RESULTS_GENERAL]
@@ -607,10 +604,9 @@ async function doBadHeuristicGroupsTest(resultGroups, expectedResults) {
 
   let provider = registerBasicTestProvider(BAD_HEURISTIC_RESULTS);
   let context = createContext("foo", { providers: [provider.name] });
-  let controller = UrlbarTestUtils.newMockController();
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.deepEqual(context.results, expectedResults);
 
@@ -826,10 +822,9 @@ async function checkSemanticDedupe({
       ? [semanticProvider.name, nonSemanticProvider.name]
       : [nonSemanticProvider.name, semanticProvider.name],
   });
-  let controller = UrlbarTestUtils.newMockController();
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    UrlbarTestUtils.mockChildController().parentController
   );
 
   Assert.deepEqual(
@@ -922,7 +917,7 @@ add_task(async function test_semantic_only_survives() {
   });
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    UrlbarTestUtils.newMockController()
+    UrlbarTestUtils.mockChildController().parentController
   );
 
   Assert.deepEqual(
@@ -968,7 +963,7 @@ add_task(async function test_dedupe_two_semantic_prefixes() {
   });
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    UrlbarTestUtils.newMockController()
+    UrlbarTestUtils.mockChildController().parentController
   );
 
   Assert.deepEqual(
@@ -1036,7 +1031,7 @@ add_task(async function test_semantic_history_separate_group_ratio() {
   });
   await providersManager.startQuery(
     limitedResultsContext,
-    UrlbarTestUtils.newMockController()
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.equal(limitedResultsContext.results.length, 3, "Fills the budget");
   Assert.equal(
@@ -1052,7 +1047,7 @@ add_task(async function test_semantic_history_separate_group_ratio() {
   });
   await providersManager.startQuery(
     historyViewContext,
-    UrlbarTestUtils.newMockController()
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.equal(historyViewContext.results.length, 10, "Fills the budget");
   Assert.equal(
@@ -1080,7 +1075,7 @@ add_task(async function test_semantic_history_separate_group_ratio() {
   });
   await providersManager.startQuery(
     sparseContext,
-    UrlbarTestUtils.newMockController()
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.equal(
     sparseContext.results.filter(r => !isSemantic(r)).length,

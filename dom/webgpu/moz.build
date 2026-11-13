@@ -61,17 +61,17 @@ UNIFIED_SOURCES += [x + ".cpp" for x in h_and_cpp]
 
 IPDL_SOURCES += [
     "ipc/PWebGPU.ipdl",
-    "ipc/PWebGPUTypes.ipdlh",
 ]
 
 EXPORTS.mozilla.webgpu += [
+    "ipc/MappedRangeGuard.h",
     "ipc/WebGPUChild.h",
     "ipc/WebGPUParent.h",
-    "ipc/WebGPUSerialize.h",
     "ipc/WebGPUTypes.h",
 ]
 
 UNIFIED_SOURCES += [
+    "ipc/MappedRangeGuard.cpp",
     "ipc/WebGPUChild.cpp",
     "ipc/WebGPUParent.cpp",
 ]

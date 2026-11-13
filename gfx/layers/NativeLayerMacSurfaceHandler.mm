@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/layers/NativeLayerMacSurfaceHandler.h"
+#include "GLBlitHelper.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/MacIOSurface.h"
-#include "mozilla/layers/NativeLayerMacSurfaceHandler.h"
 #include "mozilla/layers/SurfacePoolCA.h"
-#include "GLBlitHelper.h"
 #ifdef XP_MACOSX
 #  include "GLContextCGL.h"
 #else
@@ -231,13 +231,19 @@ Maybe<GLuint> NativeLayerMacSurfaceHandler::NextSurfaceAsFramebuffer(
         MOZ_RELEASE_ASSERT(
             sourceFBO,
             "GetFramebufferForSurface failed during HandlePartialUpdate.");
+
+        mSurfacePoolHandle->gl()->fBindFramebuffer(LOCAL_GL_READ_FRAMEBUFFER,
+                                                   *sourceFBO);
+        mSurfacePoolHandle->gl()->fBindFramebuffer(LOCAL_GL_DRAW_FRAMEBUFFER,
+                                                   *fbo);
+
         for (auto iter = copyRegion.RectIter(); !iter.Done(); iter.Next()) {
           gfx::IntRect r = iter.Get();
           if (mSurfaceIsFlipped) {
             r.y = mSize.height - r.YMost();
           }
-          mSurfacePoolHandle->gl()->BlitHelper()->BlitFramebufferToFramebuffer(
-              *sourceFBO, *fbo, r, r, LOCAL_GL_NEAREST);
+          mSurfacePoolHandle->gl()->BlitHelper()->BlitFramebuffer(
+              r, r, LOCAL_GL_NEAREST);
         }
       });
 

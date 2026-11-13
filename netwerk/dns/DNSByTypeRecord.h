@@ -5,8 +5,8 @@
 #ifndef DNSByTypeRecord_h_
 #define DNSByTypeRecord_h_
 
-#include "mozilla/net/HTTPSSVC.h"
 #include "ipc/IPCMessageUtils.h"
+#include "mozilla/net/HTTPSSVC.h"
 #include "mozilla/net/NeckoMessageUtils.h"
 
 namespace mozilla {
@@ -32,6 +32,7 @@ struct IPCTypeRecord {
   TypeRecordResultType mData;
   uint32_t mTTL = 0;
   bool mIsTRR = false;
+  bool mFromStaleCache = false;
 };
 
 }  // namespace net
@@ -40,7 +41,7 @@ struct IPCTypeRecord {
 namespace IPC {
 
 DEFINE_IPC_SERIALIZER_WITH_FIELDS(mozilla::net::IPCTypeRecord, mData, mTTL,
-                                  mIsTRR);
+                                  mIsTRR, mFromStaleCache);
 
 DEFINE_IPC_SERIALIZER_WITH_FIELDS(mozilla::net::SVCB, mSvcFieldPriority,
                                   mSvcDomainName, mEchConfig, mODoHConfig,

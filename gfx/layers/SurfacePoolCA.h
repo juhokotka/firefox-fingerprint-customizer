@@ -9,11 +9,10 @@
 
 #include <unordered_map>
 
-#include "mozilla/DataMutex.h"
-
-#include "mozilla/layers/SurfacePool.h"
 #include "CFTypeRefPtr.h"
 #include "MozFramebuffer.h"
+#include "mozilla/DataMutex.h"
+#include "mozilla/layers/SurfacePool.h"
 #include "nsISupportsImpl.h"
 
 namespace mozilla {

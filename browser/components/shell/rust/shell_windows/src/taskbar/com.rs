@@ -8,29 +8,29 @@
 //!
 //! Taskband Pin is a COM class implementing the undocumented IPinnedList3
 //! interface that affords pinning and unpinning from the Windows taskbar for
-//! unpackaged Win32 (non-MSIX) applications. Chromium source documents this API
-//! as functional starting with Windows 10 RS5 and ending as of Windows 11 24H2.
+//! unpackaged Win32 (non-MSIX) applications. This API first became available in
+//! Windows 10 RS5.
 //!
 //! ## Pinning
 //!
-//! In Windows 10 and early versions of Windows 11 this API pins without
-//! prompting the user.
+//! Starting with Windows 10 RS5 and early versions of Windows 11 this API pins
+//! without prompting the user.
 //!
-//! Later versions of Windows 11 prior to Windows 11 24H2 instead prompt the
-//! user if they wish to pin with a toast notification.
+//! Later versions of Windows 10 and Windows 11 prior to Windows 11 24H2 instead
+//! prompt the user if they wish to pin with a toast notification.
 //!
 //! For Windows 11 24H2 and later this API reports success even though pinning
 //! is not successful.
 //!
 //! ## Unpinning
 //!
-//! This API can be used to unpin an application past Windows 11 24H2.
+//! This API can be used to unpin an application for every version of Windows
+//! released after Windows 10 RS5.
 //!
 //! ## Requirements
 //!
 //! The IPinnedList3 API can pin shortcuts from any directory.
 
-use crate::util::thread::MainThreadGuard;
 use nserror::{
     nsresult, NS_ERROR_FILE_ACCESS_DENIED, NS_ERROR_FILE_NOT_FOUND, NS_ERROR_NOT_AVAILABLE,
 };
@@ -44,6 +44,7 @@ use windows::{
 };
 
 use super::PinResult;
+use crate::util::thread_guard::MainThreadGuard;
 
 pub(super) enum PinOp {
     Pin,
@@ -84,6 +85,12 @@ pub(super) fn modify_taskbar(
     // threads rely on implicit MTA thus should not be used here.
     _main_guard: MainThreadGuard,
 ) -> Result<PinResult, nsresult> {
+    #[cfg(feature = "enable_tests")]
+    if xpcom::is_in_automation() {
+        // Return early in tests to avoid actually pinning the app.
+        return Ok(PinResult::Unknown);
+    }
+
     // Ensure path is a null-terminated string.
     let shortcut_path: nsString = shortcut_path.into();
 
@@ -119,11 +126,6 @@ pub(super) fn modify_taskbar(
         PinOp::UnPin => (*pidl, std::ptr::null()),
     };
 
-    if xpcom::is_in_automation() {
-        // Return early in tests to avoid actually pinning the app.
-        return Ok(PinResult::Unknown);
-    }
-
     // SAFETY: ITEMIDLIST arguments are defined above and either initialized or
     // set to null (known valid for this API).
     unsafe { pinned_list.Modify(unpin_pidl, pin_pidl, PinnedListModifyCallerEnum::MAX) }
@@ -151,16 +153,16 @@ const CLSID_TASKBAND_PIN: GUID = GUID::from_u128(0x90AA3A4E_1CBA_4233_B8BB_53577
 
 // Note: This definition mirrors how the windows crate defines COM enums.
 #[repr(transparent)]
-pub struct PinnedListModifyCallerEnum(pub i32);
+struct PinnedListModifyCallerEnum(i32);
 
 impl PinnedListModifyCallerEnum {
     // This enum is likely only used for Windows telemetry, i32::MAX is chosen
     // to avoid confusion with existing uses.
-    pub const MAX: Self = Self(i32::MAX);
+    const MAX: Self = Self(i32::MAX);
 }
 
-// Enum to prevent usage of IPinnedList3 methods with incomplete parameter
-// definitions.
+/// Enum to prevent usage of IPinnedList3 methods with incomplete parameter
+/// definitions.
 enum IncompleteDefinition {}
 
 #[interface("0dd79ae2-d156-45d4-9eeb-3b549769e940")]

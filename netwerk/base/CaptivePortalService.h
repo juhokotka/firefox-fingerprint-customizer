@@ -5,14 +5,14 @@
 #ifndef CaptivePortalService_h_
 #define CaptivePortalService_h_
 
-#include "nsICaptivePortalService.h"
+#include "mozilla/TimeStamp.h"
+#include "nsCOMArray.h"
 #include "nsICaptivePortalDetector.h"
+#include "nsICaptivePortalService.h"
 #include "nsINamed.h"
 #include "nsIObserver.h"
-#include "nsWeakReference.h"
 #include "nsITimer.h"
-#include "nsCOMArray.h"
-#include "mozilla/TimeStamp.h"
+#include "nsWeakReference.h"
 
 namespace mozilla {
 namespace net {
@@ -46,6 +46,8 @@ class CaptivePortalService : public nsICaptivePortalService,
 
   CaptivePortalService();
   virtual ~CaptivePortalService();
+  // True if the service was started and the enabled pref is still set.
+  bool IsActive() const;
   nsresult PerformCheck();
   nsresult RearmTimer();
   void NotifyConnectivityAvailable(bool aCaptive);

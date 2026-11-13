@@ -6,8 +6,6 @@
  * JS boolean implementation.
  */
 
-#include "builtin/Boolean-inl.h"
-
 #include "jstypes.h"
 
 #include "jit/InlinableNatives.h"
@@ -18,6 +16,7 @@
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
 
+#include "builtin/Boolean-inl.h"
 #include "vm/BooleanObject-inl.h"
 
 using namespace js;
@@ -142,8 +141,8 @@ JSObject* BooleanObject::createPrototype(JSContext* cx, JSProtoKey key) {
   if (!booleanProto) {
     return nullptr;
   }
-  booleanProto->setFixedSlot(BooleanObject::PRIMITIVE_VALUE_SLOT,
-                             BooleanValue(false));
+  booleanProto->initFixedSlotTyped(BooleanObject::PRIMITIVE_VALUE_SLOT,
+                                   BooleanValue(false));
   return booleanProto;
 }
 
@@ -169,6 +168,6 @@ JS_PUBLIC_API bool js::ToBooleanSlow(HandleValue v) {
     return !v.toBigInt()->isZero();
   }
 
-  MOZ_ASSERT(v.isObject());
+  MOZ_RELEASE_ASSERT(v.isObject());
   return !EmulatesUndefined(&v.toObject());
 }

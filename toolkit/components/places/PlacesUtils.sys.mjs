@@ -10,6 +10,7 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   Bookmarks: "resource://gre/modules/Bookmarks.sys.mjs",
+  BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
   History: "resource://gre/modules/History.sys.mjs",
   PlacesSyncUtils: "resource://gre/modules/PlacesSyncUtils.sys.mjs",
   Sqlite: "resource://gre/modules/Sqlite.sys.mjs",
@@ -406,6 +407,10 @@ const PAGEINFO_VALIDATORS = Object.freeze({
 
       if (inVisit.referrer) {
         visit.referrer = PlacesUtils.normalizeToURLOrGUID(inVisit.referrer);
+      }
+
+      if (inVisit.userContextId) {
+        visit.userContextId = inVisit.userContextId;
       }
       visits.push(visit);
     }
@@ -1108,16 +1113,8 @@ export var PlacesUtils = {
     }
 
     function gatherDataHtml(node, recursiveOpen = true) {
-      let htmlEscape = s =>
-        s
-          .replace(/&/g, "&amp;")
-          .replace(/>/g, "&gt;")
-          .replace(/</g, "&lt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&apos;");
-
       // escape out potential HTML in the title
-      let escapedTitle = node.title ? htmlEscape(node.title) : "";
+      let escapedTitle = lazy.BrowserUtils.escapeHtmlEntities(node.title);
 
       if (PlacesUtils.nodeIsContainer(node)) {
         asContainer(node);
@@ -1145,7 +1142,7 @@ export var PlacesUtils = {
         return childString + "</DL>" + NEWLINE;
       }
       if (PlacesUtils.nodeIsURI(node)) {
-        return `<A HREF="${node.uri}">${escapedTitle}</A>${NEWLINE}`;
+        return `<A HREF="${lazy.BrowserUtils.escapeHtmlEntities(node.uri)}">${escapedTitle}</A>${NEWLINE}`;
       }
       if (PlacesUtils.nodeIsSeparator(node)) {
         return "<HR>" + NEWLINE;
@@ -1474,10 +1471,12 @@ export var PlacesUtils = {
    *
    * @param {nsINavHistoryContainerResultNode} aNode
    *   The container node to search through.
+   * @param {function(string): boolean} uriValidatorFn
+   *   An optional function that takes a URI and returns true if it should be considered a valid URI.
    * @returns {boolean}
    *   True if the node contains uri nodes, false otherwise.
    */
-  hasChildURIs(aNode) {
+  hasChildURIs(aNode, uriValidatorFn) {
     if (!this.nodeIsContainer(aNode)) {
       return false;
     }
@@ -1498,7 +1497,10 @@ export var PlacesUtils = {
     let found = false;
     for (let i = 0, count = root.childCount; i < count && !found; i++) {
       let child = root.getChild(i);
-      if (this.nodeIsURI(child)) {
+      if (
+        this.nodeIsURI(child) &&
+        (!uriValidatorFn || uriValidatorFn(child.uri))
+      ) {
         found = true;
       }
     }

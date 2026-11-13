@@ -47,6 +47,13 @@ export class Translator {
   #ready = Promise.reject;
 
   /**
+   * The shared promise for an in-progress port acquisition.
+   *
+   * @type {Promise<void> | null}
+   */
+  #portAcquisition = null;
+
+  /**
    * The language pair consisting of the source language and target language.
    *
    * @type {LanguagePair}
@@ -242,12 +249,16 @@ export class Translator {
    * @returns {void}
    */
   destroy() {
+    const port = this.#port;
+    this.#port = null;
+
     try {
-      this.#port?.close();
+      port?.postMessage({ type: "TranslationsPort:Close" });
     } catch {
       // We're destroying anyway, nothing to do.
+    } finally {
+      port?.close();
     }
-    this.#port = null;
 
     for (const request of this.#translationRequests.values()) {
       request.resolve(null);
@@ -270,6 +281,24 @@ export class Translator {
       return;
     }
 
+    const portAcquisition =
+      this.#portAcquisition ?? (this.#portAcquisition = this.#acquirePort());
+
+    try {
+      await portAcquisition;
+    } finally {
+      if (this.#portAcquisition === portAcquisition) {
+        this.#portAcquisition = null;
+      }
+    }
+  }
+
+  /**
+   * Requests and initializes a new engine port.
+   *
+   * @returns {Promise<void>}
+   */
+  async #acquirePort() {
     this.#port = await this.#requestTranslationsPort(this.#languagePair);
 
     const { promise, resolve, reject } = Promise.withResolvers();

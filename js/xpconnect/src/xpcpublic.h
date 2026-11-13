@@ -5,10 +5,28 @@
 #ifndef xpcpublic_h
 #define xpcpublic_h
 
+#include "mozilla/AlreadyAddRefed.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/fallible.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/StringBuffer.h"
+#include "mozilla/TextUtils.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+
 #include "ErrorList.h"
+#include "jsapi.h"
+#include "nsCOMPtr.h"
+#include "nsISupports.h"
+#include "nsIURI.h"
+#include "nsStringFwd.h"
+#include "nsTArray.h"
+#include "nsWrapperCache.h"
+
 #include "js/BuildId.h"
 #include "js/ErrorReport.h"
 #include "js/friend/Wrapper.h"
@@ -19,21 +37,6 @@
 #include "js/TypeDecls.h"
 #include "js/Utility.h"
 #include "js/Value.h"
-#include "jsapi.h"
-#include "mozilla/AlreadyAddRefed.h"
-#include "mozilla/Assertions.h"
-#include "mozilla/Attributes.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/MemoryReporting.h"
-#include "mozilla/TextUtils.h"
-#include "mozilla/StringBuffer.h"
-#include "mozilla/fallible.h"
-#include "nsCOMPtr.h"
-#include "nsISupports.h"
-#include "nsIURI.h"
-#include "nsStringFwd.h"
-#include "nsTArray.h"
-#include "nsWrapperCache.h"
 
 class JSObject;
 class JSString;
@@ -297,6 +300,8 @@ class XPCStringConvert {
     return true;
   }
 
+  XPCStringConvert() = delete;
+
  private:
   static MOZ_ALWAYS_INLINE bool MaybeGetExternalStringChars(
       JSString* str, const JSExternalStringCallbacks** callbacks,
@@ -418,8 +423,6 @@ class XPCStringConvert {
                         mozilla::MallocSizeOf aMallocSizeOf) const override;
   };
   static const LiteralExternalString sLiteralExternalString;
-
-  XPCStringConvert() = delete;
 };
 
 namespace xpc {
@@ -535,12 +538,11 @@ class ZoneStatsExtras {
  public:
   ZoneStatsExtras() = default;
 
-  nsCString zoneName;
-  nsCString pathPrefix;
-
- private:
   ZoneStatsExtras(const ZoneStatsExtras& other) = delete;
   ZoneStatsExtras& operator=(const ZoneStatsExtras& other) = delete;
+
+  nsCString zoneName;
+  nsCString pathPrefix;
 };
 
 // ReportJSRuntimeExplicitTreeStats will expect this in the |extra| member
@@ -549,13 +551,12 @@ class RealmStatsExtras {
  public:
   RealmStatsExtras() = default;
 
+  RealmStatsExtras(const RealmStatsExtras& other) = delete;
+  RealmStatsExtras& operator=(const RealmStatsExtras& other) = delete;
+
   nsCString jsPathPrefix;
   nsCString domPathPrefix;
   nsCOMPtr<nsIURI> location;
-
- private:
-  RealmStatsExtras(const RealmStatsExtras& other) = delete;
-  RealmStatsExtras& operator=(const RealmStatsExtras& other) = delete;
 };
 
 // This reports all the stats in |rtStats| that belong in the "explicit" tree,
@@ -662,6 +663,10 @@ inline nsGlobalWindowInner* SandboxWindowOrNull(JSObject* aObj,
   JSObject* proto = SandboxPrototypeOrNull(aCx, aObj);
   return proto ? WindowOrNull(proto) : nullptr;
 }
+
+/** Return a Sandbox's explicit associatedWindow, if any. */
+already_AddRefed<nsGlobalWindowInner> SandboxAssociatedWindowOrNull(
+    JSObject* aObj);
 
 /**
  * If |cx| is in a realm whose global is a window, returns the associated
@@ -845,11 +850,11 @@ struct alignas(kAutomationPageSize) ReadOnlyPage final {
   static const volatile ReadOnlyPage sInstance;
 #endif
 
- private:
   constexpr ReadOnlyPage() = default;
   ReadOnlyPage(const ReadOnlyPage&) = delete;
   void operator=(const ReadOnlyPage&) = delete;
 
+ private:
   static void Write(const volatile bool* aPtr, bool aValue);
 };
 

@@ -3,27 +3,25 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "WaylandSurface.h"
-#include "WaylandBuffer.h"
-#include <wayland-egl.h>
-#include "nsGtkUtils.h"
-#include "mozilla/StaticPrefs_widget.h"
-#include "mozilla/ToString.h"
+
 #include <dlfcn.h>
 #include <fcntl.h>
-#include "ScreenHelperGTK.h"
-#include "nsWindow.h"
-#include "DMABufFormats.h"
-#include "mozilla/gfx/gfxVars.h"
-#include "mozilla/gfx/Logging.h"
-#ifdef MOZ_LOGGING
-#  include "EncoderConfig.h"
-#endif
+#include <wayland-egl.h>
 
+#include "DMABufFormats.h"
+#include "ScreenHelperGTK.h"
+#include "WaylandBuffer.h"
+#include "mozilla/StaticPrefs_widget.h"
+#include "mozilla/ToString.h"
+#include "mozilla/gfx/Logging.h"
+#include "mozilla/gfx/gfxVars.h"
+#include "nsGtkUtils.h"
+#include "nsWindow.h"
 #undef LOG
 #ifdef MOZ_LOGGING
+#  include "Units.h"
 #  include "mozilla/Logging.h"
 #  include "nsTArray.h"
-#  include "Units.h"
 #  undef LOGWAYLAND
 #  undef LOGVERBOSE
 #  undef LOG_ENABLED_VERBOSE
@@ -91,13 +89,14 @@ void WaylandSurface::Init(RefPtr<WaylandSurface> aRootLayer) {
   LOGWAYLAND("WaylandSurface::Init() root layer [%p]",
              aRootLayer ? aRootLayer->GetLoggingWidget() : nullptr);
 
-  mSurface = wl_compositor_create_surface(WaylandDisplayGet()->GetCompositor());
-  LOGWAYLAND("    created surface %p ID %d", (void*)mSurface,
-             wl_proxy_get_id((struct wl_proxy*)mSurface));
+  mSurface = WUniquePtr<wl_surface>(
+      wl_compositor_create_surface(WaylandDisplayGet()->GetCompositor()));
+  LOGWAYLAND("    created surface %p ID %d", mSurface.get(),
+             wl_proxy_get_id((struct wl_proxy*)mSurface.get()));
   MOZ_RELEASE_ASSERT(mSurface, "Can't create wl_surface!");
   if (WaylandDisplayGet()->GetViewporter()) {
-    mViewport = wp_viewporter_get_viewport(WaylandDisplayGet()->GetViewporter(),
-                                           mSurface);
+    mViewport = WUniquePtr<wp_viewport>(wp_viewporter_get_viewport(
+        WaylandDisplayGet()->GetViewporter(), mSurface.get()));
   }
 
   // Layered child surfaces uses the same scale setup as parent ones
@@ -113,13 +112,16 @@ void WaylandSurface::Init(RefPtr<WaylandSurface> aRootLayer) {
 WaylandSurface::~WaylandSurface() {
   LOGWAYLAND("WaylandSurface::~WaylandSurface()");
 
-  MozClearPointer(mFractionalScaleListener, wp_fractional_scale_v1_destroy);
-  MozClearPointer(mCoordinatesScaleManager, xx_fractional_scale_v2_destroy);
-  MozClearPointer(mViewport, wp_viewport_destroy);
+  // Explicitly delete all object which use wl_surface before we release
+  // wl_surface itself.
+  mFractionalScaleListener = nullptr;
+  mCoordinatesScaleManager = nullptr;
+  mViewport = nullptr;
   wl_egl_window* tmp = nullptr;
   mEGLWindow.exchange(tmp);
   MozClearPointer(tmp, wl_egl_window_destroy);
-  MozClearPointer(mSurface, wl_surface_destroy);
+
+  mSurface = nullptr;
 
   MOZ_RELEASE_ASSERT(!mIsMapped, "We can't release mapped WaylandSurface!");
   MOZ_RELEASE_ASSERT(!mSurfaceLock, "We can't release locked WaylandSurface!");
@@ -173,7 +175,7 @@ void WaylandSurface::VSyncCallbackHandler(struct wl_callback* aCallback,
     // Clear already fired frame callback so we can register a new one.
     if (aCallback) {
       MOZ_DIAGNOSTIC_ASSERT(mVSyncFrameCallback);
-      MozClearPointer(mVSyncFrameCallback, wl_callback_destroy);
+      mVSyncFrameCallback = nullptr;
     }
 
     // We're getting regular VSync frame callback from this surface so we must
@@ -266,8 +268,9 @@ void WaylandSurface::SetVSyncCallbackLocked(
               /* aEmulated */ false,
               /* aRoutedFromChildSurface */ false);
         }};
-    mVSyncFrameCallback = wl_surface_frame(mSurface);
-    wl_callback_add_listener(mVSyncFrameCallback, &listener, this);
+    mVSyncFrameCallback =
+        WUniquePtr<wl_callback>(wl_surface_frame(mSurface.get()));
+    wl_callback_add_listener(mVSyncFrameCallback.get(), &listener, this);
     mSurfaceNeedsCommit = true;
   }
 
@@ -301,7 +304,7 @@ void WaylandSurface::ClearVSyncCallbackLocked(
     const WaylandSurfaceLock& aProofOfLock) {
   LOGVERBOSE("WaylandSurface::ClearVSyncCallbackLocked()");
   MOZ_DIAGNOSTIC_ASSERT(&aProofOfLock == mSurfaceLock);
-  MozClearPointer(mVSyncFrameCallback, wl_callback_destroy);
+  mVSyncFrameCallback = nullptr;
 }
 
 void WaylandSurface::ClearVSyncCallbackHandlerLocked(
@@ -387,7 +390,7 @@ void WaylandSurface::EnableDMABufFormatsLocked(
     return;
   }
 
-  mFormats = CreateDMABufFeedbackFormats(mSurface, aFormatRefreshCB);
+  mFormats = CreateDMABufFeedbackFormats(mSurface.get(), aFormatRefreshCB);
   if (!mFormats) {
     LOGWAYLAND(
         "WaylandSurface::SetDMABufFormatsLocked(): Failed to get DMABuf "
@@ -405,7 +408,7 @@ void WaylandSurface::DisableDMABufFormatsLocked(
 void WaylandSurface::VisibleCallbackHandler() {
   WaylandSurfaceLock lock(this);
   LOGVERBOSE("WaylandSurface::VisibleCallbackHandler()");
-  MozClearPointer(mVisibleFrameCallback, wl_callback_destroy);
+  mVisibleFrameCallback = nullptr;
   // We can get frame callback after unmap due to queue sync.
   // In this case just ignore it.
   if (mIsMapped) {
@@ -434,7 +437,7 @@ bool WaylandSurface::MapLocked(const WaylandSurfaceLock& aProofOfLock,
     mParent = aParentWaylandSurfaceLock->GetWaylandSurface();
     LOGWAYLAND(" parent WaylandSurface [%p]", mParent.get());
     MOZ_DIAGNOSTIC_ASSERT(mParent->IsMapped(), "Parent surface is not mapped?");
-    mParentSurface = mParent->mSurface;
+    mParentSurface = mParent->mSurface.get();
   }
 
   mSubsurfacePosition = aSubsurfacePosition;
@@ -443,8 +446,8 @@ bool WaylandSurface::MapLocked(const WaylandSurfaceLock& aProofOfLock,
   mBufferAttached = false;
   mLatestAttachedBuffer = 0;
 
-  mSubsurface = wl_subcompositor_get_subsurface(
-      WaylandDisplayGet()->GetSubcompositor(), mSurface, mParentSurface);
+  mSubsurface = WUniquePtr<wl_subsurface>(wl_subcompositor_get_subsurface(
+      WaylandDisplayGet()->GetSubcompositor(), mSurface.get(), mParentSurface));
   if (!mSubsurface) {
     LOGWAYLAND("    Failed - can't create sub-surface!");
     return false;
@@ -452,9 +455,9 @@ bool WaylandSurface::MapLocked(const WaylandSurfaceLock& aProofOfLock,
 
   mSubsurfaceDesync = aSubsurfaceDesync;
   if (aSubsurfaceDesync) {
-    wl_subsurface_set_desync(mSubsurface);
+    wl_subsurface_set_desync(mSubsurface.get());
   }
-  wl_subsurface_set_position(mSubsurface, mSubsurfacePosition.x,
+  wl_subsurface_set_position(mSubsurface.get(), mSubsurfacePosition.x,
                              mSubsurfacePosition.y);
   LOGWAYLAND(" subsurface position [%d,%d]", (int)mSubsurfacePosition.x,
              (int)mSubsurfacePosition.y);
@@ -465,8 +468,9 @@ bool WaylandSurface::MapLocked(const WaylandSurfaceLock& aProofOfLock,
         RefPtr waylandSurface = static_cast<WaylandSurface*>(aData);
         waylandSurface->VisibleCallbackHandler();
       }};
-  mVisibleFrameCallback = wl_surface_frame(mSurface);
-  wl_callback_add_listener(mVisibleFrameCallback, &listener, this);
+  mVisibleFrameCallback =
+      WUniquePtr<wl_callback>(wl_surface_frame(mSurface.get()));
+  wl_callback_add_listener(mVisibleFrameCallback.get(), &listener, this);
 
   mIsMapped = true;
 
@@ -574,15 +578,15 @@ void WaylandSurface::UnmapLocked(WaylandSurfaceLock& aSurfaceLock) {
   SetScaleTypeLocked(aSurfaceLock, ScaleType::Disabled,
                      /* aSetProtocolHandler */ false);
 
-  MozClearPointer(mSubsurface, wl_subsurface_destroy);
-  MozClearPointer(mColorSurface, wp_color_management_surface_v1_destroy);
-  MozClearPointer(mColorRepresentationSurface,
-                  wp_color_representation_surface_v1_destroy);
-  MozClearPointer(mImageDescription, wp_image_description_v1_destroy);
+  // Remove subsurface to make the WaylandSurface hidden.
+  mSubsurface = nullptr;
+
+  mColorSurface = nullptr;
+  mColorRepresentationSurface = nullptr;
+  mImageDescription = nullptr;
   mParentSurface = nullptr;
   mFormats = nullptr;
-
-  MozClearPointer(mVisibleFrameCallback, wl_callback_destroy);
+  mVisibleFrameCallback = nullptr;
 
   // Remove references to WaylandBuffers attached to mSurface,
   // we don't want to get any buffer release callback when we're unmapped.
@@ -618,7 +622,7 @@ void WaylandSurface::Commit(WaylandSurfaceLock* aProofOfLock, bool aForceCommit,
       mParent->ForceCommit();
     }
     mSurfaceNeedsCommit = false;
-    wl_surface_commit(mSurface);
+    wl_surface_commit(mSurface.get());
     if (aForceDisplayFlush) {
       wl_display_flush(WaylandDisplayGet()->GetDisplay());
     }
@@ -643,7 +647,7 @@ void WaylandSurface::MoveLocked(const WaylandSurfaceLock& aProofOfLock,
   LOGWAYLAND("WaylandSurface::MoveLocked() unscaled [%d,%d]", (int)aPosition.x,
              (int)aPosition.y);
   mSubsurfacePosition = aPosition;
-  wl_subsurface_set_position(mSubsurface, aPosition.x, aPosition.y);
+  wl_subsurface_set_position(mSubsurface.get(), aPosition.x, aPosition.y);
   mSurfaceNeedsCommit = true;
 }
 
@@ -654,7 +658,7 @@ bool WaylandSurface::DisableUserInputLocked(
   MOZ_DIAGNOSTIC_ASSERT(&aProofOfLock == mSurfaceLock);
   wl_region* region =
       wl_compositor_create_region(WaylandDisplayGet()->GetCompositor());
-  wl_surface_set_input_region(mSurface, region);
+  wl_surface_set_input_region(mSurface.get(), region);
   wl_region_destroy(region);
   mSurfaceNeedsCommit = true;
   return true;
@@ -666,7 +670,7 @@ void WaylandSurface::SetOpaqueCallbackLocked(
   LOGVERBOSE(
       "WaylandSurface::SetOpaqueCallbackLocked(): mPendingOpaqueRegion [%p] "
       "mOpaqueRegionFrameCallback [%p]",
-      mPendingOpaqueRegion, mOpaqueRegionFrameCallback);
+      mPendingOpaqueRegion.get(), mOpaqueRegionFrameCallback.get());
 
   if (mPendingOpaqueRegion && !mOpaqueRegionFrameCallback) {
     LOGVERBOSE(
@@ -677,8 +681,9 @@ void WaylandSurface::SetOpaqueCallbackLocked(
           RefPtr waylandSurface = static_cast<WaylandSurface*>(aData);
           waylandSurface->OpaqueCallbackHandler();
         }};
-    mOpaqueRegionFrameCallback = wl_surface_frame(mSurface);
-    wl_callback_add_listener(mOpaqueRegionFrameCallback, &listener, this);
+    mOpaqueRegionFrameCallback =
+        WUniquePtr<wl_callback>(wl_surface_frame(mSurface.get()));
+    wl_callback_add_listener(mOpaqueRegionFrameCallback.get(), &listener, this);
     // Apply opaque changes only if we have buffer attached to avoid painting
     // of empty window.
     if (mBufferAttached) {
@@ -690,15 +695,15 @@ void WaylandSurface::SetOpaqueCallbackLocked(
 void WaylandSurface::ClearOpaqueCallbackLocked(
     const WaylandSurfaceLock& aProofOfLock) {
   MOZ_DIAGNOSTIC_ASSERT(&aProofOfLock == mSurfaceLock);
-  MozClearPointer(mPendingOpaqueRegion, wl_region_destroy);
-  MozClearPointer(mOpaqueRegionFrameCallback, wl_callback_destroy);
+  mPendingOpaqueRegion = nullptr;
+  mOpaqueRegionFrameCallback = nullptr;
 }
 
 void WaylandSurface::OpaqueCallbackHandler() {
   WaylandSurfaceLock lock(this);
   if (mPendingOpaqueRegion) {
     LOGVERBOSE("WaylandSurface::SetOpaqueRegionCallbackHandler()");
-    wl_surface_set_opaque_region(mSurface, mPendingOpaqueRegion);
+    wl_surface_set_opaque_region(mSurface.get(), mPendingOpaqueRegion.get());
     mSurfaceNeedsCommit = true;
   }
   ClearOpaqueCallbackLocked(lock);
@@ -710,10 +715,9 @@ void WaylandSurface::SetOpaqueLocked(const WaylandSurfaceLock& aProofOfLock) {
     return;
   }
   LOGVERBOSE("WaylandSurface::SetOpaqueLocked()");
-  MozClearPointer(mPendingOpaqueRegion, wl_region_destroy);
-  mPendingOpaqueRegion =
-      wl_compositor_create_region(WaylandDisplayGet()->GetCompositor());
-  wl_region_add(mPendingOpaqueRegion, 0, 0, INT32_MAX, INT32_MAX);
+  mPendingOpaqueRegion = WUniquePtr<wl_region>(
+      wl_compositor_create_region(WaylandDisplayGet()->GetCompositor()));
+  wl_region_add(mPendingOpaqueRegion.get(), 0, 0, INT32_MAX, INT32_MAX);
   SetOpaqueCallbackLocked(aProofOfLock);
 }
 
@@ -728,12 +732,11 @@ void WaylandSurface::SetOpaqueRegionLocked(
   // the buffer scale. We use round-in in order to be safe with subpixels.
   UnknownScaleFactor scale(GetScale());
 
-  MozClearPointer(mPendingOpaqueRegion, wl_region_destroy);
-  mPendingOpaqueRegion =
-      wl_compositor_create_region(WaylandDisplayGet()->GetCompositor());
+  mPendingOpaqueRegion = WUniquePtr<wl_region>(
+      wl_compositor_create_region(WaylandDisplayGet()->GetCompositor()));
   for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
     const auto& rect = gfx::RoundedIn(iter.Get().ToUnknownRect() / scale);
-    wl_region_add(mPendingOpaqueRegion, rect.x, rect.y, rect.Width(),
+    wl_region_add(mPendingOpaqueRegion.get(), rect.x, rect.y, rect.Width(),
                   rect.Height());
     LOGVERBOSE(
         "WaylandSurface::SetOpaqueRegionLocked() region [%d, %d] -> [%d x %d]",
@@ -751,9 +754,8 @@ void WaylandSurface::ClearOpaqueRegionLocked(
     const WaylandSurfaceLock& aProofOfLock) {
   MOZ_DIAGNOSTIC_ASSERT(&aProofOfLock == mSurfaceLock);
   LOGVERBOSE("WaylandSurface::ClearOpaqueLocked()");
-  MozClearPointer(mPendingOpaqueRegion, wl_region_destroy);
-  mPendingOpaqueRegion =
-      wl_compositor_create_region(WaylandDisplayGet()->GetCompositor());
+  mPendingOpaqueRegion = WUniquePtr<wl_region>(
+      wl_compositor_create_region(WaylandDisplayGet()->GetCompositor()));
   SetOpaqueCallbackLocked(aProofOfLock);
 }
 
@@ -763,9 +765,9 @@ bool WaylandSurface::ConfigureCoordinateScaleLocked(
   if (!mCoordinatesScaleManager) {
     auto* manager = WaylandDisplayGet()->GetFractionalScaleManagerV2();
     if (manager) {
-      mCoordinatesScaleManager =
+      mCoordinatesScaleManager = WUniquePtr<xx_fractional_scale_v2>(
           xx_fractional_scale_manager_v2_get_fractional_scale(manager,
-                                                              mSurface);
+                                                              mSurface.get()));
     }
     if (!mCoordinatesScaleManager) {
       return false;
@@ -809,8 +811,8 @@ bool WaylandSurface::ConfigureCoordinateScaleLocked(
                 }
               }
             }};
-    xx_fractional_scale_v2_add_listener(mCoordinatesScaleManager, &listener,
-                                        this);
+    xx_fractional_scale_v2_add_listener(mCoordinatesScaleManager.get(),
+                                        &listener, this);
     return true;
   }
 
@@ -818,7 +820,8 @@ bool WaylandSurface::ConfigureCoordinateScaleLocked(
   // so set/uset handler processing by setting WaylandSurface param
   // if mCoordinatesScaleManager is already present.
   if (aSetProtocolHandler) {
-    wl_proxy_set_user_data((struct wl_proxy*)mCoordinatesScaleManager, this);
+    wl_proxy_set_user_data((struct wl_proxy*)mCoordinatesScaleManager.get(),
+                           this);
   }
   return true;
 }
@@ -833,9 +836,9 @@ bool WaylandSurface::ConfigureFractionalScaleLocked(
   }
   if (!mFractionalScaleListener &&
       WaylandDisplayGet()->GetFractionalScaleManager()) {
-    mFractionalScaleListener =
+    mFractionalScaleListener = WUniquePtr<wp_fractional_scale_v1>(
         wp_fractional_scale_manager_v1_get_fractional_scale(
-            WaylandDisplayGet()->GetFractionalScaleManager(), mSurface);
+            WaylandDisplayGet()->GetFractionalScaleManager(), mSurface.get()));
     if (!mFractionalScaleListener) {
       return false;
     }
@@ -867,8 +870,8 @@ bool WaylandSurface::ConfigureFractionalScaleLocked(
             }
           }
         }};
-    wp_fractional_scale_v1_add_listener(mFractionalScaleListener, &listener,
-                                        this);
+    wp_fractional_scale_v1_add_listener(mFractionalScaleListener.get(),
+                                        &listener, this);
     return true;
   }
 
@@ -876,7 +879,8 @@ bool WaylandSurface::ConfigureFractionalScaleLocked(
   // so set/uset handler processing by setting WaylandSurface param
   // if mCoordinatesScaleManager is already present.
   if (mFractionalScaleListener) {
-    wl_proxy_set_user_data((struct wl_proxy*)mFractionalScaleListener, this);
+    wl_proxy_set_user_data((struct wl_proxy*)mFractionalScaleListener.get(),
+                           this);
   }
   return true;
 }
@@ -895,13 +899,13 @@ bool WaylandSurface::ConfigureScaleLocked(
   switch (mScaleType) {
     case ScaleType::Coordinates:
       if (mCoordinatesScaleManager) {
-        wl_proxy_set_user_data((struct wl_proxy*)mCoordinatesScaleManager,
+        wl_proxy_set_user_data((struct wl_proxy*)mCoordinatesScaleManager.get(),
                                nullptr);
       }
       break;
     case ScaleType::Fractional:
       if (mFractionalScaleListener) {
-        wl_proxy_set_user_data((struct wl_proxy*)mFractionalScaleListener,
+        wl_proxy_set_user_data((struct wl_proxy*)mFractionalScaleListener.get(),
                                nullptr);
       }
       break;
@@ -1008,7 +1012,7 @@ bool WaylandSurface::SetCoordinatesScaleLocked(
   MOZ_DIAGNOSTIC_ASSERT(mCoordinatesScaleManager);
   mCoordinatesScale = scale_8_24;
   mScreenScale = GetCoordinatesScaleRounded();
-  xx_fractional_scale_v2_set_scale_factor(mCoordinatesScaleManager,
+  xx_fractional_scale_v2_set_scale_factor(mCoordinatesScaleManager.get(),
                                           mCoordinatesScale);
   LOGWAYLAND("WaylandSurface::SetCoordinatesScaleLocked() scale %f",
              GetCoordinatesScaleRounded());
@@ -1036,7 +1040,7 @@ void WaylandSurface::SetViewPortDestLocked(
             .get());
     mViewportDestinationSize.width = mViewportDestinationSize.height = -1;
   }
-  wp_viewport_set_destination(mViewport, mViewportDestinationSize.width,
+  wp_viewport_set_destination(mViewport.get(), mViewportDestinationSize.width,
                               mViewportDestinationSize.height);
   mSurfaceNeedsCommit = true;
 }
@@ -1067,10 +1071,11 @@ void WaylandSurface::SetViewPortSourceRectLocked(
     mViewportSourceRect = DesktopRect(-1, -1, -1, -1);
   }
 
-  wp_viewport_set_source(mViewport, wl_fixed_from_double(mViewportSourceRect.x),
-                         wl_fixed_from_double(mViewportSourceRect.y),
-                         wl_fixed_from_double(mViewportSourceRect.width),
-                         wl_fixed_from_double(mViewportSourceRect.height));
+  const wl_fixed_t x = wl_fixed_from_double(mViewportSourceRect.x);
+  const wl_fixed_t y = wl_fixed_from_double(mViewportSourceRect.y);
+  const wl_fixed_t xMost = wl_fixed_from_double(mViewportSourceRect.XMost());
+  const wl_fixed_t yMost = wl_fixed_from_double(mViewportSourceRect.YMost());
+  wp_viewport_set_source(mViewport.get(), x, y, xMost - x, yMost - y);
   mSurfaceNeedsCommit = true;
 }
 
@@ -1082,13 +1087,13 @@ wl_surface* WaylandSurface::Lock(WaylandSurfaceLock* aWaylandSurfaceLock)
   mMutex.Lock();
   MOZ_DIAGNOSTIC_ASSERT(!mSurfaceLock);
   mSurfaceLock = aWaylandSurfaceLock;
-  return mSurface;
+  return mSurface.get();
 }
 
 void WaylandSurface::Unlock(struct wl_surface** aSurface,
                             WaylandSurfaceLock* aWaylandSurfaceLock) {
   MOZ_DIAGNOSTIC_ASSERT(*aSurface);
-  MOZ_DIAGNOSTIC_ASSERT(*aSurface == mSurface);
+  MOZ_DIAGNOSTIC_ASSERT(*aSurface == mSurface.get());
   MOZ_DIAGNOSTIC_ASSERT(mSurfaceLock == aWaylandSurfaceLock);
   mMutex.AssertCurrentThreadOwns();
   *aSurface = nullptr;
@@ -1134,7 +1139,7 @@ bool WaylandSurface::AddOpaqueSurfaceHandlerLocked(
   AssertIsOnMainThread();
 
   mGdkWindow = aGdkWindow;
-  sGdkWaylandWindowAddCallbackSurface(mGdkWindow, mSurface);
+  sGdkWaylandWindowAddCallbackSurface(mGdkWindow, mSurface.get());
   mIsOpaqueSurfaceHandlerSet = true;
 
   if (aRegisterCommitHandler) {
@@ -1155,7 +1160,7 @@ bool WaylandSurface::RemoveOpaqueSurfaceHandlerLocked(
   }
   AssertIsOnMainThread();
   LOGWAYLAND("WaylandSurface::RemoveOpaqueSurfaceHandlerLocked()");
-  sGdkWaylandWindowRemoveCallbackSurface(mGdkWindow, mSurface);
+  sGdkWaylandWindowRemoveCallbackSurface(mGdkWindow, mSurface.get());
   mIsOpaqueSurfaceHandlerSet = false;
   if (mGdkAfterPaintId) {
     GdkFrameClock* frameClock = gdk_window_get_frame_clock(mGdkWindow);
@@ -1188,14 +1193,14 @@ wl_egl_window* WaylandSurface::GetEGLWindow(DesktopIntSize aSize) {
   LOGWAYLAND("WaylandSurface::GetEGLWindow() eglwindow %p", (void*)mEGLWindow);
 
   WaylandSurfaceLock lock(this);
-  MOZ_DIAGNOSTIC_ASSERT(mSurface, "Missing wl_surface!");
+  MOZ_DIAGNOSTIC_ASSERT(mSurface.get(), "Missing wl_surface!");
 
   mSize = aSize;
   auto scaledSize = GetScaledSize(aSize);
 
   if (!mEGLWindow) {
-    mEGLWindow =
-        wl_egl_window_create(mSurface, scaledSize.width, scaledSize.height);
+    mEGLWindow = wl_egl_window_create(mSurface.get(), scaledSize.width,
+                                      scaledSize.height);
     LOGWAYLAND(
         "WaylandSurface::GetEGLWindow() created eglwindow [%p] size %d x %d",
         (void*)mEGLWindow, scaledSize.width, scaledSize.height);
@@ -1260,18 +1265,18 @@ void WaylandSurface::InvalidateRegionLocked(
     const WaylandSurfaceLock& aProofOfLock,
     const gfx::IntRegion& aInvalidRegion) {
   MOZ_DIAGNOSTIC_ASSERT(&aProofOfLock == mSurfaceLock);
-  MOZ_DIAGNOSTIC_ASSERT(mSurface);
+  MOZ_DIAGNOSTIC_ASSERT(mSurface.get());
 
   for (auto iter = aInvalidRegion.RectIter(); !iter.Done(); iter.Next()) {
     gfx::IntRect r = iter.Get();
-    wl_surface_damage_buffer(mSurface, r.x, r.y, r.width, r.height);
+    wl_surface_damage_buffer(mSurface.get(), r.x, r.y, r.width, r.height);
   }
   mSurfaceNeedsCommit = true;
 }
 
 void WaylandSurface::InvalidateLocked(const WaylandSurfaceLock& aProofOfLock) {
   MOZ_DIAGNOSTIC_ASSERT(&aProofOfLock == mSurfaceLock);
-  wl_surface_damage_buffer(mSurface, 0, 0, INT32_MAX, INT32_MAX);
+  wl_surface_damage_buffer(mSurface.get(), 0, 0, INT32_MAX, INT32_MAX);
   mSurfaceNeedsCommit = true;
 }
 
@@ -1368,8 +1373,8 @@ bool WaylandSurface::AttachLocked(const WaylandSurfaceLock& aSurfaceLock,
     return false;
   }
 
-  wl_surface_attach(mSurface, transaction->BufferBorrowLocked(aSurfaceLock), 0,
-                    0);
+  wl_surface_attach(mSurface.get(),
+                    transaction->BufferBorrowLocked(aSurfaceLock), 0, 0);
   mLatestAttachedBuffer = reinterpret_cast<uintptr_t>(aBuffer.get());
   mSurfaceNeedsCommit = true;
   mBufferAttached = true;
@@ -1382,7 +1387,7 @@ void WaylandSurface::RemoveAttachedBufferLocked(
 
   LOGWAYLAND("WaylandSurface::RemoveAttachedBufferLocked()");
 
-  wl_surface_attach(mSurface, nullptr, 0, 0);
+  wl_surface_attach(mSurface.get(), nullptr, 0, 0);
   mLatestAttachedBuffer = 0;
   mSurfaceNeedsCommit = true;
   mBufferAttached = false;
@@ -1405,7 +1410,7 @@ void WaylandSurface::PlaceAboveLocked(const WaylandSurfaceLock& aProofOfLock,
 
   // It's possible that lowerSurface becomed unmapped. In such rare case
   // just skip the operation, we may be deleted anyway.
-  wl_subsurface_place_above(mSubsurface, lowerSurface->mSurface);
+  wl_subsurface_place_above(mSubsurface.get(), lowerSurface->mSurface.get());
   mSurfaceNeedsCommit = true;
 }
 
@@ -1422,16 +1427,18 @@ void WaylandSurface::SetTransformFlippedLocked(
 
   if (mBufferTransformFlippedY) {
     if (mBufferTransformFlippedX) {
-      wl_surface_set_buffer_transform(mSurface, WL_OUTPUT_TRANSFORM_180);
+      wl_surface_set_buffer_transform(mSurface.get(), WL_OUTPUT_TRANSFORM_180);
     } else {
-      wl_surface_set_buffer_transform(mSurface,
+      wl_surface_set_buffer_transform(mSurface.get(),
                                       WL_OUTPUT_TRANSFORM_FLIPPED_180);
     }
   } else {
     if (mBufferTransformFlippedX) {
-      wl_surface_set_buffer_transform(mSurface, WL_OUTPUT_TRANSFORM_FLIPPED);
+      wl_surface_set_buffer_transform(mSurface.get(),
+                                      WL_OUTPUT_TRANSFORM_FLIPPED);
     } else {
-      wl_surface_set_buffer_transform(mSurface, WL_OUTPUT_TRANSFORM_NORMAL);
+      wl_surface_set_buffer_transform(mSurface.get(),
+                                      WL_OUTPUT_TRANSFORM_NORMAL);
     }
   }
 }
@@ -1495,7 +1502,8 @@ void WaylandSurface::ImageDescriptionReady(
   RefPtr waylandSurface = dont_AddRef(static_cast<WaylandSurface*>(aData));
   WaylandSurfaceLock lock(waylandSurface);
   wp_color_management_surface_v1_set_image_description(
-      waylandSurface->mColorSurface, waylandSurface->mImageDescription, 0);
+      waylandSurface->mColorSurface.get(),
+      waylandSurface->mImageDescription.get(), 0);
   waylandSurface->mHDRSet = true;
   LOGS("[%p] WaylandSurface::ImageDescriptionReady()",
        waylandSurface->mLoggingWidget);
@@ -1507,125 +1515,252 @@ static const struct wp_image_description_v1_listener
         WaylandSurface::ImageDescriptionReady,
 };
 
-bool WaylandSurface::EnableColorManagementLocked(
-    const WaylandSurfaceLock& aProofOfLock, gfx::YUVColorSpace aColorSpace,
-    gfx::TransferFunction aTransferFunction) {
-  MOZ_DIAGNOSTIC_ASSERT(mIsMapped);
-  MOZ_DIAGNOSTIC_ASSERT(!mColorSurface);
-
-  auto* colorManager = WaylandDisplayGet()->GetColorManager();
-  if (!colorManager || !WaylandDisplayGet()->IsHDREnabled()) {
-    return false;
-  }
-
-  LOGWAYLAND("WaylandSurface::EnableColorManagementLocked()");
-
-  mColorSurface = wp_color_manager_v1_get_surface(colorManager, mSurface);
-
-  auto* params = wp_color_manager_v1_create_parametric_creator(colorManager);
-  switch (aColorSpace) {
-    case gfx::YUVColorSpace::BT2020:
-      wp_image_description_creator_params_v1_set_primaries_named(
-          params, WP_COLOR_MANAGER_V1_PRIMARIES_BT2020);
-      break;
-    case gfx::YUVColorSpace::BT709:
-      wp_image_description_creator_params_v1_set_primaries_named(
-          params, WP_COLOR_MANAGER_V1_PRIMARIES_SRGB);
-      break;
-    case gfx::YUVColorSpace::BT601:
-      // Hopefully if this os actually BT601_625 then it was turned into BT709
-      // already by this point...
-      wp_image_description_creator_params_v1_set_primaries_named(
-          params, WP_COLOR_MANAGER_V1_PRIMARIES_NTSC);
-      break;
-    case gfx::YUVColorSpace::Identity:
-      wp_image_description_creator_params_v1_set_primaries_named(
-          params, WP_COLOR_MANAGER_V1_PRIMARIES_SRGB);
-      break;
-  }
-  switch (aTransferFunction) {
-    case gfx::TransferFunction::PQ:
-      wp_image_description_creator_params_v1_set_tf_named(
-          params, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ);
-      break;
-    case gfx::TransferFunction::HLG:
-      wp_image_description_creator_params_v1_set_tf_named(
-          params, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_HLG);
-      break;
-    case gfx::TransferFunction::BT709:
-      wp_image_description_creator_params_v1_set_tf_named(
-          params, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_BT1886);
-      break;
-    case gfx::TransferFunction::SRGB:
-      wp_image_description_creator_params_v1_set_tf_named(
-          params, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB);
-      break;
-    case gfx::TransferFunction::LINEAR:
-      wp_image_description_creator_params_v1_set_tf_named(
-          params, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_EXT_LINEAR);
-      break;
-  }
-  mImageDescription = wp_image_description_creator_params_v1_create(params);
-  // wp_image_description_creator_params_v1_create() consumes params
-  params = nullptr;
-
-  // AddRef this to keep it live until callback
-  AddRef();
-  wp_image_description_v1_add_listener(mImageDescription,
-                                       &image_description_listener, this);
-
-  return true;
-}
-
-static int YUVColorSpaceToWLColorCoeficients(
-    mozilla::gfx::YUVColorSpace aColorSpace) {
-  switch (aColorSpace) {
-    case gfx::YUVColorSpace::BT601:
-      return WP_COLOR_REPRESENTATION_SURFACE_V1_COEFFICIENTS_BT601;
-    case gfx::YUVColorSpace::BT709:
-      return WP_COLOR_REPRESENTATION_SURFACE_V1_COEFFICIENTS_BT709;
-    case gfx::YUVColorSpace::BT2020:
-      return WP_COLOR_REPRESENTATION_SURFACE_V1_COEFFICIENTS_BT2020;
-    default:
-      MOZ_DIAGNOSTIC_CRASH("Unsupported YUV color space!");
-      return 0;
-  }
-}
-
 void WaylandSurface::SetColorRepresentationLocked(
-    const WaylandSurfaceLock& aProofOfLock,
-    mozilla::gfx::YUVColorSpace aColorSpace, bool aFullRange,
-    uint32_t aWPChromaLocation) {
+    const WaylandSurfaceLock& aProofOfLock, int aWLColorCoeficients,
+    bool aFullRange, uint32_t aWPChromaLocation) {
   auto* colorRepresentation =
       WaylandDisplayGet()->GetColorRepresentationManager();
   if (!colorRepresentation) {
     return;
   }
-
   LOGWAYLAND(
-      "WaylandSurface::SetColorRepresentationLocked() colorspace %s full "
-      "range "
-      "%d",
-      YUVColorSpaceToString(aColorSpace), aFullRange);
+      "WaylandSurface::SetColorRepresentationLocked() color coefficients %s "
+      "full range %d aWPChromaLocation %d",
+      BufferSurface::GetWLColorCoeficientsName(aWLColorCoeficients), aFullRange,
+      aWPChromaLocation);
 
   MOZ_DIAGNOSTIC_ASSERT(!mColorRepresentationSurface);
-  mColorRepresentationSurface = wp_color_representation_manager_v1_get_surface(
-      colorRepresentation, mSurface);
+  mColorRepresentationSurface = WUniquePtr<wp_color_representation_surface_v1>(
+      wp_color_representation_manager_v1_get_surface(colorRepresentation,
+                                                     mSurface.get()));
   if (aWPChromaLocation) {
     wp_color_representation_surface_v1_set_chroma_location(
-        mColorRepresentationSurface, aWPChromaLocation);
+        mColorRepresentationSurface.get(), aWPChromaLocation);
   }
-  if (auto coefficients = YUVColorSpaceToWLColorCoeficients(aColorSpace)) {
-    if (auto range =
-            WaylandDisplayGet()->GetColorRange(coefficients, aFullRange)) {
-      wp_color_representation_surface_v1_set_coefficients_and_range(
-          mColorRepresentationSurface, coefficients, range);
-    }
+  if (auto range =
+          WaylandDisplayGet()->GetColorRange(aWLColorCoeficients, aFullRange)) {
+    wp_color_representation_surface_v1_set_coefficients_and_range(
+        mColorRepresentationSurface.get(), aWLColorCoeficients, range);
   }
 }
 
 void WaylandSurface::AssertCurrentThreadOwnsMutex() {
   mMutex.AssertCurrentThreadOwns();
+}
+
+void WaylandSurface::SetColorManagementLocked(
+    const WaylandSurfaceLock& aProofOfLock, wp_color_manager_v1* aColorManager,
+    wp_image_description_creator_params_v1* aParams) {
+  MOZ_DIAGNOSTIC_ASSERT(mIsMapped);
+  MOZ_DIAGNOSTIC_ASSERT(!mColorSurface);
+
+  LOGWAYLAND("WaylandSurface::SetColorManagementLocked()");
+
+  mColorSurface = WUniquePtr<wp_color_management_surface_v1>(
+      wp_color_manager_v1_get_surface(aColorManager, mSurface.get()));
+
+  mImageDescription = WUniquePtr<wp_image_description_v1>(
+      wp_image_description_creator_params_v1_create(aParams));
+
+  // AddRef this to keep it live until callback
+  AddRef();
+  wp_image_description_v1_add_listener(mImageDescription.get(),
+                                       &image_description_listener, this);
+}
+
+void WaylandSurface::SetLuminances(
+    wp_image_description_creator_params_v1* aParams, float minLum, float maxLum,
+    float refLum) {
+  uint32_t minLuminance = std::lround(std::max(0.0f, minLum) * 10000.0f);
+  uint32_t maxLuminance = std::lround(std::max(0.0f, maxLum));
+  uint32_t refLuminance = std::lround(std::max(0.0f, refLum));
+
+  wp_image_description_creator_params_v1_set_luminances(
+      aParams, minLuminance, maxLuminance, refLuminance);
+}
+
+void WaylandSurface::SetContentLightLevel(
+    wp_image_description_creator_params_v1* aParams,
+    const mozilla::gfx::ContentLightLevel& aContentLightLevel) {
+  uint16_t maxCLL = aContentLightLevel.maxContentLightLevel;
+  uint16_t maxFALL = aContentLightLevel.maxFrameAverageLightLevel;
+
+  wp_image_description_creator_params_v1_set_max_cll(aParams, maxCLL);
+  wp_image_description_creator_params_v1_set_max_fall(aParams, maxFALL);
+}
+
+void WaylandSurface::SetMasteringDisplayColorVolume(
+    wp_image_description_creator_params_v1* aParams,
+    const mozilla::gfx::Smpte2086Metadata& aSmpte2086) {
+  // MDCV
+  int32_t r_x = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryRed.x, 0.0f, 1.0f) * 1000000.0f);
+  int32_t r_y = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryRed.y, 0.0f, 1.0f) * 1000000.0f);
+
+  int32_t g_x = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryGreen.x, 0.0f, 1.0f) * 1000000.0f);
+  int32_t g_y = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryGreen.y, 0.0f, 1.0f) * 1000000.0f);
+
+  int32_t b_x = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryBlue.x, 0.0f, 1.0f) * 1000000.0f);
+  int32_t b_y = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryBlue.y, 0.0f, 1.0f) * 1000000.0f);
+
+  int32_t w_x =
+      std::lround(std::clamp(aSmpte2086.whitePoint.x, 0.0f, 1.0f) * 1000000.0f);
+  int32_t w_y =
+      std::lround(std::clamp(aSmpte2086.whitePoint.y, 0.0f, 1.0f) * 1000000.0f);
+
+  // Luminance
+  uint32_t minLuminance =
+      std::lround(std::max(0.0f, aSmpte2086.minLuminance) * 10000.0f);
+  uint32_t maxLuminance = std::lround(std::max(0.0f, aSmpte2086.maxLuminance));
+
+  wp_image_description_creator_params_v1_set_mastering_display_primaries(
+      aParams, r_x, r_y, g_x, g_y, b_x, b_y, w_x, w_y);
+
+  wp_image_description_creator_params_v1_set_mastering_luminance(
+      aParams, minLuminance, maxLuminance);
+}
+
+bool WaylandSurface::SetPrimaries(
+    wp_image_description_creator_params_v1* aParams,
+    mozilla::gfx::YUVColorSpace aColorSpace) {
+  uint32_t requiredPrimaries = 0;
+
+  switch (aColorSpace) {
+    case gfx::YUVColorSpace::BT2020:
+      requiredPrimaries = WP_COLOR_MANAGER_V1_PRIMARIES_BT2020;
+      break;
+    case gfx::YUVColorSpace::BT709:
+      requiredPrimaries = WP_COLOR_MANAGER_V1_PRIMARIES_SRGB;
+      break;
+    case gfx::YUVColorSpace::BT601:
+      // Hopefully if this is actually BT601_625 then it was turned into BT709
+      // already by this point...
+      requiredPrimaries = WP_COLOR_MANAGER_V1_PRIMARIES_NTSC;
+      break;
+    case gfx::YUVColorSpace::Identity:
+      requiredPrimaries = WP_COLOR_MANAGER_V1_PRIMARIES_SRGB;
+      break;
+  }
+
+  if (requiredPrimaries == 0 ||
+      !WaylandDisplayGet()->IsPrimariesSupported(requiredPrimaries)) {
+    return false;
+  }
+
+  wp_image_description_creator_params_v1_set_primaries_named(aParams,
+                                                             requiredPrimaries);
+
+  return true;
+}
+
+bool WaylandSurface::SetTransferFunction(
+    wp_image_description_creator_params_v1* aParams,
+    gfx::TransferFunction aTransferFunction) {
+  uint32_t requiredTF = 0;
+  switch (aTransferFunction) {
+    case gfx::TransferFunction::PQ:
+      requiredTF = WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ;
+      break;
+    case gfx::TransferFunction::HLG:
+      requiredTF = WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_HLG;
+      break;
+    case gfx::TransferFunction::BT709:
+      requiredTF = WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_BT1886;
+      break;
+    case gfx::TransferFunction::SRGB:
+      requiredTF = WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB;
+      break;
+    case gfx::TransferFunction::LINEAR:
+      requiredTF = WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_EXT_LINEAR;
+      break;
+  }
+
+  if (requiredTF == 0 || !WaylandDisplayGet()->IsTFSupported(requiredTF)) {
+    return false;
+  }
+
+  wp_image_description_creator_params_v1_set_tf_named(aParams, requiredTF);
+
+  return true;
+}
+
+void WaylandSurface::SetHDRMetadata(
+    wp_image_description_creator_params_v1* aParams,
+    gfx::TransferFunction aTransferFunction, GdkWindow* aGdkWindow,
+    const mozilla::gfx::HDRMetadata& aHDRMetadata) {
+  if (aTransferFunction == gfx::TransferFunction::PQ) {
+    if (aHDRMetadata.mContentLightLevel.isSome()) {
+      LOGWAYLAND(
+          "aHDRMetadata.mContentLightLevel -> MaxCLL=%u cd/m^2, MaxFALL=%u "
+          "cd/m^2",
+          aHDRMetadata.mContentLightLevel->maxContentLightLevel,
+          aHDRMetadata.mContentLightLevel->maxFrameAverageLightLevel);
+
+      SetContentLightLevel(aParams, aHDRMetadata.mContentLightLevel.value());
+    }
+    if (aHDRMetadata.mSmpte2086.isSome()) {
+      LOGWAYLAND(
+          "aHDRMetadata.mSmpte2086 -> Primaries: R(%f, %f) G(%f, %f) "
+          "B(%f, %f) W(%f, %f)",
+          aHDRMetadata.mSmpte2086->displayPrimaryRed.x,
+          aHDRMetadata.mSmpte2086->displayPrimaryRed.y,
+          aHDRMetadata.mSmpte2086->displayPrimaryGreen.x,
+          aHDRMetadata.mSmpte2086->displayPrimaryGreen.y,
+          aHDRMetadata.mSmpte2086->displayPrimaryBlue.x,
+          aHDRMetadata.mSmpte2086->displayPrimaryBlue.y,
+          aHDRMetadata.mSmpte2086->whitePoint.x,
+          aHDRMetadata.mSmpte2086->whitePoint.y);
+      LOGWAYLAND(
+          "aHDRMetadata.mSmpte2086 -> minLuminance=%f cd/m^2, "
+          "maxLuminance=%f cd/m^2",
+          aHDRMetadata.mSmpte2086->minLuminance,
+          aHDRMetadata.mSmpte2086->maxLuminance);
+
+      if (WaylandDisplayGet()->IsSetMDCVSupported()) {
+        SetMasteringDisplayColorVolume(aParams,
+                                       aHDRMetadata.mSmpte2086.value());
+      } else {
+        LOGWAYLAND("SetMDCV feature not supported.");
+      }
+    }
+    if (!aHDRMetadata.mContentLightLevel.isSome() &&
+        !aHDRMetadata.mSmpte2086.isSome()) {
+      // w/o hdr metadata we default luminances in the range [0, 1000] nits
+      const float minLuminance = 0;
+      const float maxLuminance = 1000;
+
+      RefPtr<widget::Screen> screen =
+          aGdkWindow ? ScreenHelperGTK::GetScreenForGdkWindow(aGdkWindow)
+                     : nullptr;
+
+      // if we don't have a screen we fallback at 80 nits for SDR white
+      float sdrContentBrightness =
+          screen ? screen->GetSDRContentBrightness() : 80.f;
+
+      uint16_t maxCLL = std::lround(std::max(0.0f, sdrContentBrightness));
+      uint16_t maxFALL = maxCLL;
+
+      LOGWAYLAND("HDR w/o metadata -> MaxCLL=%u cd/m^2, MaxFALL=%u cd/m^2",
+                 maxCLL, maxFALL);
+
+      wp_image_description_creator_params_v1_set_max_cll(aParams, maxCLL);
+      wp_image_description_creator_params_v1_set_max_fall(aParams, maxFALL);
+
+      if (WaylandDisplayGet()->IsSetLuminancesSupported()) {
+        LOGWAYLAND("HDR w/o metadata -> Luminances=(%f, %f, %f) cd/m^2",
+                   minLuminance, maxLuminance, sdrContentBrightness);
+        SetLuminances(aParams, minLuminance, maxLuminance,
+                      sdrContentBrightness);
+      } else {
+        LOGWAYLAND("SetLuminances feature not supported.");
+      }
+    }
+  }
 }
 
 }  // namespace mozilla::widget

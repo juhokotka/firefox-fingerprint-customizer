@@ -27,6 +27,7 @@
 #include "logging/rtc_event_log/rtc_event_log_parser.h"
 #include "modules/congestion_controller/rtp/transport_feedback_adapter.h"
 #include "modules/congestion_controller/scream/scream_v2.h"
+#include "modules/congestion_controller/scream/scream_v2_parameters.h"
 #include "rtc_base/bitrate_tracker.h"
 
 namespace webrtc {
@@ -45,6 +46,7 @@ class LogScreamSimulation {
     DataRate target_rate = DataRate::Zero();
     DataRate pacing_rate = DataRate::Zero();
     DataRate send_rate = DataRate::Zero();
+    DataRate received_rate = DataRate::Zero();
 
     DataSize ref_window = DataSize::Zero();
     DataSize ref_window_i = DataSize::Zero();
@@ -94,13 +96,16 @@ class LogScreamSimulation {
   void OnCongestionControlFeedback(
       const LoggedRtcpCongestionControlFeedback& feedback);
   void OnIceConfig(const LoggedIceCandidatePairConfig& candidate);
-  void LogState(const TransportPacketsFeedback& msg);
+  void UpdateFeedbackHistory(const TransportPacketsFeedback& msg);
+  void LogState(Timestamp log_time);
 
   const Environment env_;
+  const ScreamV2Parameters params_;
   std::optional<ScreamV2> scream_;
 
   Timestamp current_time_ = Timestamp::MinusInfinity();
   Timestamp last_process_ = Timestamp::MinusInfinity();
+  Timestamp last_log_state_time_ = Timestamp::MinusInfinity();
   TransportFeedbackAdapter transport_feedback_;
   BitrateTracker send_rate_tracker_;
   State::SendWindowUsage send_window_usage_ = State::kBelowRefWindow;

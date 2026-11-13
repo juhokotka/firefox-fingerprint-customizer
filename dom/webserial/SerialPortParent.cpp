@@ -104,7 +104,9 @@ mozilla::ipc::IPCResult SerialPortParent::RecvOpen(
            NS_ConvertUTF16toUTF8(mPortId).get()));
 
   mIsOpen = true;
+  NotifySharingStateChanged();
   mPipeCapacity = std::max(aOptions.bufferSize(), kMinSerialPortPumpSize);
+  mDetectParityErrors = aOptions.parity() != ParityType::None;
 
   aResolver(NS_OK);
   return IPC_OK();
@@ -143,6 +145,7 @@ mozilla::ipc::IPCResult SerialPortParent::RecvClose(CloseResolver&& aResolver) {
          NS_ConvertUTF16toUTF8(mPortId).get(), static_cast<uint32_t>(rv)));
   }
   mIsOpen = false;
+  NotifySharingStateChanged();
 
   aResolver(rv);
   return IPC_OK();
@@ -198,8 +201,9 @@ void SerialPortParent::StartReadPump(
 
   if (!mPlatformInputStream) {
     uint32_t bufferSize = std::max(mPipeCapacity, kMinSerialPortPumpSize);
-    nsresult rv = service->GetReadStream(mPortId, bufferSize,
-                                         getter_AddRefs(mPlatformInputStream));
+    nsresult rv =
+        service->GetReadStream(mPortId, bufferSize, mDetectParityErrors,
+                               getter_AddRefs(mPlatformInputStream));
     if (NS_FAILED(rv) || !mPlatformInputStream) {
       MOZ_LOG(gWebSerialLog, LogLevel::Error,
               ("SerialPortParent[%p]::StartReadPump GetReadStream failed for "
@@ -355,7 +359,7 @@ mozilla::ipc::IPCResult SerialPortParent::RecvDrain(DrainResolver&& aResolver) {
   // meaning the write pump may still have unconsumed data. We must wait for
   // the write pipe to be fully closed (all data written to the device)
   // before draining OS transmit buffers.
-  auto completeDrain = [portId = mPortId, aResolver]() {
+  auto completeDrain = [portId = mPortId, aResolver = std::move(aResolver)]() {
     RefPtr<SerialPlatformService> service =
         SerialPlatformService::GetInstance();
     nsresult rv = NS_ERROR_FAILURE;
@@ -407,12 +411,10 @@ mozilla::ipc::IPCResult SerialPortParent::RecvFlush(bool aReceive,
   return IPC_OK();
 }
 
-void SerialPortParent::NotifySharingStateChanged(bool aConnected) {
-  mSharingConnected = aConnected;
-
+void SerialPortParent::NotifySharingStateChanged() {
   NS_DispatchToMainThread(NS_NewRunnableFunction(
       "SerialPortParent::NotifySharingStateChanged",
-      [browserId = mBrowserId, aConnected]() {
+      [browserId = mBrowserId, connected = mIsOpen]() {
         nsCOMPtr<nsIObserverService> obs =
             mozilla::services::GetObserverService();
         if (!obs) {
@@ -421,24 +423,11 @@ void SerialPortParent::NotifySharingStateChanged(bool aConnected) {
 
         auto props = MakeRefPtr<nsHashPropertyBag>();
         props->SetPropertyAsUint64(u"browserId"_ns, browserId);
-        props->SetPropertyAsBool(u"connected"_ns, aConnected);
+        props->SetPropertyAsBool(u"connected"_ns, connected);
 
         obs->NotifyObservers(static_cast<nsIPropertyBag2*>(props),
                              "serial-device-state-changed", nullptr);
       }));
-}
-
-mozilla::ipc::IPCResult SerialPortParent::RecvUpdateSharingState(
-    bool aConnected) {
-  if (aConnected != mSharingConnected) {
-    NotifySharingStateChanged(aConnected);
-  } else {
-    MOZ_LOG(gWebSerialLog, LogLevel::Warning,
-            ("SerialPortParent[%p]::RecvUpdateSharingState got same state of "
-             "%d for port '%s'",
-             this, aConnected ? 1 : 0, NS_ConvertUTF16toUTF8(mPortId).get()));
-  }
-  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult SerialPortParent::RecvClone(
@@ -476,6 +465,7 @@ void SerialPortParent::NotifyDisconnected() {
   if (mIsOpen) {
     StopPumpsBeforeClose();
     mIsOpen = false;
+    NotifySharingStateChanged();
     RefPtr<SerialPlatformService> service =
         SerialPlatformService::GetInstance();
     if (service) {
@@ -524,12 +514,10 @@ void SerialPortParent::ActorDestroy(ActorDestroyReason aWhy) {
     mIsOpen = false;
   }
 
-  // If the child sent connected=true but never sent connected=false (e.g.
-  // content process crash or iframe navigation), send the disconnect
-  // notification so the browser sharing indicator count stays in sync.
-  if (mSharingConnected) {
-    NotifySharingStateChanged(false);
-  }
+  // Covers the case where the port was still open when the actor went away
+  // (e.g. content process crash or iframe navigation) so the browser sharing
+  // indicator count stays in sync.
+  NotifySharingStateChanged();
 
   nsTArray<RefPtr<SerialPortParent>> clones = std::move(mClones);
   for (const auto& clone : clones) {

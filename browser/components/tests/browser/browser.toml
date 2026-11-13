@@ -4,7 +4,11 @@ support-files = [
   "../../../../dom/security/test/csp/dummy.pdf",
 ]
 
+["browser_background_external_url.js"]
+
 ["browser_browserGlue_client_association_ping.js"]
+
+["browser_browserGlue_fxa_client_info_ping.js"]
 
 ["browser_browserGlue_os_auth.js"]
 skip-if = [
@@ -12,10 +16,12 @@ skip-if = [
   "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11'",
 ]
 
-["browser_browserGlue_sandboxDisabledNotification.js"]
-
 ["browser_browserGlue_rosettaNotification.js"]
-run-if = ["os == 'mac'"]
+run-if = [
+  "os == 'mac'",
+]
+
+["browser_browserGlue_sandboxDisabledNotification.js"]
 
 ["browser_browserGlue_telemetry.js"]
 
@@ -32,7 +38,9 @@ reason = "test depends on update channel"
 ["browser_contentpermissionprompt.js"]
 
 ["browser_csp_baseline.js"]
-skip-if = ["debug"] # Loading a page without a custom CSP asserts in debug
+skip-if = [
+  "debug", # Loading a page without a custom CSP asserts in debug
+]
 
 ["browser_csp_blocks.js"]
 
@@ -46,9 +54,6 @@ support-files = ["file_csp_module.sys.mjs"]
 ["browser_default_browser_prompt.js"]
 
 ["browser_default_webprotocol_handler_mailto.js"]
-skip-if = [
-  "os == 'win' && os_version == '11.26200' && asan", # Bug 2019745
-]
 run-if = [
   "os == 'win'",
 ]
@@ -62,6 +67,8 @@ run-if = [
 
 ["browser_initial_tab_remoteType.js"]
 https_first_disabled = true
+
+["browser_last_window_close_trigger.js"]
 
 ["browser_quit_close_current_tab.js"]
 

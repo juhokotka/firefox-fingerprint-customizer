@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use core::num::NonZeroU32;
 
 use thiserror::Error;
 
@@ -10,6 +11,7 @@ use crate::resource::InvalidResourceError;
 use crate::validation::InvalidWorkgroupSizeError;
 use crate::{
     binding_model::{BindingError, ImmediateUploadError, LateMinBufferBindingSizeMismatch},
+    device::Device,
     resource::{
         DestroyedResourceError, MissingBufferUsageError, MissingTextureUsageError,
         ResourceErrorIdent,
@@ -65,7 +67,7 @@ pub enum DrawError {
     #[error(transparent)]
     InvalidGroupSize(#[from] InvalidWorkgroupSizeError),
     #[error(
-        "Mesh shader calls in multiview render passes require enabling the `EXPERIMENTAL_MESH_SHADER_MULTIVIEW` feature, and the highest bit ({highest_view_index}) in the multiview mask must be <= `Limits::max_multiview_view_count` ({max_multiviews})"
+        "Mesh shader calls in multiview render passes require enabling the `EXPERIMENTAL_MESH_SHADER_MULTIVIEW` feature, and the highest bit ({highest_view_index}) in the multiview mask must be less than `Limits::max_mesh_multiview_view_count` ({max_multiviews})"
     )]
     MeshPipelineMultiviewLimitsViolated {
         highest_view_index: u32,
@@ -128,6 +130,15 @@ pub enum RenderCommandError {
     InvalidViewportDepth(f32, f32),
     #[error("Scissor {0:?} is not contained in the render target {1:?}")]
     InvalidScissorRect(Rect<u32>, wgt::Extent3d),
+    #[error("Indirect buffer offset {0:?} is not a multiple of 4")]
+    UnalignedIndirectBufferOffset(wgt::BufferAddress),
+    #[error("Indirect draw arguments of {args_size} bytes (count = {count}) starting at {offset} would overrun buffer size of {buffer_size}")]
+    IndirectBufferOverrun {
+        count: u32,
+        offset: u64,
+        args_size: u64,
+        buffer_size: u64,
+    },
     #[error("Support for {0} is not implemented yet")]
     Unimplemented(&'static str),
 }
@@ -154,6 +165,8 @@ impl WebGpuError for RenderCommandError {
             | Self::InvalidViewportRectPosition { .. }
             | Self::InvalidViewportDepth(..)
             | Self::InvalidScissorRect(..)
+            | Self::UnalignedIndirectBufferOffset(..)
+            | Self::IndirectBufferOverrun { .. }
             | Self::Unimplemented(..) => ErrorType::Validation,
         }
     }
@@ -166,4 +179,27 @@ pub struct Rect<T> {
     pub y: T,
     pub w: T,
     pub h: T,
+}
+
+/// Validates a mesh shader draw against the multiview mask of the render pass or render bundle
+/// it is recorded in.
+pub(crate) fn validate_mesh_draw_multiview(
+    device: &Device,
+    multiview_mask: Option<NonZeroU32>,
+) -> Result<(), DrawError> {
+    if let Some(mv) = multiview_mask {
+        let highest_bit = 31 - mv.leading_zeros();
+
+        if !device
+            .features
+            .contains(wgt::Features::EXPERIMENTAL_MESH_SHADER_MULTIVIEW)
+            || highest_bit >= device.limits.max_mesh_multiview_view_count
+        {
+            return Err(DrawError::MeshPipelineMultiviewLimitsViolated {
+                highest_view_index: highest_bit,
+                max_multiviews: device.limits.max_mesh_multiview_view_count,
+            });
+        }
+    }
+    Ok(())
 }

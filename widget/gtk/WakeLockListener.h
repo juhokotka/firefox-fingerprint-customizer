@@ -6,9 +6,8 @@
 #define WakeLockListener_h_
 
 #include "nsHashKeys.h"
-#include "nsRefPtrHashtable.h"
-
 #include "nsIDOMWakeLockListener.h"
+#include "nsRefPtrHashtable.h"
 
 class WakeLockTopic;
 
@@ -21,7 +20,8 @@ class WakeLockListener final : public nsIDOMMozWakeLockListener {
   NS_DECL_ISUPPORTS;
 
   nsresult Callback(const nsAString& topic, const nsAString& state) override;
-  void SetState(const nsAString& topic, bool aBackground, bool aInhibit);
+  void SetState(const nsAString& topic, bool aBackground, bool aInhibit,
+                bool aCreateNewTask = true);
 
   WakeLockListener();
 

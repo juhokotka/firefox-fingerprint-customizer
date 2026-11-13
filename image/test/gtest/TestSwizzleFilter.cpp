@@ -2,14 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gtest/gtest.h"
-
-#include "mozilla/gfx/2D.h"
 #include "Common.h"
 #include "Decoder.h"
 #include "DecoderFactory.h"
 #include "SurfaceFilters.h"
 #include "SurfacePipe.h"
+#include "gtest/gtest.h"
+#include "mozilla/gfx/2D.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -18,7 +17,7 @@ using namespace mozilla::image;
 template <typename Func>
 void WithSwizzleFilter(const IntSize& aSize, SurfaceFormat aInputFormat,
                        SurfaceFormat aOutputFormat, bool aPremultiplyAlpha,
-                       Func aFunc) {
+                       Func&& aFunc) {
   RefPtr<image::Decoder> decoder = CreateTrivialDecoder();
   ASSERT_TRUE(decoder != nullptr);
 

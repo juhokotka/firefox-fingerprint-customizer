@@ -4,11 +4,25 @@
 
 #include "OriginInfo.h"
 
+#include "DirtyTrackingAutoLock.h"
 #include "GroupInfo.h"
 #include "GroupInfoPair.h"
+#include "OriginUpserter.h"
+#include "mozIStorageConnection.h"
+#include "mozIStorageStatement.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/dom/quota/AssertionsImpl.h"
+#include "mozilla/dom/quota/QuotaCommon.h"
 #include "mozilla/dom/quota/ResultExtensions.h"
 #include "mozilla/dom/quota/UsageInfo.h"
+#include "mozilla/glean/DomQuotaMetrics.h"
+
+#if defined(NIGHTLY_BUILD) || defined(DEBUG)
+#  define CHECK_USAGE() \
+    CheckIfUsageIsConsistent("OriginInfo::"_ns + nsDependentCString(__func__))
+#else
+#  define CHECK_USAGE()
+#endif
 
 namespace mozilla::dom::quota {
 
@@ -20,15 +34,17 @@ namespace mozilla::dom::quota {
 // resort to check the origin scheme instead to initialize mIsExtension.
 OriginInfo::OriginInfo(GroupInfo* aGroupInfo, const nsACString& aOrigin,
                        const nsACString& aStorageOrigin, bool aIsPrivate,
-                       const ClientUsageArray& aClientUsages, uint64_t aUsage,
-                       int64_t aAccessTime, int32_t aMaintenanceDate,
-                       bool aPersisted, bool aDirectoryExists)
+                       bool aIsEncrypted, const ClientUsageArray& aClientUsages,
+                       int64_t aUsage, int64_t aAccessTime,
+                       int32_t aMaintenanceDate, bool aPersisted,
+                       bool aDirectoryExists)
     : mGroupInfo(aGroupInfo),
       mOrigin(aOrigin),
       mStorageOrigin(aStorageOrigin),
       mAccessTime(aAccessTime),
       mMaintenanceDate(aMaintenanceDate),
       mIsPrivate(aIsPrivate),
+      mIsEncrypted(aIsEncrypted),
       mAccessed(false),
       mPersisted(aPersisted),
       mIsExtension(StringBeginsWith(aOrigin, "moz-extension://"_ns)),
@@ -41,35 +57,37 @@ OriginInfo::OriginInfo(GroupInfo* aGroupInfo, const nsACString& aOrigin,
   MOZ_ASSERT(aClientUsages.Length() == Client::TypeMax());
   MOZ_ASSERT_IF(aPersisted,
                 aGroupInfo->mPersistenceType == PERSISTENCE_TYPE_DEFAULT);
-
-#ifdef DEBUG
-  QuotaManager* quotaManager = QuotaManager::Get();
-  MOZ_ASSERT(quotaManager);
-
-  uint64_t usage = 0;
-  for (Client::Type type : quotaManager->AllClientTypes()) {
-    AssertNoOverflow(usage, aClientUsages[type].valueOr(0));
-    usage += aClientUsages[type].valueOr(0);
-  }
-  MOZ_ASSERT(aUsage == usage);
-#endif
-
+  CHECK_USAGE();
   MOZ_COUNT_CTOR(OriginInfo);
 }
 
+#if defined(NIGHTLY_BUILD) || defined(DEBUG)
+bool OriginInfo::CheckIfUsageIsConsistent(const nsACString& context) const {
+  return CheckClientUsagesConsistency(mClientUsages, mUsage, context);
+}
+#endif  // defined(NIGHTLY_BUILD) || defined(DEBUG)
+
+int64_t OriginInfo::LockedUsage() const {
+  AssertCurrentThreadOwnsQuotaMutex();
+  CHECK_USAGE();
+  return mUsage;
+}
+
 OriginMetadata OriginInfo::FlattenToOriginMetadata() const {
+  MOZ_ASSERT(mGroupInfo);
   return {mGroupInfo->mGroupInfoPair->Suffix(),
           mGroupInfo->mGroupInfoPair->Group(),
           mOrigin,
           mStorageOrigin,
           mIsPrivate,
-          mGroupInfo->mPersistenceType};
+          mGroupInfo->mPersistenceType,
+          mIsEncrypted};
 }
 
 OriginStateMetadata OriginInfo::LockedFlattenToOriginStateMetadata() const {
   AssertCurrentThreadOwnsQuotaMutex();
 
-  return {mAccessTime, mMaintenanceDate, mAccessed, mPersisted};
+  return {mAccessTime, mMaintenanceDate, mAccessed, mPersisted, LockedDirty()};
 }
 
 FullOriginMetadata OriginInfo::LockedFlattenToFullOriginMetadata() const {
@@ -105,57 +123,93 @@ nsresult OriginInfo::LockedBindToStatement(
       aStatement->BindInt64ByName("last_access_time"_ns, mAccessTime)));
   QM_TRY(MOZ_TO_RESULT(aStatement->BindInt32ByName("last_maintenance_date"_ns,
                                                    mMaintenanceDate)));
-  QM_TRY(MOZ_TO_RESULT(aStatement->BindInt32ByName("accessed"_ns, mAccessed)));
-  QM_TRY(
-      MOZ_TO_RESULT(aStatement->BindInt32ByName("persisted"_ns, mPersisted)));
+  QM_TRY(MOZ_TO_RESULT(aStatement->BindInt32ByName(
+      "metadata_flags"_ns,
+      LockedFlattenToFullOriginMetadata().ToMetadataFlags())));
 
   return NS_OK;
 }
 
-void OriginInfo::LockedDecreaseUsage(Client::Type aClientType, int64_t aSize) {
+nsresult OriginInfo::UpdateDirtyMetadata(mozIStorageConnection* aConnection,
+                                         uint32_t aMetadataFlags,
+                                         int64_t aLastAccessTime) const {
+  MOZ_ASSERT(aConnection);
+
+  nsCOMPtr<mozIStorageStatement> stmt;
+  QM_TRY(MOZ_TO_RESULT(aConnection->CreateStatement(
+      "UPDATE origin SET metadata_flags = :metadata_flags, "
+      "last_access_time = :last_access_time "
+      "WHERE repository_id = :repository_id "
+      "AND origin = :origin;"_ns,
+      getter_AddRefs(stmt))));
+
+  QM_TRY(MOZ_TO_RESULT(
+      stmt->BindInt32ByName("metadata_flags"_ns, aMetadataFlags)));
+  QM_TRY(MOZ_TO_RESULT(
+      stmt->BindInt64ByName("last_access_time"_ns, aLastAccessTime)));
+  QM_TRY(MOZ_TO_RESULT(
+      stmt->BindInt32ByName("repository_id"_ns, mGroupInfo->mPersistenceType)));
+  QM_TRY(MOZ_TO_RESULT(stmt->BindUTF8StringByName("origin"_ns, mOrigin)));
+
+  QM_TRY(MOZ_TO_RESULT(stmt->Execute()));
+
+  return NS_OK;
+}
+
+void OriginInfo::LockedDecreaseUsage(Client::Type aClientType, int64_t aSize,
+                                     DirtyTrackingAutoLock& aProofOfLock) {
   AssertCurrentThreadOwnsQuotaMutex();
 
-  MOZ_ASSERT(mClientUsages[aClientType].isSome());
-  QM_ASSERT_NO_UNDERFLOW_2(
-      mClientUsages[aClientType].value(), aSize,
-      "mClientUsages["_ns + Client::TypeToText(aClientType) + "]"_ns);
+  if (mClientUsages[aClientType].isNothing()) {
+    return;
+  }
   mClientUsages[aClientType] = Some(mClientUsages[aClientType].value() - aSize);
+  QM_ASSERT_NOT_NEGATIVE_2(
+      mClientUsages[aClientType].value(),
+      "mClientUsages["_ns + Client::TypeToText(aClientType) + "]"_ns);
+  LockedMaybeRecordUsageUnderflow(aClientType,
+                                  mClientUsages[aClientType].value(), __func__);
 
-  QM_ASSERT_NO_UNDERFLOW(mUsage, aSize);
   mUsage -= aSize;
+  QM_ASSERT_NOT_NEGATIVE(mUsage);
+  MakeDirty(aProofOfLock);
 
   if (!LockedPersisted()) {
-    QM_ASSERT_NO_UNDERFLOW(mGroupInfo->mUsage, aSize);
     mGroupInfo->mUsage -= aSize;
+    QM_ASSERT_NOT_NEGATIVE(mGroupInfo->mUsage);
   }
 
   QuotaManager* quotaManager = QuotaManager::Get();
   MOZ_ASSERT(quotaManager);
 
-  QM_ASSERT_NO_UNDERFLOW(quotaManager->mTemporaryStorageUsage, aSize);
   quotaManager->mTemporaryStorageUsage -= aSize;
+  QM_ASSERT_NOT_NEGATIVE(quotaManager->mTemporaryStorageUsage);
+  quotaManager->LockedMaybeRecordTemporaryStorageUsageUnderflow(__func__);
 }
 
-void OriginInfo::LockedResetUsageForClient(Client::Type aClientType) {
+void OriginInfo::LockedResetUsageForClient(
+    Client::Type aClientType, DirtyTrackingAutoLock& aProofOfLock) {
   AssertCurrentThreadOwnsQuotaMutex();
 
-  uint64_t size = mClientUsages[aClientType].valueOr(0);
+  int64_t size = mClientUsages[aClientType].valueOr(0);
 
   mClientUsages[aClientType].reset();
 
-  QM_ASSERT_NO_UNDERFLOW(mUsage, size);
   mUsage -= size;
+  QM_ASSERT_NOT_NEGATIVE(mUsage);
+  MakeDirty(aProofOfLock);
 
   if (!LockedPersisted()) {
-    QM_ASSERT_NO_UNDERFLOW(mGroupInfo->mUsage, size);
     mGroupInfo->mUsage -= size;
+    QM_ASSERT_NOT_NEGATIVE(mGroupInfo->mUsage);
   }
 
   QuotaManager* quotaManager = QuotaManager::Get();
   MOZ_ASSERT(quotaManager);
 
-  QM_ASSERT_NO_UNDERFLOW(quotaManager->mTemporaryStorageUsage, size);
   quotaManager->mTemporaryStorageUsage -= size;
+  QM_ASSERT_NOT_NEGATIVE(quotaManager->mTemporaryStorageUsage);
+  quotaManager->LockedMaybeRecordTemporaryStorageUsageUnderflow(__func__);
 }
 
 UsageInfo OriginInfo::LockedGetUsageForClient(Client::Type aClientType) {
@@ -171,46 +225,76 @@ UsageInfo OriginInfo::LockedGetUsageForClient(Client::Type aClientType) {
   return UsageInfo{DatabaseUsageType{mClientUsages[aClientType]}};
 }
 
-void OriginInfo::LockedPersist() {
+void OriginInfo::LockedPersist(DirtyTrackingAutoLock& aProofOfLock) {
   AssertCurrentThreadOwnsQuotaMutex();
   MOZ_ASSERT(mGroupInfo->mPersistenceType == PERSISTENCE_TYPE_DEFAULT);
   MOZ_ASSERT(!mPersisted);
 
   mPersisted = true;
+  MakeDirty(aProofOfLock);
 
   // Remove Usage from GroupInfo
-  QM_ASSERT_NO_UNDERFLOW(mGroupInfo->mUsage, mUsage);
   mGroupInfo->mUsage -= mUsage;
+  QM_ASSERT_NOT_NEGATIVE(mGroupInfo->mUsage);
 }
 
-void OriginInfo::LockedTruncateUsages(Client::Type aClientType,
-                                      uint64_t aDelta) {
+void OriginInfo::LockedTruncateUsages(Client::Type aClientType, int64_t aDelta,
+                                      DirtyTrackingAutoLock& aProofOfLock) {
   AssertCurrentThreadOwnsQuotaMutex();
+
+  if (mClientUsages[aClientType].isNothing()) {
+    return;
+  }
 
   QuotaManager* quotaManager = QuotaManager::Get();
   MOZ_ASSERT(quotaManager);
 
-  QM_ASSERT_NO_UNDERFLOW(quotaManager->mTemporaryStorageUsage, aDelta);
   quotaManager->mTemporaryStorageUsage -= aDelta;
+  QM_ASSERT_NOT_NEGATIVE(quotaManager->mTemporaryStorageUsage);
+  quotaManager->LockedMaybeRecordTemporaryStorageUsageUnderflow(__func__);
 
   if (!LockedPersisted()) {
-    QM_ASSERT_NO_UNDERFLOW(mGroupInfo->mUsage, aDelta);
     mGroupInfo->mUsage -= aDelta;
+    QM_ASSERT_NOT_NEGATIVE(mGroupInfo->mUsage);
   }
 
-  QM_ASSERT_NO_UNDERFLOW(mUsage, aDelta);
   mUsage -= aDelta;
+  QM_ASSERT_NOT_NEGATIVE(mUsage);
+  MakeDirty(aProofOfLock);
 
   MOZ_ASSERT(mClientUsages[aClientType].isSome());
-  QM_ASSERT_NO_UNDERFLOW_2(
-      mClientUsages[aClientType].value(), aDelta,
-      "mClientUsages["_ns + Client::TypeToText(aClientType) + "]"_ns);
   mClientUsages[aClientType] =
       Some(mClientUsages[aClientType].value() - aDelta);
-};
+  QM_ASSERT_NOT_NEGATIVE_2(
+      mClientUsages[aClientType].value(),
+      "mClientUsages["_ns + Client::TypeToText(aClientType) + "]"_ns);
+  LockedMaybeRecordUsageUnderflow(aClientType,
+                                  mClientUsages[aClientType].value(), __func__);
+}
 
-Maybe<bool> OriginInfo::LockedUpdateUsages(Client::Type aClientType,
-                                           uint64_t aDelta) {
+void OriginInfo::LockedMaybeRecordUsageUnderflow(Client::Type aClientType,
+                                                 int64_t aUsage,
+                                                 StaticString aCallSite) {
+  AssertCurrentThreadOwnsQuotaMutex();
+
+  if (aUsage >= 0) {
+    return;
+  }
+
+  if (!ThrottleCounter(mUsageUnderflowCount[aClientType])) {
+    return;
+  }
+
+  glean::quotamanager::UsageUnderflowExtra extra;
+  extra.callSite.emplace(aCallSite);
+  extra.client.emplace(Client::TypeToText(aClientType));
+  extra.magnitude.emplace(FloorLog2(Abs(aUsage)));
+  glean::quotamanager::usage_underflow.Record(Some(extra));
+}
+
+Maybe<bool> OriginInfo::LockedUpdateUsages(
+    Client::Type aClientType, int64_t aDelta,
+    DirtyTrackingAutoLock& aProofOfLock) {
   AssertCurrentThreadOwnsQuotaMutex();
 
   QuotaManager* quotaManager = QuotaManager::Get();
@@ -220,20 +304,21 @@ Maybe<bool> OriginInfo::LockedUpdateUsages(Client::Type aClientType,
       ComplementaryPersistenceTypes(mGroupInfo->mPersistenceType);
 
   AssertNoOverflow(mClientUsages[aClientType].valueOr(0), aDelta);
-  uint64_t newClientUsage = mClientUsages[aClientType].valueOr(0) + aDelta;
+  int64_t newClientUsage = mClientUsages[aClientType].valueOr(0) + aDelta;
 
   AssertNoOverflow(mUsage, aDelta);
-  uint64_t newUsage = mUsage + aDelta;
+  int64_t newUsage = mUsage + aDelta;
+  MakeDirty(aProofOfLock);
 
   // Temporary storage has no limit for origin usage (there's a group and the
   // global limit though).
 
-  uint64_t newGroupUsage = mGroupInfo->mUsage;
+  int64_t newGroupUsage = mGroupInfo->mUsage;
   if (!LockedPersisted()) {
     AssertNoOverflow(mGroupInfo->mUsage, aDelta);
     newGroupUsage += aDelta;
 
-    uint64_t groupUsage = mGroupInfo->mUsage;
+    int64_t groupUsage = mGroupInfo->mUsage;
     for (const auto& complementaryPersistenceType :
          complementaryPersistenceTypes) {
       const auto& complementaryGroupInfo =
@@ -255,7 +340,7 @@ Maybe<bool> OriginInfo::LockedUpdateUsages(Client::Type aClientType,
   }
 
   AssertNoOverflow(quotaManager->mTemporaryStorageUsage, aDelta);
-  uint64_t newTemporaryStorageUsage =
+  int64_t newTemporaryStorageUsage =
       quotaManager->mTemporaryStorageUsage + aDelta;
 
   if (newTemporaryStorageUsage <= quotaManager->mTemporaryStorageLimit) {
@@ -273,29 +358,31 @@ Maybe<bool> OriginInfo::LockedUpdateUsages(Client::Type aClientType,
   return Nothing();
 }
 
-bool OriginInfo::LockedUpdateUsagesForEviction(Client::Type aClientType,
-                                               uint64_t aDelta) {
+bool OriginInfo::LockedUpdateUsagesForEviction(
+    Client::Type aClientType, int64_t aDelta,
+    DirtyTrackingAutoLock& aProofOfLock) {
   AssertCurrentThreadOwnsQuotaMutex();
 
   QuotaManager* quotaManager = QuotaManager::Get();
   MOZ_ASSERT(quotaManager);
 
   AssertNoOverflow(mUsage, aDelta);
-  uint64_t newUsage = mUsage + aDelta;
+  int64_t newUsage = mUsage + aDelta;
+  MakeDirty(aProofOfLock);
 
   AssertNoOverflow(mClientUsages[aClientType].valueOr(0), aDelta);
-  uint64_t newClientUsage = mClientUsages[aClientType].valueOr(0) + aDelta;
+  int64_t newClientUsage = mClientUsages[aClientType].valueOr(0) + aDelta;
 
   AssertNoOverflow(quotaManager->mTemporaryStorageUsage, aDelta);
-  uint64_t newTemporaryStorageUsage =
+  int64_t newTemporaryStorageUsage =
       quotaManager->mTemporaryStorageUsage + aDelta;
 
-  uint64_t newGroupUsage = mGroupInfo->mUsage;
+  int64_t newGroupUsage = mGroupInfo->mUsage;
   if (!LockedPersisted()) {
     AssertNoOverflow(mGroupInfo->mUsage, aDelta);
     newGroupUsage += aDelta;
 
-    uint64_t groupUsage = mGroupInfo->mUsage;
+    int64_t groupUsage = mGroupInfo->mUsage;
 
     const auto& complementaryPersistenceTypes =
         ComplementaryPersistenceTypes(mGroupInfo->mPersistenceType);
@@ -339,6 +426,19 @@ bool OriginInfo::LockedUpdateUsagesForEviction(Client::Type aClientType,
   return true;
 };
 
+void OriginInfo::MakeDirty(DirtyTrackingAutoLock& aProofOfLock) {
+  AssertCurrentThreadOwnsQuotaMutex();
+
+  mLastModifiedTime = TimeStamp::Now();
+  if (!mMetadataDirty) {
+    auto* const quotaManager = QuotaManager::Get();
+    MOZ_ASSERT(quotaManager);
+
+    quotaManager->RegisterDirtyOriginInfo(aProofOfLock);
+    mMetadataDirty = true;
+  }
+}
+
 void OriginInfo::LockedDirectoryCreated() {
   AssertCurrentThreadOwnsQuotaMutex();
   MOZ_ASSERT(!mDirectoryExists);
@@ -347,3 +447,5 @@ void OriginInfo::LockedDirectoryCreated() {
 }
 
 }  // namespace mozilla::dom::quota
+
+#undef CHECK_USAGE

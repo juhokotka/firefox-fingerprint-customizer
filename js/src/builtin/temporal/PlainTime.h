@@ -25,15 +25,17 @@ class PlainTimeObject : public NativeObject {
   static const JSClass class_;
   static const JSClass& protoClass_;
 
-  static constexpr uint32_t PACKED_TIME_SLOT = 0;
+  JS_DEFINE_TYPED_SLOT(0, PACKED_TIME_SLOT, Double);
   static constexpr uint32_t SLOT_COUNT = 1;
 
   /**
    * Extract the time fields from this PlainTime object.
    */
   Time time() const {
+    // Keep this in sync with `MacroAssembler::unpackTime` in
+    // jit/MacroAssembler.cpp.
     auto packed = PackedTime{mozilla::BitwiseCast<uint64_t>(
-        getFixedSlot(PACKED_TIME_SLOT).toDouble())};
+        getFixedSlotTyped(PACKED_TIME_SLOT).toDouble())};
     return PackedTime::unpack(packed);
   }
 

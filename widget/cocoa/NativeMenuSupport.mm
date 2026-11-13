@@ -5,9 +5,10 @@
 #include "mozilla/widget/NativeMenuSupport.h"
 
 #include "MainThreadUtils.h"
+#include "NativeMenuMac.h"
+#include "gfxPlatform.h"
 #include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPrefs_widget.h"
-#include "NativeMenuMac.h"
 #include "nsCocoaWindow.h"
 #include "nsMenuBarX.h"
 
@@ -33,11 +34,13 @@ already_AddRefed<NativeMenu> NativeMenuSupport::CreateNativePopupMenu(
 }
 
 bool NativeMenuSupport::ShouldUseNativeAnchoredMenus() {
-  return StaticPrefs::widget_macos_native_anchored_menus();
+  return !gfxPlatform::IsHeadless() &&
+         StaticPrefs::widget_macos_native_anchored_menus();
 }
 
 bool NativeMenuSupport::ShouldUseNativeContextMenus() {
-  return StaticPrefs::widget_macos_native_context_menus();
+  return !gfxPlatform::IsHeadless() &&
+         StaticPrefs::widget_macos_native_context_menus();
 }
 
 }  // namespace mozilla::widget

@@ -5,12 +5,11 @@
 #ifndef nsIWidgetListener_h_
 #define nsIWidgetListener_h_
 
-#include "mozilla/EventForwards.h"
-#include "mozilla/layers/LayersTypes.h"
-#include "mozilla/TimeStamp.h"
-
-#include "nsRegionFwd.h"
 #include "Units.h"
+#include "mozilla/EventForwards.h"
+#include "mozilla/TimeStamp.h"
+#include "mozilla/layers/LayersTypes.h"
+#include "nsRegionFwd.h"
 
 class nsView;
 class nsIWidget;
@@ -71,6 +70,14 @@ class nsIWidgetListener {
    */
   virtual void SizeModeChanged(nsSizeMode aSizeMode) {}
 
+  /**
+   * Called when a fullscreen change the widget started is not going to happen,
+   * for instance when macOS refuses to run a native fullscreen transition.
+   * aInFullscreen is the widget's fullscreen state, which has not changed, so
+   * no SizeModeChanged() call reports it.
+   */
+  virtual void FullscreenChangeFailed(bool aInFullscreen) {}
+
   virtual void DynamicToolbarMaxHeightChanged(mozilla::ScreenIntCoord aHeight) {
   }
   virtual void DynamicToolbarOffsetChanged(mozilla::ScreenIntCoord aOffset) {}
@@ -92,11 +99,6 @@ class nsIWidgetListener {
 
   /** Called when the window is deactivated and no longer focused. */
   virtual void WindowDeactivated() {}
-
-  /**
-   * Called when the show/hide toolbar button on the Mac titlebar is pressed.
-   */
-  virtual void OSToolbarButtonPressed() {}
 
   /**
    * Called when a request is made to close the window. Returns true if the

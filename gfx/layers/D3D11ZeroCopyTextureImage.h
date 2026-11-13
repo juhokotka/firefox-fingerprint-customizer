@@ -7,10 +7,10 @@
 
 #include "ImageContainer.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/ThreadSafeWeakPtr.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/layers/TextureClient.h"
 #include "mozilla/layers/TextureD3D11.h"
-#include "mozilla/ThreadSafeWeakPtr.h"
 
 struct ID3D11Texture2D;
 struct IMFSample;
@@ -112,7 +112,7 @@ class IMFSampleWrapper : public SupportsThreadSafeWeakPtr<IMFSampleWrapper> {
   MOZ_DECLARE_REFCOUNTED_TYPENAME(IMFSampleWrapper)
 
   static RefPtr<IMFSampleWrapper> Create(IMFSample* aVideoSample);
-  virtual ~IMFSampleWrapper();
+  virtual ~IMFSampleWrapper() = default;
   void ClearVideoSample();
 
  protected:

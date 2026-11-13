@@ -8,10 +8,10 @@ import android.os.SystemClock
 import androidx.annotation.VisibleForTesting
 import androidx.compose.runtime.RememberObserver
 import androidx.compose.runtime.mutableStateOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
+import java.util.concurrent.Executors
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import mozilla.components.compose.browser.awesomebar.AwesomeBarFacts
 import mozilla.components.compose.browser.awesomebar.AwesomeBarFacts.emitAwesomeBarFact
 import mozilla.components.concept.awesomebar.AwesomeBar
@@ -19,27 +19,23 @@ import mozilla.components.concept.base.profiler.Profiler
 import mozilla.components.support.base.facts.Action
 import mozilla.components.support.base.utils.NamedThreadFactory
 import mozilla.components.support.utils.ThreadUtils
-import java.util.concurrent.Executors
 
 /**
- * Class responsible for fetching search suggestions and exposing a [state] to observe the current
- * list of suggestions from a composable.
+ * Class responsible for fetching search suggestions and exposing a [state] to observe the current list of suggestions
+ * from a composable.
  */
 internal class SuggestionFetcher(
     private val groups: List<AwesomeBar.SuggestionProviderGroup>,
     private val profiler: Profiler?,
 ) : RememberObserver {
-    private val dispatcher = Executors.newFixedThreadPool(
-        groups.fold(0, { acc, group -> acc + group.providers.size }),
-        NamedThreadFactory("SuggestionFetcher"),
-    ).asCoroutineDispatcher()
+    private val dispatcher =
+        Executors.newFixedThreadPool(
+                groups.fold(0, { acc, group -> acc + group.providers.size }),
+                NamedThreadFactory("SuggestionFetcher"),
+            )
+            .asCoroutineDispatcher()
 
-    @VisibleForTesting
-    internal var fetchJob: Job? = null
-
-    /**
-     * The current list of suggestions as an observable list.
-     */
+    /** The current list of suggestions as an observable list. */
     val state = mutableStateOf<Map<AwesomeBar.SuggestionProviderGroup, List<AwesomeBar.SuggestionItem>>>(emptyMap())
 
     /**
@@ -50,9 +46,7 @@ internal class SuggestionFetcher(
     suspend fun fetch(text: String) {
         profiler?.addMarker("SuggestionFetcher.fetch") // DO NOT ADD ANYTHING ABOVE THIS addMarker CALL.
 
-        fetchJob?.cancel()
-
-        fetchJob = CoroutineScope(dispatcher).launch {
+        supervisorScope {
             groups.forEach { group ->
                 group.providers.forEach { provider ->
                     val profilerStartTime = profiler?.getProfilerTime() // DO NOT ADD ANYTHING ABOVE getProfilerTime.
@@ -62,9 +56,7 @@ internal class SuggestionFetcher(
         }
     }
 
-    /**
-     * Fetches suggestions from [provider].
-     */
+    /** Fetches suggestions from [provider]. */
     @VisibleForTesting
     internal suspend fun fetchFrom(
         group: AwesomeBar.SuggestionProviderGroup,
@@ -94,9 +86,7 @@ internal class SuggestionFetcher(
         processResultFrom(group, provider, suggestions, profilerStartTime)
     }
 
-    /**
-     * Updates [state] to include the [suggestions] from [provider].
-     */
+    /** Updates [state] to include the [suggestions] from [provider]. */
     @Synchronized
     @VisibleForTesting
     internal fun processResultFrom(
@@ -107,9 +97,10 @@ internal class SuggestionFetcher(
     ) {
         val suggestionMap = state.value
 
-        val updatedSuggestions = (suggestionMap[group] ?: emptyList())
-            .filter { suggestion -> suggestion.provider != provider }
-            .toMutableList()
+        val updatedSuggestions =
+            (suggestionMap[group] ?: emptyList())
+                .filter { suggestion -> suggestion.provider != provider }
+                .toMutableList()
 
         updatedSuggestions.addAll(suggestions)
         updatedSuggestions.sortByDescending { suggestion -> suggestion.score }
@@ -152,9 +143,10 @@ internal fun emitProviderQueryTimingFact(provider: AwesomeBar.SuggestionProvider
     emitAwesomeBarFact(
         Action.INTERACTION,
         AwesomeBarFacts.Items.PROVIDER_DURATION,
-        metadata = mapOf(
-            // We only care about millisecond precision here, so convert from ns to ms before emitting.
-            AwesomeBarFacts.MetadataKeys.DURATION_PAIR to (provider to (timingNs / 1_000_000L)),
-        ),
+        metadata =
+            mapOf(
+                // We only care about millisecond precision here, so convert from ns to ms before emitting.
+                AwesomeBarFacts.MetadataKeys.DURATION_PAIR to (provider to (timingNs / 1_000_000L))
+            ),
     )
 }

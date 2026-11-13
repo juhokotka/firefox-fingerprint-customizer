@@ -2,31 +2,72 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global RPMCanSetDefaultPDFHandler, RPMGetBoolPref, RPMOpenPDFFile,
-   RPMSetDefaultPDFHandler, RPMSetPref */
+/* global RPMAddMessageListener, RPMCanSetDefaultPDFHandler, RPMGetBoolPref,
+   RPMPickPDFFile, RPMSendAsyncMessage, RPMSendQuery, RPMSetDefaultPDFHandler,
+   RPMSetPref */
 
 const PROMO_DISMISSED_PREF = "browser.aboutpdf.promo.dismissed";
 
 const dropzone = document.getElementById("dropzone");
 const dropzoneHint = document.getElementById("dropzone-hint");
 const dropzoneError = document.getElementById("dropzone-error");
-const fileInput = document.getElementById("file-input");
 const browseFiles = document.getElementById("browse-files");
 const promo = document.getElementById("promo");
 const setDefault = document.getElementById("set-default");
 const dismissPromo = document.getElementById("dismiss-promo");
+const notification = document.getElementById("pdf-notification");
+const featuresCta = document.getElementById("features-cta");
+const featuresBack = document.getElementById("features-back");
+const mainHeading = document.getElementById("main-heading");
+const featuresHeading = document.getElementById("features-heading");
 
-browseFiles.addEventListener("click", () => {
-  fileInput.click();
+let notificationClaimed = false;
+let notificationConsumed = false;
+
+function renderView(moveFocus) {
+  const showFeatures = window.location.hash === "#features";
+  document.body.classList.toggle("view-features", showFeatures);
+  if (showFeatures) {
+    consumeNotification();
+  }
+  updateNotificationVisibility();
+  if (moveFocus) {
+    (showFeatures ? featuresHeading : mainHeading).focus();
+  }
+}
+
+window.addEventListener("hashchange", () => renderView(true));
+
+// Add a history entry so Back returns to the main view.
+featuresCta.addEventListener("click", () => {
+  window.location.hash = "features";
 });
 
-fileInput.addEventListener("change", () => {
-  const file = fileInput.files[0];
-  // Reset so the same file can be re-selected after an error.
-  fileInput.value = "";
-  if (file) {
-    handleFile(file);
+featuresBack.addEventListener("click", async () => {
+  try {
+    if (await RPMSendQuery("AboutPDF:GoBack")) {
+      return;
+    }
+  } catch (e) {
+    console.error("Failed to go back", e);
   }
+  // With no previous entry, switch views without adding history.
+  try {
+    window.history.replaceState(
+      null,
+      "",
+      window.location.href.replace(/#.*$/, "")
+    );
+    renderView(true);
+  } catch {
+    window.location.hash = "";
+  }
+});
+
+renderView(false);
+
+browseFiles.addEventListener("click", () => {
+  pickFile();
 });
 
 dropzone.addEventListener("dragenter", e => {
@@ -48,11 +89,19 @@ dropzone.addEventListener("dragleave", e => {
 });
 
 dropzone.addEventListener("drop", e => {
-  e.preventDefault();
   dropzone.classList.remove("drag-over");
-  const file = e.dataTransfer?.files[0];
-  if (file) {
-    handleFile(file);
+  // Let native handling open .pdf files with a PDF MIME type; cancel others.
+  const files = e.dataTransfer?.files;
+  if (
+    !files?.length ||
+    ![...files].every(
+      file =>
+        file.type === "application/pdf" &&
+        file.name.toLowerCase().endsWith(".pdf")
+    )
+  ) {
+    e.preventDefault();
+    showError("invalid");
   }
 });
 
@@ -60,7 +109,7 @@ dropzone.addEventListener("drop", e => {
 // through #browse-files which has the real button semantics.
 dropzone.addEventListener("click", e => {
   if (!e.target.closest("#browse-files")) {
-    fileInput.click();
+    pickFile();
   }
 });
 
@@ -90,7 +139,69 @@ dismissPromo.addEventListener("click", () => {
   });
 });
 
+setupNotification();
+
 updatePromoVisibility();
+
+async function setupNotification() {
+  // Move focus before the bar removes itself.
+  notification.addEventListener("message-bar:user-dismissed", () => {
+    if (notification.matches(":focus-within")) {
+      browseFiles.focus();
+    }
+    persistNotificationDismissal();
+  });
+
+  RPMAddMessageListener("PDF:HideFeaturesNotification", () => {
+    dropNotification();
+  });
+
+  // Do not claim an impression on the features view.
+  if (document.body.classList.contains("view-features")) {
+    dropNotification();
+    return;
+  }
+  try {
+    notificationClaimed = await RPMSendQuery("AboutPDF:NotificationEligible");
+  } catch (e) {
+    console.error("Failed to check the notification eligibility", e);
+  }
+  // Another surface may dismiss the notification while the query is pending.
+  if (!notificationClaimed || !notification.isConnected) {
+    dropNotification();
+    return;
+  }
+  updateNotificationVisibility();
+}
+
+function consumeNotification() {
+  if (notificationConsumed) {
+    return;
+  }
+  notificationConsumed = true;
+  persistNotificationDismissal();
+  dropNotification();
+}
+
+function persistNotificationDismissal() {
+  notificationClaimed = false;
+  RPMSendAsyncMessage("AboutPDF:DismissNotification");
+}
+
+function updateNotificationVisibility() {
+  if (
+    notificationClaimed &&
+    !document.body.classList.contains("view-features")
+  ) {
+    notification.hidden = false;
+  }
+}
+
+// Removal prevents later callbacks from showing it again.
+function dropNotification() {
+  notificationClaimed = false;
+  notification.remove();
+}
 
 async function updatePromoVisibility() {
   try {
@@ -106,14 +217,15 @@ async function updatePromoVisibility() {
 
 let processing = false;
 
-async function handleFile(file) {
+// The parent validates the selected file before opening it.
+async function pickFile() {
   if (processing) {
     return;
   }
   processing = true;
   showError(null);
   try {
-    if (!(await RPMOpenPDFFile(file))) {
+    if ((await RPMPickPDFFile()) === "invalid") {
       showError("invalid");
     }
   } catch (e) {
@@ -124,7 +236,7 @@ async function handleFile(file) {
   }
 }
 
-// errorType: null (clear), "invalid" (file type), or "generic" (other failure).
+// errorType: null, "invalid" (not a PDF), or "generic".
 function showError(errorType) {
   if (!errorType) {
     dropzoneError.hidden = true;
@@ -142,8 +254,7 @@ function showError(errorType) {
   dropzoneHint.hidden = errorType === "invalid";
 }
 
-// Enter triggers the picker only when the dropzone itself is hovered and no
-// inner control has focus (which would handle Enter itself).
+// Enter opens the picker while the dropzone is hovered and no control has focus.
 document.addEventListener("keydown", e => {
   if (e.key === "Enter" && dropzone.matches(":hover")) {
     const active = document.activeElement;
@@ -153,7 +264,7 @@ document.addEventListener("keydown", e => {
       active === document.documentElement
     ) {
       e.preventDefault();
-      fileInput.click();
+      pickFile();
     }
   }
 });

@@ -30,6 +30,7 @@ support-files = [
   "printpreview_font_api_ref.html",
   "printpreview_font_mozprintcallback.html",
   "printpreview_font_mozprintcallback_ref.html",
+  "printpreview_random.html",
   "printpreview_quirks.html",
   "printpreview_quirks_ref.html",
   "printpreview_images.html",
@@ -88,6 +89,7 @@ support-files = [
   "markA.ttf",
   "markB.ttf",
   "2in_blue.pdf",
+  "2in_blue_3pages.pdf",
   "2in_by_3in_blue.pdf",
   "2in_by_4in_blue.pdf",
 ]

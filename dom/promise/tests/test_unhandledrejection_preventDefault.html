@@ -66,18 +66,22 @@ add_task(async function test_no_preventDefault_logs_console() {
 });
 
 add_task(async function test_worker_shutdown_still_reports() {
-  const check = waitForConsoleCheck(/bug1642147_worker_shutdown_error/);
-
-  const worker = new Worker("worker_unhandledrejection_shutdown.js");
-  // Worker rejects then posts "rejected" then calls self.close().
-  await new Promise(r => { worker.onmessage = r; });
-  // Worker has rejected and is closing. Give shutdown flush time to report.
-  await flushAsyncTasks();
-  await flushAsyncTasks();
-  SpecialPowers.postConsoleSentinel();
-
-  const consoleErrorSeen = await check;
-  ok(consoleErrorSeen,
+  const pattern = /bug1642147_worker_shutdown_error/;
+  // The worker rejects a promise then calls self.close(). The shutdown
+  // path (FlushUncaughtRejections) reports the error cross-thread, so
+  // we listen for it event-driven rather than using a fixed flush count.
+  const seen = await new Promise(resolve => {
+    SpecialPowers.registerConsoleListener(function(msg) {
+      if (pattern.test(msg.message || "")) {
+        SpecialPowers.postConsoleSentinel();
+      }
+      if (msg.message === "SENTINEL") {
+        resolve(true);
+      }
+    });
+    new Worker("worker_unhandledrejection_shutdown.js");
+  });
+  ok(seen,
      "Worker shutdown should still report unhandled rejection to console");
 });
 </script>

@@ -3,10 +3,18 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 SOURCES += [
+    "AndroidLocalNetworkPermission.cpp",
+    "AndroidNetworkBlockedReason.cpp",
     "nsAndroidNetworkLinkService.cpp",
 ]
 
 FINAL_LIBRARY = "xul"
 LOCAL_INCLUDES += [
     "/netwerk/base",
+]
+
+SOURCE_HEADERS += [
+    "AndroidLocalNetworkPermission.h",
+    "AndroidNetworkBlockedReason.h",
+    "nsAndroidNetworkLinkService.h",
 ]

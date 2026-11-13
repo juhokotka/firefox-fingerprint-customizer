@@ -62,6 +62,7 @@ using mozilla::dom::ForceMediaDocument from "mozilla/dom/LoadURIOptionsBinding.h
 using mozilla::dom::NavigationHistoryBehavior from "mozilla/dom/NavigationBinding.h";
 [RefCounted] using class mozilla::dom::ipc::StructuredCloneData from "mozilla/dom/ipc/StructuredCloneData.h";
 [RefCounted] using class nsStructuredCloneContainer from "nsStructuredCloneContainer.h";
+using struct mozilla::dom::RemoteType from "mozilla/dom/RemoteType.h";
 
 namespace mozilla {
 namespace dom {
@@ -95,6 +96,8 @@ struct ScreenDetails {
   uint16_t orientationAngle;
   bool isPseudoDisplay;
   bool isHDR;
+  float sdrContentBrightness;
+  float hdrPeakBrightness;
 };
 
 struct DimensionInfo
@@ -154,13 +157,13 @@ struct DocShellLoadStateInit
 
   // The provided remote type of the process responsible for causing the load to
   // occur. Validated in the parent process.
-  nsCString TriggeringRemoteType;
+  RemoteType TriggeringRemoteType;
 
   nsString SrcdocData; // useless without sourcedocshell
 
   nsCString? OriginalURIString;
 
-  nsCString? RemoteTypeOverride;
+  RemoteType? RemoteTypeOverride;
 
   LoadingSessionHistoryInfo? loadingSessionHistoryInfo;
 
@@ -175,7 +178,6 @@ struct DocShellLoadStateInit
   // responsible for causing the load to occur.
   uint32_t TriggeringSandboxFlags;
   uint64_t TriggeringWindowId;
-  bool TriggeringStorageAccess;
   ClassificationFlags TriggeringClassificationFlags;
   int32_t? CancelContentJSEpoch;
 
@@ -185,6 +187,7 @@ struct DocShellLoadStateInit
   bool InheritPrincipal;
   bool PrincipalIsExplicit;
   bool NotifiedBeforeUnloadListeners;
+  bool PageSwapFired;
   bool ForceAllowDataURI;
   bool IsExemptFromHTTPSFirstMode;
   bool OriginalFrameSrc;
@@ -257,6 +260,7 @@ struct ReplacementChannelConfigInit
   TimedChannelInfo? timedChannelInfo;
   nullable RemoteLazyInputStream uploadStream;
   uint64_t uploadStreamLength;
+  bool uploadStreamIsStreaming;
   nsCString? contentType;
   nsCString? contentLength;
 };
@@ -328,6 +332,7 @@ struct IPCImage {
 struct IPCNotificationAction {
   nsString name;
   nsString title;
+  nullable nsIURI navigate;
 };
 
 // Mostly same as NotificationOptions except:
@@ -342,6 +347,7 @@ struct IPCNotificationOptions {
   nsString body;
   nsString tag;
   nullable nsIURI icon;
+  nullable nsIURI navigate;
   bool requireInteraction;
   bool silent;
   uint32_t[] vibrate;

@@ -3,10 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsRegion.h"
-#include "nsTArray.h"
-#include "gfxUtils.h"
+
 #include "gfx2DGlue.h"
+#include "gfxUtils.h"
 #include "mozilla/ToString.h"
+#include "nsTArray.h"
 
 void nsRegion::AssertStateInternal() const {
   bool failed = false;
@@ -482,7 +483,7 @@ uint64_t nsRegion::Area() const {
   for (const Band& band : mBands) {
     uint32_t height = band.bottom - band.top;
     for (const Strip& strip : band.mStrips) {
-      area += (strip.right - strip.left) * height;
+      area += int64_t(strip.right - strip.left) * height;
     }
   }
 

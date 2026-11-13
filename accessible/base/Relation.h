@@ -5,9 +5,9 @@
 #ifndef mozilla_a11y_relation_h_
 #define mozilla_a11y_relation_h_
 
-#include "AccIterator.h"
-
 #include <memory>
+
+#include "AccIterator.h"
 
 namespace mozilla {
 namespace a11y {
@@ -43,6 +43,9 @@ class Relation {
     aRH.mLastIter = nullptr;
     return *this;
   }
+
+  Relation& operator=(const Relation&) = delete;
+  Relation(const Relation&) = delete;
 
   inline void AppendIter(AccIterable* aIter) {
     if (mLastIter) {
@@ -90,9 +93,6 @@ class Relation {
   }
 
  private:
-  Relation& operator=(const Relation&) = delete;
-  Relation(const Relation&) = delete;
-
   std::unique_ptr<AccIterable> mFirstIter;
   AccIterable* mLastIter;
 };

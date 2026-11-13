@@ -8,6 +8,7 @@
 <window
   xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
   xmlns:html="http://www.w3.org/1999/xhtml"
+  data-l10n-id="fingerprint-editor-window"
   data-l10n-attrs="title"
   persist="screenX screenY width height"
   width="640"
@@ -16,12 +17,13 @@
   <dialog
     id="fingerprint-detailed-editor-dialog"
     buttons="accept,cancel"
-    buttonlabelaccept="Save"
-    buttonaccesskeyaccept="S"
+    data-l10n-id="fingerprint-editor-dialog"
+    data-l10n-attrs="buttonlabelaccept,buttonaccesskeyaccept"
   >
     <linkset>
       <html:link rel="stylesheet" href="chrome://global/skin/global.css" />
       <html:link rel="stylesheet" href="chrome://browser/skin/usercontext/container-editor.css" />
+      <html:link rel="localization" href="browser/preferences/containers.ftl" />
     </linkset>
 
     <script src="chrome://browser/content/fingerprintprofile/fingerprint-detailed-editor.js" />

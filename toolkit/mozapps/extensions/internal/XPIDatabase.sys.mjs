@@ -29,6 +29,10 @@ ChromeUtils.defineESModuleGetters(lazy, {
   PermissionsUtils: "resource://gre/modules/PermissionsUtils.sys.mjs",
   QuarantinedDomains: "resource://gre/modules/ExtensionPermissions.sys.mjs",
   ExtensionPermissions: "resource://gre/modules/ExtensionPermissions.sys.mjs",
+  getL10nThemeString:
+    "resource://gre/modules/addons/ThemesBundledLocalization.sys.mjs",
+  hasThemeIdBundledLocalization:
+    "resource://gre/modules/addons/ThemesBundledLocalization.sys.mjs",
 });
 
 // A temporary hidden pref just meant to be used as a last resort, in case
@@ -154,7 +158,8 @@ const PROP_JSON_FIELDS = [
   "rootURI",
 ];
 
-const SIGNED_TYPES = new Set(["extension", "locale", "theme"]);
+// Keep in sync with ALL_XPI_TYPES in XPIProvider.sys.mjs.
+const SIGNED_TYPES = new Set(["extension", "locale", "theme", "dictionary"]);
 
 // Time to wait before async save of XPI JSON database, in milliseconds
 const ASYNC_SAVE_DELAY_MS = 20;
@@ -327,14 +332,6 @@ export class AddonInternal {
   get resolvedRootURI() {
     return XPIExports.XPIInternal.maybeResolveURI(
       Services.io.newURI(this.rootURI)
-    );
-  }
-
-  get isBuiltinColorwayTheme() {
-    return (
-      this.type === "theme" &&
-      this.location.isBuiltin &&
-      this.id.endsWith("-colorway@mozilla.org")
     );
   }
 
@@ -707,6 +704,15 @@ export class AddonInternal {
       // re-enable them.
       if (this.location.isSystem && !allowSystemAddons) {
         throw new Error(`Cannot disable system add-on ${this.id}`);
+      }
+      if (
+        val &&
+        Services.policies &&
+        !Services.policies.isAllowed(`disable-extension:${this.id}`)
+      ) {
+        throw new Error(
+          `Cannot disable add-on ${this.id}: disallowed by enterprise policy`
+        );
       }
       await XPIDatabase.updateAddonDisabledState(this, { userDisabled: val });
     } else {
@@ -1587,7 +1593,6 @@ function defineAddonWrapperProperty(name, getter) {
   "signedState",
   "signedTypes",
   "isCorrectlySigned",
-  "isBuiltinColorwayTheme",
 ].forEach(function (aProp) {
   defineAddonWrapperProperty(aProp, function () {
     let addon = addonFor(this);
@@ -1656,32 +1661,23 @@ defineAddonWrapperProperty("signedDate", function () {
   });
 });
 
-// Add to this Map if you need to change an addon's Fluent ID. Keep it in sync
-// with the list in browser_verify_l10n_strings.js
-const updatedAddonFluentIds = new Map([
-  ["extension-default-theme-name", "extension-default-theme-name-auto"],
-]);
-
 ["name", "description", "creator", "homepageURL"].forEach(function (aProp) {
   defineAddonWrapperProperty(aProp, function () {
     let addon = addonFor(this);
 
-    let formattedMessage;
+    let formattedValue;
     // We want to make sure that all built-in themes that are localizable can
-    // actually localized, particularly those for thunderbird and desktop.
+    // be actually localized, particularly those for thunderbird and desktop, as
+    // well as curated AMO-hosted themes with bundled Fluent localization (e.g.
+    // Nova themes).
     if (
       (aProp === "name" || aProp === "description") &&
-      addon.location.name === KEY_APP_BUILTINS &&
-      addon.type === "theme"
+      addon.type === "theme" &&
+      (addon.location.name === KEY_APP_BUILTINS ||
+        lazy.hasThemeIdBundledLocalization(addon.id))
     ) {
-      // Built-in themes are localized with Fluent instead of the WebExtension API.
-      let addonIdPrefix = addon.id.replace("@mozilla.org", "");
-      let defaultFluentId = `extension-${addonIdPrefix}-${aProp}`;
-      let fluentId =
-        updatedAddonFluentIds.get(defaultFluentId) || defaultFluentId;
       try {
-        const l10n = new Localization(["browser/appExtensionFields.ftl"], true);
-        [formattedMessage] = l10n.formatMessagesSync([{ id: fluentId }]);
+        formattedValue = lazy.getL10nThemeString(addon.id, aProp);
       } catch (e) {
         // Log a warning when no fluent string was found, but fallback to the value set
         // in the manifest field or values got from AMO and stored in the AddonRepository.
@@ -1692,8 +1688,8 @@ const updatedAddonFluentIds = new Map([
       }
     }
 
-    if (formattedMessage) {
-      return formattedMessage.value;
+    if (formattedValue) {
+      return formattedValue;
     }
 
     let [result, usedRepository] = chooseValue(
@@ -2764,7 +2760,14 @@ export const XPIDatabase = {
       return true;
     }
 
-    if (Services.policies && !Services.policies.mayInstallAddon(aAddon)) {
+    if (
+      Services.policies &&
+      !Services.policies.mayInstallAddon({
+        id: aAddon.id,
+        type: aAddon.type,
+        permissions: aAddon.userPermissions?.permissions,
+      })
+    ) {
       return false;
     }
 

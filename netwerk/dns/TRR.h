@@ -5,15 +5,15 @@
 #ifndef mozilla_net_TRR_h
 #define mozilla_net_TRR_h
 
+#include "DNSPacket.h"
 #include "mozilla/net/DNSByTypeRecord.h"
 #include "nsClassHashtable.h"
 #include "nsIChannel.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIStreamListener.h"
+#include "nsITRRSkipReason.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
-#include "DNSPacket.h"
-#include "nsITRRSkipReason.h"
 
 class AHostResolver;
 class nsHostRecord;
@@ -47,7 +47,7 @@ class TRR : public Runnable,
   // to verify a domain
   explicit TRR(AHostResolver* aResolver, nsACString& aHost, enum TrrType aType,
                const nsACString& aOriginSuffix, bool aPB,
-               bool aUseFreshConnection);
+               bool aUseFreshConnection, nsIEventTarget* aTarget);
 
   NS_IMETHOD Run() override;
   void Cancel(nsresult aStatus);
@@ -69,6 +69,7 @@ class TRR : public Runnable,
   RequestPurpose Purpose() { return mPurpose; }
   void SetPurpose(RequestPurpose aPurpose) { mPurpose = aPurpose; }
   TRRSkippedReason SkipReason() const { return mTRRSkippedReason; }
+  nsIEventTarget* Target() const { return mTarget; }
 
  protected:
   virtual ~TRR() = default;
@@ -107,6 +108,8 @@ class TRR : public Runnable,
 
   void StoreIPHintAsDNSRecord(const struct SVCB& aSVCBRecord);
 
+  static already_AddRefed<nsIEventTarget> DefaultTarget();
+
   nsCOMPtr<nsIChannel> mChannel;
   enum TrrType mType { TRRTYPE_A };
   UniquePtr<DNSPacket> mPacket;
@@ -125,6 +128,12 @@ class TRR : public Runnable,
   nsCString mCname;
   uint32_t mCnameLoop = kCnameChaseMax;  // loop detection counter
 
+  // True when this TRR was dispatched to follow an HTTPS AliasMode TargetName.
+  // If the target has no HTTPS record of its own, we synthesize an AliasMode
+  // record for it (RFC 9460) instead of failing, so the connection is routed
+  // to the target.
+  bool mHTTPSAliasFollow = false;
+
   uint32_t mTTL = UINT32_MAX;
   TypeRecordResultType mResult = mozilla::AsVariant(Nothing());
 
@@ -140,6 +149,10 @@ class TRR : public Runnable,
 
   // If true, we set LOAD_FRESH_CONNECTION on our channel's load flags.
   bool mUseFreshConnection = false;
+
+  // The thread this request runs on. Chosen at construction so it can be read
+  // from any thread without locking.
+  const nsCOMPtr<nsIEventTarget> mTarget;
 };
 
 }  // namespace net

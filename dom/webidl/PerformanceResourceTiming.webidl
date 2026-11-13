@@ -15,6 +15,12 @@ enum RenderBlockingStatusType { "blocking", "non-blocking" };
 interface PerformanceResourceTiming : PerformanceEntry
 {
   readonly attribute DOMString initiatorType;
+
+  // https://w3c.github.io/resource-timing/#dom-performanceresourcetiming-deliverytype
+  // Own pref, independent of dom.speculation_rules.enabled.
+  [Pref="dom.performance.deliverytype.enabled"]
+  readonly attribute DOMString deliveryType;
+
   readonly attribute DOMString nextHopProtocol;
 
   readonly attribute DOMHighResTimeStamp workerStart;

@@ -5,22 +5,20 @@
 #ifndef IMMHandler_h_
 #define IMMHandler_h_
 
+#include <windows.h>
+
 #include "mozilla/ContentData.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/TextEventDispatcher.h"
 #include "mozilla/WritingModes.h"
-
-#include "windef.h"
-#include "winnetwk.h"
 #include "npapi.h"
-
 #include "nsCOMPtr.h"
 #include "nsIWidget.h"
 #include "nsRect.h"
 #include "nsString.h"
 #include "nsTArray.h"
-
-#include <windows.h>
+#include "windef.h"
+#include "winnetwk.h"
 
 class nsWindow;
 
@@ -31,7 +29,7 @@ struct MSGResult;
 
 class IMEContext final {
  public:
-  IMEContext() : mWnd(nullptr), mIMC(nullptr) {}
+  IMEContext() = default;
 
   explicit IMEContext(HWND aWnd);
   explicit IMEContext(nsWindow* aWindowBase);
@@ -87,8 +85,8 @@ class IMEContext final {
  protected:
   IMEContext(const IMEContext& aOther) { MOZ_CRASH("Don't copy IMEContext"); }
 
-  HWND mWnd;
-  HIMC mIMC;
+  HWND mWnd{nullptr};
+  HIMC mIMC{nullptr};
 };
 
 class IMMHandler final {

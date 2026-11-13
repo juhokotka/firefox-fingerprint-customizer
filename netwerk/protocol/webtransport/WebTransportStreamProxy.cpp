@@ -41,17 +41,17 @@ WebTransportStreamProxy::~WebTransportStreamProxy() {
                   gSocketTransportService, mWebTransportStream.forget());
 }
 
-NS_IMETHODIMP WebTransportStreamProxy::SendStopSending(uint8_t aError) {
+NS_IMETHODIMP WebTransportStreamProxy::SendStopSending(uint64_t aErrorCode) {
   if (!OnSocketThread()) {
     RefPtr<WebTransportStreamProxy> self(this);
     return gSocketTransportService->Dispatch(
         NS_NewRunnableFunction("WebTransportStreamProxy::SendStopSending",
-                               [self{std::move(self)}, error(aError)]() {
+                               [self{std::move(self)}, error(aErrorCode)]() {
                                  self->SendStopSending(error);
                                }));
   }
 
-  mWebTransportStream->SendStopSending(aError);
+  mWebTransportStream->SendStopSending(aErrorCode);
   return NS_OK;
 }
 
@@ -73,7 +73,7 @@ NS_IMETHODIMP WebTransportStreamProxy::SendFin(void) {
   return NS_OK;
 }
 
-NS_IMETHODIMP WebTransportStreamProxy::Reset(uint8_t aErrorCode) {
+NS_IMETHODIMP WebTransportStreamProxy::Reset(uint64_t aErrorCode) {
   if (!mWriter) {
     return NS_ERROR_UNEXPECTED;
   }
@@ -221,7 +221,7 @@ NS_IMETHODIMP WebTransportStreamProxy::GetStreamId(uint64_t* aId) {
   return NS_OK;
 }
 
-NS_IMETHODIMP WebTransportStreamProxy::SetSendOrder(Maybe<int64_t> aSendOrder) {
+NS_IMETHODIMP WebTransportStreamProxy::SetSendOrder(int64_t aSendOrder) {
   if (!OnSocketThread()) {
     return gSocketTransportService->Dispatch(NS_NewRunnableFunction(
         "SetSendOrder", [stream = mWebTransportStream, aSendOrder]() {
@@ -229,6 +229,17 @@ NS_IMETHODIMP WebTransportStreamProxy::SetSendOrder(Maybe<int64_t> aSendOrder) {
         }));
   }
   mWebTransportStream->SetSendOrder(aSendOrder);
+  return NS_OK;
+}
+
+NS_IMETHODIMP WebTransportStreamProxy::SetSendGroup(uint64_t aSendGroupId) {
+  if (!OnSocketThread()) {
+    return gSocketTransportService->Dispatch(NS_NewRunnableFunction(
+        "SetSendGroup", [stream = mWebTransportStream, aSendGroupId]() {
+          stream->SetSendGroup(aSendGroupId);
+        }));
+  }
+  mWebTransportStream->SetSendGroup(aSendGroupId);
   return NS_OK;
 }
 

@@ -6,6 +6,7 @@ package org.mozilla.fenix.tabgroups
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -38,12 +39,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import mozilla.components.browser.state.state.createTab
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.TabThumbnailImageData
 import org.mozilla.fenix.tabstray.TabsTrayTestTag
 import org.mozilla.fenix.tabstray.data.TabGroupTheme
 import org.mozilla.fenix.tabstray.data.TabsTrayItem
+import org.mozilla.fenix.tabstray.data.createTab
+import org.mozilla.fenix.tabstray.ui.tabitems.MediaPlaybackIndicator
 import org.mozilla.fenix.tabstray.ui.tabitems.TabsTrayItemSelectionState
 import org.mozilla.fenix.tabstray.ui.tabitems.tablistItemThumbnailBorder
 import org.mozilla.fenix.theme.FirefoxTheme
@@ -72,52 +74,53 @@ fun TabGroupRow(
     trailingContentColor: Color? = null,
     shouldClickListen: Boolean = true,
 ) {
-    val tabGroupRowContentDescription = pluralStringResource(
-        id = R.plurals.add_to_exiting_tab_group_content_description,
-        count = tabGroup.tabs.size,
-        tabGroup.title,
-        tabGroup.tabs.size,
-        tabGroup.theme.contentLabel,
-    )
+    val tabGroupRowContentDescription =
+        pluralStringResource(
+            id = R.plurals.add_to_exiting_tab_group_content_description,
+            count = tabGroup.tabs.size,
+            tabGroup.title,
+            tabGroup.tabs.size,
+            tabGroup.theme.contentLabel,
+        )
 
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(enabled = shouldClickListen, onClick = onClick)
-            .testTag("${TabsTrayTestTag.TAB_GROUP_ROOT}.${tabGroup.id}")
-            .padding(
-                if (trailingContent == null) {
-                    PaddingValues(
-                        horizontal = FirefoxTheme.layout.space.dynamic200,
-                        vertical = FirefoxTheme.layout.space.static100,
-                    )
-                } else {
-                    PaddingValues(
-                        start = FirefoxTheme.layout.space.dynamic200,
-                        top = FirefoxTheme.layout.space.static100,
-                        end = 0.dp,
-                        bottom = FirefoxTheme.layout.space.static100,
-                    )
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .clickable(enabled = shouldClickListen, onClick = onClick)
+                .testTag("${TabsTrayTestTag.TAB_GROUP_ROOT}.${tabGroup.id}")
+                .padding(
+                    if (trailingContent == null) {
+                        PaddingValues(
+                            horizontal = FirefoxTheme.layout.space.dynamic200,
+                            vertical = FirefoxTheme.layout.space.static100,
+                        )
+                    } else {
+                        PaddingValues(
+                            start = FirefoxTheme.layout.space.dynamic200,
+                            top = FirefoxTheme.layout.space.static100,
+                            end = 0.dp,
+                            bottom = FirefoxTheme.layout.space.static100,
+                        )
+                    }
+                )
+                .semantics(mergeDescendants = true) {
+                    contentDescription = tabGroupRowContentDescription
+                    role = Role.Button
+                    selected = selectionState.isFocused
                 },
-            )
-            .semantics(mergeDescendants = true) {
-                contentDescription = tabGroupRowContentDescription
-                role = Role.Button
-                selected = selectionState.isFocused
-            },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(FirefoxTheme.layout.space.static200),
     ) {
         TabGroupListThumbnail(
             thumbnails = tabGroup.thumbnails,
+            isMediaActive = tabGroup.isMediaActive,
         )
 
         TabGroupTextContent(tabGroup = tabGroup, modifier = Modifier.weight(1f))
 
         trailingContent?.let { content ->
-            CompositionLocalProvider(
-                LocalContentColor provides (trailingContentColor ?: LocalContentColor.current),
-            ) {
+            CompositionLocalProvider(LocalContentColor provides (trailingContentColor ?: LocalContentColor.current)) {
                 content()
             }
         }
@@ -137,7 +140,7 @@ private fun TabGroupTextContent(
 
             Text(
                 text = tabGroup.title,
-                modifier = Modifier.clearAndSetSemantics { },
+                modifier = Modifier.clearAndSetSemantics {},
                 color = MaterialTheme.colorScheme.onSurface,
                 style = FirefoxTheme.typography.body1,
                 maxLines = 1,
@@ -148,12 +151,13 @@ private fun TabGroupTextContent(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = pluralStringResource(
-                id = R.plurals.tab_group_tabs_count_subtitle,
-                count = tabGroup.tabs.size,
-                tabGroup.tabs.size,
-            ),
-            modifier = Modifier.clearAndSetSemantics { },
+            text =
+                pluralStringResource(
+                    id = R.plurals.tab_group_tabs_count_subtitle,
+                    count = tabGroup.tabs.size,
+                    tabGroup.tabs.size,
+                ),
+            modifier = Modifier.clearAndSetSemantics {},
             color = MaterialTheme.colorScheme.secondary,
             style = FirefoxTheme.typography.caption,
             maxLines = 1,
@@ -165,42 +169,61 @@ private fun TabGroupTextContent(
 @Composable
 private fun TabGroupListThumbnail(
     thumbnails: List<TabThumbnailImageData>,
+    isMediaActive: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Card(
-        modifier = modifier
-            .size(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT),
+        modifier = modifier.size(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT),
         border = tablistItemThumbnailBorder,
         shape = MaterialTheme.shapes.extraSmall,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
     ) {
-        ThumbnailsGridView(
-            thumbnails = thumbnails,
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.extraSmall)
-                .padding(tablistItemThumbnailBorder.width) // inset to prevent spillover
-                .fillMaxSize(),
-        )
+        Box {
+            ThumbnailsGridView(
+                thumbnails = thumbnails,
+                modifier =
+                    Modifier.clip(MaterialTheme.shapes.extraSmall)
+                        .padding(tablistItemThumbnailBorder.width) // inset to prevent spillover
+                        .fillMaxSize(),
+            )
+
+            MediaPlaybackIndicator(isMediaActive = isMediaActive)
+        }
     }
 }
 
 @Preview(showBackground = true)
 @Composable
 private fun TabGroupRowPreview() {
-    val tab = TabsTrayItem.Tab(createTab("test1"))
-    val tab2 = TabsTrayItem.Tab(createTab("test2"))
-    val tab3 = TabsTrayItem.Tab(createTab("test3"))
-    val tab4 = TabsTrayItem.Tab(createTab("test4"))
+    val tab = createTab(url = "test1")
+    val tab2 = createTab(url = "test2")
+    val tab3 = createTab(url = "test3")
+    val tab4 = createTab(url = "test4")
 
     TabGroupRow(
-        tabGroup = TabsTrayItem.TabGroup(
-            title = "Tab Group",
-            theme = TabGroupTheme.default,
-            tabs = mutableListOf(tab, tab2, tab3, tab4),
-            closed = false,
-        ),
+        tabGroup =
+            TabsTrayItem.TabGroup(
+                title = "Tab Group",
+                theme = TabGroupTheme.default,
+                tabs = listOf(tab, tab2, tab3, tab4),
+                closed = false,
+            ),
+        onClick = {},
+    )
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun TabGroupRowMediaPreview() {
+    val tab = createTab(url = "test1", isMediaActive = true)
+    TabGroupRow(
+        tabGroup =
+            TabsTrayItem.TabGroup(
+                title = "Tab Group",
+                theme = TabGroupTheme.default,
+                tabs = listOf(tab),
+                closed = false,
+            ),
         onClick = {},
     )
 }

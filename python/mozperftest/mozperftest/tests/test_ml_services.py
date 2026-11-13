@@ -41,14 +41,14 @@ def test_ml_services_sets_browser_prefs():
         assert "services.settings.server" in browser_prefs
         assert (
             browser_prefs["services.settings.server"]
-            == "https://firefox.settings.services.mozilla.com/v1"
+            == "https://firefox.settings.services.mozilla.com/v2"
         )
 
         assert "network.socket.allowed_nonlocal_domains" in browser_prefs
         allowlist = browser_prefs["network.socket.allowed_nonlocal_domains"]
         assert "firefox.settings.services.mozilla.com" in allowlist
         assert "model-hub.mozilla.org" in allowlist
-        assert "mlpa-prod-prod-mozilla.global.ssl.fastly.net" in allowlist
+        assert "mlpa-prod-prod-mozilla.freetls.fastly.net" in allowlist
 
     finally:
         cleanup_ml_services(mach_cmd)
@@ -60,7 +60,7 @@ def test_ml_services_allowlist_contains_all_expected_hosts():
         "firefox-settings-attachments.cdn.mozilla.net",
         "content-signature-2.cdn.mozilla.net",
         "model-hub.mozilla.org",
-        "mlpa-prod-prod-mozilla.global.ssl.fastly.net",
+        "mlpa-prod-prod-mozilla.freetls.fastly.net",
     ]
 
     mach_cmd, metadata, env = get_running_env()
@@ -103,23 +103,30 @@ def test_ml_services_allowlist_format():
 
 
 def test_ml_services_layer_properties():
-    mach_cmd, metadata, env = get_running_env(flavor="eval-mochitest")
+    cases = (
+        ({"flavor": "mochitest"}, False),
+        ({"flavor": "mochitest", "ml_services": True}, True),
+        ({"flavor": "eval-mochitest"}, True),
+    )
 
-    try:
-        system_layers = env.layers[SYSTEM]
+    for options, expected in cases:
+        mach_cmd, metadata, env = get_running_env(**options)
 
-        ml_services_layer = None
-        for layer in system_layers.layers:
-            if isinstance(layer, MLServices):
-                ml_services_layer = layer
-                break
+        try:
+            system_layers = env.layers[SYSTEM]
 
-        assert ml_services_layer is not None
-        assert ml_services_layer.name == "ml-services"
-        assert ml_services_layer.activated is True
+            ml_services_layer = None
+            for layer in system_layers.layers:
+                if isinstance(layer, MLServices):
+                    ml_services_layer = layer
+                    break
 
-    finally:
-        shutil.rmtree(mach_cmd._mach_context.state_dir)
+            assert (ml_services_layer is not None) is expected
+            if ml_services_layer:
+                assert ml_services_layer.name == "ml-services"
+
+        finally:
+            shutil.rmtree(mach_cmd._mach_context.state_dir)
 
 
 def test_ml_services_returns_metadata():

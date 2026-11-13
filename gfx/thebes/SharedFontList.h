@@ -5,8 +5,9 @@
 #ifndef SharedFontList_h
 #define SharedFontList_h
 
-#include "gfxFontEntry.h"
 #include <atomic>
+
+#include "gfxFontEntry.h"
 
 class gfxCharacterMap;
 struct gfxFontStyle;
@@ -38,7 +39,7 @@ struct Pointer {
  public:
   static Pointer Null() { return Pointer(); }
 
-  Pointer() : mBlockAndOffset(kNullValue) {}
+  Pointer() = default;
 
   Pointer(uint32_t aBlock, uint32_t aOffset)
       : mBlockAndOffset((aBlock << kBlockShift) | aOffset) {
@@ -61,10 +62,6 @@ struct Pointer {
    * that may run in child processes must be prepared to handle this.
    */
   bool IsNull() const { return mBlockAndOffset == kNullValue; }
-
-  uint32_t Block() const { return mBlockAndOffset >> kBlockShift; }
-
-  uint32_t Offset() const { return mBlockAndOffset & kOffsetMask; }
 
   /**
    * Convert a fontlist::Pointer to a standard C++ pointer. This requires the
@@ -102,7 +99,7 @@ struct Pointer {
   // We store the block index and the offset within the block as a single
   // atomic 32-bit value so we can safely modify a Pointer without other
   // processes seeing a broken (partially-updated) value.
-  std::atomic<uint32_t> mBlockAndOffset;
+  std::atomic<uint32_t> mBlockAndOffset{kNullValue};
 };
 
 /**
@@ -175,7 +172,7 @@ struct Face {
 #endif
     bool mFixedPitch;                  // is the face fixed-pitch (monospaced)?
     mozilla::WeightRange mWeight;      // CSS font-weight value
-    mozilla::StretchRange mStretch;    // CSS font-stretch value
+    mozilla::WidthRange mWidth;        // CSS font-width value
     mozilla::SlantStyleRange mStyle;   // CSS font-style value
     RefPtr<gfxCharacterMap> mCharMap;  // character map, or null if not loaded
   };
@@ -190,7 +187,7 @@ struct Face {
 #endif
         mFixedPitch(aData.mFixedPitch),
         mWeight(aData.mWeight),
-        mStretch(aData.mStretch),
+        mWidth(aData.mWidth),
         mStyle(aData.mStyle),
         mCharacterMap(Pointer::Null()) {
   }
@@ -209,7 +206,7 @@ struct Face {
 #endif
   bool mFixedPitch;
   mozilla::WeightRange mWeight;
-  mozilla::StretchRange mStretch;
+  mozilla::WidthRange mWidth;
   mozilla::SlantStyleRange mStyle;
   Pointer mCharacterMap;
 };

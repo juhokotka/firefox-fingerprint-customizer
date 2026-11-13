@@ -20,6 +20,12 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "canvasMaxSize",
   "gfx.canvas.max-size"
 );
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "compositorReadback",
+  "remote.screenshot.use_readback",
+  false
+);
 
 const CONTEXT_2D = "2d";
 const BG_COLOUR = "rgb(255,255,255)";
@@ -59,13 +65,22 @@ capture.Format = {
  * @param {number=} options.flags
  *     Optional integer representing flags to pass to drawWindow; these
  *     are defined on CanvasRenderingContext2D.
+ * @param {number=} options.maxHeight
+ *     Maximum height of the resulting canvas in pixels.
+ * @param {number=} options.maxWidth
+ *     Maximum width of the resulting canvas in pixels.
  * @param {number=} options.dX
  *     Horizontal offset between the browser window and content area. Defaults to 0.
  * @param {number=} options.dY
  *     Vertical offset between the browser window and content area. Defaults to 0.
  * @param {boolean=} options.readback
  *     If true, read back a snapshot of the pixel data currently in the
- *     compositor/window. Defaults to false.
+ *     compositor/window. Defaults to false, unless the
+ *     `remote.screenshot.use_readback` preference is set.
+ * @param {boolean=} options.drawView
+ *     If true, the rectangle is relative to the visible viewport rather than to
+ *     the page, and view level rendering such as the root scrollbars is
+ *     included. Ignored when reading back. Defaults to false.
  *
  * @returns {HTMLCanvasElement}
  *     The canvas on which the selection from the window's framebuffer
@@ -78,14 +93,47 @@ capture.canvas = async function (
   top,
   width,
   height,
-  { canvas = null, flags = null, dX = 0, dY = 0, readback = false } = {}
+  {
+    canvas = null,
+    flags = null,
+    maxHeight = null,
+    maxWidth = null,
+    dX = 0,
+    dY = 0,
+    readback = false,
+    drawView = false,
+  } = {}
 ) {
+  if (lazy.compositorReadback && !readback) {
+    // Readback can only return the content area composited on screen, and its
+    // coordinates are relative to the chrome window rather than the document,
+    // so any requested region degrades to the whole content area.
+    const browser = browsingContext.top.embedderElement;
+    if (browser) {
+      readback = true;
+      ({ left, top, width, height } = browser.getBoundingClientRect());
+    }
+  }
+
   // FIXME(bug 1761032): This looks a bit sketchy, overrideDPPX doesn't
   // influence rendering...
-  const scale = browsingContext.overrideDPPX || win.devicePixelRatio;
+  const devicePixelRatio = browsingContext.overrideDPPX || win.devicePixelRatio;
+  let scale = devicePixelRatio;
 
-  const canvasHeight = height * scale;
-  const canvasWidth = width * scale;
+  if (maxWidth !== null) {
+    scale = Math.min(scale, maxWidth / width);
+  }
+  if (maxHeight !== null) {
+    scale = Math.min(scale, maxHeight / height);
+  }
+
+  const isDownscaled = scale < devicePixelRatio;
+  const canvasHeight = isDownscaled
+    ? Math.max(1, Math.round(height * scale))
+    : height * scale;
+  const canvasWidth = isDownscaled
+    ? Math.max(1, Math.round(width * scale))
+    : width * scale;
   const canvasArea = canvasWidth * canvasHeight;
 
   if (canvasWidth > lazy.canvasMaxSize) {
@@ -124,17 +172,26 @@ capture.canvas = async function (
       }
 
       // drawWindow doesn't take scaling into account.
-      ctx.scale(scale, scale);
+      if (isDownscaled) {
+        ctx.scale(canvasWidth / width, canvasHeight / height);
+      } else {
+        ctx.scale(scale, scale);
+      }
       ctx.drawWindow(win, left + dX, top + dY, width, height, BG_COLOUR, flags);
     } else {
       let rect = new DOMRect(left, top, width, height);
       let snapshot = await browsingContext.currentWindowGlobal.drawSnapshot(
         rect,
         scale,
-        BG_COLOUR
+        BG_COLOUR,
+        { drawView }
       );
 
-      ctx.drawImage(snapshot, 0, 0);
+      if (isDownscaled) {
+        ctx.drawImage(snapshot, 0, 0, canvasWidth, canvasHeight);
+      } else {
+        ctx.drawImage(snapshot, 0, 0);
+      }
 
       // Bug 1574935 - Huge dimensions can trigger an OOM because multiple copies
       // of the bitmap will exist in memory. Force the removal of the snapshot

@@ -3,16 +3,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
-
 #include "HttpBackgroundChannelParent.h"
 
 #include "HttpChannelParent.h"
-#include "mozilla/ipc/BackgroundParent.h"
+#include "HttpLog.h"
 #include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/net/BackgroundChannelRegistrar.h"
 #include "mozilla/net/ChannelEventQueue.h"
 #include "nsNetCID.h"
+#include "nsProxyRelease.h"
 #include "nsQueryObject.h"
 #include "nsThreadUtils.h"
 
@@ -494,6 +494,7 @@ auto HttpBackgroundChannelParent::AttachStreamFilter(
 auto HttpBackgroundChannelParent::DetachStreamFilters()
     -> RefPtr<GenericPromise> {
   LOG(("HttpBackgroundChannelParent::DetachStreamFilters [this=%p]\n", this));
+  MOZ_ASSERT(IsOnBackgroundThread());
   if (NS_WARN_IF(!mIPCOpened) || !SendDetachStreamFilters()) {
     return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
   }
@@ -509,18 +510,26 @@ void HttpBackgroundChannelParent::ActorDestroy(ActorDestroyReason aWhy) {
   mIPCOpened = false;
 
   RefPtr<HttpBackgroundChannelParent> self = this;
-  DebugOnly<nsresult> rv = NS_DispatchToMainThread(NS_NewRunnableFunction(
-      "net::HttpBackgroundChannelParent::ActorDestroy", [self]() {
-        MOZ_ASSERT(NS_IsMainThread());
+  nsresult rv = NS_DispatchToMainThread(
+      NS_NewRunnableFunction("net::HttpBackgroundChannelParent::ActorDestroy",
+                             [self]() {
+                               MOZ_ASSERT(NS_IsMainThread());
 
-        RefPtr<HttpChannelParent> channelParent =
-            std::move(self->mChannelParent);
+                               RefPtr<HttpChannelParent> channelParent =
+                                   std::move(self->mChannelParent);
 
-        if (channelParent) {
-          channelParent->OnBackgroundParentDestroyed();
-        }
-      }));
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
+                               if (channelParent) {
+                                 channelParent->OnBackgroundParentDestroyed();
+                               }
+                             }),
+      NS_DISPATCH_FALLIBLE);
+  if (NS_FAILED(rv)) {
+    // HttpChannelParent is not thread-safe refcounted, so don't let it be
+    // released here when the main thread is gone.
+    nsCOMPtr<nsIParentChannel> channelParent = mChannelParent.forget();
+    NS_ReleaseOnMainThread("HttpBackgroundChannelParent::mChannelParent",
+                           channelParent.forget());
+  }
 }
 
 }  // namespace net

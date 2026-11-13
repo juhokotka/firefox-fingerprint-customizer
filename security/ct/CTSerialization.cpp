@@ -3,10 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CTSerialization.h"
-#include "CTUtils.h"
 
 #include <stdint.h>
+
 #include <type_traits>
+
+#include "CTUtils.h"
 
 namespace mozilla {
 namespace ct {

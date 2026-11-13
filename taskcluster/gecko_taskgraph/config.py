@@ -69,6 +69,15 @@ class PartnerUrlsConfig(Schema, kw_only=True):
         Optional[str],
         use_msgspec=True,
     )
+    enterprise_repack: Optional[
+        optionally_keyed_by(
+            "release-product",
+            "release-level",
+            "release-type",
+            Optional[str],
+            use_msgspec=True,
+        )
+    ] = None
     release_partner_attribution: Optional[
         optionally_keyed_by(
             "release-product",
@@ -169,7 +178,9 @@ class GraphConfigSchema(Schema, kw_only=True):
     try_: TryConfig
     release_promotion: ReleasePromotionConfig
     scriptworker: ScriptworkerConfig
-    task_priority: optionally_keyed_by("project", TaskPriority, use_msgspec=True)
+    task_priority: optionally_keyed_by(
+        "project", "shipping", TaskPriority, use_msgspec=True
+    )
     partner_urls: PartnerUrlsConfig
     workers: WorkersConfig
     mac_signing: MacSigningConfig

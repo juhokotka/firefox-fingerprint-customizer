@@ -4,6 +4,7 @@
 
 #include "mozilla/TextInputProcessor.h"
 
+#include "mozilla/AutoRestore.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/NativeKeyBindingsType.h"
@@ -397,7 +398,8 @@ nsresult TextInputProcessor::BeginInputTransactionInternal(
   // And also if another instance is composing with the new dispatcher or
   // dispatching an event, it'll fail to steal its ownership.  Then, we should
   // not throw an exception, just return false.
-  if (dispatcher->IsComposing() || dispatcher->IsDispatchingEvent()) {
+  if (NS_WARN_IF(dispatcher->IsComposing()) ||
+      NS_WARN_IF(dispatcher->IsDispatchingEvent())) {
     return NS_OK;
   }
 
@@ -707,20 +709,19 @@ TextInputProcessor::FlushPendingComposition(Event* aDOMKeyEvent,
   // was already started, we shouldn't prevent the change of composition.
   if (dispatcherResult.mDoDefault || wasComposing) {
     // Preceding keydown event may cause destroying the widget.
-    if (NS_FAILED(IsValidStateForComposition())) {
+    if (NS_WARN_IF(NS_FAILED(IsValidStateForComposition()))) {
       return NS_OK;
     }
     nsEventStatus status = nsEventStatus_eIgnore;
     rv = kungFuDeathGrip->FlushPendingComposition(status);
+    NS_WARNING_ASSERTION(
+        NS_SUCCEEDED(rv),
+        "TextEventDispatcher::FlushPendingComposition() failed");
     *aSucceeded = status != nsEventStatus_eConsumeNoDefault;
   }
 
   MaybeDispatchKeyupForComposition(keyboardEvent, aKeyFlags);
-
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-  return NS_OK;
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -910,7 +911,8 @@ TextInputProcessor::NotifyIME(TextEventDispatcher* aTextEventDispatcher,
     }
     MOZ_RELEASE_ASSERT(notification);
     bool result = false;
-    nsresult rv = mCallback->OnNotify(this, notification, &result);
+    nsCOMPtr callback = mCallback;
+    nsresult rv = callback->OnNotify(this, notification, &result);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -1857,6 +1859,24 @@ uint32_t TextInputProcessor::GuessKeyCodeOfPrintableKeyInUSEnglishLayout(
   }
 }
 
+NS_IMETHODIMP TextInputProcessor::BeginTextEventDispatcherBatchForTests() {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+  if (NS_WARN_IF(!mDispatcher) || NS_WARN_IF(!mForTests)) {
+    return NS_ERROR_FAILURE;
+  }
+  mDispatcher->BeginBatch();
+  return NS_OK;
+}
+
+NS_IMETHODIMP TextInputProcessor::EndTextEventDispatcherBatchForTests() {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+  if (NS_WARN_IF(!mDispatcher) || NS_WARN_IF(!mForTests)) {
+    return NS_ERROR_FAILURE;
+  }
+  RefPtr<TextEventDispatcher> dispatcher = mDispatcher;
+  return dispatcher->EndBatch();
+}
+
 /******************************************************************************
  * TextInputProcessor::AutoPendingCompositionResetter
  ******************************************************************************/
@@ -1916,6 +1936,39 @@ void TextInputProcessor::ModifierKeyDataArray::ToggleModifierKey(
     return;
   }
   RemoveElementAt(index);
+}
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TextInputProcessorListener)
+  NS_INTERFACE_MAP_ENTRY(nsITextInputProcessorListener)
+  NS_INTERFACE_MAP_ENTRY(nsITextInputProcessorCallback)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
+NS_IMPL_CYCLE_COLLECTING_ADDREF(TextInputProcessorListener)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(TextInputProcessorListener)
+NS_IMPL_CYCLE_COLLECTION(TextInputProcessorListener, mCallback)
+
+NS_IMETHODIMP TextInputProcessorListener::OnNotify(
+    nsITextInputProcessor* aTextInputProcessor,
+    nsITextInputProcessorNotification* aNotification, bool* aRetVal) {
+  if (!mCallback) {
+    return NS_OK;
+  }
+  AutoRestore restore(mNotification);
+  mNotification = aNotification;
+  nsCOMPtr callback = mCallback;
+  return callback->OnNotify(aRetVal);
+}
+
+NS_IMETHODIMP TextInputProcessorListener::GetNotification(
+    nsITextInputProcessorNotification** aRetVal) {
+  NS_IF_ADDREF(*aRetVal = mNotification);
+  return NS_OK;
+}
+
+NS_IMETHODIMP TextInputProcessorListener::SetCallback(
+    nsITextInputProcessorListenerCallback* aCallback) {
+  mCallback = aCallback;
+  return NS_OK;
 }
 
 }  // namespace mozilla

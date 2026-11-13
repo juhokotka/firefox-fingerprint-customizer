@@ -5,10 +5,15 @@
 We document here the decision making and planning around when we update the
 various toolchains used and required to build Firefox.
 
+## Toolchain freeze period
+
+Toolchains shall not be updated during the period starting 7 days before a
+merge day until said merge day.
+
 ## Rust
 
 The Rust update policy is documented in a
-{ref}`separate document<Rust Update Policy>`.
+{doc}`separate document </writing-rust-code/update-policy>`.
 
 ## Clang
 

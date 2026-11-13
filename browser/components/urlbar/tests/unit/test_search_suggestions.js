@@ -15,7 +15,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
 const SUGGEST_PREF = "browser.urlbar.suggest.searches";
 const SUGGEST_ENABLED_PREF = "browser.search.suggest.enabled";
 const PRIVATE_ENABLED_PREF = "browser.search.suggest.enabled.private";
-const PRIVATE_SEARCH_PREF = "browser.search.separatePrivateDefault.ui.enabled";
+const PRIVATE_SEARCH_PREF = "browser.search.separatePrivateDefault.featureGate";
 const TAB_TO_SEARCH_PREF = "browser.urlbar.suggest.engines";
 const TRENDING_PREF = "browser.urlbar.trending.featureGate";
 const QUICKACTIONS_PREF = "browser.urlbar.suggest.quickactions";
@@ -112,18 +112,18 @@ function setResultGroups(groups) {
       {
         maxResultCount: 1,
         children: [
-          { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TEST },
-          { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_EXTENSION },
-          { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_SEARCH_TIP },
-          { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_OMNIBOX },
-          { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_AUTOFILL },
-          { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE },
-          { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_FALLBACK },
+          { group: UrlbarShared.RESULT_GROUP.HEURISTIC_TEST },
+          { group: UrlbarShared.RESULT_GROUP.HEURISTIC_EXTENSION },
+          { group: UrlbarShared.RESULT_GROUP.HEURISTIC_SEARCH_TIP },
+          { group: UrlbarShared.RESULT_GROUP.HEURISTIC_OMNIBOX },
+          { group: UrlbarShared.RESULT_GROUP.HEURISTIC_AUTOFILL },
+          { group: UrlbarShared.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE },
+          { group: UrlbarShared.RESULT_GROUP.HEURISTIC_FALLBACK },
         ],
       },
       // extensions using the omnibox API
       {
-        group: UrlbarUtils.RESULT_GROUP.OMNIBOX,
+        group: UrlbarShared.RESULT_GROUP.OMNIBOX,
       },
       ...groups,
     ],
@@ -202,6 +202,31 @@ add_task(async function disabled_allSuggestions() {
       }),
     ],
   });
+  await cleanUpSuggestions();
+});
+
+// The searchbar shows form history even when remote suggestions are disabled.
+add_task(async function disabled_allSuggestions_searchbar() {
+  Services.prefs.setBoolPref(SUGGEST_PREF, true);
+  Services.prefs.setBoolPref(SUGGEST_ENABLED_PREF, false);
+
+  for (let isPrivate of [false, true]) {
+    let context = createContext(SEARCH_STRING, {
+      isPrivate,
+      sapName: "searchbar",
+    });
+    await check_results({
+      context,
+      matches: [
+        makeSearchResult(context, {
+          engineName: SUGGESTIONS_ENGINE_NAME,
+          heuristic: true,
+        }),
+        ...makeFormHistoryResults(context, MAX_RESULTS - 1),
+      ],
+    });
+  }
+
   await cleanUpSuggestions();
 });
 
@@ -778,28 +803,28 @@ add_task(async function mixup_frecency() {
     {
       maxResultCount: 1,
       children: [
-        { group: UrlbarUtils.RESULT_GROUP.FORM_HISTORY },
-        { group: UrlbarUtils.RESULT_GROUP.REMOTE_SUGGESTION },
+        { group: UrlbarShared.RESULT_GROUP.FORM_HISTORY },
+        { group: UrlbarShared.RESULT_GROUP.REMOTE_SUGGESTION },
       ],
     },
     // 5 general
     {
       maxResultCount: 5,
-      group: UrlbarUtils.RESULT_GROUP.GENERAL,
+      group: UrlbarShared.RESULT_GROUP.GENERAL,
     },
     // 1 suggestion
     {
       maxResultCount: 1,
       children: [
-        { group: UrlbarUtils.RESULT_GROUP.FORM_HISTORY },
-        { group: UrlbarUtils.RESULT_GROUP.REMOTE_SUGGESTION },
+        { group: UrlbarShared.RESULT_GROUP.FORM_HISTORY },
+        { group: UrlbarShared.RESULT_GROUP.REMOTE_SUGGESTION },
       ],
     },
     // remaining general
-    { group: UrlbarUtils.RESULT_GROUP.GENERAL },
+    { group: UrlbarShared.RESULT_GROUP.GENERAL },
     // remaining suggestions
-    { group: UrlbarUtils.RESULT_GROUP.FORM_HISTORY },
-    { group: UrlbarUtils.RESULT_GROUP.REMOTE_SUGGESTION },
+    { group: UrlbarShared.RESULT_GROUP.FORM_HISTORY },
+    { group: UrlbarShared.RESULT_GROUP.REMOTE_SUGGESTION },
   ]);
 
   // Do an unrestricted search to make sure everything appears in it, including

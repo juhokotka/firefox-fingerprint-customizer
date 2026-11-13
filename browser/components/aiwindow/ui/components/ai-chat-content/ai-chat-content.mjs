@@ -2,8 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { html, nothing } from "chrome://global/content/vendor/lit.all.mjs";
+import {
+  html,
+  nothing,
+  repeat,
+} from "chrome://global/content/vendor/lit.all.mjs";
 import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
+import { isTabGroupMember } from "chrome://browser/content/urlbar/SmartbarMentionUtils.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://browser/content/aiwindow/components/assistant-message-footer.mjs";
 // eslint-disable-next-line import/no-unassigned-import
@@ -11,34 +16,70 @@ import "chrome://browser/content/aiwindow/components/chat-assistant-error.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://browser/content/aiwindow/components/chat-assistant-loader.mjs";
 // eslint-disable-next-line import/no-unassigned-import
+import "chrome://browser/content/aiwindow/components/chat-assistant-citations.mjs";
+// eslint-disable-next-line import/no-unassigned-import
 import "chrome://browser/content/aiwindow/components/website-chip-container.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://browser/content/aiwindow/components/ai-website-confirmation.mjs";
 // eslint-disable-next-line import/no-unassigned-import
+import "chrome://browser/content/aiwindow/components/ai-chat-message.mjs";
+// eslint-disable-next-line import/no-unassigned-import
+import "chrome://browser/content/aiwindow/components/ai-action-confirmation.mjs";
+// eslint-disable-next-line import/no-unassigned-import
 import "chrome://browser/content/aiwindow/components/kit-mention.mjs";
+// eslint-disable-next-line import/no-unassigned-import
+import "chrome://browser/content/aiwindow/components/agent-monitor-item.mjs";
+// eslint-disable-next-line import/no-unassigned-import
+import "chrome://global/content/elements/moz-textarea.mjs";
+import {
+  dispatchClientError,
+  installClientErrorListeners,
+} from "chrome://browser/content/aiwindow/modules/ClientErrorTelemetry.mjs";
+import { STATE_CHOOSE } from "chrome://browser/content/aiwindow/components/aitab-tool-ui.mjs";
+
+/**
+ * @typedef {import("chrome://browser/content/aiwindow/components/ai-action-confirmation.mjs").TabSelectionData} TabSelectionData
+ */
 
 const FOLLOW_UP_QTY = 2;
+// Stand-in "error" for invalid message data, which has no error object of its
+// own. Reusing one object lets dispatchClientError's dedup skip a burst of
+// repeated invalid-data reports instead of sending an IPC message each time.
+const INVALID_MESSAGE_DATA = {};
 /**
  * UI labels for tool results and follow-ups.
  */
 const UI_TYPES = {
+  AITAB: "aitab",
   WEBSITE_CONFIRMATION: "website-confirmation",
   TAB_GROUP_CONFIRMATION: "tab-group-confirmation",
   AI_ACTION_RESULT: "ai-action-result",
   CANCELLED_COMPONENT: "cancelled-component",
   ACTION_LOG: "action-log",
   RETRY_COMPONENT: "retry-component",
+  AGENT_MONITOR: "agent-monitor-item",
 };
 /**
  * UI update types for communicating user interactions with tool UIs back to the actor.
  */
 const UI_UPDATE_TYPES = {
+  OPEN_AITAB: "open-aitab",
   CONFIRMATION_TAB_SELECTION: "confirmation-tab-selection",
   CANCEL_TAB_SELECTION: "cancel-tab-selection",
   CONFIRM_TAB_GROUP_SELECTION: "confirm-tab-group-selection",
+  CONFIRM_OPEN_AND_GROUP_TABS_SELECTION:
+    "confirm-open-and-group-tabs-selection",
+  TOGGLE_ALL_TAB_SELECTION: "toggle-all-tab-selection",
   UNDO_TAB_CLOSE: "undo-tab-close",
   UNDO_TAB_GROUP: "undo-tab-group",
   RETRY_PROMPT: "retry-prompt",
+  CREATE_WATCH: "create-watch",
+  CANCEL_WATCH: "cancel-watch",
+  UPDATE_WATCH: "update-watch",
+  DELETE_WATCH: "delete-watch",
+  PAUSE_WATCH: "pause-watch",
+  CHECK_WATCH: "check-watch",
+  SAVE_WATCH_DRAFT: "save-watch-draft",
 };
 
 const CONFIRMATION_UI_TYPES = [
@@ -48,10 +89,40 @@ const CONFIRMATION_UI_TYPES = [
 
 /**
  * Map action types to their corresponding undo update types
+ *
+ * open_tabs is deliberately absent - every outcome (opening a tab,
+ * switching to one, or opening+grouping a mix of new and already-open
+ * tabs) is trivially reversible through normal browsing (back button,
+ * switching back, closing/ungrouping), unlike close_tabs where undo
+ * exists to prevent real data loss. canUndo below checks for an entry
+ * here, so its button correctly doesn't render for open_tabs.
  */
 const ACTION_TYPE_TO_UNDO_UPDATE_TYPE = {
   close_tabs: UI_UPDATE_TYPES.UNDO_TAB_CLOSE,
   group_tabs: UI_UPDATE_TYPES.UNDO_TAB_GROUP,
+};
+
+/**
+ * Per-actionType config for the tab-group confirmation card: which l10n
+ * strings the confirm button uses, and which update type submitting it
+ * dispatches. Add a new entry here to support another action type -
+ * #renderTabGroupConfirmation itself shouldn't need to change.
+ */
+const TAB_GROUP_ACTION_CONFIG = {
+  group_tabs: {
+    confirmActionL10n: {
+      disabled: "smart-window-confirm-group-tab",
+      enabled: "smart-window-confirm-group-tabs",
+    },
+    updateType: UI_UPDATE_TYPES.CONFIRM_TAB_GROUP_SELECTION,
+  },
+  open_tabs: {
+    confirmActionL10n: {
+      disabled: "smart-window-confirm-open-tab",
+      enabled: "smart-window-confirm-open-tabs",
+    },
+    updateType: UI_UPDATE_TYPES.CONFIRM_OPEN_AND_GROUP_TABS_SELECTION,
+  },
 };
 
 /**
@@ -80,13 +151,19 @@ export class AIChatContent extends MozLitElement {
 
   #lastScrollReq = null;
   #overflowObserver = null;
+  #overflowRafId = null;
   #scrollHandler = null;
-  #scrollClickHandler = null;
+  #jumpClickHandler = null;
   #scrollRafId = null;
+  #removeClientErrorListeners = null;
   #pendingAnnouncementMessageId = null;
   #scrollPositions = new Map();
   #actionResultExpandState = new Map();
   #uiRenderMap = null;
+  // English fallback until connectedCallback()'s l10n lookup resolves.
+  #defaultTabGroupLabel = "Tab Group";
+  // Identity of the agent-monitor "create" card we have already auto-focused
+  #focusedMonitorCardId = null;
 
   constructor() {
     super();
@@ -99,6 +176,7 @@ export class AIChatContent extends MozLitElement {
 
     // Initialize UI render map
     this.#uiRenderMap = {
+      [UI_TYPES.AITAB]: msg => this.#renderAITab(msg),
       [UI_TYPES.TAB_GROUP_CONFIRMATION]: msg =>
         this.#renderTabGroupConfirmation(msg),
       [UI_TYPES.WEBSITE_CONFIRMATION]: msg =>
@@ -106,6 +184,7 @@ export class AIChatContent extends MozLitElement {
       [UI_TYPES.AI_ACTION_RESULT]: msg => this.#renderActionResult(msg),
       [UI_TYPES.CANCELLED_COMPONENT]: () => this.#renderCancelledComponent(),
       [UI_TYPES.RETRY_COMPONENT]: msg => this.#renderRetryComponent(msg),
+      [UI_TYPES.AGENT_MONITOR]: msg => this.#renderAgentMonitorComponent(msg),
     };
 
     /**
@@ -134,14 +213,75 @@ export class AIChatContent extends MozLitElement {
     this.#initFooterActionListeners();
     this.#initOverflowObserver();
     this.#initScrollListener();
+    this.#removeClientErrorListeners = installClientErrorListeners(
+      window,
+      (error, source) => dispatchClientError(this, error, source)
+    );
     this.#scrollPositions.clear();
+
+    this.ownerDocument.l10n
+      .formatValue("smart-window-default-tab-group-label")
+      .then(label => {
+        if (label) {
+          this.#defaultTabGroupLabel = label;
+          this.requestUpdate();
+        }
+      })
+      .catch(() => {});
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     this.#overflowObserver?.disconnect();
     this.#overflowObserver = null;
+    if (this.#overflowRafId) {
+      cancelAnimationFrame(this.#overflowRafId);
+      this.#overflowRafId = null;
+    }
     this.#teardownScrollListener();
+    this.#removeClientErrorListeners?.();
+    this.#removeClientErrorListeners = null;
+  }
+
+  updated(changedProperties) {
+    super.updated(changedProperties);
+    this.#maybeFocusAgentMonitorCard();
+  }
+
+  /**
+   * Give keyboard users an immediate focus target when a new agent-monitor
+   * "create" card is seeded into the chat (e.g. from a /watch command)
+   */
+  #maybeFocusAgentMonitorCard() {
+    const card = this.conversationState.findLast(
+      msg =>
+        msg?.toolUIData?.uiType === UI_TYPES.AGENT_MONITOR &&
+        (msg.toolUIData.properties?.mode ?? "create") === "create" &&
+        !msg.isRestored
+    );
+    if (!card) {
+      return;
+    }
+    const cardId = card.toolUIData.toolCallId ?? card.messageId;
+    if (cardId == null || this.#focusedMonitorCardId === cardId) {
+      return;
+    }
+    this.#focusedMonitorCardId = cardId;
+    this.#focusMonitorNameInput(cardId);
+  }
+
+  async #focusMonitorNameInput(cardId) {
+    const item = this.shadowRoot?.querySelector(
+      `agent-monitor-item[data-tool-call-id="${CSS.escape(cardId)}"]`
+    );
+    if (!item) {
+      return;
+    }
+    await item.updateComplete;
+    // The card can be submitted or cancelled while it renders.
+    if (item.isConnected && item.getAttribute("mode") === "create") {
+      item.focusName();
+    }
   }
 
   #dispatchAction(action, detail) {
@@ -157,10 +297,18 @@ export class AIChatContent extends MozLitElement {
     );
   }
 
+  // ai-window sends its mode (sidebar/fullpage) over the actor once the content
+  // is ready; reflect it as an attribute so styles can key off it.
+  #handleSetMode(event) {
+    const mode = event.detail?.mode;
+    if (mode) {
+      this.setAttribute("mode", mode);
+    }
+  }
+
   /**
    * Initialize event listeners for AI chat content events
    */
-
   #initEventListeners() {
     this.addEventListener(
       "aiChatContentActor:message",
@@ -190,6 +338,11 @@ export class AIChatContent extends MozLitElement {
     this.addEventListener(
       "aiChatContentActor:assets-ready",
       this.#handleAssetsReady.bind(this)
+    );
+
+    this.addEventListener(
+      "aiChatContentActor:set-mode",
+      this.#handleSetMode.bind(this)
     );
 
     this.addEventListener(
@@ -274,32 +427,79 @@ export class AIChatContent extends MozLitElement {
     this.addEventListener("thumbs-down", event => {
       this.#dispatchAction("thumbs-down", event.detail);
     });
+
+    this.addEventListener("shown", this.#onPanelShown);
+  }
+
+  // panel-list positions itself against the viewport and is unaware of the
+  // chrome chat header. If it opens into the header area, it can be covered and
+  // intercept header clicks, so shift it below the header.
+  #onPanelShown = event => {
+    const panel = event.composedPath()[0];
+    if (panel?.localName !== "panel-list") {
+      return;
+    }
+
+    const bounds = panel.getBoundingClientRect();
+    const overlap = this.#topSpacing() - bounds.top;
+    if (overlap <= 0) {
+      return;
+    }
+
+    panel.style.top = `${(parseFloat(panel.style.top) || 0) + overlap}px`;
+    const height =
+      panel.getAttribute("valign") === "top"
+        ? bounds.height - overlap
+        : window.innerHeight - (bounds.top + overlap);
+    panel.style.maxHeight = `${Math.max(0, height)}px`;
+  };
+
+  // How much of the viewport's top edge the floating chat header covers, read
+  // off the space the chat list already reserves for it.
+  #topSpacing() {
+    const innerWrapper = this.shadowRoot?.querySelector(".chat-inner-wrapper");
+    if (!innerWrapper) {
+      return 0;
+    }
+    return parseFloat(getComputedStyle(innerWrapper).paddingBlockStart) || 0;
   }
 
   #initOverflowObserver() {
-    this.#overflowObserver = new ResizeObserver(() => {
-      const wrapper = this.shadowRoot.querySelector(".chat-content-wrapper");
-      const innerWrapper = this.shadowRoot.querySelector(".chat-inner-wrapper");
-
-      if (!wrapper || !innerWrapper) {
-        return;
-      }
-
-      const hasContent = innerWrapper.children.length;
-      // Use a 10px threshold to avoid false positives from layout differences
-      const thresholdPadding = 10;
-
-      wrapper.toggleAttribute(
-        "overflowing",
-        hasContent &&
-          wrapper.scrollHeight > wrapper.clientHeight + thresholdPadding
-      );
-    });
+    this.#overflowObserver = new ResizeObserver(() =>
+      this.#updateOverflowState()
+    );
     this.updateComplete.then(() => {
       this.#overflowObserver.observe(
         this.shadowRoot.querySelector(".chat-inner-wrapper")
       );
     });
+  }
+
+  /**
+   * Toggle the scroll container's `overflowing` attribute (which drives the
+   * scroll fades) to match whether it actually scrolls, and recompute the
+   * jump-to-bottom button, which no scroll event covers when the change came
+   * from content rather than from scrolling.
+   */
+  #updateOverflowState() {
+    const wrapper = this.#wrapper;
+    const innerWrapper = this.shadowRoot?.querySelector(".chat-inner-wrapper");
+
+    if (!wrapper || !innerWrapper) {
+      return;
+    }
+
+    const hasContent = innerWrapper.children.length;
+    // Use a 10px threshold to avoid false positives from layout differences
+    const thresholdPadding = 10;
+
+    wrapper.toggleAttribute(
+      "overflowing",
+      hasContent &&
+        wrapper.scrollHeight > wrapper.clientHeight + thresholdPadding
+    );
+
+    this.#updateJumpButtonState();
   }
 
   get #wrapper() {
@@ -316,8 +516,8 @@ export class AIChatContent extends MozLitElement {
         return;
       }
       const wrapper = this.#wrapper;
-      const btn = this.#jumpButton;
-      if (!wrapper || !btn) {
+      const jumpButton = this.#jumpButton;
+      if (!wrapper || !jumpButton) {
         return;
       }
       this.#scrollHandler = () => {
@@ -326,26 +526,35 @@ export class AIChatContent extends MozLitElement {
         }
         this.#scrollRafId = requestAnimationFrame(() => {
           this.#scrollRafId = null;
-          const distanceFromBottom =
-            wrapper.scrollHeight - wrapper.scrollTop - wrapper.clientHeight;
-          const threshold = wrapper.clientHeight * 0.5;
-          const show = distanceFromBottom > threshold;
-          const atBottom = distanceFromBottom < 1;
-          if (btn.hasAttribute("visible") !== show) {
-            btn.toggleAttribute("visible", show);
-            btn.toggleAttribute("disabled", !show);
-          }
-          if (wrapper.hasAttribute("scrolled-to-bottom") !== atBottom) {
-            wrapper.toggleAttribute("scrolled-to-bottom", atBottom);
-          }
+          this.#updateJumpButtonState();
         });
       };
-      this.#scrollClickHandler = () => {
+      this.#jumpClickHandler = () => {
         wrapper.scrollTop = wrapper.scrollHeight;
       };
       wrapper.addEventListener("scroll", this.#scrollHandler);
-      btn.addEventListener("click", this.#scrollClickHandler);
+      jumpButton.addEventListener("click", this.#jumpClickHandler);
     });
+  }
+
+  #updateJumpButtonState() {
+    const wrapper = this.#wrapper;
+    const jumpButton = this.#jumpButton;
+    if (!wrapper || !jumpButton) {
+      return;
+    }
+    const distanceFromBottom =
+      wrapper.scrollHeight - wrapper.scrollTop - wrapper.clientHeight;
+    const threshold = wrapper.clientHeight * 0.5;
+    const show = distanceFromBottom > threshold;
+    const atBottom = distanceFromBottom < 1;
+    if (jumpButton.hasAttribute("visible") !== show) {
+      jumpButton.toggleAttribute("visible", show);
+      jumpButton.toggleAttribute("disabled", !show);
+    }
+    if (wrapper.hasAttribute("scrolled-to-bottom") !== atBottom) {
+      wrapper.toggleAttribute("scrolled-to-bottom", atBottom);
+    }
   }
 
   #teardownScrollListener() {
@@ -357,9 +566,9 @@ export class AIChatContent extends MozLitElement {
       this.#wrapper?.removeEventListener("scroll", this.#scrollHandler);
       this.#scrollHandler = null;
     }
-    if (this.#scrollClickHandler) {
-      this.#jumpButton?.removeEventListener("click", this.#scrollClickHandler);
-      this.#scrollClickHandler = null;
+    if (this.#jumpClickHandler) {
+      this.#jumpButton?.removeEventListener("click", this.#jumpClickHandler);
+      this.#jumpClickHandler = null;
     }
   }
 
@@ -405,6 +614,14 @@ export class AIChatContent extends MozLitElement {
 
   messageEvent(event) {
     const message = event.detail;
+
+    // Only bail on shapes that can't be handled at all (null, non-object).
+    // Unknown roles fall through to the switch's default arm below, so adding
+    // a new role doesn't require touching telemetry.
+    if (!message || typeof message !== "object") {
+      dispatchClientError(this, INVALID_MESSAGE_DATA, "message-data");
+      return;
+    }
 
     if (message?.content?.isError) {
       this.handleErrorEvent(message?.content);
@@ -470,22 +687,54 @@ export class AIChatContent extends MozLitElement {
       msg => msg?.messageId === messageId
     );
 
-    if (!entry?.historyResultsMap) {
+    if (!entry) {
       return;
     }
 
     let changed = false;
-    for (const { url, image, hasFavicon } of images) {
-      const record = entry.historyResultsMap.get(url);
-      if (!record) {
-        continue;
+
+    if (entry.historyResultsMap) {
+      for (const { url, image, hasFavicon } of images) {
+        const record = entry.historyResultsMap.get(url);
+        if (!record) {
+          continue;
+        }
+        if (record.image !== image) {
+          record.image = image;
+          changed = true;
+        }
+        if (record.hasFavicon !== hasFavicon) {
+          record.hasFavicon = hasFavicon;
+          changed = true;
+        }
       }
-      if (record.image !== image) {
-        record.image = image;
-        changed = true;
+      if (changed) {
+        // New Map reference so Lit sees a changed prop and ai-chat-message
+        // re-renders, in-place mutations above alone won't trigger a change
+        entry.historyResultsMap = new Map(entry.historyResultsMap);
       }
-      if (record.hasFavicon !== hasFavicon) {
-        record.hasFavicon = hasFavicon;
+    }
+
+    if (entry.citations?.length) {
+      const faviconByUrl = new Map(
+        images.map(({ url, hasFavicon }) => [url, hasFavicon])
+      );
+      let citationsChanged = false;
+      const citations = entry.citations.map(citation => {
+        if (!faviconByUrl.has(citation.url)) {
+          return citation;
+        }
+        const hasFavicon = faviconByUrl.get(citation.url);
+        // TODO (Bug 2060835): Citations get a default favicon when Places don’t
+        // already have one stored for the URL.
+        if (citation.hasFavicon === hasFavicon) {
+          return citation;
+        }
+        citationsChanged = true;
+        return { ...citation, hasFavicon };
+      });
+      if (citationsChanged) {
+        entry.citations = citations;
         changed = true;
       }
     }
@@ -494,10 +743,35 @@ export class AIChatContent extends MozLitElement {
       return;
     }
 
-    // New Map reference so Lit sees a changed prop and ai-chat-message re-renders,
-    // in-place mutations above alone won't trigger a change
-    entry.historyResultsMap = new Map(entry.historyResultsMap);
     this.requestUpdate();
+  }
+
+  /**
+   * Ask the parent to resolve favicon availability for citation URLs.
+   *
+   * @param {string} messageId
+   * @param {Array<{url: string}>} citations
+   */
+  #requestCitationFavicons(messageId, citations) {
+    const items = citations
+      .filter(citation => citation?.url && citation.hasFavicon === undefined)
+      .map(citation => ({ url: citation.url }));
+
+    if (!items.length) {
+      return;
+    }
+
+    this.dispatchEvent(
+      new CustomEvent("AIChatContent:RequestAssets", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          conversationId: this.conversationId,
+          messageId,
+          items,
+        },
+      })
+    );
   }
 
   async #restoreChatScrollPosition(convId) {
@@ -574,6 +848,10 @@ export class AIChatContent extends MozLitElement {
         assistantLastMessage.historyResultsMap = new Map(
           records.map(record => [record.url, record])
         );
+      }
+      if (message.citations?.length) {
+        assistantLastMessage.citations = message.citations;
+        this.#requestCitationFavicons(messageId, message.citations);
       }
     }
 
@@ -742,7 +1020,11 @@ export class AIChatContent extends MozLitElement {
   }
 
   #isAIResponseValid(content, toolUIData) {
-    return (typeof content?.body === "string" && content.body) || !!toolUIData;
+    return (
+      (typeof content?.body === "string" && content.body) ||
+      !!content?.l10nId ||
+      !!toolUIData
+    );
   }
 
   /**
@@ -765,12 +1047,25 @@ export class AIChatContent extends MozLitElement {
       followUpSuggestions = [],
       isPreviousMessage,
       toolUIData,
+      toolUIDraft,
       kit,
       isRestored,
       historyResults = [],
+      citations = [],
     } = event.detail;
 
-    if (!this.#isAIResponseValid(content, toolUIData)) {
+    const hasRenderableResponse = this.#isAIResponseValid(content, toolUIData);
+    const isToolUICleared = toolUIData === null;
+
+    if (!hasRenderableResponse) {
+      if (isToolUICleared) {
+        this.conversationState = this.conversationState.filter(message => {
+          const isMatchingMessage = message.messageId === messageId;
+          const hasToolUI = !!message.toolUIData;
+          const shouldRemoveMessage = isMatchingMessage && hasToolUI;
+          return !shouldRemoveMessage;
+        });
+      }
       return;
     }
 
@@ -793,13 +1088,22 @@ export class AIChatContent extends MozLitElement {
       convId,
       messageId,
       body: content.body,
+      messageL10n: content.l10nId
+        ? { id: content.l10nId, args: content.l10nArgs, link: content.link }
+        : null,
       appliedMemories: memoriesApplied ?? [],
       showCallout: showMemoriesCallout ?? false,
       isLastChunk,
       toolUIData,
+      toolUIDraft,
       historyResultsMap,
+      citations,
       isRestored,
     };
+
+    if (citations.length) {
+      this.#requestCitationFavicons(messageId, citations);
+    }
 
     if (kit && !isPreviousMessage) {
       this.#kitMention?.trigger({ value: kit, convId });
@@ -875,8 +1179,9 @@ export class AIChatContent extends MozLitElement {
   }
 
   /**
-   * Returns the chips to display for a message, suppressing the current-tab
-   * chip when the page context hasn't changed since the previous user message.
+   * Returns the chips to display for a message, hiding the tabs expanded from
+   * a tab group and suppressing the current-tab chip when the page context
+   * hasn't changed since the previous user message.
    *
    * @param {object} msg - A conversationState entry.
    * @param {string|null} lastContextPageUrl - The page URL of the preceding
@@ -889,15 +1194,14 @@ export class AIChatContent extends MozLitElement {
     if (!msg || msg.role !== "user" || !msg.contextMentions?.length) {
       return [];
     }
+    const chips = msg.contextMentions.filter(chip => !isTabGroupMember(chip));
     const currentPageUrl = msg.pageUrl;
     const shouldHideDuplicatePageChip =
       currentPageUrl && currentPageUrl === lastContextPageUrl;
     if (shouldHideDuplicatePageChip) {
-      return msg.contextMentions.filter(
-        chip => URL.parse(chip.url)?.href !== currentPageUrl
-      );
+      return chips.filter(chip => URL.parse(chip.url)?.href !== currentPageUrl);
     }
-    return msg.contextMentions;
+    return chips;
   }
 
   openAccountSignInAfterError() {
@@ -908,21 +1212,25 @@ export class AIChatContent extends MozLitElement {
     this.dispatchEvent(event);
   }
 
+  #buildTabsRow(labelL10nId, tabs) {
+    return tabs.length
+      ? [
+          {
+            labelL10nId,
+            items: tabs.map(tab => ({ url: tab.url, label: tab.title })),
+          },
+        ]
+      : [];
+  }
+
   #getCloseTabsData(confirmedData) {
     const selectedTabs = confirmedData.selectedTabs || [];
     const tabCount = selectedTabs.length;
 
-    // Format rows to show the closed tabs
-    const rows = [];
-    if (selectedTabs.length) {
-      rows.push({
-        labelL10nId: "smart-window-closed-tabs-row-label",
-        items: selectedTabs.map(tab => ({
-          url: tab.url,
-          label: tab.title,
-        })),
-      });
-    }
+    const rows = this.#buildTabsRow(
+      "smart-window-closed-tabs-row-label",
+      selectedTabs
+    );
 
     return {
       labelL10nId: "smart-window-closed-tabs-label",
@@ -961,20 +1269,15 @@ export class AIChatContent extends MozLitElement {
 
   #getGroupTabsData(confirmedData) {
     const selectedTabs = confirmedData.selectedTabs || [];
-    const tabCount = selectedTabs.length;
     const group = confirmedData.group || {};
+    // The group can also hold the chat tab, which the user never picked, so
+    // report the size of the group rather than the size of their selection.
+    const tabCount = group.tabCount ?? selectedTabs.length;
 
-    // Format rows to show the grouped tabs
-    const rows = [];
-    if (selectedTabs.length) {
-      rows.push({
-        labelL10nId: "smart-window-grouped-tabs-row-label",
-        items: selectedTabs.map(tab => ({
-          url: tab.url,
-          label: tab.title,
-        })),
-      });
-    }
+    const rows = this.#buildTabsRow(
+      "smart-window-grouped-tabs-row-label",
+      selectedTabs
+    );
 
     return {
       labelL10nId: "smart-window-grouped-tabs-label",
@@ -982,8 +1285,57 @@ export class AIChatContent extends MozLitElement {
       summaryL10nId: "smart-window-grouped-tabs-summary",
       summaryL10nArgs: {
         count: tabCount,
-        label: group.label || "Tab Group",
+        label: group.label || this.#defaultTabGroupLabel,
       },
+      rows,
+    };
+  }
+
+  #getSwitchedTabData(tab) {
+    return {
+      labelL10nId: "smart-window-switched-tab-label",
+      summaryL10nId: "smart-window-switched-tab-summary",
+      summaryL10nArgs: { title: tab?.title || tab?.url || "" },
+      rows: [],
+    };
+  }
+
+  #getOpenTabsData(confirmedData) {
+    // A single already-open tab was switched to, not opened - no group,
+    // no "opened" wording.
+    if (confirmedData.switched) {
+      return this.#getSwitchedTabData(confirmedData.selectedTabs?.[0]);
+    }
+
+    const selectedTabs = confirmedData.selectedTabs || [];
+    const tabCount = selectedTabs.length;
+
+    // Every selected tab was already open - nothing was actually opened,
+    // so this reads the same as a plain group_tabs result.
+    if (tabCount && confirmedData.mergedCount === tabCount) {
+      return this.#getGroupTabsData(confirmedData);
+    }
+
+    const group = confirmedData.group || {};
+    // A tab group is only created for 2+ tabs (see
+    // ToolUI#handleOpenAndGroupTabsSelection) - group.label is only ever
+    // set in that case, never for a single opened tab.
+    const hasGroup = !!group.label;
+
+    const rows = this.#buildTabsRow(
+      "smart-window-opened-tabs-row-label",
+      selectedTabs
+    );
+
+    return {
+      labelL10nId: "smart-window-opened-tabs-label",
+      labelL10nArgs: { count: tabCount },
+      summaryL10nId: hasGroup
+        ? "smart-window-opened-tabs-summary-group"
+        : "smart-window-opened-tabs-summary-single",
+      summaryL10nArgs: hasGroup
+        ? { count: tabCount, label: group.label || this.#defaultTabGroupLabel }
+        : { count: tabCount },
       rows,
     };
   }
@@ -1031,6 +1383,9 @@ export class AIChatContent extends MozLitElement {
       close_tabs: wasRestored
         ? () => this.#getRestoreTabsData(confirmedData.originalClosedTabs || [])
         : () => this.#getCloseTabsData(confirmedData),
+      // No wasRestored branch yet - open_tabs has no undo support (see
+      // ACTION_TYPE_TO_UNDO_UPDATE_TYPE above).
+      open_tabs: () => this.#getOpenTabsData(confirmedData),
     };
 
     const method = methodMap[actionType];
@@ -1057,7 +1412,9 @@ export class AIChatContent extends MozLitElement {
       <ai-action-result
         .labelL10nId=${summary?.l10nId}
         .labelL10nArgs=${summary?.l10nArgs}
+        .labelLink=${summary?.link ?? null}
         .rows=${this.#buildGroupedActionLogRows(toolMsgs)}
+        .isLoading=${!isComplete}
         .isExpanded=${this.#actionResultExpandState.get(key) ?? false}
         @action-result-toggle=${e =>
           this.#actionResultExpandState.set(key, !!e.detail?.isExpanded)}
@@ -1092,6 +1449,21 @@ export class AIChatContent extends MozLitElement {
     return renderFn ? renderFn(msg) : nothing;
   }
 
+  #renderAITab(msg) {
+    return html`<aitab-tool-ui
+      .state=${msg.toolUIData.properties?.state ?? STATE_CHOOSE}
+      .title=${msg.toolUIData.properties?.title ?? ""}
+      .viewerURL=${msg.toolUIData.properties?.viewerURL ?? ""}
+      @aitab-open-request=${event =>
+        this.#dispatchToolUIUpdate({
+          messageId: msg.messageId,
+          toolCallId: msg.toolUIData.toolCallId,
+          updateType: UI_UPDATE_TYPES.OPEN_AITAB,
+          updateData: { openTarget: event.detail.openTarget },
+        })}
+    ></aitab-tool-ui>`;
+  }
+
   #handleConfirmationSubmit = (event, messageId, toolCallId) => {
     this.#dispatchToolUIUpdate({
       messageId,
@@ -1110,35 +1482,127 @@ export class AIChatContent extends MozLitElement {
     });
   };
 
-  #handleCreateTabGroupSubmit = (event, messageId, toolCallId) => {
+  #handleConfirmationToggleAll = (event, messageId, toolCallId) => {
     this.#dispatchToolUIUpdate({
       messageId,
       toolCallId,
-      updateType: UI_UPDATE_TYPES.CONFIRM_TAB_GROUP_SELECTION,
+      updateType: UI_UPDATE_TYPES.TOGGLE_ALL_TAB_SELECTION,
+      updateData: event.detail,
+    });
+  };
+
+  #handleMonitorSubmit = (event, messageId, toolCallId) => {
+    // The display card reuses submit for edits; create only happens from the
+    // "create" card.
+    const isEdit = event.detail?.mode === "display";
+    this.#dispatchToolUIUpdate({
+      messageId,
+      toolCallId,
+      updateType: isEdit
+        ? UI_UPDATE_TYPES.UPDATE_WATCH
+        : UI_UPDATE_TYPES.CREATE_WATCH,
+      updateData: event.detail,
+    });
+  };
+
+  #handleMonitorCancel = (event, messageId, toolCallId) => {
+    /* TODO: Bug 2055336 - Add cancel monitor view */
+    this.#dispatchToolUIUpdate({
+      messageId,
+      toolCallId,
+      updateType: UI_UPDATE_TYPES.CANCEL_WATCH,
+      updateData: event.detail,
+    });
+  };
+
+  #handleMonitorAction = (event, messageId, toolCallId, updateType) => {
+    this.#dispatchToolUIUpdate({
+      messageId,
+      toolCallId,
+      updateType,
+      updateData: event.detail,
+    });
+  };
+
+  #renderAgentMonitorComponent(msg) {
+    const { messageId, toolUIData, toolUIDraft } = msg;
+    const toolCallId = toolUIData.toolCallId;
+    return html`<agent-monitor-item
+      data-tool-call-id=${toolCallId ?? messageId}
+      mode=${toolUIData.properties?.mode ?? "create"}
+      .agent=${toolUIData.properties?.agent}
+      .draft=${toolUIDraft}
+      @agent-monitor-item:draft-change=${event =>
+        this.#handleMonitorAction(
+          event,
+          messageId,
+          toolCallId,
+          UI_UPDATE_TYPES.SAVE_WATCH_DRAFT
+        )}
+      @agent-monitor-item:submit=${event =>
+        this.#handleMonitorSubmit(event, messageId, toolCallId)}
+      @agent-monitor-item:cancel=${event =>
+        this.#handleMonitorCancel(event, messageId, toolCallId)}
+      @agent-monitor-item:delete=${event =>
+        this.#handleMonitorAction(
+          event,
+          messageId,
+          toolCallId,
+          UI_UPDATE_TYPES.DELETE_WATCH
+        )}
+      @agent-monitor-item:pause=${event =>
+        this.#handleMonitorAction(
+          event,
+          messageId,
+          toolCallId,
+          UI_UPDATE_TYPES.PAUSE_WATCH
+        )}
+      @agent-monitor-item:check-now=${event =>
+        this.#handleMonitorAction(
+          event,
+          messageId,
+          toolCallId,
+          UI_UPDATE_TYPES.CHECK_WATCH
+        )}
+    ></agent-monitor-item>`;
+  }
+
+  #handleTabGroupActionSubmit = (event, messageId, toolCallId, updateType) => {
+    this.#dispatchToolUIUpdate({
+      messageId,
+      toolCallId,
+      updateType,
       updateData: event.detail,
     });
   };
 
   #renderTabGroupConfirmation(msg) {
     const toolUIData = msg.toolUIData;
+    const actionType = toolUIData.properties?.actionType || "group_tabs";
+    const { confirmActionL10n, updateType } =
+      TAB_GROUP_ACTION_CONFIG[actionType] ?? TAB_GROUP_ACTION_CONFIG.group_tabs;
 
     return html`
       <ai-website-confirmation
         .tabs=${toolUIData.properties?.tabs || []}
         .tabGroupLabel=${toolUIData.properties?.tabGroupLabel}
-        .confirmActionL10n=${{
-          disabled: "smart-window-confirm-group-tab",
-          enabled: "smart-window-confirm-group-tabs",
-        }}
-        .actionType=${"group_tabs"}
+        .confirmActionL10n=${confirmActionL10n}
+        .actionType=${actionType}
         @ai-website-confirmation:submit=${event =>
-          this.#handleCreateTabGroupSubmit(
+          this.#handleTabGroupActionSubmit(
+            event,
+            msg.messageId,
+            toolUIData.toolCallId,
+            updateType
+          )}
+        @ai-website-confirmation:close=${event =>
+          this.#handleConfirmationClose(
             event,
             msg.messageId,
             toolUIData.toolCallId
           )}
-        @ai-website-confirmation:close=${event =>
-          this.#handleConfirmationClose(
+        @ai-website-confirmation:toggle-all=${event =>
+          this.#handleConfirmationToggleAll(
             event,
             msg.messageId,
             toolUIData.toolCallId
@@ -1170,6 +1634,12 @@ export class AIChatContent extends MozLitElement {
             msg.messageId,
             toolUIData.toolCallId
           )}
+        @ai-website-confirmation:toggle-all=${event =>
+          this.#handleConfirmationToggleAll(
+            event,
+            msg.messageId,
+            toolUIData.toolCallId
+          )}
       ></ai-website-confirmation>
     `;
   }
@@ -1191,13 +1661,17 @@ export class AIChatContent extends MozLitElement {
       wasRestored
     );
 
-    let canUndo = !wasRestored && !!confirmedData.operationId;
+    const undoOperationIds = confirmedData.operationIds ?? [];
+    const undoUpdateType = ACTION_TYPE_TO_UNDO_UPDATE_TYPE[actionType];
+
+    // Undo needs both something to undo (recorded operation ids) and a way
+    // to undo it (an update type registered for this action type - e.g.
+    // open_tabs has none, so it's never undoable regardless of ids).
+    let canUndo = !wasRestored && !!undoOperationIds.length && !!undoUpdateType;
     // Override can undo if explicitly dismissed
     if (toolUIData.properties?.undoDismissed) {
       canUndo = false;
     }
-
-    const undoUpdateType = ACTION_TYPE_TO_UNDO_UPDATE_TYPE[actionType];
 
     const onUndo =
       canUndo && undoUpdateType
@@ -1207,27 +1681,48 @@ export class AIChatContent extends MozLitElement {
               toolCallId: toolUIData.toolCallId,
               updateType: undoUpdateType,
               updateData: {
-                operationId: confirmedData.operationId,
+                operationIds: undoOperationIds,
                 selectedTabs: confirmedData.selectedTabs || [],
                 actionTimestamp: confirmedData.actionTimestamp,
               },
             })
         : undefined;
+    const tabs = this.#getConfirmationTabs(confirmedData, wasRestored);
 
     return html`
-      <ai-action-result
+      <ai-action-confirmation
         .labelL10nId=${actionResultData.labelL10nId}
         .labelL10nArgs=${actionResultData.labelL10nArgs}
-        .summaryL10nId=${actionResultData.summaryL10nId}
-        .summaryL10nArgs=${actionResultData.summaryL10nArgs}
-        .rows=${actionResultData.rows}
+        .tabs=${tabs}
         .canUndo=${canUndo}
         .isExpanded=${this.#actionResultExpandState.get(messageId) ?? false}
-        @action-result-toggle=${e =>
-          this.#actionResultExpandState.set(messageId, !!e.detail?.isExpanded)}
-        @action-result-undo=${onUndo}
-      ></ai-action-result>
+        @action-confirmation-toggle=${e =>
+          this.#actionResultExpandState.set(messageId, e.detail.isExpanded)}
+        @action-confirmation-undo=${onUndo}
+      ></ai-action-confirmation>
     `;
+  }
+
+  /**
+   * Build the list of affected tabs.
+   *
+   * @param {object} confirmedData - The confirmed action data
+   * @param {boolean} wasRestored - Whether the action has been undone
+   * @returns {Array<TabSelectionData>}
+   */
+  #getConfirmationTabs(confirmedData, wasRestored) {
+    let sourceTabs = confirmedData.originalClosedTabs;
+    if (!wasRestored) {
+      sourceTabs = confirmedData.selectedTabs;
+    } else if (confirmedData.actionType === "group_tabs") {
+      sourceTabs = confirmedData.originalGroupedTabs;
+    }
+
+    return (sourceTabs ?? []).map(tab => ({
+      url: tab.url,
+      title: tab.title,
+      iconSrc: tab.iconSrc || (tab.url ? `page-icon:${tab.url}` : ""),
+    }));
   }
 
   #renderCancelledComponent() {
@@ -1300,6 +1795,7 @@ export class AIChatContent extends MozLitElement {
           : nothing}
         <ai-chat-message
           .message=${msg.body}
+          .messageL10n=${msg.messageL10n}
           .role=${msg.role}
           .messageId=${msg.messageId}
           .complete=${msg.role === "assistant" && !!msg.isLastChunk}
@@ -1310,12 +1806,20 @@ export class AIChatContent extends MozLitElement {
         ${msg.role === "assistant" && msg.toolUIData && !isRetryComponent
           ? this.#renderToolUI(msg)
           : nothing}
+        ${msg.role === "assistant" && msg.isLastChunk && msg.citations?.length
+          ? html`<chat-assistant-citations
+              .citations=${msg.citations}
+            ></chat-assistant-citations>`
+          : nothing}
         ${msg.role === "assistant" && msg.isLastChunk
-          ? html`
+          ? // TODO(Bug 2066269): remove hideRetry once resume-activity has
+            // its own retry path.
+            html`
               <assistant-message-footer
                 .messageId=${msg.messageId}
                 .appliedMemories=${msg.appliedMemories}
                 .showCallout=${msg.showCallout}
+                .hideRetry=${!!msg.toolUIData?.isResumeActivity}
               ></assistant-message-footer>
             `
           : nothing}
@@ -1336,8 +1840,12 @@ export class AIChatContent extends MozLitElement {
     ></smartwindow-prompts>`;
   }
 
-  #renderLoader() {
-    if (!this.assistantIsLoading) {
+  #renderLoader(suppress) {
+    // The spinner is suppressed while an action log is processing (its animated
+    // label already communicates progress) and once the reply is streaming (its
+    // text is already visible). It only shows while waiting with nothing else on
+    // screen yet.
+    if (!this.assistantIsLoading || suppress) {
       return nothing;
     }
     return html`<chat-assistant-loader
@@ -1444,9 +1952,12 @@ export class AIChatContent extends MozLitElement {
       });
     }
 
-    // Commit anything still pending at end of loop. The in-flight turn is
-    // complete once assistantIsLoading set false
-    appendPendingAssistantTurn(!this.assistantIsLoading);
+    // Commit anything still pending at end of loop. The action log is finished
+    // once the turn's reply starts streaming (its tools are done by then) or the
+    // whole turn completes, so it doesn't keep shimmering through response
+    // generation.
+    const replyStarted = !!pendingAssistantMessage?.body;
+    appendPendingAssistantTurn(!this.assistantIsLoading || replyStarted);
 
     return items;
   }
@@ -1461,19 +1972,44 @@ export class AIChatContent extends MozLitElement {
     return toolMsgs.map(msg => msg.row).filter(Boolean);
   }
 
-  #renderMessages() {
-    return this.#buildTurnRenderItems().map((item, i) => {
-      const { type, msgs, msg, isComplete, contextPageUrl } = item;
-      if (type === "action-log") {
-        return this.#renderActionLogGroup(msgs, isComplete, i);
-      }
+  #renderMessages(items) {
+    return repeat(
+      items,
+      (item, i) => this.#renderItemKey(item, i),
+      (item, i) => {
+        const { type, msgs, msg, isComplete, contextPageUrl } = item;
+        if (type === "action-log") {
+          return this.#renderActionLogGroup(msgs, isComplete, i);
+        }
 
-      const chips = this.#getVisibleChips(msg, contextPageUrl);
-      return this.#renderMessage(msg, chips);
-    });
+        const chips = this.#getVisibleChips(msg, contextPageUrl);
+        return this.#renderMessage(msg, chips);
+      }
+    );
+  }
+
+  #renderItemKey(item, i) {
+    if (item.type === "action-log") {
+      const first = item.msgs?.[0];
+      return `action-log:${first?.toolCallId ?? first?.messageId ?? i}`;
+    }
+    const { msg } = item;
+    return `message:${msg?.convId ?? ""}:${msg?.ordinal ?? i}`;
   }
 
   render() {
+    const renderItems = this.#buildTurnRenderItems();
+    const actionLogInProgress = renderItems.some(
+      item => item.type === "action-log" && item.isComplete === false
+    );
+    // Once the reply is streaming, its text is already visible, so the spinner
+    // isn't needed (and shouldn't reappear now that the action log completes as
+    // soon as the reply starts).
+    const lastItem = renderItems.at(-1);
+    const replyStreaming =
+      lastItem?.type === "message" &&
+      lastItem.msg?.role === "assistant" &&
+      !!lastItem.msg?.body;
     return html`
       <link
         rel="stylesheet"
@@ -1481,10 +2017,13 @@ export class AIChatContent extends MozLitElement {
       />
       <div class="chat-content-wrapper" tabindex="-1">
         <div class="chat-inner-wrapper">
-          ${this.#renderMessages()} ${this.#renderFollowUpSuggestions()}
-          ${this.#renderLoader()} ${this.#renderError()}
+          ${this.#renderMessages(renderItems)}
+          ${this.#renderFollowUpSuggestions()}
+          ${this.#renderLoader(actionLogInProgress || replyStreaming)}
+          ${this.#renderError()}
         </div>
       </div>
+      <div class="fullpage-top-box-shadow"></div>
       <kit-mention variant="sidebar"></kit-mention>
       <div
         class="assistant-response-announcer"

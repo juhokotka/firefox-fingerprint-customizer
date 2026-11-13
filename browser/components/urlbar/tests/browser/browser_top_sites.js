@@ -9,8 +9,13 @@ ChromeUtils.defineESModuleGetters(this, {
   TopSites: "resource:///modules/topsites/TopSites.sys.mjs",
 });
 
-const EN_US_TOPSITES =
-  "https://www.youtube.com/,https://www.facebook.com/,https://www.amazon.com/,https://www.reddit.com/,about:robots,https://twitter.com/";
+// Uses Baidu for a top site, so that it works as a search shortcut.
+const DEFAULT_TOPSITES =
+  "https://www.youtube.com/,https://www.facebook.com/,https://www.baidu.com/,https://www.reddit.com/,about:robots,https://twitter.com/";
+
+// The Baidu search shortcut keyword, see SEARCH_SHORTCUTS in
+// SearchShortcuts.sys.mjs.
+const BAIDU_KEYWORD = "@百度";
 
 async function addTestVisits() {
   // Add some visits to a URL.
@@ -67,16 +72,51 @@ async function checkDoesNotOpenOnFocus(win = window) {
 }
 
 add_setup(async function () {
+  // Set up the configuration so that Baidu is available as a search engine, so
+  // the search shortcut works.
+  await SearchTestUtils.updateRemoteSettingsConfig([
+    {
+      identifier: "google",
+      base: {
+        name: "Google",
+        aliases: ["google"],
+        urls: {
+          search: {
+            base: "https://www.google.com/search",
+            searchTermParamName: "q",
+          },
+        },
+      },
+    },
+    {
+      identifier: "baidu",
+      base: {
+        name: "百度",
+        aliases: ["百度", "baidu"],
+        urls: {
+          search: {
+            base: "https://www.baidu.com/baidu",
+            searchTermParamName: "wd",
+          },
+        },
+      },
+    },
+  ]);
+
   await SpecialPowers.pushPrefEnv({
     set: [
       ["browser.urlbar.suggest.topsites", true],
       ["browser.urlbar.suggest.quickactions", false],
-      ["browser.newtabpage.activity-stream.default.sites", EN_US_TOPSITES],
+      ["browser.newtabpage.activity-stream.default.sites", DEFAULT_TOPSITES],
+      [
+        "browser.newtabpage.activity-stream.improvesearch.topSiteSearchShortcuts.searchEngines",
+        "baidu",
+      ],
     ],
   });
 
   await updateTopSites(
-    sites => sites && sites.length == EN_US_TOPSITES.split(",").length
+    sites => sites && sites.length == DEFAULT_TOPSITES.split(",").length
   );
 
   let tab = await BrowserTestUtils.openNewForegroundTab(
@@ -138,6 +178,11 @@ add_task(async function topSitesShown() {
         result.title,
         "The Top Site title and the result title shoud match."
       );
+      Assert.equal(
+        result.element.row.getAttribute("type"),
+        "top_site",
+        "The Top Site row should have the expected 'type'."
+      );
     }
     await UrlbarTestUtils.promisePopupClose(window, () => {
       gURLBar.blur();
@@ -161,28 +206,35 @@ add_task(async function selectSearchTopSite() {
   });
   await UrlbarTestUtils.promiseSearchComplete(window);
 
-  let amazonSearch = await UrlbarTestUtils.waitForAutocompleteResultAt(
+  let baiduSearch = await UrlbarTestUtils.waitForAutocompleteResultAt(
     window,
     0
   );
 
   Assert.equal(
-    amazonSearch.result.type,
+    baiduSearch.result.type,
     UrlbarShared.RESULT_TYPE.SEARCH,
     "First result should have SEARCH type."
   );
 
   Assert.equal(
-    amazonSearch.result.payload.keyword,
-    "@amazon",
-    "First result should have the Amazon keyword."
+    baiduSearch.result.payload.keyword,
+    BAIDU_KEYWORD,
+    "First result should have the Baidu keyword."
+  );
+
+  Assert.equal(
+    baiduSearch.getAttribute("type"),
+    "search_engine",
+    "The search row should have the expected 'type'."
   );
 
   let searchPromise = UrlbarTestUtils.promiseSearchComplete(window);
-  EventUtils.synthesizeMouseAtCenter(amazonSearch, {});
+  EventUtils.synthesizeMouseAtCenter(baiduSearch, {});
   await searchPromise;
   await UrlbarTestUtils.assertSearchMode(window, {
-    engineName: amazonSearch.result.payload.engine,
+    engineName: baiduSearch.result.payload.engine,
+    source: UrlbarShared.RESULT_SOURCE.SEARCH,
     entry: "topsites_urlbar",
   });
   await UrlbarTestUtils.exitSearchMode(window, { backspace: true });
@@ -223,10 +275,20 @@ add_task(async function topSitesBookmarksAndTabs() {
     "The example.com Top Site should be the first result."
   );
 
-  Assert.equal(
+  Assert.notEqual(
     exampleResult.source,
-    UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
+    UrlbarShared.RESULT_SOURCE.TABS,
     "The example.com Top Site should not appear in the view as an open tab result since it is the current tab."
+  );
+  Assert.notEqual(
+    exampleResult.type,
+    UrlbarShared.RESULT_TYPE.TAB_SWITCH,
+    "The example.com Top Site should not be a TAB_SWITCH"
+  );
+  Assert.equal(
+    exampleResult.element.row.getAttribute("type"),
+    "history",
+    "The example.com Top Site row should have the expected 'type'"
   );
 
   let youtubeResult = await UrlbarTestUtils.getDetailsOfResultAt(window, 1);
@@ -239,6 +301,11 @@ add_task(async function topSitesBookmarksAndTabs() {
     youtubeResult.source,
     UrlbarShared.RESULT_SOURCE.BOOKMARKS,
     "The YouTube Top Site should appear in the view as a bookmark result."
+  );
+  Assert.equal(
+    youtubeResult.element.row.getAttribute("type"),
+    "bookmark",
+    "The YouTube Top Site row should have the expected 'type'"
   );
   await UrlbarTestUtils.promisePopupClose(window, () => {
     gURLBar.blur();
@@ -332,15 +399,25 @@ add_task(async function topSitesPinned() {
     "The example.com Top Site should be the first result."
   );
 
-  Assert.equal(
+  Assert.notEqual(
     exampleResult.source,
-    UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
+    UrlbarShared.RESULT_SOURCE.TABS,
     "The example.com Top Site should not appear in the view as an open tab result since it is the current tab."
+  );
+  Assert.notEqual(
+    exampleResult.type,
+    UrlbarShared.RESULT_TYPE.TAB_SWITCH,
+    "The example.com Top Site should not be a TAB_SWITCH"
   );
 
   Assert.ok(
     exampleResult.element.row.hasAttribute("pinned"),
     "The example.com Top Site should have the pinned property."
+  );
+  Assert.equal(
+    exampleResult.element.row.getAttribute("type"),
+    "history",
+    "The example.com Top Site row should have the expected 'type'"
   );
 
   await UrlbarTestUtils.promisePopupClose(window, () => {
@@ -389,10 +466,20 @@ add_task(async function topSitesBookmarksAndTabsDisabled() {
     "http://example.com/",
     "The example.com Top Site should be the second result."
   );
-  Assert.equal(
+  Assert.notEqual(
     exampleResult.source,
-    UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
+    UrlbarShared.RESULT_SOURCE.TABS,
     "The example.com Top Site should appear as a normal result even though it's open in a tab."
+  );
+  Assert.notEqual(
+    exampleResult.type,
+    UrlbarShared.RESULT_TYPE.TAB_SWITCH,
+    "The example.com Top Site should not be a TAB_SWITCH even though it's open in a tab."
+  );
+  Assert.equal(
+    exampleResult.element.row.getAttribute("type"),
+    "history",
+    "The example.com Top Site row should have the expected 'type'"
   );
 
   let youtubeResult = await UrlbarTestUtils.getDetailsOfResultAt(window, 1);
@@ -405,6 +492,11 @@ add_task(async function topSitesBookmarksAndTabsDisabled() {
     youtubeResult.source,
     UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
     "The YouTube Top Site should appear as a normal result even though it's bookmarked."
+  );
+  Assert.equal(
+    youtubeResult.element.row.getAttribute("type"),
+    "top_site",
+    "The YouTube Top Site row should have the expected 'type'"
   );
   await UrlbarTestUtils.promisePopupClose(window, () => {
     gURLBar.blur();

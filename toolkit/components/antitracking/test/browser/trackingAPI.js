@@ -20,11 +20,11 @@ onmessage = event => {
       break;
     case "socialtracking":
       createIframe(
-        "https://social-tracking.example.org/browser/browser/base/content/test/protectionsUI/cookieServer.sjs"
+        "https://social-tracking.example.org/browser/browser/base/content/test/browser-protectionsUI/cookieServer.sjs"
       );
       break;
     case "cryptomining":
-      // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+      // eslint-disable-next-line sdl/no-insecure-url
       createIframe("http://cryptomining.example.com/");
       break;
     case "fingerprinting":
@@ -38,7 +38,7 @@ onmessage = event => {
       break;
     case "cookie":
       createIframe(
-        "https://trackertest.org/browser/browser/base/content/test/protectionsUI/cookieServer.sjs"
+        "https://trackertest.org/browser/browser/base/content/test/browser-protectionsUI/cookieServer.sjs"
       );
       break;
     case "first-party-cookie":
@@ -46,25 +46,25 @@ onmessage = event => {
       // top-level cookies right now, we just create an iframe with the
       // first party domain...
       createIframe(
-        // eslint-disable-next-line @microsoft/sdl/no-insecure-url
-        "http://not-tracking.example.com/browser/browser/base/content/test/protectionsUI/cookieServer.sjs"
+        // eslint-disable-next-line sdl/no-insecure-url
+        "http://not-tracking.example.com/browser/browser/base/content/test/browser-protectionsUI/cookieServer.sjs"
       );
       break;
     case "third-party-cookie":
       createIframe(
-        "https://test1.example.org/browser/browser/base/content/test/protectionsUI/cookieServer.sjs"
+        "https://test1.example.org/browser/browser/base/content/test/browser-protectionsUI/cookieServer.sjs"
       );
       break;
     case "image":
       createImage(
-        // eslint-disable-next-line @microsoft/sdl/no-insecure-url
-        "https://itisatracker.org/browser/browser/base/content/test/protectionsUI/cookieServer.sjs?type=image-no-cookie"
+        // eslint-disable-next-line sdl/no-insecure-url
+        "https://itisatracker.org/browser/browser/base/content/test/browser-protectionsUI/cookieServer.sjs?type=image-no-cookie"
       );
       break;
     case "window-open":
       window.win = window.open(
-        // eslint-disable-next-line @microsoft/sdl/no-insecure-url
-        "http://trackertest.org/browser/browser/base/content/test/protectionsUI/cookieServer.sjs",
+        // eslint-disable-next-line sdl/no-insecure-url
+        "http://trackertest.org/browser/browser/base/content/test/browser-protectionsUI/cookieServer.sjs",
         "_blank",
         "width=100,height=100"
       );

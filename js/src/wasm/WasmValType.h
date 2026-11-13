@@ -485,18 +485,7 @@ class RefType {
 #endif
   }
   static bool isSubTypeOf(RefType subType, RefType superType);
-  static bool castPossible(RefType sourceType, RefType destType);
-
-  // If we have two references, one of type `a` and one of type `b`, return
-  // true if there is any possibility that they might point at the same thing.
-  // That can only happen if either they are the same type or if one type is a
-  // subtype of the other.  Note, this can only be used for types in the same
-  // hierarchy.
-  static bool valuesMightAlias(RefType a, RefType b) {
-    MOZ_RELEASE_ASSERT(a.hierarchy() == b.hierarchy());
-    // The exact-same-type case is subsumed by `isSubTypeOf`.
-    return RefType::isSubTypeOf(a, b) || RefType::isSubTypeOf(b, a);
-  }
+  static bool valuesInCommon(RefType a, RefType b);
 
   // Gets the top of the given type's hierarchy, e.g. Any for structs and
   // arrays, and Func for funcs.
@@ -543,7 +532,7 @@ class StorageTypeTraits {
       case TypeCode::I64:
       case TypeCode::F32:
       case TypeCode::F64:
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
       case TypeCode::V128:
 #endif
       case TypeCode::FuncRef:
@@ -593,7 +582,7 @@ class StorageTypeTraits {
 
   static bool isVectorTypeCode(TypeCode tc) {
     switch (tc) {
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
       case TypeCode::V128:
         return true;
 #endif
@@ -638,7 +627,7 @@ class ValTypeTraits {
       case TypeCode::I64:
       case TypeCode::F32:
       case TypeCode::F64:
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
       case TypeCode::V128:
 #endif
       case TypeCode::FuncRef:
@@ -680,7 +669,7 @@ class ValTypeTraits {
 
   static bool isVectorTypeCode(TypeCode tc) {
     switch (tc) {
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
       case TypeCode::V128:
         return true;
 #endif
@@ -855,13 +844,13 @@ class PackedType : public T {
 
   // Returns whether the type has a representation in JS.
   bool isExposable() const {
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
     if (kind() == Kind::V128) {
       return false;
     }
 #endif
 #ifdef ENABLE_WASM_JSPI
-    if (isContRef() || isNoCont()) {
+    if (isRefType() && refType().isContHierarchy()) {
       return false;
     }
 #endif
@@ -1069,8 +1058,12 @@ class MaybeRefType {
     return aDefault;
   }
 
-  bool operator==(const MaybeRefType& other) { return inner_ == other.inner_; }
-  bool operator!=(const MaybeRefType& other) { return inner_ != other.inner_; }
+  bool operator==(const MaybeRefType& other) const {
+    return inner_ == other.inner_;
+  }
+  bool operator!=(const MaybeRefType& other) const {
+    return inner_ != other.inner_;
+  }
 
   explicit operator bool() const { return isSome(); }
 
@@ -1079,6 +1072,20 @@ class MaybeRefType {
       return mozilla::Some(value().hierarchy());
     }
     return mozilla::Nothing();
+  }
+
+  MaybeRefType asNonNullable() const {
+    if (isSome()) {
+      return MaybeRefType(value().asNonNullable());
+    }
+    return MaybeRefType();
+  }
+
+  static bool mayHaveValuesInCommon(MaybeRefType a, MaybeRefType b) {
+    if (a.isSome() && b.isSome()) {
+      return RefType::valuesInCommon(a.value(), b.value());
+    }
+    return true;
   }
 
   // Takes the least upper bound of two ref types. Returns Nothing if either

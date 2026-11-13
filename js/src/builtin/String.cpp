@@ -426,10 +426,9 @@ static bool str_resolve(JSContext* cx, HandleObject obj, HandleId id,
 
   RootedString str(cx, obj->as<StringObject>().unbox());
 
-  int32_t slot = id.toInt();
-  if ((size_t)slot < str->length()) {
-    JSString* str1 =
-        cx->staticStrings().getUnitStringForElement(cx, str, size_t(slot));
+  uint32_t slot = id.toInt();
+  if (slot < str->length()) {
+    JSString* str1 = cx->staticStrings().getUnitStringForElement(cx, str, slot);
     if (!str1) {
       return false;
     }
@@ -3649,28 +3648,27 @@ static ArrayObject* SingleElementStringArray(JSContext* cx,
   return array;
 }
 
-// ES 2016 draft Mar 25, 2016 21.1.3.17 steps 4, 8, 12-18.
+// https://tc39.es/ecma262/#sec-string.prototype.split
+// Steps 11-18
 static ArrayObject* SplitHelper(JSContext* cx, Handle<JSLinearString*> str,
                                 uint32_t limit, Handle<JSLinearString*> sep) {
   size_t strLength = str->length();
   size_t sepLength = sep->length();
   MOZ_ASSERT(sepLength != 0);
 
-  // Step 12.
+  // Step 11.
   if (strLength == 0) {
-    // Step 12.a.
-    int match = StringMatch(str, sep, 0);
-
-    // Step 12.b.
-    if (match != -1) {
-      return NewDenseEmptyArray(cx);
-    }
-
-    // Steps 12.c-e.
     return SingleElementStringArray(cx, str);
   }
 
-  // Step 3 (reordered).
+  // Step 14 (reordered)
+  int matchIndex = StringMatch(str, sep, 0);
+  if (matchIndex == -1) {
+    // If there are no matches, we can exit early.
+    return SingleElementStringArray(cx, str);
+  }
+
+  // Step 12
   Rooted<ArrayObject*> substrings(cx, NewDenseEmptyArray(cx));
   if (!substrings) {
     return nullptr;
@@ -3679,75 +3677,46 @@ static ArrayObject* SplitHelper(JSContext* cx, Handle<JSLinearString*> str,
   // Switch to allocating in the tenured heap if we fill the nursery.
   AutoSelectGCHeap gcHeap(cx);
 
-  // Step 8 (reordered).
-  size_t lastEndIndex = 0;
-
   // Step 13.
-  size_t index = 0;
+  size_t searchStart = 0;
 
-  // Step 14.
-  while (index != strLength) {
-    // Step 14.a.
-    int match = StringMatch(str, sep, index);
+  // Step 15
+  while (true) {
+    // Step 15.a.
+    size_t endIndex = matchIndex + sepLength;
+    size_t subLength = size_t(endIndex - sepLength - searchStart);
+    JSString* sub = NewDependentString(cx, str, searchStart, subLength, gcHeap);
 
-    // Step 14.b.
-    //
-    // Our match algorithm differs from the spec in that it returns the
-    // next index at which a match happens.  If no match happens we're
-    // done.
-    //
-    // But what if the match is at the end of the string (and the string is
-    // not empty)?  Per 14.c.i this shouldn't be a match, so we have to
-    // specially exclude it.  Thus this case should hold:
-    //
-    //   var a = "abc".split(/\b/);
-    //   assertEq(a.length, 1);
-    //   assertEq(a[0], "abc");
-    if (match == -1) {
-      break;
-    }
-
-    // Step 14.c.
-    size_t endIndex = match + sepLength;
-
-    // Step 14.c.i.
-    if (endIndex == lastEndIndex) {
-      index++;
-      continue;
-    }
-
-    // Step 14.c.ii.
-    MOZ_ASSERT(lastEndIndex < endIndex);
-    MOZ_ASSERT(sepLength <= strLength);
-    MOZ_ASSERT(lastEndIndex + sepLength <= endIndex);
-
-    // Step 14.c.ii.1.
-    size_t subLength = size_t(endIndex - sepLength - lastEndIndex);
-    JSString* sub =
-        NewDependentString(cx, str, lastEndIndex, subLength, gcHeap);
-
-    // Steps 14.c.ii.2-4.
+    // Step 15.b.
     if (!sub || !NewbornArrayPush(cx, substrings, StringValue(sub))) {
       return nullptr;
     }
 
-    // Step 14.c.ii.5.
+    // Step 15.c
     if (substrings->length() == limit) {
       return substrings;
     }
 
-    // Step 14.c.ii.6.
-    index = endIndex;
+    // Step 15.d
+    searchStart = endIndex;
 
-    // Step 14.c.ii.7.
-    lastEndIndex = index;
+    // Skip the last match if the separator is longer than the remaining string.
+    if (searchStart + sepLength > strLength) {
+      break;
+    }
+
+    // Step 15.e
+    matchIndex = StringMatch(str, sep, searchStart);
+    if (matchIndex == -1) {
+      break;
+    }
   }
 
-  // Step 15.
-  size_t subLength = strLength - lastEndIndex;
-  JSString* sub = NewDependentString(cx, str, lastEndIndex, subLength, gcHeap);
+  // Step 16.
+  size_t subLength = strLength - searchStart;
+  JSString* sub = NewDependentString(cx, str, searchStart, subLength, gcHeap);
 
-  // Steps 16-17.
+  // Step 17.
   if (!sub || !NewbornArrayPush(cx, substrings, StringValue(sub))) {
     return nullptr;
   }
@@ -3804,10 +3773,14 @@ template <typename TextChar>
 static ArrayObject* SplitSingleCharHelper(JSContext* cx,
                                           Handle<JSLinearString*> str,
                                           char16_t patCh) {
+  static constexpr bool isTwoByteChar = std::is_same_v<TextChar, char16_t>;
+
   // Count the number of occurrences of |patCh| within |str|.
   uint32_t count = 0;
   if (patCh <= std::numeric_limits<TextChar>::max()) {
     JS::AutoCheckCannotGC nogc;
+
+    MOZ_RELEASE_ASSERT(str->hasTwoByteChars() == isTwoByteChar);
 
     auto text = str->range<TextChar>(nogc);
 
@@ -3837,11 +3810,13 @@ static ArrayObject* SplitSingleCharHelper(JSContext* cx,
     {
       JS::AutoCheckCannotGC nogc;
 
+      MOZ_RELEASE_ASSERT(str->hasTwoByteChars() == isTwoByteChar);
+
       auto text = str->range<TextChar>(nogc);
 
       auto* p = std::find(text.begin().get() + lastEndIndex, text.end().get(),
                           static_cast<TextChar>(patCh));
-      MOZ_ASSERT(p != text.end().get());
+      MOZ_RELEASE_ASSERT(p != text.end().get());
 
       index = std::distance(text.begin().get(), p);
     }
@@ -4300,7 +4275,7 @@ SharedShape* StringObject::assignInitialShape(JSContext* cx,
   MOZ_ASSERT(obj->empty());
 
   if (!NativeObject::addPropertyInReservedSlot(cx, obj, cx->names().length,
-                                               LENGTH_SLOT, {})) {
+                                               LENGTH_SLOT.index(), {})) {
     return nullptr;
   }
 

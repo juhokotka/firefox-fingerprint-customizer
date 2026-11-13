@@ -4,14 +4,13 @@
 
 #include "gfxPattern.h"
 
-#include "gfxUtils.h"
-#include "gfxTypes.h"
-#include "gfxPlatform.h"
+#include "cairo.h"
 #include "gfx2DGlue.h"
 #include "gfxGradientCache.h"
+#include "gfxPlatform.h"
+#include "gfxTypes.h"
+#include "gfxUtils.h"
 #include "mozilla/gfx/2D.h"
-
-#include "cairo.h"
 
 using namespace mozilla::gfx;
 
@@ -114,7 +113,9 @@ Pattern* gfxPattern::GetPattern(const DrawTarget* aTarget,
   }
   patternToUser.NudgeToIntegers();
 
-  if (!mStops && !mStopsList.IsEmpty()) {
+  // Ensure stops are compatible with the DT.
+  if (!mStopsList.IsEmpty() &&
+      (!mStops || mStops->GetBackendType() != aTarget->GetBackendType())) {
     mStops = aTarget->CreateGradientStops(mStopsList.Elements(),
                                           mStopsList.Length(), mExtend);
   }

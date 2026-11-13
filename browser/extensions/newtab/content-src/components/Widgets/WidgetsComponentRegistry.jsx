@@ -7,16 +7,18 @@ import { useSelector } from "react-redux";
 import { Lists } from "./Lists/Lists";
 import { FocusTimer } from "./FocusTimer/FocusTimer";
 import { Weather as WeatherWidget } from "./Weather/Weather";
-import { SportsWidget } from "./SportsWidget/SportsWidget";
 import { Clocks } from "./Clocks/Clocks";
 import { Privacy } from "./Privacy/Privacy";
 import { Crossword } from "./Crossword/Crossword";
 import { Stocks } from "./Stocks/Stocks";
 import { PictureOfTheDay } from "./PictureOfTheDay/PictureOfTheDay";
+import { RecentSearches } from "./RecentSearches/RecentSearches";
+import { Horoscopes } from "./Horoscopes/Horoscopes";
+import { Travel } from "./Travel/Travel";
+import { Solitaire } from "./Solitaire/Solitaire";
 import { WIDGET_REGISTRY, resolveWidgetSize } from "common/WidgetsRegistry.mjs";
 
 const weatherEntry = WIDGET_REGISTRY.find(w => w.id === "weather");
-const clocksEntry = WIDGET_REGISTRY.find(w => w.id === "clocks");
 
 function WeatherRowWidget({ dispatch, widgetEnabledMap }) {
   const prefs = useSelector(state => state.Prefs.values);
@@ -38,28 +40,19 @@ function WeatherSidebarWidget({ dispatch }) {
   return <WeatherWidget dispatch={dispatch} size="small" />;
 }
 
-function ClocksRowWidget({ dispatch, widgetEnabledMap }) {
-  const prefs = useSelector(state => state.Prefs.values);
-  const clocksSize = resolveWidgetSize(clocksEntry, prefs);
-  return (
-    <Clocks
-      dispatch={dispatch}
-      size={clocksSize}
-      widgetEnabledMap={widgetEnabledMap}
-    />
-  );
-}
-
 export const WIDGET_ROW_COMPONENTS = {
   lists: Lists,
   focusTimer: FocusTimer,
   weather: WeatherRowWidget,
-  sportsWidget: SportsWidget,
-  clocks: ClocksRowWidget,
+  clocks: Clocks,
   privacy: Privacy,
   crossword: Crossword,
   stocks: Stocks,
   pictureOfTheDay: PictureOfTheDay,
+  recentSearches: RecentSearches,
+  horoscopes: Horoscopes,
+  travel: Travel,
+  solitaire: Solitaire,
 };
 
 export const WIDGET_SIDEBAR_COMPONENTS = {

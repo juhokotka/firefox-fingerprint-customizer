@@ -10,6 +10,7 @@
 #include "mozilla/EndianUtils.h"
 #include "mozilla/EnumSet.h"
 #include "mozilla/Range.h"
+
 #include "nsString.h"
 #include "nsTArray.h"
 
@@ -18,7 +19,7 @@ namespace loader {
 
 class OutputBuffer {
  public:
-  OutputBuffer() {}
+  OutputBuffer() = default;
 
   uint8_t* write(size_t size) {
     auto buf = data.AppendElements(size);

@@ -21,12 +21,15 @@ legend {
   gap: var(--space-small);
   align-items: baseline;
 
+  /* FIXME(bug 2061147): Remove this hack */
+  /* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
   &:has(+ a, + slot[name="support-link"]:has-slotted) {
     display: inline-flex;
   }
 
   /* Hack to handle vertical alignment in cases where we have an icon + heading
   followed by a support link */
+  /* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
   &:has(.icon) + a[is="moz-support-link"],
   &:has(.icon) + ::slotted([slot="support-link"]) {
     vertical-align: baseline;
@@ -61,7 +64,8 @@ h6 {
   flex-direction: column;
   gap: var(--space-large);
 
-  fieldset[aria-orientation="horizontal"] & {
+  fieldset[aria-orientation="horizontal"] &,
+  &[aria-orientation="horizontal"] {
     flex-direction: row;
     flex-wrap: wrap;
     row-gap: var(--fieldset-gap-row);
@@ -77,7 +81,6 @@ h6 {
   }
 }
 
-a[is="moz-support-link"],
-::slotted([slot="support-link"]) {
-  white-space: nowrap;
+::slotted([slot="support-link"]:not([hidden])) {
+  display: inline-block;
 }

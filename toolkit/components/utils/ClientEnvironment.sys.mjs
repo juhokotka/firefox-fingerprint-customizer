@@ -18,8 +18,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   TelemetryController: "resource://gre/modules/TelemetryController.sys.mjs",
   UpdateUtils: "resource://gre/modules/UpdateUtils.sys.mjs",
   WindowsRegistry: "resource://gre/modules/WindowsRegistry.sys.mjs",
-  WindowsVersionInfo:
-    "resource://gre/modules/components-utils/WindowsVersionInfo.sys.mjs",
 });
 
 function getOsVersion() {
@@ -124,7 +122,7 @@ export class ClientEnvironmentBase {
   }
 
   // Note that we intend to replace usages of this with client_id in https://bugzilla.mozilla.org/show_bug.cgi?id=1542955
-  static get randomizationId() {
+  static get legacyRandomizationId() {
     let id = Services.prefs.getCharPref("app.normandy.user_id", "");
     if (!id) {
       id = lazy.NormandyUtils.generateUuid();
@@ -142,7 +140,7 @@ export class ClientEnvironmentBase {
   }
 
   static get isDefaultBrowser() {
-    return lazy.ShellService.isDefaultBrowser();
+    return lazy.ShellService.isDefaultBrowserAsync();
   }
 
   static get searchEngine() {
@@ -253,7 +251,8 @@ export class ClientEnvironmentBase {
           return null;
         }
 
-        return lazy.WindowsVersionInfo.get({ throwOnError: false }).buildNumber;
+        let build = Number(Services.sysinfo.get("build"));
+        return Number.isInteger(build) ? build : null;
       },
 
       /**

@@ -3,31 +3,38 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsCOMPtr.h"
-#include "nsPIDOMWindow.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "nsIWidget.h"
+#include "nsBaseFilePicker.h"
 
-#include "nsArrayEnumerator.h"
-#include "nsIStringBundle.h"
-#include "nsString.h"
-#include "nsCOMArray.h"
-#include "nsIFile.h"
-#include "nsEnumeratorUtils.h"
-#include "mozilla/dom/Directory.h"
-#include "mozilla/dom/File.h"
-#include "mozilla/dom/Promise.h"
-#include "mozilla/dom/Element.h"
+#include "ContentAnalysis.h"
+#include "WidgetUtils.h"
+#include "mozilla/BasePrincipal.h"
+#include "mozilla/Components.h"
+#include "mozilla/StaticPrefs_browser.h"
+#include "mozilla/StaticPrefs_security.h"
+#include "mozilla/StaticPrefs_widget.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
-#include "mozilla/Components.h"
-#include "mozilla/StaticPrefs_widget.h"
-#include "WidgetUtils.h"
-#include "nsSimpleEnumerator.h"
+#include "mozilla/dom/Directory.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/File.h"
+#include "mozilla/dom/Promise.h"
+#include "mozilla/dom/WindowGlobalParent.h"
+#include "nsArrayEnumerator.h"
+#include "nsCOMArray.h"
+#include "nsCOMPtr.h"
 #include "nsContentUtils.h"
+#include "nsEnumeratorUtils.h"
+#include "nsIFile.h"
+#include "nsIInterfaceRequestorUtils.h"
+#include "nsIStringBundle.h"
+#include "nsIWidget.h"
+#include "nsPIDOMWindow.h"
+#include "nsSimpleEnumerator.h"
+#include "nsString.h"
 #include "nsThreadUtils.h"
-
-#include "nsBaseFilePicker.h"
+#ifdef MOZ_WIDGET_GTK
+#  include "mozilla/WidgetUtilsGtk.h"
+#endif
 
 using namespace mozilla::widget;
 using namespace mozilla::dom;
@@ -290,6 +297,11 @@ NS_IMETHODIMP nsBaseFilePicker::SetDisplayDirectory(nsIFile* aDirectory) {
     mDisplayDirectory = nullptr;
     return NS_OK;
   }
+
+  if (NS_WARN_IF(!IsPotentiallyReadableDirectory(*aDirectory))) {
+    return NS_OK;
+  }
+
   nsCOMPtr<nsIFile> directory;
   nsresult rv = aDirectory->Clone(getter_AddRefs(directory));
   if (NS_FAILED(rv)) {
@@ -358,8 +370,8 @@ bool nsBaseFilePicker::MaybeBlockFilePicker(
     if (topFrameElement) {
       // Dispatch an event that the frontend may use.
       nsContentUtils::DispatchEventOnlyToChrome(
-          topFrameElement->OwnerDoc(), topFrameElement, u"FilePickerBlocked"_ns,
-          mozilla::CanBubble::eYes, mozilla::Cancelable::eNo);
+          topFrameElement, u"FilePickerBlocked"_ns, mozilla::CanBubble::eYes,
+          mozilla::Cancelable::eNo);
     }
 
     return true;
@@ -379,6 +391,110 @@ bool nsBaseFilePicker::MaybeBlockFilePicker(
   }
 
   return true;
+}
+
+// static
+bool nsBaseFilePicker::IsWithinInputProtectionTimeRange(
+    mozilla::TimeStamp aShowTime, mozilla::TimeStamp aNow,
+    uint32_t aProtectionMs) {
+  if (!aProtectionMs || aShowTime.IsNull()) {
+    return false;
+  }
+  // TimeStamp only moves forward, so the current time should never be earlier
+  // than the shown time. We do not expect this to happen; if it ever does we
+  // want to find out and decide how to handle it, so assert on debug and
+  // Nightly builds. On other builds, fall back to "not protected" so we never
+  // block the user from confirming.
+  MOZ_DIAGNOSTIC_ASSERT(aNow >= aShowTime,
+                        "file picker shown time is in the future");
+  if (aNow < aShowTime) {
+    return false;
+  }
+  return (aNow - aShowTime).ToMilliseconds() < double(aProtectionMs);
+}
+
+// static
+bool nsBaseFilePicker::IsPotentiallyReadableDirectory(nsIFile& aDirectory) {
+  if (XRE_IsContentProcess()) {
+    // The content process sandbox may block access to directories that the
+    // file picker, which runs in the parent process, can read.
+    return true;
+  }
+
+#ifdef XP_MACOSX
+  // On macOS, the file picker can read directories that our own process can't.
+  return true;
+#else
+#  ifdef MOZ_WIDGET_GTK
+  if (mozilla::widget::IsRunningUnderFlatpakOrSnap()) {
+    // On Flatpak / snap, the file picker can read directories that our own
+    // process can't.
+    return true;
+  }
+#  endif
+  bool isDirectory = false;
+  bool isReadable = false;
+  return NS_SUCCEEDED(aDirectory.IsDirectory(&isDirectory)) && isDirectory &&
+         NS_SUCCEEDED(aDirectory.IsReadable(&isReadable)) && isReadable;
+#endif
+}
+
+bool nsBaseFilePicker::IsContentInitiated() const {
+  if (!mBrowsingContext || !mBrowsingContext->IsContent()) {
+    return false;
+  }
+  // Only web content is subject to input protection. Exempt trusted documents
+  // (system principal and about: pages), which run in a content browsing
+  // context but are not untrusted web content.
+  if (mozilla::dom::WindowGlobalParent* wgp =
+          mBrowsingContext->Canonical()->GetCurrentWindowGlobal()) {
+    if (nsIPrincipal* principal = wgp->DocumentPrincipal()) {
+      return !principal->IsSystemPrincipal() && !principal->SchemeIs("about");
+    }
+  }
+  return true;
+}
+
+bool nsBaseFilePicker::IsPickerInputProtected() const {
+  return IsContentInitiated() &&
+         IsWithinInputProtectionTimeRange(
+             mShowTime, mozilla::TimeStamp::Now(),
+             mozilla::StaticPrefs::security_notification_enable_delay());
+}
+
+bool nsBaseFilePicker::ShouldRunContentAnalysis() const {
+  if (mMode == nsIFilePicker::modeSave || !mBrowsingContext ||
+      mBrowsingContext->IsChrome() ||
+      !mozilla::StaticPrefs::
+          browser_contentanalysis_interception_point_file_upload_enabled()) {
+    return false;
+  }
+  nsCOMPtr<nsIContentAnalysis> contentAnalysis =
+      mozilla::components::nsIContentAnalysis::Service();
+  if (!contentAnalysis) {
+    return false;
+  }
+  // GetIsActive() can report active and still fail if the backend isn't ready.
+  // Ignore the failure so that the check still runs and fails closed.
+  bool isActive = false;
+  (void)contentAnalysis->GetIsActive(&isActive);
+  return isActive;
+}
+
+RefPtr<nsBaseFilePicker::ContentAnalysisPromise>
+nsBaseFilePicker::CheckContentAnalysis(nsCOMArray<nsIFile>&& aFiles) {
+  if (NS_WARN_IF(aFiles.IsEmpty()) || NS_WARN_IF(!mBrowsingContext)) {
+    return ContentAnalysisPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+  }
+  auto* windowGlobal = mBrowsingContext->Canonical()->GetCurrentWindowGlobal();
+  if (NS_WARN_IF(!windowGlobal)) {
+    return ContentAnalysisPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+  }
+  // This will check all of the files even if BLOCK responses are received for
+  // some of them, and the promise will resolve with the files that are ALLOWed.
+  return mozilla::contentanalysis::ContentAnalysis::CheckUploadsInBatchMode(
+      std::move(aFiles), /* aAutoAcknowledge */ true, windowGlobal,
+      nsIContentAnalysisRequest::Reason::eFilePickerDialog);
 }
 
 nsresult nsBaseFilePicker::ResolveSpecialDirectory(

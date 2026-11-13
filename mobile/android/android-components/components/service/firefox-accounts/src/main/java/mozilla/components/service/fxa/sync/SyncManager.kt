@@ -5,7 +5,11 @@
 package mozilla.components.service.fxa.sync
 
 import androidx.annotation.VisibleForTesting
+import androidx.annotation.VisibleForTesting.Companion.PROTECTED
 import androidx.work.WorkInfo
+import java.io.Closeable
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.StateFlow
 import mozilla.components.concept.storage.KeyProvider
 import mozilla.components.concept.sync.SyncConfig
 import mozilla.components.concept.sync.SyncEngine
@@ -14,70 +18,51 @@ import mozilla.components.service.fxa.manager.SyncEnginesStorage
 import mozilla.components.support.base.log.logger.Logger
 import mozilla.components.support.base.observer.Observable
 import mozilla.components.support.base.observer.ObserverRegistry
-import java.io.Closeable
-import java.lang.Exception
-import java.util.concurrent.TimeUnit
 
-/**
- * A collection of objects describing a reason for running a sync.
- */
+/** A collection of objects describing a reason for running a sync. */
 sealed class SyncReason {
-    /**
-     * Application is starting up, and wants to sync data.
-     */
+    /** Application is starting up, and wants to sync data. */
     object Startup : SyncReason()
 
-    /**
-     * User is requesting a sync (e.g. pressed a "sync now" button).
-     */
+    /** User is requesting a sync (e.g. pressed a "sync now" button). */
     object User : SyncReason()
 
-    /**
-     * User changed enabled/disabled state of one or more [SyncEngine]s.
-     */
+    /** User changed enabled/disabled state of one or more [SyncEngine]s. */
     object EngineChange : SyncReason()
 
-    /**
-     * Internal use only: first time running a sync.
-     */
+    /** Internal use only: first time running a sync. */
     internal object FirstSync : SyncReason()
 
-    /**
-     * Internal use only: running a periodic sync.
-     */
+    /** Internal use only: running a periodic sync. */
     internal object Scheduled : SyncReason()
 }
 
-/**
- * An interface for consumers that wish to observer "sync lifecycle" events.
- */
+/** An interface for consumers that wish to observer "sync lifecycle" events. */
 interface SyncStatusObserver {
-    /**
-     * Gets called at the start of a sync, before any configured syncable is synchronized.
-     */
+    /** Gets called at the start of a sync, before any configured syncable is synchronized. */
     fun onStarted()
 
     /**
-     * Gets called at the end of a sync, after every configured syncable has been synchronized.
-     * A set of enabled [SyncEngine]s could have changed, so observers are expected to query
-     * [SyncEnginesStorage.getStatus].
+     * Gets called at the end of a sync, after every configured syncable has been synchronized. A set of enabled
+     * [SyncEngine]s could have changed, so observers are expected to query [SyncEnginesStorage.getStatus].
      */
     fun onIdle()
 
     /**
      * Gets called if sync encounters an error that's worthy of processing by status observers.
+     *
      * @param error Optional relevant exception.
      */
     fun onError(error: Exception?)
 }
 
 /**
- * A lazy instance of a [SyncableStore] with an optional [KeyProvider] instance, used if this store
- * has encrypted contents. Lazy wrapping is in place to ensure we don't eagerly instantiate the storage.
+ * A lazy instance of a [SyncableStore] with an optional [KeyProvider] instance, used if this store has encrypted
+ * contents. Lazy wrapping is in place to ensure we don't eagerly instantiate the storage.
  *
  * @property lazyStore A [SyncableStore] wrapped in [Lazy].
- * @property keyProvider An optional [KeyProvider] wrapped in [Lazy]. If present, it'll be used for
- * crypto operations on the storage.
+ * @property keyProvider An optional [KeyProvider] wrapped in [Lazy]. If present, it'll be used for crypto operations on
+ *   the storage.
  */
 data class LazyStoreWithKey(
     val lazyStore: Lazy<SyncableStore>,
@@ -85,17 +70,18 @@ data class LazyStoreWithKey(
 )
 
 /**
- * A singleton registry of [SyncableStore] objects. [WorkManagerSyncDispatcher] will use this to
- * access configured [SyncableStore] instances.
+ * A singleton registry of [SyncableStore] objects. [WorkManagerSyncDispatcher] will use this to access configured
+ * [SyncableStore] instances.
  *
- * This pattern provides a safe way for library-defined background workers to access globally
- * available instances of stores within an application.
+ * This pattern provides a safe way for library-defined background workers to access globally available instances of
+ * stores within an application.
  */
 object GlobalSyncableStoreProvider {
     private val stores: MutableMap<SyncEngine, LazyStoreWithKey> = mutableMapOf()
 
     /**
      * Configure an instance of [SyncableStore] for a [SyncEngine] enum.
+     *
      * @param storePair A pair associating [SyncableStore] with a [SyncEngine].
      */
     fun configureStore(storePair: Pair<SyncEngine, Lazy<SyncableStore>>, keyProvider: Lazy<KeyProvider>? = null) {
@@ -107,34 +93,38 @@ object GlobalSyncableStoreProvider {
     }
 }
 
-/**
- * Internal interface to enable testing SyncManager implementations independently from SyncDispatcher.
- */
+/** Internal interface to enable testing SyncManager implementations independently from SyncDispatcher. */
 internal interface SyncDispatcher : Closeable, Observable<SyncStatusObserver> {
+
+    fun initialize()
+
     fun isSyncActive(): Boolean
+
     fun syncNow(
         reason: SyncReason,
         debounce: Boolean = false,
         customEngineSubset: List<SyncEngine> = listOf(),
     )
+
     fun startPeriodicSync(unit: TimeUnit, period: Long, initialDelay: Long)
+
     fun stopPeriodicSync()
+
     fun workersStateChanged(currentWorkStates: List<WorkInfo.State>?)
+
     fun setEngineEnabled(engine: SyncEngine, enabled: Boolean)
 }
 
 /**
  * A base sync manager implementation.
+ *
  * @param syncConfig A [SyncConfig] object describing how sync should behave.
  */
-internal abstract class SyncManager(
-    private val syncConfig: SyncConfig,
-) {
+internal abstract class SyncManager(private val syncConfig: SyncConfig) {
     open val logger = Logger("SyncManager")
 
     // A SyncDispatcher instance bound to an account and a set of syncable stores.
-    @VisibleForTesting
-    internal var syncDispatcher: SyncDispatcher? = null
+    @VisibleForTesting(otherwise = PROTECTED) internal var syncDispatcher: SyncDispatcher? = null
 
     private val syncStatusObserverRegistry = ObserverRegistry<SyncStatusObserver>()
 
@@ -145,13 +135,32 @@ internal abstract class SyncManager(
     private val dispatcherStatusObserver = PassThroughSyncStatusObserver(syncStatusObserverRegistry)
 
     /**
-     * Indicates if sync is currently running.
+     * Emits whether sync is connected on this device, and if it is, whether it is able to run.
+     *
+     * Emits [SyncConnectionState.Uninitialized] until [initialize] has been called.
      */
+    abstract val syncConnectionState: StateFlow<SyncConnectionState>
+
+    /** Initializes the manager. */
+    internal abstract fun initialize()
+
+    /** Indicates if sync is currently running. */
     internal fun isSyncActive() = syncDispatcher?.isSyncActive() ?: false
 
     internal fun registerSyncStatusObserver(observer: SyncStatusObserver) {
         syncStatusObserverRegistry.register(observer)
     }
+
+    /**
+     * Configures and initializes sync, persisting that sync is connected on this device.
+     *
+     * @param params The [ConnectParams] describing how sync should be connected.
+     * @return [ConnectResult.Success] once sync is connected, or [ConnectResult.Failure] if connect did not succeed
+     */
+    abstract suspend fun connect(params: ConnectParams): ConnectResult
+
+    /** Disconnect sync on this device. */
+    abstract suspend fun disconnect()
 
     /**
      * Request an immediate synchronization of all configured stores.
@@ -164,34 +173,34 @@ internal abstract class SyncManager(
         reason: SyncReason,
         debounce: Boolean = false,
         customEngineSubset: List<SyncEngine> = listOf(),
-    ) = synchronized(this) {
-        if (syncDispatcher == null) {
-            logger.info("Sync is not enabled. Ignoring 'sync now' request.")
+    ) {
+        synchronized(this) {
+            if (syncDispatcher == null) {
+                logger.info("Sync is not enabled. Ignoring 'sync now' request.")
+            }
+            syncDispatcher?.syncNow(reason, debounce, customEngineSubset)
         }
-        syncDispatcher?.syncNow(reason, debounce, customEngineSubset)
     }
 
     internal fun setEngineEnabled(engine: SyncEngine, enabled: Boolean) {
         syncDispatcher?.setEngineEnabled(engine, enabled)
     }
 
-    /**
-     * Enables synchronization, with behaviour described in [syncConfig].
-     */
-    internal fun start() = synchronized(this) {
-        logger.debug("Enabling...")
-        syncDispatcher = initDispatcher(newDispatcher(syncDispatcher, syncConfig.supportedEngines))
-        logger.debug("set and initialized new dispatcher: $syncDispatcher")
-    }
+    /** Enables synchronization, with behaviour described in [syncConfig]. */
+    internal fun start() =
+        synchronized(this) {
+            logger.debug("Enabling...")
+            syncDispatcher = initDispatcher(newDispatcher(syncDispatcher, syncConfig.supportedEngines))
+            logger.debug("set and initialized new dispatcher: $syncDispatcher")
+        }
 
-    /**
-     * Disables synchronization.
-     */
-    internal fun stop() = synchronized(this) {
-        logger.debug("Disabling...")
-        syncDispatcher?.close()
-        syncDispatcher = null
-    }
+    /** Disables synchronization. */
+    internal fun stop() =
+        synchronized(this) {
+            logger.debug("Disabling...")
+            syncDispatcher?.close()
+            syncDispatcher = null
+        }
 
     internal abstract fun createDispatcher(supportedEngines: Set<SyncEngine>): SyncDispatcher
 
@@ -221,12 +230,23 @@ internal abstract class SyncManager(
             )
         }
         dispatcherUpdated(dispatcher)
+        dispatcher.initialize()
         return dispatcher
     }
 
-    private class PassThroughSyncStatusObserver(
-        private val passThroughRegistry: ObserverRegistry<SyncStatusObserver>,
-    ) : SyncStatusObserver {
+    /**
+     * Checks that when [requestedEngines] is not empty, it should be a subset of the supported engines.
+     *
+     * Throws an [IllegalStateException] if the requested engines are not a subset of the supported engines.
+     */
+    protected fun checkSupportedEngines(requestedEngines: Set<SyncEngine>) {
+        check(requestedEngines.isEmpty() || syncConfig.supportedEngines.containsAll(requestedEngines)) {
+            "Custom engines for sync must be a subset of supported engines."
+        }
+    }
+
+    private class PassThroughSyncStatusObserver(private val passThroughRegistry: ObserverRegistry<SyncStatusObserver>) :
+        SyncStatusObserver {
         override fun onStarted() {
             passThroughRegistry.notifyObservers { onStarted() }
         }

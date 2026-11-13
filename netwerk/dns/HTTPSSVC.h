@@ -5,11 +5,11 @@
 #ifndef HTTPSSVC_h_
 #define HTTPSSVC_h_
 
-#include "nsIDNSByTypeRecord.h"
-#include "mozilla/net/DNS.h"
-#include "mozilla/Variant.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Variant.h"
+#include "mozilla/net/DNS.h"
 #include "nsHttp.h"
+#include "nsIDNSByTypeRecord.h"
 
 namespace mozilla {
 namespace net {
@@ -43,9 +43,7 @@ struct SvcParamNoDefaultAlpn {
 };
 
 struct SvcParamPort {
-  bool operator==(const SvcParamPort& aOther) const {
-    return mValue == aOther.mValue;
-  }
+  bool operator==(const SvcParamPort& aOther) const = default;
   uint16_t mValue;
 };
 
@@ -86,8 +84,8 @@ struct SvcFieldValue {
   bool operator==(const SvcFieldValue& aOther) const {
     return mValue == aOther.mValue;
   }
-  SvcFieldValue() : mValue(AsVariant(Nothing{})) {}
-  SvcParamType mValue;
+  SvcFieldValue() = default;
+  SvcParamType mValue{AsVariant(Nothing{})};
 };
 
 struct SVCB {

@@ -66,6 +66,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/PlainObject-inl.h"
+#include "vm/Realm-inl.h"
 
 namespace js {
 namespace pbl {
@@ -633,7 +634,7 @@ uint64_t ICInterpretOps(uint64_t arg0, uint64_t arg1, ICStub* stub,
     DECLARE_CACHEOP_CASE(GuardDynamicSlotValue);
     DECLARE_CACHEOP_CASE(LoadFixedSlot);
     DECLARE_CACHEOP_CASE(LoadDynamicSlot);
-    DECLARE_CACHEOP_CASE(GuardNoAllocationMetadataBuilder);
+    DECLARE_CACHEOP_CASE(AssertNoAllocationMetadataBuilder);
     DECLARE_CACHEOP_CASE(GuardFunctionHasJitEntry);
     DECLARE_CACHEOP_CASE(GuardFunctionHasNoJitEntry);
     DECLARE_CACHEOP_CASE(GuardFunctionIsNonBuiltinCtor);
@@ -1232,6 +1233,11 @@ uint64_t ICInterpretOps(uint64_t arg0, uint64_t arg1, ICStub* stub,
           case GuardClassKind::Map:
           case GuardClassKind::BoundFunction:
           case GuardClassKind::Date:
+          case GuardClassKind::Duration:
+          case GuardClassKind::PlainTime:
+          case GuardClassKind::PlainDateTime:
+          case GuardClassKind::Instant:
+          case GuardClassKind::ZonedDateTime:
           case GuardClassKind::WeakMap:
           case GuardClassKind::WeakSet:
             if (object->getClass() != jit::ClassFor(kind)) {
@@ -1347,10 +1353,12 @@ uint64_t ICInterpretOps(uint64_t arg0, uint64_t arg1, ICStub* stub,
         ObjOperandId objId = cacheIRReader.objOperandId();
         JSObject* obj = reinterpret_cast<JSObject*>(READ_REG(objId.id()));
         const JSClass* clasp = obj->getClass();
+        // This should match MacroAssembler::branchIfIsArrayBufferMaybeShared
         if (clasp == &FixedLengthArrayBufferObject::class_ ||
             clasp == &FixedLengthSharedArrayBufferObject::class_ ||
             clasp == &ResizableArrayBufferObject::class_ ||
-            clasp == &GrowableSharedArrayBufferObject::class_) {
+            clasp == &GrowableSharedArrayBufferObject::class_ ||
+            clasp == &ImmutableArrayBufferObject::class_) {
           FAIL_IC();
         }
         DISPATCH_CACHEOP();
@@ -1673,13 +1681,13 @@ uint64_t ICInterpretOps(uint64_t arg0, uint64_t arg1, ICStub* stub,
         DISPATCH_CACHEOP();
       }
 
-      CACHEOP_CASE(GuardNoAllocationMetadataBuilder) {
+      CACHEOP_CASE(AssertNoAllocationMetadataBuilder) {
         uint32_t builderAddrOffset = cacheIRReader.stubOffset();
         uintptr_t builderAddr =
             stubInfo->getStubRawWord(cstub, builderAddrOffset);
-        if (*reinterpret_cast<uintptr_t*>(builderAddr) != 0) {
-          FAIL_IC();
-        }
+        (void)builderAddr;
+        MOZ_ASSERT(*reinterpret_cast<uintptr_t*>(builderAddr) == 0,
+                   "unexpected allocation metadata builder");
         DISPATCH_CACHEOP();
       }
 
@@ -2296,7 +2304,7 @@ uint64_t ICInterpretOps(uint64_t arg0, uint64_t arg1, ICStub* stub,
         {
           PUSH_IC_FRAME();
 
-          if (!ctx.stack.check(sp, sizeof(StackVal) * (totalArgs + 6))) {
+          if (!ctx.stack.check(sp, sizeof(StackVal) * (totalArgs + 7))) {
             ReportOverRecursed(ctx.frameMgr.cxForLocalUseOnly());
             ctx.error = PBIResult::Error;
             return IC_ERROR_SENTINEL();
@@ -2366,6 +2374,7 @@ uint64_t ICInterpretOps(uint64_t arg0, uint64_t arg1, ICStub* stub,
           Value* args = reinterpret_cast<Value*>(sp);
 
           if (isNative) {
+            PUSHNATIVE(StackValNative(callee));
             PUSHNATIVE(StackValNative(argc));
             PUSHNATIVE(
                 StackValNative(MakeFrameDescriptor(FrameType::BaselineStub)));
@@ -3867,11 +3876,8 @@ uint64_t ICInterpretOps(uint64_t arg0, uint64_t arg1, ICStub* stub,
       CACHEOP_CASE(Int32MinMaxArrayResult) {
         ObjOperandId arrayId = cacheIRReader.objOperandId();
         bool isMax = cacheIRReader.readBool();
-        // ICs that use this opcode depend on implicit unboxing due to
-        // type-overload on ObjOperandId when a value is loaded
-        // directly from an argument slot. We explicitly unbox here.
-        NativeObject* nobj = reinterpret_cast<NativeObject*>(
-            &READ_VALUE_REG(arrayId.id()).toObject());
+        NativeObject* nobj =
+            reinterpret_cast<NativeObject*>(READ_REG(arrayId.id()));
         uint32_t len = nobj->getDenseInitializedLength();
         if (len == 0) {
           FAIL_IC();
@@ -3900,11 +3906,8 @@ uint64_t ICInterpretOps(uint64_t arg0, uint64_t arg1, ICStub* stub,
       CACHEOP_CASE(NumberMinMaxArrayResult) {
         ObjOperandId arrayId = cacheIRReader.objOperandId();
         bool isMax = cacheIRReader.readBool();
-        // ICs that use this opcode depend on implicit unboxing due to
-        // type-overload on ObjOperandId when a value is loaded
-        // directly from an argument slot. We explicitly unbox here.
-        NativeObject* nobj = reinterpret_cast<NativeObject*>(
-            &READ_VALUE_REG(arrayId.id()).toObject());
+        NativeObject* nobj =
+            reinterpret_cast<NativeObject*>(READ_REG(arrayId.id()));
         uint32_t len = nobj->getDenseInitializedLength();
         if (len == 0) {
           FAIL_IC();
@@ -4756,13 +4759,15 @@ uint64_t ICInterpretOps(uint64_t arg0, uint64_t arg1, ICStub* stub,
 
       CACHEOP_CASE(StringToAtom) {
         StringOperandId strId = cacheIRReader.stringOperandId();
+        StringOperandId resultId = cacheIRReader.stringOperandId();
+        BOUNDSCHECK(resultId);
         JSString* str = reinterpret_cast<JSString*>(READ_REG(strId.id()));
         JSAtom* result =
             AtomizeStringNoGC(ctx.frameMgr.cxForLocalUseOnly(), str);
         if (!result) {
           FAIL_IC();
         }
-        WRITE_REG(strId.id(), reinterpret_cast<uint64_t>(result), STRING);
+        WRITE_REG(resultId.id(), reinterpret_cast<uint64_t>(result), STRING);
         DISPATCH_CACHEOP();
       }
 
@@ -8047,7 +8052,7 @@ PBIResult PortableBaselineInterpret(
       }
 
       CASE(InitialYield) {
-        // gen => rval, gen, resumeKind
+        // gen => rval, resumeKind
         ReservedRooted<JSObject*> obj0(&state.obj0,
                                        &VIRTSP(0).asValue().toObject());
         uint32_t frameSize = ctx.stack.frameSize(sp, frame);
@@ -8063,7 +8068,7 @@ PBIResult PortableBaselineInterpret(
 
       CASE(Await)
       CASE(Yield) {
-        // rval1, gen => rval2, gen, resumeKind
+        // rval1, gen => rval2, resumeKind
         ReservedRooted<JSObject*> obj0(&state.obj0,
                                        &VIRTPOP().asValue().toObject());
         uint32_t frameSize = ctx.stack.frameSize(sp, frame);
@@ -8088,12 +8093,6 @@ PBIResult PortableBaselineInterpret(
           }
         }
         goto do_return;
-      }
-
-      CASE(IsGenClosing) {
-        bool result = VIRTSP(0).asValue() == MagicValue(JS_GENERATOR_CLOSING);
-        VIRTPUSH(StackVal(BooleanValue(result)));
-        END_OP(IsGenClosing);
       }
 
       CASE(AsyncAwait) {
@@ -8161,7 +8160,9 @@ PBIResult PortableBaselineInterpret(
       CASE(CanSkipAwait) {
         // value => value, can_skip
         bool result = false;
-        {
+        // The await can only be skipped when this is the first frame of its
+        // activation. See js::CanSkipAwait.
+        if (frame->framePrefix()->prevType() == FrameType::CppToJSJit) {
           ReservedRooted<Value> value0(&state.value0, VIRTSP(0).asValue());
           PUSH_EXIT_FRAME();
           if (!CanSkipAwait(cx, value0, &result)) {
@@ -8196,43 +8197,27 @@ PBIResult PortableBaselineInterpret(
         END_OP(ResumeKind);
       }
 
-      CASE(CheckResumeKind) {
+      CASE(Resume) {
         // rval, gen, resumeKind => rval
         {
           GeneratorResumeKind resumeKind =
-              IntToResumeKind(VIRTPOP().asValue().toInt32());
-          ReservedRooted<JSObject*> obj0(
-              &state.obj0,
-              &VIRTPOP().asValue().toObject());  // gen
-          ReservedRooted<Value> value0(&state.value0,
-                                       VIRTSP(0).asValue());  // rval
-          if (resumeKind != GeneratorResumeKind::Next) {
-            PUSH_EXIT_FRAME();
-            MOZ_ALWAYS_FALSE(GeneratorThrowOrReturn(
-                cx, frame, obj0.as<AbstractGeneratorObject>(), value0,
-                resumeKind));
-            GOTO_ERROR();
-          }
-        }
-        END_OP(CheckResumeKind);
-      }
-
-      CASE(Resume) {
-        SYNCSP();
-        Value gen = VIRTSP(2).asValue();
-        Value* callerSP = reinterpret_cast<Value*>(sp);
-        {
-          ReservedRooted<Value> value0(&state.value0);
-          ReservedRooted<JSObject*> obj0(&state.obj0, &gen.toObject());
+              IntToResumeKind(VIRTSP(0).asValue().toInt32());
+          ReservedRooted<Value> value0(&state.value0, VIRTSP(1).asValue());
+          ReservedRooted<JSObject*> obj0(&state.obj0,
+                                         &VIRTSP(2).asValue().toObject());
+          ReservedRooted<Value> value1(&state.value1);
           {
             PUSH_EXIT_FRAME();
             TRACE_PRINTF("Going to C++ interp for Resume\n");
-            if (!InterpretResume(cx, obj0, callerSP, &value0)) {
+            Handle<AbstractGeneratorObject*> genObj =
+                obj0.as<AbstractGeneratorObject>();
+            AutoRealm ar(cx, genObj);
+            if (!ResumeGenerator(cx, genObj, value0, resumeKind, &value1)) {
               GOTO_ERROR();
             }
           }
           VIRTPOPN(2);
-          VIRTSPWRITE(0, StackVal(value0));
+          VIRTSPWRITE(0, StackVal(value1));
         }
         END_OP(Resume);
       }
@@ -8263,12 +8248,6 @@ PBIResult PortableBaselineInterpret(
         if (frame->script()->isDebuggee()) {
           TRACE_PRINTF("doing DebugAfterYield\n");
           PUSH_EXIT_FRAME();
-          ReservedRooted<JSScript*> script0(&state.script0, frame->script());
-          if (DebugAPI::hasAnyBreakpointsOrStepMode(script0) &&
-              !HandleDebugTrap(cx, frame, pc)) {
-            TRACE_PRINTF("HandleDebugTrap returned error\n");
-            GOTO_ERROR();
-          }
           if (!DebugAfterYield(cx, frame)) {
             TRACE_PRINTF("DebugAfterYield returned error\n");
             GOTO_ERROR();
@@ -8871,7 +8850,6 @@ PBIResult PortableBaselineInterpret(
         frame->popOffEnvironmentChain<WithEnvironmentObject>();
         END_OP(LeaveWith);
       }
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
       CASE(AddDisposable) {
         {
           ReservedRooted<JSObject*> env(&state.obj0, frame->environmentChain());
@@ -8924,7 +8902,6 @@ PBIResult PortableBaselineInterpret(
         VIRTPUSH(StackVal(ObjectValue(*errorObj)));
         END_OP(CreateSuppressedError);
       }
-#endif
       CASE(BindVar) {
         JSObject* varObj;
         {
@@ -9062,7 +9039,6 @@ PBIResult PortableBaselineInterpret(
       }
       CASE(Lineno) { END_OP(Lineno); }
       CASE(NopDestructuring) { END_OP(NopDestructuring); }
-      CASE(ForceInterpreter) { END_OP(ForceInterpreter); }
       CASE(Debugger) {
         {
           PUSH_EXIT_FRAME();
@@ -9326,14 +9302,14 @@ bool PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
 
 MethodStatus CanEnterPortableBaselineInterpreter(JSContext* cx,
                                                  RunState& state) {
+  // Resuming a suspended generator or async function/module is not supported.
+  MOZ_ASSERT(!state.isGeneratorResume());
+
   if (!JitOptions.portableBaselineInterpreter) {
     return MethodStatus::Method_CantCompile;
   }
   if (state.script()->hasJitScript()) {
     return MethodStatus::Method_Compiled;
-  }
-  if (state.script()->hasForceInterpreterOp()) {
-    return MethodStatus::Method_CantCompile;
   }
   if (state.script()->isAsync() || state.script()->isGenerator()) {
     return MethodStatus::Method_CantCompile;
@@ -9374,7 +9350,10 @@ bool PortablebaselineInterpreterStackCheck(JSContext* cx, RunState& state,
   StackVal* base = reinterpret_cast<StackVal*>(pbs.base);
   StackVal* top = reinterpret_cast<StackVal*>(pbs.top);
   ssize_t margin = kStackMargin / sizeof(StackVal);
-  ssize_t needed = numActualArgs + state.script()->nslots() + margin;
+  size_t numFormals =
+      state.isInvoke() ? state.script()->function()->nargs() : 0;
+  ssize_t needed =
+      std::max(numActualArgs, numFormals) + state.script()->nslots() + margin;
   return (top - base) >= needed;
 }
 

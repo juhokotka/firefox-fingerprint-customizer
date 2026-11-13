@@ -10,11 +10,14 @@ import android.view.LayoutInflater
 import android.view.View
 import android.widget.TextView
 import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.core.content.res.use
 import androidx.core.content.withStyledAttributes
 import org.mozilla.fenix.R
 import org.mozilla.fenix.databinding.DeleteBrowsingDataItemBinding
 
-class DeleteBrowsingDataItem @JvmOverloads constructor(
+class DeleteBrowsingDataItem
+@JvmOverloads
+constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0,
@@ -25,7 +28,7 @@ class DeleteBrowsingDataItem @JvmOverloads constructor(
         private const val DISABLED_ALPHA = 0.6f
     }
 
-    private var binding: DeleteBrowsingDataItemBinding
+    private val binding: DeleteBrowsingDataItemBinding
 
     val titleView: TextView
         get() = binding.title
@@ -42,10 +45,15 @@ class DeleteBrowsingDataItem @JvmOverloads constructor(
     var onCheckListener: ((Boolean) -> Unit)? = null
 
     init {
-        val view =
-            LayoutInflater.from(context).inflate(R.layout.delete_browsing_data_item, this, true)
+        binding = DeleteBrowsingDataItemBinding.inflate(LayoutInflater.from(context), this)
 
-        binding = DeleteBrowsingDataItemBinding.bind(view)
+        val preferredItemHeight =
+            context.obtainStyledAttributes(intArrayOf(android.R.attr.listPreferredItemHeight)).use {
+                it.getDimensionPixelSize(0, 0)
+            }
+        if (preferredItemHeight != 0) {
+            minHeight = preferredItemHeight
+        }
 
         setOnClickListener {
             binding.checkbox.isChecked = !binding.checkbox.isChecked
@@ -56,14 +64,16 @@ class DeleteBrowsingDataItem @JvmOverloads constructor(
         }
 
         context.withStyledAttributes(attrs, R.styleable.DeleteBrowsingDataItem, defStyleAttr, 0) {
-            val titleId = getResourceId(
-                R.styleable.DeleteBrowsingDataItem_deleteBrowsingDataItemTitle,
-                R.string.browser_menu_library,
-            )
-            val subtitleId = getResourceId(
-                R.styleable.DeleteBrowsingDataItem_deleteBrowsingDataItemSubtitle,
-                R.string.empty_string,
-            )
+            val titleId =
+                getResourceId(
+                    R.styleable.DeleteBrowsingDataItem_deleteBrowsingDataItemTitle,
+                    R.string.browser_menu_library,
+                )
+            val subtitleId =
+                getResourceId(
+                    R.styleable.DeleteBrowsingDataItem_deleteBrowsingDataItemSubtitle,
+                    R.string.empty_string,
+                )
 
             binding.title.text = resources.getString(titleId)
             val subtitleText = resources.getString(subtitleId)

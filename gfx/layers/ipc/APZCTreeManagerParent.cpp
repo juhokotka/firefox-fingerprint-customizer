@@ -40,16 +40,6 @@ void APZCTreeManagerParent::ActorDestroy(ActorDestroyReason aWhy) {
   CompositorBridgeParent::DisconnectApzcTreeManager(this);
 }
 
-mozilla::ipc::IPCResult APZCTreeManagerParent::RecvSetKeyboardMap(
-    const KeyboardMap& aKeyboardMap) {
-  mUpdater->RunOnUpdaterThread(
-      mLayersId, NewRunnableMethod<KeyboardMap>(
-                     "layers::IAPZCTreeManager::SetKeyboardMap", mTreeManager,
-                     &IAPZCTreeManager::SetKeyboardMap, aKeyboardMap));
-
-  return IPC_OK();
-}
-
 mozilla::ipc::IPCResult APZCTreeManagerParent::RecvZoomToRect(
     const ScrollableLayerGuid& aGuid, const ZoomTarget& aZoomTarget,
     const uint32_t& aFlags) {
@@ -78,6 +68,12 @@ mozilla::ipc::IPCResult APZCTreeManagerParent::RecvContentReceivedInputBlock(
 
 mozilla::ipc::IPCResult APZCTreeManagerParent::RecvSetTargetAPZC(
     const uint64_t& aInputBlockId, nsTArray<ScrollableLayerGuid>&& aTargets) {
+  for (const auto& guid : aTargets) {
+    if (!IsGuidValid(guid)) {
+      return IPC_FAIL_NO_REASON(this);
+    }
+  }
+
   mUpdater->RunOnUpdaterThread(
       mLayersId,
       NewRunnableMethod<uint64_t,
@@ -100,15 +96,6 @@ mozilla::ipc::IPCResult APZCTreeManagerParent::RecvUpdateZoomConstraints(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult APZCTreeManagerParent::RecvSetDPI(
-    const float& aDpiValue) {
-  mUpdater->RunOnUpdaterThread(
-      mLayersId,
-      NewRunnableMethod<float>("layers::IAPZCTreeManager::SetDPI", mTreeManager,
-                               &IAPZCTreeManager::SetDPI, aDpiValue));
-  return IPC_OK();
-}
-
 mozilla::ipc::IPCResult APZCTreeManagerParent::RecvSetAllowedTouchBehavior(
     const uint64_t& aInputBlockId, nsTArray<TouchBehaviorFlags>&& aValues) {
   mUpdater->RunOnUpdaterThread(
@@ -118,17 +105,6 @@ mozilla::ipc::IPCResult APZCTreeManagerParent::RecvSetAllowedTouchBehavior(
           "layers::IAPZCTreeManager::SetAllowedTouchBehavior", mTreeManager,
           &IAPZCTreeManager::SetAllowedTouchBehavior, aInputBlockId,
           std::move(aValues)));
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult APZCTreeManagerParent::RecvSetBrowserGestureResponse(
-    const uint64_t& aInputBlockId, const BrowserGestureResponse& aResponse) {
-  mUpdater->RunOnUpdaterThread(
-      mLayersId, NewRunnableMethod<uint64_t, BrowserGestureResponse>(
-                     "layers::IAPZCTreeManager::SetBrowserGestureResponse",
-                     mTreeManager, &IAPZCTreeManager::SetBrowserGestureResponse,
-                     aInputBlockId, aResponse));
 
   return IPC_OK();
 }
@@ -144,47 +120,6 @@ mozilla::ipc::IPCResult APZCTreeManagerParent::RecvStartScrollbarDrag(
       NewRunnableMethod<ScrollableLayerGuid, AsyncDragMetrics>(
           "layers::IAPZCTreeManager::StartScrollbarDrag", mTreeManager,
           &IAPZCTreeManager::StartScrollbarDrag, aGuid, aDragMetrics));
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult APZCTreeManagerParent::RecvStartAutoscroll(
-    const ScrollableLayerGuid& aGuid, const ScreenPoint& aAnchorLocation) {
-  // Unlike RecvStartScrollbarDrag(), this message comes from the parent
-  // process (via nsIWidget::mAPZC) rather than from the child process
-  // (via BrowserChild::mApzcTreeManager), so there is no need to check the
-  // layers id against mLayersId (and in any case, it wouldn't match, because
-  // mLayersId stores the parent process's layers id, while nsIWidget is
-  // sending the child process's layers id).
-
-  mUpdater->RunOnControllerThread(
-      mLayersId,
-      NewRunnableMethod<ScrollableLayerGuid, ScreenPoint>(
-          "layers::IAPZCTreeManager::StartAutoscroll", mTreeManager,
-          &IAPZCTreeManager::StartAutoscroll, aGuid, aAnchorLocation));
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult APZCTreeManagerParent::RecvStopAutoscroll(
-    const ScrollableLayerGuid& aGuid) {
-  // See RecvStartAutoscroll() for why we don't check the layers id.
-
-  mUpdater->RunOnControllerThread(
-      mLayersId, NewRunnableMethod<ScrollableLayerGuid>(
-                     "layers::IAPZCTreeManager::StopAutoscroll", mTreeManager,
-                     &IAPZCTreeManager::StopAutoscroll, aGuid));
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult APZCTreeManagerParent::RecvSetLongTapEnabled(
-    const bool& aLongTapEnabled) {
-  mUpdater->RunOnUpdaterThread(
-      mLayersId,
-      NewRunnableMethod<bool>(
-          "layers::IAPZCTreeManager::SetLongTapEnabled", mTreeManager,
-          &IAPZCTreeManager::SetLongTapEnabled, aLongTapEnabled));
 
   return IPC_OK();
 }

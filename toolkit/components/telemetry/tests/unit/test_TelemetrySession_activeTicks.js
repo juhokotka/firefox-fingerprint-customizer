@@ -9,9 +9,24 @@ const { TelemetrySession } = ChromeUtils.importESModule(
   "resource://gre/modules/TelemetrySession.sys.mjs"
 );
 
+// Helpers to fire the user-interaction notifications that drive active-tick
+// telemetry. The "-non-synthesized" variants drive the corrected stream added
+// in Bug 2050081.
+const active = () =>
+  Services.obs.notifyObservers(null, "user-interaction-active");
+const inactive = () =>
+  Services.obs.notifyObservers(null, "user-interaction-inactive");
+const activeNonSynth = () =>
+  Services.obs.notifyObservers(null, "user-interaction-active-non-synthesized");
+const inactiveNonSynth = () =>
+  Services.obs.notifyObservers(
+    null,
+    "user-interaction-inactive-non-synthesized"
+  );
+
 function tick(aHowMany) {
   for (let i = 0; i < aHowMany; i++) {
-    Services.obs.notifyObservers(null, "user-interaction-active");
+    active();
   }
 }
 
@@ -42,6 +57,10 @@ function checkSubsessionTicks(aExpected, aClearSubsession) {
 
 add_task(async function test_setup() {
   do_get_profile();
+  // Make sure TelemetryEnvironment initialization doesn't wait for
+  // browser-delayed-startup-finished indefinitely as part of waiting
+  // for Intl initialization promise to be resolved.
+  fakeIntlReady();
   // Make sure we don't generate unexpected pings due to pref changes.
   await setEmptyPrefWatchlist();
   // Ensure FOG's init
@@ -97,21 +116,6 @@ add_task(async function test_record_activeTicks_nonSynthesized() {
   await TelemetryController.testReset();
   Services.fog.testResetFOG();
 
-  let active = () =>
-    Services.obs.notifyObservers(null, "user-interaction-active");
-  let inactive = () =>
-    Services.obs.notifyObservers(null, "user-interaction-inactive");
-  let activeNonSynth = () =>
-    Services.obs.notifyObservers(
-      null,
-      "user-interaction-active-non-synthesized"
-    );
-  let inactiveNonSynth = () =>
-    Services.obs.notifyObservers(
-      null,
-      "user-interaction-inactive-non-synthesized"
-    );
-
   let checkTicks = (expectedLegacy, expectedNonSynth) => {
     Assert.equal(
       Glean.browserEngagement.activeTicks.testGetValue() ?? 0,
@@ -151,6 +155,124 @@ add_task(async function test_record_activeTicks_nonSynthesized() {
   checkTicks(2, 4);
   activeNonSynth();
   checkTicks(2, 5);
+
+  await TelemetryController.testShutdown();
+});
+
+add_task(async function test_record_consecutiveActiveTicks() {
+  await TelemetryController.testReset();
+  Services.fog.testResetFOG();
+
+  // Reduce a distribution to the number of samples and their sum, so we can
+  // assert on the recorded run lengths without depending on bucket boundaries.
+  let summarize = label => {
+    let data =
+      Glean.browserEngagement.consecutiveActiveTicks[label].testGetValue();
+    if (!data) {
+      return { count: 0, sum: 0 };
+    }
+    let count = Object.values(data.values).reduce((a, b) => a + b, 0);
+    return { count, sum: data.sum };
+  };
+
+  let checkDist = (label, expectedCount, expectedSum) => {
+    let { count, sum } = summarize(label);
+    Assert.equal(
+      count,
+      expectedCount,
+      `${label}: number of recorded runs must match.`
+    );
+    Assert.equal(sum, expectedSum, `${label}: sum of run lengths must match.`);
+  };
+
+  // A run in progress is not recorded until the user goes inactive. The first
+  // active after testReset is counted because the initial state is active.
+  active();
+  active();
+  active();
+  checkDist("active_ticks", 0, 0);
+
+  // Ending the run records its length (3) as a single sample.
+  inactive();
+  checkDist("active_ticks", 1, 3);
+
+  // The first active out of inactivity is just the start of the run and is not
+  // counted, so this run has length 1.
+  active();
+  active();
+  inactive();
+  checkDist("active_ticks", 2, 4);
+
+  // An empty run (start immediately followed by inactive) records nothing.
+  active();
+  inactive();
+  checkDist("active_ticks", 2, 4);
+
+  // Consecutive inactive notifications don't record spurious samples.
+  inactive();
+  checkDist("active_ticks", 2, 4);
+
+  // The non-synthesized stream is tracked independently.
+  checkDist("active_ticks_non_synthesized", 0, 0);
+  activeNonSynth();
+  activeNonSynth();
+  inactiveNonSynth();
+  checkDist("active_ticks_non_synthesized", 1, 2);
+  // The legacy distribution is unchanged by the non-synthesized stream.
+  checkDist("active_ticks", 2, 4);
+
+  await TelemetryController.testShutdown();
+});
+
+add_task(async function test_record_inactivePeriodDuration() {
+  await TelemetryController.testReset();
+  Services.fog.testResetFOG();
+
+  // Notifications fire synchronously, so each recorded period has a near-zero
+  // duration; assert on the number of recorded periods rather than their times.
+  let checkCount = (label, expected) => {
+    let data =
+      Glean.browserEngagement.inactivePeriodDuration[label].testGetValue();
+    Assert.equal(
+      data ? data.count : 0,
+      expected,
+      `${label}: number of recorded inactive periods must match.`
+    );
+  };
+
+  // Nothing is recorded until an inactive period completes (inactive->active).
+  active();
+  inactive();
+  checkCount("active_ticks", 0);
+
+  // Activity resumes: the completed inactive period is recorded.
+  active();
+  checkCount("active_ticks", 1);
+
+  // A second complete inactive period.
+  inactive();
+  active();
+  checkCount("active_ticks", 2);
+
+  // An inactive period in progress is not recorded until activity resumes.
+  inactive();
+  checkCount("active_ticks", 2);
+  active();
+  checkCount("active_ticks", 3);
+
+  // Consecutive inactive notifications don't start overlapping periods.
+  inactive();
+  inactive();
+  active();
+  checkCount("active_ticks", 4);
+
+  // The non-synthesized stream is tracked independently.
+  checkCount("active_ticks_non_synthesized", 0);
+  activeNonSynth();
+  inactiveNonSynth();
+  activeNonSynth();
+  checkCount("active_ticks_non_synthesized", 1);
+  checkCount("active_ticks", 4);
 
   await TelemetryController.testShutdown();
 });

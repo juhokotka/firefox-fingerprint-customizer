@@ -7,6 +7,7 @@
 
 #include "MainThreadUtils.h"
 #include "js/ContextOptions.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
@@ -44,8 +45,10 @@ class RuntimeService final : public nsIObserver {
       return mActiveServiceWorkers.Length();
     }
 
+    // There are no active or queued workers under the domain.
     bool HasNoWorkers() const {
-      return ActiveWorkerCount() == 0 && ActiveServiceWorkerCount() == 0;
+      return ActiveWorkerCount() == 0 && ActiveServiceWorkerCount() == 0 &&
+             mQueuedWorkers.IsEmpty();
     }
   };
 
@@ -91,6 +94,13 @@ class RuntimeService final : public nsIObserver {
   bool RegisterWorker(WorkerPrivate& aWorkerPrivate);
 
   void UnregisterWorker(WorkerPrivate& aWorkerPrivate);
+
+  // Try to schedule the first queued worker for aDomain. aParent is the
+  // current worker when called on a worker thread, or nullptr when called on
+  // the main thread. The first queued worker is scheduled only when it belongs
+  // on the current thread; otherwise a retry is dispatched to the right thread.
+  void MaybeScheduleQueuedWorker(const nsACString& aDomain,
+                                 WorkerPrivate* aParent);
 
   void CancelWorkersForWindow(const nsPIDOMWindowInner& aWindow);
 
@@ -170,7 +180,9 @@ class RuntimeService final : public nsIObserver {
   uint32_t ClampedHardwareConcurrency(bool aRFPHardcoded,
                                       bool aRFPTiered) const;
 
-  void CrashIfHanging();
+  // Returns a description of the still running workers if worker shutdown
+  // started and has not completed, Nothing() otherwise.
+  Maybe<nsCString> GetHangingWorkersInfo();
 
   bool IsShuttingDown() const { return mShuttingDown; }
 

@@ -1,9 +1,19 @@
+#![deny(unsafe_op_in_unsafe_fn)]
+
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::command::{RecordedComputePass, RecordedRenderPass};
-use wgc::id;
+use wgpu_core_remote_types::binding_model::{BindGroupDescriptor, BindGroupLayoutDescriptor};
+use wgpu_core_remote_types::encoders::{
+    CommandEncoderCommand, ComputePassEncoderCommand, RenderBundleEncoderCommand,
+    RenderBundleEncoderDescriptor, RenderPassEncoderCommand, TexelCopyTextureInfo,
+};
+use wgpu_core_remote_types::pipelines::{ComputePipelineDescriptor, RenderPipelineDescriptor};
+use wgpu_core_remote_types::{
+    id, BufferDescriptor, DeviceDescriptor, Label, PipelineLayoutDescriptor, QuerySetDescriptor,
+    RequestAdapterOptions, SamplerDescriptor, TextureDescriptor, TextureViewDescriptor,
+};
 
 pub mod client;
 pub mod command;
@@ -11,12 +21,12 @@ pub mod error;
 pub mod server;
 pub mod telemetry;
 
-pub use wgc::command::ffi::Command as CommandEncoderAction;
-
 use std::marker::PhantomData;
 use std::{borrow::Cow, mem, slice};
 
-use nsstring::nsACString;
+use nsstring::{nsACString, nsCString};
+
+use crate::error::GPUError;
 
 type RawString = *const std::os::raw::c_char;
 
@@ -27,6 +37,13 @@ fn cow_label(raw: &RawString) -> Option<Cow<'_, str>> {
         let cstr = unsafe { std::ffi::CStr::from_ptr(*raw) };
         cstr.to_str().ok().map(Cow::Borrowed)
     }
+}
+
+fn raw_string_to_string(raw: RawString) -> String {
+    unsafe { std::ffi::CStr::from_ptr(raw) }
+        .to_str()
+        .unwrap()
+        .to_string()
 }
 
 // Hides the repeated boilerplate of turning a `Option<&nsACString>` into a `Option<Cow<str>`.
@@ -58,7 +75,7 @@ impl<'a, T> FfiSlice<'a, T> {
             return &[];
         }
 
-        std::slice::from_raw_parts(self.data, self.length)
+        unsafe { std::slice::from_raw_parts(self.data, self.length) }
     }
 }
 
@@ -104,7 +121,7 @@ impl ByteBuf {
     }
 
     unsafe fn as_slice(&self) -> &[u8] {
-        slice::from_raw_parts(self.data, self.len)
+        unsafe { slice::from_raw_parts(self.data, self.len) }
     }
 }
 
@@ -132,7 +149,7 @@ pub struct AdapterInformation<S> {
 }
 
 #[repr(C)]
-pub struct TextureViewDescriptor<'a> {
+pub struct FfiTextureViewDescriptor<'a> {
     label: Option<&'a nsACString>,
     format: Option<&'a wgt::TextureFormat>,
     dimension: Option<&'a wgt::TextureViewDimension>,
@@ -235,31 +252,24 @@ pub enum QueueWriteDataSource {
 const MAX_SWAPCHAIN_BUFFER_COUNT: usize = 10;
 
 #[derive(serde::Serialize, serde::Deserialize)]
-enum Message<'a> {
+pub(crate) enum Message<'a> {
     RequestAdapter {
         adapter_id: id::AdapterId,
-        power_preference: wgt::PowerPreference,
-        force_fallback_adapter: bool,
+        desc: RequestAdapterOptions,
     },
     RequestDevice {
         adapter_id: id::AdapterId,
         device_id: id::DeviceId,
         queue_id: id::QueueId,
-        desc: wgc::device::DeviceDescriptor<'a>,
+        desc: DeviceDescriptor<'a>,
     },
     Device(id::DeviceId, DeviceAction<'a>),
-    Texture(id::DeviceId, id::TextureId, TextureAction<'a>),
-    CommandEncoder(id::DeviceId, id::CommandEncoderId, CommandEncoderAction),
-    CommandEncoderFinish(
-        id::DeviceId,
-        id::CommandEncoderId,
-        id::CommandBufferId,
-        wgt::CommandBufferDescriptor<wgc::Label<'a>>,
-    ),
-    ReplayRenderPass(id::DeviceId, id::CommandEncoderId, RecordedRenderPass),
-    ReplayComputePass(id::DeviceId, id::CommandEncoderId, RecordedComputePass),
+    Texture(id::TextureId, TextureAction<'a>),
+    RenderBundleEncoder(id::RenderBundleEncoderId, RenderBundleEncoderCommand<'a>),
+    CommandEncoder(id::CommandEncoderId, CommandEncoderCommand<'a>),
+    RenderPassEncoder(id::RenderPassEncoderId, RenderPassEncoderCommand),
+    ComputePassEncoder(id::ComputePassEncoderId, ComputePassEncoderCommand),
     QueueWrite {
-        device_id: id::DeviceId,
         queue_id: id::QueueId,
         data_source: QueueWriteDataSource,
         action: QueueWriteAction,
@@ -273,7 +283,6 @@ enum Message<'a> {
     },
     BufferUnmap(id::DeviceId, id::BufferId, bool),
     QueueSubmit(
-        id::DeviceId,
         id::QueueId,
         Cow<'a, [id::CommandBufferId]>,
         Cow<'a, [id::TextureId]>,
@@ -286,12 +295,8 @@ enum Message<'a> {
     CreateSwapChain {
         device_id: id::DeviceId,
         queue_id: id::QueueId,
-        width: i32,
-        height: i32,
+        desc: TextureDescriptor<'a>,
         format: SurfaceFormat,
-        texture_format: wgt::TextureFormat,
-        usage: wgt::TextureUsages,
-        view_formats: Vec<wgt::TextureFormat>,
         buffer_ids: [id::BufferId; MAX_SWAPCHAIN_BUFFER_COUNT],
         remote_texture_owner_id: RemoteTextureOwnerId,
         use_shared_texture_in_swap_chain: bool,
@@ -343,58 +348,32 @@ enum Message<'a> {
 enum DeviceAction<'a> {
     CreateBuffer {
         buffer_id: id::BufferId,
-        desc: wgc::resource::BufferDescriptor<'a>,
+        desc: BufferDescriptor<'a>,
         shmem_handle_index: usize,
     },
-    CreateTexture(
-        id::TextureId,
-        wgc::resource::TextureDescriptor<'a>,
-        Option<SwapChainId>,
-    ),
+    CreateTexture(id::TextureId, TextureDescriptor<'a>, Option<SwapChainId>),
     CreateExternalTexture(
         id::ExternalTextureId,
-        crate::ExternalTextureDescriptor<wgc::Label<'a>>,
+        crate::ExternalTextureDescriptor<Label<'a>>,
     ),
-    CreateSampler(id::SamplerId, wgc::resource::SamplerDescriptor<'a>),
-    CreateBindGroupLayout(
-        id::BindGroupLayoutId,
-        wgc::binding_model::BindGroupLayoutDescriptor<'a>,
-    ),
-    CreateBindGroupLayoutError(id::BindGroupLayoutId, wgc::Label<'a>),
+    CreateSampler(id::SamplerId, SamplerDescriptor<'a>),
+    CreateBindGroupLayout(id::BindGroupLayoutId, BindGroupLayoutDescriptor<'a>),
+    CreateBindGroupLayoutError(id::BindGroupLayoutId, Label<'a>),
     RenderPipelineGetBindGroupLayout(id::RenderPipelineId, u32, id::BindGroupLayoutId),
     ComputePipelineGetBindGroupLayout(id::ComputePipelineId, u32, id::BindGroupLayoutId),
-    CreatePipelineLayout(
-        id::PipelineLayoutId,
-        wgc::binding_model::PipelineLayoutDescriptor<'a>,
-    ),
-    CreateBindGroup(id::BindGroupId, wgc::binding_model::BindGroupDescriptor<'a>),
-    CreateShaderModule(id::ShaderModuleId, wgc::Label<'a>, Cow<'a, str>),
-    CreateComputePipeline(
-        id::ComputePipelineId,
-        wgc::pipeline::ComputePipelineDescriptor<'a>,
-        bool,
-    ),
-    CreateRenderPipeline(
-        id::RenderPipelineId,
-        wgc::pipeline::RenderPipelineDescriptor<'a>,
-        bool,
-    ),
-    CreateRenderBundle(
-        id::RenderBundleId,
-        wgc::command::RenderBundleEncoder,
-        wgc::command::RenderBundleDescriptor<'a>,
-    ),
-    CreateRenderBundleError(id::RenderBundleId, wgc::Label<'a>),
-    CreateQuerySet(id::QuerySetId, wgc::resource::QuerySetDescriptor<'a>),
+    CreatePipelineLayout(id::PipelineLayoutId, PipelineLayoutDescriptor<'a>),
+    CreateBindGroup(id::BindGroupId, BindGroupDescriptor<'a>),
+    CreateShaderModule(id::ShaderModuleId, Label<'a>, Cow<'a, str>),
+    CreateComputePipeline(id::ComputePipelineId, ComputePipelineDescriptor<'a>, bool),
+    CreateRenderPipeline(id::RenderPipelineId, RenderPipelineDescriptor<'a>, bool),
+    CreateRenderBundleEncoder(id::RenderBundleEncoderId, RenderBundleEncoderDescriptor<'a>),
+    CreateQuerySet(id::QuerySetId, QuerySetDescriptor<'a>),
     CreateCommandEncoder(
         id::CommandEncoderId,
-        wgt::CommandEncoderDescriptor<wgc::Label<'a>>,
+        wgt::CommandEncoderDescriptor<Label<'a>>,
     ),
-    Error {
-        message: String,
-        r#type: wgt::error::ErrorType,
-    },
-    PushErrorScope(u8 /* dom::GPUErrorFilter */),
+    Error(GPUError<'a>),
+    PushErrorScope(FfiErrorFilter),
     PopErrorScope,
 }
 
@@ -405,7 +384,7 @@ enum QueueWriteAction {
         offset: wgt::BufferAddress,
     },
     Texture {
-        dst: wgt::TexelCopyTextureInfo<id::TextureId>,
+        dst: TexelCopyTextureInfo,
         layout: wgt::TexelCopyBufferLayout,
         size: wgt::Extent3d,
     },
@@ -413,13 +392,44 @@ enum QueueWriteAction {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 enum TextureAction<'a> {
-    CreateView(id::TextureViewId, wgc::resource::TextureViewDescriptor<'a>),
+    CreateView(id::TextureViewId, TextureViewDescriptor<'a>),
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PipelineError {
     is_validation_error: bool,
     error: String,
+}
+
+/// The DOM exception `GPUAdapter.requestDevice()` is specified to reject with.
+#[repr(C)]
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub enum FfiRequestDeviceErrorType {
+    TypeError,
+    OperationError,
+}
+
+#[repr(C)]
+pub struct FfiRequestDeviceError<'a> {
+    pub ty: FfiRequestDeviceErrorType,
+    pub message: &'a nsCString,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RequestDeviceError {
+    ty: FfiRequestDeviceErrorType,
+    message: String,
+}
+
+impl RequestDeviceError {
+    /// Only the Vulkan/dmabuf device-creation path constructs these directly.
+    #[cfg(target_os = "linux")]
+    fn operation_error(message: String) -> Self {
+        Self {
+            ty: FfiRequestDeviceErrorType::OperationError,
+            message,
+        }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -429,6 +439,7 @@ pub struct ShaderModuleCompilationMessage {
     pub utf16_offset: u64,
     pub utf16_length: u64,
     pub message: String,
+    pub message_type: wgt::CompilationMessageType,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -444,12 +455,8 @@ pub enum BufferMapResult<'a> {
 #[derive(serde::Serialize, serde::Deserialize)]
 enum ServerMessage<'a> {
     RequestAdapterResponse(id::AdapterId, Option<AdapterInformation<Cow<'a, str>>>),
-    RequestDeviceResponse(id::DeviceId, id::QueueId, Option<String>),
-    PopErrorScopeResponse(
-        id::DeviceId,
-        u8, /* PopErrorScopeResultType */
-        Cow<'a, str>,
-    ),
+    RequestDeviceResponse(id::DeviceId, id::QueueId, Result<wgt::Limits, RequestDeviceError>),
+    PopErrorScopeResponse(id::DeviceId, FfiPopErrorScopeResultType, Cow<'a, str>),
     CreateRenderPipelineResponse {
         pipeline_id: id::RenderPipelineId,
         error: Option<PipelineError>,
@@ -461,6 +468,8 @@ enum ServerMessage<'a> {
     CreateShaderModuleResponse(id::ShaderModuleId, Vec<ShaderModuleCompilationMessage>),
     BufferMapResponse(id::BufferId, BufferMapResult<'a>),
     QueueOnSubmittedWorkDoneResponse(id::QueueId),
+    UncapturedError(id::DeviceId, FfiErrorFilter, Cow<'a, str>),
+    DeviceLost(id::DeviceId, FfiDeviceLostReason, Cow<'a, str>),
 
     /// This message tells the client when we are done with swapchain readback buffers.
     /// Freeing a swapchain buffer too early may result in an ID resolution panic or
@@ -469,13 +478,13 @@ enum ServerMessage<'a> {
 }
 
 #[repr(C)]
-pub struct TexelCopyBufferLayout<'a> {
+pub struct FfiTexelCopyBufferLayout<'a> {
     pub offset: wgt::BufferAddress,
     pub bytes_per_row: Option<&'a u32>,
     pub rows_per_image: Option<&'a u32>,
 }
 
-impl<'a> TexelCopyBufferLayout<'a> {
+impl<'a> FfiTexelCopyBufferLayout<'a> {
     fn into_wgt(&self) -> wgt::TexelCopyBufferLayout {
         wgt::TexelCopyBufferLayout {
             offset: self.offset,
@@ -483,6 +492,60 @@ impl<'a> TexelCopyBufferLayout<'a> {
             rows_per_image: self.rows_per_image.map(|rpi| *rpi),
         }
     }
+}
+
+#[repr(C)]
+pub struct FfiTextureDescriptor<'a> {
+    label: Option<&'a nsACString>,
+    size: wgt::Extent3d,
+    mip_level_count: u32,
+    sample_count: u32,
+    dimension: wgt::TextureDimension,
+    format: wgt::TextureFormat,
+    usage: wgt::TextureUsages,
+    view_formats: FfiSlice<'a, wgt::TextureFormat>,
+}
+
+impl FfiTextureDescriptor<'_> {
+    fn to_wgpu(&self) -> TextureDescriptor<'_> {
+        let label = wgpu_string(self.label);
+        let view_formats = unsafe { self.view_formats.as_slice() }.to_vec();
+        TextureDescriptor {
+            label,
+            size: self.size,
+            mip_level_count: self.mip_level_count,
+            sample_count: self.sample_count,
+            dimension: self.dimension,
+            format: self.format,
+            usage: self.usage,
+            view_formats,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub enum FfiErrorFilter {
+    Validation,
+    OutOfMemory,
+    Internal,
+}
+
+#[repr(C)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub enum FfiPopErrorScopeResultType {
+    NoError,
+    EmptyErrorScopeStack,
+    Validation,
+    OutOfMemory,
+    Internal,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub enum FfiDeviceLostReason {
+    Unknown,
+    Destroyed,
 }
 
 #[repr(C)]

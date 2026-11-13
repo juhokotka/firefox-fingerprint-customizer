@@ -30,7 +30,11 @@ use crate::{
     double_to_s15Fixed16Number,
     transform::{set_rgb_colorants, PrecacheOuput},
 };
-use crate::{matrix::Matrix, s15Fixed16Number, s15Fixed16Number_to_float, Intent, Intent::*};
+use crate::{
+    matrix::{Matrix, Vector},
+    s15Fixed16Number, s15Fixed16Number_to_float, Intent,
+    Intent::*,
+};
 
 pub static SUPPORTS_ICCV4: AtomicBool = AtomicBool::new(cfg!(feature = "iccv4-enabled"));
 
@@ -1503,6 +1507,60 @@ impl Profile {
         self.is_srgb
     }
 
+    /// Returns the chromaticities of the RGB colorants and of the white they
+    /// sum to. If the profile has a chromatic adaptation tag it is undone, so
+    /// the values describe the device rather than the D50 PCS.
+    pub fn colorant_chromaticities(&self) -> Option<(qcms_CIE_xyYTRIPLE, qcms_CIE_xyY)> {
+        if self.color_space != RGB_SIGNATURE {
+            return None;
+        }
+        let to_vector = |c: &XYZNumber| Vector {
+            v: [
+                s15Fixed16Number_to_float(c.X),
+                s15Fixed16Number_to_float(c.Y),
+                s15Fixed16Number_to_float(c.Z),
+            ],
+        };
+        let mut colorants = [
+            to_vector(&self.redColorant),
+            to_vector(&self.greenColorant),
+            to_vector(&self.blueColorant),
+        ];
+        if let Some(chad) = &self.chromaticAdaption {
+            let inverse = chad.invert()?;
+            for c in &mut colorants {
+                *c = inverse.eval(*c);
+            }
+        }
+        let [r, g, b] = colorants;
+        let white = Vector {
+            v: [
+                r.v[0] + g.v[0] + b.v[0],
+                r.v[1] + g.v[1] + b.v[1],
+                r.v[2] + g.v[2] + b.v[2],
+            ],
+        };
+        let to_xyY = |c: Vector| {
+            let sum = c.v[0] + c.v[1] + c.v[2];
+            if !(sum > 0.) {
+                return None;
+            }
+            Some(qcms_CIE_xyY {
+                x: (c.v[0] / sum) as f64,
+                y: (c.v[1] / sum) as f64,
+                Y: c.v[1] as f64,
+            })
+        };
+        Some((
+            qcms_CIE_xyYTRIPLE {
+                red: to_xyY(r)?,
+                green: to_xyY(g)?,
+                blue: to_xyY(b)?,
+            },
+            to_xyY(white)?,
+        ))
+    }
+
     pub fn rendering_intent(&self) -> Intent {
         self.rendering_intent
     }
@@ -1579,6 +1637,14 @@ impl Profile {
     }
 
     pub fn new_cicp(cp: ColourPrimaries, tc: TransferCharacteristics) -> Option<Box<Profile>> {
+        Profile::new_cicp_with_intent(cp, tc, Perceptual)
+    }
+
+    pub fn new_cicp_with_intent(
+        cp: ColourPrimaries,
+        tc: TransferCharacteristics,
+        rendering_intent: Intent,
+    ) -> Option<Box<Profile>> {
         let mut profile = profile_create();
         if !cp.is_usable() || !tc.is_usable() {
             return None;
@@ -1592,7 +1658,7 @@ impl Profile {
         profile.blueTRC = Some(Box::new(curve.clone()));
         profile.greenTRC = Some(Box::new(curve));
         profile.class_type = DISPLAY_DEVICE_PROFILE;
-        profile.rendering_intent = Perceptual;
+        profile.rendering_intent = rendering_intent;
         profile.color_space = RGB_SIGNATURE;
         profile.pcs = XYZ_TYPE;
 

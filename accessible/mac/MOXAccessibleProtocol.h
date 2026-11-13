@@ -155,9 +155,6 @@
 // AXLinkedUIElements
 - (NSArray* _Nullable)moxLinkedUIElements;
 
-// AXARIAControls
-- (NSArray* _Nullable)moxARIAControls;
-
 // AXDetailsElements
 - (NSArray* _Nullable)moxDetailsElements;
 
@@ -175,6 +172,9 @@
 
 // AXVisited
 - (NSNumber* _Nullable)moxVisited;
+
+// AXGrabbed
+- (NSNumber* _Nullable)moxGrabbed;
 
 // AXExpanded
 - (NSNumber* _Nullable)moxExpanded;

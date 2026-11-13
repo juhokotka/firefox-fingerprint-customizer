@@ -8,6 +8,7 @@
 // Keep others in (case-insensitive) order:
 #include "AutoReferenceChainGuard.h"
 #include "ImgDrawResult.h"
+#include "gfx2DGlue.h"
 #include "gfxContext.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/SVGGeometryFrame.h"
@@ -113,8 +114,7 @@ void SVGClipPathFrame::PaintChildren(gfxContext& aMaskContext,
         aMaskContext, aClippedFrame, aMatrix);
     // We want the mask to be untransformed so use the inverse of the current
     // transform as the maskTransform to compensate.
-    Matrix maskTransform = aMaskContext.CurrentMatrix();
-    maskTransform.Invert();
+    Matrix maskTransform = aMaskContext.CurrentMatrix().Inverse();
     autoGroupForBlend.PushGroupForBlendBack(gfxContentType::ALPHA, 1.0f,
                                             maskSurface, maskTransform);
   }
@@ -196,8 +196,7 @@ void SVGClipPathFrame::PaintFrameIntoMask(nsIFrame* aFrame,
 
     // We want the mask to be untransformed so use the inverse of the current
     // transform as the maskTransform to compensate.
-    Matrix maskTransform = aTarget.CurrentMatrix();
-    maskTransform.Invert();
+    Matrix maskTransform = aTarget.CurrentMatrix().Inverse();
     autoGroupForBlend.PushGroupForBlendBack(gfxContentType::ALPHA, 1.0f,
                                             maskSurface, maskTransform);
   }
@@ -314,6 +313,13 @@ bool SVGClipPathFrame::IsTrivial(nsIFrame** aSingleChild) {
     if (!svgChild) {
       continue;
     }
+    // An invisible leaf contributes nothing to the clip, so it does not make
+    // the clipPath non-trivial. Containers are not skipped because a
+    // descendant can set visibility back to visible.
+    if (!svgChild->IsDisplayContainer() &&
+        !kid->StyleVisibility()->IsVisible()) {
+      continue;
+    }
     // We consider a non-trivial clipPath to be one containing
     // either more than one svg child and/or a svg container
     if (foundChild || svgChild->IsDisplayContainer()) {
@@ -387,6 +393,48 @@ void SVGClipPathFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
 
 gfxMatrix SVGClipPathFrame::GetCanvasTM() { return mMatrixForChildren; }
 
+bool SVGClipPathFrame::GetSimpleClipShape(nsIFrame* aClippedFrame,
+                                          CSSRect* aRect, CSSSize* aRadii) {
+  nsIFrame* singleClipPathChild = nullptr;
+  if (!IsTrivial(&singleClipPathChild)) {
+    return false;
+  }
+  if (!singleClipPathChild) {
+    // The spec says to clip away everything when there is nothing to clip
+    // with, which matches what ApplyClipPath does.
+    *aRect = CSSRect();
+    *aRadii = CSSSize();
+    return true;
+  }
+  SVGGeometryFrame* pathFrame = do_QueryFrame(singleClipPathChild);
+  if (!pathFrame) {
+    return false;
+  }
+
+  auto* element = static_cast<SVGGeometryElement*>(pathFrame->GetContent());
+  SVGGeometryElement::SimpleShape shape;
+  element->GetAsSimpleShape(&shape);
+  if (!shape.IsRoundedRect()) {
+    return false;
+  }
+
+  gfxMatrix toClippedUserSpace =
+      SVGUtils::GetTransformMatrixInUserSpace(pathFrame) *
+      GetClipPathTransform(aClippedFrame);
+  if (toClippedUserSpace.IsSingular() ||
+      toClippedUserSpace.HasNonAxisAlignedTransform() ||
+      toClippedUserSpace._11 < 0 || toClippedUserSpace._22 < 0) {
+    return false;
+  }
+
+  gfxRect rect = toClippedUserSpace.TransformBounds(
+      ThebesRect(shape.AsRect().ToUnknownRect()));
+  *aRect = CSSRect::FromUnknownRect(ToRect(rect));
+  *aRadii = CSSSize(float(shape.Radii().width * toClippedUserSpace._11),
+                    float(shape.Radii().height * toClippedUserSpace._22));
+  return true;
+}
+
 gfxMatrix SVGClipPathFrame::GetClipPathTransform(nsIFrame* aClippedFrame) {
   gfxMatrix tm = SVGUtils::GetTransformMatrixInUserSpace(this);
 
@@ -413,6 +461,13 @@ SVGBBox SVGClipPathFrame::GetBBoxForClipPathFrame(const SVGBBox& aBBox,
                                               &clipPathThatClipsClipPath) ==
       SVGObserverUtils::ReferenceState::HasRefsSomeInvalid) {
     return SVGBBox();
+  }
+
+  static int16_t sRefChainLengthCounter = AutoReferenceChainGuard::noChain;
+  AutoReferenceChainGuard refChainGuard(this, &mIsBeingProcessed,
+                                        &sRefChainLengthCounter);
+  if (MOZ_UNLIKELY(!refChainGuard.Reference())) {
+    return SVGBBox();  // Break reference chain
   }
 
   nsIContent* node = GetContent()->GetFirstChild();

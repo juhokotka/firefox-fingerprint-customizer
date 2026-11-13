@@ -4,16 +4,17 @@
 
 use api::BorderRadius;
 use api::units::*;
-use euclid::{Point2D, Rect, Box2D, Size2D, Vector2D, point2, point3};
-use euclid::{default, Transform2D, Transform3D, Scale, approxeq::ApproxEq};
+use euclid::{Point2D, Rect, Box2D, Size2D, SideOffsets2D};
+use euclid::{Transform2D, Transform3D, Vector2D};
 use plane_split::{Clipper, Polygon};
-use std::{i32, f32, fmt, ptr};
-use std::borrow::Cow;
+use std::{fmt, ptr};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::mem::replace;
 
 use crate::internal_types::FrameVec;
+
+pub use api::{ScaleOffset, FastTransform, LayoutFastTransform, LayoutToWorldFastTransform};
 
 // Matches the definition of SK_ScalarNearlyZero in Skia.
 const NEARLY_ZERO: f32 = 1.0 / 4096.0;
@@ -108,280 +109,45 @@ impl<T> VecHelper<T> for Vec<T> {
     }
 }
 
-// Represents an optimized transform where there is only
-// a scale and translation (which are guaranteed to maintain
-// an axis align rectangle under transformation). The
-// scaling is applied first, followed by the translation.
-// TODO(gw): We should try and incorporate F <-> T units here,
-//           but it's a bit tricky to do that now with the
-//           way the current spatial tree works.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, MallocSizeOf, PartialEq)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct ScaleOffset {
-    pub scale: euclid::Vector2D<f32, euclid::UnknownUnit>,
-    pub offset: euclid::Vector2D<f32, euclid::UnknownUnit>,
-}
-
-impl ScaleOffset {
-    pub fn new(sx: f32, sy: f32, tx: f32, ty: f32) -> Self {
-        ScaleOffset {
-            scale: Vector2D::new(sx, sy),
-            offset: Vector2D::new(tx, ty),
-        }
-    }
-
-    pub fn identity() -> Self {
-        ScaleOffset {
-            scale: Vector2D::new(1.0, 1.0),
-            offset: Vector2D::zero(),
-        }
-    }
-
-    // Construct a ScaleOffset from a transform. Returns
-    // None if the matrix is not a pure scale / translation.
-    pub fn from_transform<F, T>(
-        m: &Transform3D<f32, F, T>,
-    ) -> Option<ScaleOffset> {
-
-        // To check that we have a pure scale / translation:
-        // Every field must match an identity matrix, except:
-        //  - Any value present in tx,ty
-        //  - Any value present in sx,sy
-
-        if m.m12.abs() > NEARLY_ZERO ||
-           m.m13.abs() > NEARLY_ZERO ||
-           m.m14.abs() > NEARLY_ZERO ||
-           m.m21.abs() > NEARLY_ZERO ||
-           m.m23.abs() > NEARLY_ZERO ||
-           m.m24.abs() > NEARLY_ZERO ||
-           m.m31.abs() > NEARLY_ZERO ||
-           m.m32.abs() > NEARLY_ZERO ||
-           (m.m33 - 1.0).abs() > NEARLY_ZERO ||
-           m.m34.abs() > NEARLY_ZERO ||
-           m.m43.abs() > NEARLY_ZERO ||
-           (m.m44 - 1.0).abs() > NEARLY_ZERO {
-            return None;
-        }
-
-        Some(ScaleOffset {
-            scale: Vector2D::new(m.m11, m.m22),
-            offset: Vector2D::new(m.m41, m.m42),
-        })
-    }
-
-    pub fn from_offset(offset: default::Vector2D<f32>) -> Self {
-        ScaleOffset {
-            scale: Vector2D::new(1.0, 1.0),
-            offset,
-        }
-    }
-
-    pub fn from_scale(scale: default::Vector2D<f32>) -> Self {
-        ScaleOffset {
-            scale,
-            offset: Vector2D::new(0.0, 0.0),
-        }
-    }
-
-    pub fn inverse(&self) -> Self {
-        // If either of the scale factors is 0, inverse also has scale 0
-        // TODO(gw): Consider making this return Option<Self> in future
-        //           so that callers can detect and handle when inverse
-        //           fails here.
-        if self.scale.x.approx_eq(&0.0) || self.scale.y.approx_eq(&0.0) {
-            return ScaleOffset::new(0.0, 0.0, 0.0, 0.0);
-        }
-
-        ScaleOffset {
-            scale: Vector2D::new(
-                1.0 / self.scale.x,
-                1.0 / self.scale.y,
-            ),
-            offset: Vector2D::new(
-                -self.offset.x / self.scale.x,
-                -self.offset.y / self.scale.y,
-            ),
-        }
-    }
-
-    pub fn pre_offset(&self, offset: default::Vector2D<f32>) -> Self {
-        self.pre_transform(
-            &ScaleOffset {
-                scale: Vector2D::new(1.0, 1.0),
-                offset,
-            }
-        )
-    }
-
-    pub fn pre_scale(&self, scale: f32) -> Self {
-        ScaleOffset {
-            scale: self.scale * scale,
-            offset: self.offset,
-        }
-    }
-
-    pub fn then_scale(&self, scale: f32) -> Self {
-        ScaleOffset {
-            scale: self.scale * scale,
-            offset: self.offset * scale,
-        }
-    }
-
-    /// Produce a ScaleOffset that includes both self and other.
-    /// The 'self' ScaleOffset is applied after `other`.
-    /// This is equivalent to `Transform3D::pre_transform`.
-    pub fn pre_transform(&self, other: &ScaleOffset) -> Self {
-        ScaleOffset {
-            scale: Vector2D::new(
-                self.scale.x * other.scale.x,
-                self.scale.y * other.scale.y,
-            ),
-            offset: Vector2D::new(
-                self.offset.x + self.scale.x * other.offset.x,
-                self.offset.y + self.scale.y * other.offset.y,
-            ),
-        }
-    }
-
-    /// Produce a ScaleOffset that includes both self and other.
-    /// The 'other' ScaleOffset is applied after `self`.
-    /// This is equivalent to `Transform3D::then`.
-    #[allow(unused)]
-    pub fn then(&self, other: &ScaleOffset) -> Self {
-        ScaleOffset {
-            scale: Vector2D::new(
-                self.scale.x * other.scale.x,
-                self.scale.y * other.scale.y,
-            ),
-            offset: Vector2D::new(
-                other.scale.x * self.offset.x + other.offset.x,
-                other.scale.y * self.offset.y + other.offset.y,
-            ),
-        }
-    }
-
-
-    pub fn map_rect<F, T>(&self, rect: &Box2D<f32, F>) -> Box2D<f32, T> {
-        let x0 = rect.min.x * self.scale.x + self.offset.x;
-        let y0 = rect.min.y * self.scale.y + self.offset.y;
-        // TODO: If the supplied rect is invalid (has size < 0) we must ensure that the
-        // returned rect has size zero else some tests fail. Using the max() of the min
-        // and max points ensures that is the case. In future we could catch / assert /
-        // fix these invalid rects earlier, and assert here instead.
-        let x1 = rect.min.x.max(rect.max.x) * self.scale.x + self.offset.x;
-        let y1 = rect.min.y.max(rect.max.y) * self.scale.y + self.offset.y;
-
-        Box2D::new(
-            Point2D::new(x0.min(x1), y0.min(y1)),
-            Point2D::new(x0.max(x1), y0.max(y1)),
-        )
-    }
-
-    pub fn unmap_rect<F, T>(&self, rect: &Box2D<f32, F>) -> Box2D<f32, T> {
-        let x0 = (rect.min.x - self.offset.x) / self.scale.x;
-        let y0 = (rect.min.y - self.offset.y) / self.scale.y;
-        // TODO: If the supplied rect is invalid (has size < 0) we must ensure that the
-        // returned rect has size zero else some tests fail. Using the max() of the min
-        // and max points ensures that is the case. In future we could catch / assert /
-        // fix these invalid rects earlier, and assert here instead.
-        let x1 = (rect.min.x.max(rect.max.x) - self.offset.x) / self.scale.x;
-        let y1 = (rect.min.y.max(rect.max.y) - self.offset.y) / self.scale.y;
-
-        Box2D::new(
-            Point2D::new(x0.min(x1), y0.min(y1)),
-            Point2D::new(x0.max(x1), y0.max(y1)),
-        )
-    }
-
-    pub fn map_vector<F, T>(&self, vector: &Vector2D<f32, F>) -> Vector2D<f32, T> {
-        Vector2D::new(
-            vector.x * self.scale.x,
-            vector.y * self.scale.y,
-        )
-    }
-
-    pub fn map_size<F, T>(&self, size: &Size2D<f32, F>) -> Size2D<f32, T> {
-        Size2D::new(
-            size.width * self.scale.x,
-            size.height * self.scale.y,
-        )
-    }
-
-    pub fn unmap_vector<F, T>(&self, vector: &Vector2D<f32, F>) -> Vector2D<f32, T> {
-        Vector2D::new(
-            vector.x / self.scale.x,
-            vector.y / self.scale.y,
-        )
-    }
-
-    pub fn map_point<F, T>(&self, point: &Point2D<f32, F>) -> Point2D<f32, T> {
-        Point2D::new(
-            point.x * self.scale.x + self.offset.x,
-            point.y * self.scale.y + self.offset.y,
-        )
-    }
-
-    pub fn unmap_point<F, T>(&self, point: &Point2D<f32, F>) -> Point2D<f32, T> {
-        Point2D::new(
-            (point.x - self.offset.x) / self.scale.x,
-            (point.y - self.offset.y) / self.scale.y,
-        )
-    }
-
-    pub fn to_transform<F, T>(&self) -> Transform3D<f32, F, T> {
-        Transform3D::new(
-            self.scale.x,
-            0.0,
-            0.0,
-            0.0,
-
-            0.0,
-            self.scale.y,
-            0.0,
-            0.0,
-
-            0.0,
-            0.0,
-            1.0,
-            0.0,
-
-            self.offset.x,
-            self.offset.y,
-            0.0,
-            1.0,
-        )
-    }
-
-    pub fn is_identity(&self) -> bool {
-        self.scale.x == 1.0 &&
-        self.scale.y == 1.0 &&
-        self.offset.x == 0.0 &&
-        self.offset.y == 0.0
-    }
-
-    pub fn is_reflection(&self) -> bool {
-        self.scale.x < 0.0 ||
-        self.scale.y < 0.0
-    }
-}
-
 // TODO: Implement these in euclid!
 pub trait MatrixHelpers<Src, Dst> {
     /// A port of the preserves2dAxisAlignment function in Skia.
     /// Defined in the SkMatrix44 class.
     fn preserves_2d_axis_alignment(&self) -> bool;
     fn has_perspective_component(&self) -> bool;
-    /// Returns true only if the perspective divide varies across the z=0 plane
-    /// (`m14`/`m24` non-zero), i.e. a coplanar 2D surface is mapped with a
-    /// non-constant `w` (a true keystone). A perspective matrix whose only
-    /// perspective terms are `m34`/`m44` still maps a z=0 surface affinely
-    /// (constant `w`), so it returns false here even though
-    /// `has_perspective_component` is true. Used to decide whether coplanar
-    /// content (e.g. text) can still be rasterized and snapped in device space
-    /// (bug 2052019).
-    fn has_2d_plane_perspective(&self) -> bool;
+    /// Returns true if this transform maps coplanar `z=0` content exactly as the
+    /// plain 2D transform in its `m11`/`m12`/`m21`/`m22`/`m41`/`m42` terms would,
+    /// *and* `inverse()` maps it back the same way. Content that is rasterized
+    /// and positioned in device space (e.g. text) needs both halves, because it
+    /// round-trips through device space: the CPU places it with this transform
+    /// and the shader maps the result back with `inv_m`, forcing `z` to 0 again.
+    ///
+    /// This is `Transform3D::is_2d()` weakened where the extra 3D terms can't be
+    /// observed on that plane:
+    ///  * `m33` is free: nothing reads the mapped `z`.
+    ///  * only *one* of the third row (`m31`/`m32`/`m34`) and the third column
+    ///    (`m13`/`m23`/`m43`) has to vanish, not both. Mapping the plane reads
+    ///    rows and columns 1, 2 and 4, and that block of the inverse picks up a
+    ///    `-b*c/m33` correction from those two groups - so with either one zero
+    ///    the block is still the 2D inverse. A flat `perspective` (bug 2052019)
+    ///    and a bare `translateZ` are each clean on one side; pairing them, or
+    ///    rotating in 3D, is not, and no longer round-trips (bug 2060342).
+    ///
+    /// `m14`/`m24` and `m44` must still be 2D-exact: a `w` that varies across the
+    /// plane is a true keystone, which can't be rasterized into an axis-aligned
+    /// device rect at all, and a constant `w != 1` would need the perspective
+    /// divide that mapping through `inv_m` skips.
+    fn is_2d_on_z_plane(&self) -> bool;
+    /// Scale factors for content that is coplanar in the source space (z=0),
+    /// which is the case for the contents of a picture surface. Returns `None`
+    /// if the perspective divide varies across that plane, where no single
+    /// scale factor is correct.
+    ///
+    /// Much weaker than `is_2d_on_z_plane`: this only asks how the plane is
+    /// mapped, not that mapping it back through `inverse()` agrees, so a
+    /// constant `w != 1` is fine (it divides out) and the `z` terms don't
+    /// matter at all.
+    fn coplanar_scale_factors(&self) -> Option<(f32, f32)>;
     fn has_2d_inverse(&self) -> bool;
     /// Check if the matrix post-scaling on either the X or Y axes could cause geometry
     /// transformed by this matrix to have scaling exceeding the supplied limit.
@@ -447,9 +213,40 @@ impl<Src, Dst> MatrixHelpers<Src, Dst> for Transform3D<f32, Src, Dst> {
          (self.m44 - 1.0).abs() > NEARLY_ZERO
     }
 
-    fn has_2d_plane_perspective(&self) -> bool {
-         self.m14.abs() > NEARLY_ZERO ||
-         self.m24.abs() > NEARLY_ZERO
+    fn is_2d_on_z_plane(&self) -> bool {
+        if self.m14.abs() > NEARLY_ZERO ||
+           self.m24.abs() > NEARLY_ZERO ||
+           (self.m44 - 1.0).abs() > NEARLY_ZERO {
+            return false;
+        }
+
+        let z_in = self.m31.abs() > NEARLY_ZERO ||
+                   self.m32.abs() > NEARLY_ZERO ||
+                   self.m34.abs() > NEARLY_ZERO;
+        let z_out = self.m13.abs() > NEARLY_ZERO ||
+                    self.m23.abs() > NEARLY_ZERO ||
+                    self.m43.abs() > NEARLY_ZERO;
+
+        !z_in || !z_out
+    }
+
+    fn coplanar_scale_factors(&self) -> Option<(f32, f32)> {
+        // `w` varies across the z=0 plane: a true keystone, with no single scale.
+        if self.m14.abs() > NEARLY_ZERO ||
+           self.m24.abs() > NEARLY_ZERO {
+            return None;
+        }
+
+        // `w` is constant over that plane, so the mapping is affine with its
+        // 2d part divided through by `m44`. A non-positive `w` means the plane
+        // is degenerate or behind the eye.
+        if self.m44 < NEARLY_ZERO {
+            return None;
+        }
+
+        let (major, minor) = scale_factors(self);
+
+        Some((major / self.m44, minor / self.m44))
     }
 
     fn has_2d_inverse(&self) -> bool {
@@ -656,17 +453,49 @@ pub fn pack_as_float(value: u32) -> f32 {
 fn extract_inner_rect_impl<U>(
     rect: &Box2D<f32, U>,
     radii: &BorderRadius,
+    inset: &SideOffsets2D<f32, U>,
     k: f32,
 ) -> Option<Box2D<f32, U>> {
     // `k` defines how much border is taken into account
     // We enforce the offsets to be rounded to pixel boundaries
     // by `ceil`-ing and `floor`-ing them
 
-    let xl = (k * radii.top_left.width.max(radii.bottom_left.width)).ceil();
-    let xr = (rect.width() - k * radii.top_right.width.max(radii.bottom_right.width)).floor();
-    let yt = (k * radii.top_left.height.max(radii.top_right.height)).ceil();
+    // In case of a corner shape below "round" (superellipse parameter < 1),
+    // we need to add the inset to the radii for correctness. This will slightly
+    // overestimate the corner area for sub-ellipses (-1 < parameter < 1), but
+    // keeps the computation cheap.
+
+    let mut top_left_width = radii.top_left.width;
+    let mut top_left_height = radii.top_left.height;
+    let mut top_right_width = radii.top_right.width;
+    let mut top_right_height = radii.top_right.height;
+    let mut bottom_left_width = radii.bottom_left.width;
+    let mut bottom_left_height = radii.bottom_left.height;
+    let mut bottom_right_width = radii.bottom_right.width;
+    let mut bottom_right_height = radii.bottom_right.height;
+
+    if radii.shape_top_left < 1.0 {
+        top_left_width += inset.top;
+        top_left_height += inset.left;
+    }
+    if radii.shape_top_right < 1.0 {
+        top_right_width += inset.top;
+        top_right_height += inset.right;
+    }
+    if radii.shape_bottom_left < 1.0 {
+        bottom_left_width += inset.bottom;
+        bottom_left_height += inset.left;
+    }
+    if radii.shape_bottom_right < 1.0 {
+        bottom_right_width += inset.bottom;
+        bottom_right_height += inset.right;
+    }
+
+    let xl = (k * top_left_width.max(bottom_left_width)).ceil();
+    let xr = (rect.width() - k * top_right_width.max(bottom_right_width)).floor();
+    let yt = (k * top_left_height.max(top_right_height)).ceil();
     let yb =
-        (rect.height() - k * radii.bottom_left.height.max(radii.bottom_right.height)).floor();
+        (rect.height() - k * bottom_left_height.max(bottom_right_height)).floor();
 
     if xl <= xr && yt <= yb {
         Some(Box2D::from_origin_and_size(
@@ -683,10 +512,13 @@ fn extract_inner_rect_impl<U>(
 pub fn extract_inner_rect_safe<U>(
     rect: &Box2D<f32, U>,
     radii: &BorderRadius,
+    inset: &SideOffsets2D<f32, U>,
 ) -> Option<Box2D<f32, U>> {
-    // value of `k==1.0` is used for extraction of the corner rectangles
-    // see `SEGMENT_CORNER_*` in `clip_shared.glsl`
-    extract_inner_rect_impl(rect, radii, 1.0)
+    // `k == 1.0` excludes each corner's full bounding box, so the result is the
+    // region that the edge and center parts of a nine-patch can cover. See the
+    // rounded-rect case of `SegmentBuilder::push_clip_rect` in segment.rs, which
+    // builds that nine-patch.
+    extract_inner_rect_impl(rect, radii, inset, 1.0)
 }
 
 /// Return an aligned rectangle that is inside the clip region and doesn't intersect
@@ -695,9 +527,18 @@ pub fn extract_inner_rect_safe<U>(
 pub fn extract_inner_rect_k<U>(
     rect: &Box2D<f32, U>,
     radii: &BorderRadius,
+    inset: &SideOffsets2D<f32, U>,
     k: f32,
 ) -> Option<Box2D<f32, U>> {
-    extract_inner_rect_impl(rect, radii, k)
+    // When using corner shape, corners can go inside the shape and create
+    // clipping issues, we need the 'safe' (k == 1.0) version in that case.
+    // This could be refined by computing the superellipse half corners but
+    // would make the calculation a bit more expensive.
+    if radii.shapes_all_round() {
+        extract_inner_rect_impl(rect, radii, inset, k)
+    } else {
+        extract_inner_rect_impl(rect, radii, inset, 1.0)
+    }
 }
 
 #[cfg(test)]
@@ -709,9 +550,34 @@ pub mod test {
     use euclid::default::{Box2D, Point2D, Size2D, Transform3D};
     use euclid::{Angle, approxeq::ApproxEq};
     use std::f32::consts::PI;
-    use crate::clip::{is_left_of_line, polygon_contains_point};
-    use crate::prim_store::PolygonKey;
-    use api::FillRule;
+
+    #[test]
+    fn is_2d_on_z_plane() {
+        // A z=0 point mapped by each of these, then mapped back by the inverse
+        // with its z forced to 0 again (what the device-space text path does),
+        // lands where it started exactly when this returns true.
+        let flat_perspective = Transform3D::new(
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            -7.9, -1.8375, 1.0, -0.025,
+            0.0, 0.0, 0.0, 1.0,
+        );
+        let translate_z = Transform3D::translation(0.0, 0.0, 5.0);
+        // Neither side is clean once the two are paired.
+        let perspective_and_translate_z = translate_z.then(&flat_perspective);
+        let rotate_y = Transform3D::rotation(0.0, 1.0, 0.0, Angle::degrees(35.0));
+        let mut w_scale = Transform3D::identity();
+        w_scale.m44 = 2.0;
+
+        assert!(flat_perspective.is_2d_on_z_plane());
+        assert!(translate_z.is_2d_on_z_plane());
+        assert!(Transform3D::scale(2.0, 3.0, 4.0).is_2d_on_z_plane());
+        assert!(!perspective_and_translate_z.is_2d_on_z_plane());
+        assert!(!rotate_y.is_2d_on_z_plane());
+        assert!(!w_scale.is_2d_on_z_plane());
+        assert!(!Transform3D::perspective(40.0).pre_translate(
+            euclid::vec3(0.0, 0.0, 1.0)).is_2d_on_z_plane());
+    }
 
     #[test]
     fn inverse_project() {
@@ -879,83 +745,6 @@ pub mod test {
         assert_eq!(i1, ScaleOffset::new(0.0, 0.0, 0.0, 0.0));
     }
 
-    #[test]
-    fn polygon_clip_is_left_of_point() {
-        // Define points of a line through (1, -3) and (-2, 6) to test against.
-        // If the triplet consisting of these two points and the test point
-        // form a counter-clockwise triangle, then the test point is on the
-        // left. The easiest way to visualize this is with an "ascending"
-        // line from low-Y to high-Y.
-        let p0_x = 1.0;
-        let p0_y = -3.0;
-        let p1_x = -2.0;
-        let p1_y = 6.0;
-
-        // Test some points to the left of the line.
-        assert!(is_left_of_line(-9.0, 0.0, p0_x, p0_y, p1_x, p1_y) > 0.0);
-        assert!(is_left_of_line(-1.0, 1.0, p0_x, p0_y, p1_x, p1_y) > 0.0);
-        assert!(is_left_of_line(1.0, -4.0, p0_x, p0_y, p1_x, p1_y) > 0.0);
-
-        // Test some points on the line.
-        assert!(is_left_of_line(-3.0, 9.0, p0_x, p0_y, p1_x, p1_y) == 0.0);
-        assert!(is_left_of_line(0.0, 0.0, p0_x, p0_y, p1_x, p1_y) == 0.0);
-        assert!(is_left_of_line(100.0, -300.0, p0_x, p0_y, p1_x, p1_y) == 0.0);
-
-        // Test some points to the right of the line.
-        assert!(is_left_of_line(0.0, 1.0, p0_x, p0_y, p1_x, p1_y) < 0.0);
-        assert!(is_left_of_line(-4.0, 13.0, p0_x, p0_y, p1_x, p1_y) < 0.0);
-        assert!(is_left_of_line(5.0, -12.0, p0_x, p0_y, p1_x, p1_y) < 0.0);
-    }
-
-    #[test]
-    fn polygon_clip_contains_point() {
-        // We define the points of a self-overlapping polygon, which we will
-        // use to create polygons with different windings and fill rules.
-        let p0 = LayoutPoint::new(4.0, 4.0);
-        let p1 = LayoutPoint::new(6.0, 4.0);
-        let p2 = LayoutPoint::new(4.0, 7.0);
-        let p3 = LayoutPoint::new(2.0, 1.0);
-        let p4 = LayoutPoint::new(8.0, 1.0);
-        let p5 = LayoutPoint::new(6.0, 7.0);
-
-        let poly_clockwise_nonzero = PolygonKey::new(
-            &[p5, p4, p3, p2, p1, p0].to_vec(), FillRule::Nonzero
-        );
-        let poly_clockwise_evenodd = PolygonKey::new(
-            &[p5, p4, p3, p2, p1, p0].to_vec(), FillRule::Evenodd
-        );
-        let poly_counter_clockwise_nonzero = PolygonKey::new(
-            &[p0, p1, p2, p3, p4, p5].to_vec(), FillRule::Nonzero
-        );
-        let poly_counter_clockwise_evenodd = PolygonKey::new(
-            &[p0, p1, p2, p3, p4, p5].to_vec(), FillRule::Evenodd
-        );
-
-        // We define a rect that provides a bounding clip area of
-        // the polygon.
-        let rect = LayoutRect::from_size(LayoutSize::new(10.0, 10.0));
-
-        // And we'll test three points of interest.
-        let p_inside_once = LayoutPoint::new(5.0, 3.0);
-        let p_inside_twice = LayoutPoint::new(5.0, 5.0);
-        let p_outside = LayoutPoint::new(9.0, 9.0);
-
-        // We should get the same results for both clockwise and
-        // counter-clockwise polygons.
-        // For nonzero polygons, the inside twice point is considered inside.
-        for poly_nonzero in vec![poly_clockwise_nonzero, poly_counter_clockwise_nonzero].iter() {
-            assert_eq!(polygon_contains_point(&p_inside_once, &rect, &poly_nonzero), true);
-            assert_eq!(polygon_contains_point(&p_inside_twice, &rect, &poly_nonzero), true);
-            assert_eq!(polygon_contains_point(&p_outside, &rect, &poly_nonzero), false);
-        }
-        // For evenodd polygons, the inside twice point is considered outside.
-        for poly_evenodd in vec![poly_clockwise_evenodd, poly_counter_clockwise_evenodd].iter() {
-            assert_eq!(polygon_contains_point(&p_inside_once, &rect, &poly_evenodd), true);
-            assert_eq!(polygon_contains_point(&p_inside_twice, &rect, &poly_evenodd), false);
-            assert_eq!(polygon_contains_point(&p_outside, &rect, &poly_evenodd), false);
-        }
-    }
-
     // Ensures that mapping or unmapping an input rect with negative size returns a rect
     // with size 0, and the origin transformed as expected.
     #[test]
@@ -1037,219 +826,6 @@ impl<U> MaxRect for Box2D<f32, U> {
         )
     }
 }
-
-/// An enum that tries to avoid expensive transformation matrix calculations
-/// when possible when dealing with non-perspective axis-aligned transformations.
-#[derive(Debug, MallocSizeOf)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub enum FastTransform<Src, Dst> {
-    /// A simple offset, which can be used without doing any matrix math.
-    Offset(Vector2D<f32, Src>),
-
-    /// A 2D transformation with an inverse.
-    Transform {
-        transform: Transform3D<f32, Src, Dst>,
-        inverse: Option<Transform3D<f32, Dst, Src>>,
-        is_2d: bool,
-    },
-}
-
-impl<Src, Dst> Clone for FastTransform<Src, Dst> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<Src, Dst> Copy for FastTransform<Src, Dst> { }
-
-impl<Src, Dst> FastTransform<Src, Dst> {
-    pub fn identity() -> Self {
-        FastTransform::Offset(Vector2D::zero())
-    }
-
-    pub fn with_vector(offset: Vector2D<f32, Src>) -> Self {
-        FastTransform::Offset(offset)
-    }
-
-    pub fn with_scale_offset(scale_offset: ScaleOffset) -> Self {
-        if scale_offset.scale == Vector2D::new(1.0, 1.0) {
-            FastTransform::Offset(Vector2D::from_untyped(scale_offset.offset))
-        } else {
-            FastTransform::Transform {
-                transform: scale_offset.to_transform(),
-                inverse: Some(scale_offset.inverse().to_transform()),
-                is_2d: true,
-            }
-        }
-    }
-
-    #[inline(always)]
-    pub fn with_transform(transform: Transform3D<f32, Src, Dst>) -> Self {
-        if transform.is_simple_2d_translation() {
-            return FastTransform::Offset(Vector2D::new(transform.m41, transform.m42));
-        }
-        let inverse = transform.inverse();
-        let is_2d = transform.is_2d();
-        FastTransform::Transform { transform, inverse, is_2d}
-    }
-
-    pub fn to_transform(&self) -> Cow<Transform3D<f32, Src, Dst>> {
-        match *self {
-            FastTransform::Offset(offset) => Cow::Owned(
-                Transform3D::translation(offset.x, offset.y, 0.0)
-            ),
-            FastTransform::Transform { ref transform, .. } => Cow::Borrowed(transform),
-        }
-    }
-
-    /// Return true if this is an identity transform
-    #[allow(unused)]
-    pub fn is_identity(&self)-> bool {
-        match *self {
-            FastTransform::Offset(offset) => {
-                offset == Vector2D::zero()
-            }
-            FastTransform::Transform { ref transform, .. } => {
-                *transform == Transform3D::identity()
-            }
-        }
-    }
-
-    pub fn then<NewDst>(&self, other: &FastTransform<Dst, NewDst>) -> FastTransform<Src, NewDst> {
-        match *self {
-            FastTransform::Offset(offset) => match *other {
-                FastTransform::Offset(other_offset) => {
-                    FastTransform::Offset(offset + other_offset * Scale::<_, _, Src>::new(1.0))
-                }
-                FastTransform::Transform { transform: ref other_transform, .. } => {
-                    FastTransform::with_transform(
-                        other_transform
-                            .with_source::<Src>()
-                            .pre_translate(offset.to_3d())
-                    )
-                }
-            }
-            FastTransform::Transform { ref transform, ref inverse, is_2d } => match *other {
-                FastTransform::Offset(other_offset) => {
-                    FastTransform::with_transform(
-                        transform
-                            .then_translate(other_offset.to_3d())
-                            .with_destination::<NewDst>()
-                    )
-                }
-                FastTransform::Transform { transform: ref other_transform, inverse: ref other_inverse, is_2d: other_is_2d } => {
-                    FastTransform::Transform {
-                        transform: transform.then(other_transform),
-                        inverse: inverse.as_ref().and_then(|self_inv|
-                            other_inverse.as_ref().map(|other_inv| other_inv.then(self_inv))
-                        ),
-                        is_2d: is_2d & other_is_2d,
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn pre_transform<NewSrc>(
-        &self,
-        other: &FastTransform<NewSrc, Src>
-    ) -> FastTransform<NewSrc, Dst> {
-        other.then(self)
-    }
-
-    pub fn pre_translate(&self, other_offset: Vector2D<f32, Src>) -> Self {
-        match *self {
-            FastTransform::Offset(offset) =>
-                FastTransform::Offset(offset + other_offset),
-            FastTransform::Transform { transform, .. } =>
-                FastTransform::with_transform(transform.pre_translate(other_offset.to_3d()))
-        }
-    }
-
-    pub fn then_translate(&self, other_offset: Vector2D<f32, Dst>) -> Self {
-        match *self {
-            FastTransform::Offset(offset) => {
-                FastTransform::Offset(offset + other_offset * Scale::<_, _, Src>::new(1.0))
-            }
-            FastTransform::Transform { ref transform, .. } => {
-                let transform = transform.then_translate(other_offset.to_3d());
-                FastTransform::with_transform(transform)
-            }
-        }
-    }
-
-    #[inline(always)]
-    pub fn is_backface_visible(&self) -> bool {
-        match *self {
-            FastTransform::Offset(..) => false,
-            FastTransform::Transform { inverse: None, .. } => false,
-            //TODO: fix this properly by taking "det|M33| * det|M34| > 0"
-            // see https://www.w3.org/Bugs/Public/show_bug.cgi?id=23014
-            FastTransform::Transform { inverse: Some(ref inverse), .. } => inverse.m33 < 0.0,
-        }
-    }
-
-    #[inline(always)]
-    pub fn transform_point2d(&self, point: Point2D<f32, Src>) -> Option<Point2D<f32, Dst>> {
-        match *self {
-            FastTransform::Offset(offset) => {
-                let new_point = point + offset;
-                Some(Point2D::from_untyped(new_point.to_untyped()))
-            }
-            FastTransform::Transform { ref transform, .. } => transform.transform_point2d(point),
-        }
-    }
-
-    #[inline(always)]
-    pub fn project_point2d(&self, point: Point2D<f32, Src>) -> Option<Point2D<f32, Dst>> {
-        match* self {
-            FastTransform::Offset(..) => self.transform_point2d(point),
-            FastTransform::Transform{ref transform, ..} => {
-                // Find a value for z that will transform to 0.
-
-                // The transformed value of z is computed as:
-                // z' = point.x * self.m13 + point.y * self.m23 + z * self.m33 + self.m43
-
-                // Solving for z when z' = 0 gives us:
-                let z = -(point.x * transform.m13 + point.y * transform.m23 + transform.m43) / transform.m33;
-
-                transform.transform_point3d(point3(point.x, point.y, z)).map(| p3 | point2(p3.x, p3.y))
-            }
-        }
-    }
-
-    #[inline(always)]
-    pub fn inverse(&self) -> Option<FastTransform<Dst, Src>> {
-        match *self {
-            FastTransform::Offset(offset) =>
-                Some(FastTransform::Offset(Vector2D::new(-offset.x, -offset.y))),
-            FastTransform::Transform { transform, inverse: Some(inverse), is_2d, } =>
-                Some(FastTransform::Transform {
-                    transform: inverse,
-                    inverse: Some(transform),
-                    is_2d
-                }),
-            FastTransform::Transform { inverse: None, .. } => None,
-
-        }
-    }
-}
-
-impl<Src, Dst> From<Transform3D<f32, Src, Dst>> for FastTransform<Src, Dst> {
-    fn from(transform: Transform3D<f32, Src, Dst>) -> Self {
-        FastTransform::with_transform(transform)
-    }
-}
-
-impl<Src, Dst> From<Vector2D<f32, Src>> for FastTransform<Src, Dst> {
-    fn from(vector: Vector2D<f32, Src>) -> Self {
-        FastTransform::with_vector(vector)
-    }
-}
-
-pub type LayoutFastTransform = FastTransform<LayoutPixel, LayoutPixel>;
-pub type LayoutToWorldFastTransform = FastTransform<LayoutPixel, WorldPixel>;
 
 pub fn project_rect<F, T>(
     transform: &Transform3D<f32, F, T>,

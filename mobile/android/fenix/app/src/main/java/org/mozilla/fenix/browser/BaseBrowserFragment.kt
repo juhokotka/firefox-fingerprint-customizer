@@ -22,11 +22,13 @@ import android.view.accessibility.AccessibilityManager
 import androidx.activity.result.ActivityResultLauncher
 import androidx.annotation.CallSuper
 import androidx.annotation.VisibleForTesting
+import androidx.appcompat.R as appcompatR
 import androidx.appcompat.app.AlertDialog
 import androidx.biometric.BiometricManager
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.viewinterop.AndroidView
@@ -40,8 +42,11 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavController
 import androidx.navigation.fragment.findNavController
 import androidx.preference.PreferenceManager
+import com.google.android.material.R as materialR
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar.LENGTH_LONG
+import java.lang.ref.WeakReference
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +56,6 @@ import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import mozilla.components.browser.state.action.ContentAction
 import mozilla.components.browser.state.action.SystemPermissionRequestAction
 import mozilla.components.browser.state.selector.findCustomTab
@@ -66,6 +70,7 @@ import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.browser.state.state.content.DownloadState
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.browser.thumbnails.BrowserThumbnails
+import mozilla.components.browser.thumbnails.facts.BrowserThumbnailsFacts
 import mozilla.components.browser.toolbar.BrowserToolbar
 import mozilla.components.compose.browser.toolbar.store.BrowserToolbarStore
 import mozilla.components.concept.base.crash.Breadcrumb
@@ -84,6 +89,7 @@ import mozilla.components.feature.downloads.CurrentDownloadState
 import mozilla.components.feature.downloads.DownloadsFeature
 import mozilla.components.feature.downloads.NegativeActionCallback
 import mozilla.components.feature.downloads.PositiveActionCallback
+import mozilla.components.feature.downloads.R as downloadsR
 import mozilla.components.feature.downloads.manager.FetchDownloadManager
 import mozilla.components.feature.downloads.temporary.CopyDownloadFeature
 import mozilla.components.feature.downloads.temporary.ShareResourceFeature
@@ -128,6 +134,7 @@ import mozilla.components.feature.webauthn.WebAuthnFeature
 import mozilla.components.lib.state.ext.consumeFlow
 import mozilla.components.lib.state.ext.consumeFrom
 import mozilla.components.lib.state.ext.flowScoped
+import mozilla.components.lib.state.ext.observeAsComposableState
 import mozilla.components.lib.state.helpers.StoreProvider.Companion.fragmentStore
 import mozilla.components.service.sync.autofill.DefaultCreditCardValidationDelegate
 import mozilla.components.service.sync.logins.DefaultLoginValidationDelegate
@@ -138,6 +145,7 @@ import mozilla.components.support.base.feature.PermissionsFeature
 import mozilla.components.support.base.feature.UserInteractionHandler
 import mozilla.components.support.base.feature.ViewBoundFeatureWrapper
 import mozilla.components.support.ktx.android.content.appName
+import mozilla.components.support.ktx.android.content.isEdgeToEdgeDisabled
 import mozilla.components.support.ktx.android.view.ImeInsetsSynchronizer
 import mozilla.components.support.ktx.android.view.enterImmersiveMode
 import mozilla.components.support.ktx.android.view.exitImmersiveMode
@@ -145,6 +153,9 @@ import mozilla.components.support.ktx.android.view.hideKeyboard
 import mozilla.components.support.ktx.kotlinx.coroutines.flow.ifAnyChanged
 import mozilla.components.support.locale.ActivityContextWrapper
 import mozilla.components.support.utils.DefaultDownloadFileUtils
+import mozilla.components.support.utils.ext.isLandscape
+import mozilla.components.support.utils.ext.pixelSizeFor
+import mozilla.components.ui.widgets.R as widgetsR
 import mozilla.components.ui.widgets.behavior.EngineViewClippingBehavior
 import mozilla.components.ui.widgets.withCenterAlignedButtons
 import mozilla.telemetry.glean.private.NoExtras
@@ -170,10 +181,13 @@ import org.mozilla.fenix.browser.browsingmode.BrowsingMode
 import org.mozilla.fenix.browser.permissions.FenixSitePermissionLearnMoreUrlProvider
 import org.mozilla.fenix.browser.readermode.DefaultReaderModeController
 import org.mozilla.fenix.browser.readermode.ReaderModeController
+import org.mozilla.fenix.browser.reloadcover.TabReloadCoverFeature
+import org.mozilla.fenix.browser.reloadcover.TabReloadCoverGating
 import org.mozilla.fenix.browser.store.BrowserScreenMiddleware
 import org.mozilla.fenix.browser.store.BrowserScreenState
 import org.mozilla.fenix.browser.store.BrowserScreenStore
 import org.mozilla.fenix.browser.tabstrip.TabStrip
+import org.mozilla.fenix.browser.tabstrip.ext.handleTabStripLastTabClosed
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.FenixAutocompletePrompt
 import org.mozilla.fenix.components.FenixEmailMaskPrompt
@@ -186,6 +200,7 @@ import org.mozilla.fenix.components.share.ShareSource
 import org.mozilla.fenix.components.toolbar.BottomToolbarContainerIntegration
 import org.mozilla.fenix.components.toolbar.BottomToolbarContainerView
 import org.mozilla.fenix.components.toolbar.BrowserNavigationBar
+import org.mozilla.fenix.components.toolbar.BrowserTabStrip
 import org.mozilla.fenix.components.toolbar.BrowserToolbarComposable
 import org.mozilla.fenix.components.toolbar.ToolbarContainerView
 import org.mozilla.fenix.components.toolbar.ToolbarPosition
@@ -205,48 +220,42 @@ import org.mozilla.fenix.ext.getBottomToolbarHeight
 import org.mozilla.fenix.ext.getPreferenceKey
 import org.mozilla.fenix.ext.getTopToolbarHeight
 import org.mozilla.fenix.ext.hideToolbar
+import org.mozilla.fenix.ext.isMicrosurveyPromptVisible
+import org.mozilla.fenix.ext.isOnline
 import org.mozilla.fenix.ext.isToolbarAtBottom
 import org.mozilla.fenix.ext.nav
-import org.mozilla.fenix.ext.pixelSizeFor
 import org.mozilla.fenix.ext.registerForActivityResult
 import org.mozilla.fenix.ext.requireComponents
 import org.mozilla.fenix.ext.runIfFragmentIsAttached
 import org.mozilla.fenix.ext.secure
 import org.mozilla.fenix.ext.tabClosedUndoMessage
-import org.mozilla.fenix.ext.updateMicrosurveyPromptForConfigurationChange
 import org.mozilla.fenix.messaging.FenixMessageSurfaceId
 import org.mozilla.fenix.messaging.MessagingFeature
 import org.mozilla.fenix.microsurvey.ui.MicrosurveyRequestPrompt
-import org.mozilla.fenix.microsurvey.ui.ext.MicrosurveyUIData
-import org.mozilla.fenix.microsurvey.ui.ext.toMicrosurveyUIData
 import org.mozilla.fenix.nimbus.FxNimbus
 import org.mozilla.fenix.pbmlock.BlackScreenOverlay
 import org.mozilla.fenix.pbmlock.NavigationOrigin
 import org.mozilla.fenix.pbmlock.observePrivateModeLock
 import org.mozilla.fenix.perf.MarkersFragmentLifecycleCallbacks
 import org.mozilla.fenix.search.awesomebar.AwesomeBarComposable
-import org.mozilla.fenix.settings.SupportUtils
 import org.mozilla.fenix.settings.biometric.BiometricPromptFeature
 import org.mozilla.fenix.settings.downloads.DownloadLocationManager
 import org.mozilla.fenix.snackbar.FenixSnackbarDelegate
 import org.mozilla.fenix.snackbar.SnackbarBinding
+import org.mozilla.fenix.tabgroups.TabGroupsStrip
+import org.mozilla.fenix.tabgroups.strip.redux.TabGroupsStripAction
+import org.mozilla.fenix.tabgroups.strip.redux.TabGroupsStripMiddleware
+import org.mozilla.fenix.tabgroups.strip.redux.TabGroupsStripStore
 import org.mozilla.fenix.tabstray.ext.toDisplayTitle
 import org.mozilla.fenix.tabstray.redux.state.Page
 import org.mozilla.fenix.theme.FirefoxTheme
 import org.mozilla.fenix.theme.ThemeManager
 import org.mozilla.fenix.utils.allowUndo
 import org.mozilla.fenix.wifi.SitePermissionsWifiIntegration
-import java.lang.ref.WeakReference
-import kotlin.coroutines.cancellation.CancellationException
-import androidx.appcompat.R as appcompatR
-import com.google.android.material.R as materialR
-import mozilla.components.feature.downloads.R as downloadsR
-import mozilla.components.ui.widgets.R as widgetsR
 
 /**
- * Base fragment extended by [BrowserFragment].
- * This class only contains shared code focused on the main browsing content.
- * UI code specific to the app or to custom tabs can be found in the subclasses.
+ * Base fragment extended by [BrowserFragment]. This class only contains shared code focused on the main browsing
+ * content. UI code specific to the app or to custom tabs can be found in the subclasses.
  */
 @Suppress("TooManyFunctions", "LargeClass")
 abstract class BaseBrowserFragment :
@@ -257,20 +266,18 @@ abstract class BaseBrowserFragment :
     AccessibilityManager.AccessibilityStateChangeListener {
 
     private var _binding: FragmentBrowserBinding? = null
-    internal val binding get() = _binding!!
+    internal val binding
+        get() = _binding!!
 
     private var loginSelectBar: AutocompletePrompt<Login>? = null
     private var addressSelectBar: AutocompletePrompt<Address>? = null
     private var creditCardSelectBar: AutocompletePrompt<CreditCardEntry>? = null
     private var suggestStrongPasswordBar: PasswordPromptView? = null
     private var emailMaskBar: EmailMaskPromptView? = null
-    private var currentMicrosurvey: MicrosurveyUIData? = null
     internal var blackScreenOverlay: ComposeView? = null
     private lateinit var startForResult: ActivityResultLauncher<Intent>
 
-    @VisibleForTesting
-    @Suppress("VariableNaming")
-    internal var _browserToolbar: BrowserToolbarComposable? = null
+    @VisibleForTesting @Suppress("VariableNaming") internal var _browserToolbar: BrowserToolbarComposable? = null
     private var awesomeBarComposable: AwesomeBarComposable? = null
 
     @VisibleForTesting
@@ -279,6 +286,8 @@ abstract class BaseBrowserFragment :
 
     @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     internal var browserNavigationBar: BrowserNavigationBar? = null
+
+    @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED) internal var browserTabStrip: BrowserTabStrip? = null
 
     @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     @Suppress("VariableNaming")
@@ -290,11 +299,16 @@ abstract class BaseBrowserFragment :
     private val findInPageLauncher: () -> Unit
         get() = _findInPageLauncher!!
 
+    @Suppress("VariableNaming") private var _readerMenuController: DefaultReaderModeController? = null
+    protected val readerMenuController: DefaultReaderModeController
+        get() = _readerMenuController!!
+
     protected val readerViewFeature = ViewBoundFeatureWrapper<ReaderViewFeature>()
     protected val thumbnailsFeature = ViewBoundFeatureWrapper<BrowserThumbnails>()
+    private val scrollAwareThumbnailFeature = ViewBoundFeatureWrapper<ScrollAwareThumbnailFeature>()
+    private val tabReloadCoverFeature = ViewBoundFeatureWrapper<TabReloadCoverFeature>()
 
-    @VisibleForTesting
-    internal val messagingFeatureMicrosurvey = ViewBoundFeatureWrapper<MessagingFeature>()
+    @VisibleForTesting internal val messagingFeatureMicrosurvey = ViewBoundFeatureWrapper<MessagingFeature>()
 
     private val sessionFeature = ViewBoundFeatureWrapper<SessionFeature>()
     private val lastTabFeature = ViewBoundFeatureWrapper<LastTabFeature>()
@@ -305,8 +319,7 @@ abstract class BaseBrowserFragment :
     private val copyDownloadsFeature = ViewBoundFeatureWrapper<CopyDownloadFeature>()
     private val promptsFeature = ViewBoundFeatureWrapper<PromptFeature>()
 
-    @VisibleForTesting
-    internal val findInPageIntegration = ViewBoundFeatureWrapper<FindInPageIntegration>()
+    @VisibleForTesting internal val findInPageIntegration = ViewBoundFeatureWrapper<FindInPageIntegration>()
     private val toolbarsIntegration = ViewBoundFeatureWrapper<ToolbarsIntegration>()
     private val bottomToolbarContainerIntegration = ViewBoundFeatureWrapper<BottomToolbarContainerIntegration>()
     private val sitePermissionsFeature = ViewBoundFeatureWrapper<SitePermissionsFeature>()
@@ -315,11 +328,9 @@ abstract class BaseBrowserFragment :
 
     private val swipeRefreshFeature = ViewBoundFeatureWrapper<SwipeRefreshFeature>()
     private val webchannelIntegration = ViewBoundFeatureWrapper<FxaWebChannelIntegration>()
-    private val sitePermissionWifiIntegration =
-        ViewBoundFeatureWrapper<SitePermissionsWifiIntegration>()
+    private val sitePermissionWifiIntegration = ViewBoundFeatureWrapper<SitePermissionsWifiIntegration>()
     private val secureWindowFeature = ViewBoundFeatureWrapper<SecureWindowFeature>()
-    private var fullScreenMediaSessionFeature =
-        ViewBoundFeatureWrapper<MediaSessionFullscreenFeature>()
+    private var fullScreenMediaSessionFeature = ViewBoundFeatureWrapper<MediaSessionFullscreenFeature>()
     private val searchFeature = ViewBoundFeatureWrapper<SearchFeature>()
     private val webAuthnFeature = ViewBoundFeatureWrapper<WebAuthnFeature>()
     private val screenOrientationFeature = ViewBoundFeatureWrapper<ScreenOrientationFeature>()
@@ -343,11 +354,9 @@ abstract class BaseBrowserFragment :
     var customTabSessionId: String? = null
         private set
 
-    @VisibleForTesting
-    internal var browserInitialized: Boolean = false
+    @VisibleForTesting internal var browserInitialized: Boolean = false
 
-    @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
-    internal var webAppToolbarShouldBeVisible = true
+    @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED) internal var webAppToolbarShouldBeVisible = true
 
     protected val browserScreenStore by buildBrowserScreenStore()
 
@@ -398,9 +407,7 @@ abstract class BaseBrowserFragment :
         // https://github.com/mozilla-mobile/android-components/issues/7960
         breadcrumb(
             message = "onCreateView()",
-            data = mapOf(
-                "customTabSessionId" to customTabSessionId.toString(),
-            ),
+            data = mapOf("customTabSessionId" to customTabSessionId.toString()),
         )
 
         _binding = FragmentBrowserBinding.inflate(inflater, container, false)
@@ -410,11 +417,12 @@ abstract class BaseBrowserFragment :
 
         startForResult = registerForActivityResult { result ->
             listOf(
-                promptsFeature,
-                webAuthnFeature,
-            ).any {
-                it.onActivityResult(PIN_REQUEST, result.data, result.resultCode)
-            }
+                    promptsFeature,
+                    webAuthnFeature,
+                )
+                .any {
+                    it.onActivityResult(PIN_REQUEST, result.data, result.resultCode)
+                }
         }
 
         // DO NOT MOVE ANYTHING BELOW THIS addMarker CALL!
@@ -433,28 +441,29 @@ abstract class BaseBrowserFragment :
         initializeUI(view)
 
         appLinksFeature.set(
-            feature = AppLinksFeature(
-                context = requireContext(),
-                store = requireComponents.core.store,
-                fragmentManager = parentFragmentManager,
-                sessionId = customTabSessionId,
-                dialog = appLinksPromptDialog(),
-                launchInApp = { requireComponents.settings.shouldOpenLinksInApp(customTabSessionId != null) },
-                loadUrlUseCase = requireComponents.useCases.sessionUseCases.loadUrl,
-                shouldPrompt = { requireComponents.settings.shouldPromptOpenLinksInApp() },
-                alwaysOpenCheckboxAction = {
-                    requireComponents.settings.openLinksInExternalApp =
-                        requireContext().getString(R.string.pref_key_open_links_in_apps_always)
-                },
-                failedToLaunchAction = { fallbackUrl ->
-                    fallbackUrl?.let {
-                        val appLinksUseCases = requireComponents.useCases.appLinksUseCases
-                        val getRedirect = appLinksUseCases.appLinkRedirect
-                        val redirect = getRedirect.invoke(fallbackUrl)
-                        appLinksUseCases.openAppLink.invoke(redirect.appIntent)
-                    }
-                },
-            ),
+            feature =
+                AppLinksFeature(
+                    context = requireContext(),
+                    store = requireComponents.core.store,
+                    fragmentManager = parentFragmentManager,
+                    sessionId = customTabSessionId,
+                    dialog = appLinksPromptDialog(),
+                    launchInApp = { requireComponents.settings.shouldOpenLinksInApp(customTabSessionId != null) },
+                    loadUrlUseCase = requireComponents.useCases.sessionUseCases.loadUrl,
+                    shouldPrompt = { requireComponents.settings.shouldPromptOpenLinksInApp() },
+                    alwaysOpenCheckboxAction = {
+                        requireComponents.settings.openLinksInExternalApp =
+                            requireContext().getString(R.string.pref_key_open_links_in_apps_always)
+                    },
+                    failedToLaunchAction = { fallbackUrl ->
+                        fallbackUrl?.let {
+                            val appLinksUseCases = requireComponents.useCases.appLinksUseCases
+                            val getRedirect = appLinksUseCases.appLinkRedirect
+                            val redirect = getRedirect.invoke(fallbackUrl)
+                            appLinksUseCases.openAppLink.invoke(redirect.appIntent)
+                        }
+                    },
+                ),
             owner = this,
             view = binding.root,
         )
@@ -471,25 +480,28 @@ abstract class BaseBrowserFragment :
             isCustomTabSession = customTabSessionId != null,
         )
 
-        observePrivateModeLock {
-            findNavController().navigate(
-                NavGraphDirections.actionGlobalUnlockPrivateTabsFragment(
-                    if (customTabSessionId != null) NavigationOrigin.CUSTOM_TAB else NavigationOrigin.TAB,
-                ),
-            )
+        if (customTabSessionId == null) {
+            tabGroupsStripStore.dispatch(TabGroupsStripAction.InitializeDataObservation)
         }
 
-        if (!requireComponents.fenixOnboarding.userHasBeenOnboarded()) {
-            observeTabSource(requireComponents.core.store)
+        observePrivateModeLock {
+            findNavController()
+                .navigate(
+                    NavGraphDirections.actionGlobalUnlockPrivateTabsFragment(
+                        if (customTabSessionId != null) NavigationOrigin.CUSTOM_TAB else NavigationOrigin.TAB
+                    )
+                )
         }
 
         requireContext().accessibilityManager.addAccessibilityStateChangeListener(this)
 
         requireComponents.backgroundServices.closeSyncedTabsCommandReceiver.register(
-            observer = CloseLastSyncedTabObserver(
-                scope = viewLifecycleOwner.lifecycleScope,
-                navController = findNavController(),
-            ),
+            observer =
+                CloseLastSyncedTabObserver(
+                    scope = viewLifecycleOwner.lifecycleScope,
+                    navController = findNavController(),
+                    settings = requireComponents.settings,
+                ),
             view = view,
         )
 
@@ -503,13 +515,14 @@ abstract class BaseBrowserFragment :
 
     private fun initializeUI(view: View) {
         val tab = getCurrentTab()
-        browserInitialized = if (tab != null) {
-            initializeUI(view, tab)
-            setupIMEInsetsHandling(view)
-            true
-        } else {
-            false
-        }
+        browserInitialized =
+            if (tab != null) {
+                initializeUI(view, tab)
+                setupIMEInsetsHandling(view)
+                true
+            } else {
+                false
+            }
     }
 
     @Suppress("CognitiveComplexMethod", "CyclomaticComplexMethod", "LongMethod", "DEPRECATION")
@@ -520,376 +533,404 @@ abstract class BaseBrowserFragment :
         val store = context.components.core.store
         val activity = requireActivity() as HomeActivity
         val appStore = context.components.appStore
+        val settings = context.components.settings
 
-        val openInFenixIntent = Intent(context, IntentReceiverActivity::class.java).apply {
-            action = Intent.ACTION_VIEW
-            putExtra(HomeActivity.OPEN_TO_BROWSER, true)
-        }
+        val openInFenixIntent =
+            Intent(context, IntentReceiverActivity::class.java).apply {
+                action = Intent.ACTION_VIEW
+                putExtra(HomeActivity.OPEN_TO_BROWSER, true)
+            }
 
-        val readerMenuController = DefaultReaderModeController(
-            readerViewFeature,
-            binding.readerViewControlsBar,
-            isPrivate = appStore.state.mode.isPrivate,
-            onReaderModeChanged = { activity.finishActionMode() },
-        )
+        _readerMenuController =
+            DefaultReaderModeController(
+                readerViewFeature,
+                binding.readerViewControlsBar,
+                isPrivate = appStore.state.mode.isPrivate,
+                onReaderModeChanged = { activity.finishActionMode() },
+            )
         _findInPageLauncher = {
             launchFindInPageFeature(view, store)
         }
 
         _browserToolbar = initializeBrowserToolbar(activity, store, readerMenuController)
+        browserTabStrip = initializeBrowserTabStripView(activity, appStore, settings)
 
-        if (context.components.settings.microsurveyFeatureEnabled) {
+        if (settings.microsurveyFeatureEnabled) {
             listenForMicrosurveyMessage(context)
         }
 
         toolbarsIntegration.set(
-            feature = ToolbarsIntegration(
-                fullScreenFeature = { fullScreenFeature.get() },
-                webAppHideToolbarFeature = { hideToolbarFeature.get() },
-                settings = context.components.settings,
-                browserLayout = getSwipeRefreshLayout(),
-                engineView = getEngineView(),
-                toolbar = browserToolbar,
-                topToolbarHeight = {
-                    getTopToolbarHeight(
-                        includeTabStripIfAvailable = customTabSessionId == null,
-                    )
-                },
-                onToolbarsReset = ::collapseBrowserView,
-            ),
+            feature =
+                ToolbarsIntegration(
+                    fullScreenFeature = { fullScreenFeature.get() },
+                    webAppHideToolbarFeature = { hideToolbarFeature.get() },
+                    settings = settings,
+                    browserLayout = getSwipeRefreshLayout(),
+                    engineView = getEngineView(),
+                    toolbar = browserToolbar,
+                    topToolbarHeight = {
+                        getTopToolbarHeight(includeTabStripIfAvailable = customTabSessionId == null)
+                    },
+                    onToolbarsReset = ::collapseBrowserView,
+                ),
             owner = this,
             view = view,
         )
 
         findInPageBinding.set(
-            feature = FindInPageBinding(
-                appStore = context.components.appStore,
-                onFindInPageLaunch = findInPageLauncher,
-            ),
+            feature =
+                FindInPageBinding(
+                    appStore = context.components.appStore,
+                    onFindInPageLaunch = findInPageLauncher,
+                ),
             owner = this,
             view = view,
         )
 
         readerViewBinding.set(
-            feature = ReaderViewBinding(
-                appStore = context.components.appStore,
-                readerMenuController = readerMenuController,
-            ),
+            feature =
+                ReaderViewBinding(
+                    appStore = context.components.appStore,
+                    readerMenuController = readerMenuController,
+                ),
             owner = this,
             view = view,
         )
 
         openInFirefoxBinding.set(
-            feature = OpenInFirefoxBinding(
-                activity = activity,
-                appStore = context.components.appStore,
-                customTabSessionId = customTabSessionId,
-                customTabsUseCases = context.components.useCases.customTabsUseCases,
-                openInFenixIntent = openInFenixIntent,
-                sessionFeature = sessionFeature,
-            ),
+            feature =
+                OpenInFirefoxBinding(
+                    activity = activity,
+                    appStore = context.components.appStore,
+                    customTabSessionId = customTabSessionId,
+                    customTabsUseCases = context.components.useCases.customTabsUseCases,
+                    openInFenixIntent = openInFenixIntent,
+                    sessionFeature = sessionFeature,
+                ),
             owner = this,
             view = view,
         )
 
         contextMenuFeature.set(
-            feature = ContextMenuFeature(
-                fragmentManager = parentFragmentManager,
-                store = store,
-                candidates = getContextMenuCandidates(context, binding.dynamicSnackbarContainer),
-                engineView = binding.engineView,
-                useCases = context.components.useCases.contextMenuUseCases,
-                tabId = customTabSessionId,
-                shouldHide = {
-                    val state = requireComponents.appStore.state
-                    state.isPrivateScreenLocked && state.mode.isPrivate
-                },
-            ),
+            feature =
+                ContextMenuFeature(
+                    fragmentManager = parentFragmentManager,
+                    store = store,
+                    candidates = getContextMenuCandidates(context, binding.dynamicSnackbarContainer),
+                    engineView = binding.engineView,
+                    useCases = context.components.useCases.contextMenuUseCases,
+                    tabId = customTabSessionId,
+                    shouldHide = {
+                        val state = requireComponents.appStore.state
+                        state.isPrivateScreenLocked && state.mode.isPrivate
+                    },
+                ),
             owner = this,
             view = view,
         )
 
         snackbarBinding.set(
-            feature = SnackbarBinding(
-                context = context,
-                browserStore = context.components.core.store,
-                appStore = context.components.appStore,
-                snackbarDelegate = FenixSnackbarDelegate(binding.dynamicSnackbarContainer),
-                navController = findNavController(),
-                tabsUseCases = context.components.useCases.tabsUseCases,
-                sendTabUseCases = SendTabUseCases(requireComponents.backgroundServices.accountManager),
-                customTabSessionId = customTabSessionId,
-                viewHasFocus = { view.hasWindowFocus() },
-            ),
+            feature =
+                SnackbarBinding(
+                    context = context,
+                    browserStore = context.components.core.store,
+                    appStore = context.components.appStore,
+                    snackbarDelegate = FenixSnackbarDelegate(binding.dynamicSnackbarContainer),
+                    navController = findNavController(),
+                    tabsUseCases = context.components.useCases.tabsUseCases,
+                    sendTabUseCases = SendTabUseCases(requireComponents.backgroundServices.accountManager),
+                    customTabSessionId = customTabSessionId,
+                    applicationScope = context.components.applicationScope,
+                    viewHasFocus = { view.hasWindowFocus() },
+                ),
             owner = this,
             view = view,
         )
 
         standardSnackbarErrorBinding.set(
-            feature = StandardSnackbarErrorBinding(
-                snackbarParent = binding.dynamicSnackbarContainer,
-                appStore = requireActivity().components.appStore,
-                snackbarFactory = DefaultSnackbarFactory(),
-                dismissLabel = getString(R.string.standard_snackbar_error_dismiss),
-            ),
+            feature =
+                StandardSnackbarErrorBinding(
+                    snackbarParent = binding.dynamicSnackbarContainer,
+                    appStore = requireActivity().components.appStore,
+                    snackbarFactory = DefaultSnackbarFactory(),
+                    dismissLabel = getString(R.string.standard_snackbar_error_dismiss),
+                ),
             owner = viewLifecycleOwner,
             view = binding.root,
         )
 
         ipProtectionWarningBinding.set(
-            feature = IPProtectionWarningBinding(
-                store = requireComponents.ipProtection.store,
-                proxyUnavailable = {
-                    Vpn.proxyUnavailable.record()
-                    findNavController().navigate(
-                        BrowserFragmentDirections.actionGlobalIpProtectionUnavailableDialog(),
-                    )
-                },
-            ),
+            feature =
+                IPProtectionWarningBinding(
+                    store = requireComponents.ipProtection.store,
+                    proxyUnavailable = {
+                        Vpn.proxyUnavailable.record()
+                        findNavController()
+                            .navigate(BrowserFragmentDirections.actionGlobalIpProtectionUnavailableDialog())
+                    },
+                ),
             owner = this,
             view = view,
         )
 
         secureWindowFeature.set(
-            feature = SecureWindowFeature(
-                window = requireActivity().window,
-                store = store,
-                customTabId = customTabSessionId,
-                isSecure = { !context.components.settings.shouldSecureModeBeOverridden && it.content.private },
-                clearFlagOnStop = false,
-            ),
+            feature =
+                SecureWindowFeature(
+                    window = requireActivity().window,
+                    store = store,
+                    customTabId = customTabSessionId,
+                    isSecure = { !settings.shouldSecureModeBeOverridden && it.content.private },
+                    clearFlagOnStop = false,
+                ),
             owner = this,
             view = view,
         )
 
         fullScreenMediaSessionFeature.set(
-            feature = MediaSessionFullscreenFeature(
-                requireActivity(),
-                context.components.core.store,
-                customTabSessionId,
-            ),
+            feature =
+                MediaSessionFullscreenFeature(
+                    requireActivity(),
+                    context.components.core.store,
+                    customTabSessionId,
+                ),
             owner = this,
             view = view,
         )
 
-        val shareResourceFeature = ShareResourceFeature(
-            context = context.applicationContext,
-            httpClient = context.components.core.client,
-            store = store,
-            tabId = customTabSessionId,
-        )
+        val shareResourceFeature =
+            ShareResourceFeature(
+                context = context.applicationContext,
+                httpClient = context.components.core.client,
+                store = store,
+                tabId = customTabSessionId,
+            )
 
-        val copyDownloadFeature = CopyDownloadFeature(
-            context = context.applicationContext,
-            httpClient = context.components.core.client,
-            store = store,
-            tabId = customTabSessionId,
-            onCopyConfirmation = {
-                showSnackbarForClipboardCopy()
-            },
-        )
+        val copyDownloadFeature =
+            CopyDownloadFeature(
+                context = context.applicationContext,
+                httpClient = context.components.core.client,
+                store = store,
+                tabId = customTabSessionId,
+                onCopyConfirmation = {
+                    showSnackbarForClipboardCopy()
+                },
+            )
 
-        val downloadFileUtils = DefaultDownloadFileUtils(
-            context = context.applicationContext,
-            downloadLocation = {
-                DownloadLocationManager(
-                    context.components.settings,
-                    context.contentResolver,
-                ).defaultLocation
-            },
-        )
+        val downloadFileUtils =
+            DefaultDownloadFileUtils(
+                context = context.applicationContext,
+                downloadLocation = {
+                    DownloadLocationManager(
+                            settings,
+                            context.contentResolver,
+                        )
+                        .defaultLocation
+                },
+            )
 
-        val downloadFeature = DownloadsFeature(
-            context.applicationContext,
-            store = store,
-            useCases = context.components.useCases.downloadUseCases,
-            fragmentManager = childFragmentManager,
-            tabId = customTabSessionId,
-            downloadFileUtils = downloadFileUtils,
-            downloadManager = FetchDownloadManager(
+        val downloadFeature =
+            DownloadsFeature(
                 context.applicationContext,
-                store,
-                DownloadService::class,
-                notificationsDelegate = context.components.notificationsDelegate,
-            ),
-            shouldForwardToThirdParties = {
-                PreferenceManager.getDefaultSharedPreferences(context).getBoolean(
-                    context.getPreferenceKey(R.string.pref_key_external_download_manager),
-                    false,
-                )
-            },
-            promptsStyling = DownloadsFeature.PromptsStyling(
-                gravity = Gravity.BOTTOM,
-                shouldWidthMatchParent = true,
-                positiveButtonBackgroundColor = ThemeManager.resolveAttribute(
-                    R.attr.accent,
-                    context,
-                ),
-                positiveButtonTextColor = ThemeManager.resolveAttribute(
-                    R.attr.textOnColorPrimary,
-                    context,
-                ),
-                positiveButtonRadius = pixelSizeFor(R.dimen.tab_corner_radius).toFloat(),
-            ),
-            onDownloadStartedListener = { downloadId ->
-                context.components.appStore.dispatch(
-                    AppAction.DownloadAction.DownloadInProgress(
-                        downloadId,
+                store = store,
+                useCases = context.components.useCases.downloadUseCases,
+                fragmentManager = childFragmentManager,
+                tabId = customTabSessionId,
+                downloadFileUtils = downloadFileUtils,
+                downloadManager =
+                    FetchDownloadManager(
+                        context.applicationContext,
+                        store,
+                        DownloadService::class,
+                        notificationsDelegate = context.components.notificationsDelegate,
                     ),
-                )
-            },
-            onNeedToRequestPermissions = { permissions ->
-                requestPermissions(permissions, REQUEST_CODE_DOWNLOAD_PERMISSIONS)
-            },
-            dismissCustomFirstPartyDownloadDialog = {
-                dismissRenameDialog()
-                dismissDownloadDialogs()
-            },
-            customFirstPartyDownloadDialog = {
+                shouldForwardToThirdParties = {
+                    PreferenceManager.getDefaultSharedPreferences(context)
+                        .getBoolean(
+                            context.getPreferenceKey(R.string.pref_key_external_download_manager),
+                            false,
+                        )
+                },
+                promptsStyling =
+                    DownloadsFeature.PromptsStyling(
+                        gravity = Gravity.BOTTOM,
+                        shouldWidthMatchParent = true,
+                        positiveButtonBackgroundColor =
+                            ThemeManager.resolveAttribute(
+                                materialR.attr.colorTertiary,
+                                context,
+                            ),
+                        positiveButtonTextColor =
+                            ThemeManager.resolveAttribute(
+                                materialR.attr.colorOnTertiary,
+                                context,
+                            ),
+                        positiveButtonRadius = pixelSizeFor(R.dimen.tab_corner_radius).toFloat(),
+                    ),
+                onDownloadStartedListener = { downloadId ->
+                    context.components.appStore.dispatch(AppAction.DownloadAction.DownloadInProgress(downloadId))
+                },
+                onNeedToRequestPermissions = { permissions ->
+                    requestPermissions(permissions, REQUEST_CODE_DOWNLOAD_PERMISSIONS)
+                },
+                dismissCustomFirstPartyDownloadDialog = {
+                    dismissRenameDialog()
+                    dismissDownloadDialogs()
+                },
+                customFirstPartyDownloadDialog = {
                     currentDownloadState,
                     fileNameIfAlreadyDownloaded,
                     positiveAction,
                     negativeAction,
-                    openFileAction,
-                ->
-                run {
-                    if (canShowDownloadDialog()) {
-                        context.components.analytics.crashReporter.recordCrashBreadcrumb(
-                            Breadcrumb("FirstPartyDownloadDialog created"),
-                        )
-                        val contentSize = currentDownloadState.value.contentLength ?: 0
-
-                        if (fileNameIfAlreadyDownloaded.value != null) {
-                            val title = if (contentSize > 0L) {
-                                val contentSizeInBytes =
-                                    requireComponents.core.fileSizeFormatter.formatSizeInBytes(
-                                        contentSize,
-                                    )
-                                getString(
-                                    downloadsR.string.mozac_feature_downloads_again_dialog_title,
-                                    contentSizeInBytes,
-                                )
-                            } else {
-                                getString(
-                                    downloadsR.string.mozac_feature_downloads_again_dialog_title_with_unknown_size,
-                                )
-                            }
-
-                            val message = getString(
-                                downloadsR.string.mozac_feature_downloads_already_exists_dialog_title,
-                                fileNameIfAlreadyDownloaded.value,
+                    openFileAction ->
+                    run {
+                        if (canShowDownloadDialog()) {
+                            context.components.analytics.crashReporter.recordCrashBreadcrumb(
+                                Breadcrumb("FirstPartyDownloadDialog created")
                             )
+                            val contentSize = currentDownloadState.value.contentLength ?: 0
 
-                            downloadDialog = MaterialAlertDialogBuilder(context)
-                                .setTitle(title)
-                                .setMessage(message)
-                                .setNegativeButton(
-                                    downloadsR.string.mozac_feature_downloads_dialog_download_again,
-                                ) { dialog, _ ->
-                                    dialog.dismiss()
-                                    positiveAction.value.invoke(currentDownloadState.value)
-                                }
-                                .setPositiveButton(
-                                    downloadsR.string.mozac_feature_downloads_open_existing_file,
-                                ) { dialog, _ ->
-                                    openFileAction.value.invoke()
-                                    dialog.dismiss()
-                                }
-                                .setNeutralButton(
-                                    downloadsR.string.mozac_feature_downloads_dialog_cancel,
-                                ) { dialog, _ ->
-                                    negativeAction.value.invoke()
-                                    dialog.dismiss()
-                                }.setOnCancelListener {
-                                    negativeAction.value.invoke()
-                                }.setOnDismissListener {
-                                    downloadDialog = null
-                                    context.components.analytics.crashReporter.recordCrashBreadcrumb(
-                                        Breadcrumb("FirstPartyDownloadDialog onDismiss"),
+                            if (fileNameIfAlreadyDownloaded.value != null) {
+                                val title =
+                                    if (contentSize > 0L) {
+                                        val contentSizeInBytes =
+                                            requireComponents.core.fileSizeFormatter.formatSizeInBytes(contentSize)
+                                        getString(
+                                            downloadsR.string.mozac_feature_downloads_again_dialog_title,
+                                            contentSizeInBytes,
+                                        )
+                                    } else {
+                                        getString(
+                                            downloadsR.string
+                                                .mozac_feature_downloads_again_dialog_title_with_unknown_size
+                                        )
+                                    }
+
+                                val message =
+                                    getString(
+                                        downloadsR.string.mozac_feature_downloads_already_exists_dialog_title,
+                                        fileNameIfAlreadyDownloaded.value,
                                     )
-                                }.show()
-                        } else {
-                            if (!FxNimbus.features.downloadsCustomLocation.value().enabled) {
-                                showFirstPartyDownloadDialog(
-                                    currentDownloadState = currentDownloadState,
-                                    positiveAction = positiveAction,
-                                    negativeAction = negativeAction,
-                                )
+
+                                downloadDialog =
+                                    MaterialAlertDialogBuilder(context)
+                                        .setTitle(title)
+                                        .setMessage(message)
+                                        .setNegativeButton(
+                                            downloadsR.string.mozac_feature_downloads_dialog_download_again
+                                        ) { dialog, _ ->
+                                            dialog.dismiss()
+                                            positiveAction.value.invoke(currentDownloadState.value)
+                                        }
+                                        .setPositiveButton(
+                                            downloadsR.string.mozac_feature_downloads_open_existing_file
+                                        ) { dialog, _ ->
+                                            openFileAction.value.invoke()
+                                            dialog.dismiss()
+                                        }
+                                        .setNeutralButton(downloadsR.string.mozac_feature_downloads_dialog_cancel) {
+                                            dialog,
+                                            _ ->
+                                            negativeAction.value.invoke()
+                                            dialog.dismiss()
+                                        }
+                                        .setOnCancelListener {
+                                            negativeAction.value.invoke()
+                                        }
+                                        .setOnDismissListener {
+                                            downloadDialog = null
+                                            context.components.analytics.crashReporter.recordCrashBreadcrumb(
+                                                Breadcrumb("FirstPartyDownloadDialog onDismiss")
+                                            )
+                                        }
+                                        .show()
                             } else {
-                                currentDownloadState.value.fileName?.let { fileName ->
-                                    showRenameDownloadDialog(
-                                        fileName = fileName,
+                                if (!FxNimbus.features.downloadsCustomLocation.value().enabled) {
+                                    showFirstPartyDownloadDialog(
                                         currentDownloadState = currentDownloadState,
                                         positiveAction = positiveAction,
                                         negativeAction = negativeAction,
                                     )
+                                } else {
+                                    currentDownloadState.value.fileName?.let { fileName ->
+                                        showRenameDownloadDialog(
+                                            fileName = fileName,
+                                            currentDownloadState = currentDownloadState,
+                                            positiveAction = positiveAction,
+                                            negativeAction = negativeAction,
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            },
-            customThirdPartyDownloadDialog = { downloaderApps, onAppSelected, negativeActionCallback ->
-                run {
-                    if (canShowDownloadDialog()) {
-                        context.components.analytics.crashReporter.recordCrashBreadcrumb(
-                            Breadcrumb("DownloaderAppDialog created"),
-                        )
-                        downloadDialog = createDownloadAppDialog(
-                            context = context,
-                            downloaderApps = downloaderApps.value,
-                            onAppSelected = onAppSelected.value,
-                            onDismiss = {
-                                downloadDialog = null
-                                context.components.analytics.crashReporter.recordCrashBreadcrumb(
-                                    Breadcrumb("DownloaderAppDialog onDismiss"),
+                },
+                customThirdPartyDownloadDialog = { downloaderApps, onAppSelected, negativeActionCallback ->
+                    run {
+                        if (canShowDownloadDialog()) {
+                            context.components.analytics.crashReporter.recordCrashBreadcrumb(
+                                Breadcrumb("DownloaderAppDialog created")
+                            )
+                            downloadDialog =
+                                createDownloadAppDialog(
+                                    context = context,
+                                    downloaderApps = downloaderApps.value,
+                                    onAppSelected = onAppSelected.value,
+                                    onDismiss = {
+                                        downloadDialog = null
+                                        context.components.analytics.crashReporter.recordCrashBreadcrumb(
+                                            Breadcrumb("DownloaderAppDialog onDismiss")
+                                        )
+                                    },
                                 )
-                            },
-                        )
-                        downloadDialog?.show()
+                            downloadDialog?.show()
+                        }
                     }
-                }
-            },
-            fileHasNotEnoughStorageDialog = callback@{ filename ->
-                val context = this.context ?: return@callback
-                MaterialAlertDialogBuilder(context)
-                    .setTitle(R.string.download_file_has_not_enough_storage_dialog_title)
-                    .setMessage(
-                        HtmlCompat.fromHtml(
-                            getString(
-                                R.string.download_file_has_not_enough_storage_dialog_message,
-                                filename.value,
-                            ),
-                            HtmlCompat.FROM_HTML_MODE_COMPACT,
-                        ),
-                    )
-                    .setPositiveButton(
-                        R.string.download_file_has_not_enough_storage_dialog_confirm_button_text,
-                    ) { dialog, _ ->
-                        openManageStorageSettings()
-                        dialog.dismiss()
-                    }
-                    .setNegativeButton(
-                        R.string.download_file_has_not_enough_storage_dialog_cancel_button_text,
-                    ) { dialog, _ ->
-                        dialog.dismiss()
-                    }.show()
-            },
-        )
+                },
+                fileHasNotEnoughStorageDialog = callback@{ filename ->
+                        val context = this.context ?: return@callback
+                        MaterialAlertDialogBuilder(context)
+                            .setTitle(R.string.download_file_has_not_enough_storage_dialog_title)
+                            .setMessage(
+                                HtmlCompat.fromHtml(
+                                    getString(
+                                        R.string.download_file_has_not_enough_storage_dialog_message,
+                                        filename.value,
+                                    ),
+                                    HtmlCompat.FROM_HTML_MODE_COMPACT,
+                                )
+                            )
+                            .setPositiveButton(
+                                R.string.download_file_has_not_enough_storage_dialog_confirm_button_text
+                            ) { dialog, _ ->
+                                openManageStorageSettings()
+                                dialog.dismiss()
+                            }
+                            .setNegativeButton(
+                                R.string.download_file_has_not_enough_storage_dialog_cancel_button_text
+                            ) { dialog, _ ->
+                                dialog.dismiss()
+                            }
+                            .show()
+                    },
+            )
 
-        val bottomToolbarHeight = getBottomToolbarHeight(
-            includeNavBarIfEnabled = customTabSessionId == null,
-        )
+        val bottomToolbarHeight =
+            getBottomToolbarHeight(
+                includeTabStripIfAvailable = customTabSessionId == null,
+                includeNavBarIfEnabled = customTabSessionId == null,
+                includeTabGroupsStrip = customTabSessionId == null,
+            )
 
         downloadFeature.onDownloadStopped = { downloadState, _, downloadJobStatus ->
             handleOnDownloadFinished(
                 appStore = requireComponents.appStore,
                 downloadState = downloadState,
                 downloadJobStatus = downloadJobStatus,
-                browserToolbars = listOfNotNull(
-                    browserToolbar,
-                    _bottomToolbarContainerView?.toolbarContainerView,
-                ),
+                browserToolbars =
+                    listOfNotNull(
+                        browserToolbar,
+                        _bottomToolbarContainerView?.toolbarContainerView,
+                    ),
                 downloadFileUtils = downloadFileUtils,
             )
         }
@@ -912,24 +953,26 @@ abstract class BaseBrowserFragment :
             view = view,
         )
 
-        pipFeature = PictureInPictureFeature(
-            store = store,
-            activity = requireActivity(),
-            crashReporting = context.components.analytics.crashReporter,
-            tabId = customTabSessionId,
-        )
+        pipFeature =
+            PictureInPictureFeature(
+                store = store,
+                activity = requireActivity(),
+                crashReporting = context.components.analytics.crashReporter,
+                tabId = customTabSessionId,
+            )
 
         biometricPromptFeature.set(
-            feature = BiometricPromptFeature(
-                context = context,
-                fragment = this,
-                onAuthFailure = {
-                    promptsFeature.get()?.onBiometricResult(isAuthenticated = false)
-                },
-                onAuthSuccess = {
-                    promptsFeature.get()?.onBiometricResult(isAuthenticated = true)
-                },
-            ),
+            feature =
+                BiometricPromptFeature(
+                    context = context,
+                    fragment = this,
+                    onAuthFailure = {
+                        promptsFeature.get()?.onBiometricResult(isAuthenticated = false)
+                    },
+                    onAuthSuccess = {
+                        promptsFeature.get()?.onBiometricResult(isAuthenticated = true)
+                    },
+                ),
             owner = this,
             view = view,
         )
@@ -941,339 +984,406 @@ abstract class BaseBrowserFragment :
             )
         }
 
-        loginSelectBar = FenixAutocompletePrompt(
-            viewProvider = {
-                view.findViewById(R.id.loginSelectBar) ?: (binding.loginSelectBarStub.inflate() as LoginSelectBar)
-            },
-            toolbarPositionProvider = {
-                requireComponents.settings.toolbarPosition
-            },
-            onShow = ::onAutocompleteBarShow,
-        )
+        loginSelectBar =
+            FenixAutocompletePrompt(
+                viewProvider = {
+                    view.findViewById(R.id.loginSelectBar) ?: (binding.loginSelectBarStub.inflate() as LoginSelectBar)
+                },
+                toolbarPositionProvider = {
+                    requireComponents.settings.toolbarPosition
+                },
+                onShow = ::onAutocompleteBarShow,
+            )
 
-        addressSelectBar = FenixAutocompletePrompt(
-            viewProvider = {
-                view.findViewById(R.id.addressSelectBar)
-                    ?: binding.addressSelectBarStub.inflate() as AddressSelectBar
-            },
-            toolbarPositionProvider = {
-                requireComponents.settings.toolbarPosition
-            },
-            onShow = ::onAutocompleteBarShow,
-        )
+        addressSelectBar =
+            FenixAutocompletePrompt(
+                viewProvider = {
+                    view.findViewById(R.id.addressSelectBar)
+                        ?: binding.addressSelectBarStub.inflate() as AddressSelectBar
+                },
+                toolbarPositionProvider = {
+                    requireComponents.settings.toolbarPosition
+                },
+                onShow = ::onAutocompleteBarShow,
+            )
 
-        creditCardSelectBar = FenixAutocompletePrompt(
-            viewProvider = {
-                view.findViewById(R.id.creditCardSelectBar)
-                    ?: binding.creditCardSelectBarStub.inflate() as CreditCardSelectBar
-            },
-            toolbarPositionProvider = {
-                requireComponents.settings.toolbarPosition
-            },
-            onShow = ::onAutocompleteBarShow,
-        )
+        creditCardSelectBar =
+            FenixAutocompletePrompt(
+                viewProvider = {
+                    view.findViewById(R.id.creditCardSelectBar)
+                        ?: binding.creditCardSelectBarStub.inflate() as CreditCardSelectBar
+                },
+                toolbarPositionProvider = {
+                    requireComponents.settings.toolbarPosition
+                },
+                onShow = ::onAutocompleteBarShow,
+            )
 
-        suggestStrongPasswordBar = FenixSuggestStrongPasswordPrompt(
-            viewProvider = {
-                view.findViewById(R.id.suggestStrongPasswordBar)
-                    ?: binding.suggestStrongPasswordBarStub.inflate() as SuggestStrongPasswordBar
-            },
-            toolbarPositionProvider = {
-                requireComponents.settings.toolbarPosition
-            },
-            onShow = ::onAutocompleteBarShow,
-        )
+        suggestStrongPasswordBar =
+            FenixSuggestStrongPasswordPrompt(
+                viewProvider = {
+                    view.findViewById(R.id.suggestStrongPasswordBar)
+                        ?: binding.suggestStrongPasswordBarStub.inflate() as SuggestStrongPasswordBar
+                },
+                toolbarPositionProvider = {
+                    requireComponents.settings.toolbarPosition
+                },
+                onShow = ::onAutocompleteBarShow,
+            )
 
-        emailMaskBar = FenixEmailMaskPrompt(
-            viewProvider = {
-                view.findViewById(R.id.emailMaskBar)
-                    ?: binding.emailMaskBarStub.inflate() as EmailMaskPromptBarView
-            },
-            toolbarPositionProvider = {
-                requireComponents.settings.toolbarPosition
-            },
-            onShow = {
-                onAutocompleteBarShow()
-                EmailMask.promptShown.record()
-            },
-        )
+        emailMaskBar =
+            FenixEmailMaskPrompt(
+                viewProvider = {
+                    view.findViewById(R.id.emailMaskBar) ?: binding.emailMaskBarStub.inflate() as EmailMaskPromptBarView
+                },
+                toolbarPositionProvider = {
+                    requireComponents.settings.toolbarPosition
+                },
+                onShow = {
+                    onAutocompleteBarShow()
+                    EmailMask.promptShown.record()
+                },
+            )
 
         promptsFeature.set(
-            feature = PromptFeature(
-                activity = activity,
-                store = store,
-                customTabId = customTabSessionId,
-                fragmentManager = parentFragmentManager,
-                identityCredentialColorsProvider = colorsProvider,
-                tabsUseCases = requireComponents.useCases.tabsUseCases,
-                fileUploadsDirCleaner = requireComponents.core.fileUploadsDirCleaner,
-                creditCardValidationDelegate = DefaultCreditCardValidationDelegate(
-                    context.components.core.lazyAutofillStorage,
-                ),
-                loginValidationDelegate = DefaultLoginValidationDelegate(
-                    context.components.core.lazyPasswordsStorage,
-                ),
-                isLoginAutofillEnabled = {
-                    context.components.settings.shouldAutofillLogins
-                },
-                isSaveLoginEnabled = {
-                    context.components.settings.shouldPromptToSaveLogins
-                },
-                isCreditCardAutofillEnabled = {
-                    context.components.settings.shouldAutofillCreditCardDetails
-                },
-                isAddressAutofillEnabled = {
-                    context.components.settings.addressFeature &&
-                        context.components.settings.shouldAutofillAddressDetails
-                },
-                loginExceptionStorage = context.components.core.loginExceptionStorage,
-                shareDelegate = object : ShareDelegate {
-                    override fun showShareSheet(
-                        context: Context,
-                        shareData: ShareData,
-                        onDismiss: () -> Unit,
-                        onSuccess: () -> Unit,
-                    ) {
-                        val currentTab = getCurrentTab()
+            feature =
+                PromptFeature(
+                    activity = activity,
+                    store = store,
+                    customTabId = customTabSessionId,
+                    fragmentManager = parentFragmentManager,
+                    identityCredentialColorsProvider = colorsProvider,
+                    tabsUseCases = requireComponents.useCases.tabsUseCases,
+                    fileUploadsDirCleaner = requireComponents.core.fileUploadsDirCleaner,
+                    creditCardValidationDelegate =
+                        DefaultCreditCardValidationDelegate(context.components.core.lazyAutofillStorage),
+                    loginValidationDelegate =
+                        DefaultLoginValidationDelegate(context.components.core.lazyPasswordsStorage),
+                    isLoginAutofillEnabled = {
+                        context.components.settings.shouldAutofillLogins
+                    },
+                    isSaveLoginEnabled = {
+                        context.components.settings.shouldPromptToSaveLogins
+                    },
+                    isCreditCardAutofillEnabled = {
+                        context.components.settings.shouldAutofillCreditCardDetails
+                    },
+                    isAddressAutofillEnabled = {
+                        context.components.settings.addressFeature &&
+                            context.components.settings.shouldAutofillAddressDetails
+                    },
+                    loginExceptionStorage = context.components.core.loginExceptionStorage,
+                    shareDelegate =
+                        object : ShareDelegate {
+                            override fun showShareSheet(
+                                context: Context,
+                                shareData: ShareData,
+                                onDismiss: () -> Unit,
+                                onSuccess: () -> Unit,
+                            ) {
+                                val currentTab = getCurrentTab()
 
-                        context.components.useCases.shareUseCases.shareUrl(
-                            id = currentTab?.id,
-                            url = shareData.url,
-                            title = shareData.title,
-                            source = ShareSource.WEB_SHARE,
-                            isPrivate = currentTab?.content?.private ?: false,
-                            isCustomTab = currentTab is CustomTabSessionState,
-                            navigateToShareFragment = {
-                                findNavController().navigate(
-                                    NavGraphDirections.actionGlobalShareFragment(
-                                        data = arrayOf(shareData),
-                                        showPage = true,
-                                        sessionId = currentTab?.id,
-                                    ),
+                                context.components.useCases.shareUseCases.shareUrl(
+                                    id = currentTab?.id,
+                                    url = shareData.url,
+                                    title = shareData.title,
+                                    source = ShareSource.WEB_SHARE,
+                                    isPrivate = currentTab?.content?.private ?: false,
+                                    isCustomTab = currentTab is CustomTabSessionState,
+                                    navigateToShareFragment = {
+                                        findNavController()
+                                            .navigate(
+                                                NavGraphDirections.actionGlobalShareFragment(
+                                                    data = arrayOf(shareData),
+                                                    showPage = true,
+                                                    sessionId = currentTab?.id,
+                                                )
+                                            )
+                                    },
                                 )
-                            },
+                            }
+                        },
+                    onNeedToRequestPermissions = { permissions ->
+                        requestPermissions(permissions, REQUEST_CODE_PROMPT_PERMISSIONS)
+                    },
+                    loginDelegate =
+                        object : LoginDelegate {
+                            override val loginPickerView
+                                get() = loginSelectBar
+
+                            override val onManageLogins = {
+                                val directions = NavGraphDirections.actionGlobalSavedLoginsAuthFragment()
+                                findNavController().navigate(directions)
+                            }
+                        },
+                    suggestStrongPasswordDelegate =
+                        object : SuggestStrongPasswordDelegate {
+                            override val strongPasswordPromptViewListenerView
+                                get() = suggestStrongPasswordBar
+                        },
+                    emailMaskDelegate =
+                        object : EmailMaskDelegate {
+                            override val emailMaskPromptViewListenerView
+                                get() = emailMaskBar
+
+                            override fun shouldShowEmailMaskCfr() =
+                                requireComponents.emailMasksRepository.shouldShowCfr() &&
+                                    context.components.settings.cfrPopupsEnabled
+
+                            override fun onEmailMaskCfrDismissed() {
+                                requireComponents.emailMasksRepository.dismissCfr()
+                            }
+
+                            override suspend fun onEmailMaskClick(generatedFor: String): String? {
+
+                                EmailMask.promptClicked.record()
+
+                                val relay = requireComponents.relayFeatureIntegration
+                                // For this phase, we'll also use the generatedFor value for the description.
+                                val created = relay.getOrCreateNewMask(generatedFor, generatedFor)
+
+                                if (created == null) {
+                                    // Record failure telemetry
+                                    EmailMask.getOrCreateFailed.record()
+                                    // Log failure
+                                    val errorMessage = getString(R.string.email_masks_error_retrieving_masks)
+
+                                    appStore.dispatch(AppAction.SnackbarAction.ShowSnackbar(errorMessage))
+                                    return null
+                                }
+
+                                EmailMask.autofillSuccess.record()
+
+                                return created.fullAddress
+                            }
+                        },
+                    isEmailMaskFeatureEnabled = { context.components.settings.isEmailMaskFeatureEnabled },
+                    isSuggestEmailMaskEnabled = { requireComponents.emailMasksRepository.isSuggestionEnabled() },
+                    shouldAutomaticallyShowSuggestedPassword = {
+                        context.components.settings.isFirstTimeEngagingWithSignup
+                    },
+                    onFirstTimeEngagedWithSignup = {
+                        context.components.settings.isFirstTimeEngagingWithSignup = false
+                    },
+                    onSaveLoginWithStrongPassword = { url, password ->
+                        handleOnSaveLoginWithGeneratedStrongPassword(
+                            passwordsStorage = context.components.core.passwordsStorage,
+                            url = url,
+                            password = password,
                         )
-                    }
-                },
-                onNeedToRequestPermissions = { permissions ->
-                    requestPermissions(permissions, REQUEST_CODE_PROMPT_PERMISSIONS)
-                },
-                loginDelegate = object : LoginDelegate {
-                    override val loginPickerView
-                        get() = loginSelectBar
-                    override val onManageLogins = {
-                        val directions =
-                            NavGraphDirections.actionGlobalSavedLoginsAuthFragment()
-                        findNavController().navigate(directions)
-                    }
-                },
-                suggestStrongPasswordDelegate = object : SuggestStrongPasswordDelegate {
-                    override val strongPasswordPromptViewListenerView
-                        get() = suggestStrongPasswordBar
-                },
-                emailMaskDelegate = object : EmailMaskDelegate {
-                    override val emailMaskPromptViewListenerView
-                        get() = emailMaskBar
+                    },
+                    hideUpdateFragmentAfterSavingGeneratedPassword = { username, password ->
+                        hideUpdateFragmentAfterSavingGeneratedPassword(
+                            username,
+                            password,
+                        )
+                    },
+                    removeLastSavedGeneratedPassword = { removeLastSavedGeneratedPassword() },
+                    creditCardDelegate =
+                        object : CreditCardDelegate {
+                            override val creditCardPickerView
+                                get() = creditCardSelectBar
 
-                    override fun shouldShowEmailMaskCfr() =
-                        requireComponents.emailMasksRepository.shouldShowCfr() &&
-                            context.components.settings.cfrPopupsEnabled
+                            override val onManageCreditCards = {
+                                val directions = NavGraphDirections.actionGlobalAutofillSettingFragment()
+                                findNavController().navigate(directions)
+                            }
+                            override val onSelectCreditCard = {
+                                showBiometricPrompt(context)
+                            }
+                        },
+                    addressDelegate =
+                        object : AddressDelegate {
+                            override val addressPickerView
+                                get() = addressSelectBar
 
-                    override fun onEmailMaskCfrDismissed() {
-                        requireComponents.emailMasksRepository.dismissCfr()
-                    }
-
-                    override suspend fun onEmailMaskClick(generatedFor: String) = withContext(Dispatchers.IO) {
-                        EmailMask.promptClicked.record()
-
-                        val relay = requireComponents.relayFeatureIntegration
-                        // For this phase, we'll also use the generatedFor value for the description.
-                        val created = relay.getOrCreateNewMask(generatedFor, generatedFor)
-
-                        if (created == null) {
-                            // Record failure telemetry
-                            EmailMask.getOrCreateFailed.record()
-                            // Log failure
-                            val errorMessage =
-                                getString(R.string.email_masks_error_retrieving_masks)
-
-                            appStore.dispatch(AppAction.SnackbarAction.ShowSnackbar(errorMessage))
-                            return@withContext null
-                        }
-
-                        EmailMask.autofillSuccess.record()
-
-                        created.fullAddress
-                    }
-                },
-                isEmailMaskFeatureEnabled = { context.components.settings.isEmailMaskFeatureEnabled },
-                isSuggestEmailMaskEnabled = { requireComponents.emailMasksRepository.isSuggestionEnabled() },
-                shouldAutomaticallyShowSuggestedPassword = {
-                    context.components.settings.isFirstTimeEngagingWithSignup
-                },
-                onFirstTimeEngagedWithSignup = {
-                    context.components.settings.isFirstTimeEngagingWithSignup = false
-                },
-                onSaveLoginWithStrongPassword = { url, password ->
-                    handleOnSaveLoginWithGeneratedStrongPassword(
-                        passwordsStorage = context.components.core.passwordsStorage,
-                        url = url,
-                        password = password,
-                    )
-                },
-                hideUpdateFragmentAfterSavingGeneratedPassword = { username, password ->
-                    hideUpdateFragmentAfterSavingGeneratedPassword(
-                        username,
-                        password,
-                    )
-                },
-                removeLastSavedGeneratedPassword = { removeLastSavedGeneratedPassword() },
-                creditCardDelegate = object : CreditCardDelegate {
-                    override val creditCardPickerView
-                        get() = creditCardSelectBar
-                    override val onManageCreditCards = {
-                        val directions =
-                            NavGraphDirections.actionGlobalAutofillSettingFragment()
-                        findNavController().navigate(directions)
-                    }
-                    override val onSelectCreditCard = {
-                        showBiometricPrompt(context)
-                    }
-                },
-                addressDelegate = object : AddressDelegate {
-                    override val addressPickerView
-                        get() = addressSelectBar
-                    override val onManageAddresses = {
-                        val directions = NavGraphDirections.actionGlobalAutofillSettingFragment()
-                        findNavController().navigate(directions)
-                    }
-                },
-                androidPhotoPicker = AndroidPhotoPicker(
-                    requireContext(),
-                    singleMediaPicker,
-                    multipleMediaPicker,
+                            override val onManageAddresses = {
+                                val directions = NavGraphDirections.actionGlobalAutofillSettingFragment()
+                                findNavController().navigate(directions)
+                            }
+                        },
+                    androidPhotoPicker =
+                        AndroidPhotoPicker(
+                            requireContext(),
+                            singleMediaPicker,
+                            multipleMediaPicker,
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                AndroidPhotoPicker.allHdrCapabilities()
+                            } else {
+                                null
+                            },
+                        ),
                 ),
-            ),
             owner = this,
             view = view,
         )
 
         sessionFeature.set(
-            feature = SessionFeature(
-                requireComponents.core.store,
-                requireComponents.useCases.sessionUseCases.goBack,
-                requireComponents.useCases.sessionUseCases.goForward,
-                binding.engineView,
-                customTabSessionId,
-            ),
+            feature =
+                SessionFeature(
+                    requireComponents.core.store,
+                    requireComponents.useCases.sessionUseCases.goBack,
+                    requireComponents.useCases.sessionUseCases.goForward,
+                    binding.engineView,
+                    customTabSessionId,
+                ),
             owner = this,
             view = view,
         )
 
+        val isCoverEnabled = TabReloadCoverGating.isCoverEnabled(settings)
+        val isScrollAwareEnabled = TabReloadCoverGating.isScrollAwareEnabled(settings)
+        val isOnline = {
+            context.getSystemService<android.net.ConnectivityManager>()?.isOnline() ?: false
+        }
+
+        if (isCoverEnabled) {
+            tabReloadCoverFeature.set(
+                feature =
+                    TabReloadCoverFeature(
+                        store = requireComponents.core.store,
+                        browserScreenStore = browserScreenStore,
+                        thumbnailStorage = requireComponents.core.thumbnailStorage,
+                        coverView = binding.tabReloadCover,
+                        tabId = customTabSessionId,
+                        isOnline = isOnline,
+                    ),
+                owner = this,
+                view = view,
+            )
+        }
+
+        if (isScrollAwareEnabled) {
+            scrollAwareThumbnailFeature.set(
+                feature =
+                    ScrollAwareThumbnailFeature(
+                        store = requireComponents.core.store,
+                        lifecycleOwner = viewLifecycleOwner,
+                        thumbnailsFeature = { thumbnailsFeature.get() },
+                        isOnline = isOnline,
+                    ),
+                owner = this,
+                view = view,
+            )
+        }
+
         lastTabFeature.set(
-            feature = LastTabFeature(
-                requireComponents.core.store,
-                customTabSessionId,
-                requireComponents.useCases.tabsUseCases.removeTab,
-                requireActivity(),
-            ),
+            feature =
+                LastTabFeature(
+                    requireComponents.core.store,
+                    customTabSessionId,
+                    requireComponents.useCases.tabsUseCases.removeTab,
+                    requireActivity(),
+                ),
             owner = this,
             view = view,
         )
 
         crashContentIntegration.set(
-            feature = CrashContentIntegration(
-                browserStore = requireComponents.core.store,
-                appStore = requireComponents.appStore,
-                toolbar = browserToolbar,
-                components = requireComponents,
-                settings = context.components.settings,
-                navController = findNavController(),
-                customTabSessionId = customTabSessionId,
-                getTopToolbarHeightValue = { includeTabStrip ->
-                    this.getTopToolbarHeight(
-                        includeTabStrip,
+            feature =
+                CrashContentIntegration(
+                        browserStore = requireComponents.core.store,
+                        appStore = requireComponents.appStore,
+                        toolbar = browserToolbar,
+                        components = requireComponents,
+                        settings = context.components.settings,
+                        navController = findNavController(),
+                        customTabSessionId = customTabSessionId,
+                        getTopToolbarHeightValue = { includeTabStrip ->
+                            this.getTopToolbarHeight(includeTabStrip)
+                        },
+                        getBottomToolbarHeightValue = { includeTabStrip, includeNavBar ->
+                            this.getBottomToolbarHeight(
+                                includeTabStripIfAvailable = includeTabStrip,
+                                includeNavBarIfEnabled = includeNavBar,
+                                includeTabGroupsStrip = includeNavBar,
+                            )
+                        },
                     )
-                },
-                getBottomToolbarHeightValue = { includeNavBar ->
-                    this.getBottomToolbarHeight(
-                        includeNavBar,
-                    )
-                },
-            ).apply {
-                viewProvider = {
-                    view.findViewById(R.id.crash_reporter_view)
-                        ?: binding.crashReporterViewStub.inflate() as CrashContentView
-                }
-            },
+                    .apply {
+                        viewProvider = {
+                            view.findViewById(R.id.crash_reporter_view)
+                                ?: binding.crashReporterViewStub.inflate() as CrashContentView
+                        }
+                    },
             owner = this,
             view = view,
         )
 
         searchFeature.set(
-            feature = SearchFeature(store, customTabSessionId) { request, tabId ->
-                val parentSession = store.state.findTabOrCustomTab(tabId)
-                val useCase = if (request.isPrivate) {
-                    requireComponents.useCases.searchUseCases.newPrivateTabSearch
-                } else {
-                    requireComponents.useCases.searchUseCases.newTabSearch
-                }
+            feature =
+                SearchFeature(store, customTabSessionId) { request, tabId ->
+                    val parentSession = store.state.findTabOrCustomTab(tabId)
+                    val useCase =
+                        if (request.isPrivate) {
+                            requireComponents.useCases.searchUseCases.newPrivateTabSearch
+                        } else {
+                            requireComponents.useCases.searchUseCases.newTabSearch
+                        }
 
-                if (parentSession is CustomTabSessionState) {
-                    useCase.invoke(request.query)
-                    requireActivity().startActivity(openInFenixIntent)
-                } else {
-                    useCase.invoke(request.query, parentSessionId = parentSession?.id)
-                }
-            },
+                    if (parentSession is CustomTabSessionState) {
+                        useCase.invoke(request.query)
+                        requireActivity().startActivity(openInFenixIntent)
+                    } else {
+                        useCase.invoke(request.query, parentSessionId = parentSession?.id)
+                    }
+                },
             owner = this,
             view = view,
         )
 
         sitePermissionsFeature.set(
-            feature = SitePermissionsFeature(
-                context = context,
-                storage = context.components.core.geckoSitePermissionsStorage,
-                fragmentManager = parentFragmentManager,
-                promptsStyling = SitePermissionsFeature.PromptsStyling(
-                    gravity = getAppropriateLayoutGravity(),
-                    shouldWidthMatchParent = true,
-                    positiveButtonBackgroundColor =
-                        ThemeManager.resolveAttribute(appcompatR.attr.colorPrimary, context),
-                    positiveButtonTextColor =
-                        ThemeManager.resolveAttribute(materialR.attr.colorOnPrimary, context),
+            feature =
+                SitePermissionsFeature(
+                    context = context,
+                    storage = context.components.core.geckoSitePermissionsStorage,
+                    fragmentManager = parentFragmentManager,
+                    promptsStyling =
+                        SitePermissionsFeature.PromptsStyling(
+                            gravity = getAppropriateLayoutGravity(),
+                            shouldWidthMatchParent = true,
+                            positiveButtonBackgroundColor =
+                                ThemeManager.resolveAttribute(appcompatR.attr.colorPrimary, context),
+                            positiveButtonTextColor =
+                                ThemeManager.resolveAttribute(materialR.attr.colorOnPrimary, context),
+                        ),
+                    sessionId = customTabSessionId,
+                    onNeedToRequestPermissions = { permissions ->
+                        store.dispatch(SystemPermissionRequestAction.SystemPermissionStateRequestInProgress)
+
+                        if (shouldAddBlackScreen()) {
+                            addBlackScreen()
+                        }
+
+                        requestPermissions(permissions, REQUEST_CODE_APP_PERMISSIONS)
+                    },
+                    onShouldShowRequestPermissionRationale = {
+                        shouldShowRequestPermissionRationale(it)
+                    },
+                    shouldShowDoNotAskAgainCheckBox = context.components.appStore.state.mode != BrowsingMode.Private,
+                    store = store,
+                    coroutineScope = requireComponents.applicationScope,
+                    shouldHide = {
+                        // if the fragment is detached,
+                        // returning true will hide the site permission prompt rather than crash
+                        if (this.context == null) {
+                            true
+                        } else {
+                            val state = requireComponents.appStore.state
+                            state.isPrivateScreenLocked && state.mode.isPrivate
+                        }
+                    },
                 ),
-                sessionId = customTabSessionId,
-                onNeedToRequestPermissions = { permissions ->
-                    store.dispatch(SystemPermissionRequestAction.SystemPermissionStateRequestInProgress)
-
-                    if (shouldAddBlackScreen()) {
-                        addBlackScreen()
-                    }
-
-                    requestPermissions(permissions, REQUEST_CODE_APP_PERMISSIONS)
-                },
-                onShouldShowRequestPermissionRationale = {
-                    shouldShowRequestPermissionRationale(
-                        it,
-                    )
-                },
-                shouldShowDoNotAskAgainCheckBox = context.components.appStore.state.mode != BrowsingMode.Private,
-                store = store,
-                shouldHide = {
-                    val state = requireComponents.appStore.state
-                    state.isPrivateScreenLocked && state.mode.isPrivate
-                },
-            ),
             owner = this,
             view = view,
         )
 
         sitePermissionWifiIntegration.set(
-            feature = SitePermissionsWifiIntegration(
-                settings = context.components.settings,
-                wifiConnectionMonitor = context.components.wifiConnectionMonitor,
-            ),
+            feature =
+                SitePermissionsWifiIntegration(
+                    settings = context.components.settings,
+                    wifiConnectionMonitor = context.components.wifiConnectionMonitor,
+                ),
             owner = this,
             view = view,
         )
@@ -1281,22 +1391,24 @@ abstract class BaseBrowserFragment :
         // This component feature only works on Fenix when built on Mozilla infrastructure.
         if (BuildConfig.MOZILLA_OFFICIAL) {
             webAuthnFeature.set(
-                feature = WebAuthnFeature(
-                    engine = requireComponents.core.engine,
-                    activity = requireActivity(),
-                    exitFullScreen = requireComponents.useCases.sessionUseCases.exitFullscreen::invoke,
-                    currentTab = { store.state.selectedTabId },
-                ),
+                feature =
+                    WebAuthnFeature(
+                        engine = requireComponents.core.engine,
+                        activity = requireActivity(),
+                        exitFullScreen = requireComponents.useCases.sessionUseCases.exitFullscreen::invoke,
+                        currentTab = { store.state.selectedTabId },
+                    ),
                 owner = this,
                 view = view,
             )
         }
 
         screenOrientationFeature.set(
-            feature = ScreenOrientationFeature(
-                engine = requireComponents.core.engine,
-                activity = requireActivity(),
-            ),
+            feature =
+                ScreenOrientationFeature(
+                    engine = requireComponents.core.engine,
+                    activity = requireActivity(),
+                ),
             owner = this,
             view = view,
         )
@@ -1311,13 +1423,14 @@ abstract class BaseBrowserFragment :
         assignSitePermissionsRules()
 
         fullScreenFeature.set(
-            feature = FullScreenFeature(
-                requireComponents.core.store,
-                requireComponents.useCases.sessionUseCases,
-                customTabSessionId,
-                ::viewportFitChange,
-                ::fullScreenChanged,
-            ),
+            feature =
+                FullScreenFeature(
+                    requireComponents.core.store,
+                    requireComponents.useCases.sessionUseCases,
+                    customTabSessionId,
+                    ::viewportFitChange,
+                    ::fullScreenChanged,
+                ),
             owner = this,
             view = view,
         )
@@ -1325,7 +1438,8 @@ abstract class BaseBrowserFragment :
         closeFindInPageBarOnNavigation(store)
 
         store.flowScoped(viewLifecycleOwner, Dispatchers.Main) { flow ->
-            flow.mapNotNull { state -> state.findTabOrCustomTabOrSelectedTab(customTabSessionId) }
+            flow
+                .mapNotNull { state -> state.findTabOrCustomTabOrSelectedTab(customTabSessionId) }
                 .distinctUntilChangedBy { tab -> tab.content.pictureInPictureEnabled }
                 .collect { tab -> pipModeChanged(tab) }
         }
@@ -1333,8 +1447,7 @@ abstract class BaseBrowserFragment :
         binding.swipeRefresh.isEnabled = shouldPullToRefreshBeEnabled(false)
 
         if (binding.swipeRefresh.isEnabled) {
-            val primaryTextColor =
-                ThemeManager.resolveAttribute(materialR.attr.colorOnSurface, context)
+            val primaryTextColor = ThemeManager.resolveAttribute(materialR.attr.colorOnSurface, context)
             val primaryBackgroundColor =
                 ThemeManager.resolveAttribute(materialR.attr.colorSurfaceContainerLowest, context)
             binding.swipeRefresh.apply {
@@ -1342,35 +1455,36 @@ abstract class BaseBrowserFragment :
                 setProgressBackgroundColorSchemeResource(primaryBackgroundColor)
             }
             swipeRefreshFeature.set(
-                feature = SwipeRefreshFeature(
-                    requireComponents.core.store,
-                    context.components.useCases.sessionUseCases.reload,
-                    binding.swipeRefresh,
-                    { PullToRefreshInBrowser.executed.record(NoExtras()) },
-                    customTabSessionId,
-                ),
+                feature =
+                    SwipeRefreshFeature(
+                        requireComponents.core.store,
+                        context.components.useCases.sessionUseCases.reload,
+                        binding.swipeRefresh,
+                        { PullToRefreshInBrowser.executed.record(NoExtras()) },
+                        customTabSessionId,
+                    ),
                 owner = this,
                 view = view,
             )
         }
 
         webchannelIntegration.set(
-            feature = FxaWebChannelIntegration(
-                customTabSessionId = customTabSessionId,
-                runtime = requireComponents.core.engine,
-                store = requireComponents.core.store,
-                accountManager = requireComponents.backgroundServices.accountManager,
-                serverConfig = requireComponents.backgroundServices.serverConfig,
-                activityRef = WeakReference(getActivity()),
-            ),
+            feature =
+                FxaWebChannelIntegration(
+                    customTabSessionId = customTabSessionId,
+                    runtime = requireComponents.core.engine,
+                    store = requireComponents.core.store,
+                    accountManager = requireComponents.backgroundServices.accountManager,
+                    serverConfig = requireComponents.backgroundServices.serverConfig,
+                    fxaCapabilities = requireComponents.backgroundServices.fxaCapabilities,
+                    activityRef = WeakReference(getActivity()),
+                ),
             owner = this,
             view = view,
         )
 
         initializeEngineView(
-            topToolbarHeight = getTopToolbarHeight(
-                includeTabStripIfAvailable = customTabSessionId == null,
-            ),
+            topToolbarHeight = getTopToolbarHeight(includeTabStripIfAvailable = customTabSessionId == null),
             bottomToolbarHeight = bottomToolbarHeight,
         )
 
@@ -1387,25 +1501,29 @@ abstract class BaseBrowserFragment :
         val settings = components.settings
         val appStore = components.appStore
         browserNavigationBar =
-             BrowserNavigationBar(
+            BrowserNavigationBar(
                 context = activity,
                 container = binding.browserLayout,
                 toolbarStore = toolbarStore,
                 settings = settings,
+                customTabSessionId = customTabSessionId,
                 hideWhenKeyboardShown = true,
+                tabStripContent = { buildTabStrip(appStore, settings) },
+                tabGroupsStripContent = { buildTabGroupsStrip() },
             )
 
         // set the summarize CFR binding only for regular, non-custom tabs
         if (customTabSessionId == null) {
             summarizeToolbarCfrBinding.set(
-                feature = SummarizeToolbarCFRBinding(
-                    browserStore = requireComponents.core.store,
-                    browserToolbarStore = toolbarStore,
-                    featureDiscovery = requireComponents.core.summarizeFeatureSettings,
-                    eligibilityChecker = requireComponents.core.summarizationEligibilityChecker,
-                    mainDispatcher = Dispatchers.Main,
-                    ioDispatcher = Dispatchers.IO,
-                ),
+                feature =
+                    SummarizeToolbarCFRBinding(
+                        browserStore = requireComponents.core.store,
+                        browserToolbarStore = toolbarStore,
+                        featureDiscovery = requireComponents.core.summarizeFeatureSettings,
+                        eligibilityChecker = requireComponents.core.summarizationEligibilityChecker,
+                        mainDispatcher = Dispatchers.Main,
+                        ioDispatcher = Dispatchers.IO,
+                    ),
                 owner = viewLifecycleOwner,
                 view = binding.root,
             )
@@ -1421,12 +1539,27 @@ abstract class BaseBrowserFragment :
             settings = settings,
             customTabSession = customTabSessionId?.let { store.state.findCustomTab(it) },
             tabStripContent = buildTabStrip(appStore, settings),
+            tabGroupsStripContent = buildTabGroupsStrip(),
             searchSuggestionsContent = { modifier ->
                 (awesomeBarComposable ?: buildAwesomeBar(activity, toolbarStore, modifier)).SearchSuggestions()
             },
             navigationBarContent = browserNavigationBar?.asComposable(),
         )
     }
+
+    /** Build the TabStrip [View] for when the TabStrip is to be shown alone at the top of the screen. */
+    private fun initializeBrowserTabStripView(
+        context: Context,
+        appStore: AppStore,
+        settings: org.mozilla.fenix.utils.Settings,
+    ) =
+        if (customTabSessionId == null && settings.shouldShowTabStripAtTop && settings.shouldUseBottomToolbar) {
+            BrowserTabStrip(context, binding.browserLayout, settings) {
+                buildTabStrip(appStore, settings)()
+            }
+        } else {
+            null
+        }
 
     @VisibleForTesting
     internal fun shouldAddBlackScreen(): Boolean =
@@ -1437,13 +1570,14 @@ abstract class BaseBrowserFragment :
 
     @VisibleForTesting
     internal fun addBlackScreen(container: ViewGroup = binding.browserLayout) {
-        blackScreenOverlay = ComposeView(requireContext()).apply {
-            setContent {
-                FirefoxTheme {
-                    BlackScreenOverlay()
+        blackScreenOverlay =
+            ComposeView(requireContext()).apply {
+                setContent {
+                    FirefoxTheme {
+                        BlackScreenOverlay()
+                    }
                 }
             }
-        }
         container.addView(blackScreenOverlay)
     }
 
@@ -1460,26 +1594,33 @@ abstract class BaseBrowserFragment :
         FirefoxTheme {
             TabStrip(
                 showTabCounterButton = false,
+                hideWhenKeyboardShown = settings.shouldUseBottomTabStrip,
                 onAddTabClick = {
                     if (settings.enableHomepageAsNewTab) {
                         requireComponents.useCases.fenixBrowserUseCases.addNewHomepageTab(
-                            private = appStore.state.mode.isPrivate,
+                            private = appStore.state.mode.isPrivate
                         )
                     } else {
-                        findNavController().navigate(
-                            NavGraphDirections.actionGlobalHome(
-                                focusOnAddressBar = true,
-                            ),
-                        )
+                        findNavController()
+                            .navigate(
+                                NavGraphDirections.actionGlobalHome(
+                                    focusOnAddressBar = !settings.enableHomepageTrendingRecentSearch
+                                )
+                            )
                     }
                 },
                 onLastTabClose = { isPrivate ->
-                    requireComponents.appStore.dispatch(
-                        AppAction.TabStripAction.UpdateLastTabClosed(isPrivate),
-                    )
-                    findNavController().navigate(
-                        BrowserFragmentDirections.actionGlobalHome(),
-                    )
+                    handleTabStripLastTabClosed(
+                        isHomepageAsNewTabEnabled = settings.enableHomepageAsNewTab,
+                        isLastTabClosedPrivate = isPrivate,
+                        navigateFromId = R.id.browserFragment,
+                        appStore = requireComponents.appStore,
+                        browsingMode = requireComponents.appStore.state.mode,
+                        navController = findNavController(),
+                    ) {
+                        requireComponents.appStore.dispatch(AppAction.TabStripAction.UpdateLastTabClosed(isPrivate))
+                        findNavController().navigate(BrowserFragmentDirections.actionGlobalHome())
+                    }
                 },
                 onSelectedTabClick = {},
                 onCloseTabClick = { isPrivate ->
@@ -1490,64 +1631,83 @@ abstract class BaseBrowserFragment :
         }
     }
 
+    private val tabGroupsStripStore by lazy {
+        TabGroupsStripStore(
+            middleware =
+                listOf(
+                    TabGroupsStripMiddleware(
+                        tabDataCoordinator = requireComponents.tabDataCoordinator,
+                        scope = lifecycleScope,
+                    )
+                )
+        )
+    }
+
+    private fun buildTabGroupsStrip(): @Composable () -> Unit = { TabGroupsStrip(store = tabGroupsStripStore) }
+
     private fun buildAwesomeBar(
         activity: HomeActivity,
         toolbarStore: BrowserToolbarStore,
         modifier: Modifier,
-    ) = AwesomeBarComposable(
-        activity = activity,
-        fragment = this,
-        modifier = modifier,
-        components = requireComponents,
-        appStore = requireComponents.appStore,
-        browserStore = requireComponents.core.store,
-        toolbarStore = toolbarStore,
-        navController = findNavController(),
-        showScrimWhenNoSuggestions = true,
-    ).also {
-        awesomeBarComposable = it
-    }
+    ) =
+        AwesomeBarComposable(
+                activity = activity,
+                fragment = this,
+                modifier = modifier,
+                components = requireComponents,
+                appStore = requireComponents.appStore,
+                browserStore = requireComponents.core.store,
+                toolbarStore = toolbarStore,
+                navController = findNavController(),
+                showScrimWhenNoSuggestions = true,
+            )
+            .also {
+                awesomeBarComposable = it
+            }
 
-    private fun buildBrowserScreenStore() = fragmentStore(BrowserScreenState()) {
-        BrowserScreenStore(
-            middleware = listOf(
-                BrowserScreenMiddleware(
-                    uiContext = requireContext(),
-                    crashReporter = requireContext().components.analytics.crashReporter,
-                    fragmentManager = childFragmentManager,
-                ),
-            ),
-        )
-    }
+    private fun buildBrowserScreenStore() =
+        fragmentStore(BrowserScreenState()) {
+            BrowserScreenStore(
+                middleware =
+                    listOf(
+                        BrowserScreenMiddleware(
+                            uiContext = requireContext(),
+                            crashReporter = requireContext().components.analytics.crashReporter,
+                            fragmentManager = childFragmentManager,
+                        )
+                    )
+            )
+        }
 
     private fun buildToolbarStore(
         activity: HomeActivity,
         readerModeController: ReaderModeController,
-    ) = BrowserToolbarStoreBuilder.build(
-        activity = activity,
-        fragment = this,
-        navController = findNavController(),
-        appStore = activity.components.appStore,
-        browserStore = activity.components.core.store,
-        browserScreenStore = browserScreenStore,
-        components = activity.components,
-        browsingModeManager = activity.browsingModeManager,
-        thumbnailsFeature = { thumbnailsFeature.get() },
-        readerModeController = readerModeController,
-        customTabSession = customTabSessionId?.let { activity.components.core.store.state.findCustomTab(it) },
-        isSandboxCustomTab = isSandboxCustomTab,
-    )
+    ) =
+        BrowserToolbarStoreBuilder.build(
+            activity = activity,
+            fragment = this,
+            navController = findNavController(),
+            appStore = activity.components.appStore,
+            browserStore = activity.components.core.store,
+            browserScreenStore = browserScreenStore,
+            components = activity.components,
+            browsingModeManager = activity.browsingModeManager,
+            thumbnailsFeature = { thumbnailsFeature.get() },
+            readerModeController = readerModeController,
+            customTabSession = customTabSessionId?.let { activity.components.core.store.state.findCustomTab(it) },
+            isSandboxCustomTab = isSandboxCustomTab,
+        )
 
     private fun showUndoSnackbar(message: String) {
         viewLifecycleOwner.lifecycleScope.allowUndo(
             binding.dynamicSnackbarContainer,
             requireComponents.settings,
-                message,
+            message,
             requireContext().getString(R.string.snackbar_deleted_undo),
             {
                 requireComponents.useCases.tabsUseCases.undo.invoke()
             },
-            operation = { },
+            operation = {},
         )
     }
 
@@ -1556,27 +1716,27 @@ abstract class BaseBrowserFragment :
     }
 
     /**
-     * Show a [Snackbar] when data is set to the device clipboard. To avoid duplicate displays of
-     * information only show a [Snackbar] for Android 12 and lower.
+     * Show a [Snackbar] when data is set to the device clipboard. To avoid duplicate displays of information only show
+     * a [Snackbar] for Android 12 and lower.
      *
      * [See details](https://developer.android.com/develop/ui/views/touch-and-input/copy-paste#duplicate-notifications).
      */
     private fun showSnackbarForClipboardCopy() {
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
-            ContextMenuSnackbarDelegate().show(
-                snackBarParentView = binding.dynamicSnackbarContainer,
-                text = widgetsR.string.snackbar_copy_image_to_clipboard_confirmation,
-                duration = LENGTH_LONG,
-            )
+            ContextMenuSnackbarDelegate()
+                .show(
+                    snackBarParentView = binding.dynamicSnackbarContainer,
+                    text = widgetsR.string.snackbar_copy_image_to_clipboard_confirmation,
+                    duration = LENGTH_LONG,
+                )
         }
     }
 
-    /**
-     * Shows a biometric prompt and fallback to prompting for the password.
-     */
+    /** Shows a biometric prompt and fallback to prompting for the password. */
     private fun showBiometricPrompt(context: Context) {
         if (BiometricPromptFeature.canUseFeature(BiometricManager.from(context))) {
-            biometricPromptFeature.get()
+            biometricPromptFeature
+                .get()
                 ?.requestAuthentication(getString(R.string.credit_cards_biometric_prompt_unlock_message_2))
             return
         }
@@ -1595,39 +1755,41 @@ abstract class BaseBrowserFragment :
         }
     }
 
-    /**
-     * Shows a pin request prompt. This is only used when BiometricPrompt is unavailable.
-     */
+    /** Shows a pin request prompt. This is only used when BiometricPrompt is unavailable. */
     @Suppress("DEPRECATION")
     private fun showPinVerification(manager: KeyguardManager) {
-        val intent = manager.createConfirmDeviceCredentialIntent(
-            getString(R.string.credit_cards_biometric_prompt_message_pin),
-            getString(R.string.credit_cards_biometric_prompt_unlock_message_2),
-        )
+        val intent =
+            manager.createConfirmDeviceCredentialIntent(
+                getString(R.string.credit_cards_biometric_prompt_message_pin),
+                getString(R.string.credit_cards_biometric_prompt_unlock_message_2),
+            )
 
         startForResult.launch(intent)
     }
 
-    /**
-     * Shows a dialog warning about setting up a device lock PIN.
-     */
+    /** Shows a dialog warning about setting up a device lock PIN. */
     private fun showPinDialogWarning(context: Context) {
-        MaterialAlertDialogBuilder(context).apply {
-            setTitle(getString(R.string.credit_cards_warning_dialog_title_2))
-            setMessage(getString(R.string.credit_cards_warning_dialog_message_3))
+        MaterialAlertDialogBuilder(context)
+            .apply {
+                setTitle(getString(R.string.credit_cards_warning_dialog_title_2))
+                setMessage(getString(R.string.credit_cards_warning_dialog_message_3))
 
-            setNegativeButton(getString(R.string.credit_cards_warning_dialog_later)) { _: DialogInterface, _ ->
-                promptsFeature.get()?.onBiometricResult(isAuthenticated = false)
+                setNegativeButton(getString(R.string.credit_cards_warning_dialog_later)) { _: DialogInterface, _ ->
+                    promptsFeature.get()?.onBiometricResult(isAuthenticated = false)
+                }
+
+                setPositiveButton(getString(R.string.credit_cards_warning_dialog_set_up_now)) { it: DialogInterface, _
+                    ->
+                    it.dismiss()
+                    promptsFeature.get()?.onBiometricResult(isAuthenticated = false)
+                    startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                }
+
+                create()
             }
-
-            setPositiveButton(getString(R.string.credit_cards_warning_dialog_set_up_now)) { it: DialogInterface, _ ->
-                it.dismiss()
-                promptsFeature.get()?.onBiometricResult(isAuthenticated = false)
-                startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
-            }
-
-            create()
-        }.show().withCenterAlignedButtons().secure(activity)
+            .show()
+            .withCenterAlignedButtons()
+            .secure(activity)
 
         context.components.settings.incrementSecureWarningCount()
     }
@@ -1637,9 +1799,10 @@ abstract class BaseBrowserFragment :
         mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     ) {
         consumeFlow(store, mainDispatcher = mainDispatcher) { flow ->
-            flow.mapNotNull { state ->
-                state.findCustomTabOrSelectedTab(customTabSessionId)
-            }
+            flow
+                .mapNotNull { state ->
+                    state.findCustomTabOrSelectedTab(customTabSessionId)
+                }
                 .ifAnyChanged { tab ->
                     val urlWithoutFragment = tab.content.url.substringBefore("#")
                     arrayOf(urlWithoutFragment, tab.content.loadRequest)
@@ -1659,15 +1822,15 @@ abstract class BaseBrowserFragment :
 
     /**
      * Sets up the necessary layout configurations for the engine view. If the toolbar is dynamic, this method sets a
-     * [CoordinatorLayout.Behavior] that will adjust the top/bottom paddings when the tab content is being scrolled.
-     * If the toolbar is not dynamic, it simply sets the top and bottom margins to ensure that content is always
-     * displayed above or below the respective toolbars.
+     * [CoordinatorLayout.Behavior] that will adjust the top/bottom paddings when the tab content is being scrolled. If
+     * the toolbar is not dynamic, it simply sets the top and bottom margins to ensure that content is always displayed
+     * above or below the respective toolbars.
      *
      * @param topToolbarHeight The height of the top toolbar, which could be zero if the toolbar is positioned at the
-     * bottom, or it could be equal to the height of [BrowserToolbar].
+     *   bottom, or it could be equal to the height of [BrowserToolbar].
      * @param bottomToolbarHeight The height of the bottom toolbar, which could be equal to the height of
-     * [BrowserToolbar] or [ToolbarContainerView], or zero if the toolbar is positioned at the top without a navigation
-     * bar.
+     *   [BrowserToolbar] or [ToolbarContainerView], or zero if the toolbar is positioned at the top without a
+     *   navigation bar.
      */
     @VisibleForTesting
     internal fun initializeEngineView(
@@ -1699,27 +1862,33 @@ abstract class BaseBrowserFragment :
     }
 
     private fun onTabCounterClicked(browsingMode: BrowsingMode) {
-        thumbnailsFeature.get()?.requestScreenshot()
-        findNavController().nav(
-            R.id.browserFragment,
-            BrowserFragmentDirections.actionGlobalTabManagementFragment(
-                page = when (browsingMode) {
-                    BrowsingMode.Normal -> Page.NormalTabs
-                    BrowsingMode.Private -> Page.PrivateTabs
-                },
-            ),
-        )
+        thumbnailsFeature
+            .get()
+            ?.requestScreenshot(trigger = BrowserThumbnailsFacts.CaptureAttemptedTriggers.TAB_COUNTER_CLICK)
+        findNavController()
+            .nav(
+                R.id.browserFragment,
+                BrowserFragmentDirections.actionGlobalTabManagementFragment(
+                    page =
+                        when (browsingMode) {
+                            BrowsingMode.Normal -> Page.NormalTabs
+                            BrowsingMode.Private -> Page.PrivateTabs
+                        }
+                ),
+            )
     }
 
     @VisibleForTesting
     internal fun initializeMicrosurveyFeature(context: Context) {
-        if (context.components.settings.isExperimentationEnabled &&
-            context.components.settings.microsurveyFeatureEnabled
+        if (
+            context.components.settings.isExperimentationEnabled &&
+                context.components.settings.microsurveyFeatureEnabled
         ) {
-            val messagingFeature = MessagingFeature(
-                appStore = requireComponents.appStore,
-                surface = FenixMessageSurfaceId.MICROSURVEY,
-            )
+            val messagingFeature =
+                MessagingFeature(
+                    appStore = requireComponents.appStore,
+                    surface = FenixMessageSurfaceId.MICROSURVEY,
+                )
             messagingFeatureMicrosurvey.set(
                 feature = messagingFeature,
                 owner = viewLifecycleOwner,
@@ -1745,67 +1914,69 @@ abstract class BaseBrowserFragment :
             binding.browserLayout.removeView(navigationBar)
         }
 
-        _bottomToolbarContainerView = BottomToolbarContainerView(
-            context = context,
-            parent = binding.browserLayout,
-            hideOnScroll = isToolbarDynamic(context),
-            content = {
-                FirefoxTheme {
-                    Column {
-                        val activity = requireActivity() as HomeActivity
+        _bottomToolbarContainerView =
+            BottomToolbarContainerView(
+                    context = context,
+                    parent = binding.browserLayout,
+                    hideOnScroll = isToolbarDynamic(context),
+                    content = {
+                        FirefoxTheme {
+                            Column {
+                                val microsurveyState by
+                                    context.components.appStore.observeAsComposableState {
+                                        it.microsurvey
+                                    }
 
-                        if (!activity.isMicrosurveyPromptDismissed.value) {
-                            currentMicrosurvey?.let {
-                                if (isToolbarAtBottom) {
-                                    removeBottomToolbarDivider()
+                                microsurveyState.current?.let {
+                                    if (isToolbarAtBottom) {
+                                        removeBottomToolbarDivider()
+                                    }
+
+                                    HorizontalDivider()
+
+                                    MicrosurveyRequestPrompt(
+                                        microsurvey = it,
+                                        onStartSurveyClicked = {
+                                            context.components.appStore.dispatch(MicrosurveyAction.Started(it.id))
+                                            findNavController()
+                                                .nav(
+                                                    R.id.browserFragment,
+                                                    BrowserFragmentDirections.actionGlobalMicrosurveyDialog(it.id),
+                                                )
+                                        },
+                                        onCloseButtonClicked = {
+                                            context.components.appStore.dispatch(MicrosurveyAction.Dismissed(it.id))
+                                        },
+                                    )
                                 }
 
-                                HorizontalDivider()
-
-                                MicrosurveyRequestPrompt(
-                                    microsurvey = it,
-                                    onStartSurveyClicked = {
-                                        context.components.appStore.dispatch(MicrosurveyAction.Started(it.id))
-                                        findNavController().nav(
-                                            R.id.browserFragment,
-                                            BrowserFragmentDirections.actionGlobalMicrosurveyDialog(it.id),
-                                        )
-                                    },
-                                    onCloseButtonClicked = {
-                                        context.components.appStore.dispatch(
-                                            MicrosurveyAction.Dismissed(it.id),
-                                        )
-
-                                        context.components.settings.shouldShowMicrosurveyPrompt = false
-                                        activity.isMicrosurveyPromptDismissed.value = true
-                                    },
-                                )
+                                if (isToolbarAtBottom) {
+                                    AndroidView(factory = { _ -> browserToolbarLayout })
+                                } else if (navigationBar != null) {
+                                    AndroidView(factory = { _ -> navigationBar })
+                                }
                             }
                         }
-
-                        if (isToolbarAtBottom) {
-                            AndroidView(factory = { _ -> browserToolbarLayout })
-                        } else if (navigationBar != null) {
-                            AndroidView(factory = { _ -> navigationBar })
-                        }
-                    }
+                    },
+                )
+                .apply {
+                    // This covers the usecase when the app goes into fullscreen mode from portrait orientation.
+                    // Transition to fullscreen happens first, and orientation change follows. Microsurvey container is
+                    // getting
+                    // reinitialized when going into landscape mode, but it shouldn't be visible if the app is already
+                    // in the
+                    // fullscreen mode. It still has to be initialized to be shown after the user exits the fullscreen.
+                    val isFullscreen = fullScreenFeature.get()?.isFullScreen == true
+                    toolbarContainerView.isVisible = !isFullscreen
                 }
-            },
-        ).apply {
-            // This covers the usecase when the app goes into fullscreen mode from portrait orientation.
-            // Transition to fullscreen happens first, and orientation change follows. Microsurvey container is getting
-            // reinitialized when going into landscape mode, but it shouldn't be visible if the app is already in the
-            // fullscreen mode. It still has to be initialized to be shown after the user exits the fullscreen.
-            val isFullscreen = fullScreenFeature.get()?.isFullScreen == true
-            toolbarContainerView.isVisible = !isFullscreen
-        }
 
         bottomToolbarContainerIntegration.set(
-            feature = BottomToolbarContainerIntegration(
-                toolbar = bottomToolbarContainerView.toolbarContainerView,
-                store = requireComponents.core.store,
-                sessionId = customTabSessionId,
-            ),
+            feature =
+                BottomToolbarContainerIntegration(
+                    toolbar = bottomToolbarContainerView.toolbarContainerView,
+                    store = requireComponents.core.store,
+                    sessionId = customTabSessionId,
+                ),
             owner = this,
             view = view,
         )
@@ -1818,36 +1989,26 @@ abstract class BaseBrowserFragment :
     }
 
     /**
-     * Listens for the microsurvey message and initializes the microsurvey prompt if one is available.
+     * Listens for the microsurvey message, initializes the microsurvey prompt if one is available, and updates the
+     * engine view insets when the prompt is shown or hidden.
      */
     private fun listenForMicrosurveyMessage(context: Context) {
+        var wasMicrosurveyVisible = isMicrosurveyPromptVisible()
         binding.root.consumeFrom(context.components.appStore, viewLifecycleOwner) { state ->
-            state.messaging.messageToShow[FenixMessageSurfaceId.MICROSURVEY]?.let { message ->
-                if (message.id != currentMicrosurvey?.id) {
-                    message.toMicrosurveyUIData()?.let { microsurvey ->
-                        context.components.settings.shouldShowMicrosurveyPrompt = true
-                        currentMicrosurvey = microsurvey
-
-                        _bottomToolbarContainerView?.toolbarContainerView.let {
-                            binding.browserLayout.removeView(it)
-                        }
-
-                        initializeMicrosurveyPrompt()
-                    }
-                }
+            val isMicrosurveyVisible = state.microsurvey.current != null
+            if (isMicrosurveyVisible && _bottomToolbarContainerView == null) {
+                initializeMicrosurveyPrompt()
+            } else if (isMicrosurveyVisible != wasMicrosurveyVisible) {
+                reinitializeEngineView()
             }
+            wasMicrosurveyVisible = isMicrosurveyVisible
         }
     }
-
-    private fun shouldShowMicrosurveyPrompt(context: Context) =
-        context.components.settings.shouldShowMicrosurveyPrompt
 
     private fun isToolbarDynamic(context: Context) =
         !context.components.settings.shouldUseFixedTopToolbar && context.components.settings.isDynamicToolbarEnabled
 
-    /**
-     * Returns a list of context menu items [ContextMenuCandidate] for the context menu
-     */
+    /** Returns a list of context menu items [ContextMenuCandidate] for the context menu */
     protected abstract fun getContextMenuCandidates(
         context: Context,
         view: View,
@@ -1860,14 +2021,14 @@ abstract class BaseBrowserFragment :
         mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     ) {
         consumeFlow(store, mainDispatcher = mainDispatcher) { flow ->
-            flow.map { state -> state.restoreComplete }
+            flow
+                .map { state -> state.restoreComplete }
                 .distinctUntilChanged()
                 .collect { restored ->
                     if (restored) {
                         // Once tab restoration is complete, if there are no tabs to show in the browser, go home
                         val isPrivate = requireComponents.appStore.state.mode.isPrivate
-                        val tabs =
-                            store.state.getNormalOrPrivateTabs(isPrivate)
+                        val tabs = store.state.getNormalOrPrivateTabs(isPrivate)
                         if (tabs.isEmpty() || store.state.selectedTabId == null) {
                             navController.popBackStack(R.id.homeFragment, false)
                         }
@@ -1883,9 +2044,10 @@ abstract class BaseBrowserFragment :
         mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     ) {
         consumeFlow(store, mainDispatcher = mainDispatcher) { flow ->
-            flow.distinctUntilChangedBy {
-                it.selectedTabId
-            }
+            flow
+                .distinctUntilChangedBy {
+                    it.selectedTabId
+                }
                 .mapNotNull {
                     it.selectedTab
                 }
@@ -1898,36 +2060,15 @@ abstract class BaseBrowserFragment :
     }
 
     private fun dismissRenameDialog() {
-        val renameDialog = childFragmentManager.findFragmentByTag(
-            RenameAndChangeLocationDialogFragment.RENAME_AND_CHANGE_LOCATION_DIALOG_TAG,
-        ) as? RenameAndChangeLocationDialogFragment
+        val renameDialog =
+            childFragmentManager.findFragmentByTag(
+                RenameAndChangeLocationDialogFragment.RENAME_AND_CHANGE_LOCATION_DIALOG_TAG
+            ) as? RenameAndChangeLocationDialogFragment
         renameDialog?.dismissAllowingStateLoss()
     }
 
     private fun dismissDownloadDialogs() {
         downloadDialog?.dismiss()
-    }
-
-    @VisibleForTesting
-    @Suppress("ComplexCondition")
-    internal fun observeTabSource(
-        store: BrowserStore,
-        mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
-    ) {
-        consumeFlow(store, mainDispatcher = mainDispatcher) { flow ->
-            flow.mapNotNull { state ->
-                state.selectedTab
-            }
-                .collect {
-                    if (!requireComponents.fenixOnboarding.userHasBeenOnboarded() &&
-                        it.content.loadRequest?.triggeredByRedirect != true &&
-                        it.source !is SessionState.Source.External &&
-                        it.content.url !in onboardingLinksList
-                    ) {
-                        requireComponents.fenixOnboarding.finish()
-                    }
-                }
-        }
     }
 
     private fun handleTabSelected(selectedTab: TabSessionState, isCustomTabSession: Boolean) {
@@ -1940,8 +2081,7 @@ abstract class BaseBrowserFragment :
                 fullScreenChanged(false)
                 browserToolbar.expand()
 
-                @Suppress("DEPRECATION")
-                it.announceForAccessibility(selectedTab.toDisplayTitle())
+                @Suppress("DEPRECATION") it.announceForAccessibility(selectedTab.toDisplayTitle())
             }
         } else {
             view?.let { view -> initializeUI(view) }
@@ -1960,8 +2100,7 @@ abstract class BaseBrowserFragment :
         }
         hideToolbar()
 
-        BiometricAuthenticationManager.biometricAuthenticationNeededInfo.shouldShowAuthenticationPrompt =
-            true
+        BiometricAuthenticationManager.biometricAuthenticationNeededInfo.shouldShowAuthenticationPrompt = true
         BiometricAuthenticationManager.biometricAuthenticationNeededInfo.authenticationStatus =
             AuthenticationStatus.NOT_AUTHENTICATED
 
@@ -1970,7 +2109,7 @@ abstract class BaseBrowserFragment :
                 ContentAction.UpdateExpandedToolbarStateAction(
                     sessionId = it,
                     expanded = true,
-                ),
+                )
             )
         }
     }
@@ -1994,22 +2133,21 @@ abstract class BaseBrowserFragment :
         super.onStop()
         dismissDownloadDialogs()
 
-        requireComponents.core.store.state.findTabOrCustomTabOrSelectedTab(customTabSessionId)
-            ?.let { session ->
-                // If we didn't enter PiP, exit full screen on stop
-                if (!session.content.pictureInPictureEnabled && fullScreenFeature.onBackPressed()) {
-                    fullScreenChanged(false)
-                }
+        requireComponents.core.store.state.findTabOrCustomTabOrSelectedTab(customTabSessionId)?.let { session ->
+            // If we didn't enter PiP, exit full screen on stop
+            if (!session.content.pictureInPictureEnabled && fullScreenFeature.onBackPressed()) {
+                fullScreenChanged(false)
             }
+        }
     }
 
     @CallSuper
     override fun onBackPressed(): Boolean {
         return findInPageIntegration.onBackPressed() ||
-                fullScreenFeature.onBackPressed() ||
-                promptsFeature.onBackPressed() ||
-                sessionFeature.onBackPressed() ||
-                lastTabFeature.onBackPressed()
+            fullScreenFeature.onBackPressed() ||
+            promptsFeature.onBackPressed() ||
+            sessionFeature.onBackPressed() ||
+            lastTabFeature.onBackPressed()
     }
 
     @CallSuper
@@ -2017,25 +2155,19 @@ abstract class BaseBrowserFragment :
         return sessionFeature.onForwardPressed()
     }
 
-    /**
-     * Forwards activity results to the [ActivityResultHandler] features.
-     */
+    /** Forwards activity results to the [ActivityResultHandler] features. */
     override fun onActivityResult(requestCode: Int, data: Intent?, resultCode: Int): Boolean {
         return listOf(
-            promptsFeature,
-            webAuthnFeature,
-        ).any { it.onActivityResult(requestCode, data, resultCode) }
+                promptsFeature,
+                webAuthnFeature,
+            )
+            .any { it.onActivityResult(requestCode, data, resultCode) }
     }
 
-    /**
-     * Navigate to GlobalTabHistoryDialogFragment.
-     */
+    /** Navigate to GlobalTabHistoryDialogFragment. */
     private fun navigateToGlobalTabHistoryDialogFragment() {
-        findNavController().navigate(
-            NavGraphDirections.actionGlobalTabHistoryDialogFragment(
-                activeSessionId = customTabSessionId,
-            ),
-        )
+        findNavController()
+            .navigate(NavGraphDirections.actionGlobalTabHistoryDialogFragment(activeSessionId = customTabSessionId))
     }
 
     override fun onBackLongPressed(): Boolean {
@@ -2048,18 +2180,14 @@ abstract class BaseBrowserFragment :
         return true
     }
 
-    /**
-     * Saves the external app session ID to be restored later in [onViewStateRestored].
-     */
+    /** Saves the external app session ID to be restored later in [onViewStateRestored]. */
     final override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_CUSTOM_TAB_SESSION_ID, customTabSessionId)
         outState.putString(LAST_SAVED_GENERATED_PASSWORD, lastSavedGeneratedPassword)
     }
 
-    /**
-     * Retrieves the external app session ID saved by [onSaveInstanceState].
-     */
+    /** Retrieves the external app session ID saved by [onSaveInstanceState]. */
     final override fun onViewStateRestored(savedInstanceState: Bundle?) {
         super.onViewStateRestored(savedInstanceState)
         savedInstanceState?.getString(KEY_CUSTOM_TAB_SESSION_ID)?.let {
@@ -2070,21 +2198,20 @@ abstract class BaseBrowserFragment :
         lastSavedGeneratedPassword = savedInstanceState?.getString(LAST_SAVED_GENERATED_PASSWORD)
     }
 
-    /**
-     * Forwards permission grant results to one of the features.
-     */
+    /** Forwards permission grant results to one of the features. */
     @Suppress("OVERRIDE_DEPRECATION")
     final override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<String>,
         grantResults: IntArray,
     ) {
-        val feature: PermissionsFeature? = when (requestCode) {
-            REQUEST_CODE_DOWNLOAD_PERMISSIONS -> downloadsFeature.get()
-            REQUEST_CODE_PROMPT_PERMISSIONS -> promptsFeature.get()
-            REQUEST_CODE_APP_PERMISSIONS -> sitePermissionsFeature.get()
-            else -> null
-        }
+        val feature: PermissionsFeature? =
+            when (requestCode) {
+                REQUEST_CODE_DOWNLOAD_PERMISSIONS -> downloadsFeature.get()
+                REQUEST_CODE_PROMPT_PERMISSIONS -> promptsFeature.get()
+                REQUEST_CODE_APP_PERMISSIONS -> sitePermissionsFeature.get()
+                else -> null
+            }
 
         feature?.onPermissionsResult(permissions, grantResults)
 
@@ -2100,15 +2227,12 @@ abstract class BaseBrowserFragment :
         sitePermissions: SitePermissions?,
     )
 
-    /**
-     * Returns the layout [android.view.Gravity] for the quick settings and ETP dialog.
-     */
-    protected fun getAppropriateLayoutGravity(): Int =
-        requireComponents.settings.toolbarPosition.androidGravity
+    /** Returns the layout [android.view.Gravity] for the quick settings and ETP dialog. */
+    protected fun getAppropriateLayoutGravity(): Int = requireComponents.settings.toolbarPosition.androidGravity
 
     /**
-     * Configure the engine view to know where to place website's dynamic elements
-     * depending on the space taken by any dynamic toolbar.
+     * Configure the engine view to know where to place website's dynamic elements depending on the space taken by any
+     * dynamic toolbar.
      */
     @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     internal fun configureEngineViewWithDynamicToolbarsMaxHeight() {
@@ -2130,26 +2254,23 @@ abstract class BaseBrowserFragment :
         }
     }
 
-    /**
-     * Get an instant reading of the top toolbar height and the bottom toolbar height.
-     */
+    /** Get an instant reading of the top toolbar height and the bottom toolbar height. */
     private fun probeToolbarHeights(): Pair<Int, Int> {
         // Avoid any change for scenarios where the toolbar is not shown
         if (fullScreenFeature.get()?.isFullScreen == true) return 0 to 0
 
-        val topToolbarHeight = getTopToolbarHeight(
-            includeTabStripIfAvailable = customTabSessionId == null,
-        )
-        val bottomToolbarHeight = getBottomToolbarHeight(
-            includeNavBarIfEnabled = customTabSessionId == null,
-        )
+        val topToolbarHeight = getTopToolbarHeight(includeTabStripIfAvailable = customTabSessionId == null)
+        val bottomToolbarHeight =
+            getBottomToolbarHeight(
+                includeTabStripIfAvailable = customTabSessionId == null,
+                includeNavBarIfEnabled = customTabSessionId == null,
+                includeTabGroupsStrip = customTabSessionId == null,
+            )
 
         return topToolbarHeight to bottomToolbarHeight
     }
 
-    /**
-     * Updates the site permissions rules based on user settings.
-     */
+    /** Updates the site permissions rules based on user settings. */
     private fun assignSitePermissionsRules() {
         val rules = requireComponents.settings.getSitePermissionsCustomSettingsRules()
 
@@ -2158,32 +2279,26 @@ abstract class BaseBrowserFragment :
         }
     }
 
-    /**
-     * Set the activity normal/private theme to match the current session.
-     */
+    /** Set the activity normal/private theme to match the current session. */
     @VisibleForTesting
     internal fun updateThemeForSession(session: SessionState) {
         val sessionMode = BrowsingMode.fromBoolean(session.content.private)
         (activity as HomeActivity).browsingModeManager.mode = sessionMode
     }
 
-    /**
-     * A safe version of [getCurrentTab] that safely checks for context nullability.
-     */
+    /** A safe version of [getCurrentTab] that safely checks for context nullability. */
     protected fun getSafeCurrentTab(): SessionState? {
         return context?.components?.core?.store?.state?.findCustomTabOrSelectedTab(customTabSessionId)
     }
 
-    @VisibleForTesting
+    @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     internal fun getCurrentTab(): SessionState? {
         return requireComponents.core.store.state.findCustomTabOrSelectedTab(customTabSessionId)
     }
 
     override fun onHomePressed() = pipFeature?.onHomePressed() ?: false
 
-    /**
-     * Exit fullscreen mode when exiting PIP mode
-     */
+    /** Exit fullscreen mode when exiting PIP mode */
     private fun pipModeChanged(session: SessionState) {
         if (!session.content.pictureInPictureEnabled && session.content.fullScreen && isAdded) {
             onBackPressed()
@@ -2196,11 +2311,13 @@ abstract class BaseBrowserFragment :
         pipFeature?.onPictureInPictureModeChanged(isInPipMode)
     }
 
-    private fun viewportFitChange(layoutInDisplayCutoutMode: Int) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val layoutParams = activity?.window?.attributes
-            layoutParams?.layoutInDisplayCutoutMode = layoutInDisplayCutoutMode
-            activity?.window?.attributes = layoutParams
+    @VisibleForTesting
+    internal fun viewportFitChange(layoutInDisplayCutoutMode: Int) {
+        val activity = activity ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && activity.isEdgeToEdgeDisabled()) {
+            val layoutParams = activity.window.attributes
+            layoutParams.layoutInDisplayCutoutMode = layoutInDisplayCutoutMode
+            activity.window.attributes = layoutParams
         }
     }
 
@@ -2212,16 +2329,17 @@ abstract class BaseBrowserFragment :
             findInPageIntegration.onBackPressed()
 
             FullScreenNotificationToast(
-                activity = activity,
-                gestureNavString = getString(R.string.exit_fullscreen_with_gesture_short),
-                backButtonString = getString(R.string.exit_fullscreen_with_back_button_short),
-                GestureNavUtils,
-            ).show()
+                    activity = activity,
+                    gestureNavString = getString(R.string.exit_fullscreen_with_gesture_short),
+                    backButtonString = getString(R.string.exit_fullscreen_with_back_button_short),
+                    GestureNavUtils,
+                )
+                .show()
 
             activity.enterImmersiveMode(
                 setOnApplyWindowInsetsListener = { key: String, listener: OnApplyWindowInsetsListener ->
                     binding.engineView.addWindowInsetsListener(key, listener)
-                },
+                }
             )
             (view as? SwipeGestureLayout)?.isSwipeEnabled = false
             expandBrowserView()
@@ -2229,7 +2347,7 @@ abstract class BaseBrowserFragment :
             MediaState.fullscreen.record(NoExtras())
         } else {
             activity.exitImmersiveMode(
-                unregisterOnApplyWindowInsetsListener = binding.engineView::removeWindowInsetsListener,
+                unregisterOnApplyWindowInsetsListener = binding.engineView::removeWindowInsetsListener
             )
 
             (view as? SwipeGestureLayout)?.isSwipeEnabled = true
@@ -2247,6 +2365,8 @@ abstract class BaseBrowserFragment :
 
     @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     internal fun expandBrowserView() {
+        browserTabStrip?.gone()
+
         browserToolbar.apply {
             collapse()
             gone()
@@ -2278,6 +2398,7 @@ abstract class BaseBrowserFragment :
     @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     internal fun collapseBrowserView() {
         if (webAppToolbarShouldBeVisible) {
+            browserTabStrip?.visible()
             browserToolbar.visible()
             browserNavigationBar?.visible()
             _bottomToolbarContainerView?.toolbarContainerView?.isVisible = true
@@ -2292,12 +2413,16 @@ abstract class BaseBrowserFragment :
         reinitializeEngineView()
 
         // If the microsurvey feature is visible, we should update it's state.
-        if (shouldShowMicrosurveyPrompt(requireContext())) {
-            updateMicrosurveyPromptForConfigurationChange(
-                parent = binding.browserLayout,
-                bottomToolbarContainerView = _bottomToolbarContainerView?.toolbarContainerView,
-                reinitializeMicrosurveyPrompt = ::initializeMicrosurveyPrompt,
-            )
+        if (isMicrosurveyPromptVisible() && !requireContext().isLandscape()) {
+            // Already having a bottomContainer after switching back to portrait mode will happen when address bar
+            // is positioned at bottom and also as an edge case if configurationChange is called after onCreateView
+            // with the same orientation. Observed on a foldable emulator while going from single screen portrait
+            // mode to landscape tablet, back and forth.
+            _bottomToolbarContainerView?.toolbarContainerView?.let {
+                binding.browserLayout.removeView(it)
+            }
+
+            initializeMicrosurveyPrompt()
         }
 
         view?.let { setupIMEInsetsHandling(it) }
@@ -2307,12 +2432,13 @@ abstract class BaseBrowserFragment :
     internal fun reinitializeEngineView() {
         val isFullscreen = fullScreenFeature.get()?.isFullScreen == true
         val shouldToolbarsBeHidden = isFullscreen || !webAppToolbarShouldBeVisible
-        val topToolbarHeight = getTopToolbarHeight(
-            includeTabStripIfAvailable = customTabSessionId == null,
-        )
-        val bottomToolbarHeight = getBottomToolbarHeight(
-            includeNavBarIfEnabled = customTabSessionId == null,
-        )
+        val topToolbarHeight = getTopToolbarHeight(includeTabStripIfAvailable = customTabSessionId == null)
+        val bottomToolbarHeight =
+            getBottomToolbarHeight(
+                includeTabStripIfAvailable = customTabSessionId == null,
+                includeNavBarIfEnabled = customTabSessionId == null,
+                includeTabGroupsStrip = customTabSessionId == null,
+            )
 
         initializeEngineView(
             topToolbarHeight = if (shouldToolbarsBeHidden) 0 else topToolbarHeight,
@@ -2328,9 +2454,7 @@ abstract class BaseBrowserFragment :
 
         // Diagnostic breadcrumb for "Display already aquired" crash:
         // https://github.com/mozilla-mobile/android-components/issues/7960
-        breadcrumb(
-            message = "onDestroyView()",
-        )
+        breadcrumb(message = "onDestroyView()")
 
         binding.engineView.setActivityContext(null)
         requireContext().accessibilityManager.removeAccessibilityStateChangeListener(this)
@@ -2342,13 +2466,14 @@ abstract class BaseBrowserFragment :
         emailMaskBar = null
 
         _findInPageLauncher = null
+        _readerMenuController = null
 
         _bottomToolbarContainerView = null
         _browserToolbar = null
         awesomeBarComposable = null
         browserNavigationBar = null
+        browserTabStrip = null
         blackScreenOverlay = null
-        currentMicrosurvey = null
         _binding = null
     }
 
@@ -2357,9 +2482,7 @@ abstract class BaseBrowserFragment :
 
         // Diagnostic breadcrumb for "Display already aquired" crash:
         // https://github.com/mozilla-mobile/android-components/issues/7960
-        breadcrumb(
-            message = "onAttach()",
-        )
+        breadcrumb(message = "onAttach()")
     }
 
     override fun onDetach() {
@@ -2367,9 +2490,7 @@ abstract class BaseBrowserFragment :
 
         // Diagnostic breadcrumb for "Display already aquired" crash:
         // https://github.com/mozilla-mobile/android-components/issues/7960
-        breadcrumb(
-            message = "onDetach()",
-        )
+        breadcrumb(message = "onDetach()")
     }
 
     companion object {
@@ -2378,11 +2499,6 @@ abstract class BaseBrowserFragment :
         private const val REQUEST_CODE_PROMPT_PERMISSIONS = 2
         private const val REQUEST_CODE_APP_PERMISSIONS = 3
         private const val LAST_SAVED_GENERATED_PASSWORD = "last_saved_generated_password"
-
-        val onboardingLinksList: List<String> = listOf(
-            SupportUtils.getMozillaPageUrl(SupportUtils.MozillaPage.PRIVACY_NOTICE),
-            SupportUtils.FXACCOUNT_SUMO_URL,
-        )
     }
 
     override fun onAccessibilityStateChanged(enabled: Boolean) {
@@ -2394,26 +2510,18 @@ abstract class BaseBrowserFragment :
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
 
-        if (findInPageIntegration.get()?.isFeatureActive != true &&
-            fullScreenFeature.get()?.isFullScreen != true
-        ) {
+        if (findInPageIntegration.get()?.isFeatureActive != true && fullScreenFeature.get()?.isFullScreen != true) {
             _browserToolbar?.let {
                 onUpdateToolbarForConfigurationChange(it)
             }
         }
     }
 
-    /**
-     * Convenience method for replacing EngineView (id/engineView) in unit tests.
-     */
-    @VisibleForTesting
-    internal fun getEngineView() = binding.engineView
+    /** Convenience method for replacing EngineView (id/engineView) in unit tests. */
+    @VisibleForTesting internal fun getEngineView() = binding.engineView
 
-    /**
-     * Convenience method for replacing SwipeRefreshLayout (id/swipeRefresh) in unit tests.
-     */
-    @VisibleForTesting
-    internal fun getSwipeRefreshLayout() = binding.swipeRefresh
+    /** Convenience method for replacing SwipeRefreshLayout (id/swipeRefresh) in unit tests. */
+    @VisibleForTesting internal fun getSwipeRefreshLayout() = binding.swipeRefresh
 
     internal fun shouldShowCompletedDownloadDialog(
         downloadState: DownloadState,
@@ -2431,12 +2539,13 @@ abstract class BaseBrowserFragment :
         password: String,
     ) {
         lastSavedGeneratedPassword = password
-        val loginToSave = LoginEntry(
-            origin = url,
-            httpRealm = url,
-            username = "",
-            password = password,
-        )
+        val loginToSave =
+            LoginEntry(
+                origin = url,
+                httpRealm = url,
+                username = "",
+                password = password,
+            )
         var saveLoginJob: Deferred<Unit>? = null
         lifecycleScope.launch(Dispatchers.IO) {
             saveLoginJob = async {
@@ -2473,24 +2582,25 @@ abstract class BaseBrowserFragment :
 
     private fun launchFindInPageFeature(view: View, store: BrowserStore) {
         if (findInPageIntegration.get() == null) {
-            val findInPageBar = view.findViewById(R.id.findInPageView)
-                ?: (binding.findInPageViewStub.inflate() as FindInPageBar)
+            val findInPageBar =
+                view.findViewById(R.id.findInPageView) ?: (binding.findInPageViewStub.inflate() as FindInPageBar)
             findInPageIntegration.set(
-                feature = FindInPageIntegration(
-                    store = store,
-                    appStore = requireComponents.appStore,
-                    sessionId = customTabSessionId,
-                    view = findInPageBar,
-                    engineView = binding.engineView,
-                    findInPageHeight = requireComponents.settings.browserToolbarHeight,
-                    toolbarsHideCallback = {
-                        expandBrowserView()
-                    },
-                    toolbarsResetCallback = {
-                        onUpdateToolbarForConfigurationChange(browserToolbar)
-                        collapseBrowserView()
-                    },
-                ),
+                feature =
+                    FindInPageIntegration(
+                        store = store,
+                        appStore = requireComponents.appStore,
+                        sessionId = customTabSessionId,
+                        view = findInPageBar,
+                        engineView = binding.engineView,
+                        findInPageHeight = requireComponents.settings.getBrowserToolbarHeight(requireContext()),
+                        toolbarsHideCallback = {
+                            expandBrowserView()
+                        },
+                        toolbarsResetCallback = {
+                            onUpdateToolbarForConfigurationChange(browserToolbar)
+                            collapseBrowserView()
+                        },
+                    ),
                 owner = this,
                 view = view,
             )
@@ -2506,10 +2616,12 @@ abstract class BaseBrowserFragment :
 
         when (context?.components?.settings?.toolbarPosition) {
             ToolbarPosition.BOTTOM -> {
-                val toolbar = listOf(
-                    _bottomToolbarContainerView?.toolbarContainerView,
-                    _browserToolbar?.layout,
-                ).firstOrNull { it != null } ?: return
+                val toolbar =
+                    listOf(
+                            _bottomToolbarContainerView?.toolbarContainerView,
+                            _browserToolbar?.layout,
+                        )
+                        .firstOrNull { it != null } ?: return
 
                 // Ensure the toolbar is anchored to the bottom of the screen.
                 (toolbar.layoutParams as? ViewGroup.MarginLayoutParams)?.bottomMargin = 0
@@ -2565,9 +2677,10 @@ abstract class BaseBrowserFragment :
     }
 
     private fun canShowDownloadDialog(): Boolean {
-        val isRenameFragmentShowing = childFragmentManager.findFragmentByTag(
-            RenameAndChangeLocationDialogFragment.RENAME_AND_CHANGE_LOCATION_DIALOG_TAG,
-        ) != null
+        val isRenameFragmentShowing =
+            childFragmentManager.findFragmentByTag(
+                RenameAndChangeLocationDialogFragment.RENAME_AND_CHANGE_LOCATION_DIALOG_TAG
+            ) != null
 
         return downloadDialog == null && !isRenameFragmentShowing && isAdded
     }
@@ -2608,43 +2721,39 @@ abstract class BaseBrowserFragment :
     ) {
         val context = context ?: return
         val contentSize = currentDownloadState.value.contentLength ?: 0
-        val title = if (contentSize > 0L) {
-            val contentSizeInBytes = requireComponents.core.fileSizeFormatter.formatSizeInBytes(
-                contentSize,
-            )
-            getString(
-                downloadsR.string.mozac_feature_downloads_dialog_title_3,
-                contentSizeInBytes,
-            )
-        } else {
-            getString(
-                downloadsR.string.mozac_feature_downloads_dialog_title_with_unknown_size,
-            )
-        }
-
-        downloadDialog = MaterialAlertDialogBuilder(context)
-            .setTitle(title)
-            .setMessage(currentDownloadState.value.fileName)
-            .setPositiveButton(
-                downloadsR.string.mozac_feature_downloads_dialog_download,
-            ) { dialog, _ ->
-                positiveAction.value.invoke(currentDownloadState.value)
-                dialog.dismiss()
-            }
-            .setNegativeButton(
-                downloadsR.string.mozac_feature_downloads_dialog_cancel,
-            ) { dialog, _ ->
-                negativeAction.value.invoke()
-                dialog.dismiss()
-            }
-            .setOnCancelListener {
-                negativeAction.value.invoke()
-            }.setOnDismissListener {
-                downloadDialog = null
-                context.components.analytics.crashReporter.recordCrashBreadcrumb(
-                    Breadcrumb("FirstPartyDownloadDialog onDismiss"),
+        val title =
+            if (contentSize > 0L) {
+                val contentSizeInBytes = requireComponents.core.fileSizeFormatter.formatSizeInBytes(contentSize)
+                getString(
+                    downloadsR.string.mozac_feature_downloads_dialog_title_3,
+                    contentSizeInBytes,
                 )
-            }.show()
+            } else {
+                getString(downloadsR.string.mozac_feature_downloads_dialog_title_with_unknown_size)
+            }
+
+        downloadDialog =
+            MaterialAlertDialogBuilder(context)
+                .setTitle(title)
+                .setMessage(currentDownloadState.value.fileName)
+                .setPositiveButton(downloadsR.string.mozac_feature_downloads_dialog_download) { dialog, _ ->
+                    positiveAction.value.invoke(currentDownloadState.value)
+                    dialog.dismiss()
+                }
+                .setNegativeButton(downloadsR.string.mozac_feature_downloads_dialog_cancel) { dialog, _ ->
+                    negativeAction.value.invoke()
+                    dialog.dismiss()
+                }
+                .setOnCancelListener {
+                    negativeAction.value.invoke()
+                }
+                .setOnDismissListener {
+                    downloadDialog = null
+                    context.components.analytics.crashReporter.recordCrashBreadcrumb(
+                        Breadcrumb("FirstPartyDownloadDialog onDismiss")
+                    )
+                }
+                .show()
     }
 
     private fun showRenameDownloadDialog(
@@ -2653,21 +2762,24 @@ abstract class BaseBrowserFragment :
         positiveAction: PositiveActionCallback,
         negativeAction: NegativeActionCallback,
     ) {
-        val existingFragment = childFragmentManager.findFragmentByTag(
-            RenameAndChangeLocationDialogFragment.RENAME_AND_CHANGE_LOCATION_DIALOG_TAG,
-        )
+        val existingFragment =
+            childFragmentManager.findFragmentByTag(
+                RenameAndChangeLocationDialogFragment.RENAME_AND_CHANGE_LOCATION_DIALOG_TAG
+            )
 
         if (existingFragment == null && isAdded && !childFragmentManager.isStateSaved) {
-            val renameDialog = RenameAndChangeLocationDialogFragment.newInstance(
-                fileName = fileName,
-                directoryPath = currentDownloadState.value.directoryPath,
-                contentSize = currentDownloadState.value.contentLength ?: 0,
-            )
-            renameDialog.onConfirmSave = { newFileName: String, directoryPath: String ->
-                val downloadState = currentDownloadState.value.copy(
-                    fileName = newFileName,
-                    directoryPath = directoryPath,
+            val renameDialog =
+                RenameAndChangeLocationDialogFragment.newInstance(
+                    fileName = fileName,
+                    directoryPath = currentDownloadState.value.directoryPath,
+                    contentSize = currentDownloadState.value.contentLength ?: 0,
                 )
+            renameDialog.onConfirmSave = { newFileName: String, directoryPath: String ->
+                val downloadState =
+                    currentDownloadState.value.copy(
+                        fileName = newFileName,
+                        directoryPath = directoryPath,
+                    )
                 positiveAction.value.invoke(downloadState)
             }
             renameDialog.onCancel = {

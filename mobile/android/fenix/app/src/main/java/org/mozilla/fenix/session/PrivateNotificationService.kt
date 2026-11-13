@@ -9,29 +9,31 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import java.util.Locale
 import mozilla.components.browser.state.selector.selectedTab
 import mozilla.components.browser.state.store.BrowserStore
+import mozilla.components.concept.base.crash.CrashReporting
 import mozilla.components.feature.privatemode.notification.AbstractPrivateNotificationService
 import mozilla.components.support.base.android.NotificationsDelegate
+import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.HomeActivity
 import org.mozilla.fenix.IntentReceiverActivity
 import org.mozilla.fenix.R
 import org.mozilla.fenix.customtabs.ExternalAppBrowserActivity
 import org.mozilla.fenix.ext.components
-import java.util.Locale
-import mozilla.components.ui.icons.R as iconsR
 
 /**
  * Manages notifications for private tabs.
  *
- * Private tab notifications solve two problems for us:
- * 1 - They allow users to interact with us from outside of the app (example: by closing all
- * private tabs).
- * 2 - The notification will keep our process alive, allowing us to keep private tabs in memory.
+ * Private tab notifications solve two problems for us: 1 - They allow users to interact with us from outside of the app
+ * (example: by closing all private tabs). 2 - The notification will keep our process alive, allowing us to keep private
+ * tabs in memory.
  *
  * As long as a session is active this service will keep its notification alive.
  */
 class PrivateNotificationService : AbstractPrivateNotificationService() {
+
+    override val crashReporter: CrashReporting by lazy { components.analytics.crashReporter }
 
     override val store: BrowserStore by lazy { components.core.store }
 
@@ -40,30 +42,31 @@ class PrivateNotificationService : AbstractPrivateNotificationService() {
     override fun NotificationCompat.Builder.buildNotification() {
         setSmallIcon(iconsR.drawable.mozac_ic_private_mode_fill_24)
 
-        val contentTitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            applicationContext.getString(R.string.notification_erase_title_android_14)
-        } else {
-            applicationContext.getString(R.string.app_name_private_4, getString(R.string.app_name))
-        }
+        val contentTitle =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                applicationContext.getString(R.string.notification_erase_title_android_14)
+            } else {
+                applicationContext.getString(R.string.app_name_private_4, getString(R.string.app_name))
+            }
 
-        val contentText = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            applicationContext.getString(R.string.notification_erase_text_android_14)
-        } else {
-            applicationContext.getString(R.string.notification_pbm_delete_text_2)
-        }
+        val contentText =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                applicationContext.getString(R.string.notification_erase_text_android_14)
+            } else {
+                applicationContext.getString(R.string.notification_pbm_delete_text_2)
+            }
 
         setContentTitle(contentTitle)
         setContentText(contentText)
 
-        color = ContextCompat.getColor(
-            this@PrivateNotificationService,
-            R.color.pbm_notification_color,
-        )
+        color =
+            ContextCompat.getColor(
+                this@PrivateNotificationService,
+                R.color.pbm_notification_color,
+            )
     }
 
-    /**
-     * Update the existing notification when the [Locale] has been changed.
-     */
+    /** Update the existing notification when the [Locale] has been changed. */
     override fun notifyLocaleChanged() {
         super.refreshNotification()
     }
@@ -82,10 +85,22 @@ class PrivateNotificationService : AbstractPrivateNotificationService() {
         // If the app is in normal mode there's no reason to direct the user away to
         // private mode as all private tabs have been deleted.
         if (inPrivateMode) {
-            val homeScreenIntent = Intent(this, HomeActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                putExtra(HomeActivity.PRIVATE_BROWSING_MODE, true)
+            if (components.settings.enableHomepageAsNewTab) {
+                // When Homepage as a New Tab is enabled, there must always be at least one tab, so reopen a
+                // new private homepage tab only if the user is in private browsing mode.
+                components.useCases.fenixBrowserUseCases.addNewHomepageTab(private = true)
+
+                // The reopened private tab keeps the notifications alive, so the
+                // one-shot erase action is never rebuilt by a service restart. Refresh the
+                // notification to ensure the erase action works for subsequent taps.
+                refreshNotification()
             }
+
+            val homeScreenIntent =
+                Intent(this, HomeActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    putExtra(HomeActivity.PRIVATE_BROWSING_MODE, true)
+                }
 
             if (VisibilityLifecycleCallback.finishAndRemoveTaskIfInBackground(this)) {
                 // Set start mode to be in background (recents screen)
@@ -98,10 +113,11 @@ class PrivateNotificationService : AbstractPrivateNotificationService() {
         }
     }
 
-    override fun ignoreTaskComponentClasses(): List<String> = listOf(
-        ExternalAppBrowserActivity::class.qualifiedName!!,
-        IntentReceiverActivity::class.qualifiedName!!,
-    )
+    override fun ignoreTaskComponentClasses(): List<String> =
+        listOf(
+            ExternalAppBrowserActivity::class.qualifiedName!!,
+            IntentReceiverActivity::class.qualifiedName!!,
+        )
 
     override fun ignoreTaskActions(): List<String> = listOf()
 }

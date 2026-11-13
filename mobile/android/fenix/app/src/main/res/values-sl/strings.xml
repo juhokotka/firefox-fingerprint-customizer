@@ -31,6 +31,8 @@
   <string name="history_search_hint">Iskanje po zgodovini</string>
   <!-- Placeholder text shown in search bar when using bookmarks search -->
   <string name="bookmark_search_hint">Iskanje po zaznamkih</string>
+  <!-- Content description for the toolbar back button while searching bookmarks -->
+  <string name="bookmark_close_search_description">Pojdi nazaj in zapri iskanje</string>
   <!-- Placeholder text shown in search bar when using tabs search -->
   <string name="tab_search_hint">Išči po zavihkih</string>
   <!-- Placeholder text shown in the search bar when using application search engines -->
@@ -75,7 +77,11 @@
   <string name="about_content" tools:ignore="BrandUsage">%1$s izdeluje Mozilla.</string>
   <!-- Private Browsing -->
   <string name="private_browsing_common_myths">Pogoste zmote o zasebnem brskanju</string>
-  <!-- Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active. -->
+  <!--
+    Private Browsing
+
+    Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active.
+  -->
   <string name="private_browsing_a11y_session_announcement">Seja zasebnega brskanja</string>
   <!--
     True Private Browsing Mode
@@ -104,14 +110,6 @@
   <string name="open_in_app_cfr_positive_button_text">Pojdi v nastavitve</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">Zapri</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
-  <!--
-    Address bar swipe "contextual feature recommendation" (CFR)
-
-    Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar.
-  -->
-  <string name="address_bar_swipe_cfr_message_2">Za preklop med zavihki podrsajte orodno vrstico v levo ali desno.</string>
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">Potreben je dostop do kamere. Odprite nastavitve sistema Android in v dovoljenjih tapnite Dovoli.</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -149,16 +147,16 @@
   <string name="home_screen_shortcut_open_new_private_tab_2">Nov zasebni zavihek</string>
   <!-- Shortcut action to open Passwords screen -->
   <string name="home_screen_shortcut_passwords">Gesla</string>
+  <!-- Shortcut action to open uninstall survey -->
+  <string name="home_screen_shortcut_uninstall_survey">Odstrani – zakaj?</string>
   <!--
     Recent Tabs
 
-    Header text for jumping back into the recent tab in the home screen
+    Header text on the homescreen for continuing to browse the most recent browser tab
   -->
-  <string name="recent_tabs_header">Skoči nazaj</string>
+  <string name="recent_tabs_header_2">Nadaljuj</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">Prikaži vse</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">Gumb za prikaz vseh nedavnih zavihkov</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">Prikaži vse sinhronizirane zavihke</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -187,8 +185,10 @@
   <!--
     Browser Fragment
 
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
+    Label for popup button that appears when long-pressing the main menu. Tapping it allows the user to customize the main menu layout.
   -->
+  <string name="customize_menu">Prilagodi meni</string>
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Nazaj</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Naprej</string>
@@ -279,6 +279,8 @@
   <string name="browser_main_menu_content_description_navigation_header">Krmarjenje</string>
   <!-- Content description (not visible, for screen readers etc.) for bottom sheet handlebar custom tab menu. -->
   <string name="browser_custom_tab_menu_handlebar_content_description">Zapri meni zavihkov po meri</string>
+  <!-- URL bar indicator shown on a cached version of the website, when the tab is reloading, but the content is not live yet -->
+  <string name="browser_toolbar_cached_page_indicator">Predpomnjeno</string>
   <!-- Browser menu label that bookmarks the currently visited page -->
   <string name="browser_menu_bookmark_this_page_2">Dodaj stran med zaznamke</string>
   <!-- Browser menu label that navigates to the edit bookmark screen for the current bookmarked page -->
@@ -293,8 +295,12 @@
   <string name="browser_menu_summarize_page">Povzemi stran</string>
   <!-- Browser menu badge text for summarization feature -->
   <string name="browser_menu_summarize_page_badge">Novo</string>
+  <!-- Browser menu badge text for new, highlighted feature -->
+  <string name="browser_menu_page_badge_text">Novo</string>
   <!-- Browser menu label for navigating to the Web Compat Reporter feature, which provides users the ability to send bug reports for broken sites. -->
   <string name="browser_menu_webcompat_reporter_2">Prijavi nedelujočo stran</string>
+  <!-- Browser menu label for adding a tab to a tab group -->
+  <string name="browser_menu_add_to_tab_group">Dodaj skupini</string>
   <!-- Browser menu label that is displayed when the current page has been translated by the translation feature. -->
   <string name="browser_menu_translated">Prevedeno</string>
   <!-- Browser menu label for the print feature -->
@@ -311,18 +317,8 @@
   <string name="browser_menu_default_banner_title">Nastavite %1$s za privzeti brskalnik</string>
   <!-- Label text within the set as default banner -->
   <string name="browser_menu_default_banner_subtitle_2">Hiter, zaseben in ustvarjen za vas.</string>
-  <!-- Content description (not visible, for screen readers etc.) for the button that dismisses the set as default banner in the menu -->
-  <string name="browser_menu_default_banner_dismiss_promotion">Skrij promocijo</string>
   <!-- Content description (not visible, for screen readers etc.) for recommended extensions in main menu -->
   <string name="browser_menu_recommended_extensions_content_description">Več informacij</string>
-  <!--
-    Menu "contextual feature recommendation" (CFR)
-
-    Text for the title in the contextual feature recommendation popup promoting the menu feature.
-  -->
-  <string name="menu_cfr_title">Novo: poenostavljen meni</string>
-  <!-- Text for the message in the contextual feature recommendation popup promoting the menu feature. -->
-  <string name="menu_cfr_body">Hitreje poiščite, kar potrebujete, najsi bo to zasebno brskanje ali možnost shranjevanja.</string>
   <!--
     Extensions management fragment
 
@@ -335,6 +331,8 @@
     Content description for the translate page toolbar button that opens the translations dialog when no translation has occurred.
   -->
   <string name="browser_toolbar_translate">Prevedi stran</string>
+  <!-- CFR description for the browser toolbar describing the "Shake to summarize feature" -->
+  <string name="browser_toolbar_summarize_cfr_description">Stresite napravo in povzemite stran v nekaj sekundah. ⚡️</string>
   <!--
     Translation Toolbar
 
@@ -343,8 +341,22 @@
     %2$s is the name of the language which the page was translated to. (For example: French)
   -->
   <string name="translation_toolbar_translated_from_and_to" tools:ignore="UnusedResources">Prevedeno iz jezika %1$s v jezik %2$s</string>
+  <!-- Content description for the translate toolbar action that opens the translations dialog. -->
+  <string name="translation_toolbar_expand_action">Odpri prevodni list</string>
   <!-- Content description for the translate toolbar action that closes the translations toolbar. -->
   <string name="translation_toolbar_close_action">Skrij sporočilo</string>
+  <!--
+    Page summaries
+
+    Toolbar title for the Page summaries settings fragment
+  -->
+  <string name="preferences_page_summaries">Povzetki strani</string>
+  <!--
+    AI Controls settings
+
+    Title for the AI controls settings screen
+  -->
+  <string name="preferences_ai_controls">Nadzor UI</string>
   <!-- Headline text for the AI controls banner. %s is the name of the app (for example "Firefox"). -->
   <string name="ai_controls_banner_headline">V %su imate vedno izbiro</string>
   <!-- Supporting text for the AI controls banner. %s is a learn more link using ai_controls_learn_more as text. -->
@@ -359,6 +371,8 @@
   <string name="ai_controls_see_whats_included">Kaj je in kaj ni vključeno</string>
   <!-- Banner text shown when AI enhancements are blocked -->
   <string name="ai_controls_blocked_info_banner">Nove in trenutne izboljšave z uporabo UI so privzeto prepovedane. Določene možnosti lahko posebej omogočite spodaj.</string>
+  <!-- Section header for the AI-powered features list -->
+  <string name="ai_controls_ai_powered_features">Funkcije, ki jih poganja UI</string>
   <!-- Title for the translations AI feature toggle -->
   <string name="ai_controls_translations_title">Prevajanje</string>
   <!-- Description for the translations AI feature toggle -->
@@ -474,6 +488,8 @@
   <string name="onboarding_term_of_service_line_three" tools:ignore="BrandUsage">Za izboljšanje brskalnika Firefox Mozilli pošilja diagnostične podatke in podatke o uporabi. %1$s</string>
   <!-- Used as text for the link in onboarding_term_of_service_line_three. -->
   <string name="onboarding_term_of_service_line_three_link_text">Upravljaj</string>
+  <!-- Terms of use (ToU) onboarding redesign title. -->
+  <string name="onboarding_redesign_tou_title" tools:ignore="UnusedResources">Zaženite najboljši brskalnik za Android</string>
   <!-- Terms of use (ToU) first subheader. -->
   <string name="onboarding_redesign_tou_subheader_one" tools:ignore="UnusedResources">Bliskovito nalaganje strani</string>
   <!-- Terms of use (ToU) second subheader. -->
@@ -515,6 +531,8 @@
   <string name="onboarding_marketing_redesign_learn_more" tools:ignore="UnusedResources">Kako uporabljamo te podatke</string>
   <!-- Marketing onboarding page button label. Button to confirm choice and start browsing. -->
   <string name="onboarding_marketing_redesign_positive_button" tools:ignore="UnusedResources">Potrdi</string>
+  <!-- Set to default browser onboarding redesign title. -->
+  <string name="onboarding_redesign_set_default_browser_title" tools:ignore="UnusedResources">Privzeto pridobite samodejno zaščito pred sledenjem</string>
   <!-- Set to default browser onboarding redesign body. -->
   <string name="onboarding_redesign_set_default_browser_body" tools:ignore="UnusedResources">Z enim dotikom se uprite podjetjem, ki vohunijo za vašimi kliki.</string>
   <!-- Sync onboarding redesign title. 'Firefox' is intentionally hardcoded. -->
@@ -531,8 +549,6 @@
   <string name="onboarding_marketing_body_1" tools:ignore="BrandUsage,UnusedResources">Sporočite Mozillinim tehnološkim partnerjem za trženje, kako ste odkrili Firefox in da ga uporabljate. Ti podatki se nikoli ne bodo prodali.</string>
   <!-- Marketing onboarding page button label variant. Button to confirm choice and start browsing. -->
   <string name="onboarding_marketing_positive_button_1" tools:ignore="UnusedResources">Strinjam se, začni z brskanjem</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
   <!-- "Continue" onboarding button. -->
   <string name="nova_onboarding_continue_button">Nadaljuj</string>
   <!-- "Continue browsing" onboarding button. -->
@@ -602,12 +618,38 @@
   -->
   <string name="nova_onboarding_marketing_body" tools:ignore="BrandUsage,UnusedResources">Sporočite Mozillinim tehnološkim partnerjem za trženje, kako ste odkrili Firefox in da ga uporabljate. Ti podatki se nikoli ne bodo prodali. %1$s</string>
   <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
-  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage">Sporočite Mozillinim tehnološkim partnerjem za trženje, kako ste odkrili Firefox in da ga uporabljate. Ti podatki se nikoli ne bodo prodali.</string>
+  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage,UnusedResources">Sporočite Mozillinim tehnološkim partnerjem za trženje, kako ste odkrili Firefox in da ga uporabljate. Ti podatki se nikoli ne bodo prodali.</string>
+  <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
+  <string name="nova_onboarding_marketing_body_3" tools:ignore="BrandUsage,UnusedResources">Pomagate nam lahko doseči več ljudi, tako da Mozilli dovolite, da kanale, na katerih promoviramo Firefox, obvestimo, da ste vi njegov uporabnik.</string>
+  <!--
+    Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded.
+    “Platform you came from” refers to the external app, website, store, campaign, or other source that directed the user to Firefox.
+  -->
+  <string name="nova_onboarding_marketing_body_4" tools:ignore="BrandUsage,UnusedResources">Pomagate nam, da dosežemo več ljudi, tako da Mozilli dovolite, da platformo, s katere ste, obvesti, da uporabljate Firefox.</string>
   <!--
     Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded.
     “Platform you came from” refers to the external app, website, store, campaign, or other source that directed the user to Firefox.
   -->
   <string name="nova_onboarding_marketing_body_5" tools:ignore="BrandUsage,UnusedResources">Pomagajte nam doseči več ljudi in dovolite Mozilli, da platformo, s katere prihajate, obvesti, da uporabljate Firefox.</string>
+  <!--
+    Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded.
+    “Platform you came from” refers to the external app, website, store, campaign, or other source that directed the user to Firefox.
+    %1$s is replaced by an active link, using nova_onboarding_marketing_body_link_text as text (“How we use the data”).
+  -->
+  <string name="nova_onboarding_marketing_body_6" tools:ignore="BrandUsage,UnusedResources">Pomagajte nam doseči več ljudi in dovolite Mozilli, da platformo, s katere prihajate, obvesti, da uporabljate Firefox. %1$s</string>
+  <!--
+    Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded.
+    “Platform you came from” refers to the external app, website, store, campaign, or other source that directed the user to Firefox.
+    %1$s is replaced by an active link, using nova_onboarding_marketing_body_link_text_1 as text (“Learn More”).
+  -->
+  <string name="nova_onboarding_marketing_body_7" tools:ignore="BrandUsage">Pomagajte nam doseči več ljudi in dovolite Mozilli, da platformo, s katere prihajate, obvesti, da uporabljate Firefox. %1$s</string>
+  <!-- Marketing onboarding additional body text. 'Firefox' is intentionally hardcoded. -->
+  <string name="nova_onboarding_marketing_body_line_two" tools:ignore="BrandUsage">Firefox je ponosno neodvisen in predan obrambi odprtega spleta pred tehnološkimi monopoli.</string>
+  <!--
+    Marketing onboarding additional body text. 'Firefox' is intentionally hardcoded.
+    “Allowing” refers to the main button “Allow and Continue”; the ask for the user is to allow communicating back to the platform.
+  -->
+  <string name="nova_onboarding_marketing_body_line_three" tools:ignore="BrandUsage">Prosim, razmislite o tem, da dovolite in pomagajte Firefoxu, da zmaga.</string>
   <!-- Marketing onboarding body link text. -->
   <string name="nova_onboarding_marketing_body_link_text">Kako uporabljamo te podatke</string>
   <!-- Marketing onboarding body link text. -->
@@ -615,11 +657,15 @@
   <!-- Marketing onboarding primary button text. 'Firefox' is intentionally hardcoded. -->
   <string name="nova_onboarding_marketing_primary_button_text" tools:ignore="BrandUsage,UnusedResources">Pomagaj Firefoxu</string>
   <!-- Marketing onboarding primary button text. -->
-  <string name="nova_onboarding_marketing_primary_button_text_2">Dovoli in nadaljuj</string>
+  <string name="nova_onboarding_marketing_primary_button_text_3">Da</string>
   <!-- Marketing onboarding secondary button text. -->
   <string name="nova_onboarding_marketing_secondary_button_text" tools:ignore="UnusedResources">Ne, hvala</string>
+  <!-- Marketing onboarding secondary button text. -->
+  <string name="nova_onboarding_marketing_secondary_button_text_2">Ne</string>
   <!-- Notifications onboarding title. 'Firefox' is intentionally hardcoded. -->
   <string name="nova_onboarding_notifications_title" tools:ignore="BrandUsage,UnusedResources">Obvestila vam pomagajo, da ostanete varni v Firefoxu</string>
+  <!-- Notifications onboarding subtitle. 'Firefox' is intentionally hardcoded. -->
+  <string name="nova_onboarding_notifications_subtitle" tools:ignore="BrandUsage,UnusedResources">Odkrijte najnovejše možnosti zasebnosti v Firefoxu, da boste vedno na tekočem, kako ostati zaščiteni.</string>
   <!-- Notifications onboarding button. -->
   <string name="nova_onboarding_notifications_button">Vklopi obvestila</string>
   <!-- "Add search widget" onboarding title. -->
@@ -649,8 +695,6 @@
   <string name="nova_onboarding_app_icon_prompt_title" tools:ignore="UnusedResources">Izberite si ikono aplikacije</string>
   <!-- App icon onboarding body. -->
   <string name="nova_onboarding_app_icon_prompt_body" tools:ignore="UnusedResources">Dodajte domačemu zaslonu osebno noto.</string>
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Widget Picker
 
@@ -669,13 +713,23 @@
   <string name="search_widget_text_long">Iskanje po spletu</string>
   <!-- Content description (not visible, for screen readers etc.): Voice search -->
   <string name="search_widget_voice">Glasovno iskanje</string>
+  <!-- Content description (not visible, for screen readers etc.): Button in the search widget that starts a search in a private tab -->
+  <string name="search_widget_private_search">Zasebno iskanje</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for private search and for voice search -->
+  <string name="search_bar_widget_description">Iskalna vrstica z zasebnim in glasovnim iskanjem</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for image search, private search and voice search -->
+  <string name="search_bar_with_lens_widget_description">Iskalna vrstica s slikovnim, zasebnim in glasovnim iskanjem</string>
   <!--
     Preferences
 
     Title for the settings page
   -->
   <string name="settings">Nastavitve</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">Splošno</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Vizitka</string>
@@ -738,40 +792,6 @@
   <string name="preferences_pbm_lock_screen_title">Uporabite zaklepanje zaslona za skrivanje zavihkov v zasebnem brskanju</string>
   <!-- Informs the user how to access the tabs when "Use screen lock to hide tabs in private browsing" is enabled -->
   <string name="preferences_pbm_lock_screen_summary_3">Odklenite zavihke s prstnim odtisom, kodo PIN ali s prepoznavo obraza. Ob vklopu bo preprečeno tudi zajemanje posnetkov zaslona in deljenje.</string>
-  <!-- Label for cookie banner section in quick settings panel. -->
-  <string name="cookie_banner_blocker">Zavračanje pasic s piškotki</string>
-  <!-- Preference for removing cookie/consent banners from sites automatically in private mode. See reduce_cookie_banner_summary for additional context. -->
-  <string name="preferences_cookie_banner_reduction_private_mode">Zavračanje pasic s piškotki v zasebnem brskanju</string>
-  <!-- Text for indicating cookie banner handling is off this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_off_for_site">Izključeno na tem spletnem mestu</string>
-  <!-- Text for cancel button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_cancel_button">Prekliči</string>
-  <!-- Text for request support button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_request_support_button_2">Pošlji zahtevek</string>
-  <!-- Text for title indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_title_2">Zahtevam podporo za to spletno mesto?</string>
-  <!-- Label for the snackBar, after the user reports with success a website where cookie banner reducer did not work -->
-  <string name="cookie_banner_handling_report_site_snack_bar_text_2">Zahtevek poslan</string>
-  <!-- Text for indicating cookie banner handling is on this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_on_for_site">Vključeno na tem spletnem mestu</string>
-  <!-- Text for indicating that a request for unsupported site was sent to Nimbus (it's a Mozilla library for experiments), this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site_request_submitted_2">Zahtevek za podporo je poslan</string>
-  <!-- Text for indicating cookie banner handling is currently not supported for this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site">Spletno mesto trenutno ni podprto</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is on this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_on_for_site_1">Vključim zavračanje pasic s piškotki za %1$s?</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is off this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_off_for_site_1">Izključim zavračanje pasic s piškotki za %1$s?</string>
-  <!-- Title text for a detail explanation indicating cookie banner reducer didn't work for the current site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_title_unsupported_site_request_2">%1$s na tem spletnem mestu ni mogel samodejno zavrniti zahtev za shranjevanje piškotkov. Pošljete lahko zahtevek, naj se v prihodnosti uvede podpora za to spletno mesto.</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is off for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_off_for_site_1">Izklopite in %1$s bo izbrisal piškotke ter znova naložil stran, kar vas lahko odjavi in izprazni vaš nakupovalni voziček.</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is on for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_on_for_site_3">Vklopite to možnost in %1$s bo skušal na tem spletnem mestu samodejno zavrniti pasice s piškotki.</string>
-  <!-- Title for the cookie banner re-engagement CFR, the placeholder is replaced with app name. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="cookie_banner_cfr_title">%1$s je pravkar zavrnil piškotke v vašem imenu</string>
-  <!-- Message for the cookie banner re-engagement CFR -->
-  <string name="cookie_banner_cfr_message">Manj motenj in manj piškotkov, ki vam sledijo po tem spletnem mestu.</string>
   <!-- Description of the preference to enable "HTTPS-Only" mode. -->
   <string name="preferences_https_only_summary">Za večjo varnost poskuša samodejno vzpostaviti povezavo s šifrirnim protokolom HTTPS.</string>
   <!-- Summary of https only preference if https only is set to off -->
@@ -800,6 +820,8 @@
   <string name="preferences_override_sync_tokenserver">Sinhronizacijski strežnik po meri</string>
   <!-- Preference category for account information -->
   <string name="preferences_category_account">Račun</string>
+  <!-- Preference category for sync controls. Sync can be translated, it's just short for ”Synchronization” in English. -->
+  <string name="preferences_category_sync_controls">Sync</string>
   <!-- Preference for changing where the AddressBar is positioned -->
   <string name="preferences_toolbar_2">Mesto naslovne vrstice</string>
   <!-- Preference for changing toolbar layout -->
@@ -816,6 +838,8 @@
   <string name="preferences_toolbar_shortcut">Bližnjica v orodni vrstici</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_toolbar_select_shortcut">Izberite bližnjico</string>
+  <!-- Title of a menu option allowing to change the shortcut button shown in the toolbar -->
+  <string name="toolbar_shortcut_menu_edit_option">Uredi bližnjico</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_gestures">Poteze</string>
   <!-- Preference for settings related to visual options -->
@@ -854,6 +878,8 @@
   <string name="preferences_search_synced_tabs">Iskanje po sinhroniziranih zavihkih</string>
   <!-- Preference for account settings -->
   <string name="preferences_account_settings">Nastavitve računa</string>
+  <!-- Preference for account and sync settings -->
+  <string name="preferences_account_and_sync_settings">Račun in sinhronizacija</string>
   <!-- Preference for enabling url autocomplete -->
   <string name="preferences_enable_autocomplete_urls">Samodokončaj spletne naslove</string>
   <!-- Preference title for switch preference to show sponsored Firefox Suggest search suggestions -->
@@ -890,6 +916,10 @@
   <string name="preferences_open_links_in_apps_ask">Vprašaj pred odpiranjem</string>
   <!-- Preference for open links in third party apps never open in apps option -->
   <string name="preferences_open_links_in_apps_never">Nikoli</string>
+  <!-- Preference category header for media related open links in apps settings -->
+  <string name="preferences_media_category">Predstavnost</string>
+  <!-- Preference label for choosing whether links open in the YouTube app -->
+  <string name="preferences_open_links_in_youtube">Odpiraj povezave v aplikaciji YouTube</string>
   <!-- Preference category for file storage. -->
   <string name="preferences_category_file_storage">Shramba datotek</string>
   <!-- Preference title for downloads default location. -->
@@ -924,6 +954,12 @@
   <string name="notifications_allowed_summary">Dovoljeno</string>
   <!-- Summary for notification preference indicating notifications are not allowed -->
   <string name="notifications_not_allowed_summary">Ni dovoljeno</string>
+  <!-- Preference for local network access / nearby devices in Android 17 -->
+  <string name="preferences_local_network_access">Dostop do lokalnega omrežja / naprave v bližini</string>
+  <!-- Summary for local network access preference indicating access is allowed -->
+  <string name="local_network_access_allowed_summary">Dovoljeno</string>
+  <!-- Summary for local network access preference indicating access is not allowed -->
+  <string name="local_network_access_not_allowed_summary">Ni dovoljeno</string>
   <!--
     Add-on Permissions
 
@@ -968,8 +1004,8 @@
     Title for the customize home screen section with privacy report.
   -->
   <string name="customize_toggle_privacy_report">Poročilo o zasebnosti</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">Skoči nazaj</string>
+  <!-- Title for a customize home screen section. Continue is a section that displays the most recent browser tab, so users can continue browsing where they left off. -->
+  <string name="customize_toggle_continue">Nadaljuj</string>
   <!-- Title for the customize home screen section with bookmarks. -->
   <string name="customize_toggle_bookmarks">Zaznamki</string>
   <!--
@@ -983,12 +1019,10 @@
   <string name="customize_toggle_pocket_sponsored">Sponzorirane zgodbe</string>
   <!-- Title for the opening wallpaper settings screen -->
   <string name="customize_wallpapers">Ozadja</string>
-  <!-- Label for the menu item that opens the wallpaper settings screen. -->
-  <string name="browser_menu_change_wallpaper">Zamenjaj ozadje</string>
+  <!-- Label for the menu item that opens the customize homepage settings screen. -->
+  <string name="browser_menu_customize_homepage">Prilagodi domačo stran</string>
   <!-- Title for the customize home screen section with sponsored shortcuts. -->
   <string name="customize_toggle_contile">Sponzorirane bližnjice</string>
-  <!-- Title for the customize home screen section that toggles the Homepage sports widget. -->
-  <string name="customize_toggle_world_cup">Svetovno prvenstvo</string>
   <!--
     Wallpapers
 
@@ -1113,6 +1147,8 @@
   <string name="extension_process_crash_dialog_retry_button_text" tools:ignore="UnusedResources">Poskusi znova zagnati razširitve</string>
   <!-- Button text on the extension crash dialog to prompt the user to continue with all extensions disabled. -->
   <string name="extension_process_crash_dialog_disable_extensions_button_text">Nadaljuj z onemogočenimi razširitvami</string>
+  <!-- Text shown in the snackbar action button that lets the user retry an add-on operation that just failed. -->
+  <string name="addon_failure_retry_action">Poskusi znova</string>
   <!--
     Account Preferences
 
@@ -1125,6 +1161,12 @@
   <string name="preferences_sync_now">Sinhroniziraj zdaj</string>
   <!-- Preference category for sync -->
   <string name="preferences_sync_category">Izberite, kaj želite sinhronizirati</string>
+  <!-- Preference category for sync controls -->
+  <string name="preferences_category_sync">Sinhronizirani podatki</string>
+  <!-- Summary for the sync preference category. -->
+  <string name="preferences_sync_category_summary">Upravljajte, kaj se sinhronizira med povezanimi napravami</string>
+  <!-- Summary for the sync preference category, when user has disabled all synchronisation items. -->
+  <string name="preferences_sync_category_no_engine_selected_summary">Trenutno ne sinhronizirate ničesar. Izberite, kaj želite sinhronizirati med napravami.</string>
   <!-- Preference for syncing history -->
   <string name="preferences_sync_history">Zgodovina</string>
   <!-- Preference for syncing bookmarks -->
@@ -1137,6 +1179,10 @@
   <string name="preferences_sign_out">Odjava</string>
   <!-- Preference displays and allows changing current FxA device name -->
   <string name="preferences_sync_device_name">Ime naprave</string>
+  <!-- Preference category for Device name -->
+  <string name="preferences_device_name_category">Ime naprave</string>
+  <!-- Label for the Preference that displays and allows changing current device name on Mozilla Account -->
+  <string name="preferences_sync_change_device_name">Spremeni ime naprave</string>
   <!-- Text shown when user enters empty device name -->
   <string name="empty_device_name_error">Ime naprave ne sme ostati prazno.</string>
   <!-- Label indicating that sync is in progress -->
@@ -1256,8 +1302,6 @@
   <string name="preference_simple_toolbar">Preprosto</string>
   <!-- Preference for using expanded toolbar -->
   <string name="preference_expanded_toolbar">Razširjeno</string>
-  <!-- Preference description indicating the toolbar location preference is disabled when the tab strip is enabled -->
-  <string name="preference_toolbar_pref_disabled_explanation">Ko je prikazana vrstica z zavihki, mora biti naslovna vrstica na vrhu.</string>
   <!-- New tab shortcut in toolbar customization -->
   <string name="toolbar_customize_shortcut_new_tab">Odpri nov zavihek</string>
   <!-- Share shortcut in toolbar customization -->
@@ -1286,6 +1330,11 @@
   <string name="preference_light_theme">Svetla</string>
   <!-- Preference for using dark theme -->
   <string name="preference_dark_theme">Temna</string>
+  <!--
+    Preference for using the OLED theme. For localization, this can be translated as "True Black", "Maximum Darkness",
+    or "Full dark" if needed.
+  -->
+  <string name="preference_oled_theme">Najtemnejša</string>
   <!-- Preference for using using dark or light theme automatically set by battery -->
   <string name="preference_auto_battery_theme">Nastavi ohranjevalnik baterije</string>
   <!-- Preference for using following device theme -->
@@ -1296,6 +1345,12 @@
     Preferences for showing tab strip
   -->
   <string name="preference_tab_strip_show">Prikaži vrstico z zavihki</string>
+  <!-- Preference for tab bar placement (top or bottom of the screen) -->
+  <string name="preference_tab_strip_location_header">Položaj vrstice z zavihki</string>
+  <!-- Preference for using top tab strip -->
+  <string name="preference_top_tab_strip">Na vrhu</string>
+  <!-- Preference for using bottom tab strip -->
+  <string name="preference_bottom_tab_strip">Na dnu</string>
   <!--
     Gestures Preferences
 
@@ -1308,6 +1363,8 @@
   <string name="preference_gestures_swipe_toolbar_show_tabs_2">Prikaz odprtih zavihkov s potegom orodne vrstice navzgor/navzdol</string>
   <!-- Preference for switching tabs by swiping horizontally on the addressbar -->
   <string name="preference_gestures_swipe_toolbar_switch_tabs_2">Preklop med zavihki s potegom naslovne vrstice vstran</string>
+  <!-- Preference for switching for the shake to summarize toggle in page summaries and customize settings -->
+  <string name="preferences_shake_to_summarize">Stresite za povzetek</string>
   <!--
     Library
 
@@ -1326,6 +1383,8 @@
   <string name="library_desktop_bookmarks_unfiled">Drugi zaznamki</string>
   <!-- Option in Library to open History page -->
   <string name="library_history">Zgodovina</string>
+  <!-- Content description (not visible, for screen readers etc.) for the check mark that replaces a site's icon in History and Recently closed tabs when the item is selected -->
+  <string name="library_item_selected_content_description">Izbrano</string>
   <!-- Settings Page Title -->
   <string name="settings_title">Nastavitve</string>
   <!-- Content description (not visible, for screen readers etc.): "Close button for library settings" -->
@@ -1376,8 +1435,8 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">Zavihki</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">Pogled zavihkov</string>
+  <!-- Title of preference that allows a user to specify the tab layout -->
+  <string name="preferences_tab_layout">Postavitev zavihkov</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">Seznam</string>
   <!-- Option for a grid tab view -->
@@ -1396,6 +1455,8 @@
   <string name="preference_auto_close_tabs" tools:ignore="UnusedResources">Samodejno zapiraj odprte zavihke</string>
   <!-- Content description (not visible, for screen readers etc.): Close tab button -->
   <string name="tab_manager_close_tabs">Zapri</string>
+  <!-- Content description for the media playback indicator in the tabs tray. -->
+  <string name="tab_indicator_media_playing">Predvaja predstavnost</string>
   <!--
     Opening screen
 
@@ -1423,13 +1484,27 @@
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">Po štirih urah odpri na domači strani</string>
   <!--
-    Inactive tabs
+    Tab organization
 
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
+    Category header for the preferences that control how tabs are organized
   -->
-  <string name="preferences_inactive_tabs">Premakni stare zavihke med nedejavne</string>
-  <!-- Title of inactive tabs preference -->
+  <string name="preferences_tab_organization">Organiziranost zavihkov</string>
+  <!-- Title of the preference that allows a user to enable or disable the inactive tabs feature -->
+  <string name="preferences_inactive_tabs_toggle_title">Nedejavni zavihki</string>
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">Zavihki, ki jih dva tedna niste odprli, se premaknejo v razdelek nedejavnih.</string>
+  <!-- Title of the preference that allows a user to enable or disable the tab groups feature -->
+  <string name="preferences_tab_groups_title">Skupine zavihkov</string>
+  <!-- Summary of the preference that allows a user to enable or disable the tab groups feature -->
+  <string name="preferences_tab_groups_description">Razporedite si zavihke po skupinah, ki jih lahko poimenujete in shranite.</string>
+  <!--
+    Privacy report
+
+    Category header of a preference that allows a user to enable or disable the privacy report feature
+  -->
+  <string name="preferences_privacy_report">Poročilo o zasebnosti</string>
+  <!-- Title of the privacy report preference that allows a user to enable or disable the feature -->
+  <string name="preferences_privacy_report_title">Omogoči poročilo o zasebnosti</string>
   <!--
     Studies
 
@@ -1487,6 +1562,8 @@
   <string name="add_tab">Dodaj zavihek</string>
   <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
   <string name="add_private_tab">Dodaj zasebni zavihek</string>
+  <!-- Content description (not visible, for screen readers etc.): Create tab group button. Opens the create tab group sheet when pressed -->
+  <string name="create_tab_group_content_description">Ustvari skupino zavihkov</string>
   <!-- Text for the tab search bar placeholder -->
   <string name="tab_manager_search_bar_placeholder">Iskanje po zavihkih</string>
   <!-- Text shown in the menu to view recently closed tabs -->
@@ -1563,6 +1640,8 @@
   <string name="tab_group_onboarding_list_item_description">Za ustvaritev skupine izberite več zavihkov.</string>
   <!-- Content description (accessibility label) for button to dismiss the tab group onboarding item. -->
   <string name="tab_group_onboarding_item_dismiss_content_description">Zapri informativno ploščo o skupinah zavihkov</string>
+  <!-- The header text displayed on the tab groups page when no tab groups are open -->
+  <string name="tab_manager_empty_tab_groups_page_header">Preizkusite skupine zavihkov za manj drsenja, več opravljenega</string>
   <!-- The description displayed on the tab groups page when no tab groups are open -->
   <string name="tab_manager_empty_tab_groups_page_description">Izberite zavihke, iz katerih želite ustvariti skupino. Vanjo bodo shranjeni in pripravljeni na trenutek, ko jih boste potrebovali.</string>
   <!--
@@ -1611,6 +1690,8 @@
     <item quantity="few">Dodaj skupini zavihkov %1$s, %2$d zavihki, barva %3$s</item>
     <item quantity="other">Dodaj skupini zavihkov %1$s, %2$d zavihkov, barva %3$s</item>
   </plurals>
+  <!-- Content description for the grabber/handle of the tab group bottom sheet. -->
+  <string name="tab_group_sheet_dismiss_description">Prikaži skupino zavihkov, strni ročico za vlečenje</string>
   <plurals name="expanded_tab_group_header_description">
     <!--
       Accessibility description for the header of an expanded tab group.
@@ -1637,6 +1718,41 @@
   <string name="close_tab_and_delete_group_confirmation_dialog_confirm">Izbriši skupino</string>
   <!-- Text shown on the cancel button in the Close last tab and delete tab group confirmation dialog. -->
   <string name="close_tab_and_delete_group_confirmation_dialog_cancel">Prekliči</string>
+  <!-- Content description for the three dot button next to a tab group" -->
+  <string name="tab_group_three_dot_button_content_description">Več možnosti</string>
+  <!--
+    Content description for the Expand button on the contracted menu for a tab group:
+    when tapped, tabs are displayed in an expanded grid or list view, taking up the full screen.
+  -->
+  <string name="tab_groups_strip_expand_group_content_description">Razširi za celozaslonski prikaz zavihkov</string>
+  <!-- Text shown on the edit button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_edit">Uredi</string>
+  <!-- Text shown on the ungroup button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_ungroup">Razdruži</string>
+  <!-- Text shown on the delete button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_delete">Izbriši</string>
+  <!-- Text shown on the share button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_share">Deli</string>
+  <!-- Text shown on the close button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_close">Zapri</string>
+  <!-- Title for the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_title">Razdružim skupino zavihkov?</string>
+  <!-- Text shown in the body of the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_body">Zavihki bodo ostali odprti na tej napravi, skupina pa bo izbrisana.</string>
+  <!-- Text shown on the Don't Ask Again checkbox button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_dont_ask_again">Ne sprašuj več</string>
+  <!-- Text shown on the confirm button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_confirm">Razdruži</string>
+  <!-- Text shown on the cancel button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_cancel">Prekliči</string>
+  <!-- Custom accessibility action to reorder a tab up rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_up">Premakni zavihek gor</string>
+  <!-- Custom accessibility action to reorder a tab left rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_left">Premakni zavihek levo</string>
+  <!-- Custom accessibility action to reorder a tab right rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_right">Premakni zavihek desno</string>
+  <!-- Custom accessibility action to reorder a tab down rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_down">Premakni zavihek dol</string>
   <!--
     Color labels for tab groups, used for accessibility and selection UI.
 
@@ -1651,8 +1767,6 @@
   <string name="tab_group_color_pink">Rožnata</string>
   <!-- Tab group color: Purple -->
   <string name="tab_group_color_purple">Lila</string>
-  <!-- Tab group color: Violet -->
-  <string name="tab_group_color_violet">Vijolična</string>
   <!-- Tab group color: Blue -->
   <string name="tab_group_color_blue">Modra</string>
   <!-- Tab group color: Cyan -->
@@ -1669,8 +1783,6 @@
   <string name="history_search_1">Vnesite iskalni niz</string>
   <!-- Text for the button to clear all history -->
   <string name="history_delete_all">Izbriši zgodovino</string>
-  <!-- Text for the snackbar to confirm that multiple browsing history items has been deleted -->
-  <string name="history_delete_multiple_items_snackbar">Zgodovina izbrisana</string>
   <!-- Text for the snackbar to confirm that a single browsing history item has been deleted. %1$s is the shortened URL of the deleted history item. -->
   <string name="history_delete_single_item_snackbar">Izbrisan %1$s</string>
   <!-- Context description text for the button to delete a single history item -->
@@ -1680,16 +1792,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d izbranih</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">Danes</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">Včeraj</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Zadnjih 7 dni</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Zadnjih 30 dni</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Starejše</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">Ni zgodovine</string>
   <!--
@@ -1912,40 +2014,26 @@
   <string name="webcompat_reporter_label_whats_broken_3">Kaj ne deluje?</string>
   <!-- Content description for the icon button that clears the selected broken site reason in the WebCompat Reporter. -->
   <string name="webcompat_reporter_clear_reason_content_description">Prekliči izbrani razlog</string>
-  <!-- The label/title of a field in the Web Compat Reporter feature for explaining a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_label_whats_broken_2">Kaj je narobe?</string>
-  <!-- The placeholder text for the dropdown where a user selects a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_2">Izberite razlog</string>
-  <!-- The error message of the dropdown, prompting the user to select a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_error">Izberite razlog</string>
-  <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
-  <string name="webcompat_reporter_label_description_2">Podrobneje opišite težavo, da nam jo pomagate raziskati (neobvezno)</string>
-  <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
-  <string name="webcompat_reporter_label_description">Opišite težavo (neobvezno)</string>
-  <!-- The button text for navigating away from the feature to provide more information on the broken site's bug report. -->
-  <string name="webcompat_reporter_add_more_info">Dodaj več informacij</string>
+  <!-- The error message of the description when the user selects "Something else" as the reason, but left the description empty or too short. -->
+  <string name="webcompat_reporter_description_error">Vnesite vsaj 10 znakov</string>
+  <!-- The label/title of a mandatory field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_mandatory_description">Podrobneje opišite težavo, da nam jo pomagate raziskati</string>
+  <!-- The label/title of a optional field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_optional_description">Podrobneje opišite težavo, da nam jo pomagate raziskati (neobvezno)</string>
   <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
   <string name="webcompat_reporter_cancel">Prekliči</string>
   <!-- The button text for the send button to submit the provided form data. -->
-  <string name="webcompat_reporter_send">Pošlji</string>
+  <string name="webcompat_reporter_send_report">Pošlji poročilo</string>
   <!-- Text for a snackbar to confirm the successful submission of a WebCompat report. -->
   <string name="webcompat_reporter_success_snackbar_text_2">Poročilo poslano</string>
   <!-- Placeholder text for the description field to prompt the user on what they should type. -->
   <string name="webcompat_reporter_problem_description_placeholder_text_2">Kaj se je zgodilo? Kaj bi se moralo zgoditi? Navedite korake, ki privedejo do pojava težave.</string>
-  <!-- Placeholder text for the description field to prompt the user on what they should type. -->
-  <string name="webcompat_reporter_problem_description_placeholder_text">Kaj se je zgodilo? Kaj bi se moralo zgoditi?</string>
   <!-- Label of the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. -->
   <string name="webcompat_reporter_etp_checkbox_text_2">Pošlji seznam elementov, ki jih je zaščita pred sledenjem blokirala</string>
-  <!-- Label of the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. -->
-  <string name="webcompat_reporter_etp_checkbox_text">Pošlji URL-je, ki jih je zaščita pred sledenjem blokirala</string>
-  <!-- Description text for the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. It informs the user when checked, the report will include the list of URLs that were blocked by Enhanced Tracking Protection on the current page. -->
-  <string name="webcompat_reporter_etp_checkbox_description">Izboljšana zaščita pred sledenjem lahko ponekod blokira sledilce in skripte, ki jih spletna mesta potrebujejo za pravilno delovanje.</string>
   <!-- The button text for the preview report button to view a preview of the report. -->
   <string name="webcompat_reporter_preview_report">Predogled prijave</string>
   <!-- The title shown at the top of the WebCompat Report preview panel. This appears after the user taps the “Preview” button before sending a report. -->
   <string name="webcompat_reporter_preview_bottom_sheet_header">Predogled prijave</string>
-  <!-- Label for the “Send” button shown in the WebCompat Report preview panel, which the user taps to submit the report. -->
-  <string name="webcompat_reporter_preview_bottom_sheet_send">Pošlji</string>
   <!-- Title for the Edit URL confirmation dialog in the WebCompatReporter -->
   <string name="webcompat_reporter_edit_url_dialog_title">Urejanje naslova spletne strani</string>
   <!-- Text shown on the save button for the Edit URL confirmation dialog in the WebCompatReporter. -->
@@ -1972,8 +2060,8 @@
   <string name="webcompat_reporter_reason_turn_off_adblocker">Stran je prosila, naj izklopim blokiranje oglasov</string>
   <!-- Broken site reason text for browser isn’t supported or blocked -->
   <string name="webcompat_reporter_reason_notsupported_2">Brskalnik ni podprt ali je blokiran</string>
-  <!-- Broken site reason text for browser isn’t supported or blocked -->
-  <string name="webcompat_reporter_reason_notsupported">Brskalnik ni podprt ali je blokiran</string>
+  <!-- Broken site reason text for the site being deceptive -->
+  <string name="webcompat_reporter_reason_site_is_deceptive">Stran je zavajajoča</string>
   <!-- Broken site reason text for something else -->
   <string name="webcompat_reporter_reason_other">Nekaj drugega</string>
   <!--
@@ -2135,18 +2223,16 @@
   <string name="bookmark_select_folder_new_folder_button_title">Nova mapa</string>
   <!-- Bookmark snackbar message for moving a single item. %1$s is the title of the item being moved and %2$s is the new parent folder of the bookmark -->
   <string name="bookmark_moved_single_item">%1$s premaknjen v mapo %2$s</string>
+  <!-- Text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results">Ni zadetkov.</string>
+  <!-- Additional text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results_additional_text">Poskusite z drugačnim iskanjem!</string>
   <!--
     Site Permissions
 
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">Odpri nastavitve</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">Seznam hitrih nastavitev</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">Priporočeno</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -2316,6 +2402,8 @@
   <string name="qr_code_display_close">Zapri</string>
   <!-- Heading on the QR code display screen -->
   <string name="qr_code_display_share_nearby">Deli povezavo z osebami v bližini</string>
+  <!-- Body text on the QR code display screen instructing the user to have others scan the code -->
+  <string name="qr_code_display_instructions">Če želite to povezavo deliti z osebami v bližini, naj skenirajo spodnjo kodo QR.</string>
   <!-- Label for the download button on the QR code display screen -->
   <string name="qr_code_display_download">Prenesi</string>
   <!-- Toast shown when the QR code is successfully saved to Downloads -->
@@ -2336,6 +2424,10 @@
   <string name="sync_send_to_all">Pošlji na vse naprave</string>
   <!-- An option from the share dialog to reconnect to sync -->
   <string name="sync_reconnect">Ponovno se poveži v Sync</string>
+  <!-- Label for the button in the share dialog that sends the tab to the selected sync devices -->
+  <string name="sync_send_to_selected_devices">Pošlji</string>
+  <!-- Content description announced when a device is selected in the share dialog -->
+  <string name="send_to_devices_device_selected_content_description">Izbrano</string>
   <!-- Text displayed when sync is offline and cannot be accessed -->
   <string name="sync_offline">Brez povezave</string>
   <!-- An option to connect additional devices -->
@@ -2358,6 +2450,24 @@
   <string name="sent_from_firefox_template" tools:ignore="UnusedResources">%1$s\n\nPoslano iz %2$sa 🦊 Preizkusite mobilni brskalnik: %3$s</string>
   <!-- A short message template for the shared link with a footer. %1$s is the shared link, %2$s is the app name (e.g. Firefox) and %3$s is a download link for the app. -->
   <string name="sent_from_firefox_template_short" tools:ignore="UnusedResources">%1$s\n\nPoslano iz %2$sa 🦊 %3$s</string>
+  <!-- Send tab to synced devices: Authentication error title - Message asking the user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_title">Za pošiljanje zavihkov med napravami se ponovno prijavite</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_button">Prijava</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to remove the currently connected account -->
+  <string name="sync_send_tab_error_auth_remove_account">Odstrani račun</string>
+  <!-- Send tab to synced devices: Empty state title - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_title">Ni povezanih naprav</string>
+  <!-- Send tab to synced devices: Empty state message - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_description" tools:ignore="BrandUsage">Če želite poslati zavihek, se v Firefox prijavite v vsaj še eni napravi.</string>
+  <!-- Send tab to synced devices: Empty state link - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_link">Preberite, kako povezati napravo</string>
+  <!-- Send tab to synced devices: Connectivity Error title -->
+  <string name="sync_send_tab_error_connection_title">Preverite svojo povezavo z internetom</string>
+  <!-- Send tab to synced devices: Connectivity Error message - Suggested user action after internet connection has been established -->
+  <string name="sync_send_tab_error_connection_text">Nato poskusite zavihek znova poslati.</string>
+  <!-- Send tab to synced devices: Connectivity Error button - When tapped, refreshes the list of connected devices. -->
+  <string name="sync_send_tab_error_connection_button">Poskusi znova</string>
   <!--
     Notifications
 
@@ -2380,6 +2490,18 @@
   -->
   <string name="nimbus_notification_default_browser_text" tools:ignore="BrandUsage,UnusedResources">Nastavite Firefox kot privzeti brskalnik</string>
   <!--
+    Privacy report notification
+
+    Name of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app.
+  -->
+  <string name="notification_privacy_report_channel_name">Poročilo o zasebnosti</string>
+  <!-- Description of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_channel_description">%1$s prikazuje, koliko sledilcev je bilo blokiranih, medtem ko ste brskali.</string>
+  <!-- Body text for the weekly privacy report notification for when trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_body_has_trackers">Brskajte dalje, %1$s pa bo še naprej blokiral sledilce.</string>
+  <!-- Headline text of the weekly privacy report notification for when no trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_headline_no_trackers">%1$s med brskanjem blokira sledilce. Tukaj jih boste lahko videli.</string>
+  <!--
     Survey
 
     Text shown in the fullscreen message that pops up to ask user to take a short survey.
@@ -2390,6 +2512,8 @@
   <string name="preferences_take_survey">Izpolnite vprašalnik</string>
   <!-- Preference for not taking the short survey. -->
   <string name="preferences_not_take_survey">Ne, hvala</string>
+  <!-- Error message shown in a Toast when the system fails to trigger the device uninstallation prompt. -->
+  <string name="uninstall_survey_error_failed">Ni bilo mogoče odpreti sistemskega poziva za odstranjevanje, zato uporabite sistemsko odstranjevanje.</string>
   <!--
     Snackbar
 
@@ -2526,6 +2650,12 @@
   <string name="sign_in_create_account_text" tools:ignore="BrandUsage"><![CDATA[Nimate računa? <u>Ustvarite ga</u> za sinhronizacijo Firefoxa med napravami.]]></string>
   <!-- Text shown in confirmation dialog to sign out of account. %s is the name of the app (for example "Firefox"). -->
   <string name="sign_out_confirmation_message_2">%s se bo prenehal sinhronizirati z vašim računom, vendar ne bo izbrisal podatkov o brskanju na tej napravi.</string>
+  <!-- Title of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_title">Se želite odjaviti iz računa?</string>
+  <!-- Body of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_message">Sinhronizirani podatki ostanejo shranjeni v vašem računu.</string>
+  <!-- Text for the primary action button of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_confirm_button">Odjava</string>
   <!-- Option to continue signing out of account shown in confirmation dialog to sign out of account -->
   <string name="sign_out_disconnect">Prekini povezavo</string>
   <!-- Option to cancel signing out shown in confirmation dialog to sign out of account -->
@@ -2535,10 +2665,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">Nastavitve zaščite</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">Izboljšana zaščita pred sledenjem</string>
   <!-- Preference summary for enhanced tracking protection settings on/off switch -->
   <string name="preference_enhanced_tracking_protection_summary">Zdaj vključuje Popolno zaščito pred piškotki, našo najzmogljivejšo oviro pred sledilci med spletnimi mesti.</string>
@@ -2557,23 +2685,14 @@
     <item quantity="few">%d blokirani sledilci</item>
     <item quantity="other">%d blokiranih sledilcev</item>
   </plurals>
-  <plurals name="trackers_blocked_count">
-    <!--
-      Trackers blocked card on homepage
-
-      Text shown on the trackers blocked card. %d is the number of trackers blocked.
-    -->
-    <item quantity="one">%d zavrnjen sledilec</item>
-    <item quantity="two">%d zavrnjena sledilca</item>
-    <item quantity="few">%d zavrnjeni sledilci</item>
-    <item quantity="other">%d zavrnjenih sledilcev</item>
-  </plurals>
   <!-- Text shown on the trackers blocked card when no trackers have been blocked yet -->
   <string name="trackers_blocked_empty">Zaščiteni ste</string>
+  <!-- Text shown below the trackers blocked card with typing animation -->
+  <string name="help_catch_trackers">Pomagajte ujeti sledilce</string>
   <!-- Preference for enhanced tracking protection for the standard protection settings -->
   <string name="preference_enhanced_tracking_protection_standard_default_1">Običajno (privzeto)</string>
   <!-- Preference description for enhanced tracking protection for the standard protection settings -->
-  <string name="preference_enhanced_tracking_protection_standard_description_5">Strani se bodo nalagale normalno, vendar bo zavrnjenih manj sledilcev.</string>
+  <string name="preference_enhanced_tracking_protection_standard_description_5">Strani se bodo nalagale normalno, vendar bo blokiranih manj sledilcev.</string>
   <!-- Accessibility text for the Standard protection information icon -->
   <string name="preference_enhanced_tracking_protection_standard_info_button">Kaj blokira običajna zaščita pred sledenjem</string>
   <!-- Preference for enhanced tracking protection for the strict protection settings -->
@@ -2603,13 +2722,13 @@
   <!-- Cancel button text for the dialog that appears after disabling the baseline exceptions preference under Strict or Custom tracking protection. This dismisses the dialog and re-enables the preference. -->
   <string name="preference_enhanced_tracking_protection_allow_list_dialog_cancel">Ohrani popravke vklopljene</string>
   <!-- Accessibility text for the Strict protection information icon -->
-  <string name="preference_enhanced_tracking_protection_strict_info_button">Kaj je zavrnjeno s strogo zaščito pred sledenjem</string>
+  <string name="preference_enhanced_tracking_protection_strict_info_button">Kaj blokira stroga zaščita pred sledenjem</string>
   <!-- Preference for enhanced tracking protection for the custom protection settings -->
   <string name="preference_enhanced_tracking_protection_custom">Po meri</string>
   <!-- Preference description for enhanced tracking protection for the strict protection settings -->
-  <string name="preference_enhanced_tracking_protection_custom_description_2">Izberite, katere sledilce in skripte želite zavračati.</string>
+  <string name="preference_enhanced_tracking_protection_custom_description_2">Izberite, katere sledilce in skripte želite blokirati.</string>
   <!-- Accessibility text for the Strict protection information icon -->
-  <string name="preference_enhanced_tracking_protection_custom_info_button">Kaj je zavrnjeno z zaščito pred sledenjem po meri</string>
+  <string name="preference_enhanced_tracking_protection_custom_info_button">Kaj blokira zaščita pred sledenjem po meri</string>
   <!--
     Header for categories that are being blocked by current Enhanced Tracking Protection settings
 
@@ -2638,12 +2757,8 @@
   <string name="preference_enhanced_tracking_protection_custom_cryptominers">Kriptorudarje</string>
   <!-- Preference for enhanced tracking protection for the custom protection settings -->
   <string name="preference_enhanced_tracking_protection_custom_known_fingerprinters">Znane sledilce prstnih odtisov</string>
-  <!-- Button label for navigating to the Enhanced Tracking Protection details -->
-  <string name="enhanced_tracking_protection_details">Podrobnosti</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">Zavrnjeno</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">Dovoljeno</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">Sledilci družbenih omrežij</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -2666,10 +2781,6 @@
   <string name="etp_tracking_content_title">Sledilna vsebina</string>
   <!-- Description of tracking content that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_description">Preprečuje nalaganje zunanjih oglasov, videoposnetkov in druge vsebine, ki vsebuje sledilno kodo. Lahko vpliva na delovanje nekaterih spletnih mest.</string>
-  <!-- Enhanced Tracking Protection message that protection is currently on for this site -->
-  <string name="etp_panel_on">Zaščite za to spletno mesto so VKLJUČENE</string>
-  <!-- Enhanced Tracking Protection message that protection is currently off for this site -->
-  <string name="etp_panel_off">Zaščite za to spletno mesto so IZKLJUČENE</string>
   <!-- Header for exceptions list for which sites enhanced tracking protection is always off -->
   <string name="enhanced_tracking_protection_exceptions">Izboljšana zaščita pred sledenjem je za ta spletna mesta izključena</string>
   <!--
@@ -2694,13 +2805,6 @@
   <string name="etp_suspected_fingerprinters_description">Omogoči zaščito pred skripti, ki bi lahko bili sledilci prstnih odtisov.</string>
   <!-- Category of trackers (fingerprinters) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_known_fingerprinters_title">Znane sledilce prstnih odtisov</string>
-  <!--
-    Description of the SmartBlock Enhanced Tracking Protection feature. The * symbol is intentionally hardcoded here,
-    as we use it on the UI to indicate which trackers have been partially unblocked.
-  -->
-  <string name="preference_etp_smartblock_description">Nekateri spodaj označeni sledilci so na tej strani delno dovoljeni, ker ste bili v interakciji z njimi *.</string>
-  <!-- Text displayed that links to website about enhanced tracking protection SmartBlock -->
-  <string name="preference_etp_smartblock_learn_more">Več o tem</string>
   <!--
     Content description (not visible, for screen readers etc.):
     Enhanced tracking protection exception preference icon for ETP settings.
@@ -2830,12 +2934,8 @@
   <string name="add_to_homescreen_cancel">Prekliči</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">Dodaj</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">Nadaljuj na spletno stran</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">Ime bližnjice</string>
-  <!-- Describes the add to homescreen functionality -->
-  <string name="add_to_homescreen_description_2">To stran lahko preprosto dodate na svoj domači zaslon naprave za lažji dostop in hitrejše brskanje v načinu, podobnem aplikaciji.</string>
   <!-- Preference for managing the settings for logins and passwords in Fenix -->
   <string name="preferences_passwords_logins_and_passwords_2">Gesla</string>
   <!-- Preference for managing the saving of logins and passwords in Fenix -->
@@ -2977,15 +3077,30 @@
   <!-- Label for the BETA badge for the browser VPN entry in the settings list -->
   <string name="preferences_ip_protection_beta_badge_label">BETA</string>
   <!-- Title for the browser VPN settings screen (displayed in the app bar) -->
-  <string name="ip_protection_title">VPN</string>
+  <string name="ip_protection_settings_title">Vgrajeni VPN</string>
   <!-- Label for the browser VPN toggle on the settings screen -->
   <string name="ip_protection_toggle_label">VPN</string>
   <!-- Content description for the browser VPN settings screen top bar back button -->
   <string name="ip_protection_navigate_back_button_content_description">Pojdi nazaj</string>
   <!-- Headline for the browser VPN promo card. %s is the name of the app (for example "Firefox"). -->
   <string name="ip_protection_promo_headline">%sov vgrajeni VPN</string>
+  <!-- Body text for the browser VPN settings header, shown when no promo is running. %s is a learn more link using ip_protection_learn_more as text. -->
+  <string name="ip_protection_promo_body_2">Brskajte z dodatno zaščito s skrivanjem vaše lokacije, tudi na javnem omrežju Wi-Fi. %s</string>
   <!-- Link text that opens additional information about the browser VPN -->
   <string name="ip_protection_learn_more">Več o tem</string>
+  <!-- Label for the monthly data allowance section on the browser VPN settings screen -->
+  <string name="ip_protection_data_limit_label">Mesečna omejitev prenosa podatkov</string>
+  <!--
+    Data usage shown on the browser VPN settings screen.
+    %1$.1f is the data remaining in GB (for example "8.3").
+    %2$.1f is the total monthly allowance in GB (for example "50.0").
+  -->
+  <string name="ip_protection_data_limit_value">Preostalo: %1$.1f GB od skupno %2$.1f GB</string>
+  <!--
+    Text shown below the data usage bar describing when the monthly allowance resets.
+    %1$.0f is the total monthly data allowance in GB (for example "50").
+  -->
+  <string name="ip_protection_data_reset_info">Vsak prvi dan v mesecu se ponastavi na %1$.0f GB.</string>
   <!-- Header for the browser VPN `location` section -->
   <string name="ip_protection_location_section">Lokacija</string>
   <!-- Label for the recommended automatic location option on the browser VPN settings screen -->
@@ -3000,30 +3115,93 @@
   <string name="ip_protection_menu_paused">Začasno ustavljeno</string>
   <!-- Badge label shown in the menu item when the browser VPN has an error -->
   <string name="ip_protection_menu_error">Napaka</string>
-  <!-- Badge label shown in the menu item when the user is eligible to use the browser VPN but should authenticate or authorize it first. -->
-  <string name="ip_protection_menu_auth_required">Preizkusite ga</string>
+  <!-- Badge label shown in the VPN menu item when the user is eligible for the feature but needs to authenticate / authorize to enable it -->
+  <string name="ip_protection_menu_try_vpn_cta">Preizkusite brezplačno</string>
   <!-- Content description for the chevron button that opens the browser VPN settings screen -->
   <string name="ip_protection_navigate_settings">Odpri nastavitve VPN</string>
+  <!--
+    Subtitle shown below the VPN label in menus when the monthly data allowance is exhausted.
+    %1$d is the total monthly allowance in GB (for example "50").
+  -->
+  <string name="ip_protection_menu_limit_reached">Dosežena omejitev %1$d GB</string>
+  <!--
+    Error message shown on the browser VPN settings screen when the monthly data allowance is exhausted.
+    %1$d is the total monthly allowance in GB (for example "50").
+  -->
+  <string name="ip_protection_data_limit_reached_description">Porabili ste vseh %1$d GB podatkov VPN. Dostop bo ponovno omogočen prihodnji mesec.</string>
   <!-- Label shown next to the browser protection icon in the address bar when the browser VPN is active -->
   <string name="ip_protection_toolbar_pill_label">VPN je vklopljen</string>
   <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has been activated -->
   <string name="ip_protection_toolbar_pill_description">VPN deluje.</string>
+  <!-- Label shown next to the browser protection icon in the address bar when the browser VPN turns off -->
+  <string name="ip_protection_toolbar_pill_label_off">VPN izključen</string>
+  <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has turned off -->
+  <string name="ip_protection_toolbar_pill_description_off">VPN je izključen.</string>
   <!-- Label for the button that starts the browser VPN authentication or authorization flow on the settings screen -->
   <string name="ip_protection_get_started">Začnite</string>
   <!-- Label for the "connecting" state of the button that starts the browser VPN authentication or authorization flow on the settings screen -->
   <string name="ip_protection_connecting">Povezovanje …</string>
   <!-- Headline for the browser VPN onboarding card. %s is the name of the app (for example "Firefox"). -->
   <string name="ip_protection_onboarding_card_headline">Preizkusite %sov vgrajeni VPN</string>
+  <!--
+    The body of the VPN onboarding card.
+    %1$s is a link using ip_protection_onboarding_body_link (“Browse with extra protection”) as text. It links to a support article about VPN on Firefox.
+    %2$d is the total monthly allowance in GB (for example "50").
+  -->
+  <string name="ip_protection_onboarding_body">%1$s, ki skrije vašo lokacijo tudi na javnem omrežju Wi-Fi. Vsak mesec prejmete %2$d GB brezplačno.</string>
   <!-- Used as text for a link in ip_protection_onboarding_body. Make sure to adapt capitalization if the link is in the middle of the sentence. -->
   <string name="ip_protection_onboarding_body_link">Brskajte z dodatno zaščito</string>
+  <!--
+    The body of the VPN onboarding card for a promotion that provides unlimited data bandwidth for a certain time.
+    %1$s is a localized date (for example "Jun 9") indicating the end of the promotional period.
+    %2$s is a link using ip_protection_onboarding_body_link_promo (“Learn more”) as text. It links to a support article about VPN on Firefox.
+  -->
+  <string name="ip_protection_onboarding_body_promo">Vklopite ga, da bo vaše brskanje bolj zasebno in težje sledljivo. Preizkusite ga zdaj in uživajte v neomejeni pasovni širini do %1$s. %2$s</string>
   <!-- Used as text for a link in ip_protection_onboarding_body. Make sure to adapt capitalization if the link is in the middle of the sentence. -->
   <string name="ip_protection_onboarding_body_link_promo">Več o tem</string>
   <!-- Label for the dismiss button on the onboarding bottom sheet. -->
   <string name="ip_protection_onboarding_not_now_button">Ne zdaj</string>
   <!-- Snackbar (in-app pop-up notification) text to signal the browser VPN connection error -->
   <string name="ip_protection_connection_error_snackbar">Povezava z VPN ni uspela. Poskusite znova čez nekaj minut.</string>
+  <!-- Snackbar (in-app pop-up notification) text to signal the VPN location has been reset due to the previously selected VPN location being no longer available. -->
+  <string name="ip_protection_location_selection_reset_snackbar">Izbrana lokacija VPN ni na voljo. Preklopljeno na priporočeno lokacijo.</string>
+  <!--
+    Snackbar (in-app pop-up notification) text to signal the browser VPN has reached the monthly data limit.
+    %1$d is the total monthly allowance in GB (for example "50").
+  -->
+  <string name="ip_protection_data_limit_reached_snackbar">Porabili ste %1$d GB podatkov VPN. Dostop bo ponovno omogočen prihodnji mesec.</string>
   <!-- Snackbar (in-app pop-up notification) action button text that takes the user to the VPN settings screen. -->
-  <string name="ip_protection_data_limit_reached_snackbar_action">Nastavitve</string>
+  <string name="ip_protection_open_settings_snackbar_action">Nastavitve</string>
+  <!-- Description shown on the browser VPN settings screen prompting the user to turn the VPN on. -->
+  <string name="ip_protection_settings_description" tools:ignore="UnusedResources">Vklopite VPN, da bo vaše brskanje bolj zasebno in težje sledljivo.</string>
+  <!-- Title shown on the browser VPN settings screen for location selection section. -->
+  <string name="ip_protection_location_title" tools:ignore="UnusedResources">Lokacija</string>
+  <!-- Label for the Recommended server location option which is automatically selected by the browser. -->
+  <string name="ip_protection_recommended_location" tools:ignore="UnusedResources">Priporočeno</string>
+  <!-- Headline for the card that promotes the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_headline" tools:ignore="UnusedResources,BrandUsage">Še boljša zaščita z Mozilla VPN</string>
+  <!-- Body for the card that promotes the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_body" tools:ignore="UnusedResources">Izbirajte med več kot 300 lokacijami in zaščitite vse svoje aplikacije v do 5 napravah.</string>
+  <!-- Label for the button that takes the user to get the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_button" tools:ignore="UnusedResources,BrandUsage">Prenesite Mozilla VPN</string>
+  <!-- Title for the browser VPN location picker screen. -->
+  <string name="ip_protection_location_picker_title" tools:ignore="UnusedResources">Izberite lokacijo VPN</string>
+  <!-- Description for what it means to use the Recommended setting and let the app automatically pick the best server location. -->
+  <string name="ip_protection_location_fastest_description" tools:ignore="BrandUsage">Firefox poišče najhitrejšo lokacijo</string>
+  <!-- Description for an unavailable VPN location in the location list. -->
+  <string name="ip_protection_location_unavailable_description">Ni na voljo</string>
+  <!-- Error message shown when the selected browser VPN location is unavailable. -->
+  <string name="ip_protection_location_unavailable" tools:ignore="UnusedResources">Lokacija ni na voljo. Izberite drugo.</string>
+  <!-- Snackbar (in-app pop-up notification) text shown when the previously selected browser VPN location is unavailable and the recommended location was used instead. -->
+  <string name="ip_protection_location_unavailable_recommended_snackbar" tools:ignore="UnusedResources">Izbrana lokacija VPN ni na voljo. Povezava vzpostavljena s priporočeno lokacijo.</string>
+  <!-- Title for the card shown to the user when we are unable to fetch server locations -->
+  <string name="ip_protection_locations_unavailable_title">Lokacije niso na voljo</string>
+  <!-- Description for the card shown to the user when we are unable to fetch server locations -->
+  <string name="ip_protection_locations_unavailable_description">Preklopljeno na priporočeno lokacijo.</string>
+  <!-- Title for the browser VPN location selection screen (displayed in the app bar) -->
+  <string name="ip_protection_locations_title">Izberite lokacijo VPN</string>
+  <!-- Content description for the browser VPN location selection screen top bar back button -->
+  <string name="ip_protection_locations_navigate_back_button_content_description">Pojdi nazaj</string>
   <!--
     Autofill
 
@@ -3104,6 +3282,10 @@
   <string name="credit_cards_warning_dialog_set_up_now">Nastavi zdaj</string>
   <!-- Negative button to ignore warning dialog if users have no device authentication set up -->
   <string name="credit_cards_warning_dialog_later">Pozneje</string>
+  <!-- Primary button on the dialog shown on Android Automotive OS (in cars). Tapping it directs users to the device settings to set up a device lock -->
+  <string name="automotive_authentication_setup_dialog_set_up_now">Nastavi zdaj</string>
+  <!-- Secondary button of the dialog shown on Android Automotive OS (in cars). Tapping closes the dialogue and cancels the action that triggered the dialogue. -->
+  <string name="automotive_authentication_setup_dialog_cancel">Prekliči</string>
   <!-- Title of PIN verification dialog to direct users to re-enter their device credentials to access their credit cards -->
   <string name="credit_cards_biometric_prompt_message_pin">Odklenite svojo napravo</string>
   <!-- Message displayed in biometric prompt for authentication, before allowing users to use their stored payment method information -->
@@ -3176,8 +3358,6 @@
   <string name="addresses_save_button">Shrani</string>
   <!-- The text for the "Cancel" button for cancelling adding, updating or deleting an address -->
   <string name="addresses_cancel_button">Prekliči</string>
-  <!-- The text for the "Delete address" button for deleting an address -->
-  <string name="addressess_delete_address_button">Izbriši naslov</string>
   <!-- The title for the "Delete address" confirmation dialog -->
   <string name="addressess_confirm_dialog_message_2">Izbrišem ta naslov?</string>
   <!-- The text for the positive button on "Delete address" dialog -->
@@ -3232,16 +3412,8 @@
   <string name="phone_feature_blocked_step_permissions"><![CDATA[2. Tapnite <b>Dovoljenja</b>]]></string>
   <!-- Third step for the allowing a permission (%1$s is the permission name, for example "Camera"). -->
   <string name="phone_feature_blocked_step_feature"><![CDATA[3. Preklopite <b>%1$s</b> na VKLOPLJENO]]></string>
-  <!-- Label that indicates a site is using a secure connection -->
-  <string name="quick_settings_sheet_secure_connection_2">Povezava je varna</string>
-  <!-- Label that indicates a site is using a insecure connection -->
-  <string name="quick_settings_sheet_insecure_connection_2">Povezava ni varna</string>
-  <!-- Label that indicates a site is displaying a local document -->
-  <string name="quick_settings_sheet_local_page">Ta stran je shranjena na vaši napravi.</string>
   <!-- Label to clear site data -->
   <string name="clear_site_data">Počisti piškotke in podatke strani</string>
-  <!-- Confirmation message for a dialog confirming if the user wants to delete all data for current site. %s is the domain of the site. -->
-  <string name="confirm_clear_site_data"><![CDATA[Ali ste prepričani, da želite počistiti vse piškotke in podatke spletnega mesta <b>%s</b>?]]></string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for all sites -->
   <string name="confirm_clear_permissions_on_all_sites">Ali ste prepričani, da želite počistiti vsa dovoljenja na vseh straneh?</string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for a site -->
@@ -3254,11 +3426,6 @@
   <string name="browser_menu_add_to_shortcuts">Dodaj med bližnjice</string>
   <!-- Browser menu button that removes a shortcut from the home fragment -->
   <string name="browser_menu_remove_from_shortcuts">Odstrani iz bližnjic</string>
-  <!--
-    text shown before the issuer name to indicate who its verified by, %1$s is the name of
-    the certificate authority that verified the ticket
-  -->
-  <string name="certificate_info_verified_by">Overil: %1$s</string>
   <!-- Message in delete confirmation dialog for password -->
   <string name="login_deletion_confirmation_2">Ali ste prepričani, da želite izbrisati to geslo?</string>
   <!-- Positive action of a dialog asking to delete -->
@@ -3322,6 +3489,16 @@
     which navigates the user to a screen displaying all the shortcuts.
   -->
   <string name="homepage_shortcuts_show_all_content_description">Prikaži vse bližnjice</string>
+  <!--
+    Label for the button in the shortcuts home screen section that expands the section to show
+    every shortcut.
+  -->
+  <string name="homepage_shortcuts_show_all">Prikaži vse</string>
+  <!--
+    Label for the button in the shortcuts home screen section that collapses the section back
+    to showing only the first shortcuts.
+  -->
+  <string name="homepage_shortcuts_show_less">Prikaži manj</string>
   <!-- Label for the "Add shortcut" button displayed as a tile. -->
   <string name="homepage_shortcuts_add_shortcut">Dodaj bližnjico</string>
   <!-- Title for the "Add to homepage" bottom sheet. -->
@@ -3453,8 +3630,6 @@
   <string name="a11y_action_label_expand">razširite</string>
   <!-- Action label for links to a website containing documentation about a wallpaper collection. Talkback will append this to say "Double tap to open link to learn more about this collection". -->
   <string name="a11y_action_label_wallpaper_collection_learn_more">odprete povezavo s podrobnostmi o tej zbirki</string>
-  <!-- Translations feature -->
-
   <!--
     Translation request dialog
 
@@ -3719,13 +3894,21 @@
     %s is the name of the app (for example "Firefox").
   -->
   <string name="protection_panel_banner_protected_title">%s je na straži</string>
+  <plurals name="protection_panel_banner_protected_blocked_trackers_description">
+    <!--
+      Description text for the protection panel banner when privacy dashboard is enabled.
+      %1$d is the number of trackers blocked.
+    -->
+    <item quantity="one">Na tem spletnem mestu je bil blokiran %1$d sledilec.</item>
+    <item quantity="two">Na tem spletnem mestu sta bila blokirana %1$d sledilca.</item>
+    <item quantity="few">Na tem spletnem mestu so bili blokirani %1$d sledilci.</item>
+    <item quantity="other">Na tem spletnem mestu je bilo blokiranih %1$d sledilcev.</item>
+  </plurals>
   <!--
     Description text for the protection panel banner when privacy dashboard is enabled.
     and there are no trackers blocked.
   -->
   <string name="protection_panel_banner_protected_no_blocked_trackers_description">Zaščiteni ste.</string>
-  <!-- Description text for the protection panel banner when tracking protection is enabled. -->
-  <string name="protection_panel_banner_protected_description">Zaščiteni ste. Če kaj opazimo, vas obvestimo.</string>
   <!-- Label text for the Enhanced Tracking Protection toggle. -->
   <string name="protection_panel_etp_toggle_label">Izboljšana zaščita pred sledenjem</string>
   <!-- Toggle if Enhanced Tracking Protection is turned on -->
@@ -3741,14 +3924,22 @@
     %d is a placeholder for the number of trackers blocked.
   -->
   <string name="protection_panel_num_trackers_blocked">Zavrnjeni sledilci: %d</string>
-  <!-- Text for when no trackers have been blocked. -->
-  <string name="protection_panel_no_trackers_blocked">Ni najdenih sledilcev</string>
   <!-- Text for when tracking protection is disabled and no trackers are blocked. -->
   <string name="protection_panel_etp_disabled_no_trackers_blocked">Sledilci niso blokirani</string>
   <!-- Link text to navigate to privacy and security settings from the protection panel. -->
   <string name="protection_panel_privacy_and_security_settings_2">Nastavitve zasebnosti</string>
   <!-- Title text for the protection panel permissions section. -->
   <string name="protection_panel_permissions_title">Dovoljenja</string>
+  <plurals name="trackers_blocked_panel_total_num_trackers_blocked_2">
+    <!--
+      Text for displaying the total number of trackers blocked in the trackers blocked panel.
+      %1$d is a placeholder for the number of trackers blocked.
+    -->
+    <item quantity="one">Na tem spletnem mestu je bil blokiran %1$d sledilec</item>
+    <item quantity="two">Na tem spletnem mestu sta bila blokirana %1$d sledilca</item>
+    <item quantity="few">Na tem spletnem mestu so bili blokirani %1$d sledilci</item>
+    <item quantity="other">Na tem spletnem mestu je bilo blokiranih %1$d sledilcev</item>
+  </plurals>
   <plurals name="trackers_blocked_panel_num_social_media_trackers">
     <!--
       Text for displaying in the trackers blocked panel the total number of blocked social media trackers.
@@ -3789,6 +3980,16 @@
     <item quantity="few">%1$d sledilci prstnih odtisov</item>
     <item quantity="other">%1$d sledilcev prstnih odtisov</item>
   </plurals>
+  <plurals name="trackers_blocked_panel_num_trackers_2">
+    <!--
+      Text for displaying in the trackers blocked panel the total number of blocked generic tracking scripts.
+      %1$d is a placeholder for the number of trackers blocked.
+    -->
+    <item quantity="one">%1$d element sledilne vsebine</item>
+    <item quantity="two">%1$d elementa sledilne vsebine</item>
+    <item quantity="few">%1$d elementi sledilne vsebine</item>
+    <item quantity="other">%1$d elementov sledilne vsebine</item>
+  </plurals>
   <plurals name="trackers_blocked_panel_num_trackers_blocked_this_week_2">
     <!--
       Text for displaying the number of trackers blocked this week in the trackers blocked panel.
@@ -3799,17 +4000,6 @@
     <item quantity="few">%1$d blokirani sledilci ta teden</item>
     <item quantity="other">%1$d blokiranih sledilcev ta teden</item>
   </plurals>
-  <!--
-    Text for displaying the total number of trackers blocked in the trackers blocked panel.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_total_num_trackers_blocked">Zavrnjeni sledilci: %d</string>
-  <!--
-    Text for displaying the number of trackers blocked for a specific tracker category in the trackers blocked panel.
-    %s is a placeholder for the name of the tracker category.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_categorical_num_trackers_blocked">%s: %d</string>
   <!--
     Description text for a dialog confirming whether the user wants to delete all data for current site.
     %s is a placeholder for the base domain of website.
@@ -3830,6 +4020,8 @@
     %s is a placeholder for the name of the certificate authority that issued the certificate.
   -->
   <string name="connection_security_panel_verified_by">Overil %s</string>
+  <!-- Content description (not visible, for screen readers etc.) for the handle used to drag the protections dashboard to the bottom of the screen and close it. -->
+  <string name="tracker_protections_dashboard_close_handlebar_content_description">Zapri pregledno ploščo</string>
   <!--
     Text for the connection security panel when the site uses a QWAC.
     %s is a placeholder for the organization for which the certificate was issued.
@@ -3953,6 +4145,26 @@
   <string name="microsurvey_sync_title" tools:ignore="BrandUsage,UnusedResources">Kako zadovoljni ste s sinhronizacijo v Firefoxu?</string>
   <!-- Text shown in the survey title for 'describe your experience so far' microsurvey. Note: The word "Firefox" should NOT be translated. -->
   <string name="microsurvey_describe_your_experience_title" tools:ignore="BrandUsage,UnusedResources">Pomagajte nam izboljšati Firefox. Katero izmed naštetega najbolje opisuje vašo dosedanjo izkušnjo?</string>
+  <!--
+    Uninstall Survey
+
+    Title text for the uninstall survey dialog, asking the user for the reason they are removing the app
+  -->
+  <string name="microsurvey_uninstall_survey_title">Vaše povratne informacije nam pomenijo zelo veliko. Zakaj odstranjujete aplikacijo?</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_1_v2">Je počasna ali nezanesljiva</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_2_v2">Spletne strani niso delovale pravilno</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_3_v2">Ne ponuja funkcij, ki jih potrebujem</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_4_v2">Videi, prenosi ali predstavnost niso delovali</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_5_v2">Težko jo je uporabljati, slabo je zasnovana</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_6_v2">Imam pomisleke glede zasebnosti ali varnosti</string>
+  <!-- Button label shown at the bottom of the uninstall survey -->
+  <string name="uninstall_survey_button_label">Pošlji povratne informacije in odstrani</string>
   <!--
     Accessibility
 
@@ -4101,8 +4313,6 @@
   <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">Posodobite pred 14. marcem, da boste lahko še naprej uporabljali dodatke in druge funkcije.</string>
   <!-- Push notification message about old Firefox version -->
   <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">Nekatere zmogljivosti bodo jutri prenehale delovati.</string>
-  <!-- TextField Design System Component -->
-
   <!--
     Setup checklist feature
 
@@ -4261,8 +4471,6 @@
   <string name="settings_search_no_results_message">Morda poskusite z drugačnim iskanjem?</string>
   <!-- Content Description for the button to open Settings Search (to search through settings). -->
   <string name="settings_search_button_content_description">Gumb za iskanje nastavitev</string>
-  <!-- ==== Terms of use pop up prompt ==== -->
-
   <!-- Title for the pop up prompt -->
   <string name="terms_of_use_prompt_title">Na voljo je posodobitev</string>
   <!--
@@ -4287,8 +4495,6 @@
   <string name="terms_of_use_prompt_accept">Sprejmi</string>
   <!-- Label for a button to postpone accepting the terms of use -->
   <string name="terms_of_use_prompt_postpone">Opomni me pozneje</string>
-  <!-- ==== Experiment strings. ==== -->
-
   <!-- A title for the popup prompt. -->
   <string name="terms_of_use_prompt_title_option_a" tools:ignore="UnusedResources">Pogoji uporabe</string>
   <!--
@@ -4304,170 +4510,6 @@
   <!-- Link text for terms_of_use_prompt_body_line_two_alternative that links to a site with more information about the Terms of Use -->
   <string name="terms_of_use_prompt_body_line_two_alternative_link" tools:ignore="UnusedResources">tukaj</string>
   <!--
-    Sports widget
-
-    Title text shown at the top of the sports widget country selector, encouraging the user to pick a national team to follow.
-  -->
-  <string name="sports_widget_country_selector_title">Sledite svoji ekipi</string>
-  <!-- Section header for the North America region in the sports widget country selector. -->
-  <string name="sports_widget_confederation_north_america">Severna Amerika</string>
-  <!-- Section header for the Africa confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_africa">Afrika</string>
-  <!-- Section header for the Asia confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_asia">Azija</string>
-  <!-- Section header for the CONCACAF confederation group in the sports widget country selector. "CONCACAF" is the abbreviation for "Confederation of North, Central America and Caribbean Association Football". -->
-  <string name="sports_widget_confederation_concacaf">CONCACAF</string>
-  <!-- Section header for the Europe confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_europe">Evropa</string>
-  <!-- Section header for the Oceania confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_oceania">Oceanija</string>
-  <!-- Section header for the South America confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_south_america">Južna Amerika</string>
-  <!-- Country name for England in the sports widget. England cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_england">Anglija</string>
-  <!-- Country name for Scotland in the sports widget. Scotland cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_scotland">Škotska</string>
-  <!-- Label shown on the sports widget scoreboard when a match is currently being played live. -->
-  <string name="sports_widget_match_live">V ŽIVO</string>
-  <!-- Title shown on the sports widget champion scoreboard row celebrating the soccer tournament winner. -->
-  <string name="sports_widget_champions_title">Zmagovalci svetovnega prvenstva 2026</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament runners-up. Runners-up means second place. -->
-  <string name="sports_widget_runner_up_title" tools:ignore="UnusedResources">Podprvaki</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament third place winners. -->
-  <string name="sports_widget_third_place_title">Tretje mesto</string>
-  <!-- Round name shown on the sports widget for the Round of 32 stage in the soccer tournament. -->
-  <string name="sports_widget_round_of_32">Šestnajstina finala</string>
-  <!-- Round name shown on the sports widget for the Round of 16 stage in the soccer tournament. -->
-  <string name="sports_widget_round_of_16">Osmina finala</string>
-  <!-- Round name shown on the sports widget for the quarter-finals stage in the soccer tournament. -->
-  <string name="sports_widget_quarter_final">Četrtfinali</string>
-  <!-- Round name shown on the sports widget for the semi-finals stage in the soccer tournament. -->
-  <string name="sports_widget_semi_final">Polfinala</string>
-  <!-- Round name shown on the sports widget for the final stage in the soccer tournament. -->
-  <string name="sports_widget_final">Finale</string>
-  <!-- Round name shown on the sports widget for the bronze final stage in the soccer tournament. -->
-  <string name="sports_widget_bronze_final">Tekma za tretje mesto</string>
-  <!-- Sports widget error card message shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed" tools:ignore="UnusedResources">Podatki o tekmah ta trenutek niso na voljo. Poskusite osvežiti čez nekaj minut.</string>
-  <!-- Sports widget action label to refresh match data after an error. -->
-  <string name="sports_widget_error_refresh">Osveži</string>
-  <!-- Sports widget group stage label for group A in the soccer tournament. -->
-  <string name="sports_widget_group_a">Skupina A</string>
-  <!-- Sports widget group stage label for group B in the soccer tournament. -->
-  <string name="sports_widget_group_b">Skupina B</string>
-  <!-- Sports widget group stage label for group C in the soccer tournament. -->
-  <string name="sports_widget_group_c">Skupina C</string>
-  <!-- Sports widget group stage label for group D in the soccer tournament. -->
-  <string name="sports_widget_group_d">Skupina D</string>
-  <!-- Sports widget group stage label for group E in the soccer tournament. -->
-  <string name="sports_widget_group_e">Skupina E</string>
-  <!-- Sports widget group stage label for group F in the soccer tournament. -->
-  <string name="sports_widget_group_f">Skupina F</string>
-  <!-- Sports widget group stage label for group G in the soccer tournament. -->
-  <string name="sports_widget_group_g">Skupina G</string>
-  <!-- Sports widget group stage label for group H in the soccer tournament. -->
-  <string name="sports_widget_group_h">Skupina H</string>
-  <!-- Sports widget group stage label for group I in the soccer tournament. -->
-  <string name="sports_widget_group_i">Skupina I</string>
-  <!-- Sports widget group stage label for group J in the soccer tournament. -->
-  <string name="sports_widget_group_j">Skupina J</string>
-  <!-- Sports widget group stage label for group K in the soccer tournament. -->
-  <string name="sports_widget_group_k">Skupina K</string>
-  <!-- Sports widget group stage label for group L in the soccer tournament. -->
-  <string name="sports_widget_group_l">Skupina L</string>
-  <!-- Sports widget button label to see match results. -->
-  <string name="sports_widget_see_results" tools:ignore="UnusedResources">Ogled izidov</string>
-  <!-- Sports widget button label to view details of a soccer match results. -->
-  <string name="sports_widget_view_match_details" tools:ignore="UnusedResources">Ogled podrobnosti tekme</string>
-  <!-- Sports widget section header for related soccer matches in the same group. -->
-  <string name="sports_widget_related_matches" tools:ignore="UnusedResources">Povezane tekme</string>
-  <!--
-    Sports widget card title encouraging the user to follow the soccer tournament. “Keep tabs on” is an informal expression
-    meaning to stay updated on or regularly follow something (in this case, World Cup matches and updates).
-    It’s playfully related to Firefox in that “tabs” are a browser feature.
-    It suggests ongoing awareness rather than active monitoring or control. Not to be translated literally as physical “tabs”
-    or tracking in a technical sense; the meaning is about staying informed.
-  -->
-  <string name="sports_widget_card_title">Spremljajte svetovno prvenstvo</string>
-  <!-- Sports widget card description shown below the title on the homepage entry point. -->
-  <string name="sports_widget_card_description">V živo prejemajte obvestila o dogajanju na tekmah in še več.</string>
-  <!-- Sports widget menu item to change the selected team. -->
-  <string name="sports_widget_change_team">Zamenjaj ekipo</string>
-  <!-- Sports widget menu item to get a custom wallpaper for the widget. -->
-  <string name="sports_widget_get_custom_wallpaper">Pridobite ozadje po meri</string>
-  <!-- Sports widget menu item to remove the widget from the homepage. -->
-  <string name="sports_widget_remove">Odstrani</string>
-  <!-- Sports widget card title shown after a team is eliminated, asking if the user still wants to continue following the soccer tournament. -->
-  <string name="sports_widget_still_want_to_follow">Vas še zanima?</string>
-  <!-- Sports widget card description shown after a team is eliminated, suggesting to choose another team. -->
-  <string name="sports_widget_choose_another_team">Izberite še kakšno ekipo, katere napredek na svetovnem prvenstvu želite spremljati.</string>
-  <!-- Sports widget button label to follow another team after the current team is eliminated. -->
-  <string name="sports_widget_follow_another_team">Spremljaj drugo ekipo</string>
-  <!-- Sports widget card title shown before the soccer tournament begins on top of a timer that is counting down. -->
-  <string name="sports_widget_countdown_to_world_cup">Odštevanje do svetovnega prvenstva</string>
-  <!-- Sports widget button label that navigates the user to the full soccer tournament match schedule. -->
-  <string name="sports_widget_view_schedule">Prikaži spored</string>
-  <!-- Sports widget button label that dismisses the step of choosing a team to follow. -->
-  <string name="sports_widget_skip">Preskoči</string>
-  <!-- Sports widget match status label shown during halftime of a match. -->
-  <string name="sports_widget_halftime" tools:ignore="UnusedResources">Polčas</string>
-  <!-- Sports widget match status label shown during extra time of a match. -->
-  <string name="sports_widget_extra_time">Podaljški</string>
-  <!-- Sports widget match status label shown during penalties of a match. -->
-  <string name="sports_widget_penalties">Enajstmetrovke</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget team / country selector. -->
-  <string name="sports_widget_close_team_selection_sheet_content_description">Zapri seznam za izbiro ekip</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget card. -->
-  <string name="sports_widget_close_content_description">Zapri</string>
-  <!-- Content description (for accessibility, not displayed) for the overflow (more options) menu button on the sports widget card. -->
-  <string name="sports_widget_more_options_content_description">Več možnosti</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing the time remaining until the soccer tournament kickoff.
-    %1$d is the number of days, %2$d is the number of hours, and %3$d is the number of minutes.
-  -->
-  <string name="sports_widget_countdown_remaining_content_description">Preostali čas. Dni: %1$d. Ur: %2$d. Minut: %3$d.</string>
-  <!-- Content description (for accessibility, not displayed)  for the action that navigates to the World Cup website. -->
-  <string name="sports_widget_go_to_world_cup_site_content_description" tools:ignore="UnusedResources">Obišči spletno stran svetovnega prvenstva</string>
-  <!--
-    Content description (for accessibility, not displayed)  used for the sports widget card header announcing a live match for a group or stage.
-    %s is the soccer tournament group name or stage (e.g. Group A represented by sports_widget_group_a, Round of 32 represented by sports_widget_round_of_32,
-    or Final represented by sports_widget_final).
-  -->
-  <string name="sports_widget_live_game_content_description">%s, tekma v živo</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing a live score.
-    %1$s is the home team name, %2$d is the home team score, %3$s is the away team name, %4$d is the away team score,
-    and %5$s is the match elapsed time (e.g. 72 minutes).
-  -->
-  <string name="sports_widget_live_score_content_description">%1$s %2$d, %3$s %4$d, %5$s, v živo</string>
-  <!--
-    Content description (for accessibility, not displayed) for a paginated item.
-    %1$s is the soccer tournament group name or stage (e.g. Group A represented by sports_widget_group_a, Round of 32 represented by sports_widget_round_of_32),
-    %2$d is the current page number, and %3$d is the total number of pages.
-  -->
-  <string name="sports_widget_page_position_content_description">%1$s, stran %2$d od %3$d</string>
-  <!--
-    Content description (for accessibility, not displayed) for a page within the World Cup final results carousel.
-    %1$d is the current page number, and %2$d is the total number of pages.
-  -->
-  <string name="sports_widget_final_results_page_content_description" tools:ignore="UnusedResources">Končni izidi svetovnega prvenstva, stran %1$d od %2$d</string>
-  <!-- Content description (for accessibility, not displayed) for the World Cup final results page. -->
-  <string name="sports_widget_final_results_content_description">Končni izidi svetovnega prvenstva</string>
-  <!-- Content description (for accessibility, not displayed) for the remove button that removes the sports widget from the homepage. -->
-  <string name="sports_widget_remove_content_description" tools:ignore="UnusedResources">Odstrani svetovno prvenstvo z domače strani</string>
-  <!-- Sports widget match status label shown during first half of a match. -->
-  <string name="sports_widget_first_half" tools:ignore="UnusedResources">Prvi polčas</string>
-  <!-- Sports widget match status label shown during second half of a match. -->
-  <string name="sports_widget_second_half" tools:ignore="UnusedResources">Drugi polčas</string>
-  <!-- Sports widget error card title shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_title">Videti je, da ste brez povezave.</string>
-  <!-- Sports widget error card description shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_description">Preverite internetno povezavo in poskusite znova.</string>
-  <!-- Sports widget general group stage label in the soccer tournament. -->
-  <string name="sports_widget_group_stage">Skupinski del</string>
-  <!-- ==== End of Terms of use popup prompt. ==== -->
-
-  <!--
     Privacy notice homepage banner
 
     A message we show the user on the homepage when there is a new version of the privacy notice. 'Firefox' is intentionally hardcoded.
@@ -4480,6 +4522,72 @@
   <!-- The second active link used in privacy_notice_updated_homepage_message -->
   <string name="privacy_notice_updated_homepage_message_learn_more" tools:ignore="UnusedResources">Več o tem</string>
   <!--
+    Collections migration homepage card
+
+    Title shown on the collections to tab groups migration card on the homepage.
+  -->
+  <string name="collections_migration_homepage_banner_title">Zbirke so postale skupine</string>
+  <!-- Message shown on the collections to tab groups migration card on the homepage. -->
+  <string name="collections_migration_homepage_card_message">Zavihke lahko organizirate na preprostejši način</string>
+  <!-- Link text shown on the collections to tab groups migration card that opens the tab groups page in the tab manager. -->
+  <string name="collections_migration_homepage_card_link">Prikaži moje skupine zavihkov</string>
+  <!-- Google Lens prototype related strings -->
+  <string name="preferences_debug_settings_google_lens_integration">Omogoči integracijo z Google Lens</string>
+  <!-- Lens image search button content description -->
+  <string name="lens_search_content_description">Išči s sliko</string>
+  <!-- Content description for the gallery picker button in the Lens camera screen -->
+  <string name="content_description_gallery">Izberite v galeriji za pošiljanje v Google Lens</string>
+  <!-- Content description for the shutter button in the Lens camera screen -->
+  <string name="content_description_take_photo">Fotografiraj in pošlji Google Lens</string>
+  <!-- Image context menu entry that sends the long-pressed image to Google Lens -->
+  <string name="context_menu_open_image_with_google_lens">Išči z Google Lens</string>
+  <!-- Toast shown when the user denies the camera permission requested by the Lens camera screen -->
+  <string name="lens_camera_permission_denied">Dovoljenje zavrnjeno</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the photo they capture will be sent to Google Lens for a visual search.
+  -->
+  <string name="lens_camera_title_lens">Google Lens</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the camera is being used to scan a QR code.
+  -->
+  <string name="lens_camera_title_qr">Koda QR</string>
+  <!-- Title for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_title">Omogoči iskanje z Google Lens</string>
+  <!-- Description for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_description">Pošilja slike in fotografije Googlu za vizualno iskanje.</string>
+  <!-- Caption shown under the Google Lens toggle clarifying when the feature is available -->
+  <string name="preferences_google_lens_availability_caption">Na voljo samo, ko je Google zgoraj omogočen in je med brskanjem vaš aktivni iskalnik.</string>
+  <!-- Content description for the Google Lens half of the camera mode toggle -->
+  <string name="lens_camera_mode_lens">Google Lens</string>
+  <!-- Content description for the QR scanner half of the camera mode toggle -->
+  <string name="lens_camera_mode_qr">Bralnik QR</string>
+  <!-- Toast shown when the user picks an image from the gallery in QR mode but no QR code is found in it -->
+  <string name="lens_camera_qr_no_code_found">Na sliki ni bilo mogoče najti QR-kode</string>
+  <!-- Status shown under an image picked from the gallery or taken with the camera while it is being sent to Google Lens for a visual search -->
+  <string name="lens_camera_loading_status">Iskanje</string>
+  <!-- Button shown under an image picked from the gallery or taken with the camera while it is being sent to Google Lens. Tapping it stops the search and returns to the camera. -->
+  <string name="lens_camera_loading_cancel_button">Prekliči</string>
+  <!-- Snackbar message shown when an image picked from the gallery or taken with the camera could not be opened or read, so it was never sent to Google Lens. Shown after returning to the camera. -->
+  <string name="lens_camera_image_load_failed_v2">Te slike ni bilo mogoče naložiti.</string>
+  <!-- Snackbar message shown when an image picked from the gallery could not be opened or read, so it was never sent to Google Lens. Shown after returning to the camera. -->
+  <string name="lens_camera_image_load_failed">Te slike ni bilo mogoče naložiti. Poskusite z drugo.</string>
+  <!-- Snackbar message shown when an image picked from the gallery or taken with the camera could not be searched because of a network problem or an error from Google Lens. Shown after returning to the camera, next to the lens_camera_upload_failed_retry_button action. -->
+  <string name="lens_camera_upload_failed">Rezultatov Google Lens ni bilo mogoče pridobiti</string>
+  <!-- Action in the snackbar shown when an image picked from the gallery or taken with the camera could not be searched with Google Lens. Tapping it searches the same image again. -->
+  <string name="lens_camera_upload_failed_retry_button">Poskusi znova</string>
+  <!-- Title of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
+  <string name="lens_opt_out_title">Poiščite z Google Lens</string>
+  <!-- Description of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
+  <string name="lens_opt_out_description">Izberite sliko ali uporabite kamero za prikaz rezultatov z Google Lens.</string>
+  <!-- Text of the link in the first-run Google Lens bottom sheet that opens the Search settings page -->
+  <string name="lens_opt_out_settings_link">Nastavitve Google Lens</string>
+  <!-- Button in the first-run Google Lens bottom sheet that dismisses it and starts the camera -->
+  <string name="lens_opt_out_try_it_now_button">Preizkusite zdaj</string>
+  <!-- Button in the first-run Google Lens bottom sheet that leaves Google Lens without using it -->
+  <string name="lens_opt_out_not_now_button">Ne zdaj</string>
+  <!--
     Firefox Labs
 
     Firefox Labs is the name of a screen in Settings to allow users to learn about
@@ -4488,6 +4596,17 @@
     in English.
   -->
   <string name="firefox_labs_title" tools:ignore="BrandUsage">Firefox Labs</string>
+  <!-- Banner title text on the Firefox Labs screen. -->
+  <string name="firefox_labs_banner_title_2">Preizkusite naše poskusne možnosti!</string>
+  <!--
+    Banner description text on the Firefox Labs screen. Provides information on what Firefox Labs does. %s is the name of the app (for example "Firefox Nightly").
+    Text will appear under the Firefox Labs banner title.
+  -->
+  <string name="firefox_labs_experimental_description">So še v razvoju, kar lahko vpliva na delovanje %sa.</string>
+  <!-- The link text shown when a feedback URL for a Firefox Labs feature is available. The feedback URL page will allow users to provide opinions and suggestions. -->
+  <string name="firefox_labs_share_feedback">Pošlji povratne informacije</string>
+  <!-- Content description for the share feedback link on a Firefox Labs feature. This text will be used by screen readers to provide more context on the feedback link. %s is the name of the Firefox Labs feature. -->
+  <string name="firefox_labs_share_feedback_content_description">Sporočite povratne informacije o %su.</string>
   <!-- Button text on the Firefox Labs screen for restoring all toggles back to the default settings. The button will turn off any experimental features. -->
   <string name="firefox_labs_restore_default_button_text">Obnovi privzeto</string>
   <!-- The title used in a confirmation dialog on the Firefox Labs screen when toggling "on" or "off" an experimental feature that requires a restart. -->
@@ -4498,4 +4617,68 @@
   <string name="firefox_labs_dialog_cancel_button">Prekliči</string>
   <!-- The title used in a confirmation dialog on the Firefox Labs screen when restoring the application to its defaults by turning "off" any experimental features. -->
   <string name="firefox_labs_restore_defaults_dialog_title">Zahtevan je ponoven zagon</string>
+  <!-- The description used in a confirmation dialog on the Firefox Labs screen when restoring the application to its defaults by turning "off" any experimental features. %s is the name of the app (for example "Firefox Nightly") -->
+  <string name="firefox_labs_restore_defaults_dialog_message">Za obnovitev privzetih nastavitev znova zaženite %s.</string>
+  <!-- The description text that is displayed in the confirmation dialog on the Firefox Labs screen for toggling "on" experimental features. %s is the name of the app (for example "Firefox Nightly") -->
+  <string name="firefox_labs_feature_enable_dialog_message">Za vklop te možnosti znova zaženite %s.</string>
+  <!-- The description text that is displayed in the confirmation dialog on the Firefox Labs screen for toggling "off" experimental features. %s is the name of the app (for example "Firefox Nightly") -->
+  <string name="firefox_labs_feature_disable_dialog_message">Za izklop te možnosti znova zaženite %s.</string>
+  <!-- Helper text shown beneath a Firefox Labs item when it is blocked from being turned on. -->
+  <string name="firefox_labs_feature_conflict">Možnost ni na voljo za preskušanje.</string>
+  <!-- Text displayed on the Firefox Labs screen when there are no Labs experimental features present. -->
+  <string name="firefox_labs_no_labs_available_description">Trenutno ni poskusnih možnosti, ki bi jih lahko preizkusili</string>
+  <!-- Title of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_title" tools:ignore="UnusedResources">Izolacija spletnih mest</string>
+  <!-- Description of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_description" tools:ignore="UnusedResources">Dodatna zaščitna pregrada med spletnimi mesti, ki pomaga varovati vaše podatke v različnih zavihkih. Lahko vpliva na učinkovitost delovanja, stabilnost, združljivost spletnih mest in način shranjevanja zgodovine brskanja.</string>
+  <!--
+    PDF viewer toolbar and buttons
+
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description_2">Dodaj podpis</string>
+  <!--
+    PDF viewer toolbar and buttons
+
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description">Podpiši PDF</string>
+  <!-- Content description for accessibility (used by screen readers): Description of the button that downloads the PDF displayed on the screen to the user's device. -->
+  <string name="pdf_tools_download_content_description">Prenesi PDF</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the printing dialogue window for the PDF displayed on the screen. -->
+  <string name="pdf_tools_print_content_description">Natisni PDF</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the sharing options for the PDF being displayed on the screen. -->
+  <string name="pdf_tools_share_content_description">Deli PDF</string>
+  <!--
+    PDF viewer add a signature dialog
+
+    The title of the dialog for adding a signature to a PDF.
+  -->
+  <string name="pdf_tools_signature_title">Dodaj podpis</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that closes the dialog for adding a signature to a PDF. -->
+  <string name="pdf_tools_signature_close_content_description">Zapri podokno za podpisovanje datoteke PDF</string>
+  <!-- The placeholder text shown in the empty text input field where users can enter the signature they wish to add to a PDF. -->
+  <string name="pdf_tools_signature_placeholder">Natipkajte podpis</string>
+  <!-- The text for the button that erases the text the user entered in the "add a signature" field. -->
+  <string name="pdf_tools_signature_clear_button">Izbriši</string>
+  <!-- The text for the button that adds the signature the user has typed to the PDF. -->
+  <string name="pdf_tools_signature_add_button">Dodaj</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the loading indicator when a signature is in the process of being added to a PDF. -->
+  <string name="pdf_tools_signature_adding_content_description">Dodajanje podpisa</string>
+  <!--
+    Listen to page
+
+    Content description for the reader view panel: a group of buttons floating over the content, which allow customizing the reader view or activating the Listen to Page feature
+  -->
+  <string name="reader_mode_panel_content_description_2">Možnosti bralnega pogleda</string>
+  <!--
+    Listen to page
+
+    Content description for the reader mode panel: a group of buttons floating over the content
+  -->
+  <string name="reader_mode_panel_content_description">Možnosti bralnega načina</string>
+  <!-- Content description for the button in the reader view panel that turns on the Listen to Page feature (playback of content begins when button is pressed) -->
+  <string name="reader_mode_panel_listen_content_description">Preberi naglas</string>
+  <!-- Content description for media player displayed in Reader view when the Listen to Page (Read Aloud) feature is selected -->
+  <string name="reader_mode_panel_media_player_content_description">Predvajalnik predstavnosti</string>
 </resources>

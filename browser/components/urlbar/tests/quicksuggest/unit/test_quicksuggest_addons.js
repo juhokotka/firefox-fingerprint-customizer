@@ -26,8 +26,8 @@ AddonTestUtils.createAppInfo(
 const MERINO_SUGGESTIONS = [
   {
     provider: "amo",
-    icon: "icon",
     url: "https://example.com/merino-addon",
+    icon: "https://example.com/merino-addon-icon",
     title: "title",
     description: "description",
     custom_details: {
@@ -561,7 +561,7 @@ function makeExpectedResult({
     description: suggestion.description,
     url: suggestion.url,
     originalUrl: suggestion.url,
-    icon: suggestion.icon,
+    icon: UrlbarTestUtils.makeMozRemoteImageUrl(suggestion.icon),
   });
 }
 
@@ -656,7 +656,7 @@ async function doShowLessFrequentlyTest({
           result: expectedResult,
           expectedCountsByCall: {
             acknowledgeFeedback: 1,
-            invalidateResultMenuCommands:
+            updateResultMenuCommands:
               count == showLessFrequentlyCap - 1 ? 1 : 0,
           },
         });

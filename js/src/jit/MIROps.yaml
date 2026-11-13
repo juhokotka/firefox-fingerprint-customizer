@@ -420,12 +420,7 @@
   gen_boilerplate: false
 
 - name: NewBoundFunction
-  arguments:
-    templateObj: JSObject*
-  result_type: Object
-  alias_set: none
-  generate_lir: true
-  lir_temps: 1
+  gen_boilerplate: false
 
 - name: BoundFunctionNumArgs
   operands:
@@ -550,6 +545,30 @@
   movable: true
   alias_set: none
   folds_to: custom
+  result_type: Boolean
+  generate_lir: true
+
+- name: StrictConstantCompareString
+  operands:
+    value: Value
+  arguments:
+    constant: JSOffThreadAtom*
+    jsop: JSOp
+  movable: true
+  alias_set: none
+  folds_to: custom
+  result_type: Boolean
+  generate_lir: true
+  lir_temps: 1
+
+- name: StrictConstantCompareObject
+  operands:
+    value: Value
+  arguments:
+    constant: JSObject*
+    jsop: JSOp
+  movable: true
+  alias_set: none
   result_type: Boolean
   generate_lir: true
 
@@ -825,8 +844,8 @@
 - name: ToFloat16
   gen_boilerplate: false
 
-# Converts a uint32 to a double (coming from wasm).
-- name: WasmUnsignedToDouble
+# Converts a uint32 to a double.
+- name: UnsignedToDouble
   operands:
     def: Int32
   type_policy: none
@@ -836,8 +855,10 @@
   congruent_to: if_operands_equal
   alias_set: none
   clone: true
+  can_recover: true
 
-- name: WasmUnsignedToFloat32
+# Converts a uint32 to a float32.
+- name: UnsignedToFloat32
   gen_boilerplate: false
 
 - name: WrapInt64ToInt32
@@ -1705,8 +1726,12 @@
   result_type: Value
   generate_lir: true
 
-# Checks whether we need to fire the interrupt handler.
+# Guard against overrecursion. This may also fire the interrupt handler, unless
+# isResumingGenerator is set: interrupt callbacks can run JS/Debugger code and a
+# frame that's in the middle of resuming a generator is only half-initialized.
 - name: CheckOverRecursed
+  arguments:
+    isResumingGenerator: bool
   guard: true
   alias_set: none
   generate_lir: true
@@ -1905,17 +1930,19 @@
   clone: true
   generate_lir: true
 
-# Store to the initialized length in an elements header. Note the input is an
-# *index*, one less than the desired initialized length.
+# Set the initialized length field in an elements header.
 - name: SetInitializedLength
   operands:
     elements: Elements
-    index: Int32
+  arguments:
+    length: uint32_t
+    needsPreBarrier: bool
   type_policy: none
   alias_set:
     store: ObjectFields
   clone: true
   generate_lir: true
+  lir_temps: 1
 
 # Load the array length from an elements header.
 - name: ArrayLength
@@ -1931,12 +1958,12 @@
   clone: true
   generate_lir: true
 
-# Store to the length in an elements header. Note the input is an *index*, one
-# less than the desired length.
+# Set the array length field in an elements header.
 - name: SetArrayLength
   operands:
     elements: Elements
-    index: Int32
+  arguments:
+    length: uint32_t
   type_policy: none
   alias_set:
     store: ObjectFields
@@ -3600,6 +3627,17 @@
   alias_set: none
   generate_lir: true
 
+- name: IsSuspendedGenerator
+  operands:
+    object: Object
+  result_type: Boolean
+  alias_set:
+    load:
+      - ObjectFields
+      - FixedSlot
+  generate_lir: true
+  lir_temps: 1
+
 - name: IsNullOrUndefined
   operands:
     value: any
@@ -3679,22 +3717,52 @@
   possibly_calls: true
   generate_lir: true
 
-# Returns from this function to the previous caller; this looks like a regular
-# Unary instruction and is used to lie to the MIR generator about suspending
-# ops like Yield/Await, which are emitted like returns, but MIR-Build like
-# regular instructions.
-- name: GeneratorReturn
-  operands:
-    input: Value
-  guard: true
-  alias_set: none
-
 - name: AsyncAwait
   operands:
     value: Value
     generator: Object
   result_type: Object
   possibly_calls: true
+  generate_lir: true
+
+- name: GeneratorResume
+  operands:
+    generator: Object
+    value: Value
+  arguments:
+    resumeKind: int32_t
+  result_type: Value
+  possibly_calls: true
+  generate_lir: true
+  lir_temps: 2
+
+# Test the frame's FrameDescriptor::IsResumingGenerator bit. True on a resume,
+# false on a fresh call.
+- name: IsResumingGenerator
+  result_type: Boolean
+  movable: true
+  congruent_to: if_operands_equal
+  alias_set:
+    load: GeneratorResumeState
+  generate_lir: true
+
+# Read one ResumeFrameArgs slot from this frame's args region. Only valid while
+# the frame is mid-resume (between the MIsResumingGenerator test and the
+# JSOp::AfterYield's MClearResumingGeneratorFlag). Not movable so LICM can't
+# hoist it out of that region.
+- name: ResumeFrameArg
+  arguments:
+    slot: uint32_t
+  result_type: Value
+  movable: false
+  congruent_to: if_operands_and_arguments_equal
+  alias_set: none
+  generate_lir: true
+
+# Clear the frame's FrameDescriptor::IsResumingGenerator bit.
+- name: ClearResumingGeneratorFlag
+  alias_set:
+    store: GeneratorResumeState
   generate_lir: true
 
 - name: CheckThisReinit
@@ -3717,6 +3785,7 @@
   result_type: Boolean
   possibly_calls: true
   generate_lir: true
+  lir_temps: 1
 
 - name: MaybeExtractAwaitValue
   gen_boilerplate: false
@@ -4611,6 +4680,31 @@
   generate_lir: true
   lir_temps: 1
 
+- name: UnpackTime
+  operands:
+    packedVal: Value
+  arguments:
+    shiftImm: uint32_t
+    maskImm: uint32_t
+  result_type: Int32
+  movable: true
+  congruent_to: if_operands_and_arguments_equal
+  alias_set: none
+  # Only used on 32-bit systems
+  lir_temps: 1
+  generate_lir: true
+
+- name: EpochMilliseconds
+  operands:
+    seconds: Double
+    nanoseconds: Int32
+  result_type: Double
+  movable: true
+  congruent_to: if_operands_equal
+  alias_set: none
+  lir_temps: 1
+  generate_lir: true
+
 - name: PostIntPtrConversion
   gen_boilerplate: false
 
@@ -4802,17 +4896,21 @@
   generate_lir: true
   lir_temps: 4
 
+# Suspends the current continuation, delivering the suspend params to the
+# matched handler. suspendResultsArea is always present (empty when the tag has
+# no results); the resumer writes the tag results there and the suspender reads
+# them FP-relative via ->base() at codegen.
 - name: WasmSuspend
   operands:
     instance: Pointer
     suspendedCont: WasmAnyRef
     handler: Pointer
+    suspendResultsArea: StackResults
   arguments:
     callSiteDesc: wasm::CallSiteDesc
   type_policy: none
   possibly_calls: true
-  generate_lir: true
-  lir_temps: 3
+  alias_set: custom
 
 - name: WasmResumeBarrier
   operands:
@@ -4823,6 +4921,22 @@
   type_policy: none
   generate_lir: true
   lir_temps: 1
+
+# Prepares a resume: validates the continuation (null/resumable checks that
+# trap on failure) and returns the destination paramsArea pointer (the resumer's
+# resumeParamsArea for a fresh continuation, or the suspender's advertised
+# suspendResultsArea for a suspended one). Emitted for every resume, so the
+# resumability check happens here. resumeParamsArea is an MWasmStackResultArea
+# (empty when the cont takes no params), read via ->base() at codegen.
+- name: WasmPrepareResume
+  operands:
+    cont: WasmAnyRef
+    resumeParamsArea: StackResults
+  arguments:
+    trapSiteDesc: wasm::TrapSiteDesc
+  result_type: Pointer
+  guard: true
+  type_policy: none
 
 - name: WasmResume
   gen_boilerplate: false
@@ -4873,6 +4987,25 @@
 
 - name: WasmReplaceLaneSimd128
   gen_boilerplate: false
+
+# (v128, v128) -> v128 replace_lane of lhs with a lane extracted from rhs.
+# simdOp is the replace_lane operation, which gives the lane size, and
+# srcLaneIndex is in units of that lane size.
+- name: WasmMoveLaneSimd128
+  operands:
+    lhs: Simd128
+    rhs: Simd128
+  arguments:
+    laneIndex: uint32_t
+    srcLaneIndex: uint32_t
+    simdOp: wasm::SimdOp
+  type_policy: none
+  result_type: Simd128
+  movable: true
+  congruent_to: if_operands_and_arguments_equal
+  alias_set: none
+  clone: true
+  generate_lir: true
 
 - name: WasmUnarySimd128
   operands:
@@ -4979,7 +5112,6 @@
   gen_boilerplate: false
 #endif
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
 - name: AddDisposableResource
   operands:
     environment: Object
@@ -4996,4 +5128,3 @@
     environment: Object
   result_type: Value
   generate_lir: true
-#endif

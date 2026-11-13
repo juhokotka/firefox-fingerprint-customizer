@@ -14,6 +14,14 @@ namespace X86Encoding {
 
 class BaseAssemblerX64 : public BaseAssembler {
  public:
+  // So the buffer can be read, for verification
+  uint8_t getByteAtOffset(size_t offset) const {
+    MOZ_ASSERT(offset < m_formatter.size());
+    const uint8_t* code =
+        const_cast<X86InstructionFormatter&>(m_formatter).data();
+    return code[offset];
+  }
+
   // Arithmetic operations:
 
   void adcq_rr(RegisterID src, RegisterID dst) {
@@ -256,6 +264,29 @@ class BaseAssemblerX64 : public BaseAssembler {
       } else {
         m_formatter.oneByteOp64(OP_GROUP1_EvIz, dst, GROUP1_OP_AND);
       }
+      m_formatter.immediate32(imm);
+    }
+  }
+
+  void andq_im(int32_t imm, int32_t offset, RegisterID base) {
+    spew(currentOffset(), "andq       $%d, " MEM_ob, imm,
+         ADDR_ob(offset, base));
+    if (CAN_SIGN_EXTEND_8_32(imm)) {
+      m_formatter.oneByteOp64(OP_GROUP1_EvIb, offset, base, GROUP1_OP_AND);
+      m_formatter.immediate8s(imm);
+    } else {
+      m_formatter.oneByteOp64(OP_GROUP1_EvIz, offset, base, GROUP1_OP_AND);
+      m_formatter.immediate32(imm);
+    }
+  }
+
+  void andq_im(int32_t imm, const void* addr) {
+    spew(currentOffset(), "andq       $%d, %p", imm, addr);
+    if (CAN_SIGN_EXTEND_8_32(imm)) {
+      m_formatter.oneByteOp64(OP_GROUP1_EvIb, addr, GROUP1_OP_AND);
+      m_formatter.immediate8s(imm);
+    } else {
+      m_formatter.oneByteOp64(OP_GROUP1_EvIz, addr, GROUP1_OP_AND);
       m_formatter.immediate32(imm);
     }
   }
@@ -582,6 +613,11 @@ class BaseAssemblerX64 : public BaseAssembler {
   }
 
   void testq_ir(int32_t rhs, RegisterID lhs) {
+    // Note: rhs == -1 sign-extends to the all-ones 64-bit mask.
+    if (rhs == -1) {
+      testq_rr(lhs, lhs);
+      return;
+    }
     // If the mask fits in a 32-bit immediate, we can use testl with a
     // 32-bit subreg.
     if (CAN_ZERO_EXTEND_32_64(rhs)) {
@@ -931,6 +967,20 @@ class BaseAssemblerX64 : public BaseAssembler {
   void immediate64(int64_t imm) {
     spew(currentOffset(), ".quad      %lld", (long long)imm);
     m_formatter.immediate64(imm);
+  }
+
+  // CET Shadow Stack operations:
+
+  void rdsspq_r(RegisterID dst) {
+    spew(currentOffset(), "rdsspq     %s", GPReg64Name(dst));
+    m_formatter.prefix(PRE_REP);
+    m_formatter.twoByteOp64(OP2_RDSSP, dst, GROUP21_OP_RDSSP);
+  }
+
+  void incsspq_r(RegisterID src) {
+    spew(currentOffset(), "incsspq    %s", GPReg64Name(src));
+    m_formatter.prefix(PRE_REP);
+    m_formatter.twoByteOp64(OP2_INCSSP, src, GROUP15_OP_INCSSP);
   }
 
   // SSE operations:

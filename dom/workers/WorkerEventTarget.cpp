@@ -90,7 +90,8 @@ class WrappedDebuggerRunnable final : public WorkerDebuggerRunnable {
  public:
   WrappedDebuggerRunnable(WorkerPrivate* aWorkerPrivate,
                           nsCOMPtr<nsIRunnable>&& aInner)
-      : WorkerDebuggerRunnable("WrappedDebuggerRunnable"),
+      : WorkerDebuggerRunnable("WrappedDebuggerRunnable",
+                               /* aIsIPCMessage */ true),
         mInner(std::move(aInner)) {}
 
   virtual bool PreDispatch(WorkerPrivate* aWorkerPrivate) override {

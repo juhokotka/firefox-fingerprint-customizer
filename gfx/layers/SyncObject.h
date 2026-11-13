@@ -5,8 +5,8 @@
 #ifndef MOZILLA_GFX_LAYERS_SYNCOBJECT_H
 #define MOZILLA_GFX_LAYERS_SYNCOBJECT_H
 
-#include "mozilla/gfx/FileHandleWrapper.h"
 #include "mozilla/RefCounted.h"
+#include "mozilla/gfx/FileHandleWrapper.h"
 
 struct ID3D11Device;
 
@@ -19,7 +19,7 @@ typedef RefPtr<gfx::FileHandleWrapper> SyncHandle;
 typedef uintptr_t SyncHandle;
 #endif  // XP_WIN
 
-class SyncObjectHost : public RefCounted<SyncObjectHost> {
+class SyncObjectHost : public external::AtomicRefCounted<SyncObjectHost> {
  public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SyncObjectHost)
   virtual ~SyncObjectHost() = default;

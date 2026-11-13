@@ -1,6 +1,6 @@
 (urlbar-nontechnical-overview)=
 
-# Address Bar Nontechnical Overview
+# Nontechnical Overview
 
 This document provides a high level, nontechnical overview of Firefox's address
 bar, with a focus on the different types of results it shows and how it chooses
@@ -495,7 +495,7 @@ group. Most of them appear at specific positions within the view.
 
 Search interventions help the user perform a task based on their search string.
 There are three kinds of interventions, and each is triggered by typing a
-certain set of {searchfox}`phrases <mozilla-central/rev/c4d682be93f090e99d5f4049ceb7b6b6c03d0632:browser/components/urlbar/UrlbarProviderInterventions.jsm#64>` in the input. They always appear as the second result,
+certain set of {searchfox}`phrases <firefox-main/rev/88b0f8e6a5925058755d2671bdac5a76d84bd224:browser/components/urlbar/UrlbarProviderInterventions.sys.mjs#171>` in the input. They always appear as the second result,
 after the heuristic result.
 
 The three kinds of interventions are:

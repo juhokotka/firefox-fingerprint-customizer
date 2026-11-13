@@ -8,19 +8,10 @@ use crate::prim_store::{
     InternablePrimitive, PrimitiveKind, PrimKey, PrimTemplate,
     PrimTemplateCommonData, PrimitiveStore, PictureIndex,
 };
-use crate::scene_building::IsVisible;
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, Eq, PartialEq, MallocSizeOf, Hash)]
-pub struct BackdropCapture {
-}
-
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, Eq, PartialEq, MallocSizeOf, Hash)]
-pub struct BackdropRender {
-}
+// `BackdropCapture` and `BackdropRender` (empty interned values) now live in
+// `webrender_api::interned_prims`. Re-exported to keep existing references working.
+pub use api::interned_prims::{BackdropCapture, BackdropRender};
 
 impl From<BackdropCapture> for BackdropCaptureData {
     fn from(_backdrop: BackdropCapture) -> Self {
@@ -39,29 +30,6 @@ impl From<BackdropRender> for BackdropRenderData {
 pub type BackdropCaptureKey = PrimKey<BackdropCapture>;
 pub type BackdropRenderKey = PrimKey<BackdropRender>;
 
-impl BackdropCaptureKey {
-    pub fn new(
-        info: &LayoutPrimitiveInfo,
-        backdrop_capture: BackdropCapture,
-    ) -> Self {
-        BackdropCaptureKey {
-            common: info.into(),
-            kind: backdrop_capture,
-        }
-    }
-}
-
-impl BackdropRenderKey {
-    pub fn new(
-        info: &LayoutPrimitiveInfo,
-        backdrop_render: BackdropRender,
-    ) -> Self {
-        BackdropRenderKey {
-            common: info.into(),
-            kind: backdrop_render,
-        }
-    }
-}
 
 impl InternDebug for BackdropCaptureKey {}
 impl InternDebug for BackdropRenderKey {}
@@ -125,7 +93,7 @@ impl InternablePrimitive for BackdropCapture {
         self,
         info: &LayoutPrimitiveInfo,
     ) -> BackdropCaptureKey {
-        BackdropCaptureKey::new(info, self)
+        BackdropCaptureKey::new(info.into(), self)
     }
 
     fn make_instance_kind(
@@ -144,7 +112,7 @@ impl InternablePrimitive for BackdropRender {
         self,
         info: &LayoutPrimitiveInfo,
     ) -> BackdropRenderKey {
-        BackdropRenderKey::new(info, self)
+        BackdropRenderKey::new(info.into(), self)
     }
 
     fn make_instance_kind(
@@ -156,17 +124,5 @@ impl InternablePrimitive for BackdropRender {
             data_handle,
             pic_index: PictureIndex::INVALID,
         }
-    }
-}
-
-impl IsVisible for BackdropCapture {
-    fn is_visible(&self) -> bool {
-        true
-    }
-}
-
-impl IsVisible for BackdropRender {
-    fn is_visible(&self) -> bool {
-        true
     }
 }

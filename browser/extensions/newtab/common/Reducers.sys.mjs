@@ -4,22 +4,12 @@
 
 import { actionTypes as at } from "resource://newtab/common/Actions.mjs";
 import { Dedupe } from "resource:///modules/Dedupe.sys.mjs";
-// Namespace import: a named import of an export missing on older train-hop
-// platforms is a link error; a namespace member is just undefined.
-import * as PlatformTopSitesConstants from "resource:///modules/topsites/constants.mjs";
 
 export {
   TOP_SITES_DEFAULT_ROWS,
+  TOP_SITES_MAX_ROWS,
   TOP_SITES_MAX_SITES_PER_ROW,
 } from "resource:///modules/topsites/constants.mjs";
-
-// @backward-compat { version 154 }
-// TOP_SITES_MAX_ROWS lands in platform constants.mjs in 154; until that reaches
-// Release it's absent on train-hop, so fall back to 4. At 154-Release: drop the
-// namespace import above, delete this shim, and add TOP_SITES_MAX_ROWS to the
-// re-export block above.
-export const TOP_SITES_MAX_ROWS =
-  PlatformTopSitesConstants.TOP_SITES_MAX_ROWS ?? 4;
 
 const dedupe = new Dedupe(site => site && site.url);
 
@@ -70,7 +60,7 @@ export const INITIAL_STATE = {
   },
   Prefs: {
     initialized: false,
-    values: { featureConfig: {} },
+    values: { featureConfig: {}, lockedPrefs: [] },
   },
   Dialog: {
     visible: false,
@@ -152,6 +142,8 @@ export const INITIAL_STATE = {
     inferredInterests: {},
     coarseInferredInterests: {},
     coarsePrivateInferredInterests: {},
+    locationPrivateInferredInterests: null,
+    shouldUseLocationVector: false,
     debugFeatures: null,
     inferredTelemetrySettingsOverrides: {},
   },
@@ -169,9 +161,23 @@ export const INITIAL_STATE = {
     highlightSeenCounter: 0,
     categories: [],
     uploadedWallpaper: "",
+    uploadResult: null,
+    // The images someone has saved, newest first. Shown as "Your images".
+    customWallpapers: [],
   },
   SectionsLayout: {
     configs: {},
+    orderings: {},
+  },
+  // Web notifications surfaced on newtab. Distinct from `Notifications` above,
+  // which is in-newtab toast UI state. `notifications` is the canonical
+  // id-keyed table; `byOrigin` is an id-only index. Fed by WebNotificationsFeed.
+  WebNotifications: {
+    initialized: false,
+    lastUpdated: null,
+    notifications: {},
+    byOrigin: {},
+    error: null,
   },
   Weather: {
     initialized: false,
@@ -193,6 +199,13 @@ export const INITIAL_STATE = {
   Stocks: {
     tickers: [],
     lastUpdated: null,
+    error: false,
+    watchlistTickers: [],
+    watchlistReconciledSymbols: [],
+    searchResults: [],
+    searchStatus: "idle",
+    activeRequestId: null,
+    submittedQuery: "",
   },
   PictureOfTheDay: {
     initialized: false,
@@ -206,6 +219,7 @@ export const INITIAL_STATE = {
     author: "",
     licenseLabel: "",
     licenseUrl: "",
+    previous: null,
     error: null,
   },
   ListsWidget: {
@@ -244,39 +258,7 @@ export const INITIAL_STATE = {
   ExternalComponents: {
     components: [],
   },
-  SportsWidget: {
-    data: null,
-    initialized: false,
-    widgetState: "sports-intro",
-    selectedTeams: [],
-    matchesTab: "upcoming",
-    // Per-tab "Only followed teams" filter toggle. Defaults to on so users
-    // who follow teams see the filtered list right away.
-    followedOnly: { results: true, upcoming: true },
-    watchLive: {
-      loaded: false,
-      data: null,
-    },
-    // Timestamp (ms since epoch) of the last successful live update.
-    // Kept at root so it survives WIDGETS_SPORTS_WIDGET_SET wholesale-replaces
-    // of `data` (e.g. post-match resync).
-    lastLiveUpdated: null,
-    // Index into the live matches list for the Now tab's single-card pager.
-    liveIndex: 0,
-    // End-of-match celebration bookkeeping (set by the feed): `endedAt` maps a
-    // just-ended match's global_event_id to the ms timestamp it left /live;
-    // `celebrated` lists ids that have already triggered a celebration.
-    celebrations: { endedAt: {}, celebrated: [] },
-    // Session-only state for infinite-scroll load-more on the Upcoming and
-    // Results expanded "View all" lists. Each direction tracks its own
-    // in-flight flag, end-of-data flag, and the most recently requested
-    // date. Fetched windows are NOT persisted — they re-fetch on next
-    // session start.
-    loadMore: {
-      upcoming: { loading: false, exhausted: false, lastFetchedDate: null },
-      results: { loading: false, exhausted: false, lastFetchedDate: null },
-    },
-  },
+  ExtensionWidgets: {},
   PrivacyWidget: {
     initialized: false,
     // Count of trackers blocked today, fetched by PrivacyFeed.
@@ -285,6 +267,53 @@ export const INITIAL_STATE = {
     // "sites where we blocked something"; see PrivacyFeed).
     sitesToday: 0,
     lastUpdated: null,
+    // True when the user has turned off every Enhanced Tracking Protection
+    // blocking option, so nothing is being counted (Bug 2063525). The widget
+    // shows a warning card instead of the readout.
+    etpOff: false,
+    // Secondary-message decision chosen by PrivacyFeed's selector
+    // (Bug 2050954). variant: empty | blank | streak | tip. `category` is the
+    // message family (CATEGORY) so the UI can tell a celebration from an
+    // ordinary tip; `icon` is an icon key (see Privacy.jsx); `countArg` is the
+    // l10n plural/var arg.
+    variant: null,
+    messageId: null,
+    category: null,
+    icon: null,
+    countArg: null,
+    // SpecialMessageAction for the message's CTA button (null → no button).
+    cta: null,
+    // When set, the count readout shows "{countCeiling}+" (the daily-cap render).
+    countCeiling: null,
+    // Pending count-up celebration awarded by PrivacyFeed, or null. Shaped
+    // { awardedAt, fromCount, toCount }, plus `forcedTier` when the debug
+    // pref made it; `awardedAt` doubles as its id.
+    celebration: null,
+  },
+  RecentSearches: {
+    initialized: false,
+    /**
+     * @type {Array<{value: string, lastUsed: number}>}
+     *   Recent searches, newest first, as { value, lastUsed } where lastUsed is
+     *   a ms epoch.
+     */
+    searches: [],
+    /**
+     * @type {?Array<string>}
+     *   Trending search strings for the default engine. Null until a user opens
+     *   the Trending tab and the engine answers, so an empty list means the
+     *   engine had nothing rather than that nothing has been asked for yet.
+     */
+    trending: null,
+    /**
+     * Name of the default engine, for the Trending tab attribution. Empty until
+     * the first update arrives, and for a profile with no default engine.
+     */
+    engineName: "",
+  },
+  Travel: {
+    initialized: false,
+    results: [],
   },
 };
 
@@ -722,6 +751,9 @@ function InferredPersonalization(
         coarseInferredInterests: action.data.coarseInferredInterests,
         coarsePrivateInferredInterests:
           action.data.coarsePrivateInferredInterests,
+        locationPrivateInferredInterests:
+          action.data.locationPrivateInferredInterests ?? null,
+        shouldUseLocationVector: action.data.shouldUseLocationVector ?? false,
         inferredTelemetrySettingsOverrides:
           action.data.inferredTelemetrySettingsOverrides,
         lastUpdated: action.data.lastUpdated,
@@ -1088,6 +1120,10 @@ function Wallpapers(prevState = INITIAL_STATE.Wallpapers, action) {
       return { ...prevState, categories: action.data };
     case at.WALLPAPERS_CUSTOM_SET:
       return { ...prevState, uploadedWallpaper: action.data };
+    case at.WALLPAPERS_CUSTOM_LIBRARY_SET:
+      return { ...prevState, customWallpapers: action.data };
+    case at.WALLPAPER_UPLOAD_RESULT:
+      return { ...prevState, uploadResult: action.data };
     default:
       return prevState;
   }
@@ -1096,7 +1132,11 @@ function Wallpapers(prevState = INITIAL_STATE.Wallpapers, action) {
 function SectionsLayout(prevState = INITIAL_STATE.SectionsLayout, action) {
   switch (action.type) {
     case at.SECTIONS_LAYOUT_UPDATE:
-      return { ...prevState, configs: action.data.configs };
+      return {
+        ...prevState,
+        configs: action.data.configs,
+        orderings: action.data.orderings ?? prevState.orderings,
+      };
     default:
       return prevState;
   }
@@ -1126,6 +1166,61 @@ function Notifications(prevState = INITIAL_STATE.Notifications, action) {
         showNotifications,
       };
     }
+    default:
+      return prevState;
+  }
+}
+
+/** Merges one notification into the id table and origin index. */
+function addWebNotification(prevState, notification) {
+  const { id, origin } = notification;
+  const originIds = prevState.byOrigin[origin] || [];
+  return {
+    ...prevState,
+    initialized: true,
+    notifications: { ...prevState.notifications, [id]: notification },
+    byOrigin: {
+      ...prevState.byOrigin,
+      [origin]: originIds.includes(id) ? originIds : [...originIds, id],
+    },
+  };
+}
+
+/** Drops a list of `{origin, id}` pairs from the id table and origin index. */
+function removeWebNotifications(prevState, removed) {
+  const notifications = { ...prevState.notifications };
+  const byOrigin = { ...prevState.byOrigin };
+  for (const { origin, id } of removed) {
+    delete notifications[id];
+    const remaining = (byOrigin[origin] || []).filter(
+      existing => existing !== id
+    );
+    if (remaining.length) {
+      byOrigin[origin] = remaining;
+    } else {
+      delete byOrigin[origin];
+    }
+  }
+  return { ...prevState, notifications, byOrigin };
+}
+
+function WebNotifications(prevState = INITIAL_STATE.WebNotifications, action) {
+  switch (action.type) {
+    case at.WEB_NOTIFICATIONS_UPDATED:
+      return {
+        ...prevState,
+        initialized: true,
+        lastUpdated: action.data.lastUpdated,
+        notifications: action.data.notifications,
+        byOrigin: action.data.byOrigin,
+        error: null,
+      };
+    case at.WEB_NOTIFICATIONS_ADDED:
+      return addWebNotification(prevState, action.data.notification);
+    case at.WEB_NOTIFICATIONS_REMOVED:
+      return removeWebNotifications(prevState, action.data.removed);
+    case at.WEB_NOTIFICATIONS_ERROR:
+      return { ...prevState, error: action.data };
     default:
       return prevState;
   }
@@ -1169,6 +1264,7 @@ const PictureOfTheDay = (prevState = INITIAL_STATE.PictureOfTheDay, action) => {
         author: action.data.author ?? "",
         licenseLabel: action.data.licenseLabel ?? "",
         licenseUrl: action.data.licenseUrl ?? "",
+        previous: action.data.previous ?? null,
         lastUpdated: action.data.lastUpdated ?? null,
         error: action.data.error ?? null,
         initialized: true,
@@ -1181,11 +1277,38 @@ const PictureOfTheDay = (prevState = INITIAL_STATE.PictureOfTheDay, action) => {
 function PrivacyWidget(prevState = INITIAL_STATE.PrivacyWidget, action) {
   switch (action.type) {
     case at.WIDGETS_PRIVACY_UPDATE:
+      // Merge whatever the feed sent: SYSTEM_TICK/INIT broadcast counts only
+      // (message fields absent → kept); NEW_TAB_INIT also carries the
+      // selector's message decision.
       return {
         ...prevState,
-        trackersToday: action.data.trackersToday,
-        sitesToday: action.data.sitesToday,
-        lastUpdated: action.data.lastUpdated,
+        ...action.data,
+        initialized: true,
+      };
+    default:
+      return prevState;
+  }
+}
+
+function RecentSearches(prevState = INITIAL_STATE.RecentSearches, action) {
+  switch (action.type) {
+    case at.WIDGETS_RECENT_SEARCHES_UPDATE:
+      return {
+        ...prevState,
+        ...action.data,
+        initialized: prevState.initialized || "searches" in action.data,
+      };
+    default:
+      return prevState;
+  }
+}
+
+function Travel(prevState = INITIAL_STATE.Travel, action) {
+  switch (action.type) {
+    case at.WIDGETS_TRAVEL_UPDATE:
+      return {
+        ...prevState,
+        ...action.data,
         initialized: true,
       };
     default:
@@ -1301,6 +1424,38 @@ function Stocks(prevState = INITIAL_STATE.Stocks, action) {
         ...prevState,
         tickers: action.data.tickers,
         lastUpdated: action.data.lastUpdated,
+        error: action.data.error ?? false,
+      };
+    case at.WIDGETS_STOCKS_WATCHLIST_UPDATE:
+      return {
+        ...prevState,
+        watchlistTickers: action.data.watchlistTickers,
+        watchlistReconciledSymbols: action.data.reconciledSymbols,
+      };
+    case at.WIDGETS_STOCKS_SEARCH_STARTED:
+      return {
+        ...prevState,
+        searchStatus: "loading",
+        searchResults: [],
+        activeRequestId: action.data.requestId,
+        submittedQuery: action.data.query,
+      };
+    case at.WIDGETS_STOCKS_SEARCH_RESPONSE:
+      if (action.data.requestId !== prevState.activeRequestId) {
+        return prevState;
+      }
+      return {
+        ...prevState,
+        searchStatus: action.data.status,
+        searchResults: action.data.matches || [],
+      };
+    case at.WIDGETS_STOCKS_SEARCH_CLEAR:
+      return {
+        ...prevState,
+        searchStatus: "idle",
+        searchResults: [],
+        activeRequestId: null,
+        submittedQuery: "",
       };
     default:
       return prevState;
@@ -1330,112 +1485,10 @@ function ExternalComponents(
   }
 }
 
-function SportsWidget(prevState = INITIAL_STATE.SportsWidget, action) {
+function ExtensionWidgets(prevState = INITIAL_STATE.ExtensionWidgets, action) {
   switch (action.type) {
-    case at.WIDGETS_SPORTS_SET_WIDGET_STATE:
-      return { ...prevState, widgetState: action.data };
-    case at.WIDGETS_SPORTS_SET_SELECTED_TEAMS:
-      return { ...prevState, selectedTeams: action.data };
-    case at.WIDGETS_SPORTS_SET_MATCHES_TAB:
-      return { ...prevState, matchesTab: action.data };
-    case at.WIDGETS_SPORTS_SET_FOLLOWED_ONLY:
-      return {
-        ...prevState,
-        followedOnly: { ...prevState.followedOnly, ...action.data },
-      };
-    case at.WIDGETS_SPORTS_WATCH_LIVE_REQUEST: {
-      // Preserve any previously-fetched payload so a re-request (e.g. the modal
-      // refreshing links on open) doesn't drop the data the "Watch live" entry
-      // point is gated on. Only show the loading state when nothing is cached.
-      const existingWatchLiveData = prevState.watchLive?.data ?? null;
-      return {
-        ...prevState,
-        watchLive: {
-          loaded: !!existingWatchLiveData,
-          data: existingWatchLiveData,
-        },
-      };
-    }
-    case at.WIDGETS_SPORTS_WATCH_LIVE_SET:
-      return {
-        ...prevState,
-        watchLive: { loaded: true, data: action.data },
-      };
-    case at.WIDGETS_SPORTS_LIVE_UPDATE: {
-      return {
-        ...prevState,
-        lastLiveUpdated: action.data?.lastLiveUpdated ?? null,
-        data: {
-          ...prevState.data,
-          live: action.data?.live ?? [],
-        },
-      };
-    }
-    case at.WIDGETS_SPORTS_SET_LIVE_INDEX:
-      return { ...prevState, liveIndex: action.data };
-    case at.WIDGETS_SPORTS_SET_CELEBRATIONS:
-      return { ...prevState, celebrations: action.data };
-    case at.WIDGETS_SPORTS_SET_LOAD_MORE: {
-      const {
-        direction,
-        matches: newMatches,
-        ...loadMoreUpdates
-      } = action.data || {};
-      if (direction !== "upcoming" && direction !== "results") {
-        return prevState;
-      }
-      // Upcoming appends to data.matches.next; results appends to
-      // data.matches.previous. The key used to skip duplicates is the same
-      // in both cases.
-      const targetField = direction === "upcoming" ? "next" : "previous";
-      const nextState = {
-        ...prevState,
-        loadMore: {
-          ...prevState.loadMore,
-          [direction]: {
-            ...prevState.loadMore[direction],
-            ...loadMoreUpdates,
-          },
-        },
-      };
-      if (Array.isArray(newMatches) && newMatches.length && prevState.data) {
-        const existing = prevState.data.matches?.[targetField] ?? [];
-        // Build a stable key for each match so we can skip ones already in
-        // the list. Prefer global_event_id; fall back to a composite that
-        // mirrors the React row key used in the list view.
-        const matchKey = match =>
-          match?.global_event_id ??
-          `${match?.home_team?.key}-${match?.away_team?.key}-${match?.date}`;
-        const existingKeys = new Set(existing.map(matchKey));
-        const additions = newMatches.filter(
-          m => !existingKeys.has(matchKey(m))
-        );
-        if (additions.length) {
-          nextState.data = {
-            ...prevState.data,
-            matches: {
-              ...(prevState.data.matches || {
-                previous: [],
-                current: [],
-                next: [],
-              }),
-              [targetField]: [...existing, ...additions],
-            },
-          };
-        }
-      }
-      return nextState;
-    }
-    case at.WIDGETS_SPORTS_WIDGET_SET:
-      // A wholesale-replace of `data` (initial load / post-match resync) also
-      // resets the session-only load-more state so we don't keep stale
-      // lastFetchedDate / exhausted flags from a previous fetch round.
-      return {
-        ...prevState,
-        data: action.data,
-        initialized: true,
-        loadMore: { ...INITIAL_STATE.SportsWidget.loadMore },
-      };
+    case at.WIDGETS_EXTENSIONS_UPDATE:
+      return action.data;
     default:
       return prevState;
   }
@@ -1458,10 +1511,13 @@ export const reducers = {
   ListsWidget,
   Wallpapers,
   SectionsLayout,
+  WebNotifications,
   Weather,
   Stocks,
   ExternalComponents,
-  SportsWidget,
+  ExtensionWidgets,
   PrivacyWidget,
   PictureOfTheDay,
+  RecentSearches,
+  Travel,
 };

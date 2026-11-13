@@ -5,8 +5,9 @@
 #ifndef mozilla_net_ProxyConfigLookupChild_h
 #define mozilla_net_ProxyConfigLookupChild_h
 
-#include "mozilla/net/PProxyConfigLookupChild.h"
 #include <functional>
+
+#include "mozilla/net/PProxyConfigLookupChild.h"
 
 class nsIProxyInfo;
 
@@ -18,6 +19,7 @@ class ProxyConfigLookupChild final : public PProxyConfigLookupChild {
   NS_INLINE_DECL_REFCOUNTING(ProxyConfigLookupChild, override)
 
   static bool Create(nsIURI* aURI, uint32_t aProxyResolveFlags,
+                     bool aIsTRRServiceChannel,
                      std::function<void(nsIProxyInfo*, nsresult)>&& aCallback);
 
   mozilla::ipc::IPCResult Recv__delete__(

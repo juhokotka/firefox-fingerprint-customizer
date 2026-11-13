@@ -16,7 +16,6 @@
 #include "./xsimd_config.hpp"
 #include "./xsimd_cpuid.hpp"
 
-#include <initializer_list>
 #include <type_traits>
 #include <utility>
 
@@ -40,22 +39,6 @@ namespace xsimd
 
     namespace detail
     {
-        // Checks whether T appears in Tys.
-        template <class T, class... Tys>
-        struct contains;
-
-        template <class T>
-        struct contains<T> : std::false_type
-        {
-        };
-
-        template <class T, class Ty, class... Tys>
-        struct contains<T, Ty, Tys...>
-            : std::conditional_t<std::is_same<Ty, T>::value, std::true_type,
-                                 contains<T, Tys...>>
-        {
-        };
-
         template <typename T>
         XSIMD_INLINE constexpr T max_of(T value) noexcept
         {
@@ -100,13 +83,13 @@ namespace xsimd
         template <class Arch>
         static constexpr bool contains() noexcept
         {
-            return detail::contains<Arch, Archs...>::value;
+            return (std::is_same_v<Arch, Archs> || ...);
         }
 
         template <class F>
         static XSIMD_INLINE void for_each(F&& f) noexcept
         {
-            (void)std::initializer_list<bool> { (f(Archs {}), true)... };
+            (f(Archs {}), ...);
         }
 
         static constexpr std::size_t alignment() noexcept
@@ -163,7 +146,7 @@ namespace xsimd
 
     using all_x86_architectures = arch_list<
         avx512vnni<avx512vbmi2>, avx512vbmi2, avx512vbmi, avx512ifma, avx512pf, avx512vnni<avx512bw>, avx512bw, avx512er, avx512dq, avx512vl, avx512cd, avx512f,
-        avxvnni, avx512vl_256, fma3<avx2>, avx2, fma3<avx>, avx, avx512vl_128, avx2_128, avx_128, fma4, fma3<sse4_2>,
+        avx512vl_256, avxvnni, fma3<avx2>, avx2, fma3<avx>, avx, avx512vl_128, avx2_128, avx_128, fma4, fma3<sse4_2>,
         sse4_2, sse4_1, /*sse4a,*/ ssse3, sse3, sse2>;
 
     using all_sve_architectures = arch_list<detail::sve<512>, detail::sve<256>, detail::sve<128>>;

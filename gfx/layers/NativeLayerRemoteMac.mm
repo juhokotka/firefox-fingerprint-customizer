@@ -8,9 +8,9 @@
 #include <utility>
 
 #include "CFTypeRefPtr.h"
+#include "GLBlitHelper.h"
 #include "gfxPlatform.h"
 #include "gfxUtils.h"
-#include "GLBlitHelper.h"
 #ifdef XP_MACOSX
 #  include "GLContextCGL.h"
 #else
@@ -18,11 +18,11 @@
 #endif
 #include "GLContextProvider.h"
 #include "MozFramebuffer.h"
+#include "NativeLayerCA.h"
+#include "ScopedGLHelpers.h"
 #include "mozilla/gfx/Swizzle.h"
 #include "mozilla/glean/GfxMetrics.h"
 #include "mozilla/webrender/RenderMacIOSurfaceTextureHost.h"
-#include "NativeLayerCA.h"
-#include "ScopedGLHelpers.h"
 
 namespace mozilla {
 namespace layers {
@@ -78,17 +78,20 @@ void NativeLayerRemoteMac::AttachExternalImage(
   mIsDRM = isDRM;
 
   MacIOSurface* macIOSurface = texture->GetSurface();
-  mIsHDR = macIOSurface->IsHDRSurface() && gfxPlatform::UseHDR();
+  bool isHDR = macIOSurface->IsHDRSurface() && gfxPlatform::UseHDR();
+  bool changedIsHDR = mIsHDR != isHDR;
+  mIsHDR = isHDR;
 
   mDirtyLayerInfo |= changedDisplayRect;
   mSnapshotLayer.mMutatedFrontSurface = true;
   mSnapshotLayer.mMutatedSize |= changedDisplayRect;
   mSnapshotLayer.mMutatedDisplayRect |= changedDisplayRect;
   mSnapshotLayer.mMutatedIsDRM |= changedIsDRM;
+  mSnapshotLayer.mMutatedIsHDR |= changedIsHDR;
   mDirtyChangedSurface = true;
 }
 
-GpuFence* NativeLayerRemoteMac::GetGpuFence() { return nullptr; }
+RefPtr<GpuFence> NativeLayerRemoteMac::GetGpuFence() { return nullptr; }
 
 IntSize NativeLayerRemoteMac::GetSize() {
   if (mSurfaceHandler) {
@@ -245,7 +248,8 @@ void NativeLayerRemoteMac::FlushDirtyLayerInfoToCommandQueue() {
     }
 
     mCommandQueue->AppendCommand(mozilla::layers::CommandChangedSurface(
-        ID, std::move(surfacePort), IsDRM(), IsHDR(), GetSize()));
+        ID, mozilla::layers::SurfaceTransferMacOS(std::move(surfacePort)),
+        IsDRM(), IsHDR(), GetSize()));
     mDirtyChangedSurface = false;
   }
 
@@ -273,7 +277,7 @@ void NativeLayerRemoteMac::UpdateSnapshotLayer() {
       NativeLayerCAUpdateType::All, rect.Size(), mIsOpaque, rect.TopLeft(),
       mTransform, displayRect, mClipRect, mRoundedClipRect, mBackingScale,
       mSurfaceIsFlipped, mSamplingFilter, specializeVideo, surface, mColor,
-      mIsDRM, isVideo);
+      isVideo, mIsDRM, mIsHDR);
 }
 
 CALayer* NativeLayerRemoteMac::CALayerForSnapshot() {

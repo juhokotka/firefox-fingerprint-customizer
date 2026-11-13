@@ -63,16 +63,21 @@ void
 PK11_DestroyContext(PK11Context *context, PRBool freeit)
 {
     pk11_CloseSession(context->slot, context->session, context->ownSession);
-    /* initialize the critical fields of the context */
-    if (context->savedData != NULL)
+    if (context->savedData != NULL) {
         PORT_Free(context->savedData);
-    if (context->key)
-        PK11_FreeSymKey(context->key);
-    if (context->param && context->param != &pk11_null_params)
+    }
+    PK11_FreeSymKey(context->key);
+    if (context->param && context->param != &pk11_null_params) {
         SECITEM_FreeItem(context->param, PR_TRUE);
-    if (context->sessionLock)
+    }
+    if (context->sessionLock) {
         PR_DestroyLock(context->sessionLock);
+    }
     PK11_FreeSlot(context->slot);
+    /* With freeit == PR_FALSE the caller keeps the struct, so zero it out.
+     * This clears the dangling pointers and marks the context uninitialized
+     * (note that CK_INVALID_HANDLE is 0). */
+    PORT_Memset(context, 0, sizeof(*context));
     if (freeit)
         PORT_Free(context);
 }
@@ -696,30 +701,28 @@ PK11_CloneContext(PK11Context *old)
 SECStatus
 PK11_SaveContext(PK11Context *cx, unsigned char *save, int *len, int saveLength)
 {
-    unsigned char *data = NULL;
-    CK_ULONG length = saveLength;
+    unsigned char *data;
+    unsigned int length = 0;
 
-    if (cx->ownSession) {
-        PK11_EnterContextMonitor(cx);
-        data = pk11_saveContextHelper(cx, save, &length);
-        PK11_ExitContextMonitor(cx);
-        if (data)
-            *len = length;
-    } else if ((unsigned)saveLength >= cx->savedLength) {
-        data = (unsigned char *)cx->savedData;
-        if (cx->savedData) {
-            PORT_Memcpy(save, cx->savedData, cx->savedLength);
-        }
-        *len = cx->savedLength;
-    }
-    if (data != NULL) {
-        if (cx->ownSession) {
-            PORT_ZFree(data, length);
-        }
-        return SECSuccess;
-    } else {
+    if (save == NULL || len == NULL || saveLength < 0) {
+        PORT_SetError(SEC_ERROR_INVALID_ARGS);
         return SECFailure;
     }
+
+    data = PK11_SaveContextAlloc(cx, save, (unsigned int)saveLength, &length);
+    if (data == NULL) {
+        return SECFailure;
+    }
+    if (data != save) {
+        /* PK11_SaveContextAlloc allocated a temporary because the state did
+         * not fit in `save`.  We can't hand that buffer back through this API,
+         * so free it and report failure. */
+        PORT_ZFree(data, length);
+        PORT_SetError(SEC_ERROR_OUTPUT_LEN);
+        return SECFailure;
+    }
+    *len = (int)length;
+    return SECSuccess;
 }
 
 /* same as above, but may allocate the return buffer. */
@@ -777,23 +780,6 @@ PK11_RestoreContext(PK11Context *cx, unsigned char *save, int len)
         }
     }
     return rv;
-}
-
-/*
- * This is  to get FIPS compliance until we can convert
- * libjar to use PK11_ hashing functions. It returns PR_FALSE
- * if we can't get a PK11 Context.
- */
-PRBool
-PK11_HashOK(SECOidTag algID)
-{
-    PK11Context *cx;
-
-    cx = PK11_CreateDigestContext(algID);
-    if (cx == NULL)
-        return PR_FALSE;
-    PK11_DestroyContext(cx, PR_TRUE);
-    return PR_TRUE;
 }
 
 /*
@@ -1191,6 +1177,10 @@ pk11_AEADSimulateOp(PK11Context *context, void *params, int paramslen,
                 return SECFailure;
             }
             ccm_message = (CK_CCM_MESSAGE_PARAMS *)params;
+            if (ccm_message->ulMACLen > 16) {
+                PORT_SetError(SEC_ERROR_INVALID_ARGS);
+                return SECFailure;
+            }
             ccm.ulDataLen = ccm_message->ulDataLen;
             ccm.pNonce = ccm_message->pNonce;
             ccm.ulNonceLen = ccm_message->ulNonceLen;
@@ -1218,6 +1208,10 @@ pk11_AEADSimulateOp(PK11Context *context, void *params, int paramslen,
                 return SECFailure;
             }
             gcm_message = (CK_GCM_MESSAGE_PARAMS *)params;
+            if (gcm_message->ulTagBits > 128) {
+                PORT_SetError(SEC_ERROR_INVALID_ARGS);
+                return SECFailure;
+            }
             gcm.pIv = gcm_message->pIv;
             gcm.ulIvLen = gcm_message->ulIvLen;
             gcm.ulIvBits = gcm.ulIvLen * PR_BITS_PER_BYTE;
@@ -1372,6 +1366,10 @@ PK11_AEADOp(PK11Context *context, CK_GENERATOR_FUNCTION ivgen,
         case CKM_CHACHA20_POLY1305:
         case CKM_SALSA20_POLY1305:
         case CKM_NSS_CHACHA20_POLY1305:
+            if (taglen != 16) {
+                PORT_SetError(SEC_ERROR_INVALID_ARGS);
+                return SECFailure;
+            }
             chacha_poly_message.pNonce = iv;
             chacha_poly_message.ulNonceLen = ivlen;
             chacha_poly_message.pTag = tag;

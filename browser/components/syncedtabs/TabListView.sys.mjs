@@ -9,7 +9,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
 });
 
-import { getChromeWindow } from "resource:///modules/syncedtabs/util.sys.mjs";
+import { getChromeWindow } from "moz-src:///browser/components/syncedtabs/util.sys.mjs";
 
 function getContextMenu(window) {
   return getChromeWindow(window).document.getElementById(
@@ -367,6 +367,7 @@ TabListView.prototype = {
     if (item) {
       this.props.onOpenTab(item.dataset.url, "tab", {
         userContextId: parseInt(event.target?.dataset.usercontextid),
+        eventDetail: { containerSource: "synced_tabs_context_menu" },
       });
     }
   },

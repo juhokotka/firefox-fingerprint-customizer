@@ -125,6 +125,7 @@ function watchUnlockState(emitChange) {
 document.addEventListener("paneshown", event => {
   if (event.detail?.category === "paneBrowserIcon") {
     refreshUnlockState();
+    lazy.CustomIconManager.refreshTaskbarButtons();
   }
 });
 
@@ -268,6 +269,15 @@ Preferences.addSetting({
   visible: () => !gIconsUnlocked,
 });
 
+// Success promo on the Bonus card, shown once the icons are unlocked (the
+// inverse of customBrowserIconRequirement). Shares watchUnlockState so it
+// re-renders when the async default/pin check resolves.
+Preferences.addSetting({
+  id: "customBrowserIconUnlocked",
+  setup: watchUnlockState,
+  visible: () => gIconsUnlocked,
+});
+
 // Action buttons in the promo header. Each is shown only while its condition is
 // unmet, performs that single action, then re-checks state so the UI (buttons,
 // promo, Bonus picker) updates.
@@ -304,7 +314,7 @@ SettingGroupManager.registerGroups({
     ],
   },
   browserIconBonus: {
-    l10nId: "appearance-browser-icon-bonus-group",
+    l10nId: "appearance-browser-icon-bonus-group2",
     headingLevel: 2,
     items: [
       {
@@ -330,6 +340,16 @@ SettingGroupManager.registerGroups({
             slot: "actions",
           },
         ],
+      },
+      {
+        id: "customBrowserIconUnlocked",
+        l10nId: "appearance-browser-icon-unlocked",
+        control: "moz-promo",
+        controlAttrs: {
+          imagesrc: "chrome://global/skin/illustrations/kit-confetti.svg",
+          imagewidth: "small",
+          imagedisplay: "cover",
+        },
       },
       {
         id: "customBrowserIconBonus",

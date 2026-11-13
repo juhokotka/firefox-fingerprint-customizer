@@ -232,6 +232,10 @@ add_task(async function test_bonus_icons_unlock_on_default_and_pin() {
         "customBrowserIconRequirement",
         win
       );
+      let unlockedPromo = await settingControlRenders(
+        "customBrowserIconUnlocked",
+        win
+      );
       let setDefaultButton = await settingControlRenders(
         "browserIconSetDefaultButton",
         win
@@ -247,6 +251,10 @@ add_task(async function test_bonus_icons_unlock_on_default_and_pin() {
       ok(
         !BrowserTestUtils.isHidden(promo),
         "Requirement promo shown while locked"
+      );
+      ok(
+        BrowserTestUtils.isHidden(unlockedPromo),
+        "Unlocked promo hidden while locked"
       );
       ok(
         !BrowserTestUtils.isHidden(setDefaultButton),
@@ -295,6 +303,10 @@ add_task(async function test_bonus_icons_unlock_on_default_and_pin() {
       await TestUtils.waitForCondition(
         () => BrowserTestUtils.isHidden(promo),
         "Requirement promo hidden once unlocked"
+      );
+      ok(
+        !BrowserTestUtils.isHidden(unlockedPromo),
+        "Unlocked promo shown once unlocked"
       );
     } finally {
       sandbox.restore();

@@ -6,6 +6,7 @@
 
 /* This must occur *after* base/basictypes.h to avoid typedefs conflicts. */
 #include "mozilla/Base64.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/ResultExtensions.h"
 
 #include "mozilla/dom/ContentChild.h"
@@ -13,6 +14,7 @@
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/WindowContext.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/RandomNum.h"
 #include "mozilla/ScopeExit.h"
@@ -68,6 +70,7 @@
 
 #include "nsIApplicationReputation.h"
 
+#include "nsContentUtils.h"
 #include "nsDSURIContentListener.h"
 #include "nsMimeTypes.h"
 #include "nsMIMEInfoImpl.h"
@@ -972,6 +975,49 @@ static const char kExternalProtocolDefaultPref[] =
     "network.protocol-handler.external-default";
 
 // static
+bool nsExternalHelperAppService::SchemeRequiresUserActivationToLaunch(
+    nsIPrincipal* aTriggeringPrincipal, const nsACString& aScheme) {
+  if (!StaticPrefs::network_protocol_handler_prompt_without_user_activation()) {
+    return false;
+  }
+
+  // Only web content has to prove user activation; chrome and extensions are
+  // trusted to launch these protocols on their own. This mirrors the exemption
+  // in nsContentDispatchChooser._hasProtocolHandlerPermission, so that we never
+  // consume an activation for a load that isn't going to be gated. Both
+  // allowlist privileged principals; everything else is gated.
+  if (aTriggeringPrincipal &&
+      (aTriggeringPrincipal->IsSystemPrincipal() ||
+       aTriggeringPrincipal->GetIsAddonOrExpandedAddonPrincipal())) {
+    return false;
+  }
+
+  // Only schemes that would otherwise launch without a prompt (i.e. those with
+  // `network.protocol-handler.external.<scheme>` set) are gated. Currently this
+  // is only mailto.
+  nsAutoCString externalPref(kExternalProtocolPrefPrefix);
+  externalPref += aScheme;
+  return Preferences::GetBool(externalPref.get(), false);
+}
+
+// static
+void nsExternalHelperAppService::MaybeConsumeUserActivationForExternalScheme(
+    mozilla::dom::WindowContext* aWindowContext,
+    nsIPrincipal* aTriggeringPrincipal, const nsACString& aScheme) {
+  // A null window context is expected: a document being torn down or not yet
+  // associated with an inner window has none, and then there is no activation
+  // to consume. When we do have one it must be in-process, because
+  // ConsumeTransientUserGestureActivation() only acts on the process hosting
+  // the context; an out-of-process context would silently no-op and let a
+  // single gesture chain multiple launches.
+  MOZ_DIAGNOSTIC_ASSERT(!aWindowContext || aWindowContext->IsInProcess());
+  if (aWindowContext &&
+      SchemeRequiresUserActivationToLaunch(aTriggeringPrincipal, aScheme)) {
+    aWindowContext->ConsumeTransientUserGestureActivation();
+  }
+}
+
+// static
 nsresult nsExternalHelperAppService::EscapeURI(nsIURI* aURI, nsIURI** aResult) {
   MOZ_ASSERT(aURI);
   MOZ_ASSERT(aResult);
@@ -1177,7 +1223,7 @@ nsExternalHelperAppService::LoadURI(nsIURI* aURI,
   return chooser->HandleURI(
       handler, escapedURI,
       aRedirectPrincipal ? aRedirectPrincipal : aTriggeringPrincipal,
-      aBrowsingContext, aTriggeredExternally);
+      aBrowsingContext, aTriggeredExternally, aHasValidUserGestureActivation);
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1827,6 +1873,16 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
   bool shouldAutomaticallyHandleInternally =
       action == nsIMIMEInfo::handleInternally;
 
+  // The built-in viewer is the only way to handle a PDF internally, so when it
+  // is disabled the user has to be asked instead: launching the file would fail
+  // because nsIMIMEInfo::handleInternally has no application to launch.
+  if (shouldAutomaticallyHandleInternally &&
+      MIMEType.EqualsLiteral(APPLICATION_PDF) &&
+      !nsContentUtils::IsPDFJSEnabled()) {
+    shouldAutomaticallyHandleInternally = false;
+    alwaysAsk = true;
+  }
+
   if (aChannel) {
     uint32_t disposition = -1;
     aChannel->GetContentDisposition(&disposition);
@@ -1955,7 +2011,7 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
 bool nsExternalAppHandler::IsDownloadSpam(nsIChannel* aChannel) {
   nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
   nsCOMPtr<nsIPermissionManager> permissionManager =
-      mozilla::services::GetPermissionManager();
+      mozilla::components::PermissionManager::Service();
   nsCOMPtr<nsIPrincipal> principal = loadInfo->TriggeringPrincipal();
   bool exactHostMatch = false;
   constexpr auto type = "automatic-download"_ns;
@@ -2386,10 +2442,10 @@ nsresult nsExternalAppHandler::CreateTransfer() {
         mDownloadClassification, referrerInfo, !mDialogShowing,
         mBrowsingContext, mHandleInternally, nullptr);
   } else {
-    rv = transfer->Init(mSourceUrl, nullptr, target, u""_ns, mMimeInfo,
-                        mTimeDownloadStarted, mTempFile, this,
-                        channel && NS_UsePrivateBrowsing(channel),
-                        mDownloadClassification, referrerInfo, !mDialogShowing);
+    rv = transfer->Init(
+        mSourceUrl, nullptr, target, u""_ns, mMimeInfo, mTimeDownloadStarted,
+        mTempFile, this, channel && NS_UsePrivateBrowsing(channel),
+        mDownloadClassification, referrerInfo, !mDialogShowing, nullptr);
   }
   mDialogShowing = false;
 
@@ -2483,7 +2539,7 @@ nsresult nsExternalAppHandler::CreateFailedTransfer() {
     rv = transfer->Init(mSourceUrl, nullptr, pseudoTarget, u""_ns, mMimeInfo,
                         mTimeDownloadStarted, mTempFile, this,
                         channel && NS_UsePrivateBrowsing(channel),
-                        mDownloadClassification, referrerInfo, true);
+                        mDownloadClassification, referrerInfo, true, nullptr);
   }
   NS_ENSURE_SUCCESS(rv, rv);
 

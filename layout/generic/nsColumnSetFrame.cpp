@@ -43,7 +43,7 @@ class nsDisplayColumnRule final : public nsPaintedDisplayItem {
     return mFrame->InkOverflowRect() + ToReferenceFrame();
   }
 
-  bool CreateWebRenderCommands(
+  WebRenderCommandsResult CreateWebRenderCommands(
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
@@ -68,7 +68,7 @@ void nsDisplayColumnRule::Paint(nsDisplayListBuilder* aBuilder,
   }
 }
 
-bool nsDisplayColumnRule::CreateWebRenderCommands(
+WebRenderCommandsResult nsDisplayColumnRule::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
@@ -76,7 +76,7 @@ bool nsDisplayColumnRule::CreateWebRenderCommands(
     nsDisplayListBuilder* aDisplayListBuilder) {
   RefPtr dt = gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget();
   if (!dt || !dt->IsValid()) {
-    return false;
+    return Err("no valid screen reference draw target");
   }
   gfxContext screenRefCtx(dt);
 
@@ -86,14 +86,14 @@ bool nsDisplayColumnRule::CreateWebRenderCommands(
       ToReferenceFrame());
 
   if (mBorderRenderers.IsEmpty()) {
-    return true;
+    return Ok();
   }
 
   for (auto& renderer : mBorderRenderers) {
     renderer.CreateWebRenderCommands(this, aBuilder, aResources, aSc);
   }
 
-  return true;
+  return Ok();
 }
 
 // The maximum number of columns we support.
@@ -664,9 +664,12 @@ nsColumnSetFrame::ColumnBalanceData nsColumnSetFrame::ReflowColumns(
           aConfig.mIsInMeasuringReflow;
       kidReflowInput.mBreakType = BreakType::Column;
 
-      // We need to reflow any float placeholders, even if our column block-size
-      // hasn't changed.
-      kidReflowInput.mFlags.mMustReflowPlaceholders = !changingBSize;
+      // We need to reflow any float placeholders even if our column block-size
+      // hasn't changed, or when reflowing the last column with an unconstrained
+      // available block-size, so floats pushed during an earlier reflow get
+      // reflowed again.
+      kidReflowInput.mFlags.mMustReflowPlaceholders =
+          !changingBSize || reflowLastColumnWithUnconstrainedAvailBSize;
 
       COLUMN_SET_LOG(
           "%s: Reflowing child #%d %p: availSize=(%d,%d), kidCBSize=(%d,%d), "

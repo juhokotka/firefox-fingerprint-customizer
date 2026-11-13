@@ -3,12 +3,6 @@
 
 "use strict";
 
-add_setup(async function () {
-  await SpecialPowers.pushPrefEnv({
-    set: [["test.wait300msAfterTabSwitch", true]],
-  });
-});
-
 add_task(async function () {
   const tab = await BrowserTestUtils.openNewForegroundTab(
     gBrowser,
@@ -93,7 +87,7 @@ add_task(async function () {
 
   const onSecondLocationChanged = waitForNextLocationChange(webProgress);
   const onSecondPageDocumentStart = waitForNextDocumentStart(webProgress);
-  // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+  // eslint-disable-next-line sdl/no-insecure-url
   const secondLocation = "http://example.com/document-builder.sjs?html=com";
   loaded = BrowserTestUtils.browserLoaded(browser);
   BrowserTestUtils.startLoadingURIString(browser, secondLocation);

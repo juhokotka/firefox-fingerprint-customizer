@@ -9,11 +9,11 @@
 #ifndef mozilla_ArrayUtils_h
 #define mozilla_ArrayUtils_h
 
-#include "mozilla/Assertions.h"
-#include "mozilla/Attributes.h"
-
 #include <stddef.h>
 #include <stdint.h>
+
+#include "mozilla/Assertions.h"
+#include "mozilla/Attributes.h"
 
 #ifdef __cplusplus
 #  include <algorithm>
@@ -85,9 +85,8 @@ struct AlignedChecker<AlignType, Pointee,
  * particular alignment).
  */
 template <typename T, typename U>
-inline std::enable_if_t<std::is_same_v<T, U> || std::is_base_of<T, U>::value ||
-                            std::is_void_v<T>,
-                        bool>
+inline std::enable_if_t<
+    std::is_same_v<T, U> || std::is_base_of_v<T, U> || std::is_void_v<T>, bool>
 IsInRange(const T* aPtr, const U* aBegin, const U* aEnd) {
   MOZ_ASSERT(aBegin <= aEnd);
   detail::AlignedChecker<U, T>::test(aPtr);

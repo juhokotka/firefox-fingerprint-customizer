@@ -39,6 +39,9 @@ ai-window-smart-cursor-in-smart-window =
 smart-window-model-section =
     .label = Assistant model
     .description = Choose a model based on what’s important to you.
+
+smart-window-model-radio-group =
+    .aria-label = Assistant model
 smart-window-model-learn-link = Learn about models
 
 ## Variables:
@@ -54,6 +57,22 @@ smart-window-model-flexible =
 smart-window-model-personal =
     .label = Personal: Most tailored answers
     .description = Model { $model } by { $ownerName }
+
+## Full name indicates the full version name of the model currently listed along with its publisher
+##   $shortName (string) - The display name of the model collection
+##   $model (string) - The name of the AI model
+##   $ownerName (String) - The name of owner of the AI model
+
+smart-window-model-fast-v2 =
+    .label = {$shortName}: Fast
+    .description = Best for quick answers when speed matters. Full name: { $model } by { $ownerName }
+smart-window-model-flexible-v2 =
+    .label = {$shortName}: Flexible
+    .description = Ready for a variety of tasks. Full name: { $model } by { $ownerName }
+smart-window-model-personal-v2 =
+    .label = {$shortName}: Personal
+    .description = Built for personalized help across languages. Full name: { $model } by { $ownerName }
+
 smart-window-model-custom =
     .label = Custom: Use your own LLM
 smart-window-model-custom-name =

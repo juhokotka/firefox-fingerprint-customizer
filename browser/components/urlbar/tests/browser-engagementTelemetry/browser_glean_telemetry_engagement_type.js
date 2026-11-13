@@ -18,7 +18,7 @@ add_task(async function engagement_type_click() {
     await openPopup("x");
     await doClick();
 
-    assertEngagementTelemetry([{ engagement_type: "click" }]);
+    await assertEngagementTelemetry([{ engagement_type: "click" }]);
   });
 });
 
@@ -27,7 +27,7 @@ add_task(async function engagement_type_enter() {
     await openPopup("x");
     await doEnter();
 
-    assertEngagementTelemetry([{ engagement_type: "enter" }]);
+    await assertEngagementTelemetry([{ engagement_type: "enter" }]);
   });
 });
 
@@ -36,7 +36,7 @@ add_task(async function engagement_type_go_button() {
     await openPopup("x");
     EventUtils.synthesizeMouseAtCenter(gURLBar.goButton, {});
 
-    assertEngagementTelemetry([{ engagement_type: "go_button" }]);
+    await assertEngagementTelemetry([{ engagement_type: "go_button" }]);
   });
 });
 
@@ -44,7 +44,7 @@ add_task(async function engagement_type_drop_go() {
   await doTest(async () => {
     await doDropAndGo("example.com");
 
-    assertEngagementTelemetry([{ engagement_type: "drop_go" }]);
+    await assertEngagementTelemetry([{ engagement_type: "drop_go" }]);
   });
 });
 
@@ -52,7 +52,7 @@ add_task(async function engagement_type_paste_go() {
   await doTest(async () => {
     await doPasteAndGo("www.example.com");
 
-    assertEngagementTelemetry([{ engagement_type: "paste_go" }]);
+    await assertEngagementTelemetry([{ engagement_type: "paste_go" }]);
   });
 });
 
@@ -69,7 +69,7 @@ add_task(async function engagement_type_dismiss() {
       () => originalResultCount != UrlbarTestUtils.getResultCount(window)
     );
 
-    assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
+    await assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
 
     // The view should stay open after dismissing the result. Now pick the
     // heuristic result. Another "click" engagement event should be recorded.
@@ -78,7 +78,7 @@ add_task(async function engagement_type_dismiss() {
       "View should remain open after dismissing result"
     );
     await doClick();
-    assertEngagementTelemetry([
+    await assertEngagementTelemetry([
       { engagement_type: "dismiss" },
       { engagement_type: "click", interaction: "typed" },
     ]);
@@ -94,7 +94,7 @@ add_task(async function engagement_type_dismiss() {
       () => originalResultCount != UrlbarTestUtils.getResultCount(window)
     );
 
-    assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
+    await assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
   });
 
   await cleanupQuickSuggest();
@@ -106,6 +106,7 @@ add_task(async function engagement_type_dismiss_adaptive_autofill_origin() {
       ["browser.urlbar.autoFill.adaptiveHistory.enabled", true],
       ["browser.urlbar.autoFill.adaptiveHistory.minCharsThreshold", 0],
       ["browser.urlbar.autoFill.adaptiveHistory.useCountThreshold", 0],
+      ["browser.urlbar.autoFill.adaptiveHistory.urlMinPicks", 1],
     ],
   });
 
@@ -134,7 +135,7 @@ add_task(async function engagement_type_dismiss_adaptive_autofill_origin() {
     );
     await UrlbarTestUtils.promiseSearchComplete(window);
 
-    assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
+    await assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
   });
 
   await SpecialPowers.popPrefEnv();
@@ -146,6 +147,7 @@ add_task(async function engagement_type_dismiss_adaptive_autofill_url() {
       ["browser.urlbar.autoFill.adaptiveHistory.enabled", true],
       ["browser.urlbar.autoFill.adaptiveHistory.minCharsThreshold", 0],
       ["browser.urlbar.autoFill.adaptiveHistory.useCountThreshold", 0],
+      ["browser.urlbar.autoFill.adaptiveHistory.urlMinPicks", 1],
     ],
   });
 
@@ -174,7 +176,7 @@ add_task(async function engagement_type_dismiss_adaptive_autofill_url() {
     );
     await UrlbarTestUtils.promiseSearchComplete(window);
 
-    assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
+    await assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
   });
 
   await SpecialPowers.popPrefEnv();
@@ -187,6 +189,7 @@ add_task(
         ["browser.urlbar.autoFill.adaptiveHistory.enabled", true],
         ["browser.urlbar.autoFill.adaptiveHistory.minCharsThreshold", 0],
         ["browser.urlbar.autoFill.adaptiveHistory.useCountThreshold", 0],
+        ["browser.urlbar.autoFill.adaptiveHistory.urlMinPicks", 1],
       ],
     });
 
@@ -211,7 +214,7 @@ add_task(
       });
       await UrlbarTestUtils.promiseSearchComplete(window);
 
-      assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
+      await assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
     });
 
     await SpecialPowers.popPrefEnv();
@@ -249,7 +252,7 @@ add_task(async function engagement_type_dismiss_origin_autofill() {
     );
     await UrlbarTestUtils.promiseSearchComplete(window);
 
-    assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
+    await assertEngagementTelemetry([{ engagement_type: "dismiss" }]);
   });
 
   await SpecialPowers.popPrefEnv();
@@ -287,7 +290,7 @@ add_task(async function engagement_type_help() {
     const tab = await onTabOpened;
     BrowserTestUtils.removeTab(tab);
 
-    assertEngagementTelemetry([{ engagement_type: "help" }]);
+    await assertEngagementTelemetry([{ engagement_type: "help" }]);
   });
 
   providersManager.unregisterProvider(provider);
@@ -308,7 +311,7 @@ add_task(async function engagement_type_manage() {
     UrlbarTestUtils.openResultMenuAndPressAccesskey(window, "M");
     await onManagePageLoaded;
 
-    assertEngagementTelemetry([{ engagement_type: "manage" }]);
+    await assertEngagementTelemetry([{ engagement_type: "manage" }]);
   });
 
   await cleanupQuickSuggest();

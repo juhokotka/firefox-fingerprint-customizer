@@ -5,10 +5,10 @@
 #ifndef PageThumbProtocolHandler_h_
 #define PageThumbProtocolHandler_h_
 
-#include "mozilla/Result.h"
-#include "mozilla/MozPromise.h"
-#include "mozilla/net/RemoteStreamGetter.h"
 #include "SubstitutingProtocolHandler.h"
+#include "mozilla/MozPromise.h"
+#include "mozilla/Result.h"
+#include "mozilla/net/RemoteStreamGetter.h"
 #include "nsIInputStream.h"
 #include "nsWeakReference.h"
 

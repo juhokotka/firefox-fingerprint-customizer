@@ -6,6 +6,7 @@
 #define jit_riscv64_MoveEmitter_riscv64_h
 
 #include "mozilla/Assertions.h"
+
 #include "jit/MacroAssembler.h"
 #include "jit/riscv64/Architecture-riscv64.h"
 namespace js {

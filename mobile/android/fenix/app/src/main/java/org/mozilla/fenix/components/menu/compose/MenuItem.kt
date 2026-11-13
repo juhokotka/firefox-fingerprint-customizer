@@ -54,13 +54,13 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import mozilla.components.compose.base.button.IconButton
 import mozilla.components.compose.base.modifier.thenConditional
+import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.menu.MenuDialogTestTag.WEB_EXTENSION_ITEM
 import org.mozilla.fenix.compose.list.IconListItem
 import org.mozilla.fenix.compose.list.TextListItem
 import org.mozilla.fenix.theme.FirefoxTheme
 import org.mozilla.fenix.utils.DURATION_MS_MAIN_MENU_ITEM
-import mozilla.components.ui.icons.R as iconsR
 
 private val MENU_ITEM_HEIGHT_WITHOUT_DESC = 52.dp
 
@@ -77,18 +77,16 @@ private val MENU_ITEM_HEIGHT_WITH_DESC = 56.dp
  * @param isBeforeIconHighlighted Whether or not the menu item should be highlighted with a notification icon.
  * @param description An optional description text below the label.
  * @param maxDescriptionLines An optional maximum number of lines for the description text to span.
- * @param stateDescription Extra content description about state to be added after the label
- * and description.
+ * @param stateDescription Extra content description about state to be added after the label and description.
  * @param state The state of the menu item to display.
  * @param descriptionState The state of menu item description to display.
  * @param onClick Invoked when the user clicks on the item.
- * @param showDivider Whether or not to display a vertical divider line before the [IconButton]
- * at the end.
+ * @param showDivider Whether or not to display a vertical divider line before the [IconButton] at the end.
  * @param afterIconPainter [Painter] used to display an [IconButton] after the list item.
  * @param afterIconDescription Content description of the icon.
  * @param collectionItemInfo [CollectionItemInfo] to be applied to the MenuItem.
- * @param onAfterIconClick Invoked when the user clicks on the icon. An [IconButton] will be
- * displayed if this is provided. Otherwise, an [Icon] will be displayed.
+ * @param onAfterIconClick Invoked when the user clicks on the icon. An [IconButton] will be displayed if this is
+ *   provided. Otherwise, an [Icon] will be displayed.
  * @param afterContent Optional Composable for adding UI to the end of the list item.
  */
 @Composable
@@ -129,44 +127,45 @@ internal fun MenuItem(
 
     IconListItem(
         label = label,
-        modifier = modifier
-            .clearAndSetSemantics {
-                if (onClick != null || state == MenuItemState.DISABLED) {
-                    role = Role.Button
-                }
-                this.contentDescription = contentDescription
-                if (collectionItemInfo != null) {
-                    this.collectionItemInfo = collectionItemInfo
-                }
-                if (!enabled) {
-                    disabled()
-                }
-                if (onClick != null && enabled) {
-                    onClick {
-                        onClick()
-                        true
+        modifier =
+            modifier
+                .clearAndSetSemantics {
+                    if (onClick != null || state == MenuItemState.DISABLED) {
+                        role = Role.Button
+                    }
+                    this.contentDescription = contentDescription
+                    if (collectionItemInfo != null) {
+                        this.collectionItemInfo = collectionItemInfo
+                    }
+                    if (!enabled) {
+                        disabled()
+                    }
+                    if (onClick != null && enabled) {
+                        onClick {
+                            onClick()
+                            true
+                        }
                     }
                 }
-            }
-            .wrapContentSize()
-            .clip(shape = MaterialTheme.shapes.extraSmall)
-            .background(
-                color = MaterialTheme.colorScheme.surfaceBright,
-            ),
+                .wrapContentSize()
+                .clip(shape = MaterialTheme.shapes.extraSmall)
+                .background(color = MaterialTheme.colorScheme.surfaceBright),
         labelModifier = labelModifier,
-        colors = ListItemDefaults.colors(
-            headlineColor = labelTextColor,
-            supportingColor = descriptionTextColor,
-        ),
+        colors =
+            ListItemDefaults.colors(
+                headlineColor = labelTextColor,
+                supportingColor = descriptionTextColor,
+            ),
         maxLabelLines = 2,
         description = description,
         maxDescriptionLines = maxDescriptionLines,
         enabled = enabled,
-        minHeight = if (description != null) {
-            MENU_ITEM_HEIGHT_WITH_DESC
-        } else {
-            MENU_ITEM_HEIGHT_WITHOUT_DESC
-        },
+        minHeight =
+            if (description != null) {
+                MENU_ITEM_HEIGHT_WITH_DESC
+            } else {
+                MENU_ITEM_HEIGHT_WITHOUT_DESC
+            },
         onClick = onClick,
         beforeIconPainter = beforeIconPainter,
         beforeIconDescription = beforeIconDescription,
@@ -187,7 +186,9 @@ internal fun MenuItem(
  * @param label The label in the menu item.
  * @param modifier [Modifier] to be applied to the layout.
  * @param description An optional description text below the label.
+ * @param maxDescriptionLines An optional maximum number of lines for the description text to span.
  * @param iconPainter [Painter] used to display an [Icon] after the list item.
+ * @param enabled Controls the enabled state of the list item. When `false`, the list item will not be clickable.
  * @param onClick Invoked when the user clicks on the item.
  */
 @Composable
@@ -195,23 +196,27 @@ internal fun MenuTextItem(
     label: String,
     modifier: Modifier = Modifier,
     description: String? = null,
+    maxDescriptionLines: Int = 1,
     iconPainter: Painter? = null,
+    enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
 ) {
     TextListItem(
         label = label,
         maxLabelLines = 2,
         description = description,
-        minHeight = if (description != null) {
-            MENU_ITEM_HEIGHT_WITH_DESC
-        } else {
-            MENU_ITEM_HEIGHT_WITHOUT_DESC
-        },
-        modifier = modifier
-            .clip(shape = MaterialTheme.shapes.extraSmall)
-            .background(
-                color = MaterialTheme.colorScheme.surfaceBright,
-            ),
+        maxDescriptionLines = maxDescriptionLines,
+        enabled = enabled,
+        minHeight =
+            if (description != null) {
+                MENU_ITEM_HEIGHT_WITH_DESC
+            } else {
+                MENU_ITEM_HEIGHT_WITHOUT_DESC
+            },
+        modifier =
+            modifier
+                .clip(shape = MaterialTheme.shapes.extraSmall)
+                .background(color = MaterialTheme.colorScheme.surfaceBright),
         iconPainter = iconPainter,
         onClick = onClick,
     )
@@ -223,8 +228,7 @@ internal fun MenuTextItem(
  * @param label The label in the list item.
  * @param iconPainter [Painter] used to display an [Icon] before the list item.
  * @param iconTint Tint color to be applied on the [Icon].
- * @param enabled Controls the enabled state of the list item. When `false`, the list item will not
- * be clickable.
+ * @param enabled Controls the enabled state of the list item. When `false`, the list item will not be clickable.
  * @param badgeText WebExtension badge text.
  * @param index The index of the item within the column.
  * @param onClick Called when the user clicks on the item.
@@ -247,25 +251,23 @@ internal fun WebExtensionMenuItem(
         beforeIconTint = iconTint,
         beforeIconPainter = iconPainter,
         onClick = onClick,
-        modifier = Modifier
-            .testTag(WEB_EXTENSION_ITEM)
-            .clearAndSetSemantics {
-                onClick?.let { role = Role.Button }
-                contentDescription = label
-                collectionItemInfo =
-                    CollectionItemInfo(
-                        rowIndex = index,
-                        rowSpan = 1,
-                        columnIndex = 0,
-                        columnSpan = 1,
-                    )
-                testTagsAsResourceId = true
-            }
-            .wrapContentSize()
-            .clip(shape = MaterialTheme.shapes.extraSmall)
-            .background(
-                color = MaterialTheme.colorScheme.surfaceBright,
-            ),
+        modifier =
+            Modifier.testTag(WEB_EXTENSION_ITEM)
+                .clearAndSetSemantics {
+                    onClick?.let { role = Role.Button }
+                    contentDescription = label
+                    collectionItemInfo =
+                        CollectionItemInfo(
+                            rowIndex = index,
+                            rowSpan = 1,
+                            columnIndex = 0,
+                            columnSpan = 1,
+                        )
+                    testTagsAsResourceId = true
+                }
+                .wrapContentSize()
+                .clip(shape = MaterialTheme.shapes.extraSmall)
+                .background(color = MaterialTheme.colorScheme.surfaceBright),
         afterListAction = {
             Row(
                 modifier = Modifier.padding(start = 16.dp),
@@ -273,9 +275,7 @@ internal fun WebExtensionMenuItem(
                 horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End),
             ) {
                 if (!badgeText.isNullOrEmpty()) {
-                    Badge(
-                        badgeText = badgeText,
-                    )
+                    Badge(badgeText = badgeText)
                 }
 
                 if (onSettingsClick != null) {
@@ -288,7 +288,7 @@ internal fun WebExtensionMenuItem(
                     ) {
                         Icon(
                             painter = painterResource(iconsR.drawable.mozac_ic_settings_24),
-                            tint = MaterialTheme.colorScheme.onSurface,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             contentDescription = null,
                         )
                     }
@@ -308,49 +308,45 @@ internal fun MenuBadgeItem(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    val state: MenuItemState = if (checked) {
-        MenuItemState.ACTIVE
-    } else {
-        MenuItemState.DISABLED
-    }
+    val state: MenuItemState =
+        if (checked) {
+            MenuItemState.ACTIVE
+        } else {
+            MenuItemState.DISABLED
+        }
 
     Row(
-        modifier = modifier
-            .thenConditional(
-                Modifier.clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = LocalIndication.current,
-                ) { onClick() },
-                ) { enabled }
-            .thenConditional(
-                Modifier.semantics { disabled() },
-            ) { !enabled }
-            .semantics { disabled() }
-            .clip(shape = MaterialTheme.shapes.extraSmall)
-            .background(
-                color = MaterialTheme.colorScheme.surfaceBright,
-            )
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier =
+            modifier
+                .thenConditional(
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = LocalIndication.current,
+                    ) {
+                        onClick()
+                    }
+                ) {
+                    enabled
+                }
+                .thenConditional(Modifier.semantics { disabled() }) { !enabled }
+                .semantics { disabled() }
+                .clip(shape = MaterialTheme.shapes.extraSmall)
+                .background(color = MaterialTheme.colorScheme.surfaceBright)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(
-            modifier = Modifier.weight(1f),
-        ) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = label,
-                modifier = Modifier
-                    .defaultMinSize(minHeight = 24.dp)
-                    .wrapContentHeight(),
+                modifier = Modifier.defaultMinSize(minHeight = 24.dp).wrapContentHeight(),
                 color = getLabelTextColor(state),
                 style = FirefoxTheme.typography.body1,
             )
 
             Text(
                 text = description,
-                modifier = Modifier
-                    .defaultMinSize(minHeight = 20.dp)
-                    .wrapContentHeight(),
+                modifier = Modifier.defaultMinSize(minHeight = 20.dp).wrapContentHeight(),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = FirefoxTheme.typography.caption,
             )
@@ -366,13 +362,15 @@ internal fun MenuBadgeItem(
 @Composable
 internal fun Badge(
     badgeText: String,
+    modifier: Modifier = Modifier,
     state: MenuItemState = MenuItemState.ENABLED,
 ) {
     Column(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(color = getBadgeColor(state))
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier =
+            modifier
+                .clip(CircleShape)
+                .background(color = getBadgeColor(state))
+                .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -393,30 +391,38 @@ internal fun ExpandableMenuItemAnimation(
 ) {
     AnimatedVisibility(
         visible = isExpanded,
-        enter = expandVertically(
-            expandFrom = Alignment.Top,
-            animationSpec = tween(
-                durationMillis = DURATION_MS_MAIN_MENU_ITEM,
-                easing = LinearEasing,
-            ),
-        ) + fadeIn(
-            animationSpec = tween(
-                durationMillis = DURATION_MS_MAIN_MENU_ITEM,
-                easing = LinearEasing,
-            ),
-        ),
-        exit = shrinkVertically(
-            shrinkTowards = Alignment.Top,
-            animationSpec = tween(
-                durationMillis = DURATION_MS_MAIN_MENU_ITEM,
-                easing = LinearEasing,
-            ),
-        ) + fadeOut(
-            animationSpec = tween(
-                durationMillis = DURATION_MS_MAIN_MENU_ITEM,
-                easing = LinearEasing,
-            ),
-        ),
+        enter =
+            expandVertically(
+                expandFrom = Alignment.Top,
+                animationSpec =
+                    tween(
+                        durationMillis = DURATION_MS_MAIN_MENU_ITEM,
+                        easing = LinearEasing,
+                    ),
+            ) +
+                fadeIn(
+                    animationSpec =
+                        tween(
+                            durationMillis = DURATION_MS_MAIN_MENU_ITEM,
+                            easing = LinearEasing,
+                        )
+                ),
+        exit =
+            shrinkVertically(
+                shrinkTowards = Alignment.Top,
+                animationSpec =
+                    tween(
+                        durationMillis = DURATION_MS_MAIN_MENU_ITEM,
+                        easing = LinearEasing,
+                    ),
+            ) +
+                fadeOut(
+                    animationSpec =
+                        tween(
+                            durationMillis = DURATION_MS_MAIN_MENU_ITEM,
+                            easing = LinearEasing,
+                        )
+                ),
     ) {
         Column {
             content()
@@ -424,33 +430,21 @@ internal fun ExpandableMenuItemAnimation(
     }
 }
 
-/**
- * Enum containing all the supported state for the menu item.
- */
+/** Enum containing all the supported state for the menu item. */
 enum class MenuItemState {
-    /**
-     * The menu item is enabled.
-     */
+    /** The menu item is enabled. */
     ENABLED,
 
-    /**
-     * The menu item is disabled and is not clickable.
-     */
+    /** The menu item is disabled and is not clickable. */
     DISABLED,
 
-    /**
-     * The menu item is highlighted to indicate the feature behind the menu item is active.
-     */
+    /** The menu item is highlighted to indicate the feature behind the menu item is active. */
     ACTIVE,
 
-    /**
-     * The menu item is highlighted to indicate the feature behind the menu item is destructive.
-     */
+    /** The menu item is highlighted to indicate the feature behind the menu item is destructive. */
     WARNING,
 
-    /**
-     * The menu item is highlighted to indicate the feature behind the menu item is critical.
-     */
+    /** The menu item is highlighted to indicate the feature behind the menu item is critical. */
     CRITICAL,
 }
 
@@ -479,7 +473,7 @@ private fun getIconTint(state: MenuItemState): Color {
         MenuItemState.ACTIVE -> MaterialTheme.colorScheme.tertiary
         MenuItemState.WARNING -> MaterialTheme.colorScheme.error
         MenuItemState.CRITICAL -> Color.Unspecified
-        else -> MaterialTheme.colorScheme.onSurface
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 }
 
@@ -495,14 +489,11 @@ private fun getBadgeColor(state: MenuItemState): Color {
 @Composable
 private fun WebExtensionMenuItemPreview() {
     FirefoxTheme {
-        Column(
-            modifier = Modifier
-                .background(color = MaterialTheme.colorScheme.surface),
-        ) {
+        Column(modifier = Modifier.background(color = MaterialTheme.colorScheme.surface)) {
             WebExtensionMenuItem(
                 label = "label",
                 iconPainter = painterResource(iconsR.drawable.mozac_ic_extension_fill_24),
-                iconTint = MaterialTheme.colorScheme.onSurface,
+                iconTint = MaterialTheme.colorScheme.onSurfaceVariant,
                 enabled = true,
                 badgeText = "17",
                 onClick = {},
@@ -511,7 +502,7 @@ private fun WebExtensionMenuItemPreview() {
             // Web extensions may have multi-colored assets with no tint.
             WebExtensionMenuItem(
                 label = "colorful icon",
-                iconPainter = painterResource(iconsR.drawable.mozac_ic_shield_slash_critical_24),
+                iconPainter = painterResource(iconsR.drawable.mozac_ic_shield_slash_multicolor_24),
                 iconTint = Color.Unspecified,
                 enabled = true,
                 badgeText = "17",
@@ -526,11 +517,7 @@ private fun WebExtensionMenuItemPreview() {
 @Composable
 private fun MenuItemPreview() {
     FirefoxTheme {
-        Column(
-            modifier = Modifier
-                .background(color = MaterialTheme.colorScheme.surface)
-                .padding(16.dp),
-        ) {
+        Column(modifier = Modifier.background(color = MaterialTheme.colorScheme.surface).padding(16.dp)) {
             MenuGroup {
                 for (state in MenuItemState.entries) {
                     MenuItem(
@@ -572,9 +559,9 @@ private fun MenuItemPreview() {
 private fun MenuBadgeItemPreview() {
     FirefoxTheme {
         Column(
-            modifier = Modifier
-                .background(color = MaterialTheme.colorScheme.surface)
-                .padding(all = FirefoxTheme.layout.space.static200),
+            modifier =
+                Modifier.background(color = MaterialTheme.colorScheme.surface)
+                    .padding(all = FirefoxTheme.layout.space.static200)
         ) {
             MenuBadgeItem(
                 label = stringResource(id = R.string.protection_panel_etp_toggle_label),

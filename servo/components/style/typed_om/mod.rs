@@ -7,10 +7,10 @@
 //! https://drafts.css-houdini.org/css-typed-om-1/
 
 use crate::derives::*;
+use crate::values::CSSFloat;
 use crate::values::computed::url::ComputedUrl;
 use crate::values::generics::transform::GenericMatrix3D;
 use crate::values::specified::url::SpecifiedUrl;
-use crate::values::CSSFloat;
 use crate::{One, Zero};
 use app_units::Au;
 use servo_arc::Arc;
@@ -22,7 +22,7 @@ pub mod numeric_declaration;
 pub mod numeric_type;
 pub mod sum_value;
 
-pub use numeric_type::NumericType;
+pub use numeric_type::{NumericBaseType, NumericType};
 
 /// A single segment of an unparsed Typed OM value.
 ///
@@ -920,7 +920,7 @@ pub trait ToTyped {
     }
 }
 
-impl<'a, T> ToTyped for &'a T
+impl<T> ToTyped for &T
 where
     T: ToTyped + ?Sized,
 {

@@ -217,6 +217,10 @@ class SyncedTabsInSidebar extends SidebarPage {
     this.searchTextbox?.focus();
   }
 
+  #onCardToggle() {
+    this.dispatchEvent(new CustomEvent("folder-toggle"));
+  }
+
   handleNavigateToLink(e) {
     navigateToLink(e, undefined, { forceNewTab: false });
     // TO DO: update the below to handle multiple links opened at once. Bug 2024639
@@ -299,6 +303,7 @@ class SyncedTabsInSidebar extends SidebarPage {
       .iconSrc=${this.getDeviceIconSrc(deviceType)}
       class=${deviceType}
       @keydown=${this.keydownHandler}
+      @toggle=${this.#onCardToggle}
     >
       <sidebar-tab-list
         compactRows
@@ -325,9 +330,13 @@ class SyncedTabsInSidebar extends SidebarPage {
     return html`<moz-card
       .heading=${deviceName}
       .iconSrc=${this.getDeviceIconSrc(deviceType)}
+      type="accordion"
+      expanded
+      @keydown=${this.keydownHandler}
+      @toggle=${this.#onCardToggle}
       class=${deviceType}
-      data-l10n-id="firefoxview-syncedtabs-device-notabs"
     >
+      <p data-l10n-id="firefoxview-syncedtabs-device-notabs" class="notabs"></p>
     </moz-card>`;
   }
 
@@ -344,11 +353,14 @@ class SyncedTabsInSidebar extends SidebarPage {
       .heading=${deviceName}
       .iconSrc=${this.getDeviceIconSrc(deviceType)}
       class=${deviceType}
-      data-l10n-id="firefoxview-search-results-empty"
-      data-l10n-args=${JSON.stringify({
-        query: escapeHtmlEntities(this.controller.searchQuery),
-      })}
     >
+      <p
+        data-l10n-id="firefoxview-search-results-empty"
+        data-l10n-args=${JSON.stringify({
+          query: escapeHtmlEntities(this.controller.searchQuery),
+        })}
+        class="notabs"
+      ></p>
     </moz-card>`;
   }
 
@@ -438,17 +450,13 @@ class SyncedTabsInSidebar extends SidebarPage {
     return html`
       ${this.stylesheet()}
       <div class="sidebar-panel">
-        <sidebar-panel-header
-          data-l10n-id="sidebar-menu-syncedtabs-header"
-          data-l10n-attrs="heading"
-          view="viewTabsSidebar"
-        >
+        <div class="options-container">
           <moz-input-search
             data-l10n-id="firefoxview-search-text-box-tabs"
             data-l10n-attrs="placeholder"
             @MozInputSearch:search=${this.onSearchQuery}
           ></moz-input-search>
-        </sidebar-panel-header>
+        </div>
         <div class="sidebar-panel-scrollable-content" tabindex="-1">
           ${when(
             messageCard,
@@ -464,6 +472,7 @@ class SyncedTabsInSidebar extends SidebarPage {
     this.controller.searchQuery = e.detail.query;
     this.requestUpdate();
     Glean.browserUiInteraction.sidebarSyncedTabs.search.add(1);
+    this.treeView.resetActiveNode();
   }
 }
 

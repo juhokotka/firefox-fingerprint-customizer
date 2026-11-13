@@ -15,9 +15,10 @@ task-defaults:
         resources:
             - 'build/wheel_requirements.txt'
 
-linux64-2204-dbus-python:
+linux64-python3.10-dbus-python:
     treeherder:
         symbol: TL(py3.10-dbus-python)
+    use-python: "3.10"
     fetches:
         fetch:
             - dbus-python-1.3.2
@@ -30,37 +31,6 @@ linux64-2204-dbus-python:
     worker:
         docker-image: {in-tree: ubuntu2204-build-python-wheels}
 
-linux64-2404-dbus-python:
-    treeherder:
-        symbol: TL(py3.12-dbus-python)
-    fetches:
-        fetch:
-            - dbus-python-1.3.2
-    run:
-        arguments:
-            - -Csetup-args=-Ddoc=false
-            - -Csetup-args=-Dtests=false
-            - -Csetup-args=-Dinstalled_tests=false
-        toolchain-artifact: public/build/dbus_python-1.3.2-cp312-cp312-linux_x86_64.whl
-    worker:
-        docker-image: {in-tree: ubuntu2404-build-python-wheels}
-
-linux64-aarch64-2404-dbus-python:
-    treeherder:
-        symbol: TL(py3.12-arm64-dbus-python)
-    fetches:
-        fetch:
-            - dbus-python-1.3.2
-    run:
-        arguments:
-            - -Csetup-args=-Ddoc=false
-            - -Csetup-args=-Dtests=false
-            - -Csetup-args=-Dinstalled_tests=false
-        toolchain-artifact: public/build/dbus_python-1.3.2-cp312-cp312-linux_aarch64.whl
-    worker:
-        docker-image: {in-tree: ubuntu2404-arm64-build-python-wheels}
-    worker-type: b-linux-aarch64
-
 linux-python-dbusmock:
     treeherder:
         symbol: TL(py-python-dbusmock)
@@ -72,9 +42,10 @@ linux-python-dbusmock:
     worker:
         docker-image: {in-tree: ubuntu2404-build-python-wheels}
 
-linux64-2204-pygobject:
+linux64-python3.10-pygobject:
     treeherder:
         symbol: TL(py3.10-pygobject)
+    use-python: "3.10"
     fetches:
         fetch:
             - pygobject-3.48.2
@@ -83,20 +54,10 @@ linux64-2204-pygobject:
     worker:
         docker-image: {in-tree: ubuntu2204-build-python-wheels}
 
-linux64-2404-pygobject:
-    treeherder:
-        symbol: TL(py3.12-pygobject)
-    fetches:
-        fetch:
-            - pygobject-3.56.3
-    run:
-        toolchain-artifact: public/build/pygobject-3.56.3-cp312-cp312-linux_x86_64.whl
-    worker:
-        docker-image: {in-tree: ubuntu2404-build-python-wheels}
-
-linux64-2204-pycairo:
+linux64-python3.10-pycairo:
     treeherder:
         symbol: TL(py3.10-pycairo)
+    use-python: "3.10"
     fetches:
         fetch:
             - pycairo-1.29.0
@@ -104,14 +65,3 @@ linux64-2204-pycairo:
         toolchain-artifact: public/build/pycairo-1.29.0-cp310-cp310-linux_x86_64.whl
     worker:
         docker-image: {in-tree: ubuntu2204-build-python-wheels}
-
-linux64-2404-pycairo:
-    treeherder:
-        symbol: TL(py3.12-pycairo)
-    fetches:
-        fetch:
-            - pycairo-1.29.0
-    run:
-        toolchain-artifact: public/build/pycairo-1.29.0-cp312-cp312-linux_x86_64.whl
-    worker:
-        docker-image: {in-tree: ubuntu2404-build-python-wheels}

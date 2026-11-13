@@ -718,14 +718,19 @@ void Range::setDouble(double l, double h) {
   canHaveFractionalPart_ = ExcludesFractionalParts;
   canBeNegativeZero_ = ExcludesNegativeZero;
 
-  // If denormals are disabled, any value with exponent 0 will be immediately
-  // flushed to 0. This gives 2**53 bit patterns that compare equal to zero.
+  // If denormals are disabled, any denormal value will be immediately flushed
+  // to 0, so any bit pattern in the denormal range compares equal to zero.
   //
-  // Check whether the range [l .. h] can cross any of the 2^53 zeros. We have
-  // to be conservative as the main thread might not interpret doubles the same
-  // way as the compiler thread.
-  const double doubleMin = mozilla::BitwiseCast<double>(
-      mozilla::SpecificFloatingPointBits<double, 0, 1, 0>::value);
+  // Check whether the range [l .. h] can cross any of these zeros. We have to
+  // be conservative as the main thread might not interpret floating point
+  // values the same way as the compiler thread.
+  //
+  // This Range may describe a Float32 value, whose denormal range begins at
+  // the smallest normal binary32 (2**-126) rather than the smallest normal
+  // binary64 (2**-1022). Use the (wider) binary32 threshold so we stay
+  // conservative for both float32 and double values.
+  const double doubleMin = double(mozilla::BitwiseCast<float>(
+      mozilla::SpecificFloatingPointBits<float, 0, 1, 0>::value));
   bool includesNegative = std::isnan(l) || l < doubleMin;
   bool includesPositive = std::isnan(h) || h > -doubleMin;
   bool crossesZero = includesNegative && includesPositive;
@@ -2015,7 +2020,10 @@ bool RangeAnalysis::analyzeLoop(const MBasicBlock* header) {
     analyzeLoopPhi(iterationBound, *iter);
   }
 
-  if (!mir->compilingWasm() && !mir->outerInfo().hadBoundsCheckBailout()) {
+  // Disallow hoisting for loops that have a generator resume dispatch. This
+  // matches jit::LICM.
+  if (!mir->compilingWasm() && !mir->outerInfo().hadBoundsCheckBailout() &&
+      !header->hasGeneratorResumeEntry()) {
     // Try to hoist any bounds checks from the loop using symbolic bounds.
 
     Vector<MBoundsCheck*, 0, JitAllocPolicy> hoistedChecks(alloc());
@@ -2259,18 +2267,18 @@ void RangeAnalysis::analyzeLoopPhi(const LoopIterationBound* loopBound,
     return;
   }
 
-  Range* initRange = initial->range();
+  Range initRange(initial);
   if (modified.constant > 0) {
-    if (initRange && initRange->hasInt32LowerBound()) {
-      phi->range()->refineLower(initRange->lower());
+    if (initRange.hasInt32LowerBound()) {
+      phi->range()->refineLower(initRange.lower());
     }
     phi->range()->setSymbolicLower(
         SymbolicBound::New(alloc(), nullptr, initialSum));
     phi->range()->setSymbolicUpper(
         SymbolicBound::New(alloc(), loopBound, limitSum));
   } else {
-    if (initRange && initRange->hasInt32UpperBound()) {
-      phi->range()->refineUpper(initRange->upper());
+    if (initRange.hasInt32UpperBound()) {
+      phi->range()->refineUpper(initRange.upper());
     }
     phi->range()->setSymbolicUpper(
         SymbolicBound::New(alloc(), nullptr, initialSum));

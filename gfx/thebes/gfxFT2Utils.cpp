@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gfxFT2FontBase.h"
 #include "gfxFT2Utils.h"
+
+#include "gfxFT2FontBase.h"
 #include "mozilla/Likely.h"
 
 #ifdef USE_FC_FREETYPE
@@ -146,9 +147,9 @@ void gfxFT2Utils::GetVariationInstances(
     }
     inst.mValues.SetCapacity(aMMVar->num_axis);
     for (unsigned j = 0; j < aMMVar->num_axis; j++) {
-      gfxFontVariationValue value;
-      value.mAxis = aMMVar->axis[j].tag;
-      value.mValue = ns.coords[j] / 65536.0;
+      gfxFontVariation value;
+      value.tag = aMMVar->axis[j].tag;
+      value.value = ns.coords[j] / 65536.0;
       inst.mValues.AppendElement(value);
     }
     aInstances.AppendElement(inst);

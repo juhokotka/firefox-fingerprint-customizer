@@ -6,13 +6,12 @@ package mozilla.components.browser.session.storage.serialize
 
 internal const val VERSION = 2
 
-/**
- * JSON keys used in state getting read/written by [BrowserStateReader] and [BrowserStateWriter].
- */
+/** JSON keys used in state getting read/written by [BrowserStateReader] and [BrowserStateWriter]. */
 internal object Keys {
     const val SELECTED_SESSION_INDEX_KEY = "selectedSessionIndex"
     const val SELECTED_TAB_ID_KEY = "selectedTabId"
     const val SESSION_STATE_TUPLES_KEY = "sessionStateTuples"
+    const val TRANSLATIONS_ENGINE_IS_SUPPORTED_KEY = "translationsEngineIsSupported"
 
     const val SESSION_URL_KEY = "url"
     const val SESSION_UUID_KEY = "uuid"
@@ -46,11 +45,4 @@ internal object Keys {
     const val ENGINE_SESSION_KEY = "engineSession"
 
     const val VERSION_KEY = "version"
-
-    const val TAB_PARTITIONS_KEY = "tabPartitions"
-    const val TAB_PARTITION_ID_KEY = "id"
-    const val TAB_PARTITION_GROUPS_KEY = "tabGroups"
-    const val TAB_GROUP_ID_KEY = "id"
-    const val TAB_GROUP_NAME_KEY = "name"
-    const val TAB_GROUP_TAB_IDS_KEY = "tabIds"
 }

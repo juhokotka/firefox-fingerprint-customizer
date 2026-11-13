@@ -17,9 +17,6 @@ with Files("tests/browser/browser_contentpermissionprompt.js"):
 with Files("tests/unit/test_distribution.js"):
     BUG_COMPONENT = ("Firefox", "Distributions")
 
-with Files("safebrowsing/**"):
-    BUG_COMPONENT = ("Toolkit", "Safe Browsing")
-
 with Files("controlcenter/**"):
     BUG_COMPONENT = ("Firefox", "General")
 
@@ -33,9 +30,9 @@ DIRS += [
     "attribution",
     "backup",
     "contentanalysis",
-    "contentsharing",
     "contextualidentity",
     "controlcenter",
+    "miniwindow",
     "customizableui",
     "customkeys",
     "downloads",
@@ -50,6 +47,7 @@ DIRS += [
     "mozcachedohttp",
     "multilineeditor",
     "newtab",
+    "nimbus",
     "originattributes",
     "pagedata",
     "passwordmgr",
@@ -62,11 +60,14 @@ DIRS += [
     "protections",
     "protocolhandler",
     "qrcode",
+    "referrals",
+    "remotecontrol",
     "reportbrokensite",
     "resistfingerprinting",
     "screenshots",
     "search",
     "sessionstore",
+    "sharing",
     "shell",
     "sidebar",
     "syncedtabs",
@@ -80,6 +81,7 @@ DIRS += [
     "uitour",
     "urlbar",
     "webrtc",
+    "widgets",
 ]
 
 DIRS += ["build"]
@@ -88,10 +90,10 @@ if CONFIG["MOZ_SELECTABLE_PROFILES"]:
     DIRS += ["profiles"]
 
 if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
-    DIRS += ["touchbar"]
+    DIRS += ["defaultlaunchonlogin", "touchbar"]
 elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "windows":
     DIRS += [
-        "defaultwindowslaunchonlogin",
+        "defaultlaunchonlogin",
         "installerprefs",
     ]
 
@@ -105,11 +107,14 @@ XPCOM_MANIFESTS += [
     "components.conf",
 ]
 
+if CONFIG["MOZ_DEFAULT_BROWSER_AGENT"] and CONFIG["OS_ARCH"] == "WINNT":
+    DEFINES["MOZ_DEFAULT_BROWSER_AGENT"] = CONFIG["MOZ_DEFAULT_BROWSER_AGENT"]
+
 EXTRA_PP_COMPONENTS += [
     "BrowserComponents.manifest",
 ]
 
-EXTRA_JS_MODULES += [
+MOZ_SRC_FILES += [
     "AccountsGlue.sys.mjs",
     "BrowserContentHandler.sys.mjs",
     "BrowserGlue.sys.mjs",
@@ -120,16 +125,16 @@ MOZ_SRC_FILES += [
     "DefaultBrowserCheck.sys.mjs",
     "DesktopActorRegistry.sys.mjs",
     "ProfileDataUpgrader.sys.mjs",
+    "ReinstallCheck.sys.mjs",
     "StartupTelemetry.sys.mjs",
 ]
 
 if CONFIG["MOZ_DEBUG"] or CONFIG["MOZ_DEV_EDITION"] or CONFIG["NIGHTLY_BUILD"]:
-    EXTRA_JS_MODULES += [
+    MOZ_SRC_FILES += [
         "StartupRecorder.sys.mjs",
     ]
 
 BROWSER_CHROME_MANIFESTS += [
-    "safebrowsing/content/test/browser.toml",
     "tests/browser/browser.toml",
     "tests/browser/eval/browser.toml",
 ]

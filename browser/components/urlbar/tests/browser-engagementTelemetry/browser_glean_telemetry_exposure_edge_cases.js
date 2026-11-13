@@ -227,7 +227,7 @@ async function do_noExposure(showExposureResults) {
 
   // No exposure should have been recorded since the history result could never
   // be visible.
-  assertExposureTelemetry([]);
+  await assertExposureTelemetry([]);
 
   // Clean up.
   queryResolver.resolve();
@@ -374,7 +374,9 @@ async function do_exposure_append_underfilled({
   // If `showExposureResults` is true, the new search suggestion should have
   // been shown; if it's false, it would have been shown. Either way, it should
   // have triggered an exposure.
-  assertExposureTelemetry([{ results: "search_suggest", terminal: "true" }]);
+  await assertExposureTelemetry([
+    { results: "search_suggest", terminal: "true" },
+  ]);
 
   // Clean up.
   queryResolver.resolve();
@@ -527,7 +529,9 @@ async function do_exposure_replace({ showExposureResults, cancelSecondQuery }) {
   // If `showExposureResults` is true, the new search suggestion should have
   // been shown; if it's false, it would have been shown. Either way, it should
   // have triggered an exposure.
-  assertExposureTelemetry([{ results: "search_suggest", terminal: "true" }]);
+  await assertExposureTelemetry([
+    { results: "search_suggest", terminal: "true" },
+  ]);
 
   // Clean up.
   queryResolver.resolve();
@@ -751,7 +755,7 @@ async function do_exposure_append_full(showExposureResults) {
   gURLBar.blur();
 
   // An exposure for the history result should have been recorded.
-  assertExposureTelemetry([{ results: "history", terminal: "true" }]);
+  await assertExposureTelemetry([{ results: "history", terminal: "true" }]);
 
   // Clean up.
   await SpecialPowers.popPrefEnv();
@@ -1042,7 +1046,7 @@ async function do_exposure_append_full_twice(showExposureResults) {
   // An exposure only for the history result should have been recorded. If an
   // exposure was also incorrectly recorded for the tab result, this will fail
   // with "history,tab" instead of only "history".
-  assertExposureTelemetry([{ results: "history", terminal: "true" }]);
+  await assertExposureTelemetry([{ results: "history", terminal: "true" }]);
 
   // Clean up.
   await secondQueryPromise;

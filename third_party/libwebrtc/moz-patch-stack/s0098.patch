@@ -1,23 +1,25 @@
 From: Michael Froman <mfroman@mozilla.com>
-Date: Tue, 15 Oct 2024 16:46:00 -0500
-Subject: Bug 1924098 - (fix-e432503389) upstream changed signature of
- LibvpxVp9Encoder::InitAndSetControlSettings
+Date: Tue, 19 Nov 2024 16:05:00 -0600
+Subject: Bug 1928110 - (fix-b9c4c242d4) handle upstream last_arrival_timestamp
+ to last_arrival_ntp_timestamp
 
-Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/fadad7695efe0d9cc6b999a613b9e1f536e660bd
+Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/6918cf2d9126fa3e3676386349f6e383c298d8ab
 ---
- modules/video_coding/codecs/vp9/libvpx_vp9_encoder.cc | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
+ modules/rtp_rtcp/source/rtcp_receiver.cc | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
 
-diff --git a/modules/video_coding/codecs/vp9/libvpx_vp9_encoder.cc b/modules/video_coding/codecs/vp9/libvpx_vp9_encoder.cc
-index 46878860e2..811110323e 100644
---- a/modules/video_coding/codecs/vp9/libvpx_vp9_encoder.cc
-+++ b/modules/video_coding/codecs/vp9/libvpx_vp9_encoder.cc
-@@ -1354,7 +1354,7 @@ int LibvpxVp9Encoder::UpdateCodecFrameSize(
-   // bugs in trying to do it the "right" way, we basically re-do
-   // the initialization.
-   vpx_codec_destroy(encoder_); // clean up old state
--  int result = InitAndSetControlSettings(&codec_);
-+  int result = InitAndSetControlSettings();
-   if (result == WEBRTC_VIDEO_CODEC_OK) {
-     // TODO: Mozilla rates have become much more complicated, we need to store
-     // more state or find another way of doing this.
+diff --git a/modules/rtp_rtcp/source/rtcp_receiver.cc b/modules/rtp_rtcp/source/rtcp_receiver.cc
+index 9b3b2c9066..58eb0d767e 100644
+--- a/modules/rtp_rtcp/source/rtcp_receiver.cc
++++ b/modules/rtp_rtcp/source/rtcp_receiver.cc
+@@ -325,8 +325,8 @@ void RTCPReceiver::RemoteRTCPSenderInfo(uint32_t* packet_count,
+   MutexLock lock(&rtcp_receiver_lock_);
+   *packet_count = remote_sender_.packets_sent;
+   *octet_count = remote_sender_.bytes_sent;
+-  *ntp_timestamp_ms = remote_sender_.last_arrival_timestamp.ToMs();
+-  *remote_ntp_timestamp_ms = remote_sender_.last_remote_timestamp.ToMs();
++  *ntp_timestamp_ms = remote_sender_.last_arrival_ntp_timestamp.ToMs();
++  *remote_ntp_timestamp_ms = remote_sender_.last_remote_ntp_timestamp.ToMs();
+ }
+ 
+ std::vector<ReportBlockData> RTCPReceiver::GetLatestReportBlockData() const {

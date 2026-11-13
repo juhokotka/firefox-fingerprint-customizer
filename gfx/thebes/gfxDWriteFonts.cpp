@@ -5,18 +5,18 @@
 #include "gfxDWriteFonts.h"
 
 #include <algorithm>
-#include "gfxDWriteFontList.h"
+
 #include "gfxContext.h"
+#include "gfxDWriteFontList.h"
 #include "gfxHarfBuzzShaper.h"
 #include "gfxTextRun.h"
+#include "harfbuzz/hb.h"
+#include "mozilla/FontPropertyTypes.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DWriteSettings.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/gfxVars.h"
-#include "mozilla/Preferences.h"
-
-#include "harfbuzz/hb.h"
-#include "mozilla/FontPropertyTypes.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -82,8 +82,7 @@ gfxDWriteFont::gfxDWriteFont(const RefPtr<UnscaledFontDWrite>& aUnscaledFont,
     : gfxFont(aUnscaledFont, aFontEntry, aFontStyle, anAAOption),
       mFontFace(aFontFace ? aFontFace : aUnscaledFont->GetFontFace()),
       mUseSubpixelPositions(false),
-      mAllowManualShowGlyphs(true),
-      mAzureScaledFontUsedClearType(false) {
+      mAllowManualShowGlyphs(true) {
   // If the IDWriteFontFace1 interface is available, we can use that for
   // faster glyph width retrieval.
   mFontFace->QueryInterface(__uuidof(IDWriteFontFace1),
@@ -112,6 +111,12 @@ gfxDWriteFont::gfxDWriteFont(const RefPtr<UnscaledFontDWrite>& aUnscaledFont,
 
 gfxDWriteFont::~gfxDWriteFont() {
   if (auto* scaledFont = mAzureScaledFontGDI.exchange(nullptr)) {
+    scaledFont->Release();
+  }
+  if (auto* scaledFont = mAzureScaledFontClearType.exchange(nullptr)) {
+    scaledFont->Release();
+  }
+  if (auto* scaledFont = mAzureScaledFontGDIClearType.exchange(nullptr)) {
     scaledFont->Release();
   }
 }
@@ -312,8 +317,6 @@ bool gfxDWriteFont::GetFakeMetricsForArialBlack(
 }
 
 void gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption) {
-  ::memset(&mMetrics, 0, sizeof(mMetrics));
-
   DWRITE_FONT_METRICS fontMetrics;
   if (!(mFontEntry->Weight().Min() == FontWeight::FromInt(900) &&
         mFontEntry->Weight().Max() == FontWeight::FromInt(900) &&
@@ -467,7 +470,7 @@ void gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption) {
   mMetrics.strikeoutSize =
       fontMetrics.strikethroughThickness * mFUnitsConvFactor;
 
-  SanitizeMetrics(&mMetrics, GetFontEntry()->mIsBadUnderlineFont);
+  SanitizeMetrics(GetFontEntry()->mIsBadUnderlineFont);
 
   if (ApplySyntheticBold()) {
     auto delta = GetSyntheticBoldOffset();
@@ -482,6 +485,7 @@ void gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption) {
     }
   }
 
+  mIsValid = true;
 #if 0
     printf("Font: %p (%s) size: %f\n", this,
            NS_ConvertUTF16toUTF8(GetName()).get(), mStyle.size);
@@ -801,16 +805,12 @@ void gfxDWriteFont::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
 already_AddRefed<ScaledFont> gfxDWriteFont::GetScaledFont(
     const TextRunDrawParams& aRunParams) {
   bool useClearType = UsingClearType();
-  if (mAzureScaledFontUsedClearType != useClearType) {
-    if (auto* oldScaledFont = mAzureScaledFont.exchange(nullptr)) {
-      oldScaledFont->Release();
-    }
-    if (auto* oldScaledFont = mAzureScaledFontGDI.exchange(nullptr)) {
-      oldScaledFont->Release();
-    }
-  }
   bool forceGDI = aRunParams.allowGDI && GetForceGDIClassic();
-  ScaledFont* scaledFont = forceGDI ? mAzureScaledFontGDI : mAzureScaledFont;
+  auto& scaledFontCacheRef =
+      useClearType ? (forceGDI ? mAzureScaledFontGDIClearType
+                               : mAzureScaledFontClearType)
+                   : (forceGDI ? mAzureScaledFontGDI : mAzureScaledFont);
+  ScaledFont* scaledFont = scaledFontCacheRef;
   if (scaledFont) {
     return do_AddRef(scaledFont);
   }
@@ -830,19 +830,10 @@ already_AddRefed<ScaledFont> gfxDWriteFont::GetScaledFont(
   }
   InitializeScaledFont(newScaledFont);
 
-  if (forceGDI) {
-    if (mAzureScaledFontGDI.compareExchange(nullptr, newScaledFont.get())) {
-      newScaledFont.forget().leak();
-      mAzureScaledFontUsedClearType = useClearType;
-    }
-    scaledFont = mAzureScaledFontGDI;
-  } else {
-    if (mAzureScaledFont.compareExchange(nullptr, newScaledFont.get())) {
-      newScaledFont.forget().leak();
-      mAzureScaledFontUsedClearType = useClearType;
-    }
-    scaledFont = mAzureScaledFont;
+  if (scaledFontCacheRef.compareExchange(nullptr, newScaledFont.get())) {
+    newScaledFont.forget().leak();
   }
+  scaledFont = scaledFontCacheRef;
   return do_AddRef(scaledFont);
 }
 

@@ -15,7 +15,6 @@
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/Span.h"
 #include "mozilla/Try.h"
-
 #include "nsISupports.h"
 #include "nsTStringRepr.h"
 
@@ -1509,7 +1508,6 @@ static_assert(sizeof(nsTSubstring<char>) ==
               "Don't add new data fields to nsTSubstring_CharT. "
               "Add to nsTStringRepr<T> instead.");
 
-#include "nsCharSeparatedTokenizer.h"
 #include "nsTDependentSubstring.h"
 
 /**

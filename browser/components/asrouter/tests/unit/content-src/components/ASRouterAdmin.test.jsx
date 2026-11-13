@@ -110,7 +110,7 @@ describe("ASRouterAdmin", () => {
           providers: FAKE_PROVIDER,
         });
 
-        assert.lengthOf(wrapper.find(`[data-provider]`), 1);
+        assert.lengthOf(wrapper.find(`#providers-table [data-provider]`), 1);
       });
     });
     describe("#renderMessages", () => {
@@ -226,6 +226,52 @@ describe("ASRouterAdmin", () => {
 
         assert.lengthOf(wrapper.find(".message-id"), 0);
       });
+    });
+  });
+  describe("#ImpressionsSection", () => {
+    beforeEach(() => {
+      sandbox.stub(ASRouterUtils, "editState");
+      sandbox.stub(ASRouterUtils, "sendMessage").resolves();
+      wrapper = mount(
+        <ASRouterAdminInner location={{ routes: ["impressions"] }} />
+      );
+      wrapper.setState({
+        devtoolsEnabled: true,
+        messageImpressions: {},
+        groupImpressions: {},
+        screenImpressions: {},
+        multiProfileMessageImpressions: { foo: [123] },
+      });
+    });
+    it("should render an editor for each impression type", () => {
+      const labels = wrapper
+        .find(".impressions-category")
+        .map(node => node.text());
+      assert.deepEqual(labels, [
+        "Message Impressions",
+        "Group Impressions",
+        "Screen Impressions",
+        "Profile Impressions",
+      ]);
+    });
+    it("should save profile impressions via editState", () => {
+      // Profile Impressions is the fourth (index 3) impressions item
+      const profileItem = wrapper.find(".impressions-item").at(3);
+      profileItem.find("button.primary").simulate("click");
+      assert.calledWith(
+        ASRouterUtils.editState,
+        "multiProfileMessageImpressions",
+        { foo: [123] }
+      );
+    });
+    it("should reset profile impressions to an empty object", () => {
+      const profileItem = wrapper.find(".impressions-item").at(3);
+      profileItem.find("button.reset").simulate("click");
+      assert.calledWith(
+        ASRouterUtils.editState,
+        "multiProfileMessageImpressions",
+        {}
+      );
     });
   });
   describe("toBinary", () => {

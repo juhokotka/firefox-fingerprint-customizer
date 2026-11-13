@@ -16,6 +16,7 @@
 #include "mozilla/dom/PerformanceTiming.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/RemoteWorkerChild.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/SecurityPolicyViolationEventBinding.h"
 #include "mozilla/dom/WorkerChannelInfo.h"
 #include "mozilla/dom/WorkerPrivate.h"
@@ -50,7 +51,11 @@ mozilla::ipc::IPCResult FetchChild::Recv__delete__(const nsresult&& aResult) {
 
   if (mPromise->State() == Promise::PromiseState::Pending) {
     if (NS_FAILED(aResult)) {
-      mPromise->MaybeReject(aResult);
+      // The parent reports an abort as a bare nsresult, so recover the
+      // reason here rather than rejecting with a generic AbortError.
+      if (aResult != NS_ERROR_DOM_ABORT_ERR || !MaybeRejectWithAbortReason()) {
+        mPromise->MaybeReject(aResult);
+      }
       if (mFetchObserver) {
         mFetchObserver->SetState(FetchState::Errored);
       }
@@ -147,7 +152,9 @@ mozilla::ipc::IPCResult FetchChild::RecvOnResponseEnd(ResponseEndArgs&& aArgs) {
     if (!mPromise) {
       return IPC_OK();
     }
-    mPromise->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
+    if (!MaybeRejectWithAbortReason()) {
+      mPromise->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
+    }
   }
 
   Unfollow();
@@ -283,31 +290,33 @@ mozilla::ipc::IPCResult FetchChild::RecvOnCSPViolationEvent(
 
   nsString JSON(aJSON);
 
-  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(__func__, [JSON]() mutable {
-    SecurityPolicyViolationEventInit violationEventInit;
-    if (NS_WARN_IF(!violationEventInit.Init(JSON))) {
-      return;
-    }
+  nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableFunction(__func__, [JSON = std::move(JSON)]() mutable {
+        SecurityPolicyViolationEventInit violationEventInit;
+        if (NS_WARN_IF(!violationEventInit.Init(JSON))) {
+          return;
+        }
 
-    nsCOMPtr<nsIURI> uri;
-    nsresult rv =
-        NS_NewURI(getter_AddRefs(uri), violationEventInit.mBlockedURI);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return;
-    }
+        nsCOMPtr<nsIURI> uri;
+        nsresult rv =
+            NS_NewURI(getter_AddRefs(uri), violationEventInit.mBlockedURI);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return;
+        }
 
-    nsCOMPtr<nsIObserverService> observerService =
-        mozilla::services::GetObserverService();
-    if (!observerService) {
-      return;
-    }
+        nsCOMPtr<nsIObserverService> observerService =
+            mozilla::services::GetObserverService();
+        if (!observerService) {
+          return;
+        }
 
-    rv = observerService->NotifyObservers(
-        uri, CSP_VIOLATION_TOPIC, violationEventInit.mViolatedDirective.get());
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return;
-    }
-  });
+        rv = observerService->NotifyObservers(
+            uri, CSP_VIOLATION_TOPIC,
+            violationEventInit.mViolatedDirective.get());
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return;
+        }
+      });
   MOZ_ALWAYS_SUCCEEDS(SchedulerGroup::Dispatch(r.forget()));
 
   if (mCSPEventListener) {
@@ -434,6 +443,21 @@ FetchChild::FetchChild(RefPtr<Promise>&& aPromise,
       mFetchObserver(std::move(aObserver)),
       mReporter(new ConsoleReportCollector()) {
   FETCH_LOG(("FetchChild::FetchChild [%p]", this));
+}
+
+bool FetchChild::MaybeRejectWithAbortReason() {
+  if (!mPromise || !mSignalImpl || !mSignalImpl->Aborted()) {
+    return false;
+  }
+  AutoJSAPI jsapi;
+  if (!jsapi.Init(mPromise->GetGlobalObject())) {
+    return false;
+  }
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JS::Value> reason(cx);
+  mSignalImpl->GetReason(cx, &reason);
+  mPromise->MaybeReject(reason);
+  return true;
 }
 
 void FetchChild::RunAbortAlgorithm() {

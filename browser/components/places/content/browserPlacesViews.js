@@ -425,6 +425,7 @@ class PlacesViewBase {
           is: "places-popup",
         });
         popup._placesNode = PlacesUtils.asContainer(aPlacesNode);
+        popup.setAttribute("accesskey-conflicts-bug", "2073900");
 
         if (!this._nativeView) {
           popup.setAttribute("placespopup", "true");
@@ -771,7 +772,7 @@ class PlacesViewBase {
       aPopup._endOptShareFolder.className = "openintabs-menuitem badge-new";
       aPopup._endOptShareFolder.setAttribute(
         "data-l10n-id",
-        "places-share-folder2"
+        "places-share-folder3"
       );
       aPopup._endOptShareFolder.setAttribute("data-l10n-attrs", "badge");
 
@@ -1173,6 +1174,7 @@ class PlacesToolbar extends PlacesViewBase {
         popup.setAttribute("placespopup", "true");
         popup.toggleAttribute("nonnative", true);
         popup.classList.add("toolbar-menupopup");
+        popup.setAttribute("accesskey-conflicts-bug", "2073900");
         button.appendChild(popup);
         popup._placesNode = PlacesUtils.asContainer(aChild);
         popup.setAttribute("context", "placesContext");
@@ -1344,8 +1346,8 @@ class PlacesToolbar extends PlacesViewBase {
 
     let dwu = window.windowUtils;
 
-    let { visibleCount, scrollWidth } = await window.promiseDocumentFlushed(
-      () => {
+    let { visibleCount, measuredCount, scrollWidth } =
+      await window.promiseDocumentFlushed(() => {
         let scrollRect = dwu.getBoundsWithoutFlushing(this._rootElt);
         let count = 0;
         for (let child of this._rootElt.children) {
@@ -1359,9 +1361,12 @@ class PlacesToolbar extends PlacesViewBase {
           }
           count++;
         }
-        return { visibleCount: count, scrollWidth: scrollRect.width };
-      }
-    );
+        return {
+          visibleCount: count,
+          measuredCount: this._rootElt.children.length,
+          scrollWidth: scrollRect.width,
+        };
+      });
 
     this.#updatingNodesVisibility = false;
     if (!this._isAlive) {
@@ -1386,6 +1391,12 @@ class PlacesToolbar extends PlacesViewBase {
     this.#pendingVisibilityRetry = false;
     window.requestAnimationFrame(() => {
       if (!this._isAlive) {
+        return;
+      }
+      // If the length of the child list has changed, skip the update and
+      // re-queue a fresh measurement.
+      if (this._rootElt.children.length != measuredCount) {
+        this.updateNodesVisibility();
         return;
       }
       this._applyChildVisibility(visibleCount);

@@ -362,6 +362,7 @@ bool InvokeFromInterpreterStub(JSContext* cx,
 void* GetContextSensitiveInterpreterStub();
 
 bool CheckOverRecursed(JSContext* cx);
+bool CheckOverRecursedResumingGenerator(JSContext* cx);
 bool CheckOverRecursedBaseline(JSContext* cx, BaselineFrame* frame);
 
 [[nodiscard]] bool MutatePrototype(JSContext* cx, Handle<PlainObject*> obj,
@@ -449,13 +450,7 @@ JSObject* CreateGenerator(JSContext* cx, HandleFunction, HandleScript,
                                  const jsbytecode* pc);
 [[nodiscard]] bool FinalSuspend(JSContext* cx, HandleObject obj,
                                 const jsbytecode* pc);
-[[nodiscard]] bool InterpretResume(JSContext* cx, HandleObject obj,
-                                   Value* stackValues, MutableHandleValue rval);
 [[nodiscard]] bool DebugAfterYield(JSContext* cx, BaselineFrame* frame);
-[[nodiscard]] bool GeneratorThrowOrReturn(
-    JSContext* cx, BaselineFrame* frame,
-    Handle<AbstractGeneratorObject*> genObj, HandleValue arg,
-    int32_t resumeKindArg);
 
 [[nodiscard]] bool GlobalDeclInstantiationFromIon(JSContext* cx,
                                                   HandleScript script,

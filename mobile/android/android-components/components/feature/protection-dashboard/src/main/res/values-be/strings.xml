@@ -7,24 +7,23 @@
 -->
 
 <resources>
-  <!-- Title shown in the protection dashboard indicating the user is protected -->
-  <string name="mozac_protections_dashboard_youre_protected">Вы абаронены</string>
-  <plurals name="mozac_protections_dashboard_trackers_blocked_this_week">
+  <!-- Title shown in the protection dashboard header next to the shield icon -->
+  <string name="mozac_protections_dashboard_trackers_blocked_this_week_title">Заблакіравана трэкераў на гэтым тыдні</string>
+  <!--
+    Title shown when no trackers have been blocked yet
+    %1$s will be replaced by the app name (e.g. Firefox Focus)
+  -->
+  <string name="mozac_protections_dashboard_empty_title">%1$s блакіруе трэкеры падчас выкарыстання.</string>
+  <!-- Subtitle shown when no trackers have been blocked yet -->
+  <string name="mozac_protections_dashboard_empty_subtitle">Вы іх убачыце тут.</string>
+  <plurals name="mozac_protections_dashboard_total_blocked_since_2">
     <!--
-      Label shown below the tracker count in the dashboard. The count is displayed separately
-      above this string and is used to select the correct plural form. Do not include the number in
-      the translation.
+      Footer line shown in the dashboard summarizing total trackers blocked
+      since a specific date. %1$d is the trackers count number (e.g. 123).
+      %2$s is the formatted date (e.g. "February 23, 2026").
     -->
-    <item quantity="one">Трэкер заблакаваны на гэтым тыдні</item>
-    <item quantity="few">Трэкеры заблакаваныя на гэтым тыдні</item>
-    <item quantity="other">Трэкераў заблакаваныя на гэтым тыдні</item>
+    <item quantity="one">Ад %2$s заблакіраваны %1$d трэкер</item>
+    <item quantity="few">Ад %2$s заблакіраваны %1$d трэкеры</item>
+    <item quantity="other">Ад %2$s заблакіравана %1$d трэкераў</item>
   </plurals>
-  <!-- Tracker category: Advertising trackers -->
-  <string name="protections_dashboard_category_ads">Рэклама</string>
-  <!-- Tracker category: Analytics trackers -->
-  <string name="protections_dashboard_category_analytics">Аналітыка</string>
-  <!-- Tracker category: Social media trackers -->
-  <string name="protections_dashboard_category_social">Сацыяльныя сеткі</string>
-  <!-- Tracker category: Other trackers -->
-  <string name="protections_dashboard_category_others">Іншыя</string>
 </resources>

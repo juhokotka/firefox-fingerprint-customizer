@@ -41,7 +41,6 @@ def is_release_promotion_available(parameters):
                 "enum": [
                     "bump-main",
                     "bump-esr153",
-                    "early-to-late-beta",
                     "main-to-beta",
                     "beta-to-release",
                     "release-to-esr",
@@ -64,6 +63,14 @@ def is_release_promotion_available(parameters):
                 "type": "string",
                 "description": "The fx head of the target, such as beta",
             },
+            "from-revision": {
+                "type": "string",
+                "description": "The revision on the from_branch to fetch its current version from, tag with `_BASE` tags, and use as the target revision for merge actions.",
+            },
+            "to-revision": {
+                "type": "string",
+                "description": "The revision on the to_branch to fetch its current version from and use to base l10n bumps, version bumps, and replacements on.",
+            },
             "fetch-version-from": {
                 "type": "string",
                 "description": "Path to file used when querying current version.",
@@ -71,6 +78,10 @@ def is_release_promotion_available(parameters):
             "merge-automation-id": {
                 "type": "integer",
                 "description": "Shipit merge automation ID for marking as merged.",
+            },
+            "update-clobber-file": {
+                "type": "boolean",
+                "description": "Update clobber file",
             },
         },
         "required": ["behavior"],
@@ -89,11 +100,14 @@ def merge_automation_action(parameters, graph_config, input, task_group_id, task
     for field in [
         "from-repo",
         "from-branch",
+        "from-revision",
         "to-repo",
         "to-branch",
+        "to-revision",
         "push",
         "fetch-version-from",
         "merge-automation-id",
+        "update-clobber-file",
     ]:
         if input.get(field):
             parameters["merge_config"][field] = input[field]

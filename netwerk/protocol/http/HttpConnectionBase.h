@@ -5,23 +5,22 @@
 #ifndef HttpConnectionBase_h_
 #define HttpConnectionBase_h_
 
-#include "nsHttpConnectionInfo.h"
+#include "ARefBase.h"
+#include "HttpTrafficAnalyzer.h"
+#include "TimingStruct.h"
+#include "mozilla/Mutex.h"
+#include "mozilla/WeakPtr.h"
+#include "mozilla/net/DNS.h"
 #include "nsAHttpTransaction.h"
 #include "nsCOMPtr.h"
-#include "nsProxyRelease.h"
-#include "prinrval.h"
-#include "mozilla/Mutex.h"
-#include "ARefBase.h"
-#include "TimingStruct.h"
-#include "HttpTrafficAnalyzer.h"
-
-#include "mozilla/net/DNS.h"
-#include "mozilla/WeakPtr.h"
+#include "nsHttpConnectionInfo.h"
 #include "nsHttpResponseHead.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsITimer.h"
+#include "nsProxyRelease.h"
+#include "prinrval.h"
 
 class nsISocketTransport;
 class nsITLSSocketControl;
@@ -160,6 +159,9 @@ class HttpConnectionBase : public nsSupportsWeakReference {
                                   TimeStamp tcpConnectEnd,
                                   TimeStamp secureConnectionStart = TimeStamp(),
                                   TimeStamp connectEnd = TimeStamp());
+  // Gives aTrans, which is being activated on this connection, the connect
+  // phase of this connection, and hands it out only once.
+  void HandOffConnectPhase(nsAHttpTransaction* aTrans);
 
   virtual bool IsPersistent() = 0;
   virtual bool IsReused() = 0;
@@ -219,8 +221,11 @@ class HttpConnectionBase : public nsSupportsWeakReference {
   // Used to track whether this connection is serving the first request.
   bool mHasFirstHttpTransaction{false};
 
-  bool mBootstrappedTimingsSet{false};
+  // The connect phase of this connection, handed to the transaction it was
+  // established for when that transaction is activated. Set once afterwards,
+  // so that no other transaction can claim the same connect phase.
   TimingStruct mBootstrappedTimings;
+  bool mConnectPhaseHandedOff{false};
 
   Mutex mCallbacksLock{"nsHttpConnection::mCallbacksLock"};
   nsMainThreadPtrHandle<nsIInterfaceRequestor> mCallbacks

@@ -13,14 +13,13 @@ import mozilla.components.lib.crash.CrashReporter
 
 private const val TAG = "ExceptionHandler"
 
-/**
- * [Thread.UncaughtExceptionHandler] implementation that forwards crashes to the [CrashReporter] instance.
- */
+/** [Thread.UncaughtExceptionHandler] implementation that forwards crashes to the [CrashReporter] instance. */
 class ExceptionHandler(
     private val context: Context,
     private val crashReporter: CrashReporter,
     private val defaultExceptionHandler: Thread.UncaughtExceptionHandler? = null,
     private val handleCaughtException: (() -> Unit)? = null,
+    private val currentTimeMillis: () -> Long = { System.currentTimeMillis() },
 ) : Thread.UncaughtExceptionHandler {
     private var crashing = false
 
@@ -44,7 +43,7 @@ class ExceptionHandler(
             crashReporter.onCrash(
                 context,
                 Crash.UncaughtExceptionCrash(
-                    timestamp = System.currentTimeMillis(),
+                    timestamp = currentTimeMillis(),
                     throwable = throwable,
                     breadcrumbs = crashReporter.crashBreadcrumbsCopy(),
                 ),

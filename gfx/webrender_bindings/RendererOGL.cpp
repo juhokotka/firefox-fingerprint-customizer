@@ -4,26 +4,27 @@
 
 #include "RendererOGL.h"
 
-#include "base/task.h"
 #include "GLContext.h"
-#include "mozilla/gfx/Logging.h"
+#include "base/task.h"
 #include "mozilla/Logging.h"
-
-#include "mozilla/gfx/gfxVars.h"
+#include "mozilla/StaticPrefs_gfx.h"
+#include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/Types.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/Fence.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/layers/ProfilerScreenshots.h"
+#include "mozilla/layers/SyncObject.h"
 #include "mozilla/webrender/RenderCompositor.h"
 #include "mozilla/webrender/RenderTextureHost.h"
 #include "mozilla/widget/CompositorWidget.h"
 
 #ifdef MOZ_WIDGET_ANDROID
 #  include "GLContextEGL.h"
-#  include "mozilla/layers/AndroidHardwareBuffer.h"
 #  include "ScopedGLHelpers.h"
+#  include "mozilla/layers/AndroidHardwareBuffer.h"
 #endif
 
 namespace mozilla {
@@ -76,6 +77,8 @@ wr::WrExternalImage wr_renderer_lock_external_image(void* aObj,
                         << AsUint64(aId);
     return InvalidToWrExternalImage();
   }
+
+  renderer->GetCompositor()->MaybeWaitingForPendingReadFence(texture);
 
 #if defined(MOZ_WAYLAND)
   // Wayland native compositor doesn't use textures for direct compositing.
@@ -180,10 +183,7 @@ RenderedFrameId RendererOGL::UpdateAndRender(
   // with mCompositor.
   bool present = aFrameParams.present;
 
-  LayoutDeviceIntSize size(0, 0);
-  auto bufferAge = 0;
   bool fullRender = false;
-
   bool needPostRenderCall = false;
   bool beginFrame = !mThread->IsHandlingDeviceReset();
 
@@ -206,9 +206,6 @@ RenderedFrameId RendererOGL::UpdateAndRender(
     if (!mCompositor->BeginFrame()) {
       beginFrame = false;
     }
-
-    size = mCompositor->GetBufferSize();
-    bufferAge = mCompositor->GetBufferAge();
 
     fullRender = mCompositor->RequestFullRender();
     // When we're rendering to an external target, we want to render everything.
@@ -233,9 +230,28 @@ RenderedFrameId RendererOGL::UpdateAndRender(
 
   wr_renderer_update(mRenderer);
 
+  // Order the frame after producers that synchronize with the sync object,
+  // once the frame's external images are all known.
+  layers::SyncObjectHost* syncObject = mCompositor->GetSyncObject();
+  if (syncObject && mThread->SyncObjectNeeded() &&
+      !syncObject->Synchronize(/* aFallible */ true)) {
+    mThread->HandleDeviceReset(gfx::DeviceResetDetectPlace::WR_SYNC_OBJRCT,
+                               gfx::DeviceResetReason::UNKNOWN);
+    if (present) {
+      mCompositor->CancelFrame();
+    }
+    if (needPostRenderCall) {
+      mCompositor->GetWidget()->PostRender(&widgetContext);
+    }
+    return RenderedFrameId();
+  }
+
   if (fullRender) {
     wr_renderer_force_redraw(mRenderer);
   }
+
+  LayoutDeviceIntSize size = mCompositor->GetBufferSize();
+  auto bufferAge = mCompositor->GetBufferAge();
 
   nsTArray<DeviceIntRect> dirtyRects;
   bool didRasterize = false;
@@ -263,6 +279,12 @@ RenderedFrameId RendererOGL::UpdateAndRender(
 
   if (present) {
     if (aReadbackBuffer.isSome()) {
+      // Check graphics reset status before readback
+      CheckGraphicsResetStatus(gfx::DeviceResetDetectPlace::WR_BEFORE_READBACK,
+                               /* aForce */ true);
+    }
+
+    if (aReadbackBuffer.isSome() && !mThread->IsHandlingDeviceReset()) {
       MOZ_ASSERT(aReadbackSize.isSome());
       MOZ_ASSERT(aReadbackFormat.isSome());
       if (!mCompositor->MaybeReadback(aReadbackSize.ref(),
@@ -347,8 +369,8 @@ void RendererOGL::WaitForGPU() {
   }
 }
 
-RefPtr<layers::Fence> RendererOGL::GetAndResetReleaseFence() {
-  return mCompositor->GetAndResetReleaseFence();
+RefPtr<layers::Fence> RendererOGL::GetAndResetReadFence() {
+  return mCompositor->GetAndResetReadFence();
 }
 
 RenderedFrameId RendererOGL::GetLastCompletedFrameId() {
@@ -359,9 +381,32 @@ RenderedFrameId RendererOGL::UpdateFrameId() {
   return mCompositor->UpdateFrameId();
 }
 
-void RendererOGL::Pause() { mCompositor->Pause(); }
+void RendererOGL::Pause() {
+  mCompositor->Pause();
 
-bool RendererOGL::Resume() { return mCompositor->Resume(); }
+  // Only trim on the transition into the paused state. Repeated pause
+  // notifications should not generate redundant backend work. Do not use
+  // RenderCompositor::IsPaused() here: on GTK it describes surface state and
+  // remains false for normal paused windows.
+  if (mPausedForResourceTrimming) {
+    return;
+  }
+  mPausedForResourceTrimming = true;
+
+  const uint32_t trimMode =
+      StaticPrefs::gfx_webrender_trim_paused_renderers_mode();
+  if (trimMode > 0) {
+    wr_renderer_trim_transient_resources(mRenderer, trimMode >= 2);
+  }
+}
+
+bool RendererOGL::Resume() {
+  const bool resumed = mCompositor->Resume();
+  if (resumed) {
+    mPausedForResourceTrimming = false;
+  }
+  return resumed;
+}
 
 bool RendererOGL::IsPaused() { return mCompositor->IsPaused(); }
 
@@ -529,7 +574,7 @@ void RendererOGL::MaybeCaptureScreenPixels() {
                          LOCAL_GL_LINEAR);
 
   if (EGLSync sync =
-          egl->fCreateSync(LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr)) {
+          egl->fCreateSyncKHR(LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr)) {
     auto fence = UniqueFileHandle(egl->fDupNativeFenceFDANDROID(sync));
     if (fence) {
       request.mHardwareBuffer->SetAcquireFence(std::move(fence));

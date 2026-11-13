@@ -13,8 +13,8 @@
  * @property {boolean} query
  * @property {object} arg
  *
- * @typedef {import("ConduitsParent.sys.mjs").ConduitAddress} ConduitAddress
- * @typedef {import("ConduitsParent.sys.mjs").ConduitID} ConduitID
+ * @typedef {import("./ConduitsParent.sys.mjs").ConduitAddress} ConduitAddress
+ * @typedef {import("./ConduitsParent.sys.mjs").ConduitID} ConduitID
  */
 
 /**

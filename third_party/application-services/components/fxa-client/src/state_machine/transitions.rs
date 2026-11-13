@@ -7,8 +7,7 @@
 //! Each `match` arm reads top-to-bottom as imperative Rust. Use
 //! `.to_state_machine_err(|| target)?` to attach the landing state on failure.
 
-use crate::{Error, FxaError, FxaEvent, FxaRustAuthState, FxaState};
-use error_support::{convert_log_report_error, GetErrorHandling};
+use crate::{Error, FxaEvent, FxaRustAuthState, FxaState};
 
 use super::helpers::{ResultExt, RetryingAccount, StateMachineErr};
 
@@ -18,39 +17,49 @@ pub fn transition(
     from: FxaState,
     event: FxaEvent,
 ) -> std::result::Result<FxaState, StateMachineErr> {
+    use FxaEvent as E;
     use FxaState as S;
 
     match (from, event) {
         // ── From Uninitialized ──────────────────────────────────────────
-        (S::Uninitialized, FxaEvent::Initialize { device_config }) => {
-            match account.get_auth_state() {
-                FxaRustAuthState::Disconnected => Ok(S::Disconnected),
-                FxaRustAuthState::AuthIssues => Ok(S::AuthIssues),
-                FxaRustAuthState::Connected => {
-                    // Auth errors from ensure_capabilities recover via CheckAuthorizationStatus
-                    // rather than bailing to Disconnected.
-                    // FIXME: should re-run ensure_capabilities after recovery succeeds.
-                    // https://bugzilla.mozilla.org/show_bug.cgi?id=1868418
-                    match account.ensure_capabilities(&device_config.capabilities) {
-                        Ok(_) => Ok(S::Connected),
-                        Err(e) if is_auth_error(&e) => {
-                            // Report inline since we don't propagate this error to the driver.
-                            let _: FxaError = convert_log_report_error(e);
-                            let active = account
-                                .check_authorization_status()
-                                .to_state_machine_err(|| S::AuthIssues)?;
-                            Ok(if active { S::Connected } else { S::AuthIssues })
+        (S::Uninitialized, E::Initialize { device_config }) => match account.get_auth_state() {
+            FxaRustAuthState::Disconnected => Ok(S::Disconnected),
+            FxaRustAuthState::AuthIssues => {
+                // This probably indicates that the user is not authorized but there are various
+                // corner cases where we might have gotten something wrong. For example, a bug in an
+                // older browser version that we've since fixed or an FxA server bug.
+                // Because of this, we will recheck the authorization status from time to time.
+                if account.should_recheck_auth() {
+                    account.reset_auth_recheck_timer();
+                    match account.check_authorization_status() {
+                        Ok(true) => {
+                            error_support::report_error!(
+                                "fxaclient-authissues-recheck-succeeded",
+                                "Recheck of auth status succeeded despite being in AuthIssues state"
+                            );
+                            Ok(S::Connected)
                         }
-                        Err(cause) => Err(StateMachineErr::new(cause, S::Disconnected)),
+                        _ => Ok(S::AuthIssues),
+                    }
+                } else {
+                    Ok(S::AuthIssues)
+                }
+            }
+            FxaRustAuthState::Connected => {
+                match account.finish_initialize(&device_config.capabilities) {
+                    Ok(()) => Ok(S::Connected),
+                    Err(cause) => {
+                        account.reset_auth_recheck_timer();
+                        Err(StateMachineErr::new(cause, S::AuthIssues))
                     }
                 }
             }
-        }
+        },
 
         // ── From Disconnected ───────────────────────────────────────────
         (
             S::Disconnected,
-            FxaEvent::BeginOAuthFlow {
+            E::BeginOAuthFlow {
                 service,
                 scopes,
                 entrypoint,
@@ -67,7 +76,7 @@ pub fn transition(
         }
         (
             S::Disconnected,
-            FxaEvent::BeginPairingFlow {
+            E::BeginPairingFlow {
                 pairing_url,
                 service,
                 scopes,
@@ -85,7 +94,7 @@ pub fn transition(
         }
 
         // ── From Authenticating ─────────────────────────────────────────
-        (S::Authenticating { initial_state, .. }, FxaEvent::CompleteOAuthFlow { code, state }) => {
+        (S::Authenticating { initial_state, .. }, E::CompleteOAuthFlow { code, state }) => {
             account
                 .complete_oauth_flow(&code, &state)
                 .to_state_machine_err(|| initial_state.into())?;
@@ -100,16 +109,14 @@ pub fn transition(
 
             Ok(S::Connected)
         }
-        (S::Authenticating { initial_state, .. }, FxaEvent::CancelOAuthFlow) => {
-            Ok(initial_state.into())
-        }
-        (S::Authenticating { .. }, FxaEvent::Disconnect) => {
+        (S::Authenticating { initial_state, .. }, E::CancelOAuthFlow) => Ok(initial_state.into()),
+        (S::Authenticating { .. }, E::Disconnect) => {
             account.disconnect();
             Ok(S::Disconnected)
         }
         (
             S::Authenticating { initial_state, .. },
-            FxaEvent::BeginOAuthFlow {
+            E::BeginOAuthFlow {
                 service,
                 scopes,
                 entrypoint,
@@ -126,7 +133,7 @@ pub fn transition(
         }
         (
             S::Authenticating { initial_state, .. },
-            FxaEvent::BeginPairingFlow {
+            E::BeginPairingFlow {
                 pairing_url,
                 service,
                 scopes,
@@ -144,31 +151,38 @@ pub fn transition(
         }
         // A WebChannel password change while an OAuth flow is in progress
         // is a no-op; let the flow finish. Should be rare in practice.
-        (s @ S::Authenticating { .. }, FxaEvent::WebChannelPasswordChange { .. }) => {
+        (s @ S::Authenticating { .. }, E::WebChannelPasswordChange { .. }) => {
             crate::warn!("WebChannel password change received while Authenticating; ignoring");
             Ok(s)
         }
 
         // ── From Connected ──────────────────────────────────────────────
-        (S::Connected, FxaEvent::Disconnect) => {
+        (S::Connected, E::Disconnect) => {
             account.disconnect();
             Ok(S::Disconnected)
         }
-        (S::Connected, FxaEvent::CheckAuthorizationStatus) => {
+        (S::Connected, E::CheckAuthorizationStatus) => {
+            // check_authorization_status() failing should leave us in the original state.
             let active = account
                 .check_authorization_status()
-                .to_state_machine_err(|| S::AuthIssues)?;
-            Ok(if active { S::Connected } else { S::AuthIssues })
+                .to_state_machine_err(|| S::Connected)?;
+            if active {
+                Ok(S::Connected)
+            } else {
+                account.reset_auth_recheck_timer();
+                Ok(S::AuthIssues)
+            }
         }
-        (S::Connected, FxaEvent::CallGetProfile) => {
-            account
-                .get_profile()
-                .to_state_machine_err(|| S::AuthIssues)?;
+        (S::Connected, E::CallGetProfile) => {
+            account.get_profile().to_state_machine_err(|| {
+                account.reset_auth_recheck_timer();
+                S::AuthIssues
+            })?;
             Ok(S::Connected)
         }
         (
             S::Connected,
-            FxaEvent::BeginOAuthFlow {
+            E::BeginOAuthFlow {
                 service,
                 scopes,
                 entrypoint,
@@ -186,19 +200,22 @@ pub fn transition(
                 initial_state: FxaRustAuthState::Connected,
             })
         }
-        (S::Connected, FxaEvent::WebChannelPasswordChange { json_payload }) => {
+        (S::Connected, E::WebChannelPasswordChange { json_payload }) => {
             // The inner call swaps the session token for a new refresh token and re-registers
             // the device record (push subscription, commands, etc) against the new token.
             account
                 .handle_web_channel_password_change(&json_payload)
-                .to_state_machine_err(|| S::AuthIssues)?;
+                .to_state_machine_err(|| {
+                    account.reset_auth_recheck_timer();
+                    S::AuthIssues
+                })?;
             Ok(S::Connected)
         }
 
         // ── From AuthIssues ─────────────────────────────────────────────
         (
             S::AuthIssues,
-            FxaEvent::BeginOAuthFlow {
+            E::BeginOAuthFlow {
                 service,
                 scopes,
                 entrypoint,
@@ -207,23 +224,57 @@ pub fn transition(
             let scope_refs: Vec<&str> = scopes.iter().map(String::as_str).collect();
             let oauth_url = account
                 .begin_oauth_flow(&service, &scope_refs, &entrypoint)
-                .to_state_machine_err(|| S::AuthIssues)?;
+                .to_state_machine_err(|| {
+                    account.reset_auth_recheck_timer();
+                    S::AuthIssues
+                })?;
             Ok(S::Authenticating {
                 oauth_url,
                 initial_state: FxaRustAuthState::AuthIssues,
             })
         }
-        (S::AuthIssues, FxaEvent::Disconnect) => {
+        (S::AuthIssues, E::Disconnect) => {
             account.disconnect();
             Ok(S::Disconnected)
         }
-        (S::AuthIssues, FxaEvent::WebChannelPasswordChange { json_payload }) => {
+        (S::AuthIssues, E::WebChannelPasswordChange { json_payload }) => {
             // A concurrent sync/401 may have pushed us here before the webchannel ran. The new
             // session token recovers us; device re-registration will be handled inside the inner call.
             account
                 .handle_web_channel_password_change(&json_payload)
-                .to_state_machine_err(|| S::AuthIssues)?;
+                .to_state_machine_err(|| {
+                    account.reset_auth_recheck_timer();
+                    S::AuthIssues
+                })?;
             Ok(S::Connected)
+        }
+        (S::AuthIssues, E::CheckAuthorizationStatus) => {
+            let active = account
+                .check_authorization_status()
+                .to_state_machine_err(|| S::AuthIssues)?;
+            if active {
+                Ok(S::Connected)
+            } else {
+                account.reset_auth_recheck_timer();
+                Ok(S::AuthIssues)
+            }
+        }
+
+        // ── Other transitions  ─────────────────────────────────
+        (from_state, E::CheckAuthorizationStatus) => {
+            // Ignore `CheckAuthorizationStatus` from other states.
+            // We want the app to be able to send this event whenever they want,
+            // without generating an error.
+            // If we're in a state where we can't run a check, then just ignore it.
+            error_support::debug!("Ignoring `CheckAuthorizationStatus` from {from_state:?}");
+            Ok(from_state)
+        }
+        (S::Disconnected, FxaEvent::Disconnect) => {
+            // Ignore Disconnect from the Disconnected state.
+            //
+            // This makes it idempotent and safe to send from any state.
+            // https://bugzilla.mozilla.org/show_bug.cgi?id=2061224
+            Ok(S::Disconnected)
         }
 
         // ── Invalid (state, event) pair ─────────────────────────────────
@@ -231,10 +282,6 @@ pub fn transition(
             Error::InvalidStateTransition(format!("{state} -> {event}")),
         ))),
     }
-}
-
-fn is_auth_error(e: &Error) -> bool {
-    matches!(e.get_error_handling().err, FxaError::Authentication)
 }
 
 #[cfg(test)]
@@ -320,12 +367,40 @@ mod tests {
     }
 
     #[test]
-    fn disconnected_invalid_event_returns_fatal_invalid_state_transition() {
+    fn disconnect_is_idempotent() {
         nss_as::ensure_initialized();
+        // `Disconnect` should be valid from all states and always result in the user being
+        // disconnected.
         let mut account = mock_account();
         let mut wrapper = RetryingAccount::new(&mut account);
-        let result = transition(&mut wrapper, FxaState::Disconnected, FxaEvent::Disconnect);
-        assert_fatal_invalid_transition(result);
+
+        assert_eq!(
+            transition(&mut wrapper, FxaState::Connected, FxaEvent::Disconnect).unwrap(),
+            FxaState::Disconnected
+        );
+
+        assert_eq!(
+            transition(&mut wrapper, FxaState::AuthIssues, FxaEvent::Disconnect).unwrap(),
+            FxaState::Disconnected
+        );
+
+        assert_eq!(
+            transition(
+                &mut wrapper,
+                FxaState::Authenticating {
+                    oauth_url: "test".into(),
+                    initial_state: FxaRustAuthState::Disconnected
+                },
+                FxaEvent::Disconnect
+            )
+            .unwrap(),
+            FxaState::Disconnected
+        );
+
+        assert_eq!(
+            transition(&mut wrapper, FxaState::Disconnected, FxaEvent::Disconnect).unwrap(),
+            FxaState::Disconnected
+        );
     }
 
     fn assert_handled_lands_at(

@@ -52,10 +52,6 @@ bool AnimationEffect::IsCurrent() const {
   }
 
   const AnimationTimeline* timeline = mAnimation->GetTimeline();
-  // An inactive timeline does not produce any effect, and so cannot be current.
-  if (timeline && timeline->IsInactiveTimeline()) {
-    return false;
-  }
   // An animation effect is current if it is associated with an animation not
   // in the idle play state with a non-null associated timeline that is not
   // monotonically increasing.
@@ -85,7 +81,7 @@ bool AnimationEffect::IsInEffect() const {
   const auto* timeline = mAnimation ? mAnimation->GetTimeline() : nullptr;
   // https://github.com/w3c/csswg-drafts/issues/9256
   // Start time is indeterminate, so our progress cannot possibly be resolved.
-  if (timeline && timeline->IsInactiveTimeline()) {
+  if (timeline && timeline->IsUnresolvedTimeline()) {
     return false;
   }
   ComputedTiming computedTiming = GetComputedTiming();
@@ -194,6 +190,9 @@ ComputedTiming AnimationEffect::GetComputedTimingAt(
     // Note: For progress-based timeline, it's possible to have a zero active
     // duration with active phase.
     result.mPhase = ComputedTiming::AnimationPhase::Active;
+    // FIXME: Bug 2075002. An overflow may happen if delay is -inf. This causes
+    // an unexpected |mActiveTime| and incorrect AnimationEvent::elapsedTime for
+    // the animation cancel event.
     result.mActiveTime = localTime - aTiming.Delay();
   }
 
@@ -299,7 +298,7 @@ ComputedTiming AnimationEffect::GetComputedTiming(
   const double playbackRate =
       mAnimation ? mAnimation->PlaybackRateInternal() : 1;
   const auto progressTimelinePosition =
-      mAnimation ? mAnimation->AtProgressTimelineBoundary()
+      mAnimation ? mAnimation->AtTimelineBoundary()
                  : Animation::ProgressTimelinePosition::NotBoundary;
   return GetComputedTimingAt(
       GetLocalTime(), aTiming ? *aTiming : NormalizedTiming(), playbackRate,
@@ -341,7 +340,7 @@ void AnimationEffect::GetComputedTimingAsDict(
   double playbackRate = mAnimation ? mAnimation->PlaybackRateInternal() : 1;
   const Nullable<TimeDuration> currentTime = GetLocalTime();
   const auto progressTimelinePosition =
-      mAnimation ? mAnimation->AtProgressTimelineBoundary()
+      mAnimation ? mAnimation->AtTimelineBoundary()
                  : Animation::ProgressTimelinePosition::NotBoundary;
   ComputedTiming computedTiming = GetComputedTimingAt(
       currentTime, NormalizedTiming(), playbackRate, progressTimelinePosition);
@@ -364,6 +363,12 @@ void AnimationEffect::GetComputedTimingAsDict(
   }
   // TODO: for "auto", 'fill' should depend on whether we are a keyframe effect.
   aRetVal.mFill = computedTiming.mFill;
+  // For a top-level (non-grouped) effect the start time is always 0. See
+  // https://drafts.csswg.org/web-animations-2/#animation-effect-start-time
+  // Once we implement group effects (sequence effects, specifically) this code
+  // will change. See https://bugzilla.mozilla.org/show_bug.cgi?id=1778417
+  AnimationUtils::DoubleToCSSNumberish(0.0, hasProgressTimeline, progressGlobal,
+                                       aRetVal.mStartTime.Construct());
   AnimationUtils::DoubleToCSSNumberish(
       computedTiming.mActiveDuration.ToMilliseconds(), hasProgressTimeline,
       progressGlobal, aRetVal.mActiveDuration.Construct());
@@ -394,6 +399,14 @@ void AnimationEffect::GetComputedTimingAsDict(
 
 void AnimationEffect::UpdateTiming(const OptionalEffectTiming& aTiming,
                                    ErrorResult& aRv) {
+  const bool isFiniteTimeline =
+      mAnimation ? mAnimation->HasFiniteTimeline() : false;
+
+  if (isFiniteTimeline && aTiming.mIterations.WasPassed() &&
+      aTiming.mIterations.Value() >= double(UINT64_MAX)) {
+    aRv.ThrowTypeError("Infinite iterations for finite timeline");
+    return;
+  }
   TimingParams timing =
       TimingParams::MergeOptionalEffectTiming(mTiming, aTiming, aRv);
   if (aRv.Failed()) {

@@ -23,14 +23,10 @@ import org.mozilla.fenix.home.recentvisits.RecentlyVisitedItem.RecentHistoryHigh
 import org.mozilla.fenix.library.history.toHistoryMetadata
 import org.mozilla.fenix.utils.Settings
 
-/**
- * All possible updates following user interactions with the "Recent visits" section from the Home screen.
- */
+/** All possible updates following user interactions with the "Recent visits" section from the Home screen. */
 interface RecentVisitsController {
 
-    /**
-     * Callback for when the "Show all" link is clicked.
-     */
+    /** Callback for when the "Show all" link is clicked. */
     fun handleHistoryShowAllClicked()
 
     /**
@@ -62,10 +58,7 @@ interface RecentVisitsController {
     fun handleRemoveRecentHistoryHighlight(highlightUrl: String)
 }
 
-/**
- * The default implementation of [RecentVisitsController].
- */
-@Suppress("LongParameterList")
+/** The default implementation of [RecentVisitsController]. */
 class DefaultRecentVisitsController(
     private val store: BrowserStore,
     private val appStore: AppStore,
@@ -77,13 +70,9 @@ class DefaultRecentVisitsController(
     private val scope: CoroutineScope,
 ) : RecentVisitsController {
 
-    /**
-     * Shows the history fragment.
-     */
+    /** Shows the history fragment. */
     override fun handleHistoryShowAllClicked() {
-        navController.navigate(
-            HomeFragmentDirections.actionGlobalHistoryFragment(),
-        )
+        navController.navigate(HomeFragmentDirections.actionGlobalHistoryFragment())
     }
 
     /**
@@ -95,9 +84,11 @@ class DefaultRecentVisitsController(
         navController.navigate(
             HomeFragmentDirections.actionGlobalHistoryMetadataGroup(
                 title = recentHistoryGroup.title,
-                historyMetadataItems = recentHistoryGroup.historyMetadata
-                    .mapIndexed { index, item -> item.toHistoryMetadata(index) }.toTypedArray(),
-            ),
+                historyMetadataItems =
+                    recentHistoryGroup.historyMetadata
+                        .mapIndexed { index, item -> item.toHistoryMetadata(index) }
+                        .toTypedArray(),
+            )
         )
     }
 
@@ -120,8 +111,8 @@ class DefaultRecentVisitsController(
     }
 
     /**
-     * Switch to an already open tab for [recentHistoryHighlight] if one exists or
-     * create a new tab in which to load this item's URL.
+     * Switch to an already open tab for [recentHistoryHighlight] if one exists or create a new tab in which to load
+     * this item's URL.
      *
      * @param recentHistoryHighlight the just clicked [RecentHistoryHighlight] to open in browser.
      */

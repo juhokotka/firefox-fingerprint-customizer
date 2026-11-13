@@ -1,5 +1,5 @@
 const TEST_FILE = "file_with_link_to_http.html";
-// eslint-disable-next-line @microsoft/sdl/no-insecure-url
+// eslint-disable-next-line sdl/no-insecure-url
 const TEST_HTTP = "http://example.org/";
 
 // Test for bug 1338375.
@@ -11,7 +11,7 @@ add_task(async function () {
     .newFileURI(dir)
     .spec.replace(
       "/components/tabbrowser/test/browser/tabs/",
-      "/base/content/test/general/"
+      "/base/content/test/browser-general/"
     );
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, uriString);
   registerCleanupFunction(async function () {

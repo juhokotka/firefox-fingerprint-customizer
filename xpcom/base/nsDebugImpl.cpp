@@ -3,22 +3,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // Chromium headers must come before Mozilla headers.
-#include "base/process_util.h"
+#include "nsDebugImpl.h"
 
+#include "MainThreadUtils.h"
+#include "base/process_util.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/IntentionalCrash.h"
 #include "mozilla/Printf.h"
 #include "mozilla/ProfilerMarkers.h"
-
-#include "MainThreadUtils.h"
-#include "nsDebugImpl.h"
 #include "nsDebug.h"
 #include "nsExceptionHandler.h"
 #include "nsString.h"
 #include "nsXULAppAPI.h"
-#include "prerror.h"
-#include "prerr.h"
 #include "prenv.h"
+#include "prerr.h"
+#include "prerror.h"
 
 #ifdef ANDROID
 #  include <android/log.h>
@@ -37,15 +36,16 @@
 
 #if defined(XP_WIN)
 #  include <tchar.h>
+
 #  include "nsString.h"
 #endif
 
 #if defined(XP_MACOSX) || defined(__DragonFly__) || defined(__FreeBSD__) || \
     defined(__NetBSD__) || defined(__OpenBSD__)
 #  include <stdbool.h>
-#  include <unistd.h>
 #  include <sys/param.h>
 #  include <sys/sysctl.h>
+#  include <unistd.h>
 #endif
 
 #if defined(__OpenBSD__)
@@ -84,9 +84,9 @@ static void RealBreak();
 static void Break(const char* aMsg);
 
 #if defined(_WIN32)
-#  include <windows.h>
-#  include <signal.h>
 #  include <malloc.h>  // for _alloca
+#  include <signal.h>
+#  include <windows.h>
 #endif
 
 using namespace mozilla;
@@ -301,60 +301,75 @@ bool FixedBuffer::append(const char* aBuf, size_t aLen) {
 
 namespace geckoprofiler::markers {
 
-struct DebugBreakMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("DebugBreak");
+struct DebugBreakMarker : public BaseMarkerType<DebugBreakMarker> {
+  static constexpr const char* Name = "DebugBreak";
+  using MS = MarkerSchema;
+  static constexpr MS::Location Locations[] = {
+      MS::Location::TimelineOverview,
+      MS::Location::MarkerChart,
+      MS::Location::MarkerTable,
+  };
+  /* TODO: The Frontend does not support this yet.
+   static constexpr const char* AllLabels =
+      "{marker.data.lvl}: {marker.data.msg ? marker.data.msg :
+   marker.data.expr}";
+  */
+  static constexpr const char* AllLabels =
+      "{marker.data.lvl}:{marker.data.msg?' msg: "
+      "':''}{marker.data.msg}{marker.data.expr?' expr: "
+      "':''}{marker.data.expr}";
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"lvl", MS::InputType::CString, "Severity",
+       MS::Format::UniqueString},  // TODO: Use enum encoding
+      {"msg", MS::InputType::CString, "Message", MS::Format::String},
+      {"expr", MS::InputType::CString, "Expression", MS::Format::String},
+      {"file", MS::InputType::CString, "File", MS::Format::String},
+      {"line", MS::InputType::Int32, "Line",
+       MS::Format::String /* We don't want comma separator */},
+  };
+
+  static ProfilerString8View SeverityString(uint32_t aSeverity) {
+    switch (aSeverity) {
+      case NS_DEBUG_ASSERTION:
+        return "ASSERTION";
+      case NS_DEBUG_BREAK:
+        return "BREAK";
+      case NS_DEBUG_ABORT:
+        return "ABORT";
+      default:
+        return "WARNING";
+    }
   }
+
+  static void TranslateMarkerInputToSchema(void* aContext, uint32_t aSeverity,
+                                           const ProfilerString8View& aMsg,
+                                           const ProfilerString8View& aExpr,
+                                           const ProfilerString8View& aFile,
+                                           int32_t aLine) {
+    ETW::OutputMarkerSchema(aContext, DebugBreakMarker{},
+                            SeverityString(aSeverity), aMsg, aExpr, aFile,
+                            aLine);
+  }
+
   static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
                                    uint32_t aSeverity,
-                                   const ProfilerString8View& aStr,
+                                   const ProfilerString8View& aMsg,
                                    const ProfilerString8View& aExpr,
                                    const ProfilerString8View& aFile,
                                    int32_t aLine) {
-    nsAutoCString sevString("WARNING");
-    switch (aSeverity) {
-      case NS_DEBUG_ASSERTION:
-        sevString = "ASSERTION";
-        break;
-
-      case NS_DEBUG_BREAK:
-        sevString = "BREAK";
-        break;
-
-      case NS_DEBUG_ABORT:
-        sevString = "ABORT";
-        break;
-    }
-    aWriter.StringProperty("Severity", sevString);
-    // The 'name' property is searchable on the front-end.
-    if (aStr.Length() != 0) {
-      aWriter.StringProperty("Message", aStr);
-      aWriter.StringProperty("name", aStr);
-    } else if (aExpr.Length() != 0) {
-      aWriter.StringProperty("name", aExpr);
+    StreamJSONMarkerDataImpl(aWriter, SeverityString(aSeverity));
+    if (aMsg.Length() != 0) {
+      aWriter.StringProperty("msg", aMsg);
     }
     if (aExpr.Length() != 0) {
-      aWriter.StringProperty("Expression", aExpr);
+      aWriter.StringProperty("expr", aExpr);
     }
     if (aFile.Length() != 0) {
-      aWriter.StringProperty("File", aFile);
+      aWriter.StringProperty("file", aFile);
     }
     if (aLine != 0) {
-      aWriter.IntProperty("Line", aLine);
+      aWriter.IntProperty("line", aLine);
     }
-  }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::TimelineOverview, MS::Location::MarkerChart,
-              MS::Location::MarkerTable};
-    schema.SetAllLabels("{marker.data.Severity}: {marker.data.name}");
-    schema.AddKeyFormat("Message", MS::Format::String);
-    schema.AddKeyFormat("name", MS::Format::String, MS::PayloadFlags::Hidden);
-    schema.AddKeyFormat("Severity", MS::Format::String);
-    schema.AddKeyFormat("Expression", MS::Format::String);
-    schema.AddKeyFormat("File", MS::Format::String);
-    schema.AddKeyFormat("Line", MS::Format::Integer);
-    return schema;
   }
 };
 
@@ -549,6 +564,10 @@ static void RealBreak() {
       "BKPT #0");
 #elif defined(__aarch64__)
   asm("brk #0");
+#elif defined(__riscv)
+  asm("ebreak");
+#elif defined(__loongarch__)
+  asm("break 0");
 #elif defined(SOLARIS)
 #  if defined(__i386__) || defined(__i386) || defined(__x86_64__)
   asm("int $3");
@@ -561,7 +580,7 @@ static void RealBreak() {
 }
 
 // Abort() calls this function, don't call it!
-static void Break(const char* aMsg) {
+static void Break([[maybe_unused]] const char* aMsg) {
 #if defined(_WIN32)
   static int ignoreDebugger;
   if (!ignoreDebugger) {
@@ -628,6 +647,10 @@ static void Break(const char* aMsg) {
     (defined(__i386__) || defined(__i386) || defined(__x86_64__))
   RealBreak();
 #elif defined(__arm__) || defined(__aarch64__)
+  RealBreak();
+#elif defined(__riscv)
+  RealBreak();
+#elif defined(__loongarch__)
   RealBreak();
 #elif defined(SOLARIS)
   RealBreak();

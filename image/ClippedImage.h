@@ -5,13 +5,13 @@
 #ifndef mozilla_image_ClippedImage_h
 #define mozilla_image_ClippedImage_h
 
+#include <utility>
+
 #include "ImageWrapper.h"
-#include "mozilla/gfx/2D.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
-
-#include <utility>
+#include "mozilla/gfx/2D.h"
 
 namespace mozilla {
 namespace image {
@@ -65,7 +65,7 @@ class ClippedImage : public ImageWrapper {
 
  protected:
   ClippedImage(Image* aImage, nsIntRect aClip,
-               const Maybe<nsSize>& aSVGViewportSize);
+               const Maybe<CSSSize>& aSVGViewportSize);
 
   virtual ~ClippedImage();
 
@@ -84,10 +84,10 @@ class ClippedImage : public ImageWrapper {
   // If we are forced to draw a temporary surface, we cache it here.
   UniquePtr<ClippedImageCachedSurface> mCachedSurface;
 
-  nsIntRect mClip;                    // The region to clip to.
-  Maybe<bool> mShouldClip;            // Memoized ShouldClip() if present.
-  Maybe<nsIntSize> mSVGViewportSize;  // If we're clipping a VectorImage, this
-                                      // is the size of viewport of that image.
+  nsIntRect mClip;                  // The region to clip to.
+  Maybe<bool> mShouldClip;          // Memoized ShouldClip() if present.
+  Maybe<CSSSize> mSVGViewportSize;  // If we're clipping a VectorImage, this
+                                    // is the size of viewport of that image.
   friend class DrawSingleTileCallback;
   friend class ImageOps;
 };

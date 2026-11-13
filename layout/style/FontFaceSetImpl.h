@@ -201,7 +201,7 @@ class FontFaceSetImpl : public nsISupports, public gfxUserFontSet {
   void CheckLoadingFinishedAfterDelay();
 
   void OnLoadingStarted() { DispatchLoadingEventAndReplaceReadyPromise(); }
-  void OnLoadingFinished();
+  MOZ_CAN_RUN_SCRIPT void OnLoadingFinished();
 
   // Note: if you add new cycle collected objects to FontFaceRecord,
   // make sure to update FontFaceSet's cycle collection macros
@@ -235,15 +235,12 @@ class FontFaceSetImpl : public nsISupports, public gfxUserFontSet {
    */
   bool HasLoadingFontFaces();
 
-  // Whether mReady is pending, or would be when created.
-  bool ReadyPromiseIsPending() const;
-
   // Helper function for HasLoadingFontFaces.
   virtual void UpdateHasLoadingFontFaces();
 
   void ParseFontShorthandForMatching(const nsACString& aFont,
                                      StyleFontFamilyList& aFamilyList,
-                                     FontWeight& aWeight, FontStretch& aStretch,
+                                     FontWeight& aWeight, FontWidth& aWidth,
                                      FontSlantStyle& aStyle, ErrorResult& aRv);
 
   virtual TimeStamp GetNavigationStartTimeStamp() = 0;
@@ -275,6 +272,10 @@ class FontFaceSetImpl : public nsISupports, public gfxUserFontSet {
 
   // The overall status of the loading or loaded fonts in the FontFaceSet.
   dom::FontFaceSetLoadStatus mStatus MOZ_GUARDED_BY(mMutex);
+
+  // Whether we've scheduled the resolution of the ready promise and the
+  // dispatch of loadingdone / loadingerror since we last started loading.
+  bool mLoadingFinishedScheduled MOZ_GUARDED_BY(mMutex) = false;
 
   // A map from gfxFontFaceSrc pointer identity to whether the load is allowed
   // by CSP or other checks. We store this here because querying CSP off the

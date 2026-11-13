@@ -8,7 +8,6 @@
 
 #include "IMEData.h"
 #include "TextEvents.h"
-
 #include "mozilla/Assertions.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/IntegerPrintfMacros.h"
@@ -437,14 +436,17 @@ bool ContentCacheInChild::CacheTextRects(nsIWidget* aWidget,
     //      composition immediately, we should cache next character of current
     //      composition too.
     uint32_t length = textComposition->LastData().Length() + 1;
-    mTextRectArray = Some(TextRectArray(mCompositionStart.value()));
-    if (NS_WARN_IF(!QueryCharRectArray(aWidget, mTextRectArray->mStart, length,
-                                       mTextRectArray->mRects))) {
+    mTextRectArray.reset();
+    RectArray rects;
+    if (NS_WARN_IF(!QueryCharRectArray(aWidget, mCompositionStart.value(),
+                                       length, rects))) {
       MOZ_LOG(sContentCacheLog, LogLevel::Error,
               ("0x%p   CacheTextRects(), FAILED, "
                "couldn't retrieve text rect array of the composition string",
                this));
-      mTextRectArray.reset();
+    } else {
+      mTextRectArray = Some(TextRectArray(mCompositionStart.value()));
+      mTextRectArray->mRects = std::move(rects);
     }
   } else {
     mCompositionStart.reset();
@@ -605,6 +607,7 @@ bool ContentCacheInChild::CacheTextRects(nsIWidget* aWidget,
   // or undo the last commit.  Then, IME requires the character rects for
   // positioning their UI.
   if (mLastCommit.isSome()) {
+    RectArray rects;
     mLastCommitStringTextRectArray =
         Some(TextRectArray(mLastCommit->StartOffset()));
     if (mLastCommit->Length() == 1 && mSelection.isSome() &&
@@ -613,15 +616,17 @@ bool ContentCacheInChild::CacheTextRects(nsIWidget* aWidget,
         !mSelection->mAnchorCharRects[ePrevCharRect].IsEmpty()) {
       mLastCommitStringTextRectArray->mRects.AppendElement(
           mSelection->mAnchorCharRects[ePrevCharRect]);
-    } else if (NS_WARN_IF(!QueryCharRectArray(
-                   aWidget, mLastCommit->StartOffset(), mLastCommit->Length(),
-                   mLastCommitStringTextRectArray->mRects))) {
+    } else if (NS_WARN_IF(!QueryCharRectArray(aWidget,
+                                              mLastCommit->StartOffset(),
+                                              mLastCommit->Length(), rects))) {
       MOZ_LOG(sContentCacheLog, LogLevel::Error,
               ("0x%p   CacheTextRects(), FAILED, "
                "couldn't retrieve text rect array of the last commit string",
                this));
       mLastCommitStringTextRectArray.reset();
       mLastCommit.reset();
+    } else {
+      mLastCommitStringTextRectArray->mRects = std::move(rects);
     }
     MOZ_ASSERT((mLastCommitStringTextRectArray.isSome()
                     ? mLastCommitStringTextRectArray->mRects.Length()
@@ -1376,19 +1381,20 @@ bool ContentCacheInParent::OnCompositionEvent(
 
 void ContentCacheInParent::OnSelectionEvent(
     const WidgetSelectionEvent& aSelectionEvent) {
-  MOZ_LOG(sContentCacheLog, LogLevel::Info,
-          ("0x%p OnSelectionEvent(aEvent={ "
-           "mMessage=%s, mOffset=%u, mLength=%u, mReversed=%s, "
-           "mExpandToClusterBoundary=%s }), "
-           "PendingEventsNeedingAck()=%u, WidgetHasComposition()=%s, "
-           "mHandlingCompositions.Length()=%zu, HasPendingCommit()=%s, "
-           "mIsChildIgnoringCompositionEvents=%s",
-           this, ToChar(aSelectionEvent.mMessage), aSelectionEvent.mOffset,
-           aSelectionEvent.mLength, TrueOrFalse(aSelectionEvent.mReversed),
-           TrueOrFalse(aSelectionEvent.mExpandToClusterBoundary),
-           PendingEventsNeedingAck(), TrueOrFalse(WidgetHasComposition()),
-           mHandlingCompositions.Length(), TrueOrFalse(HasPendingCommit()),
-           TrueOrFalse(mIsChildIgnoringCompositionEvents)));
+  MOZ_LOG_FMT(sContentCacheLog, LogLevel::Info,
+              "{} OnSelectionEvent(aEvent={{ "
+              "mMessage={}, mOffset={}, mLength={}, mDirection={}, "
+              "mExpandToClusterBoundary={} }}), "
+              "PendingEventsNeedingAck()={}, WidgetHasComposition()={}, "
+              "mHandlingCompositions.Length()={}, HasPendingCommit()={}, "
+              "mIsChildIgnoringCompositionEvents={}",
+              static_cast<void*>(this), ToChar(aSelectionEvent.mMessage),
+              aSelectionEvent.mOffset, aSelectionEvent.mLength,
+              aSelectionEvent.mDirection,
+              aSelectionEvent.mExpandToClusterBoundary,
+              PendingEventsNeedingAck(), WidgetHasComposition(),
+              mHandlingCompositions.Length(), HasPendingCommit(),
+              mIsChildIgnoringCompositionEvents);
 
 #if MOZ_DIAGNOSTIC_ASSERT_ENABLED && !defined(FUZZING_SNAPSHOT)
   mDispatchedEventMessages.AppendElement(aSelectionEvent.mMessage);
@@ -1399,18 +1405,19 @@ void ContentCacheInParent::OnSelectionEvent(
 
 void ContentCacheInParent::OnContentCommandEvent(
     const WidgetContentCommandEvent& aContentCommandEvent) {
-  MOZ_LOG(sContentCacheLog, LogLevel::Info,
-          ("0x%p OnContentCommandEvent(aEvent={ "
-           "mMessage=%s, mString=\"%s\", mSelection={ mReplaceSrcString=\"%s\" "
-           "mOffset=%u, mPreventSetSelection=%s }, mOnlyEnabledCheck=%s })",
-           this, ToChar(aContentCommandEvent.mMessage),
-           ToString(aContentCommandEvent.mString).c_str(),
-           ToString(aContentCommandEvent.mSelection.mReplaceSrcString).c_str(),
-           aContentCommandEvent.mSelection.mOffset,
-           TrueOrFalse(aContentCommandEvent.mSelection.mPreventSetSelection),
-           TrueOrFalse(aContentCommandEvent.mOnlyEnabledCheck)));
+  MOZ_LOG_FMT(
+      sContentCacheLog, LogLevel::Info,
+      "{} OnContentCommandEvent(aEvent={{ "
+      "mMessage={}, mString=\"{}\", mSelection={{ mReplaceSrcString=\"{}\" "
+      "mOffset={}, mPreventSetSelection={} }}, mOnlyEnabledCheck={} }})",
+      static_cast<void*>(this), ToChar(aContentCommandEvent.mMessage),
+      ToString(aContentCommandEvent.mString),
+      ToString(aContentCommandEvent.mSelection.mReplaceSrcString),
+      aContentCommandEvent.mSelection.mOffset,
+      aContentCommandEvent.mSelection.mPreventSetSelection,
+      aContentCommandEvent.mOnlyEnabledCheck);
 
-  MOZ_ASSERT(!aContentCommandEvent.mOnlyEnabledCheck);
+  MOZ_ASSERT(!aContentCommandEvent.ShouldCheckEnabledOnly());
 
 #if MOZ_DIAGNOSTIC_ASSERT_ENABLED && !defined(FUZZING_SNAPSHOT)
   mDispatchedEventMessages.AppendElement(aContentCommandEvent.mMessage);

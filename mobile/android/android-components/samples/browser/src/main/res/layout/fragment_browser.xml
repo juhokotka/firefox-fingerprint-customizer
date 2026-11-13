@@ -42,7 +42,6 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent">
             <mozilla.components.concept.engine.EngineView
-                tools:ignore="Instantiatable"
                 android:id="@+id/engineView"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
@@ -73,9 +72,9 @@
             android:layout_marginLeft="16dp"
             android:layout_marginRight="16dp"
             android:layout_marginBottom="72dp"
+            android:contentDescription="@string/mozac_reader_view_appearance_description"
             android:src="@drawable/mozac_ic_reader_view_24"
-            android:visibility="gone"
-            tools:ignore="ContentDescription" />
+            android:visibility="gone" />
 
     </FrameLayout>
 

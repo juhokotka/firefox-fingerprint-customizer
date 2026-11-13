@@ -3,6 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "CompositorWidgetParent.h"
 
+#include <ddraw.h>
+
+#include "RemoteBackbuffer.h"
+#include "VRShMem.h"
+#include "VsyncDispatcher.h"
+#include "WinCompositorWindowThread.h"
 #include "mozilla/StaticPrefs_layers.h"
 #include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/gfx/Point.h"
@@ -12,12 +18,6 @@
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
 #include "nsWindow.h"
-#include "VsyncDispatcher.h"
-#include "WinCompositorWindowThread.h"
-#include "VRShMem.h"
-#include "RemoteBackbuffer.h"
-
-#include <ddraw.h>
 
 namespace mozilla {
 namespace widget {
@@ -137,6 +137,11 @@ bool CompositorWidgetParent::GetWindowIsFullyOccluded() const {
 mozilla::ipc::IPCResult CompositorWidgetParent::RecvUpdateTransparency(
     const TransparencyMode& aMode) {
   SetTransparencyMode(aMode);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult CompositorWidgetParent::RecvNotifyClientSizeChanged(
+    const LayoutDeviceIntSize&) {
   return IPC_OK();
 }
 

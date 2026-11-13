@@ -81,6 +81,20 @@ pub unsafe extern "C" fn qcms_profile_create_cicp(
         .map_or_else(null_mut, Box::into_raw)
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn qcms_profile_create_cicp_with_intent(
+    colour_primaries: u8,
+    transfer_characteristics: u8,
+    rendering_intent: Intent,
+) -> *mut Profile {
+    Profile::new_cicp_with_intent(
+        colour_primaries.into(),
+        transfer_characteristics.into(),
+        rendering_intent,
+    )
+    .map_or_else(null_mut, Box::into_raw)
+}
+
 /* qcms_profile_from_memory does not hold a reference to the memory passed in */
 #[no_mangle]
 pub unsafe extern "C" fn qcms_profile_from_memory(
@@ -114,6 +128,24 @@ pub extern "C" fn qcms_profile_get_color_space(profile: &Profile) -> icColorSpac
 #[no_mangle]
 pub extern "C" fn qcms_profile_is_sRGB(profile: &Profile) -> bool {
     profile.is_sRGB()
+}
+
+/// Fills in the chromaticities of an RGB profile's colorants and white point.
+/// Returns false, leaving the outputs untouched, if they aren't available.
+#[no_mangle]
+pub extern "C" fn qcms_profile_get_primaries(
+    profile: &Profile,
+    primaries: &mut qcms_CIE_xyYTRIPLE,
+    white_point: &mut qcms_CIE_xyY,
+) -> bool {
+    match profile.colorant_chromaticities() {
+        Some((p, w)) => {
+            *primaries = p;
+            *white_point = w;
+            true
+        }
+        None => false,
+    }
 }
 
 #[no_mangle]

@@ -11,30 +11,32 @@
 #include <sysinfoapi.h>
 #include <winerror.h>
 #include <winuser.h>
+
 #include <utility>
 
-#include "ContentAnalysis.h"
+#include "WinUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/BackgroundHangMonitor.h"
 #include "mozilla/Components.h"
+#include "mozilla/Logging.h"
+#include "mozilla/ProfilerLabels.h"
+#include "mozilla/StaticPrefs_widget.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/Directory.h"
 #include "mozilla/dom/WindowGlobalParent.h"
-#include "mozilla/Logging.h"
 #include "mozilla/ipc/UtilityProcessManager.h"
-#include "mozilla/ProfilerLabels.h"
-#include "mozilla/StaticPrefs_widget.h"
-#include "mozilla/UniquePtr.h"
+#include "mozilla/widget/filedialog/WinFileDialogCommands.h"
+#include "mozilla/widget/filedialog/WinFileDialogParent.h"
 #include "nsArrayEnumerator.h"
+#include "nsCExternalHandlerService.h"
 #include "nsCRT.h"
 #include "nsEnumeratorUtils.h"
 #include "nsHashPropertyBag.h"
-#include "nsIContentAnalysis.h"
+#include "nsIExternalHelperAppService.h"
 #include "nsIFile.h"
 #include "nsISimpleEnumerator.h"
-#include "nsCExternalHandlerService.h"
-#include "nsIExternalHelperAppService.h"
 #include "nsNetUtil.h"
 #include "nsPIDOMWindow.h"
 #include "nsPrintfCString.h"
@@ -42,10 +44,6 @@
 #include "nsString.h"
 #include "nsToolkit.h"
 #include "nsWindow.h"
-#include "WinUtils.h"
-
-#include "mozilla/widget/filedialog/WinFileDialogCommands.h"
-#include "mozilla/widget/filedialog/WinFileDialogParent.h"
 
 using mozilla::LogLevel;
 using mozilla::UniquePtr;
@@ -175,37 +173,42 @@ namespace {
 
 static RefPtr<FDPromise<Maybe<filedialog::Results>>> ShowFilePickerRemote(
     HWND parent, filedialog::FileDialogType type,
-    nsTArray<filedialog::Command> const& commands) {
+    nsTArray<filedialog::Command> const& commands, bool needsInputProtection) {
   using mozilla::widget::filedialog::sLogFileDialog;
-  return mozilla::detail::ShowRemote(
-      [parent, type,
-       commands = commands.Clone()](filedialog::WinFileDialogParent* p) {
-        MOZ_LOG(sLogFileDialog, LogLevel::Info,
-                ("%s: p = [%p]", __PRETTY_FUNCTION__, p));
-        return p->ShowFileDialogImpl(parent, type, commands);
-      });
-}
-
-static RefPtr<FDPromise<Maybe<nsString>>> ShowFolderPickerRemote(
-    HWND parent, nsTArray<filedialog::Command> const& commands) {
-  using mozilla::widget::filedialog::sLogFileDialog;
-  return mozilla::detail::ShowRemote([parent, commands = commands.Clone()](
+  return mozilla::detail::ShowRemote([parent, type, needsInputProtection,
+                                      commands = commands.Clone()](
                                          filedialog::WinFileDialogParent* p) {
     MOZ_LOG(sLogFileDialog, LogLevel::Info,
             ("%s: p = [%p]", __PRETTY_FUNCTION__, p));
-    return p->ShowFolderDialogImpl(parent, commands);
+    return p->ShowFileDialogImpl(parent, type, commands, needsInputProtection);
   });
+}
+
+static RefPtr<FDPromise<Maybe<nsString>>> ShowFolderPickerRemote(
+    HWND parent, nsTArray<filedialog::Command> const& commands,
+    bool needsInputProtection) {
+  using mozilla::widget::filedialog::sLogFileDialog;
+  return mozilla::detail::ShowRemote(
+      [parent, needsInputProtection,
+       commands = commands.Clone()](filedialog::WinFileDialogParent* p) {
+        MOZ_LOG(sLogFileDialog, LogLevel::Info,
+                ("%s: p = [%p]", __PRETTY_FUNCTION__, p));
+        return p->ShowFolderDialogImpl(parent, commands, needsInputProtection);
+      });
 }
 
 static RefPtr<FDPromise<Maybe<filedialog::Results>>> ShowFilePickerLocal(
     HWND parent, filedialog::FileDialogType type,
-    nsTArray<filedialog::Command> const& commands) {
-  return filedialog::SpawnFilePicker(parent, type, commands.Clone());
+    nsTArray<filedialog::Command> const& commands, bool needsInputProtection) {
+  return filedialog::SpawnFilePicker(parent, type, commands.Clone(),
+                                     needsInputProtection);
 }
 
 static RefPtr<FDPromise<Maybe<nsString>>> ShowFolderPickerLocal(
-    HWND parent, nsTArray<filedialog::Command> const& commands) {
-  return filedialog::SpawnFolderPicker(parent, commands.Clone());
+    HWND parent, nsTArray<filedialog::Command> const& commands,
+    bool needsInputProtection) {
+  return filedialog::SpawnFolderPicker(parent, commands.Clone(),
+                                       needsInputProtection);
 }
 
 }  // namespace
@@ -495,7 +498,8 @@ nsFilePicker::ShowFolderPicker(const nsString& aInitialDir) {
 
   return mozilla::detail::AsyncExecute(&mozilla::detail::ShowFolderPickerLocal,
                                        &mozilla::detail::ShowFolderPickerRemote,
-                                       shim.get(), commands)
+                                       shim.get(), commands,
+                                       IsContentInitiated())
       ->Map(NS_GetCurrentThread(), __PRETTY_FUNCTION__,
             [self = RefPtr(this), shim = std::move(shim),
              awps = std::move(awps)](Maybe<nsString> val) {
@@ -638,7 +642,8 @@ nsFilePicker::ShowFilePicker(const nsString& aInitialDir) {
 
   auto promise = mozilla::detail::AsyncExecute(
       &mozilla::detail::ShowFilePickerLocal,
-      &mozilla::detail::ShowFilePickerRemote, shim.get(), type, commands);
+      &mozilla::detail::ShowFilePickerRemote, shim.get(), type, commands,
+      IsContentInitiated());
 
   return promise->Map(
       mozilla::GetMainThreadSerialEventTarget(), __PRETTY_FUNCTION__,
@@ -681,65 +686,19 @@ void nsFilePicker::ClearFiles() {
   mFiles.Clear();
 }
 
-RefPtr<nsFilePicker::ContentAnalysisResponse>
-nsFilePicker::CheckContentAnalysisService() {
-  nsresult rv;
-  nsCOMPtr<nsIContentAnalysis> contentAnalysis =
-      mozilla::components::nsIContentAnalysis::Service(&rv);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return nsFilePicker::ContentAnalysisResponse::CreateAndReject(rv, __func__);
-  }
-  bool contentAnalysisIsActive = false;
-  rv = contentAnalysis->GetIsActive(&contentAnalysisIsActive);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return nsFilePicker::ContentAnalysisResponse::CreateAndReject(rv, __func__);
-  }
-  if (!contentAnalysisIsActive ||
-      !mozilla::StaticPrefs::
-          browser_contentanalysis_interception_point_file_upload_enabled()) {
-    nsCOMArray<nsIFile> files;
-    if (mMode == modeGetFolder || !mUnicodeFile.IsEmpty()) {
-      RefPtr<nsIFile> folderOrFile;
-      nsresult rv = GetFile(getter_AddRefs(folderOrFile));
-      if (NS_WARN_IF(NS_FAILED(rv) || !folderOrFile)) {
-        return nsFilePicker::ContentAnalysisResponse::CreateAndReject(rv,
-                                                                      __func__);
-      }
-      files.AppendElement(folderOrFile);
-    } else {
-      // multiple selections
-      files.AppendElements(mFiles);
-    }
-    return nsFilePicker::ContentAnalysisResponse::CreateAndResolve(
-        std::move(files), __func__);
-  }
-
-  // Entries may be files or folders.  Folder contents will be recursively
-  // checked.
+nsCOMArray<nsIFile> nsFilePicker::GetSelectedFilesOrFolder() {
   nsCOMArray<nsIFile> files;
   if (mMode == modeGetFolder || !mUnicodeFile.IsEmpty()) {
     nsCOMPtr<nsIFile> folderOrFile;
-    nsresult rv = GetFile(getter_AddRefs(folderOrFile));
-    if (NS_WARN_IF(NS_FAILED(rv) || !folderOrFile)) {
-      return nsFilePicker::ContentAnalysisResponse::CreateAndReject(rv,
-                                                                    __func__);
+    if (NS_SUCCEEDED(GetFile(getter_AddRefs(folderOrFile))) && folderOrFile) {
+      files.AppendElement(folderOrFile);
     }
-    files.AppendElement(folderOrFile);
   } else {
     // multiple selections
     files.AppendElements(mFiles);
   }
-  MOZ_ASSERT(!files.IsEmpty());
-  auto* windowGlobal = mBrowsingContext->Canonical()->GetCurrentWindowGlobal();
-  NS_ENSURE_TRUE(
-      windowGlobal,
-      nsFilePicker::ContentAnalysisResponse::CreateAndReject(rv, __func__));
-  // This will check all of the files even if BLOCK responses are received for
-  // some of them, and the promise will resolve with the files that are ALLOWed.
-  return mozilla::contentanalysis::ContentAnalysis::CheckUploadsInBatchMode(
-      std::move(files), /* aAutoAcknowledge */ true, windowGlobal,
-      nsIContentAnalysisRequest::Reason::eFilePickerDialog);
-};
+  return files;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // nsIFilePicker impl.
@@ -799,15 +758,17 @@ nsresult nsFilePicker::Open(nsIFilePickerShownCallback* aCallback) {
           }
         }
 
-        if (self->mBrowsingContext && !self->mBrowsingContext->IsChrome() &&
-            self->mMode != modeSave && retValue != ResultCode::returnCancel) {
-          self->CheckContentAnalysisService()->Then(
+        if (self->ShouldRunContentAnalysis()) {
+          auto contentAnalysisPromise =
+              self->CheckContentAnalysis(self->GetSelectedFilesOrFolder());
+          contentAnalysisPromise->Then(
               mozilla::GetMainThreadSerialEventTarget(), __func__,
               [retValue, callback,
                self = RefPtr{self}](nsCOMArray<nsIFile> aAllowedFiles) {
                 if (aAllowedFiles.IsEmpty()) {
                   self->ClearFiles();
                   callback->Done(ResultCode::returnCancel);
+                  return;
                 }
                 if (self->mMode == modeGetFolder ||
                     !self->mUnicodeFile.IsEmpty()) {

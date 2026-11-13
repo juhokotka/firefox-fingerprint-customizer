@@ -205,6 +205,11 @@
   num_temps: 1
   mir_op: true
 
+- name: NewBoundFunction
+  result_type: WordSized
+  num_temps: 1
+  mir_op: true
+
 - name: NewTypedArray
   result_type: WordSized
   call_instruction: true
@@ -979,7 +984,8 @@
   num_temps: 1
 
 - name: Return
-  gen_boilerplate: false
+  operands:
+    value: BoxedValue
 
 - name: MinMaxI
   result_type: WordSized
@@ -1310,7 +1316,7 @@
   operands:
     lhs: WordSized
     rhs: WordSized
-  call_instruction: true
+  num_temps: 2
   mir_op: Mod
 
 - name: ModPowTwoD
@@ -2205,9 +2211,7 @@
     newval: WordSized
   # Needs additional temps on LL/SC platforms to extract/insert bits of word.
 #if defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)
-  num_temps: 4
-#else
-  num_temps: 1
+  num_temps: 3
 #endif
   mir_op: true
 
@@ -2219,9 +2223,7 @@
     value: WordSized
   # Needs additional temps on LL/SC platforms to extract/insert bits of word.
 #if defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)
-  num_temps: 4
-#else
-  num_temps: 1
+  num_temps: 3
 #endif
   mir_op: true
 
@@ -2233,9 +2235,9 @@
     value: WordSized
   # Needs additional temps on LL/SC platforms to extract/insert bits of word.
 #if defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)
-  num_temps: 4
+  num_temps: 3
 #else
-  num_temps: 2
+  num_temps: 1
 #endif
   mir_op: true
 
@@ -2297,7 +2299,7 @@
     elements: WordSized
     index: WordSized
     value: Int64
-#ifndef JS_CODEGEN_X86
+#if !defined(JS_CODEGEN_X86) && !defined(JS_CODEGEN_RISCV64)
   num_temps64: 1
 #endif
   mir_op: AtomicTypedArrayElementBinop
@@ -2308,7 +2310,7 @@
     elements: WordSized
     index: WordSized
     value: Int64
-#ifndef JS_CODEGEN_X64
+#if !defined(JS_CODEGEN_X64) && !defined(JS_CODEGEN_RISCV64) && !defined(JS_CODEGEN_LOONG64)
   num_temps64: 1
 #endif
   mir_op: AtomicTypedArrayElementBinop
@@ -2682,6 +2684,9 @@
   operands:
     input: BoxedValue
 
+- name: IsResumingGeneratorAndBranch
+  successors: [ifTrue, ifFalse]
+
 - name: CloseIterCache
   operands:
     iter: WordSized
@@ -2924,6 +2929,12 @@
   successors: [ifTrue, ifFalse]
   operands:
     input: BoxedValue
+
+- name: IsSuspendedGeneratorAndBranch
+  successors: [ifTrue, ifFalse]
+  operands:
+    object: WordSized
+  num_temps: 1
 
 - name: HasClass
   result_type: WordSized
@@ -3345,9 +3356,6 @@
 - name: WasmNullConstant
   result_type: WordSized
 
-- name: WasmCallIndirectAdjunctSafepoint
-  gen_boilerplate: false
-
 - name: WasmCall
   gen_boilerplate: false
 
@@ -3372,6 +3380,10 @@
   gen_boilerplate: false
 
 #ifdef ENABLE_WASM_JSPI
+- name: WasmSuspend
+  gen_boilerplate: false
+- name: WasmPrepareResume
+  gen_boilerplate: false
 - name: WasmResume
   gen_boilerplate: false
 #endif
@@ -3660,22 +3672,16 @@
   mir_op: Unbox
 
 # Convert a 32-bit unsigned integer to a double.
-- name: WasmUint32ToDouble
+- name: Uint32ToDouble
   result_type: WordSized
   operands:
     input: WordSized
-#ifdef JS_CODEGEN_X86
-  num_temps: 1
-#endif
 
 # Convert a 32-bit unsigned integer to a float32.
-- name: WasmUint32ToFloat32
+- name: Uint32ToFloat32
   result_type: WordSized
   operands:
     input: WordSized
-#ifdef JS_CODEGEN_X86
-  num_temps: 1
-#endif
 
 - name: DivI
   result_type: WordSized
@@ -3707,7 +3713,7 @@
 #endif
   arguments:
     shift: int32_t
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_RISCV64)
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)
     # Negative divisor case not implemented for all targets.
     negativeDivisor: bool
 #endif
@@ -3820,7 +3826,7 @@
     input: WordSized
   arguments:
     type: MIRType
-  num_temps: 2
+  num_temps: 1
   extra_name: true
 
 - name: DivOrModI64
@@ -3997,7 +4003,6 @@
     input: WordSized
   arguments:
     type: MIRType
-  num_temps: 1
   extra_name: true
 
 - name: DivOrModI64
@@ -4025,13 +4030,36 @@
   call_instruction: true
   mir_op: Mod
 
-- name: ModMaskI
+- name: DivConstantI
   result_type: WordSized
   operands:
-    input: WordSized
+    numerator: WordSized
   arguments:
-    shift: int32_t
-  num_temps: 2
+    denominator: int32_t
+  mir_op: Div
+
+- name: ModConstantI
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    denominator: int32_t
+  mir_op: Mod
+
+- name: UDivConstant
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    denominator: uint32_t
+  mir_op: Div
+
+- name: UModConstant
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    denominator: uint32_t
   mir_op: Mod
 
 - name: UDiv
@@ -4118,6 +4146,17 @@
 #endif
 
 #ifdef JS_CODEGEN_ARM64
+# Int32 add, sub or bitwise op whose rhs is shifted by a constant first.
+- name: ShiftedOpI
+  result_type: WordSized
+  operands:
+    lhs: WordSized
+    rhs: WordSized
+  arguments:
+    bitop: JSOp
+    shiftOp: JSOp
+    shift: int32_t
+
 - name: DivI64
   result_type: WordSized
   operands:
@@ -4345,6 +4384,87 @@
 #endif
 
 #ifdef JS_CODEGEN_LOONG64
+- name: DivConstantI
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    denominator: int32_t
+  mir_op: Div
+
+- name: ModConstantI
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    denominator: int32_t
+  mir_op: Mod
+
+- name: UDivConstant
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    denominator: uint32_t
+  mir_op: Div
+
+- name: UModConstant
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    denominator: uint32_t
+  mir_op: Mod
+
+- name: DivConstantI64
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    denominator: int64_t
+  mir_op: Div
+
+- name: DivPowTwoI64
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    shift: int32_t
+    negativeDivisor: bool
+  mir_op: Div
+
+- name: ModConstantI64
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    denominator: int64_t
+  mir_op: Mod
+
+- name: ModPowTwoI64
+  result_type: WordSized
+  operands:
+    input: WordSized
+  arguments:
+    shift: int32_t
+  mir_op: Mod
+
+- name: UDivConstantI64
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    denominator: uint64_t
+  mir_op: Div
+
+- name: UModConstantI64
+  result_type: WordSized
+  operands:
+    numerator: WordSized
+  arguments:
+    denominator: uint64_t
+  mir_op: Mod
+
 - name: DivOrModI64
   gen_boilerplate: false
 
@@ -4353,15 +4473,6 @@
 
 - name: UDivOrModI64
   gen_boilerplate: false
-
-- name: ModMaskI
-  result_type: WordSized
-  operands:
-    input: WordSized
-  arguments:
-    shift: int32_t
-  num_temps: 2
-  mir_op: Mod
 
 - name: WasmTruncateToInt64
   result_type: Int64
@@ -4553,7 +4664,6 @@
     ptr: WordSized
     value: Int64
     memoryBase: WordSized
-  num_temps64: 1
   mir_op: WasmAtomicBinopHeap
 
 - name: WasmAtomicExchangeI64

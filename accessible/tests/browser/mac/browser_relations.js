@@ -15,7 +15,7 @@ addAccessibleTask(
     const getAriaControls = id =>
       JSON.stringify(
         getNativeInterface(accDoc, id)
-          .getAttributeValue("AXARIAControls")
+          .getAttributeValue("AXLinkedUIElements")
           .map(e => e.getAttributeValue("AXDOMIdentifier"))
       );
 

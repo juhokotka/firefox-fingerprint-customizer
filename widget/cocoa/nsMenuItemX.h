@@ -5,14 +5,14 @@
 #ifndef nsMenuItemX_h_
 #define nsMenuItemX_h_
 
+#import <Cocoa/Cocoa.h>
+
 #include "mozilla/RefPtr.h"
+#include "nsChangeObserver.h"
 #include "nsISupports.h"
 #include "nsMenuGroupOwnerX.h"
 #include "nsMenuItemIconX.h"
-#include "nsChangeObserver.h"
 #include "nsStringFwd.h"
-
-#import <Cocoa/Cocoa.h>
 
 class nsMenuItemIconX;
 class nsMenuX;
@@ -104,6 +104,9 @@ class nsMenuItemX final : public nsChangeObserver,
   nsMenuX* mMenuParent = nullptr;                // [weak]
   nsMenuGroupOwnerX* mMenuGroupOwner = nullptr;  // [weak]
   RefPtr<mozilla::dom::Element> mCommandElement;
+  // The <key> element mContent's key attribute resolves to, observed so that
+  // edits to it reach the native menu item.
+  RefPtr<mozilla::dom::Element> mKeyElement;
   RefPtr<mozilla::dom::Element> mImageElement;
   mozilla::UniquePtr<nsMenuItemIconX> mIcon;  // always non-null
   bool mIsChecked = false;

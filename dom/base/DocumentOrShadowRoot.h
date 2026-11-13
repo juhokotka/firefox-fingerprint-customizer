@@ -103,10 +103,15 @@ class DocumentOrShadowRoot {
    */
   Span<Element* const> GetAllElementsForId(
       const IdentifierMapEntry::DependentAtomOrString& aElementId) const {
-    if (IdentifierMapEntry* entry = mIdentifierMap.GetEntry(aElementId)) {
+    if (IdentifierMapEntry* entry = LookupIdentifierInMap(aElementId)) {
       return entry->GetIdElements();
     }
     return {};
+  }
+
+  IdentifierMapEntry* LookupIdentifierInMap(
+      const IdentifierMapEntry::DependentAtomOrString& aIdentifier) const {
+    return mIdentifierMap.GetEntry(aIdentifier);
   }
 
   already_AddRefed<ContentList> GetElementsByTagName(
@@ -231,7 +236,7 @@ class DocumentOrShadowRoot {
   }
 
   // https://dom.spec.whatwg.org/#dom-documentorshadowroot-customelementregistry
-  CustomElementRegistry* GetCustomElementRegistry();
+  CustomElementRegistry* GetCustomElementRegistry() const;
 
  protected:
   // Cycle collection helper functions

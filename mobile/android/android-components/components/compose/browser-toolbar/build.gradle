@@ -40,6 +40,7 @@ dependencies {
     implementation libs.androidx.compose.material3.adaptive
     implementation libs.androidx.compose.ui
     implementation libs.androidx.compose.ui.tooling.preview
+    implementation libs.androidx.lifecycle.compose
     implementation libs.androidx.window.core
 
     debugImplementation libs.androidx.compose.ui.tooling
@@ -50,6 +51,7 @@ dependencies {
     testImplementation libs.androidx.compose.ui.test.manifest
     testImplementation libs.androidx.test.core
     testImplementation libs.androidx.test.junit
+    testImplementation libs.kotlin.test
     testImplementation libs.robolectric
 }
 

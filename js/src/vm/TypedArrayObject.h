@@ -36,11 +36,6 @@ class TrampolineNativeFrameLayout;
 
 class TypedArrayObject : public ArrayBufferViewObject {
  public:
-  static_assert(js::detail::TypedArrayLengthSlot == LENGTH_SLOT,
-                "bad inlined constant in TypedData.h");
-  static_assert(js::detail::TypedArrayDataSlot == DATA_SLOT,
-                "bad inlined constant in TypedData.h");
-
   static bool sameBuffer(const TypedArrayObject* a, const TypedArrayObject* b) {
     // Inline buffers.
     if (!a->hasBuffer() || !b->hasBuffer()) {
@@ -297,9 +292,7 @@ inline bool CanStartTypedArrayIndex(CharT ch) {
 
 [[nodiscard]] inline mozilla::Maybe<uint64_t> ToTypedArrayIndex(jsid id) {
   if (id.isInt()) {
-    int32_t i = id.toInt();
-    MOZ_ASSERT(i >= 0);
-    return mozilla::Some(i);
+    return mozilla::Some(id.toInt());
   }
 
   if (MOZ_UNLIKELY(!id.isString())) {

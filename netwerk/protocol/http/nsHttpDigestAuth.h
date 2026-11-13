@@ -6,11 +6,11 @@
 #ifndef nsDigestAuth_h_
 #define nsDigestAuth_h_
 
+#include "mozilla/StaticPtr.h"
+#include "nsCOMPtr.h"
 #include "nsICryptoHash.h"
 #include "nsIHttpAuthenticator.h"
 #include "nsStringFwd.h"
-#include "nsCOMPtr.h"
-#include "mozilla/StaticPtr.h"
 
 namespace mozilla {
 namespace net {
@@ -84,6 +84,7 @@ class nsHttpDigestAuth final : public nsIHttpAuthenticator {
                                             nsACString& aHeaderLine);
 
  protected:
+  // Per-call scratch state on a shared singleton: main thread only.
   nsCOMPtr<nsICryptoHash> mVerifier;
   char mHashBuf[SHA256_DIGEST_LENGTH]{0};
 

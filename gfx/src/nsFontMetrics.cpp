@@ -3,8 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsFontMetrics.h"
-#include <math.h>                // for floor, ceil
-#include <algorithm>             // for max
+
+#include <math.h>  // for floor, ceil
+
+#include <algorithm>  // for max
+
 #include "gfxContext.h"          // for gfxContext
 #include "gfxFontConstants.h"    // for NS_FONT_{SUB,SUPER}SCRIPT_OFFSET_RATIO
 #include "gfxPlatform.h"         // for gfxPlatform
@@ -12,6 +15,8 @@
 #include "gfxRect.h"             // for gfxRect
 #include "gfxTextRun.h"          // for gfxFontGroup
 #include "gfxTypes.h"            // for gfxFloat
+#include "mozilla/Assertions.h"  // for MOZ_ASSERT
+#include "mozilla/UniquePtr.h"   // for UniquePtr
 #include "nsAtom.h"              // for nsAtom
 #include "nsBoundingMetrics.h"   // for nsBoundingMetrics
 #include "nsDebug.h"             // for NS_ERROR
@@ -20,8 +25,6 @@
 #include "nsPresContext.h"       // for nsPresContext
 #include "nsString.h"            // for nsString
 #include "nsStyleConsts.h"       // for StyleHyphens::None
-#include "mozilla/Assertions.h"  // for MOZ_ASSERT
-#include "mozilla/UniquePtr.h"   // for UniquePtr
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/Document.h"
 
@@ -129,7 +132,7 @@ nsFontMetrics::nsFontMetrics(const nsFont& aFont, const Params& aParams,
       mTextRunRTL(false),
       mVertical(false),
       mTextOrientation(mozilla::StyleTextOrientation::Mixed) {
-  gfxFontStyle style(aFont.style, aFont.weight, aFont.stretch,
+  gfxFontStyle style(aFont.style, aFont.weight, aFont.width,
                      gfxFloat(aFont.size.ToAppUnits()) / mP2A, aFont.sizeAdjust,
                      aFont.family.is_system_font,
                      aContext->DeviceContext()->IsPrinterContext(),
@@ -413,8 +416,7 @@ void nsFontMetrics::DrawString(const char* aString, uint32_t aLength,
       pt.x += textRun->GetAdvanceWidth(range, &provider);
     }
   }
-  mozilla::gfx::PaletteCache paletteCache;
-  gfxTextRun::DrawParams params(aContext, paletteCache);
+  gfxTextRun::DrawParams params(aContext, /* aPaletteValueSet */ nullptr);
   params.provider = &provider;
   mozilla::image::imgDrawingParams dummy;
   textRun->Draw(range, pt, params, dummy);
@@ -440,8 +442,7 @@ void nsFontMetrics::DrawString(
       pt.x += textRun->GetAdvanceWidth(range, &provider);
     }
   }
-  mozilla::gfx::PaletteCache paletteCache;
-  gfxTextRun::DrawParams params(aContext, paletteCache);
+  gfxTextRun::DrawParams params(aContext, /* aPaletteValueSet */ nullptr);
   params.provider = &provider;
   mozilla::image::imgDrawingParams dummy;
   textRun->Draw(range, pt, params, dummy);

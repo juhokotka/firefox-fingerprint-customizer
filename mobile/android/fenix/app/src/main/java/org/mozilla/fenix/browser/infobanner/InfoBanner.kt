@@ -4,7 +4,6 @@
 
 package org.mozilla.fenix.browser.infobanner
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.view.LayoutInflater
 import android.view.View.GONE
@@ -14,8 +13,8 @@ import org.mozilla.fenix.databinding.InfoBannerBinding
 import org.mozilla.fenix.utils.Settings
 
 /**
- * Displays an Info Banner in the specified container with a message and an optional action.
- * The container can be a placeholder layout inserted in the original screen, or an existing layout.
+ * Displays an Info Banner in the specified container with a message and an optional action. The container can be a
+ * placeholder layout inserted in the original screen, or an existing layout.
  *
  * @param context A [Context] for accessing system resources.
  * @param settings [Settings] used to update lastCfrShownTimeInMillis.
@@ -24,8 +23,9 @@ import org.mozilla.fenix.utils.Settings
  * @param dismissText The text on the dismiss button.
  * @param actionText The text on the action to perform button.
  * @param dismissByHiding Whether or not to hide the banner when dismissed.
- * @property dismissAction  Optional callback invoked when the user dismisses the banner.
+ * @property dismissAction Optional callback invoked when the user dismisses the banner.
  * @param actionToPerform The action to be performed on action button press.
+ * @param currentTimeMillis provider for the current time in milliseconds, injectable for testing.
  */
 open class InfoBanner(
     private val context: Context,
@@ -37,9 +37,9 @@ open class InfoBanner(
     private val dismissByHiding: Boolean = false,
     internal val dismissAction: (() -> Unit)? = null,
     private val actionToPerform: (() -> Unit)? = null,
+    private val currentTimeMillis: () -> Long = { System.currentTimeMillis() },
 ) {
-    @SuppressLint("InflateParams")
-    @VisibleForTesting
+    @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     internal val binding = InfoBannerBinding.inflate(LayoutInflater.from(context), container, false)
 
     internal open fun showBanner() {
@@ -56,14 +56,18 @@ open class InfoBanner(
 
         binding.dismiss.setOnClickListener {
             dismissAction?.invoke()
-            if (dismissByHiding) { binding.root.visibility = GONE } else { dismiss() }
+            if (dismissByHiding) {
+                binding.root.visibility = GONE
+            } else {
+                dismiss()
+            }
         }
 
         binding.action.setOnClickListener {
             actionToPerform?.invoke()
         }
 
-        settings.lastCfrShownTimeInMillis = System.currentTimeMillis()
+        settings.lastCfrShownTimeInMillis = currentTimeMillis()
     }
 
     internal fun dismiss() {

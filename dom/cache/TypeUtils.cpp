@@ -5,6 +5,7 @@
 #include "mozilla/dom/cache/TypeUtils.h"
 
 #include <algorithm>
+#include <memory>
 
 #include "mozilla/StaticPrefs_extensions.h"
 #include "mozilla/dom/CacheBinding.h"
@@ -208,6 +209,9 @@ void TypeUtils::ToCacheResponseWithoutBody(CacheResponse& aOut,
 
   aOut.paddingInfo() = aIn.GetPaddingInfo();
   aOut.paddingSize() = aIn.GetPaddingSize();
+
+  // Record the credentials mode of the fetch that produced this response.
+  aOut.credentials() = aIn.GetCredentialsMode();
 }
 
 void TypeUtils::ToCacheResponse(JSContext* aCx, CacheResponse& aOut,
@@ -284,8 +288,9 @@ already_AddRefed<Response> TypeUtils::ToResponse(const CacheResponse& aIn) {
 
   ir->InitChannelInfo(aIn.securityInfo());
   if (aIn.principalInfo().isSome()) {
-    UniquePtr<mozilla::ipc::PrincipalInfo> info(
-        new mozilla::ipc::PrincipalInfo(aIn.principalInfo().ref()));
+    UniquePtr<mozilla::ipc::PrincipalInfo> info =
+        std::make_unique<mozilla::ipc::PrincipalInfo>(
+            aIn.principalInfo().ref());
     ir->SetPrincipalInfo(std::move(info));
   }
 
@@ -376,7 +381,7 @@ already_AddRefed<InternalHeaders> TypeUtils::ToInternalHeaders(
 }
 
 bool TypeUtils::URLHasValidScheme(nsIURI* aUrl) {
-  return aUrl->SchemeIs("http") || aUrl->SchemeIs("https") ||
+  return net::SchemeIsHttpOrHttps(aUrl) ||
          (StaticPrefs::extensions_backgroundServiceWorker_enabled_AtStartup() &&
           aUrl->SchemeIs("moz-extension"));
 }

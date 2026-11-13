@@ -286,6 +286,12 @@ export class YelpSuggestions extends SuggestProvider {
     return commands;
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   * @param {string} searchString
+   */
   onEngagement(queryContext, controller, details, searchString) {
     let { result } = details;
     switch (details.selType) {
@@ -299,29 +305,27 @@ export class YelpSuggestions extends SuggestProvider {
         // engagement event. As with all commands, it will be recorded with an
         // `engagement_type` value that is the command's name, in this case
         // `inaccurate_location`.
-        controller.view.acknowledgeFeedback(result);
+        controller.view.acknowledgeFeedback(result.id);
         break;
       // selType == "dismiss" when the user presses the dismiss key shortcut.
       case RESULT_MENU_COMMAND.DISMISS:
         lazy.QuickSuggest.dismissResult(result);
-        result.acknowledgeDismissalL10n = {
-          id: "firefox-suggest-dismissal-acknowledgment-one-yelp",
-        };
-        controller.removeResult(result);
+        controller.removeResult(result, {
+          acknowledgeDismissalL10n: {
+            id: "firefox-suggest-dismissal-acknowledgment-one-yelp",
+          },
+        });
         break;
       case RESULT_MENU_COMMAND.NOT_INTERESTED:
         lazy.UrlbarPrefs.set("suggest.yelp", false);
-        result.acknowledgeDismissalL10n = {
-          id: "firefox-suggest-dismissal-acknowledgment-all-yelp",
-        };
-        controller.removeResult(result);
+        controller.removeResult(result, {
+          acknowledgeDismissalL10n: {
+            id: "firefox-suggest-dismissal-acknowledgment-all-yelp",
+          },
+        });
         break;
       case RESULT_MENU_COMMAND.SHOW_LESS_FREQUENTLY:
-        controller.view.acknowledgeFeedback(result);
-        this.incrementShowLessFrequentlyCount();
-        if (!this.canShowLessFrequently) {
-          controller.view.invalidateResultMenuCommands();
-        }
+        this.handleShowLessFrequently(controller, result);
         lazy.UrlbarPrefs.set("yelp.minKeywordLength", searchString.length + 1);
         break;
     }

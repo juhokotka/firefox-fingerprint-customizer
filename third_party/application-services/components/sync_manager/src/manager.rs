@@ -17,16 +17,81 @@ use sync15::client::{
 use sync15::clients_engine::{Command, CommandProcessor, CommandStatus, Settings};
 use sync15::engine::{EngineSyncAssociation, SyncEngine, SyncEngineId};
 
-#[derive(Default)]
+#[derive(Default, uniffi::Object)]
 pub struct SyncManager {
     mem_cached_state: Mutex<Option<MemoryCachedState>>,
 }
 
+#[uniffi::export]
 impl SyncManager {
+    #[uniffi::constructor]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Disconnect engines from sync, deleting/resetting the sync-related data
+    pub fn disconnect(&self) {
+        breadcrumb!("SyncManager disconnect()");
+        for engine_id in SyncEngineId::iter() {
+            if let Some(engine) = Self::get_engine(&engine_id) {
+                if let Err(e) = engine.reset(&EngineSyncAssociation::Disconnected) {
+                    error_support::report_error!(
+                        "sync-manager-reset",
+                        "Failed to reset {}: {}",
+                        engine_id,
+                        e
+                    );
+                }
+            } else {
+                warn!("Unable to reset {}, be sure to call register_with_sync_manager before disconnect if this is surprising", engine_id);
+            }
+        }
+    }
+
+    /// Perform a sync.  See [SyncParams] and [SyncResult] for details on how this works
+    ///
+    /// Fails with [SyncManagerError::Busy] if a sync is already in progress.
+    pub fn sync(&self, params: SyncParams) -> Result<SyncResult> {
+        breadcrumb!("SyncManager::sync started");
+        let Some(mut state) = self.mem_cached_state.try_lock() else {
+            breadcrumb!("SyncManager::sync is already in progress, bailing out early");
+            return Err(SyncManagerError::Busy);
+        };
+        let engines = self.calc_engines_to_sync(&params.engines)?;
+        let next_sync_after = state.as_ref().and_then(|mcs| mcs.get_next_sync_after());
+        let result = if !backoff_in_effect(next_sync_after, &params) {
+            info!("No backoff in effect (or we decided to ignore it), starting sync");
+            self.do_sync(params, &mut state, engines)
+        } else {
+            breadcrumb!(
+                "Backoff still in effect (until {:?}), bailing out early",
+                next_sync_after
+            );
+            Ok(SyncResult {
+                status: ServiceStatus::BackedOff,
+                successful: Default::default(),
+                failures: Default::default(),
+                declined: None,
+                next_sync_allowed_at: next_sync_after,
+                persisted_state: params.persisted_state.unwrap_or_default(),
+                // It would be nice to record telemetry here.
+                telemetry_json: None,
+            })
+        };
+        breadcrumb!("SyncManager sync ended");
+        result
+    }
+
+    /// Get a list of engine names available for syncing
+    pub fn get_available_engines(&self) -> Vec<String> {
+        self.iter_registered_engines()
+            .map(|(name, _)| name.to_string())
+            .collect()
+    }
+}
+
+// additional methods used internally but not exposed over the ffi.
+impl SyncManager {
     fn get_engine_id(engine_name: &str) -> Result<SyncEngineId> {
         SyncEngineId::try_from(engine_name).map_err(SyncManagerError::UnknownEngine)
     }
@@ -61,54 +126,6 @@ impl SyncManager {
             engine.reset(&EngineSyncAssociation::Disconnected)?;
         }
         Ok(())
-    }
-
-    /// Disconnect engines from sync, deleting/resetting the sync-related data
-    pub fn disconnect(&self) {
-        breadcrumb!("SyncManager disconnect()");
-        for engine_id in SyncEngineId::iter() {
-            if let Some(engine) = Self::get_engine(&engine_id) {
-                if let Err(e) = engine.reset(&EngineSyncAssociation::Disconnected) {
-                    error_support::report_error!(
-                        "sync-manager-reset",
-                        "Failed to reset {}: {}",
-                        engine_id,
-                        e
-                    );
-                }
-            } else {
-                warn!("Unable to reset {}, be sure to call register_with_sync_manager before disconnect if this is surprising", engine_id);
-            }
-        }
-    }
-
-    /// Perform a sync.  See [SyncParams] and [SyncResult] for details on how this works
-    pub fn sync(&self, params: SyncParams) -> Result<SyncResult> {
-        breadcrumb!("SyncManager::sync started");
-        let mut state = self.mem_cached_state.lock();
-        let engines = self.calc_engines_to_sync(&params.engines)?;
-        let next_sync_after = state.as_ref().and_then(|mcs| mcs.get_next_sync_after());
-        let result = if !backoff_in_effect(next_sync_after, &params) {
-            info!("No backoff in effect (or we decided to ignore it), starting sync");
-            self.do_sync(params, &mut state, engines)
-        } else {
-            breadcrumb!(
-                "Backoff still in effect (until {:?}), bailing out early",
-                next_sync_after
-            );
-            Ok(SyncResult {
-                status: ServiceStatus::BackedOff,
-                successful: Default::default(),
-                failures: Default::default(),
-                declined: None,
-                next_sync_allowed_at: next_sync_after,
-                persisted_state: params.persisted_state.unwrap_or_default(),
-                // It would be nice to record telemetry here.
-                telemetry_json: None,
-            })
-        };
-        breadcrumb!("SyncManager sync ended");
-        result
     }
 
     fn do_sync(
@@ -196,12 +213,6 @@ impl SyncManager {
 
     fn iter_registered_engines(&self) -> impl Iterator<Item = (SyncEngineId, Box<dyn SyncEngine>)> {
         SyncEngineId::iter().filter_map(|id| Self::get_engine(&id).map(|engine| (id, engine)))
-    }
-
-    pub fn get_available_engines(&self) -> Vec<String> {
-        self.iter_registered_engines()
-            .map(|(name, _)| name.to_string())
-            .collect()
     }
 
     fn calc_engines_to_sync(
@@ -312,11 +323,43 @@ impl CommandProcessor for SyncClient {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::types::{DeviceSettings, SyncAuthInfo};
 
     #[test]
     fn test_engine_id_sanity() {
         for engine_id in SyncEngineId::iter() {
             assert_eq!(engine_id, SyncEngineId::try_from(engine_id.name()).unwrap());
         }
+    }
+
+    fn dummy_sync_params() -> SyncParams {
+        SyncParams {
+            reason: SyncReason::Scheduled,
+            engines: SyncEngineSelection::All,
+            enabled_changes: HashMap::new(),
+            local_encryption_keys: HashMap::new(),
+            auth_info: SyncAuthInfo {
+                kid: "kid".to_string(),
+                fxa_access_token: "token".to_string(),
+                sync_key: "sync-key".to_string(),
+                tokenserver_url: "https://example.com/token/1.0/sync/1.5".to_string(),
+            },
+            persisted_state: None,
+            device_settings: DeviceSettings {
+                fxa_device_id: "device-id".to_string(),
+                name: "Test Device".to_string(),
+                kind: sync15::DeviceType::Mobile,
+            },
+        }
+    }
+
+    #[test]
+    fn test_sync_is_busy_while_a_sync_is_in_progress() {
+        let manager = SyncManager::new();
+        let _in_progress = manager.mem_cached_state.lock();
+        assert!(matches!(
+            manager.sync(dummy_sync_params()),
+            Err(SyncManagerError::Busy)
+        ));
     }
 }

@@ -25,15 +25,14 @@
 #include <utility>
 
 #include "AnimationParams.h"
+#include "Orientation.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Maybe.h"
-
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Variant.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Swizzle.h"
 #include "nsDebug.h"
-#include "Orientation.h"
 
 namespace mozilla {
 namespace image {
@@ -173,7 +172,7 @@ class SurfaceFilter {
    *         has finished, regardless of the lambda's internal state.
    */
   template <typename PixelType, typename Func>
-  WriteState WritePixels(Func aFunc) {
+  WriteState WritePixels(Func&& aFunc) {
     Maybe<WriteState> result;
     while (
         !(result = DoWritePixelsToRow<PixelType>(std::forward<Func>(aFunc)))) {
@@ -211,7 +210,7 @@ class SurfaceFilter {
    *         writing has finished, regardless of the lambda's internal state.
    */
   template <typename PixelType, typename Func>
-  WriteState WritePixelBlocks(Func aFunc) {
+  WriteState WritePixelBlocks(Func&& aFunc) {
     Maybe<WriteState> result;
     while (!(result = DoWritePixelBlockToRow<PixelType>(
                  std::forward<Func>(aFunc)))) {
@@ -250,7 +249,7 @@ class SurfaceFilter {
    *         state.
    */
   template <typename PixelType, typename Func>
-  WriteState WritePixelsToRow(Func aFunc) {
+  WriteState WritePixelsToRow(Func&& aFunc) {
     return DoWritePixelsToRow<PixelType>(std::forward<Func>(aFunc))
         .valueOr(WriteState::NEED_MORE_DATA);
   }
@@ -659,7 +658,7 @@ class SurfacePipe {
    * @see SurfaceFilter::WritePixels() for the canonical documentation.
    */
   template <typename PixelType, typename Func>
-  WriteState WritePixels(Func aFunc) {
+  WriteState WritePixels(Func&& aFunc) {
     MOZ_ASSERT(mHead, "Use before configured!");
     return mHead->WritePixels<PixelType>(std::forward<Func>(aFunc));
   }
@@ -672,7 +671,7 @@ class SurfacePipe {
    * @see SurfaceFilter::WritePixelBlocks() for the canonical documentation.
    */
   template <typename PixelType, typename Func>
-  WriteState WritePixelBlocks(Func aFunc) {
+  WriteState WritePixelBlocks(Func&& aFunc) {
     MOZ_ASSERT(mHead, "Use before configured!");
     return mHead->WritePixelBlocks<PixelType>(std::forward<Func>(aFunc));
   }
@@ -685,7 +684,7 @@ class SurfacePipe {
    * @see SurfaceFilter::WritePixelsToRow() for the canonical documentation.
    */
   template <typename PixelType, typename Func>
-  WriteState WritePixelsToRow(Func aFunc) {
+  WriteState WritePixelsToRow(Func&& aFunc) {
     MOZ_ASSERT(mHead, "Use before configured!");
     return mHead->WritePixelsToRow<PixelType>(std::forward<Func>(aFunc));
   }

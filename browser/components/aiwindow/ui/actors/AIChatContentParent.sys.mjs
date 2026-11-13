@@ -2,6 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import {
+  isSettingsURL,
+  isSmartPageURL,
+  isTasksURL,
+} from "chrome://browser/content/aiwindow/modules/TrustedInternalURLs.mjs";
+
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   AIWindow:
@@ -23,21 +29,23 @@ ChromeUtils.defineESModuleGetters(lazy, {
  * JSWindowActor to pass data between AIChatContent singleton and content pages.
  */
 export class AIChatContentParent extends JSWindowActorParent {
-  #settingsURI = Services.io.newURI("about:settings");
-  #prefsURI = Services.io.newURI("about:preferences");
-
   /**
-   * Returns true if the URI points to the browser settings page.
-   * Matches both about:preferences and its about:settings alias,
+   * Returns true if the URI points to an internal page that is safe to open.
+   * Matches about:preferences, about:settings, about:smartwindowtasks, and
+   * generated pages (about:smartpage?page=[slug]). Each page's trust rationale
+   * is documented with its check in TrustedInternalURLs.mjs.
+   *
+   * ai-chat-message composes the same checks when deciding whether a link
+   * stays clickable, and additionally requires a generated page to be in the
+   * conversation's seen URLs, which this process has no access to.
    *
    * @param {nsIURI} uri - A parsed URI object
    * @returns {boolean}
    */
-  isSettingsURI(uri) {
-    return (
-      uri.equalsExceptRef(this.#settingsURI) ||
-      uri.equalsExceptRef(this.#prefsURI)
-    );
+  isTrustedInternalURI(uri) {
+    const url = URL.parse(uri.spec);
+
+    return isSettingsURL(url) || isTasksURL(url) || isSmartPageURL(url);
   }
 
   dispatchMessageToChatContent(message) {
@@ -98,6 +106,10 @@ export class AIChatContentParent extends JSWindowActorParent {
         this.#handleOpenLink(data);
         break;
 
+      case "AIChatContent:OpenTabGroup":
+        this.#handleOpenTabGroup(data);
+        break;
+
       case "AIChatContent:AccountSignIn":
         this.#handleAccountSignIn();
         break;
@@ -119,6 +131,14 @@ export class AIChatContentParent extends JSWindowActorParent {
         );
         break;
 
+      case "AIChatContent:FirstCharacterDisplayed":
+        this.#getAIWindowElement()?.onFirstCharacterDisplayed(data);
+        break;
+
+      case "AIChatContent:ClientError":
+        this.#handleClientError(data);
+        break;
+
       default:
         console.warn(`AIChatContentParent received unknown message: ${name}`);
         break;
@@ -129,6 +149,12 @@ export class AIChatContentParent extends JSWindowActorParent {
   #notifyContentReady() {
     const aiWindow = this.#getAIWindowElement();
     aiWindow?.onContentReady();
+    // Tell the content its mode (sidebar/fullpage) so mode-specific styling
+    // (e.g. the fullpage top blur) can apply. Sent over the actor rather than
+    // the load URL, which would break this actor's exact about: match.
+    if (aiWindow?.mode) {
+      this.sendAsyncMessage("AIChatContent:SetMode", { mode: aiWindow.mode });
+    }
   }
 
   #handleFooterActionFromChild(data) {
@@ -154,7 +180,7 @@ export class AIChatContentParent extends JSWindowActorParent {
       if (
         uri.scheme !== "http" &&
         uri.scheme !== "https" &&
-        !this.isSettingsURI(uri)
+        !this.isTrustedInternalURI(uri)
       ) {
         return;
       }
@@ -175,7 +201,7 @@ export class AIChatContentParent extends JSWindowActorParent {
         return;
       }
 
-      if (this.isSettingsURI(uri)) {
+      if (this.isTrustedInternalURI(uri)) {
         lazy.URILoadingHelper.switchToTabHavingURI(window, url, true, {});
         return;
       }
@@ -223,6 +249,18 @@ export class AIChatContentParent extends JSWindowActorParent {
     } catch (e) {
       console.warn("Could not open link from AI Window chat", e);
     }
+  }
+
+  #handleOpenTabGroup({ groupId }) {
+    const window = this.browsingContext.topChromeWindow;
+    const tabGroup = window?.gBrowser?.tabGroups.find(
+      group => group.id == groupId
+    );
+    if (!tabGroup) {
+      console.warn("Could not find tab group to open from AI Window chat");
+      return;
+    }
+    tabGroup.select();
   }
 
   async #handleAccountSignIn() {
@@ -279,16 +317,18 @@ export class AIChatContentParent extends JSWindowActorParent {
   }
 
   /**
-   * For a set of history results, resolve the page assets — the thumbnail
-   * (`moz-page-thumb://` URI, or null) and whether Places has a real favicon for
-   * the page — then send them back to the requesting message.
+   * For a set of history results or citations, resolve the page assets — the
+   * thumbnail (`moz-page-thumb://` URI, or null) and whether Places has a real
+   * favicon for the page — then send them back to the requesting message.
    *
    * @param {object} data
    * @param {string} data.conversationId - Identifies the conversation the
    * message belongs to
-   * @param {string} data.messageId - Identifies the message whose grid requested
-   *   the assets, echoed back so the content side can route the results.
-   * @param {Array<{url: string, thumbnail?: string}>} data.items
+   * @param {string} data.messageId - Identifies the message whose grid or
+   *   citations requested the assets, echoed back so the content side can route
+   *   the results.
+   * @param {Array<{url: string, thumbnail?: string}>} data.items - The URLs to
+   *   resolve assets for. Citations pass no `thumbnail`.
    */
   async #handleRequestAssets({ conversationId, messageId, items = [] }) {
     try {
@@ -296,6 +336,7 @@ export class AIChatContentParent extends JSWindowActorParent {
         items.map(async ({ url, thumbnail }) => ({
           url,
           image: await lazy.captureThumbnail(thumbnail),
+          requestedThumbnail: !!thumbnail,
           hasFavicon: await this.#pageHasFavicon(url),
         }))
       );
@@ -332,6 +373,18 @@ export class AIChatContentParent extends JSWindowActorParent {
       return !!favicon;
     } catch (e) {
       return false;
+    }
+  }
+
+  #handleClientError(detail) {
+    try {
+      const aiWindow = this.#getAIWindowElement();
+      lazy.SmartWindowTelemetry.recordClientErrorDetail(
+        detail,
+        aiWindow?.getClientErrorContext?.()
+      );
+    } catch (e) {
+      console.warn("Could not record client error from AI Window chat", e);
     }
   }
 }

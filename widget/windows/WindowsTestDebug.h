@@ -5,8 +5,10 @@
 #ifndef mozilla_widget_WindowsTestDebug_h_
 #define mozilla_widget_WindowsTestDebug_h_
 
+// clang-format off
 #include <windows.h>
 #include <restartmanager.h>
+// clang-format on
 
 #include "nsIWindowsTestDebug.h"
 #include "nsString.h"
@@ -18,10 +20,10 @@ class WindowsTestDebug final : public nsIWindowsTestDebug {
  public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIWINDOWSTESTDEBUG
-  WindowsTestDebug();
+  WindowsTestDebug() = default;
 
  private:
-  ~WindowsTestDebug();
+  ~WindowsTestDebug() = default;
 };
 
 }  // namespace mozilla::widget

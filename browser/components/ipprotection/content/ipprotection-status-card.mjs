@@ -11,6 +11,13 @@ import "chrome://global/content/elements/moz-toggle.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://browser/content/ipprotection/bandwidth-usage.mjs";
 
+const lazy = {};
+
+ChromeUtils.defineESModuleGetters(lazy, {
+  IPProtectionServerlist:
+    "moz-src:///toolkit/components/ipprotection/IPProtectionServerlist.sys.mjs",
+});
+
 /**
  * Custom element that implements a status card for IP protection.
  */
@@ -36,7 +43,6 @@ export default class IPProtectionStatusCard extends MozLitElement {
     bandwidthUsage: { type: Object },
     hasExclusion: { type: Boolean },
     isActivating: { type: Boolean },
-    showLocationButtonBadge: { type: Boolean },
   };
 
   #actionButtonFocused = false;
@@ -104,6 +110,15 @@ export default class IPProtectionStatusCard extends MozLitElement {
   }
 
   locationSelectionButtonTemplate() {
+    let countryObject;
+    if (this.location) {
+      countryObject = lazy.IPProtectionServerlist.getLocation(this.location);
+    }
+
+    if (!this.isPremium && countryObject?.country.locked) {
+      this.location = "REC";
+    }
+
     const country =
       this.location && this.location !== "REC"
         ? countryName(this.location)
@@ -118,9 +133,6 @@ export default class IPProtectionStatusCard extends MozLitElement {
         @click=${this.handleLocationButtonClick}
       >
         <span class="location-btn-content">
-          ${this.showLocationButtonBadge
-            ? html`<moz-badge type="new"></moz-badge>`
-            : null}
           ${country
             ? html`<span
                 data-l10n-id="ipprotection-location-country-button"
@@ -186,7 +198,7 @@ export default class IPProtectionStatusCard extends MozLitElement {
   render() {
     let type = "disconnected";
     let headerL10nId = "ipprotection-connection-status-disconnected-1";
-    let buttonL10nId = "ipprotection-button-turn-vpn-on";
+    let buttonL10nId = "ipprotection-button-turn-vpn-on-1";
     let buttonDisabled = false;
     let iconSrc = null;
 
@@ -206,7 +218,7 @@ export default class IPProtectionStatusCard extends MozLitElement {
     } else if (this.protectionEnabled) {
       type = "connected";
       headerL10nId = "ipprotection-connection-status-connected-1";
-      buttonL10nId = "ipprotection-button-turn-vpn-off";
+      buttonL10nId = "ipprotection-button-turn-vpn-off-1";
       iconSrc =
         "chrome://browser/content/ipprotection/assets/states/ipprotection-on.svg";
     }

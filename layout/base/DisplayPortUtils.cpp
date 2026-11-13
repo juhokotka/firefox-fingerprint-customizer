@@ -880,10 +880,29 @@ void DisplayPortUtils::SetZeroMarginDisplayPortOnAsyncScrollableAncestors(
 
 bool DisplayPortUtils::MaybeCreateDisplayPortInFirstScrollFrameEncountered(
     nsIFrame* aFrame, nsDisplayListBuilder* aBuilder) {
-  // Don't descend into the tab bar in chrome, it can be very large and does not
-  // contain any async scrollable elements.
+  // Don't descend into the tab bar in chrome, it can be very large. The only
+  // async scrollable element it contains is its own scroll container, which
+  // arrowscrollbox.js puts directly inside the host, so we can give that a
+  // displayport without ever walking the tabs inside it. See also the comment
+  // in navigator-toolbox.inc.xhtml.
+  //
+  // Once bug 1970536 gives the horizontal strip a scroll container too, the
+  // code below will find the scroller on its own whenever the strip is
+  // overflowing, and this may be able to go away.
   if (XRE_IsParentProcess() && aFrame->GetContent() &&
       aFrame->GetContent()->GetID() == nsGkAtoms::tabbrowser_arrowscrollbox) {
+    for (nsIFrame* child : aFrame->PrincipalChildList()) {
+      if (!child->IsScrollContainerOrSubclass()) {
+        continue;
+      }
+      ScrollContainerFrame* sf = static_cast<ScrollContainerFrame*>(child);
+      if (MaybeCreateDisplayPort(aBuilder, sf, RepaintMode::Repaint)) {
+        // See the comment on the same call below.
+        sf->SetIsFirstScrollableFrameSequenceNumber(
+            Some(nsDisplayListBuilder::GetPaintSequenceNumber()));
+        return true;
+      }
+    }
     return false;
   }
   if (aFrame->IsScrollContainerOrSubclass()) {
@@ -1133,7 +1152,8 @@ FrameAndASRKind DisplayPortUtils::OneStepInASRChain(
       nsLayoutUtils::GetCrossDocParentFrameInProcess(aFrameAndASRKind.mFrame);
   if (aLimitAncestor && parent &&
       (parent == aLimitAncestor ||
-       parent->FirstContinuation() == aLimitAncestor->FirstContinuation())) {
+       nsLayoutUtils::FirstContinuationOrIBSplitSibling(parent) ==
+           nsLayoutUtils::FirstContinuationOrIBSplitSibling(aLimitAncestor))) {
     return FrameAndASRKind::default_value();
   }
   return {parent, ActiveScrolledRoot::ASRKind::Scroll};
@@ -1201,9 +1221,14 @@ const ActiveScrolledRoot* DisplayPortUtils::ActivateDisplayportOnASRAncestors(
   FrameAndASRKind frameAndASRKind{aAnchor, ActiveScrolledRoot::ASRKind::Scroll};
   frameAndASRKind =
       OneStepInASRChain(frameAndASRKind, aBuilder, aLimitAncestor);
-  while (frameAndASRKind.mFrame && frameAndASRKind.mFrame != aLimitAncestor &&
-         (!aLimitAncestor || frameAndASRKind.mFrame->FirstContinuation() !=
-                                 aLimitAncestor->FirstContinuation())) {
+  const nsIFrame* limitAncestorFirst =
+      aLimitAncestor
+          ? nsLayoutUtils::FirstContinuationOrIBSplitSibling(aLimitAncestor)
+          : nullptr;
+  while (
+      frameAndASRKind.mFrame && frameAndASRKind.mFrame != aLimitAncestor &&
+      (!aLimitAncestor || nsLayoutUtils::FirstContinuationOrIBSplitSibling(
+                              frameAndASRKind.mFrame) != limitAncestorFirst)) {
     // We check if each frame encountered generates an ASR. It can either
     // generate a scroll asr or a sticky asr, or both! If it generates both then
     // the sticky asr is the outer (parent) asr. So we check for scroll ASRs
@@ -1258,14 +1283,44 @@ const ActiveScrolledRoot* DisplayPortUtils::ActivateDisplayportOnASRAncestors(
              : FrameAndASRKind::default_value()) ==
         GetASRAncestorFrame(OneStepInASRChain(asrFrame, aBuilder), aBuilder));
 
-    asr = (asrFrame.mASRKind == ActiveScrolledRoot::ASRKind::Scroll)
-              ? aBuilder->GetOrCreateActiveScrolledRoot(
-                    asr, static_cast<ScrollContainerFrame*>(
-                             do_QueryFrame(asrFrame.mFrame)))
-              : aBuilder->GetOrCreateActiveScrolledRootForSticky(
-                    asr, asrFrame.mFrame);
+    asr = aBuilder->GetOrCreateActiveScrolledRoot(asr, asrFrame.mFrame,
+                                                  asrFrame.mASRKind);
   }
   return asr;
+}
+
+const ActiveScrolledRoot* DisplayPortUtils::GetASRForAbsPosFrame(
+    nsIFrame* aFrame, const ActiveScrolledRoot* aContainingBlockASR,
+    nsDisplayListBuilder* aBuilder) {
+  MOZ_ASSERT(aFrame->IsAbsolutelyPositioned());
+  if (!aBuilder->IsPaintingToWindow() ||
+      // If we are in view transition capture we get a null asr no matter
+      // what, so don't bother checking for async scrolling with a CSS anchor
+      // pos anchor.
+      aBuilder->IsInViewTransitionCapture() ||
+      // If there is an active view transition in this document it is tricky
+      // to determine what will be an active scroll frame outside of that
+      // frame's BuildDisplayList, so don't bother to async scroll with an
+      // anchor in that case. Bug 2001861 tracks removing this check.
+      aFrame->PresContext()->Document()->GetActiveViewTransition()) {
+    return aContainingBlockASR;
+  }
+  nsIFrame* scrollsWithAnchor =
+      AnchorPositioningUtils::GetAnchorThatFrameScrollsWith(aFrame, aBuilder);
+  if (!scrollsWithAnchor) {
+    return aContainingBlockASR;
+  }
+  if (aBuilder->IsRetainingDisplayList()) {
+    if (aBuilder->IsPartialUpdate()) {
+      aBuilder->SetPartialBuildFailed(true);
+    } else {
+      aBuilder->SetDisablePartialUpdates(true);
+    }
+  }
+  // TODO should we set the scroll parent id too?
+  // https://github.com/w3c/csswg-drafts/issues/12042
+  return ActivateDisplayportOnASRAncestors(
+      scrollsWithAnchor, aFrame->GetParent(), aContainingBlockASR, aBuilder);
 }
 
 static bool CheckAxes(ScrollContainerFrame* aScrollFrame, PhysicalAxes aAxes) {
@@ -1328,6 +1383,8 @@ static bool ShouldAsyncScrollWithAnchorNotCached(nsIFrame* aFrame,
   *aReportToDoc = true;
   nsIFrame* limitAncestor = aFrame->GetParent();
   MOZ_ASSERT(limitAncestor);
+  const nsIFrame* limitAncestorFirst =
+      nsLayoutUtils::FirstContinuationOrIBSplitSibling(limitAncestor);
   // Start from aAnchor (not aFrame) so we don't infinite loop.
   nsIFrame* frame = aAnchor;
   bool firstIteration = true;
@@ -1338,7 +1395,8 @@ static bool ShouldAsyncScrollWithAnchorNotCached(nsIFrame* aFrame,
   // potential ASR and then start checking for transforms.
   bool sawPotentialASR = false;
   while (frame && !frame->IsMenuPopupFrame() && frame != limitAncestor &&
-         (frame->FirstContinuation() != limitAncestor->FirstContinuation())) {
+         (nsLayoutUtils::FirstContinuationOrIBSplitSibling(frame) !=
+          limitAncestorFirst)) {
     // Note that we purposely check all scroll frames in this loop because we
     // might not have activated scroll frames yet.
 

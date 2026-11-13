@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <title>Tests the registry assignment during element mutation</title>
-<meta name="author" title="Jayson Chen" href="mailto:jaysonchen@microsoft.com"></meta>
+<meta name="author" title="Jayson Chen" href="mailto:jaysonchen@microsoft.com">
 <link rel="help" href="https://wicg.github.io/webcomponents/proposals/Scoped-Custom-Element-Registries">
 <link rel="help" href="https://github.com/WICG/webcomponents/issues/923">
 <script src="/resources/testharness.js"></script>
@@ -19,15 +19,6 @@
         </template>
     </div>
 </div>
-
-<template id="template">
-    <div id="template-host-1">
-        <template shadowrootmode="open" shadowrootclonable><x-foo></x-foo></template>
-    </div>
-    <div id="template-host-2">
-        <template shadowrootmode="open" shadowrootclonable shadowrootcustomelementregistry><x-foo></x-foo></template>
-    </div>
-</template>
 
 <script>
 
@@ -111,14 +102,6 @@ function runTests(mutation, mutationName) {
 runTests(function (parent, child) { parent.append(child); }, "append");
 runTests(function (parent, child) { parent.appendChild(child); }, "appendChild");
 runTests(function (parent, child) { parent.prepend(child); }, "prepend");
-
-test(() => {
-    customElements.define('x-foo', class extends HTMLElement {});
-    const template = document.getElementById('template');
-    document.body.append(template.content.cloneNode(true));
-    assert_equals(document.querySelector('#template-host-1').shadowRoot.querySelector('x-foo').customElementRegistry, customElements);
-    assert_equals(document.querySelector('#template-host-2').shadowRoot.querySelector('x-foo').customElementRegistry, null);
-}, "Declarative shadow DOM with shadowrootcustomelementregistry attribute without registry initialized should remain null registry after adoption.")
 
 </script>
 </body>

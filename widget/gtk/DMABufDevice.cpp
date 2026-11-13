@@ -3,31 +3,42 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DMABufDevice.h"
+
 #include "DMABufFormats.h"
 #include "DMABufSurface.h"
 #ifdef MOZ_WAYLAND
 #  include "nsWaylandDisplay.h"
 #endif
-#include "base/message_loop.h"    // for MessageLoop
-#include "mozilla/gfx/Logging.h"  // for gfxCriticalNote
-#include "mozilla/StaticPrefs_widget.h"
-#include "mozilla/StaticPrefs_media.h"
-#include "mozilla/gfx/gfxVars.h"
-#include "WidgetUtilsGtk.h"
-#include "gfxConfig.h"
-#include "nsIGfxInfo.h"
-#include "GfxInfo.h"
-#include "mozilla/Components.h"
-#include "mozilla/ClearOnShutdown.h"
-
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <dlfcn.h>
-#include <mutex>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
+#include <mutex>
+
+#include "GfxInfo.h"
+#include "WidgetUtilsGtk.h"
+#include "base/message_loop.h"  // for MessageLoop
+#include "gfxConfig.h"
+#include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Components.h"
+#include "mozilla/StaticPrefs_media.h"
+#include "mozilla/StaticPrefs_widget.h"
+#include "mozilla/gfx/Logging.h"  // for gfxCriticalNote
+#include "mozilla/gfx/gfxVars.h"
+#include "nsIGfxInfo.h"
+
 using namespace mozilla::gfx;
+
+// DMABufDevice.h is included only once by the unified build so redefine
+// the logging macros here, other files in the same unit use their own ones.
+#undef LOGDMABUF
+#ifdef MOZ_LOGGING
+#  define LOGDMABUF(args) MOZ_LOG(gDmabufLog, mozilla::LogLevel::Debug, args)
+#else
+#  define LOGDMABUF(args)
+#endif /* MOZ_LOGGING */
 
 namespace mozilla {
 namespace widget {

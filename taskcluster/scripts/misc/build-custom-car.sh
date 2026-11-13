@@ -16,12 +16,45 @@ if [[ "$ARTIFACT_NAME" == *"android"* ]]; then
   IS_ANDROID=true
 fi
 
-mkdir custom_car
-cd custom_car
+# Windows has a 260 character MAX_PATH limit, and some Chromium GCS
+# dependencies (chromium-bidi's node_modules) unpack to paths that overflow it
+# Use shorter directory names to avoid this.
+CAR_DIR_NAME=custom_car
+CHROMIUM_DIR_NAME=chromium
+if [[ $(uname -o) == "Msys" ]]; then
+  CAR_DIR_NAME=car
+  CHROMIUM_DIR_NAME=cr
+fi
+
+mkdir "$CAR_DIR_NAME"
+cd "$CAR_DIR_NAME"
 CUSTOM_CAR_DIR=$PWD
 
 # Setup depot_tools
 git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+
+# vpython resolves its deps through mozilla's no-index pip.conf mirror which lacks
+# some pinned revisions. Bypass it with VPYTHON_BYPASS and directly grab them from
+# chrome's artifact registry and temporarily override the pip.conf.
+if [[ $(uname -s) == "Darwin" ]]; then
+  # uv installs an arm64 native CPython 3.11 standalone (required version)
+  if [[ -d "${MOZ_FETCHES_DIR}/uv" ]]; then
+    export PATH="${MOZ_FETCHES_DIR}/uv:$PATH"
+    export UV_PYTHON_INSTALL_DIR="${MOZ_FETCHES_DIR}/uv-python"
+    uv venv --seed --python-preference only-managed --python 3.11 "${MOZ_FETCHES_DIR}/uv-venv"
+    export VIRTUAL_ENV="${MOZ_FETCHES_DIR}/uv-venv"
+    export PATH="${MOZ_FETCHES_DIR}/uv-venv/bin:$PATH"
+  fi
+  export VPYTHON_BYPASS="manually managed python not supported by chrome operations"
+  PIP_CONFIG_FILE=/dev/null python3 -m pip install --quiet \
+    --index-url https://us-python.pkg.dev/chrome-python-ar/chrome-python-ar/simple/ \
+    "httplib2[socks]==0.13.1" "six==1.10.0" "requests==2.31.0" \
+    "charset-normalizer==2.0.4" "urllib3==1.26.6" "idna==2.8" "brotli==1.0.9" \
+    "tzdata==2023.4" "python-dateutil==2.7.3" "certifi==2021.5.30" \
+    "zstandard==0.16.0"
+  # Force cipd to mac-arm64 otherwise it may grab x64 rollup libs and the arm64 rollup native module goes missing.
+  export ARCH_MAC_OVERRIDE=arm64
+fi
 export PATH="$PATH:$CUSTOM_CAR_DIR/depot_tools"
 # Bug 1901936 changes to config upstream for depot tools path
 if [[ $(uname -s) == "Linux" ]]; then
@@ -31,6 +64,15 @@ fi
 # Log the current revision of depot tools for easier tracking in the future
 DEPOT_TOOLS_REV=$(cd depot_tools && git rev-parse HEAD && cd ..)
 echo "Current depot_tools revision: $DEPOT_TOOLS_REV"
+
+# Bug 2070172 - upstream `fetch` now runs through depot_tools' hermetic
+# python-bin wrapper, which refuses to run on a checkout that has never been
+# bootstrapped, and nothing bootstraps it before the `fetch` below. Windows
+# is already covered by the `gclient` call it runs first.
+if [[ $(uname -o) != "Msys" ]]; then
+  ensure_bootstrap
+fi
+
 
 # Set up some env variables depending on the target OS
 # Linux is the default case, with minor adjustments for
@@ -59,8 +101,9 @@ fi
 
 # Logic for macosx64
 if [[ $(uname -s) == "Darwin" ]]; then
-  export MACOS_SYSROOT="$MOZ_FETCHES_DIR/MacOSX26.5.sdk"
-  CONFIG=$(echo $CONFIG mac_sdk_path='"'$MACOS_SYSROOT'"')
+  MACOS_SYSROOT=$(ls -d "$MOZ_FETCHES_DIR"/MacOSX*.sdk)
+  export MACOS_SYSROOT
+  CONFIG=$(echo $CONFIG mac_sdk_path='"//out/Default/MacOSX.sdk"')
 
   PGO_SUBSTR="chrome-mac-arm-main"
 
@@ -107,8 +150,8 @@ if [[ $(uname -o) == "Msys" ]]; then
 fi
 
 # Get chromium source code and dependencies
-mkdir chromium
-cd chromium
+mkdir "$CHROMIUM_DIR_NAME"
+cd "$CHROMIUM_DIR_NAME"
 
 fetch --no-history --nohooks $FETCH_NAME
 
@@ -139,6 +182,18 @@ if [[ $(uname -o) == "Msys" ]]; then
   echo "Using Windows SDK version: ${SDK_VERSION}"
   sed -i "s/SDK_VERSION = '[0-9.]*'/SDK_VERSION = '${SDK_VERSION}'/" build/vs_toolchain.py
   sed -i "s/SDK_VERSION = '[0-9.]*'/SDK_VERSION = '${SDK_VERSION}'/" build/toolchain/win/setup_toolchain.py
+
+  # Upstream targets a newer NTDDI level than our packaged SDK defines. An
+  # unknown NTDDI_VERSION token silently evaluates to 0 in the preprocessor,
+  # which turns off every SDK version guard and breaks windows.h itself, so
+  # clamp it to the newest level this SDK knows about (WDK_NTDDI_VERSION).
+  SDKDDKVER_H="$WINDOWSSDKDIR/Include/$SDK_VERSION/shared/sdkddkver.h"
+  NTDDI_MAX=$(tr -d '\r' < "$SDKDDKVER_H" | awk '$1 == "#define" && $2 == "WDK_NTDDI_VERSION" { print $3 }')
+  [[ -n "$NTDDI_MAX" ]] || { echo "ERROR: could not read WDK_NTDDI_VERSION from $SDKDDKVER_H"; exit 1; }
+  echo "Clamping NTDDI_VERSION to: ${NTDDI_MAX}"
+  sed -i "s/NTDDI_VERSION=NTDDI_[A-Z0-9_]*/NTDDI_VERSION=${NTDDI_MAX}/" build/config/win/BUILD.gn
+  grep -q "NTDDI_VERSION=${NTDDI_MAX}" build/config/win/BUILD.gn || \
+    { echo "ERROR: NTDDI_VERSION patch failed - upstream BUILD.gn may have changed"; exit 1; }
 fi
 
 if [[ $(uname -s) == "Linux" ]] || [[ $(uname -s) == "Darwin" ]]; then
@@ -150,8 +205,8 @@ if [[ $(uname -s) == "Linux" ]] || [[ $(uname -s) == "Darwin" ]]; then
   cipd_bin_setup
 fi
 
-# Sync again for android, after cipd bin setup
-if [ "$IS_ANDROID" = true ]; then
+# fetch --nohooks skips CIPD deps. re-sync on macOS & Android to pull them.
+if [ "$IS_ANDROID" = true ] || [[ $(uname -s) == "Darwin" ]]; then
   gclient sync
 fi
 
@@ -160,7 +215,7 @@ gclient runhooks
 
 # PGO data should be in src/chrome/build/pgo_profiles/
 # with a name like "chrome-{OS}-<some unique identifier>"
-export PGO_DATA_DIR="$CUSTOM_CAR_DIR/chromium/src/chrome/build/pgo_profiles"
+export PGO_DATA_DIR="$CUSTOM_CAR_DIR/$CHROMIUM_DIR_NAME/src/chrome/build/pgo_profiles"
 for entry in "$PGO_DATA_DIR"/*
 do
   if [ -f "$entry" ]; then
@@ -174,9 +229,10 @@ done
 
 PGO_FILE=$PGO_DATA_PATH
 if [[ $(uname -o) == "Msys" ]]; then
-  # Compute a relative path that the build scripts looks for.
-  # This odd pathing seems to only happen on windows
-  PGO_FILE=${PGO_DATA_PATH#*/*/*/*/*/*/*/*/*/}
+  # gn resolves a bare `inputs` entry relative to the directory of the BUILD.gn
+  # declaring it, so hand the build just the file name and move the profile into
+  # that directory below.
+  PGO_FILE=$(basename "$PGO_DATA_PATH")
   mv $PGO_DATA_PATH build/config/compiler/pgo/
 fi
 
@@ -184,12 +240,9 @@ CONFIG=$(echo $CONFIG pgo_data_path='"'$PGO_FILE'"')
 
 # Set up then build chrome
 if [[ $(uname -s) == "Darwin" ]]; then
-  # Bug 2045375: build/config/mac/BUILD.gn's sdk_inputs action declares SDK
-  # files as outputs so RBE remote workers can access them. We don't use RBE,
-  # and GN rejects the action when mac_sdk_path is outside root_build_dir.
-  sed -i '' 's/if (use_system_xcode && current_toolchain == default_toolchain)/if (false)/' build/config/mac/BUILD.gn
-  grep -q 'use_system_xcode && current_toolchain == default_toolchain' build/config/mac/BUILD.gn && \
-    { echo "ERROR: sdk_inputs patch failed - upstream BUILD.gn may have changed"; exit 1; }
+  # Bug 2045375/2066139: Chromium requires sdk_inputs to be inside root_build_dir.
+  mkdir -p out/Default
+  ln -s "$MACOS_SYSROOT" out/Default/MacOSX.sdk
 fi
 
 gn gen out/Default --args="$CONFIG"

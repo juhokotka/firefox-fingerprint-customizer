@@ -115,6 +115,11 @@ void MacroAssembler::xor32(const Address& src, Register dest) {
   ma_xor(dest, scratch2);
 }
 
+void MacroAssembler::nor32(Imm32 imm, Register src, Register dest) {
+  or32(imm, src, dest);
+  not32(dest);
+}
+
 // ===============================================================
 // Swap instructions
 
@@ -1260,8 +1265,8 @@ void MacroAssembler::branchTestGCThingImpl(Condition cond, const T& address,
 void MacroAssembler::branchTestPrimitive(Condition cond, Register tag,
                                          Label* label) {
   MOZ_ASSERT(cond == Equal || cond == NotEqual);
-  ma_b(tag, ImmTag(JS::detail::ValueUpperExclPrimitiveTag), label,
-       (cond == Equal) ? Below : AboveOrEqual);
+  ma_b(tag, ImmTag(JSVAL_TAG_OBJECT), label,
+       (cond == Equal) ? NotEqual : Equal);
 }
 
 void MacroAssembler::branchTestMagic(Condition cond, Register tag,
@@ -1502,31 +1507,31 @@ void MacroAssembler::spectreZeroRegister(Condition cond, Register scratch,
 // ========================================================================
 // Memory access primitives.
 
-FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
+FaultingCodeRange MacroAssembler::storeDouble(FloatRegister src,
+                                              const Address& addr) {
+  return ma_sd(src, addr);
+}
+FaultingCodeRange MacroAssembler::storeDouble(FloatRegister src,
+                                              const BaseIndex& addr) {
+  return ma_sd(src, addr);
+}
+
+FaultingCodeRange MacroAssembler::storeFloat32(FloatRegister src,
                                                const Address& addr) {
-  return ma_sd(src, addr);
+  return ma_ss(src, addr);
 }
-FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
+FaultingCodeRange MacroAssembler::storeFloat32(FloatRegister src,
                                                const BaseIndex& addr) {
-  return ma_sd(src, addr);
-}
-
-FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
-                                                const Address& addr) {
-  return ma_ss(src, addr);
-}
-FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
-                                                const BaseIndex& addr) {
   return ma_ss(src, addr);
 }
 
-FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
-                                                const Address& dest, Register) {
+FaultingCodeRange MacroAssembler::storeFloat16(FloatRegister src,
+                                               const Address& dest, Register) {
   MOZ_CRASH("Not supported for this target");
 }
-FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
-                                                const BaseIndex& dest,
-                                                Register) {
+FaultingCodeRange MacroAssembler::storeFloat16(FloatRegister src,
+                                               const BaseIndex& dest,
+                                               Register) {
   MOZ_CRASH("Not supported for this target");
 }
 

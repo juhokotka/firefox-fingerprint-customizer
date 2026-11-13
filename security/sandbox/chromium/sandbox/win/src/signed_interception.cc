@@ -16,7 +16,7 @@
 #include "sandbox/win/src/sandbox_nt_util.h"
 #include "sandbox/win/src/sharedmem_ipc_client.h"
 #include "sandbox/win/src/target_services.h"
-#include "mozilla/sandboxing/sandboxLogging.h"
+#include "sandbox/win/TargetGeckoClient.h"
 
 namespace sandbox {
 
@@ -48,8 +48,6 @@ TargetNtCreateSection(NtCreateSectionFunction orig_CreateSection,
     if (allocation_attributes != SEC_IMAGE)
       break;
 
-    mozilla::sandboxing::LogBlocked("NtCreateSection");
-
     // IPC must be fully started.
     void* memory = GetGlobalIPCMemory();
     if (!memory)
@@ -71,6 +69,8 @@ TargetNtCreateSection(NtCreateSectionFunction orig_CreateSection,
     if (!NT_SUCCESS(status)) {
       break;
     }
+
+    SYSCALL_BROKERING_WITH_CONTEXT(&path->Name);
 
     CountedParameterSet<NameBased> params;
     std::wstring_view object_name =
@@ -101,7 +101,7 @@ TargetNtCreateSection(NtCreateSectionFunction orig_CreateSection,
 
     __try {
       *section_handle = answer.handle;
-      mozilla::sandboxing::LogAllowed("NtCreateSection");
+      SYSCALL_BROKERED();
       return answer.nt_status;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
       break;

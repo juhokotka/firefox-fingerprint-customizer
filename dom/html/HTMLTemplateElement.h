@@ -42,6 +42,13 @@ class HTMLTemplateElement final : public nsGenericHTMLElement {
   DocumentFragment* Content() { return mContent; }
   void SetContent(DocumentFragment* aContent) { mContent = aContent; }
 
+  void GetHtmlFor(nsAString& aHtmlFor) {
+    GetHTMLAttr(nsGkAtoms::_for, aHtmlFor);
+  }
+  void SetHtmlFor(const nsAString& aHtmlFor) {
+    SetHTMLAttr(nsGkAtoms::_for, aHtmlFor);
+  }
+
   void GetShadowRootMode(nsAString& aResult) const {
     GetEnumAttr(nsGkAtoms::shadowrootmode, nullptr, aResult);
   }
@@ -68,6 +75,13 @@ class HTMLTemplateElement final : public nsGenericHTMLElement {
   }
   void SetShadowRootSerializable(bool aValue, ErrorResult& aRv) {
     SetHTMLBoolAttr(nsGkAtoms::shadowrootserializable, aValue, aRv);
+  }
+
+  void GetShadowRootCustomElementRegistry(nsAString& aResult) const {
+    GetHTMLAttr(nsGkAtoms::shadowrootcustomelementregistry, aResult);
+  }
+  void SetShadowRootCustomElementRegistry(const nsAString& aValue) {
+    SetHTMLAttr(nsGkAtoms::shadowrootcustomelementregistry, aValue);
   }
 
   void GetShadowRootReferenceTarget(nsAString& aResult) const {

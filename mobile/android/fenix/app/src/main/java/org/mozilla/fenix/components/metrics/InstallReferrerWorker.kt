@@ -11,6 +11,9 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.android.installreferrer.api.InstallReferrerClient
 import com.android.installreferrer.api.InstallReferrerStateListener
+import java.io.UnsupportedEncodingException
+import java.net.URLDecoder
+import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 import mozilla.components.support.base.log.logger.Logger
 import mozilla.telemetry.glean.Glean
@@ -22,17 +25,14 @@ import org.mozilla.fenix.GleanMetrics.MetaAttribution
 import org.mozilla.fenix.GleanMetrics.Pings
 import org.mozilla.fenix.GleanMetrics.PlayStoreAttribution
 import org.mozilla.fenix.ext.components
+import org.mozilla.fenix.nimbus.FxNimbus
 import org.mozilla.fenix.utils.Settings
-import java.io.UnsupportedEncodingException
-import java.net.URLDecoder
-import kotlin.coroutines.resume
 
 /**
- * A WorkManager Worker that handles retrying install referrer attribution requests.
- * This worker uses exponential backoff for retries.
+ * A WorkManager Worker that handles retrying install referrer attribution requests. This worker uses exponential
+ * backoff for retries.
  *
- * The [UTMParams] and/or [MetaParams] are derived from the install referrer URL and stored in
- * settings.
+ * The [UTMParams] and/or [MetaParams] are derived from the install referrer URL and stored in settings.
  *
  * @param context The application context.
  * @param workerParameters Setup parameters for a [CoroutineWorker].
@@ -55,8 +55,7 @@ class InstallReferrerWorker(
             }
 
             InstallReferrerClient.InstallReferrerResponse.SERVICE_DISCONNECTED,
-            InstallReferrerClient.InstallReferrerResponse.SERVICE_UNAVAILABLE,
-            -> {
+            InstallReferrerClient.InstallReferrerResponse.SERVICE_UNAVAILABLE -> {
                 if (shouldRetry(runAttemptCount)) {
                     Result.retry()
                 } else {
@@ -79,9 +78,17 @@ class InstallReferrerWorker(
         settings: Settings,
     ) {
         if (!installReferrerResponse.isNullOrBlank()) {
-            PlayStoreAttribution.installReferrerResponse.set(installReferrerResponse)
+            var utmParams = UTMParams.parseUTMParameters(installReferrerResponse)
 
-            val utmParams = UTMParams.parseUTMParameters(installReferrerResponse)
+            // A referral code must not reach attribution data, so it is pulled out and reported on
+            // its own ping before anything else consumes utm_content. See bug 2062793.
+            ReferralAttribution.referralCodeFrom(utmParams.content)?.let { referralCode ->
+                ReferralAttribution.submit(referralCode, settings)
+                utmParams = utmParams.copy(content = "")
+            }
+
+            PlayStoreAttribution.installReferrerResponse.set(ReferralAttribution.redact(installReferrerResponse))
+
             val metaParams = MetaParams.extractMetaAttribution(utmParams.content)
             if (metaParams != null) {
                 settings.isUserMetaAttributed = true
@@ -98,6 +105,24 @@ class InstallReferrerWorker(
 
             settings.isUserXTwitterAttributed =
                 InstallReferrerHandlingService.isXTwitterAttribution(installReferrerResponse)
+
+            settings.isUserMolocoAttributed =
+                InstallReferrerHandlingService.isMolocoAttribution(installReferrerResponse)
+
+            settings.isUserRakutenAttributed =
+                InstallReferrerHandlingService.isRakutenAttribution(installReferrerResponse)
+
+            settings.isUserSkyflagAttributed =
+                InstallReferrerHandlingService.isSkyflagAttribution(installReferrerResponse)
+
+            settings.isUserQuoraAttributed = InstallReferrerHandlingService.isQuoraAttribution(installReferrerResponse)
+
+            PlayStoreAttribution.pairingCampaign.set(
+                InstallReferrerHandlingService.isPairingCampaignAttribution(
+                    installReferrerResponse,
+                    FxNimbus.features.pairingSigninPrompt.value().campaignUtmContent,
+                )
+            )
 
             utmParams.recordInstallReferrer(settings)
         }
@@ -120,9 +145,7 @@ class InstallReferrerWorker(
         }
 
         @VisibleForTesting
-        internal suspend fun fetchInstallReferrer(
-            referrerClient: InstallReferrerClientWrapper,
-        ): Pair<Int, String?> {
+        internal suspend fun fetchInstallReferrer(referrerClient: InstallReferrerClientWrapper): Pair<Int, String?> {
             val timerId = PlayStoreAttribution.attributionTime.start()
 
             return suspendCancellableCoroutine { continuation ->
@@ -139,23 +162,24 @@ class InstallReferrerWorker(
             timerId: GleanTimerId,
             referrerClient: InstallReferrerClientWrapper,
             continuation: kotlin.coroutines.Continuation<Pair<Int, String?>>,
-        ) = object : InstallReferrerStateListener {
-            override fun onInstallReferrerSetupFinished(responseCode: Int) {
-                PlayStoreAttribution.attributionTime.stopAndAccumulate(timerId)
-                val referrerResponse = getReferrerResponseIfOk(responseCode, referrerClient)
-                safelyEndConnection(referrerClient)
-                continuation.resume(Pair(responseCode, referrerResponse))
-            }
+        ) =
+            object : InstallReferrerStateListener {
+                override fun onInstallReferrerSetupFinished(responseCode: Int) {
+                    PlayStoreAttribution.attributionTime.stopAndAccumulate(timerId)
+                    val referrerResponse = getReferrerResponseIfOk(responseCode, referrerClient)
+                    safelyEndConnection(referrerClient)
+                    continuation.resume(Pair(responseCode, referrerResponse))
+                }
 
-            override fun onInstallReferrerServiceDisconnected() {
-                continuation.resume(
-                    Pair(
-                        InstallReferrerClient.InstallReferrerResponse.SERVICE_UNAVAILABLE,
-                        null,
-                    ),
-                )
+                override fun onInstallReferrerServiceDisconnected() {
+                    continuation.resume(
+                        Pair(
+                            InstallReferrerClient.InstallReferrerResponse.SERVICE_UNAVAILABLE,
+                            null,
+                        )
+                    )
+                }
             }
-        }
 
         private fun getReferrerResponseIfOk(
             responseCode: Int,
@@ -188,24 +212,16 @@ class InstallReferrerWorker(
 }
 
 /**
- * Descriptions of utm parameters comes from
- * https://support.google.com/analytics/answer/1033863
- * - utm_source
- *  Identify the advertiser, site, publication, etc.
- *  that is sending traffic to your property, for example: google, newsletter4, billboard.
- * - utm_medium
- *  The advertising or marketing medium, for example: cpc, banner, email newsletter.
- * utm_campaign
- *  The individual campaign name, slogan, promo code, etc. for a product.
- * - utm_term
- *  Identify paid search keywords.
- *  If you're manually tagging paid keyword campaigns, you should also use
- *  utm_term to specify the keyword.
- * - utm_content
- *  Used to differentiate similar content, or links within the same ad.
- *  For example, if you have two call-to-action links within the same email message,
- *  you can use utm_content and set different values for each so you can tell
- *  which version is more effective.
+ * Descriptions of utm parameters comes from https://support.google.com/analytics/answer/1033863
+ * - utm_source Identify the advertiser, site, publication, etc. that is sending traffic to your property, for example:
+ *   google, newsletter4, billboard.
+ * - utm_medium The advertising or marketing medium, for example: cpc, banner, email newsletter. utm_campaign The
+ *   individual campaign name, slogan, promo code, etc. for a product.
+ * - utm_term Identify paid search keywords. If you're manually tagging paid keyword campaigns, you should also use
+ *   utm_term to specify the keyword.
+ * - utm_content Used to differentiate similar content, or links within the same ad. For example, if you have two
+ *   call-to-action links within the same email message, you can use utm_content and set different values for each so
+ *   you can tell which version is more effective.
  */
 data class UTMParams(
     val source: String,
@@ -222,9 +238,7 @@ data class UTMParams(
         const val UTM_CONTENT = "utm_content"
         const val UTM_TERM = "utm_term"
 
-        /**
-         * Try and unpack the install referrer response.
-         */
+        /** Try and unpack the install referrer response. */
         fun parseInstallReferrer(installReferrerResponse: String): Map<String, String> {
             val params = mutableMapOf<String, String>()
             for (param in installReferrerResponse.split("&")) {
@@ -238,9 +252,7 @@ data class UTMParams(
             return params
         }
 
-        /**
-         * Extract the [UTMParams] from the install referrer response.
-         */
+        /** Extract the [UTMParams] from the install referrer response. */
         fun parseUTMParameters(installReferrerResponse: String): UTMParams {
             val utmParams = parseInstallReferrer(installReferrerResponse)
             return UTMParams(
@@ -252,9 +264,7 @@ data class UTMParams(
             )
         }
 
-        /**
-         * Derive the set of UTM parameters stored in Settings.
-         */
+        /** Derive the set of UTM parameters stored in Settings. */
         fun fromSettings(settings: Settings): UTMParams =
             with(settings) {
                 UTMParams(
@@ -267,9 +277,7 @@ data class UTMParams(
             }
     }
 
-    /**
-     * Persist the UTM params into Settings.
-     */
+    /** Persist the UTM params into Settings. */
     fun intoSettings(settings: Settings) {
         with(settings) {
             utmSource = source
@@ -286,11 +294,7 @@ data class UTMParams(
      * @Return [Boolean] true if none of the utm params are set.
      */
     fun isEmpty(): Boolean {
-        return source.isBlank() &&
-            medium.isBlank() &&
-            campaign.isBlank() &&
-            term.isBlank() &&
-            content.isBlank()
+        return source.isBlank() && medium.isBlank() && campaign.isBlank() && term.isBlank() && content.isBlank()
     }
 
     /**
@@ -317,7 +321,7 @@ data class UTMParams(
                 campaign = campaign,
                 term = term,
                 content = content,
-            ),
+            )
         )
     }
 }
@@ -350,41 +354,45 @@ data class MetaParams(
             if (contentString.isNullOrBlank()) {
                 return null
             }
-            val decodedContentString = try {
-                // content string can be in percent format
-                URLDecoder.decode(contentString, "UTF-8")
-            } catch (e: UnsupportedEncodingException) {
-                logger.error("failed to decode content string", e)
-                // can't recover from this
-                return null
-            }
+            val decodedContentString =
+                try {
+                    // content string can be in percent format
+                    URLDecoder.decode(contentString, "UTF-8")
+                } catch (e: UnsupportedEncodingException) {
+                    logger.error("failed to decode content string", e)
+                    // can't recover from this
+                    return null
+                }
 
             val data: String
             val nonce: String
 
-            val contentJson = try {
-                JSONObject(decodedContentString)
-            } catch (e: JSONException) {
-                logger.error("content is not JSON", e)
-                // can't recover from this
-                return null
-            }
+            val contentJson =
+                try {
+                    JSONObject(decodedContentString)
+                } catch (e: JSONException) {
+                    logger.error("content is not JSON", e)
+                    // can't recover from this
+                    return null
+                }
 
-            val app = try {
-                contentJson.optString(APP) ?: ""
-            } catch (e: JSONException) {
-                logger.error("failed to extract app", e)
-                // this is an acceptable outcome
-                ""
-            }
+            val app =
+                try {
+                    contentJson.optString(APP) ?: ""
+                } catch (e: JSONException) {
+                    logger.error("failed to extract app", e)
+                    // this is an acceptable outcome
+                    ""
+                }
 
-            val t = try {
-                contentJson.optString(T) ?: ""
-            } catch (e: JSONException) {
-                logger.error("failed to extract t", e)
-                // this is an acceptable outcome
-                ""
-            }
+            val t =
+                try {
+                    contentJson.optString(T) ?: ""
+                } catch (e: JSONException) {
+                    logger.error("failed to extract t", e)
+                    // this is an acceptable outcome
+                    ""
+                }
 
             try {
                 val source = contentJson.optJSONObject(SOURCE)
@@ -409,9 +417,7 @@ data class MetaParams(
         }
     }
 
-    /**
-     * record META attribution params to telemetry
-     */
+    /** record META attribution params to telemetry */
     fun recordMetaAttribution() {
         MetaAttribution.app.set(app)
         MetaAttribution.t.set(t)

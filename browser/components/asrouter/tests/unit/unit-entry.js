@@ -162,8 +162,8 @@ const TEST_GLOBAL = {
       return global;
     },
   },
-  ClientEnvironment: {
-    get userId() {
+  ClientEnvironmentBase: {
+    get legacyRandomizationId() {
       return "foo123";
     },
   },
@@ -248,12 +248,6 @@ const TEST_GLOBAL = {
       CRYPTOMINERS_ID: 3,
       FINGERPRINTERS_ID: 4,
       SOCIAL_ID: 5,
-    },
-    nsICookieBannerService: {
-      MODE_DISABLED: 0,
-      MODE_REJECT: 1,
-      MODE_REJECT_OR_ACCEPT: 2,
-      MODE_UNSET: 3,
     },
   },
   Cu: {
@@ -504,6 +498,7 @@ const TEST_GLOBAL = {
   ShellService: {
     doesAppNeedPin: () => false,
     isDefaultBrowser: () => true,
+    isDefaultBrowserAsync: async () => true,
   },
   FilterExpressions: {
     eval() {

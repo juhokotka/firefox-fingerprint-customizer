@@ -9,13 +9,12 @@ import {
   RUN_SEARCH,
   GET_USER_MEMORIES,
   GET_NAVIGATION_INFO,
-  WORLD_CUP_MATCHES,
-  WORLD_CUP_LIVE,
+  SEARCH_THE_WEB,
+  GENERATE_AITAB,
+  isAITabModification,
 } from "moz-src:///browser/components/aiwindow/models/Tools.sys.mjs";
 
 export const ACTION_LOG_UI_TYPE = "action-log";
-// TODO: use SEARCH_QUERY from Tools.sys.mjs once the tool call is ready
-export const SEARCH_QUERY = "search_query";
 
 const EMPTY_ROWS = Object.freeze([]);
 
@@ -25,6 +24,15 @@ const EMPTY_ROWS = Object.freeze([]);
  * @typedef {object} ActionLogLabel
  * @property {string} l10nId - Fluent message id for the label text
  * @property {object} [l10nArgs] - optional Fluent variables (e.g. counts)
+ */
+
+/**
+ * A link embedded inside an action log label. Requires a matching
+ * <a data-l10n-name> in the l10n message.
+ *
+ * @typedef {object} ActionLogLabelLink
+ * @property {string} l10nName - matches data-l10n-name on the rendered anchor
+ * @property {string} href - URL the anchor opens
  */
 
 /**
@@ -56,6 +64,30 @@ function urlListChips(items, getLabel) {
  */
 const TOOL_ACTION_LOG_CONFIG = new Map([
   [
+    GENERATE_AITAB,
+    {
+      label: (body, args) => {
+        if (!body?.page) {
+          return {
+            l10nId: isAITabModification(args?.modify_slug)
+              ? "smartwindow-aitab-updating-an-aitab-failed"
+              : "smartwindow-aitab-creating-an-aitab-failed",
+          };
+        }
+        return {
+          l10nId: isAITabModification(args?.modify_slug)
+            ? "smartwindow-aitab-updated-an-aitab"
+            : "smartwindow-aitab-created-an-aitab",
+        };
+      },
+      pendingLabel: args => ({
+        l10nId: isAITabModification(args?.modify_slug)
+          ? "smartwindow-aitab-updating"
+          : "smartwindow-aitab-creating",
+      }),
+    },
+  ],
+  [
     GET_OPEN_TABS,
     {
       label: { l10nId: "action-log-searched-open-tabs" },
@@ -84,10 +116,15 @@ const TOOL_ACTION_LOG_CONFIG = new Map([
     },
   ],
   [
-    SEARCH_QUERY,
+    SEARCH_THE_WEB,
     {
-      label: { l10nId: "action-log-searched-web-exa" },
-      pendingLabel: { l10nId: "action-log-searching-web" },
+      label: { l10nId: "action-log-searched-web-with-exa" },
+      pendingLabel: { l10nId: "action-log-searching-web-with-exa" },
+      link: {
+        l10nName: "exa-link",
+        supportPage:
+          "smart-window?as=u&utm_source=inproduct#w_the-assistant-may-search-the-web",
+      },
     },
   ],
   [
@@ -102,20 +139,6 @@ const TOOL_ACTION_LOG_CONFIG = new Map([
     {
       label: { l10nId: "action-log-searched-settings" },
       pendingLabel: { l10nId: "action-log-searching-settings" },
-    },
-  ],
-  [
-    WORLD_CUP_MATCHES,
-    {
-      label: { l10nId: "action-log-searched-world-cup-matches" },
-      pendingLabel: { l10nId: "action-log-searching-world-cup-matches" },
-    },
-  ],
-  [
-    WORLD_CUP_LIVE,
-    {
-      label: { l10nId: "action-log-checked-world-cup-live" },
-      pendingLabel: { l10nId: "action-log-checking-world-cup-live" },
     },
   ],
 ]);
@@ -134,21 +157,53 @@ const TOOL_RESULT_TO_CHIPS = new Map([
   ],
 ]);
 
+function resolveSupportUrl(supportPage) {
+  return (
+    Services.urlFormatter.formatURLPref("app.support.baseURL") + supportPage
+  );
+}
+
 /**
  * Look up the action log UI config for a given tool. Tools without an entry
  * default to suppressed (show: false)
  *
  * @param {string} toolName
- * @param {object} [body] - tool result body
- * @returns {{ label: ActionLogLabel | null, pendingLabel: ActionLogLabel | null }}
+ * @param {object} [body] - tool result body. A `pending` body means the tool
+ *   is still running, so the in-progress label is used for the row.
+ * @param {object} [args] - parsed tool call arguments
+ * @returns {{ show: boolean, label: ActionLogLabel | null, pendingLabel: ActionLogLabel | null, link: ActionLogLabelLink | null }}
  */
-export function getActionLogConfigForTool(toolName, body) {
+export function getActionLogConfigForTool(toolName, body, args) {
   const cfg = TOOL_ACTION_LOG_CONFIG.get(toolName);
   if (!cfg) {
-    return { show: false, label: null, pendingLabel: null };
+    return { show: false, label: null, pendingLabel: null, link: null };
   }
-  const label = typeof cfg.label === "function" ? cfg.label(body) : cfg.label;
-  return { show: true, label, pendingLabel: cfg.pendingLabel ?? null };
+  const completedLabel =
+    typeof cfg.label === "function" ? cfg.label(body, args) : cfg.label;
+  const link = cfg.link
+    ? {
+        l10nName: cfg.link.l10nName,
+        href: resolveSupportUrl(cfg.link.supportPage),
+      }
+    : null;
+  let pendingLabel =
+    typeof cfg.pendingLabel === "function"
+      ? cfg.pendingLabel(args)
+      : (cfg.pendingLabel ?? null);
+  if (pendingLabel && link) {
+    pendingLabel = { ...pendingLabel, link };
+  }
+  // A still-running tool carries a `pending` placeholder body; show its
+  // in-progress label on the row rather than the completed one.
+  const label = body?.pending
+    ? (pendingLabel ?? completedLabel)
+    : completedLabel;
+  return {
+    show: true,
+    label,
+    pendingLabel,
+    link,
+  };
 }
 
 /**
@@ -173,19 +228,22 @@ export function getActionLogChipsForTool(toolName, body, args) {
  * @param {ActionLogLabel | string} label
  * @param {object} body - tool result body
  * @param {object} [args] - parsed tool call args
- * @returns {{ labelL10nId?: string, labelL10nArgs?: object, label?: string, items: Array<ActionLogChip> }}
+ * @param {ActionLogLabelLink} [link] - optional link embedded in the label
+ * @returns {{ labelL10nId?: string, labelL10nArgs?: object, label?: string, link?: ActionLogLabelLink, items: Array<ActionLogChip> }}
  */
-export function buildActionLogRow(toolName, label, body, args) {
-  const items = getActionLogChipsForTool(toolName, body, args);
-  if (label && typeof label === "object" && label.l10nId) {
-    return {
-      labelL10nId: label.l10nId,
-      labelL10nArgs: label.l10nArgs,
-      items,
-    };
+export function buildActionLogRow(toolName, label, body, args, link) {
+  const row = { items: getActionLogChipsForTool(toolName, body, args) };
+
+  if (link?.href) {
+    row.link = link;
   }
-  return {
-    label: typeof label === "string" ? label : "",
-    items,
-  };
+
+  if (label && typeof label === "object" && label.l10nId) {
+    row.labelL10nId = label.l10nId;
+    row.labelL10nArgs = label.l10nArgs;
+  } else {
+    row.label = typeof label === "string" ? label : "";
+  }
+
+  return row;
 }

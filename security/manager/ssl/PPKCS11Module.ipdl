@@ -2,9 +2,30 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+include PSMIPCTypes;
+
+using CK_SLOT_ID from "pkcs11t.h";
+using SECMODModuleID from "secmodt.h";
+using mozilla::psm::SearchingFor from "mozilla/psm/PSMIPCUtils.h";
+
 namespace mozilla {
 
 namespace psm {
+
+struct TokenInfo {
+  SECMODModuleID moduleID;
+  CK_SLOT_ID slotID;
+
+  nsCString name;
+  nsCString manID;
+  nsCString hwVersion;
+  nsCString fwVersion;
+  nsCString serialNumber;
+
+  bool isLoggedIn;
+  bool canHavePassword;
+  bool hasPassword;
+};
 
 struct SlotInfo {
   nsCString name;
@@ -14,6 +35,7 @@ struct SlotInfo {
   nsCString fwVersion;
   uint32_t status;
   nsCString tokenName;
+  TokenInfo? tokenInfo;
 };
 
 struct ModuleInfo {
@@ -36,6 +58,33 @@ protocol PPKCS11Module
     async DeleteModule(nsCString aModuleName) returns (nsresult rv);
 
     async ListModules() returns (nsresult rv, ModuleInfo[] modules);
+
+    async ResetToken(SECMODModuleID moduleID, CK_SLOT_ID slotID)
+        returns (nsresult rv, TokenInfo tokenInfo);
+
+    async LoginToken(SECMODModuleID moduleID, CK_SLOT_ID slotID)
+        returns (nsresult rv, TokenInfo tokenInfo);
+
+    async LogoutToken(SECMODModuleID moduleID, CK_SLOT_ID slotID)
+        returns (nsresult rv, TokenInfo tokenInfo);
+
+    async ChangeTokenPassword(SECMODModuleID moduleID, CK_SLOT_ID slotID,
+                              nsCString oldPassword, nsCString newPassword)
+        returns (nsresult rv, TokenInfo tokenInfo);
+
+    async CancelProtectedAuth(uint64_t id);
+
+    async FindObjects(SearchingFor searchingFor) returns (IPCClientCertObject[] objects);
+
+    async Sign(uint8_t[] certificate, uint8_t[] data, uint8_t[] params)
+        returns (uint8_t[] signature);
+
+  parent:
+    async PromptPassword(nsCString aTokenName)
+        returns (nsresult rv, nsCString password);
+
+    async ShowProtectedAuthPrompt(nsCString aTokenName, uint64_t id);
+    async DismissProtectedAuthPrompt(uint64_t id);
 };
 
 } // namespace psm

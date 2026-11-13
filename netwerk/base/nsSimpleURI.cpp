@@ -3,26 +3,26 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #undef LOG
-#include "ipc/IPCMessageUtils.h"
-
 #include "nsSimpleURI.h"
-#include "nscore.h"
-#include "nsCRT.h"
-#include "nsString.h"
-#include "nsURLHelper.h"
-#include "nsNetCID.h"
-#include "nsIObjectInputStream.h"
-#include "nsIObjectOutputStream.h"
-#include "nsEscape.h"
-#include "nsError.h"
-#include "nsQueryObject.h"
+
+#include "ipc/IPCMessageUtils.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/StaticPrefs_network.h"
 #include "mozilla/TextUtils.h"
 #include "mozilla/ipc/URIUtils.h"
-#include "nsIClassInfoImpl.h"
-#include "nsIURIMutator.h"
 #include "mozilla/net/MozURL.h"
-#include "mozilla/StaticPrefs_network.h"
+#include "nsCRT.h"
+#include "nsError.h"
+#include "nsEscape.h"
+#include "nsIClassInfoImpl.h"
+#include "nsIObjectInputStream.h"
+#include "nsIObjectOutputStream.h"
+#include "nsIURIMutator.h"
+#include "nsNetCID.h"
+#include "nsQueryObject.h"
+#include "nsString.h"
+#include "nsURLHelper.h"
+#include "nscore.h"
 
 using namespace mozilla::ipc;
 

@@ -97,7 +97,6 @@ enum class PrefersColorSchemeOverride : uint8_t;
 }  // namespace dom
 namespace gfx {
 class FontPaletteValueSet;
-class PaletteCache;
 }  // namespace gfx
 }  // namespace mozilla
 
@@ -442,10 +441,10 @@ class nsPresContext : public nsISupports,
   mozilla::ScreenIntCoord GetKeyboardHeight() const;
 
   /**
-   * Returns true if the software keyboard is hidden or
-   * the document is `interactive-widget=resizes-content` mode.
+   * Returns true if the software keyboard is visible and the document is
+   * `interactive-widget=overlays-content` mode.
    */
-  bool IsKeyboardHiddenOrResizesContentMode() const;
+  bool IsKeyboardVisibleOnOverlaysContent() const;
 
   /**
    * Returns the maximum height of the dynamic toolbar if the toolbar state is
@@ -613,6 +612,15 @@ class nsPresContext : public nsISupports,
    */
   void SetLinkParametersOverride(
       const mozilla::StyleLinkParameters& aLinkParameters);
+
+  /**
+   * Content-area scrollbar insets forwarded from the <browser> embedder, per
+   * physical side, in app units.
+   */
+  const nsMargin& EmbedderScrollbarInset() const {
+    return mEmbedderScrollbarInset;
+  }
+  void SetEmbedderScrollbarInset(const nsMargin& aInset);
 
   /**
    * Return the device's screen size in inches, for font size
@@ -949,8 +957,6 @@ class nsPresContext : public nsISupports,
   void FlushFontPaletteValues();
   void MarkFontPaletteValuesDirty() { mFontPaletteValuesDirty = true; }
 
-  mozilla::gfx::PaletteCache& FontPaletteCache();
-
   // Ensure that it is safe to hand out CSS rules outside the layout
   // engine by ensuring that all CSS style sheets have unique inners
   // and, if necessary, synchronously rebuilding all style data.
@@ -1091,7 +1097,17 @@ class nsPresContext : public nsISupports,
 
   void UpdateContainerQueryStylesAndAnchorPosLayout();
 
-  mozilla::intl::Bidi& BidiEngine();
+  // Call GetBidiEngine to get a bidi-resolution engine from the prescontext.
+  // This may be an previously-cached object or a newly-constructed one.
+  // The caller then has sole ownership of the returned object.
+  mozilla::UniquePtr<mozilla::intl::Bidi> GetBidiEngine();
+
+  // Call ReleaseBidiEngine when finished with a bidi-resolution engine. This
+  // allows the prescontext to keep it around for subsequent re-use.
+  void ReleaseBidiEngine(
+      mozilla::UniquePtr<mozilla::intl::Bidi>&& aBidiEngine) {
+    mBidiEngine = std::move(aBidiEngine);
+  }
 
   gfxFontFeatureValueSet* GetFontFeatureValuesLookup() const {
     return mFontFeatureValuesLookup;
@@ -1116,7 +1132,7 @@ class nsPresContext : public nsISupports,
  protected:
   void DoUpdateHiddenByContentVisibilityForAnimations();
   friend class nsRunnableMethod<nsPresContext>;
-  void ThemeChangedInternal();
+  MOZ_CAN_RUN_SCRIPT void ThemeChangedInternal();
   void RefreshSystemMetrics();
 
   // Update device context's resolution from the widget
@@ -1233,8 +1249,6 @@ class nsPresContext : public nsISupports,
   const nsStaticAtom* mMedium;
   RefPtr<gfxFontFeatureValueSet> mFontFeatureValuesLookup;
   RefPtr<mozilla::gfx::FontPaletteValueSet> mFontPaletteValueSet;
-
-  mozilla::UniquePtr<mozilla::gfx::PaletteCache> mFontPaletteCache;
 
   // TODO(emilio): Maybe lazily create and put under a UniquePtr if this grows a
   // lot?
@@ -1446,6 +1460,7 @@ class nsPresContext : public nsISupports,
   mozilla::dom::PrefersColorSchemeOverride mOverriddenOrEmbedderColorScheme;
   mozilla::StyleForcedColors mForcedColors;
   mozilla::StyleLinkParameters mLinkParameters;
+  nsMargin mEmbedderScrollbarInset;
 
  protected:
   virtual ~nsPresContext();

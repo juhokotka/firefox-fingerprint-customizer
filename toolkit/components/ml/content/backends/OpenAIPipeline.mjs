@@ -42,6 +42,15 @@ ChromeUtils.defineESModuleGetters(
   { global: "current" }
 );
 
+/**
+ * How long to keep reading after finish_reason for the trailing usage chunk.
+ * Only reached when a server stops talking without closing the stream, and must
+ * stay under browser.ml.modelCacheTimeout or the engine is reaped mid-drain.
+ *
+ * @type {number}
+ */
+const TOOL_CALL_DRAIN_TIMEOUT_MS = 2000;
+
 export class OpenAIPipeline {
   #errorFactory = null;
   #options = null;
@@ -215,55 +224,98 @@ export class OpenAIPipeline {
       port,
     } = args;
 
+    const createStartTime = ChromeUtils.now();
     const stream = await client.chat.completions.create(completionParams);
+    let lastChunkTime = ChromeUtils.now();
+    ChromeUtils.addProfilerMarker(
+      "MLEngine:OpenAI",
+      createStartTime,
+      "Stream opened"
+    );
 
     let streamOutput = "";
     let toolAcc = new Map();
     let sawToolCallsFinish = false;
     let usage = null;
+    let chunkIndex = 0;
 
-    for await (const chunk of stream) {
-      const choice = chunk?.choices?.[0];
-      const delta = choice?.delta ?? {};
+    // Armed once finish_reason arrives, so a server that never closes the
+    // stream cannot hold the engine open. Aborting the request interrupts the
+    // pending read, which the stream generator treats as a clean end.
+    let drainTimeoutId = null;
 
-      // Normal text tokens
-      if (delta.content) {
-        streamOutput += delta.content;
-        this.#sendProgress({
-          content: delta.content,
-          requestId,
-          inferenceProgressCallback,
-          port,
-          isDone: false,
-        });
+    try {
+      for await (const chunk of stream) {
+        const chunkTime = ChromeUtils.now();
+        const choice = chunk?.choices?.[0];
+        const delta = choice?.delta ?? {};
+
+        // Chunk 0 measures stream open to first chunk; later ones the gap.
+        let chunkKind = "empty";
+        if (delta.content) {
+          chunkKind = "content";
+        } else if (delta.tool_calls) {
+          chunkKind = "tool_calls";
+        } else if (chunk?.usage) {
+          chunkKind = "usage";
+        }
+        ChromeUtils.addProfilerMarker(
+          "MLEngine:OpenAI",
+          lastChunkTime,
+          `Raw chunk #${chunkIndex} ${chunkKind}`
+        );
+        chunkIndex++;
+        lastChunkTime = chunkTime;
+
+        // Normal text tokens
+        if (delta.content) {
+          streamOutput += delta.content;
+          this.#sendProgress({
+            content: delta.content,
+            requestId,
+            inferenceProgressCallback,
+            port,
+            isDone: false,
+          });
+        }
+
+        if (Array.isArray(delta.tool_calls) && delta.tool_calls.length) {
+          toolAcc = this.#mergeToolDeltas(toolAcc, delta.tool_calls);
+        }
+
+        if (chunk?.usage) {
+          usage = chunk.usage;
+        }
+
+        // If the model signals it wants tools now
+        if (choice?.finish_reason === "tool_calls") {
+          sawToolCallsFinish = true;
+          const toolCalls = this.#finalizeToolCalls(toolAcc);
+
+          // Emit the completed tool calls to the caller so they can execute
+          // them.
+          this.#sendProgress({
+            content: "", // no user-visible text here
+            requestId,
+            inferenceProgressCallback,
+            port,
+            isDone: false,
+            toolCalls,
+          });
+
+          // Keep reading: the usage chunk arrives after finish_reason.
+          drainTimeoutId ??= setTimeout(() => {
+            ChromeUtils.addProfilerMarker(
+              "MLEngine:OpenAI",
+              {},
+              "Tool-call drain timed out; cancelling"
+            );
+            stream.controller.abort();
+          }, TOOL_CALL_DRAIN_TIMEOUT_MS);
+        }
       }
-
-      if (Array.isArray(delta.tool_calls) && delta.tool_calls.length) {
-        toolAcc = this.#mergeToolDeltas(toolAcc, delta.tool_calls);
-      }
-
-      if (chunk?.usage) {
-        usage = chunk.usage;
-      }
-
-      // If the model signals it wants tools now
-      if (choice?.finish_reason === "tool_calls") {
-        sawToolCallsFinish = true;
-        const toolCalls = this.#finalizeToolCalls(toolAcc);
-
-        // Emit the completed tool calls to the caller so they can execute them.
-        this.#sendProgress({
-          content: "", // no user-visible text here
-          requestId,
-          inferenceProgressCallback,
-          port,
-          isDone: false,
-          toolCalls,
-        });
-
-        // Typically end this assistant turn here.
-        break;
-      }
+    } finally {
+      clearTimeout(drainTimeoutId);
     }
 
     // Final message: does not carry full content to avoid duplication
@@ -306,10 +358,20 @@ export class OpenAIPipeline {
       port,
     } = args;
 
+    const createStartTime = ChromeUtils.now();
     const completion = await client.chat.completions.create(completionParams);
+    ChromeUtils.addProfilerMarker(
+      "MLEngine:OpenAI",
+      createStartTime,
+      "Completion received"
+    );
     const message = completion.choices[0].message;
     const output = message.content || "";
     const toolCalls = message.tool_calls || null;
+    // Backend-specific data carried alongside the message, e.g. the `citations`
+    // Exa returns on its answer service. Only surfaced here: it has no
+    // equivalent on the streaming path, where the deltas carry content alone.
+    const providerSpecificFields = message.provider_specific_fields || null;
 
     this.#sendProgress({
       content: output,
@@ -324,6 +386,7 @@ export class OpenAIPipeline {
       finalOutput: output,
       metrics: [],
       ...(toolCalls ? { toolCalls } : {}),
+      ...(providerSpecificFields ? { providerSpecificFields } : {}),
     };
   }
 
@@ -355,21 +418,24 @@ export class OpenAIPipeline {
         purpose,
         extraHeaders,
         engineId,
+        maxRetries,
       } = this.#options;
-      const fxAccountToken = request.fxAccountToken
-        ? request.fxAccountToken
-        : null;
+      const token = request.token ?? null;
       const chatId = request.chatId;
 
       const userAgent = navigator.userAgent;
       const client = new OpenAIPipeline.OpenAILib.OpenAI({
         baseURL: baseURL ? baseURL : "http://localhost:11434/v1",
-        apiKey: apiKey || fxAccountToken || "apiKey",
+        apiKey: apiKey || token || "apiKey",
+        maxRetries,
         defaultHeaders: {
           "user-agent": userAgent,
           ...extraHeaders,
           "service-type": serviceType || "ai",
-          purpose: purpose || "chat",
+          // Omitted when unset rather than defaulted to "chat": a service that
+          // enumerates the purposes it accepts rejects the ones it does not
+          // know, and every feature with a purpose passes one explicitly.
+          ...(purpose ? { purpose } : {}),
           "x-engine-id": engineId,
           "chat-id": chatId,
         },
@@ -377,11 +443,15 @@ export class OpenAIPipeline {
       const stream = request.streamOptions?.enabled || false;
       const tools = request.tools || [];
 
+      // `stream` and `tools` are omitted rather than sent falsy/empty: absent
+      // means the same thing to a chat completion, and services that do not
+      // offer streaming or tools at all reject the keys outright.
       const completionParams = {
+        ...request.inferenceParams,
         model: modelId,
         messages: request.args,
-        stream,
-        tools,
+        ...(stream ? { stream } : {}),
+        ...(tools.length ? { tools } : {}),
       };
       if (stream) {
         completionParams.stream_options = { include_usage: true };

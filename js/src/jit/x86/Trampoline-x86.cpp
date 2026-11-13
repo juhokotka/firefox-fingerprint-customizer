@@ -45,10 +45,15 @@ enum EnterJitEbpArgumentOffset {
 // Generates a trampoline for calling Jit compiled code from a C++ function.
 // The trampoline use the EnterJitCode signature, with the standard cdecl
 // calling convention.
-void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
+void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm,
+                                  EnterJitMode mode) {
   AutoCreatedBy acb(masm, "JitRuntime::generateEnterJIT");
 
-  enterJITOffset_ = startTrampolineCode(masm);
+  if (mode == EnterJitMode::GeneratorResume) {
+    enterJITGeneratorResumeOffset_ = startTrampolineCode(masm);
+  } else {
+    enterJITOffset_ = startTrampolineCode(masm);
+  }
 
   masm.assertStackAlignment(ABIStackAlignment,
                             -int32_t(sizeof(uintptr_t)) /* return address */);
@@ -60,33 +65,39 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
   // Save non-volatile registers. These must be saved by the trampoline,
   // rather than the JIT'd code, because they are scanned by the conservative
   // scanner.
-  masm.push(ebx);
-  masm.push(esi);
-  masm.push(edi);
+  masm.pushRegs(ebx, esi, edi);
 
-  Register reg_argc = eax;
-  masm.loadPtr(Address(ebp, ARG_ARGC), reg_argc);
+  if (mode == EnterJitMode::GeneratorResume) {
+    Register reg_argv = ebx;
+    masm.loadPtr(Address(ebp, ARG_ARGV), reg_argv);
+    Register reg_token = edx;
+    masm.loadPtr(Address(ebp, ARG_CALLEETOKEN), reg_token);
+    generateEnterJitResumeShared(masm, reg_argv, reg_token, eax, ecx);
+  } else {
+    Register reg_argc = eax;
+    masm.loadPtr(Address(ebp, ARG_ARGC), reg_argc);
 
-  Register reg_argv = ebx;
-  masm.loadPtr(Address(ebp, ARG_ARGV), reg_argv);
+    Register reg_argv = ebx;
+    masm.loadPtr(Address(ebp, ARG_ARGV), reg_argv);
 
-  Register reg_token = edx;
-  masm.loadPtr(Address(ebp, ARG_CALLEETOKEN), reg_token);
+    Register reg_token = edx;
+    masm.loadPtr(Address(ebp, ARG_CALLEETOKEN), reg_token);
 
-  generateEnterJitShared(masm, reg_argc, reg_argv, reg_token, ecx, esi, edi);
+    generateEnterJitShared(masm, reg_argc, reg_argv, reg_token, ecx, esi, edi);
 
-  // Push the descriptor.
-  masm.mov(Operand(ebp, ARG_RESULT), eax);
-  masm.unboxInt32(Address(eax, 0x0), eax);
-  masm.pushFrameDescriptorForJitCall(FrameType::CppToJSJit, eax, eax);
+    // Push the descriptor.
+    masm.mov(Operand(ebp, ARG_RESULT), eax);
+    masm.unboxInt32(Address(eax, 0x0), eax);
+    masm.pushFrameDescriptorForJitCall(FrameType::CppToJSJit, eax, eax);
 
-  // Load the InterpreterFrame address into the OsrFrameReg.
-  // This address is also used for setting the constructing bit on all paths.
-  masm.loadPtr(Address(ebp, ARG_STACKFRAME), OsrFrameReg);
+    // Load the InterpreterFrame address into the OsrFrameReg.
+    // This address is also used for setting the constructing bit on all paths.
+    masm.loadPtr(Address(ebp, ARG_STACKFRAME), OsrFrameReg);
+  }
 
   CodeLabel returnLabel;
   Label oomReturnLabel;
-  {
+  if (mode != EnterJitMode::GeneratorResume) {
     // Handle Interpreter -> Baseline OSR.
     AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
     MOZ_ASSERT(!regs.has(ebp));
@@ -106,10 +117,8 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
 
     // Push return address.
     masm.mov(&returnLabel, scratch);
-    masm.push(scratch);
-
     // Frame prologue.
-    masm.push(ebp);
+    masm.pushRegs(scratch, ebp);
     masm.mov(esp, ebp);
 
     // Reserve frame.
@@ -177,7 +186,7 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
   ***************************************************************/
   masm.call(Address(ebp, ARG_JITCODE));
 
-  {
+  if (mode != EnterJitMode::GeneratorResume) {
     // Interpreter -> Baseline OSR will return here.
     masm.bind(&returnLabel);
     masm.addCodeLabel(returnLabel);
@@ -201,13 +210,8 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
       Return stack and registers to correct state
   **************************************************************/
 
-  // Restore non-volatile registers
-  masm.pop(edi);
-  masm.pop(esi);
-  masm.pop(ebx);
-
-  // Restore old stack frame pointer
-  masm.pop(ebp);
+  // Restore non-volatile registers, and the old stack frame pointer
+  masm.popRegs(edi, esi, ebx, ebp);
   masm.ret();
 }
 
@@ -223,7 +227,7 @@ JitRuntime::getCppEntryRegisters(JitFrameLayout* frameStackAddress) {
 // Push AllRegs in a way that is compatible with RegisterDump, regardless of
 // what PushRegsInMask might do to reduce the set size.
 static void DumpAllRegs(MacroAssembler& masm) {
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
   masm.PushRegsInMask(AllRegs);
 #else
   // When SIMD isn't supported, PushRegsInMask reduces the set of float
@@ -452,17 +456,13 @@ uint32_t JitRuntime::generatePreBarrier(JSContext* cx, MacroAssembler& masm,
   Register temp1 = eax;
   Register temp2 = ebx;
   Register temp3 = ecx;
-  masm.push(temp1);
-  masm.push(temp2);
-  masm.push(temp3);
+  masm.pushRegs(temp1, temp2, temp3);
 
   Label noBarrier;
   masm.emitPreBarrierFastPath(type, temp1, temp2, temp3, &noBarrier);
 
   // Call into C++ to mark this GC thing.
-  masm.pop(temp3);
-  masm.pop(temp2);
-  masm.pop(temp1);
+  masm.popRegs(temp3, temp2, temp1);
 
   LiveRegisterSet save;
   save.set() = RegisterSet(GeneralRegisterSet(Registers::VolatileMask),
@@ -480,9 +480,7 @@ uint32_t JitRuntime::generatePreBarrier(JSContext* cx, MacroAssembler& masm,
   masm.ret();
 
   masm.bind(&noBarrier);
-  masm.pop(temp3);
-  masm.pop(temp2);
-  masm.pop(temp1);
+  masm.popRegs(temp3, temp2, temp1);
   masm.ret();
 
   return offset;

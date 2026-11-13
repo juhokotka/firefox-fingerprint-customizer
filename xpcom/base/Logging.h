@@ -5,18 +5,17 @@
 #ifndef mozilla_logging_h
 #define mozilla_logging_h
 
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
 
+#include "fmt/format.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Likely.h"
 #include "mozilla/LoggingCore.h"
-
-#include "fmt/format.h"
 
 #define MOZ_LOGGING_ENABLED 1
 
@@ -34,6 +33,9 @@ class TimeStamp;
 class LogModule {
  public:
   ~LogModule() { ::free(mName); }
+
+  LogModule(LogModule&) = delete;
+  LogModule& operator=(const LogModule&) = delete;
 
   /**
    * Retrieves the module with the given name. If it does not already exist
@@ -55,7 +57,8 @@ class LogModule {
   static void Init(int argc, char* argv[]);
 
   /**
-   * Sets the log file to the given filename.
+   * Sets the log file to the given filename, or goes back to logging to
+   * stderr if aFilename is null.
    */
   static void SetLogFile(const char* aFilename);
 
@@ -131,9 +134,6 @@ class LogModule {
 
   explicit LogModule(const char* aName, LogLevel aLevel)
       : mName(strdup(aName)), mLevel(aLevel) {}
-
-  LogModule(LogModule&) = delete;
-  LogModule& operator=(const LogModule&) = delete;
 
   char* mName;
 

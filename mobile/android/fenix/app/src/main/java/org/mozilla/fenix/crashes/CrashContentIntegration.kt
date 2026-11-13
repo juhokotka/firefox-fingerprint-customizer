@@ -35,20 +35,19 @@ import org.mozilla.fenix.utils.Settings
  * Note that you have to call `integration.viewProvider` to set the provider that will provide
  *
  * @param browserStore [BrowserStore] observed for any changes related to [EngineState.crashed].
- * @param appStore [AppStore] that tracks all content crashes in the current app session until the user
- * decides to either send or dismiss all crash reports.
+ * @param appStore [AppStore] that tracks all content crashes in the current app session until the user decides to
+ *   either send or dismiss all crash reports.
  * @param toolbar [BrowserToolbar] that will be expanded when showing the in-app crash reporter.
  * @param components [Components] allowing interactions with other app features.
  * @param settings [Settings] allowing to check whether crash reporting is enabled or not.
  * @param navController [NavController] used to navigate to other parts of the app.
  * @param customTabSessionId [String] Id of the tab or custom tab which should be observed for [EngineState.crashed]
- * depending on which the [CrashContentView] provided by [viewProvider] will be shown or hidden.
+ *   depending on which the [CrashContentView] provided by [viewProvider] will be shown or hidden.
  * @param dispatcher The [CoroutineDispatcher] to use for launching coroutines. Defaults to [Dispatchers.Main].
  * @param getTopToolbarHeightValue Function to provide the top toolbar height.
  * @param getBottomToolbarHeightValue Function to provide the bottom toolbar height.
  *
  * Sample usage:
- *
  * ```kotlin
  * class MyFragment : Fragment() {
  *
@@ -56,8 +55,12 @@ import org.mozilla.fenix.utils.Settings
  *      //...
  *      val integration = CrashContentIntegration(
  *          // ... other params ...
- *          getTopToolbarHeightValue = { includeTabStrip -> this.getTopToolbarHeight(includeTabStrip) },
- *          getBottomToolbarHeightValue = { includeNavBar -> this.getBottomToolbarHeight(includeNavBar) }
+ *          getTopToolbarHeightValue = { includeTabStripIfAvailable ->
+ *              this.getTopToolbarHeight(includeTabStripIfAvailable)
+ *          },
+ *          getBottomToolbarHeightValue = { includeTabStripIfAvailable, includeNavBarIfEnabled ->
+ *              this.getBottomToolbarHeight(includeTabStripIfAvailable, includeNavBarIfEnabled)
+ *           }
  *      )
  *
  *      // set the view provider. it will be automatically cleared when the lifecycle gets to the
@@ -67,7 +70,6 @@ import org.mozilla.fenix.utils.Settings
  * }
  * ```
  */
-
 @Suppress("LongParameterList")
 class CrashContentIntegration(
     private val browserStore: BrowserStore,
@@ -79,12 +81,15 @@ class CrashContentIntegration(
     private val customTabSessionId: String?,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Main,
     private val getTopToolbarHeightValue: (includeTabStripIfAvailable: Boolean) -> Int,
-    private val getBottomToolbarHeightValue: (includeNavBarIfEnabled: Boolean) -> Int,
+    private val getBottomToolbarHeightValue:
+        (
+            includeTabStripIfAvailable: Boolean,
+            includeNavBarIfEnabled: Boolean,
+        ) -> Int,
 ) : LifecycleAwareFeature {
 
     /**
-     * Nullable provider to provide the [CrashContentView]
-     * which will be shown if the current tab is marked as crashed.
+     * Nullable provider to provide the [CrashContentView] which will be shown if the current tab is marked as crashed.
      */
     internal var viewProvider: (() -> CrashContentView)? = null
 
@@ -95,7 +100,8 @@ class CrashContentIntegration(
     override fun start() {
         scope = CoroutineScope(dispatcher + SupervisorJob())
         scope.launch {
-            browserStore.flow()
+            browserStore
+                .flow()
                 .mapNotNull { state -> state.findTabOrCustomTabOrSelectedTab(customTabSessionId) }
                 .distinctUntilChangedBy { tab -> tab.engineState.crashed }
                 .collect { tab ->
@@ -103,18 +109,20 @@ class CrashContentIntegration(
                         toolbar.expand()
 
                         crashReporterView?.apply {
-                            val controller = CrashReporterController(
-                                sessionId = tab.id,
-                                currentNumberOfTabs = if (tab.content.private) {
-                                    browserStore.state.privateTabs.size
-                                } else {
-                                    browserStore.state.normalTabs.size
-                                },
-                                components = components,
-                                settings = settings,
-                                navController = navController,
-                                appStore = appStore,
-                            )
+                            val controller =
+                                CrashReporterController(
+                                    sessionId = tab.id,
+                                    currentNumberOfTabs =
+                                        if (tab.content.private) {
+                                            browserStore.state.privateTabs.size
+                                        } else {
+                                            browserStore.state.normalTabs.size
+                                        },
+                                    components = components,
+                                    settings = settings,
+                                    navController = navController,
+                                    appStore = appStore,
+                                )
 
                             show(controller)
 
@@ -127,7 +135,8 @@ class CrashContentIntegration(
         }
 
         scope.launch {
-            appStore.flow()
+            appStore
+                .flow()
                 .distinctUntilChangedBy { it.orientation }
                 .map { it.orientation }
                 .collect {
@@ -146,7 +155,7 @@ class CrashContentIntegration(
         with(layoutParams as MarginLayoutParams) {
             // TabStrip and navBar are not used in custom tabs
             topMargin = getTopToolbarHeightValue(customTabSessionId == null)
-            bottomMargin = getBottomToolbarHeightValue(customTabSessionId == null)
+            bottomMargin = getBottomToolbarHeightValue(customTabSessionId == null, customTabSessionId == null)
         }
     }
 }

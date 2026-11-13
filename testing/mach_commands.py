@@ -1184,10 +1184,14 @@ def test_info_testrun_report(command_context, output_file):
     import testinfo
 
     ti = testinfo.TestInfoReport(verbose=True)
-    if os.environ.get("GECKO_HEAD_REPOSITORY", "") in [
-        "https://hg.mozilla.org/mozilla-central",
-        "https://hg.mozilla.org/try",
-    ]:
+    if (
+        os.environ.get("GECKO_HEAD_REPOSITORY", "")
+        in [
+            "https://hg.mozilla.org/mozilla-central",
+            "https://hg.mozilla.org/try",
+        ]
+        or os.environ.get("GECKO_HEAD_REF", "") == "refs/heads/main"
+    ):
         # keep the original format around as data store
         runcounts = ti.get_runcounts()
         if not output_file:
@@ -1381,7 +1385,7 @@ def run_rusttests(command_context, **kwargs):
     return command_context._mach_context.commands.dispatch(
         "build",
         command_context._mach_context,
-        what=["pre-export", "export", "recurse_rusttests"],
+        what=["rust-prereqs", "rusttests"],
     )
 
 

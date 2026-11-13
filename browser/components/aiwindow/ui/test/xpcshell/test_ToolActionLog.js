@@ -5,7 +5,6 @@
 do_get_profile();
 
 const {
-  SEARCH_QUERY,
   getActionLogConfigForTool,
   getActionLogChipsForTool,
   buildActionLogRow,
@@ -18,9 +17,84 @@ const {
   SEARCH_BROWSING_HISTORY,
   GET_USER_MEMORIES,
   GET_NAVIGATION_INFO,
+  SEARCH_THE_WEB,
+  GENERATE_AITAB,
 } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/Tools.sys.mjs"
 );
+
+add_task(function test_aitab_pending_creation_without_modify_slug() {
+  const cfg = getActionLogConfigForTool(GENERATE_AITAB, { pending: true }, {});
+
+  Assert.equal(cfg.label.l10nId, "smartwindow-aitab-creating");
+  Assert.equal(cfg.pendingLabel.l10nId, "smartwindow-aitab-creating");
+});
+
+add_task(function test_aitab_pending_creation_with_empty_modify_slug() {
+  const cfg = getActionLogConfigForTool(
+    GENERATE_AITAB,
+    { pending: true },
+    { modify_slug: "" }
+  );
+
+  Assert.equal(cfg.label.l10nId, "smartwindow-aitab-creating");
+  Assert.equal(cfg.pendingLabel.l10nId, "smartwindow-aitab-creating");
+});
+
+add_task(function test_aitab_pending_creation_with_blank_modify_slug() {
+  const cfg = getActionLogConfigForTool(
+    GENERATE_AITAB,
+    { pending: true },
+    { modify_slug: "   " }
+  );
+
+  Assert.equal(cfg.label.l10nId, "smartwindow-aitab-creating");
+  Assert.equal(cfg.pendingLabel.l10nId, "smartwindow-aitab-creating");
+});
+
+add_task(function test_aitab_pending_creation_with_non_string_modify_slug() {
+  const cfg = getActionLogConfigForTool(
+    GENERATE_AITAB,
+    { pending: true },
+    { modify_slug: 42 }
+  );
+
+  Assert.equal(cfg.label.l10nId, "smartwindow-aitab-creating");
+  Assert.equal(cfg.pendingLabel.l10nId, "smartwindow-aitab-creating");
+});
+
+add_task(function test_aitab_pending_update_with_existing_page() {
+  const cfg = getActionLogConfigForTool(
+    GENERATE_AITAB,
+    { pending: true },
+    { modify_slug: "existing-page" }
+  );
+
+  Assert.equal(cfg.label.l10nId, "smartwindow-aitab-updating");
+  Assert.equal(cfg.pendingLabel.l10nId, "smartwindow-aitab-updating");
+});
+
+add_task(function test_aitab_completed_creation_labels() {
+  const cfg = getActionLogConfigForTool(
+    GENERATE_AITAB,
+    { page: { slug: "new-page" } },
+    {}
+  );
+
+  Assert.equal(cfg.label.l10nId, "smartwindow-aitab-created-an-aitab");
+  Assert.equal(cfg.pendingLabel.l10nId, "smartwindow-aitab-creating");
+});
+
+add_task(function test_aitab_completed_update_labels() {
+  const cfg = getActionLogConfigForTool(
+    GENERATE_AITAB,
+    { page: { slug: "existing-page" } },
+    { modify_slug: "existing-page" }
+  );
+
+  Assert.equal(cfg.label.l10nId, "smartwindow-aitab-updated-an-aitab");
+  Assert.equal(cfg.pendingLabel.l10nId, "smartwindow-aitab-updating");
+});
 
 add_task(function test_getActionLogConfigForTool_visible_tools() {
   Assert.withSoftAssertions(function (soft) {
@@ -29,7 +103,7 @@ add_task(function test_getActionLogConfigForTool_visible_tools() {
       SEARCH_BROWSING_HISTORY,
       GET_USER_MEMORIES,
       GET_NAVIGATION_INFO,
-      SEARCH_QUERY,
+      SEARCH_THE_WEB,
     ]) {
       const cfg = getActionLogConfigForTool(toolName, []);
 
@@ -59,6 +133,58 @@ add_task(function test_getActionLogConfigForTool_unknown_tool_suppressed() {
     null,
     "Unknown tool has no pending label"
   );
+  Assert.strictEqual(cfg.link, null, "Unknown tool has no link");
+});
+
+add_task(function test_getActionLogConfigForTool_search_the_web_link() {
+  const cfg = getActionLogConfigForTool(SEARCH_THE_WEB, {});
+
+  Assert.equal(
+    cfg.link?.l10nName,
+    "exa-link",
+    "Exa link uses the expected l10n name"
+  );
+  Assert.ok(
+    cfg.link?.href?.startsWith("http"),
+    `Exa link href is resolved from a support pref (got: ${cfg.link?.href})`
+  );
+  Assert.equal(
+    cfg.pendingLabel?.l10nId,
+    "action-log-searching-web-with-exa",
+    "Pending label uses the Exa-branded string"
+  );
+  Assert.equal(
+    cfg.pendingLabel?.link?.href,
+    cfg.link.href,
+    "Pending label carries the same resolved link as the row"
+  );
+});
+
+add_task(
+  function test_getActionLogConfigForTool_pending_body_uses_pending_label() {
+    const pending = getActionLogConfigForTool(SEARCH_THE_WEB, {
+      pending: true,
+    });
+    Assert.equal(
+      pending.label?.l10nId,
+      "action-log-searching-web-with-exa",
+      "A pending body surfaces the in-progress label on the row"
+    );
+
+    const completed = getActionLogConfigForTool(SEARCH_THE_WEB, {
+      could_answer: true,
+    });
+    Assert.equal(
+      completed.label?.l10nId,
+      "action-log-searched-web-with-exa",
+      "A completed body surfaces the completed label on the row"
+    );
+  }
+);
+
+add_task(function test_getActionLogConfigForTool_no_link_by_default() {
+  const cfg = getActionLogConfigForTool(GET_OPEN_TABS, []);
+  Assert.strictEqual(cfg.link, null, "Tools without a link config return null");
 });
 
 add_task(function test_getActionLogConfigForTool_returns_default() {
@@ -178,4 +304,27 @@ add_task(function test_buildActionLogRow_unknown_tool_no_chip() {
   ]);
   Assert.deepEqual(row.items, [], "Unknown tool has no chip adapter");
   Assert.equal(row.labelL10nId, "x");
+});
+
+add_task(function test_buildActionLogRow_carries_link() {
+  const link = { l10nName: "exa-link", href: "https://example.com/exa" };
+  const row = buildActionLogRow(
+    SEARCH_THE_WEB,
+    { l10nId: "action-log-searched-web-with-exa" },
+    {},
+    undefined,
+    link
+  );
+  Assert.deepEqual(row.link, link, "Link is carried onto the row");
+});
+
+add_task(function test_buildActionLogRow_no_link_without_href() {
+  const row = buildActionLogRow(
+    SEARCH_THE_WEB,
+    { l10nId: "action-log-searched-web-with-exa" },
+    {},
+    undefined,
+    { l10nName: "exa-link", href: "" }
+  );
+  Assert.ok(!("link" in row), "Row omits link when href is empty");
 });

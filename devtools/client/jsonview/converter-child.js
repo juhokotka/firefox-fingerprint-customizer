@@ -6,6 +6,8 @@
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
+  JSONL_MIME_TYPE_PATTERN:
+    "resource://devtools/client/shared/jsonl-mime-types.mjs",
   NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
 });
 
@@ -42,18 +44,16 @@ loader.lazyGetter(this, "jsonViewStrings", () => {
  *
  * Inspired by JSON View: https://github.com/bhollis/jsonview/
  */
-function Converter() {}
-
-Converter.prototype = {
-  QueryInterface: ChromeUtils.generateQI([
+class Converter {
+  QueryInterface = ChromeUtils.generateQI([
     "nsIStreamConverter",
     "nsIStreamListener",
     "nsIRequestObserver",
-  ]),
+  ]);
 
   get wrappedJSObject() {
     return this;
-  },
+  }
 
   /**
    * This component works as such:
@@ -67,11 +67,13 @@ Converter.prototype = {
    */
   convert(fromStream) {
     return fromStream;
-  },
+  }
 
   asyncConvertData(fromType, toType, listener) {
     this.listener = listener;
-  },
+    this.isJsonlines = fromType === "application/vnd.mozilla.jsonlines.view";
+  }
+
   getConvertedType(_fromType, channel) {
     if (channel instanceof Ci.nsIMultiPartChannel) {
       throw new Components.Exception(
@@ -80,14 +82,14 @@ Converter.prototype = {
       );
     }
     return "text/html";
-  },
+  }
 
   onDataAvailable(request, inputStream, offset, count) {
     // Decode and insert data.
     const buffer = new ArrayBuffer(count);
     new BinaryInput(inputStream).readArrayBuffer(count, buffer);
     this.decodeAndInsertBuffer(buffer);
-  },
+  }
 
   onStartRequest(request) {
     // Set the content type to HTML in order to parse the doctype, styles
@@ -126,7 +128,7 @@ Converter.prototype = {
     this.decoder = new TextDecoder("UTF-8");
 
     // Changing the content type breaks saving functionality. Fix it.
-    fixSave(request);
+    fixSave(request, this.isJsonlines);
 
     // Start the request.
     this.listener.onStartRequest(request);
@@ -146,7 +148,7 @@ Converter.prototype = {
       return;
     }
 
-    this.data = exportData(win, headers);
+    this.data = exportData(win, headers, this.isJsonlines);
     insertJsonData(win, this.data.json);
     win.addEventListener("contentMessage", onContentMessage, false, true);
     keepThemeUpdated(win);
@@ -155,7 +157,7 @@ Converter.prototype = {
     const buffer = new TextEncoder().encode(initialHTML(win.document)).buffer;
     const stream = new BufferStream(buffer, 0, buffer.byteLength);
     this.listener.onDataAvailable(request, stream, 0, stream.available());
-  },
+  }
 
   onStopRequest(request, statusCode) {
     // Flush data if we haven't been canceled.
@@ -168,7 +170,7 @@ Converter.prototype = {
     this.listener = null;
     this.decoder = null;
     this.data = null;
-  },
+  }
 
   // Decodes an ArrayBuffer into a string and inserts it into the page.
   decodeAndInsertBuffer(buffer, flush = false) {
@@ -178,30 +180,47 @@ Converter.prototype = {
     // Using `appendData` instead of `textContent +=` is important to avoid
     // repainting previous data.
     this.data.json.appendData(data);
-  },
-};
+  }
+}
 
-// Lets "save as" save the original JSON, not the viewer.
-// To save with the proper extension we need the original content type,
-// which has been replaced by application/vnd.mozilla.json.view
-function fixSave(request) {
+/**
+ * Lets "save as" save the original JSON, not the viewer.
+ * To save with the proper extension we need the original content type,
+ * which has been replaced by application/vnd.mozilla.json.view or
+ * application/vnd.mozilla.jsonlines.view.
+ *
+ * @param {nsIRequest} request
+ *        The request whose "contentType" property is set to the original type.
+ * @param {boolean} isJsonlines
+ *        True when the document is JSON Lines, used to pick the fallback type
+ *        when the original one can't be recovered from the response or the URI.
+ */
+function fixSave(request, isJsonlines) {
   let match;
   if (request instanceof Ci.nsIHttpChannel) {
     try {
       const header = request.getResponseHeader("Content-Type");
-      match = header.match(/^(application\/(?:[^;]+\+)?json)(?:;|$)/);
+      match = header.match(
+        new RegExp(
+          `^(application\\/(?:[^;]+\\+)?json|${lazy.JSONL_MIME_TYPE_PATTERN})(?:;|$)`
+        )
+      );
     } catch (err) {
       // Handled below
     }
   } else {
     const uri = request.QueryInterface(Ci.nsIChannel).URI.spec;
-    match = uri.match(/^data:(application\/(?:[^;,]+\+)?json)[;,]/);
+    match = uri.match(
+      new RegExp(
+        `^data:(application\\/(?:[^;,]+\\+)?json|${lazy.JSONL_MIME_TYPE_PATTERN})[;,]`
+      )
+    );
   }
   let originalType;
   if (match) {
     originalType = match[1];
   } else {
-    originalType = "application/json";
+    originalType = isJsonlines ? "application/jsonl" : "application/json";
   }
   request.QueryInterface(Ci.nsIWritablePropertyBag);
   request.setProperty("contentType", originalType);
@@ -287,7 +306,7 @@ function getRequestLoadContext(request) {
 }
 
 // Exports variables that will be accessed by the non-privileged scripts.
-function exportData(win, headers) {
+function exportData(win, headers, isJsonlines) {
   const json = new win.Text();
   // This pref allows using a deploy preview or local development version of
   // the profiler, and also allows tests to avoid hitting the network.
@@ -303,6 +322,7 @@ function exportData(win, headers) {
     {
       headers,
       json,
+      isJsonlines,
       readyState: "uninitialized",
       Locale: getAllStrings(),
       profilerUrl,

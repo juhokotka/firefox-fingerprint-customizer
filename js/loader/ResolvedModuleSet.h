@@ -7,8 +7,9 @@
 
 #include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/HashTable.h"
-#include "nsIURI.h"
+
 #include "nsCOMPtr.h"
+#include "nsIURI.h"
 
 namespace JS::loader {
 

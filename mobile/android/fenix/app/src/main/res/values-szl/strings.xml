@@ -53,8 +53,6 @@
   <string name="open_in_app_cfr_positive_button_text">Idź do sztalōnkōw</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">Ôdkoż</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">Trza dostympu do kamery. Idź do sztalōnkōw Androida, tyknij \"dozwolyństwa\" i tyknij \"zgoda\".</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -92,16 +90,8 @@
   <string name="home_screen_shortcut_open_new_private_tab_2">Nowo prywatno karta</string>
   <!-- Shortcut action to open Passwords screen -->
   <string name="home_screen_shortcut_passwords">Hasła</string>
-  <!--
-    Recent Tabs
-
-    Header text for jumping back into the recent tab in the home screen
-  -->
-  <string name="recent_tabs_header">Idź nazod</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">Pokoż wszyske</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">Pokoż knefel wszyskich niydownych kart</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">Ôbocz wszyske synchrōnizowane karty</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -127,11 +117,7 @@
   <string name="recently_visited_menu_item_remove">Skasuj</string>
   <!-- Content description for the button which navigates the user to show all of their history. -->
   <string name="past_explorations_show_all_content_description_2">Pokorz wszyske downiyjsze poszukowania</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Nazod</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Do przodku</string>
@@ -215,10 +201,6 @@
     Content description (not visible, for screen readers etc.): Close button for the home onboarding dialog
   -->
   <string name="onboarding_home_content_description_close_button">Zawrzij</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Search Widget
 
@@ -237,7 +219,11 @@
     Title for the settings page
   -->
   <string name="settings">Sztalōnki</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">Ôgōlne</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Ô aplikacyji</string>
@@ -274,22 +260,6 @@
   <string name="preferences_add_private_browsing_shortcut">Przidej skrōt do prywatnego przeglōndanio</string>
   <!-- Preference for enabling "HTTPS-Only" mode -->
   <string name="preferences_https_only_title">Tryb \"Ino HTTPS\"</string>
-  <!-- Text for indicating cookie banner handling is off this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_off_for_site">Wyłōnczōne do tyj strōny</string>
-  <!-- Text for cancel button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_cancel_button">Pociep</string>
-  <!-- Text for request support button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_request_support_button_2">Poślij prośba</string>
-  <!-- Text for title indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_title_2">Zarzōndać sparcio do tyj strōny?</string>
-  <!-- Label for the snackBar, after the user reports with success a website where cookie banner reducer did not work -->
-  <string name="cookie_banner_handling_report_site_snack_bar_text_2">Prośba posłano</string>
-  <!-- Text for indicating cookie banner handling is on this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_on_for_site">Załōnczōne do tyj strōny</string>
-  <!-- Text for indicating that a request for unsupported site was sent to Nimbus (it's a Mozilla library for experiments), this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site_request_submitted_2">Prośba ô sparcie je posłano</string>
-  <!-- Text for indicating cookie banner handling is currently not supported for this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site">Strōna niy ma teroz ôbsugowano</string>
   <!-- Description of the preference to enable "HTTPS-Only" mode. -->
   <string name="preferences_https_only_summary">Autōmatycznie prōbuje łōnczyć sie ze strōnami z protokołym kodowanio HTTPS, coby zwiynkszyć bezpieczyństwo.</string>
   <!-- Summary of https only preference if https only is set to off -->
@@ -380,8 +350,6 @@
   <string name="customize_addon_collection_hint">Miano kolekcyje</string>
   <!-- Hint displayed on input field for custom collection user ID -->
   <string name="customize_addon_collection_user_hint">Posiedziciel kolekcyje (ID ôd używocza)</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">Idź nazod</string>
   <!--
     Title for the customize home screen section with recently visited. Recently visited is
     a section where users see a list of tabs that they have visited in the past few days
@@ -593,8 +561,6 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">Karty</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">Wyglōnd kart</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">Wykoz</string>
   <!-- Option for a grid tab view -->
@@ -637,13 +603,7 @@
   <string name="opening_screen_last_tab_summary">Ôdewrzij na ôstatnij karcie</string>
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">Ôdewrzij na dōmowyj strōnie po sztyrech godzinach</string>
-  <!--
-    Inactive tabs
-
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
-  -->
-  <string name="preferences_inactive_tabs">Dej stare karty do niyaktywnych</string>
-  <!-- Title of inactive tabs preference -->
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">Larty, co dwa tydnie niy były ôtwiyrane, idōm do sekcyje niyaktywnych kart.</string>
   <!--
     Studies
@@ -703,8 +663,6 @@
   <string name="history_search_1">Wkludź szukane wyrazy</string>
   <!-- Text for the button to clear all history -->
   <string name="history_delete_all">Skasuj historyjo</string>
-  <!-- Text for the snackbar to confirm that multiple browsing history items has been deleted -->
-  <string name="history_delete_multiple_items_snackbar">Historyjo je skasowano</string>
   <!-- Text for the snackbar to confirm that a single browsing history item has been deleted. %1$s is the shortened URL of the deleted history item. -->
   <string name="history_delete_single_item_snackbar">%1$s je skasowane</string>
   <!-- Context description text for the button to delete a single history item -->
@@ -714,16 +672,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">Ôbrane: %1$d</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">Dzisio</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">Wczora</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Ôstatnie 7 dni</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Ôstatnie 30 dni</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Starsze</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">Niy ma sam żodnyj historyje</string>
   <!--
@@ -789,12 +737,6 @@
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">Idź do sztalōnkōw</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">Gibke sztalōnki</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">Rykōmyndowane</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -1107,10 +1049,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">Sztalōnki ôchrōny</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">Polepszōno ôchrōna ôd śledzynio</string>
   <!-- Preference summary for enhanced tracking protection settings on/off switch -->
   <string name="preference_enhanced_tracking_protection_summary">Teroz z pōłnym ôchrōnōm cookies, naszōm nojsiylniyjszōm baryjerōm przeciw elymyntōm, co śledzōm miyndzy strōnami.</string>
@@ -1160,12 +1100,8 @@
   <string name="preference_enhanced_tracking_protection_custom_tracking_content_2">Ino we prywatnych kartach</string>
   <!-- Preference for enhanced tracking protection for the custom protection settings -->
   <string name="preference_enhanced_tracking_protection_custom_cryptominers">Elymynty, co fedrujōm kryptopiniōndze</string>
-  <!-- Button label for navigating to the Enhanced Tracking Protection details -->
-  <string name="enhanced_tracking_protection_details">Detajle</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">Zaszperowane</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">Przizwōlōne</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">Elymynty śledzōnce ôd społecznościowych serwisōw</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -1184,8 +1120,6 @@
   <string name="etp_cryptominers_description">Niy dowo ôszydnym skryptōm fedrować cyfrowych piniyndzy na twojij maszinie.</string>
   <!-- Category of trackers (tracking content) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_title">Śledzōnco zawartość</string>
-  <!-- Text displayed that links to website about enhanced tracking protection SmartBlock -->
-  <string name="preference_etp_smartblock_learn_more">Przewiydz sie wiyncyj</string>
   <!-- About page link text to open support link -->
   <string name="about_support">Sparcie</string>
   <!-- About page link text to list of past crashes (like about:crashes on desktop) -->
@@ -1222,12 +1156,8 @@
   <string name="add_to_homescreen_cancel">Pociep</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">Przidej</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">Idź dalij do stōny</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">Miano ôd skrōtu</string>
-  <!-- Describes the add to homescreen functionality -->
-  <string name="add_to_homescreen_description_2">Idzie leko przidać ta strōna na dōmowy ekran swojij masziny, coby mieć snadny dostymp i gibcyj przeglōndać internet choby bez aplikacyjo.</string>
   <!-- Preference for managing the settings for logins and passwords in Fenix -->
   <string name="preferences_passwords_logins_and_passwords_2">Hasła</string>
   <!-- Preference option for asking to save passwords in Fenix -->
@@ -1252,19 +1182,10 @@
   <string name="credit_cards_biometric_prompt_message">Ôdblokuj, żeby wejzdrzeć na spamiyntane karty</string>
   <!-- The page title for adding new password. -->
   <string name="add_login_2">Przidej hasło</string>
-  <!-- Translations feature -->
-
   <!--
     Translation settings dialog
 
     Title of the translation settings dialog that allows a user to set their preferred translation settings.
   -->
   <string name="translation_settings_toolbar_title">Przekłady</string>
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

@@ -50,8 +50,12 @@ mozilla::ipc::IPCResult RemoteDecoderParent::RecvInit(
     return IPC_OK();
   }
 
-  MOZ_DIAGNOSTIC_ASSERT(!mPendingInitResolver,
-                        "overlapping Init in RemoteDecoderParent");
+  if (mInitAttempted) {
+    aResolver(MediaResult(NS_ERROR_ALREADY_INITIALIZED, __func__));
+    return IPC_OK();
+  }
+  mInitAttempted = true;
+
   mPendingInitResolver.emplace(std::move(aResolver));
   RefPtr<RemoteDecoderParent> self = this;
   mInitRequest.DisconnectIfExists();
@@ -289,6 +293,8 @@ mozilla::ipc::IPCResult RemoteDecoderParent::RecvSetSeekThreshold(
 
 void RemoteDecoderParent::ActorDestroy(ActorDestroyReason aWhy) {
   MOZ_ASSERT(OnManagerThread());
+  // Ensure a decoder still being created is shut down when it is ready.
+  mShutdown = true;
   AbortPendingRequests();
   if (mDecoder) {
     mDecoder->Shutdown();

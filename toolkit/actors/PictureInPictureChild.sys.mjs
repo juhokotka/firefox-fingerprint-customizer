@@ -7,16 +7,18 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   ContentDOMReference: "resource://gre/modules/ContentDOMReference.sys.mjs",
   DeferredTask: "resource://gre/modules/DeferredTask.sys.mjs",
-  KEYBOARD_CONTROLS: "resource://gre/modules/PictureInPictureControls.sys.mjs",
+  KEYBOARD_CONTROLS:
+    "moz-src:///toolkit/components/pictureinpicture/PictureInPictureControls.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   Rect: "resource://gre/modules/Geometry.sys.mjs",
-  TOGGLE_POLICIES: "resource://gre/modules/PictureInPictureControls.sys.mjs",
+  TOGGLE_POLICIES:
+    "moz-src:///toolkit/components/pictureinpicture/PictureInPictureControls.sys.mjs",
   TOGGLE_POLICY_STRINGS:
-    "resource://gre/modules/PictureInPictureControls.sys.mjs",
+    "moz-src:///toolkit/components/pictureinpicture/PictureInPictureControls.sys.mjs",
 });
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
-import { WebVTT } from "resource://gre/modules/vtt.sys.mjs";
+import { WebVTT } from "moz-src:///dom/media/webvtt/vtt.sys.mjs";
 import { setTimeout, clearTimeout } from "resource://gre/modules/Timer.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
@@ -281,6 +283,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
       scrubberPosition,
       timestamp,
       volume: PictureInPictureChild.videoWrapper.getVolume(video),
+      playbackRate: PictureInPictureChild.videoWrapper.getPlaybackRate(video),
       autoFocus,
     });
 
@@ -1667,6 +1670,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
   // A reference to current WebVTT track currently displayed on the content window
   _currentWebVTTTrack = null;
 
+  // The TextTrackList currently observed for track lifecycle changes.
+  #textTrackList = null;
+
+  // Avoid registering duplicate wrapper observers on later setupTextTracks calls.
+  #captionChangeListenerRegistered = false;
+
   // A weak reference to the PictureInPictureWindow (the one exposed to web content)
   #weakPictureInPictureWindow;
 
@@ -1713,40 +1722,70 @@ export class PictureInPictureChild extends JSWindowActorChild {
   }
 
   /**
-   * Sets up Picture-in-Picture to support displaying text tracks from WebVTT
-   * or if WebVTT isn't supported we will register the caption change mutation observer if
-   * the site wrapper exists.
-   *
-   * If the originating video supports WebVTT, try to read the
-   * active track and cues. Display any active cues on the pip window
-   * right away if applicable.
+   * Listens for changes to the originating video's TextTrackList, including
+   * tracks added or removed after Picture-in-Picture opens, and displays any
+   * active WebVTT cues. A site wrapper caption observer may coexist with these
+   * listeners, but active WebVTT cues take priority over wrapper captions in
+   * PictureInPictureChildVideoWrapper.updatePiPTextTracks().
    *
    * @param originatingVideo {Element|null}
    *  The <video> being displayed in Picture-in-Picture mode, or null if that <video> no longer exists.
    */
   setupTextTracks(originatingVideo) {
-    const isWebVTTSupported = !!originatingVideo.textTracks?.length;
+    const textTracks = originatingVideo.textTracks;
 
-    if (!isWebVTTSupported) {
-      this.setUpCaptionChangeListener(originatingVideo);
-      return;
+    if (this.#textTrackList !== textTracks) {
+      this.removeTextTrackListeners(this.#textTrackList);
+      this.#textTrackList = textTracks;
+      this.addTextTrackListeners(this.#textTrackList);
     }
 
-    // Verify active track for originating video
+    this.syncWebVTTTextTrack(originatingVideo);
+
+    if (!this._currentWebVTTTrack && !this.#captionChangeListenerRegistered) {
+      this.setUpCaptionChangeListener(originatingVideo);
+    }
+  }
+
+  addTextTrackListeners(textTrackList) {
+    textTrackList?.addEventListener("change", this);
+    textTrackList?.addEventListener("addtrack", this);
+    textTrackList?.addEventListener("removetrack", this);
+  }
+
+  removeTextTrackListeners(textTrackList) {
+    textTrackList?.removeEventListener("change", this);
+    textTrackList?.removeEventListener("addtrack", this);
+    textTrackList?.removeEventListener("removetrack", this);
+  }
+
+  /**
+   * Updates the active WebVTT track for the current TextTrackList state.
+   *
+   * @param originatingVideo {Element}
+   *  The <video> being displayed in Picture-in-Picture mode.
+   */
+  syncWebVTTTextTrack(originatingVideo) {
+    const previousWebVTTTrack = this._currentWebVTTTrack;
+    this._currentWebVTTTrack?.removeEventListener(
+      "cuechange",
+      this.onCueChange
+    );
+
     this.setActiveTextTrack(originatingVideo.textTracks);
 
-    if (!this._currentWebVTTTrack) {
-      // If WebVTT track is invalid, try using a video wrapper
-      this.setUpCaptionChangeListener(originatingVideo);
+    if (this._currentWebVTTTrack) {
+      this._currentWebVTTTrack.addEventListener("cuechange", this.onCueChange);
+      this.updateWebVTTTextTracksDisplay(this._currentWebVTTTrack.activeCues);
       return;
     }
 
-    // Listen for changes in tracks and active cues
-    originatingVideo.textTracks.addEventListener("change", this);
-    this._currentWebVTTTrack.addEventListener("cuechange", this.onCueChange);
-
-    const cues = this._currentWebVTTTrack.activeCues;
-    this.updateWebVTTTextTracksDisplay(cues);
+    if (previousWebVTTTrack) {
+      this.updateWebVTTTextTracksDisplay(null);
+      if (!this.#captionChangeListenerRegistered) {
+        this.setUpCaptionChangeListener(originatingVideo);
+      }
+    }
   }
 
   /**
@@ -1768,16 +1807,11 @@ export class PictureInPictureChild extends JSWindowActorChild {
    *  The <video> being displayed in Picture-in-Picture mode, or null if that <video> no longer exists.
    */
   removeTextTracks(originatingVideo) {
-    const isWebVTTSupported = !!originatingVideo.textTracks;
-
     this.removeCaptionChangeListener(originatingVideo);
 
-    if (!isWebVTTSupported) {
-      return;
-    }
-
     // No longer listen for changes to tracks and active cues
-    originatingVideo.textTracks.removeEventListener("change", this);
+    this.removeTextTrackListeners(this.#textTrackList);
+    this.#textTrackList = null;
     this._currentWebVTTTrack?.removeEventListener(
       "cuechange",
       this.onCueChange
@@ -2081,6 +2115,15 @@ export class PictureInPictureChild extends JSWindowActorChild {
         });
         break;
       }
+      case "ratechange": {
+        let video = this.getWeakVideo();
+        if (video === event.target) {
+          this.sendAsyncMessage("PictureInPicture:PlaybackRateChange", {
+            playbackRate: this.videoWrapper.getPlaybackRate(video),
+          });
+        }
+        break;
+      }
       case "resize": {
         let video = event.target;
         if (this.inPictureInPicture(video)) {
@@ -2111,34 +2154,13 @@ export class PictureInPictureChild extends JSWindowActorChild {
         }
         break;
       }
-      case "change": {
-        // Clear currently stored track data (webvtt support) before reading
-        // a new track.
-        if (this._currentWebVTTTrack) {
-          this._currentWebVTTTrack.removeEventListener(
-            "cuechange",
-            this.onCueChange
-          );
-          this._currentWebVTTTrack = null;
+      case "change":
+      case "addtrack":
+      case "removetrack": {
+        const originatingVideo = this.getWeakVideo();
+        if (originatingVideo && event.target === this.#textTrackList) {
+          this.syncWebVTTTextTrack(originatingVideo);
         }
-
-        const tracks = event.target;
-        this.setActiveTextTrack(tracks);
-        const isCurrentTrackAvailable = this._currentWebVTTTrack;
-
-        // If tracks are disabled or invalid while change occurs,
-        // remove text tracks from the pip window and stop here.
-        if (!isCurrentTrackAvailable || !tracks.length) {
-          this.updateWebVTTTextTracksDisplay(null);
-          return;
-        }
-
-        this._currentWebVTTTrack.addEventListener(
-          "cuechange",
-          this.onCueChange
-        );
-        const cues = this._currentWebVTTTrack.activeCues;
-        this.updateWebVTTTextTracksDisplay(cues);
         break;
       }
       case "timeupdate":
@@ -2319,6 +2341,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
         this.videoWrapper.setVolume(video, volume);
         break;
       }
+      case "PictureInPicture:SetPlaybackRate": {
+        const { playbackRate } = message.data;
+        let video = this.getWeakVideo();
+        this.videoWrapper.setPlaybackRate(video, playbackRate);
+        break;
+      }
     }
     return undefined;
   }
@@ -2417,6 +2445,7 @@ export class PictureInPictureChild extends JSWindowActorChild {
       originatingVideo.addEventListener("playing", this);
       originatingVideo.addEventListener("pause", this);
       originatingVideo.addEventListener("volumechange", this);
+      originatingVideo.addEventListener("ratechange", this);
       originatingVideo.addEventListener("resize", this);
       originatingVideo.addEventListener("emptied", this);
       originatingVideo.addEventListener("timeupdate", this);
@@ -2442,12 +2471,14 @@ export class PictureInPictureChild extends JSWindowActorChild {
   setUpCaptionChangeListener(originatingVideo) {
     if (this.videoWrapper) {
       this.videoWrapper.setCaptionContainerObserver(originatingVideo, this);
+      this.#captionChangeListenerRegistered = true;
     }
   }
 
   removeCaptionChangeListener(originatingVideo) {
     if (this.videoWrapper) {
       this.videoWrapper.removeCaptionContainerObserver(originatingVideo, this);
+      this.#captionChangeListenerRegistered = false;
     }
   }
 
@@ -2470,6 +2501,7 @@ export class PictureInPictureChild extends JSWindowActorChild {
       originatingVideo.removeEventListener("playing", this);
       originatingVideo.removeEventListener("pause", this);
       originatingVideo.removeEventListener("volumechange", this);
+      originatingVideo.removeEventListener("ratechange", this);
       originatingVideo.removeEventListener("resize", this);
       originatingVideo.removeEventListener("emptied", this);
       originatingVideo.removeEventListener("timeupdate", this);
@@ -2547,15 +2579,20 @@ export class PictureInPictureChild extends JSWindowActorChild {
       }
     }
 
-    let loadPromise = new Promise(resolve => {
-      this.contentWindow.addEventListener("load", resolve, {
-        once: true,
-        mozSystemGroup: true,
-        capture: true,
+    // On Android the embedder has already loaded a document in the player session, so there is
+    // nothing to wait for. Reloading would swap the WindowGlobal and destroy this actor before
+    // it could reply to PictureInPicture:SetupPlayer.
+    if (AppConstants.platform != "android") {
+      let loadPromise = new Promise(resolve => {
+        this.contentWindow.addEventListener("load", resolve, {
+          once: true,
+          mozSystemGroup: true,
+          capture: true,
+        });
       });
-    });
-    this.contentWindow.location.reload();
-    await loadPromise;
+      this.contentWindow.location.reload();
+      await loadPromise;
+    }
 
     // We're committed to adding the video to this window now. Ensure we track
     // the content window before we do so, so that the toggle actor can
@@ -2918,6 +2955,10 @@ export class PictureInPictureChild extends JSWindowActorChild {
     return this.#subtitlesEnabled;
   }
 
+  get hasActiveWebVTTTrack() {
+    return !!this._currentWebVTTTrack;
+  }
+
   set isSubtitlesEnabled(val) {
     if (val) {
       Glean.pictureinpicture.subtitlesShownSubtitles.record({
@@ -3049,7 +3090,10 @@ class PictureInPictureChildVideoWrapper {
     });
 
     try {
-      Services.scriptloader.loadSubScript(wrapperScriptUrl, sandbox);
+      Services.scriptloader.loadSubScriptWithOptions(wrapperScriptUrl, {
+        target: sandbox,
+        allowUnsafeURL: true,
+      });
     } catch (e) {
       Cu.nukeSandbox(sandbox);
       lazy.logConsole.error(
@@ -3098,6 +3142,10 @@ class PictureInPictureChildVideoWrapper {
    * be displayed as plain text.
    */
   updatePiPTextTracks(text, type) {
+    if (this.#PictureInPictureChild.hasActiveWebVTTTrack) {
+      return;
+    }
+
     if (!this.#PictureInPictureChild.isSubtitlesEnabled && text) {
       this.#PictureInPictureChild.isSubtitlesEnabled = true;
       this.#PictureInPictureChild.sendAsyncMessage(
@@ -3331,6 +3379,45 @@ class PictureInPictureChildVideoWrapper {
       args: [video, volume],
       fallback: () => {
         video.volume = volume;
+      },
+      validateRetVal: retVal => retVal == null,
+    });
+  }
+
+  /**
+   * OVERRIDABLE - calls the getPlaybackRate() method defined in the site wrapper script. Runs a fallback
+   * implementation if the method does not exist or if an error is thrown while calling it. This method is
+   * meant to get the playback rate of a video.
+   *
+   * @param {HTMLVideoElement} video
+   *  The originating video source element
+   * @returns {number} Playback rate of the video, where 1 is normal speed
+   */
+  getPlaybackRate(video) {
+    return this.#callWrapperMethod({
+      name: "getPlaybackRate",
+      args: [video],
+      fallback: () => video.playbackRate,
+      validateRetVal: retVal => this.#isNumber(retVal),
+    });
+  }
+
+  /**
+   * OVERRIDABLE - calls the setPlaybackRate() method defined in the site wrapper script. Runs a fallback
+   * implementation if the method does not exist or if an error is thrown while calling it. This method is
+   * meant to set the playback rate of a video.
+   *
+   * @param {HTMLVideoElement} video
+   *  The originating video source element
+   * @param {number} playbackRate
+   *  Playback rate of the video, where 1 is normal speed
+   */
+  setPlaybackRate(video, playbackRate) {
+    return this.#callWrapperMethod({
+      name: "setPlaybackRate",
+      args: [video, playbackRate],
+      fallback: () => {
+        video.playbackRate = playbackRate;
       },
       validateRetVal: retVal => retVal == null,
     });

@@ -3,8 +3,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * http://dev.w3.org/2011/webrtc/editor/webrtc.html#rtcstatsreport-object
- * http://www.w3.org/2011/04/webrtc/wiki/Stats
  * https://www.w3.org/TR/webrtc-stats/
  */
 
@@ -108,6 +106,9 @@ dictionary RTCInboundRtpStreamStats : RTCReceivedRtpStreamStats {
   unsigned long framesReceived;
   unsigned long framesAssembledFromMultiplePackets;
   double totalAssemblyTime;
+  unsigned long long retransmittedPacketsReceived;
+  unsigned long long retransmittedBytesReceived;
+  unsigned long rtxSsrc;
 };
 
 dictionary RTCRemoteInboundRtpStreamStats : RTCReceivedRtpStreamStats {
@@ -130,7 +131,8 @@ dictionary RTCOutboundRtpStreamStats : RTCSentRtpStreamStats {
   unsigned long long headerBytesSent;
   unsigned long long retransmittedPacketsSent;
   unsigned long long retransmittedBytesSent;
-  unsigned long long totalEncodedBytesTarget;
+  unsigned long rtxSsrc;
+  double targetBitrate;
   unsigned long frameWidth;
   unsigned long frameHeight;
   double framesPerSecond;
@@ -217,7 +219,7 @@ dictionary RTCIceCandidatePairStats : RTCStats {
 
 dictionary RTCIceCandidateStats : RTCStats {
   required DOMString transportId;
-  DOMString address;
+  DOMString? address;
   long port;
   DOMString protocol;
   RTCIceCandidateType candidateType;
@@ -252,6 +254,7 @@ dictionary RTCTransportStats : RTCStats {
   DOMString dtlsCipher;
   RTCDtlsRole dtlsRole;
   DOMString srtpCipher;
+  unsigned long selectedCandidatePairChanges;
 };
 
 dictionary RTCCertificateStats : RTCStats {
@@ -349,6 +352,7 @@ dictionary RTCConfigurationInternal {
   RTCIceTransportPolicy          iceTransportPolicy;
   required boolean               peerIdentityProvided;
   DOMString                      sdpSemantics;
+  boolean alwaysNegotiateDataChannels = false;
 };
 
 dictionary RTCSdpHistoryInternal {

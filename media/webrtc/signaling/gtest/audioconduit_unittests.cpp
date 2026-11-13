@@ -3,13 +3,11 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #define GTEST_HAS_RTTI 0
-#include "gtest/gtest.h"
-
-#include "api/audio_codecs/opus/audio_encoder_opus_config.h"
 #include "AudioConduit.h"
 #include "Canonicals.h"
-
 #include "MockCall.h"
+#include "api/audio_codecs/opus/audio_encoder_opus_config.h"
+#include "gtest/gtest.h"
 
 using namespace mozilla;
 using namespace testing;
@@ -25,7 +23,7 @@ class AudioConduitTest : public ::testing::Test {
             mCallWrapper, GetCurrentSerialEventTarget())),
         mControl(GetCurrentSerialEventTarget()) {
     mControl.Update(
-        [&](auto& aControl) { mAudioConduit->InitControl(&mControl); });
+        [&](auto& /*aControl*/) { mAudioConduit->InitControl(&mControl); });
   }
 
   ~AudioConduitTest() override {
@@ -723,7 +721,7 @@ TEST_F(AudioConduitTest, TestSetLocalRTPExtensions) {
     RtpExtList extensions;
     webrtc::RtpExtension extension;
     extension.uri = webrtc::RtpExtension::kAudioLevelUri;
-    extension.id = 1;
+    extension.id = webrtc::RtpHeaderExtensionId(1);
     extensions.emplace_back(extension);
     aControl.mLocalRecvRtpExtensions = extensions;
     aControl.mLocalSendRtpExtensions = extensions;
@@ -740,7 +738,7 @@ TEST_F(AudioConduitTest, TestSetLocalRTPExtensions) {
     RtpExtList extensions;
     webrtc::RtpExtension extension;
     extension.uri = webrtc::RtpExtension::kCsrcAudioLevelsUri;
-    extension.id = 1;
+    extension.id = webrtc::RtpHeaderExtensionId(1);
     extensions.emplace_back(extension);
     aControl.mLocalRecvRtpExtensions = extensions;
     aControl.mLocalSendRtpExtensions = extensions;
@@ -755,7 +753,7 @@ TEST_F(AudioConduitTest, TestSetLocalRTPExtensions) {
     RtpExtList extensions;
     webrtc::RtpExtension extension;
     extension.uri = webrtc::RtpExtension::kMidUri;
-    extension.id = 1;
+    extension.id = webrtc::RtpHeaderExtensionId(1);
     extensions.emplace_back(extension);
     aControl.mLocalRecvRtpExtensions = extensions;
     aControl.mLocalSendRtpExtensions = extensions;

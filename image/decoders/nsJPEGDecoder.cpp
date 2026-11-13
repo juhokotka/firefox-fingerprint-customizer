@@ -3,28 +3,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "ImageLogging.h"  // Must appear first.
-
 #include "nsJPEGDecoder.h"
 
 #include <cstdint>
 
-#include "imgFrame.h"
-#include "Orientation.h"
 #include "EXIF.h"
+#include "ImageLogging.h"
+#include "Orientation.h"
 #include "SurfacePipeFactory.h"
-
-#include "nspr.h"
-#include "nsCRT.h"
 #include "gfxColor.h"
-
-#include "jerror.h"
-
 #include "gfxPlatform.h"
+#include "imgFrame.h"
+#include "jerror.h"
+#include "mozilla/StaticPrefs_image.h"
 #include "mozilla/gfx/Types.h"
-
-static void cmyk_convert_bgra(uint32_t* aInput, uint32_t* aOutput,
-                              int32_t aWidth, bool aIsInverted);
+#include "nsCRT.h"
+#include "nspr.h"
 
 using mozilla::gfx::SurfaceFormat;
 
@@ -360,16 +354,43 @@ LexerTransition<nsJPEGDecoder::State> nsJPEGDecoder::ReadJPEGData(
         }
       }
 
-      // We don't want to use the pipe buffers directly because we don't want
-      // any reads on non-BGRA formatted data.
-      if (mInfo.out_color_space == JCS_GRAYSCALE ||
-          mInfo.out_color_space == JCS_CMYK) {
-        mCMSLine = new (std::nothrow) uint32_t[mInfo.image_width];
-        if (!mCMSLine) {
-          mState = JPEG_ERROR;
-          MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
-                  ("} (could allocate buffer for color conversion)"));
-          return Transition::TerminateFailure();
+      // Use libjpeg-turbo DCT scaling to produce a reduced-size intermediate
+      // image when we're downscaling significantly. This avoids decoding at
+      // full resolution only to discard most of the data in the
+      // DownscalingFilter. We restrict to SIMD-accelerated factors (1/2, 1/4,
+      // 1/8) for performance.
+      //
+      // Skip IDCT scaling when the image has a non-whole number of MCUs in
+      // either dimension: the encoder may have filled the trailing MCU
+      // row/column with padding data that is harmless at full-size decode
+      // (it's cropped) but can smear into visible pixels when downscaled.
+      // See https://crbug.com/890745 and
+      // https://github.com/libjpeg-turbo/libjpeg-turbo/issues/297.
+      JDIMENSION mcuWidth = mInfo.max_h_samp_factor * DCTSIZE;
+      JDIMENSION mcuHeight = mInfo.max_v_samp_factor * DCTSIZE;
+      bool mcuAligned = mcuWidth != 0 && mcuHeight != 0 &&
+                        mInfo.image_width % mcuWidth == 0 &&
+                        mInfo.image_height % mcuHeight == 0;
+      if (ExplicitOutputSize() && mcuAligned &&
+          StaticPrefs::image_jpeg_dct_scaling_enabled()) {
+        UnorientedIntSize targetSize =
+            GetOrientation().ToUnoriented(OutputSize());
+        float widthRatio = float(mInfo.image_width) / float(targetSize.width);
+        float heightRatio =
+            float(mInfo.image_height) / float(targetSize.height);
+        float minRatio = std::min(widthRatio, heightRatio);
+        float minFactor =
+            std::max(1.0f, StaticPrefs::image_jpeg_dct_scaling_min_factor());
+
+        if (minRatio >= 8.0f * minFactor) {
+          mInfo.scale_num = 1;
+          mInfo.scale_denom = 8;
+        } else if (minRatio >= 4.0f * minFactor) {
+          mInfo.scale_num = 1;
+          mInfo.scale_denom = 4;
+        } else if (minRatio >= 2.0f * minFactor) {
+          mInfo.scale_num = 1;
+          mInfo.scale_denom = 2;
         }
       }
 
@@ -381,6 +402,18 @@ LexerTransition<nsJPEGDecoder::State> nsJPEGDecoder::ReadJPEGData(
       /* Used to set up image size so arrays can be allocated */
       jpeg_calc_output_dimensions(&mInfo);
 
+      // We don't want to use the pipe buffers directly because we don't want
+      // any reads on non-BGRA or non-CMYK formatted data.
+      if (mInfo.out_color_space == JCS_GRAYSCALE) {
+        mCMSLine = new (std::nothrow) uint32_t[mInfo.output_width];
+        if (!mCMSLine) {
+          mState = JPEG_ERROR;
+          MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
+                  ("} (could allocate buffer for color conversion)"));
+          return Transition::TerminateFailure();
+        }
+      }
+
       // We handle the transform outside the pipeline if we are outputting in
       // grayscale, because the pipeline wants BGRA pixels, particularly the
       // downscaling filter, so we can't handle it after downscaling as would
@@ -388,10 +421,17 @@ LexerTransition<nsJPEGDecoder::State> nsJPEGDecoder::ReadJPEGData(
       qcms_transform* pipeTransform =
           mInfo.out_color_space != JCS_GRAYSCALE ? mTransform : nullptr;
 
+      // Swizzling can convert from CMYK/inverted CMYK for us.
+      SurfaceFormat inFormat = SurfaceFormat::OS_RGBX;
+      if (mInfo.out_color_space == JCS_CMYK) {
+        inFormat = mIsPDF ? SurfaceFormat::CMYK : SurfaceFormat::InvertedCMYK;
+      }
+
+      OrientedIntSize pipeInputSize = GetOrientation().ToOriented(
+          UnorientedIntSize(mInfo.output_width, mInfo.output_height));
       Maybe<SurfacePipe> pipe = SurfacePipeFactory::CreateReorientSurfacePipe(
-          this, Size(), OutputSize(), SurfaceFormat::OS_RGBX,
-          SurfaceFormat::OS_RGBX, pipeTransform, GetOrientation(),
-          SurfacePipeFlags());
+          this, pipeInputSize, OutputSize(), inFormat, SurfaceFormat::OS_RGBX,
+          pipeTransform, GetOrientation(), SurfacePipeFlags());
       if (!pipe) {
         mState = JPEG_ERROR;
         MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
@@ -471,13 +511,17 @@ LexerTransition<nsJPEGDecoder::State> nsJPEGDecoder::ReadJPEGData(
       if (mState == JPEG_DECOMPRESS_PROGRESSIVE) {
         LOG_SCOPE((mozilla::LogModule*)sJPEGLog,
                   "nsJPEGDecoder::Write -- JPEG_DECOMPRESS_PROGRESSIVE case");
-        auto AllComponentsSeen = [](jpeg_decompress_struct& info) {
+        auto AllComponentsSeen = [](jpeg_decompress_struct& info) -> bool {
+          // Without coefficient state (lossless, non-interleaved sequential)
+          // we can't prove per-component completion, so require the whole
+          // input before displaying.
+          if (!info.coef_bits) {
+            return jpeg_input_complete(&info);
+          }
           bool all_components_seen = true;
-          if (info.coef_bits) {
-            for (int c = 0; c < info.num_components; ++c) {
-              bool current_component_seen = info.coef_bits[c][0] != -1;
-              all_components_seen &= current_component_seen;
-            }
+          for (int c = 0; c < info.num_components; ++c) {
+            bool current_component_seen = info.coef_bits[c][0] != -1;
+            all_components_seen &= current_component_seen;
           }
           return all_components_seen;
         };
@@ -665,25 +709,14 @@ WriteState nsJPEGDecoder::OutputScanlines() {
                                  Some(WriteState::NEED_MORE_DATA));
         }
 
-        switch (mInfo.out_color_space) {
-          default:
-            // Already outputted directly to aPixelBlock as BGRA.
-            MOZ_ASSERT(!mCMSLine);
-            break;
-          case JCS_GRAYSCALE:
-            // The transform here does both color management, and converts the
-            // pixels from grayscale to BGRA. This is why we do it here, instead
-            // of using ColorManagementFilter in the SurfacePipe, because the
-            // other filters (e.g. DownscalingFilter) require BGRA pixels.
-            MOZ_ASSERT(mCMSLine);
-            qcms_transform_data(mTransform, mCMSLine, aPixelBlock,
-                                mInfo.output_width);
-            break;
-          case JCS_CMYK:
-            // Convert from CMYK to BGRA
-            MOZ_ASSERT(mCMSLine);
-            cmyk_convert_bgra(mCMSLine, aPixelBlock, aBlockSize, mIsPDF);
-            break;
+        if (mInfo.out_color_space == JCS_GRAYSCALE) {
+          // The transform here does both color management, and converts the
+          // pixels from grayscale to BGRA. This is why we do it here, instead
+          // of using ColorManagementFilter in the SurfacePipe, because the
+          // other filters (e.g. DownscalingFilter) require BGRA pixels.
+          MOZ_ASSERT(mCMSLine);
+          qcms_transform_data(mTransform, mCMSLine, aPixelBlock,
+                              mInfo.output_width);
         }
 
         return std::make_tuple(aBlockSize, Maybe<WriteState>());
@@ -942,57 +975,3 @@ term_source(j_decompress_ptr jd) {
 
 }  // namespace image
 }  // namespace mozilla
-
-///*************** Inverted CMYK -> RGB conversion *************************
-/// Input is (Inverted) CMYK stored as 4 bytes per pixel.
-/// Output is RGB stored as 3 bytes per pixel.
-/// @param aInput Points to row buffer containing the CMYK bytes for each pixel
-///               in the row.
-/// @param aOutput Points to row buffer to write BGRA to.
-/// @param aWidth Number of pixels in the row.
-static void cmyk_convert_bgra(uint32_t* aInput, uint32_t* aOutput,
-                              int32_t aWidth, bool aIsInverted) {
-  uint8_t* input = reinterpret_cast<uint8_t*>(aInput);
-
-  for (int32_t i = 0; i < aWidth; ++i) {
-    // Source is 'Inverted CMYK', output is RGB.
-    // See: http://www.easyrgb.com/math.php?MATH=M12#text12
-    // Or:  http://www.ilkeratalay.com/colorspacesfaq.php#rgb
-
-    // From CMYK to CMY
-    // C = ( C * ( 1 - K ) + K )
-    // M = ( M * ( 1 - K ) + K )
-    // Y = ( Y * ( 1 - K ) + K )
-
-    // From Inverted CMYK to CMY is thus:
-    // C = ( (1-iC) * (1 - (1-iK)) + (1-iK) ) => 1 - iC*iK
-    // Same for M and Y
-
-    // Convert from CMY (0..1) to RGB (0..1)
-    // R = 1 - C => 1 - (1 - iC*iK) => iC*iK
-    // G = 1 - M => 1 - (1 - iM*iK) => iM*iK
-    // B = 1 - Y => 1 - (1 - iY*iK) => iY*iK
-
-    // Convert from Inverted CMYK (0..255) to RGB (0..255)
-    uint32_t iC = input[0];
-    uint32_t iM = input[1];
-    uint32_t iY = input[2];
-    uint32_t iK = input[3];
-    if (MOZ_UNLIKELY(aIsInverted)) {
-      iC = 255 - iC;
-      iM = 255 - iM;
-      iY = 255 - iY;
-      iK = 255 - iK;
-    }
-
-    const uint8_t r = iC * iK / 255;
-    const uint8_t g = iM * iK / 255;
-    const uint8_t b = iY * iK / 255;
-
-    *aOutput++ = (0xFF << mozilla::gfx::SurfaceFormatBit::OS_A) |
-                 (r << mozilla::gfx::SurfaceFormatBit::OS_R) |
-                 (g << mozilla::gfx::SurfaceFormatBit::OS_G) |
-                 (b << mozilla::gfx::SurfaceFormatBit::OS_B);
-    input += 4;
-  }
-}

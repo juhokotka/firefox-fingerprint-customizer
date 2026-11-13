@@ -1139,6 +1139,8 @@ static const char* const kMainThreadName = "GeckoMain";
     defined(GP_PLAT_arm64_freebsd) || defined(GP_ARCH_arm64) ||         \
     defined(__aarch64__)
 #  define UNWINDING_REGS_HAVE_LR_R11
+#elif defined(GP_PLAT_loongarch64_linux) || defined(GP_PLAT_riscv64_linux)
+#  define UNWINDING_REGS_HAVE_RA_T3
 #endif
 
 // The registers used for stack unwinding and a few other sampling purposes.
@@ -1167,6 +1169,9 @@ class Registers {
 #elif defined(UNWINDING_REGS_HAVE_LR_R11)
   Address mLR{nullptr};   // ARM link register, or temp for return address.
   Address mR11{nullptr};  // Temp for frame pointer.
+#elif defined(UNWINDING_REGS_HAVE_RA_T3)
+  Address mRA{nullptr};  // Return address register.
+  Address mT3{nullptr};  // Temp for frame pointer.
 #endif
 
 #if defined(GP_OS_linux) || defined(GP_OS_android) || defined(GP_OS_freebsd)
@@ -1487,6 +1492,7 @@ static void DoPeriodicSample(PSLockRef aLock,
 #undef UNWINDING_REGS_HAVE_R10_R12
 #undef UNWINDING_REGS_HAVE_LR_R7
 #undef UNWINDING_REGS_HAVE_LR_R11
+#undef UNWINDING_REGS_HAVE_RA_T3
 
 // END sampling/unwinding code
 ////////////////////////////////////////////////////////////////////////
@@ -3430,16 +3436,17 @@ UniquePtr<ProfileChunkedBuffer> profiler_capture_backtrace() {
     return nullptr;
   }
 
-  auto buffer = MakeUnique<ProfileChunkedBuffer>(
+  ProfileChunkedBuffer captureBuffer(
       ProfileChunkedBuffer::ThreadSafety::WithoutMutex,
       MakeUnique<ProfileBufferChunkManagerSingle>(
           ProfileBufferChunkManager::scExpectedMaximumStackSize));
 
-  if (!profiler_capture_backtrace_into(*buffer, StackCaptureOptions::Full)) {
+  if (!profiler_capture_backtrace_into(captureBuffer,
+                                       StackCaptureOptions::Full)) {
     return nullptr;
   }
 
-  return buffer;
+  return mozilla::profiler::detail::CopyToRightSizedBuffer(captureBuffer);
 }
 
 UniqueProfilerBacktrace profiler_get_backtrace() {
@@ -3566,3 +3573,31 @@ void profiler_suspend_and_sample_thread(BaseProfilerThreadId aThreadId,
 
 }  // namespace baseprofiler
 }  // namespace mozilla
+
+// This lives here rather than in BaseAndGeckoProfilerDetail.cpp because that
+// file is also built for JS_STANDALONE, where allocating with the vanilla
+// operator new is not allowed (see config/check_vanilla_allocations.py).
+namespace mozilla::profiler::detail {
+
+[[nodiscard]] MFBT_API UniquePtr<ProfileChunkedBuffer> CopyToRightSizedBuffer(
+    const ProfileChunkedBuffer& aSource) {
+  const ProfileChunkedBuffer::State state = aSource.GetState();
+  const auto usedBytes = static_cast<ProfileBufferChunk::Length>(
+      state.mRangeEnd - state.mRangeStart);
+  if (usedBytes == 0) {
+    return nullptr;
+  }
+
+  // Blocks are copied one by one and keep their size, so a chunk holding
+  // `usedBytes` of blocks is enough to hold all of them again.
+  auto buffer = MakeUnique<ProfileChunkedBuffer>(
+      ProfileChunkedBuffer::ThreadSafety::WithoutMutex,
+      MakeUnique<ProfileBufferChunkManagerSingle>(usedBytes));
+  if (!buffer->AppendContents(aSource)) {
+    return nullptr;
+  }
+
+  return buffer;
+}
+
+}  // namespace mozilla::profiler::detail

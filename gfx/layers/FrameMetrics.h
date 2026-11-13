@@ -6,29 +6,30 @@
 #define GFX_FRAMEMETRICS_H
 
 #include <stdint.h>  // for uint8_t, uint32_t, uint64_t
+
 #include <iosfwd>
 
-#include "Units.h"                  // for CSSRect, CSSPixel, etc
+#include "PLDHashTable.h"           // for PLDHashNumber
 #include "UnitTransforms.h"         // for ViewAs
+#include "Units.h"                  // for CSSRect, CSSPixel, etc
 #include "mozilla/DefineEnum.h"     // for MOZ_DEFINE_ENUM
 #include "mozilla/HashFunctions.h"  // for HashGeneric
 #include "mozilla/Maybe.h"
-#include "mozilla/dom/InteractiveWidget.h"
-#include "mozilla/gfx/BasePoint.h"               // for BasePoint
-#include "mozilla/gfx/Rect.h"                    // for RoundedIn
-#include "mozilla/gfx/ScaleFactor.h"             // for ScaleFactor
-#include "mozilla/gfx/Logging.h"                 // for Log
-#include "mozilla/layers/LayersTypes.h"          // for ScrollDirection
-#include "mozilla/layers/ScrollableLayerGuid.h"  // for ScrollableLayerGuid
-#include "mozilla/ScrollPositionUpdate.h"        // for ScrollPositionUpdate
+#include "mozilla/ScrollPositionUpdate.h"  // for ScrollPositionUpdate
 #include "mozilla/ScrollSnapInfo.h"
 #include "mozilla/ScrollSnapTargetId.h"
 #include "mozilla/StaticPtr.h"  // for StaticAutoPtr
 #include "mozilla/TimeStamp.h"  // for TimeStamp
 #include "mozilla/WritingModes.h"
-#include "nsTHashMap.h"  // for nsTHashMap
+#include "mozilla/dom/InteractiveWidget.h"
+#include "mozilla/gfx/BasePoint.h"               // for BasePoint
+#include "mozilla/gfx/Logging.h"                 // for Log
+#include "mozilla/gfx/Rect.h"                    // for RoundedIn
+#include "mozilla/gfx/ScaleFactor.h"             // for ScaleFactor
+#include "mozilla/layers/LayersTypes.h"          // for ScrollDirection
+#include "mozilla/layers/ScrollableLayerGuid.h"  // for ScrollableLayerGuid
 #include "nsString.h"
-#include "PLDHashTable.h"  // for PLDHashNumber
+#include "nsTHashMap.h"  // for nsTHashMap
 
 struct nsStyleDisplay;
 namespace mozilla {
@@ -729,17 +730,8 @@ struct FrameMetrics {
   // Please add new fields above this comment.
 };
 
-// clang-format off
-MOZ_DEFINE_ENUM_CLASS_WITH_BASE(
-  OverscrollBehavior, uint8_t, (
-    Auto,
-    Contain,
-    None
-));
-// clang-format on
-
 std::ostream& operator<<(std::ostream& aStream,
-                         const OverscrollBehavior& aBehavior);
+                         const StyleOverscrollBehavior& aBehavior);
 
 struct OverscrollBehaviorInfo final {
   OverscrollBehaviorInfo();
@@ -754,8 +746,8 @@ struct OverscrollBehaviorInfo final {
 
   auto MutTiedFields() { return std::tie(mBehaviorX, mBehaviorY); }
 
-  OverscrollBehavior mBehaviorX;
-  OverscrollBehavior mBehaviorY;
+  StyleOverscrollBehavior mBehaviorX;
+  StyleOverscrollBehavior mBehaviorY;
 };
 
 struct OverflowInfo final {

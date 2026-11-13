@@ -4,37 +4,41 @@
 
 #include "mozilla/LoadInfo.h"
 
+#include "ThirdPartyUtil.h"
 #include "js/Array.h"               // JS::NewArrayObject
 #include "js/PropertyAndElement.h"  // JS_DefineElement
+#include "mozIThirdPartyUtil.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/ExpandedPrincipal.h"
+#include "mozilla/NullPrincipal.h"
+#include "mozilla/StaticPrefs_network.h"
+#include "mozilla/StaticPrefs_security.h"
+#include "mozilla/StoragePrincipalHelper.h"
+#include "mozilla/dom/BrowserChild.h"
+#include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/ClientIPCTypes.h"
 #include "mozilla/dom/ClientSource.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/DOMTypes.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/InternalRequest.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/PerformanceStorage.h"
 #include "mozilla/dom/PolicyContainer.h"
-#include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/ToJSValue.h"
-#include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/dom/nsHTTPSOnlyUtils.h"
-#include "mozilla/dom/InternalRequest.h"
 #include "mozilla/net/CookieJarSettings.h"
-#include "mozilla/NullPrincipal.h"
-#include "mozilla/StaticPrefs_network.h"
-#include "mozilla/StaticPrefs_security.h"
-#include "mozIThirdPartyUtil.h"
-#include "ThirdPartyUtil.h"
 #include "nsContentSecurityManager.h"
+#include "nsDocShell.h"
 #include "nsFrameLoader.h"
 #include "nsFrameLoaderOwner.h"
+#include "nsGlobalWindowInner.h"
 #include "nsIContentPolicy.h"
 #include "nsIContentSecurityPolicy.h"
+#include "nsICookieService.h"
 #include "nsIDocShell.h"
-#include "mozilla/dom/Document.h"
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -43,25 +47,22 @@
 #include "nsISupportsImpl.h"
 #include "nsISupportsUtils.h"
 #include "nsIXPConnect.h"
-#include "nsDocShell.h"
-#include "nsGlobalWindowInner.h"
 #include "nsMixedContentBlocker.h"
 #include "nsPIDOMWindowInlines.h"
 #include "nsQueryObject.h"
 #include "nsRedirectHistoryEntry.h"
 #include "nsSandboxFlags.h"
-#include "nsICookieService.h"
 
 using namespace mozilla::dom;
 
 namespace mozilla::net {
 
-static nsCString CurrentRemoteType() {
+static const RemoteType& CurrentRemoteType() {
   MOZ_ASSERT(XRE_IsParentProcess() || XRE_IsContentProcess());
   if (ContentChild* cc = ContentChild::GetSingleton()) {
-    return nsCString(cc->GetRemoteType());
+    return cc->GetRemoteType();
   }
-  return NOT_REMOTE_TYPE;
+  return RemoteType::NotRemote();
 }
 
 static nsContentPolicyType InternalContentPolicyTypeForFrame(
@@ -140,7 +141,7 @@ bool LoadInfo::IsDocumentMissingClientInfo() {
 
 /* static */ already_AddRefed<LoadInfo> LoadInfo::CreateForDocument(
     dom::CanonicalBrowsingContext* aBrowsingContext, nsIURI* aURI,
-    nsIPrincipal* aTriggeringPrincipal, const nsACString& aTriggeringRemoteType,
+    nsIPrincipal* aTriggeringPrincipal, const RemoteType& aTriggeringRemoteType,
     const OriginAttributes& aOriginAttributes, nsSecurityFlags aSecurityFlags,
     uint32_t aSandboxFlags) {
   return MakeAndAddRef<LoadInfo>(aBrowsingContext, aURI, aTriggeringPrincipal,
@@ -150,7 +151,7 @@ bool LoadInfo::IsDocumentMissingClientInfo() {
 
 /* static */ already_AddRefed<LoadInfo> LoadInfo::CreateForFrame(
     dom::CanonicalBrowsingContext* aBrowsingContext,
-    nsIPrincipal* aTriggeringPrincipal, const nsACString& aTriggeringRemoteType,
+    nsIPrincipal* aTriggeringPrincipal, const RemoteType& aTriggeringRemoteType,
     nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags) {
   return MakeAndAddRef<LoadInfo>(aBrowsingContext, aTriggeringPrincipal,
                                  aTriggeringRemoteType, aSecurityFlags,
@@ -340,13 +341,17 @@ LoadInfo::LoadInfo(
 
     if (nsMixedContentBlocker::IsUpgradableContentType(
             mInternalContentPolicyType)) {
-      // Check the load is within a secure context but ignore loopback URLs
+      // Check the load is within a secure context, but ignore documents that
+      // are only a secure context because they are loopback or because the
+      // user allowlisted them: those are not served over https, so upgrading
+      // their subresources would just break them.
       nsCOMPtr<nsIPrincipal> precursorPrincipal =
           mLoadingPrincipal->GetPrecursorPrincipal();
       nsCOMPtr<nsIPrincipal> requestingPrincipal =
           precursorPrincipal ? precursorPrincipal : mLoadingPrincipal;
       if (requestingPrincipal->GetIsOriginPotentiallyTrustworthy() &&
-          !requestingPrincipal->GetIsLoopbackHost()) {
+          !requestingPrincipal->GetIsLoopbackHost() &&
+          !requestingPrincipal->GetIsSecureContextAllowlistedHost()) {
         if (StaticPrefs::security_mixed_content_upgrade_display_content()) {
           mBrowserUpgradeInsecureRequests = true;
         } else {
@@ -468,7 +473,7 @@ LoadInfo::LoadInfo(nsPIDOMWindowOuter* aOuterWindow, nsIURI* aURI,
 
 LoadInfo::LoadInfo(dom::CanonicalBrowsingContext* aBrowsingContext,
                    nsIURI* aURI, nsIPrincipal* aTriggeringPrincipal,
-                   const nsACString& aTriggeringRemoteType,
+                   const RemoteType& aTriggeringRemoteType,
                    const OriginAttributes& aOriginAttributes,
                    nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags)
     : mTriggeringPrincipal(aTriggeringPrincipal),
@@ -563,7 +568,7 @@ LoadInfo::LoadInfo(dom::CanonicalBrowsingContext* aBrowsingContext,
 
 LoadInfo::LoadInfo(dom::WindowGlobalParent* aParentWGP,
                    nsIPrincipal* aTriggeringPrincipal,
-                   const nsACString& aTriggeringRemoteType,
+                   const RemoteType& aTriggeringRemoteType,
                    nsContentPolicyType aContentPolicyType,
                    nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags)
     : mTriggeringPrincipal(aTriggeringPrincipal),
@@ -593,24 +598,9 @@ LoadInfo::LoadInfo(dom::WindowGlobalParent* aParentWGP,
 
   mBrowsingContextID = parentBC->Id();
 
-  // Special treatment for resources injected by add-ons if not document,
-  // iframe, workers.
-  if (!nsContentUtils::IsNonSubresourceInternalPolicyType(aContentPolicyType) &&
-      aTriggeringPrincipal &&
-      StaticPrefs::privacy_antitracking_isolateContentScriptResources() &&
-      nsContentUtils::IsExpandedPrincipal(aTriggeringPrincipal)) {
-    bool shouldResistFingerprinting =
-        nsContentUtils::ShouldResistFingerprinting_dangerous(
-            mLoadingPrincipal,
-            "CookieJarSettings can't exist yet, we're creating it",
-            RFPTarget::IsAlwaysEnabledForPrecompute);
-    mCookieJarSettings = CookieJarSettings::Create(
-        nsICookieService::BEHAVIOR_REJECT,
-        StoragePrincipalHelper::PartitionKeyForExpandedPrincipal(
-            aTriggeringPrincipal),
-        OriginAttributes::IsFirstPartyEnabled(), false,
-        shouldResistFingerprinting);
-  }
+  mCookieJarSettings =
+      StoragePrincipalHelper::MaybeCreateCookieJarSettingsForContentScript(
+          aTriggeringPrincipal, mLoadingPrincipal, aContentPolicyType);
 
   if (!mCookieJarSettings) {
     // Let's clone and inherit the cookie behavior and permission from the
@@ -692,7 +682,7 @@ LoadInfo::LoadInfo(dom::WindowGlobalParent* aParentWGP,
 // Used for TYPE_FRAME or TYPE_IFRAME load.
 LoadInfo::LoadInfo(dom::CanonicalBrowsingContext* aBrowsingContext,
                    nsIPrincipal* aTriggeringPrincipal,
-                   const nsACString& aTriggeringRemoteType,
+                   const RemoteType& aTriggeringRemoteType,
                    nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags)
     : LoadInfo(aBrowsingContext->GetParentWindowContext(), aTriggeringPrincipal,
                aTriggeringRemoteType,
@@ -710,7 +700,7 @@ LoadInfo::LoadInfo(const LoadInfo& rhs)
       mChannelCreationOriginalURI(rhs.mChannelCreationOriginalURI),
       mCookieJarSettings(rhs.mCookieJarSettings),
       mPolicyContainerToInherit(rhs.mPolicyContainerToInherit),
-      mContainerFeaturePolicyInfo(rhs.mContainerFeaturePolicyInfo),
+      mContainerPermissionsPolicyInfo(rhs.mContainerPermissionsPolicyInfo),
       mTriggeringRemoteType(rhs.mTriggeringRemoteType),
       mSandboxedNullPrincipalID(rhs.mSandboxedNullPrincipalID),
       mClientInfo(rhs.mClientInfo),
@@ -723,10 +713,12 @@ LoadInfo::LoadInfo(const LoadInfo& rhs)
       mContextForTopLevelLoad(rhs.mContextForTopLevelLoad),
       mSecurityFlags(rhs.mSecurityFlags),
       mSandboxFlags(rhs.mSandboxFlags),
+      mFrameReferrerPolicySnapshot(rhs.mFrameReferrerPolicySnapshot),
       mInternalContentPolicyType(rhs.mInternalContentPolicyType),
       // mServiceWorkerTaintingSynthesized must be handled specially during
       // redirect
       mTainting(rhs.mTainting),
+      mTrustedPrincipalToInherit(rhs.mTrustedPrincipalToInherit),
 #define DEFINE_INIT(_t, name, _n, _d) m##name(rhs.m##name),
       LOADINFO_FOR_EACH_FIELD(DEFINE_INIT, LOADINFO_DUMMY_SETTER)
 #undef DEFINE_INIT
@@ -760,8 +752,8 @@ LoadInfo::LoadInfo(
     nsIPrincipal* aPrincipalToInherit, nsIPrincipal* aTopLevelPrincipal,
     nsIURI* aResultPrincipalURI, nsICookieJarSettings* aCookieJarSettings,
     nsIPolicyContainer* aPolicyContainerToInherit,
-    const Maybe<dom::FeaturePolicyInfo>& aContainerFeaturePolicyInfo,
-    const nsACString& aTriggeringRemoteType,
+    const Maybe<dom::PermissionsPolicyInfo>& aContainerPermissionsPolicyInfo,
+    const RemoteType& aTriggeringRemoteType,
     const nsID& aSandboxedNullPrincipalID, const Maybe<ClientInfo>& aClientInfo,
     const Maybe<ClientInfo>& aReservedClientInfo,
     const Maybe<ClientInfo>& aInitialClientInfo,
@@ -796,7 +788,7 @@ LoadInfo::LoadInfo(
       mResultPrincipalURI(aResultPrincipalURI),
       mCookieJarSettings(aCookieJarSettings),
       mPolicyContainerToInherit(aPolicyContainerToInherit),
-      mContainerFeaturePolicyInfo(aContainerFeaturePolicyInfo),
+      mContainerPermissionsPolicyInfo(aContainerPermissionsPolicyInfo),
       mTriggeringRemoteType(aTriggeringRemoteType),
       mSandboxedNullPrincipalID(aSandboxedNullPrincipalID),
       mClientInfo(aClientInfo),
@@ -952,6 +944,7 @@ NS_IMETHODIMP
 LoadInfo::SetPrincipalToInherit(nsIPrincipal* aPrincipalToInherit) {
   MOZ_ASSERT(aPrincipalToInherit, "must be a valid principal to inherit");
   mPrincipalToInherit = aPrincipalToInherit;
+  mTrustedPrincipalToInherit = false;
   return NS_OK;
 }
 
@@ -971,6 +964,17 @@ nsIPrincipal* LoadInfo::FindPrincipalToInherit(nsIChannel* aChannel) {
   return prin->PrincipalToInherit(uri);
 }
 
+NS_IMETHODIMP
+LoadInfo::SetTrustedPrincipalToInherit(nsIPrincipal* aPrincipal) {
+  MOZ_ALWAYS_SUCCEEDS(SetPrincipalToInherit(aPrincipal));
+  mTrustedPrincipalToInherit = true;
+  return NS_OK;
+}
+
+bool LoadInfo::IsPrincipalToInheritTrusted() {
+  return mTrustedPrincipalToInherit;
+}
+
 const nsID& LoadInfo::GetSandboxedNullPrincipalID() {
   MOZ_ASSERT(!mSandboxedNullPrincipalID.Equals(nsID{}),
              "mSandboxedNullPrincipalID wasn't initialized?");
@@ -984,13 +988,19 @@ void LoadInfo::ResetSandboxedNullPrincipalID() {
 nsIPrincipal* LoadInfo::GetTopLevelPrincipal() { return mTopLevelPrincipal; }
 
 NS_IMETHODIMP
-LoadInfo::GetTriggeringRemoteType(nsACString& aTriggeringRemoteType) {
+LoadInfo::GetXPCOMTriggeringRemoteType(nsACString& aTriggeringRemoteType) {
+  aTriggeringRemoteType = mTriggeringRemoteType.Stringify();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LoadInfo::GetTriggeringRemoteType(RemoteType& aTriggeringRemoteType) {
   aTriggeringRemoteType = mTriggeringRemoteType;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-LoadInfo::SetTriggeringRemoteType(const nsACString& aTriggeringRemoteType) {
+LoadInfo::SetTriggeringRemoteType(const RemoteType& aTriggeringRemoteType) {
   mTriggeringRemoteType = aTriggeringRemoteType;
   return NS_OK;
 }
@@ -1113,22 +1123,8 @@ LoadInfo::GetCookiePolicy(uint32_t* aResult) {
 namespace {
 
 already_AddRefed<nsICookieJarSettings> CreateCookieJarSettings(
-    nsIPrincipal* aTriggeringPrincipal, nsContentPolicyType aContentPolicyType,
-    bool aIsPrivate, bool aShouldResistFingerprinting) {
-  // Special treatment for resources injected by add-ons if not document,
-  // iframe, workers.
-  if (!nsContentUtils::IsNonSubresourceInternalPolicyType(aContentPolicyType) &&
-      aTriggeringPrincipal &&
-      StaticPrefs::privacy_antitracking_isolateContentScriptResources() &&
-      nsContentUtils::IsExpandedPrincipal(aTriggeringPrincipal)) {
-    return CookieJarSettings::Create(
-        nsICookieService::BEHAVIOR_REJECT,
-        StoragePrincipalHelper::PartitionKeyForExpandedPrincipal(
-            aTriggeringPrincipal),
-        OriginAttributes::IsFirstPartyEnabled(), false,
-        aShouldResistFingerprinting);
-  }
-
+    nsContentPolicyType aContentPolicyType, bool aIsPrivate,
+    bool aShouldResistFingerprinting) {
   if (StaticPrefs::network_cookieJarSettings_unblocked_for_testing()) {
     return aIsPrivate ? CookieJarSettings::Create(CookieJarSettings::ePrivate,
                                                   aShouldResistFingerprinting)
@@ -1155,17 +1151,21 @@ already_AddRefed<nsICookieJarSettings> CreateCookieJarSettings(
 NS_IMETHODIMP
 LoadInfo::GetCookieJarSettings(nsICookieJarSettings** aCookieJarSettings) {
   if (!mCookieJarSettings) {
-    bool isPrivate = mOriginAttributes.IsPrivateBrowsing();
     nsCOMPtr<nsIPrincipal> loadingPrincipal;
     (void)this->GetLoadingPrincipal(getter_AddRefs(loadingPrincipal));
-    bool shouldResistFingerprinting =
-        nsContentUtils::ShouldResistFingerprinting_dangerous(
-            loadingPrincipal,
-            "CookieJarSettings can't exist yet, we're creating it",
-            RFPTarget::IsAlwaysEnabledForPrecompute);
-    mCookieJarSettings = CreateCookieJarSettings(
-        mTriggeringPrincipal, mInternalContentPolicyType, isPrivate,
-        shouldResistFingerprinting);
+    mCookieJarSettings =
+        StoragePrincipalHelper::MaybeCreateCookieJarSettingsForContentScript(
+            mTriggeringPrincipal, loadingPrincipal, mInternalContentPolicyType);
+    if (!mCookieJarSettings) {
+      bool isPrivate = mOriginAttributes.IsPrivateBrowsing();
+      bool shouldResistFingerprinting =
+          nsContentUtils::ShouldResistFingerprinting_dangerous(
+              loadingPrincipal,
+              "CookieJarSettings can't exist yet, we're creating it",
+              RFPTarget::IsAlwaysEnabledForPrecompute);
+      mCookieJarSettings = CreateCookieJarSettings(
+          mInternalContentPolicyType, isPrivate, shouldResistFingerprinting);
+    }
   }
 
   nsCOMPtr<nsICookieJarSettings> cookieJarSettings = mCookieJarSettings;
@@ -2033,13 +2033,13 @@ already_AddRefed<nsIPolicyContainer> LoadInfo::GetPolicyContainerToInherit() {
   return policyContainerToInherit.forget();
 }
 
-Maybe<FeaturePolicyInfo> LoadInfo::GetContainerFeaturePolicyInfo() {
-  return mContainerFeaturePolicyInfo;
+Maybe<PermissionsPolicyInfo> LoadInfo::GetContainerPermissionsPolicyInfo() {
+  return mContainerPermissionsPolicyInfo;
 }
 
-void LoadInfo::SetContainerFeaturePolicyInfo(
-    const FeaturePolicyInfo& aContainerFeaturePolicyInfo) {
-  mContainerFeaturePolicyInfo = Some(aContainerFeaturePolicyInfo);
+void LoadInfo::SetContainerPermissionsPolicyInfo(
+    const PermissionsPolicyInfo& aContainerPermissionsPolicyInfo) {
+  mContainerPermissionsPolicyInfo = Some(aContainerPermissionsPolicyInfo);
 }
 
 nsIInterceptionInfo* LoadInfo::InterceptionInfo() { return mInterceptionInfo; }

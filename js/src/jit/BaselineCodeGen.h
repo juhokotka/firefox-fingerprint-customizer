@@ -53,12 +53,20 @@ class BaselineCodeGen {
   // Prologue code where we resume for Ion prologue bailouts.
   NonAssertingLabel bailoutPrologue_;
 
+  // Prologue code where we resume for a bailout of a frame that is still
+  // mid-generator-resume.
+  NonAssertingLabel bailoutResumePrologue_;
+
   CodeOffset profilerEnterFrameToggleOffset_;
   CodeOffset profilerExitFrameToggleOffset_;
 
   // Early Ion bailouts will enter at this address. This is after frame
   // construction and before environment chain is initialized.
   CodeOffset bailoutPrologueOffset_;
+
+  // Bailouts of a frame that is still mid-generator-resume enter at this
+  // address.
+  CodeOffset bailoutResumePrologueOffset_;
 
   // Baseline Interpreter can enter Baseline Compiler code at this address. This
   // is right after the warm-up counter check in the prologue.
@@ -119,6 +127,11 @@ class BaselineCodeGen {
   void jumpToResumeEntry(Register resumeIndex, Register scratch1,
                          Register scratch2);
 
+  // Compute the base of a resumed frame's resume args into |dest|.
+  void loadResumeArgsBase(Register dest);
+
+  void setInterpreterPCToScriptStart(Register script, Register scratch);
+
   // Load the global's lexical environment.
   void loadGlobalLexicalEnvironment(Register dest);
   void pushGlobalLexicalEnvironmentValue(ValueOperand scratch);
@@ -130,6 +143,8 @@ class BaselineCodeGen {
   void computeFrameSize(Register dest);
 
   void prepareVMCall();
+
+  void ensureDebugModeOSRPointSpace();
 
   void storeFrameSizeAndPushDescriptor(uint32_t argSize, Register scratch);
 
@@ -166,9 +181,6 @@ class BaselineCodeGen {
 
   bool emitSuspend(JSOp op);
 
-  [[nodiscard]] bool emitAfterYieldDebugInstrumentation(Register scratch);
-  [[nodiscard]] bool emitDebugAfterYield();
-
   // ifSet should be a function emitting code for when the script has |flag|
   // set. ifNotSet emits code for when the flag isn't set.
   template <typename F1, typename F2>
@@ -184,10 +196,6 @@ class BaselineCodeGen {
   template <typename F>
   [[nodiscard]] bool emitTestScriptFlag(JSScript::MutableFlags flag, bool value,
                                         const F& emit, Register scratch);
-
-  [[nodiscard]] bool emitEnterGeneratorCode(Register script,
-                                            Register resumeIndex,
-                                            Register scratch);
 
   void emitInterpJumpToResumeEntry(Register script, Register resumeIndex,
                                    Register scratch);
@@ -270,7 +278,11 @@ class BaselineCodeGen {
 
   [[nodiscard]] bool emitPrologue();
   [[nodiscard]] bool emitEpilogue();
-  [[nodiscard]] bool emitStackCheck();
+  // |emitAfterCall| is emitted on the VM-call path only, after the call
+  // returns. This can be used to restore registers clobbered by the call.
+  template <typename F>
+  [[nodiscard]] bool emitStackCheck(RetAddrEntry::Kind kind, Register scratch1,
+                                    Register scratch2, const F& emitAfterCall);
   [[nodiscard]] bool emitDebugPrologue();
   [[nodiscard]] bool emitDebugEpilogue();
 
@@ -278,8 +290,15 @@ class BaselineCodeGen {
 
   [[nodiscard]] bool emitHandleCodeCoverageAtPrologue();
 
+  [[nodiscard]] bool emitGeneratorResumePrologue();
+  [[nodiscard]] bool emitGeneratorResumePrologueBody();
+
   void emitInitFrameFields(Register nonFunctionEnv);
-  [[nodiscard]] bool emitIsDebuggeeCheck();
+  // Sets the frame's DEBUGGEE flag if the script is a debuggee script. This
+  // clobbers volatile registers, so emitAfterCall is called on the path that
+  // actually calls into C++ to let the caller restore registers.
+  template <typename F>
+  [[nodiscard]] bool emitIsDebuggeeCheck(const F& emitAfterCall);
   void emitInitializeLocals();
 
   void emitProfilerEnterFrame();
@@ -302,6 +321,7 @@ class BaselineCompilerHandler {
 #endif
   FixedList<Label> labels_;
   RetAddrEntryVector retAddrEntries_;
+  mozilla::Maybe<uint32_t> lastDebugModeOSRPointOffset_;
   AllocSiteIndexVector allocSiteIndices_;
 
   // Native code offsets for OSR at JSOp::LoopHead ops.
@@ -358,7 +378,8 @@ class BaselineCompilerHandler {
 
   Label* labelOf(jsbytecode* pc) { return &labels_[script_->pcToOffset(pc)]; }
 
-  bool isDefinitelyLastOp() const { return pc_ == script_->lastPC(); }
+  // No code is emitted for the ops after the last reachable one.
+  bool isLastReachableOp() const { return pc_ == analysis_.lastReachablePC(); }
 
   bool shouldEmitDebugEpilogueAtReturnOp() const {
     // The JIT uses the return address -> pc mapping and bakes in the pc
@@ -397,6 +418,10 @@ class BaselineCompilerHandler {
 
   RetAddrEntryVector& retAddrEntries() { return retAddrEntries_; }
   OSREntryVector& osrEntries() { return osrEntries_; }
+
+  const mozilla::Maybe<uint32_t>& lastDebugModeOSRPointOffset() const {
+    return lastDebugModeOSRPointOffset_;
+  }
 
   [[nodiscard]] bool recordCallRetAddr(RetAddrEntry::Kind kind,
                                        uint32_t retOffset);
@@ -454,6 +479,8 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
 
   CodeOffset profilerPushToggleOffset_;
 
+  CodeOffset debugModeOSREpilogueOffset_;
+
   BaselinePerfSpewer perfSpewer_;
 
  public:
@@ -479,6 +506,7 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
   bool emitBody();
 
   [[nodiscard]] bool emitDebugTrap();
+  void emitDebugModeOSREpilogue();
 };
 
 // Interface used by BaselineCodeGen for BaselineInterpreterGenerator.
@@ -493,6 +521,10 @@ class BaselineInterpreterHandler {
   // InterpreterPCReg.
   NonAssertingLabel interpretOpWithPCReg_;
 
+  // Out-of-line code that restores a suspended generator's frame and jumps to
+  // its resume point.
+  NonAssertingLabel generatorResumePrologue_;
+
   // Offsets of toggled jumps for debugger instrumentation.
   using CodeOffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
   CodeOffsetVector debugInstrumentationOffsets_;
@@ -502,8 +534,12 @@ class BaselineInterpreterHandler {
   NonAssertingLabel codeCoverageAtPrologueLabel_;
   NonAssertingLabel codeCoverageAtPCLabel_;
 
-  // Offsets of IC calls for IsIonInlinableOp ops, for Ion bailouts.
-  BaselineInterpreter::ICReturnOffsetVector icReturnOffsets_;
+  // Offsets of bailout stubs for IsIonInlinableOp IC ops, for Ion bailouts.
+  BaselineInterpreter::ICBailoutStubOffsetVector icBailoutStubOffsets_;
+
+  // Return offset of a call to an IsIonInlinableOp IC op. This is populated by
+  // emitNextIC and cleared by the corresponding call to emitICBailoutStub.
+  mozilla::Maybe<uint32_t> icReturnOffset_;
 
   // Offsets of some callVMs for BaselineDebugModeOSR.
   BaselineInterpreter::CallVMOffsets callVMOffsets_;
@@ -520,6 +556,7 @@ class BaselineInterpreterHandler {
 
   Label* interpretOpLabel() { return &interpretOp_; }
   Label* interpretOpWithPCRegLabel() { return &interpretOpWithPCReg_; }
+  Label* generatorResumePrologueLabel() { return &generatorResumePrologue_; }
 
   Label* codeCoverageAtPrologueLabel() { return &codeCoverageAtPrologueLabel_; }
   Label* codeCoverageAtPCLabel() { return &codeCoverageAtPCLabel_; }
@@ -529,8 +566,19 @@ class BaselineInterpreterHandler {
   }
   CodeOffsetVector& codeCoverageOffsets() { return codeCoverageOffsets_; }
 
-  BaselineInterpreter::ICReturnOffsetVector& icReturnOffsets() {
-    return icReturnOffsets_;
+  BaselineInterpreter::ICBailoutStubOffsetVector& icBailoutStubOffsets() {
+    return icBailoutStubOffsets_;
+  }
+
+  void setICReturnOffset(uint32_t offset) {
+    MOZ_ASSERT(icReturnOffset_.isNothing());
+    icReturnOffset_.emplace(offset);
+  }
+  uint32_t takeICReturnOffset() {
+    MOZ_ASSERT(icReturnOffset_.isSome());
+    uint32_t offset = *icReturnOffset_;
+    icReturnOffset_.reset();
+    return offset;
   }
 
   void setCurrentOp(JSOp op) { currentOp_.emplace(op); }
@@ -539,7 +587,7 @@ class BaselineInterpreterHandler {
 
   // Interpreter doesn't know the script and pc statically.
   jsbytecode* maybePC() const { return nullptr; }
-  bool isDefinitelyLastOp() const { return false; }
+  bool isLastReachableOp() const { return false; }
   JSScript* maybeScript() const { return nullptr; }
 
   bool shouldEmitDebugEpilogueAtReturnOp() const {
@@ -607,8 +655,10 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
  private:
   [[nodiscard]] bool emitInterpreterLoop();
   [[nodiscard]] bool emitDebugTrap();
+  [[nodiscard]] bool emitICBailoutStub();
 
   void emitOutOfLineCodeCoverageInstrumentation();
+  [[nodiscard]] bool emitOutOfLineGeneratorResumePrologue();
 };
 
 }  // namespace jit

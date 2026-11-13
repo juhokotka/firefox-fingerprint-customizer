@@ -5,9 +5,9 @@
 #ifndef mozilla_a11y_XULTreeAccessible_h_
 #define mozilla_a11y_XULTreeAccessible_h_
 
-#include "nsITreeView.h"
 #include "XULListboxAccessible.h"
 #include "mozilla/dom/XULTreeElement.h"
+#include "nsITreeView.h"
 
 class nsTreeBodyFrame;
 class nsTreeColumn;
@@ -169,7 +169,7 @@ class XULTreeItemAccessibleBase : public AccessibleWrap {
    * accessible table then return null.
    */
   virtual XULTreeGridCellAccessible* GetCellAccessible(
-      nsTreeColumn* aColumn) const {
+      nsTreeColumn* /*aColumn*/) const {
     return nullptr;
   }
 

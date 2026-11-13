@@ -25,6 +25,9 @@ const { NodeHTTPServer } = ChromeUtils.importESModule(
 var { setTimeout } = ChromeUtils.importESModule(
   "resource://gre/modules/Timer.sys.mjs"
 );
+const { TestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/TestUtils.sys.mjs"
+);
 
 const override = Cc["@mozilla.org/network/native-dns-override;1"].getService(
   Ci.nsINativeDNSResolverOverride
@@ -56,7 +59,9 @@ add_setup(
     }
     gServerStarted = true;
 
-    let nss = Cc["@mozilla.org/psm;1"].getService(Ci.nsINSSComponent);
+    let nss = Cc["@mozilla.org/network/ssl-tokens-cache;1"].getService(
+      Ci.nsISSLTokensCache
+    );
     await nss.asyncClearSSLExternalAndInternalSessionCache();
 
     Services.prefs.setBoolPref("network.http.happy_eyeballs_enabled", true);
@@ -189,7 +194,9 @@ add_task(
     await node.start();
 
     try {
-      let nss = Cc["@mozilla.org/psm;1"].getService(Ci.nsINSSComponent);
+      let nss = Cc["@mozilla.org/network/ssl-tokens-cache;1"].getService(
+        Ci.nsISSLTokensCache
+      );
       await nss.asyncClearSSLExternalAndInternalSessionCache();
 
       override.clearOverrides();
@@ -287,8 +294,11 @@ add_task(
     const TLS_PORT = 8443;
     const url = `https://${host}:${TLS_PORT}/`;
 
-    let nss = Cc["@mozilla.org/psm;1"].getService(Ci.nsINSSComponent);
+    let nss = Cc["@mozilla.org/network/ssl-tokens-cache;1"].getService(
+      Ci.nsISSLTokensCache
+    );
     await nss.asyncClearSSLExternalAndInternalSessionCache();
+    let nssTest = nss.QueryInterface(Ci.nsISSLTokensCacheTest);
 
     override.clearOverrides();
     override.addIPOverride(host, "127.0.0.1");
@@ -300,14 +310,18 @@ add_task(
       const wuResult = await wu.promise;
       Assert.ok(wuResult.ok, "H2 warm-up must succeed");
 
-      // Wait for the session ticket to arrive and be cached.
-      // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
-      await new Promise(r => setTimeout(r, 1000));
+      // Wait for the ticket to land in SSLTokensCache instead of sleeping;
+      // chaos mode can delay this independently of wall-clock time.
+      await TestUtils.waitForCondition(
+        () => nssTest.countSSLTokens() >= 1,
+        "waiting for warm-up session ticket to be cached"
+      );
 
-      // Wait for the H2 idle timeout (2 s, set in add_setup) to reclaim the
-      // warm-up session so the next connection is forced to race fresh.
+      // Deterministically reclaim the warm-up connection so the next
+      // request opens fresh and races 0-RTT with the cached ticket.
+      Services.obs.notifyObservers(null, "net:cancel-all-connections");
       // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, 200));
 
       // ── Test: H2 0-RTT rejected, pref forces the null-realTxn path ────
       Services.prefs.setBoolPref(
@@ -368,7 +382,9 @@ add_task(
     const TLS_PORT = 8443;
     const url = `https://${host}:${TLS_PORT}/`;
 
-    let nss = Cc["@mozilla.org/psm;1"].getService(Ci.nsINSSComponent);
+    let nss = Cc["@mozilla.org/network/ssl-tokens-cache;1"].getService(
+      Ci.nsISSLTokensCache
+    );
     await nss.asyncClearSSLExternalAndInternalSessionCache();
 
     override.clearOverrides();

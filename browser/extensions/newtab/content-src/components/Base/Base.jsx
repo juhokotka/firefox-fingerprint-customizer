@@ -10,6 +10,7 @@ import { DiscoveryStreamBase } from "content-src/components/DiscoveryStreamBase/
 import { ErrorBoundary } from "content-src/components/ErrorBoundary/ErrorBoundary";
 import { CustomizeMenu } from "content-src/components/CustomizeMenu/CustomizeMenu";
 import { BaseContext } from "content-src/lib/BaseContext";
+import { CUSTOMIZE_SUBPANELS } from "content-src/lib/constants";
 import React, { useState, useEffect } from "react";
 import { Search } from "content-src/components/Search/Search";
 import { TopSites } from "content-src/components/TopSites/TopSites";
@@ -32,17 +33,32 @@ import {
 } from "../../lib/asrouter-message-utils.mjs";
 import {
   WIDGET_REGISTRY,
+  hasContentAreaWidgets,
+  isWeatherAvailable,
   isWidgetEnabled,
   isWidgetToggleVisible,
   isWidgetsContainerVisible,
-  resolveWidgetHasSidebar,
-  resolveWidgetSize,
 } from "common/WidgetsRegistry.mjs";
+import {
+  isSideBySideActive,
+  isSpaceOverridden,
+  isSpacesActive,
+  isSpacesArrowsAssigned,
+  SPACE_IDS,
+  sideBySideBandClasses,
+  spacesBandClasses,
+} from "common/PageLayoutVariants.mjs";
+
+const CLOSED_SUBPANELS = {
+  activeSubpanel: null,
+  wallpapersPanelCategory: null,
+};
 
 const VISIBLE = "visible";
 const VISIBILITY_CHANGE_EVENT = "visibilitychange";
-// Minimum scroll distance in pixels to record a scroll telemetry event.
-const SCROLL_TELEMETRY_THRESHOLD = 50;
+// Scroll distances in pixels, in ascending order, that each record a scroll
+// telemetry event the first time they are passed in a session.
+const SCROLL_TELEMETRY_THRESHOLDS = [50, 100, 250];
 const PREF_INFERRED_PERSONALIZATION_SYSTEM =
   "discoverystream.sections.personalization.inferred.enabled";
 const PREF_INFERRED_PERSONALIZATION_USER =
@@ -133,11 +149,15 @@ export class BaseContent extends React.PureComponent {
     this.toggleSectionsMgmtPanel = this.toggleSectionsMgmtPanel.bind(this);
     this.toggleWidgetsManagementPanel =
       this.toggleWidgetsManagementPanel.bind(this);
+    this.toggleThemesPanel = this.toggleThemesPanel.bind(this);
+    this.openWallpapersPanel = this.openWallpapersPanel.bind(this);
+    this.closeWallpapersPanel = this.closeWallpapersPanel.bind(this);
+    this.closeSubpanels = this.closeSubpanels.bind(this);
     this.openWidgetsPanel = this.openWidgetsPanel.bind(this);
     this.attachSearchSentinel = this.attachSearchSentinel.bind(this);
     this.onSearchSentinelIntersect = this.onSearchSentinelIntersect.bind(this);
     this.searchStickyObserver = null;
-    this._hasScrolledForSession = false;
+    this._nextScrollThreshold = 0;
     this.state = {
       fixedSearch: false,
       colorMode: "",
@@ -145,8 +165,7 @@ export class BaseContent extends React.PureComponent {
       wallpaperTheme: "",
       showDownloadHighlightOverride: null,
       visible: false,
-      showSectionsMgmtPanel: false,
-      showWidgetsManagementPanel: false,
+      ...CLOSED_SUBPANELS,
     };
     this.spocPlaceholderStartTime = null;
   }
@@ -296,6 +315,21 @@ export class BaseContent extends React.PureComponent {
         if (hash === "#customize-topics") {
           this.toggleSectionsMgmtPanel();
         }
+      } else if (hash === "#customize-widgets") {
+        const currentPrefs = this.props.Prefs.values;
+        // The widgets subpanel only exists with Nova and a visible widgets
+        // container. Opening it in any other state leaves the main view
+        // unscrollable, so open the main view, where the widget toggles are
+        // without Nova.
+        // @nova-cleanup(remove-conditional): Remove the novaEnabled check; keep the isWidgetsContainerVisible check and both branches
+        if (
+          currentPrefs[PREF_NOVA_ENABLED] &&
+          isWidgetsContainerVisible(currentPrefs)
+        ) {
+          this.openWidgetsPanel();
+        } else {
+          this.openCustomizationMenu();
+        }
       } else if (this.props.App.customizeMenuVisible) {
         this.closeCustomizationMenu();
       }
@@ -379,6 +413,10 @@ export class BaseContent extends React.PureComponent {
         prefs["newtabWallpapers.customWallpaper.theme"];
       const prevUploadedWallpaperTheme =
         prevPrefs["newtabWallpapers.customWallpaper.theme"];
+      const uploadedWallpaperPosition =
+        prefs["newtabWallpapers.customWallpaper.position"];
+      const prevUploadedWallpaperPosition =
+        prevPrefs["newtabWallpapers.customWallpaper.position"];
 
       // don't update wallpaper unless the wallpaper is being changed.
       if (
@@ -389,7 +427,8 @@ export class BaseContent extends React.PureComponent {
         wallpaperList !== prevWallpaperList || // remote settings wallpaper list updates
         this.props.App.isForStartupCache.Wallpaper !==
           prevProps.App.isForStartupCache.Wallpaper || // Startup cached page wallpaper is updating
-        uploadedWallpaperTheme !== prevUploadedWallpaperTheme
+        uploadedWallpaperTheme !== prevUploadedWallpaperTheme ||
+        uploadedWallpaperPosition !== prevUploadedWallpaperPosition
       ) {
         this.updateWallpaper();
       }
@@ -461,12 +500,17 @@ export class BaseContent extends React.PureComponent {
   }
 
   onWindowScroll() {
-    if (
-      !this._hasScrolledForSession &&
-      global.scrollY > SCROLL_TELEMETRY_THRESHOLD
+    // A single scroll can pass several thresholds at once, so report every
+    // threshold that hasn't been reported yet.
+    while (
+      this._nextScrollThreshold < SCROLL_TELEMETRY_THRESHOLDS.length &&
+      global.scrollY > SCROLL_TELEMETRY_THRESHOLDS[this._nextScrollThreshold]
     ) {
-      this._hasScrolledForSession = true;
-      this.props.dispatch(ac.OnlyToMain({ type: at.NEW_TAB_SCROLL }));
+      const threshold =
+        SCROLL_TELEMETRY_THRESHOLDS[this._nextScrollThreshold++];
+      this.props.dispatch(
+        ac.OnlyToMain({ type: at.NEW_TAB_SCROLL, data: { threshold } })
+      );
     }
 
     if (this.props.Prefs.values[PREF_NOVA_ENABLED]) {
@@ -552,7 +596,6 @@ export class BaseContent extends React.PureComponent {
 
   openCustomizationMenu() {
     this.props.dispatch({ type: at.SHOW_PERSONALIZE });
-    this.props.dispatch(ac.UserEvent({ event: "SHOW_PERSONALIZE" }));
   }
 
   closeCustomizationMenu() {
@@ -585,19 +628,33 @@ export class BaseContent extends React.PureComponent {
     }
   }
 
+  // The saved image the page is showing, used to read its attribution.
+  appliedSavedWallpaper() {
+    const { customWallpapers } = this.props.Wallpapers;
+    const filename =
+      this.props.Prefs.values["newtabWallpapers.customWallpaper.uuid"];
+    if (!filename) {
+      return null;
+    }
+    return customWallpapers?.find(wallpaper => wallpaper.filename === filename);
+  }
+
   renderWallpaperAttribution() {
     const { wallpaperList } = this.props.Wallpapers;
     const activeWallpaper =
       this.props.Prefs.values[`newtabWallpapers.wallpaper`] ||
       this.props.Prefs.values[`newtabWallpapers.initialWallpaper`];
-    const selected = wallpaperList.find(wp => wp.title === activeWallpaper);
+    const attribution =
+      activeWallpaper === "custom"
+        ? this.appliedSavedWallpaper()?.attribution
+        : wallpaperList.find(wp => wp.title === activeWallpaper)?.attribution;
     // make sure a wallpaper is selected and that the attribution also exists
-    if (!selected?.attribution) {
+    if (!attribution) {
       return null;
     }
 
-    const { name: authorDetails, webpage } = selected.attribution;
-    if (activeWallpaper && wallpaperList && authorDetails.url) {
+    const { name: authorDetails, webpage } = attribution;
+    if (activeWallpaper && authorDetails?.url && webpage?.url) {
       return (
         <p
           className={`wallpaper-attribution`}
@@ -624,6 +681,8 @@ export class BaseContent extends React.PureComponent {
 
   async updateWallpaper() {
     const prefs = this.props.Prefs.values;
+    // Bump every call so a newer selection supersedes an in-flight decode.
+    const applyToken = this.nextWallpaperToken();
     const novaEnabled = prefs[PREF_NOVA_ENABLED];
     const wallpapersEnabled = prefs["newtabWallpapers.enabled"];
     const wallpapersUserEnabled = prefs["newtabWallpapers.user.enabled"];
@@ -656,12 +715,19 @@ export class BaseContent extends React.PureComponent {
       return;
     }
 
+    // Keep the current background until the custom wallpaper's URL hydrates.
+    if (selectedWallpaper === "custom" && !uploadedWallpaperUrl) {
+      return;
+    }
+
     // uploaded wallpaper
     if (selectedWallpaper === "custom" && uploadedWallpaperUrl) {
       url = uploadedWallpaperUrl;
       color = "transparent";
-      // Note: There is no method to set a specific background position for custom wallpapers
-      backgroundPosition = "center";
+      // Nobody picks a position. An upload is centered, and a saved Firefox
+      // wallpaper keeps the crop it shipped with through this pref.
+      backgroundPosition =
+        prefs["newtabWallpapers.customWallpaper.position"] || "center";
       newTheme = uploadedWallpaperTheme || colorMode;
     } else if (wallpaperList) {
       const wallpaper = wallpaperList.find(
@@ -689,6 +755,18 @@ export class BaseContent extends React.PureComponent {
         }
       }
     }
+
+    // Decode a replacement before swapping so the current wallpaper stays up
+    // until it's ready; initial renders (nothing painted) apply synchronously.
+    if (
+      selectedWallpaper === "custom" &&
+      url &&
+      global.document?.body.style.getPropertyValue("--newtab-wallpaper") &&
+      !(await this.decodeWallpaper(url, applyToken))
+    ) {
+      return;
+    }
+
     global.document?.body.style.setProperty(
       "--newtab-wallpaper",
       `url(${url})`
@@ -706,6 +784,25 @@ export class BaseContent extends React.PureComponent {
     global.document?.body.classList.add(
       newTheme === "dark" ? "darkWallpaper" : "lightWallpaper"
     );
+  }
+
+  // Monotonic token to detect if a newer updateWallpaper ran mid-decode.
+  nextWallpaperToken() {
+    this._wallpaperApplyToken = (this._wallpaperApplyToken ?? 0) + 1;
+    return this._wallpaperApplyToken;
+  }
+
+  // Returns false if decode fails or a newer update supersedes this one, so the
+  // current wallpaper stays painted.
+  async decodeWallpaper(url, applyToken) {
+    try {
+      const image = new global.Image();
+      image.src = url;
+      await image.decode();
+    } catch {
+      return false;
+    }
+    return applyToken === this._wallpaperApplyToken;
   }
 
   toggleDownloadHighlight() {
@@ -755,26 +852,48 @@ export class BaseContent extends React.PureComponent {
     return 0.2125 * r + 0.7154 * g + 0.0721 * b <= 110;
   }
 
-  toggleSectionsMgmtPanel() {
+  toggleSubpanel(id) {
     this.setState(prevState => ({
-      showSectionsMgmtPanel: !prevState.showSectionsMgmtPanel,
+      activeSubpanel: prevState.activeSubpanel === id ? null : id,
     }));
   }
 
+  toggleSectionsMgmtPanel() {
+    this.toggleSubpanel(CUSTOMIZE_SUBPANELS.SECTIONS);
+  }
+
   toggleWidgetsManagementPanel() {
-    this.setState(prevState => ({
-      showWidgetsManagementPanel: !prevState.showWidgetsManagementPanel,
-    }));
+    this.toggleSubpanel(CUSTOMIZE_SUBPANELS.WIDGETS);
+  }
+
+  toggleThemesPanel() {
+    this.toggleSubpanel(CUSTOMIZE_SUBPANELS.THEMES);
+  }
+
+  openWallpapersPanel(categoryId) {
+    this.setState({
+      activeSubpanel: CUSTOMIZE_SUBPANELS.WALLPAPERS,
+      wallpapersPanelCategory: categoryId,
+    });
+  }
+
+  // Keeps wallpapersPanelCategory so the heading and wallpaper list stay
+  // populated while the subpanel slides out. The next open overwrites it.
+  closeWallpapersPanel() {
+    this.setState(prevState =>
+      prevState.activeSubpanel === CUSTOMIZE_SUBPANELS.WALLPAPERS
+        ? { activeSubpanel: null }
+        : null
+    );
+  }
+
+  closeSubpanels() {
+    this.setState(CLOSED_SUBPANELS);
   }
 
   openWidgetsPanel() {
     this.openCustomizationMenu();
-    if (!this.state.showWidgetsManagementPanel) {
-      this.setState({
-        showWidgetsManagementPanel: true,
-        showSectionsMgmtPanel: false,
-      });
-    }
+    this.setState({ activeSubpanel: CUSTOMIZE_SUBPANELS.WIDGETS });
   }
 
   shouldDisplayTopicSelectionModal() {
@@ -849,7 +968,9 @@ export class BaseContent extends React.PureComponent {
 
     const topSitesEnabled = prefs["feeds.topsites"];
     const pocketEnabled =
-      prefs["feeds.section.topstories"] && prefs["feeds.system.topstories"];
+      (prefs["feeds.section.topstories"] ||
+        isSpaceOverridden(SPACE_IDS.STORIES, prefs)) &&
+      prefs["feeds.system.topstories"];
     // @nova-cleanup(remove): pre-Nova; `filteredSections` is the legacy
     // Sections redux slice that no longer drives Nova layout. Nova uses
     // `noContentSectionsEnabled` (declared in the Nova branch below).
@@ -859,10 +980,14 @@ export class BaseContent extends React.PureComponent {
       filteredSections.filter(section => section.enabled).length === 0;
     const enabledSections = {
       topSitesEnabled,
-      pocketEnabled: prefs["feeds.section.topstories"],
+      // So the toggle does not read off while the Stories space is showing.
+      pocketEnabled:
+        prefs["feeds.section.topstories"] ||
+        isSpaceOverridden(SPACE_IDS.STORIES, prefs),
       showInferredPersonalizationEnabled:
         prefs[PREF_INFERRED_PERSONALIZATION_USER],
       topSitesRowsCount: prefs.topSitesRows,
+      webNotificationsEnabled: prefs.showWebNotifications,
       weatherEnabled: novaEnabled
         ? prefs["widgets.weather.enabled"]
         : prefs.showWeather,
@@ -871,18 +996,20 @@ export class BaseContent extends React.PureComponent {
     const pocketRegion = prefs["feeds.system.topstories"];
     const mayHaveInferredPersonalization =
       prefs[PREF_INFERRED_PERSONALIZATION_SYSTEM];
-    // Weather's visibility gate differs from the other widgets (it keys off
-    // system.showWeather / trainhopConfig.weather), so it keeps its own check
-    // plus the additive widgetsSettings.weatherVisible override.
-    const mayHaveWeather =
-      prefs["system.showWeather"] ||
-      prefs.trainhopConfig?.weather?.enabled ||
-      prefs.trainhopConfig?.widgetsSettings?.weatherVisible;
+    const mayHaveWeather = isWeatherAvailable(prefs);
+    const mayHaveWebNotifications =
+      prefs["system.showWebNotifications"] ||
+      prefs.trainhopConfig?.webNotifications?.enabled;
     const supportUrl = prefs["support.url"];
 
     // Widget toggle visibility is resolved by the shared registry helpers, which
     // are additive across the system pref, the legacy widgetsConfig variable,
     // trainhopConfig.widgets (addable), and trainhopConfig.widgetsSettings.
+    // @nova-cleanup(remove-conditional): Delete widgetVisibleById, the eight
+    // mayHave*Widget constants below and the now-unused isWidgetToggleVisible
+    // import once the classic widget toggle block in ContentSection.jsx is
+    // deleted. Keep mayHaveWidgets: the Nova widgets section and the standalone
+    // Weather row both read it.
     const widgetVisibleById = id =>
       isWidgetToggleVisible(
         WIDGET_REGISTRY.find(w => w.id === id),
@@ -892,13 +1019,17 @@ export class BaseContent extends React.PureComponent {
     const mayHaveListsWidget = widgetVisibleById("lists");
     const mayHaveTimerWidget = widgetVisibleById("focusTimer");
     const mayHaveClocksWidget = widgetVisibleById("clocks");
-    const mayHaveSportsWidget = widgetVisibleById("sportsWidget");
     const mayHavePrivacyWidget = widgetVisibleById("privacy");
     const mayHaveCrosswordWidget = widgetVisibleById("crossword");
     const mayHaveStocksWidget = widgetVisibleById("stocks");
     const mayHavePictureOfTheDayWidget = widgetVisibleById("pictureOfTheDay");
+    const mayHaveRecentSearchesWidget = widgetVisibleById("recentSearches");
 
     // These prefs set the initial values on the Customize panel toggle switches
+    // @nova-cleanup(remove-conditional): Delete every *Enabled member of
+    // enabledWidgets once the classic widget toggle block in ContentSection.jsx
+    // is deleted; keep widgetsMaximized and widgetsMayBeMaximized, which the
+    // widget size telemetry in ContentSection.jsx reads.
     const enabledWidgets = {
       listsEnabled: prefs["widgets.lists.enabled"],
       timerEnabled: prefs["widgets.focusTimer.enabled"],
@@ -906,11 +1037,11 @@ export class BaseContent extends React.PureComponent {
       weatherEnabled: novaEnabled
         ? prefs["widgets.weather.enabled"]
         : prefs.showWeather,
-      sportsWidgetEnabled: prefs["widgets.sportsWidget.enabled"],
       privacyEnabled: prefs["widgets.privacy.enabled"],
       crosswordEnabled: prefs["widgets.crossword.enabled"],
       stocksEnabled: prefs["widgets.stocks.enabled"],
       pictureOfTheDayEnabled: prefs["widgets.pictureOfTheDay.enabled"],
+      recentSearchesEnabled: prefs["widgets.recentSearches.enabled"],
       widgetsMaximized: prefs["widgets.maximized"],
       widgetsMayBeMaximized: prefs["widgets.system.maximized"],
     };
@@ -1004,6 +1135,12 @@ export class BaseContent extends React.PureComponent {
 
     const baseContextValue = { openWidgetsPanel: this.openWidgetsPanel };
 
+    // The experiment can turn the Widgets space on for a profile that had
+    // widgets off, and both the layout and the customize menu toggle have to
+    // agree with what is on the page.
+    const widgetsEnabled =
+      prefs["widgets.enabled"] || isSpaceOverridden(SPACE_IDS.WIDGETS, prefs);
+
     // @nova-cleanup(remove-conditional): Remove this conditional and
     // always render the Nova layout below. The classic render() return
     // and all its supporting variables (featureClassName, outerClassName,
@@ -1015,35 +1152,118 @@ export class BaseContent extends React.PureComponent {
       // anchors the inline-start sidebar. If the page has nothing on it
       // (no content sections, no search, no widgets), the Logo is
       // suppressed entirely via `isPageEmpty`.
-      const weatherWidget = WIDGET_REGISTRY.find(w => w.id === "weather");
-      const weatherGoesToSidebar =
-        resolveWidgetHasSidebar(weatherWidget, prefs) &&
-        resolveWidgetSize(weatherWidget, prefs) === "small";
-      const widgetsEnabled = prefs["widgets.enabled"];
       const hasAnyEnabledWidget = WIDGET_REGISTRY.some(w =>
         isWidgetEnabled(w, prefs, widgetsEnabled)
       );
-      const hasContentWidgets = WIDGET_REGISTRY.some(
-        w =>
-          isWidgetEnabled(w, prefs, widgetsEnabled) &&
-          !(w.id === "weather" && weatherGoesToSidebar)
-      );
+      const hasContentWidgets = hasContentAreaWidgets(prefs, widgetsEnabled);
       const highlightsEnabled = prefs["feeds.section.highlights"];
       const noContentSectionsEnabled =
         !topSitesEnabled && !pocketEnabled && !highlightsEnabled;
       const isPageEmpty =
         noContentSectionsEnabled && !prefs.showSearch && !hasAnyEnabledWidget;
       const hasManyTopSitesRows = topSitesEnabled && prefs.topSitesRows > 2;
-      const logoShouldBeCentered =
-        !pocketEnabled && !hasContentWidgets && !hasManyTopSitesRows;
+      // Recent activity is then alone in the band, and the logo leaves the sidebar.
+      const noFeedOrContentWidgets = !pocketEnabled && !hasContentWidgets;
+      const spacesActive = isSpacesActive(prefs, props.DiscoveryStream);
+      // Gated here rather than in CSS, so the stylesheet never has to infer
+      // whether widgets or stories exist. The lead class alone means the
+      // experiment is assigned, which is enough to frame a lone section; the
+      // two-column layout additionally needs both sections.
+      const bandClassName = [
+        "content-full-width",
+        ...sideBySideBandClasses(prefs),
+        isSideBySideActive(prefs) && "side-by-side-active",
+        // Unlike side-by-side, an assigned-but-inactive spaces variant renders
+        // the ordinary band, so there is no Spaces container for these classes
+        // to describe.
+        // The feed state too, or the thematic variant can class the band for
+        // spaces while DiscoveryStreamBase, which drops a space with no
+        // sections, has fallen back to the flat layout.
+        ...(spacesActive ? spacesBandClasses(prefs) : []),
+        noFeedOrContentWidgets && "highlights-only",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      // Variant B of the search bar carries its own row above the input, which
+      // a centered logo would sit under.
+      const searchHasOwnRow =
+        prefs.showSearch &&
+        "variant-b" in
+          (this.props.ExternalComponents.components.find(
+            c => c.type === "SEARCH"
+          )?.attributes ?? {});
+      const contentShouldBeLowered =
+        noFeedOrContentWidgets && !hasManyTopSitesRows;
+      const logoShouldBeCentered = contentShouldBeLowered && !searchHasOwnRow;
+      const searchShouldBeLowered = contentShouldBeLowered && searchHasOwnRow;
+      // The 5-column story grid is driven by the layout data alone: the content
+      // band only widens when every section has a columnCount: 5 entry. Sections
+      // share one subgrid track count, so a layout set where only some sections
+      // define 5 columns has to stay at 4 — widening it would leave the others
+      // with no tile for the active breakpoint, and nothing to render.
+      const sectionsWithLayouts = Object.values(
+        props.DiscoveryStream.feeds?.data ?? {}
+      ).find(feed => feed?.data?.sections?.length)?.data?.sections;
+      const hasFiveColumnLayout =
+        !!sectionsWithLayouts?.length &&
+        sectionsWithLayouts.every(section =>
+          section.layout?.responsiveLayouts?.some(
+            layout => layout.columnCount === 5
+          )
+        );
+      // Rendered as a direct child of .container unless the logo is centered,
+      // so position: sticky is bounded by .container (which spans the whole
+      // page) rather than .content (which now ends above the content band).
+      // With a centered logo the search has to stay under it inside .content.
+      const searchArea = prefs.showSearch && (
+        <>
+          <div
+            ref={this.attachSearchSentinel}
+            className="sticky-search-sentinel"
+            aria-hidden="true"
+          />
+          <ErrorBoundary>
+            <Search showLogo={false} {...props.Search} />
+          </ErrorBoundary>
+        </>
+      );
+      // Slotted into DiscoveryStreamBase between the widgets and the feed,
+      // which is the only place that boundary exists now that both live in the
+      // .content-full-width band.
+      const aboveContentFeedMessage = shouldShowASRouterNewTabMessage(
+        this.props.Messages,
+        "ASRouterNewTabMessage",
+        ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_CONTENT_FEED
+      ) && (
+        <ErrorBoundary>
+          <MessageWrapper dispatch={this.props.dispatch}>
+            <ExternalComponentWrapper
+              type="ASROUTER_NEWTAB_MESSAGE"
+              messageData={this.props.Messages.messageData}
+              className="asrouter-newtab-message-wrapper"
+            />
+          </MessageWrapper>
+        </ErrorBoundary>
+      );
+      // Widgets (injected via DiscoveryStreamBase) + content feed. Always render
+      // in the .content-full-width band below the grid.
+      const contentFeed = isDiscoveryStream && (
+        <ErrorBoundary className="borderless-error">
+          <DiscoveryStreamBase
+            locale={props.App.locale}
+            spocsLoading={this.isSpocsOnDemandExpired}
+            aboveContentFeed={aboveContentFeedMessage}
+          />
+        </ErrorBoundary>
+      );
 
       return (
         <BaseContext.Provider value={baseContextValue}>
           <div
-            className={`nova-outer-wrapper${this.state.fixedSearch ? " stuck-search" : ""}`}
+            className={`nova-outer-wrapper${this.state.fixedSearch ? " stuck-search" : ""}${searchHasOwnRow ? " search-has-own-row" : ""}`}
           >
             <div
-              className={`container nova-enabled${logoShouldBeCentered ? " logo-in-content" : ""}`}
+              className={`container nova-enabled${logoShouldBeCentered ? " logo-in-content" : ""}${searchHasOwnRow ? " search-has-own-row" : ""}${searchShouldBeLowered ? " search-lowered" : ""}${hasFiveColumnLayout ? " sections-5-col" : ""}`}
             >
               <aside className="sidebar-inline-start">
                 {!prefs.hideLogo && !logoShouldBeCentered && !isPageEmpty && (
@@ -1062,115 +1282,102 @@ export class BaseContent extends React.PureComponent {
                   </ErrorBoundary>
                 )}
               </aside>
-              <main className="content">
-                {!prefs.hideLogo && logoShouldBeCentered && !isPageEmpty && (
-                  <ErrorBoundary>
-                    <Logo />
-                  </ErrorBoundary>
-                )}
 
-                {/* Search */}
-                {prefs.showSearch && (
-                  <>
-                    <div
-                      ref={this.attachSearchSentinel}
-                      className="sticky-search-sentinel"
-                      aria-hidden="true"
-                    />
+              {/* Search */}
+              {!logoShouldBeCentered && searchArea}
+
+              {/* display: contents, so .content and .content-full-width stay
+              direct grid items of .container while both sit inside the main
+              landmark. See _Grid.scss. */}
+              <main className="content-main">
+                <div className="content">
+                  {!prefs.hideLogo && logoShouldBeCentered && !isPageEmpty && (
                     <ErrorBoundary>
-                      <Search showLogo={false} {...props.Search} />
+                      <Logo />
                     </ErrorBoundary>
-                  </>
-                )}
+                  )}
 
-                {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_TOPSITES) */}
-                {shouldShowASRouterNewTabMessage(
-                  this.props.Messages,
-                  "ASRouterNewTabMessage",
-                  ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_TOPSITES
-                ) && (
-                  <ErrorBoundary>
-                    <MessageWrapper dispatch={this.props.dispatch}>
-                      <ExternalComponentWrapper
-                        type="ASROUTER_NEWTAB_MESSAGE"
-                        messageData={this.props.Messages.messageData}
-                        className="asrouter-newtab-message-wrapper"
-                      />
-                    </MessageWrapper>
-                  </ErrorBoundary>
-                )}
+                  {logoShouldBeCentered && searchArea}
 
-                {/* ActivationWindowMessage */}
-                {shouldShowOMCHighlight(
-                  this.props.Messages,
-                  "ActivationWindowMessage"
-                ) && (
-                  <ErrorBoundary>
-                    <MessageWrapper dispatch={this.props.dispatch}>
-                      <ActivationWindowMessage
-                        dispatch={this.props.dispatch}
-                        messageData={this.props.Messages.messageData}
-                      />
-                    </MessageWrapper>
-                  </ErrorBoundary>
-                )}
+                  {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_TOPSITES) */}
+                  {shouldShowASRouterNewTabMessage(
+                    this.props.Messages,
+                    "ASRouterNewTabMessage",
+                    ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_TOPSITES
+                  ) && (
+                    <ErrorBoundary>
+                      <MessageWrapper dispatch={this.props.dispatch}>
+                        <ExternalComponentWrapper
+                          type="ASROUTER_NEWTAB_MESSAGE"
+                          messageData={this.props.Messages.messageData}
+                          className="asrouter-newtab-message-wrapper"
+                        />
+                      </MessageWrapper>
+                    </ErrorBoundary>
+                  )}
 
-                {/* TODO: Break out Topsites, Widgets from DiscoveryStreamBase */}
-                {/* Shortcuts / Topsites */}
-                {topSitesEnabled && (
-                  <ErrorBoundary>
-                    <TopSites />
-                  </ErrorBoundary>
-                )}
+                  {/* ActivationWindowMessage */}
+                  {shouldShowOMCHighlight(
+                    this.props.Messages,
+                    "ActivationWindowMessage"
+                  ) && (
+                    <ErrorBoundary>
+                      <MessageWrapper dispatch={this.props.dispatch}>
+                        <ActivationWindowMessage
+                          dispatch={this.props.dispatch}
+                          messageData={this.props.Messages.messageData}
+                        />
+                      </MessageWrapper>
+                    </ErrorBoundary>
+                  )}
 
-                {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_WIDGETS) */}
-                {shouldShowASRouterNewTabMessage(
-                  this.props.Messages,
-                  "ASRouterNewTabMessage",
-                  ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_WIDGETS
-                ) && (
-                  <ErrorBoundary>
-                    <MessageWrapper dispatch={this.props.dispatch}>
-                      <ExternalComponentWrapper
-                        type="ASROUTER_NEWTAB_MESSAGE"
-                        messageData={this.props.Messages.messageData}
-                        className="asrouter-newtab-message-wrapper"
-                      />
-                    </MessageWrapper>
-                  </ErrorBoundary>
-                )}
+                  {/* TODO: Break out Topsites, Widgets from DiscoveryStreamBase */}
+                  {/* Shortcuts / Topsites */}
+                  {topSitesEnabled && (
+                    <ErrorBoundary>
+                      <TopSites />
+                    </ErrorBoundary>
+                  )}
 
-                {/* Widgets */}
+                  {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_WIDGETS) */}
+                  {shouldShowASRouterNewTabMessage(
+                    this.props.Messages,
+                    "ASRouterNewTabMessage",
+                    ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_WIDGETS
+                  ) && (
+                    <ErrorBoundary>
+                      <MessageWrapper dispatch={this.props.dispatch}>
+                        <ExternalComponentWrapper
+                          type="ASROUTER_NEWTAB_MESSAGE"
+                          messageData={this.props.Messages.messageData}
+                          className="asrouter-newtab-message-wrapper"
+                        />
+                      </MessageWrapper>
+                    </ErrorBoundary>
+                  )}
 
-                {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_CONTENT_FEED) */}
-                {shouldShowASRouterNewTabMessage(
-                  this.props.Messages,
-                  "ASRouterNewTabMessage",
-                  ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_CONTENT_FEED
-                ) && (
-                  <ErrorBoundary>
-                    <MessageWrapper dispatch={this.props.dispatch}>
-                      <ExternalComponentWrapper
-                        type="ASROUTER_NEWTAB_MESSAGE"
-                        messageData={this.props.Messages.messageData}
-                        className="asrouter-newtab-message-wrapper"
-                      />
-                    </MessageWrapper>
-                  </ErrorBoundary>
-                )}
+                  {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_CONTENT_FEED)
+                renders inside the band, see aboveContentFeedMessage above. */}
 
-                {/* Content Feed */}
-                {isDiscoveryStream && (
-                  <ErrorBoundary className="borderless-error">
-                    <DiscoveryStreamBase
-                      locale={props.App.locale}
-                      spocsLoading={this.isSpocsOnDemandExpired}
-                    />
-                  </ErrorBoundary>
+                  {!pocketEnabled && multistageMessageFeed}
+                </div>
+                {/* Widgets + content feed, in a band spanning all three columns
+              on the row below the grid. See _Grid.scss. */}
+                {contentFeed && (
+                  <div className={bandClassName}>{contentFeed}</div>
                 )}
-                {!pocketEnabled && multistageMessageFeed}
+                {/* Nova only shows the wallpaper when both prefs are on, unlike
+              classic; see updateWallpaper. */}
+                {wallpapersEnabled &&
+                  wallpapersUserEnabled &&
+                  this.renderWallpaperAttribution()}
               </main>
             </div>
+            {/* The floating arrows panel runs to the bottom of the page, past
+            the band. See _Spaces.scss. */}
+            {spacesActive && isSpacesArrowsAssigned(prefs) && (
+              <div className="spaces-panel-backdrop" />
+            )}
             <ConfirmDialog />
             <menu className="personalizeButtonWrapper nova-enabled">
               <CustomizeMenu
@@ -1187,27 +1394,36 @@ export class BaseContent extends React.PureComponent {
                 mayHaveTopicSections={mayHavePersonalizedTopicSections}
                 mayHaveInferredPersonalization={mayHaveInferredPersonalization}
                 mayHaveWeather={mayHaveWeather}
+                mayHaveWebNotifications={mayHaveWebNotifications}
                 mayHaveWidgets={mayHaveWidgets}
+                // @nova-cleanup(remove-conditional): Delete the eight
+                // mayHave*Widget props from this render site once the classic
+                // widget toggle block in ContentSection.jsx is deleted. Keep
+                // enabledWidgets: its widgetsMaximized and widgetsMayBeMaximized
+                // members are read by the widget size telemetry in
+                // ContentSection.jsx.
                 mayHaveTimerWidget={mayHaveTimerWidget}
                 mayHaveListsWidget={mayHaveListsWidget}
-                mayHaveSportsWidget={mayHaveSportsWidget}
                 mayHaveClocksWidget={mayHaveClocksWidget}
                 mayHavePrivacyWidget={mayHavePrivacyWidget}
                 mayHaveCrosswordWidget={mayHaveCrosswordWidget}
                 mayHaveStocksWidget={mayHaveStocksWidget}
                 mayHavePictureOfTheDayWidget={mayHavePictureOfTheDayWidget}
+                mayHaveRecentSearchesWidget={mayHaveRecentSearchesWidget}
                 mayHaveWeatherForecast={
                   prefs["widgets.system.weatherForecast.enabled"]
                 }
                 weatherDisplay={prefs["weather.display"]}
                 showing={customizeMenuVisible}
                 toggleSectionsMgmtPanel={this.toggleSectionsMgmtPanel}
-                showSectionsMgmtPanel={this.state.showSectionsMgmtPanel}
-                showWidgetsManagementPanel={
-                  this.state.showWidgetsManagementPanel
-                }
+                activeSubpanel={this.state.activeSubpanel}
                 toggleWidgetsManagementPanel={this.toggleWidgetsManagementPanel}
-                widgetsEnabled={prefs["widgets.enabled"]}
+                toggleThemesPanel={this.toggleThemesPanel}
+                wallpapersPanelCategory={this.state.wallpapersPanelCategory}
+                openWallpapersPanel={this.openWallpapersPanel}
+                closeWallpapersPanel={this.closeWallpapersPanel}
+                closeSubpanels={this.closeSubpanels}
+                widgetsEnabled={widgetsEnabled}
                 dispatch={this.props.dispatch}
               />
               {(shouldShowOMCHighlight(
@@ -1363,22 +1579,28 @@ export class BaseContent extends React.PureComponent {
               mayHaveTopicSections={mayHavePersonalizedTopicSections}
               mayHaveInferredPersonalization={mayHaveInferredPersonalization}
               mayHaveWeather={mayHaveWeather}
+              mayHaveWebNotifications={mayHaveWebNotifications}
               mayHaveWidgets={mayHaveWidgets}
               mayHaveTimerWidget={mayHaveTimerWidget}
               mayHaveListsWidget={mayHaveListsWidget}
-              mayHaveSportsWidget={mayHaveSportsWidget}
               mayHaveClocksWidget={mayHaveClocksWidget}
               mayHavePrivacyWidget={mayHavePrivacyWidget}
               mayHaveCrosswordWidget={mayHaveCrosswordWidget}
               mayHaveStocksWidget={mayHaveStocksWidget}
               mayHavePictureOfTheDayWidget={mayHavePictureOfTheDayWidget}
+              mayHaveRecentSearchesWidget={mayHaveRecentSearchesWidget}
               mayHaveWeatherForecast={
                 prefs["widgets.system.weatherForecast.enabled"]
               }
               weatherDisplay={prefs["weather.display"]}
               showing={customizeMenuVisible}
               toggleSectionsMgmtPanel={this.toggleSectionsMgmtPanel}
-              showSectionsMgmtPanel={this.state.showSectionsMgmtPanel}
+              activeSubpanel={this.state.activeSubpanel}
+              toggleThemesPanel={this.toggleThemesPanel}
+              wallpapersPanelCategory={this.state.wallpapersPanelCategory}
+              openWallpapersPanel={this.openWallpapersPanel}
+              closeWallpapersPanel={this.closeWallpapersPanel}
+              closeSubpanels={this.closeSubpanels}
             />
             {shouldShowOMCHighlight(
               this.props.Messages,
@@ -1407,6 +1629,7 @@ export const Base = connect(state => ({
   Prefs: state.Prefs,
   Sections: state.Sections,
   DiscoveryStream: state.DiscoveryStream,
+  ExternalComponents: state.ExternalComponents,
   Messages: state.Messages,
   Notifications: state.Notifications,
   Search: state.Search,

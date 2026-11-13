@@ -28,32 +28,31 @@ import mozilla.components.compose.browser.toolbar.utils.DisplayToolbarPreviewMod
 import mozilla.components.support.base.log.logger.Logger
 
 /**
- * Sub-component of the [BrowserToolbar] responsible for displaying the URL and related
- * controls ("display mode").
+ * Sub-component of the [BrowserToolbar] responsible for displaying the URL and related controls ("display mode").
  *
  * @param pageOrigin Details about the website origin.
  * @param gravity [ToolbarGravity] for where the toolbar is being placed on the screen.
- * @param progressBarConfig [ProgressBarConfig] configuration for the progress bar.
- * If `null` a progress bar will not be displayed.
+ * @param progressBarConfig [ProgressBarConfig] configuration for the progress bar. If `null` a progress bar will not be
+ *   displayed.
  * @param backgroundColor Color of the background.
  * @param outlineColor Color of the divider.
- * @param browserActionsStart List of browser [Action]s to be displayed at the start of the
- * toolbar, outside of the URL bounding box.
- * These should be actions relevant to the browser as a whole.
- * See [MDN docs](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/browserAction).
- * @param pageActionsStart List of navigation [Action]s to be displayed between [browserActionsStart]
- * and [pageOrigin], inside of the URL bounding box.
- * These should be actions relevant to specific webpages as opposed to [browserActionsStart].
- * See [MDN docs](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/pageAction).
- * @param pageActionsEnd List of page [Action]s to be displayed between [pageOrigin] and [browserActionsEnd],
- * inside of the URL bounding box.
- * These should be actions relevant to specific webpages as opposed to [browserActionsStart].
- * See [MDN docs](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/pageAction).
- * @param browserActionsEnd List of browser [Action]s to be displayed at the end of the toolbar,
- * outside of the URL bounding box.
- * These should be actions relevant to the browser as a whole.
- * See [MDN docs](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/browserAction).
+ * @param browserActionsColor Optional `onSurface` color override applied only to the browser actions (outside the URL
+ *   bounding box), leaving the page actions on the ambient color scheme.
+ * @param browserActionsStart List of browser [Action]s to be displayed at the start of the toolbar, outside of the URL
+ *   bounding box. These should be actions relevant to the browser as a whole. See
+ *   [MDN docs](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/browserAction).
+ * @param pageActionsStart List of navigation [Action]s to be displayed between [browserActionsStart] and [pageOrigin],
+ *   inside of the URL bounding box. These should be actions relevant to specific webpages as opposed to
+ *   [browserActionsStart]. See
+ *   [MDN docs](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/pageAction).
+ * @param pageActionsEnd List of page [Action]s to be displayed between [pageOrigin] and [browserActionsEnd], inside of
+ *   the URL bounding box. These should be actions relevant to specific webpages as opposed to [browserActionsStart].
+ *   See [MDN docs](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/pageAction).
+ * @param browserActionsEnd List of browser [Action]s to be displayed at the end of the toolbar, outside of the URL
+ *   bounding box. These should be actions relevant to the browser as a whole. See
+ *   [MDN docs](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/browserAction).
  * @param onInteraction Callback for handling [BrowserToolbarEvent]s on user interactions.
+ * @param showDivider Whether to show the divider on the edge of the toolbar facing the webpage.
  */
 @Composable
 @Suppress("LongMethod")
@@ -63,12 +62,14 @@ fun BrowserDisplayToolbar(
     progressBarConfig: ProgressBarConfig?,
     backgroundColor: Color = MaterialTheme.colorScheme.surface,
     outlineColor: Color = DividerDefaults.color,
+    browserActionsColor: Color? = null,
     browserActionsStart: List<Action> = emptyList(),
     pageActionsStart: List<Action> = emptyList(),
     pageActionsEnd: List<Action> = emptyList(),
     browserActionsEnd: List<Action> = emptyList(),
     onInteraction: (BrowserToolbarEvent) -> Unit,
     useMinimalBottomToolbarWhenEnteringText: Boolean = false,
+    showDivider: Boolean = true,
 ) {
     LaunchedEffect(useMinimalBottomToolbarWhenEnteringText) {
         if (useMinimalBottomToolbarWhenEnteringText) {
@@ -88,6 +89,8 @@ fun BrowserDisplayToolbar(
         modifier = Modifier.fillMaxWidth(),
         backgroundColor = backgroundColor,
         outlineColor = outlineColor,
+        showDivider = showDivider,
+        browserActionsColor = browserActionsColor,
         browserActionsStartModifier = Modifier,
         pageActionsStartModifier = Modifier,
         originModifier = Modifier,
@@ -99,7 +102,7 @@ fun BrowserDisplayToolbar(
 @PreviewLightDark
 @Composable
 private fun BrowserDisplayToolbarPreview(
-    @PreviewParameter(DisplayToolbarDataProvider::class) config: DisplayToolbarPreviewModel,
+    @PreviewParameter(DisplayToolbarDataProvider::class) config: DisplayToolbarPreviewModel
 ) {
     AcornTheme {
         BrowserDisplayToolbar(
@@ -107,12 +110,13 @@ private fun BrowserDisplayToolbarPreview(
             progressBarConfig = ProgressBarConfig(progress = 66),
             browserActionsStart = config.browserStartActions,
             pageActionsStart = config.pageActionsStart,
-            pageOrigin = PageOrigin(
-                hint = R.string.mozac_browser_toolbar_search_hint,
-                title = config.title,
-                url = config.url,
-                onClick = object : BrowserToolbarEvent {},
-            ),
+            pageOrigin =
+                PageOrigin(
+                    hint = R.string.mozac_browser_toolbar_search_hint,
+                    title = config.title,
+                    url = config.url,
+                    onClick = object : BrowserToolbarEvent {},
+                ),
             pageActionsEnd = config.pageActionsEnd,
             browserActionsEnd = config.browserEndActions,
             onInteraction = {},
@@ -123,7 +127,7 @@ private fun BrowserDisplayToolbarPreview(
 @Preview
 @Composable
 private fun BrowserDisplayToolbarPrivatePreview(
-    @PreviewParameter(DisplayToolbarDataProvider::class) config: DisplayToolbarPreviewModel,
+    @PreviewParameter(DisplayToolbarDataProvider::class) config: DisplayToolbarPreviewModel
 ) {
     AcornTheme(
         colors = privateColorPalette,
@@ -134,12 +138,13 @@ private fun BrowserDisplayToolbarPrivatePreview(
             progressBarConfig = ProgressBarConfig(progress = 66),
             browserActionsStart = config.browserStartActions,
             pageActionsStart = config.pageActionsStart,
-            pageOrigin = PageOrigin(
-                hint = R.string.mozac_browser_toolbar_search_hint,
-                title = config.title,
-                url = config.url,
-                onClick = object : BrowserToolbarEvent {},
-            ),
+            pageOrigin =
+                PageOrigin(
+                    hint = R.string.mozac_browser_toolbar_search_hint,
+                    title = config.title,
+                    url = config.url,
+                    onClick = object : BrowserToolbarEvent {},
+                ),
             pageActionsEnd = config.pageActionsEnd,
             browserActionsEnd = config.browserEndActions,
             onInteraction = {},

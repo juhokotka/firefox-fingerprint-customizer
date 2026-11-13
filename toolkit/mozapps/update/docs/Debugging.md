@@ -49,7 +49,7 @@ Note: This has not been updated since the addition of `./mach update serve` in
 [Bug 1655128](https://bugzilla.mozilla.org/show_bug.cgi?id=1655128). It could
 probably be simplified by using that.
 
-See the main documentation for this, [here](SettingUpAnUpdateServer.rst).
+See the main documentation for this, [here](SettingUpAnUpdateServer.md).
 
 This script is meant to automate this process but is currently not designed to
 be very portable and thus will require some setup:
@@ -132,7 +132,7 @@ echo "Packaging..."
 MOZ_NOSPAM="true" ./mach package &> /dev/null
 echo "Creating MAR at \"${fake_update_directory}/local_update.mar\"..."
 touch "${obj_dir}/dist/firefox/precomplete"
-MAR="${obj_dir}/dist/host/bin/mar.exe" MOZ_PRODUCT_VERSION="2000.0a1" MAR_CHANNEL_ID="default" ./tools/update-packaging/make_full_update.sh "${fake_update_directory}/local_update.mar" "${obj_dir}/dist/firefox" &> /dev/null
+MAR="${obj_dir}/dist/host/bin/mar.exe" MOZ_PRODUCT_VERSION="2000.0a1" MAR_CHANNEL_ID="default" ./tools/update-packaging/make_full_update.sh "${fake_update_directory}/local_update.mar" "${obj_dir}/dist/firefox" firefox &> /dev/null
 
 # Make the installation
 echo "Installing Firefox to \"${install_parent_dir}/firefox\"..."

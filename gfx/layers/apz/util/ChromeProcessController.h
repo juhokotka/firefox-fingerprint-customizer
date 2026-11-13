@@ -5,10 +5,10 @@
 #ifndef mozilla_layers_ChromeProcessController_h
 #define mozilla_layers_ChromeProcessController_h
 
-#include "mozilla/layers/GeckoContentController.h"
-#include "nsCOMPtr.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/layers/GeckoContentController.h"
 #include "mozilla/layers/MatrixMessage.h"
+#include "nsCOMPtr.h"
 
 class nsIDOMWindowUtils;
 class nsISerialEventTarget;
@@ -67,8 +67,9 @@ class ChromeProcessController : public mozilla::layers::GeckoContentController {
   void NotifyAPZStateChange(const ScrollableLayerGuid& aGuid,
                             APZStateChange aChange, int aArg,
                             Maybe<uint64_t> aInputBlockId) override;
-  void NotifyMozMouseScrollEvent(const ScrollableLayerGuid::ViewID& aScrollId,
-                                 const nsString& aEvent) override;
+  MOZ_CAN_RUN_SCRIPT void NotifyMozMouseScrollEvent(
+      const ScrollableLayerGuid::ViewID& aScrollId,
+      const nsString& aEvent) override;
   void NotifyFlushComplete() override;
   void NotifyAsyncScrollbarDragInitiated(
       uint64_t aDragBlockId, const ScrollableLayerGuid::ViewID& aScrollId,

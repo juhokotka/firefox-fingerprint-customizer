@@ -11,8 +11,7 @@ use crate::internal_types::{FastHashMap, FrameMemory};
 use crate::print_tree::{PrintableTree, PrintTree, PrintTreePrinter};
 use crate::scene::SceneProperties;
 use crate::spatial_node::{ReferenceFrameInfo, SpatialNode, SpatialNodeDescriptor, SpatialNodeType, StickyFrameInfo};
-use crate::spatial_node::{ScrollFrameKind, SceneSpatialNode, SpatialNodeInfo};
-use std::{ops, u32};
+use crate::spatial_node::{ScrollFrameInfo, ScrollFrameKind, SceneSpatialNode, SpatialNodeInfo};
 use crate::util::{FastTransform, LayoutToWorldFastTransform, MatrixHelpers, ScaleOffset, scale_factors};
 use smallvec::SmallVec;
 use crate::util::TransformedRectKind;
@@ -93,9 +92,29 @@ const MIN_SCROLLABLE_AMOUNT: f32 = 0.01;
 // The minimum size for a scroll frame for it to be considered for a scroll root.
 const MIN_SCROLL_ROOT_SIZE: f32 = 128.0;
 
+/// Whether an explicit scroll frame is a real scroll root, as opposed to a
+/// redundant one that is not worth a picture cache slice of its own.
+///
+/// A frame with no scrollable area is skipped. This helps pages that have a
+/// nested scroll root within a redundant scroll root to avoid selecting the
+/// wrong reference spatial node for a picture cache.
+///
+/// Since we are skipping redundant scroll roots, we may end up selecting inner
+/// scroll roots that are very small. There is no performance benefit to
+/// creating a slice for these roots, as they are cheap to rasterize. The size
+/// comparison is in local-space, but makes for a reasonable estimate. The value
+/// is arbitrary, but is generally small enough to ignore things like scroll
+/// roots around text input elements.
+fn is_real_scroll_root(info: &ScrollFrameInfo) -> bool {
+    (info.scrollable_size.width > MIN_SCROLLABLE_AMOUNT ||
+     info.scrollable_size.height > MIN_SCROLLABLE_AMOUNT) &&
+    info.viewport_rect.width() > MIN_SCROLL_ROOT_SIZE &&
+    info.viewport_rect.height() > MIN_SCROLL_ROOT_SIZE
+}
+
 impl SpatialNodeIndex {
     pub fn new(index: usize) -> Self {
-        debug_assert!(index < ::std::u32::MAX as usize);
+        debug_assert!(index < u32::MAX as usize);
         SpatialNodeIndex(index as u32)
     }
 }
@@ -118,7 +137,7 @@ impl Default for VisibleFace {
     }
 }
 
-impl ops::Not for VisibleFace {
+impl std::ops::Not for VisibleFace {
     type Output = Self;
     fn not(self) -> Self {
         match self {
@@ -210,6 +229,11 @@ impl SceneSpatialTree {
         self.spatial_nodes[index.0 as usize].is_root_coord_system
     }
 
+    /// Record that a picture cache slice was built for this spatial node.
+    pub fn add_slice_root(&mut self, index: SpatialNodeIndex) {
+        self.updates.slice_roots.push(index);
+    }
+
     /// Complete building this scene, return the updates to apply to the frame spatial tree
     pub fn end_frame_and_get_pending_updates(&mut self) -> SpatialTreeUpdates {
         self.updates.root_reference_frame_index = self.root_reference_frame_index;
@@ -299,27 +323,8 @@ impl SceneSpatialTree {
                             // If the previously identified scroll root is sticky then we don't
                             // want to choose an ancestor scroll root, as we want the sticky item
                             // to have its own picture cache slice.
-                            if !current_scroll_root_is_sticky {
-                                // If the scroll root has no scrollable area, we don't want to
-                                // consider it. This helps pages that have a nested scroll root
-                                // within a redundant scroll root to avoid selecting the wrong
-                                // reference spatial node for a picture cache.
-                                if info.scrollable_size.width > MIN_SCROLLABLE_AMOUNT ||
-                                   info.scrollable_size.height > MIN_SCROLLABLE_AMOUNT {
-                                    // Since we are skipping redundant scroll roots, we may end up
-                                    // selecting inner scroll roots that are very small. There is
-                                    // no performance benefit to creating a slice for these roots,
-                                    // as they are cheap to rasterize. The size comparison is in
-                                    // local-space, but makes for a reasonable estimate. The value
-                                    // is arbitrary, but is generally small enough to ignore things
-                                    // like scroll roots around text input elements.
-                                    if info.viewport_rect.width() > MIN_SCROLL_ROOT_SIZE &&
-                                       info.viewport_rect.height() > MIN_SCROLL_ROOT_SIZE {
-                                        // If we've found a root that is scrollable, and a reasonable
-                                        // size, select that as the current root for this node
-                                        real_scroll_root = node_index;
-                                    }
-                                }
+                            if !current_scroll_root_is_sticky && is_real_scroll_root(info) {
+                                real_scroll_root = node_index;
                             }
                         }
                     }
@@ -337,6 +342,20 @@ impl SceneSpatialTree {
             outermost_scroll_root
         } else {
             real_scroll_root
+        }
+    }
+
+    /// Whether a scroll root returned by `find_scroll_root` is worth its own
+    /// picture cache slice. A redundant scroll frame (see `is_real_scroll_root`)
+    /// is only selected through the `outermost_scroll_root` fallback; a slice
+    /// boundary at it splits content that would otherwise composite as one
+    /// surface.
+    pub fn is_slice_worthy_scroll_root(&self, spatial_node_index: SpatialNodeIndex) -> bool {
+        match self.get_node_info(spatial_node_index).node_type {
+            SpatialNodeType::ScrollFrame(ref info) if info.frame_kind == ScrollFrameKind::Explicit => {
+                is_real_scroll_root(info)
+            }
+            _ => true,
         }
     }
 
@@ -476,6 +495,8 @@ pub struct SpatialTreeUpdate {
 pub struct SpatialTreeUpdates {
     root_reference_frame_index: SpatialNodeIndex,
     updates: Vec<SpatialTreeUpdate>,
+    /// Spatial nodes of the picture cache slices built for this scene.
+    slice_roots: Vec<SpatialNodeIndex>,
 }
 
 impl SpatialTreeUpdates {
@@ -483,6 +504,7 @@ impl SpatialTreeUpdates {
         SpatialTreeUpdates {
             root_reference_frame_index: SpatialNodeIndex::INVALID,
             updates: Vec::new(),
+            slice_roots: Vec::new(),
         }
     }
 }
@@ -601,6 +623,14 @@ impl<Src, Dst> CoordinateSpaceMapping<Src, Dst> {
             CoordinateSpaceMapping::Local => (1.0, 1.0),
             CoordinateSpaceMapping::ScaleOffset(ref scale_offset) => (scale_offset.scale.x.abs(), scale_offset.scale.y.abs()),
             CoordinateSpaceMapping::Transform(ref transform) => scale_factors(transform),
+        }
+    }
+
+    pub fn coplanar_scale_factors(&self) -> Option<(f32, f32)> {
+        match *self {
+            CoordinateSpaceMapping::Local => Some((1.0, 1.0)),
+            CoordinateSpaceMapping::ScaleOffset(ref scale_offset) => Some((scale_offset.scale.x.abs(), scale_offset.scale.y.abs())),
+            CoordinateSpaceMapping::Transform(ref transform) => transform.coplanar_scale_factors(),
         }
     }
 
@@ -732,7 +762,13 @@ impl SpatialTree {
                 is_async_zooming: false,
                 is_ancestor_or_self_zooming: false,
                 is_ancestor_or_self_animating: false,
+                is_slice_root: false,
+                slice_root_snap_offset: WorldVector2D::zero(),
             });
+        }
+
+        for index in updates.slice_roots {
+            self.get_spatial_node_mut(index).is_slice_root = true;
         }
 
         self.visit_nodes_mut(|_, node| {
@@ -805,8 +841,40 @@ impl SpatialTree {
         node_index
     }
 
+    /// Whether `get_relative_transform(child_index, parent_index)` can be
+    /// computed, i.e. whether `parent_index`'s coordinate system is an ancestor
+    /// of (or the same as) `child_index`'s.
+    ///
+    /// Relative transforms are only available in that direction. Building one
+    /// walks from the child's coordinate system up to the parent's, accumulating
+    /// each system's transform, so there is nothing to walk when the parent is
+    /// not on that path. The other direction is deliberately not offered rather
+    /// than merely missing: a transform away from the root is not always
+    /// invertible, so there is not always a transform to return. A caller that
+    /// needs the reverse has to handle the answer not existing.
+    pub fn can_get_relative_transform(
+        &self,
+        child_index: SpatialNodeIndex,
+        parent_index: SpatialNodeIndex,
+    ) -> bool {
+        let target = self.get_spatial_node(parent_index).coordinate_system_id;
+        let mut current = self.get_spatial_node(child_index).coordinate_system_id;
+
+        loop {
+            if current == target {
+                return true;
+            }
+
+            match self.coord_systems[current.0 as usize].parent {
+                Some(parent) => current = parent,
+                None => return false,
+            }
+        }
+    }
+
     /// Calculate the relative transform from `child_index` to `parent_index`.
-    /// This method will panic if the nodes are not connected!
+    /// This method will panic if the nodes are not connected! See
+    /// `can_get_relative_transform` for what "connected" means here.
     pub fn get_relative_transform(
         &self,
         child_index: SpatialNodeIndex,
@@ -914,10 +982,10 @@ impl SpatialTree {
             if index == self.root_reference_frame_index {
                 CoordinateSpaceMapping::Local
             } else {
-              match scroll {
-                TransformScroll::Scrolled => CoordinateSpaceMapping::ScaleOffset(child.content_transform),
-                TransformScroll::Unscrolled => CoordinateSpaceMapping::ScaleOffset(child.viewport_transform),
-              }
+                match scroll {
+                    TransformScroll::Scrolled => CoordinateSpaceMapping::ScaleOffset(child.content_transform),
+                    TransformScroll::Unscrolled => CoordinateSpaceMapping::ScaleOffset(child.viewport_transform),
+                }
             }
         } else {
             let system = &self.coord_systems[child.coordinate_system_id.0 as usize];
@@ -979,7 +1047,7 @@ impl SpatialTree {
             return;
         }
 
-        profile_scope!("update_tree");
+        tracy_rs::profile_scope!("update_tree");
         self.coord_systems.clear();
         self.coord_systems.push(CoordinateSystem::root());
 
@@ -1043,7 +1111,7 @@ impl SpatialTree {
     }
 
     pub fn build_transform_palette(&self, memory: &FrameMemory) -> TransformPalette {
-        profile_scope!("build_transform_palette");
+        tracy_rs::profile_scope!("build_transform_palette");
         TransformPalette::new(self.spatial_nodes.len(), memory)
     }
 
@@ -1433,6 +1501,68 @@ fn test_is_ancestor1() {
     assert!(!st.is_ancestor(child1_1, child2));
     assert!(!st.is_ancestor(child2, child1_0));
     assert!(!st.is_ancestor(child2, child1_1));
+}
+
+/// A slice root scroll frame under a reference frame at a fractional offset is
+/// snapped to the device pixel grid, and its descendants move with it. A scroll
+/// frame that isn't a slice root keeps the fractional offset.
+#[test]
+fn test_slice_root_snapped() {
+    fn build(mark_slice_root: bool) -> (SpatialTree, SpatialNodeIndex, SpatialNodeIndex) {
+        let mut cst = SceneSpatialTree::new();
+        let frame = cst.add_reference_frame(
+            cst.root_reference_frame_index(),
+            TransformStyle::Flat,
+            PropertyBinding::Value(LayoutTransform::identity()),
+            ReferenceFrameKind::Transform {
+                is_2d_scale_translation: true,
+                should_snap: false,
+                paired_with_perspective: false,
+            },
+            LayoutVector2D::new(0.0, 37.5),
+            PipelineId::dummy(),
+            false,
+        );
+        let scroll = cst.add_scroll_frame(
+            frame,
+            ExternalScrollId(1, PipelineId::dummy()),
+            PipelineId::dummy(),
+            &LayoutRect::from_size(LayoutSize::new(400.0, 400.0)),
+            &LayoutSize::new(400.0, 800.0),
+            ScrollFrameKind::Explicit,
+            LayoutVector2D::zero(),
+            APZScrollGeneration::default(),
+            HasScrollLinkedEffect::No,
+        );
+        let child = cst.add_reference_frame(
+            scroll,
+            TransformStyle::Flat,
+            PropertyBinding::Value(LayoutTransform::identity()),
+            ReferenceFrameKind::Transform {
+                is_2d_scale_translation: true,
+                should_snap: false,
+                paired_with_perspective: false,
+            },
+            LayoutVector2D::new(0.0, 10.25),
+            PipelineId::dummy(),
+            false,
+        );
+        if mark_slice_root {
+            cst.add_slice_root(scroll);
+        }
+        let mut st = SpatialTree::new();
+        st.apply_updates(cst.end_frame_and_get_pending_updates());
+        st.update_tree(&SceneProperties::new());
+        (st, scroll, child)
+    }
+
+    let (st, scroll, child) = build(true);
+    assert_eq!(st.get_spatial_node(scroll).content_transform.offset.y, 38.0);
+    assert_eq!(st.get_spatial_node(child).content_transform.offset.y, 48.25);
+
+    let (st, scroll, child) = build(false);
+    assert_eq!(st.get_spatial_node(scroll).content_transform.offset.y, 37.5);
+    assert_eq!(st.get_spatial_node(child).content_transform.offset.y, 47.75);
 }
 
 /// Tests that we select the correct scroll root in the simple case.
@@ -1849,9 +1979,10 @@ fn test_is_ancestor_or_self_zooming() {
     assert!(st.get_spatial_node(child2).is_ancestor_or_self_zooming);
 }
 
-/// Tests that a reference frame with an animated (property-bound) transform, and
-/// all of its descendants, are marked as having a self-or-ancestor animating
-/// transform, while a static ancestor above it is not.
+/// Tests the `is_ancestor_or_self_animating` policy: a CSS-transform reference
+/// frame counts as animating (and propagates that to its descendants) only once
+/// its bound transform has been observed to actually move. A bound-but-static
+/// transform, an APZ scale/translation frame, and static ancestors are not.
 #[test]
 fn test_is_ancestor_or_self_animating() {
     let mut cst = SceneSpatialTree::new();
@@ -1864,8 +1995,7 @@ fn test_is_ancestor_or_self_animating() {
         LayoutTransform::identity(),
         LayoutVector2D::zero(),
     );
-    // ... an animated CSS-transform reference frame below it (transform bound to
-    // a property, not an APZ scale/translation frame) ...
+    // ... a CSS-transform reference frame below it whose bound transform moves ...
     let animated = cst.add_reference_frame(
         root,
         TransformStyle::Flat,
@@ -1887,9 +2017,27 @@ fn test_is_ancestor_or_self_animating() {
         LayoutVector2D::zero(),
     );
 
+    // A CSS-transform reference frame whose bound transform never changes value
+    // (e.g. a `hold` animation): it must NOT be treated as animating, so its
+    // text stays device-snapped (bug 2051166).
+    let static_bound = cst.add_reference_frame(
+        root,
+        TransformStyle::Flat,
+        PropertyBinding::Binding(api::PropertyBindingKey::new(3), LayoutTransform::identity()),
+        ReferenceFrameKind::Transform {
+            is_2d_scale_translation: false,
+            should_snap: false,
+            paired_with_perspective: false,
+        },
+        LayoutVector2D::zero(),
+        PipelineId::dummy(),
+        false,
+    );
+
     // A bound reference frame marked `is_2d_scale_translation` is an APZ
     // async-zoom / fixed-position frame, not a CSS animation: it must NOT be
-    // treated as animating (and must not propagate that to its children).
+    // treated as animating (and must not propagate that to its children) even if
+    // its bound transform moves.
     let apz = cst.add_reference_frame(
         root,
         TransformStyle::Flat,
@@ -1912,14 +2060,39 @@ fn test_is_ancestor_or_self_animating() {
 
     let mut st = SpatialTree::new();
     st.apply_updates(cst.end_frame_and_get_pending_updates());
-    st.update_tree(&SceneProperties::new());
+
+    // Feed two frames of dynamic properties: the id 1 (animated) and id 2 (APZ)
+    // transforms move, while id 3 (static_bound) holds a constant value.
+    let mut props = SceneProperties::new();
+    let sample = |props: &mut SceneProperties, moving: LayoutTransform| {
+        props.reset_properties();
+        props.add_transforms(vec![
+            api::PropertyValue { key: api::PropertyBindingKey::new(1), value: moving },
+            api::PropertyValue { key: api::PropertyBindingKey::new(2), value: moving },
+            api::PropertyValue { key: api::PropertyBindingKey::new(3), value: LayoutTransform::identity() },
+        ]);
+        props.flush_pending_updates();
+    };
+    sample(&mut props, LayoutTransform::identity());
+    sample(&mut props, LayoutTransform::translation(10.0, 0.0, 0.0));
+    st.update_tree(&props);
 
     // The static ancestor above the animated frame is unaffected.
     assert!(!st.get_spatial_node(root).is_ancestor_or_self_animating);
-    // The CSS-animated frame and everything below it are marked.
+    // The moving CSS-transform frame and everything below it are marked.
     assert!(st.get_spatial_node(animated).is_ancestor_or_self_animating);
     assert!(st.get_spatial_node(child).is_ancestor_or_self_animating);
-    // The APZ (async-zoom / fixed) frame and its children are not.
+    // A bound-but-static transform is not animating.
+    assert!(!st.get_spatial_node(static_bound).is_ancestor_or_self_animating);
+    // The APZ (async-zoom / fixed) frame and its children are not, despite the
+    // bound transform moving.
     assert!(!st.get_spatial_node(apz).is_ancestor_or_self_animating);
     assert!(!st.get_spatial_node(apz_child).is_ancestor_or_self_animating);
+
+    // The latch is monotonic while the binding exists: once id 1 has moved it
+    // stays animating even on a frame where its value is unchanged.
+    sample(&mut props, LayoutTransform::translation(10.0, 0.0, 0.0));
+    st.update_tree(&props);
+    assert!(st.get_spatial_node(animated).is_ancestor_or_self_animating);
+    assert!(!st.get_spatial_node(static_bound).is_ancestor_or_self_animating);
 }

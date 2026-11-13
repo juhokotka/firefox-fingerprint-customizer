@@ -4,8 +4,6 @@
 
 package mozilla.components.lib.llm.gemini.nano.fakes
 
-import com.google.common.util.concurrent.ListenableFuture
-import com.google.mlkit.genai.common.DownloadCallback
 import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.GenAiException
 import com.google.mlkit.genai.common.StreamingCallback
@@ -14,13 +12,14 @@ import com.google.mlkit.genai.prompt.Candidate
 import com.google.mlkit.genai.prompt.CountTokensResponse
 import com.google.mlkit.genai.prompt.GenerateContentRequest
 import com.google.mlkit.genai.prompt.GenerateContentResponse
+import com.google.mlkit.genai.prompt.GenerateTypedContentRequest
+import com.google.mlkit.genai.prompt.GenerateTypedContentResponse
 import com.google.mlkit.genai.prompt.GenerativeModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.flowOf
 import mozilla.components.support.test.mock
 import org.mockito.Mockito.`when`
-import java.util.concurrent.ExecutorService
 
 internal class FakeGenerativeModel(
     status: Sequence<Int>,
@@ -42,16 +41,18 @@ internal class FakeGenerativeModel(
         }
 
         val responseTextParts = responseMap[prompt]!!
-        return responseTextParts.mapIndexed { idx, text ->
-            val mockCandidate: Candidate = mock()
-            `when`(mockCandidate.text).thenReturn(text)
-            if (idx == responseTextParts.size - 1) {
-                `when`(mockCandidate.finishReason).thenReturn(Candidate.FinishReason.STOP)
+        return responseTextParts
+            .mapIndexed { idx, text ->
+                val mockCandidate: Candidate = mock()
+                `when`(mockCandidate.text).thenReturn(text)
+                if (idx == responseTextParts.size - 1) {
+                    `when`(mockCandidate.finishReason).thenReturn(Candidate.FinishReason.STOP)
+                }
+                val mockResponse = mock<GenerateContentResponse>()
+                `when`(mockResponse.candidates).thenReturn(listOf(mockCandidate))
+                mockResponse
             }
-            val mockResponse = mock<GenerateContentResponse>()
-            `when`(mockResponse.candidates).thenReturn(listOf(mockCandidate))
-            mockResponse
-        }.asFlow()
+            .asFlow()
     }
 
     override suspend fun generateContent(prompt: String): GenerateContentResponse {
@@ -64,15 +65,7 @@ internal class FakeGenerativeModel(
 
     override fun download(): Flow<DownloadStatus> = downloadFlow
 
-    override fun downloadForFutures(callback: DownloadCallback): ListenableFuture<Void> {
-        TODO("Not yet implemented")
-    }
-
     override suspend fun warmup() {
-        TODO("Not yet implemented")
-    }
-
-    override fun warmupForFutures(): ListenableFuture<Void> {
         TODO("Not yet implemented")
     }
 
@@ -80,7 +73,7 @@ internal class FakeGenerativeModel(
         TODO("Not yet implemented")
     }
 
-    override fun countTokensForFutures(request: GenerateContentRequest): ListenableFuture<CountTokensResponse> {
+    override suspend fun <T : Any> countTokens(request: GenerateTypedContentRequest<T>): CountTokensResponse {
         TODO("Not yet implemented")
     }
 
@@ -88,11 +81,13 @@ internal class FakeGenerativeModel(
         TODO("Not yet implemented")
     }
 
-    override fun getTokenLimitForFutures(): ListenableFuture<Int> {
+    override suspend fun generateContent(request: GenerateContentRequest): GenerateContentResponse {
         TODO("Not yet implemented")
     }
 
-    override suspend fun generateContent(request: GenerateContentRequest): GenerateContentResponse {
+    override suspend fun <T : Any> generateContent(
+        request: GenerateTypedContentRequest<T>
+    ): GenerateTypedContentResponse<T> {
         TODO("Not yet implemented")
     }
 
@@ -118,6 +113,18 @@ internal class FakeGenerativeModel(
         TODO("Not yet implemented")
     }
 
+    override suspend fun isStructuredOutputFeatureAvailable(): Boolean {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun isSystemPromptAvailable(): Boolean {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun isThinkingModeAvailable(): Boolean {
+        TODO("Not yet implemented")
+    }
+
     override val caches: Caches
         get() = TODO("Not yet implemented")
 
@@ -125,15 +132,7 @@ internal class FakeGenerativeModel(
         TODO("Not yet implemented")
     }
 
-    override fun clearImplicitCachesForFutures(): ListenableFuture<Void> {
-        TODO("Not yet implemented")
-    }
-
     override fun close() {
-        TODO("Not yet implemented")
-    }
-
-    override fun getWorkerExecutor(): ExecutorService {
         TODO("Not yet implemented")
     }
 }

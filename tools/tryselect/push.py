@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import stat
+import subprocess
 import sys
 import tempfile
 from functools import cache
@@ -206,17 +207,41 @@ def _is_hg_try(remote):
     return HG_TRY_URL in remote
 
 
+def _is_git_try(remote):
+    return not _is_hg_try(remote)
+
+
 def push_to_git_backing(prefix: str) -> str:
     """Push the current head to the git-backing repo and return the git SHA."""
     print("Pushing to git-backing...")
     client = get_client("secrets", [f"secrets:get:{GIT_BACKING_SECRET}"])
     key = client.get(GIT_BACKING_SECRET)["secret"]["ssh_privkey"]
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".pem") as keyfile:
-        keyfile.write(key)
-        os.chmod(keyfile.name, stat.S_IRUSR | stat.S_IWUSR)
-        keyfile.flush()
-        ssh_command = f"ssh -i {shlex.quote(keyfile.name)} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+    fd, keyfile_name = tempfile.mkstemp(suffix=".pem")
+    try:
+        with os.fdopen(fd, "w") as keyfile:
+            keyfile.write(key)
+        os.chmod(keyfile_name, stat.S_IRUSR | stat.S_IWUSR)
+        if sys.platform == "win32":
+            # os.chmod can't restrict the ACL on Windows, so lock the key
+            # down to the owner or ssh will ignore it.
+            subprocess.run(
+                [
+                    "icacls",
+                    keyfile_name,
+                    "/inheritance:r",
+                    "/grant:r",
+                    f"{os.environ['USERNAME']}:F",
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+        ssh_command = (
+            f"ssh -F /dev/null -i {shlex.quote(keyfile_name)} "
+            "-o IdentitiesOnly=yes -o IdentityAgent=none "
+            "-o StrictHostKeyChecking=accept-new"
+        )
 
         sha = vcs.head_rev
         vcs.push(
@@ -227,6 +252,8 @@ def push_to_git_backing(prefix: str) -> str:
             env={"GIT_SSH_COMMAND": ssh_command},
         )
         return sha
+    finally:
+        os.remove(keyfile_name)
 
 
 def push_to_try(
@@ -236,6 +263,7 @@ def push_to_try(
     try_task_config=None,
     stage_changes=False,
     dry_run=False,
+    write_task_config=False,
     closed_tree=False,
     files_to_change=None,
     allow_log_capture=False,
@@ -289,8 +317,9 @@ def push_to_try(
     if GIT_BACKING_ENABLED and _is_hg_try(remote) and vcs.name != "hg":
         # Push the source tree to the git-backing repo so tasks can clone from GitHub,
         # then inject the resulting git rev into the try_task_config parameters.
+        prefix = "try"
         metrics.mach_try.git_backing_push_duration.start()
-        backing_sha = push_to_git_backing(prefix="try")
+        backing_sha = push_to_git_backing(prefix=prefix)
         metrics.mach_try.git_backing_push_duration.stop()
 
         try_task_config = try_task_config or {}
@@ -298,14 +327,32 @@ def push_to_try(
         try_task_config.setdefault("parameters", {})
         try_task_config["parameters"]["head_git_repository"] = GIT_BACKING_REPO
         try_task_config["parameters"]["head_git_rev"] = backing_sha
+        try_task_config["parameters"]["head_git_ref"] = (
+            f"refs/heads/{prefix}/{backing_sha}"
+        )
+
+    if _is_git_try(remote) and (try_task_config or {}).get("version") == 2:
+        # Github reports a null `before` revision for a push that creates the branch,
+        # so the decision task can't tell what the push changed. Record the real base
+        # for it.
+        try_task_config.setdefault("parameters", {})["base_rev"] = (
+            vcs.base_ref_as_commit()
+        )
 
     if try_task_config:
-        changed_files["try_task_config.json"] = (
+        try_task_config_file = (
             json.dumps(
                 try_task_config, indent=4, separators=(",", ": "), sort_keys=True
             )
             + "\n"
         )
+        changed_files["try_task_config.json"] = try_task_config_file
+        if write_task_config:
+            path = os.path.join(vcs.path, "try_task_config.json")
+            with open(path, "w") as fh:
+                fh.write(try_task_config_file)
+            print(f"Wrote {path}")
+            return
         if method not in ("again", "auto", "empty"):
             write_task_config_history(msg, try_task_config)
 

@@ -3,9 +3,11 @@ name: firefox-desktop-frontend
 description: You MUST use this skill when working with HTML, JS, CSS and other front-end code.
 ---
 
+# Firefox desktop front-end
 
 ## Workflow
 - Whenever you're building, if `./mach build` was previously run and you have not made any changes to C++ or Rust code (nor rebased past incoming changes to such code), you can use `./mach build faster` to skip the compilation and linking steps and only build the front-end code. This can save a lot of time when you're only working on the browser/ or toolkit/ code.
+- For frontend-only work in an unconfigured fresh worktree, use `./mach bootstrap --application-choice browser_artifact_mode`. Preserve an existing build configuration, and do not use artifact mode when the work requires C++, Rust, or other native-code changes.
 - CSS should use reusable tokens from the design system (in `toolkit/themes/shared/design-system`) wherever possible, to ensure consistent UI and to make it easy to change styles across the board.
 - Use reusable components for common UI patterns. These components live in `toolkit/content/widgets/`. A storybook instance for these components can be accessed on https://firefoxux.github.io/firefox-desktop-components/. It is fine to use in-development components.
 - Use CSS logical properties (e.g. `margin-inline-start` instead of `margin-left`) for better localization support.
@@ -19,3 +21,4 @@ description: You MUST use this skill when working with HTML, JS, CSS and other f
 - Toolkit code may be shared with Android, as well as desktop versions of Thunderbird, so do not assume that code from the `browser/` directory is available for use from there - if it must be used, make sure that the `toolkit/` code can recover if it is not available.
 - Ensure that your changes are accessible and work well with assistive technologies. Use semantic HTML elements, ARIA attributes, and test with screen readers and keyboard navigation.
 - Ensure that your changes are performant and do not cause jank or slow down the browser. Use performance profiling tools to identify and fix any performance issues.
+- When touching Firefox front-end code, read `docs/performance/bestpractices.md` to learn more about performance best practices and how to avoid common pitfalls (for example, forcing synchronous layout flushes on hot paths).

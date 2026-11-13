@@ -9,9 +9,11 @@
  * from the source profile.
  */
 
-import { MigrationUtils } from "resource:///modules/MigrationUtils.sys.mjs";
+import { MigrationUtils } from "moz-src:///browser/components/migration/MigrationUtils.sys.mjs";
 
-import { MigratorBase } from "resource:///modules/MigratorBase.sys.mjs";
+import { MigratorBase } from "moz-src:///browser/components/migration/MigratorBase.sys.mjs";
+
+import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
 const lazy = {};
 
@@ -19,7 +21,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
   PlacesBackups: "resource://gre/modules/PlacesBackups.sys.mjs",
   ProfileAge: "resource://gre/modules/ProfileAge.sys.mjs",
-  SessionMigration: "resource:///modules/sessionstore/SessionMigration.sys.mjs",
+  SessionMigration:
+    "moz-src:///browser/components/sessionstore/SessionMigration.sys.mjs",
 });
 
 /**
@@ -32,11 +35,11 @@ ChromeUtils.defineESModuleGetters(lazy, {
  */
 export class FirefoxProfileMigrator extends MigratorBase {
   static get key() {
-    return "firefox";
+    return AppConstants.MOZ_APP_NAME;
   }
 
   static get displayNameL10nID() {
-    return "migration-wizard-migrator-display-name-firefox";
+    return "migration-wizard-migrator-display-name-self";
   }
 
   static get brandImage() {
@@ -241,11 +244,44 @@ export class FirefoxProfileMigrator extends MigratorBase {
       "cookies.sqlite",
       "cookies.sqlite-wal",
     ]);
-    let passwords = getFileResource(types.PASSWORDS, [
-      "logins.json",
-      "key3.db",
-      "key4.db",
-    ]);
+    let passwords = {
+      name: "passwords", // name is used only by tests.
+      type: types.PASSWORDS,
+      migrate: async aCallback => {
+        try {
+          for (let fileName of [
+            "logins.json",
+            "logins.db",
+            "logins.db-wal",
+            "key3.db",
+            "key4.db",
+          ]) {
+            let file = this._getFileObject(sourceProfileDir, fileName);
+            if (file) {
+              file.copyTo(currentProfileDir, "");
+            }
+          }
+
+          // If the source profile had the Rust logins backend active, carry
+          // that state over so the new profile adopts the copied logins.db
+          // directly instead of re-migrating from the (now stale) logins.json
+          // and wiping the copied store.
+          let oldRawPrefs = await readOldPrefs();
+          if (
+            /^user_pref\("signon\.storage\.rust\.active",\s*true\)/m.test(
+              oldRawPrefs
+            )
+          ) {
+            Services.prefs.setBoolPref("signon.storage.rust.active", true);
+            savePrefs();
+          }
+        } catch (e) {
+          aCallback(false);
+          return;
+        }
+        aCallback(true);
+      },
+    };
     let formData = getFileResource(types.FORMDATA, [
       "formhistory.sqlite",
       "autofill-profiles.json",
@@ -275,35 +311,63 @@ export class FirefoxProfileMigrator extends MigratorBase {
         sourceProfileDir,
         "sessionstore.jsonlz4"
       );
+      let lockstoreKeys = this._getFileObject(
+        sourceProfileDir,
+        "lockstore.keys.sqlite"
+      );
+      let lockstoreKeysWal = this._getFileObject(
+        sourceProfileDir,
+        "lockstore.keys.sqlite-wal"
+      );
       if (sessionFile) {
         session = {
           type: types.SESSION,
-          migrate(aCallback) {
-            sessionCheckpoints.copyTo(
-              currentProfileDir,
-              "sessionCheckpoints.json"
-            );
-            let newSessionFile = currentProfileDir.clone();
-            newSessionFile.append("sessionstore.jsonlz4");
-            let migrationPromise = lazy.SessionMigration.migrate(
-              sessionFile.path,
-              newSessionFile.path
-            );
-            migrationPromise.then(
-              function () {
-                // Force the browser to one-off resume the session that we give it:
-                Services.prefs.setBoolPref(
-                  "browser.sessionstore.resume_session_once",
-                  true
-                );
-                configureHomepage(true);
-                savePrefs();
-                aCallback(true);
-              },
-              function () {
-                aCallback(false);
+          migrate: async aCallback => {
+            try {
+              sessionCheckpoints.copyTo(
+                currentProfileDir,
+                "sessionCheckpoints.json"
+              );
+              // Copy encryption keys so SessionMigration can decrypt
+              // encrypted session files from the source profile.
+              if (lockstoreKeys) {
+                lockstoreKeys.copyTo(currentProfileDir, "");
               }
-            );
+              if (lockstoreKeysWal) {
+                lockstoreKeysWal.copyTo(currentProfileDir, "");
+              }
+
+              let oldRawPrefs = await readOldPrefs();
+              let match =
+                /^user_pref\("browser\.sessionstore\.encryption\.enabled",\s*(true|false)\)/m.exec(
+                  oldRawPrefs
+                );
+              if (match) {
+                Services.prefs.setBoolPref(
+                  "browser.sessionstore.encryption.enabled",
+                  match[1] === "true"
+                );
+              }
+
+              let newSessionFile = currentProfileDir.clone();
+              newSessionFile.append("sessionstore.jsonlz4");
+              await lazy.SessionMigration.migrate(
+                sessionFile.path,
+                newSessionFile.path
+              );
+              // Force the browser to one-off resume the session that we give it:
+              Services.prefs.setBoolPref(
+                "browser.sessionstore.resume_session_once",
+                true
+              );
+              configureHomepage(true);
+              savePrefs();
+            } catch (e) {
+              console.error(e);
+              aCallback(false);
+              return;
+            }
+            aCallback(true);
           },
         };
       }
@@ -415,6 +479,22 @@ export class FirefoxProfileMigrator extends MigratorBase {
               continue;
             }
             file.copyTo(dest, "");
+          }
+
+          // Preserve the Glean client ID.
+          let gleanDir = this._getFileObject(dataReportingDir, "glean");
+          if (gleanDir && gleanDir.isDirectory()) {
+            let clientIdTxt = this._getFileObject(gleanDir, "client_id.txt");
+            if (clientIdTxt && clientIdTxt.exists()) {
+              let destGlean = currentProfileDir.clone();
+              destGlean.append("datareporting");
+              destGlean.append("glean");
+              destGlean.create(
+                Ci.nsIFile.DIRECTORY_TYPE,
+                lazy.FileUtils.PERMS_DIRECTORY
+              );
+              clientIdTxt.copyTo(destGlean, "");
+            }
           }
         }
 

@@ -3,16 +3,25 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "XrayWrapper.h"
-#include "AccessCheck.h"
-#include "WrapperFactory.h"
 
+#include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/ObservableArrayProxyHandler.h"
+#include "mozilla/dom/ProxyHandlerUtils.h"
+#include "mozilla/dom/WindowProxyHolder.h"
+#include "mozilla/dom/XrayExpandoClass.h"
+#include "mozilla/FloatingPoint.h"
+
+#include "AccessCheck.h"
+#include "jsapi.h"
 #include "nsDependentString.h"
+#include "nsGlobalWindowInner.h"
 #include "nsIConsoleService.h"
 #include "nsIScriptError.h"
-
+#include "nsJSUtils.h"
+#include "nsPrintfCString.h"
+#include "WrapperFactory.h"
 #include "xpcprivate.h"
 
-#include "jsapi.h"
 #include "js/CallAndConstruct.h"  // JS::Call, JS::Construct, JS::IsCallable
 #include "js/ColumnNumber.h"      // JS::ColumnNumberOneOrigin
 #include "js/experimental/TypedData.h"  // JS_GetTypedArrayLength
@@ -22,16 +31,6 @@
 #include "js/PropertyAndElement.h"  // JS_AlreadyHasOwnPropertyById, JS_DefineProperty, JS_DefinePropertyById, JS_DeleteProperty, JS_DeletePropertyById, JS_HasProperty, JS_HasPropertyById
 #include "js/PropertyDescriptor.h"  // JS::PropertyDescriptor, JS_GetOwnPropertyDescriptorById, JS_GetPropertyDescriptorById
 #include "js/PropertySpec.h"
-#include "nsGlobalWindowInner.h"
-#include "nsJSUtils.h"
-#include "nsPrintfCString.h"
-
-#include "mozilla/FloatingPoint.h"
-#include "mozilla/dom/BindingUtils.h"
-#include "mozilla/dom/ObservableArrayProxyHandler.h"
-#include "mozilla/dom/ProxyHandlerUtils.h"
-#include "mozilla/dom/WindowProxyHolder.h"
-#include "mozilla/dom/XrayExpandoClass.h"
 
 using namespace mozilla::dom;
 using namespace JS;
@@ -47,23 +46,16 @@ namespace xpc {
 
 #define Between(x, a, b) (a <= x && x <= b)
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
 static_assert(JSProto_URIError - JSProto_Error == 9,
               "New prototype added in error object range");
-#else
-static_assert(JSProto_URIError - JSProto_Error == 8,
-              "New prototype added in error object range");
-#endif
 #define AssertErrorObjectKeyInBounds(key)                      \
   static_assert(Between(key, JSProto_Error, JSProto_URIError), \
                 "We depend on js/ProtoKey.h ordering here");
 MOZ_FOR_EACH(AssertErrorObjectKeyInBounds, (),
              (JSProto_Error, JSProto_InternalError, JSProto_AggregateError,
               JSProto_EvalError, JSProto_RangeError, JSProto_ReferenceError,
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-              JSProto_SuppressedError,
-#endif
-              JSProto_SyntaxError, JSProto_TypeError, JSProto_URIError));
+              JSProto_SuppressedError, JSProto_SyntaxError, JSProto_TypeError,
+              JSProto_URIError));
 
 static_assert(JSProto_Uint8ClampedArray - JSProto_Int8Array == 8,
               "New prototype added in typed array range");
@@ -111,11 +103,9 @@ static bool IsJSXraySupported(JSProtoKey key) {
     case JSProto_Set:
     case JSProto_WeakMap:
     case JSProto_WeakSet:
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
     case JSProto_SuppressedError:
     case JSProto_DisposableStack:
     case JSProto_AsyncDisposableStack:
-#endif
       return true;
     default:
       return false;
@@ -302,9 +292,12 @@ bool JSXrayTraits::getOwnPropertyFromWrapperIfSafe(
   RootedObject wrapperGlobal(cx, JS::CurrentGlobalOrNull(cx));
   {
     JSAutoRealm ar(cx, target);
-    JS_MarkCrossZoneId(cx, id);
-    if (!getOwnPropertyFromTargetIfSafe(cx, target, wrapper, wrapperGlobal, id,
-                                        outDesc)) {
+    RootedId wrappedId(cx, id);
+    if (!JS_WrapId(cx, &wrappedId)) {
+      return false;
+    }
+    if (!getOwnPropertyFromTargetIfSafe(cx, target, wrapper, wrapperGlobal,
+                                        wrappedId, outDesc)) {
       return false;
     }
   }
@@ -337,8 +330,11 @@ bool JSXrayTraits::getOwnPropertyFromTargetIfSafe(
   // Disallow accessor properties.
   if (desc->isAccessorDescriptor()) {
     JSAutoRealm ar(cx, wrapperGlobal);
-    JS_MarkCrossZoneId(cx, id);
-    return ReportWrapperDenial(cx, id, WrapperDenialForXray,
+    RootedId wrappedId(cx, id);
+    if (!JS_WrapId(cx, &wrappedId)) {
+      return false;
+    }
+    return ReportWrapperDenial(cx, wrappedId, WrapperDenialForXray,
                                "property has accessor");
   }
 
@@ -350,8 +346,11 @@ bool JSXrayTraits::getOwnPropertyFromTargetIfSafe(
     // Disallow non-subsumed objects.
     if (!AccessCheck::subsumes(target, propObj)) {
       JSAutoRealm ar(cx, wrapperGlobal);
-      JS_MarkCrossZoneId(cx, id);
-      return ReportWrapperDenial(cx, id, WrapperDenialForXray,
+      RootedId wrappedId(cx, id);
+      if (!JS_WrapId(cx, &wrappedId)) {
+        return false;
+      }
+      return ReportWrapperDenial(cx, wrappedId, WrapperDenialForXray,
                                  "value not same-origin with target");
     }
 
@@ -359,16 +358,22 @@ bool JSXrayTraits::getOwnPropertyFromTargetIfSafe(
     XrayType xrayType = GetXrayType(propObj);
     if (xrayType == NotXray || xrayType == XrayForOpaqueObject) {
       JSAutoRealm ar(cx, wrapperGlobal);
-      JS_MarkCrossZoneId(cx, id);
-      return ReportWrapperDenial(cx, id, WrapperDenialForXray,
+      RootedId wrappedId(cx, id);
+      if (!JS_WrapId(cx, &wrappedId)) {
+        return false;
+      }
+      return ReportWrapperDenial(cx, wrappedId, WrapperDenialForXray,
                                  "value not Xrayable");
     }
 
     // Disallow callables.
     if (JS::IsCallable(propObj)) {
       JSAutoRealm ar(cx, wrapperGlobal);
-      JS_MarkCrossZoneId(cx, id);
-      return ReportWrapperDenial(cx, id, WrapperDenialForXray,
+      RootedId wrappedId(cx, id);
+      if (!JS_WrapId(cx, &wrappedId)) {
+        return false;
+      }
+      return ReportWrapperDenial(cx, wrappedId, WrapperDenialForXray,
                                  "value is callable");
     }
   }
@@ -376,16 +381,19 @@ bool JSXrayTraits::getOwnPropertyFromTargetIfSafe(
   // Disallow any property that shadows something on its (Xrayed)
   // prototype chain.
   JSAutoRealm ar2(cx, wrapperGlobal);
-  JS_MarkCrossZoneId(cx, id);
+  RootedId wrappedId(cx, id);
+  if (!JS_WrapId(cx, &wrappedId)) {
+    return false;
+  }
   RootedObject proto(cx);
   bool foundOnProto = false;
   if (!JS_GetPrototype(cx, wrapper, &proto) ||
-      (proto && !JS_HasPropertyById(cx, proto, id, &foundOnProto))) {
+      (proto && !JS_HasPropertyById(cx, proto, wrappedId, &foundOnProto))) {
     return false;
   }
   if (foundOnProto) {
     return ReportWrapperDenial(
-        cx, id, WrapperDenialForXray,
+        cx, wrappedId, WrapperDenialForXray,
         "value shadows a property on the standard prototype");
   }
 
@@ -559,8 +567,12 @@ bool JSXrayTraits::resolveOwnProperty(
           Rooted<Maybe<PropertyDescriptor>> innerDesc(cx);
           {
             JSAutoRealm ar(cx, target);
-            JS_MarkCrossZoneId(cx, id);
-            if (!JS_GetOwnPropertyDescriptorById(cx, target, id, &innerDesc)) {
+            RootedId wrappedId(cx, id);
+            if (!JS_WrapId(cx, &wrappedId)) {
+              return false;
+            }
+            if (!JS_GetOwnPropertyDescriptorById(cx, target, wrappedId,
+                                                 &innerDesc)) {
               return false;
             }
           }
@@ -597,11 +609,14 @@ bool JSXrayTraits::resolveOwnProperty(
         if (!JS_GetFunctionId(cx, fun, &fname)) {
           return false;
         }
+        RootedValue fnameValue(cx, JS_GetEmptyStringValue(cx));
         if (fname) {
-          JS_MarkCrossZoneIdValue(cx, StringValue(fname));
+          fnameValue.setString(fname);
+          if (!JS_WrapValue(cx, &fnameValue)) {
+            return false;
+          }
         }
-        desc.set(Some(PropertyDescriptor::Data(
-            fname ? StringValue(fname) : JS_GetEmptyStringValue(cx), {})));
+        desc.set(Some(PropertyDescriptor::Data(fnameValue, {})));
       } else {
         // Look for various static properties/methods and the
         // 'prototype' property.
@@ -686,7 +701,6 @@ bool JSXrayTraits::resolveOwnProperty(
       }
 #endif
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
       if (key == JSProto_SuppressedError) {
         // The .suppressed property of SuppressedErrors can have any value.
         if (id == GetJSIDByIndex(cx, XPCJSContext::IDX_SUPPRESSED)) {
@@ -698,7 +712,6 @@ bool JSXrayTraits::resolveOwnProperty(
           return getOwnPropertyFromWrapperIfSafe(cx, wrapper, id, desc);
         }
       }
-#endif
 
       if (key == JSProto_AggregateError &&
           id == GetJSIDByIndex(cx, XPCJSContext::IDX_ERRORS)) {
@@ -791,14 +804,17 @@ bool JSXrayTraits::delete_(JSContext* cx, HandleObject wrapper, HandleId id,
     RootedObject wrapperGlobal(cx, JS::CurrentGlobalOrNull(cx));
     RootedObject target(cx, getTargetObject(wrapper));
     JSAutoRealm ar(cx, target);
-    JS_MarkCrossZoneId(cx, id);
+    RootedId wrappedId(cx, id);
+    if (!JS_WrapId(cx, &wrappedId)) {
+      return false;
+    }
     Rooted<Maybe<PropertyDescriptor>> desc(cx);
-    if (!getOwnPropertyFromTargetIfSafe(cx, target, wrapper, wrapperGlobal, id,
-                                        &desc)) {
+    if (!getOwnPropertyFromTargetIfSafe(cx, target, wrapper, wrapperGlobal,
+                                        wrappedId, &desc)) {
       return false;
     }
     if (desc.isSome()) {
-      return JS_DeletePropertyById(cx, target, id, result);
+      return JS_DeletePropertyById(cx, target, wrappedId, result);
     }
   }
   return result.succeed();
@@ -862,9 +878,12 @@ bool JSXrayTraits::defineProperty(
 
     Rooted<PropertyDescriptor> wrappedDesc(cx, desc);
     JSAutoRealm ar(cx, target);
-    JS_MarkCrossZoneId(cx, id);
+    RootedId wrappedId(cx, id);
+    if (!JS_WrapId(cx, &wrappedId)) {
+      return false;
+    }
     if (!JS_WrapPropertyDescriptor(cx, &wrappedDesc) ||
-        !JS_DefinePropertyById(cx, target, id, wrappedDesc, result)) {
+        !JS_DefinePropertyById(cx, target, wrappedId, wrappedDesc, result)) {
       return false;
     }
     *defined = true;
@@ -882,8 +901,11 @@ bool JSXrayTraits::defineProperty(
       IsArrayIndex(GetArrayIndexFromId(id))) {
     RootedObject target(cx, getTargetObject(wrapper));
     JSAutoRealm ar(cx, target);
-    JS_MarkCrossZoneId(cx, id);
-    if (!JS_DefinePropertyById(cx, target, id, desc, result)) {
+    RootedId wrappedId(cx, id);
+    if (!JS_WrapId(cx, &wrappedId)) {
+      return false;
+    }
+    if (!JS_DefinePropertyById(cx, target, wrappedId, desc, result)) {
       return false;
     }
     *defined = true;
@@ -974,7 +996,9 @@ bool JSXrayTraits::enumerateNames(JSContext* cx, HandleObject wrapper,
         }
       }
       for (size_t i = 0; i < props.length(); ++i) {
-        JS_MarkCrossZoneId(cx, props[i]);
+        if (!JS_WrapId(cx, props[i])) {
+          return false;
+        }
       }
       return true;
     }
@@ -1563,8 +1587,11 @@ bool XrayTraits::resolveOwnProperty(
   // in the target compartment.
   if (expando) {
     JSAutoRealm ar(cx, expando);
-    JS_MarkCrossZoneId(cx, id);
-    if (!JS_GetOwnPropertyDescriptorById(cx, expando, id, desc)) {
+    RootedId wrappedId(cx, id);
+    if (!JS_WrapId(cx, &wrappedId)) {
+      return false;
+    }
+    if (!JS_GetOwnPropertyDescriptorById(cx, expando, wrappedId, desc)) {
       return false;
     }
   }
@@ -1895,7 +1922,7 @@ static bool RecreateLostWaivers(JSContext* cx, const PropertyDescriptor* orig,
     rewaived = &wrapped.value().toObject();
     rewaived = WrapperFactory::WaiveXray(cx, UncheckedUnwrap(rewaived));
     NS_ENSURE_TRUE(rewaived, false);
-    wrapped.value().set(ObjectValue(*rewaived));
+    wrapped.value().setObject(*rewaived);
   }
   if (getterWasWaived && !IsCrossCompartmentWrapper(wrapped.getter())) {
     // We can't end up with WindowProxy or Location as getters.
@@ -1974,7 +2001,10 @@ bool XrayWrapper<Base, Traits>::defineProperty(JSContext* cx,
   // We're placing an expando. The expando objects live in the target
   // compartment, so we need to enter it.
   JSAutoRealm ar(cx, target);
-  JS_MarkCrossZoneId(cx, id);
+  RootedId wrappedId(cx, id);
+  if (!JS_WrapId(cx, &wrappedId)) {
+    return false;
+  }
 
   // Wrap the property descriptor for the target compartment.
   Rooted<PropertyDescriptor> wrappedDesc(cx, desc);
@@ -1987,7 +2017,8 @@ bool XrayWrapper<Base, Traits>::defineProperty(JSContext* cx,
     return false;
   }
 
-  return JS_DefinePropertyById(cx, expandoObject, id, wrappedDesc, result);
+  return JS_DefinePropertyById(cx, expandoObject, wrappedId, wrappedDesc,
+                               result);
 }
 
 template <typename Base, typename Traits>
@@ -2014,13 +2045,16 @@ bool XrayWrapper<Base, Traits>::delete_(JSContext* cx, HandleObject wrapper,
 
   if (expando) {
     JSAutoRealm ar(cx, expando);
-    JS_MarkCrossZoneId(cx, id);
+    RootedId wrappedId(cx, id);
+    if (!JS_WrapId(cx, &wrappedId)) {
+      return false;
+    }
     bool hasProp;
-    if (!JS_HasPropertyById(cx, expando, id, &hasProp)) {
+    if (!JS_HasPropertyById(cx, expando, wrappedId, &hasProp)) {
       return false;
     }
     if (hasProp) {
-      return JS_DeletePropertyById(cx, expando, id, result);
+      return JS_DeletePropertyById(cx, expando, wrappedId, result);
     }
   }
 
@@ -2262,7 +2296,9 @@ bool XrayWrapper<Base, Traits>::getPropertyKeys(
     }
   }
   for (size_t i = 0; i < props.length(); ++i) {
-    JS_MarkCrossZoneId(cx, props[i]);
+    if (!JS_WrapId(cx, props[i])) {
+      return false;
+    }
   }
 
   return Traits::singleton.enumerateNames(cx, wrapper, flags, props);

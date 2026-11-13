@@ -2,27 +2,30 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "WakeLockListener.h"
+
 #include <queue>
 
-#include "WakeLockListener.h"
 #include "WidgetUtilsGtk.h"
-#include "prenv.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
+#include "nsContentUtils.h"
 #include "nsIStringBundle.h"
 #include "nsReadableUtils.h"
-#include "nsContentUtils.h"
+#include "prenv.h"
 
 #ifdef MOZ_ENABLE_DBUS
 #  include <gio/gio.h>
+
 #  include "AsyncDBus.h"
 #endif
 
 #if defined(MOZ_X11)
-#  include "prlink.h"
 #  include <gdk/gdk.h>
 #  include <gdk/gdkx.h>
+
 #  include "X11UndefineNone.h"
+#  include "prlink.h"
 #endif
 
 #if defined(MOZ_WAYLAND)
@@ -1092,15 +1095,22 @@ WakeLockListener::~WakeLockListener() {
 }
 
 void WakeLockListener::SetState(const nsAString& topic, bool aBackground,
-                                bool aInhibit) {
+                                bool aInhibit, bool aCreateNewTask) {
   WAKE_LOCK_LOG(
       "WakeLockListener::SetState() topic %s background %d inhibit %d",
       NS_ConvertUTF16toUTF8(topic).get(), aBackground, aInhibit);
 
   nsRefPtrHashtable<nsStringHashKey, WakeLockTopic>* topicTable =
       aBackground ? &mBackgroundTopics : &mForegroundTopics;
-  RefPtr<WakeLockTopic> topicLock = topicTable->LookupOrInsertWith(
-      topic, [&] { return MakeRefPtr<WakeLockTopic>(topic, aBackground); });
+  RefPtr<WakeLockTopic> topicLock =
+      aCreateNewTask
+          ? topicTable->LookupOrInsertWith(
+                topic,
+                [&] { return MakeRefPtr<WakeLockTopic>(topic, aBackground); })
+          : topicTable->Get(topic);
+  if (!topicLock) {
+    return;
+  }
 
   if (aInhibit) {
     topicLock->InhibitScreensaver();
@@ -1120,13 +1130,30 @@ nsresult WakeLockListener::Callback(const nsAString& topic,
     return NS_OK;
   }
 
-  bool backgroundLock = state.EqualsLiteral("locked-background");
+  bool backgroundLock = state.EqualsLiteral("locked-background") ||
+                        topic.Equals(u"audio-playing"_ns);
   bool shouldLock = state.EqualsLiteral("locked-background") ||
                     state.EqualsLiteral("locked-foreground");
 
+  // A backgrounded video-playing lock must not hold a system suspend inhibitor
+  // (Bug 2057365).
+  //
+  // A muted autoplay video in a background tab/subframe still takes the
+  // "video-playing" wake lock, because that lock is gated on having an audio
+  // track, not on being audible. GTK then escalates a backgrounded video lock
+  // to a GNOME SUSPEND inhibitor, blocking system sleep with no user-visible
+  // signal (the tab shows no sound indicator). GTK is the only backend that
+  // does this -- macOS/Windows/Android all release the video lock once it is
+  // backgrounded. Genuinely audible background playback is covered by the
+  // separate "audio-playing" topic, so holding no inhibitor here is safe.
+  if (backgroundLock && topic.Equals(u"video-playing"_ns)) {
+    shouldLock = false;
+  }
+
   // If there's a switch between lock types (background / foreground) we need to
   // un-inhibit a complementary one.
-  SetState(topic, !backgroundLock, /* aInhibited */ false);
+  SetState(topic, !backgroundLock, /* aInhibited */ false,
+           /* aCreateNewTask */ false);
 
   // And set requested one accordingly. Uninhibit state doesn't hold
   // foreground/background state so release both.

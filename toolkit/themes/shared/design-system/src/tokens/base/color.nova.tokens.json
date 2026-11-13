@@ -385,7 +385,7 @@
           "nativeTheme": "AccentColor",
           "light": "{color.violet.50}",
           "dark": "{color.violet.30}",
-          "forcedColors": "AccentColor"
+          "forcedColors": "ButtonText"
         }
       },
       "hover": {
@@ -415,8 +415,8 @@
     "attention": {
       "value": {
         "nativeTheme": "AccentColor",
-        "light": "{color.green.40}",
-        "dark": "{color.green.30}",
+        "light": "{color.green.50}",
+        "dark": "{color.green.20}",
         "forcedColors": "AccentColor"
       }
     }

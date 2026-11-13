@@ -6,7 +6,7 @@
 #define GFX_OTS_UTILS_H
 
 #include "gfxFontUtils.h"
-
+#include "mozilla/StaticPrefs_gfx.h"
 #include "opentype-sanitiser.h"
 
 struct gfxOTSMozAlloc {
@@ -28,8 +28,9 @@ class gfxOTSExpandingMemoryStream : public ots::OTSStream {
 
   explicit gfxOTSExpandingMemoryStream(size_t initial,
                                        size_t limit = DEFAULT_LIMIT)
-      : mLength(initial), mLimit(limit), mOff(0) {
+      : mLength(initial < limit ? initial : limit), mLimit(limit), mOff(0) {
     mPtr = mAlloc.Grow(nullptr, mLength);
+    std::memset(mPtr, 0, mLength);
   }
 
   ~gfxOTSExpandingMemoryStream() { mAlloc.Free(mPtr); }
@@ -59,6 +60,7 @@ class gfxOTSExpandingMemoryStream : public ots::OTSStream {
         newLength = mLimit;
       }
       mPtr = mAlloc.Grow(mPtr, newLength);
+      std::memset(static_cast<char*>(mPtr) + mLength, 0, newLength - mLength);
       mLength = newLength;
       return WriteRaw(data, length);
     }

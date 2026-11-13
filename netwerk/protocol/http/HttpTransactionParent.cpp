@@ -3,16 +3,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
-
 #include "HttpTransactionParent.h"
 
+#include "HttpLog.h"
 #include "HttpTrafficAnalyzer.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/net/ChannelEventQueue.h"
 #include "mozilla/net/InputChannelThrottleQueueParent.h"
 #include "mozilla/net/SocketProcessParent.h"
 #include "nsHttpHandler.h"
+#include "nsIRequestContext.h"
 #include "nsIThreadRetargetableStreamListener.h"
 #include "nsITransportSecurityInfo.h"
 #include "nsNetUtil.h"
@@ -21,7 +21,6 @@
 #include "nsSerializationHelper.h"
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
-#include "nsIRequestContext.h"
 
 namespace mozilla::net {
 
@@ -118,7 +117,7 @@ nsresult HttpTransactionParent::Init(
   mChannelId = channelId;
   mTransactionObserver = std::move(transactionObserver);
   mCaps = caps;
-  mConnInfo = cinfo->Clone();
+  mConnInfo = cinfo;
   mIsHttp3Used = cinfo->IsHttp3();
 
   HttpConnectionInfoCloneArgs infoArgs;
@@ -150,11 +149,11 @@ nsresult HttpTransactionParent::Init(
   // TODO: Figure out if we have to implement nsIThreadRetargetableRequest in
   // bug 1544378.
   if (!SendInit(caps, infoArgs, *requestHead, ipcStream, requestContentLength,
-                browserId, trafficCategory, requestContextID, classOfService,
-                initialRwin, responseTimeoutEnabled, mChannelId,
-                !!mTransactionObserver, throttleQueue, mIsDocumentLoad,
-                aParentIpAddressSpace, aLnaPermissionStatus, mRedirectStart,
-                mRedirectEnd)) {
+                mRequestBodyIsStreaming, browserId, trafficCategory,
+                requestContextID, classOfService, initialRwin,
+                responseTimeoutEnabled, mChannelId, !!mTransactionObserver,
+                throttleQueue, mIsDocumentLoad, aParentIpAddressSpace,
+                aLnaPermissionStatus, mRedirectStart, mRedirectEnd)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -425,7 +424,7 @@ bool HttpTransactionParent::Http3Disabled() const {
 
 already_AddRefed<nsHttpConnectionInfo> HttpTransactionParent::GetConnInfo()
     const {
-  RefPtr<nsHttpConnectionInfo> connInfo = mConnInfo->Clone();
+  RefPtr<nsHttpConnectionInfo> connInfo = mConnInfo;
   return connInfo.forget();
 }
 
@@ -873,8 +872,9 @@ HttpTransactionParent::Resume() {
       std::function<void()> callOnResume = nullptr;
       std::swap(callOnResume, mCallOnResume);
       neckoTarget->Dispatch(
-          NS_NewRunnableFunction("net::HttpTransactionParent::mCallOnResume",
-                                 [callOnResume]() { callOnResume(); }),
+          NS_NewRunnableFunction(
+              "net::HttpTransactionParent::mCallOnResume",
+              [callOnResume = std::move(callOnResume)]() { callOnResume(); }),
           NS_DISPATCH_NORMAL);
     }
   }

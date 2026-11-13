@@ -5,6 +5,8 @@
 package mozilla.components.feature.addons.update
 
 import androidx.room.InvalidationTracker
+import java.util.Date
+import kotlinx.coroutines.test.runTest
 import mozilla.components.feature.addons.update.AddonUpdater.Status.SuccessfullyUpdated
 import mozilla.components.feature.addons.update.DefaultAddonUpdater.UpdateAttemptStorage
 import mozilla.components.feature.addons.update.db.UpdateAttemptDao
@@ -15,7 +17,6 @@ import org.junit.Before
 import org.junit.Test
 import org.mockito.Mockito.spy
 import org.mockito.Mockito.verify
-import java.util.Date
 
 class UpdateAttemptStorageTest {
 
@@ -25,29 +26,30 @@ class UpdateAttemptStorageTest {
     @Before
     fun setup() {
         mockDAO = mock()
-        storage = spy(
-            UpdateAttemptStorage(mock()).apply {
-                databaseInitializer = { mockDatabase(mockDAO) }
-            },
-        )
+        storage =
+            spy(
+                UpdateAttemptStorage(mock()).apply {
+                    databaseInitializer = { mockDatabase(mockDAO) }
+                }
+            )
     }
 
     @Test
-    fun `save or update a request`() {
+    fun `save or update a request`() = runTest {
         storage.saveOrUpdate(createNewRequest())
 
         verify(mockDAO).insertOrUpdate(any())
     }
 
     @Test
-    fun `find a request by addonId`() {
+    fun `find a request by addonId`() = runTest {
         storage.findUpdateAttemptBy(addonId = "addonId")
 
         verify(mockDAO).getUpdateAttemptFor("addonId")
     }
 
     @Test
-    fun `remove a request`() {
+    fun `remove a request`() = runTest {
         storage.remove("addonId")
 
         verify(mockDAO).deleteUpdateAttempt(any())
@@ -61,9 +63,12 @@ class UpdateAttemptStorageTest {
         )
     }
 
-    private fun mockDatabase(dao: UpdateAttemptDao) = object : UpdateAttemptsDatabase() {
-        override fun updateAttemptDao() = dao
-        override fun createInvalidationTracker(): InvalidationTracker = mock()
-        override fun clearAllTables() = Unit
-    }
+    private fun mockDatabase(dao: UpdateAttemptDao) =
+        object : UpdateAttemptsDatabase() {
+            override fun updateAttemptDao() = dao
+
+            override fun createInvalidationTracker(): InvalidationTracker = mock()
+
+            override fun clearAllTables() = Unit
+        }
 }

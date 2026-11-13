@@ -483,7 +483,9 @@ export var PushServiceWebSocket = {
       uri.scheme == "ws"
         ? "@mozilla.org/network/protocol;1?name=ws"
         : "@mozilla.org/network/protocol;1?name=wss";
-    let socket = Cc[contractId].createInstance(Ci.nsIWebSocketChannel);
+    let socket = Cc[contractId]
+      .getService(Ci.nsIWebSocketProtocolHandler)
+      .newWebSocketChannel();
 
     socket.initLoadInfo(
       null, // aLoadingNode
@@ -784,6 +786,11 @@ export var PushServiceWebSocket = {
    */
   _handleNotificationReply(reply) {
     lazy.console.debug("handleNotificationReply()");
+    // Not acked on purpose, so the server sends it again next time
+    if (this._mainPushService.ignoresNewMessages) {
+      lazy.console.debug("handleNotificationReply: Ignoring new message");
+      return;
+    }
     if (this._dataEnabled) {
       this._handleDataUpdate(reply);
       return;

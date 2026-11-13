@@ -10,25 +10,18 @@
 
 #include "GMPUtils.h"  // ToHexString
 #include "mozilla/Assertions.h"
-#include "mozilla/CheckedInt.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs_browser.h"
-#include "mozilla/dom/CanonicalBrowsingContext.h"
-#include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/Promise.h"
-#include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/glean/ContentanalysisMetrics.h"
 #include "nsIObserverService.h"
-#include "nsITransferable.h"
 #include "nsString.h"
 #include "nsThreadPool.h"
 
 #include <sstream>
 
 #ifdef XP_WIN
-#  define SECURITY_WIN32 1
-#  include <security.h>
 #  include "mozilla/WinDllServices.h"
 #endif
 
@@ -54,6 +47,7 @@ const char* kClientSignature = "browser.contentanalysis.client_signature";
 const char* kAgentNamePref = "browser.contentanalysis.agent_name";
 const char* kInterceptionPointPrefNames[] = {
     "browser.contentanalysis.interception_point.clipboard.enabled",
+    "browser.contentanalysis.interception_point.clipboard_copy.enabled",
     "browser.contentanalysis.interception_point.download.enabled",
     "browser.contentanalysis.interception_point.drag_and_drop.enabled",
     "browser.contentanalysis.interception_point.file_upload.enabled",
@@ -84,168 +78,29 @@ const uint32_t kShutdownThreadpoolTimeoutMs = 2 * 1000;
 
 namespace mozilla::contentanalysis {
 
-static nsresult ConvertToProtobuf(
-    nsIClientDownloadResource* aIn,
-    content_analysis::sdk::ClientDownloadRequest_Resource* aOut) {
-  nsString url;
-  nsresult rv = aIn->GetUrl(url);
-  NS_ENSURE_SUCCESS(rv, rv);
-  aOut->set_url(NS_ConvertUTF16toUTF8(url).get());
-
-  uint32_t resourceType;
-  rv = aIn->GetType(&resourceType);
-  NS_ENSURE_SUCCESS(rv, rv);
-  aOut->set_type(
-      static_cast<content_analysis::sdk::ClientDownloadRequest_ResourceType>(
-          resourceType));
-
-  return NS_OK;
-}
-
-#if defined(DEBUG)
-static bool IsRequestReadyForAgent(nsIContentAnalysisRequest* aRequest) {
-  NS_ENSURE_TRUE(aRequest, false);
-
-  // The windowGlobal is allowed to be null at this point in gtests (only).
-  // The URL must be set in that case.  We check that below.
-  RefPtr<dom::WindowGlobalParent> windowGlobal;
-  NS_ENSURE_SUCCESS(
-      aRequest->GetWindowGlobalParent(getter_AddRefs(windowGlobal)), false);
-
-  // Any DataTransfer should have been expanded into individual requests.
-  nsCOMPtr<dom::DataTransfer> dataTransfer;
-  NS_ENSURE_SUCCESS(aRequest->GetDataTransfer(getter_AddRefs(dataTransfer)),
-                    false);
-  NS_ENSURE_TRUE(!dataTransfer, false);
-
-  // Any nsITransferable should have been expanded into individual requests.
-  nsCOMPtr<nsITransferable> transferable;
-  NS_ENSURE_SUCCESS(aRequest->GetTransferable(getter_AddRefs(transferable)),
-                    false);
-  NS_ENSURE_TRUE(!transferable, false);
-
-  nsCString userActionId;
-  NS_ENSURE_SUCCESS(aRequest->GetUserActionId(userActionId), false);
-  NS_ENSURE_TRUE(!userActionId.IsEmpty(), false);
-
-  int64_t userActionRequestsCount;
-  NS_ENSURE_SUCCESS(
-      aRequest->GetUserActionRequestsCount(&userActionRequestsCount), false);
-  NS_ENSURE_TRUE(userActionRequestsCount, false);
-
-  nsCOMPtr<nsIURI> url;
-  NS_ENSURE_SUCCESS(aRequest->GetUrl(getter_AddRefs(url)), false);
-  if (!url) {
-    // If no URL is given then we use the one for the window.
-    NS_ENSURE_TRUE(windowGlobal, false);
-    url = ContentAnalysis::GetURIForBrowsingContext(
-        windowGlobal->Canonical()->GetBrowsingContext());
-    NS_ENSURE_TRUE(url, false);
-  }
-
-  return true;
-}
-#endif  // defined(DEBUG)
-
-static nsresult ConvertToProtobuf(
-    nsIContentAnalysisRequest* aIn,
+// Only ExternalAgentBackend needs the print data / file path inline in the
+// protobuf request: it has no other channel to ship this content to the
+// agent process. The WASM backend instead passes file/print content bytes
+// directly to the runner alongside the (shared) request, so it doesn't
+// override this, and, unlike the external agent, isn't limited to Windows for
+// print requests.
+nsresult ExternalAgentBackend::ConvertRequestToProtobuf(
+    nsIContentAnalysisRequest* aRequest,
     content_analysis::sdk::ContentAnalysisRequest* aOut) {
-  MOZ_ASSERT(IsRequestReadyForAgent(aIn));
+  nsresult rv =
+      ContentAnalysisBackend::ConvertRequestToProtobuf(aRequest, aOut);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   nsIContentAnalysisRequest::AnalysisType analysisType;
-  nsresult rv = aIn->GetAnalysisType(&analysisType);
+  rv = aRequest->GetAnalysisType(&analysisType);
   NS_ENSURE_SUCCESS(rv, rv);
-  auto connector =
-      static_cast<content_analysis::sdk::AnalysisConnector>(analysisType);
-  aOut->set_analysis_connector(connector);
-
-  nsIContentAnalysisRequest::Reason reason;
-  rv = aIn->GetReason(&reason);
-  NS_ENSURE_SUCCESS(rv, rv);
-  auto sdkReason =
-      static_cast<content_analysis::sdk::ContentAnalysisRequest::Reason>(
-          reason);
-  aOut->set_reason(sdkReason);
-
-  nsCString requestToken;
-  rv = aIn->GetRequestToken(requestToken);
-  NS_ENSURE_SUCCESS(rv, rv);
-  aOut->set_request_token(requestToken.get(), requestToken.Length());
-  nsCString userActionId;
-  rv = aIn->GetUserActionId(userActionId);
-  NS_ENSURE_SUCCESS(rv, rv);
-  aOut->set_user_action_id(userActionId.get(), userActionId.Length());
-  int64_t userActionRequestsCount;
-  rv = aIn->GetUserActionRequestsCount(&userActionRequestsCount);
-  NS_ENSURE_SUCCESS(rv, rv);
-  aOut->set_user_action_requests_count(userActionRequestsCount);
-
-  int32_t timeout = StaticPrefs::browser_contentanalysis_agent_timeout();
-  // Non-positive timeout values indicate testing, and the test agent does not
-  // care about this value.
-  timeout = std::max(timeout, 1);
-  uint32_t timeoutMultiplier;
-  rv = aIn->GetTimeoutMultiplier(&timeoutMultiplier);
-  NS_ENSURE_SUCCESS(rv, rv);
-  timeoutMultiplier = std::max(timeoutMultiplier, static_cast<uint32_t>(1));
-  auto checkedTimeout = CheckedInt64(time(nullptr)) +
-                        timeout * userActionRequestsCount * timeoutMultiplier;
-  if (!checkedTimeout.isValid()) {
-    return NS_ERROR_FAILURE;
-  }
-  aOut->set_expires_at(checkedTimeout.value());
-
-  const std::string tag = "dlp";  // TODO:
-  *aOut->add_tags() = tag;
 
   auto* requestData = aOut->mutable_request_data();
-
-  RefPtr<dom::WindowGlobalParent> windowGlobal;
-  rv = aIn->GetWindowGlobalParent(getter_AddRefs(windowGlobal));
-  NS_ENSURE_SUCCESS(rv, rv);
-  nsCOMPtr<nsIURI> url;
-  rv = aIn->GetUrl(getter_AddRefs(url));
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (!url) {
-    // We already checked that this exists.
-    MOZ_ASSERT(windowGlobal);
-    // If no URL is given then we use the one for the window.
-    url = ContentAnalysis::GetURIForBrowsingContext(
-        windowGlobal->Canonical()->GetBrowsingContext());
-    // We also already checked for this.
-    MOZ_ASSERT(url);
-  }
-  nsCString urlString;
-  rv = url->GetSpec(urlString);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (!urlString.IsEmpty()) {
-    requestData->set_url(urlString.get());
-  }
-
-  if (windowGlobal) {
-    nsString title;
-    windowGlobal->GetDocumentTitle(title);
-    requestData->set_tab_title(NS_ConvertUTF16toUTF8(title).get());
-  }
-
-  nsString email;
-  rv = aIn->GetEmail(email);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (!email.IsEmpty()) {
-    requestData->set_email(NS_ConvertUTF16toUTF8(email).get());
-  }
-
-  nsCString sha256Digest;
-  rv = aIn->GetSha256Digest(sha256Digest);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (!sha256Digest.IsEmpty()) {
-    requestData->set_digest(sha256Digest.get());
-  }
 
   if (analysisType == nsIContentAnalysisRequest::AnalysisType::ePrint) {
 #if XP_WIN
     nsTArray<uint8_t> printData;
-    MOZ_TRY(aIn->GetPrintData(printData));
+    MOZ_TRY(aRequest->GetPrintData(printData));
     // Copy the PDF bytes into a file-mapping section so the agent can map them
     // into its own process. The agent duplicates this handle out of our process
     // while servicing the request, so the caller must keep the handle open
@@ -268,57 +123,26 @@ static nsresult ConvertToProtobuf(
     aOut->mutable_print_data()->set_size(printData.Length());
 
     nsString printerName;
-    MOZ_TRY(aIn->GetPrinterName(printerName));
+    MOZ_TRY(aRequest->GetPrinterName(printerName));
     requestData->mutable_print_metadata()->set_printer_name(
         NS_ConvertUTF16toUTF8(printerName).get());
+    return NS_OK;
 #else
     return NS_ERROR_NOT_IMPLEMENTED;
 #endif
-  } else {
-    nsString filePath;
-    rv = aIn->GetFilePath(filePath);
-    NS_ENSURE_SUCCESS(rv, rv);
-    if (!filePath.IsEmpty()) {
-      std::string filePathStr = NS_ConvertUTF16toUTF8(filePath).get();
-      aOut->set_file_path(filePathStr);
-      auto filename = filePathStr.substr(filePathStr.find_last_of("/\\") + 1);
-      if (!filename.empty()) {
-        requestData->set_filename(filename);
-      }
-    } else {
-      nsString textContent;
-      rv = aIn->GetTextContent(textContent);
-      NS_ENSURE_SUCCESS(rv, rv);
-      MOZ_ASSERT(!textContent.IsEmpty());
-      aOut->set_text_content(NS_ConvertUTF16toUTF8(textContent).get());
-    }
   }
 
-#ifdef XP_WIN
-  ULONG userLen = 0;
-  GetUserNameExW(NameSamCompatible, nullptr, &userLen);
-  if (GetLastError() == ERROR_MORE_DATA && userLen > 0) {
-    auto user = mozilla::MakeUnique<wchar_t[]>(userLen);
-    if (GetUserNameExW(NameSamCompatible, user.get(), &userLen)) {
-      auto* clientMetadata = aOut->mutable_client_metadata();
-      auto* browser = clientMetadata->mutable_browser();
-      browser->set_machine_user(NS_ConvertUTF16toUTF8(user.get()).get());
-    }
-  }
-#endif
-
-  nsTArray<RefPtr<nsIClientDownloadResource>> resources;
-  rv = aIn->GetResources(resources);
+  nsString filePath;
+  rv = aRequest->GetFilePath(filePath);
   NS_ENSURE_SUCCESS(rv, rv);
-  if (!resources.IsEmpty()) {
-    auto* pbClientDownloadRequest = requestData->mutable_csd();
-    for (auto& nsResource : resources) {
-      rv = ConvertToProtobuf(nsResource.get(),
-                             pbClientDownloadRequest->add_resources());
-      NS_ENSURE_SUCCESS(rv, rv);
+  if (!filePath.IsEmpty()) {
+    std::string filePathStr = NS_ConvertUTF16toUTF8(filePath).get();
+    aOut->set_file_path(filePathStr);
+    auto filename = filePathStr.substr(filePathStr.find_last_of("/\\") + 1);
+    if (!filename.empty()) {
+      requestData->set_filename(filename);
     }
   }
-
   return NS_OK;
 }
 
@@ -431,40 +255,6 @@ static void LogRequest(
 #undef ADD_FIELD
 
   LOGD("%s", ss.str().c_str());
-}
-
-/* static */
-already_AddRefed<ContentAnalysisResponse>
-ExternalAgentBackend::ConvertResponseFromProtobuf(
-    content_analysis::sdk::ContentAnalysisResponse&& aResponse,
-    const nsCString& aUserActionId) {
-  ContentAnalysisResponse::Action action =
-      ContentAnalysisResponse::Action::eUnspecified;
-  for (const auto& result : aResponse.results()) {
-    if (!result.has_status() ||
-        result.status() !=
-            content_analysis::sdk::ContentAnalysisResponse::Result::SUCCESS) {
-      return nullptr;
-    }
-    // The action values increase with severity, so the max is the most severe.
-    for (const auto& rule : result.triggered_rules()) {
-      action = static_cast<ContentAnalysisResponse::Action>(std::max(
-          static_cast<uint32_t>(action), static_cast<uint32_t>(rule.action())));
-    }
-  }
-
-  // If no rules blocked then we should allow.
-  if (action == ContentAnalysisResponse::Action::eUnspecified) {
-    action = ContentAnalysisResponse::Action::eAllow;
-  }
-
-  const auto& requestToken = aResponse.request_token();
-  nsCString requestTokenStr;
-  requestTokenStr.Assign(requestToken.data(), requestToken.size());
-
-  return MakeRefPtr<ContentAnalysisResponse>(action, requestTokenStr,
-                                             aUserActionId)
-      .forget();
 }
 
 static void LogResponse(
@@ -957,19 +747,19 @@ nsresult ExternalAgentBackend::Analyze(
 
   // We will need to submit the request to the agent.
   content_analysis::sdk::ContentAnalysisRequest pbRequest;
-  nsresult rv = ConvertToProtobuf(aRequest, &pbRequest);
+  nsresult rv = ConvertRequestToProtobuf(aRequest, &pbRequest);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // For print requests on Windows, ConvertToProtobuf stored the PDF bytes in a
-  // file-mapping section whose handle now lives in pbRequest. The agent
-  // duplicates that handle out of our process while servicing the request, and
-  // responses can arrive out of order, so the handle must stay open until this
-  // request's response arrives -- not merely until Send() returns. We hand it
-  // to DoAnalyzeRequest, which stores it in the per-request map entry that is
-  // only removed once the matching response is handled. The callable below also
-  // keeps a reference so the handle survives reconnect retries, where that map
-  // entry is briefly removed and re-inserted. Empty on platforms that do not
-  // transport print data via a handle.
+  // For print requests on Windows, ConvertRequestToProtobuf stored the
+  // PDF bytes in a file-mapping section whose handle now lives in pbRequest.
+  // The agent duplicates that handle out of our process while servicing the
+  // request, and responses can arrive out of order, so the handle must stay
+  // open until this request's response arrives -- not merely until Send()
+  // returns. We hand it to DoAnalyzeRequest, which stores it in the per-request
+  // map entry that is only removed once the matching response is handled. The
+  // callable below also keeps a reference so the handle survives reconnect
+  // retries, where that map entry is briefly removed and re-inserted. Empty on
+  // platforms that do not transport print data via a handle.
   std::shared_ptr<void> printDataHandleGuard;
 #ifdef XP_WIN
   if (pbRequest.has_print_data() && pbRequest.print_data().handle()) {

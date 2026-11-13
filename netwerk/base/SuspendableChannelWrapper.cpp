@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SuspendableChannelWrapper.h"
+
 #include "nsIStreamListener.h"
 
 namespace mozilla {
@@ -20,6 +21,11 @@ NS_INTERFACE_MAP_BEGIN(SuspendableChannelWrapper)
   NS_INTERFACE_MAP_ENTRY(nsIChannel)
   NS_INTERFACE_MAP_ENTRY(nsISuspendableChannelWrapper)
 NS_INTERFACE_MAP_END_AGGREGATED(mInnerChannel)
+
+SuspendableChannelWrapper::SuspendableChannelWrapper(nsIChannel* aInnerChannel)
+    : BaseSuspendableChannelWrapper(aInnerChannel) {}
+
+SuspendableChannelWrapper::~SuspendableChannelWrapper() = default;
 
 NS_IMETHODIMP
 SuspendableChannelWrapper::Suspend() {

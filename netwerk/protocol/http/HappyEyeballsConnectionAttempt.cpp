@@ -3,24 +3,24 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
+#include "HappyEyeballsConnectionAttempt.h"
 
 #include <algorithm>
 
-#include "HappyEyeballsConnectionAttempt.h"
 #include "ConnectionEntry.h"
-#include "NSSErrorsService.h"
-#include "mozilla/net/NeckoChannelParams.h"
-#include "mozilla/StaticPrefs_network.h"
-#include "nsIHttpActivityObserver.h"
-#include "PendingTransactionInfo.h"
-#include "nsHttpTransaction.h"
 #include "HttpConnectionUDP.h"
-#include "nsIDNSAdditionalInfo.h"
+#include "HttpLog.h"
+#include "NSSErrorsService.h"
+#include "NetworkConnectivityService.h"
+#include "PendingTransactionInfo.h"
+#include "mozilla/StaticPrefs_network.h"
+#include "mozilla/net/NeckoChannelParams.h"
 #include "nsDNSService2.h"
 #include "nsHttpConnectionMgr.h"
 #include "nsHttpHandler.h"
-#include "NetworkConnectivityService.h"
+#include "nsHttpTransaction.h"
+#include "nsIDNSAdditionalInfo.h"
+#include "nsIHttpActivityObserver.h"
 #include "nsQueryObject.h"
 #include "nsSocketTransport2.h"
 #include "nsSocketTransportService2.h"
@@ -98,6 +98,10 @@ class DefaultHappyEyeballsConnMgrDelegate final
   void ProcessSpdyPendingQ(ConnectionEntry* aEntry) override {
     gHttpHandler->ConnMgr()->ProcessSpdyPendingQ(aEntry);
   }
+  already_AddRefed<ConnectionEntry> HandOffHttp3OnlyConnection(
+      HttpConnectionBase* aConn, ConnectionEntry* aFromEnt) override {
+    return gHttpHandler->ConnMgr()->HandOffHttp3OnlyConnection(aConn, aFromEnt);
+  }
   void InsertIntoActiveConns(ConnectionEntry* aEntry,
                              HttpConnectionBase* aConn) override {
     aEntry->InsertIntoActiveConns(aConn);
@@ -123,15 +127,14 @@ class DefaultHappyEyeballsConnMgrDelegate final
                                nsHttpTransaction* aTrans) override {
     return aEntry->RemoveTransFromPendingQ(aTrans);
   }
-  nsresult StartRetryWithoutTRR(ConnectionEntry* aEntry,
-                                nsHttpTransaction* aTrans, uint32_t aCaps,
-                                bool aSpeculative, bool aUrgentStart,
-                                bool aAllow1918) override {
+  nsresult StartRetry(ConnectionEntry* aEntry, nsHttpTransaction* aTrans,
+                      uint32_t aCaps, bool aSpeculative, bool aUrgentStart,
+                      bool aAllow1918, bool aRetryWithoutTRR) override {
     RefPtr<PendingTransactionInfo> pendingTransInfo =
         new PendingTransactionInfo(aTrans);
     return aEntry->CreateDnsAndConnectSocket(
         aTrans, aCaps, aSpeculative, aUrgentStart, aAllow1918, pendingTransInfo,
-        /* retryWithoutTRR = */ true);
+        aRetryWithoutTRR);
   }
 };
 
@@ -145,11 +148,11 @@ HappyEyeballsConnectionAttempt::HappyEyeballsConnectionAttempt(
       mZeroRttHandle(new ZeroRttHandle(this)) {
   LOG(("HappyEyeballsConnectionAttempt ctor %p retryWithoutTRR=%d", this,
        retryWithoutTRR));
-  if (mConnInfo->GetRoutedHost().IsEmpty()) {
-    mHost = mConnInfo->GetOrigin();
-  } else {
-    mHost = mConnInfo->GetRoutedHost();
-  }
+  // mHost is the origin host: the base Happy Eyeballs resolves and falls back
+  // to. An alt-svc route's alternate host is passed to Happy Eyeballs as an
+  // alt-svc entry (see CreateHappyEyeballs) so it is attempted ahead of, but
+  // still falls back to, the origin.
+  mHost = mConnInfo->GetOrigin();
 
   NotifyConnectionActivity(
       mConnInfo, mSpeculative
@@ -192,47 +195,48 @@ nsresult HappyEyeballsConnectionAttempt::CreateHappyEyeballs(
   // enabled by prefs, so disabled protocols are never raced (from HTTPS
   // records, IP hints, or alt-svc). NS_HTTP_DISALLOW_HTTP3 is set for
   // transactions that can't use HTTP/3 (e.g. WebSocket upgrades), so honor it
-  // here too.
+  // here too. An http3Only conn info (eager Alt-Svc h3 validation) must not
+  // race h1/h2: the point is to warm an h3 connection, and racing could settle
+  // on h2 instead.
+  const bool http3Only = mConnInfo->GetHttp3Only();
   happy_eyeballs::HttpVersions httpVersions{
-      /* h1 */ true,
-      /* h2 */ StaticPrefs::network_http_http2_enabled(),
+      /* h1 */ !http3Only,
+      /* h2 */ !http3Only && StaticPrefs::network_http_http2_enabled(),
       /* h3 */ nsHttpHandler::IsHttp3Enabled() &&
           !(mCaps & NS_HTTP_DISALLOW_HTTP3),
   };
 
   LOG(("CreateHappyEyeballs ipPref=%d", static_cast<uint32_t>(ipPref)));
 
-  // An explicit HTTP/3 connection info (an alt-svc HTTP/3 route, or a direct
-  // HTTP/3 connection such as WebTransport) must race HTTP/3. When there's an
-  // alt-svc route the HTTP/3 port is the routed port; for a direct HTTP/3
-  // connection (no routed host) it's the origin port. This is checked before
-  // the routed-host-empty case below so direct HTTP/3 connections aren't
-  // mistakenly raced over TCP.
-  if (mConnInfo->IsHttp3()) {
-    LOG(("HappyEyeballsConnectionAttempt for HTTP/3"));
-    nsTArray<happy_eyeballs::AltSvc> altSvcArray;
+  // Happy Eyeballs always resolves and races the origin (mHost / origin port)
+  // as the baseline. An alt-svc route is expressed as an alt-svc entry that
+  // names the alternate host, port and protocol, so the engine attempts the
+  // alternate ahead of the origin but still falls back to the origin if the
+  // alternate is unreachable (bug 2052534).
+  const uint16_t originPort = static_cast<uint16_t>(mConnInfo->OriginPort());
+  const nsCString& routedHost = mConnInfo->GetRoutedHost();
+
+  // Add an alt-svc entry when the connection must race HTTP/3 (an explicit
+  // HTTP/3 connection info: an alt-svc HTTP/3 route, or a direct HTTP/3
+  // connection such as WebTransport) or when there is an HTTP/2 alt-svc route.
+  // A routed host names the alternate; without one (a direct HTTP/3 connection)
+  // the entry carries only the protocol and the state machine races the origin
+  // over HTTP/3 at the origin port.
+  nsTArray<happy_eyeballs::AltSvc> altSvcArray;
+  const bool isHttp3 = mConnInfo->IsHttp3();
+  if (isHttp3 || !routedHost.IsEmpty()) {
     happy_eyeballs::AltSvc altsvc{};
-    altsvc.http_version = happy_eyeballs::HttpVersion::H3;
-    altsvc.port = mConnInfo->GetRoutedHost().IsEmpty()
-                      ? static_cast<uint16_t>(mConnInfo->OriginPort())
-                      : static_cast<uint16_t>(mConnInfo->RoutedPort());
-    altSvcArray.AppendElement(altsvc);
-    return HappyEyeballs::Init(getter_AddRefs(mHappyEyeballs), mHost,
-                               static_cast<uint16_t>(mConnInfo->OriginPort()),
-                               &altSvcArray, ipPref, httpVersions);
+    altsvc.http_version = isHttp3 ? happy_eyeballs::HttpVersion::H3
+                                  : happy_eyeballs::HttpVersion::H2;
+    if (!routedHost.IsEmpty()) {
+      altsvc.host = routedHost;
+      altsvc.port = static_cast<uint16_t>(mConnInfo->RoutedPort());
+    }
+    altSvcArray.AppendElement(std::move(altsvc));
   }
 
-  if (mConnInfo->GetRoutedHost().IsEmpty()) {
-    nsTArray<happy_eyeballs::AltSvc> emptyAltSvc;
-    return HappyEyeballs::Init(getter_AddRefs(mHappyEyeballs), mHost,
-                               static_cast<uint16_t>(mConnInfo->OriginPort()),
-                               &emptyAltSvc, ipPref, httpVersions);
-  }
-
-  nsTArray<happy_eyeballs::AltSvc> emptyAltSvc;
-  return HappyEyeballs::Init(getter_AddRefs(mHappyEyeballs), mHost,
-                             static_cast<uint16_t>(mConnInfo->RoutedPort()),
-                             &emptyAltSvc, ipPref, httpVersions);
+  return HappyEyeballs::Init(getter_AddRefs(mHappyEyeballs), mHost, originPort,
+                             &altSvcArray, ipPref, httpVersions);
 }
 
 nsresult HappyEyeballsConnectionAttempt::Init(ConnectionEntry* ent) {
@@ -268,6 +272,25 @@ static Result<NetAddr, nsresult> ToNetAddr(
   }
 
   return addr;
+}
+
+// Inverse of ToNetAddr. The engine takes addresses as happy_eyeballs::IpAddr
+// rather than NetAddr, so cbindgen lays the element out for both sides. Every
+// caller already knows the family, so there is no error case here.
+static happy_eyeballs::IpAddr ToIpAddrV4(const NetAddr& aAddr) {
+  MOZ_ASSERT(aAddr.raw.family == AF_INET);
+  happy_eyeballs::IpAddr ip{};
+  ip.tag = happy_eyeballs::IpAddr::Tag::V4;
+  memcpy(ip.v4._0, &aAddr.inet.ip, 4);
+  return ip;
+}
+
+static happy_eyeballs::IpAddr ToIpAddrV6(const NetAddr& aAddr) {
+  MOZ_ASSERT(aAddr.raw.family == AF_INET6);
+  happy_eyeballs::IpAddr ip{};
+  ip.tag = happy_eyeballs::IpAddr::Tag::V6;
+  memcpy(ip.v6._0, &aAddr.inet6.ip, 16);
+  return ip;
 }
 
 HappyEyeballsConnectionAttempt::ConnResultOutcome
@@ -546,7 +569,8 @@ nsresult HappyEyeballsConnectionAttempt::ProcessHappyEyeballsOutput() {
         LOG(("HappyEyeballsEvent::Tag::SendDnsQuery id=%" PRIu64 " hostname=%s",
              event.send_dns_query.id, dnsHostname.get()));
         DNSLookup(event.send_dns_query.record_type,
-                  SetupDnsFlags(event.send_dns_query.record_type),
+                  SetupDnsFlags(event.send_dns_query.record_type,
+                                event.send_dns_query.allow_stale),
                   event.send_dns_query.id, dnsHostname);
         break;
       }
@@ -617,6 +641,10 @@ nsresult HappyEyeballsConnectionAttempt::ProcessHappyEyeballsOutput() {
           RetryWithoutTRR();
           return NS_OK;
         }
+        if (ShouldRetryForLocalAddress(event.failed.reason)) {
+          RetryForLocalAddress();
+          return NS_OK;
+        }
         TransitionPayload payload;
         payload.mFailureReason = Some(event.failed.reason);
         Transition(State::Failed, std::move(payload));
@@ -635,7 +663,7 @@ nsresult HappyEyeballsConnectionAttempt::ProcessHappyEyeballsOutput() {
 
 Result<nsIDNSService::DNSFlags, nsresult>
 HappyEyeballsConnectionAttempt::SetupDnsFlags(
-    happy_eyeballs::DnsRecordType aType) {
+    happy_eyeballs::DnsRecordType aType, bool aAllowStale) {
   LOG(("HappyEyeballsConnectionAttempt::SetupDnsFlags [this=%p aType=%d] ",
        this, static_cast<uint32_t>(aType)));
 
@@ -643,6 +671,15 @@ HappyEyeballsConnectionAttempt::SetupDnsFlags(
 
   if (mCaps & NS_HTTP_REFRESH_DNS) {
     dnsFlags = nsIDNSService::RESOLVE_BYPASS_CACHE;
+  }
+
+  // Optimistic DNS: happy-eyeballs sends this query to revalidate an answer it
+  // received from a stale (expired) cache entry, so it must not be served from
+  // that same stale entry. Bypassing the cache forces a fresh lookup; the stale
+  // entry is left in place so concurrent consumers can still use it while the
+  // revalidation is in flight.
+  if (!aAllowStale) {
+    dnsFlags |= nsIDNSService::RESOLVE_BYPASS_CACHE;
   }
 
   // Fallback attempt after TRR-resolved addresses failed to connect: bypass TRR
@@ -844,7 +881,7 @@ void HappyEyeballsConnectionAttempt::DNSLookup(
   }
 
   // Notify the state machine about DNS failure asynchronously.
-  NS_DispatchToCurrentThread(
+  DispatchToCurrent(
       NS_NewRunnableFunction("HappyEyeballsConnectionAttempt::DNSLookup",
                              [self = RefPtr{this}, rv, aType, aId]() {
                                switch (aType) {
@@ -889,6 +926,10 @@ void HappyEyeballsConnectionAttempt::HandleConnectionResult(
   RefPtr<ConnectionEstablisher> establisher = aEstablisher;
   mConnectionEstablisherTable.Remove(aId);
   NetAddr addr = establisher->Addr();
+
+  // A local establisher refuses synchronously in Start() and never reaches
+  // here, so this means an establisher actually attempted a connection.
+  mAllAttemptsRefusedLocal = false;
 
   LOG((
       "HappyEyeballsConnectionAttempt::HandleConnectionResult %p addr=[%s] "
@@ -1016,8 +1057,10 @@ nsresult HappyEyeballsConnectionAttempt::EstablishTCPConnection(
   RefPtr<nsHttpConnectionInfo> info = mConnInfo->CloneAndAdoptPortAndAlpn(
       aPort, happy_eyeballs::ConnectionAttemptHttpVersions::H2OrH1);
   if (!aEchConfig.IsEmpty()) {
-    info->SetEchConfig(
-        nsCString((const char*)aEchConfig.Elements(), aEchConfig.Length()));
+    info = info->Mutate()
+               .SetEchConfig(nsCString((const char*)aEchConfig.Elements(),
+                                       aEchConfig.Length()))
+               .Finalize();
     NotifyConnectionActivity(info, NS_HTTP_ACTIVITY_SUBTYPE_ECH_SET);
   }
   NotifyConnectionActivity(info, NS_HTTP_ACTIVITY_SUBTYPE_CONNECTION_CREATED);
@@ -1051,7 +1094,17 @@ nsresult HappyEyeballsConnectionAttempt::EstablishTCPConnection(
   if (establisher->Start(std::move(callback))) {
     mConnectionEstablisherTable.InsertOrUpdate(aId, std::move(establisher));
   } else {
-    ProcessConnectionResult(aAddr, NS_ERROR_FAILURE, aId);
+    // Start() refused synchronously. A speculative attempt refuses local
+    // (RFC1918) peers; surface it as a refusal and remember it so a later Claim
+    // can retry with local addresses allowed.
+    nsresult reason = NS_ERROR_FAILURE;
+    if (establisher->RefusedForLocalAddress()) {
+      mLocalAddrRefused = true;
+      reason = NS_ERROR_CONNECTION_REFUSED;
+    } else {
+      mAllAttemptsRefusedLocal = false;
+    }
+    ProcessConnectionResult(aAddr, reason, aId);
   }
 
   return NS_OK;
@@ -1063,8 +1116,10 @@ nsresult HappyEyeballsConnectionAttempt::EstablishUDPConnection(
   RefPtr<nsHttpConnectionInfo> info = mConnInfo->CloneAndAdoptPortAndAlpn(
       aPort, happy_eyeballs::ConnectionAttemptHttpVersions::H3);
   if (!aEchConfig.IsEmpty()) {
-    info->SetEchConfig(
-        nsCString((const char*)aEchConfig.Elements(), aEchConfig.Length()));
+    info = info->Mutate()
+               .SetEchConfig(nsCString((const char*)aEchConfig.Elements(),
+                                       aEchConfig.Length()))
+               .Finalize();
     NotifyConnectionActivity(info, NS_HTTP_ACTIVITY_SUBTYPE_ECH_SET);
   }
   NotifyConnectionActivity(info, NS_HTTP_ACTIVITY_SUBTYPE_CONNECTION_CREATED);
@@ -1091,7 +1146,17 @@ nsresult HappyEyeballsConnectionAttempt::EstablishUDPConnection(
   if (establisher->Start(std::move(callback))) {
     mConnectionEstablisherTable.InsertOrUpdate(aId, std::move(establisher));
   } else {
-    ProcessConnectionResult(aAddr, NS_ERROR_FAILURE, aId);
+    // Start() refused synchronously. A speculative attempt refuses local
+    // (RFC1918) peers; surface it as a refusal and remember it so a later Claim
+    // can retry with local addresses allowed.
+    nsresult reason = NS_ERROR_FAILURE;
+    if (establisher->RefusedForLocalAddress()) {
+      mLocalAddrRefused = true;
+      reason = NS_ERROR_CONNECTION_REFUSED;
+    } else {
+      mAllAttemptsRefusedLocal = false;
+    }
+    ProcessConnectionResult(aAddr, reason, aId);
   }
 
   return NS_OK;
@@ -1206,19 +1271,20 @@ bool HappyEyeballsConnectionAttempt::ShouldRetryWithoutTRR(
   return true;
 }
 
-void HappyEyeballsConnectionAttempt::RetryWithoutTRR() {
+void HappyEyeballsConnectionAttempt::DoRetry(bool aRetryWithoutTRR,
+                                             const char* aLogTag) {
   RefPtr<HappyEyeballsConnectionAttempt> self(this);
   RefPtr<ConnectionEntry> entry(mEntry);
   RefPtr<nsHttpTransaction> realTrans = RealHttpTransaction();
-  LOG(("HappyEyeballsConnectionAttempt::RetryWithoutTRR %p trans=%p", this,
+  LOG(("HappyEyeballsConnectionAttempt::%s %p trans=%p", aLogTag, this,
        realTrans.get()));
   MOZ_ASSERT(entry && realTrans);
 
-  // Start a fresh attempt that re-resolves this transaction with TRR disabled.
-  nsresult rv = mConnMgrDelegate->StartRetryWithoutTRR(
-      entry, realTrans, mCaps, mSpeculative, mUrgentStart, mAllow1918);
+  nsresult rv =
+      mConnMgrDelegate->StartRetry(entry, realTrans, mCaps, mSpeculative,
+                                   mUrgentStart, mAllow1918, aRetryWithoutTRR);
   if (NS_FAILED(rv)) {
-    LOG(("  StartRetryWithoutTRR failed rv=%" PRIx32 "; failing normally",
+    LOG(("  %s: StartRetry failed rv=%" PRIx32 "; failing normally", aLogTag,
          static_cast<uint32_t>(rv)));
     TransitionPayload payload;
     payload.mFailureReason = Some(happy_eyeballs::FailureReason::Connection);
@@ -1230,6 +1296,38 @@ void HappyEyeballsConnectionAttempt::RetryWithoutTRR() {
   // can't close or re-queue it, then remove ourselves and abandon.
   ForgetRealTransaction();
   mConnMgrDelegate->RemoveConnectionAttempt(entry, this, /* abandon = */ true);
+}
+
+void HappyEyeballsConnectionAttempt::RetryWithoutTRR() {
+  // Start a fresh attempt that re-resolves this transaction with TRR disabled.
+  DoRetry(/* aRetryWithoutTRR = */ true, "RetryWithoutTRR");
+}
+
+bool HappyEyeballsConnectionAttempt::ShouldRetryForLocalAddress(
+    happy_eyeballs::FailureReason aReason) const {
+  // A speculative attempt must not open a connection to a local (RFC1918) peer:
+  // that would let a remote origin use a preconnect/speculative connection to
+  // probe the user's local network before any real navigation (Local Network
+  // Access). So while speculative the establisher refuses local peers outright
+  // rather than "just connecting" -- there is no safe way to speculatively
+  // reach a local address. Claim() lifts that restriction (mAllow1918 becomes
+  // true) once a real transaction takes over, but an establisher may already
+  // have refused the peer before the claim raced in, leaving the attempt
+  // terminally failed. This retry recovers that case.
+  //
+  // Retry only when every attempt was a local-peer refusal and the attempt has
+  // since been claimed (mAllow1918 true, so a non-speculative attempt never
+  // qualifies) with a real transaction to reconnect. The fresh retry allows
+  // local addresses, so it can't refuse again or loop.
+  return aReason == happy_eyeballs::FailureReason::Connection &&
+         mLocalAddrRefused && mAllAttemptsRefusedLocal && mAllow1918 &&
+         RealHttpTransaction();
+}
+
+void HappyEyeballsConnectionAttempt::RetryForLocalAddress() {
+  // Start a fresh attempt for this transaction; mAllow1918 is now true, so the
+  // establisher no longer refuses the local peer.
+  DoRetry(/* aRetryWithoutTRR = */ false, "RetryForLocalAddress");
 }
 
 void HappyEyeballsConnectionAttempt::Abandon() {
@@ -1335,28 +1433,6 @@ void HappyEyeballsConnectionAttempt::ProcessUDPConn(
   LOG(("Got connUDP:%p transactionAlreadyOnConn=%d", aConn,
        aTransactionAlreadyOnConn));
 
-  if (!mFirstConnectionStart.IsNull()) {
-    TimingStruct connectTimings;
-    FillConnectTimings(/* aIsQuic = */ true, connectTimings);
-    aConn->SetConnectBootstrapTimings(
-        connectTimings.connectStart, connectTimings.tcpConnectEnd,
-        connectTimings.secureConnectionStart, connectTimings.connectEnd);
-
-    if (aTransactionAlreadyOnConn) {
-      // Activate already ran before timings were set on the connection,
-      // so transfer them directly to the transaction.
-      // mTransaction may be null if restartedFallback0Rtt cleared it.
-      nsHttpTransaction* trans =
-          mTransaction ? mTransaction->QueryHttpTransaction() : nullptr;
-      if (trans) {
-        TimingStruct timings;
-        DnsLookupTimings(timings.domainLookupStart, timings.domainLookupEnd);
-        FillConnectTimings(/* aIsQuic = */ true, timings);
-        trans->BootstrapTimings(timings);
-      }
-    }
-  }
-
   mConnMgrDelegate->InsertIntoActiveConns(entry, aConn);
 
   if (!aTransactionAlreadyOnConn) {
@@ -1392,8 +1468,21 @@ void HappyEyeballsConnectionAttempt::ProcessUDPConn(
     }
   }
 
+  // An h3-only attempt (eager Alt-Svc h3 validation) deliberately runs in its
+  // own connection entry so the speculative, TCP-less race cannot be claimed
+  // by normal transactions to the origin. What it produces is an ordinary h3
+  // connection to the origin though, so once it is established hand it over to
+  // the origin's entry.
+  RefPtr<ConnectionEntry> reportEntry = entry;
+  if (entry->mConnInfo->GetHttp3Only()) {
+    if (RefPtr<ConnectionEntry> originEntry =
+            mConnMgrDelegate->HandOffHttp3OnlyConnection(aConn, entry)) {
+      reportEntry = originEntry;
+    }
+  }
+
   aConn->SetIsRacing(false);
-  mConnMgrDelegate->ReportHttp3Connection(aConn, entry);
+  mConnMgrDelegate->ReportHttp3Connection(aConn, reportEntry);
 }
 
 void HappyEyeballsConnectionAttempt::EnterSucceeded() {
@@ -1421,21 +1510,16 @@ void HappyEyeballsConnectionAttempt::EnterSucceeded() {
   if (!dnsLookupStart.IsNull()) {
     mOutputConn->SetDnsBootstrapTimings(dnsLookupStart, dnsLookupEnd);
   }
-
-  // Build the real transaction's timings from the first-racer domainLookup
-  // and connect spans (rather than the winning attempt's own collected
-  // timings) before dispatch. We preserve transactionPending explicitly —
-  // BootstrapTimings does a full struct overwrite, and DispatchTransaction
-  // will read the pending time to record wait-time metrics.
-  if (mOutputTrans && mTransaction) {
-    if (nsHttpTransaction* realTransaction =
-            mTransaction->QueryHttpTransaction()) {
-      TimingStruct timings;
-      DnsLookupTimings(timings.domainLookupStart, timings.domainLookupEnd);
-      FillConnectTimings(/* aIsQuic = */ mOutputConn->UsingHttp3(), timings);
-      timings.transactionPending = realTransaction->GetPendingTime();
-      realTransaction->BootstrapTimings(timings);
-    }
+  // Record the first-racer connect spans (rather than the winning attempt's own
+  // collected timings) on the connection: it outlives this attempt and hands
+  // them to the transaction it gets activated with.
+  if (!mFirstConnectionStart.IsNull()) {
+    TimingStruct connectTimings;
+    FillConnectTimings(/* aIsQuic = */ mOutputConn->UsingHttp3(),
+                       connectTimings);
+    mOutputConn->SetConnectBootstrapTimings(
+        connectTimings.connectStart, connectTimings.tcpConnectEnd,
+        connectTimings.secureConnectionStart, connectTimings.connectEnd);
   }
   mOutputTrans = nullptr;
 
@@ -1501,6 +1585,17 @@ void HappyEyeballsConnectionAttempt::EnterSucceeded() {
   // re-inserted trans will be dispatched by ReportSpdyConnection →
   // ProcessPendingQ once the conn is in the active pool.
   bool alreadyOnConn = mZeroRttHandle->HadWinner() || restartedFallback0Rtt;
+
+  // A transaction that adopted 0-RTT on mOutputConn is already running there,
+  // so Activate has been and gone: hand it the connect phase now. Any other
+  // transaction is either about to be activated on mOutputConn, which hands it
+  // over, or was dispatched onto a different connection while we were
+  // connecting -- this attempt's spans would then describe a connect phase that
+  // never happened for it (bug 2046698).
+  if (alreadyOnConn && mTransaction) {
+    mOutputConn->HandOffConnectPhase(mTransaction);
+  }
+
   if (!mOutputConn->UsingHttp3()) {
     // If the original request had an alt-svc route but a direct TCP
     // connection won, remove the Alt-Used header since we're not using
@@ -1905,9 +2000,17 @@ nsresult HappyEyeballsConnectionAttempt::OnARecord(nsIDNSRecord* aRecord,
       mOriginDnsLookupIds.Remove(aId);
       MaybeBuildOriginCoalescingKeys();
     }
-    nsTArray<NetAddr> emptyArray;
-    rv =
-        happy_eyeballs_process_dns_response_a(mHappyEyeballs, aId, &emptyArray);
+    // A negative answer can be served from a stale (grace-period) cache entry;
+    // report that so the state machine revalidates it (optimistic DNS). The
+    // record is available even on failure because the lookup used
+    // RESOLVE_WANT_RECORD_ON_ERROR.
+    bool fromStaleCache = false;
+    if (addrRecord) {
+      (void)addrRecord->GetFromStaleCache(&fromStaleCache);
+    }
+    nsTArray<happy_eyeballs::IpAddr> emptyArray;
+    rv = happy_eyeballs_process_dns_response_a(
+        mHappyEyeballs, aId, &emptyArray, mDnsMetadata.mIsTRR, fromStaleCache);
     if (NS_FAILED(rv)) {
       return rv;
     }
@@ -1919,10 +2022,12 @@ nsresult HappyEyeballsConnectionAttempt::OnARecord(nsIDNSRecord* aRecord,
 
   // Filter to only IPv4 addresses
   nsTArray<NetAddr> ipv4Addresses;
+  nsTArray<happy_eyeballs::IpAddr> ipv4IpAddrs;
   for (const auto& addr : addresses) {
     if (addr.raw.family == AF_INET) {
       LOG(("Addr=[%s]", addr.ToString().get()));
       ipv4Addresses.AppendElement(addr);
+      ipv4IpAddrs.AppendElement(ToIpAddrV4(addr));
     }
   }
 
@@ -1932,8 +2037,11 @@ nsresult HappyEyeballsConnectionAttempt::OnARecord(nsIDNSRecord* aRecord,
     MaybeBuildOriginCoalescingKeys();
   }
 
-  rv = happy_eyeballs_process_dns_response_a(mHappyEyeballs, aId,
-                                             &ipv4Addresses);
+  bool aFromStaleCache = false;
+  (void)addrRecord->GetFromStaleCache(&aFromStaleCache);
+
+  rv = happy_eyeballs_process_dns_response_a(
+      mHappyEyeballs, aId, &ipv4IpAddrs, mDnsMetadata.mIsTRR, aFromStaleCache);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -1962,9 +2070,15 @@ nsresult HappyEyeballsConnectionAttempt::OnAAAARecord(nsIDNSRecord* aRecord,
       mOriginDnsLookupIds.Remove(aId);
       MaybeBuildOriginCoalescingKeys();
     }
-    nsTArray<NetAddr> emptyArray;
-    rv = happy_eyeballs_process_dns_response_aaaa(mHappyEyeballs, aId,
-                                                  &emptyArray);
+    // See OnARecord: a stale (grace-period) negative must be reported as such
+    // so the state machine revalidates it.
+    bool fromStaleCache = false;
+    if (addrRecord) {
+      (void)addrRecord->GetFromStaleCache(&fromStaleCache);
+    }
+    nsTArray<happy_eyeballs::IpAddr> emptyArray;
+    rv = happy_eyeballs_process_dns_response_aaaa(
+        mHappyEyeballs, aId, &emptyArray, mDnsMetadata.mIsTRR, fromStaleCache);
     if (NS_FAILED(rv)) {
       return rv;
     }
@@ -1976,10 +2090,12 @@ nsresult HappyEyeballsConnectionAttempt::OnAAAARecord(nsIDNSRecord* aRecord,
 
   // Filter to only IPv6 addresses
   nsTArray<NetAddr> ipv6Addresses;
+  nsTArray<happy_eyeballs::IpAddr> ipv6IpAddrs;
   for (const auto& addr : addresses) {
     if (addr.raw.family == AF_INET6) {
       LOG(("Addr=[%s]", addr.ToString().get()));
       ipv6Addresses.AppendElement(addr);
+      ipv6IpAddrs.AppendElement(ToIpAddrV6(addr));
     }
   }
 
@@ -1989,8 +2105,12 @@ nsresult HappyEyeballsConnectionAttempt::OnAAAARecord(nsIDNSRecord* aRecord,
     MaybeBuildOriginCoalescingKeys();
   }
 
-  rv = happy_eyeballs_process_dns_response_aaaa(mHappyEyeballs, aId,
-                                                &ipv6Addresses);
+  bool aaaaFromStaleCache = false;
+  (void)addrRecord->GetFromStaleCache(&aaaaFromStaleCache);
+
+  rv = happy_eyeballs_process_dns_response_aaaa(
+      mHappyEyeballs, aId, &ipv6IpAddrs, mDnsMetadata.mIsTRR,
+      aaaaFromStaleCache);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -2050,14 +2170,26 @@ nsresult HappyEyeballsConnectionAttempt::OnHTTPSRecord(nsIDNSRecord* aRecord,
        this, static_cast<uint32_t>(status), aId));
   nsCOMPtr<nsIDNSHTTPSSVCRecord> httpsRecord = do_QueryInterface(aRecord);
   if (!httpsRecord || NS_FAILED(status)) {
+    // A stale (grace-period) negative must be reported as such so the state
+    // machine revalidates it (optimistic DNS).
+    bool fromStaleCache = false;
+    if (nsCOMPtr<nsIDNSByTypeRecord> byTypeRec = do_QueryInterface(aRecord)) {
+      (void)byTypeRec->GetFromStaleCache(&fromStaleCache);
+    }
     nsTArray<happy_eyeballs::ServiceInfo> emptyArray;
     (void)happy_eyeballs_process_dns_response_https(
-        mHappyEyeballs, aId, &emptyArray, mDnsMetadata.mIsTRR);
+        mHappyEyeballs, aId, &emptyArray, mDnsMetadata.mIsTRR, fromStaleCache);
     return ProcessHappyEyeballsOutput();
   }
 
   bool httpsIsTRR = false;
   (void)httpsRecord->IsTRR(&httpsIsTRR);
+
+  bool httpsFromStaleCache = false;
+  if (nsCOMPtr<nsIDNSByTypeRecord> byTypeRec = do_QueryInterface(aRecord)) {
+    (void)byTypeRec->GetFromStaleCache(&httpsFromStaleCache);
+  }
+
   if (httpsIsTRR) {
     mDnsMetadata.mIsTRR = true;
     mDnsMetadata.mEffectiveTRRMode =
@@ -2075,8 +2207,8 @@ nsresult HappyEyeballsConnectionAttempt::OnHTTPSRecord(nsIDNSRecord* aRecord,
   (void)httpsRecord->GetRecords(svcbRecords);
   if (svcbRecords.IsEmpty()) {
     nsTArray<happy_eyeballs::ServiceInfo> emptyArray;
-    (void)happy_eyeballs_process_dns_response_https(mHappyEyeballs, aId,
-                                                    &emptyArray, httpsIsTRR);
+    (void)happy_eyeballs_process_dns_response_https(
+        mHappyEyeballs, aId, &emptyArray, httpsIsTRR, httpsFromStaleCache);
     return ProcessHappyEyeballsOutput();
   }
 
@@ -2150,20 +2282,20 @@ nsresult HappyEyeballsConnectionAttempt::OnHTTPSRecord(nsIDNSRecord* aRecord,
     for (const auto& addr : ipv4Hint) {
       NetAddr netAddr;
       addr->GetNetAddr(&netAddr);
-      svcInfo.ipv4_hints.AppendElement(netAddr);
+      svcInfo.ipv4_hints.AppendElement(ToIpAddrV4(netAddr));
     }
 
     for (const auto& addr : ipv6Hint) {
       NetAddr netAddr;
       addr->GetNetAddr(&netAddr);
-      svcInfo.ipv6_hints.AppendElement(netAddr);
+      svcInfo.ipv6_hints.AppendElement(ToIpAddrV6(netAddr));
     }
 
     serviceInfos.AppendElement(std::move(svcInfo));
   }
 
-  (void)happy_eyeballs_process_dns_response_https(mHappyEyeballs, aId,
-                                                  &serviceInfos, httpsIsTRR);
+  (void)happy_eyeballs_process_dns_response_https(
+      mHappyEyeballs, aId, &serviceInfos, httpsIsTRR, httpsFromStaleCache);
   return ProcessHappyEyeballsOutput();
 }
 

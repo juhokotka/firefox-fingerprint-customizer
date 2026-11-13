@@ -2,22 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsIDragService.h"
-#include "nsWidgetsCID.h"
 #include "nsNativeDragTarget.h"
-#include "nsDragService.h"
-#include "nsINode.h"
-#include "nsCOMPtr.h"
 
-#include "nsIWidget.h"
-#include "nsWindow.h"
-#include "nsClipboard.h"
 #include "KeyboardLayout.h"
-
+#include "mozilla/MouseEvents.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/MouseEventBinding.h"
-#include "mozilla/MouseEvents.h"
 #include "mozilla/widget/WidgetLogging.h"
+#include "nsCOMPtr.h"
+#include "nsClipboard.h"
+#include "nsDragService.h"
+#include "nsIDragService.h"
+#include "nsINode.h"
+#include "nsIWidget.h"
+#include "nsWidgetsCID.h"
+#include "nsWindow.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -284,13 +283,13 @@ nsNativeDragTarget::DragEnter(LPDATAOBJECT pIDataSource, DWORD grfKeyState,
   nsresult loadResult = nsClipboard::GetNativeDataOffClipboard(
       pIDataSource, 0, ::RegisterClipboardFormat(CFSTR_PREFERREDDROPEFFECT),
       nullptr, &tempOutData, &tempDataLen);
-  if (NS_SUCCEEDED(loadResult) && tempOutData) {
+  if (NS_SUCCEEDED(loadResult) && tempOutData && tempDataLen >= sizeof(DWORD)) {
     mEffectsPreferred = *((DWORD*)tempOutData);
-    free(tempOutData);
   } else {
     // We have no preference if we can't obtain it
     mEffectsPreferred = DROPEFFECT_NONE;
   }
+  free(tempOutData);
   LOGD(
       "[%p] %s | grfKeyState: %lu | ptl: (%ld, %ld) | mEffectsAllowed: %lu"
       " | mEffectsPreferred: %lu",

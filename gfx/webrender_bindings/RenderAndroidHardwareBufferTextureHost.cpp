@@ -4,14 +4,14 @@
 
 #include "RenderAndroidHardwareBufferTextureHost.h"
 
-#include "mozilla/layers/AndroidHardwareBuffer.h"
-#include "mozilla/layers/TextureHostOGL.h"
-#include "mozilla/webrender/RenderThread.h"
-#include "mozilla/gfx/2D.h"
 #include "GLContextEGL.h"
 #include "GLLibraryEGL.h"
 #include "GLReadTexImageHelper.h"
 #include "OGLShaderConfig.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/layers/AndroidHardwareBuffer.h"
+#include "mozilla/layers/TextureHostOGL.h"
+#include "mozilla/webrender/RenderThread.h"
 
 namespace mozilla {
 namespace wr {
@@ -55,7 +55,7 @@ bool RenderAndroidHardwareBufferTextureHost::EnsureLockable() {
                               fenceFd.get(), LOCAL_EGL_NONE};
 
     EGLSync sync =
-        egl->fCreateSync(LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
+        egl->fCreateSyncKHR(LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
     if (sync) {
       // Release fd here, since it is owned by EGLSync
       (void)fenceFd.release();
@@ -147,7 +147,10 @@ void RenderAndroidHardwareBufferTextureHost::DeleteTextureHandle() {
     return;
   }
   MOZ_ASSERT(mGL);
-  mGL->fDeleteTextures(1, &mTextureHandle);
+  // Deferred destruction may run with a different GL context current.
+  if (mGL->MakeCurrent()) {
+    mGL->fDeleteTextures(1, &mTextureHandle);
+  }
   mTextureHandle = 0;
 }
 

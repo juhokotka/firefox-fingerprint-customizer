@@ -706,13 +706,40 @@ void CustomElementRegistry::EnqueueLifecycleCallback(
 }
 
 using ScopedRegistryMap =
-    nsRefPtrHashtable<nsPtrHashKey<nsINode>, CustomElementRegistry>;
+    nsRefPtrHashtable<nsPtrHashKey<const nsINode>, CustomElementRegistry>;
 
 static StaticAutoPtr<ScopedRegistryMap> gScopedRegistryMap;
 
+// The per-node flag mirrors gScopedRegistryMap membership; only
+// SetScopedRegistry and RemoveScopedRegistry may flip it.
+static bool HasScopedRegistryFlag(const nsINode& aNode) {
+  if (const Element* element = Element::FromNode(aNode)) {
+    return element->GetCustomElementRegistryState() ==
+           CustomElementRegistryState::Scoped;
+  }
+  if (const ShadowRoot* shadowRoot = ShadowRoot::FromNode(aNode)) {
+    return shadowRoot->GetCustomElementRegistryState() ==
+           CustomElementRegistryState::Scoped;
+  }
+  return aNode.IsDocument() &&
+         aNode.AsDocument()->HasScopedCustomElementRegistry();
+}
+
+static void SetScopedRegistryFlag(nsINode& aNode, bool aScoped) {
+  const auto state = aScoped ? CustomElementRegistryState::Scoped
+                             : CustomElementRegistryState::Global;
+  if (Element* element = Element::FromNode(aNode)) {
+    element->SetCustomElementRegistryState(state);
+  } else if (ShadowRoot* shadowRoot = ShadowRoot::FromNode(aNode)) {
+    shadowRoot->SetCustomElementRegistryState(state);
+  } else {
+    aNode.AsDocument()->SetHasScopedCustomElementRegistry(aScoped);
+  }
+}
+
 /* static */
 already_AddRefed<CustomElementRegistry>
-CustomElementRegistry::GetScopedRegistry(nsINode& aNode) {
+CustomElementRegistry::GetScopedRegistry(const nsINode& aNode) {
   if (!gScopedRegistryMap) {
     return nullptr;
   }
@@ -727,18 +754,29 @@ CustomElementRegistry::GetScopedRegistry(nsINode& aNode) {
 void CustomElementRegistry::SetScopedRegistry(
     nsINode& aNode, CustomElementRegistry& aRegistry) {
   MOZ_ASSERT(aRegistry.IsScoped());
+  MOZ_ASSERT(!HasScopedRegistryFlag(aNode),
+             "We shouldn't override an already assigned scoped registry");
+  MOZ_ASSERT(!IsInScopedRegistryMap(aNode),
+             "Registry map entry without the scoped flag");
   if (!gScopedRegistryMap) {
     gScopedRegistryMap = new ScopedRegistryMap();
     ClearOnShutdown(&gScopedRegistryMap);
   }
   gScopedRegistryMap->InsertOrUpdate(&aNode, &aRegistry);
+  SetScopedRegistryFlag(aNode, true);
 }
 
 /* static */
 void CustomElementRegistry::RemoveScopedRegistry(nsINode& aNode) {
+  if (!HasScopedRegistryFlag(aNode)) {
+    return;
+  }
+  MOZ_ASSERT(!gScopedRegistryMap || gScopedRegistryMap->Contains(&aNode),
+             "Scoped flag without a registry map entry");
   if (gScopedRegistryMap) {
     gScopedRegistryMap->Remove(&aNode);
   }
+  SetScopedRegistryFlag(aNode, false);
 }
 
 /* static */
@@ -746,23 +784,38 @@ bool CustomElementRegistry::IsInScopedRegistryMap(nsINode& aNode) {
   return gScopedRegistryMap && gScopedRegistryMap->Contains(&aNode);
 }
 
+/* https://html.spec.whatwg.org/#scoped-document-set */
+void CustomElementRegistry::AddToScopedDocumentSet(Document* aDoc) {
+  MOZ_ASSERT(mIsScoped);
+  MOZ_ASSERT(aDoc);
+  nsWeakPtr weak = do_GetWeakReference(aDoc);
+  if (!weak) {
+    return;
+  }
+  // Ordered set: only append if not already present.
+  for (const auto& entry : mScopedDocumentSet) {
+    if (entry.get() == weak.get()) {
+      return;
+    }
+  }
+  mScopedDocumentSet.AppendElement(std::move(weak));
+}
+
 namespace {
 
 class CandidateFinder {
  public:
-  CandidateFinder(nsTHashSet<RefPtr<nsIWeakReference>>& aCandidates,
-                  Document* aDoc);
-  nsTArray<nsCOMPtr<Element>> OrderedCandidates();
+  explicit CandidateFinder(nsTHashSet<RefPtr<nsIWeakReference>>& aCandidates);
+  void CollectCandidatesFromDocument(Document* aDoc,
+                                     nsTArray<nsCOMPtr<Element>>& aResult);
 
  private:
-  nsCOMPtr<Document> mDoc;
   nsInterfaceHashtable<nsPtrHashKey<Element>, Element> mCandidates;
 };
 
 CandidateFinder::CandidateFinder(
-    nsTHashSet<RefPtr<nsIWeakReference>>& aCandidates, Document* aDoc)
-    : mDoc(aDoc), mCandidates(aCandidates.Count()) {
-  MOZ_ASSERT(mDoc);
+    nsTHashSet<RefPtr<nsIWeakReference>>& aCandidates)
+    : mCandidates(aCandidates.Count()) {
   for (const auto& candidate : aCandidates) {
     nsCOMPtr<Element> elem = do_QueryReferent(candidate);
     if (!elem) {
@@ -774,17 +827,18 @@ CandidateFinder::CandidateFinder(
   }
 }
 
-nsTArray<nsCOMPtr<Element>> CandidateFinder::OrderedCandidates() {
+void CandidateFinder::CollectCandidatesFromDocument(
+    Document* aDoc, nsTArray<nsCOMPtr<Element>>& aResult) {
+  MOZ_ASSERT(aDoc);
   if (mCandidates.Count() == 1) {
-    // Fast path for one candidate.
     auto iter = mCandidates.Iter();
-    nsTArray<nsCOMPtr<Element>> rval({std::move(iter.Data())});
-    iter.Remove();
-    return rval;
+    if (iter.Data()->GetComposedDoc() == aDoc) {
+      aResult.AppendElement(std::move(iter.Data()));
+      iter.Remove();
+    }
+    return;
   }
-
-  nsTArray<nsCOMPtr<Element>> orderedElements(mCandidates.Count());
-  for (nsINode* node : ShadowIncludingTreeIterator(*mDoc)) {
+  for (nsINode* node : ShadowIncludingTreeIterator(*aDoc)) {
     Element* element = Element::FromNode(node);
     if (!element) {
       continue;
@@ -792,19 +846,18 @@ nsTArray<nsCOMPtr<Element>> CandidateFinder::OrderedCandidates() {
 
     nsCOMPtr<Element> elem;
     if (mCandidates.Remove(element, getter_AddRefs(elem))) {
-      orderedElements.AppendElement(std::move(elem));
+      aResult.AppendElement(std::move(elem));
       if (mCandidates.Count() == 0) {
         break;
       }
     }
   }
-
-  return orderedElements;
 }
 
 }  // namespace
 
-// https://html.spec.whatwg.org/#upgrade-particular-elements-within-a-document
+/* https://html.spec.whatwg.org/#upgrade-particular-elements-within-a-document
+ */
 void CustomElementRegistry::UpgradeCandidates(
     nsAtom* aKey, CustomElementDefinition* aDefinition, ErrorResult& aRv) {
   DocGroup* docGroup = mWindow->GetDocGroup();
@@ -818,19 +871,35 @@ void CustomElementRegistry::UpgradeCandidates(
   //    whose namespace is the HTML namespace, and whose local name is
   //    localName, in shadow-including tree order. Additionally, if name is not
   //    localName, only include elements whose is value is equal to name.
-  // TODO(keithamus): The "whose custom element registry is registry" filter is
-  // not yet implemented (scoped registries).
   mozilla::UniquePtr<nsTHashSet<RefPtr<nsIWeakReference>>> candidates;
   if (mCandidatesMap.Remove(aKey, &candidates)) {
     MOZ_ASSERT(candidates);
     CustomElementReactionsStack* reactionsStack =
         docGroup->CustomElementReactionsStack();
 
-    CandidateFinder finder(*candidates, mWindow->GetExtantDoc());
-    // 2. For each element element of upgradeCandidates: enqueue a custom
-    //    element upgrade reaction given element and definition.
-    for (auto& elem : finder.OrderedCandidates()) {
-      reactionsStack->EnqueueUpgradeReaction(elem, aDefinition);
+    CandidateFinder finder(*candidates);
+
+    auto enqueue = [&](nsTArray<nsCOMPtr<Element>>& aElements) {
+      for (auto& elem : aElements) {
+        reactionsStack->EnqueueUpgradeReaction(elem, aDefinition);
+      }
+    };
+    if (mIsScoped && !mScopedDocumentSet.IsEmpty()) {
+      for (const auto& weakDoc : mScopedDocumentSet) {
+        nsCOMPtr<Document> doc = do_QueryReferent(weakDoc);
+        if (!doc) {
+          continue;
+        }
+        nsTArray<nsCOMPtr<Element>> ordered;
+        finder.CollectCandidatesFromDocument(doc, ordered);
+        // 2. For each element element of upgradeCandidates: enqueue a custom
+        //    element upgrade reaction given element and definition.
+        enqueue(ordered);
+      }
+    } else {
+      nsTArray<nsCOMPtr<Element>> ordered;
+      finder.CollectCandidatesFromDocument(mWindow->GetExtantDoc(), ordered);
+      enqueue(ordered);
     }
   }
 }
@@ -1290,7 +1359,7 @@ void CustomElementRegistry::SetElementCreationCallback(
   }
 }
 
-// https://html.spec.whatwg.org/#dom-customelementregistry-upgrade
+/* https://html.spec.whatwg.org/#dom-customelementregistry-upgrade */
 void CustomElementRegistry::Upgrade(nsINode& aRoot) {
   // 1. For each shadow-including inclusive descendant candidate of root, in
   //    shadow-including tree order:
@@ -1301,22 +1370,17 @@ void CustomElementRegistry::Upgrade(nsINode& aRoot) {
       continue;
     }
 
-    // TODO(keithamus): 1.2. If candidate's custom element registry is not this,
-    // then continue. Not yet implemented -- we don't check the element's
-    // registry against |this|. We always look up via the document's registry
-    // (scoped registries).
+    // 1.2. If candidate's custom element registry is not this, then continue.
+    if (StaticPrefs::dom_scoped_custom_element_registries_enabled()) {
+      if (element->GetCustomElementRegistry() != this) {
+        continue;
+      }
+    }
+
     CustomElementData* ceData = element->GetCustomElementData();
     if (ceData) {
       // 1.3. Try to upgrade candidate.
-      NodeInfo* nodeInfo = element->NodeInfo();
-      nsAtom* typeAtom = ceData->GetCustomElementType();
-      CustomElementDefinition* definition =
-          nsContentUtils::LookupCustomElementDefinition(
-              nodeInfo->GetDocument(), nodeInfo->NameAtom(),
-              nodeInfo->NamespaceID(), typeAtom);
-      if (definition) {
-        nsContentUtils::EnqueueUpgradeReaction(element, definition);
-      }
+      nsContentUtils::TryToUpgradeElement(element);
     }
   }
 }
@@ -1351,8 +1415,7 @@ void CustomElementRegistry::Initialize(nsINode& aRoot, ErrorResult& aRv) {
   if (aRoot.IsDocument()) {
     Document* doc = aRoot.AsDocument();
     if (!doc->GetCustomElementRegistry()) {
-      doc->SetHasScopedCustomElementRegistry(true);
-      CustomElementRegistry::SetScopedRegistry(*doc, *this);
+      SetScopedRegistry(*doc, *this);
     }
   } else if (ShadowRoot* shadowRoot = ShadowRoot::FromNode(aRoot)) {
     if (!shadowRoot->GetCustomElementRegistry()) {
@@ -1373,10 +1436,10 @@ void CustomElementRegistry::Initialize(nsINode& aRoot, ErrorResult& aRv) {
     // Step 4.2: If inclusiveDescendant's custom element registry is null:
     if (!registry) {
       // Step 4.2.1: Set inclusiveDescendant's custom element registry to this.
+      // Step 4.2.2: If this's is scoped is true, then append
+      //             inclusiveDescendant's node document to this's scoped
+      //             document set.
       element->SetCustomElementRegistry(this);
-      // TODO(keithamus, bug 2018913): Step 4.2.2: If this's is scoped is true,
-      // then append inclusiveDescendant's node document to this's scoped
-      // document set.
     } else if (registry != this) {
       // Step 4.3: If inclusiveDescendant's custom element registry is not this,
       //           then continue.
@@ -1536,6 +1599,11 @@ void CustomElementRegistry::Upgrade(Element* aElement,
   CustomElementData* data = aElement->GetCustomElementData();
   MOZ_ASSERT(data, "CustomElementData should exist");
 
+  DocGroup* docGroup = aElement->OwnerDoc()->GetDocGroup();
+  if (!docGroup) {
+    return;
+  }
+
   // 1. If element's custom element state is not "undefined" or "uncustomized",
   //    then return.
   if (data->mState != CustomElementData::State::eUndefined) {
@@ -1590,14 +1658,34 @@ void CustomElementRegistry::Upgrade(Element* aElement,
   // 6. Add element to the end of definition's construction stack.
   AutoConstructionStackEntry acs(aDefinition->mConstructionStack, aElement);
 
-  // XXX: Steps 7-9 performed by DoUpgrade:
   // 7. Let C be definition's constructor.
-  // TODO(keithamus): 8. Set the active custom element constructor map[C] to
-  // element's custom element registry. Not yet using element's registry (scoped
-  // registries).
-  // 9. Run the following steps while catching any exceptions:
-  DoUpgrade(aElement, aDefinition, MOZ_KnownLive(aDefinition->mConstructor),
-            aRv);
+
+  // 8. Let previousRegistry be the surrounding agent's active custom element
+  //    constructor map[C] with default null.
+  // 9. Set the surrounding agent's active custom element constructor map[C] to
+  //    element's custom element registry.
+  {
+    Maybe<DocGroup::AutoActiveConstructorRegistry> activeRegistry;
+    if (StaticPrefs::dom_scoped_custom_element_registries_enabled()) {
+      activeRegistry.emplace(docGroup, aDefinition->mConstructor,
+                             aElement->GetCustomElementRegistry());
+    }
+
+    // 10. Run the following steps while catching any exceptions:
+    DoUpgrade(aElement, aDefinition, MOZ_KnownLive(aDefinition->mConstructor),
+              aRv);
+
+    // 9.x. Then, perform the following steps, regardless of whether the above
+    //      steps threw an exception or not:
+    //
+    // 9.x.1. If previousRegistry is null, then remove the surrounding agent's
+    //        active custom element constructor map[C].
+    // 9.x.2. Otherwise, set the surrounding agent 's active custom element
+    //        constructor map[C] to previousRegistry.
+    // (Handled by `activeRegistry`'s destructor during scope exit).
+  }
+
+  // 9.x. Finally, if the above steps threw an exception:
   if (aRv.Failed()) {
     MOZ_ASSERT(data->mState == CustomElementData::State::eFailed ||
                data->mState == CustomElementData::State::ePrecustomized);

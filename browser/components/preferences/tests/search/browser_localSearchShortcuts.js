@@ -2,8 +2,7 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 /**
- * Checks the local shortcut rows in the engines list of the search pane
- * with the settings redesign enabled.
+ * Checks the local shortcut rows in the engines list of the search pane.
  */
 
 "use strict";
@@ -24,7 +23,7 @@ add_task(async function test_visible_rows() {
 
   Assert.equal(
     engineList.children.length,
-    engines.length + UrlbarUtils.LOCAL_SEARCH_MODES.length,
+    engines.length + UrlbarShared.LOCAL_SEARCH_MODES.length,
     "Expected number of rows"
   );
 

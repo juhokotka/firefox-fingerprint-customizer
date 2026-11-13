@@ -247,11 +247,52 @@ export class SuggestProvider extends SuggestFeature {
    * be handled by implementing `onEngagement()` with the possible exception of
    * commands automatically handled by the urlbar, like "help".
    *
+   * @param {UrlbarResult} _result
+   *   The result to get menu commands for.
    * @returns {?UrlbarResultCommand[]}
    */
-  getResultCommand() {
+  getResultCommands(_result) {
     return undefined;
   }
+
+  /**
+   * If the feature's results are dynamic, the subclass should override this
+   * and return the view template, per `UrlbarProvider.getViewTemplate()`.
+   *
+   * @param {UrlbarResult} _result
+   * @returns {?object}
+   */
+  getViewTemplate(_result) {
+    return undefined;
+  }
+
+  /**
+   * If the feature's results are dynamic, the subclass should override this
+   * and return the view update, per `UrlbarProvider.getViewUpdate()`.
+   *
+   * @param {UrlbarResult} _result
+   * @param {UrlbarParentController} _controller
+   * @returns {?object}
+   */
+  getViewUpdate(_result, _controller) {
+    return undefined;
+  }
+
+  /**
+   * Whether the "show less frequently" result-menu command should still be
+   * offered. Subclasses that support the command override this.
+   *
+   * @returns {boolean}
+   */
+  get canShowLessFrequently() {
+    return false;
+  }
+
+  /**
+   * Bumps the count backing `canShowLessFrequently`. Subclasses that support the
+   * "show less frequently" command override this.
+   */
+  incrementShowLessFrequentlyCount() {}
 
   /**
    * The subclass should override this method if it manages any sponsored
@@ -319,7 +360,7 @@ export class SuggestProvider extends SuggestFeature {
    *   The urlbar session's query context.
    * @param {UrlbarParentController} controller
    *   The controller.
-   * @param {Array} featureResults
+   * @param {{index: number, result: UrlbarResult}[]} featureResults
    *   The feature's results that were visible at the end of the session. This
    *   will always be non-empty and will only contain results from the feature.
    * @param {object|null} details
@@ -366,6 +407,28 @@ export class SuggestProvider extends SuggestFeature {
   }
 
   // Methods not designed for overriding below
+
+  /**
+   * Handles the shared "show less frequently" result-menu command: acknowledges
+   * the feedback, increments the provider's count, and once the cap is reached
+   * refreshes the result's baked menu commands so the command is dropped from
+   * the still-open view. Subclasses call this from `onEngagement()`.
+   *
+   * @param {UrlbarParentController} controller
+   *   The engagement's controller.
+   * @param {UrlbarResult} result
+   *   The result the command acted on.
+   */
+  handleShowLessFrequently(controller, result) {
+    controller.view.acknowledgeFeedback(result.id);
+    this.incrementShowLessFrequentlyCount();
+    if (!this.canShowLessFrequently) {
+      controller.view.updateResultMenuCommands(
+        result.id,
+        this.getResultCommands(result)
+      );
+    }
+  }
 
   /**
    * Enables or disables the feature. If the feature manages any Rust suggestion

@@ -4,7 +4,6 @@
 package org.mozilla.focus.cfr
 
 import mozilla.components.browser.state.action.ContentAction
-import mozilla.components.browser.state.action.CookieBannerAction
 import mozilla.components.browser.state.action.TabListAction
 import mozilla.components.browser.state.action.TrackingProtectionAction
 import mozilla.components.browser.state.state.BrowserState
@@ -25,7 +24,6 @@ import org.mockito.Mockito.spy
 import org.mockito.Mockito.verify
 import org.mockito.MockitoAnnotations
 import org.mozilla.experiments.nimbus.internal.FeatureHolder
-import org.mozilla.focus.cookiebanner.CookieBannerOption
 import org.mozilla.focus.nimbus.Onboarding
 import org.mozilla.focus.state.AppAction
 import org.mozilla.focus.state.AppState
@@ -34,19 +32,15 @@ import org.mozilla.focus.utils.Settings
 
 class CfrMiddlewareTest {
 
-    @Mock
-    private lateinit var onboardingExperiment: FeatureHolder<Onboarding>
+    @Mock private lateinit var onboardingExperiment: FeatureHolder<Onboarding>
 
-    @Mock
-    private lateinit var onboardingConfig: Onboarding
+    @Mock private lateinit var onboardingConfig: Onboarding
 
-    @Mock
-    private lateinit var appStore: AppStore
+    @Mock private lateinit var appStore: AppStore
 
     private lateinit var appState: AppState
 
-    @Mock
-    private lateinit var settings: Settings
+    @Mock private lateinit var settings: Settings
     private lateinit var browserStore: BrowserStore
     private lateinit var cfrMiddleware: CfrMiddleware
 
@@ -56,11 +50,7 @@ class CfrMiddlewareTest {
         whenever(onboardingExperiment.value()).thenReturn(onboardingConfig)
         whenever(onboardingConfig.isCfrEnabled).thenReturn(true)
 
-        whenever(settings.isFirstRun).thenReturn(false)
         whenever(settings.shouldShowCfrForTrackingProtection).thenReturn(true)
-        whenever(settings.shouldShowCookieBannerCfr).thenReturn(true)
-        whenever(settings.isCookieBannerEnable).thenReturn(true)
-        whenever(settings.getCurrentCookieBannerOptionFromSharePref()).thenReturn(CookieBannerOption.CookieBannerRejectAll())
 
         val defaultScreen = org.mozilla.focus.state.Screen.Home
         appState = AppState(screen = defaultScreen, showEraseTabsCfr = false)
@@ -68,12 +58,11 @@ class CfrMiddlewareTest {
 
         cfrMiddleware = spy(CfrMiddleware(appStore, settings) { onboardingExperiment })
 
-        browserStore = BrowserStore(
-            initialState = BrowserState(
-                tabs = listOf(),
-            ),
-            middleware = listOf(cfrMiddleware),
-        )
+        browserStore =
+            BrowserStore(
+                initialState = BrowserState(tabs = listOf()),
+                middleware = listOf(cfrMiddleware),
+            )
     }
 
     @Test
@@ -84,20 +73,21 @@ class CfrMiddlewareTest {
         browserStore.dispatch(TabListAction.AddTabAction(tab))
         browserStore.dispatch(TabListAction.SelectTabAction(tab.id))
 
-        val trackerBlockedAction = TrackingProtectionAction.TrackerBlockedAction(
-            tabId = "1",
-            tracker = Tracker(
-                url = "test.org",
-                trackingCategories = listOf(EngineSession.TrackingProtectionPolicy.TrackingCategory.CRYPTOMINING),
-                cookiePolicies = listOf(EngineSession.TrackingProtectionPolicy.CookiePolicy.ACCEPT_NONE),
-            ),
-        )
+        val trackerBlockedAction =
+            TrackingProtectionAction.TrackerBlockedAction(
+                tabId = "1",
+                tracker =
+                    Tracker(
+                        url = "test.org",
+                        trackingCategories =
+                            listOf(EngineSession.TrackingProtectionPolicy.TrackingCategory.CRYPTOMINING),
+                        cookiePolicies = listOf(EngineSession.TrackingProtectionPolicy.CookiePolicy.ACCEPT_NONE),
+                    ),
+            )
 
         browserStore.dispatch(trackerBlockedAction)
 
-        verify(appStore).dispatch(
-            AppAction.ShowTrackingProtectionCfrChange(mapOf("1" to true)),
-        )
+        verify(appStore).dispatch(AppAction.ShowTrackingProtectionCfrChange(mapOf("1" to true)))
     }
 
     @Test
@@ -109,28 +99,30 @@ class CfrMiddlewareTest {
         browserStore.dispatch(TabListAction.AddTabAction(insecureTab))
         browserStore.dispatch(TabListAction.SelectTabAction(insecureTab.id))
 
-        val updateSecurityInfoAction = ContentAction.UpdateSecurityInfoAction(
-            "1",
-            SecurityInfo.Insecure(
-                host = "test.org",
-                issuer = "Test",
-            ),
-        )
+        val updateSecurityInfoAction =
+            ContentAction.UpdateSecurityInfoAction(
+                "1",
+                SecurityInfo.Insecure(
+                    host = "test.org",
+                    issuer = "Test",
+                ),
+            )
         browserStore.dispatch(updateSecurityInfoAction)
 
-        val trackerBlockedAction = TrackingProtectionAction.TrackerBlockedAction(
-            tabId = "1",
-            tracker = Tracker(
-                url = "test.org",
-                trackingCategories = listOf(EngineSession.TrackingProtectionPolicy.TrackingCategory.CRYPTOMINING),
-                cookiePolicies = listOf(EngineSession.TrackingProtectionPolicy.CookiePolicy.ACCEPT_NONE),
-            ),
-        )
+        val trackerBlockedAction =
+            TrackingProtectionAction.TrackerBlockedAction(
+                tabId = "1",
+                tracker =
+                    Tracker(
+                        url = "test.org",
+                        trackingCategories =
+                            listOf(EngineSession.TrackingProtectionPolicy.TrackingCategory.CRYPTOMINING),
+                        cookiePolicies = listOf(EngineSession.TrackingProtectionPolicy.CookiePolicy.ACCEPT_NONE),
+                    ),
+            )
         browserStore.dispatch(trackerBlockedAction)
 
-        verify(appStore, never()).dispatch(
-            AppAction.ShowTrackingProtectionCfrChange(mapOf("1" to true)),
-        )
+        verify(appStore, never()).dispatch(AppAction.ShowTrackingProtectionCfrChange(mapOf("1" to true)))
     }
 
     @Test
@@ -142,28 +134,30 @@ class CfrMiddlewareTest {
         browserStore.dispatch(TabListAction.AddTabAction(mozillaTab))
         browserStore.dispatch(TabListAction.SelectTabAction(mozillaTab.id))
 
-        val updateSecurityInfoAction = ContentAction.UpdateSecurityInfoAction(
-            "1",
-            SecurityInfo.Secure(
-                host = "test.org",
-                issuer = "Test",
-            ),
-        )
+        val updateSecurityInfoAction =
+            ContentAction.UpdateSecurityInfoAction(
+                "1",
+                SecurityInfo.Secure(
+                    host = "test.org",
+                    issuer = "Test",
+                ),
+            )
         browserStore.dispatch(updateSecurityInfoAction)
 
-        val trackerBlockedAction = TrackingProtectionAction.TrackerBlockedAction(
-            tabId = "1",
-            tracker = Tracker(
-                url = "test.org",
-                trackingCategories = listOf(EngineSession.TrackingProtectionPolicy.TrackingCategory.CRYPTOMINING),
-                cookiePolicies = listOf(EngineSession.TrackingProtectionPolicy.CookiePolicy.ACCEPT_NONE),
-            ),
-        )
+        val trackerBlockedAction =
+            TrackingProtectionAction.TrackerBlockedAction(
+                tabId = "1",
+                tracker =
+                    Tracker(
+                        url = "test.org",
+                        trackingCategories =
+                            listOf(EngineSession.TrackingProtectionPolicy.TrackingCategory.CRYPTOMINING),
+                        cookiePolicies = listOf(EngineSession.TrackingProtectionPolicy.CookiePolicy.ACCEPT_NONE),
+                    ),
+            )
         browserStore.dispatch(trackerBlockedAction)
 
-        verify(appStore, never()).dispatch(
-            AppAction.ShowTrackingProtectionCfrChange(mapOf("1" to true)),
-        )
+        verify(appStore, never()).dispatch(AppAction.ShowTrackingProtectionCfrChange(mapOf("1" to true)))
     }
 
     @Test
@@ -175,19 +169,20 @@ class CfrMiddlewareTest {
         browserStore.dispatch(TabListAction.AddTabAction(tab))
         browserStore.dispatch(TabListAction.SelectTabAction(tab.id))
 
-        val trackerBlockedAction = TrackingProtectionAction.TrackerBlockedAction(
-            tabId = "1",
-            tracker = Tracker(
-                url = "test.org",
-                trackingCategories = listOf(EngineSession.TrackingProtectionPolicy.TrackingCategory.CRYPTOMINING),
-                cookiePolicies = listOf(EngineSession.TrackingProtectionPolicy.CookiePolicy.ACCEPT_NONE),
-            ),
-        )
+        val trackerBlockedAction =
+            TrackingProtectionAction.TrackerBlockedAction(
+                tabId = "1",
+                tracker =
+                    Tracker(
+                        url = "test.org",
+                        trackingCategories =
+                            listOf(EngineSession.TrackingProtectionPolicy.TrackingCategory.CRYPTOMINING),
+                        cookiePolicies = listOf(EngineSession.TrackingProtectionPolicy.CookiePolicy.ACCEPT_NONE),
+                    ),
+            )
         browserStore.dispatch(trackerBlockedAction)
 
-        verify(appStore, never()).dispatch(
-            AppAction.ShowTrackingProtectionCfrChange(mapOf("1" to true)),
-        )
+        verify(appStore, never()).dispatch(AppAction.ShowTrackingProtectionCfrChange(mapOf("1" to true)))
     }
 
     @Test
@@ -199,97 +194,20 @@ class CfrMiddlewareTest {
         browserStore.dispatch(TabListAction.AddTabAction(tab))
         browserStore.dispatch(TabListAction.SelectTabAction(tab.id))
 
-        val trackerBlockedAction = TrackingProtectionAction.TrackerBlockedAction(
-            tabId = "1",
-            tracker = Tracker(
-                url = "test.org",
-                trackingCategories = listOf(EngineSession.TrackingProtectionPolicy.TrackingCategory.CRYPTOMINING),
-                cookiePolicies = listOf(EngineSession.TrackingProtectionPolicy.CookiePolicy.ACCEPT_NONE),
-            ),
-        )
+        val trackerBlockedAction =
+            TrackingProtectionAction.TrackerBlockedAction(
+                tabId = "1",
+                tracker =
+                    Tracker(
+                        url = "test.org",
+                        trackingCategories =
+                            listOf(EngineSession.TrackingProtectionPolicy.TrackingCategory.CRYPTOMINING),
+                        cookiePolicies = listOf(EngineSession.TrackingProtectionPolicy.CookiePolicy.ACCEPT_NONE),
+                    ),
+            )
         browserStore.dispatch(trackerBlockedAction)
 
-        verify(appStore, never()).dispatch(
-            AppAction.ShowTrackingProtectionCfrChange(mapOf("1" to true)),
-        )
-    }
-
-    @Test
-    fun `GIVEN cookie banner action handled WHEN conditions met THEN show cookie banner CFR`() {
-        val action = CookieBannerAction.UpdateStatusAction(
-            "1",
-            EngineSession.CookieBannerHandlingStatus.HANDLED,
-        )
-
-        whenever(settings.shouldShowCfrForTrackingProtection).thenReturn(false)
-
-        browserStore.dispatch(action)
-
-        verify(appStore).dispatch(AppAction.ShowCookieBannerCfrChange(true))
-    }
-
-    @Test
-    fun `GIVEN cookie banner action not handled WHEN conditions met THEN do not show cookie banner CFR`() {
-        val action = CookieBannerAction.UpdateStatusAction(
-            "1",
-            EngineSession.CookieBannerHandlingStatus.DETECTED,
-        )
-
-        browserStore.dispatch(action)
-
-        verify(appStore, never()).dispatch(AppAction.ShowCookieBannerCfrChange(true))
-    }
-
-    @Test
-    fun `GIVEN cookie banner action handled but first run WHEN conditions met THEN do not show cookie banner CFR`() {
-        whenever(settings.isFirstRun).thenReturn(true)
-        val action = CookieBannerAction.UpdateStatusAction(
-            "1",
-            EngineSession.CookieBannerHandlingStatus.HANDLED,
-        )
-
-        browserStore.dispatch(action)
-
-        verify(appStore, never()).dispatch(AppAction.ShowCookieBannerCfrChange(true))
-    }
-
-    @Test
-    fun `GIVEN cookie banner action handled but setting disabled WHEN conditions met THEN do not show cookie banner CFR`() {
-        whenever(settings.shouldShowCookieBannerCfr).thenReturn(false)
-        val action = CookieBannerAction.UpdateStatusAction(
-            "1",
-            EngineSession.CookieBannerHandlingStatus.HANDLED,
-        )
-
-        browserStore.dispatch(action)
-
-        verify(appStore, never()).dispatch(AppAction.ShowCookieBannerCfrChange(true))
-    }
-
-    @Test
-    fun `GIVEN cookie banner action handled but feature disabled WHEN conditions met THEN do not show cookie banner CFR`() {
-        whenever(settings.isCookieBannerEnable).thenReturn(false)
-        val action = CookieBannerAction.UpdateStatusAction(
-            "1",
-            EngineSession.CookieBannerHandlingStatus.HANDLED,
-        )
-
-        browserStore.dispatch(action)
-
-        verify(appStore, never()).dispatch(AppAction.ShowCookieBannerCfrChange(true))
-    }
-
-    @Test
-    fun `GIVEN cookie banner action handled but option not reject all WHEN conditions met THEN do not show cookie banner CFR`() {
-        whenever(settings.getCurrentCookieBannerOptionFromSharePref()).thenReturn(CookieBannerOption.CookieBannerDisabled())
-        val action = CookieBannerAction.UpdateStatusAction(
-            "1",
-            EngineSession.CookieBannerHandlingStatus.HANDLED,
-        )
-
-        browserStore.dispatch(action)
-
-        verify(appStore, never()).dispatch(AppAction.ShowCookieBannerCfrChange(true))
+        verify(appStore, never()).dispatch(AppAction.ShowTrackingProtectionCfrChange(mapOf("1" to true)))
     }
 
     private fun createTab(
@@ -299,10 +217,11 @@ class CfrMiddlewareTest {
     ): TabSessionState {
         val tab = createTab(tabUrl, id = tabId.toString())
         return tab.copy(
-            content = tab.content.copy(
-                private = true,
-                securityInfo = SecurityInfo.from(isSecure),
-            ),
+            content =
+                tab.content.copy(
+                    private = true,
+                    securityInfo = SecurityInfo.from(isSecure),
+                )
         )
     }
 }

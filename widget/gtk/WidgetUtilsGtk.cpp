@@ -4,29 +4,32 @@
 
 #include "WidgetUtilsGtk.h"
 
+#include <dlfcn.h>
+#include <glib.h>
+#include <gtk/gtk.h>
+#include <inttypes.h>
+#ifdef MOZ_X11
+#  include <X11/Xatom.h>
+#  include <X11/Xlib.h>
+
+#  include "X11UndefineNone.h"
+#endif
+
 #include "MainThreadUtils.h"
 #include "mozilla/StaticPrefs_widget.h"
 #include "mozilla/UniquePtr.h"
+#include "nsCOMPtr.h"
+#include "nsDirectoryServiceDefs.h"
+#include "nsGtkKeyUtils.h"
+#include "nsGtkUtils.h"
+#include "nsIFile.h"
+#include "nsIProperties.h"
 #include "nsReadableUtils.h"
 #include "nsString.h"
 #include "nsStringFwd.h"
 #include "nsWindow.h"
-#include "nsIGfxInfo.h"
-#include "mozilla/Components.h"
-#include "nsCOMPtr.h"
-#include "nsIProperties.h"
-#include "nsIFile.h"
-#include "nsXULAppAPI.h"
 #include "nsXPCOMCID.h"
-#include "nsDirectoryServiceDefs.h"
-#include "nsString.h"
-#include "nsGtkKeyUtils.h"
-#include "nsGtkUtils.h"
-
-#include <gtk/gtk.h>
-#include <dlfcn.h>
-#include <glib.h>
-#include <inttypes.h>
+#include "nsXULAppAPI.h"
 
 #ifdef MOZ_ENABLE_DBUS
 #  include "mozilla/ClearOnShutdown.h"
@@ -37,11 +40,6 @@
 #ifdef MOZ_WAYLAND
 #  include "nsWaylandDisplay.h"
 #endif  // MOZ_WAYLAND
-
-#ifdef MOZ_X11
-#  include <X11/Xlib.h>
-#  include <X11/Xatom.h>
-#endif /* MOZ_X11 */
 
 #undef LOGW
 #ifdef MOZ_LOGGING
@@ -319,6 +317,9 @@ bool ShouldUsePortal(PortalKind aPortalKind) {
         return StaticPrefs::widget_use_xdg_desktop_portal_mime_handler();
       case PortalKind::NativeMessaging:
         return StaticPrefs::widget_use_xdg_desktop_portal_native_messaging();
+      case PortalKind::NativeMessagingProxy:
+        return StaticPrefs::
+            widget_use_xdg_desktop_portal_native_messaging_proxy();
       case PortalKind::Settings:
         autoBehavior = true;
         return StaticPrefs::widget_use_xdg_desktop_portal_settings();
@@ -326,6 +327,11 @@ bool ShouldUsePortal(PortalKind aPortalKind) {
         return StaticPrefs::widget_use_xdg_desktop_portal_location();
       case PortalKind::OpenUri:
         return StaticPrefs::widget_use_xdg_desktop_portal_open_uri();
+      case PortalKind::Notification:
+        // The portal notification backend is not feature complete yet, so it
+        // is opt-in for now regardless of the environment.
+        autoBehavior = false;
+        return StaticPrefs::widget_use_xdg_desktop_portal_notification();
     }
     return 2;
   }();
@@ -496,7 +502,7 @@ static nsCString GetWindowManagerName() {
                          req_type, &actual_type_return, &actual_format_return,
                          &nitems_return, &bytes_after_return, &prop_return);
 
-  if (result != Success || bytes_after_return != 0 || nitems_return != 1) {
+  if (result != X11Success || bytes_after_return != 0 || nitems_return != 1) {
     return {};
   }
 
@@ -520,7 +526,7 @@ static nsCString GetWindowManagerName() {
                          false,      // delete
                          req_type, &actual_type_return, &actual_format_return,
                          &nitems_return, &bytes_after_return, &prop_return);
-  if (result != Success || bytes_after_return != 0) {
+  if (result != X11Success || bytes_after_return != 0) {
     return {};
   }
 
@@ -617,7 +623,7 @@ static uint32_t GetWindowUserTime(GdkDisplay* aDisplay, uintptr_t aWindow) {
 
   if (XGetWindowProperty(xDisplay, aWindow, atom, 0, 1, false, XA_CARDINAL,
                          &actualType, &actualFormat, &numberOfItems,
-                         &bytesAfter, &property) == Success &&
+                         &bytesAfter, &property) == X11Success &&
       property) {
     if (numberOfItems == 1) {
       userTime = *((uint32_t*)property);

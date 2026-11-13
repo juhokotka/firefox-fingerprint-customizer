@@ -9,30 +9,31 @@ import org.intellij.markdown.MarkdownElementTypes
 import org.intellij.markdown.MarkdownTokenTypes
 import org.intellij.markdown.ast.ASTNode
 
-internal fun ASTNode.toInlineContent(source: String): List<InlineContent> {
+internal fun ASTNode.toInlineContent(source: CharSequence): List<InlineContent> {
     return when (type) {
-        MarkdownElementTypes.STRONG -> listOf(
-            InlineContent.Strong(children = children.flatMap { it.toInlineContent(source) }),
-        )
+        MarkdownElementTypes.STRONG ->
+            listOf(InlineContent.Strong(children = children.flatMap { it.toInlineContent(source) }))
 
-        MarkdownElementTypes.EMPH -> listOf(
-            InlineContent.Emphasis(children = children.flatMap { it.toInlineContent(source) }),
-        )
+        MarkdownElementTypes.EMPH ->
+            listOf(InlineContent.Emphasis(children = children.flatMap { it.toInlineContent(source) }))
 
-        MarkdownElementTypes.CODE_SPAN -> listOf(
-            InlineContent.Code(value = this.extractCodeSpanText(source)),
-        )
+        MarkdownElementTypes.CODE_SPAN -> listOf(InlineContent.Code(value = this.extractCodeSpanText(source)))
 
         MarkdownElementTypes.INLINE_LINK -> {
             listOf(
                 InlineContent.Link(
-                    url = children.filter { it.type == MarkdownElementTypes.LINK_DESTINATION }
-                        .map {
-                            source.substring(it.startOffset, it.endOffset)
-                        }.joinToString { it },
-                    children = children.filter { it.type == MarkdownElementTypes.LINK_TEXT }
-                        .flatMap { it.toInlineContent(source) },
-                ),
+                    url =
+                        children
+                            .filter { it.type == MarkdownElementTypes.LINK_DESTINATION }
+                            .map {
+                                source.substring(it.startOffset, it.endOffset)
+                            }
+                            .joinToString { it },
+                    children =
+                        children
+                            .filter { it.type == MarkdownElementTypes.LINK_TEXT }
+                            .flatMap { it.toInlineContent(source) },
+                )
             )
         }
 
@@ -41,19 +42,19 @@ internal fun ASTNode.toInlineContent(source: String): List<InlineContent> {
         MarkdownTokenTypes.WHITE_SPACE,
         MarkdownTokenTypes.COLON,
         MarkdownTokenTypes.SINGLE_QUOTE,
-        MarkdownTokenTypes.DOUBLE_QUOTE,
-            -> listOf(InlineContent.Plain(value = source.substring(startOffset, endOffset)))
+        MarkdownTokenTypes.DOUBLE_QUOTE -> listOf(InlineContent.Plain(value = source.substring(startOffset, endOffset)))
 
         MarkdownTokenTypes.EOL -> listOf(InlineContent.LineBreak)
-        else -> if (children.isEmpty()) {
-            emptyList()
-        } else {
-            children.flatMap { it.toInlineContent(source) }
-        }
+        else ->
+            if (children.isEmpty()) {
+                emptyList()
+            } else {
+                children.flatMap { it.toInlineContent(source) }
+            }
     }
 }
 
-private fun ASTNode.extractCodeSpanText(source: String): String {
+private fun ASTNode.extractCodeSpanText(source: CharSequence): String {
     val codeSpan = StringBuilder()
 
     fun build(node: ASTNode) {

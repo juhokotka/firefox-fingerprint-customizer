@@ -3,27 +3,30 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "NativeMenuGtk.h"
-#include "AsyncDBus.h"
-#include "gdk/gdkkeysyms-compat.h"
-#include "mozilla/BasicEvents.h"
-#include "mozilla/dom/Document.h"
-#include "mozilla/dom/DocumentInlines.h"
-#include "mozilla/dom/XULCommandEvent.h"
-#include "mozilla/WidgetUtilsGtk.h"
-#include "mozilla/EventDispatcher.h"
-#include "nsPresContext.h"
-#include "nsIWidget.h"
-#include "nsWindow.h"
-#include "nsStubMutationObserver.h"
-#include "mozilla/dom/Element.h"
-#include "mozilla/StaticPrefs_widget.h"
-#include "DBusMenu.h"
-#include "nsLayoutUtils.h"
-#include "nsGtkUtils.h"
-#include "nsGtkKeyUtils.h"
 
 #include <dlfcn.h>
 #include <gtk/gtk.h>
+
+#include "AsyncDBus.h"
+#include "DBusMenu.h"
+#include "gdk/gdkkeysyms-compat.h"
+#include "mozilla/BasicEvents.h"
+#include "mozilla/EventDispatcher.h"
+#include "mozilla/StaticPrefs_widget.h"
+#include "mozilla/WidgetUtilsGtk.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/XULCommandEvent.h"
+#include "nsCRT.h"
+#include "nsGtkKeyUtils.h"
+#include "nsGtkUtils.h"
+#include "nsIWidget.h"
+#include "nsLayoutUtils.h"
+#include "nsPresContext.h"
+#include "nsStubMutationObserver.h"
+#include "nsThreadUtils.h"
+#include "nsWindow.h"
 
 #ifdef MOZ_WAYLAND
 #  include "nsWaylandDisplay.h"
@@ -79,7 +82,7 @@ static MOZ_CAN_RUN_SCRIPT void ActivateItem(dom::Element& aElement) {
       bool newValue = !*checked;
       if (newValue) {
         aElement.SetAttr(kNameSpaceID_None, nsGkAtoms::checked, u"true"_ns,
-                         true);
+                         true, dom::IsKnownNewAttr::No);
       } else {
         aElement.UnsetAttr(kNameSpaceID_None, nsGkAtoms::checked, true);
       }
@@ -421,23 +424,38 @@ void NativeMenuGtk::ShowMenuAtPosition(nsIFrame* aClickedFrame,
 }
 
 bool NativeMenuGtk::Close() {
-  if (!mMenuModel->IsShowing()) {
-    return false;
+  if (mMenuModel->IsShowing()) {
+    // Runs OnUnmap().
+    gtk_menu_popdown(GTK_MENU(mNativeMenu.get()));
   }
-  gtk_menu_popdown(GTK_MENU(mNativeMenu.get()));
-  return true;
+  // Close() is synchronous: fire the events now so they can't reach a menu
+  // the popup manager opens next for the same element.
+  return FinishClose();
 }
 
+// The menu is unmapped before the chosen item is activated. Postpone
+// popuphiding / popuphidden so the item's command runs first, as it does for
+// XUL menus: the hiding handlers tear down state the command needs.
 void NativeMenuGtk::OnUnmap() {
-  FireEvent(eXULPopupHiding);
-
+  // Mutations from the hiding handlers only mark the model dirty now.
   mMenuModel->DidHide();
+  mClosePending = true;
+  NS_DispatchToCurrentThread(NS_NewRunnableFunction(
+      "NativeMenuGtk::OnUnmap",
+      [self = RefPtr{this}]()
+          MOZ_CAN_RUN_SCRIPT_BOUNDARY { self->FinishClose(); }));
+}
 
-  FireEvent(eXULPopupHidden);
-
-  for (NativeMenu::Observer* observer : mObservers.Clone()) {
-    observer->OnNativeMenuClosed();
+bool NativeMenuGtk::FinishClose() {
+  if (!mClosePending) {
+    return false;
   }
+  mClosePending = false;
+
+  FireEvent(eXULPopupHiding);
+  FireEvent(eXULPopupHidden);
+  OnClosed();
+  return true;
 }
 
 void NativeMenuGtk::ActivateItem(dom::Element* aItemElement, Modifiers,

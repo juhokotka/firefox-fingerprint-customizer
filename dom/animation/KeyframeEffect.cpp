@@ -103,6 +103,7 @@ KeyframeEffect::KeyframeEffect(Document* aDocument,
       mEffectOptions{aOther.IterationComposite(), aOther.Composite(),
                      mTarget.mPseudoRequest},
       mKeyframes(aOther.mKeyframes.Clone()),
+      mKeyframeOffsetsHasRangeOffset(aOther.mKeyframeOffsetsHasRangeOffset),
       mProperties(aOther.mProperties.Clone()),
       mBaseValues(aOther.mBaseValues.Clone()) {}
 
@@ -259,7 +260,7 @@ void KeyframeEffect::SetKeyframes(nsTArray<Keyframe>&& aKeyframes,
   }
 
   mKeyframes = std::move(aKeyframes);
-  mKeyframesOffsetInfo = KeyframeUtils::ComputeMissingKeyframeOffsets(
+  mKeyframeOffsetsHasRangeOffset = KeyframeUtils::ComputeMissingKeyframeOffsets(
       mKeyframes, aTimeline, aRange);
 
   if (mAnimation && mAnimation->IsRelevant()) {
@@ -888,9 +889,20 @@ nsTArray<AnimationProperty> KeyframeEffect::BuildProperties(
   // make a copy of |mKeyframes| first and iterate over that instead.
   auto keyframesCopy(mKeyframes.Clone());
 
+  // We generate the missing 0%/100% keyframes and append the missing
+  // properties to 0%/100% only if the keyframes come from CSS Keyframes rule.
+  // Note: We probably can avoid an extra copy above if GetComputedKeyframes()
+  // return true. However, we use the same function in GetKeyframes() so for
+  // readibility we still keep it as it is. If this result in any performance
+  // impact, we should write a special version of GetComputedKeyframes() here.
+  nsTArray<Keyframe> computedKeyframes;
+  const nsTArray<Keyframe>& keyframes = GetComputedKeyframes(computedKeyframes)
+                                            ? computedKeyframes
+                                            : keyframesCopy;
+
   result = KeyframeUtils::GetAnimationPropertiesFromKeyframes(
-      keyframesCopy, mTarget.mElement, mTarget.mPseudoRequest, aStyle,
-      mEffectOptions.mComposite, aTimeline, mKeyframesOffsetInfo);
+      keyframes, mTarget.mElement, mTarget.mPseudoRequest, aStyle,
+      mEffectOptions.mComposite, aTimeline);
 
 #ifdef DEBUG
   MOZ_ASSERT(SpecifiedKeyframeArraysAreEqual(mKeyframes, keyframesCopy),
@@ -1272,25 +1284,13 @@ void KeyframeEffect::GetKeyframes(JSContext* aCx, nsTArray<JSObject*>& aResult,
   const StylePerDocumentStyleData* rawData =
       mDocument->EnsureStyleSet().RawData();
 
-  // If we don't have a timeline or the timeline is not a ViewTimeline, we
-  // shouldn't generate the missing keyframes if all keyframes are using
-  // TimelineRangeOffsets. Otherwise, we should generate the missing keyframes
-  // only if needed.
-  const auto& generatedKeyframesStatus =
-      KeyframeUtils::CheckSkippableGeneratedKeyframes(
-          mKeyframes, mAnimation ? mAnimation->GetTimeline() : nullptr,
-          mKeyframesOffsetInfo);
+  // We generate the missing 0%/100% keyframes and append the missing
+  // properties to 0%/100% only if the keyframes come from CSS Keyframes rule.
+  nsTArray<Keyframe> computedKeyframes;
+  const nsTArray<Keyframe>& keyframes =
+      GetComputedKeyframes(computedKeyframes) ? computedKeyframes : mKeyframes;
 
-  for (const Keyframe& keyframe : mKeyframes) {
-    if (generatedKeyframesStatus.ShouldSkip(keyframe)) {
-      // FIXME: Bug 2037642. This is not correct actually for getKeyframes(). We
-      // still have to generate the missing keyframes if there are properties
-      // which are not specified in the keyframes with computed offst <= 0.0 or
-      // >= 1.0.
-      // https://drafts.csswg.org/scroll-animations-1/#named-range-keyframes
-      continue;
-    }
-
+  for (const Keyframe& keyframe : keyframes) {
     // Set up a dictionary object for the explicit members
     BaseComputedKeyframe keyframeDict;
     if (keyframe.mOffset) {
@@ -1519,9 +1519,10 @@ bool KeyframeEffect::CanThrottle() const {
     // a) No target element
     // b) The target element has no frame, e.g. because it is in a display:none
     //    subtree.
-    // In either case we can throttle the animation because there is no
-    // need to update on the main thread.
-    return true;
+    // Both normally throttle: a frameless element has nothing to restyle. The
+    // exception is a `display` animation, whose sample may return `display` to
+    // a visible value. Throttling it skips the restyle that rebuilds the frame.
+    return !mCumulativeChanges.mDisplay;
   }
 
   // Do not throttle any animations during print preview.
@@ -1900,6 +1901,9 @@ void KeyframeEffect::CalculateCumulativeChangesForProperty(
     return;
   }
 
+  if (aProperty.mProperty.mId == eCSSProperty_display) {
+    mCumulativeChanges.mDisplay = true;
+  }
   mCumulativeChanges.mOverflow |= bool(flags & CSSPropFlags::AffectsOverflow);
   mCumulativeChanges.mLayout |= bool(flags & CSSPropFlags::AffectsLayout);
 }
@@ -2086,7 +2090,7 @@ KeyframeEffect::MatchForCompositor KeyframeEffect::IsMatchForCompositor(
   if (mAnimation->UsingScrollTimeline()) {
     const ScrollTimeline* scrollTimeline =
         mAnimation->GetTimeline()->AsScrollTimeline();
-    const auto state = scrollTimeline->GetState();
+    const auto state = scrollTimeline->GetSnapshot();
     // We don't send this animation to the compositor if:
     // 1. The timeline doesn't have a source, in which case we don't need to
     //    run the compositor animations since we don't have its ViewID info for
@@ -2162,7 +2166,7 @@ double KeyframeEffect::AnimationsPlayBackRateMultiplier() const {
 
 void KeyframeEffect::MaybeUpdateKeyframeComputedOffsets(
     const AnimationTimeline* aTimeline, const AnimationRange& aRange) {
-  if (!mKeyframesOffsetInfo.mRangeOffset) {
+  if (mKeyframeOffsetsHasRangeOffset == KeyframeOffsetsHasRangeOffset::No) {
     return;
   }
 

@@ -95,7 +95,7 @@ class RaiiShmem final {
     return mShmem;
   }
 
-  Range<uint8_t> ByteRange() const {
+  mozilla::Range<uint8_t> ByteRange() const {
     if (!IsShmem()) {
       return {};
     }
@@ -140,7 +140,7 @@ template <>
 struct ParamTraits<mozilla::webgl::ReadPixelsResultIpc> final {
   using T = mozilla::webgl::ReadPixelsResultIpc;
 
-  static void Write(MessageWriter* const writer, T& in) {
+  static void Write(MessageWriter* const writer, T&& in) {
     WriteParam(writer, in.subrect);
     WriteParam(writer, in.byteStride);
     WriteParam(writer, std::move(in.shmem));

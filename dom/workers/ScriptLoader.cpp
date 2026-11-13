@@ -38,6 +38,7 @@
 #include "mozilla/dom/workerinternals/CacheLoadHandler.h"
 #include "mozilla/dom/workerinternals/NetworkLoadHandler.h"
 #include "mozilla/dom/workerinternals/ScriptResponseHeaderProcessor.h"
+#include "mozilla/dom/workerinternals/WorkerModuleLoader.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "nsComponentManagerUtils.h"
 #include "nsContentPolicyUtils.h"
@@ -186,6 +187,18 @@ nsresult ChannelFromScriptURL(
       nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
       rv = loadInfo->SetCspEventListener(cspEventListener);
       NS_ENSURE_SUCCESS(rv, rv);
+    }
+
+    // Bug 2048884: copy the owning BrowsingContext id so requests initiated by
+    // the worker report the correct frameId. This does not apply to shared or
+    // service workers, which have no reference frame.
+    if (aWorkerPrivate) {
+      uint64_t bcID = aWorkerPrivate->AssociatedBrowsingContextID();
+      if (bcID) {
+        nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+        rv = loadInfo->SetAssociatedBrowsingContextID(bcID);
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
     }
   }
 
@@ -337,7 +350,7 @@ class ChannelGetterRunnable final : public WorkerMainThreadRunnable {
         mLoadInfo.mReferrerInfo, getter_AddRefs(channel));
     NS_ENSURE_SUCCESS(mResult, true);
 
-    mResult = mLoadInfo.SetPrincipalsAndCSPFromChannel(channel);
+    mResult = mLoadInfo.SetPrincipalsAndPolicyContainerFromChannel(channel);
     NS_ENSURE_SUCCESS(mResult, true);
 
     mLoadInfo.mChannel = std::move(channel);
@@ -694,8 +707,8 @@ already_AddRefed<ScriptLoadRequest> WorkerScriptLoader::CreateScriptLoadRequest(
   if (mWorkerRef->Private()->WorkerType() == WorkerType::Classic ||
       IsDebuggerScript()) {
     request = new ScriptLoadRequest(ScriptKind::eClassic, SRIMetadata(),
-                                    nullptr,  // mReferrer
-                                    loadContext);
+                                    /* aReferrer = */ nullptr, loadContext,
+                                    /* aClassicScriptHintEncoding = */ nullptr);
   } else {
     // Implements part of "To fetch a worklet/module worker script graph"
     // including, setting up the request with a credentials mode,
@@ -949,12 +962,9 @@ nsresult WorkerScriptLoader::LoadScript(
   // window has a docshell, the caching behavior of this worker should match
   // that of that docshell.
   if (topWorkerPrivate->IsDedicatedWorker()) {
-    nsCOMPtr<nsPIDOMWindowInner> window = topWorkerPrivate->GetWindow();
-    if (window) {
-      nsCOMPtr<nsIDocShell> docShell = window->GetDocShell();
-      if (docShell) {
-        nsresult rv = docShell->GetDefaultLoadFlags(&loadFlags);
-        NS_ENSURE_SUCCESS(rv, rv);
+    if (nsCOMPtr<nsPIDOMWindowInner> window = topWorkerPrivate->GetWindow()) {
+      if (nsCOMPtr<nsIDocShell> docShell = window->GetDocShell()) {
+        loadFlags = docShell->GetDefaultLoadFlags();
       }
     }
   }
@@ -1569,7 +1579,9 @@ void ScriptLoaderRunnable::CancelMainThread(nsresult aCancelResult) {
     mCancelMainThread = Some(aCancelResult);
 
     for (ThreadSafeRequestHandle* handle : mLoadingRequests) {
-      if (handle->IsEmpty()) {
+      // Finishing an earlier request can have scheduled execution of this one,
+      // handing it over to the worker thread.
+      if (handle->ExecutionScheduled()) {
         continue;
       }
 
@@ -1613,7 +1625,7 @@ void ScriptLoaderRunnable::DispatchProcessPendingRequests() {
     // unset.
     auto firstItToExecute = std::find_if(
         begin, end, [](const RefPtr<ThreadSafeRequestHandle>& requestHandle) {
-          return !requestHandle->mExecutionScheduled;
+          return !requestHandle->ExecutionScheduled();
         });
 
     if (firstItToExecute == end) {
@@ -1626,13 +1638,13 @@ void ScriptLoaderRunnable::DispatchProcessPendingRequests() {
     const auto firstItUnexecutable =
         std::find_if(firstItToExecute, end,
                      [](RefPtr<ThreadSafeRequestHandle>& requestHandle) {
-                       MOZ_ASSERT(!requestHandle->IsEmpty());
+                       MOZ_ASSERT(!requestHandle->ExecutionScheduled());
                        if (!requestHandle->Finished()) {
                          return true;
                        }
 
                        // We can execute this one.
-                       requestHandle->mExecutionScheduled = true;
+                       requestHandle->SetExecutionScheduled();
 
                        return false;
                      });

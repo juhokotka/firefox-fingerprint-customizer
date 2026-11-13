@@ -10,9 +10,8 @@ import android.transition.TransitionInflater
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.fragment.app.Fragment
+import androidx.fragment.compose.content
 import mozilla.components.browser.state.state.ExternalAppType
 import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.focus.GleanMetrics.Onboarding
@@ -21,9 +20,7 @@ import org.mozilla.focus.ext.requireComponents
 import org.mozilla.focus.ui.theme.FocusTheme
 import org.mozilla.focus.utils.SupportUtils
 
-/**
- * The first fragment of the onboarding flow.
- */
+/** The first fragment of the onboarding flow. */
 class OnboardingFirstFragment : Fragment() {
     private lateinit var onboardingInteractor: OnboardingInteractor
 
@@ -44,8 +41,7 @@ class OnboardingFirstFragment : Fragment() {
 
     override fun onAttach(context: Context) {
         super.onAttach(context)
-        val transition =
-            TransitionInflater.from(context).inflateTransition(R.transition.firstrun_exit)
+        val transition = TransitionInflater.from(context).inflateTransition(R.transition.firstrun_exit)
         exitTransition = transition
     }
 
@@ -54,23 +50,16 @@ class OnboardingFirstFragment : Fragment() {
         container: ViewGroup?,
         savedInstanceState: Bundle?,
     ): View {
-        onboardingInteractor = DefaultOnboardingInteractor(
-            DefaultOnboardingController(
-                onboardingStorage = OnboardingStorage(requireContext()),
-                appStore = requireComponents.appStore,
-                context = requireActivity(),
-                selectedTabId = requireComponents.store.state.selectedTabId,
-            ),
-        )
-        return ComposeView(requireContext()).apply {
-            isTransitionGroup = true
-            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-        }
-    }
-
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-        (view as ComposeView).setContent {
+        onboardingInteractor =
+            DefaultOnboardingInteractor(
+                DefaultOnboardingController(
+                    onboardingStorage = OnboardingStorage(requireContext()),
+                    appStore = requireComponents.appStore,
+                    context = requireActivity(),
+                    selectedTabId = requireComponents.store.state.selectedTabId,
+                )
+            )
+        return content {
             FocusTheme {
                 OnBoardingFirstScreenCompose(
                     termsOfServiceOnClick = { openLearnMore(termsOfServiceUrl) },
@@ -82,11 +71,10 @@ class OnboardingFirstFragment : Fragment() {
                 )
             }
         }
+            .apply { isTransitionGroup = true }
     }
 
-    /**
-     * Companion object for the [OnboardingFirstFragment].
-     */
+    /** Companion object for the [OnboardingFirstFragment]. */
     companion object {
         const val FRAGMENT_TAG = "onboarding-first-fragment"
     }

@@ -5,6 +5,7 @@
 import io
 import re
 import sys
+import textwrap
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -21,7 +22,10 @@ from metrics_index import tags_yamls
 from run_glean_parser import ParserError, get_parser_options, parse_with_options
 
 METRIC_NAME_PATTERN = re.compile(r"\.([^:]+):")
-COMMON_PREFIX_PATTERN = re.compile(r"COMMON_PREFIX: ([^:]+):")
+VALIDATION_ERROR_SEPARATOR = re.compile(r"^={78}$", re.MULTILINE)
+VALIDATION_ERROR_HEADER = re.compile(
+    r"^(?P<path>.+?\.yaml)(?::(?P<lineno>\d+))?:\s*(?P<header>.*)$"
+)
 
 FENIX_PATTERN = re.compile(r"mobile/android/fenix/")
 FOCUS_PATTERN = re.compile(r"mobile/android/focus")
@@ -106,29 +110,22 @@ def lint(paths, config, fix=None, **lintargs):
                             "ERROR: "
                         )
 
-                        # Try to find line number for COMMON_PREFIX errors (category level)
-                        common_prefix_match = COMMON_PREFIX_PATTERN.search(message)
-                        if common_prefix_match:
+                        # Try to find line number for metric-specific errors
+                        match = METRIC_NAME_PATTERN.search(message)
+                        if match:
+                            metric_name = (
+                                match.group(1).split(".")[-1]
+                                if "." in match.group(1)
+                                else match.group(1)
+                            )
                             lineno, file_path = find_yaml_line_in_group(
-                                f"{common_prefix_match.group(1)}:", group_files
+                                f"  {metric_name}:", group_files
                             )
                         else:
-                            # Try to find line number for metric-specific errors
-                            match = METRIC_NAME_PATTERN.search(message)
-                            if match:
-                                metric_name = (
-                                    match.group(1).split(".")[-1]
-                                    if "." in match.group(1)
-                                    else match.group(1)
-                                )
-                                lineno, file_path = find_yaml_line_in_group(
-                                    f"  {metric_name}:", group_files
-                                )
-                            else:
-                                lineno, file_path = (
-                                    None,
-                                    (group_files[0] if group_files else None),
-                                )
+                            lineno, file_path = (
+                                None,
+                                (group_files[0] if group_files else None),
+                            )
 
                         if file_path:
                             results.append(
@@ -141,7 +138,44 @@ def lint(paths, config, fix=None, **lintargs):
                                 )
                             )
 
+                results.extend(
+                    validation_errors(config, error_stream.getvalue(), group_files)
+                )
+
     return {"results": results, "fixed": 0}
+
+
+def validation_errors(config, output, files):
+    """Turn the schema validation errors glean_parser reports, which are
+    separated by lines of "=", into lint results."""
+    resolved = {f.resolve(): f for f in files}
+    for block in VALIDATION_ERROR_SEPARATOR.split(output):
+        header, _, details = block.strip("\n").partition("\n")
+        match = VALIDATION_ERROR_HEADER.match(header)
+        if not match:
+            continue
+        details = textwrap.dedent(details).strip()
+        # Drop the copy of the offending YAML node that precedes the error.
+        if details.startswith("```"):
+            details = details.split("```", 2)[-1].strip()
+        message = "\n".join(part for part in (match["header"], details) if part)
+        path = Path(match["path"])
+        lineno = int(match["lineno"]) if match["lineno"] else None
+        if path not in resolved:
+            # Files that aren't linted directly, like tags.yaml, are reported
+            # on the first linted file of the group, like the glinter nits.
+            location = path.relative_to(TOPSRCDIR.resolve()).as_posix()
+            if lineno:
+                location += f":{lineno}"
+            message = f"{location}: {message}"
+            path, lineno = files[0].resolve(), None
+        yield result.from_config(
+            config,
+            path=str(resolved[path]),
+            message=message,
+            level="error",
+            lineno=lineno,
+        )
 
 
 def find_yaml_line_in_group(search_pattern, files):

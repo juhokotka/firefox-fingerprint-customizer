@@ -24,14 +24,12 @@ import org.mozilla.fenix.home.recentvisits.controller.RecentVisitsController
 import org.mozilla.fenix.home.search.HomeSearchController
 import org.mozilla.fenix.home.sessioncontrol.DefaultSessionControlController
 import org.mozilla.fenix.home.sessioncontrol.SessionControlInteractor
-import org.mozilla.fenix.home.sports.SportsController
 import org.mozilla.fenix.home.termsofuse.PrivacyNoticeBannerController
 import org.mozilla.fenix.home.toolbar.ToolbarController
 import org.mozilla.fenix.home.topsites.controller.TopSiteController
 
 class RecentVisitsInteractorTest {
-    private val defaultSessionControlController: DefaultSessionControlController =
-        mockk(relaxed = true)
+    private val defaultSessionControlController: DefaultSessionControlController = mockk(relaxed = true)
     private val recentTabController: RecentTabController = mockk(relaxed = true)
     private val recentSyncedTabController: RecentSyncedTabController = mockk(relaxed = true)
     private val bookmarksController: BookmarksController = mockk(relaxed = true)
@@ -44,28 +42,27 @@ class RecentVisitsInteractorTest {
     private val privacyNoticeBannerController: PrivacyNoticeBannerController = mockk(relaxed = true)
     private val trackingProtectionController: TrackingProtectionController = mockk(relaxed = true)
     private val logoController: LogoController = mockk(relaxed = true)
-    private val sportsController: SportsController = mockk(relaxed = true)
 
     private lateinit var interactor: SessionControlInteractor
 
     @Before
     fun setup() {
-        interactor = SessionControlInteractor(
-            defaultSessionControlController,
-            recentTabController,
-            recentSyncedTabController,
-            bookmarksController,
-            recentVisitsController,
-            pocketStoriesController,
-            privateBrowsingController,
-            toolbarController,
-            homeSearchController,
-            topSiteController,
-            privacyNoticeBannerController,
-            trackingProtectionController,
-            logoController,
-            sportsController,
-        )
+        interactor =
+            SessionControlInteractor(
+                defaultSessionControlController,
+                recentTabController,
+                recentSyncedTabController,
+                bookmarksController,
+                recentVisitsController,
+                pocketStoriesController,
+                privateBrowsingController,
+                toolbarController,
+                homeSearchController,
+                topSiteController,
+                privacyNoticeBannerController,
+                trackingProtectionController,
+                logoController,
+            )
     }
 
     @Test
@@ -73,17 +70,18 @@ class RecentVisitsInteractorTest {
         val historyGroup =
             RecentHistoryGroup(
                 title = "mozilla",
-                historyMetadata = listOf(
-                    HistoryMetadata(
-                        key = HistoryMetadataKey("http://www.mozilla.com", null, null),
-                        title = "mozilla",
-                        createdAt = System.currentTimeMillis(),
-                        updatedAt = System.currentTimeMillis(),
-                        totalViewTime = 10,
-                        documentType = DocumentType.Regular,
-                        previewImageUrl = null,
+                historyMetadata =
+                    listOf(
+                        HistoryMetadata(
+                            key = HistoryMetadataKey("http://www.mozilla.com", null, null),
+                            title = "mozilla",
+                            createdAt = System.currentTimeMillis(),
+                            updatedAt = System.currentTimeMillis(),
+                            totalViewTime = 10,
+                            documentType = DocumentType.Regular,
+                            previewImageUrl = null,
+                        )
                     ),
-                ),
             )
 
         interactor.onRecentHistoryGroupClicked(historyGroup)
@@ -100,26 +98,28 @@ class RecentVisitsInteractorTest {
 
     @Test
     fun onRemoveRecentHistoryGroup() {
-        val historyMetadataKey = HistoryMetadataKey(
-            "http://www.mozilla.com",
-            "mozilla",
-            null,
-        )
+        val historyMetadataKey =
+            HistoryMetadataKey(
+                "http://www.mozilla.com",
+                "mozilla",
+                null,
+            )
 
         val historyGroup =
             RecentHistoryGroup(
                 title = "mozilla",
-                historyMetadata = listOf(
-                    HistoryMetadata(
-                        key = historyMetadataKey,
-                        title = "mozilla",
-                        createdAt = System.currentTimeMillis(),
-                        updatedAt = System.currentTimeMillis(),
-                        totalViewTime = 10,
-                        documentType = DocumentType.Regular,
-                        previewImageUrl = null,
+                historyMetadata =
+                    listOf(
+                        HistoryMetadata(
+                            key = historyMetadataKey,
+                            title = "mozilla",
+                            createdAt = System.currentTimeMillis(),
+                            updatedAt = System.currentTimeMillis(),
+                            totalViewTime = 10,
+                            documentType = DocumentType.Regular,
+                            previewImageUrl = null,
+                        )
                     ),
-                ),
             )
 
         interactor.onRemoveRecentHistoryGroup(historyGroup.title)

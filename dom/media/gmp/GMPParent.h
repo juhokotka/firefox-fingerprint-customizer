@@ -63,7 +63,7 @@ class GMPParent final : public PGMPParent,
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(GMPParent, final)
 
-  GMPParent();
+  explicit GMPParent(nsISerialEventTarget* aGMPEventTarget);
 
 #ifdef MOZ_WIDGET_ANDROID
   void InitForClearkey(GeckoMediaPluginServiceParent* aService);
@@ -175,7 +175,7 @@ class GMPParent final : public PGMPParent,
 
 #if defined(XP_WIN)
   mozilla::ipc::IPCResult RecvGetModulesTrust(
-      ModulePaths&& aModPaths, bool aRunAtNormalPriority,
+      ModuleIdentifiers&& aModIdents, bool aRunAtNormalPriority,
       GetModulesTrustResolver&& aResolver);
 #endif  // defined(XP_WIN)
 
@@ -216,7 +216,7 @@ class GMPParent final : public PGMPParent,
   const uint32_t mPluginId;
   GMPPluginType mPluginType = GMPPluginType::Unknown;
   nsTArray<GMPCapability> mCapabilities;
-  GMPProcessParent* mProcess;
+  RefPtr<GMPProcessParent> mProcess;
   bool mDeleteProcessOnlyOnUnload;
   bool mAbnormalShutdownInProgress;
   bool mIsBlockingDeletion;
@@ -244,6 +244,7 @@ class GMPParent final : public PGMPParent,
 #endif
 
   const nsCOMPtr<nsISerialEventTarget> mMainThread;
+  const nsCOMPtr<nsISerialEventTarget> mGMPEventTarget;
 };
 
 }  // namespace mozilla::gmp

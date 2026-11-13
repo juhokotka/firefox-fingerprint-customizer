@@ -10,6 +10,7 @@
 #include "InternalResponse.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/dom/ClientInfo.h"
+#include "mozilla/dom/ClientValidation.h"
 #include "mozilla/dom/FetchTypes.h"
 #include "mozilla/dom/PerformanceTimingTypes.h"
 #include "mozilla/dom/ProcessIsolation.h"
@@ -39,7 +40,7 @@ NS_IMETHODIMP FetchParent::FetchParentCSPEventListener::OnCSPViolationEvent(
 
   nsAutoString json(aJSON);
   nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
-      __func__, [actorID = mActorID, json,
+      __func__, [actorID = mActorID, json = std::move(json),
                  reportGroup = nsString{aReportGroupName}]() mutable {
         FETCH_LOG(
             ("FetchParentCSPEventListener::OnCSPViolationEvent, Runnale"));
@@ -110,17 +111,20 @@ IPCResult FetchParent::RecvFetchOp(FetchOpArgs&& aArgs) {
       BackgroundParent::GetContentParentHandle(Manager());
   if (contentHandle &&
       StaticPrefs::dom_fetch_validatePrincipalForRemoteType()) {
-    const nsACString& remoteType = contentHandle->GetRemoteType();
     // The inference process uses ChromeWorkers which have a system principal,
     // so system principals must be allowed there.
     EnumSet<ValidatePrincipalOptions> options;
-    if (remoteType == INFERENCE_REMOTE_TYPE) {
-      options += ValidatePrincipalOptions::AllowSystem;
+    if (contentHandle->GetRemoteType().IsInference()) {
+      options += ValidatePrincipalOptions::AllowSystemIfLoaded;
     }
-    if (!ValidatePrincipalCouldPotentiallyBeLoadedBy(principal, remoteType,
-                                                     options)) {
+    if (!contentHandle->ValidatePrincipal(principal, options)) {
       return IPC_FAIL(this,
                       "RecvFetchOp principal not allowed for remote type");
+    }
+    if (!ClientIsValidPrincipalInfo(aArgs.clientInfo().principalInfo(),
+                                    contentHandle->LoadedOrigins())) {
+      return IPC_FAIL(
+          this, "RecvFetchOp clientInfo principal not allowed for remote type");
     }
   }
 
@@ -130,6 +134,13 @@ IPCResult FetchParent::RecvFetchOp(FetchOpArgs&& aArgs) {
       !StaticPrefs::dom_fetch_allow_force_allowed_dtd()) {
     return IPC_FAIL(this,
                     "RecvFetchOp FORCE_ALLOWED_DTD not allowed from content");
+  }
+
+  if (contentHandle && InternalRequest::IsNavigationContentPolicy(
+                           aArgs.request().contentPolicyType())) {
+    return IPC_FAIL(this,
+                    "RecvFetchOp navigation content policy type not allowed "
+                    "from content");
   }
 
   mRequest = MakeSafeRefPtr<InternalRequest>(std::move(aArgs.request()));

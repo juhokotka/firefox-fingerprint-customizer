@@ -5,11 +5,11 @@
 #ifndef GFX_LINESEGMENT_H
 #define GFX_LINESEGMENT_H
 
-#include "gfxTypes.h"
 #include "gfxPoint.h"
+#include "gfxTypes.h"
 
 struct gfxLineSegment {
-  gfxLineSegment() {}
+  gfxLineSegment() = default;
   gfxLineSegment(const gfxPoint& aStart, const gfxPoint& aEnd)
       : mStart(aStart), mEnd(aEnd) {}
 

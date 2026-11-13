@@ -13,7 +13,7 @@ to be able to perform native debugging inside Android Studio. This
 article will guide you through how to do that.
 
 If you need to get set up with GeckoView for the first time, follow the
-[Quick Start Guide](geckoview-quick-start.html).
+[Quick Start Guide](geckoview-quick-start.md).
 
 ### Perform a debug build of Gecko
 
@@ -126,7 +126,7 @@ connect such a Java debugger manually from the Android Studio UI.
 [Bug 1522318](https://bugzilla.mozilla.org/show_bug.cgi?id=1522318)
 added environment variables that makes GeckoView wait for Java debuggers
 to attach, making this debug process more developer-friendly. See
-[Configuring GeckoView for Automation](../consumer/automation.html)
+[Configuring GeckoView for Automation](../consumer/automation.md)
 for instructions on how to set environment variables that configure
 GeckoView’s runtime environment.
 
@@ -156,7 +156,7 @@ debugger.
 
 Determining the correct process to attach to is a little tricky because
 the mapping from process ID (pid) to process name is not always clear.
-Gecko content child processes have names like `:tab_disable_art_image_0`
+Gecko content child processes have names like `:sandboxed_tab_disable_art_image_0`
 at this time.
 
 If you attach `Dual` debuggers to both the main process and a content
@@ -214,7 +214,7 @@ android {
 
 #### Using Android Studio on Windows
 
-You can now use {ref}`artifact builds <Understanding Artifact Builds>`
+You can now use {doc}`artifact builds </contributing/build/artifact_builds>`
 mode on [MozillaBuild environment](https://wiki.mozilla.org/MozillaBuild) even if you are
 not using WSL. If you want to debug GeckoView using Android Studio on
 Windows, you have to set an additional environment variable via the

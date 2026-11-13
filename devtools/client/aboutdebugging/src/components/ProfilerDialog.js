@@ -135,7 +135,7 @@ class ProfilerDialog extends PureComponent {
           ),
           createElement("moz-button", {
             class: `qa-profiler-dialog-close`,
-            type: "icon",
+            type: "icon ghost",
             iconsrc: "chrome://devtools/skin/images/close.svg",
             "data-l10n-id": "about-debugging-message-close-icon2",
             onClick: () => {

@@ -31,13 +31,14 @@
     padding-block: var(--space-xsmall) var(--space-large);
     padding-inline: var(--space-large);
     background-color: var(--button-background-color);
+    color: var(--button-text-color);
     border-radius: var(--border-radius-large);
 
     // Bug 1908010 - This overwrites the design system color because of a
     // known transparency issue with color-mix syntax when a wallpaper is set
     .lightWallpaper &,
     .darkWallpaper & {
-      background-color: var(--newtab-weather-background-color); // stylelint-disable-line stylelint-plugin-mozilla/use-design-tokens
+      background-color: var(--newtab-weather-background-color);
 
       @media (prefers-contrast) {
         background-color: var(--background-color-box);
@@ -67,7 +68,9 @@
     display: flex;
     justify-content: flex-end;
     align-items: center;
-    gap: var(--space-medium);
+    // Combines with the grid's --space-medium row gap for --space-large spacing
+    // below the header, matching the sections header.
+    margin-block: var(--space-small) var(--space-xsmall);
 
     // Helper class around the <h1> element to position the FeatureHighlight message
     .widgets-title-container-text {
@@ -80,6 +83,10 @@
       display: flex;
       align-items: center;
       gap: var(--space-medium);
+
+      @include at-content-cols(12) {
+        gap: var(--space-large);
+      }
     }
 
     .widgets-title-actions {
@@ -96,13 +103,10 @@
 
     // @nova-cleanup(remove-conditional): Make default, remove .nova-enabled selector
     .nova-enabled & {
-      font-size: var(--font-size-heading-large);
+      font-size: var(--font-size-heading-medium);
       font-weight: var(--font-weight-heading);
       color: var(--newtab-contextual-text-primary-color);
-
-      @include at-content-cols(12) {
-        font-size: var(--font-size-heading-xlarge);
-      }
+      margin-block: 0;
 
       @include wallpaper-contrast-fix;
     }
@@ -110,7 +114,8 @@
 
   // @nova-cleanup(remove-conditional): Make default, remove .nova-enabled selector
   #hide-all-widgets-button,
-  #toggle-widgets-size-button {
+  #toggle-widgets-size-button,
+  #add-widgets-button {
     .nova-enabled & {
       color: var(--newtab-contextual-text-primary-color);
 
@@ -119,55 +124,16 @@
   }
 }
 
-
 .widgets-expand-button {
-  appearance: none;
-  align-items: center;
-  background-color: transparent;
-  border: 1px solid var(--newtab-primary-action-background);
-  border-radius: var(--border-radius-circle);
-  color: var(--newtab-primary-action-background);
-  cursor: pointer;
-  display: inline-flex;
-  height: var(--size-item-large);
-  justify-content: center;
-  margin: 0;
-  padding: 0;
-  width: var(--size-item-large);
+  transition: transform 160ms ease;
 
-  &::before {
-    background-color: currentColor;
-    content: '';
-    height: var(--size-item-small);
-    mask: url('chrome://global/skin/icons/arrow-down.svg') center / contain no-repeat;
-    transition: transform 160ms ease;
-    width: var(--size-item-small);
-  }
-
-  &.is-maximized::before {
+  &.is-maximized {
     transform: rotate(180deg);
-  }
-
-  &:hover {
-    background-color: var(--newtab-element-secondary-hover-color);
-  }
-
-  &:active {
-    background-color: var(--newtab-element-secondary-active-color);
-  }
-
-  &:focus {
-    outline: none;
-  }
-
-  &:focus-visible {
-    outline: var(--focus-outline);
-    outline-offset: var(--focus-outline-offset);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .widgets-expand-button::before {
+  .widgets-expand-button {
     transition: none;
   }
 }
@@ -195,9 +161,6 @@
     min-width: 256px;
   }
 
-  panel-item::part(button) {
-    min-block-size: 30px;
-  }
 }
 
 // Classic layout padding (when Nova is disabled)
@@ -231,6 +194,19 @@
     grid-template-columns: repeat(auto-fill, var(--col-width));
     grid-auto-rows: var(--row-height);
     gap: var(--space-medium);
+
+    @include widget-size-transition-tokens;
+  }
+
+  .nova-enabled &.is-animating-height {
+    overflow: hidden;
+    transition: height var(--widget-size-transition-duration) var(--widget-size-transition-easing);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nova-enabled &.is-animating-height {
+      transition: none;
+    }
   }
 
   // Classic layout (when Nova is disabled)
@@ -243,8 +219,7 @@
     --widgets-small-card-height: var(--newtab-card-height-small);
 
     &:has(.lists),
-    &:has(.focus-timer),
-    &:has(.sports) {
+    &:has(.focus-timer) {
       display: grid;
       grid-template-columns: repeat(auto-fit, var(--widgets-card-width));
       gap: var(--widgets-grid-gap);
@@ -274,18 +249,34 @@
   --widgets-card-width: var(--newtab-card-width-medium);
 
   &:has(.lists),
-  &:has(.focus-timer),
-  &:has(.sports) {
+  &:has(.focus-timer) {
     @media(min-width: $break-point-widest) {
       --widgets-grid-gap: var(--space-large);
     }
   }
 }
 
-// DnD visuals on the wrapper.
+// usePointerReorder drags the real widget rather than a bitmap copy, so it has
+// to paint above its neighbours. No fade either: what the user is dragging is
+// the live widget, not a native drag source.
 .nova-enabled .widget-draggable {
-  &.is-dragging {
-    opacity: 0.5;
+  &[data-dragging] {
+    position: relative;
+    z-index: 1;
+    cursor: grabbing;
+    will-change: transform;
+  }
+}
+
+// Backs up pointer capture: `pointer-events: none` keeps a widget's iframe from
+// taking the pointer if capture was never granted. Text must not select as the
+// pointer sweeps the row either.
+.nova-enabled .widgets-container:has([data-dragging]) {
+  user-select: none;
+
+  iframe,
+  moz-widget {
+    pointer-events: none;
   }
 }
 
@@ -293,6 +284,33 @@
   display: inline-block;
   margin-block-start: var(--space-medium);
   font-size: var(--font-size-small);
+}
+
+// Shared widget header typography.
+.newtab-widget-title {
+  margin: 0;
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight);
+}
+
+// @experiment(remove) { bug 2066527 }
+// The height transition itself comes from .is-animating-height above.
+.nova-enabled .widgets-container[data-section-collapsed] {
+  height: 0;
+  overflow: hidden;
+  // .widgets-section-container is a grid with `gap: var(--space-medium)`;
+  // a zero-height row still leaves its own gap behind.
+  margin-block-end: calc(-1 * var(--space-medium));
+}
+
+// @experiment(remove) { bug 2066527 }
+// :has() rather than a sibling selector: the data-overflow-N rules below
+// reveal the toggle at equal specificity and later in the file, so they
+// would win.
+.nova-enabled
+.widgets-section-container:has(.widgets-container[data-section-collapsed])
+.widgets-row-toggle {
+  display: none;
 }
 
 .nova-enabled .widgets-row-toggle {
@@ -313,8 +331,9 @@
 //     that viewport — combined with `data-row-collapsed`, drives
 //     `display: none` so the container shrinks naturally (no clip
 //     needed) and the widget tabs out of focus / a11y order.
-// One IAB card spans 4 grid columns, so the ranges below mirror 1-, 2-,
-// 3-, and 4-card viewports.
+// One IAB card spans 4 grid columns, so the ranges below mirror 1- through
+// 5-card viewports. The 5-card range is only reachable when the content band is
+// widened for a 5-column story grid; see .sections-5-col in _Grid.scss.
 .nova-enabled {
   @include at-content-cols-range(0, 8) {
     .widgets-section-container[data-overflow-1] .widgets-row-toggle {
@@ -346,12 +365,22 @@
     }
   }
 
-  @include at-content-cols(16) {
+  @include at-content-cols-range(16, 20) {
     .widgets-section-container[data-overflow-4] .widgets-row-toggle {
       display: block;
     }
 
     .widgets-container[data-row-collapsed] .widget-wrapper[data-hidden-4] {
+      display: none;
+    }
+  }
+
+  @include at-content-cols(20) {
+    .widgets-section-container[data-overflow-5] .widgets-row-toggle {
+      display: block;
+    }
+
+    .widgets-container[data-row-collapsed] .widget-wrapper[data-hidden-5] {
       display: none;
     }
   }
@@ -380,6 +409,12 @@
 
     @include at-content-cols(16) {
       &:has(> :nth-child(4)):not(:has(> :nth-child(5))) > .widgets-add-button {
+        display: flex;
+      }
+    }
+
+    @include at-content-cols(20) {
+      &:has(> :nth-child(5)):not(:has(> :nth-child(6))) > .widgets-add-button {
         display: flex;
       }
     }

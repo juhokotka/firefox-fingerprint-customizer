@@ -12,6 +12,7 @@
 #include "mozilla/net/Cookie.h"
 #include "mozilla/net/CookieCommons.h"
 #include "nsAppDirectoryServiceDefs.h"
+#include "nsContentUtils.h"
 #include "nsICookieNotification.h"
 
 using namespace mozilla::dom;
@@ -164,7 +165,7 @@ void CookieStoreSubscriptionService::Subscribe(
 
   if (!registrationData) {
     registrationData = mData.AppendElement();
-    registrationData->mRegistration = tmp;
+    registrationData->mRegistration = std::move(tmp);
   }
 
   bool toStore = false;
@@ -321,6 +322,22 @@ CookieStoreSubscriptionService::Observe(nsISupports* aSubject,
       continue;
     }
 
+    nsCOMPtr<nsIURI> principalURI;
+    rv = NS_NewURI(getter_AddRefs(principalURI), principalInfo.spec());
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      continue;
+    }
+
+    nsAutoCString host;
+    rv = nsContentUtils::GetHostOrIPv6WithBrackets(principalURI, host);
+    if (NS_WARN_IF(NS_FAILED(rv)) || host.IsEmpty()) {
+      continue;
+    }
+
+    if (!CookieCommons::DomainMatches(Cookie::Cast(cookie), host)) {
+      continue;
+    }
+
     for (const CookieSubscription& subscription : data.mSubscriptions) {
       if (subscription.name().isSome() && subscription.name().value() != name) {
         continue;
@@ -391,24 +408,39 @@ void CookieStoreSubscriptionService::ParseAndAddSubscription(
   Json::Value value;
   Json::Reader jsonReader;
 
-  MOZ_ASSERT(jsonReader.parse(aValue.BeginReading(), aValue.EndReading(), value,
-                              false));
-  MOZ_ASSERT(value.isObject());
+  if (!jsonReader.parse(aValue.BeginReading(), aValue.EndReading(), value,
+                        false)) {
+    NS_WARNING("Failed to parse the stored CookieStore subscriptions");
+    return;
+  }
 
-  for (Json::ValueConstIterator iter = value.begin(); iter != value.end();
-       ++iter) {
+  if (!value.isArray()) {
+    NS_WARNING("Unexpected shape for the stored CookieStore subscriptions");
+    return;
+  }
+
+  for (const Json::Value& entry : value) {
+    if (!entry.isObject()) {
+      continue;
+    }
+
+    const Json::Value& url = entry["url"];
+    if (!url.isString()) {
+      continue;
+    }
+
+    // "name" is optional; SerializeAndSave() omits it for a nameless
+    // subscription.
+    const bool hasName = entry.isMember("name");
+    const Json::Value& name = entry["name"];
+    if (hasName && !name.isString()) {
+      continue;
+    }
+
     CookieSubscription* subscription = aData.mSubscriptions.AppendElement();
-
-    for (Json::Value::const_iterator itr = iter->begin(); itr != iter->end();
-         itr++) {
-      MOZ_ASSERT(iter.key().isString());
-      MOZ_ASSERT(iter->isString());
-      if (itr.key().asString().compare("name") == 0) {
-        subscription->name() =
-            Some(NS_ConvertUTF8toUTF16(iter->asString().c_str()));
-      } else if (itr.key().asString().compare("url") == 0) {
-        subscription->url() = NS_ConvertUTF8toUTF16(iter->asString().c_str());
-      }
+    subscription->url() = NS_ConvertUTF8toUTF16(url.asCString());
+    if (hasName) {
+      subscription->name() = Some(NS_ConvertUTF8toUTF16(name.asCString()));
     }
   }
 }

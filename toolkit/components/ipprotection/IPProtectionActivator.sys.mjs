@@ -10,36 +10,51 @@ import { IPPNimbusHelper } from "moz-src:///toolkit/components/ipprotection/IPPN
 import { IPProtectionServerlist } from "moz-src:///toolkit/components/ipprotection/IPProtectionServerlist.sys.mjs";
 import { IPPStartupCache } from "moz-src:///toolkit/components/ipprotection/IPPStartupCache.sys.mjs";
 import { IPPSessionPrefManager } from "moz-src:///toolkit/components/ipprotection/IPPSessionPrefManager.sys.mjs";
+import { IPPSiteRuleManager } from "moz-src:///toolkit/components/ipprotection/IPPSiteRuleManager.sys.mjs";
 
 const lazy = {};
 
 if (AppConstants.MOZ_ENTERPRISE) {
   ChromeUtils.defineESModuleGetters(lazy, {
-    IPPAlwaysOnHelpers:
+    IPPAlwaysOn:
       "moz-src:///toolkit/components/ipprotection/enterprise/IPPAlwaysOn.sys.mjs",
   });
-} else {
+} else if (AppConstants.platform !== "android") {
   ChromeUtils.defineESModuleGetters(lazy, {
-    IPPAutoRestoreHelper:
-      "moz-src:///toolkit/components/ipprotection/IPPAutoRestore.sys.mjs",
-    IPPAutoStartHelpers:
-      "moz-src:///toolkit/components/ipprotection/IPPAutoStart.sys.mjs",
+    IPPAutoActivation:
+      "moz-src:///toolkit/components/ipprotection/IPPAutoActivation.sys.mjs",
   });
+}
+
+/**
+ * The helper that brings the proxy up without the user asking, or null on
+ * Android, where the embedder does so through IPProtectionController.
+ */
+function activationHelper() {
+  if (AppConstants.platform === "android") {
+    return null;
+  }
+  if (AppConstants.MOZ_ENTERPRISE) {
+    return lazy.IPPAlwaysOn;
+  }
+  return lazy.IPPAutoActivation;
 }
 
 const coreHelpers = [
   IPPStartupCache,
   IPProtectionServerlist,
+  IPPSiteRuleManager,
   IPPProxyManager,
   IPPLifecycleHelper,
   IPPSessionPrefManager,
-  ...(AppConstants.MOZ_ENTERPRISE
-    ? lazy.IPPAlwaysOnHelpers
-    : [lazy.IPPAutoRestoreHelper, ...lazy.IPPAutoStartHelpers]),
+  activationHelper(),
   IPPNimbusHelper,
-];
+].filter(Boolean);
 
 let extraHelpers = [];
+let authProvider = null;
+let fallbackProvider = null;
+let onFallbackCallback = null;
 
 export const IPProtectionActivator = {
   addHelpers(helpers) {
@@ -49,16 +64,42 @@ export const IPProtectionActivator = {
     extraHelpers = [];
   },
   setupHelpers() {
-    IPProtectionService.setHelpers([...coreHelpers, ...extraHelpers]);
+    const providerHelpers = authProvider?.helpers ?? [];
+    IPProtectionService.setHelpers([
+      ...coreHelpers,
+      ...providerHelpers,
+      ...extraHelpers,
+    ]);
   },
-  setAuthProvider(authProvider) {
-    IPProtectionService.setAuthProvider(authProvider);
+  setAuthProvider(provider) {
+    authProvider = provider;
+    IPProtectionService.setAuthProvider(provider);
+  },
+  setFallbackAuthProvider(provider, onFallback = null) {
+    fallbackProvider = provider;
+    onFallbackCallback = onFallback;
+  },
+  async reinitWithFallback() {
+    if (!fallbackProvider) {
+      return;
+    }
+    const provider = fallbackProvider;
+    const cb = onFallbackCallback;
+    fallbackProvider = null;
+    onFallbackCallback = null;
+    this.uninit();
+    this.setAuthProvider(provider);
+    cb?.();
+    await this.init();
   },
   init() {
     this.setupHelpers();
     return IPProtectionService.init();
   },
   uninit() {
+    authProvider = null;
+    fallbackProvider = null;
+    onFallbackCallback = null;
     return IPProtectionService.uninit();
   },
 };

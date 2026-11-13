@@ -24,7 +24,7 @@ class SlowHeuristicProvider extends UrlbarTestUtils.TestProvider {
     );
     super({
       name: "MyProvider",
-      type: UrlbarUtils.PROVIDER_TYPE.HEURISTIC,
+      type: UrlbarShared.PROVIDER_TYPE.HEURISTIC,
       results,
       delayResultsPromise,
     });
@@ -36,7 +36,7 @@ class SlowHeuristicProvider extends UrlbarTestUtils.TestProvider {
  */
 class FastHeuristicProvider extends UrlbarTestUtils.TestProvider {
   get type() {
-    return UrlbarUtils.PROVIDER_TYPE.HEURISTIC;
+    return UrlbarShared.PROVIDER_TYPE.HEURISTIC;
   }
 
   async startQuery(context, add) {
@@ -96,7 +96,7 @@ add_task(async function timerIsCancelled() {
     providers: [slowProvider.name, fastProvider.name],
   });
 
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
   let queryRecieved, queryCancelled;
   const controllerListener = {
     onQueryResults(queryContext) {
@@ -197,7 +197,7 @@ add_task(async function autofillIsCleared() {
   });
 
   // Set up controller to observe queries.
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
   let queryRecieved, queryCancelled;
   const controllerListener = {
     onQueryResults(queryContext) {

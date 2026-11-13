@@ -48,6 +48,7 @@ class RenderTextureHostWrapper final : public RenderTextureHostSWGL {
   RenderEGLImageTextureHost* AsRenderEGLImageTextureHost() override;
   RenderTextureHostSWGL* AsRenderTextureHostSWGL() override;
   RenderDMABUFTextureHost* AsRenderDMABUFTextureHost() override;
+  RenderWaylandTextureHost* AsRenderWaylandTextureHost() override;
   void SetIsSoftwareDecodedVideo() override;
   bool IsSoftwareDecodedVideo() override;
   RefPtr<RenderTextureHostUsageInfo> GetOrMergeUsageInfo(
@@ -72,6 +73,9 @@ class RenderTextureHostWrapper final : public RenderTextureHostSWGL {
   void UnlockSWGL() override;
   bool LockSWGLCompositeSurface(void* aContext,
                                 wr::SWGLCompositeSurfaceInfo* aInfo) override;
+  void UnlockSWGLCompositeSurface() override;
+
+  void SetReadFenceFd(UniqueFileHandle&& aFenceFd) override;
 
   // This is just a wrapper, so doesn't need to report the
   // size of the wrapped object (which reports itself).

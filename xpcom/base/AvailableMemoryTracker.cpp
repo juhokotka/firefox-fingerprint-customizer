@@ -6,18 +6,18 @@
 
 #if defined(XP_WIN)
 #  include <windows.h>
+
 #  include "nsIMemoryReporter.h"
 #endif
 
+#include "mozilla/Mutex.h"
+#include "mozilla/Services.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsIRunnable.h"
 #include "nsISupports.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
-
-#include "mozilla/Mutex.h"
-#include "mozilla/Services.h"
 
 #if defined(MOZ_MEMORY)
 #  include "mozmemory.h"
@@ -35,7 +35,7 @@ static int64_t LowMemoryEventsPhysicalDistinguishedAmount() {
 }
 
 class LowEventsReporter final : public nsIMemoryReporter {
-  ~LowEventsReporter() {}
+  ~LowEventsReporter() = default;
 
  public:
   NS_DECL_ISUPPORTS

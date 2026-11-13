@@ -7,7 +7,6 @@
 #include "MozFramebuffer.h"
 #include "WebGLBuffer.h"
 #include "WebGLContext.h"
-#include "WebGLContextUtils.h"
 #include "WebGLFormats.h"
 #include "WebGLFramebuffer.h"
 #include "WebGLProgram.h"
@@ -136,7 +135,9 @@ Maybe<double> WebGLContext::GetParameter(const GLenum pname) {
         if (Has64BitTimestamps()) {
           gl->fGetInteger64v(pname, (GLint64*)&val);
         } else {
-          gl->fGetIntegerv(pname, (GLint*)&val);
+          GLint val32 = 0;
+          gl->fGetIntegerv(pname, &val32);
+          val = val32;
         }
         // TODO: JS doesn't support 64-bit integers. Be lossy and
         // cast to double (53 bits)
@@ -162,6 +163,22 @@ Maybe<double> WebGLContext::GetParameter(const GLenum pname) {
       GLint i = 0;
       gl->fGetIntegerv(pname, &i);
       return Some(i);
+    }
+  }
+
+  if (IsExtensionEnabled(WebGLExtensionID::EXT_clip_control)) {
+    if (pname == LOCAL_GL_CLIP_ORIGIN || pname == LOCAL_GL_CLIP_DEPTH_MODE) {
+      GLint value = 0;
+      gl->fGetIntegerv(pname, &value);
+      return Some(value);
+    }
+  }
+
+  if (IsExtensionEnabled(WebGLExtensionID::EXT_polygon_offset_clamp)) {
+    if (pname == LOCAL_GL_POLYGON_OFFSET_CLAMP_EXT) {
+      GLfloat f = 0.f;
+      gl->fGetFloatv(pname, &f);
+      return Some(f);
     }
   }
 

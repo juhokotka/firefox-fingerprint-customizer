@@ -2,7 +2,7 @@
 <!-- This Source Code Form is subject to the terms of the Mozilla Public
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/colorPrimary</item>
         <!-- This is the default color for activated controls(buttons) -->
@@ -70,7 +70,7 @@
 
     <style name="ItemTextAppearance" parent="TextAppearance.AppCompat.Widget.DropDownItem">
         <item name="android:textColor">@color/primaryText</item>
-        <item name="android:textSize">@dimen/mozac_browser_menu_item_text_size</item>
+        <item name="android:textSize">@dimen/dropdown_item_text_size</item>
     </style>
 
     <style name="PreferenceTheme" parent="PreferenceThemeOverlay.v14.Material">

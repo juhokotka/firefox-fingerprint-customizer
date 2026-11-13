@@ -28,7 +28,7 @@
 #ifdef MOZ_WIDGET_ANDROID
 #  include "mozilla/gfx/gfxVars.h"
 #endif
-#include "nsPrintfCString.h"
+#include "nsStringFwd.h"
 
 // The ffmpeg namespace is introduced to avoid the PixelFormat's name conflicts
 // with MediaDataEncoder::PixelFormat in MediaDataEncoder class scope.
@@ -135,6 +135,70 @@ static constexpr H264LiteralSetting H264Profiles[]{
     {AV_PROFILE_H264_HIGH, "high"_ns}};
 #endif
 
+static AVColorRange ToAVColorRange(const gfx::ColorRange& aRange) {
+  return aRange == gfx::ColorRange::FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+}
+
+// Older libavcodec lacks some AVCOL_* constants; those map to unspecified.
+static AVColorSpace ToAVColorSpace(const gfx::YUVColorSpace& aMatrix) {
+  switch (aMatrix) {
+    case gfx::YUVColorSpace::BT601:
+      return AVCOL_SPC_SMPTE170M;
+    case gfx::YUVColorSpace::BT709:
+      return AVCOL_SPC_BT709;
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+    case gfx::YUVColorSpace::BT2020:
+      return AVCOL_SPC_BT2020_NCL;
+#endif
+    case gfx::YUVColorSpace::Identity:
+      return AVCOL_SPC_RGB;
+    default:
+      return AVCOL_SPC_UNSPECIFIED;
+  }
+}
+
+static AVColorPrimaries ToAVColorPrimaries(const gfx::ColorSpace2& aPrimaries) {
+  switch (aPrimaries) {
+    case gfx::ColorSpace2::SRGB:
+    case gfx::ColorSpace2::BT709:
+      return AVCOL_PRI_BT709;
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+    case gfx::ColorSpace2::DISPLAY_P3:
+      return AVCOL_PRI_SMPTE432;
+#endif
+    case gfx::ColorSpace2::BT601_525:
+      return AVCOL_PRI_SMPTE170M;
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+    case gfx::ColorSpace2::BT2020:
+      return AVCOL_PRI_BT2020;
+#endif
+    default:
+      return AVCOL_PRI_UNSPECIFIED;
+  }
+}
+
+static AVColorTransferCharacteristic ToAVColorTransfer(
+    const gfx::TransferFunction& aTransfer) {
+  switch (aTransfer) {
+    case gfx::TransferFunction::BT709:
+      return AVCOL_TRC_BT709;
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+    case gfx::TransferFunction::SRGB:
+      return AVCOL_TRC_IEC61966_2_1;
+    case gfx::TransferFunction::LINEAR:
+      return AVCOL_TRC_LINEAR;
+#endif
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+    case gfx::TransferFunction::PQ:
+      return AVCOL_TRC_SMPTE2084;
+    case gfx::TransferFunction::HLG:
+      return AVCOL_TRC_ARIB_STD_B67;
+#endif
+    default:
+      return AVCOL_TRC_UNSPECIFIED;
+  }
+}
+
 static Maybe<H264Setting> GetH264Profile(const H264_PROFILE& aProfile) {
   switch (aProfile) {
     case H264_PROFILE::H264_PROFILE_UNKNOWN:
@@ -156,7 +220,7 @@ static Maybe<H264Setting> GetH264Profile(const H264_PROFILE& aProfile) {
 
 static Maybe<H264Setting> GetH264Level(const H264_LEVEL& aLevel) {
   int val = static_cast<int>(aLevel);
-  nsPrintfCString str("%d", val);
+  nsFmtCString str("{}", val);
   str.Insert('.', 1);
   return Some(H264Setting{val, std::move(str)});
 }
@@ -270,6 +334,10 @@ static SVCLayerSettings GetSVCLayerSettings(CodecType aCodec,
                           appendix};
 }
 
+static bool CodecManagesTemporalIds(CodecType aCodec) {
+  return aCodec == CodecType::VP8 || aCodec == CodecType::VP9;
+}
+
 void FFmpegVideoEncoder<LIBAV_VER>::SVCInfo::UpdateTemporalLayerId() {
   MOZ_ASSERT(!mTemporalLayerIds.IsEmpty());
   mCurrentIndex = (mCurrentIndex + 1) % mTemporalLayerIds.Length();
@@ -304,7 +372,8 @@ RefPtr<MediaDataEncoder::InitPromise> FFmpegVideoEncoder<LIBAV_VER>::Init() {
 
 nsCString FFmpegVideoEncoder<LIBAV_VER>::GetDescriptionName() const {
 #ifdef USING_MOZFFVPX
-  return "ffvpx video encoder"_ns;
+  return mIsHardwareAccelerated ? "ffvpx hardware video encoder"_ns
+                                : "ffvpx software video encoder"_ns;
 #else
   const char* lib =
 #  if defined(MOZ_FFMPEG)
@@ -312,7 +381,8 @@ nsCString FFmpegVideoEncoder<LIBAV_VER>::GetDescriptionName() const {
 #  else
       "no library: ffmpeg disabled during build";
 #  endif
-  return nsPrintfCString("ffmpeg video encoder (%s)", lib);
+  return nsFmtCString("ffmpeg {} video encoder ({})",
+                      mIsHardwareAccelerated ? "hardware" : "software", lib);
 #endif
 }
 
@@ -360,6 +430,8 @@ MediaResult FFmpegVideoEncoder<LIBAV_VER>::InitEncoderInternal(bool aHardware) {
   MOZ_ASSERT(mTaskQueue->IsOnCurrentThread());
 
   FFMPEGV_LOG("FFmpegVideoEncoder::InitEncoder");
+  mLastFrameColorConfig.reset();
+  mCanChangeColorPerFrame = false;
 
   // Initialize the common members of the encoder instance
   auto r = AllocateCodecContext(aHardware);
@@ -399,22 +471,32 @@ MediaResult FFmpegVideoEncoder<LIBAV_VER>::InitEncoderInternal(bool aHardware) {
       aHardware ? ffmpeg::FFMPEG_PIX_FMT_NV12 : ffmpeg::FFMPEG_PIX_FMT_YUV420P;
 #else
   mCodecContext->pix_fmt = ffmpeg::FFMPEG_PIX_FMT_YUV420P;
-  // // TODO: do this properly, based on the colorspace of the frame. Setting
-  // this like that crashes encoders. if (mConfig.mCodec != CodecType::AV1) {
-  //     if (mConfig.mPixelFormat == dom::ImageBitmapFormat::RGBA32 ||
-  //         mConfig.mPixelFormat == dom::ImageBitmapFormat::BGRA32) {
-  //       mCodecContext->color_primaries = AVCOL_PRI_BT709;
-  //       mCodecContext->colorspace = AVCOL_SPC_RGB;
-  //   #ifdef FFVPX_VERSION
-  //       mCodecContext->color_trc = AVCOL_TRC_IEC61966_2_1;
-  //   #endif
-  //     } else {
-  //       mCodecContext->color_primaries = AVCOL_PRI_BT709;
-  //       mCodecContext->colorspace = AVCOL_SPC_BT709;
-  //       mCodecContext->color_trc = AVCOL_TRC_BT709;
-  //     }
-  // }
 #endif
+
+  // Signal what the config knows; the codec writes it into the bitstream.
+  // Unknown fields stay unspecified.
+  const EncoderConfig::VideoColorSpace& colors = mConfig.mFormat.mColorSpace;
+  if (colors.mRange) {
+    mCodecContext->color_range = ToAVColorRange(colors.mRange.ref());
+  }
+  if (colors.mMatrix) {
+    mCodecContext->colorspace = ToAVColorSpace(colors.mMatrix.ref());
+  }
+  if (colors.mPrimaries) {
+    mCodecContext->color_primaries =
+        ToAVColorPrimaries(colors.mPrimaries.ref());
+  }
+  if (colors.mTransferFunction) {
+    mCodecContext->color_trc =
+        ToAVColorTransfer(colors.mTransferFunction.ref());
+  }
+  FFMPEGV_LOG(
+      "Configured encoder color metadata: {} -> FFmpeg [range={}, matrix={}, "
+      "primaries={}, transfer={}]",
+      colors.ToString().get(), static_cast<int>(mCodecContext->color_range),
+      static_cast<int>(mCodecContext->colorspace),
+      static_cast<int>(mCodecContext->color_primaries),
+      static_cast<int>(mCodecContext->color_trc));
 
   mCodecContext->width = static_cast<int>(mConfig.mSize.width);
   mCodecContext->height = static_cast<int>(mConfig.mSize.height);
@@ -462,19 +544,20 @@ MediaResult FFmpegVideoEncoder<LIBAV_VER>::InitEncoderInternal(bool aHardware) {
                                 : 10000;
   mCodecContext->keyint_min = 0;
 
+  const bool useLowLatency = mConfig.mUsage == Usage::Realtime || SvcEnabled();
   // When either real-time or SVC is enabled via config, the general settings of
   // the encoder are set to be more appropriate for real-time usage
-  if (mConfig.mUsage == Usage::Realtime || SvcEnabled()) {
+  if (useLowLatency) {
     if (mConfig.mUsage != Usage::Realtime) {
       FFMPEGV_LOG(
           "SVC enabled but low latency encoding mode not enabled, forcing low "
           "latency mode");
     }
     mLib->av_opt_set(mCodecContext->priv_data, "deadline", "realtime", 0);
-    // Explicitly ask encoder do not keep in flight at any one time for
-    // lookahead purposes.
-    mLib->av_opt_set(mCodecContext->priv_data, "lag-in-frames", "0", 0);
-
+    const int lagResult =
+        mLib->av_opt_set(mCodecContext->priv_data, "lag-in-frames", "0", 0);
+    mCanChangeColorPerFrame =
+        mCodecName.EqualsLiteral("libaom-av1") && lagResult == 0;
     if (mConfig.mCodec == CodecType::VP8 || mConfig.mCodec == CodecType::VP9) {
       mLib->av_opt_set(mCodecContext->priv_data, "error-resilient", "1", 0);
     }
@@ -577,13 +660,13 @@ MediaResult FFmpegVideoEncoder<LIBAV_VER>::InitEncoderInternal(bool aHardware) {
       const char* levelStr = s.mSettingKeyValuePairs.Length() == 3
                                  ? s.mSettingKeyValuePairs[1].second.get()
                                  : s.mSettingKeyValuePairs[0].second.get();
-      h264Log.AppendPrintf(", H264: profile - %d (%s), level %d (%s), %s",
-                           mCodecContext->profile, profileStr,
-                           mCodecContext->level, levelStr, formatStr);
+      h264Log.AppendFmt(", H264: profile - {} ({}), level {} ({}), {}",
+                        mCodecContext->profile, profileStr,
+                        mCodecContext->level, levelStr, formatStr);
     } else {
-      h264Log.AppendPrintf(", H264: profile - %d, level %d, %s",
-                           mCodecContext->profile, mCodecContext->level,
-                           formatStr);
+      h264Log.AppendFmt(", H264: profile - {}, level {}, {}",
+                        mCodecContext->profile, mCodecContext->level,
+                        formatStr);
     }
   }
 
@@ -653,6 +736,34 @@ Result<MediaDataEncoder::EncodedData, MediaResult> FFmpegVideoEncoder<
   mFrame->height = static_cast<int>(mConfig.mSize.height);
   mFrame->pict_type =
       sample->mKeyframe ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
+#  if LIBAVCODEC_VERSION_MAJOR > 58
+  mFrame->color_range = mCodecContext->color_range;
+  mFrame->colorspace = mCodecContext->colorspace;
+  mFrame->color_primaries = mCodecContext->color_primaries;
+  mFrame->color_trc = mCodecContext->color_trc;
+
+  const layers::PlanarYCbCrData* yuv = nullptr;
+  if (layers::PlanarYCbCrImage* image = sample->mImage->AsPlanarYCbCrImage()) {
+    yuv = image->GetData();
+  } else if (layers::NVImage* image = sample->mImage->AsNVImage()) {
+    yuv = image->GetData();
+  }
+  if (yuv) {
+    mFrame->color_range = ToAVColorRange(yuv->mColorRange);
+    mFrame->colorspace = ToAVColorSpace(yuv->mYUVColorSpace);
+    mFrame->color_primaries = ToAVColorPrimaries(yuv->mColorPrimaries);
+    mFrame->color_trc = ToAVColorTransfer(yuv->mTransferFunction);
+  }
+
+  if (mCanChangeColorPerFrame) {
+    FrameColorConfig color{mFrame->color_primaries, mFrame->color_trc,
+                           mFrame->colorspace, mFrame->color_range};
+    if (mLastFrameColorConfig && !mLastFrameColorConfig->Equals(color)) {
+      mFrame->pict_type = AV_PICTURE_TYPE_I;
+    }
+    mLastFrameColorConfig = Some(color);
+  }
+#  endif
 
   // Allocate AVFrame data.
   if (int ret = mLib->av_frame_get_buffer(mFrame, 0); ret < 0) {
@@ -719,13 +830,12 @@ Result<MediaDataEncoder::EncodedData, MediaResult> FFmpegVideoEncoder<
   // VP8/VP9 use a mode that handles the temporal layer id sequence internally,
   // and don't require setting explicitly setting the metadata. Other codecs
   // such as AV1 via libaom however requires manual frame tagging.
-  if (SvcEnabled() && mConfig.mCodec != CodecType::VP8 &&
-      mConfig.mCodec != CodecType::VP9) {
-    if (aSample->mKeyframe) {
-      FFMPEGV_LOG("Key frame requested, reseting temporal layer id");
+  if (SvcEnabled() && !CodecManagesTemporalIds(mConfig.mCodec)) {
+    if (mFrame->pict_type == AV_PICTURE_TYPE_I) {
+      FFMPEGV_LOG("Resetting temporal layer id for key frame");
       mSVCInfo->ResetTemporalLayerId();
     }
-    nsPrintfCString str("%d", mSVCInfo->CurrentTemporalLayerId());
+    nsFmtCString str("{}", mSVCInfo->CurrentTemporalLayerId());
     mLib->av_dict_set(&dict, "temporal_id", str.get(), 0);
     mFrame->metadata = dict;
   }
@@ -819,9 +929,9 @@ FFmpegVideoEncoder<LIBAV_VER>::ToMediaRawData(AVPacket* aPacket) {
   }
 
   if (mSVCInfo) {
-    if (data->mKeyframe) {
+    if (data->mKeyframe && CodecManagesTemporalIds(mConfig.mCodec)) {
       FFMPEGV_LOG(
-          "Encoded packet is key frame, reseting temporal layer id sequence");
+          "Encoded packet is key frame, resetting temporal layer id sequence");
       mSVCInfo->ResetTemporalLayerId();
     }
     uint8_t temporalLayerId = mSVCInfo->CurrentTemporalLayerId();
@@ -973,33 +1083,32 @@ FFmpegVideoEncoder<LIBAV_VER>::GetSVCSettings() {
       if (i > 0) {
         parameters.Append(",");
       }
-      parameters.AppendPrintf("%d", svc.mTargetBitrates[i]);
+      parameters.AppendFmt("{}", svc.mTargetBitrates[i]);
     }
-    parameters.AppendPrintf(
-        ":ts_layering_mode=%u",
+    parameters.AppendFmt(
+        ":ts_layering_mode={}",
         svc.mCodecAppendix->as<VPXSVCAppendix>().mLayeringMode);
   }
 
   if (codecType == CodecType::AV1) {
     // Form an SVC setting string for libaom.
     name = "svc-parameters"_ns;
-    parameters.AppendPrintf("number_spatial_layers=%zu",
-                            svc.mNumberSpatialLayers);
-    parameters.AppendPrintf(":number_temporal_layers=%zu",
-                            svc.mNumberTemporalLayers);
+    parameters.AppendFmt("number_spatial_layers={}", svc.mNumberSpatialLayers);
+    parameters.AppendFmt(":number_temporal_layers={}",
+                         svc.mNumberTemporalLayers);
     parameters.Append(":framerate_factor=");
     for (size_t i = 0; i < svc.mRateDecimators.Length(); ++i) {
       if (i > 0) {
         parameters.Append(",");
       }
-      parameters.AppendPrintf("%d", svc.mRateDecimators[i]);
+      parameters.AppendFmt("{}", svc.mRateDecimators[i]);
     }
     parameters.Append(":layer_target_bitrate=");
     for (size_t i = 0; i < svc.mTargetBitrates.Length(); ++i) {
       if (i > 0) {
         parameters.Append(",");
       }
-      parameters.AppendPrintf("%d", svc.mTargetBitrates[i]);
+      parameters.AppendFmt("{}", svc.mTargetBitrates[i]);
     }
   }
 

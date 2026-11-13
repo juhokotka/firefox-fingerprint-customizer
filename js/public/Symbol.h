@@ -7,13 +7,12 @@
 #ifndef js_Symbol_h
 #define js_Symbol_h
 
-#include "js/shadow/Symbol.h"  // JS::shadow::Symbol::WellKnownAPILimit
-
 #include <stddef.h>  // size_t
 #include <stdint.h>  // uintptr_t, uint32_t
 
 #include "jstypes.h"  // JS_PUBLIC_API
 
+#include "js/shadow/Symbol.h"  // JS::shadow::Symbol::WellKnownAPILimit
 #include "js/TypeDecls.h"
 
 namespace JS {
@@ -45,25 +44,26 @@ extern JS_PUBLIC_API Symbol* GetSymbolFor(JSContext* cx, Handle<JSString*> key);
  * This function is infallible. If it returns null, that means the symbol's
  * [[Description]] is undefined.
  */
-extern JS_PUBLIC_API JSString* GetSymbolDescription(Handle<Symbol*> symbol);
+extern JS_PUBLIC_API JSString* GetSymbolDescription(JSContext* cx,
+                                                    Handle<Symbol*> symbol);
 
 /* Well-known symbols. */
-#define JS_FOR_EACH_WELL_KNOWN_SYMBOL(MACRO)      \
-  MACRO(isConcatSpreadable)                       \
-  MACRO(iterator)                                 \
-  MACRO(match)                                    \
-  MACRO(replace)                                  \
-  MACRO(search)                                   \
-  MACRO(species)                                  \
-  MACRO(hasInstance)                              \
-  MACRO(split)                                    \
-  MACRO(toPrimitive)                              \
-  MACRO(toStringTag)                              \
-  MACRO(unscopables)                              \
-  MACRO(asyncIterator)                            \
-  MACRO(matchAll)                                 \
-  IF_EXPLICIT_RESOURCE_MANAGEMENT(MACRO(dispose)) \
-  IF_EXPLICIT_RESOURCE_MANAGEMENT(MACRO(asyncDispose))
+#define JS_FOR_EACH_WELL_KNOWN_SYMBOL(MACRO) \
+  MACRO(isConcatSpreadable)                  \
+  MACRO(iterator)                            \
+  MACRO(match)                               \
+  MACRO(replace)                             \
+  MACRO(search)                              \
+  MACRO(species)                             \
+  MACRO(hasInstance)                         \
+  MACRO(split)                               \
+  MACRO(toPrimitive)                         \
+  MACRO(toStringTag)                         \
+  MACRO(unscopables)                         \
+  MACRO(asyncIterator)                       \
+  MACRO(matchAll)                            \
+  MACRO(dispose)                             \
+  MACRO(asyncDispose)
 
 enum class SymbolCode : uint32_t {
 // There is one SymbolCode for each well-known symbol.

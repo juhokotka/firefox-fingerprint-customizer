@@ -29,6 +29,7 @@ const { HttpServer } = ChromeUtils.importESModule(
 );
 ChromeUtils.defineESModuleGetters(this, {
   AddonTestUtils: "resource://testing-common/AddonTestUtils.sys.mjs",
+  AppMenuNotifications: "resource://gre/modules/AppMenuNotifications.sys.mjs",
 });
 
 /* import-globals-from ../../../toolkit/mozapps/extensions/test/xpinstall/helpers_addons_install_dialogs.js */
@@ -43,7 +44,6 @@ add_setup(async function () {
   });
 
   AddonTestUtils.initMochitest(this);
-  AddonTestUtils.hookAMTelemetryEvents();
 
   // Once the addon is installed, a dialog is displayed as a confirmation.
   // This could interfere with tests running after this one, so we set up a listener
@@ -89,6 +89,12 @@ add_task(async function testRequestMIDIAccess() {
   await BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
   const testPageHost = gBrowser.selectedTab.linkedBrowser.documentURI.host;
   Services.fog.testResetFOG();
+
+  // Track the site_permission values observed across this test task
+  // and assert the unique values collected at the end.
+  const sitePermissionsSeen = new Set();
+  const trackSitePermission = evt =>
+    sitePermissionsSeen.add(evt.site_permission);
 
   info("Check that midi-sysex isn't set");
   ok(
@@ -151,10 +157,11 @@ add_task(async function testRequestMIDIAccess() {
     "SecurityError: WebMIDI requires a site permission add-on to activate"
   );
 
-  AddonTestUtils.assertInstallTelemetryEvents(
-    ["site_warning", "cancelled"],
-    "sitepermission"
-  );
+  AddonTestUtils.assertSitePermissionInstallSteps({
+    expectedSteps: ["site_warning", "cancelled"],
+    resetFOG: true,
+    onEvent: trackSitePermission,
+  });
 
   info("Deny site permission addon install in second popup");
   onAddonInstallBlockedNotification = waitForNotification(
@@ -208,10 +215,11 @@ add_task(async function testRequestMIDIAccess() {
     "SecurityError: WebMIDI requires a site permission add-on to activate"
   );
 
-  AddonTestUtils.assertInstallTelemetryEvents(
-    ["site_warning", "permissions_prompt", "cancelled"],
-    "sitepermission"
-  );
+  AddonTestUtils.assertSitePermissionInstallSteps({
+    expectedSteps: ["site_warning", "permissions_prompt", "cancelled"],
+    resetFOG: true,
+    onEvent: trackSitePermission,
+  });
 
   info("Request midi-sysex access again");
   onAddonInstallBlockedNotification = waitForNotification(
@@ -281,10 +289,11 @@ add_task(async function testRequestMIDIAccess() {
     "requestMIDIAccess resolved without user prompt"
   );
 
-  AddonTestUtils.assertInstallTelemetryEvents(
-    ["site_warning", "permissions_prompt", "completed"],
-    "sitepermission"
-  );
+  AddonTestUtils.assertSitePermissionInstallSteps({
+    expectedSteps: ["site_warning", "permissions_prompt", "completed"],
+    resetFOG: true,
+    onEvent: trackSitePermission,
+  });
 
   info("Request midi access without sysex");
   onAddonInstallBlockedNotification = waitForNotification(
@@ -362,10 +371,11 @@ add_task(async function testRequestMIDIAccess() {
     "and midi value should also have ALLOW permission"
   );
 
-  AddonTestUtils.assertInstallTelemetryEvents(
-    ["site_warning", "permissions_prompt", "completed"],
-    "sitepermission"
-  );
+  AddonTestUtils.assertSitePermissionInstallSteps({
+    expectedSteps: ["site_warning", "permissions_prompt", "completed"],
+    resetFOG: true,
+    onEvent: trackSitePermission,
+  });
 
   info("Check that we don't prompt user again when they perm denied");
   // remove permission to have a clean state
@@ -442,19 +452,14 @@ add_task(async function testRequestMIDIAccess() {
     "Expected Glean event recorded."
   );
 
-  AddonTestUtils.assertInstallTelemetryEvents(
-    ["site_warning", "cancelled"],
-    "sitepermission"
-  );
+  AddonTestUtils.assertSitePermissionInstallSteps({
+    expectedSteps: ["site_warning", "cancelled"],
+    resetFOG: true,
+    onEvent: trackSitePermission,
+  });
 
   Assert.deepEqual(
-    Array.from(
-      new Set(
-        AddonTestUtils.getAMGleanEvents("install").map(
-          evt => evt.site_permission
-        )
-      )
-    ).sort(),
+    Array.from(sitePermissionsSeen).sort(),
     ["midi", "midi-sysex"],
     "Install telemetry events distinguish the midi and midi-sysex site permissions"
   );
@@ -547,10 +552,10 @@ add_task(async function testIframeRequestMIDIAccess() {
     "requestMIDIAccess resolved without user prompt"
   );
 
-  AddonTestUtils.assertInstallTelemetryEvents(
-    ["site_warning", "permissions_prompt", "completed"],
-    "sitepermission"
-  );
+  AddonTestUtils.assertSitePermissionInstallSteps({
+    expectedSteps: ["site_warning", "permissions_prompt", "completed"],
+    resetFOG: true,
+  });
 
   info("Check that request is rejected when done from a cross-origin iframe");
   const crossOriginIframeBrowsingContext = await SpecialPowers.spawn(
@@ -602,7 +607,10 @@ add_task(async function testIframeRequestMIDIAccess() {
       "an error message is sent to the console"
     )
   );
-  AddonTestUtils.assertInstallTelemetryEvents([], "sitepermission");
+  AddonTestUtils.assertSitePermissionInstallSteps({
+    expectedSteps: [],
+    resetFOG: true,
+  });
 });
 
 add_task(async function testRequestMIDIAccessLocalhost() {
@@ -698,7 +706,10 @@ add_task(async function testRequestMIDIAccessLocalhost() {
   );
   ok(accessGranted, "requestMIDIAccess resolved");
 
-  AddonTestUtils.assertInstallTelemetryEvents([], "sitepermission");
+  AddonTestUtils.assertSitePermissionInstallSteps({
+    expectedSteps: [],
+    resetFOG: true,
+  });
 });
 
 add_task(async function testDisabledRequestMIDIAccessFile() {
@@ -826,6 +837,14 @@ add_task(async function testMIDIAccessGrantedUseCounter() {
   let dialogPromise = waitForInstallDialog();
   addonInstallPanel.childNodes[0].button.click();
   let installDialog = await dialogPromise;
+  // This is the last add-on installed by this file, so its post install dialog
+  // has to be accepted before the end of the task: once the file is over,
+  // alwaysAcceptAddonPostInstallDialogs has stopped accepting them and the
+  // dialog would stay open for the next test file.
+  let postInstallDialogShown = BrowserTestUtils.waitForEvent(
+    PanelUI.notificationPanel,
+    "popupshown"
+  );
   installDialog.button.click();
 
   let allowResolved = await SpecialPowers.spawn(
@@ -858,13 +877,15 @@ add_task(async function testMIDIAccessGrantedUseCounter() {
     afterDeny.grantedDoc + 1,
     "midiaccess_granted document counter incremented when permission granted"
   );
-});
 
-// Ignore any additional telemetry events collected in this file.
-// Unfortunately it doesn't work to have this in a cleanup function.
-// Keep this as the last task done.
-add_task(function teardown_telemetry_events() {
-  AddonTestUtils.getAMTelemetryEvents();
+  info("Wait for the post install dialog to be shown and accepted");
+  await postInstallDialogShown;
+  await BrowserTestUtils.waitForPopupEvent(PanelUI.notificationPanel, "hidden");
+  is(
+    AppMenuNotifications.activeNotification,
+    null,
+    "the post install dialog has been accepted"
+  );
 });
 
 // See helpers_addons_install_dialogs.js for shared helpers. If needed, update the shared

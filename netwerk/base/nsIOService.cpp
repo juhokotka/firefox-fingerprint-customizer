@@ -2,76 +2,77 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/DebugOnly.h"
-
 #include "nsIOService.h"
-#include "nsIProtocolHandler.h"
-#include "nsIFileProtocolHandler.h"
-#include "nscore.h"
-#include "nsIURI.h"
-#include "prprf.h"
-#include "netCore.h"
-#include "nsIObserverService.h"
-#include "nsXPCOM.h"
-#include "nsIProxiedProtocolHandler.h"
-#include "nsIProxyInfo.h"
-#include "nsDNSService2.h"
-#include "nsEscape.h"
-#include "nsNetUtil.h"
-#include "nsNetCID.h"
-#include "nsCRT.h"
-#include "nsSimpleNestedURI.h"
-#include "nsSocketTransport2.h"
-#include "nsTArray.h"
-#include "nsIUploadChannel2.h"
-#include "nsXULAppAPI.h"
-#include "nsIProtocolProxyCallback.h"
-#include "nsICancelable.h"
-#include "nsINetworkLinkService.h"
-#include "nsAsyncRedirectVerifyHelper.h"
-#include "nsURLHelper.h"
-#include "nsIProtocolProxyService2.h"
+
+#include "IPv4Parser.h"
 #include "MainThreadUtils.h"
-#include "nsINode.h"
-#include "nsIWebTransport.h"
-#include "nsIWidget.h"
-#include "nsThreadUtils.h"
+#include "SerializedLoadContext.h"
+#include "StaticComponents.h"
+#include "SuspendableChannelWrapper.h"
 #include "WebTransportSessionProxy.h"
 #include "mozilla/AppShutdown.h"
 #include "mozilla/Components.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/LoadInfo.h"
-#include "mozilla/net/NeckoCommon.h"
 #include "mozilla/Services.h"
-#include "mozilla/net/DNS.h"
-#include "mozilla/ipc/URIUtils.h"
-#include "mozilla/net/CacheControlParser.h"
-#include "mozilla/net/NeckoChild.h"
-#include "mozilla/net/NeckoParent.h"
+#include "mozilla/StaticPrefs_network.h"
+#include "mozilla/StaticPrefs_security.h"
+#include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/dom/ChromeUtilsBinding.h"
 #include "mozilla/dom/ClientInfo.h"
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/nsHTTPSOnlyUtils.h"
 #include "mozilla/dom/ServiceWorkerDescriptor.h"
+#include "mozilla/dom/nsHTTPSOnlyUtils.h"
+#include "mozilla/glean/NetwerkMetrics.h"
+#include "mozilla/ipc/URIUtils.h"
+#include "mozilla/net/CacheControlParser.h"
 #include "mozilla/net/CaptivePortalService.h"
+#include "mozilla/net/DNS.h"
+#include "mozilla/net/NeckoChild.h"
+#include "mozilla/net/NeckoCommon.h"
+#include "mozilla/net/NeckoParent.h"
 #include "mozilla/net/NetworkConnectivityService.h"
+#include "mozilla/net/SSLTokensCache.h"
 #include "mozilla/net/SocketProcessHost.h"
 #include "mozilla/net/SocketProcessParent.h"
-#include "mozilla/net/SSLTokensCache.h"
-#include "mozilla/StoragePrincipalHelper.h"
-#include "SerializedLoadContext.h"
+#include "netCore.h"
+#include "nsAsyncRedirectVerifyHelper.h"
+#include "nsCRT.h"
 #include "nsContentSecurityManager.h"
 #include "nsContentUtils.h"
-#include "mozilla/StaticPrefs_network.h"
-#include "mozilla/StaticPrefs_security.h"
-#include "mozilla/glean/NetwerkMetrics.h"
+#include "nsDNSService2.h"
+#include "nsEscape.h"
+#include "nsICancelable.h"
+#include "nsIFileProtocolHandler.h"
+#include "nsINetworkLinkService.h"
+#include "nsINode.h"
+#include "nsIObserverService.h"
+#include "nsIProtocolHandler.h"
+#include "nsIProtocolProxyCallback.h"
+#include "nsIProtocolProxyService2.h"
+#include "nsIProxiedProtocolHandler.h"
+#include "nsIProxyInfo.h"
+#include "nsIURI.h"
+#include "nsIUploadChannel2.h"
+#include "nsIWebTransport.h"
+#include "nsIWidget.h"
 #include "nsNSSComponent.h"
-#include "IPv4Parser.h"
+#include "nsNetCID.h"
+#include "nsNetUtil.h"
+#include "nsSimpleNestedURI.h"
+#include "nsSocketTransport2.h"
+#include "nsTArray.h"
+#include "nsThreadUtils.h"
+#include "nsURLHelper.h"
+#include "nsXPCOM.h"
+#include "nsXULAppAPI.h"
+#include "nscore.h"
+#include "prprf.h"
 #include "ssl.h"
-#include "StaticComponents.h"
-#include "SuspendableChannelWrapper.h"
 
 #ifdef MOZ_WIDGET_ANDROID
 #  include <regex>
+
 #  include "AndroidBridge.h"
 #  include "mozilla/java/GeckoAppShellWrappers.h"
 #  include "mozilla/jni/Utils.h"
@@ -106,7 +107,6 @@ using mozilla::dom::ServiceWorkerDescriptor;
 #define PREF_LNA_SKIP_DOMAINS "network.lna.skip-domains"
 
 nsIOService* gIOService;
-static bool gCaptivePortalEnabled = false;
 static LazyLogModule gIOServiceLog("nsIOService");
 #undef LOG
 #define LOG(args) MOZ_LOG(gIOServiceLog, LogLevel::Debug, args)
@@ -205,8 +205,6 @@ int16_t gBadPortList[] = {
 
 static const char kProfileChangeNetTeardownTopic[] =
     "profile-change-net-teardown";
-static const char kProfileChangeNetRestoreTopic[] =
-    "profile-change-net-restore";
 static const char kProfileDoChange[] = "profile-do-change";
 
 // Necko buffer defaults
@@ -315,7 +313,6 @@ nsresult nsIOService::Init() {
   // Register for profile change notifications
   mObserverService = services::GetObserverService();
   MOZ_ALWAYS_SUCCEEDS(AddObserver(this, kProfileChangeNetTeardownTopic, true));
-  MOZ_ALWAYS_SUCCEEDS(AddObserver(this, kProfileChangeNetRestoreTopic, true));
   MOZ_ALWAYS_SUCCEEDS(AddObserver(this, kProfileDoChange, true));
   MOZ_ALWAYS_SUCCEEDS(AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, true));
   MOZ_ALWAYS_SUCCEEDS(AddObserver(this, NS_NETWORK_LINK_TOPIC, true));
@@ -714,11 +711,12 @@ void nsIOService::NotifySocketProcessPrefsChanged(const char* aName) {
                  /* isSanitized */ false, Nothing(), Nothing());
 
   Preferences::GetPreference(&pref, GeckoProcessType_Socket,
-                             /* remoteType */ ""_ns);
-  auto sendPrefUpdate = [pref]() {
-    (void)gIOService->mSocketProcess->GetActor()->SendPreferenceUpdate(pref);
+                             /* remoteType */ {});
+  auto sendPrefUpdate = [pref = std::move(pref)]() mutable {
+    (void)gIOService->mSocketProcess->GetActor()->SendPreferenceUpdate(
+        std::move(pref));
   };
-  CallOrWaitForSocketProcess(sendPrefUpdate);
+  CallOrWaitForSocketProcess(std::move(sendPrefUpdate));
 }
 
 void nsIOService::OnProcessLaunchComplete(SocketProcessHost* aHost,
@@ -828,7 +826,8 @@ NS_IMPL_ISUPPORTS(nsIOService, nsIIOService, nsINetUtil, nsISpeculativeConnect,
 
 nsresult nsIOService::RecheckCaptivePortal() {
   MOZ_ASSERT(NS_IsMainThread(), "Must be called on the main thread");
-  if (!mCaptivePortalService) {
+  if (!mCaptivePortalService ||
+      !StaticPrefs::network_captive_portal_service_enabled()) {
     return NS_OK;
   }
   nsCOMPtr<nsIRunnable> task = NewRunnableMethod(
@@ -840,7 +839,8 @@ nsresult nsIOService::RecheckCaptivePortal() {
 nsresult nsIOService::RecheckCaptivePortalIfLocalRedirect(nsIChannel* newChan) {
   nsresult rv;
 
-  if (!mCaptivePortalService) {
+  if (!mCaptivePortalService ||
+      !StaticPrefs::network_captive_portal_service_enabled()) {
     return NS_OK;
   }
 
@@ -1174,13 +1174,14 @@ nsresult nsIOService::NewChannelFromURIWithClientAndController(
     const Maybe<ClientInfo>& aLoadingClientInfo,
     const Maybe<ServiceWorkerDescriptor>& aController, uint32_t aSecurityFlags,
     nsContentPolicyType aContentPolicyType, uint32_t aSandboxFlags,
-    nsIChannel** aResult) {
+    uint64_t aAssociatedBrowsingContextID, nsIChannel** aResult) {
   return NewChannelFromURIWithProxyFlagsInternal(
       aURI,
       nullptr,  // aProxyURI
       0,        // aProxyFlags
       aLoadingNode, aLoadingPrincipal, aTriggeringPrincipal, aLoadingClientInfo,
-      aController, aSecurityFlags, aContentPolicyType, aSandboxFlags, aResult);
+      aController, aSecurityFlags, aContentPolicyType, aSandboxFlags,
+      aAssociatedBrowsingContextID, aResult);
 }
 
 NS_IMETHODIMP
@@ -1192,6 +1193,16 @@ nsIOService::NewChannelFromURIWithLoadInfo(nsIURI* aURI, nsILoadInfo* aLoadInfo,
                                                  aLoadInfo, result);
 }
 
+NS_IMETHODIMP
+nsIOService::NewChannelFromURIWithProxyFlagsAndLoadInfo(nsIURI* aURI,
+                                                        nsIURI* aProxyURI,
+                                                        uint32_t aProxyFlags,
+                                                        nsILoadInfo* aLoadInfo,
+                                                        nsIChannel** result) {
+  return NewChannelFromURIWithProxyFlagsInternal(aURI, aProxyURI, aProxyFlags,
+                                                 aLoadInfo, result);
+}
+
 nsresult nsIOService::NewChannelFromURIWithProxyFlagsInternal(
     nsIURI* aURI, nsIURI* aProxyURI, uint32_t aProxyFlags,
     nsINode* aLoadingNode, nsIPrincipal* aLoadingPrincipal,
@@ -1199,10 +1210,14 @@ nsresult nsIOService::NewChannelFromURIWithProxyFlagsInternal(
     const Maybe<ClientInfo>& aLoadingClientInfo,
     const Maybe<ServiceWorkerDescriptor>& aController, uint32_t aSecurityFlags,
     nsContentPolicyType aContentPolicyType, uint32_t aSandboxFlags,
-    nsIChannel** result) {
+    uint64_t aAssociatedBrowsingContextID, nsIChannel** result) {
   nsCOMPtr<nsILoadInfo> loadInfo = MOZ_TRY(LoadInfo::Create(
       aLoadingPrincipal, aTriggeringPrincipal, aLoadingNode, aSecurityFlags,
       aContentPolicyType, aLoadingClientInfo, aController, aSandboxFlags));
+  if (aAssociatedBrowsingContextID) {
+    MOZ_ALWAYS_SUCCEEDS(
+        loadInfo->SetAssociatedBrowsingContextID(aAssociatedBrowsingContextID));
+  }
   return NewChannelFromURIWithProxyFlagsInternal(aURI, aProxyURI, aProxyFlags,
                                                  loadInfo, result);
 }
@@ -1259,8 +1274,8 @@ nsIOService::NewChannelFromURIWithProxyFlags(
   return NewChannelFromURIWithProxyFlagsInternal(
       aURI, aProxyURI, aProxyFlags, aLoadingNode, aLoadingPrincipal,
       aTriggeringPrincipal, Maybe<ClientInfo>(),
-      Maybe<ServiceWorkerDescriptor>(), aSecurityFlags, aContentPolicyType, 0,
-      result);
+      Maybe<ServiceWorkerDescriptor>(), aSecurityFlags, aContentPolicyType,
+      /* aSandboxFlags */ 0, /* aAssociatedBrowsingContextID */ 0, result);
 }
 
 NS_IMETHODIMP
@@ -1475,7 +1490,8 @@ nsresult nsIOService::SetConnectivityInternal(bool aConnectivity) {
   mLastConnectivityChange = PR_IntervalNow();
 
   if (mCaptivePortalService) {
-    if (aConnectivity && gCaptivePortalEnabled) {
+    if (aConnectivity &&
+        StaticPrefs::network_captive_portal_service_enabled()) {
       // This will also trigger a captive portal check for the new network
       static_cast<CaptivePortalService*>(mCaptivePortalService.get())->Start();
     } else {
@@ -1565,6 +1581,43 @@ nsIOService::AllowPort(int32_t inPort, const char* scheme, bool* _retval) {
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsIOService::AddBlockedLocalPort(int32_t aPort) {
+  MOZ_ASSERT(NS_IsMainThread());
+  if (!XRE_IsParentProcess()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  if (aPort <= 0 || aPort > std::numeric_limits<uint16_t>::max()) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  AutoWriteLock lock(mLock);
+  if (!mBlockedLocalPorts.Contains(aPort)) {
+    mBlockedLocalPorts.AppendElement(aPort);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsIOService::RemoveBlockedLocalPort(int32_t aPort) {
+  MOZ_ASSERT(NS_IsMainThread());
+  if (!XRE_IsParentProcess()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  if (aPort <= 0 || aPort > std::numeric_limits<uint16_t>::max()) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  AutoWriteLock lock(mLock);
+  mBlockedLocalPorts.RemoveElement(aPort);
+  return NS_OK;
+}
+
+bool nsIOService::IsLocalPortBlocked(uint16_t aPort) {
+  AutoReadLock lock(mLock);
+  return mBlockedLocalPorts.Contains(aPort);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 // static
@@ -1619,10 +1672,8 @@ void nsIOService::PrefsChanged(const char* pref) {
   }
 
   if (!pref || strcmp(pref, NETWORK_CAPTIVE_PORTAL_PREF) == 0) {
-    nsresult rv = Preferences::GetBool(NETWORK_CAPTIVE_PORTAL_PREF,
-                                       &gCaptivePortalEnabled);
-    if (NS_SUCCEEDED(rv) && mCaptivePortalService) {
-      if (gCaptivePortalEnabled) {
+    if (mCaptivePortalService) {
+      if (StaticPrefs::network_captive_portal_service_enabled()) {
         static_cast<CaptivePortalService*>(mCaptivePortalService.get())
             ->Start();
       } else {
@@ -1845,11 +1896,6 @@ nsIOService::Observe(nsISupports* subject, const char* topic,
     if (!mOffline) {
       mOfflineForProfileChange = true;
       SetOfflineInternal(true, false);
-    }
-  } else if (!strcmp(topic, kProfileChangeNetRestoreTopic)) {
-    if (mOfflineForProfileChange) {
-      mOfflineForProfileChange = false;
-      SetOfflineInternal(false, false);
     }
   } else if (!strcmp(topic, kProfileDoChange)) {
     if (data && u"startup"_ns.Equals(data)) {

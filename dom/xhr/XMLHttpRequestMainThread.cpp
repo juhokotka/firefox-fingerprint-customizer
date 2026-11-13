@@ -51,6 +51,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/ReferrerInfo.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/URLSearchParams.h"
 #include "mozilla/dom/UserActivation.h"
 #include "mozilla/dom/WorkerError.h"
@@ -107,6 +108,7 @@
 #include "nsXPCOM.h"
 #include "nsZipArchive.h"
 #include "private/pprio.h"
+#include "xpcpublic.h"
 
 // Undefine the macro of CreateFile to avoid FileCreatorHelper#CreateFile being
 // replaced by FileCreatorHelper#CreateFileW.
@@ -168,6 +170,26 @@ static void AddLoadFlags(nsIRequest* request, nsLoadFlags newFlags) {
   request->GetLoadFlags(&flags);
   flags |= newFlags;
   request->SetLoadFlags(flags);
+}
+
+// Returns the window whose event loop a sync XHR from aGlobal must block. For
+// content script sandboxes, this is the window set as the sandboxPrototype.
+static nsPIDOMWindowInner* GetWindowForSyncLoop(nsIGlobalObject* aGlobal) {
+  if (!aGlobal) {
+    return nullptr;
+  }
+  if (nsPIDOMWindowInner* window = aGlobal->GetAsInnerWindow()) {
+    return window;
+  }
+  JS::Rooted<JSObject*> scope(RootingCx(), aGlobal->GetGlobalJSObject());
+  if (!scope) {
+    return nullptr;
+  }
+  AutoJSAPI jsapi;
+  if (!jsapi.Init(scope)) {
+    return nullptr;
+  }
+  return xpc::SandboxWindowOrNull(scope, jsapi.cx());
 }
 
 // We are in a sync event loop.
@@ -390,6 +412,16 @@ void XMLHttpRequestMainThread::SetAssociatedBrowsingContextID(uint64_t aId) {
 }
 
 void XMLHttpRequestMainThread::ResetResponse() {
+  if (RefPtr<nsXHRParseEndListener> listener = mParseEndListener.forget()) {
+    if (mResponseXML) {
+      if (EventListenerManager* manager =
+              mResponseXML->GetExistingListenerManager()) {
+        manager->RemoveEventListenerByType(listener,
+                                           kLiteralString_DOMContentLoaded,
+                                           TrustedEventsAtSystemGroupBubble());
+      }
+    }
+  }
   mResponseXML = nullptr;
   mResponseBody.Truncate();
   TruncateResponseText();
@@ -1051,6 +1083,9 @@ void XMLHttpRequestMainThread::CloseRequest(nsresult detail) {
                                "XMLHttpRequestMainThread::CloseRequest"_ns);
   }
   CancelTimeoutTimer();
+  if (mResponseXML) {
+    mResponseXML->StopDocumentLoad();
+  }
 }
 
 void XMLHttpRequestMainThread::CloseRequestWithError(
@@ -1825,8 +1860,8 @@ class FileCreationHandler final : public PromiseNativeHandler {
     aPromise->AppendNativeHandler(handler);
   }
 
-  void ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue,
-                        ErrorResult& aRv) override {
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY void ResolvedCallback(
+      JSContext* aCx, JS::Handle<JS::Value> aValue, ErrorResult& aRv) override {
     if (NS_WARN_IF(!aValue.isObject())) {
       mXHR->LocalFileToBlobCompleted(nullptr);
       return;
@@ -1838,11 +1873,12 @@ class FileCreationHandler final : public PromiseNativeHandler {
       return;
     }
 
-    mXHR->LocalFileToBlobCompleted(blob->Impl());
+    const RefPtr<BlobImpl> blobImpl = blob->Impl();
+    mXHR->LocalFileToBlobCompleted(blobImpl);
   }
 
-  void RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue,
-                        ErrorResult& aRv) override {
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY void RejectedCallback(
+      JSContext* aCx, JS::Handle<JS::Value> aValue, ErrorResult& aRv) override {
     mXHR->LocalFileToBlobCompleted(nullptr);
   }
 
@@ -1853,7 +1889,7 @@ class FileCreationHandler final : public PromiseNativeHandler {
 
   ~FileCreationHandler() = default;
 
-  RefPtr<XMLHttpRequestMainThread> mXHR;
+  MOZ_KNOWN_LIVE const RefPtr<XMLHttpRequestMainThread> mXHR;
 };
 
 NS_IMPL_ISUPPORTS0(FileCreationHandler)
@@ -2006,6 +2042,30 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request) {
   mFlagParseBody = true;
   if (mErrorLoad == ErrorType::eOK) {
     ChangeState(XMLHttpRequest_Binding::HEADERS_RECEIVED);
+  }
+
+  // Re-run earlier check after scripts may have changed the state.
+
+  if (request != mChannel) {
+    // Can this still happen?
+    return NS_OK;
+  }
+
+  // Don't do anything if we have been aborted
+  if (mState == XMLHttpRequest_Binding::UNSENT) {
+    return NS_OK;
+  }
+
+  // Don't do anything if we're in mid-abort, but let the request
+  // know (this can happen due to race conditions in valid XHRs,
+  // see bz1070763 for info).
+  if (mFlagAborted) {
+    return NS_BINDING_ABORTED;
+  }
+
+  // Don't do anything if we have timed out.
+  if (mFlagTimedOut) {
+    return NS_OK;
   }
 
   ResetResponse();
@@ -2215,7 +2275,8 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request) {
 }
 
 NS_IMETHODIMP
-XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsresult status) {
+XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsresult status)
+    MOZ_CAN_RUN_SCRIPT_BOUNDARY {
   DEBUG_WORKERREFS;
   AUTO_PROFILER_LABEL("XMLHttpRequestMainThread::OnStopRequest", NETWORK);
 
@@ -2547,8 +2608,7 @@ void XMLHttpRequestMainThread::ChangeStateToDoneInternal() {
   // Call this prior to changing state to DONE to ensure we set up the
   // observer before mutations occur.
   if (mErrorLoad == ErrorType::eOK) {
-    Document* doc = GetDocumentIfCurrent();
-    if (doc) {
+    if (const RefPtr<Document> doc = GetDocumentIfCurrent()) {
       doc->NotifyFetchOrXHRSuccess();
     }
   }
@@ -2628,13 +2688,13 @@ nsresult XMLHttpRequestMainThread::CreateChannel() {
                        nullptr,  // aCallbacks
                        loadFlags, nullptr, sandboxFlags);
   } else if (mClientInfo.isSome()) {
-    rv = NS_NewChannel(getter_AddRefs(mChannel), mRequestURL, mPrincipal,
-                       mClientInfo.ref(), mController, secFlags,
-                       contentPolicyType, mCookieJarSettings,
-                       mPerformanceStorage,  // aPerformanceStorage
-                       loadGroup,
-                       nullptr,  // aCallbacks
-                       loadFlags, nullptr, sandboxFlags);
+    rv = NS_NewChannel(
+        getter_AddRefs(mChannel), mRequestURL, mPrincipal, mClientInfo.ref(),
+        mController, secFlags, contentPolicyType, mCookieJarSettings,
+        mPerformanceStorage,  // aPerformanceStorage
+        loadGroup,
+        nullptr,  // aCallbacks
+        loadFlags, nullptr, sandboxFlags, mAssociatedBrowsingContextID);
   } else {
     // Otherwise use the principal.
     rv = NS_NewChannel(getter_AddRefs(mChannel), mRequestURL, mPrincipal,
@@ -3249,9 +3309,11 @@ void XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
 
     mFlagSyncLooping = true;
 
-    if (GetOwnerWindow()) {
+    nsCOMPtr<nsPIDOMWindowInner> window =
+        GetWindowForSyncLoop(GetRelevantGlobal());
+    if (window && window->GetOuterWindow()) {
       if (nsCOMPtr<nsPIDOMWindowOuter> topWindow =
-              GetOwnerWindow()->GetOuterWindow()->GetInProcessTop()) {
+              window->GetOuterWindow()->GetInProcessTop()) {
         if (nsCOMPtr<nsPIDOMWindowInner> topInner =
                 topWindow->GetCurrentInnerWindow()) {
           suspendedDoc = topWindow->GetExtantDoc();

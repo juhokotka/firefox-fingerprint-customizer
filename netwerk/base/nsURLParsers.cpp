@@ -2,15 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsURLParsers.h"
+
 #include <string.h>
 
 #include "mozilla/RangedPtr.h"
 #include "mozilla/TextUtils.h"
-
 #include "nsCRTGlue.h"
-#include "nsURLParsers.h"
-#include "nsURLHelper.h"
 #include "nsString.h"
+#include "nsURLHelper.h"
 
 using namespace mozilla;
 
@@ -40,6 +40,64 @@ NS_IMPL_ISUPPORTS(nsNoAuthURLParser, nsIURLParser)
   PR_BEGIN_MACRO                                   \
   if (component##Pos) *component##Pos += (offset); \
   PR_END_MACRO
+
+nsresult nsBaseURLParser::ParseAll(const char* spec, int32_t specLen,
+                                   URLParseResult& aOut) {
+  // Step 1: top-level split into scheme / authority / path.
+  nsresult rv = ParseURL(spec, specLen, &aOut.schemePos, &aOut.schemeLen,
+                         &aOut.authorityPos, &aOut.authorityLen, &aOut.pathPos,
+                         &aOut.pathLen);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  // Step 2: split authority into username / password / host / port. Offsets
+  // returned by ParseAuthority are relative to the authority substring; we
+  // shift them back into spec-relative coordinates here so callers don't have
+  // to.
+  if (aOut.authorityLen > 0) {
+    rv = ParseAuthority(spec + aOut.authorityPos, aOut.authorityLen,
+                        &aOut.usernamePos, &aOut.usernameLen, &aOut.passwordPos,
+                        &aOut.passwordLen, &aOut.hostPos, &aOut.hostLen,
+                        &aOut.port);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    aOut.usernamePos += aOut.authorityPos;
+    aOut.passwordPos += aOut.authorityPos;
+    aOut.hostPos += aOut.authorityPos;
+  }
+
+  // Step 3: split path into filepath / query / ref, then filepath into
+  // directory / basename / extension. Both substages also get their offsets
+  // folded back into spec-relative coordinates.
+  if (aOut.pathLen > 0) {
+    rv = ParsePath(spec + aOut.pathPos, aOut.pathLen, &aOut.filepathPos,
+                   &aOut.filepathLen, &aOut.queryPos, &aOut.queryLen,
+                   &aOut.refPos, &aOut.refLen);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    aOut.filepathPos += aOut.pathPos;
+    aOut.queryPos += aOut.pathPos;
+    aOut.refPos += aOut.pathPos;
+
+    if (aOut.filepathLen > 0) {
+      rv = ParseFilePath(spec + aOut.filepathPos, aOut.filepathLen,
+                         &aOut.directoryPos, &aOut.directoryLen,
+                         &aOut.basenamePos, &aOut.basenameLen,
+                         &aOut.extensionPos, &aOut.extensionLen);
+      if (NS_FAILED(rv)) {
+        return rv;
+      }
+      aOut.directoryPos += aOut.filepathPos;
+      aOut.basenamePos += aOut.filepathPos;
+      aOut.extensionPos += aOut.filepathPos;
+    }
+  }
+
+  return NS_OK;
+}
 
 NS_IMETHODIMP
 nsBaseURLParser::ParseURL(const char* spec, int32_t specLen,

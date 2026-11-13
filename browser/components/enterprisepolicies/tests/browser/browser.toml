@@ -14,8 +14,14 @@ support-files = [
   "extensionsettings.html",
   "301.sjs",
   "302.sjs",
+  "302exception.sjs",
   "404.sjs",
+  "cached301.sjs",
+  "websitefilter_sw.html",
+  "websitefilter_sw.js",
 ]
+
+["browser_policies_about_policies.js"]
 
 ["browser_policies_getActivePolicies.js"]
 
@@ -53,9 +59,20 @@ support-files = "favicon.svg"
 ["browser_policy_cookie_settings.js"]
 https_first_disabled = true
 
+["browser_policy_default_browser_setting.js"]
+
+["browser_policy_disable_buttons.js"]
+
+["browser_policy_disable_developer_tools.js"]
+
 ["browser_policy_disable_feedback_commands.js"]
 
 ["browser_policy_disable_fxaccounts.js"]
+
+["browser_policy_disable_launch_on_login.js"]
+run-if = [
+  "os == 'win'",
+]
 
 ["browser_policy_disable_masterpassword.js"]
 
@@ -65,8 +82,8 @@ https_first_disabled = true
 
 ["browser_policy_disable_popup_blocker_locked.js"]
 support-files = [
-  "!/browser/base/content/test/popups/popup_blocker2.html",
-  "!/browser/base/content/test/popups/popup_blocker_a.html",
+  "!/browser/base/content/test/browser-popups/popup_blocker2.html",
+  "!/browser/base/content/test/browser-popups/popup_blocker_a.html",
 ]
 
 ["browser_policy_disable_privatebrowsing.js"]
@@ -134,6 +151,9 @@ support-files = [
 ["browser_policy_sanitize_on_shutdown.js"]
 
 ["browser_policy_search_engine.js"]
+support-files = [
+  "!/browser/base/content/test/browser-contextMenu/subtst_contextmenu_add_search_engine.html",
+]
 
 ["browser_policy_searchbar.js"]
 
@@ -141,7 +161,15 @@ support-files = [
 
 ["browser_policy_set_startpage.js"]
 
-["browser_policy_sitepolicies.js"]
+["browser_policy_sitepolicies_container.js"]
+
+["browser_policy_sitepolicies_https.js"]
+https_first_disabled = true
+support-files = [
+  "sitepolicies_https_subresource.html",
+]
+
+["browser_policy_sitepolicies_jit.js"]
 https_first_disabled = true
 support-files = [
   "framed.html",
@@ -149,6 +177,13 @@ support-files = [
   "worker.html",
   "service-worker.js",
   "shared-worker.js",
+]
+
+["browser_policy_sitepolicies_serviceworkers.js"]
+support-files = [
+  "sitepolicies_sw_fetch.html",
+  "sitepolicies_sw_framed.html",
+  "sw_fetch_intercept.js",
 ]
 
 ["browser_policy_support_menu.js"]

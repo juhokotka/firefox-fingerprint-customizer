@@ -8,16 +8,32 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 import { E10SUtils } from "resource://gre/modules/E10SUtils.sys.mjs";
 
+const lazy = {};
+
+ChromeUtils.defineESModuleGetters(lazy, {
+  NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+});
+
 const DIALOG_URL_APP_CHOOSER =
   "chrome://mozapps/content/handling/appChooser.xhtml";
 const DIALOG_URL_PERMISSION =
   "chrome://mozapps/content/handling/permissionDialog.xhtml";
+
+// Sentinel returned by _promiseMailtoChoice when the user picks the OS default
+// mail app, which has no web handler object to key it by.
+const MAILTO_SYSTEM_DEFAULT_ID = "system-default";
 
 const gPrefs = {};
 XPCOMUtils.defineLazyPreferenceGetter(
   gPrefs,
   "promptForExternal",
   "network.protocol-handler.prompt-from-external",
+  true
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  gPrefs,
+  "promptWithoutUserActivation",
+  "network.protocol-handler.prompt-without-user-activation",
   true
 );
 
@@ -38,13 +54,16 @@ export class nsContentDispatchChooser {
    * @param {BrowsingContext} [aBrowsingContext] - Context of the load.
    * @param {bool} [aTriggeredExternally] - Whether the load came from outside
    * this application.
+   * @param {bool} [aHasValidUserGestureActivation] - Whether the navigation
+   * that triggered this load had transient user gesture activation.
    */
   async handleURI(
     aHandler,
     aURI,
     aPrincipal,
     aBrowsingContext,
-    aTriggeredExternally = false
+    aTriggeredExternally = false,
+    aHasValidUserGestureActivation = false
   ) {
     const isStandardProtocol = E10SUtils.STANDARD_SAFE_PROTOCOLS.includes(
       aURI.scheme
@@ -53,7 +72,8 @@ export class nsContentDispatchChooser {
       aHandler,
       aPrincipal,
       aTriggeredExternally,
-      isStandardProtocol
+      isStandardProtocol,
+      aHasValidUserGestureActivation
     );
 
     // Force showing the dialog for links passed from outside the application.
@@ -71,9 +91,62 @@ export class nsContentDispatchChooser {
     }
 
     if ("mailto" === aURI.scheme) {
-      Glean.protocolhandlerMailto.visit.record({
-        triggered_externally: aTriggeredExternally,
-      });
+      const browser = aBrowsingContext?.topFrameElement;
+      // Only show the picker when "always ask" is configured for mailto; a
+      // configured default handler is launched directly by the flow below.
+      // Also gated behind the "dialog" variable of the "mailto" Nimbus feature
+      // so the picker can be turned off remotely. When skipped, fall through to
+      // the default protocol handling below.
+      if (
+        browser &&
+        aHandler.alwaysAskBeforeHandling &&
+        lazy.NimbusFeatures.mailto.getVariable("dialog") &&
+        this._hasMailtoHandlerOptions(aHandler)
+      ) {
+        lazy.NimbusFeatures.mailto.recordExposureEvent();
+        let choice = null;
+        let dialogFailed = false;
+        try {
+          choice = await this._promiseMailtoChoice(aBrowsingContext, aHandler);
+        } catch {
+          // The picker failed to open; fall through to the default protocol
+          // handling below so the click still launches the mail client.
+          dialogFailed = true;
+        }
+        if (choice) {
+          const { handler, alwaysAsk } = choice;
+          if (handler === MAILTO_SYSTEM_DEFAULT_ID) {
+            // Hand the link to the OS default mail application.
+            aHandler.preferredAction = Ci.nsIHandlerInfo.useSystemDefault;
+          } else {
+            aHandler.preferredApplicationHandler = handler;
+            aHandler.preferredAction = Ci.nsIHandlerInfo.useHelperApp;
+          }
+          // Bind the stored "always ask" flag to the checkbox: unchecking it
+          // persists this selection as the silent default (the picker is
+          // skipped next time), while leaving it checked keeps prompting with
+          // this choice preselected.
+          aHandler.alwaysAskBeforeHandling = alwaysAsk;
+          // Pass no browsing context so a web handler opens the mailer in a new
+          // foreground tab (via nsIBrowserDOMWindow.openURI / OPEN_NEW) instead
+          // of replacing the page the mailto link was clicked from.
+          try {
+            aHandler.launchWithURI(aURI, null);
+            // Persist the choice only once the launch has succeeded.
+            Cc["@mozilla.org/uriloader/handler-service;1"]
+              .getService(Ci.nsIHandlerService)
+              .store(aHandler);
+          } catch (error) {
+            console.error(error);
+          }
+        }
+        // We handled the load, or the user dismissed the dialog; skip the
+        // legacy application chooser below. If the picker failed to open, fall
+        // through instead so the click still launches the default mail client.
+        if (!dialogFailed) {
+          return;
+        }
+      }
     }
 
     // Skip the dialog if a preferred application is set and the caller has
@@ -120,6 +193,87 @@ export class nsContentDispatchChooser {
     // Site was granted permission and user chose to open application.
     // Launch the external handler.
     aHandler.launchWithURI(aURI, aBrowsingContext);
+  }
+
+  /**
+   * Whether the mailto picker has anything to offer: at least one configured
+   * web mailer, or an OS default mail application. Used to skip the picker
+   * rather than present an empty dialog when nothing can handle the link.
+   *
+   * @param {nsIHandlerInfo} aHandler - Info about protocol and handlers.
+   * @returns {boolean}
+   */
+  _hasMailtoHandlerOptions(aHandler) {
+    if (aHandler.hasDefaultHandler) {
+      return true;
+    }
+    for (const app of aHandler.possibleApplicationHandlers.enumerate()) {
+      if (app instanceof Ci.nsIWebHandlerApp) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Show the application chooser in "mailto" mode (configured web mailers plus
+   * the OS default) and resolve to the handler the user selected.
+   *
+   * The dialog returns the user's choice through the `outArgs` property bag,
+   * read back here once it closes.
+   *
+   * @param {BrowsingContext} aBrowsingContext - Context used to anchor the
+   * tab-modal dialog.
+   * @param {nsIHandlerInfo} aHandler - Info about protocol and handlers.
+   * @returns {Promise<?{handler: (nsIWebHandlerApp|string), alwaysAsk: boolean}>}
+   * - An object with the chosen handler (a web handler or the
+   * MAILTO_SYSTEM_DEFAULT_ID sentinel) and the "always ask" checkbox state, or
+   * null if the user dismissed the dialog.
+   */
+  async _promiseMailtoChoice(aBrowsingContext, aHandler) {
+    const outArgs = Cc["@mozilla.org/hash-property-bag;1"].createInstance(
+      Ci.nsIWritablePropertyBag
+    );
+    outArgs.setProperty("openHandler", false);
+    outArgs.setProperty("preferredAction", aHandler.preferredAction);
+    outArgs.setProperty(
+      "preferredApplicationHandler",
+      aHandler.preferredApplicationHandler
+    );
+    outArgs.setProperty(
+      "alwaysAskBeforeHandling",
+      aHandler.alwaysAskBeforeHandling
+    );
+
+    try {
+      await this._openDialog(
+        DIALOG_URL_APP_CHOOSER,
+        { handler: aHandler, outArgs, kind: "mailto" },
+        aBrowsingContext
+      );
+    } catch (error) {
+      // Rethrow so the caller can fall back to the default protocol handling
+      // rather than dropping the click.
+      console.error(error);
+      throw error;
+    }
+
+    // "Not now" / dismissal leaves the seed values in outArgs untouched, so the
+    // selected handler and checkbox state are only meaningful once confirmed.
+    if (!outArgs.getProperty("openHandler")) {
+      return null;
+    }
+
+    const useSystemDefault =
+      outArgs.getProperty("preferredAction") ==
+      Ci.nsIHandlerInfo.useSystemDefault;
+
+    return {
+      handler: useSystemDefault
+        ? MAILTO_SYSTEM_DEFAULT_ID
+        : outArgs.getProperty("preferredApplicationHandler"),
+      alwaysAsk: outArgs.getProperty("alwaysAskBeforeHandling"),
+    };
   }
 
   /**
@@ -280,18 +434,38 @@ export class nsContentDispatchChooser {
    * Test if a given principal has the open-protocol-handler permission for a
    * specific protocol.
    *
-   * @param {string} scheme - Scheme of the protocol.
+   * @param {nsIHandlerInfo} aHandler - Info about protocol and handlers.
    * @param {nsIPrincipal} aPrincipal - Principal to test for permission.
+   * @param {boolean} aTriggeredExternally - Whether the load came from outside
+   * this application.
+   * @param {boolean} isStandardProtocol - Whether the scheme is a standard safe
+   * protocol.
+   * @param {boolean} aHasValidUserGestureActivation - Whether the triggering
+   * navigation had transient user gesture activation.
    * @returns {boolean} - true if permission is set, false otherwise.
    */
   _hasProtocolHandlerPermission(
     aHandler,
     aPrincipal,
     aTriggeredExternally,
-    isStandardProtocol
+    isStandardProtocol,
+    aHasValidUserGestureActivation
   ) {
-    // If a handler is set to open externally by default we skip the dialog.
+    // If a handler is set to open externally by default we skip the dialog, but
+    // web content needs user activation to take that shortcut, so that scripted
+    // navigations (e.g. window.location = "mailto:...") can't silently launch
+    // it. Privileged callers are exempt: they leave loadURI's optional
+    // aHasValidUserGestureActivation unset (e.g. "Email Link", talos'
+    // pageloader). Keep in sync with
+    // nsExternalHelperAppService::SchemeRequiresUserActivationToLaunch, which
+    // decides whether to consume the activation. See bug 299116.
     const { type, hasDefaultHandler, preferredApplicationHandler } = aHandler;
+
+    // Allowlist privileged principals; everything else is gated.
+    const isPrivilegedTrigger =
+      !!aPrincipal &&
+      (aPrincipal.isSystemPrincipal ||
+        aPrincipal.isAddonOrExpandedAddonPrincipal);
 
     if (
       Services.prefs.getBoolPref(
@@ -299,7 +473,14 @@ export class nsContentDispatchChooser {
         false
       )
     ) {
-      return true;
+      if (
+        !gPrefs.promptWithoutUserActivation ||
+        aHasValidUserGestureActivation ||
+        aTriggeredExternally ||
+        isPrivilegedTrigger
+      ) {
+        return true;
+      }
     }
 
     if (
@@ -315,7 +496,7 @@ export class nsContentDispatchChooser {
 
     let key = this._getSkipProtoDialogPermissionKey(type);
     return (
-      Services.perms.testPermissionFromPrincipal(aPrincipal, key) ===
+      Services.perms.testExactPermissionFromPrincipal(aPrincipal, key) ===
       Services.perms.ALLOW_ACTION
     );
   }

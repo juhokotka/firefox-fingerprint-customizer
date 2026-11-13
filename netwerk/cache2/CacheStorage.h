@@ -5,10 +5,9 @@
 #ifndef CacheStorage_h_
 #define CacheStorage_h_
 
-#include "nsICacheStorage.h"
 #include "CacheEntry.h"
 #include "LoadContextInfo.h"
-
+#include "nsICacheStorage.h"
 #include "nsILoadContextInfo.h"
 #include "nsTArray.h"
 #include "nsTHashMap.h"
@@ -54,7 +53,11 @@ class CacheEntryTable : public TCacheEntryTable {
 
   void NoteNoVarySearchEntry(const nsACString& aBasePath,
                              const nsACString& aFullKey) {
-    mNoVarySearchIndex.LookupOrInsert(aBasePath).AppendElement(aFullKey);
+    auto& keys = mNoVarySearchIndex.LookupOrInsert(aBasePath);
+    // Only append if the key is not already present
+    if (!keys.Contains(aFullKey)) {
+      keys.AppendElement(aFullKey);
+    }
   }
 
   void RemoveNoVarySearchEntry(const nsACString& aBasePath,
@@ -94,6 +97,12 @@ class CacheStorage : public nsICacheStorage {
 
  protected:
   virtual ~CacheStorage() = default;
+
+  // Shared by asyncOpenURI and asyncOpenURIString once the latter has parsed
+  // its spec. aURI must already have had its ref stripped.
+  nsresult AsyncOpenInternal(nsIURI* aURI, const nsACString& aIdExtension,
+                             uint32_t aFlags,
+                             nsICacheEntryOpenCallback* aCallback);
 
   RefPtr<LoadContextInfo> mLoadContextInfo;
   bool mWriteToDisk : 1;

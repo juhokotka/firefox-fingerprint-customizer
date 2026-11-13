@@ -6,7 +6,13 @@
 #ifndef WIDGET_GTK_GFXINFO_UTILS_h_
 #define WIDGET_GTK_GFXINFO_UTILS_h_
 
+// Print test results to stdout and logging to stderr
+#define OUTPUT_PIPE 1
 #define LOG_PIPE 2
+
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #include <cstdarg>
 
@@ -21,7 +27,7 @@ static void log(const char* format, ...) {
   va_end(args);
 }
 
-static int output_pipe = 1;
+static int output_pipe = OUTPUT_PIPE;
 static void close_logging() {
   // we want to redirect to /dev/null stdout, stderr, and while we're at it,
   // any PR logging file descriptors. To that effect, we redirect all positive
@@ -40,7 +46,7 @@ static void close_logging() {
 // to function pointer types. So the work-around is to convert first to size_t.
 // http://www.trilithium.com/johan/2004/12/problem-with-dlsym/
 template <typename func_ptr_type>
-static func_ptr_type cast(void* ptr) {
+func_ptr_type cast(void* ptr) {
   return reinterpret_cast<func_ptr_type>(reinterpret_cast<size_t>(ptr));
 }
 

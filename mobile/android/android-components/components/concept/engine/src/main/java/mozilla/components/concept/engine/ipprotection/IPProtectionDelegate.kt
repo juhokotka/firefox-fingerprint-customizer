@@ -7,15 +7,38 @@ package mozilla.components.concept.engine.ipprotection
 import mozilla.components.ExperimentalAndroidComponentsApi
 import mozilla.components.concept.engine.Engine
 
-/**
- * Engine-to-app callbacks for IP protection state changes. Passed to [Engine.registerIPProtectionDelegate].
- */
+/** Engine-to-app callbacks for IP protection state changes. Passed to [Engine.registerIPProtectionDelegate]. */
 @ExperimentalAndroidComponentsApi
 interface IPProtectionDelegate {
     /**
+     * Called when the IP protection service state changes.
+     *
+     * @param serviceState The current [ServiceState].
+     */
+    fun onServiceStateChanged(serviceState: ServiceState)
+
+    /**
      * Called when the IP protection proxy state changes.
      *
-     * @param info The current [IPProtectionHandler.StateInfo].
+     * @param proxyState The current [ProxyState].
+     * @param lastError The error the proxy last failed with, or null.
      */
-    fun onStateChanged(info: IPProtectionHandler.StateInfo)
+    fun onProxyStateChanged(proxyState: ProxyState, lastError: String?)
+
+    /**
+     * Called when the data usage changes.
+     *
+     * @param remaining Remaining data allowance in bytes.
+     * @param max Maximum data allowance in bytes, or 0 if unlimited.
+     * @param resetTime ISO 8601 string for when the allowance resets, or null if unavailable.
+     */
+    fun onUsageChanged(remaining: Long, max: Long, resetTime: String?)
+
+    /**
+     * Called when the list of available proxy countries changes, either in response to
+     * [IPProtectionHandler.updateCountryList] or by a server side push.
+     *
+     * @param countries The current list of available [IPProtectionHandler.Country] entries.
+     */
+    fun onCountryListChanged(countries: List<IPProtectionHandler.Country>) = Unit
 }

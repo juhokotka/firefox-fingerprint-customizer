@@ -99,16 +99,20 @@ moz-box-group {
   gap: var(--space-medium);
 }
 
-.key-label {
+.key-label-container {
   flex: 1 1 0;
   min-width: 0;
 }
 
 @media (max-width: 600px) {
   /* Reflow the row to have two lines and use the first one for the label */
-  .key-label {
+  .key-label-container {
     flex: 1 1 100%;
   }
+}
+
+.key-label {
+  display: block;
 }
 
 .key-actions {
@@ -129,30 +133,36 @@ moz-box-group {
 .key-actions .currentShortcut {
   flex: 1 1 auto;
   min-width: 0;
+  /* 1 input without 2 icon buttons and gaps between them */
+  max-width: calc(var(--input-width) * 10);
+}
+
+/* Edit button */
+
+.internal .change {
+  display: none;
 }
 
 /* Clear button */
 
 .clear {
   visibility: hidden;
-}
-
-.assigned .clear {
-  visibility: visible;
-}
-
-.customized .clear {
-  display: none;
+  .assigned & {
+    visibility: visible;
+  }
+  .internal &,
+  .customized & {
+    display: none;
+  }
 }
 
 /* Reset/Restore button */
 
 .reset {
   display: none;
-}
-
-.customized .reset {
-  display: revert;
+  .customized & {
+    display: revert;
+  }
 }
 
 /* Editing mode controls (after Change/Edit button is activated) */

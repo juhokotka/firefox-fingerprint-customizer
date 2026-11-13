@@ -7,6 +7,10 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   AboutWelcomeTelemetry:
     "resource:///modules/aboutwelcome/AboutWelcomeTelemetry.sys.mjs",
+  ASRouterScreenUtils:
+    "resource:///modules/asrouter/ASRouterScreenUtils.sys.mjs",
+  MessagingSystemAllowlists:
+    "resource://messaging-system/lib/MessagingSystemAllowlists.sys.mjs",
 });
 
 ChromeUtils.defineLazyGetter(
@@ -69,11 +73,39 @@ export const Spotlight = {
    */
   async showSpotlightDialog(browser, message, dispatch = this.defaultDispatch) {
     const win = browser?.documentGlobal;
-    if (!win || win.gDialogBox.isOpen) {
+    if (!win) {
       return false;
     }
-    const spotlight_url = "chrome://browser/content/spotlight.html";
 
+    // Warm the Remote Settings-backed SET_PREF allowlist cache as early as
+    // possible as a spotlight dialog can be opened directly via the SET_PREF
+    // action's own handleAction dispatch (SHOW_SPOTLIGHT), which does not go
+    // through ASRouter's own init sequence. This isn't awaited, so it only
+    // shrinks the window for a possible race condition.
+    lazy.MessagingSystemAllowlists.ensureInit();
+
+    const renderedContent =
+      await lazy.ASRouterScreenUtils.prepareContentForFirstPaint(
+        message.content
+      );
+    if (!renderedContent || win.closed || !browser.isConnected) {
+      return false;
+    }
+
+    if (message.trigger?.id === "lastWindowClose") {
+      win.gDialogBox.replaceDialogIfOpen();
+      // We do this for the selected browser, not the triggering browser, since
+      // even a global modal is prevented by a tab modal in the selected
+      // browser, and we want lastWindowClose modals to take priority: this is
+      // the user's last chance to see it before the window actually closes.
+      win.gBrowser
+        .getTabDialogBox(win.gBrowser.selectedBrowser)
+        .abortAllDialogs();
+    } else if (win.gDialogBox.isOpen) {
+      return false;
+    }
+
+    const spotlight_url = "chrome://browser/content/spotlight.html";
     const dispatchCFRAction =
       // This also blocks CFR impressions, which is fine for current use cases.
       message.content?.metrics === "block" ? () => {} : dispatch;
@@ -90,7 +122,7 @@ export const Spotlight = {
     win.addEventListener("unload", unloadHandler, { once: true });
 
     try {
-      if (message.content?.modal === "tab") {
+      if (renderedContent?.modal === "tab") {
         let { closedPromise, dialog } = win.gBrowser
           .getTabDialogBox(browser)
           .open(
@@ -99,16 +131,16 @@ export const Spotlight = {
               features: "resizable=no",
               allowDuplicateDialogs: false,
             },
-            message.content
+            renderedContent
           );
         this._dialog = dialog;
         this._dialogWindow = win;
         await closedPromise;
       } else {
-        let openPromise = win.gDialogBox.open(spotlight_url, message.content);
+        let closedPromise = win.gDialogBox.open(spotlight_url, renderedContent);
         this._dialog = win.gDialogBox.dialog;
         this._dialogWindow = win;
-        await openPromise;
+        await closedPromise;
       }
     } finally {
       win.removeEventListener("unload", unloadHandler);

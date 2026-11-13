@@ -5,6 +5,8 @@
 #ifndef PROFILER_BACKTRACE_H
 #define PROFILER_BACKTRACE_H
 
+#include "ProfileBuffer.h"
+
 #include "mozilla/ProfileChunkedBuffer.h"
 #include "mozilla/UniquePtr.h"
 
@@ -16,7 +18,6 @@ class TimeStamp;
 
 namespace baseprofiler {
 
-class ProfileBuffer;
 class SpliceableJSONWriter;
 class ThreadInfo;
 class UniqueStacks;
@@ -50,7 +51,7 @@ class ProfilerBacktrace {
       ProfileChunkedBuffer* aExternalProfileChunkedBufferOrNull = nullptr,
       ProfileBuffer* aExternalProfileBufferOrNull = nullptr);
 
-  ~ProfilerBacktrace();
+  ~ProfilerBacktrace() = default;
 
   [[nodiscard]] bool IsEmpty() const {
     return !mProfileChunkedBuffer ||

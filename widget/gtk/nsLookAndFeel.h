@@ -6,8 +6,8 @@
 #define _nsLookAndFeel
 
 #include "X11UndefineNone.h"
-#include "nsXPLookAndFeel.h"
 #include "gfxFont.h"
+#include "nsXPLookAndFeel.h"
 
 struct _GtkStyle;
 typedef struct _GDBusProxy GDBusProxy;
@@ -79,12 +79,7 @@ class nsLookAndFeel final : public nsXPLookAndFeel {
     nscolor mBg = kWhite;
     nscolor mFg = kBlack;
 
-    bool operator==(const ColorPair& aOther) const {
-      return mBg == aOther.mBg && mFg == aOther.mFg;
-    }
-    bool operator!=(const ColorPair& aOther) const {
-      return !(*this == aOther);
-    }
+    bool operator==(const ColorPair& aOther) const = default;
   };
 
   struct ButtonColors : ColorPair {

@@ -6,6 +6,7 @@
 #define frontend_SharedContext_inl_h
 
 #include "frontend/SharedContext.h"
+
 #include "frontend/ParseContext.h"
 
 namespace js {

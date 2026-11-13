@@ -46,7 +46,6 @@
 #include "nsIException.h"  // for nsIStackFrame
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsILoadContext.h"
-#include "nsISensitiveInfoHiddenURI.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIWebNavigation.h"
 #include "nsIXPConnect.h"
@@ -150,7 +149,7 @@ class ConsoleCallData final {
     nsAutoString addonId;
     aPrincipal->GetAddonId(addonId);
 
-    mAddonId = addonId;
+    mAddonId = std::move(addonId);
   }
 
   void AssertIsOnOwningThread() const {
@@ -1304,7 +1303,7 @@ void Console::Method(const GlobalObject& aGlobal, MethodName aMethodName,
 struct ConsoleTimingMarker : public BaseMarkerType<ConsoleTimingMarker> {
   static constexpr const char* Name = "ConsoleTiming";
   static constexpr const char* Description =
-      "Console timing timeStampers created using the Console API methods "
+      "Console timing markers created using the Console API methods "
       "console.time(), console.timeEnd(), and console.timeStamp().";
 
   using MS = MarkerSchema;
@@ -1314,7 +1313,7 @@ struct ConsoleTimingMarker : public BaseMarkerType<ConsoleTimingMarker> {
 
   static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
                                                MS::Location::MarkerTable};
-  static constexpr const char* AllLabels = "{timeStamper.data.label}";
+  static constexpr const char* AllLabels = "{marker.data.label}";
 
   static constexpr MS::ETWMarkerGroup Group = MS::ETWMarkerGroup::UserMarkers;
 };
@@ -1719,21 +1718,9 @@ bool Console::PopulateConsoleNotificationInTheTargetScope(
 
   event.mConsoleID = aData->mConsoleID;
   event.mLevel = aData->mMethodString;
-  event.mFilename = frame.mFilename;
   event.mPrefix = aData->mPrefix;
 
-  nsCOMPtr<nsIURI> filenameURI;
-  nsAutoCString pass;
-  if (NS_IsMainThread() &&
-      NS_SUCCEEDED(NS_NewURI(getter_AddRefs(filenameURI), frame.mFilename)) &&
-      NS_SUCCEEDED(filenameURI->GetPassword(pass)) && !pass.IsEmpty()) {
-    nsCOMPtr<nsISensitiveInfoHiddenURI> safeURI =
-        do_QueryInterface(filenameURI);
-    nsAutoCString spec;
-    if (safeURI && NS_SUCCEEDED(safeURI->GetSensitiveInfoHiddenSpec(spec))) {
-      event.mFilename = spec;
-    }
-  }
+  NS_GetSanitizedSpecFromSpec(frame.mFilename, event.mFilename);
 
   event.mSourceId = frame.mSourceId;
   event.mLineNumber = frame.mLineNumber;

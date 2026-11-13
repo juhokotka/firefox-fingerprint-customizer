@@ -119,8 +119,8 @@ struct StartupCacheEntry {
     KeyValuePair(const nsCString* aKeyPtr, StartupCacheEntry* aValuePtr)
         : first(aKeyPtr), second(aValuePtr) {}
   };
-  static_assert(std::is_trivially_move_assignable<KeyValuePair>::value);
-  static_assert(std::is_trivially_move_constructible<KeyValuePair>::value);
+  static_assert(std::is_trivially_move_assignable_v<KeyValuePair>);
+  static_assert(std::is_trivially_move_constructible_v<KeyValuePair>);
 
   struct Comparator {
     using Value = KeyValuePair;
@@ -247,7 +247,7 @@ class StartupCache : public nsIMemoryReporter {
   static void WriteTimeout(nsITimer* aTimer, void* aClosure);
   void MaybeWriteOffMainThread(WriteType aWriteType,
                                bool aUseLowPriorityIO = true);
-  void ThreadedPrefetch(uint8_t* aStart, size_t aSize);
+  void ThreadedPrefetch(const uint8_t* aStart, size_t aSize);
 
   Monitor mPrefetchComplete{"StartupCachePrefetch"};
   bool mPrefetchInProgress MOZ_GUARDED_BY(mPrefetchComplete){false};

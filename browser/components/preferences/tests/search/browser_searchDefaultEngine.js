@@ -12,6 +12,10 @@ const { SearchTestUtils } = ChromeUtils.importESModule(
 
 SearchTestUtils.init(this);
 
+// Nearly every task here opens about:preferences#search, and each open costs
+// tens of seconds under test-verify's chaos mode, so request a longer timeout.
+requestLongerTimeout(8);
+
 add_setup(async function () {
   await SearchTestUtils.installSearchExtension({
     name: "engine1",
@@ -42,8 +46,8 @@ add_setup(async function () {
 add_task(async function test_openWithPrivateDefaultNotEnabledFirst() {
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["browser.search.separatePrivateDefault.ui.enabled", false],
-      ["browser.search.separatePrivateDefault", false],
+      ["browser.search.separatePrivateDefault.featureGate", false],
+      ["browser.search.separatePrivateDefault.enabled", false],
     ],
   });
 
@@ -66,7 +70,7 @@ add_task(async function test_openWithPrivateDefaultNotEnabledFirst() {
   );
 
   await SpecialPowers.pushPrefEnv({
-    set: [["browser.search.separatePrivateDefault.ui.enabled", true]],
+    set: [["browser.search.separatePrivateDefault.featureGate", true]],
   });
 
   Assert.ok(
@@ -79,7 +83,7 @@ add_task(async function test_openWithPrivateDefaultNotEnabledFirst() {
   );
 
   await SpecialPowers.pushPrefEnv({
-    set: [["browser.search.separatePrivateDefault", true]],
+    set: [["browser.search.separatePrivateDefault.enabled", true]],
   });
 
   Assert.ok(
@@ -97,8 +101,8 @@ add_task(async function test_openWithPrivateDefaultNotEnabledFirst() {
 add_task(async function test_openWithPrivateDefaultEnabledFirst() {
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["browser.search.separatePrivateDefault.ui.enabled", true],
-      ["browser.search.separatePrivateDefault", true],
+      ["browser.search.separatePrivateDefault.featureGate", true],
+      ["browser.search.separatePrivateDefault.enabled", true],
     ],
   });
 
@@ -120,7 +124,7 @@ add_task(async function test_openWithPrivateDefaultEnabledFirst() {
   );
 
   await SpecialPowers.pushPrefEnv({
-    set: [["browser.search.separatePrivateDefault", false]],
+    set: [["browser.search.separatePrivateDefault.enabled", false]],
   });
 
   Assert.ok(
@@ -133,7 +137,7 @@ add_task(async function test_openWithPrivateDefaultEnabledFirst() {
   );
 
   await SpecialPowers.pushPrefEnv({
-    set: [["browser.search.separatePrivateDefault.ui.enabled", false]],
+    set: [["browser.search.separatePrivateDefault.featureGate", false]],
   });
 
   Assert.ok(
@@ -152,8 +156,8 @@ add_task(async function test_openWithPrivateDefaultEnabledFirst() {
 add_task(async function test_separatePrivateDefault() {
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["browser.search.separatePrivateDefault.ui.enabled", true],
-      ["browser.search.separatePrivateDefault", false],
+      ["browser.search.separatePrivateDefault.featureGate", true],
+      ["browser.search.separatePrivateDefault.enabled", false],
     ],
   });
 
@@ -174,7 +178,7 @@ add_task(async function test_separatePrivateDefault() {
   await separateEngineCheckbox.parentElement.updateComplete;
 
   Assert.ok(
-    Services.prefs.getBoolPref("browser.search.separatePrivateDefault"),
+    Services.prefs.getBoolPref("browser.search.separatePrivateDefault.enabled"),
     "Should have correctly set the pref"
   );
   Assert.ok(
@@ -184,14 +188,16 @@ add_task(async function test_separatePrivateDefault() {
 
   // Await the SearchService update to finish syncing the backend preference.
   let prefChangePromise = TestUtils.waitForPrefChange(
-    "browser.search.separatePrivateDefault"
+    "browser.search.separatePrivateDefault.enabled"
   );
   separateEngineCheckbox.click();
   await separateEngineCheckbox.parentElement.updateComplete;
   await prefChangePromise;
 
   Assert.ok(
-    !Services.prefs.getBoolPref("browser.search.separatePrivateDefault"),
+    !Services.prefs.getBoolPref(
+      "browser.search.separatePrivateDefault.enabled"
+    ),
     "Should have correctly turned the pref off"
   );
   Assert.ok(
@@ -291,11 +297,71 @@ add_task(async function test_setDefaultEngine() {
   gBrowser.removeCurrentTab();
 });
 
+add_task(async function test_defaultEngineDropdownClosesOnSecondClick() {
+  await openPreferencesViaOpenPreferencesAPI("search", { leaveOpen: true });
+
+  const doc = gBrowser.selectedBrowser.contentDocument;
+  const input = doc.getElementById("defaultEngineNormal");
+  const defaultEngineSelector = input.inputEl;
+  const defaultEnginePopup = input.panelList;
+
+  Assert.ok(!defaultEnginePopup.open, "Dropdown should be closed initially");
+
+  const popupShown = BrowserTestUtils.waitForEvent(defaultEnginePopup, "shown");
+  EventUtils.synthesizeMouseAtCenter(
+    defaultEngineSelector,
+    {},
+    defaultEngineSelector.documentGlobal
+  );
+  await popupShown;
+
+  Assert.ok(
+    defaultEnginePopup.open,
+    "Dropdown should be open after clicking the default engine"
+  );
+  Assert.equal(
+    defaultEngineSelector.getAttribute("aria-expanded"),
+    "true",
+    "Should have marked the dropdown as expanded"
+  );
+
+  const valueBeforeSecondClick = input.value;
+  const popupHidden = BrowserTestUtils.waitForEvent(
+    defaultEnginePopup,
+    "hidden"
+  );
+  EventUtils.synthesizeMouseAtCenter(
+    defaultEngineSelector,
+    {},
+    defaultEngineSelector.documentGlobal
+  );
+  await popupHidden;
+
+  Assert.ok(
+    !defaultEnginePopup.open,
+    "Dropdown should be closed after clicking the default engine again"
+  );
+  Assert.equal(
+    defaultEngineSelector.getAttribute("aria-expanded"),
+    "false",
+    "Should have marked the dropdown as collapsed"
+  );
+  // If the open dropdown covered the trigger, the second click would land on a
+  // panel-item and select an engine, which also hides the panel.
+  Assert.equal(
+    input.value,
+    valueBeforeSecondClick,
+    "Second click should have toggled the dropdown, not selected an engine"
+  );
+
+  gBrowser.removeCurrentTab();
+});
+
 add_task(async function test_privateDefaultEngineResetOnUncheck() {
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["browser.search.separatePrivateDefault.ui.enabled", true],
-      ["browser.search.separatePrivateDefault", true],
+      ["browser.search.separatePrivateDefault.featureGate", true],
+      ["browser.search.separatePrivateDefault.enabled", true],
     ],
   });
 
@@ -319,26 +385,28 @@ add_task(async function test_privateDefaultEngineResetOnUncheck() {
   );
 
   let prefChangePromise = TestUtils.waitForPrefChange(
-    "browser.search.separatePrivateDefault"
+    "browser.search.separatePrivateDefault.enabled"
   );
   separateEngineCheckbox.click();
   await separateEngineCheckbox.parentElement.updateComplete;
   await prefChangePromise;
 
   Assert.ok(
-    !Services.prefs.getBoolPref("browser.search.separatePrivateDefault"),
+    !Services.prefs.getBoolPref(
+      "browser.search.separatePrivateDefault.enabled"
+    ),
     "Pref should be false after unchecking"
   );
 
   prefChangePromise = TestUtils.waitForPrefChange(
-    "browser.search.separatePrivateDefault"
+    "browser.search.separatePrivateDefault.enabled"
   );
   separateEngineCheckbox.click();
   await separateEngineCheckbox.parentElement.updateComplete;
   await prefChangePromise;
 
   Assert.ok(
-    Services.prefs.getBoolPref("browser.search.separatePrivateDefault"),
+    Services.prefs.getBoolPref("browser.search.separatePrivateDefault.enabled"),
     "Pref should be true after re-checking"
   );
 
@@ -357,8 +425,8 @@ add_task(async function test_setPrivateDefaultEngine() {
 
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["browser.search.separatePrivateDefault.ui.enabled", true],
-      ["browser.search.separatePrivateDefault", true],
+      ["browser.search.separatePrivateDefault.featureGate", true],
+      ["browser.search.separatePrivateDefault.enabled", true],
     ],
   });
 

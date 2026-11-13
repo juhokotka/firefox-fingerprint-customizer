@@ -146,16 +146,51 @@ enum class ShouldCaptureStack { Maybe, Always };
 
 // A wrapper type to allow customization of tracing of
 // MicroTaskElements.
-struct MicroTaskQueueElement {
-  MOZ_IMPLICIT
-  MicroTaskQueueElement(const JS::Value& val) : value(val) {}
+class MicroTaskQueueElement {
+ public:
+  // This is distinct from the JS::MicroTask::Kind, as we add more
+  // internal allowable kinds between FirstJSKind and EndJSKind
+  enum class Kind : uint8_t {
+    Embedder = JS::MicroTask::Kind::Embedder,
 
-  operator JS::Value() const { return value; }
+    // A PromiseReactionRecord, run by PromiseReactionJob.
+    PromiseReaction = JS::MicroTask::Kind::FirstJSKind,
+
+    // A ThenableJob; the kind selects which resolution routine it runs.
+    ResolveThenable,
+    ResolveBuiltinThenable,
+    // Used by JS::SafeResolve: runs PerformPromiseResolution on the job's
+    // promise with the resolution value stored in the Thenable slot.
+    DeferredResolve,
+
+    // New task kinds go here.
+
+    // LastQueueElementKind gets auto incremented as we add new kinds
+    // and powers the below static assert that ensures we
+    // don't blow our kind allocation.
+    LastQueueElementKind
+  };
+
+  static_assert(static_cast<uint8_t>(Kind::LastQueueElementKind) <
+                JS::MicroTask::Kind::EndJSKind);
+
+  // Arguments are forwarded to a JS::MicroTask constructor, so the task is
+  // built in place in the slot the queue allocated for this entry rather than
+  // copied from a temporary.
+  template <typename... Args>
+  explicit MicroTaskQueueElement(Kind kind, Args&&... args)
+      : microTask_(static_cast<JS::MicroTask::Kind>(kind),
+                   std::forward<Args>(args)...) {}
+
+  explicit MicroTaskQueueElement(const JS::MicroTask& microTask)
+      : microTask_(microTask) {}
+
+  const JS::MicroTask& toMicroTask() const { return microTask_; }
 
   void trace(JSTracer* trc);
 
  private:
-  JS::Value value;
+  JS::MicroTask microTask_;
 };
 
 // Use TempAllocPolicy to report OOM
@@ -178,13 +213,28 @@ struct MicroTaskQueueSet {
   MicroTaskQueueSet(const MicroTaskQueueSet&) = delete;
   MicroTaskQueueSet& operator=(const MicroTaskQueueSet&) = delete;
 
-  bool enqueueRegularMicroTask(JSContext* cx, const JS::GenericMicroTask&);
-  bool enqueueDebugMicroTask(JSContext* cx, const JS::GenericMicroTask&);
-  bool prependRegularMicroTask(JSContext* cx, const JS::GenericMicroTask&);
+  template <typename... Args>
+  bool enqueueRegularMicroTask(JSContext* cx, MicroTaskQueueElement::Kind kind,
+                               Args&&... args) {
+    JS_LOG(mtq, Verbose, "JS: Enqueue Regular MT");
+    JS::JobQueueMayNotBeEmpty(cx);
+    return microTaskQueue.emplaceBack(kind, std::forward<Args>(args)...);
+  }
+  bool enqueueRegularMicroTask(JSContext* cx, const JS::MicroTask&);
 
-  JS::GenericMicroTask popFront();
-  JS::GenericMicroTask popDebugFront();
-  JS::GenericMicroTask peekFront();
+  template <typename... Args>
+  bool enqueueDebugMicroTask(JSContext* cx, MicroTaskQueueElement::Kind kind,
+                             Args&&... args) {
+    JS_LOG(mtq, Verbose, "JS: Enqueue Debug MT");
+    return debugMicroTaskQueue.emplaceBack(kind, std::forward<Args>(args)...);
+  }
+  bool enqueueDebugMicroTask(JSContext* cx, const JS::MicroTask&);
+
+  bool prependRegularMicroTask(JSContext* cx, const JS::MicroTask&);
+
+  mozilla::Maybe<JS::MicroTask> popFront();
+  mozilla::Maybe<JS::MicroTask> popDebugFront();
+  mozilla::Maybe<JS::MicroTask> peekFront();
 
   bool empty() { return microTaskQueue.empty() && debugMicroTaskQueue.empty(); }
 
@@ -381,13 +431,14 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
   js::SymbolRegistry& symbolRegistry() { return runtime_->symbolRegistry(); }
 
   // Methods to access other runtime data that checks locking internally.
-  js::gc::AtomMarkingRuntime& atomMarking() { return runtime_->gc.atomMarking; }
-  void markAtom(JSAtom* atom) { atomMarking().markAtom(this, atom); }
-  void markAtom(JS::Symbol* symbol) { atomMarking().markAtom(this, symbol); }
-  void markId(jsid id) { atomMarking().markId(this, id); }
-  void markAtomValue(const js::Value& value) {
-    atomMarking().markAtomValue(this, value);
+  js::gc::AtomRefRuntime& atomReferences() {
+    return runtime_->gc.atomReferences;
   }
+
+  void recordRef(JSAtom* atom);
+  bool wrapOrRecordRef(JS::MutableHandle<JS::Symbol*> symbol);
+  bool wrapOrRecordRefToId(JS::MutableHandle<jsid> id);
+  bool wrapOrRecordRefToValue(JS::MutableHandle<JS::Value> value);
 
   // Interface for recording telemetry metrics.
   js::Metrics metrics() { return js::Metrics(runtime_); }
@@ -628,10 +679,21 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
   mozilla::Atomic<bool, mozilla::SequentiallyConsistent>
       suppressProfilerSampling;
 
+  // While sampling is suppressed, whether the sampler may still read tenured
+  // script data (e.g. line/column) via ProfilingStackFrame::script(). Most
+  // suppression sites leave this false because the script pointers may be
+  // unsafe, notably during the compacting phase of GC where scripts are being
+  // relocated. Minor GC sets it because it does not move scripts. Read from
+  // the sampler thread, written from the main thread, hence atomic.
+  mozilla::Atomic<bool, mozilla::SequentiallyConsistent>
+      allowProfilerScriptAccess_;
+
  public:
   bool isProfilerSamplingEnabled() const { return !suppressProfilerSampling; }
   void disableProfilerSampling() { suppressProfilerSampling = true; }
   void enableProfilerSampling() { suppressProfilerSampling = false; }
+  bool allowProfilerScriptAccess() const { return allowProfilerScriptAccess_; }
+  void setAllowProfilerScriptAccess(bool b) { allowProfilerScriptAccess_ = b; }
 
  private:
   js::wasm::Context wasm_;
@@ -706,6 +768,28 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
 #ifdef DEBUG
     hadUncatchableException_ = true;
 #endif
+  }
+
+  // Used by irregexp code to delay calling ReportOverRecursed until we can
+  // allocate.
+ private:
+  js::ContextData<bool> hasDelayedOverRecursed;
+
+ public:
+  void noteDelayedOverRecursed() {
+    MOZ_ASSERT(!hasDelayedOverRecursed);
+    hasDelayedOverRecursed = true;
+  }
+  bool maybeReportDelayedOverRecursed() {
+    if (hasDelayedOverRecursed) {
+      hasDelayedOverRecursed = false;
+      ReportOverRecursed(this);
+      return false;
+    }
+    return true;
+  }
+  static constexpr size_t offsetOfHasDelayedOverRecursed() {
+    return offsetof(JSContext, hasDelayedOverRecursed);
   }
 
   // OOM stack trace buffer management
@@ -828,15 +912,12 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
    */
   js::SavedFrame* getPendingExceptionStack();
 
-#ifdef DEBUG
   /**
    * Return the pending exception (without wrapping).
    */
   const JS::Value& getPendingExceptionUnwrapped();
-#endif
 
   bool isThrowingDebuggeeWouldRun();
-  bool isClosingGenerator();
 
   void setPendingException(JS::HandleValue v,
                            JS::Handle<js::SavedFrame*> stack);
@@ -847,6 +928,17 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
     status = JS::ExceptionStatus::None;
     unwrappedException().setUndefined();
     unwrappedExceptionStack() = nullptr;
+  }
+
+  JS::ExceptionStatus exceptionStatus() const { return status; }
+
+  // Set the pending exception state to values saved earlier.
+  void restorePendingExceptionState(JS::ExceptionStatus newStatus,
+                                    const JS::Value& exception,
+                                    js::SavedFrame* stack) {
+    status = newStatus;
+    unwrappedException() = exception;
+    unwrappedExceptionStack() = stack;
   }
 
   bool isThrowingOutOfMemory() const {
@@ -982,11 +1074,6 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
   // True if jobQueue is empty, or we are running the last job in the queue.
   // Such conditions permit optimizations around `await` expressions.
   js::ContextData<bool> canSkipEnqueuingJobs;
-
-  // Depth of nested AsyncFunctionResume / AsyncGeneratorResume calls on the
-  // C++ stack. Maintained by AutoAsyncResumeDepth. See
-  // IsTopMostAsyncFunctionCall for more details.
-  js::ContextData<uint32_t> asyncResumeDepth;
 
   js::ContextData<JS::PromiseRejectionTrackerCallback>
       promiseRejectionTrackerCallback;

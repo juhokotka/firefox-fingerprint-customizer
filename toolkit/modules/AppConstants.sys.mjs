@@ -14,8 +14,6 @@ export var AppConstants = Object.freeze({
   // defines: https://wiki.mozilla.org/Platform/Channel-specific_build_defines
   NIGHTLY_BUILD: @NIGHTLY_BUILD_BOOL@,
 
-  ENABLE_EXPLICIT_RESOURCE_MANAGEMENT: @ENABLE_EXPLICIT_RESOURCE_MANAGEMENT_BOOL@,
-
   RELEASE_OR_BETA: @RELEASE_OR_BETA_BOOL@,
 
   EARLY_BETA_OR_EARLIER: @EARLY_BETA_OR_EARLIER_BOOL@,
@@ -168,6 +166,8 @@ export var AppConstants = Object.freeze({
   MOZ_APP_DISPLAYNAME_DO_NOT_USE: "@MOZ_APP_DISPLAYNAME@",
   MOZ_APP_VERSION: "@MOZ_APP_VERSION@",
   MOZ_APP_VERSION_DISPLAY: "@MOZ_APP_VERSION_DISPLAY@",
+  MOZ_BACKGROUNDTASK_ACTIVATABLE_CLASS_ID:
+    "@MOZ_BACKGROUNDTASK_ACTIVATABLE_CLASS_ID@",
   MOZ_BUILDID: "@MOZ_BUILDID@",
   MOZ_BUILD_APP: "@MOZ_BUILD_APP@",
   MOZ_MACBUNDLE_ID: "@MOZ_MACBUNDLE_ID@",
@@ -216,7 +216,7 @@ export var AppConstants = Object.freeze({
 #ifdef MOZ_THUNDERBIRD
     [ "https://thunderbird-settings.thunderbird.net/v1" ],
 #else
-    [ "https://firefox.settings.services.mozilla.com/v1", "https://firefox.settings.services.mozilla.com/v2" ],
+    [ "https://firefox.settings.services.mozilla.com/v2" ],
 #endif
 
   REMOTE_SETTINGS_VERIFY_SIGNATURE:
@@ -272,9 +272,7 @@ export var AppConstants = Object.freeze({
     false,
 #endif
 
-#ifdef MOZ_WIDGET_ANDROID
-  MOZ_ANDROID_CONTENT_SERVICE_ISOLATED_PROCESS: @MOZ_ANDROID_CONTENT_SERVICE_ISOLATED_PROCESS_BOOL@,
-#endif
-
   USE_LIBZ_RS: @USE_LIBZ_RS_BOOL@,
+
+  MOZ_DIAGNOSTIC_ASSERT_ENABLED: @MOZ_DIAGNOSTIC_ASSERT_ENABLED_BOOL@,
 });

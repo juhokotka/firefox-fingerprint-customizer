@@ -1146,12 +1146,13 @@ bool nsLayoutUtils::IsAncestorFrameCrossDocInProcessConsideringContinuations(
     const nsIFrame* aCommonAncestor) {
   MOZ_ASSERT(aAncestorFrame);
   const nsIFrame* ancestorFirstContinuation =
-      aAncestorFrame->FirstContinuation();
+      FirstContinuationOrIBSplitSibling(aAncestorFrame);
   const nsIFrame* commonFirstContinuation =
-      aCommonAncestor ? aCommonAncestor->FirstContinuation() : nullptr;
+      aCommonAncestor ? FirstContinuationOrIBSplitSibling(aCommonAncestor)
+                      : nullptr;
 
   for (const nsIFrame* f = aFrame; f; f = GetCrossDocParentFrameInProcess(f)) {
-    auto* first = f->FirstContinuation();
+    auto* first = FirstContinuationOrIBSplitSibling(f);
     if (first == ancestorFirstContinuation) {
       return true;
     }
@@ -1228,7 +1229,8 @@ static bool IsFrameAfter(const nsIFrame* aFrame1, const nsIFrame* aFrame2) {
 // static
 int32_t nsLayoutUtils::DoCompareTreePosition(const nsIFrame* aFrame1,
                                              const nsIFrame* aFrame2,
-                                             const nsIFrame* aCommonAncestor) {
+                                             const nsIFrame* aCommonAncestor,
+                                             CompareTreePositionFlags aFlags) {
   MOZ_ASSERT(aFrame1, "aFrame1 must not be null");
   MOZ_ASSERT(aFrame2, "aFrame2 must not be null");
 
@@ -1236,14 +1238,15 @@ int32_t nsLayoutUtils::DoCompareTreePosition(const nsIFrame* aFrame1,
   const nsIFrame* nonCommonAncestor =
       FillAncestors(aFrame2, aCommonAncestor, &frame2Ancestors);
   return DoCompareTreePosition(aFrame1, aFrame2, frame2Ancestors,
-                               nonCommonAncestor ? aCommonAncestor : nullptr);
+                               nonCommonAncestor ? aCommonAncestor : nullptr,
+                               aFlags);
 }
 
 // static
 int32_t nsLayoutUtils::DoCompareTreePosition(
     const nsIFrame* aFrame1, const nsIFrame* aFrame2,
     const nsTArray<const nsIFrame*>& aFrame2Ancestors,
-    const nsIFrame* aCommonAncestor) {
+    const nsIFrame* aCommonAncestor, CompareTreePositionFlags aFlags) {
   MOZ_ASSERT(aFrame1, "aFrame1 must not be null");
   MOZ_ASSERT(aFrame2, "aFrame2 must not be null");
 
@@ -1261,8 +1264,8 @@ int32_t nsLayoutUtils::DoCompareTreePosition(
     // it is wrong. We need to recompute without aCommonAncestor,
     // but computing frame1Ancestors array again can be avoided by
     // swapping the order of the arguments.
-    const int32_t oppositeResult =
-        DoCompareTreePosition(aFrame2, aFrame1, frame1Ancestors, nullptr);
+    const int32_t oppositeResult = DoCompareTreePosition(
+        aFrame2, aFrame1, frame1Ancestors, nullptr, aFlags);
     return -oppositeResult;
   }
 
@@ -1297,7 +1300,14 @@ int32_t nsLayoutUtils::DoCompareTreePosition(
   if (IsFrameAfter(ancestor1, ancestor2)) {
     return 1;
   }
-  NS_WARNING("Frames were in different child lists???");
+  // Generally, we assume that callers of this function use two frames in the
+  // same tree, so it's worth a warning, unless the call sites can't provide
+  // that guarantee. Though, this guarantee may be harder to provide than we
+  // think - See Bug 928645.
+  NS_WARNING_ASSERTION(
+      aFlags &
+          CompareTreePositionFlags::FramesMayBeInDifferentOrIncompleteTrees,
+      "Frames were in different child lists?");
   return 0;
 }
 
@@ -1361,26 +1371,45 @@ ScrollableLayerGuid::ViewID nsLayoutUtils::ScrollIdForRootScrollFrame(
 // static
 ScrollContainerFrame* nsLayoutUtils::GetNearestScrollableFrameForDirection(
     nsIFrame* aFrame, ScrollDirections aDirections) {
-  NS_ASSERTION(
-      aFrame, "GetNearestScrollableFrameForDirection expects a non-null frame");
+  SideBits sides = SideBits::eNone;
+  if (aDirections.contains(ScrollDirection::eVertical)) {
+    sides |= SideBits::eTop | SideBits::eBottom;
+  }
+  if (aDirections.contains(ScrollDirection::eHorizontal)) {
+    sides |= SideBits::eLeft | SideBits::eRight;
+  }
+  return GetNearestScrollContainerFrameToScrollTowards(aFrame, sides);
+}
+
+ScrollContainerFrame*
+nsLayoutUtils::GetNearestScrollContainerFrameToScrollTowards(
+    nsIFrame* aFrame, SideBits aSideBits) {
+  NS_ASSERTION(aFrame,
+               "GetNearestScrollContainerFrameToScrollTowards expects a "
+               "non-null frame");
   // FIXME Bug 1714720 : This nearest scroll target is not going to work over
   // process boundaries, in such cases we need to hand over in APZ side.
   for (nsIFrame* f = aFrame; f;
        f = nsLayoutUtils::GetCrossDocParentFrameInProcess(f)) {
     ScrollContainerFrame* scrollContainerFrame = do_QueryFrame(f);
-    if (scrollContainerFrame) {
-      ScrollDirections directions =
-          scrollContainerFrame
-              ->GetAvailableScrollingDirectionsForUserInputEvents();
-      if (aDirections.contains(ScrollDirection::eVertical)) {
-        if (directions.contains(ScrollDirection::eVertical)) {
-          return scrollContainerFrame;
-        }
-      }
-      if (aDirections.contains(ScrollDirection::eHorizontal)) {
-        if (directions.contains(ScrollDirection::eHorizontal)) {
-          return scrollContainerFrame;
-        }
+    if (scrollContainerFrame &&
+        scrollContainerFrame->SidesToScrollForUserInputEvents().Intersects(
+            aSideBits)) {
+      return scrollContainerFrame;
+    }
+
+    // A frame fixed with respect to the viewport is a child of the viewport
+    // frame, so walking up from it would skip over the root scroll container
+    // frame. SCROLLABLE_FIXEDPOS_FINDS_ROOT exists for the same reason, but
+    // unlike it we keep walking when the root can't scroll toward aSideBits.
+    if (f->StyleDisplay()->mPosition == StylePositionProperty::Fixed &&
+        nsLayoutUtils::IsReallyFixedPos(f)) {
+      ScrollContainerFrame* rootScrollContainerFrame =
+          f->PresShell()->GetRootScrollContainerFrame();
+      if (rootScrollContainerFrame &&
+          rootScrollContainerFrame->SidesToScrollForUserInputEvents()
+              .Intersects(aSideBits)) {
+        return rootScrollContainerFrame;
       }
     }
   }
@@ -2021,7 +2050,7 @@ bool nsLayoutUtils::ShouldSnapToGrid(const nsIFrame* aFrame,
 }
 
 Matrix4x4Flagged nsLayoutUtils::GetTransformToAncestor(
-    RelativeTo aFrame, RelativeTo aAncestor, uint32_t aFlags,
+    RelativeTo aFrame, RelativeTo aAncestor, TransformMatrixFlags aFlags,
     nsIFrame** aOutAncestor) {
   nsIFrame* parent;
   Matrix4x4Flagged ctm;
@@ -2038,7 +2067,8 @@ Matrix4x4Flagged nsLayoutUtils::GetTransformToAncestor(
     ctm.ProjectTo2D();
   }
   while (parent && parent != aAncestor.mFrame &&
-         (!(aFlags & nsIFrame::STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT) ||
+         (!aFlags.contains(
+              TransformMatrixFlag::StopAtStackingContextAndDisplayPort) ||
           (!parent->IsStackingContext() &&
            !DisplayPortUtils::FrameHasDisplayPort(parent)))) {
     nsIFrame* cur = parent;
@@ -2187,7 +2217,7 @@ const nsIFrame* nsLayoutUtils::FindNearestCommonAncestorFrameWithinBlock(
   return nullptr;
 }
 
-bool nsLayoutUtils::AuthorSpecifiedBorderBackgroundDisablesTheming(
+bool nsLayoutUtils::AuthorOrUserSpecifiedBorderBackgroundDisablesTheming(
     StyleAppearance aAppearance) {
   return aAppearance == StyleAppearance::NumberInput ||
          aAppearance == StyleAppearance::PasswordInput ||
@@ -2259,16 +2289,15 @@ static Rect TransformGfxRectToAncestor(
     RelativeTo aFrame, const Rect& aRect, RelativeTo aAncestor,
     bool* aPreservesAxisAlignedRectangles = nullptr,
     Maybe<Matrix4x4Flagged>* aMatrixCache = nullptr,
-    bool aStopAtStackingContextAndDisplayPortAndOOFFrame = false,
-    nsIFrame** aOutAncestor = nullptr) {
+    TransformMatrixFlags aFlags = {}, nsIFrame** aOutAncestor = nullptr) {
   Rect result;
   Matrix4x4Flagged ctm;
   if (SVGTextFrame* text = GetContainingSVGTextFrame(aFrame.mFrame)) {
     result = text->TransformFrameRectFromTextChild(aRect, aFrame.mFrame);
 
-    result = TransformGfxRectToAncestor(
-        RelativeTo{text}, result, aAncestor, nullptr, aMatrixCache,
-        aStopAtStackingContextAndDisplayPortAndOOFFrame, aOutAncestor);
+    result =
+        TransformGfxRectToAncestor(RelativeTo{text}, result, aAncestor, nullptr,
+                                   aMatrixCache, aFlags, aOutAncestor);
     if (aPreservesAxisAlignedRectangles) {
       // TransformFrameRectFromTextChild could involve any kind of transform, we
       // could drill down into it to get an answer out of it but we don't yet.
@@ -2281,11 +2310,7 @@ static Rect TransformGfxRectToAncestor(
     ctm = aMatrixCache->value();
   } else {
     // Else, compute it
-    uint32_t flags = 0;
-    if (aStopAtStackingContextAndDisplayPortAndOOFFrame) {
-      flags |= nsIFrame::STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT;
-    }
-    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, flags,
+    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, aFlags,
                                                 aOutAncestor);
     if (aMatrixCache) {
       // and put it in the cache, if provided
@@ -2494,19 +2519,19 @@ nsRect nsLayoutUtils::TransformFrameRectToAncestor(
     const nsIFrame* aFrame, const nsRect& aRect, RelativeTo aAncestor,
     bool* aPreservesAxisAlignedRectangles /* = nullptr */,
     Maybe<Matrix4x4Flagged>* aMatrixCache /* = nullptr */,
-    bool aStopAtStackingContextAndDisplayPortAndOOFFrame /* = false */,
+    TransformMatrixFlags aFlags /* = {} */,
     nsIFrame** aOutAncestor /* = nullptr */) {
   MOZ_ASSERT(IsAncestorFrameCrossDocInProcess(aAncestor.mFrame, aFrame),
              "Fix the caller");
+  MOZ_ASSERT(!aFlags.contains(TransformMatrixFlag::InCSSUnits),
+             "TransformMatrixFlag::InCSSUnits is not supported here!");
+
   float srcAppUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
-  Rect result(NSAppUnitsToFloatPixels(aRect.x, srcAppUnitsPerDevPixel),
-              NSAppUnitsToFloatPixels(aRect.y, srcAppUnitsPerDevPixel),
-              NSAppUnitsToFloatPixels(aRect.width, srcAppUnitsPerDevPixel),
-              NSAppUnitsToFloatPixels(aRect.height, srcAppUnitsPerDevPixel));
-  result = TransformGfxRectToAncestor(
-      RelativeTo{aFrame}, result, aAncestor, aPreservesAxisAlignedRectangles,
-      aMatrixCache, aStopAtStackingContextAndDisplayPortAndOOFFrame,
-      aOutAncestor);
+  Rect result = LayoutDeviceRect::FromAppUnits(aRect, srcAppUnitsPerDevPixel)
+                    .ToUnknownRect();
+  result = TransformGfxRectToAncestor(RelativeTo{aFrame}, result, aAncestor,
+                                      aPreservesAxisAlignedRectangles,
+                                      aMatrixCache, aFlags, aOutAncestor);
 
   return ScaleThenRoundGfxRectToAppRect(
       result, aAncestor.mFrame->PresContext()->AppUnitsPerDevPixel());
@@ -2604,7 +2629,7 @@ nsresult nsLayoutUtils::GetFramesForArea(RelativeTo aRelativeTo,
   nsDisplayListBuilder builder(frame, nsDisplayListBuilderMode::EventDelivery,
                                false);
   builder.BeginFrame();
-  nsDisplayList list(&builder);
+  nsDisplayList list;
 
   if (aOptions.mBits.contains(FrameForPointOption::IgnorePaintSuppression)) {
     builder.IgnorePaintSuppression();
@@ -2719,10 +2744,20 @@ FrameMetrics nsLayoutUtils::CalculateBasicFrameMetrics(
   } else {
     compBoundsScale = cumulativeResolution * layerToParentLayerScale;
   }
-  metrics.SetCompositionBounds(
-      LayoutDeviceRect::FromAppUnits(nsRect(nsPoint(0, 0), compositionSize),
-                                     presContext->AppUnitsPerDevPixel()) *
-      compBoundsScale);
+  const int32_t auPerDevPixel = presContext->AppUnitsPerDevPixel();
+  ParentLayerRect compositionBounds =
+      LayoutDeviceRect::FromAppUnits(nsRect(nsPoint(), compositionSize),
+                                     auPerDevPixel) *
+      compBoundsScale;
+  // Matches ComputeScrollMetadata. Scrollbars are not subject to resolution
+  // scaling, so LD pixels = layer pixels for them.
+  nsMargin sizes =
+      ScrollbarAreaToExcludeFromCompositionBoundsFor(aScrollContainerFrame);
+  ParentLayerMargin boundMargins =
+      LayoutDeviceMargin::FromAppUnits(sizes, auPerDevPixel) *
+      LayoutDeviceToParentLayerScale(1.0f);
+  compositionBounds.Deflate(boundMargins);
+  metrics.SetCompositionBounds(compositionBounds);
 
   metrics.SetBoundingCompositionSize(
       nsLayoutUtils::CalculateBoundingCompositionSize(aScrollContainerFrame,
@@ -2903,7 +2938,7 @@ struct TemporaryDisplayListBuilder {
   TemporaryDisplayListBuilder(nsIFrame* aFrame,
                               nsDisplayListBuilderMode aBuilderMode,
                               const bool aBuildCaret)
-      : mBuilder(aFrame, aBuilderMode, aBuildCaret), mList(&mBuilder) {}
+      : mBuilder(aFrame, aBuilderMode, aBuildCaret) {}
 
   ~TemporaryDisplayListBuilder() {
     mBuilder.SetIsDestroying();
@@ -3091,10 +3126,9 @@ void nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   // In the case where we use APZ for the given popup frame, we need to set the
   // displayport base.
   if (aFrame->IsMenuPopupFrame() &&
-      nsLayoutUtils::AsyncPanZoomEnabled(aFrame) &&
-      !DisplayPortUtils::HasDisplayPort(aFrame->GetContent())) {
+      nsLayoutUtils::AsyncPanZoomEnabled(aFrame)) {
     MOZ_ASSERT(XRE_IsParentProcess());
-    APZCCallbackHelper::InitializeRootDisplayport(aFrame);
+    APZCCallbackHelper::EnsureDisplayportSizeOnPopupRoot(aFrame);
   }
 
   nsRegion visibleRegion;
@@ -3956,7 +3990,7 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetFontMetricsForComputedStyle(
   WritingMode wm(aComputedStyle);
   const nsStyleFont* styleFont = aComputedStyle->StyleFont();
   nsFontMetrics::Params params;
-  params.language = styleFont->mLanguage;
+  params.language = styleFont->GetLangAtom();
   params.explicitLanguage = styleFont->mExplicitLanguage;
   params.orientation =
       !aForceHorizontalMetrics && wm.IsVertical() && !wm.IsSideways()
@@ -4024,7 +4058,7 @@ bool nsLayoutUtils::HasAbsolutelyPositionedDescendants(const nsIFrame* aFrame) {
   return false;
 }
 
-nsBlockFrame* nsLayoutUtils::FindNearestBlockAncestor(nsIFrame* aFrame) {
+nsBlockFrame* nsLayoutUtils::FindNearestBlockAncestor(const nsIFrame* aFrame) {
   nsIFrame* nextAncestor;
   for (nextAncestor = aFrame->GetParent(); nextAncestor;
        nextAncestor = nextAncestor->GetParent()) {
@@ -4258,7 +4292,7 @@ static Maybe<nscoord> GetPercentBSize(const LengthPercentage& aSize,
 // If aSize can be resolved to a definite value, returns it; otherwise returns
 // Nothing().
 static Maybe<nscoord> GetDefiniteSize(
-    const LengthPercentage& aSize, nsIFrame* aFrame, bool aIsInlineAxis,
+    const LengthPercentage& aSize, nsIFrame* aFrame, LogicalAxis aAxis,
     const Maybe<LogicalSize>& aPercentageBasis) {
   if (aSize.ConvertsToLength()) {
     return Some(aSize.ToLength());
@@ -4269,8 +4303,7 @@ static Maybe<nscoord> GetDefiniteSize(
   }
 
   auto wm = aFrame->GetWritingMode();
-  nscoord pb = aIsInlineAxis ? aPercentageBasis.value().ISize(wm)
-                             : aPercentageBasis.value().BSize(wm);
+  nscoord pb = aPercentageBasis.value().Size(aAxis, wm);
   if (pb == NS_UNCONSTRAINEDSIZE) {
     return Nothing();
   }
@@ -4278,16 +4311,28 @@ static Maybe<nscoord> GetDefiniteSize(
 }
 
 // If aSize can be resolved to a definite value, returns it; otherwise returns
-// Nothing().
+// Nothing(). aOffsets are aFrame's margin/border/padding in the axis of aSize,
+// which stretch-like keywords need to fill the percentage basis.
 template <typename SizeOrMaxSize>
 static Maybe<nscoord> GetDefiniteSize(
-    const SizeOrMaxSize& aSize, nsIFrame* aFrame, bool aIsInlineAxis,
-    const Maybe<LogicalSize>& aPercentageBasis) {
-  if (!aSize->IsLengthPercentage()) {
+    const SizeOrMaxSize& aSize, nsIFrame* aFrame, LogicalAxis aAxis,
+    const Maybe<LogicalSize>& aPercentageBasis,
+    const nsIFrame::IntrinsicSizeOffsetData& aOffsets,
+    StyleBoxSizing aBoxSizing) {
+  if (aSize->IsLengthPercentage()) {
+    return GetDefiniteSize(aSize->AsLengthPercentage(), aFrame, aAxis,
+                           aPercentageBasis);
+  }
+  if (!aPercentageBasis || !aSize->BehavesLikeStretch(aAxis)) {
     return Nothing();
   }
-  return GetDefiniteSize(aSize->AsLengthPercentage(), aFrame, aIsInlineAxis,
-                         aPercentageBasis);
+  const auto wm = aFrame->GetWritingMode();
+  const nscoord cbSize = aPercentageBasis->Size(aAxis, wm);
+  if (cbSize == NS_UNCONSTRAINEDSIZE) {
+    return Nothing();
+  }
+  return Some(nsLayoutUtils::ComputeStretchSize(
+      cbSize, aOffsets.margin, aOffsets.BorderPadding(), aBoxSizing));
 }
 
 // NOTE: this function will be replaced by GetDefiniteSizeTakenByBoxSizing (bug
@@ -4343,12 +4388,12 @@ static nscoord GetBSizePercentBasisAdjustment(StyleBoxSizing aBoxSizing,
 // aIsInlineAxis is true if we're computing for aFrame's inline axis.
 // aIgnorePadding is true if padding should be ignored.
 static nscoord GetDefiniteSizeTakenByBoxSizing(
-    StyleBoxSizing aBoxSizing, nsIFrame* aFrame, bool aIsInlineAxis,
+    StyleBoxSizing aBoxSizing, nsIFrame* aFrame, LogicalAxis aAxis,
     bool aIgnorePadding, const Maybe<LogicalSize>& aPercentageBasis) {
   nscoord sizeTakenByBoxSizing = 0;
   if (MOZ_UNLIKELY(aBoxSizing == StyleBoxSizing::BorderBox)) {
-    const bool isHorizontalAxis =
-        aIsInlineAxis == !aFrame->GetWritingMode().IsVertical();
+    const bool isHorizontalAxis = (aAxis == LogicalAxis::Inline) ==
+                                  !aFrame->GetWritingMode().IsVertical();
     const nsStyleBorder* styleBorder = aFrame->StyleBorder();
     sizeTakenByBoxSizing = isHorizontalAxis
                                ? styleBorder->GetComputedBorder().LeftRight()
@@ -4367,8 +4412,8 @@ static nscoord GetDefiniteSizeTakenByBoxSizing(
       // known.  See bug 1231059.
       auto GetPadding =
           [&](const LengthPercentage& aPadding) -> Maybe<nscoord> {
-        if (Maybe<nscoord> padding = GetDefiniteSize(
-                aPadding, aFrame, aIsInlineAxis, aPercentageBasis)) {
+        if (Maybe<nscoord> padding =
+                GetDefiniteSize(aPadding, aFrame, aAxis, aPercentageBasis)) {
           return padding;
         }
         if (aPercentageBasis) {
@@ -4744,7 +4789,8 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
   PhysicalAxis ourInlineAxis =
       aFrame->GetWritingMode().PhysicalAxis(LogicalAxis::Inline);
   const bool isInlineAxis = aAxis == ourInlineAxis;
-
+  const auto logicalAxis =
+      isInlineAxis ? LogicalAxis::Inline : LogicalAxis::Block;
   const auto anchorResolutionParams = AnchorPosResolutionParams::From(aFrame);
   auto styleMinISize = horizontalAxis
                            ? stylePos->GetMinWidth(anchorResolutionParams)
@@ -4763,13 +4809,16 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
   auto ResetIfKeywords = [](AnchorResolvedSize& aSize,
                             AnchorResolvedSize& aMinSize,
                             AnchorResolvedMaxSize& aMaxSize) {
-    if (!aSize->IsLengthPercentage()) {
+    if (!aSize->IsLengthPercentage() &&
+        !aSize->BehavesLikeStretchOnBlockAxis()) {
       aSize = AnchorResolvedSizeHelper::Auto();
     }
-    if (!aMinSize->IsLengthPercentage()) {
+    if (!aMinSize->IsLengthPercentage() &&
+        !aMinSize->BehavesLikeStretchOnBlockAxis()) {
       aMinSize = AnchorResolvedSizeHelper::Auto();
     }
-    if (!aMaxSize->IsLengthPercentage()) {
+    if (!aMaxSize->IsLengthPercentage() &&
+        !aMaxSize->BehavesLikeStretchOnBlockAxis()) {
       aMaxSize = AnchorResolvedMaxSizeHelper::None();
     }
   };
@@ -4777,7 +4826,8 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
   // property's initial values in block axis.
   // It also make senses to use the initial values for -moz-fit-content and
   // -moz-available for intrinsic size in block axis. Therefore, we reset them
-  // if needed.
+  // if needed. 'stretch' does resolve in the block axis when the containing
+  // block size is known, so it's kept.
   if (!isInlineAxis) {
     ResetIfKeywords(styleISize, styleMinISize, styleMaxISize);
   }
@@ -4848,15 +4898,15 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
       MOZ_LIKELY(isInlineAxis)
           ? aFrame->IntrinsicISizeOffsets(pmPercentageBasis)
           : aFrame->IntrinsicBSizeOffsets(pmPercentageBasis);
+  nsIFrame::IntrinsicSizeOffsetData offsetInOtherAxis =
+      MOZ_LIKELY(isInlineAxis)
+          ? aFrame->IntrinsicBSizeOffsets(pmPercentageBasis)
+          : aFrame->IntrinsicISizeOffsets(pmPercentageBasis);
 
   auto GetContentEdgeToBoxSizing = [&](const StyleBoxSizing aBoxSizing) {
     if (aBoxSizing == StyleBoxSizing::ContentBox) {
       return LogicalSize(childWM);
     }
-    nsIFrame::IntrinsicSizeOffsetData offsetInOtherAxis =
-        MOZ_LIKELY(isInlineAxis)
-            ? aFrame->IntrinsicBSizeOffsets(pmPercentageBasis)
-            : aFrame->IntrinsicISizeOffsets(pmPercentageBasis);
     const auto& inlineOffset =
         isInlineAxis ? offsetInRequestedAxis : offsetInOtherAxis;
     const auto& blockOffset =
@@ -4869,7 +4919,8 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
   // in this function.
   auto GetBSize = [&](const auto& aSize) -> Maybe<nscoord> {
     if (Maybe<nscoord> bSize =
-            GetDefiniteSize(aSize, aFrame, !isInlineAxis, aPercentageBasis)) {
+            GetDefiniteSize(aSize, aFrame, GetOrthogonalAxis(logicalAxis),
+                            aPercentageBasis, offsetInOtherAxis, boxSizing)) {
       return bSize;
     }
     if (aPercentageBasis) {
@@ -4931,7 +4982,8 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
             nsIFrame::ComputeBSizeValueAsPercentageBasis(
                 *styleBSize, *styleMinBSize, *styleMaxBSize,
                 percentageBasisBSizeForFrame,
-                contentEdgeToBoxSizing->BSize(childWM));
+                contentEdgeToBoxSizing->BSize(childWM),
+                offsetInOtherAxis.margin, offsetInOtherAxis.BorderPadding());
       } else {
         // aFrame is not a containing block, so its children share the same
         // containing block as aFrame. Therefore, the percentage basis for
@@ -4979,7 +5031,8 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
             aFrame, NS_FRAME_DESCENDANT_INTRINSIC_ISIZE_DEPENDS_ON_BSIZE);
 
         nscoord bSizeTakenByBoxSizing = GetDefiniteSizeTakenByBoxSizing(
-            boxSizing, aFrame, !isInlineAxis, ignorePadding, aPercentageBasis);
+            boxSizing, aFrame, GetOrthogonalAxis(logicalAxis), ignorePadding,
+            aPercentageBasis);
         if (!contentEdgeToBoxSizing) {
           contentEdgeToBoxSizing.emplace(GetContentEdgeToBoxSizing(boxSizing));
         }
@@ -5030,7 +5083,8 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
         contentEdgeToBoxSizing.emplace(GetContentEdgeToBoxSizing(boxSizing));
       }
       nscoord bSizeTakenByBoxSizing = GetDefiniteSizeTakenByBoxSizing(
-          boxSizing, aFrame, !isInlineAxis, ignorePadding, aPercentageBasis);
+          boxSizing, aFrame, GetOrthogonalAxis(logicalAxis), ignorePadding,
+          aPercentageBasis);
 
       *bSize -= bSizeTakenByBoxSizing;
       iSizeFromAspectRatio.emplace(ar.ComputeRatioDependentSize(
@@ -5853,13 +5907,31 @@ bool nsLayoutUtils::GetLastLineBaseline(WritingMode aWM, const nsIFrame* aFrame,
     return false;
   }
 
-  for (nsBlockFrame::ConstReverseLineIterator line = block->LinesRBegin(),
-                                              line_end = block->LinesREnd();
-       line != line_end; ++line) {
-    if (line->IsBlock()) {
-      nsIFrame* kid = line->mFirstChild;
+  // If we are happen to contain the line clamp ellipsis, the last baseline
+  // search should skip lineboxes that are clamped away.
+  //
+  // Note the that we don't care about this for GetFirstLineBaseline. While it's
+  // technically viable for the first baseline search to reach the clamped line,
+  // as per spec [1], the clamp point exists between two line boxes that will
+  // have a baseline. Even if the line gets displaced by the ellipsis, it
+  // provides a strut. As a result, the last unclamped line will always have a
+  // baseline.
+  // [1]: https://drafts.csswg.org/css-overflow-4/#line-clamp-containers
+  const bool isLineClamped =
+      block->HasLineClampEllipsis() || block->HasLineClampEllipsisDescendant();
+  bool hitLineClampEllipsis = false;
+
+  for (const auto& line : Reversed(block->Lines())) {
+    hitLineClampEllipsis = hitLineClampEllipsis || line.HasLineClampEllipsis();
+    if (line.IsBlock()) {
+      if (isLineClamped && !hitLineClampEllipsis &&
+          !block->HasLineClampEllipsisDescendant()) {
+        // This is clamped away, skip.
+        continue;
+      }
+      nsIFrame* kid = line.mFirstChild;
       nscoord kidBaseline;
-      const nsSize& containerSize = line->mContainerSize;
+      const nsSize& containerSize = line.mContainerSize;
       if (GetLastLineBaseline(aWM, kid, &kidBaseline)) {
         // Ignore relative positioning for baseline calculations
         *aResult = kidBaseline +
@@ -5875,10 +5947,14 @@ bool nsLayoutUtils::GetLastLineBaseline(WritingMode aWM, const nsIFrame* aFrame,
         return true;
       }
     } else {
+      if (isLineClamped && !hitLineClampEllipsis) {
+        // This is clamped away, skip.
+        continue;
+      }
       // XXX Is this the right test?  We have some bogus empty lines
       // floating around, but IsEmpty is perhaps too weak.
-      if (line->BSize() != 0 || !line->IsEmpty()) {
-        *aResult = line->BStart() + line->GetLogicalAscent();
+      if (line.BSize() != 0 || !line.IsEmpty()) {
+        *aResult = line.BStart() + line.GetLogicalAscent();
         return true;
       }
     }
@@ -5921,7 +5997,7 @@ nscoord nsLayoutUtils::CalculateContentBEnd(WritingMode aWM, nsIFrame* aFrame) {
     FrameChildListIDs skip = {FrameChildListID::PushedAbsolute,
                               FrameChildListID::Overflow,
                               FrameChildListID::ExcessOverflowContainers,
-                              FrameChildListID::OverflowOutOfFlow};
+                              FrameChildListID::OverflowFloats};
     nsBlockFrame* blockFrame = do_QueryFrame(aFrame);
     if (blockFrame) {
       contentBEnd =
@@ -6023,8 +6099,9 @@ struct SnappedImageDrawingParameters {
   // The default viewport size for SVG images, which we use unless a different
   // one has been explicitly specified. This is the same as |size| except that
   // it does not take into account any transformation on the gfxContext we're
-  // drawing to - for example, CSS transforms are not taken into account.
-  CSSIntSize svgViewportSize;
+  // drawing to - for example, CSS transforms are not taken into account, and
+  // it's not snapped.
+  CSSSize svgViewportSize;
   // Whether there's anything to draw at all.
   bool shouldDraw;
 
@@ -6034,7 +6111,7 @@ struct SnappedImageDrawingParameters {
   SnappedImageDrawingParameters(const gfxMatrix& aImageSpaceToDeviceSpace,
                                 const nsIntSize& aSize,
                                 const ImageRegion& aRegion,
-                                const CSSIntSize& aSVGViewportSize)
+                                const CSSSize& aSVGViewportSize)
       : imageSpaceToDeviceSpace(aImageSpaceToDeviceSpace),
         size(aSize),
         region(aRegion),
@@ -6152,20 +6229,8 @@ static SnappedImageDrawingParameters ComputeSnappedImageDrawingParameters(
       snappedDestSize, imgIContainer::FRAME_CURRENT, aSamplingFilter,
       aImageFlags);
 
-  nsIntSize svgViewportSize;
-  if (scaleFactors.xScale == 1.0 && scaleFactors.yScale == 1.0) {
-    // intImageSize is scaled by currentMatrix. But since there are no scale
-    // factors in currentMatrix, it is safe to assign intImageSize to
-    // svgViewportSize directly.
-    svgViewportSize = intImageSize;
-  } else {
-    // We should not take into account any transformation of currentMatrix
-    // when computing svg viewport size. Since currentMatrix contains scale
-    // factors, we need to recompute SVG viewport by unscaled devPixelDest.
-    svgViewportSize = aImage->OptimalImageSizeForDest(
-        devPixelDest.Size(), imgIContainer::FRAME_CURRENT, aSamplingFilter,
-        aImageFlags);
-  }
+  // The SVG viewport is the dest rect we're filling, not snapped.
+  const CSSSize svgViewportSize(devPixelDest.Width(), devPixelDest.Height());
 
   gfxSize imageSize(intImageSize.width, intImageSize.height);
 
@@ -6284,9 +6349,8 @@ static SnappedImageDrawingParameters ComputeSnappedImageDrawingParameters(
   ImageRegion region = ImageRegion::CreateWithSamplingRestriction(
       imageSpaceFill, subimage, extendMode);
 
-  return SnappedImageDrawingParameters(
-      transform, intImageSize, region,
-      CSSIntSize(svgViewportSize.width, svgViewportSize.height));
+  return SnappedImageDrawingParameters(transform, intImageSize, region,
+                                       svgViewportSize);
 }
 
 static ImgDrawResult DrawImageInternal(
@@ -6516,8 +6580,9 @@ CSSIntSize nsLayoutUtils::ComputeSizeForDrawingWithFallback(
 IntSize nsLayoutUtils::ComputeImageContainerDrawingParameters(
     imgIContainer* aImage, nsIFrame* aForFrame,
     const LayoutDeviceRect& aDestRect, const LayoutDeviceRect& aFillRect,
-    const StackingContextHelper& aSc, uint32_t aFlags,
-    SVGImageContext& aSVGContext, Maybe<ImageIntRegion>& aRegion) {
+    wr::DisplayListBuilder& aBuilder, const StackingContextHelper& aSc,
+    uint32_t aFlags, SVGImageContext& aSVGContext,
+    Maybe<ImageIntRegion>& aRegion, bool* aRasterizedForDest) {
   MOZ_ASSERT(aImage);
   MOZ_ASSERT(aForFrame);
 
@@ -6528,19 +6593,31 @@ IntSize nsLayoutUtils::ComputeImageContainerDrawingParameters(
   // Compute our SVG context parameters, if any. Don't replace the viewport
   // size if it was already set, prefer what the caller gave.
   SVGImageContext::MaybeStoreContextPaint(aSVGContext, aForFrame, aImage);
-  if ((scaleFactors.xScale != 1.0 || scaleFactors.yScale != 1.0) &&
-      aImage->GetType() == imgIContainer::TYPE_VECTOR &&
-      (!aSVGContext.GetViewportSize())) {
-    gfxSize gfxDestSize(aDestRect.Width(), aDestRect.Height());
-    IntSize viewportSize = aImage->OptimalImageSizeForDest(
-        gfxDestSize, imgIContainer::FRAME_CURRENT, samplingFilter, aFlags);
-
-    CSSIntSize cssViewportSize(viewportSize.width, viewportSize.height);
-    aSVGContext.SetViewportSize(Some(cssViewportSize));
+  if (aImage->GetType() == imgIContainer::TYPE_VECTOR &&
+      !aSVGContext.GetViewportSize()) {
+    aSVGContext.SetViewportSize(
+        Some(CSSSize(aDestRect.Width(), aDestRect.Height())));
   }
 
+  // WebRender snaps the rect after moving it out of the pre-scrolled
+  // coordinates it is authored in, by the accumulated external scroll offset,
+  // so round at that position. Otherwise the size would depend on the
+  // sub-pixel phase of the scroll offset while the rect it is drawn into does
+  // not, and with fractional extents the two would differ by a pixel on every
+  // other repaint during a scroll (bug 2080185).
+  const wr::LayoutVector2D eso = aBuilder.CurrentAccumulatedScrollOffset();
+  const LayoutDevicePoint scrollOffset(eso.x, eso.y);
+
   const gfx::Matrix& itm = aSc.GetInheritedTransform();
-  LayerIntRect destRect = SnapRectForImage(itm, scaleFactors, aDestRect);
+  LayerIntRect destRect =
+      SnapRectForImage(itm, scaleFactors, aDestRect + scrollOffset);
+  const IntSize snappedDestSize = destRect.Size().ToUnknownSize();
+  auto setRasterizedForDest = [&](const IntSize& aSize) {
+    if (aRasterizedForDest) {
+      *aRasterizedForDest = aSize == snappedDestSize;
+    }
+    return aSize;
+  };
 
   // Since we always decode entire raster images, we only care about the
   // ImageIntRegion for vector images when we are recording blobs, for which we
@@ -6561,9 +6638,9 @@ IntSize nsLayoutUtils::ComputeImageContainerDrawingParameters(
       destRect.height = scaleHeight;
     }
 
-    return aImage->OptimalImageSizeForDest(
+    return setRasterizedForDest(aImage->OptimalImageSizeForDest(
         gfxSize(destRect.Width(), destRect.Height()),
-        imgIContainer::FRAME_CURRENT, samplingFilter, aFlags);
+        imgIContainer::FRAME_CURRENT, samplingFilter, aFlags));
   }
 
   // We only use the region rect with blob recordings. This is because when we
@@ -6574,7 +6651,8 @@ IntSize nsLayoutUtils::ComputeImageContainerDrawingParameters(
     // If the dest rect contains the fill rect, then we are only displaying part
     // of the vector image. We need to calculate the restriction region to avoid
     // drawing more than we need, and sampling outside the desired bounds.
-    LayerIntRect clipRect = SnapRectForImage(itm, scaleFactors, aFillRect);
+    LayerIntRect clipRect =
+        SnapRectForImage(itm, scaleFactors, aFillRect + scrollOffset);
     if (destRect.Contains(clipRect)) {
       LayerIntRect restrictRect = destRect.Intersect(clipRect);
       restrictRect.MoveBy(-destRect.TopLeft());
@@ -6597,7 +6675,7 @@ IntSize nsLayoutUtils::ComputeImageContainerDrawingParameters(
 
   // VectorImage::OptimalImageSizeForDest will just round up, but we already
   // have an integer size.
-  return destRect.Size().ToUnknownSize();
+  return setRasterizedForDest(destRect.Size().ToUnknownSize());
 }
 
 /* static */
@@ -6621,10 +6699,7 @@ ImgDrawResult nsLayoutUtils::DrawBackgroundImage(
   AUTO_PROFILER_LABEL("nsLayoutUtils::DrawBackgroundImage",
                       GRAPHICS_Rasterization);
 
-  CSSIntSize destCSSSize{nsPresContext::AppUnitsToIntCSSPixels(aDest.width),
-                         nsPresContext::AppUnitsToIntCSSPixels(aDest.height)};
-
-  SVGImageContext svgContext(Some(destCSSSize));
+  SVGImageContext svgContext(Some(CSSSize::FromAppUnits(aDest.Size())));
   SVGImageContext::MaybeStoreContextPaint(svgContext, aForFrame, aImage);
 
   /* Fast path when there is no need for image spacing */
@@ -7074,7 +7149,7 @@ SurfaceFromElementResult nsLayoutUtils::SurfaceFromOffscreenCanvas(
 
 SurfaceFromElementResult nsLayoutUtils::SurfaceFromVideoFrame(
     VideoFrame* aVideoFrame, uint32_t aSurfaceFlags,
-    RefPtr<DrawTarget>& aTarget) {
+    RefPtr<DrawTarget>& aTarget, bool aOptimizeSourceSurface) {
   SurfaceFromElementResult result;
 
   RefPtr<layers::Image> layersImage = aVideoFrame->GetImage();
@@ -7164,10 +7239,10 @@ SurfaceFromElementResult nsLayoutUtils::SurfaceFromVideoFrame(
     result.mPrincipal = global->PrincipalOrNull();
   }
 
-  if (aTarget) {
+  if (aTarget && aOptimizeSourceSurface) {
     // They gave us a DrawTarget to optimize for, so even though we may have a
-    // layers::Image, we should unconditionally try to grab a SourceSurface and
-    // try to optimize it.
+    // layers::Image, we should try to grab a SourceSurface and try to optimize
+    // it if requested.
     if (result.mLayersImage) {
       MOZ_ASSERT(!result.mSourceSurface);
       result.mSourceSurface = result.mLayersImage->GetAsSourceSurface();
@@ -7712,10 +7787,10 @@ static void AddFontsFromTextRun(gfxTextRun* aTextRun, nsTextFrame* aFrame,
       end = std::min(end, contentLimit);
 
       if (end > start) {
-        RefPtr<nsRange> range =
-            nsRange::Create(content, start, content, end, IgnoreErrors());
+        RefPtr<dom::Range> range =
+            dom::Range::Create(content, start, content, end, IgnoreErrors());
         NS_WARNING_ASSERTION(range,
-                             "nsRange::Create() failed to create valid range");
+                             "Range::Create() failed to create valid range");
         if (range) {
           fontFace->AddRange(range);
         }
@@ -7960,7 +8035,8 @@ nsSetAttrRunnable::nsSetAttrRunnable(Element* aElement, nsAtom* aAttrName,
 
 NS_IMETHODIMP
 nsSetAttrRunnable::Run() {
-  return mElement->SetAttr(kNameSpaceID_None, mAttrName, mValue, true);
+  return mElement->SetAttr(kNameSpaceID_None, mAttrName, mValue, true,
+                           IsKnownNewAttr::No);
 }
 
 nsUnsetAttrRunnable::nsUnsetAttrRunnable(Element* aElement, nsAtom* aAttrName)
@@ -8283,10 +8359,6 @@ bool nsLayoutUtils::UpdateCompositionBoundsForRCDRSF(
           ? SubtractDynamicToolbar::Yes
           : SubtractDynamicToolbar::No;
 
-  const bool isKeyboardVisibleOnOverlaysContent =
-      aPresContext->GetKeyboardHeight() &&
-      aPresContext->Document()->InteractiveWidget() ==
-          InteractiveWidget::OverlaysContent;
   if (shouldSubtractDynamicToolbar == SubtractDynamicToolbar::Yes &&
       // In `overlays-content` mode with the software keyboard visible, avoid
       // flipping `shouldSubtractDynamicToolbar` below. We want to exclude
@@ -8295,7 +8367,7 @@ bool nsLayoutUtils::UpdateCompositionBoundsForRCDRSF(
       // layout viewport height in ExpandHeightForDynamicToolbar(). Otherwise,
       // the visual viewport will be taller than the layout viewport which can
       // lead to rendering problems.
-      !isKeyboardVisibleOnOverlaysContent) {
+      !aPresContext->IsKeyboardVisibleOnOverlaysContent()) {
     if (RefPtr<MobileViewportManager> MVM =
             aPresContext->PresShell()->GetMobileViewportManager()) {
       // Convert the intrinsic composition size to app units here since
@@ -8328,7 +8400,7 @@ bool nsLayoutUtils::UpdateCompositionBoundsForRCDRSF(
   // Add the keyboard height in the case of
   // `interactive-widget=overlays-content` so that contents being overlaid by
   // the keyboard can NOT be reachable by scrolling.
-  if (isKeyboardVisibleOnOverlaysContent) {
+  if (aPresContext->IsKeyboardVisibleOnOverlaysContent()) {
     contentSize.height += ViewAs<LayoutDevicePixel>(
         aPresContext->GetKeyboardHeight(),
         PixelCastJustification::LayoutDeviceIsScreenForBounds);
@@ -8373,8 +8445,7 @@ nsMargin nsLayoutUtils::ScrollbarAreaToExcludeFromCompositionBoundsFor(
 
 /* static */
 nsSize nsLayoutUtils::CalculateCompositionSizeForFrame(
-    nsIFrame* aFrame, bool aSubtractScrollbars,
-    const nsSize* aOverrideScrollPortSize,
+    nsIFrame* aFrame, const nsSize* aOverrideScrollPortSize,
     IncludeDynamicToolbar aIncludeDynamicToolbar) {
   // If we have a scroll container frame, restrict the composition bounds to its
   // scroll port. The scroll port excludes the frame borders and the scroll
@@ -8399,12 +8470,6 @@ nsSize nsLayoutUtils::CalculateCompositionSizeForFrame(
       size = nsSize(compBounds.width * auPerDevPixel,
                     compBounds.height * auPerDevPixel);
     }
-  }
-
-  if (aSubtractScrollbars) {
-    nsMargin margins = ScrollbarAreaToExcludeFromCompositionBoundsFor(aFrame);
-    size.width -= margins.LeftRight();
-    size.height -= margins.TopBottom();
   }
 
   return size;
@@ -8461,20 +8526,6 @@ CSSSize nsLayoutUtils::CalculateBoundingCompositionSize(
         widgetBounds.Size(),
         PixelCastJustification::LayoutDeviceIsScreenForBounds));
   }
-
-  // Adjust composition size for the size of scroll bars.
-  nsIFrame* rootRootScrollContainerFrame =
-      rootPresShell && !isPopupRoot
-          ? rootPresShell->GetRootScrollContainerFrame()
-          : nullptr;
-  nsMargin scrollbarMargins = ScrollbarAreaToExcludeFromCompositionBoundsFor(
-      rootRootScrollContainerFrame);
-  LayoutDeviceMargin margins = LayoutDeviceMargin::FromAppUnits(
-      scrollbarMargins, rootPresContext->AppUnitsPerDevPixel());
-  // Scrollbars are not subject to resolution scaling, so LD pixels = layer
-  // pixels for them.
-  rootCompositionSize.width -= margins.LeftRight();
-  rootCompositionSize.height -= margins.TopBottom();
 
   CSSSize result =
       rootCompositionSize / aMetrics.DisplayportPixelsPerCSSPixel();
@@ -8533,6 +8584,11 @@ nsRect nsLayoutUtils::CalculateExpandedScrollableRect(nsIFrame* aFrame) {
   nsRect scrollableRect = CalculateScrollableRectForFrame(
       aFrame->GetScrollTargetFrame(), aFrame->PresShell()->GetRootFrame());
   nsSize compSize = CalculateCompositionSizeForFrame(aFrame);
+
+  // Match FrameMetrics::GetExpandedScrollableRect().
+  nsMargin scrollbars = ScrollbarAreaToExcludeFromCompositionBoundsFor(aFrame);
+  compSize.width -= scrollbars.LeftRight();
+  compSize.height -= scrollbars.TopBottom();
 
   if (aFrame == aFrame->PresShell()->GetRootScrollContainerFrame()) {
     // the composition size for the root scroll frame does not include the
@@ -9260,8 +9316,8 @@ nsRect nsLayoutUtils::GetSelectionBoundingRect(const Selection* aSel) {
     const uint32_t rangeCount = aSel->RangeCount();
     for (const uint32_t idx : IntegerRange(rangeCount)) {
       MOZ_ASSERT(aSel->RangeCount() == rangeCount);
-      nsRange* range = aSel->GetRangeAt(idx);
-      nsRange::CollectClientRectsAndText(
+      dom::Range* range = aSel->GetRangeAt(idx);
+      dom::Range::CollectClientRectsAndText(
           &accumulator, nullptr, range, range->GetStartContainer(),
           range->StartOffset(), range->GetEndContainer(), range->EndOffset(),
           true, false);
@@ -9335,8 +9391,15 @@ CSSRect nsLayoutUtils::GetBoundingFrameRect(
 }
 
 /* static */
-bool nsLayoutUtils::IsTransformed(nsIFrame* aForFrame, nsIFrame* aTopFrame) {
-  for (nsIFrame* f = aForFrame; f != aTopFrame; f = f->GetParent()) {
+bool nsLayoutUtils::IsTransformed(const nsIFrame* aForFrame,
+                                  const nsIFrame* aTopFrame) {
+  MOZ_ASSERT(aForFrame);
+  MOZ_ASSERT(!aTopFrame || aForFrame == aTopFrame ||
+                 IsProperAncestorFrame(aTopFrame, aForFrame),
+             "aTopFrame should be either nullptr, same as aForFrame, or a "
+             "proper ancestor of aForFrame!");
+
+  for (const nsIFrame* f = aForFrame; f && f != aTopFrame; f = f->GetParent()) {
     if (f->IsTransformed()) {
       return true;
     }
@@ -9755,13 +9818,10 @@ nsPoint nsLayoutUtils::ComputeOffsetToUserSpace(nsDisplayListBuilder* aBuilder,
   // if we want "ctx" to be in user space, we first need to subtract the
   // frame's position so that SVG painting can later add it again and the
   // frame is painted in the right place.
-  gfxPoint toUserSpaceGfx =
-      SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(aFrame);
-  nsPoint toUserSpace =
-      nsPoint(nsPresContext::CSSPixelsToAppUnits(float(toUserSpaceGfx.x)),
-              nsPresContext::CSSPixelsToAppUnits(float(toUserSpaceGfx.y)));
+  nsPoint toUserSpace = CSSPoint::ToAppUnits(
+      SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(aFrame));
 
-  return (offsetToBoundingBox - toUserSpace);
+  return offsetToBoundingBox - toUserSpace;
 }
 
 /* static */
@@ -9773,7 +9833,7 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetMetricsFor(
   gfxFont::Orientation orientation =
       aIsVertical ? nsFontMetrics::eVertical : nsFontMetrics::eHorizontal;
   nsFontMetrics::Params params;
-  params.language = aStyleFont->mLanguage;
+  params.language = aStyleFont->GetLangAtom();
   params.explicitLanguage = aStyleFont->mExplicitLanguage;
   params.orientation = orientation;
   params.userFontSet =
@@ -9851,7 +9911,7 @@ void nsLayoutUtils::ComputeSystemFont(nsFont* aSystemFont,
   aSystemFont->style = fontStyle.style;
   aSystemFont->family.is_system_font = fontStyle.systemFont;
   aSystemFont->weight = fontStyle.weight;
-  aSystemFont->stretch = fontStyle.stretch;
+  aSystemFont->width = fontStyle.width;
   aSystemFont->size = Length::FromPixels(fontStyle.size);
 
   // aSystemFont->langGroup = fontStyle.langGroup;
@@ -10128,11 +10188,11 @@ template <typename SizeType>
     const nsPresContext* aPresContext, const SizeType& aSize) {
   MOZ_ASSERT(aPresContext);
 
-  // This expansion is applicable only for cases where the software keyboard is
-  // hidden or the document is `interactive-widget=resizes-content` mode
-  // because in other cases the visual viewport size is always smaller than
-  // the layout viewport so that there should be room to scroll.
-  if (!aPresContext->IsKeyboardHiddenOrResizesContentMode()) {
+  // In `overlays-content` mode with the software keyboard visible the dynamic
+  // toolbar never changes viewport related metrics
+  // (see nsPresContext::UpdateDynamicToolbarOffset), so there is no area for it
+  // to expand.
+  if (aPresContext->IsKeyboardVisibleOnOverlaysContent()) {
     return aSize;
   }
 
@@ -10169,58 +10229,4 @@ CSSSize nsLayoutUtils::ExpandHeightForDynamicToolbar(
 nsSize nsLayoutUtils::ExpandHeightForDynamicToolbar(
     const nsPresContext* aPresContext, const nsSize& aSize) {
   return ExpandHeightForDynamicToolbarImpl(aPresContext, aSize);
-}
-
-auto nsLayoutUtils::GetCombinedFragmentRects(const nsIFrame* aFrame,
-                                             const nsIFrame* aContainingBlock)
-    -> CombinedFragments {
-  bool mustCheckCBFragment = false;
-  nsPoint offset{};
-  if (aContainingBlock) {
-    MOZ_ASSERT(nsLayoutUtils::IsProperAncestorFrame(aContainingBlock, aFrame));
-    mustCheckCBFragment = aContainingBlock->GetPrevContinuation() ||
-                          aContainingBlock->GetNextContinuation();
-    offset = aFrame->GetOffsetToIgnoringScrolling(aContainingBlock);
-  }
-  bool isPaginated = aFrame->PresContext()->IsPaginated();
-
-  // Lazy getter for aFrame's page-frame ancestor, if any.
-  Maybe<const nsIFrame*> maybePageFrame;
-  auto currPageFrame = [=, &maybePageFrame]() -> const nsIFrame* {
-    MOZ_ASSERT(isPaginated);
-    if (!maybePageFrame) {
-      maybePageFrame.emplace(nsLayoutUtils::GetPageFrame(aFrame));
-    }
-    return maybePageFrame.ref();
-  };
-
-  // A continuation is considered "on the same page" if the context is not
-  // paginated, or if it has the same page-frame ancestor.
-  auto onSamePage = [=](const nsIFrame* aContinuation) -> bool {
-    return !isPaginated ||
-           nsLayoutUtils::GetPageFrame(aContinuation) == currPageFrame();
-  };
-
-  auto inSameCBFragment = [&](const nsIFrame* aContinuation) {
-    return !mustCheckCBFragment || nsLayoutUtils::IsProperAncestorFrame(
-                                       aContainingBlock, aContinuation);
-  };
-
-  // Collect rects from our continuations (limited to those that are on the
-  // same page if the context is paginated).
-  nsRect rect = aFrame->GetRectRelativeToSelf();
-  const auto* next = aFrame->GetNextContinuation();
-  for (; next && onSamePage(next) && inSameCBFragment(next);
-       next = next->GetNextContinuation()) {
-    rect =
-        rect.Union(next->GetRectRelativeToSelf() + next->GetOffsetTo(aFrame));
-  }
-  const auto* prev = aFrame->GetPrevContinuation();
-  for (; prev && onSamePage(prev) && inSameCBFragment(prev);
-       prev = prev->GetPrevContinuation()) {
-    rect =
-        rect.Union(prev->GetRectRelativeToSelf() + prev->GetOffsetTo(aFrame));
-  }
-
-  return CombinedFragments{prev, next, rect + offset};
 }

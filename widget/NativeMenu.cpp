@@ -3,13 +3,51 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "NativeMenu.h"
+
+#include "mozilla/ComputedStyle.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/ResponsiveImageSelector.h"
-#include "mozilla/ComputedStyle.h"
 #include "nsComputedDOMStyle.h"
+#include "nsXULPopupManager.h"
 
 namespace mozilla::widget {
+
+void NativeMenu::OnOpened() {
+  if (RefPtr pm = nsXULPopupManager::GetInstance()) {
+    pm->OnNativeMenuOpened(this);
+  }
+}
+
+void NativeMenu::OnClosed() {
+  if (RefPtr pm = nsXULPopupManager::GetInstance()) {
+    pm->OnNativeMenuClosed(this);
+  }
+}
+
+void NativeMenu::OnSubMenuWillOpen(dom::Element* aPopupElement) {
+  if (RefPtr pm = nsXULPopupManager::GetInstance()) {
+    pm->OnNativeSubMenuWillOpen(this, aPopupElement);
+  }
+}
+
+void NativeMenu::OnSubMenuDidOpen(dom::Element* aPopupElement) {
+  if (RefPtr pm = nsXULPopupManager::GetInstance()) {
+    pm->OnNativeSubMenuDidOpen(this, aPopupElement);
+  }
+}
+
+void NativeMenu::OnSubMenuClosed(dom::Element* aPopupElement) {
+  if (RefPtr pm = nsXULPopupManager::GetInstance()) {
+    pm->OnNativeSubMenuClosed(this, aPopupElement);
+  }
+}
+
+void NativeMenu::OnWillActivateItem(dom::Element* aMenuItemElement) {
+  if (RefPtr pm = nsXULPopupManager::GetInstance()) {
+    pm->OnNativeMenuWillActivateItem(this, aMenuItemElement);
+  }
+}
 
 NativeMenuIcon NativeMenu::GetIcon(dom::Element& aElement) {
   RefPtr img =

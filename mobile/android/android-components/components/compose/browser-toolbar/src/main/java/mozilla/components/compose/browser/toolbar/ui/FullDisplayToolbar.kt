@@ -36,6 +36,7 @@ import mozilla.components.compose.base.theme.privateColorPalette
 import mozilla.components.compose.browser.toolbar.ActionContainer
 import mozilla.components.compose.browser.toolbar.R
 import mozilla.components.compose.browser.toolbar.concept.Action
+import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags.ADDRESSBAR_HORIZONTAL_DIVIDER
 import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags.ADDRESSBAR_PROGRESSBAR
 import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags.ADDRESSBAR_URL_BOX
 import mozilla.components.compose.browser.toolbar.concept.PageOrigin
@@ -65,6 +66,8 @@ internal fun FullDisplayToolbar(
     modifier: Modifier = Modifier,
     backgroundColor: Color = MaterialTheme.colorScheme.surface,
     outlineColor: Color = DividerDefaults.color,
+    showDivider: Boolean = true,
+    browserActionsColor: Color? = null,
     browserActionsStartModifier: Modifier = Modifier,
     pageActionsStartModifier: Modifier = Modifier,
     originModifier: Modifier = Modifier,
@@ -72,57 +75,63 @@ internal fun FullDisplayToolbar(
     browserActionsEndModifier: Modifier = Modifier,
 ) {
     Surface(color = backgroundColor) {
-        Box(
-            modifier = modifier
-                .semantics { testTagsAsResourceId = true },
-        ) {
+        Box(modifier = modifier.semantics { testTagsAsResourceId = true }) {
             Row(
                 modifier = Modifier.adaptiveHorizontalPadding(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (browserActionsStart.isNotEmpty()) {
-                    ActionContainer(
-                        actions = browserActionsStart,
-                        onInteraction = onInteraction,
-                        modifier = browserActionsStartModifier,
-                    )
+                    BrowserActionsColorScheme(browserActionsColor) {
+                        ActionContainer(
+                            actions = browserActionsStart,
+                            onInteraction = onInteraction,
+                            modifier = browserActionsStartModifier,
+                        )
+                    }
                 }
 
                 Row(
-                    modifier = Modifier
-                        .padding(
-                            start = when (browserActionsStart.isEmpty()) {
-                                true -> TOOLBAR_PADDING_DP.dp
-                                false -> NO_TOOLBAR_PADDING_DP.dp
-                            },
-                            top = TOOLBAR_PADDING_DP.dp,
-                            end = when (browserActionsEnd.isEmpty()) {
-                                true -> TOOLBAR_PADDING_DP.dp
-                                false -> NO_TOOLBAR_PADDING_DP.dp
-                            },
-                            bottom = when (gravity) {
-                                Top -> TOOLBAR_PADDING_DP
-                                Bottom -> if (browserActionsEnd.isEmpty()) NO_TOOLBAR_PADDING_DP else TOOLBAR_PADDING_DP
-                            }.dp,
-                        )
-                        .height(48.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            shape = CircleShape,
-                        )
-                        .padding(
-                            start = when (pageActionsStart.isEmpty()) {
-                                true -> TOOLBAR_PADDING_DP.dp
-                                false -> NO_TOOLBAR_PADDING_DP.dp
-                            },
-                            top = NO_TOOLBAR_PADDING_DP.dp,
-                            end = when (pageActionsEnd.isEmpty()) {
-                                true -> TOOLBAR_PADDING_DP.dp
-                                false -> NO_TOOLBAR_PADDING_DP.dp
-                            },
-                            bottom = NO_TOOLBAR_PADDING_DP.dp,
-                        )
-                        .weight(1f),
+                    modifier =
+                        Modifier.padding(
+                                start =
+                                    when (browserActionsStart.isEmpty()) {
+                                        true -> TOOLBAR_PADDING_DP.dp
+                                        false -> NO_TOOLBAR_PADDING_DP.dp
+                                    },
+                                top = TOOLBAR_PADDING_DP.dp,
+                                end =
+                                    when (browserActionsEnd.isEmpty()) {
+                                        true -> TOOLBAR_PADDING_DP.dp
+                                        false -> NO_TOOLBAR_PADDING_DP.dp
+                                    },
+                                bottom =
+                                    when (gravity) {
+                                        Top -> TOOLBAR_PADDING_DP
+                                        Bottom ->
+                                            if (browserActionsEnd.isEmpty()) NO_TOOLBAR_PADDING_DP
+                                            else TOOLBAR_PADDING_DP
+                                    }.dp,
+                            )
+                            .height(48.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                shape = CircleShape,
+                            )
+                            .padding(
+                                start =
+                                    when (pageActionsStart.isEmpty()) {
+                                        true -> TOOLBAR_PADDING_DP.dp
+                                        false -> NO_TOOLBAR_PADDING_DP.dp
+                                    },
+                                top = NO_TOOLBAR_PADDING_DP.dp,
+                                end =
+                                    when (pageActionsEnd.isEmpty()) {
+                                        true -> TOOLBAR_PADDING_DP.dp
+                                        false -> NO_TOOLBAR_PADDING_DP.dp
+                                    },
+                                bottom = NO_TOOLBAR_PADDING_DP.dp,
+                            )
+                            .weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (pageActionsStart.isNotEmpty()) {
@@ -135,11 +144,7 @@ internal fun FullDisplayToolbar(
 
                     Origin(
                         hint = pageOrigin.hint,
-                        modifier = Modifier
-                            .height(56.dp)
-                            .weight(1f)
-                            .testTag(ADDRESSBAR_URL_BOX)
-                            .then(originModifier),
+                        modifier = Modifier.height(56.dp).weight(1f).testTag(ADDRESSBAR_URL_BOX).then(originModifier),
                         url = pageOrigin.url,
                         title = pageOrigin.title,
                         textGravity = pageOrigin.textGravity,
@@ -159,42 +164,67 @@ internal fun FullDisplayToolbar(
                 }
 
                 if (browserActionsEnd.isNotEmpty()) {
-                    ActionContainer(
-                        actions = browserActionsEnd,
-                        onInteraction = onInteraction,
-                        modifier = browserActionsEndModifier,
-                    )
+                    BrowserActionsColorScheme(browserActionsColor) {
+                        ActionContainer(
+                            actions = browserActionsEnd,
+                            onInteraction = onInteraction,
+                            modifier = browserActionsEndModifier,
+                        )
+                    }
                 }
             }
 
-            HorizontalDivider(
-                modifier = Modifier.align(
-                    when (gravity) {
-                        Top -> Alignment.BottomCenter
-                        Bottom -> Alignment.TopCenter
-                    },
-                ),
-                color = outlineColor,
-            )
+            if (showDivider) {
+                HorizontalDivider(
+                    modifier =
+                        Modifier.testTag(ADDRESSBAR_HORIZONTAL_DIVIDER)
+                            .align(
+                                when (gravity) {
+                                    Top -> Alignment.BottomCenter
+                                    Bottom -> Alignment.TopCenter
+                                }
+                            ),
+                    color = outlineColor,
+                )
+            }
 
             if (progressBarConfig != null) {
                 AnimatedProgressBar(
                     progress = progressBarConfig.progress,
                     color = progressBarConfig.color,
                     trackColor = Color.Transparent,
-                    modifier = Modifier
-                        .semantics {
-                            testTag = ADDRESSBAR_PROGRESSBAR
-                        }
-                        .align(
-                            when (gravity) {
-                                Top -> Alignment.BottomCenter
-                                Bottom -> Alignment.TopCenter
-                            },
-                        ),
+                    modifier =
+                        Modifier.semantics {
+                                testTag = ADDRESSBAR_PROGRESSBAR
+                            }
+                            .align(
+                                when (gravity) {
+                                    Top -> Alignment.BottomCenter
+                                    Bottom -> Alignment.TopCenter
+                                }
+                            ),
                 )
             }
         }
+    }
+}
+
+/**
+ * Overrides `onSurface` for [content] with [color] so browser action icons (and the tab counter) can be tinted
+ * independently of the page actions inside the address bar. A `null` [color] leaves the ambient color scheme untouched.
+ */
+@Composable
+private fun BrowserActionsColorScheme(
+    color: Color?,
+    content: @Composable () -> Unit,
+) {
+    if (color == null) {
+        content()
+    } else {
+        MaterialTheme(
+            colorScheme = MaterialTheme.colorScheme.copy(onSurface = color),
+            content = content,
+        )
     }
 }
 
@@ -205,21 +235,26 @@ internal fun FullDisplayToolbar(
  */
 private fun Modifier.adaptiveHorizontalPadding() = layout { measurable, constraints ->
     val isSmallWidthScreen = constraints.maxWidth < WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND.dp.roundToPx()
-    val padding = when (isSmallWidthScreen) {
-        true -> NO_TOOLBAR_PADDING_DP
-        else -> LARGE_TOOLBAR_PADDING_DP
-    }.dp.roundToPx()
+    val padding =
+        when (isSmallWidthScreen) {
+                true -> NO_TOOLBAR_PADDING_DP
+                else -> LARGE_TOOLBAR_PADDING_DP
+            }
+            .dp
+            .roundToPx()
 
     val horizontal = padding * 2
-    val placeable = measurable.measure(
-        constraints.copy(
-            minWidth = (constraints.minWidth - horizontal).coerceAtLeast(0),
-            maxWidth = when (constraints.maxWidth) {
-                Constraints.Infinity -> Constraints.Infinity
-                else -> (constraints.maxWidth - horizontal).coerceAtLeast(0)
-            },
-        ),
-    )
+    val placeable =
+        measurable.measure(
+            constraints.copy(
+                minWidth = (constraints.minWidth - horizontal).coerceAtLeast(0),
+                maxWidth =
+                    when (constraints.maxWidth) {
+                        Constraints.Infinity -> Constraints.Infinity
+                        else -> (constraints.maxWidth - horizontal).coerceAtLeast(0)
+                    },
+            )
+        )
 
     layout((placeable.width + horizontal).coerceAtMost(constraints.maxWidth), placeable.height) {
         placeable.place(padding, 0)
@@ -229,7 +264,7 @@ private fun Modifier.adaptiveHorizontalPadding() = layout { measurable, constrai
 @PreviewLightDark
 @Composable
 private fun FullDisplayToolbarPreview(
-    @PreviewParameter(DisplayToolbarDataProvider::class) config: DisplayToolbarPreviewModel,
+    @PreviewParameter(DisplayToolbarDataProvider::class) config: DisplayToolbarPreviewModel
 ) {
     AcornTheme {
         FullDisplayToolbar(
@@ -237,12 +272,13 @@ private fun FullDisplayToolbarPreview(
             progressBarConfig = ProgressBarConfig(progress = 66),
             browserActionsStart = config.browserStartActions,
             pageActionsStart = config.pageActionsStart,
-            pageOrigin = PageOrigin(
-                hint = R.string.mozac_browser_toolbar_search_hint,
-                title = config.title,
-                url = config.url,
-                onClick = object : BrowserToolbarEvent {},
-            ),
+            pageOrigin =
+                PageOrigin(
+                    hint = R.string.mozac_browser_toolbar_search_hint,
+                    title = config.title,
+                    url = config.url,
+                    onClick = object : BrowserToolbarEvent {},
+                ),
             pageActionsEnd = config.pageActionsEnd,
             browserActionsEnd = config.browserEndActions,
             onInteraction = {},
@@ -253,7 +289,7 @@ private fun FullDisplayToolbarPreview(
 @Preview
 @Composable
 private fun FullDisplayToolbarPrivatePreview(
-    @PreviewParameter(DisplayToolbarDataProvider::class) config: DisplayToolbarPreviewModel,
+    @PreviewParameter(DisplayToolbarDataProvider::class) config: DisplayToolbarPreviewModel
 ) {
     AcornTheme(
         colors = privateColorPalette,
@@ -264,12 +300,13 @@ private fun FullDisplayToolbarPrivatePreview(
             progressBarConfig = ProgressBarConfig(progress = 66),
             browserActionsStart = config.browserStartActions,
             pageActionsStart = config.pageActionsStart,
-            pageOrigin = PageOrigin(
-                hint = R.string.mozac_browser_toolbar_search_hint,
-                title = config.title,
-                url = config.url,
-                onClick = object : BrowserToolbarEvent {},
-            ),
+            pageOrigin =
+                PageOrigin(
+                    hint = R.string.mozac_browser_toolbar_search_hint,
+                    title = config.title,
+                    url = config.url,
+                    onClick = object : BrowserToolbarEvent {},
+                ),
             pageActionsEnd = config.pageActionsEnd,
             browserActionsEnd = config.browserEndActions,
             onInteraction = {},

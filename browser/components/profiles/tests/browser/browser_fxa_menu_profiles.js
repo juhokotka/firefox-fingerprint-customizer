@@ -52,6 +52,230 @@ async function closeFxaPanel() {
   await hidden;
 }
 
+// Stubs the state (signed out, at most one profile) that surfaces the
+// "Create a New Profile" CTA, then opens the FxA menu and navigates into the
+// create profile subview.
+function stubCreateProfileState(sandbox) {
+  sandbox.stub(SelectableProfileService, "isEnabled").get(() => true);
+  sandbox.stub(SelectableProfileService, "initialized").get(() => true);
+  sandbox.stub(SelectableProfileService, "getAllProfiles").resolves([]);
+}
+
+async function openCreateProfileSubview() {
+  await openFxaPanel();
+  let container = PanelMultiView.getViewNode(
+    document,
+    "PanelUI-fxa-menu-profile-buttons"
+  );
+  let createButton = container.querySelector(
+    "#PanelUI-fxa-menu-create-profile-button"
+  );
+  let subview = PanelMultiView.getViewNode(
+    document,
+    "PanelUI-fxa-menu-create-profile"
+  );
+  let subviewShown = BrowserTestUtils.waitForEvent(subview, "ViewShown");
+  EventUtils.synthesizeMouseAtCenter(createButton, {});
+  await subviewShown;
+}
+
+add_task(async function test_fxa_menu_create_profile_cta_shown() {
+  const sandbox = sinon.createSandbox();
+  stubCreateProfileState(sandbox);
+
+  await openFxaPanel();
+
+  let container = PanelMultiView.getViewNode(
+    document,
+    "PanelUI-fxa-menu-profile-buttons"
+  );
+  let createButton = container.querySelector(
+    "#PanelUI-fxa-menu-create-profile-button"
+  );
+  Assert.ok(
+    createButton,
+    "Create a new profile CTA should show when signed out with at most one profile"
+  );
+  Assert.ok(
+    createButton.classList.contains("subviewbutton-nav"),
+    "The CTA button should have a chevron"
+  );
+  Assert.ok(
+    !container.querySelector(".profile-item"),
+    "No profile list items should be shown in the CTA state"
+  );
+
+  let subview = PanelMultiView.getViewNode(
+    document,
+    "PanelUI-fxa-menu-create-profile"
+  );
+  let subviewShown = BrowserTestUtils.waitForEvent(subview, "ViewShown");
+  EventUtils.synthesizeMouseAtCenter(createButton, {});
+  await subviewShown;
+
+  for (const id of [
+    "PanelUI-fxa-menu-create-profile-illustration",
+    "PanelUI-fxa-menu-create-profile-heading",
+    "PanelUI-fxa-menu-create-profile-description",
+    "PanelUI-fxa-menu-create-profile-confirm-button",
+    "PanelUI-fxa-menu-create-profile-copy-button",
+    "PanelUI-fxa-menu-create-profile-manage-button",
+  ]) {
+    Assert.ok(
+      BrowserTestUtils.isVisible(PanelMultiView.getViewNode(document, id)),
+      `${id} is visible in the create profile subview`
+    );
+  }
+
+  let manageButton = PanelMultiView.getViewNode(
+    document,
+    "PanelUI-fxa-menu-create-profile-manage-button"
+  );
+  Assert.ok(
+    manageButton.classList.contains("panel-subview-footer-button"),
+    "The manage profiles button should be a footer button"
+  );
+
+  await closeFxaPanel();
+  sandbox.restore();
+});
+
+add_task(
+  async function test_fxa_menu_no_create_profile_cta_with_multiple_profiles() {
+    const sandbox = sinon.createSandbox();
+    let mockProfile = id => ({
+      id,
+      name: `Profile ${id}`,
+      theme: { themeBg: "#ffffff", themeFg: "#000000" },
+      getAvatarURL: async () => "",
+    });
+    sandbox.stub(SelectableProfileService, "isEnabled").get(() => true);
+    sandbox.stub(SelectableProfileService, "initialized").get(() => true);
+    sandbox
+      .stub(SelectableProfileService, "getAllProfiles")
+      .resolves([mockProfile(1), mockProfile(2)]);
+
+    await openFxaPanel();
+
+    let container = PanelMultiView.getViewNode(
+      document,
+      "PanelUI-fxa-menu-profile-buttons"
+    );
+    Assert.ok(
+      !container.querySelector("#PanelUI-fxa-menu-create-profile-button"),
+      "Create a new profile CTA should not show with multiple profiles"
+    );
+    Assert.ok(
+      container.querySelector(".profile-item"),
+      "Profile list items should be shown with multiple profiles"
+    );
+
+    await closeFxaPanel();
+    sandbox.restore();
+  }
+);
+
+add_task(async function test_fxa_menu_create_profile_actions() {
+  const sandbox = sinon.createSandbox();
+  stubCreateProfileState(sandbox);
+  let createNewProfileStub = sandbox.stub(gProfiles, "createNewProfile");
+  let copyProfileStub = sandbox.stub(gProfiles, "copyProfile");
+  let manageProfilesStub = sandbox.stub(gProfiles, "manageProfiles");
+
+  for (let { id, stub, name } of [
+    {
+      id: "PanelUI-fxa-menu-create-profile-copy-button",
+      stub: copyProfileStub,
+      name: "copyProfile",
+    },
+    {
+      id: "PanelUI-fxa-menu-create-profile-manage-button",
+      stub: manageProfilesStub,
+      name: "manageProfiles",
+    },
+    {
+      id: "PanelUI-fxa-menu-create-profile-confirm-button",
+      stub: createNewProfileStub,
+      name: "createNewProfile",
+    },
+  ]) {
+    await openCreateProfileSubview();
+
+    let button = PanelMultiView.getViewNode(document, id);
+    let hidden = BrowserTestUtils.waitForEvent(document, "popuphidden", true);
+    if (button.localName === "moz-button") {
+      button.click();
+    } else {
+      EventUtils.synthesizeMouseAtCenter(button, {});
+    }
+    await TestUtils.waitForCondition(
+      () => stub.called,
+      `Clicking ${id} should call ${name}`
+    );
+    await hidden;
+  }
+
+  sandbox.restore();
+});
+
+add_task(async function test_fxa_menu_create_profile_learn_more() {
+  const sandbox = sinon.createSandbox();
+  stubCreateProfileState(sandbox);
+  let openLinkStub = sandbox.stub(URILoadingHelper, "openTrustedLinkIn");
+
+  await openCreateProfileSubview();
+
+  let separator = PanelMultiView.getViewNode(
+    document,
+    "PanelUI-fxa-menu-create-profile-footer-separator"
+  );
+  let learnMoreButton = PanelMultiView.getViewNode(
+    document,
+    "PanelUI-fxa-menu-create-profile-learn-more-button"
+  );
+  let copyButton = PanelMultiView.getViewNode(
+    document,
+    "PanelUI-fxa-menu-create-profile-copy-button"
+  );
+
+  Assert.ok(
+    BrowserTestUtils.isVisible(learnMoreButton),
+    "The learn more button should be visible"
+  );
+  // The learn more button sits between the footer separator and the copy button.
+  Assert.strictEqual(
+    separator.compareDocumentPosition(learnMoreButton),
+    4,
+    "The learn more button should follow the footer separator"
+  );
+  Assert.strictEqual(
+    learnMoreButton.compareDocumentPosition(copyButton),
+    4,
+    "The copy profile button should follow the learn more button"
+  );
+
+  let hidden = BrowserTestUtils.waitForEvent(document, "popuphidden", true);
+  EventUtils.synthesizeMouseAtCenter(learnMoreButton, {});
+  await TestUtils.waitForCondition(
+    () => openLinkStub.called,
+    "Clicking the learn more button should open a link"
+  );
+  await hidden;
+
+  Assert.equal(
+    openLinkStub.firstCall.args[1],
+    "https://support.mozilla.org/kb/profile-management",
+    "Should open the profiles support article"
+  );
+  Assert.equal(
+    openLinkStub.firstCall.args[2],
+    "tab",
+    "Should open the article in a new tab"
+  );
+
+  sandbox.restore();
+});
+
 add_task(async function test_fxa_menu_shows_up_to_three_profiles() {
   await SelectableProfileService.init();
   await SelectableProfileService.createNewProfile(true, null, "tests");

@@ -73,7 +73,8 @@ nsresult MathMLElement::BindToTree(BindContext& aContext, nsINode& aParent) {
         [self = RefPtr<MathMLElement>(this)]() {
           nsAutoString nonce;
           self->GetNonce(nonce);
-          self->SetAttr(kNameSpaceID_None, nsGkAtoms::nonce, u""_ns, true);
+          self->SetAttr(kNameSpaceID_None, nsGkAtoms::nonce, u""_ns, true,
+                        IsKnownNewAttr::No);
           self->SetNonce(nonce);
         }));
   }
@@ -142,7 +143,7 @@ static Element::MappedAttributeEntry sGlobalAttributes[] = {
     {nsGkAtoms::displaystyle},
     {nullptr}};
 
-bool MathMLElement::IsAttributeMapped(const nsAtom* aAttribute) const {
+bool MathMLElement::IsNoNamespaceAttrMapped(const nsAtom* aAttribute) const {
   MOZ_ASSERT(IsMathMLElement());
 
   static const MappedAttributeEntry* const globalMap[] = {sGlobalAttributes};
@@ -434,6 +435,7 @@ static constexpr uint8_t cmemmemi(const char (&needle)[N],
 
 void MathMLElement::MapGlobalMathMLAttributesInto(
     MappedDeclarationsBuilder& aBuilder) {
+  MapXmlLangAttrInto(aBuilder);
   // scriptlevel
   // https://w3c.github.io/mathml-core/#dfn-scriptlevel
   const nsAttrValue* value = aBuilder.GetAttr(nsGkAtoms::scriptlevel);
@@ -687,37 +689,8 @@ int32_t MathMLElement::TabIndexDefault() {
   return mNodeInfo->Equals(nsGkAtoms::a) ? 0 : -1;
 }
 
-// XXX Bug 1586011: Share logic with other element classes.
-Focusable MathMLElement::IsFocusableWithoutStyle(IsFocusableFlags) {
-  if (!IsInComposedDoc() || IsInDesignMode()) {
-    // In designMode documents we only allow focusing the document.
-    return {};
-  }
-
-  int32_t tabIndex = TabIndex();
-  if (!IsLink()) {
-    // If a tabindex is specified at all we're focusable
-    if (GetTabIndexAttrValue().isSome()) {
-      return {true, tabIndex};
-    }
-    return {};
-  }
-
-  if (!OwnerDoc()->LinkHandlingEnabled()) {
-    return {};
-  }
-
-  // Links that are in an editable region should never be focusable, even if
-  // they are in a contenteditable="false" region.
-  if (nsContentUtils::IsNodeInEditableRegion(this)) {
-    return {};
-  }
-
-  if (!FocusModel::IsTabFocusable(TabFocusableType::Links)) {
-    tabIndex = -1;
-  }
-
-  return {true, tabIndex};
+Focusable MathMLElement::IsFocusableWithoutStyle(IsFocusableFlags aFlags) {
+  return Link::IsLinkFocusableWithoutStyle(aFlags);
 }
 
 already_AddRefed<nsIURI> MathMLElement::GetHrefURI() const {

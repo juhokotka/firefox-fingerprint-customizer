@@ -6,7 +6,6 @@
 #define SECURITY_SANDBOX_COMMON_TEST_SANDBOXTESTINGCHILDTESTS_H_
 
 #include "SandboxTestingChild.h"
-
 #include "mozilla/ipc/UtilityProcessSandboxing.h"
 #include "nsXULAppAPI.h"
 
@@ -31,6 +30,7 @@
 #    include <sys/un.h>
 #    include <sys/utsname.h>
 #    include <termios.h>
+
 #    include "mozilla/ProcInfo_linux.h"
 #    ifdef MOZ_X11
 #      include "X11/Xlib.h"
@@ -50,13 +50,13 @@
       (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
 #    include "emmintrin.h"
 #  endif
-#  include <spawn.h>
+#  include <AudioToolbox/AudioToolbox.h>
 #  include <CoreFoundation/CoreFoundation.h>
 #  include <CoreGraphics/CoreGraphics.h>
-#  include <AudioToolbox/AudioToolbox.h>
 #  include <dirent.h>
 #  include <fcntl.h>
 #  include <limits.h>
+#  include <spawn.h>
 #  include <sys/stat.h>
 #  include <sys/sysctl.h>
 #  include <unistd.h>
@@ -71,8 +71,8 @@ extern "C" int sandbox_check(pid_t pid, const char* operation, int type, ...);
 #  include <winternl.h>
 
 #  include "mozilla/DynamicallyLinkedFunctionPtr.h"
-#  include "nsAppDirectoryServiceDefs.h"
 #  include "mozilla/WindowsProcessMitigations.h"
+#  include "nsAppDirectoryServiceDefs.h"
 #endif
 
 #ifdef XP_LINUX
@@ -264,24 +264,20 @@ static void FileTest(const nsCString& aName, const char* aSpecialDirName,
 #ifdef XP_MACOSX
 /*
  * Test if this process can launch another process with posix_spawnp,
- * exec, and LSOpenCFURLRef. All launches are expected to fail. In processes
- * where the sandbox permits reading of file metadata (content processes at
- * this time), we expect the posix_spawnp error to be EPERM. In processes
- * without that permission, we expect ENOENT. Changing the sandbox policy
- * may break this assumption, but the important aspect to test for is that the
- * launch is not permitted.
+ * exec, and LSOpenCFURLRef. All launches are expected to fail. Only the
+ * failure itself is checked, not the error that is returned: the error
+ * depends on which sandbox rule stops the launch first, and that differs
+ * between process types, macOS versions and CPU architectures.
  */
-void RunMacTestLaunchProcess(SandboxTestingChild* child,
-                             int aPosixSpawnExpectedError = ENOENT) {
+void RunMacTestLaunchProcess(SandboxTestingChild* child) {
   // Test that posix_spawnp fails
   char* argv[2];
   argv[0] = const_cast<char*>("bash");
   argv[1] = NULL;
   int rv = posix_spawnp(NULL, "/bin/bash", NULL, NULL, argv, NULL);
-  nsPrintfCString posixSpawnMessage("posix_spawnp returned %d, expected %d", rv,
-                                    aPosixSpawnExpectedError);
-  child->SendReportTestResults("posix_spawnp test"_ns,
-                               rv == aPosixSpawnExpectedError,
+  nsPrintfCString posixSpawnMessage(
+      "posix_spawnp returned %d, expected a non-zero error", rv);
+  child->SendReportTestResults("posix_spawnp test"_ns, rv != 0,
                                posixSpawnMessage);
 
   // Test that exec fails
@@ -296,6 +292,7 @@ void RunMacTestLaunchProcess(SandboxTestingChild* child,
                                                      kCFStringEncodingUTF8);
   CFURLRef urlRef = ::CFURLCreateWithFileSystemPath(
       kCFAllocatorDefault, filePath, kCFURLPOSIXPathStyle, false);
+  ::CFRelease(filePath);
   if (!urlRef) {
     child->SendReportTestResults("LSOpenCFURLRef"_ns, false,
                                  "CFURLCreateWithFileSystemPath failed"_ns);
@@ -305,12 +302,8 @@ void RunMacTestLaunchProcess(SandboxTestingChild* child,
   OSStatus status = ApplicationServices::LSOpenCFURLRef(urlRef, NULL);
   ::CFRelease(urlRef);
   nsPrintfCString lsMessage(
-      "LSOpenCFURLRef returned %d, "
-      "expected kLSServerCommunicationErr (%d)",
-      status, ApplicationServices::kLSServerCommunicationErr);
-  child->SendReportTestResults(
-      "LSOpenCFURLRef"_ns,
-      status == ApplicationServices::kLSServerCommunicationErr, lsMessage);
+      "LSOpenCFURLRef returned %d, expected a non-zero error", status);
+  child->SendReportTestResults("LSOpenCFURLRef"_ns, status != noErr, lsMessage);
 }
 
 /*
@@ -637,7 +630,7 @@ void RunTestsContent(SandboxTestingChild* child) {
 #  endif  // XP_LINUX
 
 #  ifdef XP_MACOSX
-  RunMacTestLaunchProcess(child, EPERM);
+  RunMacTestLaunchProcess(child);
   RunMacTestWindowServer(child);
   RunMacTestAudioAPI(child, true);
 #  endif
@@ -845,11 +838,22 @@ void RunTestsRDD(SandboxTestingChild* child) {
 
   RunTestsSched(child);
 
+#    ifdef MOZ_ENABLE_VULKAN_VIDEO
+  // Vulkan video decode (bug 2021722) routes socket() through
+  // FakeSocketTrap, letting RDD create a real AF_UNIX socket for EGL's
+  // Wayland/X11 probing (hence the "0" below, meaning success) while
+  // still rejecting AF_INET, now with EAFNOSUPPORT instead of EACCES.
+  child->ErrnoValueTest("socket_inet"_ns, EAFNOSUPPORT,
+                        [] { return socket(AF_INET, SOCK_STREAM, 0); });
+  child->ErrnoValueTest("socket_unix"_ns, 0,
+                        [] { return socket(AF_UNIX, SOCK_STREAM, 0); });
+#    else
   child->ErrnoValueTest("socket_inet"_ns, EACCES,
                         [] { return socket(AF_INET, SOCK_STREAM, 0); });
 
   child->ErrnoValueTest("socket_unix"_ns, EACCES,
                         [] { return socket(AF_UNIX, SOCK_STREAM, 0); });
+#    endif
 
   child->ErrnoTest("uname"_ns, true, [] {
     struct utsname uts;
@@ -904,7 +908,7 @@ void RunTestsRDD(SandboxTestingChild* child) {
   });
 
 #  elif XP_MACOSX
-  RunMacTestLaunchProcess(child, EPERM);
+  RunMacTestLaunchProcess(child);
   RunMacTestWindowServer(child);
   RunMacTestAudioAPI(child, true);
 #  endif
@@ -1347,7 +1351,7 @@ void RunTestsGPU(SandboxTestingChild* child) {
     return fd;
   });
 
-  RunMacTestLaunchProcess(child, EPERM);
+  RunMacTestLaunchProcess(child);
   RunMacTestAudioAPI(child);
   RunMacTestWindowServer(child, ProcessIsX86_64());
 

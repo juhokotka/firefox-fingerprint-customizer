@@ -15,7 +15,7 @@ python3 generate_release_doc.py <version> [output_file]
 
 **Arguments:**
 - `<version>`: The version being released (e.g., `3.118` or `3.118.1`)
-- `[output_file]`: Optional. Path where to write the RST file. If not provided, defaults to `doc/rst/releases/nss_<version>.rst`
+- `[output_file]`: Optional. Path where to write the Markdown file. If not provided, defaults to `doc/src/releases/nss_<version>.md`
 
 **Examples:**
 ```bash
@@ -23,7 +23,7 @@ python3 generate_release_doc.py <version> [output_file]
 python3 automation/release/generate_release_doc.py 3.118
 
 # Generate documentation for NSS 3.118.1 with custom output path
-python3 automation/release/generate_release_doc.py 3.118.1 doc/rst/releases/nss_3_118_1.rst
+python3 automation/release/generate_release_doc.py 3.118.1 doc/src/releases/nss_3_118_1.md
 ```
 
 **What it does:**
@@ -77,16 +77,31 @@ For a complete NSS release (e.g., NSS 3.118), follow these steps:
    python3 automation/release/generate_release_doc.py 3.118
    ```
 
-2. **Update the release notes index** (if needed):
-   - Edit `doc/rst/releases/index.rst` to add the new release at the top of the toctree
-   - Update the "latest version" note
+2. **Update the release notes index:**
+   ```bash
+   python3 automation/release/nss-release-helper.py generate_release_notes_index 3.118 3.112.1
+   ```
+   This rewrites the toctree in `doc/src/releases/index.md` and the "latest
+   version" note. A new release note that is not in the toctree makes
+   `doc-lint` fail, so this has to happen before the next step.
 
-3. **Generate the release email:**
+   Passing a single version updates only the latest-release note and keeps the
+   ESR version already recorded in the index:
+   ```bash
+   python3 automation/release/nss-release-helper.py generate_release_notes_index 3.118
+   ```
+
+3. **Check the documentation builds cleanly:**
+   ```bash
+   ./mach doc-lint
+   ```
+
+4. **Generate the release email:**
    ```bash
    python3 automation/release/generate_release_email.py 3.118 release_email.txt
    ```
 
-4. **Review and commit:**
+5. **Review and commit:**
    - Review the generated documentation
    - Commit the new release notes to the repository
    - Send the release email to the appropriate mailing list

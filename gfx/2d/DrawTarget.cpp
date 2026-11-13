@@ -4,19 +4,17 @@
 
 #include "2D.h"
 #include "Blur.h"
+#include "BufferEdgePad.h"
+#include "BufferUnrotate.h"
+#include "FilterSupport.h"
 #include "Logging.h"
 #include "PathHelpers.h"
 #include "SourceSurfaceRawData.h"
 #include "Tools.h"
 
-#include "BufferEdgePad.h"
-#include "BufferUnrotate.h"
-
-#include "FilterSupport.h"
-
 #ifdef USE_NEON
-#  include "mozilla/arm.h"
 #  include "LuminanceNEON.h"
+#  include "mozilla/arm.h"
 #endif
 
 namespace mozilla {
@@ -155,6 +153,15 @@ static void ComputeLinearRGBLuminanceMask(
     sourcePixel += sourceOffset;
     destPixel += destOffset;
   }
+}
+
+RefPtr<DrawTarget> DrawTarget::CreateClippedDrawTargetForRect(
+    const IntRect& aRect, SurfaceFormat aFormat) {
+  RefPtr<DrawTarget> similar = CreateSimilarDrawTarget(aRect.Size(), aFormat);
+  if (!similar) {
+    return nullptr;
+  }
+  return Factory::CreateOffsetDrawTarget(similar, aRect.TopLeft());
 }
 
 void DrawTarget::PushDeviceSpaceClipRects(const IntRect* aRects,

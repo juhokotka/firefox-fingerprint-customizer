@@ -5,13 +5,13 @@
 #ifndef nsHostRecord_h_
 #define nsHostRecord_h_
 
+#include "PLDHashTable.h"
 #include "mozilla/AtomicBitfields.h"
 #include "mozilla/DataMutex.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/net/HTTPSSVC.h"
-#include "nsIDNSService.h"
 #include "nsIDNSByTypeRecord.h"
-#include "PLDHashTable.h"
+#include "nsIDNSService.h"
 #include "nsITRRSkipReason.h"
 
 class nsHostRecord;
@@ -50,9 +50,15 @@ class nsResolveHostCallback
    *        the host record containing the results of the lookup
    * @param status
    *        if successful, |record| contains non-null results
+   * @param aFromStaleCache
+   *        true when this specific answer was served from a stale
+   *        (past-TTL, grace-period) cache entry. Captured per delivered answer
+   *        rather than read from the shared record, so it always describes the
+   *        result handed to this callback.
    */
   virtual void OnResolveHostComplete(nsHostResolver* resolver,
-                                     nsHostRecord* record, nsresult status) = 0;
+                                     nsHostRecord* record, nsresult status,
+                                     bool aFromStaleCache) = 0;
   /**
    * EqualsAsyncListener
    *
@@ -235,6 +241,10 @@ class nsHostRecord : public mozilla::LinkedListElement<RefPtr<nsHostRecord>>,
   // Explicitly expired
   bool mDoomed = false;
 
+  // Whether this record is currently linked into HostRecordQueue::mEvictionQ
+  // (as opposed to a pending queue, or no queue).
+  bool mInEvictionQueue = false;
+
   // Whether this is resolved by TRR successfully or not.
   bool mTRRSuccess = false;
 
@@ -398,5 +408,7 @@ static inline bool IsMediumPriority(nsIDNSService::DNSFlags flags) {
 static inline bool IsLowPriority(nsIDNSService::DNSFlags flags) {
   return flags & nsHostRecord::DNS_PRIORITY_LOW;
 }
+
+nsLiteralCString RecordFamilyLabel(nsHostRecord* aRec);
 
 #endif  // nsHostRecord_h_

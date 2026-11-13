@@ -12,6 +12,7 @@ task-defaults:
         by-platform:
             linux2404-64.*: t-linux-docker-amd
             macosx1470-64.*: t-osx-1400-r8
+            macosx1500-aarch64.*: t-osx-1500-m4
             windows11-64.*: win11-64-25h2-source
     worker:
         by-platform:
@@ -50,6 +51,9 @@ firefox-ci:
     treeherder:
         symbol: ci
     run:
+        # Keep cloning from hg until bug 2080077: the ci subsuite hits the
+        # worker memory limit when run from a git checkout.
+        clone-with: hg
         using: python-test
         subsuite: ci
     when:
@@ -176,6 +180,7 @@ mozbase:
     when:
         files-changed:
             - 'testing/mozbase/**'
+            - 'tools/rb/**'
 
 mozharness:
     description: mozharness integration tests
@@ -223,6 +228,8 @@ mozlint:
                     - win64-node
                     - win64-rust
                     - win64-mozcheck
+        fetch:
+            - pnpm
         clang-tidy:
             - artifact: clang-tidy.tar.zst
               dest: clang-tools
@@ -355,6 +362,7 @@ taskgraph-tests:
         subsuite: taskgraph
     when:
         files-changed:
+            - 'build/sparse-profiles/**'
             - 'python/mach/**/*.py'
             - 'taskcluster/**/*.py'
             - 'taskcluster/requirements.txt'
@@ -392,7 +400,7 @@ update-packaging:
 
 mozbuild:
     matrix:
-        python: ['3.9', '3.11']
+        python: ['3.10', '3.11']
     description: mozbuild unit tests (python{matrix[python]})
     platform:
         - linux2404-64/opt
@@ -454,6 +462,7 @@ mozperftest:
     platform:
         - linux2404-64/opt
         - macosx1470-64/opt
+        - macosx1500-aarch64/opt
         - windows11-64/opt
     treeherder:
         symbol: mpu
@@ -467,6 +476,9 @@ mozperftest:
                     - browsertime
                 macosx1470-64/opt:
                     - macosx64-node
+                    - browsertime
+                macosx1500-aarch64/opt:
+                    - macosx64-aarch64-node
                     - browsertime
                 windows11-64/opt:
                     - win64-node
@@ -559,7 +571,6 @@ fxms-schemas:
             - 'browser/components/asrouter/content-src/schemas/extract-test-corpus.js'
             - 'browser/components/asrouter/content-src/schemas/make-schemas.py'
             - 'browser/components/asrouter/content-src/**/*.schema.json'
-            - 'browser/components/asrouter/modules/CFRMessageProvider.sys.mjs'
             - 'browser/components/asrouter/modules/OnboardingMessageProvider.sys.mjs'
             - 'browser/components/asrouter/modules/PanelTestProvider.sys.mjs'
 

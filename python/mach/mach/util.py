@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import hashlib
 import os
 import sys
@@ -74,7 +76,61 @@ def get_state_dir(
         with (state_dir / "topsrcdir.txt").open(mode="w") as fh:
             fh.write(str(topsrcdir))
 
+        # A new checkout (e.g. a git worktree) is a good time to get rid of the
+        # state dirs of checkouts that have since been deleted.
+        remove_orphaned_state_dirs(state_dir.parent)
+
     return str(state_dir)
+
+
+def remove_orphaned_state_dirs(srcdirs_dir: Path):
+    """Remove the checkout-scoped state dirs whose checkout no longer exists.
+
+    A state dir is only removed if the parent of its recorded topsrcdir still
+    exists, so that checkouts on a temporarily unavailable drive are kept.
+    """
+    import shutil
+
+    try:
+        state_dirs = list(srcdirs_dir.iterdir())
+    except OSError:
+        return
+
+    for state_dir in state_dirs:
+        try:
+            topsrcdir = Path((state_dir / "topsrcdir.txt").read_text().strip())
+        except OSError:
+            continue
+        if not topsrcdir.is_absolute() or topsrcdir.exists():
+            continue
+        if not topsrcdir.parent.is_dir():
+            continue
+        print(f"Removing state directory of deleted checkout {topsrcdir}: {state_dir}")
+        shutil.rmtree(state_dir, ignore_errors=True)
+
+
+MACHRC_NAMES = ("machrc", ".machrc")
+
+
+def get_global_machrc_path():
+    """Return the path of the global machrc file, which may not exist yet.
+
+    This is "$state_dir/machrc", unless MACHRC already resolves to an existing
+    file, in which case that is the file mach reads settings from and thus the
+    one to write them back to. MACHRC is resolved the same way as when loading
+    settings: it either names the file itself, or a directory containing a
+    "machrc" or ".machrc".
+    """
+    machrc = os.environ.get("MACHRC")
+    if machrc:
+        machrc = Path(machrc)
+        if machrc.is_file():
+            return machrc
+        for name in MACHRC_NAMES:
+            if (machrc / name).is_file():
+                return machrc / name
+
+    return Path(get_state_dir()) / "machrc"
 
 
 def get_virtualenv_base_dir(topsrcdir):
@@ -100,6 +156,34 @@ def to_optional_path(path: Optional[Path]):
         return Path(path)
     else:
         return None
+
+
+# CreateProcess on Windows rejects command lines longer than 32767 characters,
+# including the executable path. Leave headroom for the tool path and for the
+# subcommand arguments that precede the paths.
+MAX_COMMAND_LINE_LENGTH = 31000
+
+
+def batch_paths(paths: list[Union[str, Path]], budget: int = MAX_COMMAND_LINE_LENGTH):
+    if not paths:
+        return
+
+    if sys.platform != "win32":
+        yield paths
+        return
+
+    batch = []
+    used = 0
+    for path in paths:
+        # Account for the separator and for possible quoting around the path.
+        size = len(str(path)) + 3
+        if batch and used + size > budget:
+            yield batch
+            batch, used = [], 0
+        batch.append(path)
+        used += size
+    if batch:
+        yield batch
 
 
 def to_optional_str(path: Optional[Path]):

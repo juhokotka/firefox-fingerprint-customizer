@@ -5,8 +5,11 @@
 /* eslint no-shadow: error, mozilla/no-aArgs: error */
 
 /**
- * @typedef {import("resource://services-settings/RemoteSettingsClient.sys.mjs").RemoteSettingsClient} RemoteSettingsClient
- * @typedef {import("../uniffi-bindgen-gecko-js/components/generated/RustSearch.sys.mjs").SearchEngineDefinition} SearchEngineDefinition
+ * @import {RemoteSettingsClient} from "resource://services-settings/RemoteSettingsClient.sys.mjs"
+ * @import {
+ *   SearchEngineDefinition,
+ *   SearchEngineDefinitionV3,
+ * } from "../uniffi-bindgen-gecko-js/components/generated/RustSearch.sys.mjs"
  */
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
@@ -21,7 +24,6 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const lazy = XPCOMUtils.declareLazy({
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
-  ObjectUtils: "resource://gre/modules/ObjectUtils.sys.mjs",
   RemoteSettings: "resource://services-settings/remote-settings.sys.mjs",
   SearchEngineClassification:
     "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSearch.sys.mjs",
@@ -310,9 +312,7 @@ const ParamPreferenceCache = {
     let branchFetcher = AppConstants.NIGHTLY_BUILD
       ? "getBranch"
       : "getDefaultBranch";
-    this.branch = Services.prefs[branchFetcher](
-      lazy.SearchUtils.BROWSER_SEARCH_PREF + "param."
-    );
+    this.branch = Services.prefs[branchFetcher]("browser.search.param.");
     this.cache = new Map();
     this.nimbusCache = new Map();
     for (let prefName of this.branch.getChildList("")) {
@@ -423,15 +423,6 @@ export class ConfigSearchEngine extends SearchEngine {
    */
   #isGeneralPurposeSearchEngine = false;
 
-  /**
-   * Stores certain initial info about an engine. Used to verify whether we've
-   * actually changed the engine, so that we don't record default engine
-   * changed telemetry unnecessarily.
-   *
-   * @type {?Map<string, any>}
-   */
-  #prevEngineInfo = null;
-
   #partnerCode = "";
 
   /**
@@ -452,7 +443,7 @@ export class ConfigSearchEngine extends SearchEngine {
   /**
    * @param {object} options
    *   The options for this search engine.
-   * @param {SearchEngineDefinition} options.config
+   * @param {SearchEngineDefinition|SearchEngineDefinitionV3} options.config
    *   The engine config from Remote Settings.
    * @param {object} [options.settings]
    *   The saved settings for the user.
@@ -470,15 +461,6 @@ export class ConfigSearchEngine extends SearchEngine {
 
     this.#init(config);
     this._loadSettings(settings);
-
-    this.#prevEngineInfo = new Map(
-      /** @type {[string, any][]} */ ([
-        ["name", this.name],
-        ["_loadPath", this._loadPath],
-        ["submissionURL", this.getSubmission("foo").uri.spec],
-        ["aliases", this._definedAliases],
-      ])
-    );
   }
 
   /**
@@ -497,32 +479,14 @@ export class ConfigSearchEngine extends SearchEngine {
    *
    * @param {object} options
    *   The options object.
-   * @param {SearchEngineDefinition} options.configuration
+   * @param {SearchEngineDefinition|SearchEngineDefinitionV3} options.configuration
    *    The updated engine definition for this engine from the search config.
    */
   update({ configuration }) {
     this._urls = [];
     this.#init(configuration);
 
-    let needToSendUpdate = this.#hasBeenModified(this, this.#prevEngineInfo, [
-      "name",
-      "_loadPath",
-      "aliases",
-    ]);
-
-    // We only send a notification if critical fields have changed, e.g., ones
-    // that may affect the UI or telemetry. If we want to add more fields here
-    // in the future, we need to ensure we don't send unnecessary
-    // `engine-update` telemetry. Therefore we may need additional notification
-    // types or to implement an alternative.
-    if (needToSendUpdate) {
-      lazy.SearchUtils.notifyAction(
-        this,
-        lazy.SearchUtils.MODIFIED_TYPE.CHANGED
-      );
-
-      this._resetPrevEngineInfo();
-    }
+    lazy.SearchUtils.notifyAction(this, lazy.SearchUtils.MODIFIED_TYPE.CHANGED);
   }
 
   /**
@@ -552,15 +516,16 @@ export class ConfigSearchEngine extends SearchEngine {
 
   /**
    * @type {string}
-   *   The partner code being used by this search engine in the Search URL.
+   *   The default partner code being used by this search engine in the
+   *   Search URL for the default SAP.
    */
   get partnerCode() {
     return this.#partnerCode;
   }
 
   /**
-   * Returns the appropriate identifier to use for telemetry. It is based on
-   * the following order:
+   * Returns the appropriate identifier to use for telemetry based on the
+   * search URL for the default SAP. It is based on the following order:
    *
    * - telemetryId: The telemetry id from the configuration, or derived from
    *                the WebExtension name.
@@ -576,6 +541,21 @@ export class ConfigSearchEngine extends SearchEngine {
       return this.#telemetryId + "-addon";
     }
     return this.#telemetryId;
+  }
+
+  /**
+   * Returns whether the engine is new. An overridden engine is never new because the
+   * user had already installed the third-party engine now overriding the
+   * app-provided engine, so it is not new to them.
+   *
+   * @returns {boolean}
+   */
+  isNew() {
+    if (this.overriddenById) {
+      return false;
+    }
+
+    return super.isNew();
   }
 
   /**
@@ -685,7 +665,7 @@ export class ConfigSearchEngine extends SearchEngine {
   /**
    * Initializes the engine.
    *
-   * @param {SearchEngineDefinition} engineConfig
+   * @param {SearchEngineDefinition|SearchEngineDefinitionV3} engineConfig
    *   The engine definition from the search config for this engine.
    */
   #init(engineConfig) {
@@ -698,24 +678,69 @@ export class ConfigSearchEngine extends SearchEngine {
       this._queryCharset = engineConfig.charset;
     }
 
-    if (engineConfig.telemetrySuffix) {
-      this.#telemetryId += `-${engineConfig.telemetrySuffix}`;
-    }
-
-    if (engineConfig.clickUrl) {
-      this.clickUrl = engineConfig.clickUrl;
-    }
-
     this._name = engineConfig.name.trim();
     this._definedAliases =
       engineConfig.aliases?.map(alias => `@${alias}`) ?? [];
-    this.#partnerCode = engineConfig.partnerCode ?? "";
     /** @type {string} */
     this.isNewUntil = engineConfig.isNewUntil ?? "";
 
+    /** @type {Map<string, {code: ?string, telemetryId: ?string}>} */
+    let partnerCodeMap = new Map();
+
+    // The partner field replaced the partnerCode field in the v2 to v3 transition.
+    if ("partner" in engineConfig) {
+      // V3 configuration.
+
+      for (let [key, { code, telemetrySuffix }] of engineConfig.partner ?? []) {
+        if (telemetrySuffix) {
+          partnerCodeMap.set(key, {
+            code,
+            telemetryId: `${engineConfig.identifier}-${telemetrySuffix}`,
+          });
+        } else {
+          partnerCodeMap.set(key, {
+            code,
+            telemetryId: engineConfig.identifier,
+          });
+        }
+      }
+
+      let defaultEntry = partnerCodeMap.get("default");
+      this.#partnerCode = defaultEntry?.code ?? "";
+      this.#telemetryId = defaultEntry?.telemetryId ?? this.#telemetryId;
+    } else {
+      // V2 configuration.
+
+      if ("clickUrl" in engineConfig && engineConfig.clickUrl) {
+        this.clickUrl = engineConfig.clickUrl;
+      }
+      this.#partnerCode = engineConfig.partnerCode ?? "";
+      if (engineConfig.telemetrySuffix) {
+        this.#telemetryId += `-${engineConfig.telemetrySuffix}`;
+      }
+
+      partnerCodeMap.set("default", {
+        code: this.#partnerCode,
+        telemetryId: this.#telemetryId,
+      });
+
+      if (this.id == "google") {
+        for (let sapSource of ["errorpage"]) {
+          partnerCodeMap.set(sapSource, {
+            code: "",
+            telemetryId: "google-com-nocodes",
+          });
+        }
+        partnerCodeMap.set("newtab_search_widget", {
+          code: "firefox-b-exp1",
+          telemetryId: "google-b-exp1",
+        });
+      }
+    }
+
     for (const [type, urlData] of Object.entries(engineConfig.urls)) {
       if (urlData) {
-        this.#setUrl(type, urlData, engineConfig.partnerCode);
+        this.#setUrl(type, urlData, partnerCodeMap);
       }
     }
   }
@@ -727,10 +752,10 @@ export class ConfigSearchEngine extends SearchEngine {
    *   The type of url. This could be a url for search, suggestions, or trending.
    * @param {object} urlData
    *   The url data contains the template/base url and url params.
-   * @param {string} partnerCode
-   *   The partner code associated with the search engine.
+   * @param {Map<string, {code: ?string, telemetryId: ?string}>} partnerCodeMap
+   *   The map of search access points to partner codes and telemetry ids.
    */
-  #setUrl(type, urlData, partnerCode) {
+  #setUrl(type, urlData, partnerCodeMap) {
     let urlType = ConfigSearchEngine.URL_TYPE_MAP.get(type);
     if (!urlType) {
       console.warn("unexpected engine url type.", type);
@@ -741,6 +766,7 @@ export class ConfigSearchEngine extends SearchEngine {
       ...urlData,
       type: urlType,
       template: urlData.base,
+      partnerCodeMap,
     });
 
     if (urlData.params) {
@@ -753,10 +779,7 @@ export class ConfigSearchEngine extends SearchEngine {
         switch (true) {
           case param.value != undefined:
             if (!isEnterprise || !enterpriseParams.includes(param.name)) {
-              engineURL.addParam(
-                param.name,
-                param.value == "{partnerCode}" ? partnerCode : param.value
-              );
+              engineURL.addParam(param.name, param.value);
             }
             break;
           case param.experimentConfig != undefined:
@@ -768,12 +791,7 @@ export class ConfigSearchEngine extends SearchEngine {
             break;
           case param.enterpriseValue != undefined:
             if (isEnterprise) {
-              engineURL.addParam(
-                param.name,
-                param.enterpriseValue == "{partnerCode}"
-                  ? partnerCode
-                  : param.enterpriseValue
-              );
+              engineURL.addParam(param.name, param.enterpriseValue);
             }
             break;
         }
@@ -794,55 +812,6 @@ export class ConfigSearchEngine extends SearchEngine {
     }
 
     this._urls.push(engineURL);
-  }
-
-  /**
-   * Determines whether the specified engine properties differ between their
-   * current and initial values.
-   *
-   * @param {ConfigSearchEngine} currentEngine
-   *   The current engine.
-   * @param {Map} initialValues
-   *   The initial values stored for the currentEngine.
-   * @param {Array<string>} targetKeys
-   *   The relevant keys to compare (current value for the engine vs. initial
-   *   value).
-   * @returns {boolean}
-   *   Returns true if any of the properties relevant to default engine changed
-   *   telemetry was changed.
-   */
-  #hasBeenModified(currentEngine, initialValues, targetKeys) {
-    for (let i = 0; i < targetKeys.length; i++) {
-      let key = targetKeys[i];
-
-      if (
-        !lazy.ObjectUtils.deepEqual(currentEngine[key], initialValues.get(key))
-      ) {
-        return true;
-      }
-
-      let currentEngineSubmissionURL =
-        currentEngine.getSubmission("foo").uri.spec;
-      if (currentEngineSubmissionURL != initialValues.get("submissionURL")) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  // Not #-prefixed private because it's spied upon in a test.
-  _resetPrevEngineInfo() {
-    this.#prevEngineInfo.forEach((_value, key) => {
-      let newValue;
-      if (key == "submissionURL") {
-        newValue = this.getSubmission("foo").uri.spec;
-      } else {
-        newValue = this[key];
-      }
-
-      this.#prevEngineInfo.set(key, newValue);
-    });
   }
 }
 
@@ -873,7 +842,7 @@ export class UserInstalledConfigEngine extends ConfigSearchEngine {
   /**
    * @param {object} options
    *   The options for this search engine.
-   * @param {SearchEngineDefinition} options.config
+   * @param {SearchEngineDefinition|SearchEngineDefinitionV3} options.config
    *   The engine config from Remote Settings.
    * @param {object} [options.settings]
    *   The saved settings for the user.

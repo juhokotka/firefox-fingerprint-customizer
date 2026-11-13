@@ -49,7 +49,7 @@ add_task(async function () {
   let delayedHeuristicProvider = new UrlbarTestUtils.TestProvider({
     delayResultsPromise,
     results: [result],
-    type: UrlbarUtils.PROVIDER_TYPE.HEURISTIC,
+    type: UrlbarShared.PROVIDER_TYPE.HEURISTIC,
   });
   let providersManager = ProvidersManager.getInstanceForSap("urlbar");
   providersManager.registerProvider(delayedHeuristicProvider);
@@ -73,8 +73,8 @@ add_task(async function () {
   Assert.ok(view.selectedElement.isConnected, "selectedElement is connected");
   Assert.equal(view.selectedElementIndex, 0, "selectedElementIndex is correct");
   Assert.deepEqual(
-    view.getResultFromElement(view.selectedElement),
-    result,
+    view.getResultFromElement(view.selectedElement).payload,
+    result.payload,
     "result is the expected one"
   );
   Assert.notEqual(

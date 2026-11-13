@@ -15,9 +15,8 @@
 #endif
 
 #include "nsComponentManagerUtils.h"
-#include "nsServiceManagerUtils.h"
-
 #include "nsIComponentManager.h"
+#include "nsServiceManagerUtils.h"
 
 #ifndef MOZILLA_INTERNAL_API
 
@@ -85,25 +84,6 @@ nsresult CallCreateInstance(const char* aContractID, const nsIID& aIID,
   return status;
 }
 
-nsresult CallGetClassObject(const nsCID& aCID, const nsIID& aIID,
-                            void** aResult) {
-  nsCOMPtr<nsIComponentManager> compMgr;
-  nsresult status = NS_GetComponentManager(getter_AddRefs(compMgr));
-  if (compMgr) {
-    status = compMgr->GetClassObject(aCID, aIID, aResult);
-  }
-  return status;
-}
-
-nsresult CallGetClassObject(const char* aContractID, const nsIID& aIID,
-                            void** aResult) {
-  nsCOMPtr<nsIComponentManager> compMgr;
-  nsresult status = NS_GetComponentManager(getter_AddRefs(compMgr));
-  if (compMgr)
-    status = compMgr->GetClassObjectByContractID(aContractID, aIID, aResult);
-  return status;
-}
-
 #else
 
 nsresult CallCreateInstance(const nsCID& aCID, const nsIID& aIID,
@@ -124,27 +104,6 @@ nsresult CallCreateInstance(const char* aContractID, const nsIID& aIID,
   }
 
   return compMgr->nsComponentManagerImpl::CreateInstanceByContractID(
-      aContractID, aIID, aResult);
-}
-
-nsresult CallGetClassObject(const nsCID& aCID, const nsIID& aIID,
-                            void** aResult) {
-  nsComponentManagerImpl* compMgr = nsComponentManagerImpl::gComponentManager;
-  if (NS_WARN_IF(!compMgr)) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  return compMgr->nsComponentManagerImpl::GetClassObject(aCID, aIID, aResult);
-}
-
-nsresult CallGetClassObject(const char* aContractID, const nsIID& aIID,
-                            void** aResult) {
-  nsComponentManagerImpl* compMgr = nsComponentManagerImpl::gComponentManager;
-  if (NS_WARN_IF(!compMgr)) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  return compMgr->nsComponentManagerImpl::GetClassObjectByContractID(
       aContractID, aIID, aResult);
 }
 
@@ -177,30 +136,6 @@ nsresult nsCreateInstanceByContractID::operator()(const nsIID& aIID,
 nsresult nsCreateInstanceFromFactory::operator()(const nsIID& aIID,
                                                  void** aInstancePtr) const {
   nsresult status = mFactory->CreateInstance(aIID, aInstancePtr);
-  if (NS_FAILED(status)) {
-    *aInstancePtr = nullptr;
-  }
-  if (mErrorPtr) {
-    *mErrorPtr = status;
-  }
-  return status;
-}
-
-nsresult nsGetClassObjectByCID::operator()(const nsIID& aIID,
-                                           void** aInstancePtr) const {
-  nsresult status = CallGetClassObject(mCID, aIID, aInstancePtr);
-  if (NS_FAILED(status)) {
-    *aInstancePtr = nullptr;
-  }
-  if (mErrorPtr) {
-    *mErrorPtr = status;
-  }
-  return status;
-}
-
-nsresult nsGetClassObjectByContractID::operator()(const nsIID& aIID,
-                                                  void** aInstancePtr) const {
-  nsresult status = CallGetClassObject(mContractID, aIID, aInstancePtr);
   if (NS_FAILED(status)) {
     *aInstancePtr = nullptr;
   }

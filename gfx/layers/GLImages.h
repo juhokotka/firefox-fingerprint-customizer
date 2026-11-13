@@ -9,10 +9,10 @@
 #include "GLTypes.h"
 #include "ImageContainer.h"      // for Image
 #include "ImageTypes.h"          // for ImageFormat::SHARED_GLTEXTURE
-#include "nsCOMPtr.h"            // for already_AddRefed
 #include "mozilla/Maybe.h"       // for Maybe
 #include "mozilla/gfx/Matrix.h"  // for Matrix4x4
 #include "mozilla/gfx/Point.h"   // for IntSize
+#include "nsCOMPtr.h"            // for already_AddRefed
 
 #ifdef MOZ_WIDGET_ANDROID
 #  include "AndroidSurfaceTexture.h"

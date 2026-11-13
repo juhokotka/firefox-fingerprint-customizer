@@ -40,7 +40,7 @@ DistributionCustomizer.prototype = {
         ? Services.dirsvc.get("ProfD", Ci.nsIFile)
         : Services.dirsvc.get("XREAppDist", Ci.nsIFile);
       if (loadFromProfile) {
-        iniFile.leafName = "distribution";
+        iniFile.append("distribution");
       }
       iniFile.append("distribution.ini");
     } catch (ex) {}
@@ -319,14 +319,14 @@ DistributionCustomizer.prototype = {
 
     let sections = enumToObject(this._ini.getSections());
 
-    // The global section, and several of its fields, is required
+    // The global section, and its id field, is required
     // (we also check here to be consistent with applyPrefDefaults below)
     if (!sections.Global) {
       return;
     }
 
     let globalPrefs = enumToObject(this._ini.getKeys("Global"));
-    if (!(globalPrefs.id && globalPrefs.version && globalPrefs.about)) {
+    if (!globalPrefs.id) {
       return;
     }
 
@@ -380,19 +380,17 @@ DistributionCustomizer.prototype = {
 
     let sections = enumToObject(this._ini.getSections());
 
-    // The global section, and several of its fields, is required
+    // The global section, and its id field, is required
     if (!sections.Global) {
       return this._checkCustomizationComplete();
     }
     let globalPrefs = enumToObject(this._ini.getKeys("Global"));
-    if (!(globalPrefs.id && globalPrefs.version)) {
+    // Only the id is required. version and about are optional, which allows
+    // a distribution to be identified by id alone.
+    if (!globalPrefs.id) {
       return this._checkCustomizationComplete();
     }
     let distroID = this._ini.getString("Global", "id");
-    if (!globalPrefs.about && !distroID.startsWith("mozilla-")) {
-      // About is required unless it is a mozilla distro.
-      return this._checkCustomizationComplete();
-    }
 
     if (
       distroID == "MozillaOnline" &&
@@ -420,10 +418,12 @@ DistributionCustomizer.prototype = {
       return this._checkCustomizationComplete();
     }
 
-    defaults.setStringPref(
-      "distribution.version",
-      this._ini.getString("Global", "version")
-    );
+    if (globalPrefs.version) {
+      defaults.setStringPref(
+        "distribution.version",
+        this._ini.getString("Global", "version")
+      );
+    }
 
     let partnerAbout;
     try {
@@ -524,10 +524,13 @@ DistributionCustomizer.prototype = {
         }
       } catch (e) {}
       // If a theme was specified in the distribution, and it's a new profile,
-      // set the theme as default.
+      // set the theme as default. Note the distribution will have set a
+      // _default_ value for the theme.
       try {
-        const activeThemeID = Services.prefs.getCharPref(
-          "extensions.activeThemeID"
+        const defaults = Services.prefs.getDefaultBranch(null);
+        const activeThemeID = defaults.getCharPref(
+          "extensions.activeThemeID",
+          null
         );
         if (activeThemeID) {
           lazy.AddonManager.getAddonByID(activeThemeID).then(addon =>
@@ -619,12 +622,23 @@ export let DistributionManagement = {
     return FOLDER_GUID_PREFIX;
   },
 
+  /**
+   * Lazily creates the DistributionCustomizer and returns it.
+   *
+   * Callers should use the returned reference rather than
+   * `this._distributionCustomizer`: calling into the customizer can
+   * synchronously notify DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC, and our
+   * own observer for that topic clears `_distributionCustomizer`, so holding
+   * the reference is the safer bet.
+   *
+   * @returns {DistributionCustomizer}
+   */
   _ensureCustomizer() {
-    if (this._distributionCustomizer) {
-      return;
+    if (!this._distributionCustomizer) {
+      this._distributionCustomizer = new DistributionCustomizer();
+      Services.obs.addObserver(this, DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC);
     }
-    this._distributionCustomizer = new DistributionCustomizer();
-    Services.obs.addObserver(this, DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC);
+    return this._distributionCustomizer;
   },
 
   observe(_subject, topic) {
@@ -640,19 +654,23 @@ export let DistributionManagement = {
   },
 
   applyCustomizations() {
-    this._ensureCustomizer();
-    this._distributionCustomizer.applyCustomizations();
-    let localizablePreferences =
-      this._distributionCustomizer._localizablePreferences;
+    let customizer = this._ensureCustomizer();
+    customizer.applyCustomizations();
+    let localizablePreferences = customizer._localizablePreferences;
     if (localizablePreferences?.size) {
       this._localizablePreferences = localizablePreferences;
       Services.obs.addObserver(this, "intl:requested-locales-changed");
     }
   },
 
+  /**
+   * Applies the distribution's bookmarks.
+   *
+   * @returns {Promise<void>}
+   *   Resolves once the bookmarks have been applied.
+   */
   applyBookmarks() {
-    this._ensureCustomizer();
-    this._distributionCustomizer.applyBookmarks();
+    return this._ensureCustomizer().applyBookmarks();
   },
 
   QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),

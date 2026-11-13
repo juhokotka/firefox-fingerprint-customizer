@@ -40,7 +40,7 @@ const PREFS = {
   REPORTER_ENABLED: "ui.new-webcompat-reporter.enabled",
   REASON: "ui.new-webcompat-reporter.reason-dropdown",
   SCREENSHOTS: "ui.new-webcompat-reporter.screenshots.enabled",
-  SEND_MORE_INFO: "ui.new-webcompat-reporter.send-more-info-link",
+  SHOW_SEND_MORE_INFO: "ui.new-webcompat-reporter.show-send-more-info-link",
   NEW_REPORT_ENDPOINT: "ui.new-webcompat-reporter.new-report-endpoint",
   TOUCH_EVENTS: "dom.w3c_touch_events.enabled",
   USE_ACCESSIBILITY_THEME: "ui.useAccessibilityTheme",
@@ -391,11 +391,11 @@ function ensureReportBrokenSitePreffedOff() {
 }
 
 function enableSendMoreInfo() {
-  Services.prefs.setBoolPref(PREFS.SEND_MORE_INFO, true);
+  Services.prefs.setBoolPref(PREFS.SHOW_SEND_MORE_INFO, true);
 }
 
 function disableSendMoreInfo() {
-  Services.prefs.setBoolPref(PREFS.SEND_MORE_INFO, false);
+  Services.prefs.setBoolPref(PREFS.SHOW_SEND_MORE_INFO, false);
 }
 
 function enableScreenshots() {
@@ -475,6 +475,21 @@ class ReportBrokenSiteHelper {
   click(elem, options = {}) {
     return new Promise(r => {
       elem.scrollIntoView({ behavior: "instant" });
+      // An inline element wrapped across lines has a bounding box spanning
+      // every line it touches, whose center can land in the empty space
+      // beside the text. Aim at the first line box in that case.
+      const rects = elem.getClientRects();
+      if (rects.length > 1) {
+        const bounds = elem.getBoundingClientRect();
+        return EventUtils.synthesizeMouse(
+          elem,
+          rects[0].x - bounds.x + rects[0].width / 2,
+          rects[0].y - bounds.y + rects[0].height / 2,
+          options,
+          this.win,
+          r
+        );
+      }
       return EventUtils.synthesizeMouseAtCenter(elem, options, this.win, r);
     });
   }
@@ -548,10 +563,12 @@ class ReportBrokenSiteHelper {
     await Promise.all(promises);
   }
 
-  clickSend() {
-    const promise = this.waitForViewToShow(this.sentView);
-    this.sendButton.click();
-    return promise;
+  async clickSend() {
+    const { sendButton, sentView } = this;
+    const promise = this.waitForViewToShow(sentView);
+    sendButton.click();
+    await promise;
+    await isNotDisabled(sendButton, "send button should not be disabled");
   }
 
   clickCancel() {
@@ -958,7 +975,7 @@ class AppMenuHelper extends MenuHelper {
   menuDescription = "AppMenu";
 
   get reportBrokenSite() {
-    return this.getViewNode("appMenu-report-broken-site-button");
+    return this.getViewNode("appMenu_help_reportBrokenSite");
   }
 
   get popup() {
@@ -967,6 +984,11 @@ class AppMenuHelper extends MenuHelper {
 
   async open() {
     await new CustomizableUITestUtils(this.win).openMainMenu();
+    // Report Broken Site lives in the Help and Report subview.
+    const helpView = this.getViewNode("PanelUI-helpView");
+    const shownPromise = BrowserTestUtils.waitForEvent(helpView, "ViewShown");
+    this.getViewNode("appMenu-help-button2").click();
+    await shownPromise;
   }
 
   async close() {
@@ -1130,7 +1152,7 @@ async function setupStrictETP() {
   });
 }
 
-// copied from browser/base/content/test/protectionsUI/head.js
+// copied from browser/base/content/test/browser-protectionsUI/head.js
 function waitForContentBlockingEvent(numChanges, win = null) {
   if (!numChanges) {
     return Promise.resolve();

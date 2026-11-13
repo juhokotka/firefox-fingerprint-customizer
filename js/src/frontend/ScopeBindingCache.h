@@ -13,10 +13,8 @@
 
 #include "frontend/NameAnalysisTypes.h"  // NameLocation
 #include "frontend/ParserAtom.h"  // TaggedParserAtomIndex, ParserAtomsTable
-
-#include "js/Utility.h"  // AutoEnterOOMUnsafeRegion
-
-#include "vm/StringType.h"  // JSAtom
+#include "js/Utility.h"           // AutoEnterOOMUnsafeRegion
+#include "vm/StringType.h"        // JSAtom
 
 namespace js {
 
@@ -30,6 +28,7 @@ struct CompilationStencil;
 struct ScopeStencilRef;
 struct FakeStencilGlobalScope;
 struct CompilationStencilMerger;
+struct InitialStencilAndDelazifications;
 
 // Generic atom wrapper which provides a way to interpret any Atom given
 // contextual information. Thus, this structure offers the ability to compare

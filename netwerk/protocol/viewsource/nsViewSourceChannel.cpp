@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsViewSourceChannel.h"
+
 #include "mozilla/NullPrincipal.h"
 #include "nsContentSecurityManager.h"
 #include "nsContentUtils.h"
@@ -480,7 +481,7 @@ nsViewSourceChannel::GetContentType(nsACString& aContentType) {
       contentType = VIEWSOURCE_CONTENT_TYPE;
     }
 
-    mContentType = contentType;
+    mContentType = std::move(contentType);
   }
 
   aContentType = mContentType;

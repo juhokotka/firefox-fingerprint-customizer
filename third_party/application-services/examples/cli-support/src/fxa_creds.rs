@@ -8,9 +8,7 @@ use std::{collections::HashMap, fs, io::Write};
 use anyhow::Result;
 use url::Url;
 
-use fxa_client::{
-    DeviceConfig, DeviceType, FirefoxAccount, FxaConfig, FxaError, FxaEvent, FxaState,
-};
+use fxa_client::{DeviceConfig, DeviceType, FirefoxAccount, FxaConfig, FxaEvent, FxaState};
 use sync15::{client::Sync15StorageClientInit, KeyBundle};
 
 use crate::{prompt::prompt_string, workspace_root_dir};
@@ -133,26 +131,11 @@ impl CliFxa {
 
         match state {
             FxaState::Connected => {
-                crate::info!("FxA: already connected - checking if we have all the scopes.");
-                let mut have_all_scopes = true;
-                for scope in scopes {
-                    match account.get_access_token(scope, true) {
-                        Ok(_) => crate::debug!("Do already have the {scope:?} scope"),
-                        Err(FxaError::Forbidden) => {
-                            crate::info!("Don't have the {scope:?} scope, re-authenticating");
-                            have_all_scopes = false;
-                            break;
-                        }
-                        Err(e) => {
-                            crate::error!("Error checking for the {scope:?} scope: {e}");
-                            return Err(e.into());
-                        }
-                    }
-                }
+                let have_all_scopes = account.has_scope(&scopes.join(" "));
+                crate::info!("FxA: already connected, all scopes is {have_all_scopes}");
                 if !have_all_scopes {
                     self.handle_oauth_flow(service, scopes)?;
                 }
-                self.persist()?;
             }
             FxaState::Disconnected | FxaState::AuthIssues => {
                 crate::info!("FxA: need to authenticate (state was {state:?})");
@@ -247,13 +230,9 @@ impl CliFxa {
             other => anyhow::bail!("Unexpected FxA state after BeginOAuthFlow: {other:?}"),
         };
 
-        println!("Trying to open the auth URL — if your browser doesn't open, please open this URL manually:");
-        println!("    {oauth_url}\n");
-        match open::that(&oauth_url) {
-            Ok(()) => println!("Opened in your browser."),
-            Err(e) => crate::warn!("Could not open a browser: {e}"),
-        }
-
+        println!("In a (probably private) browser window, please open:");
+        println!(" {oauth_url}\n");
+        println!("paste the final 'Connected' URL from a successful flow below.");
         let final_url = Url::parse(&prompt_string("Final URL").unwrap_or_default())?;
         let query_params: HashMap<String, String> = final_url.query_pairs().into_owned().collect();
 

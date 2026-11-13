@@ -6,6 +6,7 @@ package org.mozilla.focus.activity.robots
 
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiSelector
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.mozilla.focus.R
@@ -16,6 +17,7 @@ import org.mozilla.focus.helpers.TestHelper.packageName
 import org.mozilla.focus.helpers.TestHelper.pressEnterKey
 import org.mozilla.focus.helpers.TestHelper.waitingTime
 import org.mozilla.focus.idlingResources.SessionLoadedIdlingResource
+import org.mozilla.focus.topsites.TOP_SITES_ROW_TEST_TAG
 
 class SearchRobot {
 
@@ -46,12 +48,11 @@ class SearchRobot {
     }
 
     fun verifySearchSuggestionsAreShown() {
-        suggestionsList.waitForExists(waitingTime)
-        assertTrue(suggestionsList.childCount >= 1)
+        assertTrue(suggestionsList.getChild(UiSelector().clickable(true)).waitForExists(waitingTime))
     }
 
     fun verifySearchSuggestionsAreNotShown() {
-        assertFalse(suggestionsList.exists())
+        assertFalse(suggestionsList.getChild(UiSelector().clickable(true)).exists())
     }
 
     fun verifySearchEditBarContainsText(text: String) {
@@ -77,8 +78,16 @@ class SearchRobot {
     fun clearSearchBar() = clearSearchButton.click()
 
     fun verifySearchSuggestionsContain(title: String) {
-        assertTrue(
-            suggestionsList.getChild(UiSelector().textContains(title)).waitForExists(waitingTime),
+        assertTrue(suggestionsList.getChild(UiSelector().textContains(title)).waitForExists(waitingTime))
+    }
+
+    fun verifyPageShortcutsAreCentered() {
+        val shortcutsRow = suggestionsList.getChild(UiSelector().resourceId(TOP_SITES_ROW_TEST_TAG))
+        assertTrue(shortcutsRow.waitForExists(waitingTime))
+        assertEquals(
+            suggestionsList.visibleBounds.exactCenterX(),
+            shortcutsRow.visibleBounds.exactCenterX(),
+            1f,
         )
     }
 
@@ -96,12 +105,9 @@ class SearchRobot {
             pressEnterKey()
 
             runWithIdleRes(sessionLoadedIdlingResource) {
+                assertTrue(BrowserRobot().progressBar.waitUntilGone(waitingTime))
                 assertTrue(
-                    BrowserRobot().progressBar.waitUntilGone(waitingTime),
-                )
-                assertTrue(
-                    geckoEngineView.waitForExists(waitingTime) ||
-                        trackingProtectionDialog.waitForExists(waitingTime),
+                    geckoEngineView.waitForExists(waitingTime) || trackingProtectionDialog.waitForExists(waitingTime)
                 )
             }
 
@@ -137,30 +143,18 @@ fun searchScreen(interact: SearchRobot.() -> Unit): SearchRobot.Transition {
 private val searchBar =
     mDevice.findObject(UiSelector().resourceId("$packageName:id/mozac_browser_toolbar_edit_url_view"))
 
-private val toolbar =
-    mDevice.findObject(UiSelector().resourceId("$packageName:id/mozac_browser_toolbar_url_view"))
+private val toolbar = mDevice.findObject(UiSelector().resourceId("$packageName:id/mozac_browser_toolbar_url_view"))
 
-private val searchSuggestionsTitle = mDevice.findObject(
-    UiSelector()
-        .resourceId("$packageName:id/enable_search_suggestions_title")
-        .enabled(true),
-)
+private val searchSuggestionsTitle =
+    mDevice.findObject(UiSelector().resourceId("$packageName:id/enable_search_suggestions_title").enabled(true))
 
-private val searchSuggestionsButtonYes = mDevice.findObject(
-    UiSelector()
-        .resourceId("$packageName:id/enable_search_suggestions_button")
-        .enabled(true),
-)
+private val searchSuggestionsButtonYes =
+    mDevice.findObject(UiSelector().resourceId("$packageName:id/enable_search_suggestions_button").enabled(true))
 
-private val searchSuggestionsButtonNo = mDevice.findObject(
-    UiSelector()
-        .resourceId("$packageName:id/disable_search_suggestions_button")
-        .enabled(true),
-)
+private val searchSuggestionsButtonNo =
+    mDevice.findObject(UiSelector().resourceId("$packageName:id/disable_search_suggestions_button").enabled(true))
 
-private val suggestionsList = mDevice.findObject(
-    UiSelector()
-        .resourceId("$packageName:id/search_suggestions_view"),
-)
+private val suggestionsList = mDevice.findObject(UiSelector().resourceId("$packageName:id/search_suggestions_view"))
 
-private val clearSearchButton = mDevice.findObject(UiSelector().resourceId("$packageName:id/mozac_browser_toolbar_clear_view"))
+private val clearSearchButton =
+    mDevice.findObject(UiSelector().resourceId("$packageName:id/mozac_browser_toolbar_clear_view"))

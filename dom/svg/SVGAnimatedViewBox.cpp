@@ -117,21 +117,6 @@ void SVGAnimatedViewBox::Init() {
   mAnimVal = nullptr;
 }
 
-bool SVGAnimatedViewBox::HasRect() const {
-  // Check mAnimVal if we have one; otherwise, check mBaseVal if we have one;
-  // otherwise, just return false (we clearly do not have a rect).
-  const SVGViewBox* rect = mAnimVal.get();
-  if (!rect) {
-    if (!mHasBaseVal) {
-      // no anim val, no base val --> no viewbox rect
-      return false;
-    }
-    rect = &mBaseVal;
-  }
-
-  return !rect->none && rect->width >= 0 && rect->height >= 0;
-}
-
 void SVGAnimatedViewBox::SetAnimValue(const SVGViewBox& aRect,
                                       SVGElement* aSVGElement) {
   if (!mAnimVal) {
@@ -148,19 +133,16 @@ void SVGAnimatedViewBox::SetAnimValue(const SVGViewBox& aRect,
 
 void SVGAnimatedViewBox::SetBaseField(float aValue, SVGElement* aSVGElement,
                                       float& aField) {
-  if (!mHasBaseVal) {
-    aField = aValue;
-    return;
-  }
   // If the current base value is "none", writing any field transitions the
   // viewBox to a numerical rect, so we must notify (and clear |none|) even
   // when this field's value happens to be unchanged.
-  if (!mBaseVal.none && aField == aValue) {
+  if (mHasBaseVal && !mBaseVal.none && aField == aValue) {
     return;
   }
   AutoChangeViewBoxNotifier notifier(this, aSVGElement);
   aField = aValue;
   mBaseVal.none = false;
+  mHasBaseVal = true;
 }
 
 void SVGAnimatedViewBox::SetBaseValue(const SVGViewBox& aRect,
@@ -185,6 +167,12 @@ nsresult SVGAnimatedViewBox::SetBaseValueString(const nsAString& aValue,
   nsresult rv = SVGViewBox::FromString(aValue, &viewBox);
   if (NS_FAILED(rv)) {
     return rv;
+  }
+  // Normally we treat "none" as an invalid value (because it's the same
+  // as not having a viewBox), but we don't want none to be a syntax
+  // error here.
+  if (!viewBox.IsNone() && !viewBox.IsValid()) {
+    return NS_ERROR_DOM_SYNTAX_ERR;
   }
   SetBaseValue(viewBox, aSVGElement, aDoSetAttr);
   return NS_OK;

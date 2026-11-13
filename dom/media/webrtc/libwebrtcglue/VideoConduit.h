@@ -8,6 +8,7 @@
 #include "MediaConduitInterface.h"
 #include "RtpRtcpConfig.h"
 #include "RunningStat.h"
+#include "modules/rtp_rtcp/source/source_tracker.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DataMutex.h"
@@ -166,6 +167,7 @@ class WebrtcVideoConduit : public VideoSessionConduit,
 
   Ssrcs GetLocalSSRCs() const override;
   Maybe<Ssrc> GetAssociatedLocalRtxSSRC(Ssrc aSsrc) const override;
+  Maybe<Ssrc> GetAssociatedRemoteRtxSSRC() const override;
   Maybe<Ssrc> GetRemoteSSRC() const override;
 
   Maybe<gfx::IntSize> GetLastResolution() const override;
@@ -403,6 +405,10 @@ class WebrtcVideoConduit : public VideoSessionConduit,
   // Written only on the Call thread. Guarded by mMutex, except for reads on the
   // Call thread.
   webrtc::VideoReceiveStreamInterface* mRecvStream = nullptr;
+
+  // Fed by mRecvStreamConfig.on_frame_delivered_callback. Call thread only,
+  // since webrtc::SourceTracker itself is not thread-safe.
+  webrtc::SourceTracker mSourceTracker;
 
   // Must call webrtc::Call::DestroyVideoReceive/SendStream to delete this.
   webrtc::VideoSendStream* mSendStream = nullptr;

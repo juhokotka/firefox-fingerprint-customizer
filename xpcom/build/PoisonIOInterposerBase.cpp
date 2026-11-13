@@ -2,15 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <algorithm>
+
+#include "PoisonIOInterposer.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/UniquePtr.h"
-
-#include <algorithm>
-
-#include "PoisonIOInterposer.h"
-
 #include "prlock.h"
 
 #ifdef MOZ_REPLACE_MALLOC
@@ -68,14 +66,14 @@ class ChunkedList {
     mozilla::Atomic<T> mElements[kLength];
     mozilla::UniquePtr<ListChunk> mNext;
 
-    ListChunk() : mNext(nullptr) {}
+    ListChunk() = default;
   };
 
   ListChunk mList;
-  mozilla::Atomic<size_t> mLength;
+  mozilla::Atomic<size_t> mLength{0};
 
  public:
-  ChunkedList() : mLength(0) {}
+  ChunkedList() = default;
 
   ~ChunkedList() {
     // There can be writes happening after this destructor runs, so keep

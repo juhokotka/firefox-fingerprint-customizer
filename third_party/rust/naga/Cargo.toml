@@ -14,7 +14,6 @@ edition = "2021"
 rust-version = "1.87"
 name = "naga"
 version = "30.0.0"
-authors = ["gfx-rs developers"]
 build = "build.rs"
 exclude = [
     "bin/**/*",
@@ -97,7 +96,7 @@ version = "0.7.1"
 default-features = false
 
 [dependencies.bit-set]
-version = "0.10"
+version = "0.11"
 default-features = false
 
 [dependencies.bitflags]
@@ -196,6 +195,7 @@ version = "0.1"
 
 [dev-dependencies.env_logger]
 version = "0.11"
+features = ["humantime"]
 default-features = false
 
 [dev-dependencies.hashbrown]
@@ -211,7 +211,7 @@ default-features = false
 path = "hlsl-snapshots"
 
 [dev-dependencies.itertools]
-version = "0.14"
+version = "0.15"
 
 [dev-dependencies.naga-test]
 path = "../naga-test"
@@ -242,7 +242,7 @@ default-features = false
 version = "2.3"
 
 [build-dependencies.cfg_aliases]
-version = "0.2.1"
+version = "0.2.2"
 
 [lints.clippy]
 alloc_instead_of_core = "warn"

@@ -2,22 +2,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "DNSUtils.h"
 #include "NetworkConnectivityService.h"
+
+#include "DNSUtils.h"
 #include "mozilla/AppShutdown.h"
 #include "mozilla/ClearOnShutdown.h"
-#include "mozilla/net/SocketProcessParent.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#include "mozilla/StaticPrefs_network.h"
+#include "mozilla/net/SocketProcessParent.h"
 #include "nsCOMPtr.h"
-#include "nsIChannel.h"
-#include "nsIOService.h"
 #include "nsICancelable.h"
-#include "xpcpublic.h"
-#include "nsSocketTransport2.h"
+#include "nsIChannel.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsINetworkLinkService.h"
-#include "mozilla/StaticPrefs_network.h"
+#include "nsIOService.h"
+#include "nsSocketTransport2.h"
+#include "xpcpublic.h"
 
 static mozilla::LazyLogModule gNCSLog("NetworkConnectivityService");
 #undef LOG
@@ -438,12 +439,25 @@ NetworkConnectivityService::Observe(nsISupports* aSubject, const char* aTopic,
     observerService->RemoveObserver(this,
                                     "network:captive-portal-connectivity");
     observerService->RemoveObserver(this, NS_NETWORK_LINK_TOPIC);
+    observerService->RemoveObserver(this,
+                                    "browser-idle-startup-tasks-finished");
   } else if (!strcmp(aTopic, NS_NETWORK_LINK_TOPIC) &&
              !NS_LITERAL_STRING_FROM_CSTRING(NS_NETWORK_LINK_DATA_UNKNOWN)
                   .Equals(aData)) {
     PerformChecks();
   } else if (!strcmp(aTopic, "browser-idle-startup-tasks-finished")) {
+    // GeckoView notifies this topic once per window, but we only want to run
+    // the checks the first time.
+    if (mIdleStartupDone) {
+      return NS_OK;
+    }
     mIdleStartupDone = true;
+
+    nsCOMPtr<nsIObserverService> observerService =
+        mozilla::services::GetObserverService();
+    observerService->RemoveObserver(this,
+                                    "browser-idle-startup-tasks-finished");
+
     PerformChecks();
   }
 

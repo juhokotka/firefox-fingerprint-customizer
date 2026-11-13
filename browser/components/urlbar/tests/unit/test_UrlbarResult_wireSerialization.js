@@ -88,15 +88,79 @@ add_task(function test_providerType_roundtrip() {
   let result = makeSearchResult();
   // providerType is set on the result after construction (by the providers
   // manager), via a setter rather than a constructor parameter.
-  result.providerType = UrlbarUtils.PROVIDER_TYPE.PROFILE;
+  result.providerType = UrlbarShared.PROVIDER_TYPE.PROFILE;
 
   let restored = roundTrip(result);
 
   Assert.equal(
     restored.providerType,
-    UrlbarUtils.PROVIDER_TYPE.PROFILE,
+    UrlbarShared.PROVIDER_TYPE.PROFILE,
     "set-only providerType preserved"
   );
+});
+
+add_task(function test_fromWire_skips_payload_validation() {
+  let result = makeUrlResult();
+
+  // Simulate an internal field added to the payload after the result was
+  // validated at creation time (e.g. QuickSuggest's suggestionObject, kept on
+  // the payload for dismissal). Such a field isn't in the payload schema, so
+  // re-validating the payload would reject it.
+  let wire = result.toWire();
+  wire.payload = { ...wire.payload, internalField: { some: "object" } };
+
+  // A validating construction rejects the unknown field...
+  Assert.throws(
+    () => new UrlbarResult(wire),
+    /./,
+    "constructing with validation rejects the internal payload field"
+  );
+
+  // ...but fromWire() carries it through, since the wire payload was already
+  // validated before serialization.
+  let restored = UrlbarResult.fromWire(structuredClone(wire));
+  Assert.deepEqual(
+    restored.payload.internalField,
+    { some: "object" },
+    "fromWire preserves the internal payload field without re-validating"
+  );
+});
+
+add_task(function test_fromWire_resolves_to_live_result() {
+  /**
+   * Stands in for a Rust suggestion's UniFFI class, whose prototype structured
+   * clone drops although dismissal checks for it with instanceof.
+   */
+  class Suggestion {}
+
+  let live = makeUrlResult();
+  live.id = 7;
+  live.payload.suggestionObject = new Suggestion();
+
+  let wire = structuredClone(live.toWire());
+  wire.rowIndex = 2;
+  Assert.ok(
+    !(wire.payload.suggestionObject instanceof Suggestion),
+    "the clone dropped the suggestion's class"
+  );
+
+  let restored = UrlbarResult.fromWire(wire, [makeSearchResult(), live]);
+  Assert.strictEqual(restored, live, "the live result with the same id");
+  Assert.ok(
+    restored.payload.suggestionObject instanceof Suggestion,
+    "the live payload data the wire dropped is intact"
+  );
+  Assert.equal(restored.rowIndex, 2, "the wire's rowIndex carried over");
+
+  let other = makeSearchResult();
+  other.id = 8;
+  let unresolved = UrlbarResult.fromWire(wire, [other]);
+  Assert.notStrictEqual(
+    unresolved,
+    live,
+    "no result with the id: reconstructed instead"
+  );
+  Assert.equal(unresolved.id, 7, "the reconstruction keeps the wire's id");
 });
 
 add_task(function test_queryContext_roundtrip() {
@@ -113,7 +177,7 @@ add_task(function test_queryContext_roundtrip() {
     heuristicResult: context.heuristicResult.toWire(),
   });
   Object.setPrototypeOf(wire, UrlbarQueryContext.prototype);
-  wire.results = wire.results.map(UrlbarResult.fromWire);
+  wire.results = wire.results.map(r => UrlbarResult.fromWire(r));
   wire.heuristicResult = UrlbarResult.fromWire(wire.heuristicResult);
 
   Assert.equal(wire.searchString, "foo bar", "searchString preserved");
@@ -144,4 +208,27 @@ add_task(function test_queryContext_roundtrip() {
     "boolean",
     "allowRemoteResults returns a result"
   );
+});
+
+add_task(function test_queryContext_isSearchbarSAP_roundtrip() {
+  for (let [sapName, expected] of [
+    ["newtab_searchbar", true],
+    ["urlbar", false],
+  ]) {
+    let context = createContext("foo", { sapName });
+    let wire = structuredClone(context.toWire());
+    Assert.equal(
+      wire.isSearchbarSAP,
+      undefined,
+      `isSearchbarSAP is a getter, so ${sapName}'s wire form omits it`
+    );
+
+    let restored = UrlbarQueryContext.fromWire(wire);
+    Assert.equal(restored.sapName, sapName, `${sapName} preserved`);
+    Assert.equal(
+      restored.isSearchbarSAP,
+      expected,
+      `isSearchbarSAP is recomputed from ${sapName} after the round trip`
+    );
+  }
 });

@@ -22,9 +22,7 @@
 #include "vm/Interpreter.h"
 #include "vm/Opcodes.h"
 #include "vm/TypeofEqOperand.h"  // TypeofEqOperand
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-#  include "vm/UsingHint.h"
-#endif
+#include "vm/UsingHint.h"
 
 #include "gc/ObjectKind-inl.h"
 #include "vm/BytecodeIterator-inl.h"
@@ -292,12 +290,42 @@ bool WarpBuilder::addPendingEdge(BytecodeLocation target, MBasicBlock* block,
 }
 
 bool WarpBuilder::build() {
+  if (script_->isGenerator() || script_->isAsync()) {
+    resumeAnalysis_.emplace(script_);
+    if (!resumeAnalysis_->init()) {
+      return false;
+    }
+    if (!resumeAnalysis_->hasResumes()) {
+      // An async function with no await never suspends, so nothing can resume
+      // it. Build it like an ordinary function.
+      resumeAnalysis_.reset();
+    }
+  }
+
   if (!buildPrologue()) {
     return false;
   }
 
   if (!buildBody()) {
     return false;
+  }
+
+  MOZ_ASSERT(pendingSuspendSavedSlots_.isNothing(),
+             "didn't build the AfterYield following a suspend");
+
+  // Finish inner-loop blocks build_LoopHead never filled in, because the loop
+  // is unreachable or only reachable through code Warp doesn't compile, e.g.
+  // a catch-block. The latter is reachable, so bail out to resume in Baseline
+  // instead. If this happens frequently, we disable Ion for the script and
+  // the generator will run in Baseline instead.
+  for (auto iter = pendingInnerLoopResumes_.iter(); !iter.done(); iter.next()) {
+    if (!alloc().ensureBallast()) {
+      return false;
+    }
+    MBasicBlock* block = iter.get().value();
+    MOZ_ASSERT(!block->hasLastIns());
+    block->add(MBail::New(alloc(), BailoutKind::UncompiledGeneratorResume));
+    block->end(MUnreachable::New(alloc()));
   }
 
   if (!MPhi::markIteratorPhis(*iterators())) {
@@ -312,6 +340,8 @@ bool WarpBuilder::build() {
 }
 
 bool WarpBuilder::buildInline() {
+  MOZ_ASSERT(!script_->isGenerator() && !script_->isAsync());
+
   if (!buildInlinePrologue()) {
     return false;
   }
@@ -335,28 +365,23 @@ MInstruction* WarpBuilder::buildNamedLambdaEnv(MDefinition* callee,
   current->add(namedLambda);
 
   // Initialize the object's reserved slots.
+  size_t enclosingSlot = NamedLambdaObject::enclosingEnvironmentSlot();
+  size_t lambdaSlot = NamedLambdaObject::lambdaSlot();
+  auto* storeEnv = MStoreFixedSlot::NewNoPreBarrier(alloc(), namedLambda,
+                                                    enclosingSlot, env);
+  auto* storeCallee = MStoreFixedSlot::NewNoPreBarrier(alloc(), namedLambda,
+                                                       lambdaSlot, callee);
   if (initialHeap == gc::Heap::Default) {
     // No post barrier is needed here: the object will be allocated in the
     // nursery if possible, and if the tenured heap is used instead, a minor
     // collection will have been performed that moved env/callee to the tenured
-    // heap.
-#ifdef DEBUG
-    current->add(
-        MAssertCanElidePostWriteBarrier::New(alloc(), namedLambda, env));
-    current->add(
-        MAssertCanElidePostWriteBarrier::New(alloc(), namedLambda, callee));
-#endif
-  } else {
-    current->add(MPostWriteBarrier::New(alloc(), namedLambda, env));
-    current->add(MPostWriteBarrier::New(alloc(), namedLambda, callee));
+    // heap. In debug builds, the AddPostWriteBarriers pass will insert
+    // MAssertCanElidePostWriteBarrier instructions to check this.
+    storeEnv->setNeedsPostBarrier(false);
+    storeCallee->setNeedsPostBarrier(false);
   }
-
-  size_t enclosingSlot = NamedLambdaObject::enclosingEnvironmentSlot();
-  size_t lambdaSlot = NamedLambdaObject::lambdaSlot();
-  current->add(MStoreFixedSlot::NewUnbarriered(alloc(), namedLambda,
-                                               enclosingSlot, env));
-  current->add(MStoreFixedSlot::NewUnbarriered(alloc(), namedLambda, lambdaSlot,
-                                               callee));
+  current->add(storeEnv);
+  current->add(storeCallee);
 
   return namedLambda;
 }
@@ -372,25 +397,20 @@ MInstruction* WarpBuilder::buildCallObject(MDefinition* callee,
   current->add(callObj);
 
   // Initialize the object's reserved slots.
+  size_t enclosingSlot = CallObject::enclosingEnvironmentSlot();
+  size_t calleeSlot = CallObject::calleeSlot();
+  auto* storeEnv =
+      MStoreFixedSlot::NewNoPreBarrier(alloc(), callObj, enclosingSlot, env);
+  auto* storeCallee =
+      MStoreFixedSlot::NewNoPreBarrier(alloc(), callObj, calleeSlot, callee);
   if (initialHeap == gc::Heap::Default) {
     // No post barrier is needed here, for the same reason as in
     // buildNamedLambdaEnv.
-#ifdef DEBUG
-    current->add(MAssertCanElidePostWriteBarrier::New(alloc(), callObj, env));
-    current->add(
-        MAssertCanElidePostWriteBarrier::New(alloc(), callObj, callee));
-#endif
-  } else {
-    current->add(MPostWriteBarrier::New(alloc(), callObj, env));
-    current->add(MPostWriteBarrier::New(alloc(), callObj, callee));
+    storeEnv->setNeedsPostBarrier(false);
+    storeCallee->setNeedsPostBarrier(false);
   }
-
-  size_t enclosingSlot = CallObject::enclosingEnvironmentSlot();
-  size_t calleeSlot = CallObject::calleeSlot();
-  current->add(
-      MStoreFixedSlot::NewUnbarriered(alloc(), callObj, enclosingSlot, env));
-  current->add(
-      MStoreFixedSlot::NewUnbarriered(alloc(), callObj, calleeSlot, callee));
+  current->add(storeEnv);
+  current->add(storeCallee);
 
   return callObj;
 }
@@ -435,6 +455,279 @@ bool WarpBuilder::buildEnvironmentChain() {
   return true;
 }
 
+MDefinition* WarpBuilder::resumeFrameArg(ResumeFrameArgs::Slot slot) {
+  auto* def = MResumeFrameArg::New(alloc(), slot);
+  current->add(def);
+  return def;
+}
+
+MDefinition* WarpBuilder::resumeGeneratorObject() {
+  MDefinition* val = resumeFrameArg(ResumeFrameArgs::GeneratorSlot);
+  auto* unbox =
+      MUnbox::New(alloc(), val, MIRType::Object, MUnbox::Mode::Infallible);
+  current->add(unbox);
+  return unbox;
+}
+
+MDefinition* WarpBuilder::loadGeneratorStackStorage(MDefinition* genObj) {
+  auto* arrayObj = MLoadFixedSlotAndUnbox::New(
+      alloc(), genObj, AbstractGeneratorObject::stackStorageSlot(),
+      MUnbox::Mode::Infallible, MIRType::Object);
+  current->add(arrayObj);
+  return arrayObj;
+}
+
+bool WarpBuilder::startResumePath(MBasicBlock* from, BytecodeLocation loc,
+                                  MBasicBlock** normalBlock) {
+  auto* isResuming = MIsResumingGenerator::New(alloc());
+  from->add(isResuming);
+
+  if (!startNewBlock(from, loc)) {
+    return false;
+  }
+  *normalBlock = current;
+
+  if (!startNewBlock(from, loc)) {
+    return false;
+  }
+
+  from->end(MTest::New(alloc(), isResuming, /* ifTrue = */ current,
+                       /* ifFalse = */ *normalBlock));
+  return true;
+}
+
+bool WarpBuilder::linkDispatchEntry(MBasicBlock* from, size_t successorIndex,
+                                    const DispatchEntry& entry,
+                                    BytecodeLocation loc) {
+  MOZ_ASSERT(successorIndex < from->lastIns()->numSuccessors());
+
+  if (entry.isAfterYield()) {
+    // We can jump directly to the AfterYield op.
+    BytecodeLocation afterYield =
+        resumeAnalysis_->afterYieldLocationAt(entry.resumeIndex());
+    if (!addPendingEdge(afterYield, from, successorIndex)) {
+      return false;
+    }
+  } else {
+    // We have a loop that contains an AfterYield. Create a new block to jump
+    // to the loop header. See buildLoopResumeMerge.
+    if (!startNewBlock(from, loc)) {
+      return false;
+    }
+    from->lastIns()->initSuccessor(successorIndex, current);
+    PendingInnerLoopResumesMap::AddPtr p =
+        pendingInnerLoopResumes_.lookupForAdd(entry.innerLoopHeadOffset());
+    MOZ_ASSERT(!p, "each loop is targeted by a single dispatch entry");
+    if (!pendingInnerLoopResumes_.add(p, entry.innerLoopHeadOffset(),
+                                      current)) {
+      return false;
+    }
+  }
+
+  setTerminatedBlock();
+  return true;
+}
+
+MBasicBlock* WarpBuilder::takePendingInnerLoopResume(
+    BytecodeLocation loopHead) {
+  MOZ_ASSERT(loopHead.is(JSOp::LoopHead));
+  uint32_t loopHeadOffset = loopHead.bytecodeToOffset(script_);
+
+  auto p = pendingInnerLoopResumes_.lookup(loopHeadOffset);
+  MOZ_RELEASE_ASSERT(p);
+
+  MBasicBlock* block = p->value();
+  pendingInnerLoopResumes_.remove(p);
+  return block;
+}
+
+bool WarpBuilder::buildResumeIndexDispatch(BytecodeLocation loc,
+                                           DispatchEntrySpan entries) {
+  MOZ_ASSERT(!entries.empty());
+
+  // If there's one possible target, we don't need to check the resume index.
+  // Note that MTableSwitch::foldsTo can't do this for us due to the |default|
+  // successor.
+  if (entries.size() == 1) {
+    current->end(MGoto::New(alloc(), nullptr));
+    return linkDispatchEntry(current, MGoto::TargetIndex, entries[0], loc);
+  }
+
+  auto* resumeIndexVal = resumeFrameArg(ResumeFrameArgs::ResumeIndexSlot);
+  auto* resumeIndex = MUnbox::New(alloc(), resumeIndexVal, MIRType::Int32,
+                                  MUnbox::Mode::Infallible);
+  current->add(resumeIndex);
+
+  // If there are two possible targets, we can use a compare-and-branch. The
+  // cases are ordered and the index must be in one of them, so compare against
+  // the first resume index in the second entry's range.
+  if (entries.size() == 2) {
+    int32_t second = int32_t(entries[1].resumeIndices().begin);
+    MOZ_ASSERT(int32_t(entries[0].resumeIndices().last()) < second);
+    auto* isFirst =
+        MCompare::New(alloc(), resumeIndex, constant(Int32Value(second)),
+                      JSOp::Lt, MCompare::Compare_Int32);
+    current->add(isFirst);
+    current->end(MTest::New(alloc(), isFirst, /* ifTrue = */ nullptr,
+                            /* ifFalse = */ nullptr));
+    MBasicBlock* from = current;
+    return linkDispatchEntry(from, MTest::TrueBranchIndex, entries[0], loc) &&
+           linkDispatchEntry(from, MTest::FalseBranchIndex, entries[1], loc);
+  }
+
+  // Create a table switch that covers all resume indices.
+  int32_t low = int32_t(entries[0].resumeIndices().begin);
+  int32_t high = int32_t(entries[entries.size() - 1].resumeIndices().last());
+  auto* tableswitch = MTableSwitch::New(alloc(), resumeIndex, low, high);
+  current->end(tableswitch);
+
+  // Out-of-range indices are unreachable: a suspended generator's resume index
+  // is always in |entries|. We create a |default| block with MUnreachable for
+  // these indices.
+  size_t defaultIndex;
+  if (!tableswitch->addDefault(nullptr, &defaultIndex)) {
+    return false;
+  }
+
+  // Add a single successor for each entry (either an AfterYield op we can jump
+  // to or an inner loop with AfterYields) and a case for each of the entry's
+  // resume indices.
+  MBasicBlock* from = current;
+  mozilla::DebugOnly<int32_t> nextResumeIndex = low;
+  for (const DispatchEntry& entry : entries) {
+    size_t successorIndex;
+    if (!tableswitch->addSuccessor(nullptr, &successorIndex)) {
+      return false;
+    }
+    ResumeIndexRange range = entry.resumeIndices();
+    for (uint32_t index = range.begin; index < range.end; index++) {
+      MOZ_ASSERT(int32_t(index) == nextResumeIndex);
+      if (!tableswitch->addCase(successorIndex)) {
+        return false;
+      }
+      nextResumeIndex++;
+    }
+    if (!linkDispatchEntry(from, successorIndex, entry, loc)) {
+      return false;
+    }
+  }
+  MOZ_ASSERT(nextResumeIndex == high + 1);
+
+  // Create the |default| block with MUnreachable.
+  if (!startNewBlock(from, loc)) {
+    return false;
+  }
+  tableswitch->initSuccessor(defaultIndex, current);
+  current->end(MUnreachable::New(alloc()));
+  setTerminatedBlock();
+  return true;
+}
+
+bool WarpBuilder::buildLoopResumeMerge(BytecodeLocation loopHead) {
+  MBasicBlock* preheader = current;
+
+  // Create a new block that merges the normal path and the resume path. This
+  // ensures the loop header has a single forward predecessor.
+  if (!startNewBlock(preheader, loopHead)) {
+    return false;
+  }
+  MBasicBlock* merge = current;
+
+  // Finish the resume block created in linkDispatchEntry now that we know the
+  // stack depth.
+  MBasicBlock* innerLoopResume = takePendingInnerLoopResume(loopHead);
+  MOZ_ASSERT(!innerLoopResume->hasLastIns());
+  current = innerLoopResume;
+
+  // Push |undefined| for the header's expression stack instead of the saved
+  // values: the JSOp::AfterYield op will rebuild the expression stack from the
+  // generator object, and a bailout on the resume path restores the values in
+  // Baseline's prologue, so these are never read.
+  //
+  // Restoring these stack slots here isn't an option due to bytecode generated
+  // for yield* loops. The loop header has [next, iter, received, resumeKind]
+  // slots but the suspend saves only [next, iter].
+  MOZ_ASSERT(innerLoopResume->stackDepth() <= merge->stackDepth());
+  if (innerLoopResume->stackDepth() < merge->stackDepth()) {
+    MConstant* undef = constant(UndefinedValue());
+    while (current->stackDepth() < merge->stackDepth()) {
+      current->push(undef);
+    }
+  }
+
+  innerLoopResume->end(MGoto::New(alloc(), merge));
+  if (!merge->addPredecessor(alloc(), innerLoopResume)) {
+    return false;
+  }
+
+  preheader->end(MGoto::New(alloc(), merge));
+  current = merge;
+  return true;
+}
+
+bool WarpBuilder::buildPrologueResumeDispatch(BytecodeLocation startLoc) {
+  MBasicBlock* entryBlock = current;
+
+  MBasicBlock* normalBlock = nullptr;
+  if (!startResumePath(entryBlock, startLoc, &normalBlock)) {
+    return false;
+  }
+
+  // Guard against over-recursion. The resume path must not handle interrupts
+  // because interrupt callbacks can run JS/Debugger code, and this frame's pc
+  // is still the script start with its locals and expression stack not yet
+  // restored.
+  current->add(
+      MCheckOverRecursed::New(alloc(), /* isResumingGenerator = */ true));
+
+  // Restore the environment chain.
+  MDefinition* genObj = resumeGeneratorObject();
+  auto* envChain = MLoadFixedSlotAndUnbox::New(
+      alloc(), genObj, AbstractGeneratorObject::envChainSlot(),
+      MUnbox::Mode::Infallible, MIRType::Object);
+  current->add(envChain);
+  current->setEnvironmentChain(envChain);
+
+  // Restore the locals. The expression stack slots are restored at the
+  // AfterYield op.
+  uint32_t nfixed = info().nlocals();
+  if (nfixed > 0) {
+    MDefinition* arrayObj = loadGeneratorStackStorage(genObj);
+
+    auto* elements = MElements::New(alloc(), arrayObj);
+    current->add(elements);
+
+    for (uint32_t i = 0; i < nfixed; i++) {
+      if (!alloc().ensureBallast()) {
+        return false;
+      }
+      auto* load = MLoadElement::New(alloc(), elements, constant(Int32Value(i)),
+                                     /* needsHoleCheck = */ false);
+      current->add(load);
+      current->setSlot(info().localSlot(i), load);
+    }
+  }
+
+  // Restore the arguments object.
+  if (info().needsArgsObj()) {
+    auto* argsObj = MLoadFixedSlotAndUnbox::New(
+        alloc(), genObj, AbstractGeneratorObject::argsObjectSlot(),
+        MUnbox::Mode::Infallible, MIRType::Object);
+    current->add(argsObj);
+    current->setSlot(info().argsObjSlot(), argsObj);
+  }
+
+  // Build the resume index dispatch.
+  DispatchEntrySpan entries = resumeAnalysis_->prologueDispatchEntries();
+  MOZ_ASSERT(!entries.empty(), "a script with no suspend has no dispatch");
+  if (!buildResumeIndexDispatch(startLoc, entries)) {
+    return false;
+  }
+
+  current = normalBlock;
+  return true;
+}
+
 bool WarpBuilder::buildPrologue() {
   BytecodeLocation startLoc(script_, script_->code());
   if (!startNewEntryBlock(info().firstStackSlot(), startLoc)) {
@@ -474,8 +767,17 @@ bool WarpBuilder::buildPrologue() {
 
   current->add(MStart::New(alloc()));
 
+  // Build the prologue's resume dispatch if this is a generator or async
+  // function. After this, |current| is the normal non-resume path.
+  if (resumeAnalysis_.isSome()) {
+    if (!buildPrologueResumeDispatch(startLoc)) {
+      return false;
+    }
+  }
+
   // Guard against over-recursion.
-  MCheckOverRecursed* check = MCheckOverRecursed::New(alloc());
+  auto* check =
+      MCheckOverRecursed::New(alloc(), /* isResumingGenerator = */ false);
   current->add(check);
 
   if (!buildEnvironmentChain()) {
@@ -965,6 +1267,13 @@ bool WarpBuilder::build_SetArg(BytecodeLocation loc) {
     // it doesn't map to the actual arguments values. Either way, we
     // don't need to worry about synchronizing the argument values
     // when writing to them.
+    //
+    // If this SetArg is pruned, a bailout may resume before it, in which case
+    // Baseline will store `val` into the formal. If formals are observable via
+    // Function.arguments, `val` should not be optimized out.
+    if (info().isObservableSlot(info().argSlot(arg))) {
+      val->setImplicitlyUsedUnchecked();
+    }
     current->setArg(arg);
     return true;
   }
@@ -972,7 +1281,6 @@ bool WarpBuilder::build_SetArg(BytecodeLocation loc) {
   // If an arguments object is in use, and it aliases formals, then all SetArgs
   // must go through the arguments object.
   MDefinition* argsObj = current->argumentsObject();
-  current->add(MPostWriteBarrier::New(alloc(), argsObj, val));
   auto* ins = MSetArgumentsObjectArg::New(alloc(), argsObj, val, arg);
   current->add(ins);
   return resumeAfter(ins, loc);
@@ -1169,7 +1477,6 @@ bool WarpBuilder::build_StrictConstantNe(BytecodeLocation loc) {
   return buildStrictConstantEqOp(loc, JSOp::StrictNe);
 }
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
 bool WarpBuilder::build_AddDisposable(BytecodeLocation loc) {
   MOZ_ASSERT(usesEnvironmentChain());
 
@@ -1194,7 +1501,6 @@ bool WarpBuilder::build_TakeDisposeCapability(BytecodeLocation loc) {
   current->push(ins);
   return resumeAfter(ins, loc);
 }
-#endif
 
 // Returns true iff the MTest added for |op| has a true-target corresponding
 // with the join point in the bytecode.
@@ -1331,6 +1637,17 @@ bool WarpBuilder::build_LoopHead(BytecodeLocation loc) {
     return true;
   }
 
+  // If this loop contains a yield or await, the generator resume dispatch has
+  // to descend into this header to avoid irreducible control flow. Create a new
+  // block to merge the normal and resume paths before the loop header.
+  DispatchEntrySpan entries;
+  if (resumeAnalysis_.isSome()) {
+    entries = resumeAnalysis_->loopDispatchEntries(loc);
+    if (!entries.empty() && !buildLoopResumeMerge(loc)) {
+      return false;
+    }
+  }
+
   // Handle OSR from Baseline JIT code.
   if (loc.toRawBytecode() == info().osrPc()) {
     if (!startNewOsrPreHeaderBlock(loc)) {
@@ -1351,6 +1668,24 @@ bool WarpBuilder::build_LoopHead(BytecodeLocation loc) {
     return false;
   }
 
+  // Create the generator resume index dispatch for the new loop header. After
+  // this, |current| is the normal non-resume loop body.
+  if (!entries.empty()) {
+    current->setHasGeneratorResumeEntry();
+
+    MBasicBlock* body = nullptr;
+    if (!startResumePath(current, loc, &body)) {
+      return false;
+    }
+    if (!buildResumeIndexDispatch(loc, entries)) {
+      return false;
+    }
+    current = body;
+  }
+
+  // Add the loop's interrupt check on the non-resume path. Interrupt checks can
+  // run arbitrary JS/Debugger code and handling this on the resume path is
+  // complicated because we're in the middle of restoring the frame.
   MInterruptCheck* check = MInterruptCheck::New(alloc());
   current->add(check);
 
@@ -1787,8 +2122,6 @@ bool WarpBuilder::build_SetAliasedVar(BytecodeLocation loc) {
     return false;
   }
 
-  current->add(MPostWriteBarrier::New(alloc(), obj, val));
-
   MInstruction* store;
   if (EnvironmentObject::nonExtensibleIsFixedSlot(ec)) {
     store = MStoreFixedSlot::NewBarriered(alloc(), obj, ec.slot(), val);
@@ -1897,8 +2230,10 @@ bool WarpBuilder::buildCallOp(BytecodeLocation loc) {
 
   if (const auto* inliningSnapshot = getOpSnapshot<WarpInlinedCall>(loc)) {
     // Transpile the CacheIR to generate the correct guards before
-    // inlining.  In this case, CacheOp::CallInlinedFunction updates
-    // the CallInfo, but does not generate a call.
+    // inlining.  In this case, the call op (CallInlinedFunction,
+    // CallInlinedBoundFunction, or for monomorphic inlining the un-replaced
+    // CallScriptedFunction/CallBoundScriptedFunction) updates the CallInfo,
+    // but does not generate a call.
     callInfo.markAsInlined();
     if (!transpileCall(loc, inliningSnapshot->cacheIRSnapshot(), &callInfo)) {
       return false;
@@ -2156,15 +2491,12 @@ bool WarpBuilder::build_PushLexicalEnv(BytecodeLocation loc) {
   auto* ins = MNewLexicalEnvironmentObject::New(alloc(), templateCst);
   current->add(ins);
 
-#ifdef DEBUG
-  // Assert in debug mode we can elide the post write barrier.
-  current->add(MAssertCanElidePostWriteBarrier::New(alloc(), ins, env));
-#endif
-
   // Initialize the object's reserved slots. No post barrier is needed here,
   // for the same reason as in buildNamedLambdaEnv.
-  current->add(MStoreFixedSlot::NewUnbarriered(
-      alloc(), ins, EnvironmentObject::enclosingEnvironmentSlot(), env));
+  auto* store = MStoreFixedSlot::NewNoPreBarrier(
+      alloc(), ins, EnvironmentObject::enclosingEnvironmentSlot(), env);
+  store->setNeedsPostBarrier(false);
+  current->add(store);
 
   current->setEnvironmentChain(ins);
   return true;
@@ -2182,15 +2514,12 @@ bool WarpBuilder::build_PushClassBodyEnv(BytecodeLocation loc) {
   auto* ins = MNewClassBodyEnvironmentObject::New(alloc(), templateCst);
   current->add(ins);
 
-#ifdef DEBUG
-  // Assert in debug mode we can elide the post write barrier.
-  current->add(MAssertCanElidePostWriteBarrier::New(alloc(), ins, env));
-#endif
-
   // Initialize the object's reserved slots. No post barrier is needed here,
   // for the same reason as in buildNamedLambdaEnv.
-  current->add(MStoreFixedSlot::NewUnbarriered(
-      alloc(), ins, EnvironmentObject::enclosingEnvironmentSlot(), env));
+  auto* store = MStoreFixedSlot::NewNoPreBarrier(
+      alloc(), ins, EnvironmentObject::enclosingEnvironmentSlot(), env);
+  store->setNeedsPostBarrier(false);
+  current->add(store);
 
   current->setEnvironmentChain(ins);
   return true;
@@ -2226,17 +2555,13 @@ bool WarpBuilder::build_FreshenLexicalEnv(BytecodeLocation loc) {
   auto* ins = MNewLexicalEnvironmentObject::New(alloc(), templateCst);
   current->add(ins);
 
-#ifdef DEBUG
-  // Assert in debug mode we can elide the post write barrier.
-  current->add(
-      MAssertCanElidePostWriteBarrier::New(alloc(), ins, enclosingEnv));
-#endif
-
   // Initialize the object's reserved slots. No post barrier is needed here,
   // for the same reason as in buildNamedLambdaEnv.
-  current->add(MStoreFixedSlot::NewUnbarriered(
+  auto* store = MStoreFixedSlot::NewNoPreBarrier(
       alloc(), ins, EnvironmentObject::enclosingEnvironmentSlot(),
-      enclosingEnv));
+      enclosingEnv);
+  store->setNeedsPostBarrier(false);
+  current->add(store);
 
   // Copy environment slots.
   MSlots* envSlots = nullptr;
@@ -2269,23 +2594,17 @@ bool WarpBuilder::build_FreshenLexicalEnv(BytecodeLocation loc) {
       auto* load = MLoadDynamicSlot::New(alloc(), envSlots, dynamicSlot);
       current->add(load);
 
-#ifdef DEBUG
-      // Assert in debug mode we can elide the post write barrier.
-      current->add(MAssertCanElidePostWriteBarrier::New(alloc(), ins, load));
-#endif
-
-      current->add(
-          MStoreDynamicSlot::NewUnbarriered(alloc(), slots, dynamicSlot, load));
+      auto* store =
+          MStoreDynamicSlot::NewNoPreBarrier(alloc(), slots, dynamicSlot, load);
+      store->setNeedsPostBarrier(false);
+      current->add(store);
     } else {
       auto* load = MLoadFixedSlot::New(alloc(), env, slot);
       current->add(load);
 
-#ifdef DEBUG
-      // Assert in debug mode we can elide the post write barrier.
-      current->add(MAssertCanElidePostWriteBarrier::New(alloc(), ins, load));
-#endif
-
-      current->add(MStoreFixedSlot::NewUnbarriered(alloc(), ins, slot, load));
+      auto* store = MStoreFixedSlot::NewNoPreBarrier(alloc(), ins, slot, load);
+      store->setNeedsPostBarrier(false);
+      current->add(store);
     }
   }
 
@@ -2309,17 +2628,13 @@ bool WarpBuilder::build_RecreateLexicalEnv(BytecodeLocation loc) {
   auto* ins = MNewLexicalEnvironmentObject::New(alloc(), templateCst);
   current->add(ins);
 
-#ifdef DEBUG
-  // Assert in debug mode we can elide the post write barrier.
-  current->add(
-      MAssertCanElidePostWriteBarrier::New(alloc(), ins, enclosingEnv));
-#endif
-
   // Initialize the object's reserved slots. No post barrier is needed here,
   // for the same reason as in buildNamedLambdaEnv.
-  current->add(MStoreFixedSlot::NewUnbarriered(
+  auto* store = MStoreFixedSlot::NewNoPreBarrier(
       alloc(), ins, EnvironmentObject::enclosingEnvironmentSlot(),
-      enclosingEnv));
+      enclosingEnv);
+  store->setNeedsPostBarrier(false);
+  current->add(store);
 
   current->setEnvironmentChain(ins);
   return true;
@@ -2337,15 +2652,12 @@ bool WarpBuilder::build_PushVarEnv(BytecodeLocation loc) {
   auto* ins = MNewVarEnvironmentObject::New(alloc(), templateCst);
   current->add(ins);
 
-#ifdef DEBUG
-  // Assert in debug mode we can elide the post write barrier.
-  current->add(MAssertCanElidePostWriteBarrier::New(alloc(), ins, env));
-#endif
-
   // Initialize the object's reserved slots. No post barrier is needed here,
   // for the same reason as in buildNamedLambdaEnv.
-  current->add(MStoreFixedSlot::NewUnbarriered(
-      alloc(), ins, EnvironmentObject::enclosingEnvironmentSlot(), env));
+  auto* store = MStoreFixedSlot::NewNoPreBarrier(
+      alloc(), ins, EnvironmentObject::enclosingEnvironmentSlot(), env);
+  store->setNeedsPostBarrier(false);
+  current->add(store);
 
   current->setEnvironmentChain(ins);
   return true;
@@ -2401,24 +2713,102 @@ bool WarpBuilder::build_Generator(BytecodeLocation loc) {
 }
 
 bool WarpBuilder::build_AfterYield(BytecodeLocation loc) {
-  // Unreachable blocks don't need to generate a bail.
-  if (hasTerminatedBlock()) {
+  MOZ_ASSERT(resumeAnalysis_.isSome());
+
+  // The preceding block was terminated by the suspend. Get the stack depth
+  // saved by the suspend op.
+  MOZ_ASSERT(hasTerminatedBlock());
+  mozilla::Maybe<uint32_t> savedSlots = pendingSuspendSavedSlots_.take();
+  MOZ_ASSERT_IF(savedSlots, pendingSuspendResumeIndex_ ==
+                                loc.getSuspendForAfterYield().getResumeIndex());
+
+  // If the AfterYield is in a loop we didn't compile because it was
+  // unreachable, there will be no dispatch entry.
+  // See BailoutKind::UncompiledGeneratorResume.
+  PendingEdgesMap::Ptr p = pendingEdges_.lookup(loc.toRawBytecode());
+  if (!p) {
+    MOZ_ASSERT(savedSlots.isNothing());
     return true;
   }
 
-  // This comes after a yield, which we generate as a return,
-  // so we know this should be unreachable code.
-  //
-  // We emit an unreachable bail for this, which will assert if we
-  // ever execute this.
-  //
-  // An Unreachable bail, instead of MUnreachable, because MUnreachable
-  // is a control instruction, and injecting it in the middle of a block
-  // causes various graph state assertions to fail.
-  MBail* bail = MBail::New(alloc(), BailoutKind::Unreachable);
-  current->add(bail);
+  // There must be a single edge from the innermost resume index dispatch.
+  // AfterYield is a jump target op but is only targeted by the dispatch block.
+  PendingEdges edges(std::move(p->value()));
+  pendingEdges_.remove(p);
+  MOZ_RELEASE_ASSERT(edges.length() == 1);
 
-  return true;
+  // Create a new block with the dispatch block's pc. The values in its entry
+  // resume point are never used, because a bailout on the resume path redoes
+  // the resume in Baseline, but its stack depth must match its pc.
+  const PendingEdge& edge = edges[0];
+  BytecodeLocation predLoc(script_, edge.block()->pc());
+  if (!startNewBlock(edge.block(), predLoc, edge.numToPop())) {
+    return false;
+  }
+  edge.block()->lastIns()->initSuccessor(edge.successor(), current);
+
+  if (savedSlots.isNothing()) {
+    // We didn't compile the matching suspend because it was unreachable or in a
+    // catch-block. Bail out and resume in Baseline instead.
+    current->add(MBail::New(alloc(), BailoutKind::UncompiledGeneratorResume));
+    current->end(MUnreachable::New(alloc()));
+    setTerminatedBlock();
+    return true;
+  }
+
+  // Drop the loop header expression stack inherited from the resume path (the
+  // |undefined| placeholders pushed in buildLoopResumeMerge) before rebuilding
+  // the real one.
+  while (current->stackDepth() > info().firstStackSlot()) {
+    current->pop();
+  }
+
+  MDefinition* genObj = resumeGeneratorObject();
+
+  uint32_t nfixed = info().nlocals();
+  MOZ_ASSERT(*savedSlots >= nfixed);
+  uint32_t nexpr = *savedSlots - nfixed;
+  if (*savedSlots > 0) {
+    // Load the generator's stack storage elements.
+    MDefinition* arrayObj = loadGeneratorStackStorage(genObj);
+    auto* elements = MElements::New(alloc(), arrayObj);
+    current->add(elements);
+
+    // Restore the expression stack slots.
+    for (uint32_t i = 0; i < nexpr; i++) {
+      if (!alloc().ensureBallast()) {
+        return false;
+      }
+      auto* load =
+          MLoadElement::New(alloc(), elements, constant(Int32Value(nfixed + i)),
+                            /* needsHoleCheck = */ false);
+      current->add(load);
+      current->push(load);
+    }
+
+    // Clear the stack storage array by setting its initialized length to 0.
+    // Nothing between here and the MClearResumingGeneratorFlag below may bail
+    // out: a bailout there would redo the resume in Baseline, which restores
+    // the frame from the stack storage we just drained.
+    // See BaselineStackBuilder::isGeneratorResumePrologueBailout.
+    current->add(MSetInitializedLength::New(alloc(), elements, 0,
+                                            /* needsPreBarrier = */ true));
+  }
+
+  // Push the [rval, resumeKind] values on top of the stack.
+  current->push(resumeFrameArg(ResumeFrameArgs::ResumeValueSlot));
+  auto* resumeKindVal = resumeFrameArg(ResumeFrameArgs::ResumeKindSlot);
+  auto* resumeKind = MUnbox::New(alloc(), resumeKindVal, MIRType::Int32,
+                                 MUnbox::Mode::Infallible);
+  current->add(resumeKind);
+  current->push(resumeKind);
+
+  // Done! End the resume path by clearing the IsResuming frame descriptor bit.
+  // From now on, loop backedges will take the normal path and the
+  // ResumeFrameArgs are dead.
+  auto* clear = MClearResumingGeneratorFlag::New(alloc());
+  current->add(clear);
+  return resumeAfter(clear, loc);
 }
 
 bool WarpBuilder::build_FinalYieldRval(BytecodeLocation loc) {
@@ -2431,7 +2821,7 @@ bool WarpBuilder::build_FinalYieldRval(BytecodeLocation loc) {
   };
 
   // Close the generator
-  setSlotNull(AbstractGeneratorObject::calleeSlot());
+  setSlotNull(AbstractGeneratorObject::calleeOrModuleSlot());
   setSlotNull(AbstractGeneratorObject::envChainSlot());
   setSlotNull(AbstractGeneratorObject::argsObjectSlot());
   setSlotNull(AbstractGeneratorObject::stackStorageSlot());
@@ -2439,6 +2829,23 @@ bool WarpBuilder::build_FinalYieldRval(BytecodeLocation loc) {
 
   // Return
   return build_RetRval(loc);
+}
+
+bool WarpBuilder::build_Resume(BytecodeLocation loc) {
+  MDefinition* resumeKind = current->pop();
+  MDefinition* value = current->pop();
+  MDefinition* gen = current->pop();
+
+  // resumeKind is always a constant Int32 emitted by JSOp::ResumeKind right
+  // before the resume.
+  MOZ_RELEASE_ASSERT(resumeKind->isConstant());
+  int32_t resumeKindInt32 = resumeKind->toConstant()->toInt32();
+  resumeKind->setImplicitlyUsedUnchecked();
+
+  auto* resume = MGeneratorResume::New(alloc(), gen, value, resumeKindInt32);
+  current->add(resume);
+  current->push(resume);
+  return resumeAfter(resume, loc);
 }
 
 bool WarpBuilder::build_AsyncResolve(BytecodeLocation loc) {
@@ -2458,33 +2865,11 @@ bool WarpBuilder::build_ResumeKind(BytecodeLocation loc) {
   return true;
 }
 
-bool WarpBuilder::build_CheckResumeKind(BytecodeLocation loc) {
-  // Outside of `yield*`, this is normally unreachable code in Warp,
-  // so we just manipulate the stack appropriately to ensure correct
-  // MIR generation.
-  //
-  // However, `yield*` emits a forced generator return which can be
-  // warp compiled, so in order to correctly handle these semantics
-  // we also generate a bailout, so that the forced generator return
-  // runs in baseline.
-  MDefinition* resumeKind = current->pop();
-  MDefinition* gen = current->pop();
-  MDefinition* rval = current->peek(-1);
-
-  // Mark operands as implicitly used.
-  resumeKind->setImplicitlyUsedUnchecked();
-  gen->setImplicitlyUsedUnchecked();
-  rval->setImplicitlyUsedUnchecked();
-
-  // Bail out if we encounter CheckResumeKind.
-  MBail* bail = MBail::New(alloc(), BailoutKind::Inevitable);
-  current->add(bail);
-  current->setAlwaysBails();
-
-  return true;
-}
-
 bool WarpBuilder::build_CanSkipAwait(BytecodeLocation loc) {
+  // LCanSkipAwait's frame descriptor check is not correct for inlined
+  // functions.
+  MOZ_ASSERT(!inlineCallInfo());
+
   MDefinition* val = current->pop();
 
   MCanSkipAwait* canSkip = MCanSkipAwait::New(alloc(), val);
@@ -2525,6 +2910,8 @@ bool WarpBuilder::build_Yield(BytecodeLocation loc) { return build_Await(loc); }
 
 bool WarpBuilder::buildSuspend(BytecodeLocation loc, MDefinition* gen,
                                MDefinition* retVal) {
+  MOZ_ASSERT(resumeAnalysis_.isSome());
+
   // If required, unbox the generator object explicitly and infallibly.
   //
   // This is done to avoid fuzz-bugs where ApplyTypeInformation does the
@@ -2541,14 +2928,18 @@ bool WarpBuilder::buildSuspend(BytecodeLocation loc, MDefinition* gen,
 
   int32_t slotsToCopy = current->stackDepth() - info().firstLocalSlot();
   MOZ_ASSERT(slotsToCopy >= 0);
-  if (slotsToCopy > 0) {
-    auto* arrayObj = MLoadFixedSlotAndUnbox::New(
-        alloc(), genObj, AbstractGeneratorObject::stackStorageSlot(),
-        MUnbox::Mode::Infallible, MIRType::Object);
-    current->add(arrayObj);
 
-    auto* stackStorage = MElements::New(alloc(), arrayObj);
-    current->add(stackStorage);
+  // Record the stack depth for the JSOp::AfterYield that follows.
+  MOZ_ASSERT(pendingSuspendSavedSlots_.isNothing());
+  pendingSuspendSavedSlots_.emplace(uint32_t(slotsToCopy));
+#ifdef DEBUG
+  pendingSuspendResumeIndex_ = loc.getResumeIndex();
+#endif
+
+  if (slotsToCopy > 0) {
+    MDefinition* arrayObj = loadGeneratorStackStorage(genObj);
+    auto* elements = MElements::New(alloc(), arrayObj);
+    current->add(elements);
 
     for (int32_t i = 0; i < slotsToCopy; i++) {
       if (!alloc().ensureBallast()) {
@@ -2557,21 +2948,19 @@ bool WarpBuilder::buildSuspend(BytecodeLocation loc, MDefinition* gen,
       // Use peekUnchecked because we're also writing out the argument slots
       int32_t peek = -slotsToCopy + i;
       MDefinition* stackElem = current->peekUnchecked(peek);
-      auto* store = MStoreElement::NewUnbarriered(
-          alloc(), stackStorage, constant(Int32Value(i)), stackElem,
+      auto* store = MStoreElement::NewNoPreBarrier(
+          alloc(), elements, constant(Int32Value(i)), stackElem,
           /* needsHoleCheck = */ false);
 
       current->add(store);
-      current->add(MPostWriteBarrier::New(alloc(), arrayObj, stackElem));
     }
 
-    auto* len = constant(Int32Value(slotsToCopy - 1));
-
     auto* setInitLength =
-        MSetInitializedLength::New(alloc(), stackStorage, len);
+        MSetInitializedLength::New(alloc(), elements, slotsToCopy,
+                                   /* needsPreBarrier = */ false);
     current->add(setInitLength);
 
-    auto* setLength = MSetArrayLength::New(alloc(), stackStorage, len);
+    auto* setLength = MSetArrayLength::New(alloc(), elements, slotsToCopy);
     current->add(setLength);
   }
 
@@ -2580,7 +2969,7 @@ bool WarpBuilder::buildSuspend(BytecodeLocation loc, MDefinition* gen,
 
   // This store is unbarriered, as it's only ever storing an integer, and as
   // such doesn't partake of object tracing.
-  current->add(MStoreFixedSlot::NewUnbarriered(
+  current->add(MStoreFixedSlot::NewNoPreBarrier(
       alloc(), genObj, AbstractGeneratorObject::resumeIndexSlot(),
       constant(Int32Value(resumeIndex))));
 
@@ -2589,31 +2978,12 @@ bool WarpBuilder::buildSuspend(BytecodeLocation loc, MDefinition* gen,
       alloc(), genObj, AbstractGeneratorObject::envChainSlot(),
       current->environmentChain()));
 
-  current->add(
-      MPostWriteBarrier::New(alloc(), genObj, current->environmentChain()));
-
-  // GeneratorReturn will return from the method, however to support MIR
-  // generation isn't treated like the end of a block
-  MGeneratorReturn* ret = MGeneratorReturn::New(alloc(), retVal);
-  current->add(ret);
-
-  // To ensure the rest of the MIR generation looks correct, fill the stack with
-  // the appropriately typed MUnreachable's for the stack pushes from this
-  // opcode.
-  auto* unreachableResumeKind =
-      MUnreachableResult::New(alloc(), MIRType::Int32);
-  current->add(unreachableResumeKind);
-  current->push(unreachableResumeKind);
-
-  auto* unreachableGenerator =
-      MUnreachableResult::New(alloc(), MIRType::Object);
-  current->add(unreachableGenerator);
-  current->push(unreachableGenerator);
-
-  auto* unreachableRval = MUnreachableResult::New(alloc(), MIRType::Value);
-  current->add(unreachableRval);
-  current->push(unreachableRval);
-
+  // End the block with a Return. The AfterYield op will create a new block.
+  current->end(MReturn::New(alloc(), retVal));
+  if (!graph().addReturn(current)) {
+    return false;
+  }
+  setTerminatedBlock();
   return true;
 }
 
@@ -2685,8 +3055,6 @@ bool WarpBuilder::build_CheckAliasedLexical(BytecodeLocation loc) {
 bool WarpBuilder::build_InitHomeObject(BytecodeLocation loc) {
   MDefinition* homeObject = current->pop();
   MDefinition* function = current->pop();
-
-  current->add(MPostWriteBarrier::New(alloc(), function, homeObject));
 
   auto* ins = MInitHomeObject::New(alloc(), function, homeObject);
   current->add(ins);
@@ -3005,14 +3373,14 @@ bool WarpBuilder::build_InitElemArray(BytecodeLocation loc) {
     auto* store = MStoreHoleValueElement::New(alloc(), elements, indexConst);
     current->add(store);
   } else {
-    current->add(MPostWriteBarrier::New(alloc(), obj, val));
     auto* store =
-        MStoreElement::NewUnbarriered(alloc(), elements, indexConst, val,
-                                      /* needsHoleCheck = */ false);
+        MStoreElement::NewNoPreBarrier(alloc(), elements, indexConst, val,
+                                       /* needsHoleCheck = */ false);
     current->add(store);
   }
 
-  auto* setLength = MSetInitializedLength::New(alloc(), elements, indexConst);
+  auto* setLength = MSetInitializedLength::New(alloc(), elements, index + 1,
+                                               /* needsPreBarrier = */ false);
   current->add(setLength);
 
   return resumeAfter(setLength, loc);
@@ -3184,8 +3552,7 @@ bool WarpBuilder::build_TableSwitch(BytecodeLocation loc) {
 }
 
 bool WarpBuilder::build_Rest(BytecodeLocation loc) {
-  auto* snapshot = getOpSnapshot<WarpRest>(loc);
-  Shape* shape = snapshot ? snapshot->shape() : nullptr;
+  Shape* shape = getOpSnapshot<WarpRest>(loc)->shape();
 
   // NOTE: Keep this code in sync with |ArgumentsReplacer|.
 
@@ -3200,7 +3567,7 @@ bool WarpBuilder::build_Rest(BytecodeLocation loc) {
 
     // Allocate an array of the correct size.
     MInstruction* newArray;
-    if (shape && gc::CanUseFixedElementsForArray(numRest)) {
+    if (gc::CanUseFixedElementsForArray(numRest)) {
       auto* shapeConstant = MConstant::NewShape(alloc(), shape);
       current->add(shapeConstant);
       newArray = MNewArrayObject::New(alloc(), shapeConstant, numRest, heap);
@@ -3221,27 +3588,26 @@ bool WarpBuilder::build_Rest(BytecodeLocation loc) {
 
     // Unroll the argument copy loop. We don't need to do any bounds or hole
     // checking here.
-    MConstant* index = nullptr;
     for (uint32_t i = numFormals; i < numActuals; i++) {
       if (!alloc().ensureBallast()) {
         return false;
       }
 
-      index = MConstant::NewInt32(alloc(), i - numFormals);
+      MConstant* index = MConstant::NewInt32(alloc(), i - numFormals);
       current->add(index);
 
       MDefinition* arg = inlineCallInfo()->argv()[i];
       MStoreElement* store =
-          MStoreElement::NewUnbarriered(alloc(), elements, index, arg,
-                                        /* needsHoleCheck = */ false);
+          MStoreElement::NewNoPreBarrier(alloc(), elements, index, arg,
+                                         /* needsHoleCheck = */ false);
       current->add(store);
-      current->add(MPostWriteBarrier::New(alloc(), newArray, arg));
     }
 
     // Update the initialized length for all the (necessarily non-hole)
     // elements added.
     MSetInitializedLength* initLength =
-        MSetInitializedLength::New(alloc(), elements, index);
+        MSetInitializedLength::New(alloc(), elements, numRest,
+                                   /* needsPreBarrier = */ false);
     current->add(initLength);
 
     return true;
@@ -3284,11 +3650,9 @@ bool WarpBuilder::build_ExceptionAndStack(BytecodeLocation) {
   MOZ_CRASH("Unreachable because we skip catch-blocks");
 }
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
 bool WarpBuilder::build_CreateSuppressedError(BytecodeLocation) {
   MOZ_CRASH("Unreachable because we skip catch-blocks");
 }
-#endif
 
 bool WarpBuilder::build_AsyncReject(BytecodeLocation) {
   MOZ_CRASH("Unreachable because we skip catch-blocks");
@@ -3349,6 +3713,170 @@ bool WarpBuilder::build_ThrowMsg(BytecodeLocation loc) {
   current->end(MUnreachable::New(alloc()));
   setTerminatedBlock();
   return true;
+}
+
+static bool CanTruncateToInt32(MIRType type) {
+  // Don't allow Strings because `MTruncateToInt32` can't directly truncate
+  // them to Int32. And it's probably not much more efficient if Strings are
+  // first boxed and then truncated through `LValueTruncateToInt32`.
+  return IsTypeRepresentableAsDouble(type) || IsNullOrUndefined(type) ||
+         type == MIRType::Boolean;
+}
+
+// Try to emit a bitwise instruction if both operands can be truncated to Int32.
+static MInstruction* TryBitwise(TempAllocator& alloc, JSOp jsop,
+                                MDefinition* lhs, MDefinition* rhs) {
+  switch (jsop) {
+    case JSOp::BitOr:
+    case JSOp::BitXor:
+    case JSOp::BitAnd:
+    case JSOp::Lsh:
+    case JSOp::Rsh:
+      break;
+    case JSOp::Ursh:
+      // Ursh is complicated because we don't know which MUrsh to use, so we
+      // don't yet optimize it here.
+      return nullptr;
+    default:
+      return nullptr;
+  }
+
+  // Both operands must be convertible to Int32 using truncation.
+  if (!CanTruncateToInt32(lhs->type()) || !CanTruncateToInt32(rhs->type())) {
+    return nullptr;
+  }
+
+  // It's valid to check the operand types even for loop phis, because loop
+  // phis are always typed as `MIRType::Value` at this point.
+  MOZ_ASSERT(lhs->type() != MIRType::Value && rhs->type() != MIRType::Value);
+
+  switch (jsop) {
+    case JSOp::BitOr:
+      return MBitOr::New(alloc, lhs, rhs, MIRType::Int32);
+    case JSOp::BitXor:
+      return MBitXor::New(alloc, lhs, rhs, MIRType::Int32);
+    case JSOp::BitAnd:
+      return MBitAnd::New(alloc, lhs, rhs, MIRType::Int32);
+    case JSOp::Lsh:
+      return MLsh::New(alloc, lhs, rhs, MIRType::Int32);
+    case JSOp::Rsh:
+      return MRsh::New(alloc, lhs, rhs, MIRType::Int32);
+    default:
+      break;
+  }
+  MOZ_CRASH("unexpected jsop");
+}
+
+// Try to emit a compare instruction if both operands are unboxed.
+static MInstruction* TryCompare(TempAllocator& alloc, JSOp jsop,
+                                MDefinition* lhs, MDefinition* rhs) {
+  MOZ_ASSERT(IsEqualityOp(jsop) || IsRelationalOp(jsop));
+
+  // Both operands must be unboxed.
+  //
+  // It's valid to check the operand types even for loop phis, because loop
+  // phis are always typed as `MIRType::Value` at this point.
+  if (lhs->type() == MIRType::Value || rhs->type() == MIRType::Value) {
+    return nullptr;
+  }
+
+  // Prefer MCompare if both operands have the same type.
+  if (lhs->type() == rhs->type()) {
+    MCompare::CompareType compareType;
+    switch (lhs->type()) {
+      case MIRType::Int32:
+        compareType = MCompare::Compare_Int32;
+        break;
+      case MIRType::Float32:
+        compareType = MCompare::Compare_Float32;
+        break;
+      case MIRType::Double:
+        compareType = MCompare::Compare_Double;
+        break;
+      case MIRType::String:
+        compareType = MCompare::Compare_String;
+        break;
+      case MIRType::BigInt:
+        compareType = MCompare::Compare_BigInt;
+        break;
+      default:
+        return nullptr;
+    }
+    return MCompare::New(alloc, lhs, rhs, jsop, compareType);
+  }
+
+  // Use MCompare if both operands are Numbers.
+  if (IsTypeRepresentableAsDouble(lhs->type()) &&
+      IsTypeRepresentableAsDouble(rhs->type())) {
+    return MCompare::New(alloc, lhs, rhs, jsop, MCompare::Compare_Double);
+  }
+  return nullptr;
+}
+
+// Try to emit a strict-constant-compare instruction.
+static MInstruction* TryStrictConstantCompare(TempAllocator& alloc, JSOp jsop,
+                                              MDefinition* lhs,
+                                              MDefinition* rhs) {
+  // Need strict equality comparison.
+  if (!IsStrictEqualityOp(jsop)) {
+    return nullptr;
+  }
+
+  // At least one operand must be a constant.
+  if (!lhs->isConstant() && !rhs->isConstant()) {
+    return nullptr;
+  }
+
+  auto strictCompare = [&](MConstant* cst,
+                           MDefinition* operand) -> MInstruction* {
+    // Strict equality comparison against an Int32 constant, but the constant
+    // is too large for the StrictConstantEq/Ne byte code.
+    if (cst->type() == MIRType::Int32) {
+      cst->setImplicitlyUsedUnchecked();
+      return MStrictConstantCompareInt32::New(alloc, operand, cst->toInt32(),
+                                              jsop);
+    }
+
+    // Strict equality comparison against a String constant.
+    if (cst->type() == MIRType::String) {
+      cst->setImplicitlyUsedUnchecked();
+      return MStrictConstantCompareString::New(alloc, operand, cst->toString(),
+                                               jsop);
+    }
+
+    // Strict equality comparison against an Object constant.
+    if (cst->type() == MIRType::Object) {
+      cst->setImplicitlyUsedUnchecked();
+      return MStrictConstantCompareObject::New(alloc, operand, &cst->toObject(),
+                                               jsop);
+    }
+
+    // Strict equality comparison against Undefined.
+    if (cst->type() == MIRType::Undefined) {
+      return MCompare::New(alloc, operand, cst, jsop,
+                           MCompare::Compare_Undefined);
+    }
+
+    // Strict equality comparison against Null.
+    if (cst->type() == MIRType::Null) {
+      return MCompare::New(alloc, operand, cst, jsop, MCompare::Compare_Null);
+    }
+
+    // No optimization possible.
+    return nullptr;
+  };
+
+  if (lhs->isConstant()) {
+    if (auto* ins = strictCompare(lhs->toConstant(), rhs)) {
+      return ins;
+    }
+  }
+  if (rhs->isConstant()) {
+    if (auto* ins = strictCompare(rhs->toConstant(), lhs)) {
+      return ins;
+    }
+  }
+  return nullptr;
 }
 
 bool WarpBuilder::buildIC(BytecodeLocation loc, CacheKind kind,
@@ -3412,16 +3940,50 @@ bool WarpBuilder::buildIC(BytecodeLocation loc, CacheKind kind,
     }
     case CacheKind::BinaryArith: {
       MOZ_ASSERT(numInputs == 2);
-      auto* ins =
-          MBinaryCache::New(alloc(), getInput(0), getInput(1), MIRType::Value);
+
+      auto* lhs = getInput(0);
+      auto* rhs = getInput(1);
+
+      // If both operands are unboxed, we may be able to emit a more optimized
+      // instruction than just MBinaryCache.
+      //
+      // We perform this optimization early instead of in MBinaryCache::foldsTo
+      // to avoid creating resume points which may keep some operands alive.
+      if (auto* ins = TryBitwise(alloc(), loc.getOp(), lhs, rhs)) {
+        current->add(ins);
+        current->push(ins);
+        return true;
+      }
+
+      auto* ins = MBinaryCache::New(alloc(), lhs, rhs, MIRType::Value);
       current->add(ins);
       current->push(ins);
       return resumeAfter(ins, loc);
     }
     case CacheKind::Compare: {
       MOZ_ASSERT(numInputs == 2);
-      auto* ins = MBinaryCache::New(alloc(), getInput(0), getInput(1),
-                                    MIRType::Boolean);
+
+      auto* lhs = getInput(0);
+      auto* rhs = getInput(1);
+
+      // If both operands are unboxed, we may be able to emit a more optimized
+      // instruction than just MBinaryCache.
+      if (auto* ins = TryCompare(alloc(), loc.getOp(), lhs, rhs)) {
+        current->add(ins);
+        current->push(ins);
+        return true;
+      }
+
+      // If one operand is a constant, we may be able to create strict constant
+      // compare instructions.
+      if (auto* ins =
+              TryStrictConstantCompare(alloc(), loc.getOp(), lhs, rhs)) {
+        current->add(ins);
+        current->push(ins);
+        return true;
+      }
+
+      auto* ins = MBinaryCache::New(alloc(), lhs, rhs, MIRType::Boolean);
       current->add(ins);
       current->push(ins);
       return resumeAfter(ins, loc);

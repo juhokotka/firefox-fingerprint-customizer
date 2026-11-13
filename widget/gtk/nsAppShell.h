@@ -7,10 +7,12 @@
 
 #ifdef MOZ_ENABLE_DBUS
 #  include <gio/gio.h>
-#  include "mozilla/RefPtr.h"
+
 #  include "mozilla/GRefPtr.h"
+#  include "mozilla/RefPtr.h"
 #endif
 #include <glib.h>
+
 #include "nsBaseAppShell.h"
 
 typedef enum {

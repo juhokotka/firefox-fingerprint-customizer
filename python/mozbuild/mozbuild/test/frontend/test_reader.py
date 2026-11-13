@@ -543,6 +543,40 @@ class TestBuildReader(unittest.TestCase):
         self.assertEqual(contexts["foo/biz"]["DEFINES"], {"ALL": True, "FOO": True})
         self.assertEqual(contexts["bar"]["DEFINES"], {"ALL": True, "BAR_ONLY": True})
 
+    def test_locale_pp_defines(self):
+        reader = self.reader("locale-pp-defines")
+
+        contexts = list(reader.read_topsrcdir())
+        self.assertEqual(len(contexts), 1)
+
+        locale_pp_defines = contexts[0]["LOCALE_PP_DEFINES"]
+        self.assertEqual(
+            locale_pp_defines,
+            {
+                "ANDROID_MARKETPLACE_AB_CD": {
+                    "es*": "es-ES",
+                    "es-MX": "es-MX",
+                    "fr": "fr",
+                },
+            },
+        )
+
+    def test_source_headers(self):
+        reader = self.reader("reader-source-headers")
+        contexts = list(reader.read_topsrcdir())
+        self.assertEqual(len(contexts), 1)
+
+        source_headers = contexts[0]["SOURCE_HEADERS"]
+        self.assertEqual(source_headers, ["header.h", "exported.h", "installed.h"])
+
+        reader = self.reader("reader-source-headers-duplicate")
+        with self.assertRaises(BuildReaderError) as e:
+            contexts = list(reader.read_topsrcdir())
+        self.assertIn(
+            "SOURCE_HEADERS lists header.h which is already listed in EXPORTS",
+            str(e.exception),
+        )
+
 
 if __name__ == "__main__":
     main()

@@ -32,6 +32,8 @@
 // continue to the TLS connection.
 
 #include "TLSClientAuthCertSelection.h"
+
+#include "NSSCertDBTrustDomain.h"
 #include "cert_storage/src/cert_storage.h"
 #include "mozilla/Logging.h"
 #include "mozilla/dom/BrowsingContext.h"
@@ -42,18 +44,17 @@
 #include "mozilla/net/SocketProcessBackgroundChild.h"
 #include "mozilla/psm/SelectTLSClientAuthCertChild.h"
 #include "mozilla/psm/SelectTLSClientAuthCertParent.h"
-#include "nsArray.h"
-#include "nsArrayUtils.h"
-#include "nsNSSComponent.h"
-#include "nsIClientAuthDialogService.h"
-#include "nsIMutableArray.h"
-#include "nsINSSComponent.h"
-#include "NSSCertDBTrustDomain.h"
-#include "nsIClientAuthRememberService.h"
-#include "nsIX509CertDB.h"
+#include "mozpkix/pkix.h"
 #include "mozpkix/pkixnss.h"
 #include "mozpkix/pkixutil.h"
-#include "mozpkix/pkix.h"
+#include "nsArray.h"
+#include "nsArrayUtils.h"
+#include "nsIClientAuthDialogService.h"
+#include "nsIClientAuthRememberService.h"
+#include "nsIMutableArray.h"
+#include "nsINSSComponent.h"
+#include "nsIX509CertDB.h"
+#include "nsNSSComponent.h"
 #include "secerr.h"
 #include "sslerr.h"
 
@@ -351,6 +352,7 @@ mozilla::pkix::Result ClientAuthCertNonverifyingTrustDomain::FindIssuer(
 
   SECItem encodedIssuerNameItem =
       pkix::UnsafeMapInputToSECItem(encodedIssuerName);
+  AutoSearchingForCertificates _;
   // NSS seems not to differentiate between "no potential issuers found" and
   // "there was an error trying to retrieve the potential issuers." We assume
   // there was no error if CERT_CreateSubjectCertList returns nullptr.

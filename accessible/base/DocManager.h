@@ -6,12 +6,12 @@
 #define mozilla_a11_DocManager_h_
 
 #include "mozilla/ClearOnShutdown.h"
-#include "nsIDOMEventListener.h"
-#include "nsRefPtrHashtable.h"
-#include "nsIWebProgressListener.h"
-#include "nsWeakReference.h"
 #include "mozilla/StaticPtr.h"
+#include "nsIDOMEventListener.h"
 #include "nsINode.h"
+#include "nsIWebProgressListener.h"
+#include "nsRefPtrHashtable.h"
+#include "nsWeakReference.h"
 
 namespace mozilla::dom {
 class Document;
@@ -111,9 +111,7 @@ class DocManager : public nsIWebProgressListener,
   bool IsProcessingRefreshDriverNotification() const;
 #endif
 
-#ifdef MOZ_ENABLE_SKIA_PDF
   static void NotifyOfPrintDocument(dom::Document* aDoc);
-#endif
 
  protected:
   DocManager();

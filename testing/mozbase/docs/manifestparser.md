@@ -291,7 +291,7 @@ that can be applied to the `TestManifest`. To do so, add the filter to `TestMani
 from manifestparser.filters import subsuite
 import mozinfo
 
-filters = [subsuite('devtools')]
+filters = [subsuite("devtools")]
 tests = manifest.active_tests(filters=filters, **mozinfo.info)
 ```
 
@@ -301,7 +301,6 @@ tests = manifest.active_tests(filters=filters, **mozinfo.info)
     :exclude-members: filterlist,InstanceFilter,DEFAULT_FILTERS
 ```
 
-% rstcheck: ignore-directives=autodata
 
 ```{eval-rst}
 .. autodata::  manifestparser.filters.DEFAULT_FILTERS
@@ -326,13 +325,15 @@ and add it:
 from manifestparser.expression import parse
 import mozinfo
 
+
 def timeout_if(tests, values):
     for test in tests:
-        if 'timeout-if' in test:
-            timeout, condition = test['timeout-if'].split(',', 1)
+        if "timeout-if" in test:
+            timeout, condition = test["timeout-if"].split(",", 1)
             if parse(condition, **values):
-                test['timeout'] = timeout
+                test["timeout"] = timeout
         yield test
+
 
 tests = manifest.active_tests(filters=[timeout_if], **mozinfo.info)
 ```

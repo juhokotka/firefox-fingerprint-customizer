@@ -756,15 +756,11 @@
     }
 
     set selected(val) {
-      if (val) {
-        this.setAttribute("selected", "true");
-      } else {
-        this.removeAttribute("selected");
-      }
+      this.toggleAttribute("selected", val);
 
       setTimeout(() => {
         const { AutoCompleteParent } = ChromeUtils.importESModule(
-          "resource://gre/actors/AutoCompleteParent.sys.mjs"
+          "moz-src:///toolkit/actors/AutoCompleteParent.sys.mjs"
         );
         const actor = AutoCompleteParent.getCurrentActor();
         actor?.previewAutoCompleteEntry();
@@ -772,7 +768,7 @@
     }
 
     get selected() {
-      return this.getAttribute("selected") == "true";
+      return this.hasAttribute("selected");
     }
   }
 

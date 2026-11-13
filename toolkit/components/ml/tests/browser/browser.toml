@@ -1,5 +1,11 @@
 [DEFAULT]
-prefs = ["browser.ml.modelHubRootUrl='chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/data'"]
+prefs = [
+  "browser.ml.modelHubRootUrl='chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/data'",
+  # Retire the serving process with its last generator, without an idle wait.
+  "browser.ml.hwinference.browser_idle_shutdown_grace_ms=0",
+  # The pref defaults on; tests opt into the HWInference path.
+  "browser.ml.llama.hwInference=false",
+]
 support-files = [
   "head.js",
   "shared-head.js",
@@ -8,9 +14,9 @@ support-files = [
 
 # Asserts best-onnx resolves to onnx-native; gated to platforms that bundle
 # the native onnxruntime (matches browser_ml_native.js skip-if).
+
 ["browser_ml_best_onnx.js"]
 skip-if = [
-  "arch == 'x86'",
   "asan",
   "debug",
   "os == 'android'",
@@ -20,9 +26,12 @@ skip-if = [
 
 # Simulates a missing native runtime via a worker stub and asserts the
 # fallback resolves to wasm onnx. Pair with the test above.
+
 ["browser_ml_best_onnx_fallback.js"]
 support-files = [
   "ml_best_onnx_fallback_stub.worker.mjs",
+  "ml_native_ort_unavailable_stub.worker.mjs",
+  "ml_native_ort_error_stub.worker.mjs",
 ]
 
 ["browser_ml_cache.js"]
@@ -31,11 +40,10 @@ support-files = [
 
 ["browser_ml_embeddings_generator.js"]
 
+["browser_ml_engine_creation_interceptor.js"]
+
 ["browser_ml_engine_e2e.js"]
-support-files = [
-  "ml_engine_e2e_backend_stub.worker.mjs",
-  "ml_engine_e2e_cancel_stub.worker.mjs",
-]
+support-files = ["ml_engine_e2e_cancel_stub.worker.mjs"]
 
 ["browser_ml_engine_lifetime.js"]
 
@@ -45,13 +53,25 @@ support-files = [
 
 ["browser_ml_engine_rs_hub.js"]
 
-["browser_ml_engine_security.js"]
+["browser_ml_hwinference_process.js"]
+
+["browser_ml_inference_session_error.js"]
+skip-if = [
+  "asan", # global onnxruntime env leaks its thread pool; trips leakcheck
+  "debug", # same
+  "os == 'android'",
+  "tsan",
+]
+support-files = [
+  "ml_inference_session_error_stub.worker.mjs",
+]
+
+["browser_ml_llama_cancel.js"]
 
 ["browser_ml_mock_llm_engine.js"]
 
 ["browser_ml_native.js"]
 skip-if = [
-  "arch == 'x86'",
   "asan",
   "debug",
   "os == 'android'",
@@ -59,11 +79,28 @@ skip-if = [
   "verify",
 ]
 
+["browser_ml_native_backend_error.js"]
+skip-if = [
+  "asan",
+  "debug",
+  "os == 'android'",
+  "verify",
+]
+
+["browser_ml_native_ort_availability.js"]
+support-files = [
+  "ml_native_ort_available_stub.worker.mjs",
+  "ml_native_ort_error_stub.worker.mjs",
+  "ml_native_ort_unavailable_stub.worker.mjs",
+]
+
 ["browser_ml_nlp_utils.js"]
 
 ["browser_ml_openai.js"]
 
 ["browser_ml_opfs.js"]
+
+["browser_ml_perf_test_utils.js"]
 
 ["browser_ml_pipeline.js"]
 
@@ -79,15 +116,23 @@ support-files = [
   "ml_telemetry_stub.worker.mjs",
 ]
 
+["browser_ml_textgeneration_concurrency.js"]
+
+["browser_ml_textgeneration_engine.js"]
+
+["browser_ml_textgeneration_markers.js"]
+
+["browser_ml_textgeneration_telemetry.js"]
+
+["browser_ml_textgenerator.js"]
+
 ["browser_ml_thompson_sample.js"]
 
 ["browser_ml_utf8_codepoint.js"]
 skip-if = [
-  "arch == 'x86'",
   "asan",
   "debug",
   "os == 'android'",
-  "tsan",
   "verify",
 ]
 

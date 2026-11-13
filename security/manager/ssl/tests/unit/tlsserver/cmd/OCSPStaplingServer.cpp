@@ -11,8 +11,9 @@
 // it. That is, when the server is all set up and ready to receive connections,
 // it will connect to a specified port and issue a simple HTTP request.
 
-#include <fstream>
 #include <stdio.h>
+
+#include <fstream>
 
 #include "OCSPCommon.h"
 #include "TLSServer.h"
@@ -157,7 +158,7 @@ ByteString ReadSCTList(const std::vector<const char*>& sctFilenames) {
 }
 
 int32_t DoSNISocketConfig(PRFileDesc* aFd, const SECItem* aSrvNameArr,
-                          uint32_t aSrvNameArrSize, void* aArg) {
+                          uint32_t aSrvNameArrSize, void* /*aArg*/) {
   const char* hostName = nullptr;
   OCSPResponseType ocspResponseType = ORTNone;
   const char* additionalCertName = nullptr;

@@ -20,6 +20,7 @@
 #include "vm/JSContext.h"
 #include "vm/JSFunction.h"
 #include "vm/JSObject.h"
+#include "vm/SymbolType.h"
 #include "vm/WrapperObject.h"
 
 #include "gc/Marking-inl.h"
@@ -184,13 +185,32 @@ void js::AutoEnterPolicy::recordLeave() {
   }
 }
 
+// A unique symbol used as a property key can be rewrapped into a zone-local
+// copy (see JS::Symbol::wrap) partway through a cross-compartment operation,
+// so the id AutoEnterPolicy recorded on entry may no longer be
+// pointer-identical to the id seen here. Treat two local symbols as the same
+// entered id if they share the same underlying shared symbol.
+static bool IsSameEnteredPolicyId(jsid enteredId, jsid id) {
+  if (enteredId == id) {
+    return true;
+  }
+
+  if (!enteredId.isSymbol() || !id.isSymbol()) {
+    return false;
+  }
+
+  JS::Symbol* enteredSymbol = UnwrapSymbol(enteredId.toSymbol());
+  JS::Symbol* symbol = UnwrapSymbol(id.toSymbol());
+  return enteredSymbol == symbol;
+}
+
 JS_PUBLIC_API void js::assertEnteredPolicy(JSContext* cx, JSObject* proxy,
                                            jsid id,
                                            BaseProxyHandler::Action act) {
   MOZ_ASSERT(proxy->is<ProxyObject>());
   MOZ_ASSERT(cx->enteredPolicy);
   MOZ_ASSERT(cx->enteredPolicy->enteredProxy->get() == proxy);
-  MOZ_ASSERT(cx->enteredPolicy->enteredId->get() == id);
+  MOZ_ASSERT(IsSameEnteredPolicyId(cx->enteredPolicy->enteredId->get(), id));
   MOZ_ASSERT(cx->enteredPolicy->enteredAction & act);
 }
 #endif
@@ -1000,7 +1020,16 @@ void ProxyObject::renew(const BaseProxyHandler* handler, const Value& priv) {
   MOZ_ASSERT(hasDynamicPrototype());
 
   setHandler(handler);
+
   setCrossCompartmentPrivate(priv);
+  // The post barrier may add a store buffer entry but since this may be called
+  // on a dying object we don't know if they will survive GC. Therefore we need
+  // to set a flag to ensure we clear out the nursery before doing any sweeping.
+  if (isTenured() && zone()->wasGCStarted() && priv.isGCThing() &&
+      !priv.toGCThing()->isTenured()) {
+    runtimeFromMainThread()->gc.storeBuffer().setMayHavePointersToDeadCells();
+  }
+
   for (size_t i = 0; i < numReservedSlots(); i++) {
     setReservedSlot(i, UndefinedValue());
   }

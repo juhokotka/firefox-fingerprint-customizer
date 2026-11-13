@@ -130,6 +130,7 @@
   MACRO(Async, "'async'")                                              \
   MACRO(Await, "'await'")                                              \
   MACRO(Each, "'each'")                                                \
+  MACRO(Defer, "'defer'")                                              \
   MACRO(From, "'from'")                                                \
   MACRO(Get, "'get'")                                                  \
   MACRO(Let, "'let'")                                                  \
@@ -139,7 +140,7 @@
   MACRO(Static, "'static'")                                            \
   MACRO(Source, "'source'")                                            \
   MACRO(Target, "'target'")                                            \
-  IF_EXPLICIT_RESOURCE_MANAGEMENT(MACRO(Using, "'using'"))             \
+  MACRO(Using, "'using'")                                              \
   MACRO(Yield, "'yield'")                                              \
   RANGE(ContextualKeywordLast, Yield)                                  \
                                                                        \

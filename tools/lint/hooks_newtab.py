@@ -12,7 +12,6 @@
 # Configure tests (optional, default is none):
 #   git config newtab.pre-commit.tests none       # skip tests (default)
 #   git config newtab.pre-commit.tests jest       # Jest only (~30s)
-#   git config newtab.pre-commit.tests jest-karma # Jest + Karma/Enzyme (~3-5min)
 #   git config newtab.pre-commit.tests all        # all tests including xpcshell and browser (10+ min)
 
 # Runs three checks in order, stopping at the first failure:
@@ -36,8 +35,6 @@ topsrcdir = os.path.join(here, os.pardir, os.pardir)
 
 NEWTAB_SRC = "browser/extensions/newtab/content-src"
 BUNDLE_FILES = [
-    "browser/extensions/newtab/data/content/activity-stream.bundle.js",
-    "browser/extensions/newtab/css/activity-stream.css",
     "browser/extensions/newtab/prerendered/activity-stream.html",
 ]
 
@@ -107,7 +104,13 @@ def run_tests(python):
 
     if test_level == "none":
         return 0
-    elif test_level == "jest":
+    elif test_level in ("jest", "jest-karma"):
+        if test_level == "jest-karma":
+            print(
+                "[newtab hook] Karma has been removed, so 'jest-karma' now runs "
+                "Jest only. Run `git config newtab.pre-commit.tests jest` to "
+                "update your setting."
+            )
         print("[newtab hook] Running Jest tests...")
         return run_process(
             mach
@@ -119,9 +122,6 @@ def run_tests(python):
                 "--testPathPattern=test/jest",
             ]
         )
-    elif test_level == "jest-karma":
-        print("[newtab hook] Running Jest + Karma tests...")
-        return run_process(mach + ["npm", "test", "--prefix=browser/extensions/newtab"])
     elif test_level == "all":
         print("[newtab hook] Running all newtab tests...")
         for cmd in [
@@ -137,7 +137,7 @@ def run_tests(python):
         print(
             f"[newtab hook] Warning: Unknown test level '{test_level}'. Skipping tests."
         )
-        print("[newtab hook] Valid values: none, jest, jest-karma, all")
+        print("[newtab hook] Valid values: none, jest, all")
         return 0
 
 

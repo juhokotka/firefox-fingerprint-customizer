@@ -90,6 +90,14 @@ void MacroAssembler::andPtr(Imm32 imm, Register src, Register dest) {
   ma_and(dest, src, imm);
 }
 
+void MacroAssembler::andPtr(Imm32 imm, const Address& dest) {
+  UseScratchRegisterScope temps(*this);
+  Register scratch2 = temps.Acquire();
+  loadPtr(dest, scratch2);
+  ma_and(scratch2, imm);
+  storePtr(scratch2, dest);
+}
+
 void MacroAssembler::and64(Imm64 imm, Register64 dest) {
   UseScratchRegisterScope temps(*this);
   Register scratch = temps.Acquire();
@@ -359,6 +367,11 @@ void MacroAssembler::lshift64(Imm32 imm, Register64 dest) {
   ma_dsll(dest.reg, dest.reg, imm);
 }
 
+void MacroAssembler::lshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  ma_dsll(dest.reg, src.reg, imm);
+}
+
 void MacroAssembler::lshift64(Register shift, Register64 dest) {
   ma_dsll(dest.reg, dest.reg, shift);
 }
@@ -379,6 +392,11 @@ void MacroAssembler::rshiftPtr(Register shift, Register dest) {
 void MacroAssembler::rshift64(Imm32 imm, Register64 dest) {
   MOZ_ASSERT(0 <= imm.value && imm.value < 64);
   ma_dsrl(dest.reg, dest.reg, imm);
+}
+
+void MacroAssembler::rshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  ma_dsrl(dest.reg, src.reg, imm);
 }
 
 void MacroAssembler::rshift64(Register shift, Register64 dest) {
@@ -402,6 +420,12 @@ void MacroAssembler::rshiftPtrArithmetic(Register shift, Register dest) {
 void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 dest) {
   MOZ_ASSERT(0 <= imm.value && imm.value < 64);
   ma_dsra(dest.reg, dest.reg, imm);
+}
+
+void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 src,
+                                        Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  ma_dsra(dest.reg, src.reg, imm);
 }
 
 void MacroAssembler::rshift64Arithmetic(Register shift, Register64 dest) {
@@ -443,6 +467,37 @@ void MacroAssembler::rotateRight64(Register count, Register64 src,
                                    Register64 dest, Register temp) {
   MOZ_ASSERT(temp == InvalidReg);
   ma_dror(dest.reg, src.reg, count);
+}
+
+// ===============================================================
+// Shift or rotate, then combine with another register
+
+void MacroAssembler::lshift32ThenAdd(Imm32 shift, Register rhs,
+                                     Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  lshift32(shift, srcDest);
+  add32(rhs, srcDest);
+}
+
+void MacroAssembler::lshift32ThenOr(Imm32 shift, Register rhs,
+                                    Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  lshift32(shift, srcDest);
+  or32(rhs, srcDest);
+}
+
+void MacroAssembler::rshiftPtrThenXor(Imm32 shift, Register rhs,
+                                      Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  rshiftPtr(shift, srcDest);
+  xorPtr(rhs, srcDest);
+}
+
+void MacroAssembler::rotateLeft64ThenXor(Imm32 count, Register64 rhs,
+                                         Register64 srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  rotateLeft64(count, srcDest, srcDest, InvalidReg);
+  xor64(rhs, srcDest);
 }
 
 // ===============================================================

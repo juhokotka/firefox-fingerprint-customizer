@@ -79,6 +79,9 @@ terms:
 | profilerstacks      | Profiler | When profiling with the Firefox Profiler and log modules are enabled, capture the callstack for each log statement.                                                                                                 |
 | jsstacks            | Any      | Enables logging JavaScript stack traces when logging JavaScript console messages. (this may be extended outside of only console messages)                                                                           |
 
+For `rotate` and `maxsize`, **N** is clamped to 2047 MB, and 0 or a negative
+value disables the option.
+
 This syntax is used for most methods of enabling logging.
 
 ### Enabling Logging
@@ -440,7 +443,7 @@ Any call made to a `console` API from JavaScript will be logged through the
   `prefix` value will be used as the MOZ_LOG module name.
 
 More info about `console.createInstance` is available on the
-[JavaScript Logging page](/toolkit/javascript-logging.html)
+[JavaScript Logging page](/toolkit/javascript-logging.md)
 
 When using the `console` API, the console methods calls will be visible
 in the Developer Tools, as well as through MOZ_LOG stdout, file or profiler

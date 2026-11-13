@@ -6,15 +6,15 @@
 #include "nsClipboardHelper.h"
 
 // basics
-#include "nsComponentManagerUtils.h"
 #include "nsCOMPtr.h"
-#include "nsXPCOM.h"
+#include "nsComponentManagerUtils.h"
 #include "nsISupportsPrimitives.h"
 #include "nsServiceManagerUtils.h"
+#include "nsXPCOM.h"
 
 // helpers
-#include "nsIClipboard.h"
 #include "mozilla/dom/Document.h"
+#include "nsIClipboard.h"
 #include "nsITransferable.h"
 #include "nsReadableUtils.h"
 
@@ -106,6 +106,8 @@ nsClipboardHelper::CopyString(
   // copy to the global clipboard. it's bad if this fails in any way.
   rv = CopyStringToClipboard(aString, nsIClipboard::kGlobalClipboard,
                              aSettingWindowContext, aSensitive);
+  // Note that a copy denied by content analysis does not surface here: in the
+  // parent process the check is asynchronous.
   NS_ENSURE_SUCCESS(rv, rv);
 
   // unix also needs us to copy to the selection clipboard. this will

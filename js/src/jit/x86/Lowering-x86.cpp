@@ -46,8 +46,7 @@ void LIRGenerator::visitBox(MBox* box) {
   if (IsFloatingPointType(inner->type())) {
     LDefinition spectreTemp =
         JitOptions.spectreValueMasking ? temp() : LDefinition::BogusTemp();
-    defineBox(new (alloc()) LBoxFloatingPoint(useRegisterAtStart(inner),
-                                              tempCopy(inner, 0), spectreTemp,
+    defineBox(new (alloc()) LBoxFloatingPoint(useRegister(inner), spectreTemp,
                                               inner->type()),
               box);
     return;
@@ -128,16 +127,6 @@ void LIRGenerator::visitUnbox(MUnbox* unbox) {
   } else {
     define(lir, unbox);
   }
-}
-
-void LIRGenerator::visitReturnImpl(MDefinition* opd, bool isGenerator) {
-  MOZ_ASSERT(opd->type() == MIRType::Value);
-
-  LReturn* ins = new (alloc()) LReturn(isGenerator);
-  ins->setOperand(0, LUse(JSReturnReg_Type));
-  ins->setOperand(1, LUse(JSReturnReg_Data));
-  fillBoxUses(ins, 0, opd);
-  add(ins);
 }
 
 void LIRGeneratorX86::lowerUntypedPhiInput(MPhi* phi, uint32_t inputPosition,
@@ -361,20 +350,6 @@ void LIRGeneratorX86::lowerAtomicStore64(MStoreUnboxedScalar* ins) {
   add(new (alloc()) LAtomicStore64(elements, index, value, temp), ins);
 }
 
-void LIRGenerator::visitWasmUnsignedToDouble(MWasmUnsignedToDouble* ins) {
-  MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
-  LWasmUint32ToDouble* lir = new (alloc())
-      LWasmUint32ToDouble(useRegisterAtStart(ins->input()), temp());
-  define(lir, ins);
-}
-
-void LIRGenerator::visitWasmUnsignedToFloat32(MWasmUnsignedToFloat32* ins) {
-  MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
-  LWasmUint32ToFloat32* lir = new (alloc())
-      LWasmUint32ToFloat32(useRegisterAtStart(ins->input()), temp());
-  define(lir, ins);
-}
-
 // If the base is a constant, and it is zero or its offset is zero, then
 // code generation will fold the values into the access.  Allocate the
 // pointer to a register only if that can't happen.
@@ -497,7 +472,7 @@ void LIRGenerator::visitWasmStore(MWasmStore* ins) {
       }
       break;
     case Scalar::Simd128:
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
       valueAlloc = useRegisterAtStart(ins->value());
       break;
 #else

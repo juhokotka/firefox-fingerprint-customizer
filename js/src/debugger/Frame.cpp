@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "debugger/Frame-inl.h"
-
 #include "mozilla/Assertions.h"  // for MOZ_ASSERT, MOZ_ASSERT_IF, MOZ_CRASH
 #include "mozilla/HashTable.h"   // for HashMapEntry
 #include "mozilla/Maybe.h"       // for Maybe
@@ -73,7 +71,8 @@
 #include "wasm/WasmJS.h"           // for WasmInstanceObject
 #include "wasm/WasmStacks.h"       // for wasm::ContStack
 
-#include "debugger/Debugger-inl.h"    // for Debugger::fromJSObject
+#include "debugger/Debugger-inl.h"  // for Debugger::fromJSObject
+#include "debugger/Frame-inl.h"
 #include "gc/WeakMap-inl.h"           // for WeakMap::remove
 #include "vm/Compartment-inl.h"       // for Compartment::wrap
 #include "vm/JSContext-inl.h"         // for JSContext::check
@@ -387,7 +386,7 @@ bool DebuggerFrame::setGeneratorInfo(JSContext* cx,
   //
   // 2) The generator's script's observer count must be bumped.
 
-  RootedScript script(cx, genObj->callee().nonLazyScript());
+  RootedScript script(cx, genObj->script());
   Rooted<UniquePtr<GeneratorInfo>> info(
       cx, cx->make_unique<GeneratorInfo>(genObj, script));
   if (!info) {
@@ -505,8 +504,10 @@ bool DebuggerFrame::getCallee(JSContext* cx, Handle<DebuggerFrame*> frame,
     }
   } else {
     MOZ_ASSERT(frame->isSuspendedGeneratorFrame());
-
-    callee = &frame->generatorInfo()->unwrappedGenerator().callee();
+    AbstractGeneratorObject& gen = frame->generatorInfo()->unwrappedGenerator();
+    if (!gen.isModuleGenerator()) {
+      callee = &gen.callee();
+    }
   }
 
   return frame->owner()->wrapNullableDebuggeeObject(cx, callee, result);
@@ -991,9 +992,8 @@ static WithEnvironmentObject* CreateBindingsEnv(
   JS::Rooted<JS::Value> val(cx);
   for (size_t i = 0; i < bindingKeys.length(); i++) {
     id = bindingKeys[i];
-    cx->markId(id);
     val = bindingValues[i];
-    if (!cx->compartment()->wrap(cx, &val) ||
+    if (!cx->wrapOrRecordRefToId(&id) || !cx->compartment()->wrap(cx, &val) ||
         !NativeDefineDataProperty(cx, bindingsObj, id, val, 0)) {
       return nullptr;
     }
@@ -1112,6 +1112,9 @@ static bool EvaluateInEnv(
       break;
     }
     case EvalOptions::EnvKind::Global: {
+      options.setAllowRedeclaringExistingLexicalBinding(
+          evalOptions.allowRedeclaringExistingLexicalBinding());
+
       AutoReportFrontendContext fc(cx);
       script = frontend::CompileGlobalScript(cx, &fc, options, srcBuf,
                                              ScopeKind::Global);
@@ -1131,7 +1134,9 @@ static bool EvaluateInEnv(
 
       MOZ_ASSERT(envArg == &cx->global()->lexicalEnvironment());
 
-      options.setNonSyntacticScope(true);
+      options.setNonSyntacticScope(true)
+          .setAllowRedeclaringExistingLexicalBinding(
+              evalOptions.allowRedeclaringExistingLexicalBinding());
 
       AutoReportFrontendContext fc(cx);
       script = frontend::CompileGlobalScriptWithExtraBindings(

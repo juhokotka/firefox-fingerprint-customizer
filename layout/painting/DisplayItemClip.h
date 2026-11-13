@@ -6,6 +6,7 @@
 #define DISPLAYITEMCLIP_H_
 
 #include "mozilla/AlreadyAddRefed.h"
+#include "nsMargin.h"
 #include "nsRect.h"
 #include "nsTArray.h"
 
@@ -45,6 +46,13 @@ class DisplayItemClip {
     // Indices into mRadii are the HalfCorner values in gfx/2d/Types.h
     nsRectCornerRadii mRadii;
 
+    // This is here to keep track of how much the rounded rect was
+    // inflated or shrunk relative to its reference frame. It is
+    // necessary for the correct computation of contoured superellipses
+    // used by CSS corner-shape (see bug 2058091).
+    // Spec: https://drafts.csswg.org/css-borders/#contour-path
+    nsMargin mInset;
+
     RoundedRect operator+(const nsPoint& aOffset) const {
       RoundedRect r = *this;
       r.mRect += aOffset;
@@ -59,16 +67,14 @@ class DisplayItemClip {
       }
       return true;
     }
-    bool operator!=(const RoundedRect& aOther) const {
-      return !(*this == aOther);
-    }
   };
 
   // Constructs a DisplayItemClip that does no clipping at all.
   DisplayItemClip() : mHaveClipRect(false) {}
 
   void SetTo(const nsRect& aRect);
-  void SetTo(const nsRect& aRect, const nsRectCornerRadii* aRadii);
+  void SetTo(const nsRect& aRect, const nsRectCornerRadii* aRadii,
+             const nsMargin* aInset = nullptr);
   void SetTo(const nsRect& aRect, const nsRect& aRoundedRect,
              const nsRectCornerRadii* aRadii);
   void IntersectWith(const DisplayItemClip& aOther);
@@ -150,9 +156,6 @@ class DisplayItemClip {
     return mHaveClipRect == aOther.mHaveClipRect &&
            (!mHaveClipRect || mClipRect.IsEqualInterior(aOther.mClipRect)) &&
            mRoundedClipRects == aOther.mRoundedClipRects;
-  }
-  bool operator!=(const DisplayItemClip& aOther) const {
-    return !(*this == aOther);
   }
 
   bool HasClip() const { return mHaveClipRect; }

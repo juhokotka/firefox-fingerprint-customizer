@@ -46,6 +46,34 @@ except Exception:
 BUILD_LOG_SUBDIR = os.path.join("logs", "build")
 
 
+def split_job_flags(make_flags):
+    num_jobs = 0
+    other_flags = []
+    expect_job_count = False
+
+    for flag in make_flags or []:
+        if expect_job_count:
+            expect_job_count = False
+            try:
+                num_jobs = int(flag)
+                continue
+            except ValueError:
+                pass
+
+        if flag == "-j":
+            num_jobs = 0
+            expect_job_count = True
+        elif flag.startswith("-j"):
+            try:
+                num_jobs = int(flag[2:])
+            except ValueError:
+                pass
+        else:
+            other_flags.append(flag)
+
+    return num_jobs, other_flags
+
+
 class BadEnvironmentException(Exception):
     """Base class for errors raised when the build environment is not sane."""
 
@@ -268,6 +296,27 @@ class MozbuildObject(ProcessExecutionMixin):
 
         dep_file = "%s.in" % backend_file
         return self.build_out_of_date(backend_file, dep_file)
+
+    def ensure_backend_current(self):
+        backends = self.substs.get("BUILD_BACKENDS", [])
+        if not any(
+            self.backend_out_of_date(
+                mozpath.join(self.topobjdir, f"backend.{backend}Backend")
+            )
+            for backend in backends
+        ):
+            return
+        self.log(
+            logging.INFO,
+            "build_output",
+            {},
+            "Build configuration changed. Regenerating backend.",
+        )
+        self.run_process(
+            [self.substs["PYTHON3"], mozpath.join(self.topobjdir, "config.status")],
+            cwd=self.topobjdir,
+            pass_thru=True,
+        )
 
     @property
     def topobjdir(self):
@@ -751,6 +800,42 @@ class MozbuildObject(ProcessExecutionMixin):
     def _wrap_path_argument(self, arg):
         return PathArgument(arg, self.topsrcdir, self.topobjdir)
 
+    def resolve_num_jobs(self, num_jobs=0, job_size=0):
+        if num_jobs == 0:
+            for param in self.mozconfig["make_extra"] or []:
+                key, value = param.split("=", 1)
+                if key == "MOZ_PARALLEL_BUILD":
+                    num_jobs = int(value)
+
+        if num_jobs == 0:
+            num_jobs, _ = split_job_flags(self.mozconfig["make_flags"])
+
+        if num_jobs == 0:
+            if job_size == 0:
+                job_size = 2.0 if self.substs.get("CC_TYPE") == "gcc" else 1.0  # GiB
+
+            cpus = cpu_count()
+            if not psutil or not job_size:
+                num_jobs = cpus
+            else:
+                mem_gb = psutil.virtual_memory().total / 1024**3
+                from_mem = round(mem_gb / job_size)
+                num_jobs = max(1, min(cpus, from_mem))
+                self.log(
+                    logging.INFO,
+                    "parallelism",
+                    {
+                        "jobs": num_jobs,
+                        "cores": cpus,
+                        "mem_gb": f"{mem_gb:.1f}",
+                        "job_size": f"{job_size:.1f}",
+                    },
+                    "Parallelism determined by memory: using {jobs} jobs for {cores} cores "
+                    "based on {mem_gb} GiB RAM and estimated job size of {job_size} GiB",
+                )
+
+        return num_jobs
+
     def _run_make(
         self,
         directory=None,
@@ -794,50 +879,10 @@ class MozbuildObject(ProcessExecutionMixin):
         if filename:
             args.extend(["-f", filename])
 
-        if num_jobs == 0 and self.mozconfig["make_flags"]:
-            flags = iter(self.mozconfig["make_flags"])
-            for flag in flags:
-                if flag == "-j":
-                    try:
-                        flag = flags.next()
-                    except StopIteration:
-                        break
-                    try:
-                        num_jobs = int(flag)
-                    except ValueError:
-                        args.append(flag)
-                elif flag.startswith("-j"):
-                    try:
-                        num_jobs = int(flag[2:])
-                    except (ValueError, IndexError):
-                        break
-                else:
-                    args.append(flag)
+        _, extra_flags = split_job_flags(self.mozconfig["make_flags"])
+        args.extend(extra_flags)
 
-        if num_jobs == 0:
-            if job_size == 0:
-                job_size = 2.0 if self.substs.get("CC_TYPE") == "gcc" else 1.0  # GiB
-
-            cpus = cpu_count()
-            if not psutil or not job_size:
-                num_jobs = cpus
-            else:
-                mem_gb = psutil.virtual_memory().total / 1024**3
-                from_mem = round(mem_gb / job_size)
-                num_jobs = max(1, min(cpus, from_mem))
-                self.log(
-                    logging.INFO,
-                    "parallelism",
-                    {
-                        "jobs": num_jobs,
-                        "cores": cpus,
-                        "mem_gb": f"{mem_gb:.1f}",
-                        "job_size": f"{job_size:.1f}",
-                    },
-                    "Parallelism determined by memory: using {jobs} jobs for {cores} cores "
-                    "based on {mem_gb} GiB RAM and estimated job size of {job_size} GiB",
-                )
-
+        num_jobs = self.resolve_num_jobs(num_jobs, job_size)
         args.append("-j%d" % num_jobs)
 
         if ignore_errors:
@@ -1011,17 +1056,19 @@ class MachCommandBase(MozbuildObject):
 
         # Keep a per-command log in logs/{command}/, and track the latest command
         # in latest-command. Don't do that for mach invocations from scripts
-        # (especially not the ones done by the build system itself).
+        # (especially not the ones done by the build system itself). Agents pipe
+        # stdout, and bug 2009215 quiets their output, so always log for them.
         try:
             fileno = getattr(sys.stdout, "fileno", lambda: None)()
         except io.UnsupportedOperation:
             fileno = None
         handler = getattr(context, "handler", None)
-        if fileno and os.isatty(fileno) and not no_auto_log and handler:
+        use_text_log = is_running_under_coding_agent()
+        interactive = bool(fileno) and os.isatty(fileno)
+        if (use_text_log or interactive) and not no_auto_log and handler:
             command_name = handler.name
             subdir = os.path.join("logs", command_name)
             self._ensure_state_subdir_exists(subdir)
-            use_text_log = is_running_under_coding_agent()
             suffix = ".log" if use_text_log else ".json"
             self.logfile = self._get_state_filename(
                 construct_log_filename(command_name, suffix=suffix), subdir=subdir

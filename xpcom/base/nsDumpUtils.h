@@ -5,13 +5,13 @@
 #ifndef mozilla_nsDumpUtils_h
 #define mozilla_nsDumpUtils_h
 
-#include "nsIObserver.h"
 #include "base/message_loop.h"
-#include "nsXULAppAPI.h"
-#include "nsThreadUtils.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/StaticPtr.h"
+#include "nsIObserver.h"
 #include "nsTArray.h"
+#include "nsThreadUtils.h"
+#include "nsXULAppAPI.h"
 
 #ifdef LOG
 #  undef LOG
@@ -74,8 +74,8 @@ class FdWatcher : public MessageLoopForIO::Watcher, public nsIObserver {
   // course call StopWatching() multiple times.
   virtual void StopWatching();
 
-  NS_IMETHOD Observe(nsISupports* aSubject, const char* aTopic,
-                     const char16_t* aData) override {
+  NS_IMETHOD Observe(nsISupports* /*aSubject*/, const char* aTopic,
+                     const char16_t* /*aData*/) override {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(!strcmp(aTopic, "xpcom-shutdown"));
 

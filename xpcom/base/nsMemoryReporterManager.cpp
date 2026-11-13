@@ -4,39 +4,39 @@
 
 #include "nsMemoryReporterManager.h"
 
+#include "GeckoProfilerReporter.h"
 #include "nsAtomTable.h"
-#include "nsCOMPtr.h"
 #include "nsCOMArray.h"
+#include "nsCOMPtr.h"
+#include "nsIGlobalObject.h"
+#include "nsIOService.h"
+#include "nsIObserverService.h"
+#include "nsITimer.h"
+#include "nsIXPConnect.h"
+#include "nsPIDOMWindow.h"
 #include "nsPrintfCString.h"
 #include "nsProxyRelease.h"
 #include "nsServiceManagerUtils.h"
-#include "nsITimer.h"
 #include "nsThreadManager.h"
 #include "nsThreadUtils.h"
-#include "nsPIDOMWindow.h"
-#include "nsIObserverService.h"
-#include "nsIOService.h"
-#include "nsIGlobalObject.h"
-#include "nsIXPConnect.h"
-#include "GeckoProfilerReporter.h"
 #if defined(XP_UNIX) || defined(MOZ_DMD)
 #  include "nsMemoryInfoDumper.h"
 #endif
-#include "nsNetCID.h"
-#include "nsThread.h"
 #include "VRProcessManager.h"
 #include "mozilla/MemoryReportingProcess.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/StaticPrefs_memory.h"
 #include "mozilla/RDDProcessManager.h"
 #include "mozilla/Services.h"
-#include "mozilla/glean/XpcomMetrics.h"
+#include "mozilla/StaticPrefs_memory.h"
 #include "mozilla/UniquePtrExtensions.h"
-#include "mozilla/dom/MemoryReportTypes.h"
 #include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/MemoryReportTypes.h"
 #include "mozilla/gfx/GPUProcessManager.h"
-#include "mozilla/ipc/UtilityProcessManager.h"
+#include "mozilla/glean/XpcomMetrics.h"
 #include "mozilla/ipc/FileDescriptorUtils.h"
+#include "mozilla/ipc/UtilityProcessManager.h"
+#include "nsNetCID.h"
+#include "nsThread.h"
 #ifdef MOZ_PHC
 #  include "PHC.h"
 #endif
@@ -47,9 +47,9 @@
 #endif
 
 #ifdef XP_WIN
-#  include "mozilla/MemoryInfo.h"
-
 #  include <process.h>
+
+#  include "mozilla/MemoryInfo.h"
 #  ifndef getpid
 #    define getpid _getpid
 #  endif
@@ -63,11 +63,11 @@ using namespace dom;
 
 #if defined(XP_LINUX)
 
-#  include "mozilla/MemoryMapping.h"
-
 #  include <malloc.h>
-#  include <string.h>
 #  include <stdlib.h>
+#  include <string.h>
+
+#  include "mozilla/MemoryMapping.h"
 
 [[nodiscard]] static nsresult GetProcSelfStatmField(int aField, int64_t* aN) {
   // There are more than two fields, but we're only interested in the first
@@ -122,7 +122,35 @@ using namespace dom;
 #  define HAVE_RESIDENT_UNIQUE_REPORTER 1
 [[nodiscard]] static nsresult ResidentUniqueDistinguishedAmount(
     int64_t* aN, pid_t aPid = 0) {
-  return GetProcSelfSmapsPrivate(aN, aPid);
+  FILE* f =
+      aPid == 0
+          ? fopen("/proc/self/smaps_rollup", "r")
+          : fopen(nsPrintfCString("/proc/%d/smaps_rollup", aPid).get(), "r");
+  if (!f) {
+    // smaps_rollup is only available since Linux 4.14.
+    return GetProcSelfSmapsPrivate(aN, aPid);
+  }
+
+  size_t privateClean = 0;
+  size_t privateDirty = 0;
+  bool havePrivateClean = false;
+  bool havePrivateDirty = false;
+  char line[256];
+  while (fgets(line, sizeof(line), f)) {
+    if (sscanf(line, "Private_Clean: %zu kB", &privateClean) == 1) {
+      havePrivateClean = true;
+    } else if (sscanf(line, "Private_Dirty: %zu kB", &privateDirty) == 1) {
+      havePrivateDirty = true;
+    }
+  }
+  bool readFailed = ferror(f);
+  fclose(f);
+
+  if (readFailed || !havePrivateClean || !havePrivateDirty) {
+    return NS_ERROR_FAILURE;
+  }
+  *aN = int64_t(privateClean + privateDirty) * 1024;
+  return NS_OK;
 }
 
 #  ifdef HAVE_MALLINFO
@@ -232,6 +260,7 @@ using namespace dom;
 
 #  ifdef __FreeBSD__
 #    include <libutil.h>
+
 #    include <algorithm>
 
 [[nodiscard]] static nsresult GetKinfoVmentrySelf(int64_t* aPrss,
@@ -286,8 +315,8 @@ using namespace dom;
 
 #elif defined(SOLARIS)
 
-#  include <procfs.h>
 #  include <fcntl.h>
+#  include <procfs.h>
 #  include <unistd.h>
 
 static void XMappingIter(int64_t& aVsize, int64_t& aResident,
@@ -574,8 +603,9 @@ static bool InSharedRegion(mach_vm_address_t aAddr, cpu_type_t aType) {
 
 #elif defined(XP_WIN)
 
-#  include <windows.h>
 #  include <psapi.h>
+#  include <windows.h>
+
 #  include <algorithm>
 
 #  include "nsTHashMap.h"
@@ -742,10 +772,7 @@ struct SegmentKind {
     return mozilla::HashGeneric(mState, mType, mProtect, mIsStack);
   }
 
-  bool operator==(const SegmentKind& aOther) const {
-    return mState == aOther.mState && mType == aOther.mType &&
-           mProtect == aOther.mProtect && mIsStack == aOther.mIsStack;
-  }
+  bool operator==(const SegmentKind& aOther) const = default;
 };
 
 struct SegmentStats {
@@ -754,7 +781,7 @@ struct SegmentStats {
 };
 
 class WindowsAddressSpaceReporter final : public nsIMemoryReporter {
-  ~WindowsAddressSpaceReporter() {}
+  ~WindowsAddressSpaceReporter() = default;
 
  public:
   NS_DECL_ISUPPORTS
@@ -924,7 +951,7 @@ NS_IMPL_ISUPPORTS(WindowsAddressSpaceReporter, nsIMemoryReporter)
 
 #ifdef HAVE_VSIZE_MAX_CONTIGUOUS_REPORTER
 class VsizeMaxContiguousReporter final : public nsIMemoryReporter {
-  ~VsizeMaxContiguousReporter() {}
+  ~VsizeMaxContiguousReporter() = default;
 
  public:
   NS_DECL_ISUPPORTS
@@ -945,7 +972,7 @@ NS_IMPL_ISUPPORTS(VsizeMaxContiguousReporter, nsIMemoryReporter)
 
 #ifdef HAVE_PRIVATE_REPORTER
 class PrivateReporter final : public nsIMemoryReporter {
-  ~PrivateReporter() {}
+  ~PrivateReporter() = default;
 
  public:
   NS_DECL_ISUPPORTS
@@ -1089,6 +1116,8 @@ NS_IMPL_ISUPPORTS(SystemHeapReporter, nsIMemoryReporter)
 #ifdef XP_UNIX
 
 #  include <sys/resource.h>
+
+#  include <memory>
 
 #  define HAVE_RESIDENT_PEAK_REPORTER 1
 
@@ -2439,9 +2468,9 @@ nsMemoryReporterManager::BlockRegistrationAndHideExistingReporters() {
   mSavedStrongEternalReporters.swap(mStrongEternalReporters);
   mSavedStrongReporters.swap(mStrongReporters);
   mSavedWeakReporters.swap(mWeakReporters);
-  mStrongEternalReporters.reset(new StrongReportersArray());
-  mStrongReporters.reset(new StrongReportersTable());
-  mWeakReporters.reset(new WeakReportersTable());
+  mStrongEternalReporters = std::make_unique<StrongReportersArray>();
+  mStrongReporters = std::make_unique<StrongReportersTable>();
+  mWeakReporters = std::make_unique<WeakReportersTable>();
 
   return NS_OK;
 }

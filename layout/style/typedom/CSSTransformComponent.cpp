@@ -17,6 +17,7 @@
 #include "mozilla/dom/CSSSkewY.h"
 #include "mozilla/dom/CSSTransformComponentBinding.h"
 #include "mozilla/dom/CSSTranslate.h"
+#include "mozilla/dom/DOMMatrix.h"
 #include "nsCycleCollectionParticipant.h"
 
 namespace mozilla::dom {
@@ -50,11 +51,68 @@ JSObject* CSSTransformComponent::WrapObject(JSContext* aCx,
 // https://drafts.css-houdini.org/css-typed-om-1/#dom-csstransformcomponent-is2d
 bool CSSTransformComponent::Is2D() const { return mIs2D; }
 
-void CSSTransformComponent::SetIs2D(bool aArg) {}
+// https://drafts.css-houdini.org/css-typed-om-1/#dom-csstransformcomponent-is2d
+void CSSTransformComponent::SetIs2D(bool aArg) {
+  switch (GetTransformComponentType()) {
+    // https://drafts.css-houdini.org/css-typed-om-1/#dom-cssskew-is2d
+    case TransformComponentType::Skew:
+    case TransformComponentType::SkewX:
+    case TransformComponentType::SkewY:
+    // https://drafts.css-houdini.org/css-typed-om-1/#dom-cssperspective-is2d
+    case TransformComponentType::Perspective:
+      break;
 
+    default:
+      mIs2D = aArg;
+  }
+}
+
+// https://drafts.css-houdini.org/css-typed-om-1/#dom-csstransformcomponent-tomatrix
 already_AddRefed<DOMMatrix> CSSTransformComponent::ToMatrix(ErrorResult& aRv) {
-  aRv.Throw(NS_ERROR_NOT_INITIALIZED);
-  return nullptr;
+  // Step 1.
+  auto matrix = [this](ErrorResult& aRv) -> RefPtr<DOMMatrix> {
+    switch (GetTransformComponentType()) {
+      case TransformComponentType::Translate: {
+        return GetAsCSSTranslate().ToMatrix(aRv);
+      }
+
+      case TransformComponentType::Rotate: {
+        return GetAsCSSRotate().ToMatrix(aRv);
+      }
+
+      case TransformComponentType::Scale: {
+        return GetAsCSSScale().ToMatrix(aRv);
+      }
+
+      case TransformComponentType::Skew: {
+        return GetAsCSSSkew().ToMatrix(aRv);
+      }
+
+      case TransformComponentType::SkewX: {
+        return GetAsCSSSkewX().ToMatrix(aRv);
+      }
+
+      case TransformComponentType::SkewY: {
+        return GetAsCSSSkewY().ToMatrix(aRv);
+      }
+
+      case TransformComponentType::Perspective: {
+        return GetAsCSSPerspective().ToMatrix(aRv);
+      }
+
+      case TransformComponentType::MatrixComponent: {
+        return GetAsCSSMatrixComponent().ToMatrix(aRv);
+      }
+    }
+    MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("Bad type value!");
+  }(aRv);
+
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  // Step 2.
+  return matrix.forget();
 }
 
 void CSSTransformComponent::Stringify(nsACString& aRetVal) {

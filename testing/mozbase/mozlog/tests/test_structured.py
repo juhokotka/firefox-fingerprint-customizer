@@ -174,6 +174,24 @@ class TestStatusHandler(BaseStructuredTest):
         self.assertEqual(1, summary.action_counts["crash"])
         self.assertEqual(1, summary.expected_statuses["PASS"])
 
+    def test_quiet_crash_not_counted(self):
+        # A harness that asked for the dump itself (e.g. force-killing a test
+        # that timed out) logs the crash quietly; the timeout is the failure.
+        self.logger.suite_start([])
+        self.logger.test_start("test1")
+        self.logger.crash(
+            test="test1",
+            process=1234,
+            signature="test_signature",
+            minidump_path="/path/to/dump",
+            quiet=True,
+        )
+        self.logger.test_end("test1", "TIMEOUT", expected="TIMEOUT")
+        self.logger.suite_end()
+        summary = self.handler.summarize()
+        self.assertEqual(0, summary.action_counts.get("crash", 0))
+        self.assertEqual(1, summary.expected_statuses["TIMEOUT"])
+
 
 class TestSummaryHandler(BaseStructuredTest):
     def setUp(self):
@@ -690,6 +708,73 @@ class TestStructuredLog(BaseStructuredTest):
         log1.shutdown()
         with self.assertRaises(structuredlog.LoggerShutdownError):
             log2.info("line 3")
+
+    def test_assertion_failure(self):
+        stack = [{"function": "f", "file": "a.cpp", "line": 1}]
+        self.logger.assertion_failure(
+            "NS_ASSERTION",
+            "boom: 'expr'",
+            file="a.cpp",
+            lineno=1,
+            pid=42,
+            process_type="Parent",
+            thread="Main Thread",
+            stack=stack,
+            test="test1",
+        )
+        self.assert_log_equals({
+            "action": "assertion_failure",
+            "kind": "NS_ASSERTION",
+            "message": "boom: 'expr'",
+            "file": "a.cpp",
+            "lineno": 1,
+            "pid": 42,
+            "process_type": "Parent",
+            "thread": "Main Thread",
+            "stack": stack,
+            "test": "test1",
+        })
+
+    def test_assertion_failure_minimal(self):
+        self.logger.assertion_failure("MOZ_CRASH", "", fatal=True)
+        self.assert_log_equals({
+            "action": "assertion_failure",
+            "kind": "MOZ_CRASH",
+            "message": "",
+            "fatal": True,
+        })
+
+    def test_ubsan_error(self):
+        stack = [{"function": "f", "file": "a.c", "line": 1, "column": 2}]
+        self.logger.ubsan_error(
+            "undefined-behavior",
+            "applying non-zero offset 96 to null pointer",
+            file="a.c",
+            lineno=1,
+            column=2,
+            stack=stack,
+            scope="browser/foo",
+            test="test1",
+        )
+        self.assert_log_equals({
+            "action": "ubsan_error",
+            "kind": "undefined-behavior",
+            "message": "applying non-zero offset 96 to null pointer",
+            "file": "a.c",
+            "lineno": 1,
+            "column": 2,
+            "stack": stack,
+            "scope": "browser/foo",
+            "test": "test1",
+        })
+
+    def test_ubsan_error_minimal(self):
+        self.logger.ubsan_error("undefined-behavior", "division by zero")
+        self.assert_log_equals({
+            "action": "ubsan_error",
+            "kind": "undefined-behavior",
+            "message": "division by zero",
+        })
 
 
 class TestTypeConversions(BaseStructuredTest):

@@ -67,13 +67,6 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGLengthList)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-void DOMSVGLengthList::IndexedSetter(uint32_t index, DOMSVGLength& newValue,
-                                     ErrorResult& aRv) {
-  // Need to take a ref to the return value so it does not leak.
-  RefPtr<DOMSVGLength> ignored = ReplaceItem(newValue, index, aRv);
-  (void)ignored;
-}
-
 JSObject* DOMSVGLengthList::WrapObject(JSContext* cx,
                                        JS::Handle<JSObject*> aGivenProto) {
   return mozilla::dom::SVGLengthList_Binding::Wrap(cx, this, aGivenProto);
@@ -189,6 +182,13 @@ already_AddRefed<DOMSVGLength> DOMSVGLengthList::IndexedGetter(
   return nullptr;
 }
 
+void DOMSVGLengthList::IndexedSetter(uint32_t aIndex, DOMSVGLength& aNewValue,
+                                     ErrorResult& aRv) {
+  // Need to take a ref to the return value so it does not leak.
+  RefPtr<DOMSVGLength> ignored = ReplaceItem(aNewValue, aIndex, aRv);
+  (void)ignored;
+}
+
 already_AddRefed<DOMSVGLength> DOMSVGLengthList::InsertItemBefore(
     DOMSVGLength& newItem, uint32_t index, ErrorResult& aRv) {
   if (IsAnimValList()) {
@@ -222,10 +222,13 @@ already_AddRefed<DOMSVGLength> DOMSVGLengthList::InsertItemBefore(
 
   index = std::min(index, LengthNoFlush());
 
-  AutoChangeLengthListNotifier notifier(this);
-  // Now that we know we're inserting, keep animVal list in sync as necessary.
-  MaybeInsertNullInAnimValListAt(index);
+  // Keep animVal list in sync as necessary.
+  if (!MaybeInsertNullInAnimValListAt(index)) {
+    aRv.ThrowIndexSizeError("List too long");
+    return nullptr;
+  }
 
+  AutoChangeLengthListNotifier notifier(this);
   InternalList().InsertItem(index, domItem->ToSVGLength());
   MOZ_ALWAYS_TRUE(mItems.InsertElementAt(index, domItem.get(), fallible));
 
@@ -317,21 +320,26 @@ already_AddRefed<DOMSVGLength> DOMSVGLengthList::GetItemAt(uint32_t aIndex) {
   return result.forget();
 }
 
-void DOMSVGLengthList::MaybeInsertNullInAnimValListAt(uint32_t aIndex) {
+bool DOMSVGLengthList::MaybeInsertNullInAnimValListAt(uint32_t aIndex) {
   MOZ_ASSERT(!IsAnimValList(), "call from baseVal to animVal");
 
   if (!AnimListMirrorsBaseList()) {
-    return;
+    return true;
+  }
+  DOMSVGLengthList* animVal = mAList->mAnimVal;
+  MOZ_ASSERT(animVal, "AnimListMirrorsBaseList() promised a non-null animVal");
+
+  if (animVal->mItems.Length() >= DOMSVGLength::MaxListIndex()) {
+    return false;
   }
 
-  DOMSVGLengthList* animVal = mAList->mAnimVal;
-
-  MOZ_ASSERT(animVal, "AnimListMirrorsBaseList() promised a non-null animVal");
   MOZ_ASSERT(animVal->mItems.Length() == mItems.Length(),
              "animVal list not in sync!");
   MOZ_ALWAYS_TRUE(animVal->mItems.InsertElementAt(aIndex, nullptr, fallible));
 
   UpdateListIndicesFromIndex(animVal->mItems, aIndex + 1);
+
+  return true;
 }
 
 void DOMSVGLengthList::MaybeRemoveItemFromAnimValListAt(uint32_t aIndex) {

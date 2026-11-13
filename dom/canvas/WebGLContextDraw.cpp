@@ -3,12 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <algorithm>
+#include <memory>
 
 #include "GLContext.h"
 #include "MozFramebuffer.h"
 #include "WebGLBuffer.h"
 #include "WebGLContext.h"
-#include "WebGLContextUtils.h"
 #include "WebGLFormats.h"
 #include "WebGLFramebuffer.h"
 #include "WebGLProgram.h"
@@ -377,14 +377,6 @@ bool WebGLContext::ValidateBuffersForTf(
 
 ////////////////////////////////////////
 
-template <typename T>
-static bool DoSetsIntersect(const std::set<T>& a, const std::set<T>& b) {
-  std::vector<T> intersection;
-  std::set_intersection(a.begin(), a.end(), b.begin(), b.end(),
-                        std::back_inserter(intersection));
-  return !intersection.empty();
-}
-
 template <size_t N>
 static size_t FindFirstOne(const std::bitset<N>& bs) {
   MOZ_ASSERT(bs.any());
@@ -641,8 +633,12 @@ class ScopedDrawWithTransformFeedback final {
     const auto usedVerts =
         CheckedInt<uint32_t>(usedVertsPerInstance) * instanceCount;
 
-    const auto remainingCapacity =
-        mTFO->mActive_VertCapacity - mTFO->mActive_VertPosition;
+    // The position can exceed the capacity if a bound buffer was shrunk while
+    // the TF was paused.
+    const size_t remainingCapacity =
+        mTFO->mActive_VertCapacity > mTFO->mActive_VertPosition
+            ? mTFO->mActive_VertCapacity - mTFO->mActive_VertPosition
+            : 0;
     if (!usedVerts.isValid() || usedVerts.value() > remainingCapacity) {
       mWebGL->ErrorInvalidOperation(
           "Insufficient buffer capacity remaining for"
@@ -1061,7 +1057,7 @@ void WebGLContext::DrawElementsInstanced(const GLenum mode,
           [[unlikely]] {
         // ANGLE does range validation even when it doesn't need to.
         // With MOZ_GL_ABORT_ON_ERROR, we need to catch it or hit assertions.
-        errorScope.reset(new gl::GLContext::LocalErrorScope(*gl));
+        errorScope = std::make_unique<gl::GLContext::LocalErrorScope>(*gl);
       }
 
       if (indexCount && instanceCount) {

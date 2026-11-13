@@ -12,6 +12,7 @@
 #include "MobileViewportManager.h"
 #include "mozilla/AbsoluteContainingBlock.h"
 #include "mozilla/ComputedStyleInlines.h"
+#include "mozilla/DisplayPortUtils.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/ReflowInput.h"
@@ -115,6 +116,9 @@ static void BuildDisplayListForTopLayerFrame(nsDisplayListBuilder* aBuilder,
   nsDisplayListBuilder::AutoCurrentActiveScrolledRootSetter asrSetter(aBuilder);
   if (auto* savedOutOfFlowData =
           nsDisplayListBuilder::GetOutOfFlowData(aFrame)) {
+#ifdef DEBUG
+    savedOutOfFlowData->CheckASR(aBuilder, aFrame);
+#endif
     visible =
         savedOutOfFlowData->GetVisibleRectForFrame(aBuilder, aFrame, &dirty);
     // If we are in the top layer, our containing block is the viewport, which
@@ -133,8 +137,11 @@ static void BuildDisplayListForTopLayerFrame(nsDisplayListBuilder* aBuilder,
       // root scroll frame.
       clipState.SetClipChainForContainingBlockDescendants(
           savedOutOfFlowData->mCombinedClipChain);
+
       asrSetter.SetCurrentActiveScrolledRoot(
-          savedOutOfFlowData->mContainingBlockActiveScrolledRoot);
+          DisplayPortUtils::GetASRForAbsPosFrame(
+              aFrame, savedOutOfFlowData->mContainingBlockActiveScrolledRoot,
+              aBuilder));
       asrSetter.SetCurrentScrollParentId(savedOutOfFlowData->mScrollParentId);
     }
   }
@@ -142,7 +149,7 @@ static void BuildDisplayListForTopLayerFrame(nsDisplayListBuilder* aBuilder,
   nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
       aBuilder, aFrame, visible, dirty);
 
-  nsDisplayList list(aBuilder);
+  nsDisplayList list;
   aFrame->BuildDisplayListForStackingContext(aBuilder, &list);
   aList->AppendToTop(&list);
 }
@@ -212,7 +219,7 @@ nsDisplayWrapList* ViewportFrame::BuildDisplayListForContentTopLayer(
     return nullptr;
   }
 
-  nsDisplayList topLayerList(aBuilder);
+  nsDisplayList topLayerList;
   auto* doc = PresContext()->Document();
 
   nsTArray<dom::Element*> topLayer = doc->GetTopLayer();
@@ -279,7 +286,7 @@ ViewportFrame::BuildDisplayListForViewTransitionsAndNACTopLayer(
     return nullptr;
   }
 
-  nsDisplayList topLayerList(aBuilder);
+  nsDisplayList topLayerList;
   auto* doc = PresContext()->Document();
   if (dom::ViewTransition* vt = doc->GetActiveViewTransition()) {
     if (dom::Element* root = vt->GetSnapshotContainingBlock()) {

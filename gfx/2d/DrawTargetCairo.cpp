@@ -4,23 +4,22 @@
 
 #include "DrawTargetCairo.h"
 
-#include "SourceSurfaceCairo.h"
-#include "PathCairo.h"
-#include "HelpersCairo.h"
-#include "BorrowedContext.h"
-#include "FilterNodeSoftware.h"
-#include "mozilla/Vector.h"
-#include "mozilla/StaticPrefs_gfx.h"
-#include "mozilla/StaticPrefs_print.h"
-#include "nsPrintfCString.h"
-
-#include "cairo.h"
-#include "cairo-tee.h"
 #include <string.h>
 
 #include "Blur.h"
+#include "BorrowedContext.h"
+#include "FilterNodeSoftware.h"
+#include "HelpersCairo.h"
 #include "Logging.h"
+#include "PathCairo.h"
+#include "SourceSurfaceCairo.h"
 #include "Tools.h"
+#include "cairo-tee.h"
+#include "cairo.h"
+#include "mozilla/StaticPrefs_gfx.h"
+#include "mozilla/StaticPrefs_print.h"
+#include "mozilla/Vector.h"
+#include "nsPrintfCString.h"
 
 #ifdef CAIRO_HAS_QUARTZ_SURFACE
 #  include "cairo-quartz.h"
@@ -168,17 +167,20 @@ static bool PatternIsCompatible(const Pattern& aPattern) {
     case PatternType::LINEAR_GRADIENT: {
       const LinearGradientPattern& pattern =
           static_cast<const LinearGradientPattern&>(aPattern);
-      return pattern.mStops->GetBackendType() == BackendType::CAIRO;
+      return pattern.mStops &&
+             pattern.mStops->GetBackendType() == BackendType::CAIRO;
     }
     case PatternType::RADIAL_GRADIENT: {
       const RadialGradientPattern& pattern =
           static_cast<const RadialGradientPattern&>(aPattern);
-      return pattern.mStops->GetBackendType() == BackendType::CAIRO;
+      return pattern.mStops &&
+             pattern.mStops->GetBackendType() == BackendType::CAIRO;
     }
     case PatternType::CONIC_GRADIENT: {
       const ConicGradientPattern& pattern =
           static_cast<const ConicGradientPattern&>(aPattern);
-      return pattern.mStops->GetBackendType() == BackendType::CAIRO;
+      return pattern.mStops &&
+             pattern.mStops->GetBackendType() == BackendType::CAIRO;
     }
     default:
       return true;
@@ -446,8 +448,7 @@ static inline void CairoPatternAddGradientStop(cairo_pattern_t* aPattern,
                                     aStop.color.a);
 }
 
-// Never returns nullptr. As such, you must always pass in Cairo-compatible
-// patterns, most notably gradients with a GradientStopCairo.
+// Returns nullptr for patterns with incompatible Cairo gradient stops.
 // The pattern returned must have cairo_pattern_destroy() called on it by the
 // caller.
 // As the cairo_pattern_t returned may depend on the Pattern passed in, the
@@ -456,6 +457,10 @@ static inline void CairoPatternAddGradientStop(cairo_pattern_t* aPattern,
 static cairo_pattern_t* GfxPatternToCairoPattern(const Pattern& aPattern,
                                                  Float aAlpha,
                                                  const Matrix& aTransform) {
+  if (!PatternIsCompatible(aPattern)) {
+    return nullptr;
+  }
+
   cairo_pattern_t* pat;
   const Matrix* matrix = nullptr;
 
@@ -950,7 +955,8 @@ void DrawTargetCairo::DrawSurface(SourceSurface* aSurface, const Rect& aDest,
 void DrawTargetCairo::DrawFilter(FilterNode* aNode, const Rect& aSourceRect,
                                  const Point& aDestPoint,
                                  const DrawOptions& aOptions) {
-  if (!IsValid() || !aNode) {
+  if (!IsValid() || !aNode ||
+      aNode->GetBackendType() != FILTER_BACKEND_SOFTWARE) {
     gfxCriticalNote << "DrawFilter with bad surface "
                     << cairo_surface_status(cairo_get_group_target(mContext));
     return;
@@ -1043,10 +1049,6 @@ void DrawTargetCairo::DrawPattern(const Pattern& aPattern,
   if (!IsValid()) {
     gfxCriticalNote << "DrawPattern with bad surface "
                     << cairo_surface_status(cairo_get_group_target(mContext));
-    return;
-  }
-
-  if (!PatternIsCompatible(aPattern)) {
     return;
   }
 
@@ -1592,10 +1594,6 @@ void DrawTargetCairo::MaskSurface(const Pattern& aSource, SourceSurface* aMask,
   AutoClearDeviceOffset clearSource(aSource);
   AutoClearDeviceOffset clearMask(aMask);
 
-  if (!PatternIsCompatible(aSource)) {
-    return;
-  }
-
   cairo_set_antialias(mContext,
                       GfxAntialiasToCairoAntialias(aOptions.mAntialiasMode));
 
@@ -1722,6 +1720,9 @@ void DrawTargetCairo::PopClip() {
 }
 
 bool DrawTargetCairo::RemoveAllClips() {
+  if (!mPushedLayers.empty()) {
+    return false;
+  }
   while (mClipDepth > 0) {
     PopClip();
   }
@@ -1896,6 +1897,10 @@ DrawTargetCairo::CreateSourceSurfaceFromNativeSurface(
 
 already_AddRefed<DrawTarget> DrawTargetCairo::CreateSimilarDrawTarget(
     const IntSize& aSize, SurfaceFormat aFormat) const {
+  if (!CanCreateSimilarDrawTarget(aSize, aFormat)) {
+    return nullptr;
+  }
+
   if (cairo_surface_status(cairo_get_group_target(mContext))) {
     RefPtr target = MakeRefPtr<DrawTargetCairo>();
     if (target->Init(aSize, aFormat)) {
@@ -1944,6 +1949,12 @@ already_AddRefed<DrawTarget> DrawTargetCairo::CreateSimilarDrawTarget(
   cairo_surface_destroy(similar);
 
   return nullptr;
+}
+
+bool DrawTargetCairo::CanCreateSimilarDrawTarget(const IntSize& aSize,
+                                                 SurfaceFormat aFormat) const {
+  // Ensure that surface indexes fit in an int32_t.
+  return Factory::CheckSurfaceSize(aSize);
 }
 
 RefPtr<DrawTarget> DrawTargetCairo::CreateClippedDrawTarget(
@@ -2069,6 +2080,10 @@ bool DrawTargetCairo::Init(cairo_surface_t* aSurface, const IntSize& aSize,
 }
 
 bool DrawTargetCairo::Init(const IntSize& aSize, SurfaceFormat aFormat) {
+  if (!Factory::CheckSurfaceSize(aSize)) {
+    return false;
+  }
+
   cairo_surface_t* surf = cairo_image_surface_create(
       GfxFormatToCairoFormat(aFormat), aSize.width, aSize.height);
   return InitAlreadyReferenced(surf, aSize);

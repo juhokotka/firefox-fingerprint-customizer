@@ -6,15 +6,15 @@
 #define mozilla_a11y_IPCTypes_h
 
 #ifdef ACCESSIBILITY
-#  include "mozilla/a11y/AccAttributes.h"
-#  include "mozilla/a11y/AccTypes.h"
-#  include "mozilla/a11y/CacheConstants.h"
-#  include "mozilla/a11y/Role.h"
-#  include "mozilla/a11y/AccGroupInfo.h"
-#  include "mozilla/GfxMessageUtils.h"
 #  include "ipc/EnumSerializer.h"
 #  include "ipc/IPCMessageUtilsSpecializations.h"
 #  include "ipc/nsGUIEventIPC.h"
+#  include "mozilla/GfxMessageUtils.h"
+#  include "mozilla/a11y/AccAttributes.h"
+#  include "mozilla/a11y/AccGroupInfo.h"
+#  include "mozilla/a11y/AccTypes.h"
+#  include "mozilla/a11y/CacheConstants.h"
+#  include "mozilla/a11y/Role.h"
 
 namespace IPC {
 

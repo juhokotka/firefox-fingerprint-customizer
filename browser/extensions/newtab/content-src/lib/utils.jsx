@@ -1,7 +1,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useContext, useEffect, useRef } from "react";
+import { SpaceActiveContext } from "./SpaceActiveContext";
 
 /**
  * A custom react hook that sets up an IntersectionObserver to observe a single
@@ -19,7 +20,11 @@ import { useCallback, useEffect, useRef } from "react";
 function useIntersectionObserver(callback, threshold = 0.3) {
   const elementsRef = useRef([]);
   const triggeredElements = useRef(new WeakSet());
+  const spaceActive = useContext(SpaceActiveContext);
   useEffect(() => {
+    if (!spaceActive) {
+      return undefined;
+    }
     const observer = new IntersectionObserver(
       entries => {
         entries.forEach(entry => {
@@ -44,7 +49,7 @@ function useIntersectionObserver(callback, threshold = 0.3) {
 
     // Cleanup function to disconnect observer on unmount
     return () => observer.disconnect();
-  }, [callback, threshold]);
+  }, [callback, threshold, spaceActive]);
 
   return elementsRef;
 }
@@ -83,6 +88,54 @@ function getNovaColumnLayout(el) {
     10
   );
   return Number.isInteger(val) ? `col-${val}` : null;
+}
+
+/**
+ * Determines which sections-grid column a card occupies, by measuring where
+ * the browser actually placed it.
+ *
+ * Every column is the same width, so a fixed distance separates it from the
+ * previous one: that width plus the grid's column gap. Dividing how far the
+ * card starts from the edge of the grid by that distance gives its column
+ * number. Only the leading edge is measured, so a card spanning several
+ * columns reports the first one it occupies.
+ *
+ * Nova only: classic layouts do not set --sections-col-count.
+ *
+ * @param {Element} el - Any element inside the card, or the card itself
+ * @returns {number|null} 1-based column, or null if it cannot be determined
+ */
+function getCardColumn(el) {
+  const item = el?.closest(".ds-section-grid > *");
+  if (!item) {
+    return null;
+  }
+  const grid = item.parentElement;
+
+  const style = getComputedStyle(grid);
+  const columnCount = parseInt(
+    style.getPropertyValue("--sections-col-count"),
+    10
+  );
+  if (!(columnCount > 0)) {
+    return null;
+  }
+
+  const itemRect = item.getBoundingClientRect();
+  if (!itemRect.width) {
+    return null;
+  }
+
+  const gridRect = grid.getBoundingClientRect();
+  const columnGap = parseFloat(style.columnGap) || 0;
+  const columnStride = (gridRect.width + columnGap) / columnCount;
+
+  const offset =
+    grid.ownerDocument.dir === "rtl"
+      ? gridRect.right - itemRect.right
+      : itemRect.left - gridRect.left;
+
+  return Math.round(offset / columnStride) + 1;
 }
 
 /**
@@ -326,11 +379,51 @@ function useSizeSubmenu(onChangeSize) {
   }, []);
 }
 
+// Biggest units first, so the loop returns the coarsest one that fits.
+const RELATIVE_TIME_UNITS = [
+  ["year", 365 * 24 * 60 * 60 * 1000],
+  ["month", 30 * 24 * 60 * 60 * 1000],
+  ["week", 7 * 24 * 60 * 60 * 1000],
+  ["day", 24 * 60 * 60 * 1000],
+  ["hour", 60 * 60 * 1000],
+  ["minute", 60 * 1000],
+];
+
+/**
+ * Picks the largest relative-time unit that fits ("2 hours ago", "5 days ago").
+ * Under a minute there is no unit to pick, so the caller gets a Fluent id to
+ * render instead of a string: the wording of "just now" belongs to the surface
+ * showing it, and each has its own message.
+ *
+ * @param {number} timestamp ms epoch of the moment being described.
+ * @param {string} [locale] BCP-47 locale; falls back to the runtime default.
+ * @param {number} now ms epoch to measure against.
+ * @param {string} justNowL10nId Fluent id for the under-a-minute case.
+ * @returns {{text: ?string, l10nId: ?string}} Exactly one of the two is set.
+ */
+function formatRelativeTime(timestamp, locale, now, justNowL10nId) {
+  const delta = timestamp - now;
+  const abs = Math.abs(delta);
+  for (const [unit, ms] of RELATIVE_TIME_UNITS) {
+    if (abs >= ms) {
+      return {
+        text: new Intl.RelativeTimeFormat(locale || undefined, {
+          numeric: "auto",
+        }).format(Math.round(delta / ms), unit),
+        l10nId: null,
+      };
+    }
+  }
+  return { text: null, l10nId: justNowL10nId };
+}
+
 export {
+  formatRelativeTime,
   useIntersectionObserver,
   useSizeSubmenu,
   getActiveCardSize,
   getActiveColumnLayout,
   getNovaColumnLayout,
+  getCardColumn,
   useConfetti,
 };

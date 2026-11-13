@@ -9,8 +9,6 @@
 // real Rust engine stays live, driven via its FFI inputs; an IP-literal origin
 // avoids DNS.
 
-#include "gtest/gtest.h"
-
 #include "ConnectionEntry.h"
 #include "ConnectionEstablisher.h"
 #include "HappyEyeballsConnMgrDelegate.h"
@@ -21,15 +19,16 @@
 #include "NullHttpTransaction.h"
 #include "PendingTransactionInfo.h"
 #include "ZeroRttHandle.h"
+#include "gtest/gtest.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/net/ClassOfService.h"
 #include "mozilla/net/DNS.h"
 #include "nsHttpConnectionInfo.h"
 #include "nsHttpRequestHead.h"
 #include "nsHttpTransaction.h"
+#include "nsIHttpProtocolHandler.h"
 #include "nsISeekableStream.h"
 #include "nsISocketTransportService.h"
-#include "nsIHttpProtocolHandler.h"
 #include "nsNetAddr.h"
 #include "nsServiceManagerUtils.h"
 #include "nsSocketTransportService2.h"
@@ -135,11 +134,24 @@ class FakeConnectionEstablisher final : public ConnectionEstablisher {
                                        ConnectionEstablisher)
 
   FakeConnectionEstablisher(nsHttpConnectionInfo* aConnInfo,
-                            const NetAddr& aAddr, uint32_t aCaps, bool aIsUDP)
-      : ConnectionEstablisher(aConnInfo, aAddr, aCaps), mIsUDP(aIsUDP) {}
+                            const NetAddr& aAddr, uint32_t aCaps, bool aIsUDP,
+                            bool aAllow1918, bool aForceRefuseLocal)
+      : ConnectionEstablisher(aConnInfo, aAddr, aCaps, aAllow1918),
+        mIsUDP(aIsUDP),
+        mForceRefuseLocal(aForceRefuseLocal) {}
 
   bool Start(DoneCallback&& aCallback) override {
     mCallback = std::move(aCallback);
+    // Mirror the real establishers: refuse a local peer when !mAllow1918.
+    // mForceRefuseLocal lets a test simulate a refusal made while speculative
+    // even after Claim() flipped allow1918 to true.
+    if (mForceRefuseLocal && mAddr.IsIPAddrLocal()) {
+      mRefusedForLocalAddress = true;
+      return false;
+    }
+    if (RefuseIfLocalAddress()) {
+      return false;
+    }
     return true;
   }
   void Close(nsresult) override { ++mCloseCount; }
@@ -158,6 +170,7 @@ class FakeConnectionEstablisher final : public ConnectionEstablisher {
   ~FakeConnectionEstablisher() = default;
   void Finish(nsresult) override {}
   bool mIsUDP;
+  bool mForceRefuseLocal;
 };
 
 class FakeConnectionEstablisherFactory final
@@ -165,16 +178,19 @@ class FakeConnectionEstablisherFactory final
  public:
   already_AddRefed<ConnectionEstablisher> Create(
       ConnectionEstablisherType aType, nsHttpConnectionInfo* aConnInfo,
-      const NetAddr& aAddr, uint32_t aCaps, bool, bool) override {
+      const NetAddr& aAddr, uint32_t aCaps, bool, bool aAllow1918) override {
     bool isUDP = aType == ConnectionEstablisherType::UDP;
-    RefPtr<FakeConnectionEstablisher> e =
-        new FakeConnectionEstablisher(aConnInfo, aAddr, aCaps, isUDP);
+    RefPtr<FakeConnectionEstablisher> e = new FakeConnectionEstablisher(
+        aConnInfo, aAddr, aCaps, isUDP, aAllow1918, mForceRefuseLocal);
     (isUDP ? mUDP : mTCP).AppendElement(e);
     return e.forget();
   }
 
   nsTArray<RefPtr<FakeConnectionEstablisher>> mTCP;
   nsTArray<RefPtr<FakeConnectionEstablisher>> mUDP;
+  // When set, created establishers refuse a local peer even if allow1918 is
+  // true, to simulate a refusal made while the attempt was still speculative.
+  bool mForceRefuseLocal = false;
 };
 
 class RecordingConnMgrDelegate final : public HappyEyeballsConnMgrDelegate {
@@ -212,6 +228,11 @@ class RecordingConnMgrDelegate final : public HappyEyeballsConnMgrDelegate {
   void ProcessSpdyPendingQ(ConnectionEntry*) override {
     mCalls.AppendElement("ProcessSpdyPendingQ"_ns);
   }
+  already_AddRefed<ConnectionEntry> HandOffHttp3OnlyConnection(
+      HttpConnectionBase*, ConnectionEntry*) override {
+    mCalls.AppendElement("HandOffHttp3OnlyConnection"_ns);
+    return nullptr;
+  }
   void InsertIntoActiveConns(ConnectionEntry*, HttpConnectionBase*) override {
     mCalls.AppendElement("InsertIntoActiveConns"_ns);
   }
@@ -234,10 +255,11 @@ class RecordingConnMgrDelegate final : public HappyEyeballsConnMgrDelegate {
     mCalls.AppendElement("RemoveTransFromPendingQ"_ns);
     return false;
   }
-  nsresult StartRetryWithoutTRR(ConnectionEntry*, nsHttpTransaction*, uint32_t,
-                                bool, bool, bool) override {
-    mCalls.AppendElement("StartRetryWithoutTRR"_ns);
-    return mStartRetryWithoutTRRRv;
+  nsresult StartRetry(ConnectionEntry*, nsHttpTransaction*, uint32_t, bool,
+                      bool, bool, bool aRetryWithoutTRR) override {
+    mCalls.AppendElement(aRetryWithoutTRR ? "StartRetryWithoutTRR"_ns
+                                          : "StartRetryForLocalAddress"_ns);
+    return mStartRetryRv;
   }
 
   int32_t Count(const char* aName) const {
@@ -261,7 +283,7 @@ class RecordingConnMgrDelegate final : public HappyEyeballsConnMgrDelegate {
   nsTArray<nsCString> mCalls;
   RefPtr<PendingTransactionInfo> mFindResult;
   nsresult mDispatchRv = NS_OK;
-  nsresult mStartRetryWithoutTRRRv = NS_OK;
+  nsresult mStartRetryRv = NS_OK;
   bool mSimulateDispatchBindsConnection = false;
   nsTArray<RefPtr<ConnectionHandle>> mDispatchHandles;
 };
@@ -278,9 +300,11 @@ struct TestHarness {
   // aRealTransaction: use a real nsHttpTransaction (QueryHttpTransaction()
   // non-null) for paths that touch the real request; else a
   // NullHttpTransaction.
-  explicit TestHarness(uint32_t aCaps = 0, bool aRealTransaction = false) {
-    mConnInfo = new nsHttpConnectionInfo("127.0.0.1"_ns, 443, ""_ns, ""_ns,
-                                         nullptr, OriginAttributes(),
+  explicit TestHarness(uint32_t aCaps = 0, bool aRealTransaction = false,
+                       const nsACString& aOrigin = "127.0.0.1"_ns,
+                       bool aSpeculative = false, bool aAllow1918 = true) {
+    mConnInfo = new nsHttpConnectionInfo(aOrigin, 443, ""_ns, ""_ns, nullptr,
+                                         OriginAttributes(),
                                          /*endToEndSSL*/ true);
     if (aRealTransaction) {
       mTrans = new nsHttpTransaction();
@@ -291,8 +315,9 @@ struct TestHarness {
     mFactory = new FakeConnectionEstablisherFactory();
     mDelegate = new RecordingConnMgrDelegate();
     mHE = new HappyEyeballsConnectionAttempt(mConnInfo, mTrans, aCaps,
-                                             /*speculative*/ false,
+                                             aSpeculative,
                                              /*urgentStart*/ false);
+    mHE->SetAllow1918(aAllow1918);
     mHE->SetConnectionEstablisherFactoryForTesting(mFactory);
     mHE->SetConnMgrDelegateForTesting(mDelegate);
   }
@@ -381,6 +406,59 @@ TEST(HappyEyeballsConnectionAttempt, TcpFailureDoesNotDispatch)
     EXPECT_EQ(h.mDelegate->Count("DispatchTransaction"), 0);
     EXPECT_EQ(h.mDelegate->Count("InsertIntoActiveConns"), 0);
     EXPECT_GE(h.mDelegate->Count("RemoveConnectionAttempt"), 1);
+  });
+}
+
+// A speculative attempt to a local peer refuses it synchronously instead of
+// opening a socket, and -- being unclaimed -- fails without retrying.
+TEST(HappyEyeballsConnectionAttempt, SpeculativeRefusesLocalAddress)
+{
+  EnsureHttpHandler();
+  RunOnSocketThread([]() {
+    TestHarness h(/*caps*/ 0, /*realTransaction*/ false, "10.0.0.2"_ns,
+                  /*speculative*/ true, /*allow1918*/ false);
+    h.Init();
+
+    // The engine still asks the factory for a TCP establisher for the local
+    // address, but Start() refuses it instead of connecting.
+    ASSERT_GE(h.mFactory->mTCP.Length(), 1u);
+    EXPECT_TRUE(h.mFactory->mTCP[0]->RefusedForLocalAddress())
+        << "a speculative establisher must refuse a local peer";
+
+    EXPECT_TRUE(h.mHE->IsTerminal());
+    EXPECT_EQ(h.mDelegate->Count("DispatchTransaction"), 0);
+    // Unclaimed speculative attempt: no real transaction, so no retry.
+    EXPECT_EQ(h.mDelegate->Count("StartRetryForLocalAddress"), 0);
+    EXPECT_GE(h.mDelegate->Count("RemoveConnectionAttempt"), 1);
+  });
+}
+
+// Once a speculative attempt that refused a local peer is claimed by a real
+// transaction, the terminal failure starts a fresh attempt via the delegate.
+TEST(HappyEyeballsConnectionAttempt, ClaimedLocalAttemptRetries)
+{
+  EnsureHttpHandler();
+  RunOnSocketThread([]() {
+    // A speculative attempt (null transaction, allow1918=false) to a local
+    // origin.
+    TestHarness h(/*caps*/ 0, /*realTransaction*/ false, "10.0.0.2"_ns,
+                  /*speculative*/ true, /*allow1918*/ false);
+    // Simulate the local refusal the speculative attempt made even though the
+    // claim below flips allow1918 to true.
+    h.mFactory->mForceRefuseLocal = true;
+
+    // A real transaction claims the speculative attempt.
+    RefPtr<nsHttpTransaction> realTrans = new nsHttpTransaction();
+    EXPECT_TRUE(h.mHE->Claim(realTrans));
+
+    h.Init();
+
+    ASSERT_GE(h.mFactory->mTCP.Length(), 1u);
+    EXPECT_TRUE(h.mFactory->mTCP[0]->RefusedForLocalAddress());
+    EXPECT_TRUE(h.mHE->IsTerminal());
+    EXPECT_EQ(h.mDelegate->Count("StartRetryForLocalAddress"), 1)
+        << "a claimed attempt whose only failures were local refusals must "
+           "retry via the delegate";
   });
 }
 

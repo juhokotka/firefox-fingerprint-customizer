@@ -5,21 +5,19 @@
 #ifndef MOZILLA_GFX_DRAWEVENTRECORDER_H_
 #define MOZILLA_GFX_DRAWEVENTRECORDER_H_
 
-#include "2D.h"
-#include "DrawEventRecorderTypes.h"
-#include "RecordedEvent.h"
-#include "RecordingTypes.h"
-
-#include <deque>
 #include <functional>
 #include <vector>
 
+#include "2D.h"
+#include "DrawEventRecorderTypes.h"
 #include "ImageContainer.h"
+#include "RecordedEvent.h"
+#include "RecordingTypes.h"
 #include "mozilla/DataMutex.h"
 #include "mozilla/ThreadSafeWeakPtr.h"
+#include "nsISupportsImpl.h"
 #include "nsTHashMap.h"
 #include "nsTHashSet.h"
-#include "nsISupportsImpl.h"
 
 namespace mozilla {
 namespace layers {
@@ -46,6 +44,17 @@ class DrawEventRecorderPrivate : public DrawEventRecorder {
     return true;
   }
   virtual void FlushItem(IntRect) {}
+
+  /**
+   * Whether recordings made with this recorder might be replayed against a
+   * DrawTarget which supports glyph source text, e.g. when printing. See
+   * DrawTarget::SupportsGlyphSourceText.
+   */
+  bool SupportsGlyphSourceText() const { return mSupportsGlyphSourceText; }
+  void SetSupportsGlyphSourceText(bool aSupports) {
+    mSupportsGlyphSourceText = aSupports;
+  }
+
   virtual void DetachResources() {
     NS_ASSERT_OWNINGTHREAD(DrawEventRecorderPrivate);
 
@@ -227,7 +236,7 @@ class DrawEventRecorderPrivate : public DrawEventRecorder {
     int64_t mEventCount = -1;
   };
 
-  using ExternalImagesHolder = std::deque<ExternalImageEntry>;
+  using ExternalImagesHolder = std::vector<ExternalImageEntry>;
 
   virtual already_AddRefed<layers::CanvasChild> GetCanvasChild() const {
     return nullptr;
@@ -282,6 +291,7 @@ class DrawEventRecorderPrivate : public DrawEventRecorder {
   ExternalSurfacesHolder mExternalSurfaces;
   ExternalImagesHolder mExternalImages;
   bool mExternalFonts;
+  bool mSupportsGlyphSourceText = false;
 };
 
 typedef std::function<void(MemStream& aStream,

@@ -4,23 +4,21 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 """
-Generate NSS release documentation (RST file) based on version number.
+Generate NSS release documentation (Markdown file) based on version number.
 
 Usage: python3 generate_release_doc.py <version> [output_file]
 
 Example:
   python3 generate_release_doc.py 3.118
-  python3 generate_release_doc.py 3.118.1 doc/rst/releases/nss_3_118_1.rst
+  python3 generate_release_doc.py 3.118.1 doc/src/releases/nss_3_118_1.md
 """
 
 import os
 import sys
 from datetime import datetime
-from subprocess import call, check_call
 
 sys.path.insert(0, os.path.dirname(__file__))
 from release_utils import (
-    exit_with_failure,
     get_nspr_version,
     get_bug_list_for_version,
     version_string_to_underscore,
@@ -29,48 +27,44 @@ from release_utils import (
 )
 
 
-def generate_rst_content(version, nspr_version, bug_lines, release_date):
-    """Generate the RST content for the release notes."""
+def generate_md_content(version, nspr_version, bug_lines, release_date):
+    """Generate the MyST Markdown content for the release notes."""
     version_underscore = version_string_to_underscore(version)
-    changes_text = "\n".join([f"   - {line}" for line in bug_lines])
+    version_dash = version.replace(".", "-")
+    changes_text = "\n".join([f"- {line}" for line in bug_lines])
 
-    rst_content = f""".. _mozilla_projects_nss_nss_{version_underscore}_release_notes:
+    md_content = f"""(mozilla-projects-nss-nss-{version_dash}-release-notes)=
 
-NSS {version} release notes
-{"=" * len(f"NSS {version} release notes")}
+# NSS {version} release notes
 
-`Introduction <#introduction>`__
---------------------------------
+## Introduction
 
-.. container::
+:::{{container}}
+Network Security Services (NSS) {version} was released on *{release_date}*.
+:::
 
-   Network Security Services (NSS) {version} was released on *{release_date}*.
+## Distribution Information
 
-`Distribution Information <#distribution_information>`__
---------------------------------------------------------
+:::{{container}}
+The HG tag is NSS_{version_underscore}_RTM. NSS {version} requires NSPR {nspr_version} or newer.
 
-.. container::
+NSS {version} source distributions are available on ftp.mozilla.org for secure HTTPS download:
 
-   The HG tag is NSS_{version_underscore}_RTM. NSS {version} requires NSPR {nspr_version} or newer.
+- Source tarballs:
+  <https://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_{version_underscore}_RTM/src/>
 
-   NSS {version} source distributions are available on ftp.mozilla.org for secure HTTPS download:
+Other releases are available {{ref}}`mozilla-projects-nss-releases`.
+:::
 
-   -  Source tarballs:
-      https://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_{version_underscore}_RTM/src/
+(changes-in-nss-{version_dash})=
 
-   Other releases are available :ref:`mozilla_projects_nss_releases`.
+## Changes in NSS {version}
 
-.. _changes_in_nss_{version}:
-
-`Changes in NSS {version} <#changes_in_nss_{version}>`__
-------------------------------------------------------------------
-
-.. container::
-
+:::{{container}}
 {changes_text}
-
+:::
 """
-    return rst_content
+    return md_content
 
 
 def main():
@@ -85,7 +79,7 @@ def main():
         output_file = sys.argv[2].strip()
     else:
         version_underscore = version_string_to_underscore(version)
-        output_file = f"doc/rst/releases/nss_{version_underscore}.rst"
+        output_file = f"doc/src/releases/nss_{version_underscore}.md"
 
     rtm_tag = version_string_to_RTM_tag(version)
     rtm_date = get_rtm_tag_date(rtm_tag)
@@ -105,25 +99,27 @@ def main():
     print(f"Found {len(bug_lines)} bug entries")
     print()
 
-    # Generate RST content
-    rst_content = generate_rst_content(version, nspr_version, bug_lines, current_date)
+    # Generate Markdown content
+    md_content = generate_md_content(version, nspr_version, bug_lines, current_date)
 
     # Write to file
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    output_dir = os.path.dirname(output_file)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     with open(output_file, "w") as f:
-        f.write(rst_content)
+        f.write(md_content)
 
     print(f"Release documentation written to: {output_file}")
     print()
-    print("Running doc-lint...")
-    rc = call(["./mach", "doc-lint"])
-    if rc != 0:
-        exit_with_failure(f"doc-lint failed with exit status {rc}")
+    print(
+        "Add it to the toctree in doc/src/releases/index.md, then run "
+        "`./mach doc-lint`."
+    )
     print()
     print("=" * 70)
     print("Preview:")
     print("=" * 70)
-    print(rst_content)
+    print(md_content)
 
 
 if __name__ == "__main__":

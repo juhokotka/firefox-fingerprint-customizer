@@ -29,6 +29,7 @@ if CONFIG["CC_TYPE"] in ("clang", "clang-cl"):
 UNIFIED_SOURCES += [
     "imported/regexp-bytecode-generator.cc",
     "imported/regexp-bytecode-iterator.cc",
+    "imported/regexp-bytecodes.cc",
     "imported/regexp-code-generator.cc",
     "imported/regexp-dotprinter.cc",
     "imported/regexp-interpreter.cc",
@@ -55,7 +56,6 @@ SOURCES += [
 if CONFIG["JS_HAS_INTL_API"]:
     CXXFLAGS += ["-DV8_INTL_SUPPORT"]
     UNIFIED_SOURCES += [
-        "imported/property-sequences.cc",
         "imported/special-case.cc",
         "util/ZoneShimFFI.cpp",
     ]
@@ -67,3 +67,14 @@ if CONFIG["JS_JITSPEW"]:
 # coverage instrumentation in FUZZING mode.
 if CONFIG["FUZZING_INTERFACES"] and CONFIG["LIBFUZZER"]:
     include("/tools/fuzzing/libfuzzer-config.mozbuild")
+
+LICENSED_UNDER += [
+    "v8",
+]
+
+SOURCE_HEADERS += [
+    "RegExpAPI.h",
+    "RegExpNativeMacroAssembler.h",
+    "RegExpShim.h",
+    "RegExpTypes.h",
+]

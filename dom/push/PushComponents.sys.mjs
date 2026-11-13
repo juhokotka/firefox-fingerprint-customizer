@@ -32,6 +32,7 @@ ChromeUtils.defineLazyGetter(lazy, "PushService", function () {
 // changes. These are duplicated and used in `nsIPushNotifier`. They're exposed
 // on `nsIPushService` so that JS callers only need to import this service.
 const OBSERVER_TOPIC_PUSH = "push-message";
+const OBSERVER_TOPIC_PUSH_MESSAGE_HANDLED = "push-message-handled";
 const OBSERVER_TOPIC_SUBSCRIPTION_CHANGE = "push-subscription-change";
 const OBSERVER_TOPIC_SUBSCRIPTION_MODIFIED = "push-subscription-modified";
 
@@ -64,10 +65,13 @@ PushServiceBase.prototype = {
   ]),
 
   pushTopic: OBSERVER_TOPIC_PUSH,
+  pushMessageHandledTopic: OBSERVER_TOPIC_PUSH_MESSAGE_HANDLED,
   subscriptionChangeTopic: OBSERVER_TOPIC_SUBSCRIPTION_CHANGE,
   subscriptionModifiedTopic: OBSERVER_TOPIC_SUBSCRIPTION_MODIFIED,
 
   ensureReady() {},
+
+  ignoreNewMessages() {},
 
   _addListeners() {
     for (let message of this._messages) {
@@ -130,7 +134,6 @@ Object.assign(PushServiceParent.prototype, {
     "Push:Register",
     "Push:Registration",
     "Push:Unregister",
-    "Push:Clear",
     "Push:ReportError",
   ],
 
@@ -233,7 +236,7 @@ Object.assign(PushServiceParent.prototype, {
     this.service.reportDeliveryError(messageId, reason);
   },
 
-  receiveMessage(message) {
+  async receiveMessage(message) {
     if (!this._isValidMessage(message)) {
       return;
     }
@@ -242,26 +245,43 @@ Object.assign(PushServiceParent.prototype, {
       this.reportDeliveryError(data.messageId, data.reason);
       return;
     }
-    this._handleRequest(name, data.principal, data)
-      .then(
-        result => {
-          target.sendAsyncMessage(this._getResponseName(name, "OK"), {
-            requestID: data.requestID,
-            result,
-          });
-        },
-        error => {
-          target.sendAsyncMessage(this._getResponseName(name, "KO"), {
-            requestID: data.requestID,
-            result: error.result,
-          });
-        }
-      )
-      .catch(console.error);
+    try {
+      if (!target.processParent.validatePrincipal(data.principal)) {
+        throw new Error("Invalid principal");
+      }
+      ChromeUtils.validateServiceWorkerScope(
+        data.principal,
+        Services.io.newURI(data.scope)
+      );
+      const result = await this._handleRequest(name, data.principal, data);
+      target.sendAsyncMessage(this._getResponseName(name, "OK"), {
+        requestID: data.requestID,
+        result,
+      });
+    } catch (error) {
+      console.error(error);
+      target.sendAsyncMessage(this._getResponseName(name, "KO"), {
+        requestID: data.requestID,
+        result: error.result,
+        errorMessage: error.message,
+      });
+    }
   },
 
+  /**
+   * Start the Push Service.
+   *
+   * @returns {Promise<void>} Resolves once the Push Service has started.
+   */
   ensureReady() {
-    this.service.init();
+    return this.service.init();
+  },
+
+  /**
+   * Stop handling new push messages. See PushService.ignoreNewMessages.
+   */
+  ignoreNewMessages() {
+    this.service.ignoreNewMessages();
   },
 
   _toPageRecord(principal, data) {
@@ -409,14 +429,6 @@ Object.assign(PushServiceContent.prototype, {
       scope,
       requestID,
       principal,
-    });
-  },
-
-  clearForDomain(domain, callback) {
-    let requestID = this._addRequest(callback);
-    this._mm.sendAsyncMessage("Push:Clear", {
-      domain,
-      requestID,
     });
   },
 

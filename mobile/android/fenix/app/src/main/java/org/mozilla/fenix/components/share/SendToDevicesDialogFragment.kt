@@ -4,223 +4,262 @@
 
 package org.mozilla.fenix.components.share
 
-import android.content.Intent
+import android.app.Dialog
+import android.content.Context
+import android.content.res.Configuration
 import android.net.ConnectivityManager
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
-import androidx.appcompat.content.res.AppCompatResources
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.ComposeView
 import androidx.core.content.getSystemService
-import androidx.core.net.toUri
-import androidx.fragment.app.viewModels
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat.Type.systemBars
 import androidx.fragment.compose.content
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewModelScope
+import com.google.android.material.R as materialR
+import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import kotlinx.coroutines.Deferred
+import com.google.android.material.snackbar.Snackbar
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import mozilla.components.concept.sync.AccountObserver
-import mozilla.components.concept.sync.AuthType
-import mozilla.components.concept.sync.OAuthAccount
 import mozilla.components.concept.sync.TabData
 import mozilla.components.concept.sync.TabPrivacy
 import mozilla.components.feature.accounts.push.SendTabUseCases
-import mozilla.components.feature.share.RecentAppsStorage
-import mozilla.components.service.fxa.manager.FxaAccountManager
-import mozilla.components.support.utils.ext.packageManagerCompatHelper
+import mozilla.components.lib.state.helpers.StoreProvider.Companion.fragmentStore
+import mozilla.components.lib.state.helpers.StoreProvider.Companion.storeProvider
+import mozilla.components.service.fxa.FxaService
+import mozilla.components.service.fxa.manager.SCOPE_PROFILE
+import mozilla.components.service.fxa.manager.SCOPE_SYNC
+import mozilla.components.support.utils.ext.isLandscape
 import mozilla.telemetry.glean.private.NoExtras
-import org.mozilla.fenix.BuildConfig
-import org.mozilla.fenix.GleanMetrics.SyncAccount
+import org.mozilla.fenix.GleanMetrics.SyncAuth
 import org.mozilla.fenix.R
+import org.mozilla.fenix.components.accounts.FenixFxAEntryPoint
+import org.mozilla.fenix.components.share.store.ShareUiAction
+import org.mozilla.fenix.components.share.store.ShareUiState
+import org.mozilla.fenix.components.share.store.ShareUiStore
+import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.requireComponents
-import org.mozilla.fenix.share.DefaultShareController.Companion.ACTION_COPY_LINK_TO_CLIPBOARD
-import org.mozilla.fenix.share.ShareViewModel
-import org.mozilla.fenix.share.listadapters.AppShareOption
+import org.mozilla.fenix.settings.SupportUtils
+import org.mozilla.fenix.settings.account.SignOutFragment
 import org.mozilla.fenix.share.listadapters.SyncShareOption
+import org.mozilla.fenix.snackbar.FenixSnackbarDelegate
 
-/**
- * A [BottomSheetDialogFragment] that allows the user to send a tab to their other devices.
- */
+/** A [BottomSheetDialogFragment] that allows the user to send a tab to their other devices. */
 class SendToDevicesDialogFragment : BottomSheetDialogFragment() {
 
-    private val model: ShareViewModel by viewModels {
-        object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                val app = requireContext().applicationContext
-                return ShareViewModel(
-                    fxaAccountManager = requireComponents.backgroundServices.accountManager,
-                    recentAppsStorage = RecentAppsStorage(app),
-                    connectivityManager = app.getSystemService<ConnectivityManager>(),
-                    packageManager = app.packageManager,
-                    packageName = app.packageName,
-                    getCopyApp = ::getCopyApp,
-                    queryIntentActivitiesCompat = { intent ->
-                        app.packageManagerCompatHelper.queryIntentActivitiesCompat(intent, 0)
-                    },
-                ) as T
-            }
-        }
-    }
+    private lateinit var shareUiStore: ShareUiStore
+    private lateinit var deviceObserver: ShareUiDevicesObserver
 
     private val sendTabUseCases by lazy {
         SendTabUseCases(requireComponents.backgroundServices.accountManager)
     }
 
-    private var tabUrl: String? = null
-    private var tabTitle: String? = null
-    private var tabPrivacy: TabPrivacy = TabPrivacy.Normal
-    private var hasNavigatedToSignIn = false
-
-    private val accountObserver = object : AccountObserver {
-        override fun onAuthenticated(account: OAuthAccount, authType: AuthType) {
-            onAuthenticated()
-        }
-    }
+    private var tabs: List<TabData> = emptyList()
 
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?,
-    ) = content {
-        val uiState = model.uiState.collectAsState().value
-        SendToDevicesContent(
-            uiState = uiState,
-            onDismiss = { dismiss() },
-            onSendToDevice = { option: SyncShareOption.SingleDevice ->
-                sendAndDismiss(
-                    sendTabToDevices(option.device.id, tabUrl ?: "", tabTitle ?: "", tabPrivacy),
-                )
-            },
-            onSendToAll = {
-                sendAndDismiss(sendTabToAllDevices(tabUrl ?: "", tabTitle ?: "", tabPrivacy))
-            },
-        )
-    }
+    ): ComposeView {
+        shareUiStore =
+            fragmentStore(ShareUiState.initial) {
+                    ShareUiStore(initialState = it)
+                }
+                .value
 
-    override fun onStart() {
-        super.onStart()
-        loadTabData(arguments)
-        requireComponents.backgroundServices.accountManager.register(
-            accountObserver,
-            owner = this,
-            autoPause = false,
-        )
-    }
-
-    internal fun loadTabData(bundle: Bundle?) {
-        tabUrl = bundle?.getString(EXTRA_URL)
-        tabTitle = bundle?.getString(EXTRA_TITLE)
-        tabPrivacy = if (bundle?.getString(EXTRA_PRIVACY) == PRIVACY_PRIVATE) {
-            TabPrivacy.Private
-        } else {
-            TabPrivacy.Normal
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        checkAuthAndNavigate(requireComponents.backgroundServices.accountManager)
-    }
-
-    internal fun onAuthenticated() {
-        model.initDataLoad()
-    }
-
-    internal fun checkAuthAndNavigate(accountManager: FxaAccountManager) {
-        if (accountManager.authenticatedAccount() != null) {
-            onAuthenticated()
-        } else if (!hasNavigatedToSignIn) {
-            hasNavigatedToSignIn = true
-            navigateToSignIn()
-        }
-    }
-
-    internal fun navigateToSignIn() {
-        SyncAccount.signInToSendTab.record(NoExtras())
-        requireActivity().startActivity(
-            Intent(
-                Intent.ACTION_VIEW,
-                "${BuildConfig.DEEP_LINK_SCHEME}://turn_on_sync".toUri(),
-            ).apply {
-                setPackage(requireActivity().packageName)
-                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
-            },
-        )
-    }
-
-    private fun getCopyApp(): AppShareOption? {
-        val copyIcon = AppCompatResources.getDrawable(requireContext(), R.drawable.ic_share_clipboard)
-        return copyIcon?.let {
-            AppShareOption(
-                requireContext().getString(R.string.share_copy_link_to_clipboard),
-                it,
-                ACTION_COPY_LINK_TO_CLIPBOARD,
-                "",
+        return content {
+            val uiState by shareUiStore.stateFlow.collectAsState()
+            SendToDevicesContent(
+                uiState = uiState,
+                onDismiss = { dismiss() },
+                onSend = { devices: Set<SyncShareOption.SingleDevice> ->
+                    sendAndDismiss {
+                        sendTabUseCases.sendToDeviceAsync.invoke(devices.map { it.device }, tabs).await()
+                    }
+                },
+                onDeviceSelectionToggle = { shareUiStore.dispatch(ShareUiAction.DeviceSelectionToggle(it)) },
+                onSignInClicked = {
+                    reconnectToSync(requireContext())
+                },
+                onSignOutClicked = {
+                    removeAccountFromSync()
+                },
+                onRetryClicked = { deviceObserver.refreshDevices(null) },
+                onLearnMoreClicked = {
+                    openLearnMoreLink()
+                },
             )
         }
     }
 
-    private fun sendAndDismiss(deferred: Deferred<Boolean>) {
-        lifecycleScope.launch {
-            val success = deferred.await()
-            val message = if (success) {
-                R.string.sync_sent_tab_snackbar_2
-            } else {
-                R.string.sync_sent_tab_error_snackbar
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        val app = requireContext().applicationContext
+        deviceObserver =
+            ShareUiDevicesObserver(
+                store = shareUiStore,
+                fxaAccountManager = requireComponents.backgroundServices.accountManager,
+                connectivityManager = app.getSystemService<ConnectivityManager>(),
+                scope = storeProvider.viewModelScope,
+            )
+        viewLifecycleOwner.lifecycle.addObserver(deviceObserver)
+    }
+
+    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+        return super.onCreateDialog(savedInstanceState).apply {
+            setOnShowListener {
+                val bottomSheet = findViewById<View>(materialR.id.design_bottom_sheet) ?: return@setOnShowListener
+                ViewCompat.setOnApplyWindowInsetsListener(bottomSheet) { view, insets ->
+                    val systemBarInsets = insets.getInsets(systemBars())
+                    view.setPadding(0, systemBarInsets.top, 0, systemBarInsets.bottom)
+                    insets
+                }
+                bottomSheet.setBackgroundResource(R.drawable.bottom_sheet_with_top_rounded_corners)
             }
-            Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
-            dismiss()
         }
     }
 
-    private fun sendTabToDevices(
-        deviceId: String,
-        url: String,
-        title: String,
-        privacy: TabPrivacy,
-    ): Deferred<Boolean> {
-        return sendTabUseCases.sendToDeviceAsync.invoke(
-            deviceId = deviceId,
-            tab = TabData(url = url, title = title, privacy = privacy),
-        )
+    override fun onStart() {
+        super.onStart()
+        updateSheetHeight()
+        loadTabData(arguments)
     }
 
-    private fun sendTabToAllDevices(
-        url: String,
-        title: String,
-        privacy: TabPrivacy,
-    ): Deferred<Boolean> {
-        return sendTabUseCases.sendToAllAsync.invoke(
-            tab = TabData(url = url, title = title, privacy = privacy),
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        updateSheetHeight()
+    }
+
+    private fun updateSheetHeight() {
+        val bottomSheet = dialog?.findViewById<View>(materialR.id.design_bottom_sheet) ?: return
+        BottomSheetBehavior.from(bottomSheet).peekHeight =
+            if (requireContext().isLandscape()) {
+                resources.displayMetrics.heightPixels
+            } else {
+                BottomSheetBehavior.PEEK_HEIGHT_AUTO
+            }
+    }
+
+    internal fun loadTabData(bundle: Bundle?) {
+        val urls = bundle?.getStringArrayList(EXTRA_URLS).orEmpty()
+        val titles = bundle?.getStringArrayList(EXTRA_TITLES).orEmpty()
+        val privacy =
+            if (bundle?.getString(EXTRA_PRIVACY) == PRIVACY_PRIVATE) {
+                TabPrivacy.Private
+            } else {
+                TabPrivacy.Normal
+            }
+        tabs = urls.mapIndexed { i, url ->
+            TabData(url = url, title = titles.getOrNull(i).orEmpty(), privacy = privacy)
+        }
+    }
+
+    private fun reconnectToSync(context: Context) {
+        context.components.services.accountsAuthFeature.beginAuthentication(
+            context = context,
+            entrypoint = FenixFxAEntryPoint.ShareMenu,
+            service = FxaService.Sync.identifier,
+            scopes = setOf(SCOPE_PROFILE, SCOPE_SYNC),
         )
+        SyncAuth.useEmailProblem.record(NoExtras())
+    }
+
+    private fun removeAccountFromSync() {
+        val fragmentManager = parentFragmentManager
+        dismiss()
+        if (fragmentManager.findFragmentByTag("SignOutFragment") == null) {
+            SignOutFragment().show(fragmentManager, "SignOutFragment")
+        }
+    }
+
+    private fun sendAndDismiss(send: suspend () -> Boolean) {
+        val delegate = FenixSnackbarDelegate(requireActivity().findViewById(android.R.id.content))
+        lifecycleScope.launch {
+            showSendResult(
+                retryScope = requireActivity().lifecycleScope,
+                onSuccess = { text -> delegate.show(text = text, duration = Snackbar.LENGTH_SHORT) },
+                onFailure = { onRetry ->
+                    delegate.show(
+                        text = R.string.sync_sent_tab_error_snackbar,
+                        duration = Snackbar.LENGTH_LONG,
+                        isError = true,
+                        action = R.string.sync_sent_tab_error_snackbar_action,
+                    ) {
+                        onRetry()
+                    }
+                },
+                send = send,
+            )
+            dismissAllowingStateLoss()
+        }
+    }
+
+    private fun openLearnMoreLink() {
+        val url = SupportUtils.getGenericSumoURLForTopic(SupportUtils.SumoTopic.CONNECT_ADDITIONAL_DEVICES_TO_SYNC)
+        SupportUtils.launchSandboxCustomTab(requireContext(), url)
+    }
+
+    /**
+     * Displays a notification with the result of sending tabs.
+     *
+     * Shows a success message if [send] succeeds, or triggers [onFailure] if it fails. If the user retries,
+     * [showSendResult] is called again inside [retryScope]. This ensures the retry operation continues even if the
+     * calling component is dismissed.
+     */
+    internal suspend fun showSendResult(
+        retryScope: CoroutineScope,
+        onSuccess: (Int) -> Unit,
+        onFailure: (onRetry: () -> Unit) -> Unit,
+        send: suspend () -> Boolean,
+    ) {
+        if (send()) {
+            onSuccess(
+                if (tabs.size == 1) {
+                    R.string.sync_sent_tab_snackbar_2
+                } else {
+                    R.string.sync_sent_tabs_snackbar_2
+                }
+            )
+            return
+        }
+
+        onFailure {
+            retryScope.launch {
+                showSendResult(retryScope, onSuccess, onFailure, send)
+            }
+        }
     }
 
     companion object {
         const val TAG = "SendToDevicesDialogFragment"
 
-        internal const val EXTRA_URL = "url"
-        internal const val EXTRA_TITLE = "title"
+        internal const val EXTRA_URLS = "urls"
+        internal const val EXTRA_TITLES = "titles"
         internal const val EXTRA_PRIVACY = "privacy"
         internal const val PRIVACY_PRIVATE = "PRIVATE"
         internal const val PRIVACY_NORMAL = "NORMAL"
 
         /**
-         * Creates a new instance of [SendToDevicesDialogFragment] with the provided URL, title, and privacy status.
-         * @param url The URL of the tab to be sent.
-         * @param title The title of the tab to be sent (optional).
-         * @param isPrivate Whether the tab is private or not.
+         * Creates a new instance of [SendToDevicesDialogFragment] with the provided URLs, titles, and privacy status.
+         *
+         * @param urls The URLs of the tabs to be sent.
+         * @param titles The titles of the tabs to be sent, aligned by index with [urls].
+         * @param isPrivate Whether the tabs are private or not.
          */
-        fun newInstance(url: String, title: String?, isPrivate: Boolean) =
+        fun newInstance(urls: List<String>, titles: List<String>, isPrivate: Boolean) =
             SendToDevicesDialogFragment().apply {
-                arguments = Bundle().apply {
-                    putString(EXTRA_URL, url)
-                    putString(EXTRA_TITLE, title)
-                    putString(EXTRA_PRIVACY, if (isPrivate) PRIVACY_PRIVATE else PRIVACY_NORMAL)
-                }
+                arguments =
+                    Bundle().apply {
+                        putStringArrayList(EXTRA_URLS, ArrayList(urls))
+                        putStringArrayList(EXTRA_TITLES, ArrayList(titles))
+                        putString(EXTRA_PRIVACY, if (isPrivate) PRIVACY_PRIVATE else PRIVACY_NORMAL)
+                    }
             }
     }
 }

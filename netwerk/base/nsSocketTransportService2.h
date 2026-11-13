@@ -11,14 +11,13 @@
 #include "mozilla/Logging.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Mutex.h"
+#include "mozilla/Queue.h"
 #include "mozilla/RWLock.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/Queue.h"
-
 #include "mozilla/UniquePtr.h"
 #include "mozilla/net/DashboardTypes.h"
-#include "nsCOMPtr.h"
 #include "nsASocketHandler.h"
+#include "nsCOMPtr.h"
 #include "nsIDirectTaskDispatcher.h"
 #include "nsIObserver.h"
 #include "nsIRunnable.h"
@@ -158,6 +157,16 @@ class nsSocketTransportService final : public nsPISocketTransportService,
   // Public accessor for the socket thread. Returns the socket thread in a
   // thread-safe manner.
   already_AddRefed<nsIThread> GetSocketThread() { return GetThreadSafely(); }
+
+  // Main thread only. True from the time Shutdown() is called until Init() is
+  // called again (or forever, if this was XPCOM shutdown), and before the
+  // first Init(). When shutting down, work dispatched will run on the current
+  // socket thread before it is joined. When not initted at all, Dispatch
+  // returns an error.
+  bool IsShuttingDownOrShutDown() const {
+    MOZ_ASSERT(NS_IsMainThread());
+    return !mInitialized || mShuttingDown;
+  }
 
  private:
   //-------------------------------------------------------------------------
@@ -356,6 +365,12 @@ class nsSocketTransportService final : public nsPISocketTransportService,
 
 extern nsSocketTransportService* gSocketTransportService;
 bool OnSocketThread();
+
+// Unlike NS_DispatchToCurrentThread, this function tries to dispatch
+// to the currentSerialEventTarget, so the prioritization logic in
+// nsSocketTransportService::Dispatch gets to run.
+nsresult DispatchToCurrent(already_AddRefed<nsIRunnable> aEvent);
+nsresult DispatchToCurrent(nsIRunnable* aEvent);
 
 }  // namespace net
 }  // namespace mozilla

@@ -19,16 +19,6 @@
     margin-inline-end: var(--space-xsmall);
   }
 
-  &.icon-button-style {
-    fill: var(--newtab-text-secondary-color);
-    border: 0;
-
-    &:focus,
-    &:hover {
-      fill: var(--newtab-text-primary-color);
-    }
-  }
-
   // icon images
   &.icon-bookmark-added {
     background-image: url('chrome://browser/skin/bookmark.svg');
@@ -131,7 +121,7 @@
   }
 
   &.icon-trending {
-    background-image: url('chrome://browser/skin/trending.svg');
+    background-image: url('chrome://browser/skin/lightning-bolt.svg');
     transform: translateY(2px); // trending bolt is visually top heavy
   }
 

@@ -97,9 +97,7 @@ function initDevToolsServer() {
 }
 
 async function initPerfFront() {
-  initDevToolsServer();
-  const client = new DevToolsClient(DevToolsServer.connectPipe());
-  await waitUntilClientConnected(client);
+  const client = await createLocalClientForTests();
   const front = await client.mainRoot.getFront("perf");
   return { front, client };
 }
@@ -110,16 +108,6 @@ async function initInspectorFront(url) {
   const walker = inspector.walker;
 
   return { inspector, walker, target };
-}
-
-/**
- * Wait until a DevToolsClient is connected.
- *
- * @param {DevToolsClient} client
- * @return {Promise} Resolves when connected.
- */
-function waitUntilClientConnected(client) {
-  return client.once("connected");
 }
 
 /**
@@ -247,8 +235,9 @@ function waitForMarkerType(
   });
 }
 
-function getCookieId(name, domain, path, partitionKey = "") {
-  return `${name}${SEPARATOR_GUID}${domain}${SEPARATOR_GUID}${path}${SEPARATOR_GUID}${partitionKey}`;
+function getCookieId(name, domain, path, originAttributes = {}) {
+  const suffix = ChromeUtils.originAttributesToSuffix(originAttributes);
+  return `${name}${SEPARATOR_GUID}${domain}${SEPARATOR_GUID}${path}${SEPARATOR_GUID}${suffix}`;
 }
 
 /**

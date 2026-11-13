@@ -1,5 +1,4 @@
 #include "gtest/gtest.h"
-
 #include "nsHttpHeaderArray.h"
 #include "nsHttpRequestHead.h"
 #include "nsIHttpHeaderVisitor.h"

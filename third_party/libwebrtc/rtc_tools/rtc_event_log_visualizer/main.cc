@@ -14,6 +14,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
@@ -124,6 +125,14 @@ ABSL_FLAG(int,
           10,
           "How often (in ms) a data point is generated in bitrate plots.");
 
+ABSL_FLAG(
+    bool,
+    include_overhead,
+    true,
+    "Include estimated network-level protocol (IP/UDP/SRTP/STUN) overhead "
+    "in the total incoming and outgoing bitrate graphs. This flag only "
+    "affects incoming_bitrate and outgoing_bitrate graphs.");
+
 namespace {
 std::vector<std::string> StrSplit(const std::string& s,
                                   const std::string& delimiter) {
@@ -159,10 +168,10 @@ int main(int argc, char* argv[]) {
   std::vector<char*> args = absl::ParseCommandLine(argc, argv);
 
   // Print RTC_LOG warnings and errors even in release builds.
-  if (webrtc::LogMessage::GetLogToDebug() > webrtc::LS_WARNING) {
-    webrtc::LogMessage::LogToDebug(webrtc::LS_WARNING);
-  }
-  webrtc::LogMessage::SetLogToStderr(true);
+  webrtc::LoggingConfig logging_config;
+  logging_config.set_min_severity(webrtc::LS_WARNING);
+  logging_config.set_debug_severity(webrtc::LS_WARNING);
+  webrtc::InitializeLogging(std::move(logging_config));
 
   const std::string field_trials = absl::GetFlag(FLAGS_force_fieldtrials);
   webrtc::Environment env = webrtc::CreateEnvironment(
@@ -217,7 +226,8 @@ int main(int argc, char* argv[]) {
   webrtc::EventLogAnalyzer analyzer(parsed_log, config);
   analyzer.InitializeMapOfNamedGraphs(absl::GetFlag(FLAGS_show_detector_state),
                                       absl::GetFlag(FLAGS_show_alr_state),
-                                      absl::GetFlag(FLAGS_show_link_capacity));
+                                      absl::GetFlag(FLAGS_show_link_capacity),
+                                      absl::GetFlag(FLAGS_include_overhead));
   analyzer.SetNetEqReplacementFile(wav_path, 48000);
 
   // Flag replacements

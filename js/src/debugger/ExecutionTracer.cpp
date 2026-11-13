@@ -11,10 +11,8 @@
 #include "builtin/BigInt.h"     // BigIntObject
 #include "builtin/MapObject.h"  // MapObject, SetObject
 #include "builtin/Symbol.h"     // SymbolObject
-
-#include "debugger/Frame.h"  // DebuggerFrameType
-
-#include "vm/BooleanObject.h"  // BooleanObject
+#include "debugger/Frame.h"     // DebuggerFrameType
+#include "vm/BooleanObject.h"   // BooleanObject
 #include "vm/ErrorObject.h"
 #include "vm/NumberObject.h"      // NumberObject
 #include "vm/ObjectOperations.h"  // DefineDataElement
@@ -93,7 +91,7 @@ static DebuggerFrameType GetFrameType(AbstractFramePtr frame) {
   }
 
   if (result) {
-    cx->markAtom(result);
+    cx->recordRef(result);
   }
   return true;
 }

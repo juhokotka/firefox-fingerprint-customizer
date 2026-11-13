@@ -1,5 +1,7 @@
-#include "gtest/gtest.h"
+#include <fcntl.h>
+#include <sys/stat.h>
 
+#include "gtest/gtest.h"
 #include "mozilla/net/rust_helper.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
@@ -9,8 +11,6 @@
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsUnicharUtils.h"
-#include <fcntl.h>
-#include <sys/stat.h>
 
 #ifndef XP_WIN
 #  include <sys/file.h>
@@ -277,6 +277,23 @@ TEST_F(TestEtcHostsParsing, ParseNonExistentFile) {
 
   // Callback should not be invoked for non-existent files
   EXPECT_FALSE(mCallbackInvoked);
+}
+
+TEST_F(TestEtcHostsParsing, PersistentReadError) {
+  sCurrentTest = this;
+
+  // Opening a directory succeeds on Unix, but every read fails with EISDIR.
+  nsCOMPtr<nsIFile> tmpDir;
+  nsresult rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(tmpDir));
+  ASSERT_TRUE(NS_SUCCEEDED(rv));
+
+  nsAutoCString path;
+  rv = GetCrossplatformNativePath(tmpDir, path);
+  ASSERT_TRUE(NS_SUCCEEDED(rv));
+
+  rust_parse_etc_hosts(&path, TestCallback);
+
+  EXPECT_EQ(mParsedHosts.Length(), 0u);
 }
 
 TEST_F(TestEtcHostsParsing, CallbackReturnsFalse) {

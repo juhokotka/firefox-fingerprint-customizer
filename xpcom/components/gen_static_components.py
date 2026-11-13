@@ -294,6 +294,7 @@ class ModuleEntry:
         )
         self.singleton = data.get("singleton", False)
         self.overridable = data.get("overridable", False)
+        self.serializable = data.get("serializable", False)
 
         self.protocol_config = data.get("protocol_config", None)
 
@@ -365,6 +366,8 @@ class ModuleEntry:
           {self.cid.to_cxx()},
           {contract_id},
           {lower_processes(self.processes)},
+          {"true" if self.serializable else "false"},
+          {"true" if self.singleton else "false"},
         }}"""
 
     # Generates the C++ code for a JSServiceEntry representing this module.
@@ -438,7 +441,7 @@ class ModuleEntry:
           std::is_same_v<already_AddRefed<T>, decltype(%(constructor)s())>,
           "Singleton constructor must return already_AddRefed");
       static_assert(
-          std::is_base_of<%(type)s, T>::value,
+          std::is_base_of_v<%(type)s, T>,
           "Singleton constructor must return correct already_AddRefed");
 
 """ % {

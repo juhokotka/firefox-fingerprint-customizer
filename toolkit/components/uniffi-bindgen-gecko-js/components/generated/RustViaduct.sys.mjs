@@ -38,7 +38,7 @@ export var UnitTestObjs = {
 export function allowAndroidEmulatorLoopback() {
    
 const result = UniFFIScaffolding.callSync(
-    202, // uniffi_viaduct_fn_func_allow_android_emulator_loopback
+    30, // uniffi_viaduct_fn_func_allow_android_emulator_loopback
 )
 return handleRustResult(
     result,
@@ -53,7 +53,7 @@ return handleRustResult(
 export function clearOhttpChannels() {
    
 const result = UniFFIScaffolding.callSync(
-    203, // uniffi_viaduct_fn_func_clear_ohttp_channels
+    31, // uniffi_viaduct_fn_func_clear_ohttp_channels
 )
 return handleRustResult(
     result,
@@ -71,7 +71,7 @@ return handleRustResult(
 export function configureDefaultOhttpChannels() {
    
 const result = UniFFIScaffolding.callSync(
-    204, // uniffi_viaduct_fn_func_configure_default_ohttp_channels
+    32, // uniffi_viaduct_fn_func_configure_default_ohttp_channels
 )
 return handleRustResult(
     result,
@@ -93,7 +93,7 @@ export function configureOhttpChannel(
 FfiConverterString.checkType(channel);
 FfiConverterTypeOhttpConfig.checkType(config);
 const result = UniFFIScaffolding.callSync(
-    205, // uniffi_viaduct_fn_func_configure_ohttp_channel
+    33, // uniffi_viaduct_fn_func_configure_ohttp_channel
     FfiConverterString.lower(channel),
     FfiConverterTypeOhttpConfig.lower(config),
 )
@@ -113,13 +113,13 @@ export function initBackend(
    
 FfiConverterTypeBackend.checkType(backend);
 const result = UniFFIScaffolding.callSync(
-    206, // uniffi_viaduct_fn_func_init_backend
+    34, // uniffi_viaduct_fn_func_init_backend
     FfiConverterTypeBackend.lower(backend),
 )
 return handleRustResult(
     result,
     (result) => undefined,
-    FfiConverterTypeViaductError.lift.bind(FfiConverterTypeViaductError),
+    null,
 )
 }
 
@@ -130,7 +130,7 @@ return handleRustResult(
 export function listOhttpChannels() {
    
 const result = UniFFIScaffolding.callSync(
-    207, // uniffi_viaduct_fn_func_list_ohttp_channels
+    35, // uniffi_viaduct_fn_func_list_ohttp_channels
 )
 return handleRustResult(
     result,
@@ -172,7 +172,7 @@ export async function sendOhttpRequest(
 FfiConverterTypeRequest.checkType(request);
 FfiConverterString.checkType(channel);
 const result = await UniFFIScaffolding.callAsync(
-    208, // uniffi_viaduct_fn_func_send_ohttp_request
+    36, // uniffi_viaduct_fn_func_send_ohttp_request
     FfiConverterTypeRequest.lower(request),
     FfiConverterString.lower(channel),
 )
@@ -195,7 +195,7 @@ export function setGlobalDefaultUserAgent(
    
 FfiConverterString.checkType(userAgent);
 const result = UniFFIScaffolding.callSync(
-    209, // uniffi_viaduct_fn_func_set_global_default_user_agent
+    37, // uniffi_viaduct_fn_func_set_global_default_user_agent
     FfiConverterString.lower(userAgent),
 )
 return handleRustResult(
@@ -204,6 +204,7 @@ return handleRustResult(
     null,
 )
 }
+
 
 
 
@@ -252,7 +253,7 @@ export class FfiConverterOptionalString extends FfiConverterArrayBuffer {
 export class ClientSettings {
     constructor(
         {
-            timeout= 0, 
+            timeout= 60000, 
             redirectLimit= 10, 
             ohttpChannel, 
             userAgent= null
@@ -493,7 +494,7 @@ export class FfiConverterTypeOhttpConfig extends FfiConverterArrayBuffer {
  * 
  * The supported methods are the limited to what's supported by android-components.
  */
-export const Method = Object.freeze({
+export const Method = Object.freeze(/** @lends Method */ {
     /**
      * GET
      */
@@ -1529,7 +1530,7 @@ export class BackendImpl extends Backend {
         FfiConverterTypeRequest.checkType(request);
         FfiConverterTypeClientSettings.checkType(settings);
         const result = await UniFFIScaffolding.callAsync(
-            210, // uniffi_viaduct_fn_method_backend_send_request
+            289, // uniffi_viaduct_fn_method_backend_send_request
             FfiConverterTypeBackend.lowerReceiver(this),
             FfiConverterTypeRequest.lower(request),
             FfiConverterTypeClientSettings.lower(settings),
@@ -1556,7 +1557,7 @@ export class FfiConverterTypeBackend extends FfiConverter {
           return new BackendImpl(opts);
         } else {
           // JS handle.  Get the JS object from the callback handler
-          return uniffiCallbackHandlerViaductBackend.takeCallbackObj(handle)
+          return uniffiCallbackHandlerBackend.takeCallbackObj(handle)
         }
     }
 
@@ -1570,11 +1571,11 @@ export class FfiConverterTypeBackend extends FfiConverter {
           if (!(value instanceof Backend)) {
               throw new UniFFITypeError("expected 'Backend' subclass");
           }
-          return uniffiCallbackHandlerViaductBackend.storeCallbackObj(value)
+          return uniffiCallbackHandlerBackend.storeCallbackObj(value)
         }
     }
 
-    // lowerReceiver is used when calling methods on an interface we got from Rust, 
+    // lowerReceiver is used when calling methods on an interface we got from Rust,
     // it treats value like a regular interface.
     static lowerReceiver(value) {
         const ptr = value[uniffiObjectPtr];
@@ -1585,13 +1586,13 @@ export class FfiConverterTypeBackend extends FfiConverter {
     }
 
     static read(dataStream) {
-        return this.lift(dataStream.readHandleOrPointer(25))
+        return this.lift(dataStream.readHandleOrPointer(26))
     }
 
     static write(dataStream, value) {
         if (value[uniffiObjectPtr] instanceof UniFFIPointer) {
           // Rust-implemented interface, return the ptr.
-          dataStream.writePointer(25, this.lower(value));
+          dataStream.writePointer(26, this.lower(value));
         } else {
           dataStream.writeInt64(this.lower(value))
         }
@@ -1602,9 +1603,9 @@ export class FfiConverterTypeBackend extends FfiConverter {
     }
 }
 
-const uniffiCallbackHandlerViaductBackend = new UniFFICallbackHandler(
+const uniffiCallbackHandlerBackend = new UniFFICallbackHandler(
     "Backend",
-    8,
+    7,
     [
         new UniFFICallbackMethodHandler(
             "sendRequest",
@@ -1624,7 +1625,7 @@ const uniffiCallbackHandlerViaductBackend = new UniFFICallbackHandler(
 );
 
 // Allow the shutdown-related functionality to be tested in the unit tests
-UnitTestObjs.uniffiCallbackHandlerViaductBackend = uniffiCallbackHandlerViaductBackend;
+UnitTestObjs.uniffiCallbackHandlerBackend = uniffiCallbackHandlerBackend;
 // Export the FFIConverter object to make external types work.
 export class FfiConverterSequenceString extends FfiConverterArrayBuffer {
     static read(dataStream) {

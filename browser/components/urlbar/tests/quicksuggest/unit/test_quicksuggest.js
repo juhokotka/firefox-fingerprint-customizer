@@ -19,6 +19,23 @@ add_setup(async function init() {
   await QuickSuggestTestUtils.ensureQuickSuggestInit();
 });
 
+// The Rust backend should remain enabled regardless of the
+// `suggest.quicksuggest.all` pref.
+add_task(async function suggestAllPref() {
+  UrlbarPrefs.set("suggest.quicksuggest.all", false);
+  UrlbarPrefs.set("suggest.quicksuggest.sponsored", false);
+  await QuickSuggestTestUtils.forceSync();
+
+  Assert.ok(
+    QuickSuggest.getFeature("SuggestBackendRust").isEnabled,
+    "SuggestBackendRust should remain enabled when `suggest.quicksuggest.all` is false"
+  );
+
+  UrlbarPrefs.clear("suggest.quicksuggest.all");
+  UrlbarPrefs.clear("suggest.quicksuggest.sponsored");
+  await QuickSuggestTestUtils.forceSync();
+});
+
 add_task(async function maxResults() {
   UrlbarPrefs.set("suggest.quicksuggest.sponsored", true);
   await QuickSuggestTestUtils.forceSync();
@@ -174,7 +191,7 @@ add_task(async function manySuggestResults() {
                   url: record.url,
                   suggestedIndex: -1,
                 }),
-                { exposureTelemetry: UrlbarUtils.EXPOSURE_TELEMETRY.HIDDEN }
+                { exposureTelemetry: UrlbarShared.EXPOSURE_TELEMETRY.HIDDEN }
               )
             )
             .reverse(),
@@ -359,7 +376,7 @@ add_task(async function tabToSearch() {
           // tab to search
           makeSearchResult(context, {
             engineName: engine.name,
-            engineIconUri: UrlbarUtils.ICON.SEARCH_GLASS,
+            engineIconUri: UrlbarShared.ICON.SEARCH_GLASS,
             searchUrlDomainWithoutSuffix: UrlbarUtils.stripPublicSuffixFromHost(
               engine.searchUrlDomain
             ),

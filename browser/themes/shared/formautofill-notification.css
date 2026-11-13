@@ -12,12 +12,8 @@
  * "address-save-update" prefix is used for "save address doorhanger" and "update address doorhanger"
  */
 
-.popup-notification-body[popupid="address-save-update"],
-.popup-notification-body[popupid="address-edit"] {
-  width: 25.8em;
-}
-
-.address-capture-notification {
+.address-capture-notification,
+.passport-capture-notification {
   /* Overwrite margin that we don't need */
   :is(popupnotificationcontent, .panel-footer) {
     margin-top: 0;
@@ -43,7 +39,8 @@
   }
 }
 
-.address-capture-header {
+.address-capture-header,
+.passport-capture-header {
   margin-top: var(--space-large);
   margin-bottom: var(--space-medium);
   display: flex;
@@ -56,12 +53,17 @@
   }
 }
 
+.passport-capture-header {
+  margin-bottom: var(--space-small);
+}
+
 .address-save-update-notification-content > .address-capture-content {
   display: flex;
   flex-direction: column;
 }
 
 .address-capture-description,
+.passport-capture-description,
 .address-save-update-row-container,
 .address-edit-row-container {
   margin-bottom: var(--space-large);
@@ -101,6 +103,12 @@
   text-decoration: line-through;
 }
 
+.address-capture-img-address,
+.address-capture-img-email {
+  -moz-context-properties: fill;
+  fill: currentColor;
+}
+
 .address-capture-img-address {
   list-style-image: url("chrome://browser/skin/formautofill/icon-capture-address-fields.svg");
 }
@@ -119,19 +127,53 @@
   flex: 1;
 }
 
-.credit-card-capture-content {
+.credit-card-capture-content,
+.passport-capture-content {
   display: flex;
   flex-direction: column;
   gap: var(--space-large);
 }
 
+.passport-capture-content {
+  margin-bottom: var(--space-large);
+}
+
+.passport-capture-content :is(moz-input-text, moz-input-password, moz-select) {
+  width: 100%;
+}
+
+.passport-capture-date-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xsmall);
+}
+
+.passport-capture-date-row {
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-large);
+}
+
+.passport-capture-date-row > .passport-capture-date-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.desc-message-box {
+  align-items: center;
+  gap: var(--space-medium);
+  padding: var(--space-medium) var(--space-large);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius-large);
+}
+
 .cc-icon {
   height: var(--icon-size-small);
-  margin-inline-end: var(--space-small);
 }
 
 .payments-doorhanger-description {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: var(--space-xsmall);
 

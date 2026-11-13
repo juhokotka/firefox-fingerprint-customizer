@@ -26,6 +26,18 @@ use url::Url;
 pub const OAUTH_WEBCHANNEL_REDIRECT: &str = "urn:ietf:wg:oauth:2.0:oob:oauth-redirect-webchannel";
 
 impl FirefoxAccount {
+    /// Check whether every requested scope has been granted to the account's refresh token.
+    pub fn has_scope(&self, scope: &str) -> bool {
+        let mut requested = scope.split_ascii_whitespace().peekable();
+        if requested.peek().is_none() {
+            return false;
+        }
+        match self.state.refresh_token() {
+            Some(refresh_token) => requested.all(|s| refresh_token.scopes.contains(s)),
+            None => false,
+        }
+    }
+
     /// Extracts and stores the session token from a WebChannel login JSON payload.
     /// The JSON payload is the `data` object from the `fxaccounts:login` WebChannel command.
     pub fn handle_web_channel_login(&mut self, json_payload: &str) -> Result<()> {
@@ -107,7 +119,7 @@ impl FirefoxAccount {
 
     /// Check whether user is authorized using our refresh token.
     pub fn check_authorization_status(&mut self) -> Result<IntrospectInfo> {
-        let resp = match self.state.refresh_token() {
+        let resp = match self.state.refresh_token_for_reauth() {
             Some(refresh_token) => {
                 self.auth_circuit_breaker.check()?;
                 self.client
@@ -294,13 +306,16 @@ impl FirefoxAccount {
         let keys_jwk = URL_SAFE_NO_PAD.encode(jwk_json);
         url.query_pairs_mut()
             .append_pair("client_id", &self.state.config().client_id)
-            .append_pair("scope", &scopes.join(" "))
             .append_pair("state", &state)
             .append_pair("code_challenge_method", "S256")
             .append_pair("code_challenge", &code_challenge)
             .append_pair("access_type", "offline")
             .append_pair("keys_jwk", &keys_jwk);
 
+        if !scopes.is_empty() {
+            url.query_pairs_mut()
+                .append_pair("scope", &scopes.join(" "));
+        }
         if self.state.config().redirect_uri == OAUTH_WEBCHANNEL_REDIRECT {
             url.query_pairs_mut()
                 .append_pair("context", "oauth_webchannel_v1");
@@ -357,7 +372,8 @@ impl FirefoxAccount {
         resp: OAuthTokenResponse,
         scoped_keys_flow: Option<ScopedKeysFlow>,
     ) -> Result<()> {
-        let sync_scope_granted = resp.scope.split(' ').any(|s| s == scopes::OLD_SYNC);
+        // These are the keys granted by *this* response - any invariants about scopes vs keys
+        // must be checked after we've fully merged the scopes and keys.
         let scoped_keys = match resp.keys_jwe {
             Some(ref jwe) => {
                 let scoped_keys_flow = scoped_keys_flow.ok_or(Error::ApiClientError(
@@ -366,28 +382,12 @@ impl FirefoxAccount {
                 let decrypted_keys = scoped_keys_flow.decrypt_keys_jwe(jwe)?;
                 let scoped_keys: serde_json::Map<String, serde_json::Value> =
                     serde_json::from_str(&decrypted_keys)?;
-                if sync_scope_granted && !scoped_keys.contains_key(scopes::OLD_SYNC) {
-                    error_support::report_error!(
-                        "fxaclient-scoped-key",
-                        "Sync scope granted, but no sync scoped key (scope granted: {}, key scopes: {})",
-                        resp.scope,
-                        scoped_keys.keys().map(|s| s.as_ref()).collect::<Vec<&str>>().join(", ")
-                    );
-                }
                 scoped_keys
                     .into_iter()
                     .map(|(scope, key)| Ok((scope, serde_json::from_value(key)?)))
                     .collect::<Result<Vec<_>>>()?
             }
-            None => {
-                if sync_scope_granted {
-                    error_support::report_error!(
-                        "fxaclient-scoped-key",
-                        "Sync scope granted, but keys_jwe is None"
-                    );
-                }
-                vec![]
-            }
+            None => vec![],
         };
 
         // We are only interested in the refresh token at this time because we
@@ -485,6 +485,27 @@ impl FirefoxAccount {
             // and clear the old refresh token from our state, just in case we encounter an error before
             // we've set the new one as current.
             self.state.clear_refresh_token();
+        }
+
+        // Evaluate the sync-key invariant against the final state: the scopes the merged
+        // refresh token actually carries, and every key we'll hold afterwards (keys from this
+        // response plus keys we already had for other scopes).
+        let sync_scope_granted = new_refresh_token.scopes.contains(scopes::OLD_SYNC);
+        let have_sync_key = scoped_keys
+            .iter()
+            .any(|(scope, _)| scope == scopes::OLD_SYNC)
+            || self.state.get_scoped_key(scopes::OLD_SYNC).is_some();
+        if sync_scope_granted && !have_sync_key {
+            error_support::report_error!(
+                "fxaclient-scoped-key",
+                "Sync scope granted, but no sync scoped key held (final scopes: {})",
+                new_refresh_token
+                    .scopes
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
 
         self.state
@@ -652,6 +673,42 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn test_has_scope() {
+        nss_as::ensure_initialized();
+        let mut fxa =
+            FirefoxAccount::with_config(Config::stable_dev("12345678", "https://foo.bar"));
+        // No refresh token -> false.
+        assert!(!fxa.has_scope("profile"));
+        fxa.state.force_refresh_token(RefreshToken {
+            token: "rt".to_owned(),
+            scopes: ["profile", "sync"].iter().map(|s| s.to_string()).collect(),
+        });
+        assert!(fxa.has_scope("profile"));
+        assert!(fxa.has_scope("sync profile"));
+        assert!(fxa.has_scope("profile sync ")); // trailing whitespace too
+        assert!(!fxa.has_scope("sync unknown")); // one missing -> false
+        assert!(!fxa.has_scope("")); // empty -> false
+    }
+
+    #[test]
+    fn test_oauth_flow_url_without_scopes() {
+        nss_as::ensure_initialized();
+        let config = Config::new_with_mock_well_known_fxa_client_configuration(
+            "https://mock-fxa.example.com",
+            "12345678",
+            "https://foo.bar",
+        );
+        let mut fxa = FirefoxAccount::with_config(config);
+        let url = fxa
+            .begin_oauth_flow("", &[], "test_oauth_flow_url")
+            .unwrap();
+        let flow_url = Url::parse(&url).unwrap();
+        let params: HashMap<String, String> = flow_url.query_pairs().into_owned().collect();
+
+        assert!(!params.contains_key("scope"));
+    }
+
+    #[test]
     fn test_oauth_flow_url() {
         nss_as::ensure_initialized();
         let config = Config::new_with_mock_well_known_fxa_client_configuration(
@@ -667,60 +724,19 @@ mod tests {
 
         assert_eq!(flow_url.path(), "/authorization");
 
-        let mut pairs = flow_url.query_pairs();
-        assert_eq!(pairs.count(), 11);
-        assert_eq!(
-            pairs.next(),
-            Some((Cow::Borrowed("action"), Cow::Borrowed("email")))
-        );
-        assert_eq!(
-            pairs.next(),
-            Some((Cow::Borrowed("response_type"), Cow::Borrowed("code")))
-        );
-        assert_eq!(
-            pairs.next(),
-            Some((
-                Cow::Borrowed("entrypoint"),
-                Cow::Borrowed("test_oauth_flow_url")
-            ))
-        );
-        assert_eq!(
-            pairs.next(),
-            Some((Cow::Borrowed("client_id"), Cow::Borrowed("12345678")))
-        );
-
-        assert_eq!(
-            pairs.next(),
-            Some((Cow::Borrowed("scope"), Cow::Borrowed("profile")))
-        );
-        let state_param = pairs.next().unwrap();
-        assert_eq!(state_param.0, Cow::Borrowed("state"));
-        assert_eq!(state_param.1.len(), 22);
-        assert_eq!(
-            pairs.next(),
-            Some((
-                Cow::Borrowed("code_challenge_method"),
-                Cow::Borrowed("S256")
-            ))
-        );
-        let code_challenge_param = pairs.next().unwrap();
-        assert_eq!(code_challenge_param.0, Cow::Borrowed("code_challenge"));
-        assert_eq!(code_challenge_param.1.len(), 43);
-        assert_eq!(
-            pairs.next(),
-            Some((Cow::Borrowed("access_type"), Cow::Borrowed("offline")))
-        );
-        let keys_jwk = pairs.next().unwrap();
-        assert_eq!(keys_jwk.0, Cow::Borrowed("keys_jwk"));
-        assert_eq!(keys_jwk.1.len(), 168);
-
-        assert_eq!(
-            pairs.next(),
-            Some((
-                Cow::Borrowed("redirect_uri"),
-                Cow::Borrowed("https://foo.bar")
-            ))
-        );
+        assert_eq!(flow_url.query_pairs().count(), 11);
+        let params: HashMap<String, String> = flow_url.query_pairs().into_owned().collect();
+        assert_eq!(params["action"], "email");
+        assert_eq!(params["response_type"], "code");
+        assert_eq!(params["entrypoint"], "test_oauth_flow_url");
+        assert_eq!(params["client_id"], "12345678");
+        assert_eq!(params["scope"], "profile");
+        assert_eq!(params["state"].len(), 22);
+        assert_eq!(params["code_challenge_method"], "S256");
+        assert_eq!(params["code_challenge"].len(), 43);
+        assert_eq!(params["access_type"], "offline");
+        assert_eq!(params["keys_jwk"].len(), 168);
+        assert_eq!(params["redirect_uri"], "https://foo.bar");
     }
 
     #[test]
@@ -813,55 +829,17 @@ mod tests {
         assert_eq!(flow_url.path(), "/pair/supp");
         assert_eq!(flow_url.fragment(), expected_parsed_url.fragment());
 
-        let mut pairs = flow_url.query_pairs();
-        assert_eq!(pairs.count(), 9);
-        assert_eq!(
-            pairs.next(),
-            Some((
-                Cow::Borrowed("entrypoint"),
-                Cow::Borrowed("test_pairing_flow_url")
-            ))
-        );
-        assert_eq!(
-            pairs.next(),
-            Some((Cow::Borrowed("client_id"), Cow::Borrowed("12345678")))
-        );
-        assert_eq!(
-            pairs.next(),
-            Some((
-                Cow::Borrowed("scope"),
-                Cow::Borrowed("https://identity.mozilla.com/apps/oldsync")
-            ))
-        );
-
-        let state_param = pairs.next().unwrap();
-        assert_eq!(state_param.0, Cow::Borrowed("state"));
-        assert_eq!(state_param.1.len(), 22);
-        assert_eq!(
-            pairs.next(),
-            Some((
-                Cow::Borrowed("code_challenge_method"),
-                Cow::Borrowed("S256")
-            ))
-        );
-        let code_challenge_param = pairs.next().unwrap();
-        assert_eq!(code_challenge_param.0, Cow::Borrowed("code_challenge"));
-        assert_eq!(code_challenge_param.1.len(), 43);
-        assert_eq!(
-            pairs.next(),
-            Some((Cow::Borrowed("access_type"), Cow::Borrowed("offline")))
-        );
-        let keys_jwk = pairs.next().unwrap();
-        assert_eq!(keys_jwk.0, Cow::Borrowed("keys_jwk"));
-        assert_eq!(keys_jwk.1.len(), 168);
-
-        assert_eq!(
-            pairs.next(),
-            Some((
-                Cow::Borrowed("redirect_uri"),
-                Cow::Borrowed("https://foo.bar")
-            ))
-        );
+        assert_eq!(flow_url.query_pairs().count(), 9);
+        let params: HashMap<String, String> = flow_url.query_pairs().into_owned().collect();
+        assert_eq!(params["entrypoint"], "test_pairing_flow_url");
+        assert_eq!(params["client_id"], "12345678");
+        assert_eq!(params["scope"], "https://identity.mozilla.com/apps/oldsync");
+        assert_eq!(params["state"].len(), 22);
+        assert_eq!(params["code_challenge_method"], "S256");
+        assert_eq!(params["code_challenge"].len(), 43);
+        assert_eq!(params["access_type"], "offline");
+        assert_eq!(params["keys_jwk"].len(), 168);
+        assert_eq!(params["redirect_uri"], "https://foo.bar");
     }
 
     #[test]
@@ -1395,5 +1373,133 @@ mod tests {
 
         let scopes = &fxa.state.refresh_token().unwrap().scopes;
         assert_eq!(scopes, &["profile".to_string()].into());
+    }
+
+    // Test that adding a non-sync scope to an account that is already signed in with sync
+    // retains the sync scoped key we already hold, even though this response carries no keys.
+    #[test]
+    fn test_complete_oauth_flow_retains_existing_sync_key_when_adding_scope() {
+        nss_as::ensure_initialized();
+        let config = Config::new_with_mock_well_known_fxa_client_configuration(
+            "mock-fxa.example.com",
+            "12345678",
+            "https://foo.bar",
+        );
+        let mut fxa = FirefoxAccount::with_config(config);
+
+        // Start a flow requesting only a new, non-sync scope.
+        let url = fxa
+            .begin_oauth_flow("", &["new_scope"], "test_entrypoint")
+            .unwrap();
+        let url = Url::parse(&url).unwrap();
+        let state = url.query_pairs().find(|(name, _)| name == "state").unwrap();
+
+        // Pre-populate: signed in with the sync scope, holding its scoped key, plus a session
+        // token so the scope merge can happen.
+        fxa.state.force_refresh_token(RefreshToken {
+            token: "old_refresh".to_string(),
+            scopes: [OLD_SYNC.to_string()].into(),
+        });
+        fxa.state.insert_scoped_key(
+            OLD_SYNC,
+            crate::ScopedKey {
+                kty: "oct".to_string(),
+                scope: OLD_SYNC.to_string(),
+                k: "existing_sync_key_material".to_string(),
+                kid: "existing_sync_kid".to_string(),
+            },
+        );
+        fxa.set_session_token("mock_session_token");
+
+        let mut client = MockFxAClient::new();
+
+        // 1. Exchange auth code — narrow token with only the new scope and no keys.
+        client
+            .expect_create_refresh_token_using_authorization_code()
+            .times(1)
+            .returning(|_, _, _, _| {
+                Ok(OAuthTokenResponse {
+                    keys_jwe: None,
+                    refresh_token: Some("new_narrow_refresh".to_string()),
+                    session_token: None,
+                    expires_in: 3600,
+                    scope: "new_scope".to_string(),
+                    access_token: "access_token".to_string(),
+                })
+            });
+
+        // 2. Destroy the over-scoped access token.
+        client
+            .expect_destroy_access_token()
+            .with(always(), always())
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        // 3. Fetch current device so it can be restored after the token swap.
+        client
+            .expect_get_devices()
+            .with(always(), eq("old_refresh"))
+            .times(1)
+            .returning(|_, _| Ok(vec![make_mock_device("Test Device")]));
+
+        // 4. Get merged refresh token covering both the old sync scope and the new scope.
+        client
+            .expect_create_refresh_token_using_session_token()
+            .withf(|_, session_token, _| session_token == "mock_session_token")
+            .times(1)
+            .returning(|_, _, _| {
+                Ok(OAuthTokenResponse {
+                    keys_jwe: None,
+                    refresh_token: Some("merged_refresh".to_string()),
+                    session_token: None,
+                    expires_in: 3600,
+                    scope: format!("{OLD_SYNC} new_scope"),
+                    access_token: "access_token2".to_string(),
+                })
+            });
+
+        // 5. Destroy the narrow new token (replaced by the merged one).
+        client
+            .expect_destroy_refresh_token()
+            .with(always(), eq("new_narrow_refresh"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        // 6. Destroy the old refresh token.
+        client
+            .expect_destroy_refresh_token()
+            .with(always(), eq("old_refresh"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        // 7. Restore the device record.
+        client
+            .expect_update_device_record()
+            .times(1)
+            .returning(|_, _, _| Ok(make_mock_update_device_response()));
+
+        fxa.set_client(Arc::new(client));
+
+        fxa.complete_oauth_flow("mock_code", state.1.as_ref())
+            .unwrap();
+
+        // The sync key we already held must survive, even though this flow carried no keys.
+        let sync_key = fxa
+            .state
+            .get_scoped_key(OLD_SYNC)
+            .expect("sync scoped key should be retained");
+        assert_eq!(sync_key.k, "existing_sync_key_material");
+
+        // And the merged refresh token should carry both scopes.
+        let scopes = &fxa.state.refresh_token().unwrap().scopes;
+        assert!(
+            scopes.contains(OLD_SYNC),
+            "expected sync scope, got {scopes:?}"
+        );
+        assert!(
+            scopes.contains("new_scope"),
+            "expected new_scope, got {scopes:?}"
+        );
+        assert_eq!(scopes.len(), 2);
     }
 }

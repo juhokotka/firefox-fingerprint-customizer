@@ -199,19 +199,24 @@ class DebuggerSourceGetTextMatcher {
 
   ReturnType match(Handle<ScriptSourceObject*> sourceObject) {
     ScriptSource* ss = sourceObject->source();
-    bool hasSourceText;
-    if (!ScriptSource::loadSource(cx_, ss, &hasSourceText)) {
+
+    bool loaded = false;
+    Maybe<ScriptSource::DataReader> reader;
+    if (!ss->tryLoadSource(cx_, reader, &loaded)) {
       return nullptr;
     }
-    if (!hasSourceText) {
+
+    if (!loaded) {
       return NewStringCopyZ<CanGC>(cx_, "[no source]");
     }
 
+    MOZ_ASSERT((*reader)->hasSourceText());
+
     if (ss->shouldUnwrapEventHandlerBody()) {
-      return ss->functionBodyString(cx_);
+      return (*reader)->functionBodyString(cx_, ss);
     }
 
-    return ss->substring(cx_, 0, ss->length());
+    return (*reader)->substring(cx_, 0, (*reader)->length());
   }
 
   ReturnType match(Handle<WasmInstanceObject*> instanceObj) {
@@ -602,6 +607,7 @@ bool DebuggerSource::CallData::getSourceMapURL() {
 
 template <typename Unit>
 static JSScript* ReparseSource(JSContext* cx, Handle<ScriptSourceObject*> sso,
+                               ScriptSource::DataReader& reader,
                                bool asModule) {
   AutoRealm ar(cx, sso);
   ScriptSource* ss = sso->source();
@@ -613,13 +619,13 @@ static JSScript* ReparseSource(JSContext* cx, Handle<ScriptSourceObject*> sso,
 
   UncompressedSourceCache::AutoHoldEntry holder;
 
-  ScriptSource::PinnedUnits<Unit> units(cx, ss, holder, 0, ss->length());
-  if (!units.get()) {
+  const Unit* units = reader->units<Unit>(cx, holder, 0, reader->length());
+  if (!units) {
     return nullptr;
   }
 
   JS::SourceText<Unit> srcBuf;
-  if (!srcBuf.init(cx, units.get(), ss->length(),
+  if (!srcBuf.init(cx, units, reader->length(),
                    JS::SourceOwnership::Borrowed)) {
     return nullptr;
   }
@@ -652,7 +658,8 @@ bool DebuggerSource::CallData::reparse() {
     return false;
   }
 
-  if (!sourceObject->source()->hasSourceText()) {
+  ScriptSource::DataReader reader(sourceObject->source());
+  if (!reader.hasSourceText()) {
     JS_ReportErrorASCII(cx, "Source object missing text");
     return false;
   }
@@ -660,10 +667,11 @@ bool DebuggerSource::CallData::reparse() {
   bool asModule = ToBoolean(args.get(0));
 
   RootedScript script(cx);
-  if (sourceObject->source()->hasSourceType<mozilla::Utf8Unit>()) {
-    script = ReparseSource<mozilla::Utf8Unit>(cx, sourceObject, asModule);
+  if (reader->hasSourceType<mozilla::Utf8Unit>()) {
+    script =
+        ReparseSource<mozilla::Utf8Unit>(cx, sourceObject, reader, asModule);
   } else {
-    script = ReparseSource<char16_t>(cx, sourceObject, asModule);
+    script = ReparseSource<char16_t>(cx, sourceObject, reader, asModule);
   }
 
   if (!script) {

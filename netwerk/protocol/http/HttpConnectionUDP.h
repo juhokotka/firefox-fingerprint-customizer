@@ -5,24 +5,23 @@
 #ifndef HttpConnectionUDP_h_
 #define HttpConnectionUDP_h_
 
+#include "ARefBase.h"
+#include "Http3Session.h"
 #include "HttpConnectionBase.h"
-#include "nsHttpConnectionInfo.h"
-#include "nsHttpResponseHead.h"
+#include "HttpTrafficAnalyzer.h"
+#include "TimingStruct.h"
+#include "mozilla/Mutex.h"
 #include "nsAHttpTransaction.h"
 #include "nsCOMPtr.h"
-#include "nsProxyRelease.h"
-#include "prinrval.h"
-#include "mozilla/Mutex.h"
-#include "ARefBase.h"
-#include "TimingStruct.h"
-#include "HttpTrafficAnalyzer.h"
-
+#include "nsHttpConnectionInfo.h"
+#include "nsHttpResponseHead.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
-#include "nsISupportsPriority.h"
 #include "nsIInterfaceRequestor.h"
+#include "nsISupportsPriority.h"
 #include "nsITimer.h"
-#include "Http3Session.h"
+#include "nsProxyRelease.h"
+#include "prinrval.h"
 
 class nsIDNSRecord;
 class nsISocketTransport;
@@ -104,6 +103,8 @@ class HttpConnectionUDP final : public HttpConnectionBase,
                               bool aIsExtendedCONNECT = false) override;
 
   void OnConnected();
+
+  void RekeyAfterHttp3OnlyHandOff(nsHttpConnectionInfo* aConnInfo);
 
   void SetDontExclude() override;
 

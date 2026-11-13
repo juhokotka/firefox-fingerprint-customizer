@@ -20,6 +20,7 @@
 #include "js/SourceText.h"
 #include "js/Value.h"
 #include "js/Wrapper.h"
+#include "js/loader/ModuleLoaderBase.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "mozilla/AlreadyAddRefed.h"
@@ -288,6 +289,13 @@ WorkerGlobalScopeBase::WorkerGlobalScopeBase(
 
 WorkerGlobalScopeBase::~WorkerGlobalScopeBase() = default;
 
+void WorkerGlobalScopeBase::InitModuleLoader(
+    JS::loader::ModuleLoaderBase* aModuleLoader) {
+  if (!mModuleLoader) {
+    mModuleLoader = aModuleLoader;
+  }
+}
+
 JSObject* WorkerGlobalScopeBase::GetGlobalJSObject() {
   AssertIsOnWorkerThread();
   return GetWrapper();
@@ -503,7 +511,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(WorkerGlobalScope,
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCrypto)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPerformance)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebTaskScheduler)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebTaskSchedulingState)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTrustedTypePolicyFactory)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLocation)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNavigator)
@@ -521,7 +528,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(WorkerGlobalScope,
     tmp->mWebTaskScheduler->Disconnect();
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebTaskScheduler)
   }
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebTaskSchedulingState)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTrustedTypePolicyFactory)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mLocation)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mNavigator)
@@ -899,11 +905,6 @@ WebTaskScheduler* WorkerGlobalScope::Scheduler() {
 
 WebTaskScheduler* WorkerGlobalScope::GetExistingScheduler() const {
   return mWebTaskScheduler;
-}
-
-inline void WorkerGlobalScope::SetWebTaskSchedulingState(
-    WebTaskSchedulingState* aState) {
-  mWebTaskSchedulingState = aState;
 }
 
 already_AddRefed<Promise> WorkerGlobalScope::CreateImageBitmap(

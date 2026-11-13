@@ -6,7 +6,7 @@
 const isWin = AppConstants.platform == "win";
 const isMac = AppConstants.platform == "macosx";
 
-add_task(async function test_PIN_FIREFOX_TO_TASKBAR() {
+function getShell() {
   const sandbox = sinon.createSandbox();
   let shell = {
     canPinToTaskbar() {},
@@ -32,6 +32,12 @@ add_task(async function test_PIN_FIREFOX_TO_TASKBAR() {
     },
   });
 
+  return { sandbox, shell };
+}
+
+add_task(async function test_PIN_FIREFOX_TO_TASKBAR() {
+  const { sandbox, shell } = getShell();
+
   const test = () =>
     SMATestUtils.executeAndValidateAction(
       { type: "PIN_FIREFOX_TO_TASKBAR" },
@@ -50,6 +56,12 @@ add_task(async function test_PIN_FIREFOX_TO_TASKBAR() {
       count * isWin,
       `pinCurrentAppToTaskbar was ${message} by the action for windows`
     );
+    if (isWin) {
+      Assert.ok(
+        shell.pinCurrentAppToTaskbar.calledWithExactly(false, false),
+        "pinCurrentAppToTaskbar called with privateBrowsing=false and fireAndForget=false"
+      );
+    }
     Assert.equal(
       shell.ensureAppIsPinnedToDock.callCount,
       count * isMac,
@@ -69,4 +81,45 @@ add_task(async function test_PIN_FIREFOX_TO_TASKBAR() {
   shell.isAppInDock = false;
   await test();
   check(2, "called again");
+
+  sandbox.restore();
+});
+
+add_task(async function test_FIRE_AND_FORGET() {
+  // Test the fireAndForget parameter.
+  const { sandbox, shell } = getShell();
+
+  const test = () =>
+    SMATestUtils.executeAndValidateAction(
+      { type: "PIN_FIREFOX_TO_TASKBAR", data: { fireAndForget: true } },
+      {
+        documentGlobal: {
+          getShellService: () => shell,
+        },
+      }
+    );
+
+  await test();
+
+  function check(count, message) {
+    Assert.equal(
+      shell.pinCurrentAppToTaskbar.callCount,
+      count * isWin,
+      `pinCurrentAppToTaskbar was ${message} by the action for windows`
+    );
+    if (isWin) {
+      Assert.ok(
+        shell.pinCurrentAppToTaskbar.calledWithExactly(false, true),
+        "pinCurrentAppToTaskbar called with privateBrowsing=false and fireAndForget=true"
+      );
+    }
+    Assert.equal(
+      shell.ensureAppIsPinnedToDock.callCount,
+      count * isMac,
+      `ensureAppIsPinnedToDock was ${message} by the action for not windows`
+    );
+  }
+  check(1, "called");
+
+  sandbox.restore();
 });

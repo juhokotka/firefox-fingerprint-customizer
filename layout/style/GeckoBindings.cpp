@@ -60,6 +60,7 @@
 #include "nsAttrValueInlines.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsCSSProps.h"
+#include "nsCharSeparatedTokenizer.h"
 #include "nsContentUtils.h"
 #include "nsDOMTokenList.h"
 #include "nsDeviceContext.h"
@@ -379,8 +380,8 @@ const StyleLockedDeclarationBlock* Gecko_GetStyleAttrDeclarationBlock(
   return aElement->GetInlineStyleDeclaration();
 }
 
-const StyleLockedDeclarationBlock*
-Gecko_GetHTMLPresentationAttrDeclarationBlock(const Element* aElement) {
+const StyleLockedDeclarationBlock* Gecko_GetMappedAttributeDeclarations(
+    const Element* aElement) {
   return aElement->GetMappedAttributeStyle();
 }
 
@@ -795,11 +796,15 @@ bool Gecko_MatchViewTransitionClass(
   const Document* doc = aElement->OwnerDoc();
   MOZ_ASSERT(doc);
   const ViewTransition* vt = doc->GetActiveViewTransition();
-  MOZ_ASSERT(
-      vt, "We should have an active view transition for this pseudo-element");
-
+  if (!vt) {
+    // We can get here while lazily resolving the style of a named view
+    // transition pseudo-element that doesn't exist.
+    return false;
+  }
   nsAtom* name = Gecko_GetImplementedPseudoIdentifier(aElement);
-  MOZ_ASSERT(name);
+  if (!name) {
+    return false;
+  }
   return vt->MatchClassList(name, *aPtNameAndClassSelector);
 }
 
@@ -834,20 +839,6 @@ bool Gecko_HasActiveViewTransitionTypes(
     }
   }
   return false;
-}
-
-nsAtom* Gecko_GetXMLLangValue(const Element* aElement) {
-  const nsAttrValue* attr =
-      aElement->GetParsedAttr(nsGkAtoms::lang, kNameSpaceID_XML);
-
-  if (!attr) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(attr->Type() == nsAttrValue::eAtom);
-
-  RefPtr<nsAtom> atom = attr->GetAtomValue();
-  return atom.forget().take();
 }
 
 const PreferenceSheet::Prefs* Gecko_GetPrefSheetPrefs(const Document* aDoc) {
@@ -910,18 +901,13 @@ bool Gecko_AttrEquals(const nsAttrValue* aValue, const nsAtom* aStr,
   return aValue->Equals(aStr, aIgnoreCase ? eIgnoreCase : eCaseMatters);
 }
 
-#define WITH_COMPARATOR(ignore_case_, c_, expr_)                    \
-  auto c_ = (ignore_case_) ? nsASCIICaseInsensitiveStringComparator \
-                           : nsTDefaultStringComparator<char16_t>;  \
-  return expr_;
-
 bool Gecko_AttrDashEquals(const nsAttrValue* aValue, const nsAtom* aStr,
                           bool aIgnoreCase) {
   nsAutoString str;
   aValue->ToString(str);
-  WITH_COMPARATOR(
-      aIgnoreCase, c,
-      nsStyleUtil::DashMatchCompare(str, nsDependentAtomString(aStr), c))
+  return nsStyleUtil::DashMatchCompare(
+      str, nsDependentAtomString(aStr),
+      aIgnoreCase ? eIgnoreCase : eCaseMatters);
 }
 
 bool Gecko_AttrIncludes(const nsAttrValue* aValue, const nsAtom* aStr,
@@ -931,9 +917,8 @@ bool Gecko_AttrIncludes(const nsAttrValue* aValue, const nsAtom* aStr,
   }
   nsAutoString str;
   aValue->ToString(str);
-  WITH_COMPARATOR(
-      aIgnoreCase, c,
-      nsStyleUtil::ValueIncludes(str, nsDependentAtomString(aStr), c))
+  return nsStyleUtil::ValueIncludes(str, nsDependentAtomString(aStr),
+                                    aIgnoreCase ? eIgnoreCase : eCaseMatters);
 }
 
 bool Gecko_AttrHasSubstring(const nsAttrValue* aValue, const nsAtom* aStr,
@@ -969,7 +954,11 @@ SERVO_IMPL_ELEMENT_ATTR_MATCHING_FUNCTIONS(Gecko_Snapshot,
 #undef SERVO_IMPL_ELEMENT_ATTR_MATCHING_FUNCTIONS
 
 nsAtom* Gecko_Atomize(const char* aString, uint32_t aLength) {
-  return NS_Atomize(nsDependentCSubstring(aString, aLength)).take();
+  nsDependentCSubstring str(aString, aLength);
+  if (NS_IsMainThread()) {
+    return NS_AtomizeMainThread(str).take();
+  }
+  return NS_Atomize(str).take();
 }
 
 nsAtom* Gecko_Atomize16(const nsAString* aString) {
@@ -984,7 +973,8 @@ void Gecko_nsFont_InitSystem(nsFont* aDest, StyleSystemFont aFontId,
                              const nsStyleFont* aFont,
                              const Document* aDocument) {
   const nsFont& defaultVariableFont =
-      aDocument->GetFontPrefsForLang(aFont->mLanguage)->mDefaultVariableFont;
+      aDocument->GetFontPrefsForLang(aFont->GetLangAtom())
+          ->mDefaultVariableFont;
 
   // We have passed uninitialized memory to this function,
   // initialize it. We can't simply return an nsFont because then
@@ -1043,7 +1033,7 @@ void Gecko_SetFontPaletteOverride(
     return;
   }
   aValues->mOverrides.AppendElement(gfx::FontPaletteValueSet::OverrideColor{
-      uint32_t(aIndex), gfx::sRGBColor::FromABGR(aColor->ToColor())});
+      uint32_t(aIndex), aColor->ToColor()});
 }
 
 void Gecko_EnsureImageLayersLength(nsStyleImageLayers* aLayers, size_t aLen,
@@ -1082,23 +1072,16 @@ void Gecko_EnsureStyleViewTimelineArrayLength(void* aArray, size_t aLen) {
   EnsureStyleAutoArrayLength(base, aLen);
 }
 
-enum class KeyframeSearchDirection {
-  Forwards,
-  Backwards,
-};
-
-enum class KeyframeInsertPosition {
-  Prepend,
-  LastForOffset,
-  Append,
-};
-
+// Note: There is a specialized version, FindOrInsertInitialOrFinalKeyframe(),
+// in CSSAnimation.cpp, and it finds the matched keyframes based on the computed
+// offset. However, this function is to find or create the matched keyframe
+// based on the specified <keyframe-selector>, for grouping them.
+// For more details, see the step 2.2 in
+// https://drafts.csswg.org/css-animations-2/#keyframe-processing
 static std::pair<Keyframe*, size_t> GetOrCreateKeyframe(
     nsTArray<Keyframe>* aKeyframes, StyleTimelineRangeName aRangeName,
     float aOffset, const StyleComputedTimingFunction* aTimingFunction,
-    const CompositeOperationOrAuto aComposition,
-    KeyframeSearchDirection aSearchDirection,
-    KeyframeInsertPosition aInsertPosition) {
+    const CompositeOperationOrAuto aComposition) {
   MOZ_ASSERT(aKeyframes, "The keyframe array should be valid");
   MOZ_ASSERT(aTimingFunction, "The timing function should be valid");
   MOZ_ASSERT(aRangeName != StyleTimelineRangeName::None ||
@@ -1108,43 +1091,18 @@ static std::pair<Keyframe*, size_t> GetOrCreateKeyframe(
 
   const auto& offset = Keyframe::OffsetType{aRangeName, (double)aOffset};
   size_t keyframeIndex;
-  switch (aSearchDirection) {
-    case KeyframeSearchDirection::Forwards:
-      if (nsAnimationManager::FindMatchingKeyframe(
-              *aKeyframes, offset, *aTimingFunction, aComposition,
-              keyframeIndex)) {
-        return {&(*aKeyframes)[keyframeIndex], keyframeIndex};
-      }
-      break;
-    case KeyframeSearchDirection::Backwards:
-      if (nsAnimationManager::FindMatchingKeyframe(
-              Reversed(*aKeyframes), offset, *aTimingFunction, aComposition,
-              keyframeIndex)) {
-        return {&(*aKeyframes)[aKeyframes->Length() - 1 - keyframeIndex],
-                aKeyframes->Length() - 1 - keyframeIndex};
-      }
-      keyframeIndex = aKeyframes->Length() - 1;
-      break;
+  // We search the keyframes in the reversed order because the newest added
+  // keyframe is the most possible one we should match (since we sorted the
+  // keyframes with <percentage> offsets already).
+  if (nsAnimationManager::FindMatchingKeyframe(Reversed(*aKeyframes), offset,
+                                               *aTimingFunction, aComposition,
+                                               keyframeIndex)) {
+    return {&(*aKeyframes)[aKeyframes->Length() - 1 - keyframeIndex],
+            aKeyframes->Length() - 1 - keyframeIndex};
   }
+  keyframeIndex = aKeyframes->Length() - 1;
 
-  Keyframe* keyframe = nullptr;
-  switch (aInsertPosition) {
-    case KeyframeInsertPosition::Prepend:
-      keyframe = aKeyframes->InsertElementAt(0);
-      break;
-    case KeyframeInsertPosition::LastForOffset:
-      // FIXME: Bug 2037642. This may be incorrect to insert the final keyframe,
-      // or we probably never call this because we generate the initial/final
-      // keyframes in from_keyframes().
-      // However, we will move the generation of initial/final keyframes into
-      // other places so this will be dropped soon. Just keep it as it is.
-      keyframe = aKeyframes->InsertElementAt(keyframeIndex);
-      break;
-    case KeyframeInsertPosition::Append:
-      keyframe = aKeyframes->AppendElement();
-      break;
-  }
-  MOZ_ASSERT(keyframe);
+  Keyframe* keyframe = aKeyframes->AppendElement();
   keyframe->mOffset.emplace(offset);
   if (!aTimingFunction->IsLinearKeyword()) {
     keyframe->mTimingFunction.emplace(*aTimingFunction);
@@ -1154,55 +1112,29 @@ static std::pair<Keyframe*, size_t> GetOrCreateKeyframe(
   return {keyframe, aKeyframes->Length()};
 }
 
-Keyframe* Gecko_GetOrCreateKeyframeAtStart(
+Keyframe* Gecko_GetOrCreateKeyframeForPercentageOffset(
     nsTArray<Keyframe>* aKeyframes, float aOffset,
     const StyleComputedTimingFunction* aTimingFunction,
     const CompositeOperationOrAuto aComposition) {
   MOZ_ASSERT(aKeyframes->IsEmpty() ||
-                 aKeyframes->ElementAt(0).mOffset->mPercentage >= aOffset,
-             "The percentage offset should be less than or equal to the first "
+                 aKeyframes->LastElement().mOffset->mPercentage >= aOffset,
+             "The percentage offset should be less than or equal to the last "
              "keyframe's offset if there are exisiting keyframes");
   return GetOrCreateKeyframe(aKeyframes, StyleTimelineRangeName::None, aOffset,
-                             aTimingFunction, aComposition,
-                             KeyframeSearchDirection::Forwards,
-                             KeyframeInsertPosition::Prepend)
+                             aTimingFunction, aComposition)
       .first;
 }
 
-Keyframe* Gecko_GetOrCreateKeyframeWithRangeName(
+Keyframe* Gecko_GetOrCreateKeyframeForTimelineRangeOffset(
     nsTArray<Keyframe>* aKeyframes, const StyleTimelineRangeName aRangeName,
     float aOffset, const StyleComputedTimingFunction* aTimingFunction,
     const CompositeOperationOrAuto aComposition, size_t* aMatchedIdx) {
   MOZ_ASSERT(aRangeName != StyleTimelineRangeName::Normal,
              "normal shouldn't be used");
-
-  auto [keyframe, idx] = GetOrCreateKeyframe(
-      aKeyframes, aRangeName, aOffset, aTimingFunction, aComposition,
-      KeyframeSearchDirection::Backwards, KeyframeInsertPosition::Append);
+  auto [keyframe, idx] = GetOrCreateKeyframe(aKeyframes, aRangeName, aOffset,
+                                             aTimingFunction, aComposition);
   *aMatchedIdx = idx;
   return keyframe;
-}
-
-Keyframe* Gecko_GetOrCreateInitialKeyframe(
-    nsTArray<Keyframe>* aKeyframes,
-    const StyleComputedTimingFunction* aTimingFunction,
-    const CompositeOperationOrAuto aComposition) {
-  return GetOrCreateKeyframe(aKeyframes, StyleTimelineRangeName::None, 0.,
-                             aTimingFunction, aComposition,
-                             KeyframeSearchDirection::Forwards,
-                             KeyframeInsertPosition::LastForOffset)
-      .first;
-}
-
-Keyframe* Gecko_GetOrCreateFinalKeyframe(
-    nsTArray<Keyframe>* aKeyframes,
-    const StyleComputedTimingFunction* aTimingFunction,
-    const CompositeOperationOrAuto aComposition) {
-  return GetOrCreateKeyframe(aKeyframes, StyleTimelineRangeName::None, 1.,
-                             aTimingFunction, aComposition,
-                             KeyframeSearchDirection::Backwards,
-                             KeyframeInsertPosition::LastForOffset)
-      .first;
 }
 
 void Gecko_GetComputedURLSpec(const StyleComputedUrl* aURL, nsCString* aOut) {
@@ -1301,16 +1233,6 @@ bool Gecko_IsURIInList(const URLExtraData* aData, const nsACString* aList) {
                                      PromiseFlatCString(*aList));
 }
 
-void Gecko_nsStyleFont_SetLang(nsStyleFont* aFont, nsAtom* aAtom) {
-  aFont->mLanguage = dont_AddRef(aAtom);
-  aFont->mExplicitLanguage = true;
-}
-
-void Gecko_nsStyleFont_CopyLangFrom(nsStyleFont* aFont,
-                                    const nsStyleFont* aSource) {
-  aFont->mLanguage = aSource->mLanguage;
-}
-
 Length Gecko_nsStyleFont_ComputeMinSize(const nsStyleFont* aFont,
                                         const Document* aDocument) {
   // Don't change font-size:0, since that would un-hide hidden text.
@@ -1322,7 +1244,7 @@ Length Gecko_nsStyleFont_ComputeMinSize(const nsStyleFont* aFont,
     return {0};
   }
   Length minFontSize =
-      aDocument->GetFontPrefsForLang(aFont->mLanguage)->mMinimumFontSize;
+      aDocument->GetFontPrefsForLang(aFont->GetLangAtom())->mMinimumFontSize;
   if (minFontSize.ToCSSPixels() <= 0.0f) {
     return {0};
   }
@@ -1843,6 +1765,14 @@ uint64_t Gecko_Element_GetSubtreeBloomFilter(const Element* aElement) {
   return aElement->GetSubtreeBloomFilter();
 }
 
+uint64_t Gecko_Element_GetRandomSeed(const Element* aElement) {
+  return aElement->GetRandomSeed();
+}
+
+uint64_t Gecko_Document_GetRandomSeed(const Document* aDocument) {
+  return aDocument->GetRandomSeed();
+}
+
 bool StyleSingleFontFamily::IsNamedFamily(const nsAString& aFamilyName) const {
   if (!IsFamilyName()) {
     return false;
@@ -2082,12 +2012,12 @@ bool Gecko_GetAnchorPosSize(const AnchorPosResolutionParams* aParams,
     return false;
   }
   const auto* positioned = aParams->mFrame;
+  const auto* containingBlock = positioned->GetParent();
   const auto size = AnchorPositioningUtils::ResolveAnchorPosSize(
-      positioned, {aAnchorName, *aTreeScope}, aParams->mCache);
+      positioned, containingBlock, {aAnchorName, *aTreeScope}, aParams->mCache);
   if (!size) {
     return false;
   }
-  const auto* containingBlock = positioned->GetParent();
   const auto l = [&]() {
     switch (aAnchorSizeKeyword) {
       case StyleAnchorSizeKeyword::None:

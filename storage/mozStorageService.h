@@ -10,14 +10,18 @@
 #include "nsIMemoryReporter.h"
 #include "nsIObserver.h"
 #include "nsTArray.h"
+#include "mozilla/DataMutex.h"
 #include "mozilla/Mutex.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/glean/StorageMetrics.h"
 #include "mozilla/intl/Collator.h"
 
 #include "mozIStorageService.h"
 
 class nsIMemoryReporter;
 struct sqlite3_vfs;
+struct sqlite3_stmt;
 namespace mozilla::intl {
 class Collator;
 }
@@ -88,6 +92,19 @@ class Service : public mozIStorageService,
    */
   void getConnections(nsTArray<RefPtr<Connection> >& aConnections);
 
+#ifdef NIGHTLY_BUILD
+  /**
+   * Report a statement as slow.
+   * Assumes the thread it is called on is the thread the statement ran on.
+   *
+   * @param aStatement the statement that was slow.
+   * @param aDuration the length of time it took to run.
+   * @param aFilename the database filename against which the statement ran.
+   */
+  void RecordSlowStatement(sqlite3_stmt* aStatement, TimeDuration aDuration,
+                           const nsCString& aFilename);
+#endif  // NIGHTLY_BUILD
+
  private:
   Service();
   virtual ~Service();
@@ -112,7 +129,7 @@ class Service : public mozIStorageService,
   /**
    * Protects mConnections.
    */
-  Mutex mRegistrationMutex MOZ_UNANNOTATED;
+  Mutex mRegistrationMutex MOZ_UNANNOTATED{"Service::mRegistrationMutex"};
 
   /**
    * The list of connections we have created.  Modifications to it are
@@ -131,6 +148,8 @@ class Service : public mozIStorageService,
   nsCOMPtr<nsIMemoryReporter> mStorageSQLiteReporter;
 
   static Service* gService;
+
+  DataMutex<glean::sqlite_store::SlowStatementsObject> mSlowStatements;
 };
 
 }  // namespace mozilla::storage

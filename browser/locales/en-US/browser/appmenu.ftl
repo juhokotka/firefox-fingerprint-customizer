@@ -19,11 +19,8 @@ appmenuitem-banner-update-unsupported =
 appmenuitem-banner-update-restart =
     .label = Update available — restart now
 
-# Fresh Firefox refers to the new updated UI
-appmenu-nova-update-promo =
-    .message = Get a fresh { -brand-short-name }. Keep all your tabs.
-
-appmenu-nova-update-link = Restart to update
+appmenu-nova-update-title = Restart to update { -brand-short-name }
+appmenu-nova-update-description = Your tabs will reopen.
 
 appmenu-nova-fxa-sign-in = Sign in
 
@@ -58,10 +55,16 @@ appmenuitem-translate =
     .label = Translate Page…
 appmenuitem-zoom =
     .value = Zoom
+
+# This menu item opens the referral page, where the user can invite others to
+# use the browser. "Share" here means recommending or referring the browser
+appmenuitem-referrals =
+    .label = Share { -brand-product-name }
 appmenuitem-more-tools =
     .label = More Tools
-appmenuitem-help =
-    .label = Help
+# Menu combining the previous "Help" menu and report broken site
+appmenuitem-help-and-report =
+    .label = Help and Report
 appmenuitem-exit2 =
     .label =
         { PLATFORM() ->
@@ -127,22 +130,80 @@ appmenu-remote-tabs-unverified = Your account needs to be verified.
 appmenuitem-fxa-toolbar-sync-now2 = Sync now
 appmenuitem-fxa-sign-in = Sign in to { -brand-product-name }
 appmenuitem-fxa-manage-account = Manage account
+
+fxa-menu-sync-status-on = Sync is On
+
+fxa-menu-sync-status-off = Sync is Off
+
+# Shown in place of "Sync is Off" on the sync status button when the user has
+# never signed in. Sync is a verb, short for synchronize.
+fxa-menu-sync-your-data = Sync Your Data
+
+# Shown as a secondary label under "Sync is Off" when the user is signed in but
+# sync is turned off.
+fxa-menu-sync-off-data-description = Your data isn’t syncing
+
+# Button shown next to "Sync is Off" when the user is signed in but sync is
+# turned off. Turns syncing on by opening sync preferences.
+fxa-menu-sync-status-turn-on-button =
+    .label = Turn on
+fxa-menu-sync-status-turn-on-button-aria-label = Turn on
+
+# Shown as a secondary label under "Sync is Off" when the user needs to sign in
+# (again) for sync to work.
+fxa-menu-sync-off-signin-description = Sign in to sync
+
+# Sync is a verb, short for synchronize.
+# Variables:
+#   $deviceName (String): The name of the local device.
+fxa-menu-sync-device-now = Sync { $deviceName } Now
+
+fxa-menu-manage-sync-settings =
+    .label = Manage Sync Settings
+
+fxa-menu-add-device =
+    .label = Add a Device
+
+fxa-menu-manage-devices =
+    .label = Manage Your Devices
+
+fxa-menu-device-missing =
+    .label = Don’t See Your Device?
+
+# Mozilla account menu item when selected opens a panel with all devices synced to the user's account
+fxa-menu-all-devices =
+    .label = All Devices
+
+# Mozilla account panel title which shows all devices synced to a user's account
+fxa-menu-all-devices-panel =
+    .title = All Devices
+
+fxa-menu-get-firefox-mobile =
+    .label = Get { -brand-product-name } for Android or iOS
+
+fxa-menu-secure-sync-subpanel =
+    .title = Secure sync
 appmenu-account-header = Account
 # Variables
 # $time (string) - Localized relative time since last sync (e.g. 1 second ago,
 # 3 hours ago, etc.)
 appmenu-fxa-last-sync = Last synced { $time }
     .label = Last synced { $time }
-appmenu-fxa-sync-and-save-data2 = Sync and save data
+appmenu-fxa-sync-and-save-data2 = Sync and Save Data
 appmenu-fxa-signed-in-label = Sign In
+
+# Sign-in promo shown in the app menu when signed out and no menu message or
+# update banner is present, prompting the user to sign in and sync. The user can
+# dismiss it, after which the compact sign-in row is shown in its place.
+appmenu-fxa-sign-in-promo-heading2 = Sync your data everywhere
+appmenu-fxa-sign-in-promo-link = Sign in
+appmenu-fxa-sign-in-promo-dismiss-button =
+    .title = Dismiss
+    .aria-label = Dismiss sign-in promo
 appmenu-fxa-setup-sync =
     .label = Turn On Syncing…
-appmenu-fxa-setup-sync-new = Turn On
 appmenuitem-save-page =
     .label = Save Page As…
-
-appmenuitem-fxa-sync-off-title = Sync is off
-appmenuitem-fxa-sync-off-description = Protect and access your bookmarks, passwords, and more anywhere.
 
 ## The Firefox Profiler – The popup is the UI to turn on the profiler, and record
 ## performance profiles. To enable it go to profiler.firefox.com and click
@@ -262,35 +323,65 @@ profiler-popup-presets-custom-label =
 ## History panel
 
 appmenu-manage-history =
-    .label = Manage history
+    .label = Manage History
+
+## Sync promo shown at the bottom of the History and Bookmarks panels. Its
+## variant depends on the user's account and Sync state. The sign-in heading and
+## all three call-to-action labels are shared by both panels; the remaining
+## headings are specific to the panel they appear in.
+
+appmenu-sync-promo-signin =
+    .heading = Stay in sync across devices
+appmenu-sync-promo-signin-cta = Sign in
+appmenu-sync-promo-turnonsync =
+    .heading = Sync your tabs and history
+appmenu-sync-promo-turnonsync-cta = Turn on sync
+# This refers to getting tabs from your mobile device via sync
+appmenu-sync-promo-connectdevice =
+    .heading = Grab your mobile tabs
+appmenu-sync-promo-connectdevice-cta = Connect a device
+appmenu-bookmarks-sync-promo-turnonsync =
+    .heading = Bring your bookmarks with you
+# This refers to having your bookmarks available on your mobile device via sync
+appmenu-bookmarks-sync-promo-connectdevice =
+    .heading = Take your bookmarks to go
+
+##
+
 appmenu-restore-session =
     .label = Restore previous session
 appmenu-clear-history =
-    .label = Clear recent history…
+    .label = Clear Recent History…
 appmenu-recent-history-subheader = Recent history
 appmenu-recently-closed-tabs =
-    .label = Recently closed tabs
+    .label = Recently Closed Tabs
 appmenu-recently-closed-windows =
-    .label = Recently closed windows
+    .label = Recently Closed Windows
 # This allows to search through the browser's history.
 appmenu-search-history =
-    .label = Search history
+    .label = Search History
 
 ## Help panel
 
-appmenu-help-header =
-    .title = { -brand-shorter-name } help
+# Menu header for combination of "Help" menu and report broken site
+appmenu-help-and-report-header =
+    .title = Help and Report
 appmenu-about =
     .label = About { -brand-shorter-name }
     .accesskey = A
+# This menu item opens the referral page, where the user can invite others to
+# use the browser. "Share" here means recommending or referring the browser
+appmenu-referrals2 =
+    .label = Share { -brand-product-name }
+    .accesskey = r
 appmenu-get-help =
-    .label = Get help
+    .label = Get Help
     .accesskey = h
 appmenu-help-more-troubleshooting-info =
-    .label = More troubleshooting information
+    .label = More Troubleshooting Information
     .accesskey = t
 appmenu-help-share-ideas =
-    .label = Share ideas and feedback…
+    .label = Share Ideas and Feedback…
     .accesskey = S
 appmenu-help-switch-device =
     .label = Switching to a new device
@@ -309,7 +400,7 @@ appmenu-help-exit-troubleshoot-mode =
 ## are mutually exclusive, so it's possible to use the same accesskey for both.
 
 appmenu-help-report-deceptive-site =
-    .label = Report deceptive site…
+    .label = Report Deceptive Site…
     .accesskey = d
 appmenu-help-not-deceptive =
     .label = This isn’t a deceptive site…
@@ -318,7 +409,7 @@ appmenu-help-not-deceptive =
 ## More Tools
 
 appmenu-customizetoolbar =
-    .label = Customize toolbar…
+    .label = Customize Toolbar…
 appmenu-abouttranslations =
     .label = Translate…
 appmenu-edit-pdf =
@@ -326,7 +417,7 @@ appmenu-edit-pdf =
 
 appmenu-developer-tools-subheader = Browser tools
 appmenu-developer-tools-extensions =
-    .label = Extensions for developers
+    .label = Extensions for Developers
 appmenuitem-report-broken-site =
   .label = Report Broken Site
 
@@ -336,14 +427,17 @@ appmenuitem-sign-in-account = Sign in to your account
 
 appmenuitem-monitor-title2 = Stay Ahead of Identity Theft
 appmenuitem-monitor-description2 = Get alerts about data breaches
-appmenuitem-relay-title = { -relay-brand-short-name }
+# Shown in place of appmenuitem-monitor-title2 when the user has signed up for Monitor.
+appmenuitem-monitor-title-signed-in = { -monitor-brand-short-name } Data Breach Alerts
 appmenuitem-relay-title2 = Keep Your Email Private
 appmenuitem-relay-description2 = Helps prevent spam in your inbox
-appmenuitem-services-relay-description = Launch email masks dashboard
+# Shown in place of appmenuitem-relay-title2 when the user has signed up for Relay.
+appmenuitem-relay-title-signed-in = View Email Masks
 appmenuitem-vpn-title2 = Hide Your Location with { -mozilla-vpn-brand-name }
-appmenuitem-vpn-description3 = Make your browsing harder to trace
+appmenuitem-vpn-description5 = Get extra protection across devices
+# Shown in place of appmenuitem-vpn-title2 when the user has signed up for VPN.
+appmenuitem-vpn-title-signed-in1 = Download { -mozilla-vpn-brand-name }
 
-appmenu-services-header = My services
 # "Mozilla" is intentionally hardcoded to prevent forks from replacing it
 # with their own vendor name, since these tools are created and maintained by
 # Mozilla.
@@ -355,6 +449,24 @@ appmenu-profiles-header = Profiles
 appmenu-all-profiles =
     .label = All Profiles
 appmenu-secure-sync-header = Secure sync
+
+# Panel shown when clicking a synced device in the Mozilla account menu.
+# The .title attribute sets the panel header text.
+fxa-menu-device-recent-tabs-panel =
+    .title = Recent tabs
+
+# Button at the bottom of the per-device recent tabs subpanel.
+# Variables:
+#   $tabCount (Number): Total number of synced tabs on the device.
+fxa-menu-device-view-all-synced-tabs =
+    .label = { $tabCount ->
+        [one] View { $tabCount } Synced Tab
+       *[other] View All { $tabCount } Synced Tabs
+    }
+
+# Button in the recent tabs sub-panel that sends the current page to the synced device.
+fxa-menu-device-send-current-page =
+    .label = Send Current Page to This Device
 
 appmenu-profiles-2 =
     .label = Profiles
@@ -370,3 +482,16 @@ appmenu-edit-profile =
 appmenu-edit-this-profile =
     .label = Edit This Profile
 appmenu-profile-current-in-use = Current profile in use
+
+fxa-menu-create-profile-subpanel =
+    .title = Create a new profile
+
+fxa-menu-create-profile-heading = Level up your browsing with a new profile
+
+fxa-menu-create-profile-description = Keep your bookmarks, passwords, and history separate for work and personal browsing.
+
+fxa-menu-create-profile-confirm =
+    .label = Create new profile
+
+fxa-menu-create-profile-learn-more =
+    .label = What Are Profiles?

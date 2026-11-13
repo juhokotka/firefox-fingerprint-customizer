@@ -4,19 +4,20 @@
 
 #include "InputData.h"
 
-#include "mozilla/dom/MouseEventBinding.h"
-#include "mozilla/dom/Touch.h"
-#include "mozilla/dom/WheelEventBinding.h"
+#include <type_traits>
+
+#include "UnitTransforms.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/SwipeTracker.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
+#include "mozilla/dom/MouseEventBinding.h"
+#include "mozilla/dom/Touch.h"
+#include "mozilla/dom/WheelEventBinding.h"
 #include "nsContentUtils.h"
 #include "nsDebug.h"
 #include "nsThreadUtils.h"
-#include "UnitTransforms.h"
-#include <type_traits>
 
 namespace mozilla {
 
@@ -82,7 +83,11 @@ already_AddRefed<Touch> SingleTouchData::ToNewDOMTouch() const {
       LayoutDeviceIntPoint::Truncate(mScreenPoint.x, mScreenPoint.y),
       LayoutDeviceIntPoint::Truncate(mRadius.width, mRadius.height),
       mRotationAngle, mForce);
-  touch->mTilt.emplace(mTiltX, mTiltY);
+  if (mAngle) {
+    touch->mAngle = mAngle;
+  } else {
+    touch->mTilt.emplace(mTiltX, mTiltY);
+  }
   touch->twist = mTwist;
   return touch.forget();
 }
@@ -146,6 +151,13 @@ MultiTouchInput::MultiTouchInput(const WidgetTouchEvent& aTouchEvent)
             domTouch->mRefPoint,
             PixelCastJustification::LayoutDeviceIsScreenForUntransformedEvent),
         ScreenSize((float)radiusX, (float)radiusY), rotationAngle, force);
+
+    if (domTouch->mTilt) {
+      data.mTiltX = domTouch->mTilt->mX;
+      data.mTiltY = domTouch->mTilt->mY;
+    }
+    data.mTwist = domTouch->twist;
+    data.mAngle = domTouch->mAngle;
 
     mTouches.AppendElement(data);
   }
@@ -338,9 +350,6 @@ MouseInput::MouseInput(const WidgetMouseEvent& aMouseEvent)
     case eMouseExitFromWidget:
       mType = MOUSE_WIDGET_EXIT;
       break;
-    case eMouseExploreByTouch:
-      mType = MOUSE_EXPLORE_BY_TOUCH;
-      break;
     case eMouseHitTest:
       mType = MOUSE_HITTEST;
       break;
@@ -427,9 +436,6 @@ WidgetMouseOrPointerEvent MouseInput::ToWidgetEvent(nsIWidget* aWidget) const {
     case MOUSE_WIDGET_EXIT:
       msg = eMouseExitFromWidget;
       exitFrom = Some(WidgetMouseEvent::ePlatformChild);
-      break;
-    case MOUSE_EXPLORE_BY_TOUCH:
-      msg = eMouseExploreByTouch;
       break;
     case MOUSE_HITTEST:
       msg = eMouseHitTest;

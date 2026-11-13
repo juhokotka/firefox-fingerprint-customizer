@@ -5,13 +5,12 @@
 #ifndef nsUnknownDecoder_h_
 #define nsUnknownDecoder_h_
 
+#include "mozilla/Atomics.h"
+#include "mozilla/Mutex.h"
+#include "nsCOMPtr.h"
+#include "nsIContentSniffer.h"
 #include "nsIStreamConverter.h"
 #include "nsIThreadRetargetableStreamListener.h"
-#include "nsIContentSniffer.h"
-#include "mozilla/Mutex.h"
-#include "mozilla/Atomics.h"
-
-#include "nsCOMPtr.h"
 #include "nsString.h"
 
 #define NS_UNKNOWNDECODER_CID                 \

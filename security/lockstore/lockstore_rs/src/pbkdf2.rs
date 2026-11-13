@@ -4,6 +4,7 @@
 
 use crate::LockstoreError;
 use nss_rs::hmac::HmacAlgorithm;
+use zeroize::Zeroizing;
 
 pub const PBKDF2_ITERATIONS: u32 = 600_000;
 pub const PBKDF2_SALT_SIZE: usize = 16;
@@ -14,7 +15,7 @@ pub fn derive_kek(
     salt: &[u8],
     iterations: u32,
     key_size: usize,
-) -> Result<Vec<u8>, LockstoreError> {
+) -> Result<Zeroizing<Vec<u8>>, LockstoreError> {
     if iterations == 0 {
         return Err(LockstoreError::InvalidConfiguration(
             "PBKDF2 iterations must be > 0".to_string(),
@@ -26,6 +27,9 @@ pub fn derive_kek(
         ));
     }
 
+    // NSS derives the key internally, so no HMAC intermediates are held
+    // in Rust; wrap the returned key in `Zeroizing` so this
+    // password-derived secret is wiped from memory on drop.
     nss_rs::pbkdf2::pbkdf2(
         &HmacAlgorithm::HMAC_SHA2_256,
         password,
@@ -33,6 +37,7 @@ pub fn derive_kek(
         iterations,
         key_size,
     )
+    .map(Zeroizing::new)
     .map_err(|e| LockstoreError::Encryption(format!("PBKDF2 failed: {e}")))
 }
 
@@ -51,7 +56,7 @@ mod tests {
             0xf8, 0x37, 0xa8, 0x65, 0x48, 0xc9, 0x2c, 0xcc, 0x35, 0x48, 0x08, 0x05, 0x98, 0x7c,
             0xb7, 0x0b, 0xe1, 0x7b,
         ];
-        assert_eq!(dk, expected);
+        assert_eq!(&dk[..], &expected[..]);
     }
 
     #[test]
@@ -62,20 +67,20 @@ mod tests {
             0x6d, 0xd0, 0x2a, 0x30, 0x3f, 0x8e, 0xf3, 0xc2, 0x51, 0xdf, 0xd6, 0xe2, 0xd8, 0x5a,
             0x95, 0x47, 0x4c, 0x43,
         ];
-        assert_eq!(dk, expected);
+        assert_eq!(&dk[..], &expected[..]);
     }
 
     #[test]
     fn deterministic_across_calls() {
         let a = derive_kek(b"hello", b"saltysalt0000000", 10_000, 32).unwrap();
         let b = derive_kek(b"hello", b"saltysalt0000000", 10_000, 32).unwrap();
-        assert_eq!(a, b);
+        assert_eq!(&a[..], &b[..]);
     }
 
     #[test]
     fn different_salt_different_key() {
         let a = derive_kek(b"hello", b"saltysalt0000000", 10_000, 32).unwrap();
         let b = derive_kek(b"hello", b"saltysalt0000001", 10_000, 32).unwrap();
-        assert_ne!(a, b);
+        assert_ne!(&a[..], &b[..]);
     }
 }

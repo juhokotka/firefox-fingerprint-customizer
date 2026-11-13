@@ -20,6 +20,48 @@ myst:
 
 ```{toctree}
 :name: devtools-user-doc
+:hidden:
+:maxdepth: 1
+
+3d_view/index
+about_colon_debugging/index
+accessibility_inspector/index
+application/index
+browser_console/index
+browser_toolbox/index
+custom_formatters/index
+debugger/index
+debugger-api/index
+deprecated_tools/index
+devtoolsapi/index
+devtoolscolors/index
+dom_property_viewer/index
+eyedropper/index
+index/index
+javascript_tracer/index
+json_viewer/index
+keyboard_shortcuts/index
+local_mode/index
+measure_a_portion_of_the_page/index
+memory/index
+migrating_from_firebug/index
+network_monitor/index
+page_inspector/index
+performance/index
+responsive_design_mode/index
+rulers/index
+settings/index
+shader_editor/index
+storage_inspector/index
+style_editor/index
+taking_screenshots/index
+tips/index
+tools_toolbox/index
+validators/index
+view_source/index
+web_audio_editor/index
+web_console/index
+working_with_iframes/index
 ```
 
 # Firefox DevTools User Docs
@@ -84,7 +126,7 @@ View and edit page content and layout. Visualize many aspects of the page includ
 
 See messages logged by a web page and interact with the page using JavaScript.
 
-### [JavaScript Debugger](debugger)
+### [JavaScript Debugger](debugger/index.md)
 
 ```{image} landingpage_debugger.png
 :alt: The all-new Debugger panel in Firefox 57.
@@ -134,7 +176,7 @@ See how your website or app will look and behave on different devices and networ
 
 Provides a means to access the page's accessibility tree, allowing you to check what's missing or otherwise needs attention.
 
-### [Application panel](application)
+### [Application panel](application/index.md)
 
 ```{image} just-application-panel.png
 :alt: Performance Tools in Firefox 57 Developer Tools.

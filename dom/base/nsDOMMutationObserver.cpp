@@ -135,7 +135,8 @@ void nsMutationReceiver::Disconnect(bool aRemoveFromObserver) {
 
   if (target && observer) {
     if (aRemoveFromObserver) {
-      static_cast<nsDOMMutationObserver*>(observer)->RemoveReceiver(this);
+      static_cast<nsDOMMutationObserver*>(observer)->RemoveReceiver(target,
+                                                                    this);
     }
     // UnbindObject may delete 'this'!
     target->UnbindObject(observer);
@@ -144,7 +145,8 @@ void nsMutationReceiver::Disconnect(bool aRemoveFromObserver) {
 
 void nsMutationReceiver::AttributeWillChange(Element* aElement,
                                              int32_t aNameSpaceID,
-                                             nsAtom* aAttribute, AttrModType) {
+                                             nsAtom* aAttribute,
+                                             AttrModType aModType) {
   if (nsAutoMutationBatch::IsBatching() ||
       !ObservesAttr(RegisterTarget(), aElement, aNameSpaceID, aAttribute)) {
     return;
@@ -165,7 +167,10 @@ void nsMutationReceiver::AttributeWillChange(Element* aElement,
     }
   }
 
-  if (AttributeOldValue() && m->mPrevValue.IsVoid()) {
+  MOZ_ASSERT_IF(aModType == AttrModType::Addition,
+                !aElement->HasAttr(aNameSpaceID, aAttribute));
+  if (AttributeOldValue() && m->mPrevValue.IsVoid() &&
+      aModType != AttrModType::Addition) {
     if (!aElement->GetAttr(aNameSpaceID, aAttribute, m->mPrevValue)) {
       m->mPrevValue.SetIsVoid(true);
     }
@@ -455,6 +460,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDOMMutationObserver)
     tmp->mReceivers[i]->Disconnect(false);
   }
   tmp->mReceivers.Clear();
+  tmp->mReceiverMap.Clear();
   tmp->ClearPendingRecords();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCallback)
 // No need to handle mTransientReceivers
@@ -478,10 +484,9 @@ nsMutationReceiver* nsDOMMutationObserver::GetReceiverFor(
     return nullptr;
   }
 
-  for (int32_t i = 0; i < mReceivers.Count(); ++i) {
-    if (mReceivers[i]->Target() == aNode) {
-      return mReceivers[i];
-    }
+  if (nsMutationReceiver* r = mReceiverMap.Get(aNode)) {
+    MOZ_ASSERT(r->Target() == aNode);
+    return r;
   }
   if (!aMayCreate) {
     return nullptr;
@@ -494,10 +499,15 @@ nsMutationReceiver* nsDOMMutationObserver::GetReceiverFor(
     r = nsMutationReceiver::Create(aNode, this);
   }
   mReceivers.AppendObject(r);
+  mReceiverMap.InsertOrUpdate(aNode, r);
+  MOZ_ASSERT(mReceiverMap.Count() == uint32_t(mReceivers.Count()));
   return r;
 }
 
-void nsDOMMutationObserver::RemoveReceiver(nsMutationReceiver* aReceiver) {
+void nsDOMMutationObserver::RemoveReceiver(nsINode* aTarget,
+                                           nsMutationReceiver* aReceiver) {
+  MOZ_ASSERT(mReceiverMap.Get(aTarget) == aReceiver);
+  mReceiverMap.Remove(aTarget);
   mReceivers.RemoveObject(aReceiver);
 }
 
@@ -602,7 +612,6 @@ void nsDOMMutationObserver::RescheduleForRun() {
 
 void nsDOMMutationObserver::Observe(nsINode& aTarget,
                                     const MutationObserverInit& aOptions,
-                                    nsIPrincipal& aSubjectPrincipal,
                                     ErrorResult& aRv) {
   bool childList = aOptions.mChildList;
   bool attributes =
@@ -655,7 +664,7 @@ void nsDOMMutationObserver::Observe(nsINode& aTarget,
     return;
   }
 
-  nsTArray<RefPtr<nsAtom>> filters;
+  AutoTArray<RefPtr<nsAtom>, 2> filters;
   bool allAttrs = true;
   if (aOptions.mAttributeFilter.WasPassed()) {
     allAttrs = false;
@@ -665,7 +674,7 @@ void nsDOMMutationObserver::Observe(nsINode& aTarget,
     filters.SetCapacity(len);
 
     for (uint32_t i = 0; i < len; ++i) {
-      filters.AppendElement(NS_Atomize(filtersAsString[i]));
+      filters.AppendElement(NS_AtomizeMainThread(filtersAsString[i]));
     }
   }
 
@@ -682,13 +691,6 @@ void nsDOMMutationObserver::Observe(nsINode& aTarget,
   r->SetChromeOnlyNodes(chromeOnlyNodes);
   r->RemoveClones();
 
-  if (!aSubjectPrincipal.IsSystemPrincipal() &&
-      !aSubjectPrincipal.GetIsAddonOrExpandedAddonPrincipal()) {
-    if (nsPIDOMWindowInner* window = aTarget.OwnerDoc()->GetInnerWindow()) {
-      window->SetMutationObserverHasObservedNodeForTelemetry();
-    }
-  }
-
 #ifdef DEBUG
   for (int32_t i = 0; i < mReceivers.Count(); ++i) {
     NS_WARNING_ASSERTION(mReceivers[i]->Target(),
@@ -702,6 +704,7 @@ void nsDOMMutationObserver::Disconnect() {
     mReceivers[i]->Disconnect(false);
   }
   mReceivers.Clear();
+  mReceiverMap.Clear();
   mCurrentMutations.Clear();
   ClearPendingRecords();
 }
@@ -873,7 +876,7 @@ void nsDOMMutationObserver::HandleMutationsInternal(AutoSlowOperation& aAso) {
   // Fire slotchange event for each slot in signalLists.
   for (const nsTArray<RefPtr<HTMLSlotElement>>& signalList : signalLists) {
     for (const RefPtr<HTMLSlotElement>& signal : signalList) {
-      signal->FireSlotChangeEvent();
+      MOZ_KnownLive(signal)->FireSlotChangeEvent();
     }
   }
 }

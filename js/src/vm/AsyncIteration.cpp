@@ -7,7 +7,6 @@
 #include "builtin/Promise.h"  // js::PromiseHandler, js::CreatePromiseObjectForAsyncGenerator, js::AsyncFromSyncIteratorMethod, js::ResolvePromiseInternal, js::RejectPromiseInternal, js::InternalAsyncGeneratorAwait
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/PropertySpec.h"
-#include "vm/AsyncFunction.h"  // js::AutoAsyncResumeDepth
 #include "vm/CompletionKind.h"
 #include "vm/FunctionFlags.h"  // js::FunctionFlags
 #include "vm/GeneratorObject.h"
@@ -44,7 +43,7 @@ const JSClassOps AsyncGeneratorObject::classOps_ = {
 // https://tc39.es/ecma262/#sec-ordinarycreatefromconstructor
 //
 // specialized for AsyncGeneratorObjects.
-static AsyncGeneratorObject* OrdinaryCreateFromConstructorAsynGen(
+static AsyncGeneratorObject* OrdinaryCreateFromConstructorAsyncGen(
     JSContext* cx, HandleFunction constructor) {
   // Step 1. Assert: intrinsicDefaultProto is this specification's name of an
   //         intrinsic object. The corresponding object must be an intrinsic
@@ -54,8 +53,13 @@ static AsyncGeneratorObject* OrdinaryCreateFromConstructorAsynGen(
 
   // Step 2. Let proto be
   //         ? GetPrototypeFromConstructor(constructor, intrinsicDefaultProto).
+  // Note: this step is skipped for async iterator helpers, which are specified
+  // as abstract closures, not JS functions, so they always use the default
+  // prototype instead of reading it from the constructor:
+  // https://arai-a.github.io/ecma262-compare/?rev=5f4be6e41ce9f6e1997f5e1e42af253145c6c885&id=sec-createasynciteratorfromclosure
   RootedValue protoVal(cx);
-  if (!GetProperty(cx, constructor, constructor, cx->names().prototype,
+  if (!constructor->isSelfHostedBuiltin() &&
+      !GetProperty(cx, constructor, constructor, cx->names().prototype,
                    &protoVal)) {
     return nullptr;
   }
@@ -92,7 +96,7 @@ AsyncGeneratorObject* AsyncGeneratorObject::create(JSContext* cx,
   MOZ_ASSERT(asyncGen->isAsync() && asyncGen->isGenerator());
 
   AsyncGeneratorObject* generator =
-      OrdinaryCreateFromConstructorAsynGen(cx, asyncGen);
+      OrdinaryCreateFromConstructorAsyncGen(cx, asyncGen);
   if (!generator) {
     return nullptr;
   }
@@ -1220,8 +1224,6 @@ bool js::AsyncGeneratorThrow(JSContext* cx, unsigned argc, Value* vp) {
 [[nodiscard]] static bool AsyncGeneratorResume(
     JSContext* cx, Handle<AsyncGeneratorObject*> generator,
     CompletionKind completionKind, HandleValue argument) {
-  AutoAsyncResumeDepth autoDepth(cx);
-
   // Given that yield can resume again, we implement it as a loop.
   JS::Rooted<JS::Value> resumeArgument(cx, argument);
   while (true) {
@@ -1262,15 +1264,19 @@ bool js::AsyncGeneratorThrow(JSContext* cx, unsigned argc, Value* vp) {
     //       to be handled with the genContext.
     //       when the execution continues, we resume the generator with
     //       the corresponding completion value.
-    Handle<PropertyName*> funName = completionKind == CompletionKind::Normal
-                                        ? cx->names().AsyncGeneratorNext
-                                    : completionKind == CompletionKind::Throw
-                                        ? cx->names().AsyncGeneratorThrow
-                                        : cx->names().AsyncGeneratorReturn;
-    FixedInvokeArgs<1> args(cx);
-    args[0].set(resumeArgument);
+    GeneratorResumeKind resumeKind =
+        completionKind == CompletionKind::Normal  ? GeneratorResumeKind::Next
+        : completionKind == CompletionKind::Throw ? GeneratorResumeKind::Throw
+                                                  : GeneratorResumeKind::Return;
     RootedValue thisOrRval(cx, ObjectValue(*generator));
-    if (!CallSelfHostedFunction(cx, funName, thisOrRval, args, &thisOrRval)) {
+
+    bool resumeOk;
+    {
+      AutoRealm ar(cx, generator);
+      resumeOk = ResumeGenerator(cx, generator, resumeArgument, resumeKind,
+                                 &thisOrRval);
+    }
+    if (!resumeOk) {
       if (!generator->isClosed()) {
         generator->setClosed(cx);
       }
@@ -1347,7 +1353,6 @@ bool js::AsyncGeneratorThrow(JSContext* cx, unsigned argc, Value* vp) {
   }
 }
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
 /**
  * Explicit Resource Management Proposal
  * 27.1.3.1 %AsyncIteratorPrototype% [ @@asyncDispose ] ( )
@@ -1410,7 +1415,6 @@ static bool AsyncIteratorDispose(JSContext* cx, unsigned argc, Value* vp) {
   args.rval().setObject(*promise);
   return true;
 }
-#endif
 
 static const JSFunctionSpec async_generator_methods[] = {
     JS_FN("next", js::AsyncGeneratorNext, 1, 0),
@@ -1680,9 +1684,7 @@ bool GlobalObject::initAsyncFromSyncIteratorProto(
 
 static const JSFunctionSpec async_iterator_proto_methods[] = {
     JS_SELF_HOSTED_SYM_FN(asyncIterator, "AsyncIteratorIdentity", 0, 0),
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
     JS_SYM_FN(asyncDispose, AsyncIteratorDispose, 0, 0),
-#endif
     JS_FS_END,
 };
 
@@ -1700,9 +1702,7 @@ static const JSFunctionSpec async_iterator_proto_methods_with_helpers[] = {
     JS_SELF_HOSTED_FN("every", "AsyncIteratorEvery", 1, 0),
     JS_SELF_HOSTED_FN("find", "AsyncIteratorFind", 1, 0),
     JS_SELF_HOSTED_SYM_FN(asyncIterator, "AsyncIteratorIdentity", 0, 0),
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
     JS_SYM_FN(asyncDispose, AsyncIteratorDispose, 0, 0),
-#endif
     JS_FS_END,
 };
 

@@ -151,6 +151,122 @@ add_task(async function test_reintegration_adaptive_origin() {
   resetBackspaceState();
 });
 
+// A backspace-blocked origin should be unblocked when the user manually types
+// the full origin. While the origin is blocked, the origin/adaptive queries are
+// suppressed, but the path-based URL query is not, so typing the origin yields a
+// "url"-type autofill. Picking it should clear the origin block (block_until_ms).
+add_task(async function test_reintegration_typed_url_clears_origin_block() {
+  await seedAdaptiveHistory(TEST_ORIGIN_URL, TEST_INPUT);
+
+  // Block via backspaces.
+  await backspaces(BACKSPACE_THRESHOLD);
+
+  let state = await getOriginBlockState(TEST_ORIGIN_URL);
+  Assert.greater(
+    state.blockUntilMs,
+    0,
+    "block_until_ms should be set after backspacing an origin"
+  );
+
+  // Verify autofill is gone.
+  await UrlbarTestUtils.promiseAutocompleteResultPopup({
+    window,
+    value: TEST_INPUT,
+  });
+  let details = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
+  Assert.ok(!details.autofill, "Autofill should not appear while blocked");
+
+  await UrlbarTestUtils.promiseAutocompleteResultPopup({
+    window,
+    value: TEST_ORIGIN_URL,
+  });
+  details = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
+  Assert.equal(details.result.autofill.type, "url", "Autofill type is URL.");
+  let loadPromise = BrowserTestUtils.browserLoaded(
+    gBrowser.selectedBrowser,
+    false,
+    TEST_ORIGIN_URL
+  );
+  EventUtils.synthesizeKey("KEY_Enter");
+  await loadPromise;
+
+  await TestUtils.waitForCondition(async () => {
+    let s = await getOriginBlockState(TEST_ORIGIN_URL);
+    return s.blockUntilMs === 0;
+  }, "block_until_ms should be cleared after typing the origin and navigating");
+
+  // Make sure we navigate away or else in other tests, a result matching the
+  // URL the user on will be suppressed.
+  await BrowserTestUtils.loadURIString({
+    browser: gBrowser.selectedBrowser,
+    uriString: "about:blank",
+  });
+
+  await UrlbarTestUtils.promisePopupClose(window);
+  await PlacesUtils.history.clear();
+  resetBackspaceState();
+});
+
+// Same as above, but for a backspace-blocked page URL. Typing the full page URL
+// yields a "url"-type autofill even while blocked, and picking it should clear
+// the page block (block_pages_until_ms).
+add_task(async function test_reintegration_typed_url_clears_page_block() {
+  await seedAdaptiveHistory(TEST_PAGE_URL, TEST_INPUT);
+
+  // Block via backspaces.
+  await backspaces(BACKSPACE_THRESHOLD);
+
+  let state = await getOriginBlockState(TEST_PAGE_URL);
+  Assert.greater(
+    state.blockPagesUntilMs,
+    0,
+    "block_pages_until_ms should be set after backspacing an origin"
+  );
+
+  // Verify autofill is gone.
+  await UrlbarTestUtils.promiseAutocompleteResultPopup({
+    window,
+    value: TEST_INPUT,
+  });
+  let details = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
+  Assert.ok(
+    !details.result.autofill ||
+      (details.result.autofill.type !== "adaptive_url" &&
+        details.result.autofill.type !== "adaptive_origin"),
+    "Adaptive autofill should not appear while blocked"
+  );
+
+  await UrlbarTestUtils.promiseAutocompleteResultPopup({
+    window,
+    value: TEST_PAGE_URL,
+  });
+  details = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
+  Assert.equal(details.result.autofill.type, "url", "Autofill type is URL.");
+  let loadPromise = BrowserTestUtils.browserLoaded(
+    gBrowser.selectedBrowser,
+    false,
+    TEST_PAGE_URL
+  );
+  EventUtils.synthesizeKey("KEY_Enter");
+  await loadPromise;
+
+  await TestUtils.waitForCondition(async () => {
+    let s = await getOriginBlockState(TEST_PAGE_URL);
+    return s.blockPagesUntilMs === 0;
+  }, "block_pages_until_ms should be cleared.");
+
+  // Make sure we navigate away or else in other tests, a result matching the
+  // URL the user on will be suppressed.
+  await BrowserTestUtils.loadURIString({
+    browser: gBrowser.selectedBrowser,
+    uriString: "about:blank",
+  });
+
+  await UrlbarTestUtils.promisePopupClose(window);
+  await PlacesUtils.history.clear();
+  resetBackspaceState();
+});
+
 // Backspace-blocked origins autofill (non-adaptive) should be restored after
 // picking the origin as a history result.
 add_task(async function test_reintegration_origins_autofill() {

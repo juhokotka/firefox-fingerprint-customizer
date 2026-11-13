@@ -10,6 +10,7 @@
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/net/Cookie.h"
 #include "mozilla/net/CookieCommons.h"
+#include "nsContentUtils.h"
 #include "nsGlobalWindowInner.h"
 #include "nsICookie.h"
 #include "nsICookieNotification.h"
@@ -49,7 +50,9 @@ already_AddRefed<CookieStoreNotifier> CookieStoreNotifier::Create(
   }
 
   nsCString host;
-  if (NS_WARN_IF(NS_FAILED(principal->GetAsciiHost(host))) || host.IsEmpty()) {
+  if (NS_WARN_IF(NS_FAILED(
+          nsContentUtils::GetHostOrIPv6WithBrackets(principal, host))) ||
+      host.IsEmpty()) {
     return nullptr;
   }
 
@@ -89,6 +92,7 @@ void CookieStoreNotifier::Disentangle() {
   MOZ_ASSERT(NS_IsMainThread());
 
   mCookieStore = nullptr;
+  mDelayedDOMEvents.Clear();
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (NS_WARN_IF(!os)) {
@@ -160,7 +164,7 @@ CookieStoreNotifier::Observe(nsISupports* aSubject, const char* aTopic,
   bool deletedEvent = action == nsICookieNotification::COOKIE_DELETED;
 
   GetCurrentSerialEventTarget()->Dispatch(NS_NewRunnableFunction(
-      __func__, [self = RefPtr(this), item, deletedEvent] {
+      __func__, [self = RefPtr(this), item = std::move(item), deletedEvent] {
         self->DispatchEvent(item, deletedEvent);
       }));
 

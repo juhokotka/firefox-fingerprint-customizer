@@ -19,6 +19,18 @@ const { sinon } = ChromeUtils.importESModule(
   "resource://testing-common/Sinon.sys.mjs"
 );
 
+const { AITabStore } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/ui/modules/AITabStore.sys.mjs"
+);
+
+const { TabStateFlusher } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs"
+);
+
+const { MockEngineManager } = ChromeUtils.importESModule(
+  "resource://testing-common/AIWindowTestUtils.sys.mjs"
+);
+
 function createMockConversation(id = "test-restore-id") {
   const conversation = new ChatConversation({
     id,
@@ -296,4 +308,290 @@ describe("AI Window session restore", () => {
       );
     });
   });
+
+  describe("reopen closed tab", () => {
+    let convId, mockEngineManager, reopenedTab;
+
+    beforeEach(async () => {
+      findStub.restore();
+      mockEngineManager = new MockEngineManager();
+      await SpecialPowers.pushPrefEnv({
+        set: [["browser.smartwindow.sidebar.openByDefault", true]],
+      });
+
+      await closeRecordedTab();
+
+      Assert.equal(
+        SessionStore.getClosedTabCountForWindow(win),
+        1,
+        "Closed tab should be recorded by SessionStore"
+      );
+
+      reopenedTab = SessionStore.undoCloseTab(win, 0, win);
+    });
+
+    afterEach(async () => {
+      if (reopenedTab) {
+        await BrowserTestUtils.removeTab(reopenedTab);
+        reopenedTab = null;
+      }
+      mockEngineManager.cleanupMocks();
+    });
+
+    async function getSidebarBrowser() {
+      const sidebarBrowser = await TestUtils.waitForCondition(
+        () => win.document.getElementById("ai-window-browser"),
+        "Sidebar browser should be in the DOM"
+      );
+      await TestUtils.waitForCondition(
+        () =>
+          sidebarBrowser.contentDocument?.querySelector("ai-window:defined"),
+        "Sidebar ai-window should be loaded"
+      );
+      return sidebarBrowser;
+    }
+
+    // Drives a real conversation through the sidebar smartbar, then closes the
+    // tab so SessionStore records a closed tab "Reopen Closed Tab" can restore.
+    async function closeRecordedTab() {
+      const tab = await BrowserTestUtils.openNewForegroundTab(
+        win.gBrowser,
+        "https://example.com/"
+      );
+      const sidebarBrowser = await getSidebarBrowser();
+
+      await typeInSmartbar(sidebarBrowser, "hello");
+      await submitSmartbar(sidebarBrowser);
+      await mockEngineManager.respondTo({
+        purpose: "chat",
+        response: "Response from assistant",
+      });
+
+      convId = await getConversationId(sidebarBrowser);
+
+      await TabStateFlusher.flush(tab.linkedBrowser);
+
+      const sessionUpdate = BrowserTestUtils.waitForSessionStoreUpdate(tab);
+      BrowserTestUtils.removeTab(tab);
+      await sessionUpdate;
+    }
+
+    it("restores the tab's conversation after reopening a closed tab", async () => {
+      // Wait for the restored tab to finish loading example.com. By then the
+      // restore and read path has had its chance to reopen the conversation
+      await BrowserTestUtils.browserLoaded(
+        win.gBrowser.selectedBrowser,
+        false,
+        "https://example.com/"
+      );
+
+      const sidebarBrowser = await getSidebarBrowser();
+
+      // the restored conversation should reload its messages into the sidebar
+      const messages = await TestUtils.waitForCondition(async () => {
+        const msgs = await getSidebarChatMessages(sidebarBrowser);
+        return msgs.length === 2 ? msgs : null;
+      }, "Sidebar should restore both messages");
+
+      const reloadedConvId = await getConversationId(sidebarBrowser);
+      Assert.equal(
+        reloadedConvId,
+        convId,
+        "Reopened tab should restore its conversation id"
+      );
+
+      Assert.equal(messages[0].role, "user", "First message is the user turn");
+      Assert.equal(messages[0].message, "hello", "user turn restored");
+      Assert.equal(
+        messages[1].role,
+        "assistant",
+        "Second message is the assistant turn"
+      );
+      Assert.equal(
+        messages[1].message,
+        "Response from assistant",
+        "assistant turn restored"
+      );
+    });
+  });
+});
+
+add_task(async function test_restore_pending_aitab_into_existing_smart_tab() {
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["browser.smartwindow.sidebar.openByDefault", true],
+      ["browser.smartwindow.aitab.enabled", true],
+    ],
+  });
+  const restoreSignIn = skipSignIn();
+  const mockEngine = new MockEngineManager();
+  const pageUrl =
+    "https://example.com/browser/browser/components/aiwindow/ui/test/browser/test_context_url_page.html";
+  let win;
+  let savedTabState;
+
+  try {
+    await arrangePendingAITabRestore();
+    await restoreSavedTab();
+    await assertPendingAITabRestored();
+  } finally {
+    mockEngine.rejectAllRequests();
+    mockEngine.cleanupMocks();
+    if (win) {
+      await BrowserTestUtils.closeWindow(win);
+    }
+    await ChatStore.destroyDatabase();
+    await AITabStore.destroyDatabase();
+    _setRemoteClientForTesting({ get: async () => MOCK_RS_RECORDS });
+    restoreSignIn();
+    await SpecialPowers.popPrefEnv();
+  }
+
+  async function arrangePendingAITabRestore() {
+    mockAITabPrompts();
+    win = await openAIWindow();
+    const { sidebarBrowser } = await openAIWindowSidebar(win, pageUrl);
+    await createAITabFromSmartbar(sidebarBrowser);
+    await waitForPendingAITabPersisted(sidebarBrowser);
+    await saveSessionAndReopenWindow();
+  }
+
+  function mockAITabPrompts() {
+    const modules = [
+      {
+        name: "system-instructions",
+        prompts: "Create a page using these components:\n{schemas}",
+      },
+      {
+        name: "user-data",
+        prompts: "Focus: {focus}\n{pageContent}",
+      },
+    ];
+    _setRemoteClientForTesting({
+      get: async () => [
+        ...MOCK_RS_RECORDS,
+        {
+          kind: "params",
+          feature: "aitab",
+          model: "test-model",
+          service_type: "ai",
+          purpose: "aitab",
+          parameters: {},
+          modules: modules.map(({ name }) => ({ name, version: "v1.0" })),
+          version: "v1.0",
+          is_default: true,
+        },
+        ...modules.map(({ name, prompts }) => ({
+          kind: "module",
+          feature: "aitab",
+          module: name,
+          model: "test-model",
+          prompts,
+          version: "v1.0",
+        })),
+      ],
+    });
+  }
+
+  async function waitForPendingAITabPersisted(sidebarBrowser) {
+    const conversationId = await getConversationId(sidebarBrowser);
+    await TestUtils.waitForCondition(async () => {
+      const savedConversation =
+        await ChatStore.findConversationById(conversationId);
+      return savedConversation?.messages.some(
+        message => message.toolUIData?.properties?.state === "choose"
+      );
+    }, "The pending AI-tab choices should be persisted before closing");
+  }
+
+  async function saveSessionAndReopenWindow() {
+    const sourceTab = win.gBrowser.selectedTab;
+    await TabStateFlusher.flush(sourceTab.linkedBrowser);
+    savedTabState = SessionStore.getTabState(sourceTab);
+    await BrowserTestUtils.closeWindow(win);
+    win = null;
+
+    win = await openAIWindow();
+    await getAichatBrowser(win.gBrowser.selectedBrowser);
+    await TestUtils.waitForCondition(
+      () => AIWindow.getActiveConversation(win)?.messageCount === 0,
+      "The Smart Window start tab should have an empty cached conversation"
+    );
+  }
+
+  async function createAITabFromSmartbar(sidebarBrowser) {
+    await typeInSmartbar(sidebarBrowser, "Create an AI tab");
+    await submitSmartbar(sidebarBrowser);
+    const chatRequest = await mockEngine.captureRequest({ purpose: "chat" });
+    chatRequest.respond({
+      text: "",
+      tokens: null,
+      isPrompt: false,
+      toolCalls: [
+        {
+          id: "restore-aitab",
+          function: {
+            name: "generate_page",
+            arguments: JSON.stringify({
+              url_list: [pageUrl],
+              focus: "Session restore",
+            }),
+          },
+        },
+      ],
+    });
+    const generationRequest = await mockEngine.captureRequest({
+      purpose: "aitab",
+    });
+    generationRequest.respond(
+      JSON.stringify({
+        components: [
+          {
+            id: "root",
+            component: "Page",
+            header: "header",
+            children: ["body"],
+          },
+          { id: "header", component: "Header", title: "Generated page" },
+          { id: "body", component: "TextBlock", lead: "A generated page." },
+        ],
+        dataModel: {},
+      })
+    );
+  }
+
+  async function restoreSavedTab() {
+    const tab = win.gBrowser.selectedTab;
+    const restored = BrowserTestUtils.waitForEvent(tab, "SSTabRestored");
+    SessionStore.setTabState(tab, savedTabState);
+    await restored;
+  }
+
+  async function assertPendingAITabRestored() {
+    const sidebarBrowser = await TestUtils.waitForCondition(
+      () => win.document.getElementById("ai-window-browser"),
+      "The restored tab should open the Smart Window sidebar"
+    );
+    const chatBrowser = await getAichatBrowser(sidebarBrowser);
+    await TestUtils.waitForCondition(async () => {
+      const messages = await getSidebarChatMessages(sidebarBrowser);
+      return messages.some(
+        m => m.role === "user" && m.message === "Create an AI tab"
+      );
+    }, "The saved conversation's user message should be rendered");
+
+    const hasAITabCard = await SpecialPowers.spawn(
+      chatBrowser,
+      [],
+      async () => {
+        const chat = content.document.querySelector("ai-chat-content");
+        await chat.wrappedJSObject.updateComplete;
+        return !!chat.shadowRoot.querySelector("aitab-tool-ui");
+      }
+    );
+    Assert.ok(
+      hasAITabCard,
+      "The restored conversation should contain the AI-tab card"
+    );
+  }
 });

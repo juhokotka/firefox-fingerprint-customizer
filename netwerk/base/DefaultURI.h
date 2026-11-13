@@ -5,13 +5,13 @@
 #ifndef DefaultURI_h_
 #define DefaultURI_h_
 
-#include "nsIIPCSerializableURI.h"
-#include "nsIURI.h"
-#include "nsIURIWithSizeOf.h"
-#include "nsISerializable.h"
-#include "nsIURIMutator.h"
-#include "mozilla/net/MozURL.h"
 #include "URIHasher.h"
+#include "mozilla/net/MozURL.h"
+#include "nsIIPCSerializableURI.h"
+#include "nsISerializable.h"
+#include "nsIURI.h"
+#include "nsIURIMutator.h"
+#include "nsIURIWithSizeOf.h"
 
 namespace mozilla {
 namespace net {

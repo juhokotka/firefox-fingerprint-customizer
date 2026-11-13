@@ -4,13 +4,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
-
 #include "ZeroRttHandle.h"
 
 #include "HappyEyeballsConnectionAttempt.h"
 #include "HappyEyeballsTransaction.h"
 #include "HttpConnectionBase.h"
+#include "HttpLog.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "nsAHttpTransaction.h"
 #include "nsHttpRequestHead.h"
@@ -32,6 +31,8 @@ ZeroRttHandle::ZeroRttHandle(HappyEyeballsConnectionAttempt* aHet)
     : mHet(aHet ? do_GetWeakReference(
                       static_cast<nsSupportsWeakReference*>(aHet))
                 : nullptr) {}
+
+ZeroRttHandle::~ZeroRttHandle() = default;
 
 static bool IsUsableRealTxn(nsHttpTransaction* aRealTxn) {
   return aRealTxn && !aRealTxn->Closed();

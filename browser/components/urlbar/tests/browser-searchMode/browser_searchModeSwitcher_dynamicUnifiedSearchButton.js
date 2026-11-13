@@ -13,6 +13,7 @@ add_setup(async function setup() {
   await SpecialPowers.pushPrefEnv({
     set: [["browser.urlbar.scotchBonnet.enableOverride", true]],
   });
+  UrlbarTestUtils.registerZeroPrefixProvider();
 });
 
 add_task(async function test_button_visibility_by_escape() {

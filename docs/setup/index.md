@@ -2,7 +2,7 @@
 
 This page will help you get set up to build Firefox on your own machine.
 
-Don't hesitate to look at the {ref}`Firefox Contributors Quick Reference <Firefox Contributors' Quick Reference>` to read a quick tutorial.
+Don't hesitate to look at the {doc}`Firefox Contributors Quick Reference </contributing/contribution_quickref>` to read a quick tutorial.
 
 ```{toctree}
 :caption: Thank you for contributing to Firefox
@@ -27,14 +27,17 @@ common_build_errors
 
 ### For Firefox Android
 
-{ref}`Firefox for Android`
+{doc}`/mobile/android/index`
 
 ### For Firefox iOS
 
-{ref}`Firefox for iOS`
+{doc}`/overview/ios`
 
 ## Getting Ready to Contribute
 
 ```{toctree}
 contributing_code
+building_with_debug_symbols
+configuring_build_options
+editing_moz_configure
 ```

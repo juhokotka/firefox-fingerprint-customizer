@@ -5,13 +5,13 @@
 #ifndef mozilla_gfx_layers_d3d11_DeviceAttachmentsD3D11_h
 #define mozilla_gfx_layers_d3d11_DeviceAttachmentsD3D11_h
 
-#include "mozilla/EnumeratedArray.h"
-#include "mozilla/RefPtr.h"
-#include "mozilla/gfx/DeviceManagerDx.h"
-#include "mozilla/layers/CompositorTypes.h"
-#include "mozilla/layers/SyncObject.h"
 #include <d3d11.h>
 #include <dxgi1_2.h>
+
+#include "mozilla/EnumeratedArray.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/SyncObject.h"
 
 namespace mozilla {
 namespace layers {
@@ -22,7 +22,8 @@ class DeviceAttachmentsD3D11 final {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DeviceAttachmentsD3D11);
 
  public:
-  static RefPtr<DeviceAttachmentsD3D11> Create(ID3D11Device* aDevice);
+  static RefPtr<DeviceAttachmentsD3D11> Create(ID3D11Device* aDevice,
+                                               SyncObjectHost* aSyncObject);
 
   bool IsValid() const { return mInitialized; }
   const nsCString& GetFailureId() const {
@@ -59,18 +60,17 @@ class DeviceAttachmentsD3D11 final {
   RefPtr<ID3D11BlendState> mNonPremulBlendState;
   RefPtr<ID3D11BlendState> mDisabledBlendState;
 
-  RefPtr<SyncObjectHost> mSyncObject;
+  const RefPtr<SyncObjectHost> mSyncObject;
 
   void SetDeviceReset() { mDeviceReset = true; }
   bool IsDeviceReset() const { return mDeviceReset; }
 
  private:
-  explicit DeviceAttachmentsD3D11(ID3D11Device* device);
-  ~DeviceAttachmentsD3D11();
+  DeviceAttachmentsD3D11(ID3D11Device* aDevice, SyncObjectHost* aSyncObject);
+  ~DeviceAttachmentsD3D11() = default;
 
   bool Initialize();
   bool CreateShaders();
-  bool InitSyncObject();
 
   void InitVertexShader(const ShaderBytes& aShader, VertexShaderArray& aArray,
                         ClipType aClipType) {

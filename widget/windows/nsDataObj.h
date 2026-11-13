@@ -8,15 +8,13 @@
 #include <oleidl.h>
 #include <shldisp.h>
 
-#include "mozilla/glue/WinUtils.h"
 #include "mozilla/LazyIdleThread.h"
-#include "nsCOMPtr.h"
-#include "nsString.h"
-#include "nsIFile.h"
-#include "nsIURI.h"
-#include "nsIStreamListener.h"
-#include "nsIChannel.h"
+#include "mozilla/glue/WinUtils.h"
 #include "nsCOMArray.h"
+#include "nsCOMPtr.h"
+#include "nsIChannel.h"
+#include "nsIFile.h"
+#include "nsIStreamListener.h"
 #include "nsITimer.h"
 #include "nsIURI.h"
 #include "nsString.h"
@@ -160,6 +158,7 @@ class nsDataObj : public IDataObject, public IDataObjectAsyncCapability {
 
   nsresult ExtractShortcutURL(nsString& outURL);
   nsresult ExtractShortcutTitle(nsString& outTitle);
+  bool ShortcutUrlHasWebScheme();
 
   // munge our HTML data to win32's CF_HTML spec. Will null terminate
   nsresult BuildPlatformHTML(const char* inOurHTML, char** outPlatformHTML);
@@ -217,19 +216,19 @@ class nsDataObj : public IDataObject, public IDataObjectAsyncCapability {
                        ULONG* nBytesRead) final;
 
    protected:
-    uint32_t mStreamRead;
+    uint32_t mStreamRead{0};
 
-    CStreamBase();
-    virtual ~CStreamBase();
+    CStreamBase() = default;
+    virtual ~CStreamBase() = default;
   };
 
   class CStream final : public CStreamBase, public nsIStreamListener {
     nsCOMPtr<nsIChannel> mChannel;
     FallibleTArray<uint8_t> mChannelData;
     nsresult mChannelResult;
-    bool mChannelRead;
+    bool mChannelRead{false};
 
-    virtual ~CStream();
+    virtual ~CStream() = default;
     nsresult WaitForCompletion();
 
     // IUnknown
@@ -241,7 +240,7 @@ class nsDataObj : public IDataObject, public IDataObjectAsyncCapability {
     STDMETHODIMP Stat(STATSTG* statstg, DWORD dwFlags) final;
 
    public:
-    CStream();
+    CStream() = default;
     nsresult Init(nsIURI* pSourceURI, nsContentPolicyType aContentPolicyType,
                   nsIPrincipal* aRequestingPrincipal,
                   nsICookieJarSettings* aCookieJarSettings,
@@ -293,7 +292,7 @@ class nsDataObj : public IDataObject, public IDataObjectAsyncCapability {
     const uint32_t mTotalLength;
     RefPtr<IUnknown> mMarshaler;
 
-    virtual ~CMemStream();
+    virtual ~CMemStream() = default;
     void WaitForCompletion();
 
     // IStream

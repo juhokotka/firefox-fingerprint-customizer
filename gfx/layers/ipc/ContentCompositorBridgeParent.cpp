@@ -12,30 +12,33 @@
 #  include "mozilla/gfx/DeviceManagerDx.h"  // for DeviceManagerDx
 #  include "mozilla/layers/ImageDataSerializer.h"
 #endif
-#include "mozilla/layers/AnimationHelper.h"  // for CompositorAnimationStorage
+#include "GeckoProfiler.h"
+#include "mozilla/BaseProfilerMarkerTypes.h"
+#include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/layers/APZCTreeManagerParent.h"  // for APZCTreeManagerParent
 #include "mozilla/layers/APZUpdater.h"             // for APZUpdater
+#include "mozilla/layers/AnimationHelper.h"  // for CompositorAnimationStorage
+#include "mozilla/layers/AsyncImagePipelineManager.h"
 #include "mozilla/layers/CompositorManagerParent.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/layers/CompositorThread.h"
+#include "mozilla/layers/LayerTreeLog.h"
 #include "mozilla/layers/LayerTreeOwnerTracker.h"
 #include "mozilla/layers/RemoteContentController.h"
 #include "mozilla/layers/WebRenderBridgeParent.h"
-#include "mozilla/layers/AsyncImagePipelineManager.h"
 #include "mozilla/mozalloc.h"  // for operator new, etc
 #include "nsDebug.h"           // for NS_ASSERTION, etc
 #include "nsTArray.h"          // for nsTArray
 #include "nsXULAppAPI.h"       // for XRE_GetAsyncIOEventTarget
-#include "mozilla/StaticPrefs_dom.h"
-#include "mozilla/StaticPtr.h"
-#include "mozilla/BaseProfilerMarkerTypes.h"
-#include "GeckoProfiler.h"
 
 namespace mozilla::layers {
 
 void EraseLayerState(LayersId aId);
 
 void ContentCompositorBridgeParent::ActorDestroy(ActorDestroyReason aWhy) {
+  LAYERTREE_LOG("Compositor bridge for content {} destroyed, reason {}",
+                GetContentId(), fmt::enums::format_as(aWhy));
   mCanSend = false;
 
   // We must keep this object alive untill the code handling message
@@ -67,6 +70,10 @@ ContentCompositorBridgeParent::AllocPAPZCTreeManagerParent(
         // chance yet to unmap our layers id, and we could get here without a
         // parent compositor. In this case return an empty APZCTM.
         if (!state.mParent) {
+          LAYERTREE_LOG(
+              "Layer tree {:x} for content {} has no parent compositor, "
+              "using a dummy APZ tree manager",
+              aLayersId, GetContentId());
           // Note: we immediately call ClearTree since otherwise the APZCTM will
           // retain a reference to itself, through the checkerboard observer.
           LayersId dummyId{0};
@@ -97,13 +104,15 @@ already_AddRefed<PAPZParent> ContentCompositorBridgeParent::AllocPAPZParent(
     return nullptr;
   }
 
-  auto controller = MakeRefPtr<RemoteContentController>();
+  auto controller = MakeRefPtr<RemoteContentController>(aLayersId);
 
   CompositorBridgeParent::WithIndirectLayerTreesLock(
       [&](const StaticMonitorAutoLock& aProofOfLock) {
         CompositorBridgeParent::LayerTreeState& state =
             CompositorBridgeParent::EnsureLayerTreeStateUnderLock(aLayersId,
                                                                   aProofOfLock);
+        LAYERTREE_LOG("APZ controller created for layer tree {:x}, content {}",
+                      aLayersId, GetContentId());
         MOZ_ASSERT(!state.mController);
         state.mController = controller;
       });
@@ -156,6 +165,8 @@ ContentCompositorBridgeParent::AllocPWebRenderBridgeParent(
         nsPrintfCString("Created child without a matching parent? root %p",
                         root.get())
             .get());
+    LAYERTREE_LOG("Layer tree {:x} for content {} has no parent compositor",
+                  layersId, GetContentId());
     nsCString error("NO_PARENT");
     return WebRenderBridgeParent::CreateDestroyed(aPipelineId,
                                                   std::move(error));
@@ -176,36 +187,15 @@ ContentCompositorBridgeParent::AllocPWebRenderBridgeParent(
         state.mWrBridge = parent;
       });
 
+  LAYERTREE_LOG("Layer tree {:x} for content {} connected to root {:x}",
+                layersId, GetContentId(), cbp->RootLayerTreeId());
   return parent.forget();
-}
-
-mozilla::ipc::IPCResult ContentCompositorBridgeParent::RecvNotifyChildCreated(
-    const LayersId& child, CompositorOptions* aOptions) {
-  if (NS_WARN_IF(!LayerTreeOwnerTracker::Get()->IsMapped(child, OtherPid()))) {
-    return IPC_OK();
-  }
-
-  bool found = false;
-  CompositorBridgeParent::WithIndirectLayerTreesLock(
-      [&](const StaticMonitorAutoLock& aProofOfLock) {
-        CompositorBridgeParent::ForEachLayerTreeStateUnderLock(
-            aProofOfLock,
-            [&](LayersId, CompositorBridgeParent::LayerTreeState& lts) {
-              if (!found && lts.mParent &&
-                  lts.mContentCompositorBridgeParent == this) {
-                lts.mParent->NotifyChildCreated(child);
-                *aOptions = lts.mParent->GetOptions();
-                found = true;
-              }
-            });
-      });
-  return found ? IPC_OK() : IPC_FAIL_NO_REASON(this);
 }
 
 mozilla::ipc::IPCResult
 ContentCompositorBridgeParent::RecvMapAndNotifyChildCreated(
-    const LayersId& child, const base::ProcessId& pid,
-    CompositorOptions* aOptions) {
+    const LayersId& child, const LayersId& embedderId,
+    const base::ProcessId& pid, CompositorOptions* aOptions) {
   // This can only be called from the browser process, as the mapping
   // ensures proper window ownership of layer trees.
   return IPC_FAIL_NO_REASON(this);
@@ -412,9 +402,27 @@ ContentCompositorBridgeParent::AllocPTextureParent(
     const SurfaceDescriptor& aSharedData, ReadLockDescriptor& aReadLock,
     const LayersBackend& aLayersBackend, const TextureFlags& aFlags,
     const uint64_t& aSerial, const wr::MaybeExternalImageId& aExternalImageId) {
-  if (aSharedData.type() == SurfaceDescriptor::TSurfaceDescriptorDcompSurface) {
+  if (aFlags & TextureFlags::REMOTE_TEXTURE) {
+    MOZ_ASSERT_UNREACHABLE("Unexpected to be called!");
     return nullptr;
   }
+
+  switch (aSharedData.type()) {
+    case SurfaceDescriptor::TSurfaceDescriptorBuffer:
+      break;
+    case SurfaceDescriptor::TSurfaceDescriptorGPUVideo:
+      break;
+    case SurfaceDescriptor::TSurfaceDescriptorRemoteTexture:
+      break;
+#ifdef MOZ_WIDGET_ANDROID
+    case SurfaceDescriptor::TSurfaceTextureDescriptor:
+      break;
+#endif
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unexpected to be called!");
+      return nullptr;
+  }
+
   if (aExternalImageId.isSome() &&
       !OwnsExternalImageId(aExternalImageId.ref())) {
     NS_ERROR("We do not own this external image id.");

@@ -8,6 +8,7 @@
 
 #include "mozilla/DataMutex.h"
 #include "mozilla/ReentrantMonitor.h"
+#include "nsCharSeparatedTokenizer.h"
 #include "nsIClientAuthRememberService.h"
 #include "nsIDataStorage.h"
 #include "nsIObserver.h"
@@ -70,8 +71,7 @@ class nsClientAuthRememberService final : public nsIClientAuthRememberService {
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSICLIENTAUTHREMEMBERSERVICE
 
-  nsClientAuthRememberService()
-      : mMigrated(false, "nsClientAuthRememberService::mMigrated") {}
+  nsClientAuthRememberService() = default;
 
   nsresult Init();
 
@@ -86,7 +86,8 @@ class nsClientAuthRememberService final : public nsIClientAuthRememberService {
                           const OriginAttributes& aOriginAttributes,
                           const nsACString& aDBKey, Duration aDuration);
 
-  mozilla::DataMutex<bool> mMigrated;
+  mozilla::DataMutex<bool> mMigrated{false,
+                                     "nsClientAuthRememberService::mMigrated"};
   void Migrate();
 };
 

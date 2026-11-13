@@ -5,8 +5,9 @@
 #ifndef mozilla_SandboxInfo_h
 #define mozilla_SandboxInfo_h
 
-#include "mozilla/Types.h"
 #include <cstdint>
+
+#include "mozilla/Types.h"
 
 // Information on what parts of sandboxing are enabled in this build
 // and/or supported by the system.
@@ -61,9 +62,9 @@ class SandboxInfo {
   uint32_t AsInteger() const { return mFlags; }
 
  private:
+  SandboxInfo();  // NOLINT(modernize-use-equals-delete)
   enum Flags mFlags;
   static const MOZ_EXPORT SandboxInfo sSingleton;
-  SandboxInfo();
 };
 
 }  // namespace mozilla

@@ -5,11 +5,13 @@
 #include "MozFramebuffer.h"
 
 #include "GLContext.h"
-#include "mozilla/gfx/Logging.h"
 #include "ScopedGLHelpers.h"
+#include "mozilla/gfx/Logging.h"
 
 namespace mozilla {
 namespace gl {
+
+RefPtr<GLContext> DepthAndStencilBuffer::gl() const { return mWeakGL.get(); };
 
 static void DeleteByTarget(GLContext* const gl, const GLenum target,
                            const GLuint name) {
@@ -23,7 +25,8 @@ static void DeleteByTarget(GLContext* const gl, const GLenum target,
 UniquePtr<MozFramebuffer> MozFramebuffer::Create(GLContext* const gl,
                                                  const gfx::IntSize& size,
                                                  const uint32_t samples,
-                                                 const bool depthStencil) {
+                                                 const bool depth,
+                                                 const bool stencil) {
   if (samples && !gl->IsSupported(GLFeature::framebuffer_multisample))
     return nullptr;
 
@@ -64,38 +67,43 @@ UniquePtr<MozFramebuffer> MozFramebuffer::Create(GLContext* const gl,
     return nullptr;
   }
 
-  return CreateImpl(
-      gl, size, samples,
-      depthStencil ? DepthAndStencilBuffer::Create(gl, size, samples) : nullptr,
-      colorTarget, colorName);
+  return CreateImpl(gl, size, samples,
+                    (depth || stencil) ? DepthAndStencilBuffer::Create(
+                                             gl, size, samples, depth, stencil)
+                                       : nullptr,
+                    colorTarget, colorName, ColorBackingOwnership::Owned);
 }
 
 UniquePtr<MozFramebuffer> MozFramebuffer::CreateForBacking(
     GLContext* const gl, const gfx::IntSize& size, const uint32_t samples,
-    bool depthStencil, const GLenum colorTarget, const GLuint colorName) {
-  return CreateImpl(
-      gl, size, samples,
-      depthStencil ? DepthAndStencilBuffer::Create(gl, size, samples) : nullptr,
-      colorTarget, colorName);
+    bool depth, bool stencil, const GLenum colorTarget, const GLuint colorName,
+    ColorBackingOwnership colorBackingOwnership) {
+  return CreateImpl(gl, size, samples,
+                    (depth || stencil) ? DepthAndStencilBuffer::Create(
+                                             gl, size, samples, depth, stencil)
+                                       : nullptr,
+                    colorTarget, colorName, colorBackingOwnership);
 }
 
 /* static */ UniquePtr<MozFramebuffer>
 MozFramebuffer::CreateForBackingWithSharedDepthAndStencil(
     const gfx::IntSize& size, const uint32_t samples, GLenum colorTarget,
     GLuint colorName,
-    const RefPtr<DepthAndStencilBuffer>& depthAndStencilBuffer) {
+    const RefPtr<DepthAndStencilBuffer>& depthAndStencilBuffer,
+    ColorBackingOwnership colorBackingOwnership) {
   auto gl = depthAndStencilBuffer->gl();
   if (!gl || !gl->MakeCurrent()) {
     return nullptr;
   }
   return CreateImpl(gl, size, samples, depthAndStencilBuffer, colorTarget,
-                    colorName);
+                    colorName, colorBackingOwnership);
 }
 
 /* static */ UniquePtr<MozFramebuffer> MozFramebuffer::CreateImpl(
     GLContext* const gl, const gfx::IntSize& size, const uint32_t samples,
     const RefPtr<DepthAndStencilBuffer>& depthAndStencilBuffer,
-    const GLenum colorTarget, const GLuint colorName) {
+    const GLenum colorTarget, const GLuint colorName,
+    ColorBackingOwnership colorBackingOwnership) {
   GLuint fb = gl->CreateFramebuffer();
   const ScopedBindFramebuffer bindFB(gl, fb);
 
@@ -109,12 +117,16 @@ MozFramebuffer::CreateForBackingWithSharedDepthAndStencil(
   }
 
   if (depthAndStencilBuffer) {
-    gl->fFramebufferRenderbuffer(
-        LOCAL_GL_FRAMEBUFFER, LOCAL_GL_DEPTH_ATTACHMENT, LOCAL_GL_RENDERBUFFER,
-        depthAndStencilBuffer->mDepthRB);
-    gl->fFramebufferRenderbuffer(
-        LOCAL_GL_FRAMEBUFFER, LOCAL_GL_STENCIL_ATTACHMENT,
-        LOCAL_GL_RENDERBUFFER, depthAndStencilBuffer->mStencilRB);
+    if (depthAndStencilBuffer->mDepthRB) {
+      gl->fFramebufferRenderbuffer(
+          LOCAL_GL_FRAMEBUFFER, LOCAL_GL_DEPTH_ATTACHMENT,
+          LOCAL_GL_RENDERBUFFER, depthAndStencilBuffer->mDepthRB);
+    }
+    if (depthAndStencilBuffer->mStencilRB) {
+      gl->fFramebufferRenderbuffer(
+          LOCAL_GL_FRAMEBUFFER, LOCAL_GL_STENCIL_ATTACHMENT,
+          LOCAL_GL_RENDERBUFFER, depthAndStencilBuffer->mStencilRB);
+    }
   }
 
   const auto status = gl->fCheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER);
@@ -128,12 +140,14 @@ MozFramebuffer::CreateForBackingWithSharedDepthAndStencil(
     return nullptr;
   }
 
-  return UniquePtr<MozFramebuffer>(new MozFramebuffer(
-      gl, size, fb, samples, depthAndStencilBuffer, colorTarget, colorName));
+  return UniquePtr<MozFramebuffer>(
+      new MozFramebuffer(gl, size, fb, samples, depthAndStencilBuffer,
+                         colorTarget, colorName, colorBackingOwnership));
 }
 
 /* static */ RefPtr<DepthAndStencilBuffer> DepthAndStencilBuffer::Create(
-    GLContext* const gl, const gfx::IntSize& size, const uint32_t samples) {
+    GLContext* const gl, const gfx::IntSize& size, const uint32_t samples,
+    const bool depth, const bool stencil) {
   const auto fnAllocRB = [&](GLenum format) {
     GLuint rb = gl->CreateRenderbuffer();
     const ScopedBindRenderbuffer bindRB(gl, rb);
@@ -147,16 +161,20 @@ MozFramebuffer::CreateForBackingWithSharedDepthAndStencil(
     return rb;
   };
 
-  GLuint depthRB, stencilRB;
+  GLuint depthRB = 0, stencilRB = 0;
   {
     GLContext::LocalErrorScope errorScope(*gl);
 
-    if (gl->IsSupported(GLFeature::packed_depth_stencil)) {
+    if (depth && stencil && gl->IsSupported(GLFeature::packed_depth_stencil)) {
       depthRB = fnAllocRB(LOCAL_GL_DEPTH24_STENCIL8);
       stencilRB = depthRB;  // Ignore unused mStencilRB.
     } else {
-      depthRB = fnAllocRB(LOCAL_GL_DEPTH_COMPONENT24);
-      stencilRB = fnAllocRB(LOCAL_GL_STENCIL_INDEX8);
+      if (depth) {
+        depthRB = fnAllocRB(LOCAL_GL_DEPTH_COMPONENT24);
+      }
+      if (stencil) {
+        stencilRB = fnAllocRB(LOCAL_GL_STENCIL_INDEX8);
+      }
     }
 
     const auto err = errorScope.GetError();
@@ -174,14 +192,16 @@ MozFramebuffer::CreateForBackingWithSharedDepthAndStencil(
 MozFramebuffer::MozFramebuffer(
     GLContext* const gl, const gfx::IntSize& size, GLuint fb,
     const uint32_t samples, RefPtr<DepthAndStencilBuffer> depthAndStencilBuffer,
-    const GLenum colorTarget, const GLuint colorName)
+    const GLenum colorTarget, const GLuint colorName,
+    ColorBackingOwnership colorBackingOwnership)
     : mWeakGL(gl),
       mSize(size),
       mSamples(samples),
       mFB(fb),
       mColorTarget(colorTarget),
       mDepthAndStencilBuffer(std::move(depthAndStencilBuffer)),
-      mColorName(colorName) {
+      mColorName(colorName),
+      mColorBackingOwnership(colorBackingOwnership) {
   MOZ_ASSERT(mColorTarget);
   MOZ_ASSERT(mColorName);
 }
@@ -194,7 +214,9 @@ MozFramebuffer::~MozFramebuffer() {
 
   gl->DeleteFramebuffer(mFB);
 
-  DeleteByTarget(gl, mColorTarget, mColorName);
+  if (mColorBackingOwnership == ColorBackingOwnership::Owned) {
+    DeleteByTarget(gl, mColorTarget, mColorName);
+  }
 }
 
 bool MozFramebuffer::HasDepth() const {

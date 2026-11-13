@@ -9,16 +9,16 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include <dlfcn.h>
+#include <queue>
+#include "ViewRegion.h"
+#include "mozView.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/layers/NativeLayerRootRemoteMacChild.h"
 #include "mozilla/layers/NativeLayerRootRemoteMacParent.h"
-#include "nsIWidget.h"
 #include "nsCocoaUtils.h"
+#include "nsIWidget.h"
 #include "nsTouchBar.h"
-#include "ViewRegion.h"
-#include "mozView.h"
-#include <dlfcn.h>
-#include <queue>
 
 class nsCocoaWindow;
 class nsChildView;
@@ -129,6 +129,11 @@ class TextInputHandler;
 // (and its subclasses) to find out which NSFrameView subclass to instantiate
 // to create its "frame view".
 + (Class)frameViewClassForStyleMask:(NSUInteger)styleMask;
+
+// Sanitizes a style mask before AppKit stores it. NSWindow clears the
+// non-activating panel bit here; NSPanel keeps it. Both -initWithContentRect:
+// and -setStyleMask: go through it.
++ (NSUInteger)_validateStyleMask:(NSUInteger)aStyleMask;
 
 @end
 
@@ -317,6 +322,8 @@ class nsCocoaWindow final : public nsIWidget {
   void DispatchAPZWheelInputEvent(mozilla::InputData& aEvent);
   nsEventStatus DispatchAPZInputEvent(mozilla::InputData& aEvent);
 
+  void PerformHapticFeedback(mozilla::HapticFeedbackType aType) override;
+
   void DispatchDoubleTapGesture(mozilla::TimeStamp aEventTimeStamp,
                                 LayoutDeviceIntPoint aScreenPosition,
                                 mozilla::Modifiers aModifiers);
@@ -443,6 +450,8 @@ class nsCocoaWindow final : public nsIWidget {
   void PostHandleKeyEvent(mozilla::WidgetKeyboardEvent* aEvent) override;
   nsresult ActivateNativeMenuItemAt(const nsAString& indexString) override;
   nsresult ForceUpdateNativeMenuAt(const nsAString& indexString) override;
+  nsresult GetNativeMenuItemKeyEquivalent(const nsAString& aElementId,
+                                          nsAString& aResult) override;
   [[nodiscard]] nsresult GetSelectionAsPlaintext(nsAString& aResult) override;
   TextEventDispatcherListener* GetNativeTextEventDispatcherListener() override;
   [[nodiscard]] nsresult AttachNativeKeyEvent(
@@ -455,7 +464,6 @@ class nsCocoaWindow final : public nsIWidget {
   void SetWindowTransform(const mozilla::gfx::Matrix& aTransform) override;
   void SetInputRegion(const InputRegion&) override;
   void SetColorScheme(const mozilla::Maybe<mozilla::ColorScheme>&) override;
-  void SetShowsToolbarButton(bool aShow) override;
   bool GetSupportsNativeFullscreen();
   void SetSupportsNativeFullscreen(bool aShow) override;
   void SetWindowAnimationType(WindowAnimationType aType) override;
@@ -479,7 +487,7 @@ class nsCocoaWindow final : public nsIWidget {
   NSWindow* GetCocoaWindow() { return [[mWindow retain] autorelease]; }
 
   void SetMenuBar(RefPtr<nsMenuBarX>&& aMenuBar);
-  nsMenuBarX* GetMenuBar();
+  already_AddRefed<nsMenuBarX> GetMenuBar();
 
   void SetInputContext(const InputContext& aContext,
                        const InputContextAction& aAction) override;
@@ -498,6 +506,7 @@ class nsCocoaWindow final : public nsIWidget {
   void CocoaWindowWillEnterFullscreen(bool aFullscreen);
   void CocoaWindowDidEnterFullscreen(bool aFullscreen);
   void CocoaWindowDidResize();
+  void SaveRestoredBounds();
   void CocoaSendToplevelActivateEvents();
   void CocoaSendToplevelDeactivateEvents();
 
@@ -541,7 +550,7 @@ class nsCocoaWindow final : public nsIWidget {
   CGFloat ComputeBackingScaleFactor() const;
 
   void DoResize(double aX, double aY, double aWidth, double aHeight,
-                bool aRepaint, bool aConstrainToCurrentScreen);
+                bool aRepaint);
 
   // If the window's NSWindow frame doesn't intersect any currently-attached
   // NSScreen, relocate the window onto the main screen so the user can reach
@@ -671,6 +680,9 @@ class nsCocoaWindow final : public nsIWidget {
   bool mAlwaysOnTop = false;
   bool mAspectRatioLocked = false;
   bool mIsAlert = false;  // True if this is an non-native alert window.
+  // True if this window should not auto-enter native fullscreen on its initial
+  // show (e.g. a window created by detaching a tab from a fullscreen window).
+  bool mIsInitialFullscreenSuppressed = false;
   bool mWasShown = false;
 
   int32_t mNumModalDescendants = 0;

@@ -5,19 +5,18 @@
 
 ChromeUtils.defineESModuleGetters(this, {
   AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
-  BrowsetUIUtils: "resource:///modules/BrowserUIUtils.sys.mjs",
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   NimbusTestUtils: "resource://testing-common/NimbusTestUtils.sys.mjs",
   ObjectUtils: "resource://gre/modules/ObjectUtils.sys.mjs",
   PromptTestUtils: "resource://testing-common/PromptTestUtils.sys.mjs",
   ResetProfile: "resource://gre/modules/ResetProfile.sys.mjs",
+  SearchTestUtils: "resource://testing-common/SearchTestUtils.sys.mjs",
   SearchUITestUtils: "resource://testing-common/SearchUITestUtils.sys.mjs",
   SearchUtils: "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
   TelemetryTestUtils: "resource://testing-common/TelemetryTestUtils.sys.mjs",
   UrlbarParentController:
     "moz-src:///browser/components/urlbar/UrlbarParentController.sys.mjs",
-  UrlbarQueryContext:
-    "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
+  UrlbarQueryContext: "chrome://browser/content/urlbar/UrlbarQueryContext.mjs",
   UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
   UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
   UrlbarSearchUtils:
@@ -32,6 +31,7 @@ ChromeUtils.defineLazyGetter(this, "PlacesFrecencyRecalculator", () => {
   ).wrappedJSObject;
 });
 
+SearchTestUtils.init(this);
 SearchUITestUtils.init(this);
 
 let sandbox;

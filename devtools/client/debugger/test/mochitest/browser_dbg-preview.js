@@ -111,10 +111,7 @@ add_task(async function () {
     { line: 126, column: 6, expression: "worker", result: "Worker" },
   ]);
 
-  // javascript.options.experimental.explicit_resource_management is set to true, but it's
-  // only supported on Nightly at the moment, so only check for SuppressedError if
-  // they're supported.
-  if (AppConstants.ENABLE_EXPLICIT_RESOURCE_MANAGEMENT) {
+  {
     info("Check that preview works in a script with `using` keyword");
 
     const onPaused = waitForPaused(dbg);
@@ -167,6 +164,16 @@ add_task(async function () {
       initialNodesLength
   );
   ok(true, `"hello" was expanded`);
+
+  info("Check that the object tree in the popup is keyboard operable");
+  const treeEl = popupEl.querySelector(".tree");
+  const clickedRowId = treeEl.getAttribute("aria-activedescendant");
+  ok(clickedRowId, "The clicked row became the tree's active descendant");
+  pressKey(dbg, "Down");
+  await waitFor(
+    () => treeEl.getAttribute("aria-activedescendant") != clickedRowId
+  );
+  ok(true, "The down arrow key moved the active descendant");
 
   info("Check that the preview popup can be closed with Escape");
   // sanity check

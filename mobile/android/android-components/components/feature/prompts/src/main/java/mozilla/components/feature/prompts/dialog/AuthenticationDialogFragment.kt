@@ -4,7 +4,6 @@
 
 package mozilla.components.feature.prompts.dialog
 
-import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.DialogInterface
 import android.os.Bundle
@@ -27,9 +26,9 @@ private const val KEY_ONLY_SHOW_PASSWORD = "KEY_ONLY_SHOW_PASSWORD"
 private const val KEY_URL = "KEY_SESSION_URL"
 
 /**
- * [android.support.v4.app.DialogFragment] implementation to display a
- * <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication">authentication</a>
- * dialog with native dialogs.
+ * [android.support.v4.app.DialogFragment] implementation to display a <a
+ * href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication">authentication</a> dialog with native
+ * dialogs.
  */
 internal class AuthenticationDialogFragment : PromptDialogFragment() {
 
@@ -54,22 +53,21 @@ internal class AuthenticationDialogFragment : PromptDialogFragment() {
         }
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
-        val builder = MaterialAlertDialogBuilder(requireContext())
-            .setupTitle()
-            .setMessage(truncateMessage(message))
-            .setCancelable(true)
-            .setNegativeButton(R.string.mozac_feature_prompts_cancel) { _, _ ->
-                feature?.onCancel(sessionId, promptRequestUID)
-            }
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                onPositiveClickAction()
-            }
+        val builder =
+            MaterialAlertDialogBuilder(requireContext())
+                .setupTitle()
+                .setMessage(truncateMessage(message))
+                .setCancelable(true)
+                .setNegativeButton(R.string.mozac_feature_prompts_cancel) { _, _ ->
+                    feature?.onCancel(sessionId, promptRequestUID)
+                }
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    onPositiveClickAction()
+                }
         return addLayout(builder).create().withCenterAlignedButtons()
     }
 
-    /**
-     * Truncates the message to prevent ANR during text measurement.
-     */
+    /** Truncates the message to prevent ANR during text measurement. */
     private fun truncateMessage(text: String): String {
         return if (text.length > Truncation.MAX_MESSAGE_LENGTH) {
             text.substring(0, Truncation.MAX_MESSAGE_LENGTH) + "…"
@@ -87,7 +85,6 @@ internal class AuthenticationDialogFragment : PromptDialogFragment() {
         feature?.onConfirm(sessionId, promptRequestUID, username to password)
     }
 
-    @SuppressLint("InflateParams")
     private fun addLayout(builder: MaterialAlertDialogBuilder): MaterialAlertDialogBuilder {
         val inflater = LayoutInflater.from(requireContext())
         val view = inflater.inflate(R.layout.mozac_feature_prompt_auth_prompt, null)
@@ -117,7 +114,7 @@ internal class AuthenticationDialogFragment : PromptDialogFragment() {
                     override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
 
                     override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-                },
+                }
             )
         }
     }
@@ -138,17 +135,18 @@ internal class AuthenticationDialogFragment : PromptDialogFragment() {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
 
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-            },
+            }
         )
     }
 
     companion object {
         /**
          * A builder method for creating a [AuthenticationDialogFragment]
+         *
          * @param sessionId the id of the session for which this dialog will be created.
          * @param promptRequestUID identifier of the [PromptRequest] for which this dialog is shown.
-         * @param shouldDismissOnLoad whether or not the dialog should automatically be dismissed
-         * when a new page is loaded.
+         * @param shouldDismissOnLoad whether or not the dialog should automatically be dismissed when a new page is
+         *   loaded.
          * @param title the title of the dialog.
          * @param message the text that will go below title.
          * @param username the default value of the username text field.
@@ -186,8 +184,7 @@ internal class AuthenticationDialogFragment : PromptDialogFragment() {
             return fragment
         }
 
-        @StringRes
-        internal val DEFAULT_TITLE = R.string.mozac_feature_prompt_sign_in
+        @StringRes internal val DEFAULT_TITLE = R.string.mozac_feature_prompt_sign_in
     }
 
     @VisibleForTesting(otherwise = PRIVATE)

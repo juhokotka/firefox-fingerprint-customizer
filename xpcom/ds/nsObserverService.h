@@ -5,9 +5,9 @@
 #ifndef nsObserverService_h_
 #define nsObserverService_h_
 
+#include "nsIMemoryReporter.h"
 #include "nsIObserverService.h"
 #include "nsObserverList.h"
-#include "nsIMemoryReporter.h"
 #include "nsTHashtable.h"
 
 // {D07F5195-E3D1-11d2-8ACD-00105A1B8860}
@@ -18,8 +18,6 @@ class nsObserverService final : public nsIObserverService,
                                 public nsIMemoryReporter {
  public:
   NS_INLINE_DECL_STATIC_IID(NS_OBSERVERSERVICE_CID)
-
-  nsObserverService();
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVERSERVICE
@@ -34,14 +32,15 @@ class nsObserverService final : public nsIObserverService,
   NS_IMETHOD UnmarkGrayStrongObservers();
 
  private:
-  ~nsObserverService(void);
+  nsObserverService() = default;
+  ~nsObserverService();
   void RegisterReporter();
   nsresult EnsureValidCall() const;
   nsresult FilterHttpOnTopics(const char* aTopic);
 
   static const size_t kSuspectReferentCount = 100;
-  bool mShuttingDown;
   nsTHashtable<nsObserverList> mObserverTopicTable;
+  bool mShuttingDown = false;
 };
 
 #endif /* nsObserverService_h_ */

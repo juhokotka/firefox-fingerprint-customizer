@@ -5,11 +5,23 @@
 :host {
   display: block;
   --ai-chat-grid-columns: repeat(3, minmax(0, 1fr));
+  --ai-chat-grid-scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
+  --ai-chat-grid-scrollarea-border-color: light-dark(var(--color-violet-10), var(--color-violet-80));
+  --ai-chat-grid-button-icon-fill: light-dark(var(--color-black), var(--color-white));
+  --ai-chat-grid-button-icon-fill-transparent: light-dark(var(--color-black-alpha-40), var(--color-white-alpha-20));
+
+  @media (forced-colors: active) {
+    --ai-chat-grid-scrollbar-color: auto;
+    --ai-chat-grid-scrollarea-border-color: var(--background-color-canvas);
+
+    --ai-chat-grid-button-icon-fill: currentColor;
+    --ai-chat-grid-button-icon-fill-transparent: currentColor;
+  }
 }
 
 .ai-chat-grid {
   --border-color: var(--smartwindow-ai-chat-grid-border-color);
-  --space-xsmall: var(--dimension-4);
+  --space-xsmall: 4px;
   --icon-size-medium: var(--border-radius-large);
   --icon-size-large: calc(var(--border-radius-large) * 1.5);
 
@@ -45,17 +57,36 @@
     display: grid;
     gap: var(--panel-padding-block);
     grid-template-columns: var(--ai-chat-grid-columns);
+    background-color: transparent;
+    margin-top: var(--space-medium);
+    scrollbar-width: thin;
+    scrollbar-color: var(--ai-chat-grid-scrollbar-color);
   }
 
   .scroll-area.list {
+    --background-color: light-dark(var(--color-violet-10), var(--color-violet-80));
+    --card-border: var(--card-border-radius) solid var(--ai-chat-grid-scrollarea-border-color);
+
     display: flex;
     flex-direction: column;
+    box-sizing: border-box;
+    background-color: var(--background-color);
+    border-radius: var(--card-border-radius);
+    padding: 0 var(--space-xlarge);
+    margin-top: var(--space-medium);
+    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens -- Figma design */
+    height: 255px;
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--ai-chat-grid-scrollbar-color);
+    border-inline-end: var(--card-border);
+    border-block: var(--card-border);
   }
 
   &.loading {
     .loading-skeleton {
       width: 100%;
-      /* stylelint-disable-next-line -- Figma design */
+      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens -- Figma design */
       height: 255px;
     }
   }
@@ -78,33 +109,8 @@ ai-chat-grid::part(row) {
   padding-top: 0;
 }
 
-ai-chat-grid::part(scrollarea-grid) {
-  background-color: transparent;
-  margin-top: var(--space-medium);
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.5) transparent;
-}
-
-ai-chat-grid::part(scrollarea-list) {
-  --background-color: light-dark(var(--color-violet-10), var(--color-violet-80));
-  --card-border: var(--card-border-radius) solid light-dark(var(--color-violet-10), var(--color-violet-80));
-
-  box-sizing: border-box;
-  background-color: var(--background-color);
-  border-radius: var(--card-border-radius);
-  padding: 0 var(--space-xlarge);
-  margin-top: var(--space-medium);
-  /* stylelint-disable-next-line -- Figma design */
-  height: 255px;
-  overflow: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.5) transparent;
-  border-inline-end: var(--card-border);
-  border-block: var(--card-border);
-}
-
 .list-controls moz-button {
-  --button-icon-fill: light-dark(var(--color-black-alpha-40), var(--color-white-alpha-20));
+  --button-icon-fill: var(--ai-chat-grid-button-icon-fill-transparent);
   --button-background-color-ghost-selected: light-dark(var(--color-violet-10), var(--color-violet-80));
 }
 
@@ -121,7 +127,7 @@ ai-chat-grid::part(scrollarea-list) {
 
 :host([view="list"]) #list,
 :host([view="grid"]) #grid {
-  --button-icon-fill: light-dark(var(--color-black), var(--color-white));
+  --button-icon-fill: var(--ai-chat-grid-button-icon-fill);
 
   /* The selected button stays selected, so suppress the hover/active feedback
      to avoid implying it can be pressed again. */

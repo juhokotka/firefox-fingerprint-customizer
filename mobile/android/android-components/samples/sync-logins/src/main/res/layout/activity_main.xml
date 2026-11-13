@@ -13,14 +13,14 @@
 
 
     <LinearLayout
+        tools:ignore="UselessParent"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentStart="true"
         android:layout_alignParentTop="true"
         android:orientation="vertical"
         android:id="@+id/buttonList"
-        tools:context="org.mozilla.samples.sync.logins.MainActivity"
-        tools:ignore="UselessParent">
+        tools:context="org.mozilla.samples.sync.logins.MainActivity">
 
         <ListView
             android:id="@+id/logins_list_view"

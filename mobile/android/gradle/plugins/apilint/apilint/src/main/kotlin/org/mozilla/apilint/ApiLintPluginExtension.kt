@@ -5,10 +5,10 @@
 package org.mozilla.apilint
 
 import groovy.lang.Closure
+import javax.inject.Inject
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
-import javax.inject.Inject
 
 abstract class ApiLintPluginExtension @Inject constructor(objects: ObjectFactory) {
     abstract val packageFilter: Property<String>
@@ -37,7 +37,7 @@ abstract class ApiLintPluginExtension @Inject constructor(objects: ObjectFactory
         jsonResultFileName.convention("apilint-result.json")
         skipClassesRegex.convention(emptyList())
         helpCommand.convention { variantName ->
-            "\$ ./gradlew apiUpdateFile${variantName}"
+            "\$ ./mach gradle apiUpdateFile$variantName"
         }
     }
 

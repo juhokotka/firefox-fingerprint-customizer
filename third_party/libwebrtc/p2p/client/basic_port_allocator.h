@@ -18,7 +18,6 @@
 #include <string>
 #include <vector>
 
-#include "absl/base/attributes.h"
 #include "absl/base/nullability.h"
 #include "absl/strings/string_view.h"
 #include "api/candidate.h"
@@ -27,6 +26,7 @@
 #include "api/local_network_access_permission.h"
 #include "api/packet_socket_factory.h"
 #include "api/task_queue/pending_task_safety_flag.h"
+#include "api/task_queue/task_queue_base.h"
 #include "api/transport/enums.h"
 #include "api/turn_customizer.h"
 #include "api/units/time_delta.h"
@@ -46,7 +46,6 @@
 #include "rtc_base/network/received_packet.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/system/rtc_export.h"
-#include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
@@ -145,7 +144,7 @@ class RTC_EXPORT BasicPortAllocatorSession : public PortAllocatorSession {
   ~BasicPortAllocatorSession() override;
 
   virtual BasicPortAllocator* allocator();
-  Thread* network_thread() { return network_thread_; }
+  TaskQueueBase* network_thread() { return network_thread_; }
   PacketSocketFactory* socket_factory() { return socket_factory_; }
 
   // If the new filter allows new types of candidates compared to the previous
@@ -188,8 +187,7 @@ class RTC_EXPORT BasicPortAllocatorSession : public PortAllocatorSession {
   // network (or a timeout occurs), we will start allocating ports.
   void ConfigReady(std::unique_ptr<PortConfiguration> config);
   // TODO(bugs.webrtc.org/12840) Remove once unused in downstream projects.
-  ABSL_DEPRECATED(
-      "Use ConfigReady(std::unique_ptr<PortConfiguration>) instead!")
+  [[deprecated("Use ConfigReady(std::unique_ptr<PortConfiguration>) instead!")]]
   void ConfigReady(PortConfiguration* config);
 
  private:
@@ -292,7 +290,7 @@ class RTC_EXPORT BasicPortAllocatorSession : public PortAllocatorSession {
   bool PruneNewlyPairableTurnPort(PortData* newly_pairable_turn_port);
 
   BasicPortAllocator* allocator_;
-  Thread* network_thread_;
+  TaskQueueBase* network_thread_;
   PacketSocketFactory* socket_factory_;
   bool allocation_started_;
   bool network_manager_started_;

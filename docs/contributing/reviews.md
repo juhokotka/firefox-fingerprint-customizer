@@ -50,24 +50,95 @@ Sometimes when publishing a patch, groups will automatically be added as blockin
 
 ## Choosing reviewers
 
+**Prefer a review group over an individual reviewer.** Groups spread the load across
+several people, so your patch is far less likely to sit waiting on someone who is on
+holiday, sick, or busy with another project. Only request a specific person when no group
+covers the code you are touching, or when someone is already the obvious owner of that
+change.
+
+- Run `mach file-info reviewers` on the files you changed (see below); this is usually enough to
+  find the right group.
+- If your code fits into one of the [review groups](#review-groups) below, request review from that group.
 - If you have a mentor assigned on the bug you are fixing, the mentor can usually either also review or find a suitable reviewer on your behalf.
-- If you do not have a mentor, see if your code fits into one of the review groups below, and request review from that group.
 - Otherwise, try looking at the history of the file to see who has modified it recently (for example, `git log <modified-file>`).
 - Finally if you are still unable to identify someone, try asking in the [#introduction channel on Matrix](https://chat.mozilla.org/#/room/#introduction:mozilla.org).
 
+### Suggesting reviewers from the command line
+
+`mach file-info reviewers` takes the paths you modified and prints the reviewers to
+request:
+
+```shell
+./mach file-info reviewers dom/media/mediasink/AudioSink.cpp
+```
+
+```
+Module reviewer groups (from mots.yaml):
+  #media-playback-reviewers (Core: Media Playback)
+
+Herald reviewers (automatically added):
+  #media-playback-reviewers (blocking)
+```
+
+It reports up to three kinds of suggestion:
+
+- **Module reviewer groups** are the groups of the [modules](/mots/index.md) owning the
+  files, taken from the in-tree `mots.yaml`.
+- **Herald reviewers** are the groups and individuals that Phabricator's Herald rules add
+  by themselves once you submit the patch. Those marked `(blocking)` have to accept the
+  patch before it can land, so requesting them up front saves a round trip.
+- **Recent reviewers** are the reviewers of recent patches touching the files, read from
+  the `r=` lines in the version control history. These are only shown when the two sources
+  above have nothing to say, since they are a weaker signal: a file may have last been
+  touched by an unrelated cleanup.
+
+Pass several paths at once to get the reviewers for a whole patch, and `--format json` if
+you want to consume the output from a script. The Herald rules are downloaded and cached;
+use `--offline` to work from the cached copy only.
+
+To see every group name that Phabricator knows about, for example to check the spelling of
+one before putting it in a commit message, run:
+
+```shell
+./mach file-info reviewer-groups
+```
+
+## Keeping track of your review queue
+
+If you review patches, you are strongly encouraged to install the
+[MyQOnly add-on](https://addons.mozilla.org/firefox/addon/myqonly/). It
+polls Phabricator, Bugzilla and GitHub and shows a badge in the toolbar
+with the number of reviews waiting on you. Most delayed reviews are
+simply forgotten ones, and this is the easiest way to avoid that.
+
+Phabricator works from your existing session; Bugzilla needs an API key
+in the add-on preferences, and GitHub needs your username. In the
+Bugzilla preferences, also enable *Count open needinfos too* so that
+needinfo requests are included in the badge.
+
+(getting-attention)=
+
 ## Getting attention
 
-Generally most reviews will happen within roughly a week. If, however, a reviewer doesn't respond within a week or so of the review request:
+We expect reviews to happen within a business day or two, and most of them do.
+Requesting review from a [group](#review-groups) rather than an individual is the best way
+to get a quick answer, as any member of the group can pick the patch up.
 
-- Contact the reviewer directly (either via e-mail or on Matrix).
+All the delays on this page are in business days: weekends and public holidays
+do not count, and reviewers are spread across many time zones and countries, so
+their non-working days may not be the same as yours.
+
+If a reviewer hasn't responded after two or three business days:
+
+- Ping the review group's channel, or contact the reviewer directly (either via e-mail or on Matrix).
 - Join developers on [Mozilla's Matrix server](https://chat.mozilla.org), and ask if anyone knows why a review may be delayed. Please link to the bug too.
-- If the review is still not addressed, mail the reviewer directly, asking if/when they'll have time to review the patch, or might otherwise be able to review it.
+- If the review is still not addressed after a business week, request review from a group covering that code, or from another peer or the module owner listed in [mots](/mots/index.md).
 
 Remember that reviewers are human too, and may have complex reasons that prevent them from reviewing your patch in a timely manner. Be confident in reaching out to your reviewer, but be mindful of the [Mozilla Community Participation Guidelines](https://www.mozilla.org/en-US/about/governance/policies/participation/) while doing so.
 
 For simple documentation changes, reviews are not required.
 
-For more information about the review process, see the {ref}`Code Review FAQ`.
+For more information about the review process, see the {doc}`Code_Review_FAQ`.
 
 ## Review groups
 
@@ -100,7 +171,7 @@ For more information about the review process, see the {ref}`Code Review FAQ`.
      - `Firefox DevTools </mots/index.html#devtools>`__
      - `Member list <https://phabricator.services.mozilla.com/project/members/153/>`__
    * - #dom-core
-     - `Core: DOM <https://firefox-source-docs.mozilla.org/mots/index.html#core-document-object-model>`__
+     - `Core: DOM </mots/index.html#core-document-object-model>`__
      - `Member list <https://phabricator.services.mozilla.com/project/members/178/>`__
    * - #dom-worker-reviewers
      - DOM Workers
@@ -135,11 +206,14 @@ For more information about the review process, see the {ref}`Code Review FAQ`.
    * - #gfx-reviewers
      - Graphics code
      - `Member list <https://phabricator.services.mozilla.com/project/members/122/>`__
+   * - #gtk-reviewers
+     - GTK/Linux-specific widget code (widget/gtk)
+     - `Member list <https://phabricator.services.mozilla.com/project/members/249/>`__
    * - #intermittent-reviewers
      - Test manifest changes
      - `Member list <https://phabricator.services.mozilla.com/project/members/110/>`__
    * - #ipc-reviewers
-     - `Core: IPC <https://firefox-source-docs.mozilla.org/mots/index.html#core-ipc>`__
+     - `Core: IPC </mots/index.html#core-ipc>`__
      - `Member list <https://phabricator.services.mozilla.com/project/members/145/>`__
    * - #layout-reviewers
      - Layout
@@ -156,6 +230,9 @@ For more information about the review process, see the {ref}`Code Review FAQ`.
    * - #media-playback-reviewers
      - `Media playback <https://wiki.mozilla.org/Modules/All#Media_Playback>`__
      - `Member list <https://phabricator.services.mozilla.com/project/profile/159/>`__
+   * - #mobiletest-reviewers
+     - Android UI test/framework and UI test infra code
+     - `Member list <https://phabricator.services.mozilla.com/project/members/201/>`__
    * - #mozbase
      - Mozbase
      - `Member list <https://phabricator.services.mozilla.com/project/members/113/>`__
@@ -168,6 +245,9 @@ For more information about the review process, see the {ref}`Code Review FAQ`.
    * - #nss-reviewers
      - Network Security Services (NSS)
      - `Member list <https://phabricator.services.mozilla.com/project/members/156/>`__
+   * - #pdfjs-reviewers
+     - `Core: PDF </mots/index.html#core-pdf>`__ (the `pdf.js <https://github.com/mozilla/pdf.js>`__ viewer and its Gecko integration)
+     - `Member list <https://phabricator.services.mozilla.com/project/members/152/>`__
    * - #perftest-reviewers
      - Perf Tests
      - `Member list <https://phabricator.services.mozilla.com/project/members/102/>`__
@@ -213,8 +293,11 @@ For more information about the review process, see the {ref}`Code Review FAQ`.
    * - #theme or #desktop-theme-reviewers
      - `Firefox: Theme and Toolkit: Themes </mots/index.html#desktop-theme>`__
      - `Member list <https://phabricator.services.mozilla.com/project/members/141/>`__
+   * - #toolkit-telemetry-reviewers-rotation
+     - `Toolkit :: Telemetry </mots/index.html#telemetry>`__
+     - `Member list <https://phabricator.services.mozilla.com/project/members/229/>`__
    * - #translations-reviewers
-     - `Firefox: Translation <https://firefox-source-docs.mozilla.org/mots/index.html#translation>`__
+     - `Firefox: Translation </mots/index.html#translation>`__
      - `Member list <https://phabricator.services.mozilla.com/project/members/192/>`__
    * - #urlbar-reviewers
      - `Urlbar (Address Bar) </mots/index.html#address-bar>`__

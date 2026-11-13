@@ -2,25 +2,27 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsTHashtable.h"
-#include "nsBaseHashtable.h"
-#include "nsTHashMap.h"
-#include "nsInterfaceHashtable.h"
-#include "nsClassHashtable.h"
-#include "nsRefCountedHashtable.h"
-
-#include "nsCOMPtr.h"
-#include "nsIMemoryReporter.h"
-#include "nsISupports.h"
-#include "nsCOMArray.h"
-#include "mozilla/Attributes.h"
+#include <functional>
+#include <numeric>
 
 #include "gtest/gtest.h"
-
-#include <numeric>
+#include "mozilla/Attributes.h"
+#include "mozilla/ThreadSafeWeakPtr.h"
+#include "nsBaseHashtable.h"
+#include "nsCOMArray.h"
+#include "nsCOMPtr.h"
+#include "nsClassHashtable.h"
+#include "nsIMemoryReporter.h"
+#include "nsISupports.h"
+#include "nsInterfaceHashtable.h"
+#include "nsRefCountedHashtable.h"
+#include "nsTHashMap.h"
+#include "nsTHashtable.h"
 
 using mozilla::MakeRefPtr;
 using mozilla::MakeUnique;
+using mozilla::SupportsThreadSafeWeakPtr;
+using mozilla::ThreadSafeWeakPtr;
 using mozilla::UniquePtr;
 
 namespace TestHashtables {
@@ -106,7 +108,7 @@ class EntityToUnicodeEntry : public PLDHashEntryHdr {
   typedef const char* KeyType;
   typedef const char* KeyTypePointer;
 
-  explicit EntityToUnicodeEntry(const char* aKey) { mNode = nullptr; }
+  explicit EntityToUnicodeEntry(const char* /*aKey*/) { mNode = nullptr; }
   EntityToUnicodeEntry(const EntityToUnicodeEntry& aEntry) {
     mNode = aEntry.mNode;
   }
@@ -1617,4 +1619,57 @@ TEST(Hashtables, Values)
   values.Sort();
 
   EXPECT_EQ((nsTArray<uint64_t>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}), values);
+}
+
+struct HasThreadSafeWeak : public SupportsThreadSafeWeakPtr<HasThreadSafeWeak> {
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(HasThreadSafeWeak)
+  ~HasThreadSafeWeak() { mOnDestroy(this); }
+  std::function<void(HasThreadSafeWeak*)> mOnDestroy;
+};
+
+TEST(Hashtables, ThreadSafeWeakPtrAsKey)
+{
+  nsTHashMap<ThreadSafeWeakPtr<HasThreadSafeWeak>, int32_t> table;
+  RefPtr<HasThreadSafeWeak> alive = new HasThreadSafeWeak;
+
+  ThreadSafeWeakPtr<HasThreadSafeWeak> weak(alive);
+  EXPECT_FALSE(weak.IsDead());
+  EXPECT_FALSE(weak.IsNull());
+
+  table.InsertOrUpdate(weak, 1);
+  table.InsertOrUpdate(nullptr, 0);
+
+  auto origHash = weak.Hash();
+
+  bool destructorRan = false;
+  alive->mOnDestroy = [&](HasThreadSafeWeak* aDyingObject) {
+    destructorRan = true;
+    EXPECT_TRUE(weak.IsDead()) << "no longer upgradable";
+    EXPECT_FALSE(weak.IsNull());
+    EXPECT_EQ(weak, aDyingObject) << "still compares equal";
+
+    ThreadSafeWeakPtr<HasThreadSafeWeak> weak2(aDyingObject);
+    EXPECT_TRUE(weak2.IsDead());
+    EXPECT_FALSE(weak2.IsNull());
+    EXPECT_EQ(weak, weak2) << "still compares equal";
+    EXPECT_NE(weak, nullptr) << "is not == nullptr";
+
+    EXPECT_TRUE(table.Contains(aDyingObject));
+    EXPECT_EQ(table.Get(aDyingObject), 1);
+
+    EXPECT_EQ(origHash, weak2.Hash());
+    EXPECT_EQ(origHash, weak.Hash());
+  };
+
+  EXPECT_FALSE(destructorRan);
+  alive = nullptr;
+  EXPECT_TRUE(destructorRan);
+
+  EXPECT_TRUE(table.Contains(weak));
+  EXPECT_EQ(table.Get(weak), 1);
+
+  table.Remove(weak);
+
+  EXPECT_FALSE(table.Contains(weak));
+  EXPECT_TRUE(table.Contains(nullptr));
 }

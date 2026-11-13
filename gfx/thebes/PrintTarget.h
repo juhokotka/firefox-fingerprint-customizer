@@ -30,8 +30,8 @@ class PrintTarget {
   /// Must be matched 1:1 by an EndPrinting/AbortPrinting call.
   virtual nsresult BeginPrinting(const nsAString& aTitle,
                                  const nsAString& aPrintToFileName,
-                                 uint64_t aBrowsingContextId,
-                                 int32_t aStartPage, int32_t aEndPage) {
+                                 uint64_t aInnerWindowId, int32_t aStartPage,
+                                 int32_t aEndPage) {
     return NS_OK;
   }
   virtual nsresult EndPrinting() { return NS_OK; }
@@ -106,13 +106,8 @@ class PrintTarget {
    * We'd need to check that our consumers always pass the same aRecorder for
    * our entire lifetime.
    *
-   * XXX Once PrintTargetThebes is removed this can become non-virtual.
-   *
    * XXX In the long run, this class and its sub-classes should be converted to
    * use STL classes and mozilla::RefCounted<> so the can be moved to Moz2D.
-   *
-   * TODO: Consider adding a SetDPI method that calls
-   * cairo_surface_set_fallback_resolution.
    */
   virtual already_AddRefed<DrawTarget> MakeDrawTarget(
       const IntSize& aSize, DrawEventRecorder* aRecorder = nullptr);

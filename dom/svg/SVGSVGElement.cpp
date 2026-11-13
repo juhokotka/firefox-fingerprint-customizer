@@ -125,12 +125,18 @@ SVGAnimatedTransformList* SVGSVGElement::GetViewTransformList() const {
   return nullptr;
 }
 
-float SVGSVGElement::CurrentScale() const { return mCurrentScale; }
+float SVGSVGElement::CurrentScale() const {
+  return IsInner() ? 1.0f : mCurrentScale;
+}
 
 #define CURRENT_SCALE_MAX 16.0f
 #define CURRENT_SCALE_MIN 0.0625f
 
 void SVGSVGElement::SetCurrentScale(float aCurrentScale) {
+  if (IsInner()) {
+    // currentScale values cannot be set on inner svg elements
+    return;
+  }
   // Prevent bizarre behaviour and maxing out of CPU and memory by clamping
   aCurrentScale =
       std::clamp(aCurrentScale, CURRENT_SCALE_MIN, CURRENT_SCALE_MAX);
@@ -546,14 +552,16 @@ void SVGSVGElement::SetCurrentView(const nsAString& aCurrentViewID) {
     // schedule attribute mapping now it's being unset.
     if (!IsPendingMappedAttributeEvaluation() &&
         mAttrs.MarkAsPendingPresAttributeEvaluation()) {
-      OwnerDoc()->ScheduleForPresAttrEvaluation(this);
+      if (Document* doc = GetComposedDoc()) {
+        doc->ScheduleForPresAttrEvaluation(this);
+      }
     }
-
-    InvalidateTransformNotifyFrame();
   }
 
   mCurrentViewID = aCurrentViewID;
   mSVGView = nullptr;
+
+  InvalidateTransformNotifyFrame();
 }
 
 void SVGSVGElement::SetViewSpec(std::unique_ptr<SVGView> aSVGView) {
@@ -565,7 +573,9 @@ void SVGSVGElement::SetViewSpec(std::unique_ptr<SVGView> aSVGView) {
   // schedule attribute mapping.
   if (!IsPendingMappedAttributeEvaluation() &&
       mAttrs.MarkAsPendingPresAttributeEvaluation()) {
-    OwnerDoc()->ScheduleForPresAttrEvaluation(this);
+    if (Document* doc = GetComposedDoc()) {
+      doc->ScheduleForPresAttrEvaluation(this);
+    }
   }
 
   mSVGView = std::move(aSVGView);

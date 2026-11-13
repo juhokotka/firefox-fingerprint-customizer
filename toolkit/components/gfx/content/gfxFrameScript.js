@@ -2,6 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+const { testVideoEncode, CodecTestResult } = ChromeUtils.importESModule(
+  "resource://gre/modules/SanityTestChecks.sys.mjs"
+);
+
 const gfxFrameScript = {
   domUtils: null,
 
@@ -17,11 +21,13 @@ const gfxFrameScript = {
 
     this.domUtils = content.windowUtils;
 
+    addMessageListener("gfxSanity:RunEncoderTest", this);
+
     let loadURIOptions = {
       triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
     };
     webNav.loadURI(
-      Services.io.newURI("chrome://gfxsanity/content/sanitytest.html"),
+      Services.io.newURI("resource://gfxsanity/sanitytest.html"),
       loadURIOptions
     );
   },
@@ -31,6 +37,21 @@ const gfxFrameScript = {
       case "MozAfterPaint":
         sendAsyncMessage("gfxSanity:ContentLoaded");
         removeEventListener("MozAfterPaint", this);
+        break;
+    }
+  },
+
+  receiveMessage(aMessage) {
+    switch (aMessage.name) {
+      case "gfxSanity:RunEncoderTest":
+        testVideoEncode(content).then(
+          result => sendAsyncMessage("gfxSanity:EncoderResult", result),
+          e =>
+            sendAsyncMessage("gfxSanity:EncoderResult", {
+              status: CodecTestResult.Failed,
+              reason: `encode check threw: ${e}`,
+            })
+        );
         break;
     }
   },

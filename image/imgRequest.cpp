@@ -4,43 +4,39 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "imgRequest.h"
-#include "ImageLogging.h"
 
+#include "DecodePool.h"
+#include "Image.h"
+#include "ImageFactory.h"
+#include "ImageLogging.h"
+#include "MultipartImage.h"
+#include "ProgressTracker.h"
+#include "RasterImage.h"
+#include "imgIRequest.h"
 #include "imgLoader.h"
 #include "imgRequestProxy.h"
-#include "DecodePool.h"
-#include "ProgressTracker.h"
-#include "ImageFactory.h"
-#include "Image.h"
-#include "MultipartImage.h"
-#include "RasterImage.h"
-
-#include "nsIChannel.h"
-#include "nsICacheInfoChannel.h"
-#include "nsIClassOfService.h"
+#include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/SizeOfState.h"
 #include "mozilla/dom/Document.h"
-#include "nsIThreadRetargetableRequest.h"
-#include "nsIInputStream.h"
-#include "nsIMultiPartChannel.h"
-#include "nsIHttpChannel.h"
-#include "nsMimeTypes.h"
-
-#include "nsIInterfaceRequestorUtils.h"
-#include "nsISupportsPrimitives.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsComponentManagerUtils.h"
 #include "nsContentUtils.h"
 #include "nsEscape.h"
-
-#include "prtime.h"  // for PR_Now
-#include "nsNetUtil.h"
+#include "nsICacheInfoChannel.h"
+#include "nsIChannel.h"
+#include "nsIClassOfService.h"
+#include "nsIHttpChannel.h"
+#include "nsIInputStream.h"
+#include "nsIInterfaceRequestorUtils.h"
+#include "nsIMultiPartChannel.h"
 #include "nsIProtocolHandler.h"
-#include "imgIRequest.h"
-#include "nsProperties.h"
+#include "nsIScriptSecurityManager.h"
+#include "nsISupportsPrimitives.h"
+#include "nsIThreadRetargetableRequest.h"
 #include "nsIURL.h"
-
-#include "mozilla/IntegerPrintfMacros.h"
-#include "mozilla/SizeOfState.h"
+#include "nsMimeTypes.h"
+#include "nsNetUtil.h"
+#include "nsProperties.h"
+#include "prtime.h"  // for PR_Now
 
 using namespace mozilla;
 using namespace mozilla::image;
@@ -622,6 +618,22 @@ bool imgRequest::HadInsecureRedirect() const {
   return mHadInsecureRedirect;
 }
 
+bool imgRequest::HadCrossOriginRedirects() const {
+  // While the channel is still around (during the load) read the authoritative
+  // value from it; afterwards fall back to the value latched in OnStopRequest.
+  // Ignore internal redirects (e.g. a service worker substituting a same-origin
+  // response for a cross-origin request): those are not cross-origin data flow
+  // and must not taint. Real cross-origin redirects (incl. bounce-backs) count.
+  if (mTimedChannel) {
+    bool allRedirectsSameOrigin = false;
+    return NS_SUCCEEDED(
+               mTimedChannel->GetAllRedirectsSameOriginIgnoringInternal(
+                   &allRedirectsSameOrigin)) &&
+           !allRedirectsSameOrigin;
+  }
+  return mHadCrossOriginRedirects;
+}
+
 /** nsIRequestObserver methods **/
 
 NS_IMETHODIMP
@@ -815,6 +827,18 @@ imgRequest::OnStopRequest(nsIRequest* aRequest, nsresult status) {
 
     RefPtr<ProgressTracker> progressTracker = GetProgressTracker();
     progressTracker->SyncNotifyProgress(progress);
+  }
+
+  // Store whether the load involved a cross-origin redirect before we drop the
+  // timed channel. Internal redirects (e.g. a service worker serving a
+  // same-origin response for a cross-origin request) are ignored so we don't
+  // over-taint; real cross-origin redirects (incl. bounce-backs) still count.
+  if (mTimedChannel) {
+    bool allRedirectsSameOrigin = false;
+    mHadCrossOriginRedirects =
+        NS_SUCCEEDED(mTimedChannel->GetAllRedirectsSameOriginIgnoringInternal(
+            &allRedirectsSameOrigin)) &&
+        !allRedirectsSameOrigin;
   }
 
   mTimedChannel = nullptr;

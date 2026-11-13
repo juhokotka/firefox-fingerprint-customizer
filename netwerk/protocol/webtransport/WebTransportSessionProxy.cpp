@@ -2,27 +2,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "WebTransportLog.h"
+#include "WebTransportSessionProxy.h"
+
 #include "Http3WebTransportSession.h"
 #include "Http3WebTransportStream.h"
 #include "ScopedNSSTypes.h"
-#include "WebTransportSessionProxy.h"
-#include "WebTransportStreamProxy.h"
 #include "WebTransportEventService.h"
+#include "WebTransportLog.h"
+#include "WebTransportStreamProxy.h"
+#include "mozilla/LoadInfo.h"
+#include "mozilla/Logging.h"
+#include "mozilla/ScopeExit.h"
+#include "mozilla/StaticPrefs_network.h"
+#include "mozilla/net/SFVService.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
+#include "nsILoadInfo.h"
 #include "nsIRequest.h"
 #include "nsITransportSecurityInfo.h"
 #include "nsIX509Cert.h"
 #include "nsNetUtil.h"
 #include "nsProxyRelease.h"
-#include "nsILoadInfo.h"
 #include "nsSocketTransportService2.h"
-#include "mozilla/Logging.h"
-#include "mozilla/ScopeExit.h"
-#include "mozilla/StaticPrefs_network.h"
-#include "mozilla/LoadInfo.h"
 
 namespace mozilla::net {
 
@@ -72,9 +74,12 @@ nsresult WebTransportSessionProxy::AsyncConnect(
     nsIPrincipal* aPrincipal, uint32_t aSecurityFlags,
     WebTransportSessionEventListener* aListener,
     nsIWebTransport::HTTPVersion aVersion) {
+  nsTArray<nsString> emptyProtocols;
+  nsTArray<nsCString> emptyHeaders;
   return AsyncConnectWithClient(aURI, aDedicated, std::move(aServerCertHashes),
                                 aPrincipal, 0, aSecurityFlags, aListener,
-                                Maybe<dom::ClientInfo>(), aVersion);
+                                Maybe<dom::ClientInfo>(), emptyProtocols,
+                                emptyHeaders, emptyHeaders, aVersion);
 }
 
 nsresult WebTransportSessionProxy::AsyncConnectWithClient(
@@ -83,8 +88,12 @@ nsresult WebTransportSessionProxy::AsyncConnectWithClient(
     nsIPrincipal* aPrincipal, uint64_t aBrowsingContextID,
     uint32_t aSecurityFlags, WebTransportSessionEventListener* aListener,
     const Maybe<dom::ClientInfo>& aClientInfo,
+    const nsTArray<nsString>& aProtocols,
+    const nsTArray<nsCString>& aHeaderNames,
+    const nsTArray<nsCString>& aHeaderValues,
     nsIWebTransport::HTTPVersion aVersion) {
   MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aHeaderNames.Length() == aHeaderValues.Length());
 
   if (aVersion == nsIWebTransport::HTTPVersion::h2) {
     mHTTPVersion = nsIWebTransport::HTTPVersion::h2;
@@ -96,8 +105,12 @@ nsresult WebTransportSessionProxy::AsyncConnectWithClient(
   }
   auto cleanup = MakeScopeExit([self = RefPtr<WebTransportSessionProxy>(this)] {
     MutexAutoLock lock(self->mMutex);
-    self->mListener->OnSessionClosed(false, 0,
-                                     ""_ns);  // TODO: find a better error.
+    mozilla::dom::WebTransportStatsData stats;  // Zero-initialized
+    nsCOMPtr<nsIWebTransportSessionStats> statsWrapper =
+        new WebTransportSessionStatsWrapper(stats);
+    self->mListener->OnSessionClosed(
+        false, 0, ""_ns,
+        statsWrapper);  // TODO: find a better error.
     self->mChannel = nullptr;
     self->mListener = nullptr;
     self->ChangeState(WebTransportSessionProxyState::DONE);
@@ -170,6 +183,74 @@ nsresult WebTransportSessionProxy::AsyncConnectWithClient(
     return rv;
   }
 
+  for (size_t i = 0; i < aHeaderNames.Length(); i++) {
+    rv = httpChannel->SetRequestHeader(aHeaderNames[i], aHeaderValues[i], true);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+  }
+
+  // Set wt-available-protocols header if protocols were provided
+  // Format: "protocol1", "protocol2", "protocol3"
+  if (!aProtocols.IsEmpty()) {
+    // Store offered protocols for later validation
+    {
+      MutexAutoLock lock(mMutex);
+      mOfferedProtocols = aProtocols.Clone();
+    }
+
+    // wt-available-protocols is an SF List of SF Strings (RFC 8941); build it
+    // with the SFV service so the quoting/escaping matches the spec exactly.
+    nsCOMPtr<nsISFVService> sfv = mozilla::net::GetSFVService();
+    if (!sfv) {
+      return NS_ERROR_FAILURE;
+    }
+    nsTArray<RefPtr<nsISFVItemOrInnerList>> members;
+    for (const auto& p : aProtocols) {
+      NS_ConvertUTF16toUTF8 protocol(p);
+      // SF strings only allow printable ASCII (0x20-0x7E); reject any protocol
+      // containing characters outside that range to prevent a compromised
+      // content process from injecting malformed header values.
+      for (size_t j = 0; j < protocol.Length(); j++) {
+        unsigned char c = static_cast<unsigned char>(protocol[j]);
+        if (c < 0x20 || c > 0x7E) {
+          return NS_ERROR_INVALID_ARG;
+        }
+      }
+      nsCOMPtr<nsISFVString> str;
+      rv = sfv->NewString(protocol, getter_AddRefs(str));
+      if (NS_FAILED(rv)) {
+        return rv;
+      }
+      nsCOMPtr<nsISFVParams> params;
+      rv = sfv->NewParameters(getter_AddRefs(params));
+      if (NS_FAILED(rv)) {
+        return rv;
+      }
+      nsCOMPtr<nsISFVItem> item;
+      rv = sfv->NewItem(str, params, getter_AddRefs(item));
+      if (NS_FAILED(rv)) {
+        return rv;
+      }
+      members.AppendElement(item);
+    }
+    nsCOMPtr<nsISFVList> list;
+    rv = sfv->NewList(members, getter_AddRefs(list));
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    nsAutoCString protocolsHeader;
+    rv = list->Serialize(protocolsHeader);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    rv = httpChannel->SetRequestHeader("wt-available-protocols"_ns,
+                                       protocolsHeader, false);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+  }
+
   nsCOMPtr<nsIHttpChannelInternal> internalChannel =
       do_QueryInterface(mChannel);
   if (!internalChannel) {
@@ -220,8 +301,155 @@ WebTransportSessionProxy::RetargetTo(nsIEventTarget* aTarget) {
   return NS_OK;
 }
 
+void WebTransportSessionProxy::GetStatsInternal(
+    const RefPtr<WebTransportSessionBase>& aSession) {
+  MOZ_ASSERT(OnSocketThread());
+
+  aSession->GetStats();
+}
+
 NS_IMETHODIMP
-WebTransportSessionProxy::GetStats() { return NS_ERROR_NOT_IMPLEMENTED; }
+WebTransportSessionProxy::ExportKeyingMaterial(
+    const nsTArray<uint8_t>& aLabel, const nsTArray<uint8_t>& aContext,
+    uint32_t aOutputLength, nsTArray<uint8_t>& aKeyingMaterial) {
+  MOZ_ASSERT(OnSocketThread(),
+             "ExportKeyingMaterial must be called on socket thread");
+
+  RefPtr<WebTransportSessionBase> session;
+  {
+    MutexAutoLock lock(mMutex);
+    if (mState != WebTransportSessionProxyState::ACTIVE ||
+        !mWebTransportSession) {
+      return NS_ERROR_NOT_CONNECTED;
+    }
+    session = mWebTransportSession;
+  }
+
+  return session->ExportKeyingMaterial(aLabel, aContext, aOutputLength,
+                                       aKeyingMaterial);
+}
+
+bool WebTransportSessionProxy::CloseSessionAndGetStats(
+    uint32_t aStatus, const nsACString& aReason,
+    mozilla::dom::WebTransportStatsData& aStats) {
+  MOZ_ASSERT(OnSocketThread());
+  LOG(("WebTransportSessionProxy::CloseSessionAndGetStats"));
+  MutexAutoLock lock(mMutex);
+
+  if (mState != WebTransportSessionProxyState::ACTIVE ||
+      !mWebTransportSession) {
+    return false;
+  }
+
+  RefPtr<WebTransportSessionBase> session = mWebTransportSession;
+
+  {
+    MutexAutoUnlock unlock(mMutex);
+    Http3WebTransportSession* http3Session =
+        session->GetHttp3WebTransportSession();
+    if (http3Session &&
+        http3Session->CloseSessionAndGetStats(aStatus, aReason, aStats)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+NS_IMETHODIMP
+WebTransportSessionProxy::GetStats() {
+  RefPtr<WebTransportSessionBase> session;
+  mozilla::dom::WebTransportStatsData cachedStats;
+  bool useCachedStats = false;
+  {
+    MutexAutoLock lock(mMutex);
+
+    if (!mStopRequestCalled) {
+      LOG(("WebTransportSessionProxy::GetStats queuing - not ready yet"));
+      // Pending events run on the socket thread once the session is ready. If
+      // the session went away in the meantime, report the failure rather than
+      // dropping it on the floor: the return value of this retry has nowhere
+      // to go, and the caller is waiting for exactly one OnStatsAvailable().
+      mPendingEvents.AppendElement([self = RefPtr{this}]() {
+        if (NS_FAILED(self->GetStats())) {
+          (void)self->OnStatsAvailable(nullptr);
+        }
+      });
+      return NS_OK;
+    }
+
+    // Per spec: If transport.[[State]] is "closed", return the most recent
+    // stats available for the connection.
+    if (mState == WebTransportSessionProxyState::DONE) {
+      if (mHasCachedStats) {
+        LOG(
+            ("WebTransportSessionProxy::GetStats using cached stats - "
+             "connection closed"));
+        useCachedStats = true;
+        cachedStats = mCachedStats;
+      } else {
+        return NS_ERROR_NOT_AVAILABLE;
+      }
+    } else if (mState != WebTransportSessionProxyState::ACTIVE ||
+               !mWebTransportSession) {
+      return NS_ERROR_NOT_AVAILABLE;
+    } else {
+      session = mWebTransportSession;
+    }
+  }
+
+  // If we're using cached stats, call OnStatsAvailable directly
+  if (useCachedStats) {
+    nsCOMPtr<nsIWebTransportSessionStats> statsWrapper =
+        new WebTransportSessionStatsWrapper(cachedStats);
+    return OnStatsAvailable(statsWrapper);
+  }
+
+  if (!OnSocketThread()) {
+    return gSocketTransportService->Dispatch(NS_NewRunnableFunction(
+        "WebTransportSessionProxy::GetStatsInternal",
+        [self = RefPtr{this}, session{std::move(session)}]() {
+          self->GetStatsInternal(session);
+        }));
+  }
+
+  GetStatsInternal(session);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+WebTransportSessionProxy::GetNegotiatedProtocol(nsACString& aProtocol) {
+  MutexAutoLock lock(mMutex);
+  aProtocol = mProtocol;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+WebTransportSessionProxy::GetResponseHeaders(nsTArray<nsCString>& aNames,
+                                             nsTArray<nsCString>& aValues) {
+  MutexAutoLock lock(mMutex);
+  aNames = mResponseHeaderNames.Clone();
+  aValues = mResponseHeaderValues.Clone();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+WebTransportSessionProxy::RegisterSendGroup(uint64_t aGroupId) {
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+
+  RefPtr<WebTransportSessionBase> session;
+  {
+    MutexAutoLock lock(mMutex);
+    session = mWebTransportSession;
+  }
+
+  if (!session) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  LOG(("RegisterSendGroup with ID: %" PRIu64, aGroupId));
+  return session->RegisterSendGroup(aGroupId);
+}
 
 NS_IMETHODIMP
 WebTransportSessionProxy::CloseSession(uint32_t status,
@@ -530,15 +758,29 @@ WebTransportSessionProxy::CreateOutgoingBidirectionalStream(
 
 void WebTransportSessionProxy::SendDatagramInternal(
     const RefPtr<WebTransportSessionBase>& aSession, nsTArray<uint8_t>&& aData,
-    uint64_t aTrackingId) {
+    uint64_t aTrackingId, uint64_t aSendGroupId, int64_t aSendOrder,
+    TimeStamp aTimestamp) {
   MOZ_ASSERT(OnSocketThread());
 
-  aSession->SendDatagram(std::move(aData), aTrackingId);
+  aSession->SendDatagram(std::move(aData), aTrackingId, aSendGroupId,
+                         aSendOrder, aTimestamp);
 }
 
 NS_IMETHODIMP
 WebTransportSessionProxy::SendDatagram(const nsTArray<uint8_t>& aData,
-                                       uint64_t aTrackingId) {
+                                       uint64_t aTrackingId,
+                                       uint64_t aSendGroupId,
+                                       int64_t aSendOrder) {
+  return SendDatagramAt(aData, aTrackingId, aSendGroupId, aSendOrder,
+                        TimeStamp::Now());
+}
+
+NS_IMETHODIMP
+WebTransportSessionProxy::SendDatagramAt(const nsTArray<uint8_t>& aData,
+                                         uint64_t aTrackingId,
+                                         uint64_t aSendGroupId,
+                                         int64_t aSendOrder,
+                                         TimeStamp aTimestamp) {
   RefPtr<WebTransportSessionBase> session;
   {
     MutexAutoLock lock(mMutex);
@@ -555,12 +797,16 @@ WebTransportSessionProxy::SendDatagram(const nsTArray<uint8_t>& aData,
     return gSocketTransportService->Dispatch(NS_NewRunnableFunction(
         "WebTransportSessionProxy::SendDatagramInternal",
         [self = RefPtr{this}, session{std::move(session)},
-         data{std::move(copied)}, trackingId(aTrackingId)]() mutable {
-          self->SendDatagramInternal(session, std::move(data), trackingId);
+         data{std::move(copied)}, trackingId(aTrackingId),
+         sendGroupId(aSendGroupId), sendOrder(aSendOrder),
+         timestamp(aTimestamp)]() mutable {
+          self->SendDatagramInternal(session, std::move(data), trackingId,
+                                     sendGroupId, sendOrder, timestamp);
         }));
   }
 
-  SendDatagramInternal(session, std::move(copied), aTrackingId);
+  SendDatagramInternal(session, std::move(copied), aTrackingId, aSendGroupId,
+                       aSendOrder, aTimestamp);
   return NS_OK;
 }
 
@@ -598,6 +844,72 @@ WebTransportSessionProxy::GetMaxDatagramSize() {
 NS_IMETHODIMP
 WebTransportSessionProxy::GetHttpChannelID(uint64_t* _retval) {
   *_retval = mHttpChannelID;
+  return NS_OK;
+}
+
+void WebTransportSessionProxy::SetDatagramMaxBufferedDatagramsInternal(
+    const RefPtr<WebTransportSessionBase>& aSession,
+    uint32_t aMaxBufferedDatagrams) {
+  MOZ_ASSERT(OnSocketThread());
+
+  aSession->SetDatagramMaxBufferedDatagrams(aMaxBufferedDatagrams);
+}
+
+NS_IMETHODIMP
+WebTransportSessionProxy::SetDatagramMaxBufferedDatagrams(
+    uint32_t aMaxBufferedDatagrams) {
+  RefPtr<WebTransportSessionBase> session;
+  {
+    MutexAutoLock lock(mMutex);
+    if (mState != WebTransportSessionProxyState::ACTIVE ||
+        !mWebTransportSession) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+    session = mWebTransportSession;
+  }
+
+  if (!OnSocketThread()) {
+    return gSocketTransportService->Dispatch(NS_NewRunnableFunction(
+        "WebTransportSessionProxy::SetDatagramMaxBufferedDatagramsInternal",
+        [self = RefPtr{this}, session{std::move(session)},
+         maxBufferedDatagrams(aMaxBufferedDatagrams)]() {
+          self->SetDatagramMaxBufferedDatagramsInternal(session,
+                                                        maxBufferedDatagrams);
+        }));
+  }
+
+  SetDatagramMaxBufferedDatagramsInternal(session, aMaxBufferedDatagrams);
+  return NS_OK;
+}
+
+void WebTransportSessionProxy::SetDatagramMaxAgeInternal(
+    const RefPtr<WebTransportSessionBase>& aSession, double aMaxAge) {
+  MOZ_ASSERT(OnSocketThread());
+
+  aSession->SetDatagramMaxAge(aMaxAge);
+}
+
+NS_IMETHODIMP
+WebTransportSessionProxy::SetDatagramMaxAge(double aMaxAge) {
+  RefPtr<WebTransportSessionBase> session;
+  {
+    MutexAutoLock lock(mMutex);
+    if (mState != WebTransportSessionProxyState::ACTIVE ||
+        !mWebTransportSession) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+    session = mWebTransportSession;
+  }
+
+  if (!OnSocketThread()) {
+    return gSocketTransportService->Dispatch(NS_NewRunnableFunction(
+        "WebTransportSessionProxy::SetDatagramMaxAgeInternal",
+        [self = RefPtr{this}, session{std::move(session)}, maxAge(aMaxAge)]() {
+          self->SetDatagramMaxAgeInternal(session, maxAge);
+        }));
+  }
+
+  SetDatagramMaxAgeInternal(session, aMaxAge);
   return NS_OK;
 }
 
@@ -660,7 +972,10 @@ WebTransportSessionProxy::OnStartRequest(nsIRequest* aRequest) {
     }
   }
   if (listener) {
-    listener->OnSessionClosed(false, closeStatus, reason);
+    mozilla::dom::WebTransportStatsData stats;  // Zero-initialized
+    nsCOMPtr<nsIWebTransportSessionStats> statsWrapper =
+        new WebTransportSessionStatsWrapper(stats);
+    listener->OnSessionClosed(false, closeStatus, reason, statsWrapper);
   }
   return NS_OK;
 }
@@ -737,6 +1052,24 @@ WebTransportSessionProxy::OnStopRequest(nsIRequest* aRequest,
     mStopRequestCalled = true;
   }
 
+  // Notify the listener before activating queued streams: OnSessionReady
+  // retargets event delivery to the socket thread, so activating streams only
+  // afterwards keeps their OnStopSending/OnResetReceived events off the main
+  // thread and out of a race with the retarget.
+  if (listener) {
+    if (succeeded) {
+      listener->OnSessionReady(sessionId);
+    } else {
+      mozilla::dom::WebTransportStatsData stats;  // Zero-initialized
+      nsCOMPtr<nsIWebTransportSessionStats> statsWrapper =
+          new WebTransportSessionStatsWrapper(stats);
+      listener->OnSessionClosed(
+          false, closeStatus, reason,
+          statsWrapper);  // TODO: find a better error.
+                          // Currently error code 0 is used.
+    }
+  }
+
   if (!pendingCreateStreamEvents.IsEmpty()) {
     (void)gSocketTransportService->Dispatch(NS_NewRunnableFunction(
         "WebTransportSessionProxy::DispatchPendingCreateStreamEvents",
@@ -748,23 +1081,14 @@ WebTransportSessionProxy::OnStopRequest(nsIRequest* aRequest,
         }));
   }  // otherwise let the CreateStreams just go away
 
-  if (listener) {
-    if (succeeded) {
-      listener->OnSessionReady(sessionId);
-      if (!pendingEvents.IsEmpty()) {
-        (void)gSocketTransportService->Dispatch(NS_NewRunnableFunction(
-            "WebTransportSessionProxy::DispatchPendingEvents",
-            [pendingEvents = std::move(pendingEvents)]() {
-              for (const auto& event : pendingEvents) {
-                event();
-              }
-            }));
-      }
-    } else {
-      listener->OnSessionClosed(false, closeStatus,
-                                reason);  // TODO: find a better error.
-                                          // Currently error code 0 is used.
-    }
+  if (listener && succeeded && !pendingEvents.IsEmpty()) {
+    (void)gSocketTransportService->Dispatch(NS_NewRunnableFunction(
+        "WebTransportSessionProxy::DispatchPendingEvents",
+        [pendingEvents = std::move(pendingEvents)]() {
+          for (const auto& event : pendingEvents) {
+            event();
+          }
+        }));
   }
   return NS_OK;
 }
@@ -875,6 +1199,33 @@ WebTransportSessionProxy::OnSessionReadyInternal(
     case WebTransportSessionProxyState::NEGOTIATING:
       mWebTransportSession = aSession;
       mSessionId = aSession->GetStreamId();
+      aSession->GetNegotiatedProtocol(mProtocol);
+      aSession->GetResponseHeaders(mResponseHeaderNames, mResponseHeaderValues);
+      // Validate the negotiated protocol against offered protocols
+      // Note: mOfferedProtocols is only set if protocols were offered (not
+      // null) If a protocol is returned but either:
+      // - No protocols were offered (empty list was passed), or
+      // - The returned protocol isn't in the offered list
+      // then we must reject it per spec
+      if (!mProtocol.IsEmpty()) {
+        bool shouldAccept = false;
+        // Only accept if we offered protocols AND the returned one is in the
+        // list
+        if (!mOfferedProtocols.IsEmpty()) {
+          for (const auto& offered : mOfferedProtocols) {
+            if (mProtocol.Equals(NS_ConvertUTF16toUTF8(offered))) {
+              shouldAccept = true;
+              break;
+            }
+          }
+        }
+        // If we shouldn't accept it, clear the protocol
+        if (!shouldAccept) {
+          LOG(("Negotiated protocol '%s' not valid (offered=%zu), rejecting",
+               mProtocol.get(), mOfferedProtocols.Length()));
+          mProtocol.Truncate();
+        }
+      }
       ChangeState(WebTransportSessionProxyState::NEGOTIATING_SUCCEEDED);
       mWebTransportSession->StartReading();
       break;
@@ -963,15 +1314,31 @@ WebTransportSessionProxy::OnSessionReady(uint64_t ready) {
   return NS_OK;
 }
 
+// Pointer lifetime: aStats is owned by the caller
+// (Http3WebTransportSession::OnSessionClosed) and remains valid for the
+// duration of this synchronous call. We copy the data immediately to cache it
+// and when capturing it in lambdas for deferred execution.
 NS_IMETHODIMP
 WebTransportSessionProxy::OnSessionClosed(bool aCleanly, uint32_t aStatus,
-                                          const nsACString& aReason) {
+                                          const nsACString& aReason,
+                                          nsIWebTransportSessionStats* aStats) {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   MutexAutoLock lock(mMutex);
   LOG(
       ("WebTransportSessionProxy::OnSessionClosed %p mState=%d "
        "mStopRequestCalled=%d",
        this, mState, mStopRequestCalled));
+
+  mozilla::dom::WebTransportStatsData* rawStats = nullptr;
+  MOZ_ALWAYS_SUCCEEDS(aStats->GetRawStats(&rawStats));
+  MOZ_ASSERT(rawStats);
+
+  // Cache stats (spec requirement for GetStats after close)
+  if (!mHasCachedStats) {
+    mHasCachedStats = true;
+    mCachedStats = *rawStats;
+  }
+
   // Since OnSessionReady on the listener is called on the main thread,
   // OnSessionClosed and OnSessionReady can be racy. If OnStopRequest is not
   // called yet, OnSessionClosed needs to wait.
@@ -979,8 +1346,11 @@ WebTransportSessionProxy::OnSessionClosed(bool aCleanly, uint32_t aStatus,
     nsCString closeReason(aReason);
     mPendingEvents.AppendElement([self = RefPtr{this}, status(aStatus),
                                   closeReason(std::move(closeReason)),
-                                  cleanly(aCleanly)]() {
-      (void)self->OnSessionClosed(cleanly, status, closeReason);
+                                  cleanly(aCleanly),
+                                  stats = *rawStats]() mutable {
+      nsCOMPtr<nsIWebTransportSessionStats> statsWrapper =
+          new WebTransportSessionStatsWrapper(stats);
+      (void)self->OnSessionClosed(cleanly, status, closeReason, statsWrapper);
     });
     return NS_OK;
   }
@@ -1011,6 +1381,130 @@ WebTransportSessionProxy::OnSessionClosed(bool aCleanly, uint32_t aStatus,
   return NS_OK;
 }
 
+void WebTransportSessionProxy::OnDrainingInternal() {
+  nsCOMPtr<WebTransportSessionEventListener> listener;
+  {
+    MutexAutoLock lock(mMutex);
+    if (!mTarget->IsOnCurrentThread()) {
+      // mTarget changed (RetargetTo) after this runnable was queued; forward to
+      // the current target so the listener is only ever invoked on one thread.
+      mTarget->Dispatch(NS_NewRunnableFunction(
+          "WebTransportSessionProxy::OnDrainingInternal",
+          [self = RefPtr{this}] { self->OnDrainingInternal(); }));
+      return;
+    }
+    listener = mListener;
+  }
+
+  if (listener) {
+    listener->OnDraining();
+  }
+}
+
+NS_IMETHODIMP
+WebTransportSessionProxy::OnDraining() {
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+  LOG(("WebTransportSessionProxy::OnDraining %p", this));
+
+  {
+    MutexAutoLock lock(mMutex);
+    // Since OnSessionReady on the listener is called on the main thread,
+    // OnDraining and OnSessionReady can be racy. If OnStopRequest is not
+    // called yet, mTarget may still be the pre-retargeting default and
+    // OnDraining needs to wait.
+    if (!mStopRequestCalled) {
+      mPendingEvents.AppendElement(
+          [self = RefPtr{this}]() { (void)self->OnDraining(); });
+      return NS_OK;
+    }
+
+    if (!mTarget->IsOnCurrentThread()) {
+      return mTarget->Dispatch(NS_NewRunnableFunction(
+          "WebTransportSessionProxy::OnDraining",
+          [self = RefPtr{this}] { self->OnDrainingInternal(); }));
+    }
+  }
+
+  OnDrainingInternal();
+  return NS_OK;
+}
+
+// Pointer lifetime: aStats is owned by the caller (Http3WebTransportSession::
+// GetStats) and remains valid for the duration of this synchronous call, or
+// null if the caller was unable to gather stats. We copy the data (if any)
+// before dispatching to another thread or calling into mListener.
+void WebTransportSessionProxy::OnStatsAvailableInternal(
+    const Maybe<mozilla::dom::WebTransportStatsData>& aStats) {
+  // The listener must be called without mMutex held: it may re-enter this
+  // object (e.g. via GetStats()).
+  nsCOMPtr<WebTransportSessionEventListener> listener;
+  {
+    MutexAutoLock lock(mMutex);
+    if (!mTarget->IsOnCurrentThread()) {
+      // mTarget changed (RetargetTo) after this runnable was queued; forward to
+      // the current target so the listener is only ever invoked on one thread.
+      mTarget->Dispatch(NS_NewRunnableFunction(
+          "WebTransportSessionProxy::OnStatsAvailableInternal",
+          [self = RefPtr{this}, stats = aStats] {
+            self->OnStatsAvailableInternal(stats);
+          }));
+      return;
+    }
+    listener = mListener;
+  }
+  if (!listener) {
+    return;
+  }
+  if (aStats) {
+    nsCOMPtr<nsIWebTransportSessionStats> statsWrapper =
+        new WebTransportSessionStatsWrapper(*aStats);
+    listener->OnStatsAvailable(statsWrapper);
+  } else {
+    listener->OnStatsAvailable(nullptr);
+  }
+}
+
+NS_IMETHODIMP
+WebTransportSessionProxy::OnStatsAvailable(
+    nsIWebTransportSessionStats* aStats) {
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+  mozilla::dom::WebTransportStatsData* rawStats = nullptr;
+  if (aStats) {
+    MOZ_ALWAYS_SUCCEEDS(aStats->GetRawStats(&rawStats));
+  }
+  if (rawStats) {
+    LOG(("WebTransportSessionProxy::OnStatsAvailable %p - bytesSent=%" PRIu64
+         ", bytesReceived=%" PRIu64 ", minRtt=%f, smoothedRtt=%f",
+         this, rawStats->bytesSent(), rawStats->bytesReceived(),
+         rawStats->minRtt(), rawStats->smoothedRtt()));
+  } else {
+    LOG(("WebTransportSessionProxy::OnStatsAvailable %p - stats unavailable",
+         this));
+  }
+
+  Maybe<mozilla::dom::WebTransportStatsData> stats =
+      rawStats ? Some(*rawStats) : Nothing();
+
+  {
+    MutexAutoLock lock(mMutex);
+    // Cache stats for use after connection is closed (spec requirement).
+    if (rawStats) {
+      mHasCachedStats = true;
+      mCachedStats = *rawStats;
+    }
+    if (!mTarget->IsOnCurrentThread()) {
+      return mTarget->Dispatch(
+          NS_NewRunnableFunction("WebTransportSessionProxy::OnStatsAvailable",
+                                 [self = RefPtr{this}, stats]() {
+                                   self->OnStatsAvailableInternal(stats);
+                                 }));
+    }
+  }
+
+  OnStatsAvailableInternal(stats);
+  return NS_OK;
+}
+
 void WebTransportSessionProxy::CallOnSessionClosedLocked() {
   MutexAutoLock lock(mMutex);
   CallOnSessionClosed();
@@ -1032,6 +1526,7 @@ void WebTransportSessionProxy::CallOnSessionClosed() MOZ_REQUIRES(mMutex) {
   bool cleanly = false;
   nsAutoCString reason;
   uint32_t closeStatus = 0;
+  mozilla::dom::WebTransportStatsData stats;
 
   switch (mState) {
     case WebTransportSessionProxyState::INIT:
@@ -1047,6 +1542,9 @@ void WebTransportSessionProxy::CallOnSessionClosed() MOZ_REQUIRES(mMutex) {
       cleanly = mCleanly;
       reason = mReason;
       closeStatus = mCloseStatus;
+      if (mHasCachedStats) {
+        stats = mCachedStats;
+      }
       ChangeState(WebTransportSessionProxyState::DONE);
       break;
     case WebTransportSessionProxyState::DONE:
@@ -1056,7 +1554,9 @@ void WebTransportSessionProxy::CallOnSessionClosed() MOZ_REQUIRES(mMutex) {
   if (listener) {
     // Don't invoke the callback under the lock.
     MutexAutoUnlock unlock(mMutex);
-    listener->OnSessionClosed(cleanly, closeStatus, reason);
+    nsCOMPtr<nsIWebTransportSessionStats> statsWrapper =
+        new WebTransportSessionStatsWrapper(stats);
+    listener->OnSessionClosed(cleanly, closeStatus, reason, statsWrapper);
   }
 }
 
@@ -1130,7 +1630,16 @@ void WebTransportSessionProxy::NotifyDatagramReceived(
   nsCOMPtr<WebTransportSessionEventListener> listener;
   {
     MutexAutoLock lock(mMutex);
-    MOZ_ASSERT(mTarget->IsOnCurrentThread());
+    if (!mTarget->IsOnCurrentThread()) {
+      // mTarget changed (RetargetTo) after this runnable was queued; forward to
+      // the current target so the listener is only ever invoked on one thread.
+      mTarget->Dispatch(NS_NewRunnableFunction(
+          "WebTransportSessionProxy::NotifyDatagramReceived",
+          [self = RefPtr{this}, data{std::move(aData)}]() mutable {
+            self->NotifyDatagramReceived(std::move(data));
+          }));
+      return;
+    }
 
     if (mState != WebTransportSessionProxyState::ACTIVE || !mListener) {
       return;
@@ -1178,12 +1687,21 @@ void WebTransportSessionProxy::OnMaxDatagramSizeInternal(uint64_t aSize) {
   nsCOMPtr<WebTransportSessionEventListener> listener;
   {
     MutexAutoLock lock(mMutex);
-    MOZ_ASSERT(mTarget->IsOnCurrentThread());
-
     if (!mStopRequestCalled) {
       mPendingEvents.AppendElement([self = RefPtr{this}, size(aSize)]() {
         self->OnMaxDatagramSizeInternal(size);
       });
+      return;
+    }
+
+    if (!mTarget->IsOnCurrentThread()) {
+      // mTarget changed (RetargetTo) after this runnable was queued; forward to
+      // the current target so the listener is only ever invoked on one thread.
+      mTarget->Dispatch(NS_NewRunnableFunction(
+          "WebTransportSessionProxy::OnMaxDatagramSizeInternal",
+          [self = RefPtr{this}, size(aSize)] {
+            self->OnMaxDatagramSizeInternal(size);
+          }));
       return;
     }
 
@@ -1219,7 +1737,16 @@ void WebTransportSessionProxy::OnOutgoingDatagramOutComeInternal(
   nsCOMPtr<WebTransportSessionEventListener> listener;
   {
     MutexAutoLock lock(mMutex);
-    MOZ_ASSERT(mTarget->IsOnCurrentThread());
+    if (!mTarget->IsOnCurrentThread()) {
+      // mTarget changed (RetargetTo) after this runnable was queued; forward to
+      // the current target so the listener is only ever invoked on one thread.
+      mTarget->Dispatch(NS_NewRunnableFunction(
+          "WebTransportSessionProxy::OnOutgoingDatagramOutComeInternal",
+          [self = RefPtr{this}, id(aId), outcome(aOutCome)] {
+            self->OnOutgoingDatagramOutComeInternal(id, outcome);
+          }));
+      return;
+    }
     if (mState != WebTransportSessionProxyState::ACTIVE || !mListener) {
       return;
     }
@@ -1250,22 +1777,31 @@ WebTransportSessionProxy::OnOutgoingDatagramOutCome(
 }
 
 void WebTransportSessionProxy::OnStopSendingInternal(uint64_t aStreamId,
-                                                     nsresult aError) {
+                                                     uint64_t aErrorCode) {
   nsCOMPtr<WebTransportSessionEventListener> listener;
   {
     MutexAutoLock lock(mMutex);
-    MOZ_ASSERT(mTarget->IsOnCurrentThread());
+    if (!mTarget->IsOnCurrentThread()) {
+      // mTarget changed (RetargetTo) after this runnable was queued; forward to
+      // the current target so the listener is only ever invoked on one thread.
+      mTarget->Dispatch(NS_NewRunnableFunction(
+          "WebTransportSessionProxy::OnStopSendingInternal",
+          [self = RefPtr{this}, aStreamId, aErrorCode] {
+            self->OnStopSendingInternal(aStreamId, aErrorCode);
+          }));
+      return;
+    }
     if (mState != WebTransportSessionProxyState::ACTIVE || !mListener) {
       return;
     }
     listener = mListener;
   }
 
-  listener->OnStopSending(aStreamId, aError);
+  listener->OnStopSending(aStreamId, aErrorCode);
 }
 
 NS_IMETHODIMP WebTransportSessionProxy::OnStopSending(uint64_t aStreamId,
-                                                      nsresult aError) {
+                                                      uint64_t aErrorCode) {
   MOZ_ASSERT(OnSocketThread());
 
   {
@@ -1273,33 +1809,42 @@ NS_IMETHODIMP WebTransportSessionProxy::OnStopSending(uint64_t aStreamId,
     if (!mTarget->IsOnCurrentThread()) {
       return mTarget->Dispatch(NS_NewRunnableFunction(
           "WebTransportSessionProxy::OnStopSending",
-          [self = RefPtr{this}, aStreamId, aError] {
-            self->OnStopSendingInternal(aStreamId, aError);
+          [self = RefPtr{this}, aStreamId, aErrorCode] {
+            self->OnStopSendingInternal(aStreamId, aErrorCode);
           }));
     }
   }
 
-  OnStopSendingInternal(aStreamId, aError);
+  OnStopSendingInternal(aStreamId, aErrorCode);
   return NS_OK;
 }
 
 void WebTransportSessionProxy::OnResetReceivedInternal(uint64_t aStreamId,
-                                                       nsresult aError) {
+                                                       uint64_t aErrorCode) {
   nsCOMPtr<WebTransportSessionEventListener> listener;
   {
     MutexAutoLock lock(mMutex);
-    MOZ_ASSERT(mTarget->IsOnCurrentThread());
+    if (!mTarget->IsOnCurrentThread()) {
+      // mTarget changed (RetargetTo) after this runnable was queued; forward to
+      // the current target so the listener is only ever invoked on one thread.
+      mTarget->Dispatch(NS_NewRunnableFunction(
+          "WebTransportSessionProxy::OnResetReceivedInternal",
+          [self = RefPtr{this}, aStreamId, aErrorCode] {
+            self->OnResetReceivedInternal(aStreamId, aErrorCode);
+          }));
+      return;
+    }
     if (mState != WebTransportSessionProxyState::ACTIVE || !mListener) {
       return;
     }
     listener = mListener;
   }
 
-  listener->OnResetReceived(aStreamId, aError);
+  listener->OnResetReceived(aStreamId, aErrorCode);
 }
 
 NS_IMETHODIMP WebTransportSessionProxy::OnResetReceived(uint64_t aStreamId,
-                                                        nsresult aError) {
+                                                        uint64_t aErrorCode) {
   MOZ_ASSERT(OnSocketThread());
 
   {
@@ -1307,13 +1852,13 @@ NS_IMETHODIMP WebTransportSessionProxy::OnResetReceived(uint64_t aStreamId,
     if (!mTarget->IsOnCurrentThread()) {
       return mTarget->Dispatch(NS_NewRunnableFunction(
           "WebTransportSessionProxy::OnResetReceived",
-          [self = RefPtr{this}, aStreamId, aError] {
-            self->OnResetReceivedInternal(aStreamId, aError);
+          [self = RefPtr{this}, aStreamId, aErrorCode] {
+            self->OnResetReceivedInternal(aStreamId, aErrorCode);
           }));
     }
   }
 
-  OnResetReceivedInternal(aStreamId, aError);
+  OnResetReceivedInternal(aStreamId, aErrorCode);
   return NS_OK;
 }
 

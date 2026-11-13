@@ -18,14 +18,6 @@ WindowsUIElement::WindowsUIElement(HWND aWindow,
                                    RefPtr<IUIAutomationElement> aElement)
     : mWindow{aWindow}, mElement{aElement}, mRect{} {}
 
-static bool IsWindowPointVisible(HWND aWindow, POINT aPoint) {
-  HWND topWindow{WindowFromPoint(aPoint)};
-  if (aWindow != topWindow && !IsChild(aWindow, topWindow)) {
-    return false;
-  }
-  return true;
-}
-
 static mozilla::Maybe<RECT> GetBoundingRectangle(
     RefPtr<IUIAutomationElement> aElement) {
   RECT rect{};
@@ -39,38 +31,6 @@ static mozilla::Maybe<RECT> GetBoundingRectangle(
   }
 
   return mozilla::Some(rect);
-}
-
-bool WindowsUIElement::IsVisible() {
-  mozilla::Maybe<RECT> rect{GetBoundingRectangle(mElement)};
-  if (!rect) {
-    mRect = RECT{};
-    return false;
-  }
-
-  mRect = *rect;
-
-  POINT pointTopLeft{mRect.left, mRect.top};
-  if (!IsWindowPointVisible(mWindow, pointTopLeft)) {
-    return false;
-  }
-
-  POINT pointBottomLeft{mRect.left, mRect.bottom};
-  if (!IsWindowPointVisible(mWindow, pointBottomLeft)) {
-    return false;
-  }
-
-  POINT pointTopRight{mRect.right, mRect.top};
-  if (!IsWindowPointVisible(mWindow, pointTopRight)) {
-    return false;
-  }
-
-  POINT pointBottomRight{mRect.right, mRect.bottom};
-  if (!IsWindowPointVisible(mWindow, pointBottomRight)) {
-    return false;
-  }
-
-  return true;
 }
 
 mozilla::Maybe<bool> WindowsUIElement::IsMoving() {

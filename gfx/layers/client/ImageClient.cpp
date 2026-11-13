@@ -6,9 +6,9 @@
 
 #include <stdint.h>  // for uint32_t
 
+#include "GLImages.h"            // for SurfaceTextureImage::Data, etc
 #include "ImageContainer.h"      // for Image, PlanarYCbCrImage, etc
 #include "ImageTypes.h"          // for ImageFormat::PLANAR_YCBCR, etc
-#include "GLImages.h"            // for SurfaceTextureImage::Data, etc
 #include "gfx2DGlue.h"           // for ImageFormatToSurfaceFormat
 #include "gfxPlatform.h"         // for gfxPlatform
 #include "mozilla/Assertions.h"  // for MOZ_ASSERT, etc
@@ -21,15 +21,15 @@
 #include "mozilla/layers/CompositableForwarder.h"
 #include "mozilla/layers/CompositorTypes.h"  // for CompositableType, etc
 #include "mozilla/layers/ISurfaceAllocator.h"
-#include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor, etc
-#include "mozilla/layers/TextureForwarder.h"
+#include "mozilla/layers/LayersSurfaces.h"    // for SurfaceDescriptor, etc
 #include "mozilla/layers/TextureClient.h"     // for TextureClient, etc
 #include "mozilla/layers/TextureClientOGL.h"  // for SurfaceTextureClient
-#include "mozilla/mozalloc.h"                 // for operator delete, etc
-#include "nsCOMPtr.h"                         // for already_AddRefed
-#include "nsDebug.h"                          // for NS_WARNING, NS_ASSERTION
-#include "nsISupportsImpl.h"                  // for Image::Release, etc
-#include "nsRect.h"                           // for mozilla::gfx::IntRect
+#include "mozilla/layers/TextureForwarder.h"
+#include "mozilla/mozalloc.h"  // for operator delete, etc
+#include "nsCOMPtr.h"          // for already_AddRefed
+#include "nsDebug.h"           // for NS_WARNING, NS_ASSERTION
+#include "nsISupportsImpl.h"   // for Image::Release, etc
+#include "nsRect.h"            // for mozilla::gfx::IntRect
 
 #ifdef MOZ_WIDGET_ANDROID
 #  include "mozilla/layers/AndroidImageReader.h"
@@ -92,12 +92,15 @@ already_AddRefed<TextureClient> ImageClient::CreateTextureClientForImage(
     if (!data) {
       return nullptr;
     }
+    const auto sizes = data->GetPlaneSizes();
+    if (!sizes) {
+      return nullptr;
+    }
     texture = TextureClient::CreateForYCbCr(
-        aKnowsCompositor, data->mPictureRect, data->YDataSize(), data->mYStride,
-        data->CbCrDataSize(), data->mCbCrStride, data->mStereoMode,
-        data->mColorDepth, data->mYUVColorSpace, data->mColorRange,
-        data->mTransferFunction, data->mChromaSubsampling,
-        TextureFlags::DEFAULT, data->mHDRMetadata);
+        aKnowsCompositor, data->mPictureRect, sizes->mY, data->mYStride,
+        sizes->mCbCr, data->mCbCrStride, data->mStereoMode, data->mColorDepth,
+        data->mYUVColorSpace, data->mColorRange, data->mTransferFunction,
+        data->mChromaSubsampling, TextureFlags::DEFAULT, data->mHDRMetadata);
     if (!texture) {
       return nullptr;
     }

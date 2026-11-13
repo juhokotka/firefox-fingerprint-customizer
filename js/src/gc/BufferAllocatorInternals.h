@@ -49,7 +49,7 @@ static constexpr uint32_t FreeRegionCheckValue = 0xBFA110C3;
 template <size_t N, typename Word = size_t>
 class BitSetIter {
   using BitSet = mozilla::BitSet<N, Word>;
-  const BitSet& bitset;
+  BitSet bitset;
   size_t bit = 0;
 
  public:
@@ -183,12 +183,15 @@ class BufferAllocator::FreeLists::FreeRegionIter
 
 class BufferAllocator::ChunkLists::ChunkListIter
     : public BitSetIter<AllocSizeClasses + 1, uint32_t> {
-  ChunkLists& chunkLists;
+  ChunkListArray& lists;
 
  public:
   explicit ChunkListIter(ChunkLists& chunkLists)
-      : BitSetIter(chunkLists.available), chunkLists(chunkLists) {}
-  BufferChunkList& get() { return chunkLists.lists[getSizeClass()]; }
+      : BitSetIter(chunkLists.availableMixed | chunkLists.availableTenured),
+        lists(chunkLists.lists) {}
+  ChunkListIter(ChunkLists& chunkLists, const AvailableBitSet& bitSet)
+      : BitSetIter(bitSet), lists(chunkLists.lists) {}
+  BufferChunkList& get() { return lists[getSizeClass()]; }
   size_t getSizeClass() const { return BitSetIter::get(); }
   operator BufferChunkList&() { return get(); }
 };
@@ -282,6 +285,10 @@ struct AllocSpace {
     return markBits.ref().getBit(bit);
   }
 
+  uintptr_t startAddress() const {
+    return uintptr_t(static_cast<const Derived*>(this));
+  }
+
   // Find next/previous allocations from |offset|. Return SizeBytes on failure.
   size_t findNextAllocated(uintptr_t offset) const;
   size_t findPrevAllocated(uintptr_t offset) const;
@@ -292,25 +299,25 @@ struct AllocSpace {
   FreeRegion* findPrecedingFreeRegion(uintptr_t endAddr);
 
   using FreeLists = BufferAllocator::FreeLists;
+  using SizeKind = BufferAllocator::SizeKind;
   using SweepKind = BufferAllocator::SweepKind;
   struct SweepResult {
     bool isEmpty = false;
     bool hasNurseryOwnedAllocs = false;
     size_t bytesFreed = 0;
+    // Total bytes in allocations that survived this sweep. Computed as a
+    // byproduct of the sweep's allocation-bitmap walk so callers can derive
+    // used/free/admin byte totals without a separate free-region walk.
+    size_t usedBytes = 0;
   };
-  SweepResult sweep(BufferAllocator* allocator, FreeLists& freeLists,
-                    SweepKind sweepKind, bool sweptAnyPreviously,
-                    bool shouldDecommit);
+  SweepResult sweep(FreeLists& freeLists, SweepKind sweepKind,
+                    bool mayBeUnchanged, bool shouldDecommit);
 
  protected:
   AllocSpace() {
     MOZ_ASSERT(allocStartBitmap.ref().IsEmpty());
     MOZ_ASSERT(allocEndBitmap.ref().IsEmpty());
     MOZ_ASSERT(nurseryOwnedBitmap.ref().IsEmpty());
-  }
-
-  uintptr_t startAddress() const {
-    return uintptr_t(static_cast<const Derived*>(this));
   }
 
   template <size_t Divisor = GranularityBytes, size_t Align = Divisor>
@@ -369,7 +376,7 @@ struct BufferChunk
       public AllocSpace<BufferChunk, ChunkSize, MediumAllocGranularity> {
   MainThreadOrGCTaskData<Zone*> zone;
 
-  MainThreadOrGCTaskData<bool> allocatedDuringCollection;
+  mozilla::Atomic<bool, mozilla::Relaxed> allocatedDuringCollection;
   MainThreadOrGCTaskData<bool> stolenFromSweepList;
   MainThreadOrGCTaskData<bool> hasNurseryOwnedAllocs;
   MainThreadOrGCTaskData<bool> hasNurseryOwnedAllocsAfterSweep;
@@ -394,6 +401,11 @@ struct BufferChunk
   MainThreadOrGCTaskData<BufferAllocator::FreeLists> freeLists;
   MainThreadOrGCTaskData<bool> ownsFreeLists;
 
+  // Used and admin sizes after this chunk was last swept as part of a major
+  // collection.
+  MainThreadOrGCTaskData<size_t> usedBytesAfterSweep;
+  MainThreadOrGCTaskData<size_t> adminBytesAfterSweep;
+
   using SmallRegionIter = BitmapToBlockIter<SmallRegionBitmap::Iter,
                                             SmallRegionSize, SmallBufferRegion>;
   SmallRegionIter smallRegionIter() { return {this, smallRegionBitmap.ref()}; }
@@ -410,6 +422,11 @@ struct BufferChunk
   explicit BufferChunk(Zone* zone);
   ~BufferChunk();
 
+  BufferAllocator::ContentKind kind() const {
+    return hasNurseryOwnedAllocs ? BufferAllocator::ContentKind::Mixed
+                                 : BufferAllocator::ContentKind::Tenured;
+  }
+
   void setSmallBufferRegion(void* alloc, bool smallAlloc);
   bool isSmallBufferRegion(const void* alloc) const;
 
@@ -419,6 +436,10 @@ struct BufferChunk
   void clearMarkBitsIfStolenChunk();
 
   bool isPointerWithinAllocation(void* ptr) const;
+
+  void addSweptRegion(uintptr_t freeStart, uintptr_t freeEnd,
+                      bool shouldDecommit, bool expectUnchanged,
+                      FreeLists& freeLists);
 
   void getStats(BufferAllocator::Stats& stats);
 };
@@ -446,6 +467,10 @@ struct SmallBufferRegion : public AllocSpace<SmallBufferRegion, SmallRegionSize,
   bool hasNurseryOwnedAllocs() const;
 
   bool isPointerWithinAllocation(void* ptr) const;
+
+  void addSweptRegion(uintptr_t freeStart, uintptr_t freeEnd,
+                      bool shouldDecommit, bool expectUnchanged,
+                      FreeLists& freeLists);
 };
 
 constexpr size_t FirstSmallAllocOffset = SmallBufferRegion::firstAllocOffset();
@@ -469,6 +494,9 @@ struct BufferAllocator::FreeRegion
 
   explicit FreeRegion(uintptr_t startAddr, bool decommitted = false)
       : startAddr(startAddr), hasDecommittedPages(decommitted) {}
+
+  static FreeRegion* create(uintptr_t start, size_t bytes, bool anyDecommitted,
+                            bool expectUnchanged = false);
 
   static FreeRegion* fromEndOffset(BufferChunk* chunk, uintptr_t endOffset) {
     MOZ_ASSERT(endOffset <= ChunkSize);

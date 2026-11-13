@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "mozilla/Attributes.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/ReflowInput.h"
@@ -36,11 +35,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsListControlFrame)
 
 nsListControlFrame::nsListControlFrame(ComputedStyle* aStyle,
                                        nsPresContext* aPresContext)
-    : ScrollContainerFrame(aStyle, aPresContext, kClassID, false),
-      mNeedToReset(true),
-      mPostChildrenLoadedReset(false),
-      mMightNeedSecondPass(false),
-      mReflowWasInterrupted(false) {}
+    : ScrollContainerFrame(aStyle, aPresContext, kClassID, false) {}
 
 nsListControlFrame::~nsListControlFrame() = default;
 
@@ -77,24 +72,27 @@ static bool GetMaxRowBSize(nsIFrame* aContainer, WritingMode aWM,
                            nscoord* aResult) {
   bool found = false;
   for (nsIFrame* child : aContainer->PrincipalChildList()) {
-    if (child->GetContent()->IsHTMLElement(nsGkAtoms::optgroup)) {
-      // An optgroup; drill through any scroll frame and recurse.  |inner| might
-      // be null here though if |inner| is an anonymous leaf frame of some sort.
+    nsIContent* content = child->GetContent();
+    bool isOptGroupLabel =
+        child->Style()->IsPseudoElement() &&
+        aContainer->GetContent()->IsHTMLElement(nsGkAtoms::optgroup);
+    if (!isOptGroupLabel && content->IsElement() &&
+        !content->IsAnyOfHTMLElements(nsGkAtoms::option, nsGkAtoms::hr)) {
+      // An optgroup or a wrapper element, both of which can contain options;
+      // drill through any scroll frame and recurse.  |inner| might be null here
+      // though if |inner| is an anonymous leaf frame of some sort.
       auto inner = child->GetContentInsertionFrame();
       if (inner && GetMaxRowBSize(inner, aWM, aResult)) {
         found = true;
       }
-    } else {
-      // an option or optgroup label
-      bool isOptGroupLabel =
-          child->Style()->IsPseudoElement() &&
-          aContainer->GetContent()->IsHTMLElement(nsGkAtoms::optgroup);
-      nscoord childBSize = child->BSize(aWM);
-      // XXX bug 1499176: skip empty <optgroup> labels (zero bsize) for now
-      if (!isOptGroupLabel || childBSize > nscoord(0)) {
-        found = true;
-        *aResult = std::max(childBSize, *aResult);
-      }
+      continue;
+    }
+    // an option, an <hr> or an optgroup label
+    nscoord childBSize = child->BSize(aWM);
+    // XXX bug 1499176: skip empty <optgroup> labels (zero bsize) for now
+    if (!isOptGroupLabel || childBSize > nscoord(0)) {
+      found = true;
+      *aResult = std::max(childBSize, *aResult);
     }
   }
   return found;
@@ -148,9 +146,6 @@ void nsListControlFrame::Reflow(nsPresContext* aPresContext,
   MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
   NS_WARNING_ASSERTION(aReflowInput.ComputedISize() != NS_UNCONSTRAINEDSIZE,
                        "Must have a computed inline size");
-
-  const bool hadPendingInterrupt = aPresContext->HasPendingInterrupt();
-
   SchedulePaint();
 
   MarkInReflow();
@@ -243,7 +238,7 @@ void nsListControlFrame::Reflow(nsPresContext* aPresContext,
   mMightNeedSecondPass = false;
 
   // Now see whether we need a second pass.  If we do, our
-  // nsSelectsAreaFrame will have suppressed the scrollbar update.
+  // scrolled frame will have suppressed the scrollbar update.
   if (mBSizeOfARow == oldBSizeOfARow) {
     return;
   }
@@ -266,37 +261,10 @@ void nsListControlFrame::Reflow(nsPresContext* aPresContext,
   // because ScrollContainerFrame just adds in the border....
   aStatus.Reset();
   ScrollContainerFrame::Reflow(aPresContext, aDesiredSize, state, aStatus);
-
-  mReflowWasInterrupted |=
-      !hadPendingInterrupt && aPresContext->HasPendingInterrupt();
-}
-
-static uint32_t CountOptionsAndOptgroups(nsIFrame* aFrame) {
-  uint32_t count = 0;
-  for (nsIFrame* child : aFrame->PrincipalChildList()) {
-    nsIContent* content = child->GetContent();
-    if (content) {
-      if (content->IsHTMLElement(nsGkAtoms::option)) {
-        ++count;
-      } else {
-        RefPtr<HTMLOptGroupElement> optgroup =
-            HTMLOptGroupElement::FromNode(content);
-        if (optgroup) {
-          nsAutoString label;
-          optgroup->GetLabel(label);
-          if (label.Length() > 0) {
-            ++count;
-          }
-          count += CountOptionsAndOptgroups(child);
-        }
-      }
-    }
-  }
-  return count;
 }
 
 uint32_t nsListControlFrame::GetNumberOfRows() {
-  return ::CountOptionsAndOptgroups(GetContentInsertionFrame());
+  return Select().CountRenderedRows();
 }
 
 //---------------------------------------------------------
@@ -356,11 +324,6 @@ dom::HTMLOptionElement* nsListControlFrame::GetOption(uint32_t aIndex) const {
   return Select().Item(aIndex);
 }
 
-void nsListControlFrame::OnSelectionReset() {
-  mPostChildrenLoadedReset = true;
-  InvalidateFocus();
-}
-
 void nsListControlFrame::ElementStateChanged(ElementState aStates) {
   if (aStates.HasState(ElementState::FOCUS)) {
     InvalidateFocus();
@@ -374,50 +337,6 @@ void nsListControlFrame::GetOptionText(uint32_t aIndex, nsAString& aStr) {
   }
 }
 
-void nsListControlFrame::OptionsAdded() {
-  // Make sure we scroll to the selected option as needed
-  mNeedToReset = true;
-
-  if (Select().IsDoneAddingChildren()) {
-    mPostChildrenLoadedReset = true;
-  }
-}
-
-class AsyncReset final : public Runnable {
- public:
-  AsyncReset(HTMLSelectElement& aElement, bool aScroll)
-      : Runnable("AsyncReset"), mElement(&aElement), mScroll(aScroll) {}
-
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY NS_IMETHOD Run() override {
-    MOZ_KnownLive(mElement)->ResetListBoxSelection(mScroll);
-    return NS_OK;
-  }
-
- private:
-  const RefPtr<HTMLSelectElement> mElement;
-  const bool mScroll;
-};
-
-bool nsListControlFrame::ReflowFinished() {
-  if (mNeedToReset && !mReflowWasInterrupted) {
-    mNeedToReset = false;
-    // Suppress scrolling to the selected element if we restored scroll
-    // history state AND the list contents have not changed since we loaded
-    // all the children AND nothing else forced us to scroll by calling
-    // ResetList(true). The latter two conditions are folded into
-    // mPostChildrenLoadedReset.
-    //
-    // The idea is that we want scroll history restoration to trump ResetList
-    // scrolling to the selected element, when the ResetList was probably only
-    // caused by content loading normally.
-    const bool scroll = !DidHistoryRestore() || mPostChildrenLoadedReset;
-    nsContentUtils::AddScriptRunner(
-        MakeAndAddRef<AsyncReset>(Select(), scroll));
-  }
-  mReflowWasInterrupted = false;
-  return ScrollContainerFrame::ReflowFinished();
-}
-
 #ifdef DEBUG_FRAME_DUMP
 nsresult nsListControlFrame::GetFrameName(nsAString& aResult) const {
   return MakeFrameName(u"ListControl"_ns, aResult);
@@ -425,19 +344,6 @@ nsresult nsListControlFrame::GetFrameName(nsAString& aResult) const {
 #endif
 
 nscoord nsListControlFrame::GetBSizeOfARow() { return BSizeOfARow(); }
-
-bool nsListControlFrame::IsOptionInteractivelySelectable(int32_t aIndex) const {
-  auto& select = Select();
-  if (HTMLOptionElement* item = select.Item(aIndex)) {
-    return IsOptionInteractivelySelectable(&select, item);
-  }
-  return false;
-}
-
-bool nsListControlFrame::IsOptionInteractivelySelectable(
-    HTMLSelectElement* aSelect, HTMLOptionElement* aOption) {
-  return !aSelect->IsOptionDisabled(aOption) && aOption->GetPrimaryFrame();
-}
 
 nscoord nsListControlFrame::CalcFallbackRowBSize(float aFontSizeInflation) {
   RefPtr<nsFontMetrics> fontMet =
@@ -457,23 +363,6 @@ nscoord nsListControlFrame::CalcIntrinsicBSize(nscoord aBSizeOfARow,
     mNumDisplayRows = 4;
   }
   return mNumDisplayRows * aBSizeOfARow;
-}
-
-//----------------------------------------------------------------------
-// Scroll helpers.
-//----------------------------------------------------------------------
-void nsListControlFrame::ScrollToIndex(int32_t aIndex) {
-  if (aIndex < 0) {
-    // XXX shouldn't we just do nothing if we're asked to scroll to
-    // kNothingSelected?
-    ScrollTo(nsPoint(0, 0), ScrollMode::Instant);
-  } else {
-    RefPtr<dom::HTMLOptionElement> option =
-        GetOption(AssertedCast<uint32_t>(aIndex));
-    if (option) {
-      ScrollToFrame(*option);
-    }
-  }
 }
 
 void nsListControlFrame::ScrollToFrame(dom::HTMLOptionElement& aOptElement) {

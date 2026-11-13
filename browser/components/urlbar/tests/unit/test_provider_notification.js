@@ -21,7 +21,7 @@ add_setup(async function () {
       }),
     ],
     priority: 999,
-    type: UrlbarUtils.PROVIDER_TYPE.PROFILE,
+    type: UrlbarShared.PROVIDER_TYPE.PROFILE,
     name: "firstProvider",
     onEngagement: () => {},
     onAbandonment: () => {},
@@ -42,7 +42,7 @@ add_setup(async function () {
       }),
     ],
     priority: 999,
-    type: UrlbarUtils.PROVIDER_TYPE.PROFILE,
+    type: UrlbarShared.PROVIDER_TYPE.PROFILE,
     name: "secondProvider",
   });
 
@@ -84,7 +84,7 @@ add_task(async function testOnEngagementNotification() {
     ],
   });
 
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
   controller.setView({
     get visibleResults() {
       return context.results;
@@ -128,7 +128,7 @@ add_task(async function testOnAbandonmentNotification() {
     ],
   });
 
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
   controller.setView({
     get visibleResults() {
       return context.results;
@@ -172,7 +172,7 @@ add_task(async function testOnImpressionNotification() {
     ],
   });
 
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
   controller.setView({
     get visibleResults() {
       return context.results;
@@ -239,7 +239,7 @@ add_task(async function testOnSearchSessionEndNotification() {
     ],
   });
 
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
   controller.setView({
     get visibleResults() {
       return context.results;

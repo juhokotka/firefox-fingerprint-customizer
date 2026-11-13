@@ -5,10 +5,10 @@
 #ifndef HEAPCOPYOFSTACKARRAY_H_
 #define HEAPCOPYOFSTACKARRAY_H_
 
+#include <string.h>
+
 #include "mozilla/Attributes.h"
 #include "mozilla/UniquePtr.h"
-
-#include <string.h>
 
 namespace mozilla {
 
@@ -25,14 +25,14 @@ class HeapCopyOfStackArray {
     memcpy(mArrayData.get(), &array[0], N * sizeof(ElemType));
   }
 
+  HeapCopyOfStackArray() = delete;
+  HeapCopyOfStackArray(const HeapCopyOfStackArray&) = delete;
+
   ElemType* Data() const { return mArrayData.get(); }
   size_t ArrayLength() const { return mArrayLength; }
   size_t ByteLength() const { return mArrayLength * sizeof(ElemType); }
 
  private:
-  HeapCopyOfStackArray() = delete;
-  HeapCopyOfStackArray(const HeapCopyOfStackArray&) = delete;
-
   const size_t mArrayLength;
   UniquePtr<ElemType[]> const mArrayData;
 };

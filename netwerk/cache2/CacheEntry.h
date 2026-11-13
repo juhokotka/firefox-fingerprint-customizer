@@ -5,25 +5,24 @@
 #ifndef CacheEntry_h_
 #define CacheEntry_h_
 
-#include "mozilla/LinkedList.h"
-#include "nsICacheEntry.h"
 #include "CacheFile.h"
-
-#include "nsIRunnable.h"
-#include "nsIOutputStream.h"
-#include "nsICacheEntryOpenCallback.h"
-#include "nsICacheEntryDoomCallback.h"
-#include "nsITransportSecurityInfo.h"
-
-#include "nsCOMPtr.h"
-#include "nsRefPtrHashtable.h"
-#include "nsHashKeys.h"
-#include "nsString.h"
-#include "nsCOMArray.h"
-#include "nsThreadUtils.h"
+#include "Dictionary.h"
+#include "mozilla/LinkedList.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/TimeStamp.h"
-#include "Dictionary.h"
+#include "nsCOMArray.h"
+#include "nsCOMPtr.h"
+#include "nsHashKeys.h"
+#include "nsICacheEntry.h"
+#include "nsICacheEntryDoomCallback.h"
+#include "nsICacheEntryOpenCallback.h"
+#include "nsIOutputStream.h"
+#include "nsIRunnable.h"
+#include "nsITransportSecurityInfo.h"
+#include "nsIURI.h"
+#include "nsRefPtrHashtable.h"
+#include "nsString.h"
+#include "nsThreadUtils.h"
 
 static inline uint32_t PRTimeToSeconds(PRTime t_usec) {
   return uint32_t(t_usec / PR_USEC_PER_SEC);
@@ -53,7 +52,7 @@ class CacheEntry final : public nsIRunnable,
 
   static uint64_t GetNextId();
 
-  CacheEntry(const nsACString& aStorageID, const nsACString& aURI,
+  CacheEntry(const nsACString& aStorageID, nsIURI* aURI,
              const nsACString& aEnhanceID, bool aUseDisk, bool aSkipSizeCheck,
              bool aPin);
 
@@ -115,7 +114,7 @@ class CacheEntry final : public nsIRunnable,
   uint32_t GetMetadataMemoryConsumption();
   nsCString const& GetStorageID() const { return mStorageID; }
   nsCString const& GetEnhanceID() const { return mEnhanceID; }
-  nsCString const& GetURI() const { return mURI; }
+  nsIURI* GetURI() const { return mURI; }
   // Accessible at any time
   bool IsUsingDisk() const { return mUseDisk; }
   bool IsReferenced() const MOZ_NO_THREAD_SAFETY_ANALYSIS;
@@ -344,8 +343,9 @@ class CacheEntry final : public nsIRunnable,
   // When mFileStatus is read and found success it is ensured there is mFile and
   // that it is after a successful call to Init().
   Atomic<nsresult, ReleaseAcquire> mFileStatus{NS_ERROR_NOT_INITIALIZED};
-  // Set in constructor
-  nsCString const mURI;
+  // Set in constructor. nsIURI is immutable and thread-safe, so this can be
+  // read from any thread without a lock.
+  nsCOMPtr<nsIURI> const mURI;
   nsCString const mEnhanceID;
   nsCString const mStorageID;
 
@@ -444,6 +444,10 @@ class CacheEntry final : public nsIRunnable,
 
   nsCOMPtr<nsITransportSecurityInfo> mSecurityInfo;
   mozilla::TimeStamp mLoadStart;
+  // Set when mState transitions to REVALIDATING, cleared when it leaves that
+  // state.  Used to self-heal an entry whose revalidating writer went away
+  // without ever calling OnHandleClosed (see bug 2062281).
+  mozilla::TimeStamp mRevalidatingSince MOZ_GUARDED_BY(mLock);
   uint32_t mUseCount{0};
 
   RefPtr<DictionaryCacheEntry> mDict;

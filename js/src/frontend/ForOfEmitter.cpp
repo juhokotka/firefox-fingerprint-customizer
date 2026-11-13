@@ -18,22 +18,13 @@ using mozilla::Nothing;
 
 ForOfEmitter::ForOfEmitter(BytecodeEmitter* bce,
                            const EmitterScope* headLexicalEmitterScope,
-                           SelfHostedIter selfHostedIter, IteratorKind iterKind
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-                           ,
-                           HeadUsingDeclarationKind usingDeclarationInHead
-#endif
-                           )
+                           SelfHostedIter selfHostedIter, IteratorKind iterKind,
+                           HeadUsingDeclarationKind usingDeclarationInHead)
     : bce_(bce),
       selfHostedIter_(selfHostedIter),
       iterKind_(iterKind),
-      headLexicalEmitterScope_(headLexicalEmitterScope)
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-      ,
-      usingDeclarationInHead_(usingDeclarationInHead)
-#endif
-{
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+      headLexicalEmitterScope_(headLexicalEmitterScope),
+      usingDeclarationInHead_(usingDeclarationInHead) {
   // The using bindings are closed over and stored in the lexical environment
   // object for headLexicalEmitterScope.
   // Mark that the environment has disposables for them to be disposed on
@@ -45,7 +36,6 @@ ForOfEmitter::ForOfEmitter(BytecodeEmitter* bce,
   MOZ_ASSERT_IF(
       headLexicalEmitterScope && headLexicalEmitterScope->hasDisposables(),
       usingDeclarationInHead != HeadUsingDeclarationKind::None);
-#endif
 }
 
 bool ForOfEmitter::emitIterated() {
@@ -110,7 +100,6 @@ bool ForOfEmitter::emitInitialize(uint32_t forPos) {
                ScopeKind::Lexical);
 
     if (headLexicalEmitterScope_->hasEnvironment()) {
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
       // Before recreation of the lexical environment, we must dispose
       // the disposables of the previous iteration.
       //
@@ -126,7 +115,6 @@ bool ForOfEmitter::emitInitialize(uint32_t forPos) {
               usingDeclarationInHead_ == HeadUsingDeclarationKind::Async)) {
         return false;
       }
-#endif
       if (!bce_->emitInternedScopeOp(headLexicalEmitterScope_->index(),
                                      JSOp::RecreateLexicalEnv)) {
         //          [stack] NEXT ITER
@@ -181,7 +169,7 @@ bool ForOfEmitter::emitInitialize(uint32_t forPos) {
   // Emit code to assign result.value to the iteration variable.
   //
   // Note that ES 13.7.5.13, step 5.c says getting result.value does not
-  // call IteratorClose, so start TryNoteKind::ForOfIterClose after the GetProp.
+  // call IteratorClose, so start the try-block below after the GetProp.
   if (!bce_->emitAtomOp(JSOp::GetProp,
                         TaggedParserAtomIndex::WellKnown::value())) {
     //              [stack] NEXT ITER VALUE
@@ -191,6 +179,12 @@ bool ForOfEmitter::emitInitialize(uint32_t forPos) {
   if (!loopInfo_->emitBeginCodeNeedingIteratorClose(bce_)) {
     return false;
   }
+
+  // A non-local exit through this loop has to leave the stack like this for the
+  // iterator close code.
+  //
+  //                [stack] NEXT ITER VALUE
+  loopInfo_->setNonLocalExitStackDepth(bce_->bytecodeSection().stackDepth());
 
 #ifdef DEBUG
   state_ = State::Initialize;
@@ -251,6 +245,11 @@ bool ForOfEmitter::emitEnd(uint32_t iteratedPos) {
                                         1);
 
   if (!bce_->emitPopN(3)) {
+    //              [stack]
+    return false;
+  }
+
+  if (!loopInfo_->emitEnd(bce_)) {
     //              [stack]
     return false;
   }

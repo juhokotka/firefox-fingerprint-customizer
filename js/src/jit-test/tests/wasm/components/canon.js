@@ -1336,3 +1336,74 @@ wasmFailValidateText(
   `),
   /exceeded maximum depth/,
 );
+
+// ----------------------------------------------------------------------------
+// resource.new, resource.drop, resource.rep
+
+function resourceBuiltinImportedAs(op, importSig) {
+  return `
+    (component
+      (type $r (resource (rep i32)))
+      (core func $b (canon ${op} $r))
+      (core instance $env (export "b" (func $b)))
+      (core module $test (import "env" "b" (func ${importSig})))
+      (core instance (instantiate $test (with "env" (instance $env))))
+    )
+  `;
+}
+
+// Correct signatures validate.
+wasmValidateText(resourceBuiltinImportedAs("resource.new", "(param i32) (result i32)"));
+wasmValidateText(resourceBuiltinImportedAs("resource.drop", "(param i32)"));
+wasmValidateText(resourceBuiltinImportedAs("resource.rep", "(param i32) (result i32)"));
+
+// resource.new must be (i32) -> (i32).
+wasmFailValidateText(resourceBuiltinImportedAs("resource.new", "(param i32)"),
+  /incompatible function type for import/);
+wasmFailValidateText(resourceBuiltinImportedAs("resource.new", "(param i64) (result i32)"),
+  /incompatible function type for import/);
+wasmFailValidateText(resourceBuiltinImportedAs("resource.new", "(param i32 i32) (result i32)"),
+  /incompatible function type for import/);
+
+// resource.drop must be (i32) -> ()
+wasmFailValidateText(resourceBuiltinImportedAs("resource.drop", "(param i32) (result i32)"),
+  /incompatible function type for import/);
+wasmFailValidateText(resourceBuiltinImportedAs("resource.drop", "(param i32 i32)"),
+  /incompatible function type for import/);
+wasmFailValidateText(resourceBuiltinImportedAs("resource.drop", ""),
+  /incompatible function type for import/);
+
+// resource.rep must be (i32) -> (i32).
+wasmFailValidateText(resourceBuiltinImportedAs("resource.rep", "(param i32)"),
+  /incompatible function type for import/);
+wasmFailValidateText(resourceBuiltinImportedAs("resource.rep", "(param i32) (result i64)"),
+  /incompatible function type for import/);
+
+for (const op of ["resource.new", "resource.drop", "resource.rep"]) {
+  // Referenced type is not a resource.
+  wasmFailValidateText(`
+    (component
+      (type (func))
+      (core func (canon ${op} 0))
+    )
+  `, /expected a resource type/);
+
+  // Referenced type index is out of bounds.
+  wasmFailValidateText(`
+    (component
+      (core func (canon ${op} 99))
+    )
+  `, /invalid type index/);
+}
+
+// resource.new and resource.rep require a defined resource type
+for (const op of ["resource.new", "resource.rep"]) {
+  wasmFailValidateText(`(component
+    (import "foo" (type (sub resource)))
+    (canon ${op} 0 (core func))
+  )`, /expected a defined resource type/);
+}
+wasmValidateText(`(component
+  (import "foo" (type (sub resource)))
+  (canon resource.drop 0 (core func))
+)`);

@@ -7,11 +7,18 @@ const SHOW_SEARCH_PREF = "browser.newtabpage.activity-stream.showSearch";
 const SHOW_WEATHER_SYSTEM_PREF =
   "browser.newtabpage.activity-stream.system.showWeather";
 const SHOW_WEATHER_PREF = "browser.newtabpage.activity-stream.showWeather";
+// @nova-cleanup(remove-pref): Delete this const, the _nova task suffixes and the
+// classic test_weather_widget_visibility / test_weather_toggle_functionality
+// tasks; the _nova variants become the only ones. SHOW_WEATHER_PREF and
+// SHOW_WEATHER_SYSTEM_PREF go with them, and the NOVA_ prefixes drop.
 const NOVA_ENABLED_PREF = "browser.newtabpage.activity-stream.nova.enabled";
 const NOVA_SHOW_WEATHER_SYSTEM_PREF =
   "browser.newtabpage.activity-stream.widgets.system.weather.enabled";
 const NOVA_SHOW_WEATHER_PREF =
   "browser.newtabpage.activity-stream.widgets.weather.enabled";
+// Weather only gets its own row when the Widgets group is hidden.
+const WIDGETS_SYSTEM_PREF =
+  "browser.newtabpage.activity-stream.widgets.system.enabled";
 
 add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
@@ -98,7 +105,7 @@ add_task(async function test_weather_widget_visibility() {
 
   let { win, tab } = await openHomePreferences();
 
-  let weatherWrapper = getSettingControl("weather", win);
+  let weatherWrapper = getSettingControl("weatherStandalone", win);
   ok(
     !weatherWrapper || BrowserTestUtils.isHidden(weatherWrapper),
     "Weather control is hidden when system pref is false"
@@ -115,7 +122,7 @@ add_task(async function test_weather_widget_visibility() {
 
   ({ win, tab } = await openHomePreferences());
 
-  weatherWrapper = await settingControlRenders("weather", win);
+  weatherWrapper = await settingControlRenders("weatherStandalone", win);
   ok(weatherWrapper, "Weather control exists when system pref is true");
   ok(
     BrowserTestUtils.isVisible(weatherWrapper),
@@ -136,7 +143,7 @@ add_task(async function test_weather_toggle_functionality() {
 
   let { win, tab } = await openHomePreferences();
 
-  let weatherControl = await settingControlRenders("weather", win);
+  let weatherControl = await settingControlRenders("weatherStandalone", win);
   ok(weatherControl, "Weather control exists");
 
   let toggle = weatherControl.querySelector("moz-toggle");
@@ -169,13 +176,14 @@ add_task(async function test_weather_widget_visibility_nova() {
   await SpecialPowers.pushPrefEnv({
     set: [
       [NOVA_ENABLED_PREF, true],
+      [WIDGETS_SYSTEM_PREF, false],
       [NOVA_SHOW_WEATHER_SYSTEM_PREF, false],
     ],
   });
 
   let { win, tab } = await openHomePreferences();
 
-  let weatherWrapper = getSettingControl("weather", win);
+  let weatherWrapper = getSettingControl("weatherStandalone", win);
   ok(
     !weatherWrapper || BrowserTestUtils.isHidden(weatherWrapper),
     "Weather control is hidden when Nova system pref is false"
@@ -186,13 +194,14 @@ add_task(async function test_weather_widget_visibility_nova() {
   await SpecialPowers.pushPrefEnv({
     set: [
       [NOVA_ENABLED_PREF, true],
+      [WIDGETS_SYSTEM_PREF, false],
       [NOVA_SHOW_WEATHER_SYSTEM_PREF, true],
     ],
   });
 
   ({ win, tab } = await openHomePreferences());
 
-  weatherWrapper = await settingControlRenders("weather", win);
+  weatherWrapper = await settingControlRenders("weatherStandalone", win);
   ok(weatherWrapper, "Weather control exists when Nova system pref is true");
   ok(
     BrowserTestUtils.isVisible(weatherWrapper),
@@ -206,6 +215,7 @@ add_task(async function test_weather_toggle_functionality_nova() {
   await SpecialPowers.pushPrefEnv({
     set: [
       [NOVA_ENABLED_PREF, true],
+      [WIDGETS_SYSTEM_PREF, false],
       [NOVA_SHOW_WEATHER_SYSTEM_PREF, true],
       [NOVA_SHOW_WEATHER_PREF, true],
     ],
@@ -213,7 +223,7 @@ add_task(async function test_weather_toggle_functionality_nova() {
 
   let { win, tab } = await openHomePreferences();
 
-  let weatherControl = await settingControlRenders("weather", win);
+  let weatherControl = await settingControlRenders("weatherStandalone", win);
   ok(weatherControl, "Weather control exists");
 
   let toggle = weatherControl.querySelector("moz-toggle");

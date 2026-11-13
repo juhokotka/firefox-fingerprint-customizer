@@ -152,6 +152,260 @@ add_task(
 );
 
 add_task(
+  async function test_edit_button_keyboard_opens_about_logins_with_preselected_login() {
+    for (const activationKey of ["KEY_Enter", " "]) {
+      await BrowserTestUtils.withNewTab(
+        {
+          gBrowser,
+          url: TEST_URL_PATH,
+        },
+        async function (browser) {
+          const popup = document.getElementById("PopupAutoComplete");
+
+          await openACPopup(popup, browser, "#form-basic-username");
+
+          const secondLoginItem = popup.firstChild.getItemAtIndex(1);
+          const secondLoginRowItem = secondLoginItem.querySelector(
+            "autocomplete-row-item"
+          );
+          const secondaryAction = secondLoginRowItem.shadowRoot.querySelector(
+            "moz-button.secondary-action"
+          );
+
+          await EventUtils.synthesizeKey("KEY_ArrowDown");
+          await EventUtils.synthesizeKey("KEY_ArrowDown");
+          await TestUtils.waitForCondition(
+            () => secondLoginItem.hasAttribute("selected"),
+            "Wait for second login to become active"
+          );
+
+          await EventUtils.synthesizeKey("KEY_Tab");
+          await TestUtils.waitForCondition(
+            () => secondLoginRowItem.hasAttribute("subfocused"),
+            "Wait for edit button to become sub-focused via Tab"
+          );
+
+          Assert.ok(
+            secondaryAction.checkVisibility({ checkVisibilityCSS: true }),
+            "Secondary action should be visible when sub-focused"
+          );
+
+          const aboutLoginsTabPromise = BrowserTestUtils.waitForNewTab(
+            gBrowser,
+            url => url.includes(ABOUT_LOGINS_ORIGIN),
+            true
+          );
+
+          await EventUtils.synthesizeKey(activationKey);
+          const aboutLoginsTab = await aboutLoginsTabPromise;
+
+          await SpecialPowers.spawn(
+            aboutLoginsTab.linkedBrowser,
+            [{ expectedGuid: LOGINS_DATA[2].guid }],
+            isExpectedLoginItemSelected
+          );
+
+          await closePopup(popup);
+          gBrowser.removeTab(aboutLoginsTab);
+        }
+      );
+    }
+  }
+);
+
+add_task(async function test_edit_button_subfocus_cleared_by_navigation() {
+  await BrowserTestUtils.withNewTab(
+    {
+      gBrowser,
+      url: TEST_URL_PATH,
+    },
+    async function (browser) {
+      const popup = document.getElementById("PopupAutoComplete");
+
+      await openACPopup(popup, browser, "#form-basic-username");
+
+      const secondLoginItem = popup.firstChild.getItemAtIndex(1);
+      const secondLoginRowItem = secondLoginItem.querySelector(
+        "autocomplete-row-item"
+      );
+
+      await EventUtils.synthesizeKey("KEY_ArrowDown");
+      await EventUtils.synthesizeKey("KEY_ArrowDown");
+      await TestUtils.waitForCondition(
+        () => secondLoginItem.hasAttribute("selected"),
+        "Wait for second login to become active"
+      );
+
+      await EventUtils.synthesizeKey("KEY_Tab");
+      await TestUtils.waitForCondition(
+        () => secondLoginRowItem.hasAttribute("subfocused"),
+        "Edit button sub-focused after Tab"
+      );
+
+      await EventUtils.synthesizeKey("KEY_Tab", { shiftKey: true });
+      await TestUtils.waitForCondition(
+        () => !secondLoginRowItem.hasAttribute("subfocused"),
+        "Shift+Tab returns sub-focus to the row"
+      );
+
+      await EventUtils.synthesizeKey("KEY_Tab");
+      await TestUtils.waitForCondition(
+        () => secondLoginRowItem.hasAttribute("subfocused"),
+        "Edit button sub-focused after Tab again"
+      );
+
+      await EventUtils.synthesizeKey("KEY_ArrowUp");
+      await TestUtils.waitForCondition(
+        () => !secondLoginRowItem.hasAttribute("subfocused"),
+        "Arrow navigation clears sub-focus"
+      );
+
+      await closePopup(popup);
+    }
+  );
+});
+
+add_task(async function test_edit_button_subfocus_announced_to_a11y() {
+  await BrowserTestUtils.withNewTab(
+    {
+      gBrowser,
+      url: TEST_URL_PATH,
+    },
+    async function (browser) {
+      const popup = document.getElementById("PopupAutoComplete");
+
+      await openACPopup(popup, browser, "#form-basic-username");
+
+      const secondLoginItem = popup.firstChild.getItemAtIndex(1);
+      const secondLoginRowItem = secondLoginItem.querySelector(
+        "autocomplete-row-item"
+      );
+
+      const announced = [];
+      const originalAnnounce = window.A11yUtils.announce;
+      window.A11yUtils.announce = args => {
+        announced.push(args);
+        return originalAnnounce.call(window.A11yUtils, args);
+      };
+
+      try {
+        await EventUtils.synthesizeKey("KEY_ArrowDown");
+        await EventUtils.synthesizeKey("KEY_ArrowDown");
+        await TestUtils.waitForCondition(
+          () => secondLoginItem.hasAttribute("selected"),
+          "Wait for second login to become active"
+        );
+
+        await EventUtils.synthesizeKey("KEY_Tab");
+        await TestUtils.waitForCondition(
+          () => secondLoginRowItem.hasAttribute("subfocused"),
+          "Wait for edit button to become sub-focused via Tab"
+        );
+
+        const label = secondLoginRowItem.actions.secondary.label;
+        Assert.ok(
+          announced.some(args => args?.raw === label),
+          "Sub-focusing the edit button announces its label to assistive technology"
+        );
+      } finally {
+        window.A11yUtils.announce = originalAnnounce;
+      }
+
+      await closePopup(popup);
+    }
+  );
+});
+
+add_task(async function test_edit_button_hidden_for_pointer_selection() {
+  await BrowserTestUtils.withNewTab(
+    {
+      gBrowser,
+      url: TEST_URL_PATH,
+    },
+    async function (browser) {
+      const popup = document.getElementById("PopupAutoComplete");
+
+      await openACPopup(popup, browser, "#form-basic-username");
+
+      const richlistbox = popup.firstChild;
+      const firstLoginItem = richlistbox.getItemAtIndex(0);
+      const secondLoginItem = richlistbox.getItemAtIndex(1);
+      const secondLoginRowItem = secondLoginItem.querySelector(
+        "autocomplete-row-item"
+      );
+      const secondaryAction = secondLoginRowItem.shadowRoot.querySelector(
+        "moz-button.secondary-action"
+      );
+      const rowItemEl =
+        secondLoginRowItem.shadowRoot.querySelector(".row-item");
+      const noHighlight = "rgba(0, 0, 0, 0)";
+
+      // Move the pointer over the first row so it is not over the second row we
+      // select below (otherwise :host(:hover) would add its background).
+      EventUtils.synthesizeMouseAtCenter(firstLoginItem, { type: "mousemove" });
+      await TestUtils.waitForCondition(
+        () =>
+          firstLoginItem
+            .querySelector("autocomplete-row-item")
+            .hasAttribute("pointerselected"),
+        "Wait for the first row to become pointer-selected"
+      );
+
+      // Keyboard selection shows the edit icon and the focus outline, but not
+      // the background highlight (that is reserved for pointer hover).
+      popup.selectedIndex = 1;
+      await TestUtils.waitForCondition(
+        () => secondLoginRowItem.selected,
+        "Wait for the login to become keyboard-selected"
+      );
+      Assert.ok(
+        !secondLoginRowItem.hasAttribute("pointerselected"),
+        "Keyboard selection is not pointer-selected"
+      );
+      Assert.ok(
+        secondaryAction.checkVisibility({ checkVisibilityCSS: true }),
+        "Edit icon is visible for a keyboard-selected row"
+      );
+      Assert.notEqual(
+        getComputedStyle(secondLoginRowItem).borderTopColor,
+        noHighlight,
+        "Focus outline is shown for a keyboard-selected row"
+      );
+      Assert.equal(
+        getComputedStyle(rowItemEl).backgroundColor,
+        noHighlight,
+        "Background highlight is not shown for a keyboard-selected row"
+      );
+
+      // Pointer-select the second row while the pointer stays over the first.
+      // Its edit icon and background highlight must not be shown by the selected
+      // state alone (only on :hover), so they cannot linger when the list
+      // scrolls out from under a stationary pointer (bug 2058133).
+      popup._setSelectedIndex(1, true);
+      await TestUtils.waitForCondition(
+        () => secondLoginRowItem.hasAttribute("pointerselected"),
+        "Wait for the second row to become pointer-selected"
+      );
+      Assert.ok(
+        secondLoginRowItem.selected,
+        "The pointer-selected row is still selected"
+      );
+      Assert.ok(
+        !secondaryAction.checkVisibility({ checkVisibilityCSS: true }),
+        "Edit icon is not shown by the pointer-selected state without hover"
+      );
+      Assert.equal(
+        getComputedStyle(rowItemEl).backgroundColor,
+        noHighlight,
+        "Background highlight is not shown by the pointer-selected state without hover"
+      );
+
+      await closePopup(popup);
+    }
+  );
+});
+
+add_task(
   async function test_password_menu_opens_about_logins_with_preselected_login() {
     await BrowserTestUtils.withNewTab(
       {

@@ -5,9 +5,9 @@
 #ifndef mozilla_net_Http3Stream_h
 #define mozilla_net_Http3Stream_h
 
-#include "nsAHttpTransaction.h"
 #include "ARefBase.h"
 #include "Http3StreamBase.h"
+#include "nsAHttpTransaction.h"
 #include "nsIClassOfService.h"
 
 namespace mozilla {
@@ -155,6 +155,7 @@ class Http3Stream : public nsAHttpSegmentReader,
 #ifdef DEBUG
   uint32_t mRequestBodyLenExpected{0};
   uint32_t mRequestBodyLenSent{0};
+  bool mRequestBodyLenKnown{false};
 #endif
 };
 

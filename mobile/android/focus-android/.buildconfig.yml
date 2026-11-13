@@ -16,6 +16,7 @@ projects:
     - components:compose-awesomebar
     - components:compose-base
     - components:compose-cfr
+    - components:compose-menu
     - components:concept-awesomebar
     - components:concept-base
     - components:concept-engine
@@ -66,6 +67,7 @@ projects:
     - components:support-test-libstate
     - components:support-utils
     - components:support-webextensions
+    - components:tooling-detekt
     - components:tooling-lint
     - components:ui-autocomplete
     - components:ui-colors

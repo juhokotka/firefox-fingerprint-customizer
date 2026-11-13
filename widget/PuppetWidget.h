@@ -12,16 +12,16 @@
 #ifndef mozilla_widget_PuppetWidget_h_
 #define mozilla_widget_PuppetWidget_h_
 
-#include "mozilla/gfx/2D.h"
-#include "mozilla/RefPtr.h"
-#include "nsIWidget.h"
-#include "nsCOMArray.h"
-#include "nsThreadUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ContentCache.h"
 #include "mozilla/EventForwards.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/TextEventDispatcherListener.h"
+#include "mozilla/gfx/2D.h"
 #include "mozilla/layers/MemoryPressureObserver.h"
+#include "nsCOMArray.h"
+#include "nsIWidget.h"
+#include "nsThreadUtils.h"
 
 class nsRefreshDriver;
 
@@ -176,6 +176,14 @@ class PuppetWidget final : public nsIWidget,
                        const InputContextAction& aAction) override;
   InputContext GetInputContext() override;
   NativeIMEContext GetNativeIMEContext() override;
+  /**
+   * If this widget has a external event dispatcher listener, it means that
+   * we're dispatching native text input events starting from this process.
+   * I.e., the events do not come from the parent process.
+   */
+  [[nodiscard]] bool HasExternalNativeTextEventDispatcherListener() const {
+    return mNativeTextEventDispatcherListener;
+  }
   TextEventDispatcherListener* GetNativeTextEventDispatcherListener() override {
     return mNativeTextEventDispatcherListener
                ? mNativeTextEventDispatcherListener.get()

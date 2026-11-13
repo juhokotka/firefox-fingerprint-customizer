@@ -5,6 +5,7 @@
 #include "SMILTimedElement.h"
 
 #include <algorithm>
+#include <ranges>
 
 #include "mozilla/AutoRestore.h"
 #include "mozilla/ContentEvents.h"
@@ -460,7 +461,12 @@ void SMILTimedElement::SampleEndAt(SMILTime aContainerTime) {
 void SMILTimedElement::DoSampleAt(SMILTime aContainerTime, bool aEndOnly) {
   MOZ_ASSERT(mAnimationElement,
              "Got sample before being registered with an animation element");
-  MOZ_ASSERT(GetTimeContainer(),
+
+  // Resolving the time container walks up to the outer <svg>, so do it once for
+  // the whole sample. Nothing below can rebind us: the state machine only fires
+  // time events asynchronously.
+  SMILTimeContainer* container = GetTimeContainer();
+  MOZ_ASSERT(container,
              "Got sample without being registered with a time container");
 
   // This could probably happen if we later implement externalResourcesRequired
@@ -468,8 +474,7 @@ void SMILTimedElement::DoSampleAt(SMILTime aContainerTime, bool aEndOnly) {
   // start) we transfer a node from another document fragment that has already
   // started. In such a case we might receive milestone samples registered with
   // the already active container.
-  if (GetTimeContainer()->IsPausedByType(SMILTimeContainer::PauseType::Begin))
-    return;
+  if (container->IsPausedByType(SMILTimeContainer::PauseType::Begin)) return;
 
   // We use an end-sample to start animation since an end-sample lets us
   // tentatively create an interval without committing to it (by transitioning
@@ -487,13 +492,12 @@ void SMILTimedElement::DoSampleAt(SMILTime aContainerTime, bool aEndOnly) {
   }
 
   bool finishedSeek = false;
-  if (GetTimeContainer()->IsSeeking() &&
-      mSeekState == SMILSeekState::NotSeeking) {
+  if (container->IsSeeking() && mSeekState == SMILSeekState::NotSeeking) {
     mSeekState = mElementState == SMILElementState::Active
                      ? SMILSeekState::ForwardFromActive
                      : SMILSeekState::ForwardFromInactive;
   } else if (mSeekState != SMILSeekState::NotSeeking &&
-             !GetTimeContainer()->IsSeeking()) {
+             !container->IsSeeking()) {
     finishedSeek = true;
   }
 
@@ -647,7 +651,7 @@ void SMILTimedElement::DoSampleAt(SMILTime aContainerTime, bool aEndOnly) {
   if (finishedSeek) {
     DoPostSeek();
   }
-  RegisterMilestone();
+  RegisterMilestone(container);
 }
 
 void SMILTimedElement::HandleContainerTimeChange() {
@@ -1178,8 +1182,8 @@ void SMILTimedElement::ClearIntervals() {
   ResetCurrentInterval();
 
   // Remove old intervals
-  for (int32_t i = mOldIntervals.Length() - 1; i >= 0; --i) {
-    mOldIntervals[i]->Unlink();
+  for (auto& oldInterval : std::views::reverse(mOldIntervals)) {
+    oldInterval->Unlink();
   }
   mOldIntervals.Clear();
 }
@@ -1940,8 +1944,10 @@ void SMILTimedElement::AddInstanceTimeFromCurrentTime(SMILTime aCurrentTime,
   AddInstanceTime(instanceTime, aIsBegin);
 }
 
-void SMILTimedElement::RegisterMilestone() {
-  SMILTimeContainer* container = GetTimeContainer();
+void SMILTimedElement::RegisterMilestone(SMILTimeContainer* aContainer) {
+  MOZ_ASSERT(!aContainer || aContainer == GetTimeContainer(),
+             "Caller passed a container that isn't the one we'd resolve");
+  SMILTimeContainer* container = aContainer ? aContainer : GetTimeContainer();
   if (!container) return;
   MOZ_ASSERT(mAnimationElement,
              "Got a time container without an owning animation element");

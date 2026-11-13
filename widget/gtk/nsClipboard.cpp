@@ -2,43 +2,46 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsArrayUtils.h"
 #include "nsClipboard.h"
+
+#include "nsArrayUtils.h"
 #include "nsComponentManagerUtils.h"
 #if defined(MOZ_X11)
 #  include "RetrievalContextX11.h"
 #endif
 #if defined(MOZ_WAYLAND)
 #  include "RetrievalContextGtk.h"
+#  include "RetrievalContextWayland.h"
 #  include "nsWaylandDisplay.h"
 #endif
-#include "nsGtkUtils.h"
-#include "nsIURI.h"
-#include "nsIFile.h"
-#include "nsNetUtil.h"
-#include "nsContentUtils.h"
+#include <gtk/gtk.h>
+
+#include "GRefPtr.h"
 #include "HeadlessClipboard.h"
-#include "nsSupportsPrimitives.h"
-#include "nsString.h"
-#include "nsReadableUtils.h"
-#include "nsPrimitiveHelpers.h"
-#include "nsImageToPixbuf.h"
-#include "nsStringStream.h"
-#include "nsIFileURL.h"
-#include "nsIObserverService.h"
+#include "WidgetUtilsGtk.h"
+#include "imgIContainer.h"
 #include "mozilla/GRefPtr.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/SchedulerGroup.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs_clipboard.h"
+#include "mozilla/StaticPrefs_widget.h"
 #include "mozilla/TimeStamp.h"
-#include "GRefPtr.h"
-#include "WidgetUtilsGtk.h"
-
-#include "imgIContainer.h"
 #include "mozilla/widget/nsGtkHtmlUtils.h"
-
-#include <gtk/gtk.h>
+#include "nsContentUtils.h"
+#include "nsGtkUtils.h"
+#include "nsIFile.h"
+#include "nsIFileURL.h"
+#include "nsIMutableArray.h"
+#include "nsIObserverService.h"
+#include "nsIURI.h"
+#include "nsImageToPixbuf.h"
+#include "nsNetUtil.h"
+#include "nsPrimitiveHelpers.h"
+#include "nsReadableUtils.h"
+#include "nsString.h"
+#include "nsStringStream.h"
+#include "nsSupportsPrimitives.h"
 #if defined(MOZ_X11)
 #  include <gtk/gtkx.h>
 #endif
@@ -192,12 +195,16 @@ NS_IMPL_ISUPPORTS_INHERITED(nsClipboard, nsBaseClipboard, nsIObserver)
 nsresult nsClipboard::Init(void) {
 #if defined(MOZ_X11)
   if (widget::GdkIsX11Display()) {
-    mContext = new RetrievalContextX11();
+    mContext = MakeRefPtr<RetrievalContextX11>();
   }
 #endif
 #if defined(MOZ_WAYLAND)
-  if (widget::GdkIsWaylandDisplay()) {
-    mContext = new RetrievalContextGtk();
+  if (widget::GdkIsWaylandDisplay() &&
+      StaticPrefs::widget_wayland_native_data_session_AtStartup()) {
+    mContext = MakeRefPtr<RetrievalContextWayland>();
+  }
+  if (!mContext) {
+    mContext = MakeRefPtr<RetrievalContextGtk>();
   }
 #endif
 

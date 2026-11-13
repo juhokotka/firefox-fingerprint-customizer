@@ -8,8 +8,8 @@
 #include <d3d11.h>
 
 #include "GLTypes.h"
-#include "mozilla/gfx/FileHandleWrapper.h"
 #include "RenderTextureHostSWGL.h"
+#include "mozilla/gfx/FileHandleWrapper.h"
 
 struct ID3D11Texture2D;
 struct IDCompositionTexture;
@@ -166,8 +166,6 @@ class RenderDXGIYCbCrTextureHost final : public RenderTextureHostSWGL {
 
   gfx::IntSize GetSize(uint8_t aChannelIndex) const;
   GLuint GetGLHandle(uint8_t aChannelIndex) const;
-
-  bool SyncObjectNeeded() override { return true; }
 
   gfx::ColorRange GetColorRange() const { return mColorRange; }
 

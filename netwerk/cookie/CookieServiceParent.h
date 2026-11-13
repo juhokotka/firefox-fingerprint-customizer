@@ -5,8 +5,8 @@
 #ifndef mozilla_net_CookieServiceParent_h
 #define mozilla_net_CookieServiceParent_h
 
-#include "mozilla/net/PCookieServiceParent.h"
 #include "mozilla/net/CookieKey.h"
+#include "mozilla/net/PCookieServiceParent.h"
 
 class nsIArray;
 class nsICookie;

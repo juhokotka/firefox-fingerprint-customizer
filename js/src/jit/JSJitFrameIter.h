@@ -12,6 +12,7 @@
 #include "jit/JitCode.h"
 #include "jit/MachineState.h"
 #include "jit/Snapshots.h"
+#include "js/Exception.h"
 #include "js/ProfilingFrameIterator.h"
 #include "vm/JSFunction.h"
 #include "vm/JSScript.h"
@@ -19,6 +20,7 @@
 namespace js {
 
 class ArgumentsObject;
+class SavedFrame;
 
 namespace jit {
 
@@ -309,17 +311,27 @@ class RInstructionResults {
   // avoid evaluating the recover instruction twice.
   bool initialized_;
 
+  // Set if computing the results failed. Later attempts to run the recover
+  // instructions will report the same failure.
+  mozilla::Maybe<JS::ExceptionStatus> failureStatus_;
+  HeapPtr<Value> exception_;
+  HeapPtr<SavedFrame*> exceptionStack_;
+
  public:
   explicit RInstructionResults(JitFrameLayout* fp);
   RInstructionResults(RInstructionResults&& src);
 
   RInstructionResults& operator=(RInstructionResults&& rhs);
 
-  ~RInstructionResults();
+  ~RInstructionResults() = default;
 
   [[nodiscard]] bool init(JSContext* cx, uint32_t numResults);
   bool isInitialized() const;
   size_t length() const;
+
+  bool hasFailure() const { return failureStatus_.isSome(); }
+  void saveFailure(JSContext* cx);
+  void restoreFailure(JSContext* cx) const;
 
   JitFrameLayout* frame() const;
 

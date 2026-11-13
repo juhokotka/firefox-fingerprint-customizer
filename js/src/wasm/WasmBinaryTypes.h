@@ -12,7 +12,6 @@
 #include "mozilla/Vector.h"
 
 #include "js/AllocPolicy.h"
-
 #include "wasm/WasmSerialize.h"
 #include "wasm/WasmShareable.h"
 
@@ -79,9 +78,7 @@ struct BytecodeRange {
     return 1;
   }
 
-  bool operator==(const BytecodeRange& rhs) const {
-    return start == rhs.start && end == rhs.end;
-  }
+  bool operator==(const BytecodeRange& rhs) const = default;
 
   // Returns a range that represents `this` relative to `other`. `this` must
   // be wholly contained in `other`, no partial overlap is allowed.

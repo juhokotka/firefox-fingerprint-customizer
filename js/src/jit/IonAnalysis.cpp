@@ -14,7 +14,6 @@
 #include "jit/DominatorTree.h"
 #include "jit/MIRGenerator.h"
 #include "jit/MIRGraph.h"
-#include "js/HashTable.h"
 
 #include "vm/BytecodeUtil-inl.h"
 
@@ -1165,8 +1164,7 @@ bool jit::EliminateRedundantShapeGuards(MIRGraph& graph) {
   return true;
 }
 
-[[nodiscard]] static bool TryEliminateGCBarriersForAllocation(
-    TempAllocator& alloc, MInstruction* allocation) {
+static void TryEliminateGCBarriersForAllocation(MInstruction* allocation) {
   MOZ_ASSERT(allocation->type() == MIRType::Object);
 
   JitSpew(JitSpew_RedundantGCBarriers, "Analyzing allocation %s",
@@ -1187,7 +1185,6 @@ bool jit::EliminateRedundantShapeGuards(MIRGraph& graph) {
       case MDefinition::Opcode::Constant:
       case MDefinition::Opcode::Box:
       case MDefinition::Opcode::Unbox:
-      case MDefinition::Opcode::AssertCanElidePostWriteBarrier:
         // These instructions can't trigger GC or affect this analysis in other
         // ways.
         break;
@@ -1196,44 +1193,19 @@ bool jit::EliminateRedundantShapeGuards(MIRGraph& graph) {
         if (store->object() != allocation) {
           JitSpew(JitSpew_RedundantGCBarriers,
                   "Stopped at StoreFixedSlot for other object");
-          return true;
+          return;
         }
-        store->setNeedsBarrier(false);
-        JitSpew(JitSpew_RedundantGCBarriers, "Elided StoreFixedSlot barrier");
-        break;
-      }
-      case MDefinition::Opcode::PostWriteBarrier: {
-        auto* barrier = ins->toPostWriteBarrier();
-        if (barrier->object() != allocation) {
-          JitSpew(JitSpew_RedundantGCBarriers,
-                  "Stopped at PostWriteBarrier for other object");
-          return true;
-        }
-#ifdef DEBUG
-        if (!alloc.ensureBallast()) {
-          return false;
-        }
-        MDefinition* value = barrier->value();
-        if (value->type() != MIRType::Value) {
-          value = MBox::New(alloc, value);
-          block->insertBefore(barrier, value->toInstruction());
-        }
-        auto* assert =
-            MAssertCanElidePostWriteBarrier::New(alloc, allocation, value);
-        block->insertBefore(barrier, assert);
-#endif
-        block->discard(barrier);
-        JitSpew(JitSpew_RedundantGCBarriers, "Elided PostWriteBarrier");
+        store->setNeedsPreBarrier(false);
+        store->setNeedsPostBarrier(false);
+        JitSpew(JitSpew_RedundantGCBarriers, "Elided StoreFixedSlot barriers");
         break;
       }
       default:
         JitSpew(JitSpew_RedundantGCBarriers,
                 "Stopped at unsupported instruction %s", ins->opName());
-        return true;
+        return;
     }
   }
-
-  return true;
 }
 
 bool jit::EliminateRedundantGCBarriers(MIRGraph& graph) {
@@ -1242,14 +1214,11 @@ bool jit::EliminateRedundantGCBarriers(MIRGraph& graph) {
   //   0: MNewCallObject
   //   1: MStoreFixedSlot(0, ...)
   //   2: MStoreFixedSlot(0, ...)
-  //   3: MPostWriteBarrier(0, ...)
   //
   // If the instructions immediately following the allocation instruction can't
-  // trigger GC and we are storing to the new object's slots, we can elide the
-  // pre-barrier.
-  //
-  // We also eliminate the post barrier and (in debug builds) replace it with an
-  // assertion.
+  // trigger GC and we are storing to the new object's slots, we can elide both
+  // the pre-barrier and the post-barrier. AddPostWriteBarriers will insert a
+  // MIR instruction to assert the post barrier is unnecessary in debug builds.
   //
   // See also the similar optimizations in WarpBuilder::buildCallObject.
 
@@ -1265,9 +1234,7 @@ bool jit::EliminateRedundantGCBarriers(MIRGraph& graph) {
         // We can only eliminate the post barrier if we know the call object
         // will be allocated in the nursery.
         if (allocation->initialHeap() == gc::Heap::Default) {
-          if (!TryEliminateGCBarriersForAllocation(graph.alloc(), allocation)) {
-            return false;
-          }
+          TryEliminateGCBarriersForAllocation(allocation);
         }
       }
     }
@@ -1422,13 +1389,6 @@ static auto NeedToCanonicalizeNaN(const MDefinition* def) {
     case MDefinition::Opcode::TypedArrayFill:
       // These definitions accept and can store non-canonical NaN values. They
       // don't return any value.
-      MOZ_ASSERT(def->type() == MIRType::None);
-      return CanonicalizeNaN::No;
-
-    case MDefinition::Opcode::PostWriteBarrier:
-    case MDefinition::Opcode::PostWriteElementBarrier:
-      // Post-write barriers on known floating point values are omitted, so
-      // non-canonical NaN values don't need to be handled.
       MOZ_ASSERT(def->type() == MIRType::None);
       return CanonicalizeNaN::No;
 
@@ -1821,6 +1781,135 @@ static bool NeedsKeepAlive(MInstruction* slotsOrElements, MInstruction* use) {
   MOZ_CRASH("Unreachable");
 }
 
+bool jit::AddPostWriteBarriers(MIRGraph& graph) {
+  // Insert MPostWriteBarrier or MPostWriteElementBarrier instructions for store
+  // instructions that don't have their own post-barrier code.
+  //
+  // This pass must run after MIR optimization passes that can move instructions
+  // between the barrier and the store. This ensures we can't trigger a GC or a
+  // bailout between the barrier and the store.
+
+  for (MBasicBlockIterator block(graph.begin()); block != graph.end();
+       block++) {
+    for (MInstructionIterator insIter(block->begin()); insIter != block->end();
+         insIter++) {
+      MInstruction* ins = *insIter;
+
+      MDefinition* object = nullptr;
+      MDefinition* value = nullptr;
+      bool needsBarrier = true;
+
+      // The index operand for element barriers.
+      MDefinition* index = nullptr;
+
+      switch (ins->op()) {
+        case MDefinition::Opcode::StoreFixedSlot: {
+          auto* store = ins->toStoreFixedSlot();
+          object = store->object();
+          value = store->value();
+          needsBarrier = store->needsPostBarrier();
+          break;
+        }
+        case MDefinition::Opcode::StoreFixedSlotFromOffset: {
+          auto* store = ins->toStoreFixedSlotFromOffset();
+          object = store->object();
+          value = store->value();
+          break;
+        }
+        case MDefinition::Opcode::StoreDynamicSlot: {
+          auto* store = ins->toStoreDynamicSlot();
+          object = store->slots()->toSlots()->object();
+          value = store->value();
+          needsBarrier = store->needsPostBarrier();
+          break;
+        }
+        case MDefinition::Opcode::StoreDynamicSlotFromOffset: {
+          auto* store = ins->toStoreDynamicSlotFromOffset();
+          object = store->slots()->toSlots()->object();
+          value = store->value();
+          break;
+        }
+        case MDefinition::Opcode::StoreElement: {
+          auto* store = ins->toStoreElement();
+          object = store->elements()->toElements()->object();
+          value = store->value();
+          if (store->canUseElementPostBarrier()) {
+            index = store->index();
+          }
+          break;
+        }
+        case MDefinition::Opcode::AddAndStoreSlot: {
+          auto* store = ins->toAddAndStoreSlot();
+          object = store->object();
+          value = store->value();
+          break;
+        }
+        case MDefinition::Opcode::AllocateAndStoreSlot: {
+          auto* store = ins->toAllocateAndStoreSlot();
+          object = store->object();
+          value = store->value();
+          break;
+        }
+        case MDefinition::Opcode::SetArgumentsObjectArg: {
+          auto* store = ins->toSetArgumentsObjectArg();
+          object = store->argsObject();
+          value = store->value();
+          break;
+        }
+        case MDefinition::Opcode::InitHomeObject: {
+          auto* store = ins->toInitHomeObject();
+          object = store->function();
+          value = store->homeObject();
+          break;
+        }
+        default:
+          continue;
+      }
+
+      MOZ_ASSERT(object->type() == MIRType::Object);
+
+      if (!ValueNeedsPostBarrier(value)) {
+        continue;
+      }
+
+      if (!graph.alloc().ensureBallast()) {
+        return false;
+      }
+
+      if (!needsBarrier) {
+#ifdef DEBUG
+        // The store claims the barrier can be elided. Assert this.
+        if (value->type() != MIRType::Value) {
+          auto* box = MBox::New(graph.alloc(), value);
+          block->insertBefore(ins, box);
+          value = box;
+        }
+        auto* assert =
+            MAssertCanElidePostWriteBarrier::New(graph.alloc(), object, value);
+        block->insertBefore(ins, assert);
+#endif
+        continue;
+      }
+
+      if (value->isBox()) {
+        value = value->toBox()->input();
+      }
+
+      MInstruction* barrier;
+      if (index) {
+        MOZ_ASSERT(index->type() == MIRType::Int32);
+        barrier =
+            MPostWriteElementBarrier::New(graph.alloc(), object, value, index);
+      } else {
+        barrier = MPostWriteBarrier::New(graph.alloc(), object, value);
+      }
+      block->insertBefore(ins, barrier);
+    }
+  }
+
+  return true;
+}
+
 bool jit::AddKeepAliveInstructions(MIRGraph& graph) {
   for (MBasicBlockIterator i(graph.begin()); i != graph.end(); i++) {
     MBasicBlock* block = *i;
@@ -1953,7 +2042,7 @@ bool LinearSum::add(MDefinition* term, int32_t scale) {
   }
 
   AutoEnterOOMUnsafeRegion oomUnsafe;
-  if (!terms_.append(LinearTerm(term, scale))) {
+  if (!terms_.emplaceBack(term, scale)) {
     oomUnsafe.crash("LinearSum::add");
   }
 
@@ -2486,83 +2575,47 @@ static MObjectToIterator* FindObjectToIteratorUse(MDefinition* ins) {
   return nullptr;
 }
 
-using IteratorMoreSet =
-    InlineSet<MIteratorMore*, 8, DefaultHasher<MIteratorMore*>,
-              BackgroundSystemAllocPolicy>;
+static bool IteratorMoreIsUsedInsideLoop(MInstruction* use,
+                                         MIteratorMore* iterMore) {
+  // We have an IteratorMore node, and an instruction that uses it. We can only
+  // optimize that instruction to use the indices stored on that iterator if the
+  // use is inside the for-in loop; otherwise, we will have closed the iterator
+  // and reset the cursor.
+  //
+  // To verify this, we walk the path from `use` to `iterMore`, checking for an
+  // IteratorEnd node that closes the iterator. There can be more than one such
+  // path, but we only have to walk one. The iterator must be closed along any
+  // path that leaves the loop. If `use` is outside the loop, then all paths
+  // from `iterMore` to `use` must include an IteratorEnd; if it's inside the
+  // loop, then no path may include an IteratorEnd. By the nature of an SSA
+  // graph, `iterMore` must dominate its uses. Therefore, if we simply walk
+  // the CFG by following a non-back-edge predecessor, we are guaranteed to
+  // eventually reach the block containing  `iterMore`. If we have not seen
+  // an IteratorEnd by that point, then `use` is inside the loop.
+  //
+  // We don't try to distinguish between IteratorEnd nodes for this iterator
+  // and IteratorEnd nodes for some other iterator (for example, the iterator
+  // of a nested for-in loop), because reasoning about that is subtle and
+  // nested for-in loops are not worth optimizing.
 
-static bool FindSafeIteratorMoreInstructions(MIRGraph& graph,
-                                             IteratorMoreSet& safeIterMores) {
-  // Fill |safeIterMores| with MIteratorMore instructions where no instruction
-  // use is dominated by an MIteratorEnd for the same iterator.
-
-  using InstructionVector =
-      Vector<MInstruction*, 8, BackgroundSystemAllocPolicy>;
-
-  auto hasDominatingIteratorEnd = [](const InstructionVector& iteratorEnds,
-                                     MInstruction* access) {
-    for (MInstruction* iteratorEnd : iteratorEnds) {
-      if (iteratorEnd->dominates(access)) {
+  MBasicBlock* block = use->block();
+  MInstructionReverseIterator ins = block->rbegin(use);
+  while (true) {
+    for (; ins != block->rend(); ins++) {
+      if (*ins == iterMore) {
         return true;
       }
-    }
-    return false;
-  };
-
-  for (MBasicBlockIterator block(graph.begin()); block != graph.end();
-       block++) {
-    for (MInstructionIterator ins(block->begin()); ins != block->end(); ins++) {
-      if (!ins->isObjectToIterator()) {
-        continue;
-      }
-
-      InstructionVector iteratorMores;
-      InstructionVector iteratorEnds;
-      bool hasPhiUse = false;
-
-      for (MUseDefIterator uses(*ins); uses; uses++) {
-        MDefinition* def = uses.def();
-        if (def->isIteratorMore()) {
-          if (!iteratorMores.append(def->toInstruction())) {
-            return false;
-          }
-        } else if (def->isIteratorEnd()) {
-          if (!iteratorEnds.append(def->toInstruction())) {
-            return false;
-          }
-        } else if (def->isLoadIteratorElement() ||
-                   def->isObjectKeysFromIterator() || def->isIteratorLength() ||
-                   def->isPostWriteBarrier() || def->isStoreElement()) {
-          continue;
-        } else if (def->isPhi()) {
-          hasPhiUse = true;
-          break;
-        } else {
-          MOZ_CRASH("Unexpected ObjectToIterator use");
-        }
-      }
-      if (hasPhiUse) {
-        continue;
-      }
-
-      for (MInstruction* iterMore : iteratorMores) {
-        bool hasUnsafeUse = false;
-        for (MUseDefIterator iterMoreUses(iterMore); iterMoreUses;
-             iterMoreUses++) {
-          MDefinition* def = iterMoreUses.def();
-          if (def->isInstruction() &&
-              hasDominatingIteratorEnd(iteratorEnds, def->toInstruction())) {
-            hasUnsafeUse = true;
-            break;
-          }
-        }
-        if (!hasUnsafeUse && !safeIterMores.put(iterMore->toIteratorMore())) {
-          return false;
-        }
+      if (ins->isIteratorEnd()) {
+        return false;
       }
     }
+
+    // Predecessor 0 of a loop header is the loop predecessor, so following
+    // predecessor 0 never walks a back edge.
+    MOZ_RELEASE_ASSERT(block->numPredecessors() > 0);
+    block = block->getPredecessor(0);
+    ins = block->rbegin();
   }
-
-  return true;
 }
 
 bool jit::OptimizeIteratorIndices(const MIRGenerator* mir, MIRGraph& graph) {
@@ -2572,11 +2625,6 @@ bool jit::OptimizeIteratorIndices(const MIRGenerator* mir, MIRGraph& graph) {
   auto hasNoDominatorInfo = [&](MBasicBlock* block) {
     return block->id() >= numInitialBlocks;
   };
-
-  IteratorMoreSet safeIteratorMores;
-  if (!FindSafeIteratorMoreInstructions(graph, safeIteratorMores)) {
-    return false;
-  }
 
   for (ReversePostorderIterator blockIter = graph.rpoBegin();
        blockIter != graph.rpoEnd();) {
@@ -2669,7 +2717,6 @@ bool jit::OptimizeIteratorIndices(const MIRGenerator* mir, MIRGraph& graph) {
       MDefinition* iterElementIndex = nullptr;
       if (idVal->isIteratorMore()) {
         auto* iterNext = idVal->toIteratorMore();
-
         if (!iterNext->iterator()->isObjectToIterator()) {
           continue;
         }
@@ -2679,7 +2726,7 @@ bool jit::OptimizeIteratorIndices(const MIRGenerator* mir, MIRGraph& graph) {
             SkipIterObjectUnbox(receiver)) {
           continue;
         }
-        if (!safeIteratorMores.has(iterNext)) {
+        if (!IteratorMoreIsUsedInsideLoop(ins, iterNext)) {
           continue;
         }
       } else if (supportObjectKeys && SkipBox(idVal)->isLoadIteratorElement()) {

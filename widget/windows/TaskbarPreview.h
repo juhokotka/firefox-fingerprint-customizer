@@ -6,17 +6,18 @@
 #ifndef _mozilla_widget_TaskbarPreview_h_
 #define _mozilla_widget_TaskbarPreview_h_
 
-#include <windows.h>
 #include <shobjidl.h>
+#include <windows.h>
 #undef LogSeverity  // SetupAPI.h #defines this as DWORD
 
-#include "mozilla/RefPtr.h"
+#include <nsIDocShell.h>
 #include <nsITaskbarPreview.h>
 #include <nsITaskbarPreviewController.h>
-#include <nsString.h>
 #include <nsIWeakReferenceUtils.h>
-#include <nsIDocShell.h>
+#include <nsString.h>
+
 #include "WindowHook.h"
+#include "mozilla/RefPtr.h"
 
 namespace mozilla {
 namespace widget {
@@ -117,7 +118,7 @@ class TaskbarPreviewCallback : public nsITaskbarPreviewCallback {
   void SetIsPreview() { mIsThumbnail = false; }
 
  protected:
-  virtual ~TaskbarPreviewCallback() {}
+  virtual ~TaskbarPreviewCallback() = default;
 
  private:
   RefPtr<TaskbarPreview> mPreview;

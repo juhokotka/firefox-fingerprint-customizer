@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "vm/Compartment-inl.h"
-
 #include "mozilla/MemoryReporting.h"
 
 #include <stddef.h>
@@ -29,6 +27,7 @@
 
 #include "gc/Marking-inl.h"
 #include "gc/WeakMap-inl.h"
+#include "vm/Compartment-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/Realm-inl.h"
 #include "vm/StringType-inl.h"
@@ -171,7 +170,7 @@ bool Compartment::wrap(JSContext* cx, MutableHandleString strp) {
    * the atom as being in use by the new zone.
    */
   if (str->isAtom()) {
-    cx->markAtom(&str->asAtom());
+    cx->recordRef(&str->asAtom());
     return true;
   }
 
@@ -462,24 +461,8 @@ bool Compartment::wrap(JSContext* cx, MutableHandle<GCVector<Value>> vec) {
   return true;
 }
 
-static inline bool ShouldTraceWrapper(JSObject* wrapper,
-                                      Compartment::EdgeSelector whichEdges) {
-  switch (whichEdges) {
-    case Compartment::AllEdges:
-      return true;
-    case Compartment::NonGrayEdges:
-      return !wrapper->isMarkedGray();
-    case Compartment::GrayEdges:
-      return wrapper->isMarkedGray();
-    case Compartment::BlackEdges:
-      return wrapper->isMarkedBlack();
-    default:
-      MOZ_CRASH("Unexpected EdgeSelector value");
-  }
-}
-
-void Compartment::traceWrapperTargetsInCollectedZones(JSTracer* trc,
-                                                      EdgeSelector whichEdges) {
+void Compartment::traceWrapperTargetsInCollectedZones(
+    JSTracer* trc, gc::EdgeSelector whichEdges) {
   // Trace cross compartment wrapper private pointers into collected zones to
   // either mark or update them. Wrapped object pointers are updated by
   // sweepCrossCompartmentObjectWrappers().
@@ -497,31 +480,10 @@ void Compartment::traceWrapperTargetsInCollectedZones(JSTracer* trc,
     for (auto iter = objectWrapperMappingsTo(c); !iter.done(); iter.next()) {
       JSObject* obj = iter.get().value().unbarrieredGet();
       ProxyObject* wrapper = &obj->as<ProxyObject>();
-      if (ShouldTraceWrapper(wrapper, whichEdges)) {
+      if (ShouldTraceEdge(wrapper, whichEdges)) {
         ProxyObject::traceEdgeToTarget(trc, wrapper);
       }
     }
-  }
-}
-
-/* static */
-void Compartment::traceIncomingCrossCompartmentEdgesForZoneGC(
-    JSTracer* trc, EdgeSelector whichEdges) {
-  MOZ_ASSERT(JS::RuntimeHeapIsMajorCollecting());
-
-  for (ZonesIter zone(trc->runtime(), SkipAtoms); !zone.done(); zone.next()) {
-    if (zone->isCollectingFromAnyThread()) {
-      continue;
-    }
-
-    for (CompartmentsInZoneIter c(zone); !c.done(); c.next()) {
-      c->traceWrapperTargetsInCollectedZones(trc, whichEdges);
-    }
-  }
-
-  // Currently we trace all debugger edges as black.
-  if (whichEdges != GrayEdges) {
-    DebugAPI::traceCrossCompartmentEdges(trc);
   }
 }
 
@@ -548,7 +510,7 @@ void Compartment::fixupCrossCompartmentObjectWrappersAfterMovingGC(
 
   // Trace the wrappers in the map to update their cross-compartment edges
   // to wrapped values in other compartments that may have been moved.
-  traceWrapperTargetsInCollectedZones(trc, AllEdges);
+  traceWrapperTargetsInCollectedZones(trc, gc::AllEdges);
 }
 
 void Compartment::fixupAfterMovingGC(JSTracer* trc) {

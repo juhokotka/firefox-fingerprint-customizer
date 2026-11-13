@@ -6,12 +6,11 @@
 
 #include "mozilla/AntiTrackingUtils.h"
 #include "mozilla/HashFunctions.h"
+#include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/StorageAccess.h"
 #include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/ServiceWorkerManager.h"
-#include "mozilla/StaticPrefs_privacy.h"
-#include "mozilla/StorageAccess.h"
 #include "nsContentUtils.h"
 #include "nsHashKeys.h"
 #include "nsLayoutUtils.h"

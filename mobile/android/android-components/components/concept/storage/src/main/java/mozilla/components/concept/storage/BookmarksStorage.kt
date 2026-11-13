@@ -6,9 +6,7 @@ package mozilla.components.concept.storage
 
 import mozilla.components.concept.storage.bookmarks.BookmarkInserter
 
-/**
- * An interface which defines read/write operations for bookmarks data.
- */
+/** An interface which defines read/write operations for bookmarks data. */
 interface BookmarksStorage : Storage, BookmarkInserter {
 
     /**
@@ -41,13 +39,11 @@ interface BookmarksStorage : Storage, BookmarkInserter {
      *
      * @param limit The maximum number of entries to return.
      * @param maxAge Optional parameter used to filter out entries older than this number of milliseconds.
-     * @param currentTime Optional parameter for current time. Defaults toSystem.currentTimeMillis()
      * @return The list of bookmarks that have been recently added up to the limit number of items.
      */
     suspend fun getRecentBookmarks(
         limit: Int,
         maxAge: Long? = null,
-        currentTime: Long = System.currentTimeMillis(),
     ): Result<List<BookmarkNode>>
 
     /**
@@ -116,11 +112,11 @@ interface BookmarksStorage : Storage, BookmarkInserter {
 
     /**
      * Counts the number of bookmarks in the trees under the specified GUIDs.
-
+     *
      * @param guids The guids of folders to query.
-     * @return Count of all bookmark items (ie, no folders or separators) in all specified folders
-     * recursively. Empty folders, non-existing GUIDs and non-existing items will return zero.
-     * The result is implementation dependant if the trees overlap.
+     * @return Count of all bookmark items (ie, no folders or separators) in all specified folders recursively. Empty
+     *   folders, non-existing GUIDs and non-existing items will return zero. The result is implementation dependant if
+     *   the trees overlap.
      */
     suspend fun countBookmarksInTrees(guids: List<String>): UInt
 
@@ -155,11 +151,11 @@ data class BookmarkNode(
     /**
      * Removes [children] from [BookmarkNode.children] and returns the new modified [BookmarkNode].
      *
-     * DOES NOT delete the bookmarks from storage, so this should only be used where you are
-     * batching deletes, or where the deletes are otherwise pending.
+     * DOES NOT delete the bookmarks from storage, so this should only be used where you are batching deletes, or where
+     * the deletes are otherwise pending.
      *
-     * In the general case you should try and avoid using this - just delete the items from
-     * storage then re-fetch the parent node.
+     * In the general case you should try and avoid using this - just delete the items from storage then re-fetch the
+     * parent node.
      */
     operator fun minus(children: Set<BookmarkNode>): BookmarkNode {
         val removedChildrenGuids = children.map { it.guid }
@@ -167,9 +163,7 @@ data class BookmarkNode(
     }
 }
 
-/**
- * Class for making alterations to any bookmark node
- */
+/** Class for making alterations to any bookmark node */
 data class BookmarkInfo(
     val parentGuid: String?,
     val position: UInt?,
@@ -177,9 +171,9 @@ data class BookmarkInfo(
     val url: String?,
 )
 
-/**
- * The types of bookmark nodes
- */
+/** The types of bookmark nodes */
 enum class BookmarkNodeType {
-    ITEM, FOLDER, SEPARATOR
+    ITEM,
+    FOLDER,
+    SEPARATOR,
 }

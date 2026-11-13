@@ -7,9 +7,9 @@
 
 #include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/MozPromise.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/MozPromise.h"
 #include "nsIProtocolHandler.h"
 #include "nsThreadUtils.h"
 #include "nsWeakReference.h"
@@ -32,7 +32,8 @@ class RemoteImageProtocolHandler : public nsIProtocolHandler,
   }
 
   static already_AddRefed<gfx::SourceSurface> GetImageSurface(
-      imgIContainer* aContainer, gfx::IntSize aSize, ColorScheme aColorScheme);
+      imgIContainer* aContainer, gfx::IntSize aSize, bool aStretch,
+      ColorScheme aColorScheme);
 
  private:
   virtual ~RemoteImageProtocolHandler() = default;

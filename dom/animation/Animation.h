@@ -21,6 +21,7 @@
 #include "mozilla/dom/AnimationBinding.h"  // for AnimationPlayState
 #include "mozilla/dom/AnimationTimeline.h"
 #include "mozilla/dom/CSSNumericValueBindingFwd.h"
+#include "mozilla/dom/TimelineName.h"
 #include "nsCycleCollectionParticipant.h"
 
 struct JSContext;
@@ -33,6 +34,27 @@ namespace mozilla {
 
 struct AnimationRule;
 class MicroTaskRunnable;
+
+// Properties of CSS Animations that can be overridden by the Web Animations API
+// in a manner that means we should ignore subsequent changes to markup for that
+// property.
+enum class CSSAnimationProperties : uint16_t {
+  None = 0,
+  Keyframes = 1 << 0,
+  Duration = 1 << 1,
+  IterationCount = 1 << 2,
+  Direction = 1 << 3,
+  Delay = 1 << 4,
+  FillMode = 1 << 5,
+  Composition = 1 << 6,
+  Effect = Keyframes | Duration | IterationCount | Direction | Delay |
+           FillMode | Composition,
+  PlayState = 1 << 7,
+  Timeline = 1 << 8,
+  AnimationRangeStart = 1 << 9,
+  AnimationRangeEnd = 1 << 10,
+};
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(CSSAnimationProperties)
 
 namespace dom {
 
@@ -120,7 +142,7 @@ class Animation : public DOMEventTargetHelper,
 
   AnimationTimeline* GetTimelineFromJS() const {
     auto* timeline = GetTimeline();
-    if (timeline && timeline->IsInactiveTimeline()) {
+    if (timeline && timeline->IsUnresolvedTimeline()) {
       // See:
       // https://github.com/w3c/csswg-drafts/issues/13807#issuecomment-4390005560
       return nullptr;
@@ -128,20 +150,24 @@ class Animation : public DOMEventTargetHelper,
     return timeline;
   }
 
-  virtual void TimelineWillSetFromJS() {}
-  virtual bool TimelineOverridenByJS() const { return false; }
+  virtual void PropertiesWillSetFromJS(CSSAnimationProperties) {}
+  virtual CSSAnimationProperties PropertiesOverridenByJS() const {
+    return CSSAnimationProperties::None;
+  }
+
   void SetTimelineFromJS(AnimationTimeline* aTimeline);
   AnimationTimeline* GetTimeline() const { return mTimeline; }
   // Timeline may be overriden through JS, any update from the CSS side
   // will not take effect. Returns true if the timeline did update.
-  bool SetTimeline(AnimationTimeline* aTimeline, const nsAtom* aTimelineName,
-                   FromJS aFromJS);
+  bool SetTimeline(AnimationTimeline* aTimeline,
+                   const ScopedTimelineName& aTimelineName, FromJS aFromJS);
   bool SetTimelineNoUpdate(AnimationTimeline* aTimeline,
-                           const nsAtom* aTimelineName, FromJS aFromJS);
+                           const ScopedTimelineName& aTimelineName,
+                           FromJS aFromJS);
 
   const AnimationRange& GetTimelineRange() const { return mTimelineRange; }
-  void SetTimelineRange(AnimationRange&& aRange);
-  void SetTimelineRangeNoUpdate(AnimationRange&& aRange);
+  void SetTimelineRange(AnimationRange&& aRange, FromJS aFromJS);
+  void SetTimelineRangeNoUpdate(AnimationRange&& aRange, FromJS aFromJS);
 
   Nullable<TimeDuration> GetStartTime() const { return mStartTime; }
   void SetStartTime(const Nullable<TimeDuration>& aNewStartTime);
@@ -159,6 +185,16 @@ class Animation : public DOMEventTargetHelper,
   void GetCurrentTime(Nullable<OwningCSSNumberish>& aRetVal) const;
   void SetCurrentTime(const Nullable<CSSNumberish>& aCurrentTime,
                       ErrorResult& aRv);
+
+  // Web IDL binding for the rangeStart/rangeEnd attributes.
+  void GetRangeStart(JSContext* aCx, JS::MutableHandle<JS::Value> aRetVal,
+                     ErrorResult& aRv);
+  void GetRangeEnd(JSContext* aCx, JS::MutableHandle<JS::Value> aRetVal,
+                   ErrorResult& aRv);
+  void SetRangeStart(JSContext* aCx, JS::Handle<JS::Value> aValue,
+                     ErrorResult& aRv);
+  void SetRangeEnd(JSContext* aCx, JS::Handle<JS::Value> aValue,
+                   ErrorResult& aRv);
 
   Nullable<TimeDuration> GetCurrentTimeAsDuration() const {
     return GetCurrentTimeForHoldTime(mHoldTime);
@@ -360,13 +396,6 @@ class Animation : public DOMEventTargetHelper,
   }
 
   /**
-   * Returns true if this animation does not currently need to update
-   * style on the main thread (e.g. because it is empty, or is
-   * running on the compositor).
-   */
-  bool CanThrottle() const;
-
-  /**
    * Updates various bits of state that we need to update as the result of
    * running ComposeStyle().
    * See the comment of KeyframeEffect::WillComposeStyle for more detail.
@@ -431,23 +460,11 @@ class Animation : public DOMEventTargetHelper,
    * https://drafts.csswg.org/web-animations-2/#at-progress-timeline-boundary
    */
   enum class ProgressTimelinePosition : uint8_t { Boundary, NotBoundary };
-  static ProgressTimelinePosition AtProgressTimelineBoundary(
-      const Nullable<TimeDuration>& aTimelineDuration,
-      const Nullable<TimeDuration>& aCurrentTime,
-      const TimeDuration& aEffectStartTime, const double aPlaybackRate);
-  ProgressTimelinePosition AtProgressTimelineBoundary() const {
-    Nullable<TimeDuration> currentTime = GetUnconstrainedCurrentTime();
-    return AtProgressTimelineBoundary(
-        mTimeline ? mTimeline->TimelineDuration(mTimelineRange) : nullptr,
-        // Set unlimited current time based on the first matching condition:
-        // 1. start time is resolved:
-        //    (timeline time - start time) × playback rate
-        // 2. Otherwise:
-        //    animation’s current time
-        !currentTime.IsNull() ? currentTime : GetCurrentTimeAsDuration(),
-        mStartTime.IsNull() ? TimeDuration() : mStartTime.Value(),
-        PlaybackRateInternal());
-  }
+  static ProgressTimelinePosition AtTimelineBoundary(
+      const Nullable<TimeDuration>& aTimelineTime,
+      const TimeDuration& aMinimumTimelineTime,
+      const TimeDuration& aMaximumTimelineTime);
+  ProgressTimelinePosition AtTimelineBoundary() const;
 
   void UpdateNormalizedTimingForTimelineDataChange();
   void MaybeUpdateKeyframeComputedOffsets();
@@ -465,7 +482,9 @@ class Animation : public DOMEventTargetHelper,
 
   void AutoAlignStartTime();
 
-  const nsAtom* GetTimelineName() const { return mTimelineName; }
+  ScopedTimelineName GetTimelineName() const {
+    return ScopedTimelineName{mTimelineName};
+  }
 
   bool HasFiniteTimeline() const {
     return mTimeline && !mTimeline->IsMonotonicallyIncreasing();
@@ -570,7 +589,7 @@ class Animation : public DOMEventTargetHelper,
 
   bool HasFiniteActiveTimeline() const {
     return mTimeline && !mTimeline->IsMonotonicallyIncreasing() &&
-           !mTimeline->IsInactiveTimeline();
+           !mTimeline->IsUnresolvedTimeline();
   }
 
   RefPtr<AnimationTimeline> mTimeline;
@@ -661,7 +680,9 @@ class Animation : public DOMEventTargetHelper,
   // The name of the timeline this animation is referring to, if one exists.
   // Note that animations can have a null timeline but have this set, if it
   // refers to a timeline that does not exist by name.
-  RefPtr<const nsAtom> mTimelineName;
+  // We must store the scoped context, since the rule introducing the timeline
+  // name may be at a different scope, even with the identical name.
+  OwningScopedTimelineName mTimelineName;
 };
 
 }  // namespace dom

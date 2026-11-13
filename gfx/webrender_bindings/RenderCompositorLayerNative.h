@@ -10,14 +10,14 @@
 
 #include "GLTypes.h"
 #include "mozilla/HashFunctions.h"
+#include "mozilla/TimeStamp.h"
+#include "mozilla/layers/GpuFence.h"
 #include "mozilla/layers/ScreenshotGrabber.h"
 #include "mozilla/webrender/RenderCompositor.h"
-#include "mozilla/TimeStamp.h"
 
 namespace mozilla {
 
 namespace layers {
-class GpuFence;
 class NativeLayerRootSnapshotter;
 class NativeLayerRoot;
 class NativeLayer;
@@ -65,12 +65,8 @@ class RenderCompositorLayerNative : public RenderCompositor {
   // Interface for wr::Compositor
   void CompositorBeginFrame() override;
   void CompositorEndFrame() override;
-  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aVirtualOffset,
-                     wr::DeviceIntSize aTileSize, bool aIsOpaque) override;
   void CreateExternalSurface(wr::NativeSurfaceId aId, bool aIsOpaque) override;
   void DestroySurface(NativeSurfaceId aId) override;
-  void CreateTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY) override;
-  void DestroyTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY) override;
   void CreateSwapChainSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aSize,
                               bool aIsOpaque,
                               bool aNeedsSyncDcompCommit) override;
@@ -133,7 +129,7 @@ class RenderCompositorLayerNative : public RenderCompositor {
   gfx::IntRect mVisibleBounds;
   std::unordered_map<wr::NativeSurfaceId, Surface, SurfaceIdHashFn> mSurfaces;
   TimeStamp mBeginFrameTimeStamp;
-  std::deque<RefPtr<layers::GpuFence>> mPendingGpuFeces;
+  std::deque<RefPtr<layers::GpuFence>> mPendingGpuFences;
   // Used when platform does not support to take screenshot with multiple
   // layers. By GetWindowProperties(), it notifies WebRender layer manager to
   // use single layer for taking screenshot. By EnableAsyncScreenshot(), it
@@ -183,11 +179,11 @@ class RenderCompositorLayerNativeOGL : public RenderCompositorLayerNative {
 
   struct BackPressureFences {
     explicit BackPressureFences(
-        std::deque<RefPtr<layers::GpuFence>>&& aGpuFeces)
-        : mGpuFeces(std::move(aGpuFeces)) {}
+        std::deque<RefPtr<layers::GpuFence>>&& aGpuFences)
+        : mGpuFences(std::move(aGpuFences)) {}
 
     GLsync mSync = nullptr;
-    std::deque<RefPtr<layers::GpuFence>> mGpuFeces;
+    std::deque<RefPtr<layers::GpuFence>> mGpuFences;
   };
 
   // Used to apply back-pressure in WaitForGPU().

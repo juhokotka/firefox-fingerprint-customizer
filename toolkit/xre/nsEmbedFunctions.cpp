@@ -24,7 +24,6 @@
 #  endif
 #  include "mozilla/ScopeExit.h"
 #  include "mozilla/WinDllServices.h"
-#  include "mozilla/WindowsBCryptInitialization.h"
 #  include "WinUtils.h"
 #endif
 
@@ -88,7 +87,7 @@
 
 #if defined(MOZ_SANDBOX) && defined(XP_WIN)
 #  include "mozilla/sandboxTarget.h"
-#  include "mozilla/sandboxing/loggingCallbacks.h"
+#  include "mozilla/sandboxing/TargetGeckoServicesImpl.h"
 #endif
 
 #if defined(MOZ_SANDBOX)
@@ -112,7 +111,6 @@
 
 #if defined(XP_WIN) && defined(MOZ_SANDBOX)
 #  include "mozilla/sandboxing/SandboxInitialization.h"
-#  include "mozilla/sandboxing/sandboxLogging.h"
 #endif
 
 #if defined(MOZ_ENABLE_FORKSERVER)
@@ -156,7 +154,7 @@ const char* XRE_GeckoProcessTypeToString(GeckoProcessType aProcessType) {
                            webidl_typename, allcaps_name)                     \
   case GeckoProcessType::GeckoProcessType_##enum_name:                        \
     return string_name;
-#include "mozilla/GeckoProcessTypes.h"
+#include "mozilla/GeckoProcessTypes.inc"
 #undef GECKO_PROCESS_TYPE
     default:
       return "invalid";
@@ -284,13 +282,6 @@ nsresult XRE_InitChildProcess(int aArgc, char* aArgv[],
   // It will succeed when the parent process is a command line,
   // so that stdio will be displayed in it.
   UseParentConsole();
-
-#  if defined(MOZ_SANDBOX)
-  if (aChildData->sandboxTargetServices) {
-    SandboxTarget::Instance()->SetTargetServices(
-        aChildData->sandboxTargetServices);
-  }
-#  endif
 #endif
 
   // NB: This must be called before profiler_init
@@ -303,6 +294,15 @@ nsresult XRE_InitChildProcess(int aArgc, char* aArgv[],
                            OTHER);
   AUTO_PROFILER_INIT;
   AUTO_PROFILER_LABEL("XRE_InitChildProcess", OTHER);
+
+#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+  mozilla::sandboxing::InitTargetGeckoServices(
+      aChildData->setTargetGeckoServices);
+  if (aChildData->sandboxTargetServices) {
+    SandboxTarget::Instance()->SetTargetServices(
+        aChildData->sandboxTargetServices);
+  }
+#endif
 
 #ifdef XP_MACOSX
   auto _supplementalFontThread = gfxPlatformMac::RegisterSupplementalFonts();
@@ -451,7 +451,8 @@ nsresult XRE_InitChildProcess(int aArgc, char* aArgv[],
   }
 
   nsID messageChannelId{};
-  if (NS_WARN_IF(!messageChannelId.Parse(*initialChannelIdString))) {
+  if (NS_WARN_IF(!messageChannelId.Parse(
+          nsDependentCString(*initialChannelIdString)))) {
     return NS_ERROR_FAILURE;
   }
 
@@ -484,13 +485,6 @@ nsresult XRE_InitChildProcess(int aArgc, char* aArgv[],
       uiLoopType = MessageLoop::TYPE_UI;
       break;
   }
-
-#if defined(XP_WIN)
-  {
-    DebugOnly<bool> result = mozilla::WindowsBCryptInitialization();
-    MOZ_ASSERT(result);
-  }
-#endif  // defined(XP_WIN)
 
   {
     // This is a lexical scope for the MessageLoop below.  We want it
@@ -577,12 +571,6 @@ nsresult XRE_InitChildProcess(int aArgc, char* aArgv[],
           MakeScopeExit([&dllSvc]() { dllSvc->DisableFull(); });
 #endif
 
-#if defined(MOZ_SANDBOX) && defined(XP_WIN)
-      // We need to do this after the process has been initialised, as
-      // InitLoggingIfRequired may need access to prefs.
-      mozilla::sandboxing::InitLoggingIfRequired(
-          aChildData->ProvideLogFunction);
-#endif
       mozilla::FilePreferences::InitDirectoriesAllowlist();
       mozilla::FilePreferences::InitPrefs();
 
@@ -696,8 +684,8 @@ already_AddRefed<TestShellParent> GetOrCreateTestShellParent() {
     // this and you're sure you wouldn't be better off writing a "browser"
     // chrome mochitest where you can have multiple types of content
     // processes.
-    TestShellContentParent() =
-        ContentParent::GetNewOrUsedBrowserProcess(DEFAULT_REMOTE_TYPE);
+    TestShellContentParent() = ContentParent::GetNewOrUsedBrowserProcess(
+        mozilla::dom::RemoteType::SharedWeb({}));
   } else if (TestShellContentParent()->IsShuttingDown()) {
     return nullptr;
   }

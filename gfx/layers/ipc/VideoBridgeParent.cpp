@@ -3,9 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "VideoBridgeParent.h"
+
 #include "CompositorThread.h"
 #include "mozilla/DataMutex.h"
 #include "mozilla/ipc/Endpoint.h"
+#include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/PTextureParent.h"
 #include "mozilla/layers/TextureHost.h"
 #include "mozilla/layers/VideoBridgeUtils.h"
@@ -258,10 +260,23 @@ already_AddRefed<PTextureParent> VideoBridgeParent::AllocPTextureParent(
     return nullptr;
   }
 
+  if (aFlags & TextureFlags::REMOTE_TEXTURE) {
+    MOZ_ASSERT_UNREACHABLE("Unexpected to be called!");
+    return nullptr;
+  }
+
   MonitorAutoLock lock(mMonitor);
   mTextureMap.insert(
       {aSerial, {TextureHost::AsTextureHost(parent), aContentId}});
   return parent.forget();
+}
+
+mozilla::ipc::IPCResult VideoBridgeParent::RecvGetTextureFactoryIdentifier(
+    const dom::ContentParentId& aContentId,
+    GetTextureFactoryIdentifierResolver&& aResolver) {
+  aResolver(CompositorBridgeParent::GetTextureFactoryIdentifierForContent(
+      aContentId));
+  return IPC_OK();
 }
 
 void VideoBridgeParent::RemoveTexture(uint64_t aSerial) {

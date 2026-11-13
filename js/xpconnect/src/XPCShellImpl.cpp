@@ -2,9 +2,42 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsXULAppAPI.h"
+#include "mozilla/ChaosMode.h"
+#include "mozilla/dom/AutoEntryScript.h"
+#include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/IOInterposer.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
+
+#include "Components.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "nsAppDirectoryServiceDefs.h"
+#include "nsArrayEnumerator.h"
+#include "nsCOMArray.h"
+#include "nsComponentManagerUtils.h"
+#include "nsCOMPtr.h"
+#include "nscore.h"
+#include "nsDirectoryServiceDefs.h"
+#include "nsDirectoryServiceUtils.h"
+#include "nsExceptionHandler.h"
+#include "nsIAppStartup.h"
+#include "nsIDirectoryService.h"
+#include "nsIFile.h"
+#include "nsIPrincipal.h"
+#include "nsIScriptSecurityManager.h"
+#include "nsIServiceManager.h"
+#include "nsIXULRuntime.h"
+#include "nsJSPrincipals.h"
+#include "nsJSUtils.h"
+#include "nsServiceManagerUtils.h"
+#include "nsString.h"
+#include "nsXULAppAPI.h"
+#include "ProfilerControl.h"
+#include "SystemGlobal.h"
+#include "xpcprivate.h"
+#include "xpcpublic.h"
+
 #include "js/Array.h"             // JS::NewArrayObject
 #include "js/CallAndConstruct.h"  // JS_CallFunctionValue
 #include "js/CharacterEncoding.h"
@@ -14,42 +47,10 @@
 #include "js/PropertyAndElement.h"  // JS_DefineElement, JS_DefineFunctions, JS_DefineProperty
 #include "js/PropertySpec.h"
 #include "js/SourceText.h"  // JS::SourceText
-#include "mozilla/ChaosMode.h"
-#include "mozilla/dom/AutoEntryScript.h"
-#include "mozilla/dom/ScriptSettings.h"
-#include "mozilla/IOInterposer.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
-#include "nsServiceManagerUtils.h"
-#include "nsComponentManagerUtils.h"
-#include "nsExceptionHandler.h"
-#include "nsIServiceManager.h"
-#include "nsIFile.h"
-#include "nsString.h"
-#include "nsIDirectoryService.h"
-#include "nsDirectoryServiceDefs.h"
-#include "nsAppDirectoryServiceDefs.h"
-#include "nscore.h"
-#include "nsArrayEnumerator.h"
-#include "nsCOMArray.h"
-#include "nsDirectoryServiceUtils.h"
-#include "nsCOMPtr.h"
-#include "nsJSPrincipals.h"
-#include "nsJSUtils.h"
-#include "xpcpublic.h"
-#include "xpcprivate.h"
-#include "SystemGlobal.h"
-#include "nsIScriptSecurityManager.h"
-#include "nsIPrincipal.h"
-#include "nsJSUtils.h"
-
-#include "nsIXULRuntime.h"
-#include "nsIAppStartup.h"
-#include "Components.h"
-#include "ProfilerControl.h"
 
 #ifdef ANDROID
 #  include <android/log.h>
+
 #  include "XREShellData.h"
 #endif
 
@@ -61,11 +62,11 @@
 #  include "mozilla/mscom/ProcessRuntime.h"
 #  include "mozilla/ScopeExit.h"
 #  include "mozilla/WinDllServices.h"
-#  include "mozilla/WindowsBCryptInitialization.h"
+
 #  include <windows.h>
 #  if defined(MOZ_SANDBOX)
-#    include "XREShellData.h"
 #    include "sandboxBroker.h"
+#    include "XREShellData.h"
 #  endif
 #endif
 
@@ -74,8 +75,8 @@
 #endif
 
 // all this crap is needed to do the interactive shell stuff
-#include <stdlib.h>
 #include <errno.h>
+#include <stdlib.h>
 #ifdef HAVE_IO_H
 #  include <io.h> /* for isatty() */
 #endif
@@ -89,8 +90,9 @@
 
 // Fuzzing support for XPC runtime fuzzing
 #ifdef FUZZING_INTERFACES
-#  include "xpcrtfuzzing/xpcrtfuzzing.h"
 #  include "XREShellData.h"
+
+#  include "xpcrtfuzzing/xpcrtfuzzing.h"
 MOZ_RUNINIT static bool fuzzDoDebug = !!getenv("MOZ_FUZZ_DEBUG");
 MOZ_RUNINIT static bool fuzzHaveModule = !!getenv("FUZZER");
 #endif  // FUZZING_INTERFACES
@@ -138,7 +140,6 @@ static FILE* gInFile = nullptr;
 
 static int gExitCode = 0;
 static bool gQuitting = false;
-static bool reportWarnings = true;
 static bool compileOnly = false;
 
 static JSPrincipals* gJSPrincipals = nullptr;
@@ -203,14 +204,20 @@ static bool GetLocationProperty(JSContext* cx, unsigned argc, Value* vp) {
 #endif
 }
 
-static bool GetLine(JSContext* cx, char* bufp, FILE* file, const char* prompt) {
+static bool GetLine(JSContext* cx, char* bufp, size_t bufsize, FILE* file,
+                    const char* prompt) {
   fputs(prompt, gOutFile);
   fflush(gOutFile);
 
   char line[4096] = {'\0'};
   while (true) {
     if (fgets(line, sizeof line, file)) {
-      strcpy(bufp, line);
+      size_t linelen = strlen(line);
+      if (linelen >= bufsize) {
+        fprintf(gErrFile, "JS console: input line too long, exiting\n");
+        return false;
+      }
+      memcpy(bufp, line, linelen + 1);
       return true;
     }
     if (errno != EINTR) {
@@ -239,7 +246,7 @@ static bool ReadLine(JSContext* cx, unsigned argc, Value* vp) {
 
   /* Get a line from the infile */
   JS::UniqueChars strBytes = JS_EncodeStringToLatin1(cx, str);
-  if (!strBytes || !GetLine(cx, buf, gInFile, strBytes.get())) {
+  if (!strBytes || !GetLine(cx, buf, sizeof(buf), gInFile, strBytes.get())) {
     return false;
   }
 
@@ -754,7 +761,9 @@ static bool ProcessFile(AutoJSAPI& jsapi, const char* filename, FILE* file,
      */
     int startline = lineno;
     do {
-      if (!GetLine(cx, bufp, file, startline == lineno ? "js> " : "")) {
+      size_t remaining = sizeof(buffer) - static_cast<size_t>(bufp - buffer);
+      if (!GetLine(cx, bufp, remaining, file,
+                   startline == lineno ? "js> " : "")) {
         hitEOF = true;
         break;
       }
@@ -886,11 +895,7 @@ static bool ProcessArgs(AutoJSAPI& jsapi, char** argv, int argc,
     }
     switch (argv[i][1]) {
       case 'W':
-        reportWarnings = false;
-        break;
       case 'w':
-        reportWarnings = true;
-        break;
       case 'x':
         break;
       case 'd':
@@ -1304,10 +1309,6 @@ int XRE_XPCShellMain(int argc, char** argv, char** envp,
     }
 #  endif  // defined(MOZ_SANDBOX)
 
-    {
-      DebugOnly<bool> result = WindowsBCryptInitialization();
-      MOZ_ASSERT(result);
-    }
 #endif  // defined(XP_WIN)
 
 #ifdef MOZ_CODE_COVERAGE

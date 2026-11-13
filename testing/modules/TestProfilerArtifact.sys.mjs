@@ -15,6 +15,79 @@
 const DUMP_AND_QUIT_TOPIC = "profiler-dump-and-quit";
 
 /**
+ * Gather a profile and write it as a CI artifact in MOZ_UPLOAD_DIR, returning a
+ * message naming the artifact (in the "profile uploaded in <file>" form the
+ * dashboards recognize) so the profile can be associated with the failure.
+ *
+ * Requires MOZ_UPLOAD_DIR to be set and the profiler to be active; callers are
+ * expected to check those conditions (see shouldSaveFailureProfile).
+ *
+ * @param {string} profileName Names the profile artifact file (only its
+ *   basename is used).
+ * @returns {Promise<string>} The message to report.
+ */
+export async function saveProfileToUploadDir(profileName) {
+  let basename = profileName.replace(/.*\//, "");
+  let uploadDir = Services.env.get("MOZ_UPLOAD_DIR");
+  try {
+    // The same test can fail more than once in a run (it was retried, or it is
+    // referenced from several manifests), reusing the same upload directory.
+    // Don't overwrite an earlier profile: each run's log message points at the
+    // file it wrote, and the failures may differ, so every one is worth keeping.
+    // Either name can be taken, since the extension depends on which of the
+    // two dumps below wrote the profile.
+    let filename = `profile_${basename}.json`;
+    let path = PathUtils.join(uploadDir, filename);
+    let taken = async () =>
+      (await IOUtils.exists(path)) || (await IOUtils.exists(`${path}.gz`));
+    for (let i = 2; await taken(); ++i) {
+      // Insert the counter before the test's own extension, so a ".js" test's
+      // profile is still named after the test, or append it when there is no
+      // extension. The extension must be optional: an extension-less name
+      // (e.g. a shutdown profile) would otherwise be left unchanged, so the
+      // path would never differ and this loop would spin forever.
+      filename = `profile_${basename.replace(/(\.\w+)?$/, (m, ext = "") => `-${i}${ext}`)}.json`;
+      path = PathUtils.join(uploadDir, filename);
+    }
+
+    if (Services.startup.shuttingDown) {
+      // A multi-process gather would hang waiting on the child processes that
+      // are blocking shutdown; dump just this process synchronously instead.
+      Services.profiler.dumpProfileToFile(path);
+    } else {
+      const { profile } =
+        await Services.profiler.getProfileDataAsGzippedArrayBuffer();
+      filename += ".gz";
+      path += ".gz";
+      await IOUtils.write(path, new Uint8Array(profile));
+    }
+    // Symbolication rewrites every uploaded profile as gzip and renames it
+    // accordingly (see symbolicate_profile_json), so report the name the
+    // artifact ends up with rather than the one just written.
+    let artifact = filename.endsWith(".gz") ? filename : `${filename}.gz`;
+    return `profile uploaded in ${artifact}`;
+  } catch (e) {
+    // If the profile is large, we may encounter out of memory errors.
+    return `failed to upload profile: ${e}`;
+  }
+}
+
+/**
+ * The conditions under which a failing test's profile should be saved, shared by
+ * all harnesses: the profiler must be active, there must be an upload directory,
+ * and shutdown profiling (from --profiler) must not already be saving a profile.
+ *
+ * @returns {boolean} Whether a failing test's profile should be saved.
+ */
+export function shouldSaveFailureProfile() {
+  return (
+    Services.profiler.IsActive() &&
+    Services.env.exists("MOZ_UPLOAD_DIR") &&
+    !Services.env.exists("MOZ_PROFILER_SHUTDOWN")
+  );
+}
+
+/**
  * Gather a profile, write it as a CI artifact in MOZ_UPLOAD_DIR, and report an
  * unmissable failure naming the artifact (in the "profile uploaded in <file>"
  * form the dashboards recognize) so the profile can be associated with the
@@ -38,40 +111,7 @@ export async function uploadProfileArtifact(
   profileName = testName,
   testRunning = true
 ) {
-  let basename = profileName.replace(/.*\//, "");
-  let uploadDir = Services.env.get("MOZ_UPLOAD_DIR");
-  let message;
-  try {
-    // The same test can fail more than once in a run (it was retried, or it is
-    // referenced from several manifests), reusing the same upload directory.
-    // Don't overwrite an earlier profile: each run's log message points at the
-    // file it wrote, and the failures may differ, so every one is worth keeping.
-    let filename = `profile_${basename}.json`;
-    let path = PathUtils.join(uploadDir, filename);
-    for (let i = 2; await IOUtils.exists(path); ++i) {
-      // Insert the counter before the file extension (so a ".js" test's profile
-      // still ends in ".js.json", which Treeherder requires) or append it when
-      // there is no extension. The extension must be optional: an extension-less
-      // name (e.g. a shutdown profile) would otherwise be left unchanged, so the
-      // path would never differ and this loop would spin forever.
-      filename = `profile_${basename.replace(/(\.\w+)?$/, (m, ext = "") => `-${i}${ext}`)}.json`;
-      path = PathUtils.join(uploadDir, filename);
-    }
-
-    if (Services.startup.shuttingDown) {
-      // A multi-process gather would hang waiting on the child processes that
-      // are blocking shutdown; dump just this process synchronously instead.
-      Services.profiler.dumpProfileToFile(path);
-    } else {
-      const { profile } =
-        await Services.profiler.getProfileDataAsGzippedArrayBuffer();
-      await IOUtils.write(path, new Uint8Array(profile));
-    }
-    message = `profile uploaded in ${filename}`;
-  } catch (e) {
-    // If the profile is large, we may encounter out of memory errors.
-    message = `failed to upload profile: ${e}`;
-  }
+  let message = await saveProfileToUploadDir(profileName);
   if (testRunning) {
     logger.testStatus(testName, null, "FAIL", "PASS", message);
   } else {

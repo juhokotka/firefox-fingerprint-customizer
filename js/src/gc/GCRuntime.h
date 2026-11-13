@@ -177,12 +177,12 @@ class ZoneList {
   Zone* removeFront();
   void clear();
 
+  ZoneList(const ZoneList& other) = delete;
+  ZoneList& operator=(const ZoneList& other) = delete;
+
  private:
   explicit ZoneList(Zone* singleZone);
   void check() const;
-
-  ZoneList(const ZoneList& other) = delete;
-  ZoneList& operator=(const ZoneList& other) = delete;
 };
 
 struct WeakCacheToSweep {
@@ -244,19 +244,34 @@ class BufferAllocatorRuntime {
   // sweeping.
   MainThreadOrGCTaskData<LargeAllocMap> largeAllocMap;
 
-  // Atomic count of buffer allocators whose minor state is sweeping plus those
-  // whose major state is sweeping. Used to decide whether the mutex is
-  // required.
-  mozilla::Atomic<size_t, mozilla::ReleaseAcquire> allocatorSweepCount;
+  // Atomic count of:
+  //  - buffer allocators whose minor state is sweeping, plus
+  //  - buffer allocators whose major state is sweeping, plus
+  //  - number of concurrent marking threads (zero or one)
+  // Used to decide whether the mutex is required to access |largeAllocMap|.
+  mozilla::Atomic<size_t, mozilla::ReleaseAcquire> offThreadAccessCount;
+
+  // Totals of buffer allocator used/free/admin bytes for retained chunks after
+  // the last GC (so not an up-to-date total). Used for telemetry.
+  MainThreadData<size_t> usedBytesInRetainedChunks;
+  MainThreadData<size_t> freeBytesInRetainedChunks;
+  MainThreadData<size_t> adminBytesInRetainedChunks;
 
  public:
   BufferAllocatorRuntime();
 
   void checkGCStateNotInUse();
 
+  void incOffThreadCount();
+  void decOffThreadCount();
+
+  // Report/reset the used/free/admin byte totals described above.
+  void getRetainedStats(size_t* usedBytesOut, size_t* freeBytesOut,
+                        size_t* adminBytesOut);
+  void resetRetainedStats();
+
  private:
-  void incSweepCount();
-  void decSweepCount();
+  void addRetainedStats(size_t usedBytes, size_t freeBytes, size_t adminBytes);
 
   bool needLockToAccessBufferMap() const;
 
@@ -595,7 +610,7 @@ class GCRuntime {
   bool isCompactingGc() const { return isCompacting; }
   bool didCompactZones() const { return isCompacting && zonesCompacted; }
 
-  bool areGrayBitsValid() const { return grayBitsValid; }
+  bool areGrayBitsValid() const { return grayBitsInvalid == 0; }
   void setGrayBitsInvalid();
 
   mozilla::TimeStamp lastGCStartTime() const { return lastGCStartTime_; }
@@ -745,6 +760,7 @@ class GCRuntime {
                        Handle<WeakRefObject*> weakRef);
   void traceKeptObjects(JSTracer* trc);
 
+  void noteWeakRefTargets(JS::NoteWeakRefTargetCallback callback, void* data);
   void maybeClearWeakRefTargets(JS::ShouldClearWeakRefTargetCallback callback,
                                 void* data);
 
@@ -765,9 +781,11 @@ class GCRuntime {
   static void* refillFreeList(JS::Zone* zone, AllocKind thingKind);
   void attemptLastDitchGC();
 
-  // Return whether |sym| is marked at least |color| in the atom marking state
-  // for uncollected zones.
-  bool isSymbolReferencedByUncollectedZone(JS::Symbol* sym, MarkColor color);
+  // Return whether |sym| is present in the atom reference state for uncollected
+  // zones.
+  bool isAtomReferencedByUncollectedZone(TenuredCell* atom);
+  template <typename T>
+  void maybeMarkWeaklyHeldAtom(T* atom);
 
   // Test mark queue.
 #ifdef DEBUG
@@ -875,7 +893,9 @@ class GCRuntime {
   void incrementalSlice(JS::SliceBudget& budget, JS::GCReason reason,
                         bool budgetWasIncreased);
 
-  bool mightSweepInThisSlice(bool nonIncremental);
+  bool shouldYieldAtEndOfMarkPhase() const;
+  bool shouldYieldBeforeSweep(const JS::SliceBudget& budget) const;
+
   void collectNurseryFromMajorGC(JS::GCReason reason);
   void collectNursery(JS::GCOptions options, JS::GCReason reason,
                       gcstats::PhaseKind phase);
@@ -890,10 +910,12 @@ class GCRuntime {
   bool prepareZonesForCollection(bool* isFullOut);
   void endPreparePhase();
   void beginMarkPhase(AutoGCSession& session);
-  bool shouldPreserveJITCode(JS::Realm* realm,
-                             const mozilla::TimeStamp& currentTime,
-                             bool canAllocateMoreCode,
-                             bool isActiveCompartment);
+  bool shouldRealmPreserveJitCode(JS::Realm* realm,
+                                  const mozilla::TimeStamp& currentTime);
+  void setRealmPreserveJitCodeFlags(JS::Zone* zone,
+                                    const mozilla::TimeStamp& currentTime,
+                                    bool canAllocateMoreCode);
+  void clearRealmPreserveJitCodeFlags(JS::Zone* zone);
   void maybeDiscardJitCodeForGC();
   void startBackgroundFreeAfterMinorGC();
   void relazifyFunctionsForShrinkingGC();
@@ -903,6 +925,8 @@ class GCRuntime {
   void traceRuntimeForMajorGC(JSTracer* trc, AutoGCSession& session);
   void traceRuntimeAtoms(JSTracer* trc);
   void traceRuntimeCommon(JSTracer* trc, TraceOrMarkRuntime traceOrMark);
+  void traceIncomingCrossCompartmentEdgesForZoneGC(JSTracer* trc,
+                                                   EdgeSelector whichEdges);
   void traceEmbeddingBlackRoots(JSTracer* trc);
   void traceEmbeddingGrayRoots(JSTracer* trc);
   IncrementalProgress traceEmbeddingGrayRoots(JSTracer* trc,
@@ -914,7 +938,7 @@ class GCRuntime {
   std::tuple<JS::SliceBudget, JS::SliceBudget> budgetConcurrentMarking(
       const JS::SliceBudget& requestedBudget);
   void maybeStartConcurrentMarking(JS::SliceBudget& budget);
-  void finishAnyConcurrentMarking(JS::SliceBudget& budget);
+  bool finishAnyConcurrentMarking(JS::SliceBudget& budget);
   friend class BackgroundMarkTask;
   enum ParallelMarking : bool {
     NoParallelMarking = false,
@@ -956,7 +980,6 @@ class GCRuntime {
 
   template <class ZoneIterT>
   IncrementalProgress markWeakReferences(JS::SliceBudget& budget);
-  void markIncomingGraySymbolEdgesFromUncollectedZones();
   IncrementalProgress markWeakReferencesInCurrentGroup(JS::SliceBudget& budget);
   IncrementalProgress markGrayRoots(JS::SliceBudget& budget,
                                     gcstats::PhaseKind phase);
@@ -998,6 +1021,7 @@ class GCRuntime {
   void updateAtomsBitmap();
   void sweepCCWrappers();
   void sweepRealmGlobals();
+  void sweepWasmInstances();
   void sweepEmbeddingWeakPointers(JS::GCContext* gcx);
   void sweepMisc();
   void sweepCompressionTasks();
@@ -1028,7 +1052,6 @@ class GCRuntime {
   void startBackgroundFree();
   void freeFromBackgroundThread(AutoLockHelperThreadState& lock);
   void sweepBackgroundThings(ZoneList& zones);
-  void prepareForSweepSlice();
   void disableIncrementalBarriers();
   void enableIncrementalBarriers();
   void assertBackgroundSweepingFinished();
@@ -1163,8 +1186,8 @@ class GCRuntime {
   HelperThreadLockData<size_t> dispatchedParallelTasks;
   HelperThreadLockData<GCParallelTaskList> queuedParallelTasks;
 
-  // State used for managing atom mark bitmaps in each zone.
-  AtomMarkingRuntime atomMarking;
+  // State used for managing atom reference bitmaps in each zone.
+  AtomRefRuntime atomReferences;
   MainThreadOrGCTaskData<UniquePtr<DenseBitmap>> atomsUsedByUncollectedZones;
 
   /*
@@ -1225,7 +1248,9 @@ class GCRuntime {
    * The gray bits can become invalid if UnmarkGray overflows the stack. A
    * full GC will reset this bit, since it fills in all the gray bits.
    */
-  UnprotectedData<bool> grayBitsValid;
+  static constexpr uint32_t GrayBitsInvalid = Bit(0);
+  static constexpr uint32_t GrayBitsInvalidatedInCurrentGC = Bit(1);
+  mozilla::Atomic<uint32_t, mozilla::Relaxed> grayBitsInvalid;
 
   mozilla::Atomic<JS::GCReason, mozilla::ReleaseAcquire> majorGCTriggerReason;
 
@@ -1288,8 +1313,8 @@ class GCRuntime {
   const bool useZeal;
 #endif
 
-  /* Indicates that the last incremental slice exhausted the mark stack. */
-  MainThreadData<bool> lastMarkSlice;
+  /* Indicates that we previously yielded after finishing marking work. */
+  MainThreadData<bool> didYieldAtEndOfMarkPhase;
 
   // Whether it's currently safe to yield to the mutator in an incremental GC.
   MainThreadData<bool> safeToYield;
@@ -1303,12 +1328,6 @@ class GCRuntime {
   // thread.
   MainThreadData<bool> useBackgroundThreads;
 
-  /*
-   * We're ready to start sweeping in this slice. Either we just marked roots in
-   * this slice or we called prepareForSweepSlice().
-   */
-  MainThreadData<bool> preparedForSweepInThisSlice;
-
   MainThreadData<size_t> markSliceCount;
 
   /* Whether we successfully added all edges to the implicit edges table. */
@@ -1321,6 +1340,9 @@ class GCRuntime {
 #ifdef DEBUG
   /* Shutdown has started. Further collections must be shutdown collections. */
   MainThreadData<bool> hadShutdownGC;
+
+  /* Unexpected gray cells were found after marking was finished for zone. */
+  MainThreadData<bool> foundUnexpectedGrayCells;
 #endif
 
   /* Singly linked list of zones to be swept in the background. */

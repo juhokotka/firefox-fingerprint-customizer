@@ -6,11 +6,15 @@ package org.mozilla.fenix.webcompat.ui
 
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -29,6 +33,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -59,20 +64,22 @@ import mozilla.components.compose.base.button.IconButton
 import mozilla.components.compose.base.button.TextButton
 import mozilla.components.compose.base.textfield.TextField
 import mozilla.components.compose.base.theme.AcornCorners
+import mozilla.components.compose.base.theme.ThemedValue
+import mozilla.components.compose.base.theme.ThemedValueProvider
+import mozilla.components.compose.base.theme.layout.AcornWindowSize
+import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.components
 import org.mozilla.fenix.ext.getBaseDomainUrl
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.ThemedValue
-import org.mozilla.fenix.theme.ThemedValueProvider
 import org.mozilla.fenix.webcompat.BrokenSiteReporterTestTags
 import org.mozilla.fenix.webcompat.BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_DESCRIPTION_INPUT
+import org.mozilla.fenix.webcompat.BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_INCLUDE_ETP_BLOCKED_URLS_CHECKBOX
 import org.mozilla.fenix.webcompat.BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_SEND_BUTTON
 import org.mozilla.fenix.webcompat.store.WebCompatReporterAction
 import org.mozilla.fenix.webcompat.store.WebCompatReporterState
 import org.mozilla.fenix.webcompat.store.WebCompatReporterState.BrokenSiteReason
 import org.mozilla.fenix.webcompat.store.WebCompatReporterStore
-import mozilla.components.ui.icons.R as iconsR
 
 private const val PROBLEM_DESCRIPTION_MAX_LINES = 5
 
@@ -82,9 +89,7 @@ private const val PROBLEM_DESCRIPTION_MAX_LINES = 5
  * @param store [WebCompatReporterStore] used to manage the state of the Web Compat Reporter feature.
  */
 @Composable
-fun WebCompatReporter(
-    store: WebCompatReporterStore,
-) {
+fun WebCompatReporter(store: WebCompatReporterStore) {
     val state by store.stateFlow.collectAsState()
 
     var previewSheetVisible by remember { mutableStateOf(false) }
@@ -96,13 +101,12 @@ fun WebCompatReporter(
     val appComponents = components
 
     LaunchedEffect(state.enteredUrl) {
-        baseDomain = if (state.enteredUrl.isNotEmpty()) {
-            state.enteredUrl.getBaseDomainUrl(
-                publicSuffixList = appComponents.publicSuffixList,
-            )
-        } else {
-            ""
-        }
+        baseDomain =
+            if (state.enteredUrl.isNotEmpty()) {
+                state.enteredUrl.getBaseDomainUrl(publicSuffixList = appComponents.publicSuffixList)
+            } else {
+                ""
+            }
     }
 
     Scaffold(
@@ -110,11 +114,10 @@ fun WebCompatReporter(
             TempAppBar(
                 onCloseClick = {
                     store.dispatch(WebCompatReporterAction.CancelClicked)
-                },
-                scrollState = scrollState,
+                }
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = MaterialTheme.colorScheme.surfaceBright,
     ) { paddingValues ->
         WebCompatReporterContent(
             state = state,
@@ -146,54 +149,149 @@ private fun WebCompatReporterContent(
     onPreviewReportClick: () -> Unit,
     onAction: (WebCompatReporterAction) -> Unit,
 ) {
+    val isTablet = FirefoxTheme.windowSize != AcornWindowSize.Small
+
     Column(
-        modifier = Modifier
-            .verticalScroll(scrollState)
-            .padding(paddingValues)
-            .imePadding()
-            .padding(horizontal = FirefoxTheme.layout.space.static200)
-            .width(FirefoxTheme.layout.size.containerMaxWidth),
+        modifier = Modifier.padding(paddingValues).fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Column(
+            modifier =
+                Modifier.weight(1f)
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = FirefoxTheme.layout.space.static200)
+                    .width(FirefoxTheme.layout.size.containerMaxWidth)
+                    .imePadding(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            ReporterHeader(
+                isTablet = isTablet,
+                state = state,
+                baseDomain = baseDomain,
+                onPreviewReportClick = onPreviewReportClick,
+                onAction = onAction,
+            )
+
+            ReporterForm(
+                isTablet = isTablet,
+                state = state,
+                onPreviewReportClick = onPreviewReportClick,
+                onAction = onAction,
+            )
+
+            WebCompatReporterFooter(onLearnMoreClick = { onAction(WebCompatReporterAction.LearnMoreClicked) })
+        }
+
+        if (!isTablet) {
+            ActionButtonsSection(
+                isSubmitVisible = state.reason != null,
+                isSubmitEnabled = state.isSubmitEnabled,
+                onSendClick = { onAction(WebCompatReporterAction.SendReportClicked) },
+                modifier = Modifier.width(FirefoxTheme.layout.size.containerMaxWidth),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReporterForm(
+    isTablet: Boolean,
+    state: WebCompatReporterState,
+    onPreviewReportClick: () -> Unit,
+    onAction: (WebCompatReporterAction) -> Unit,
+) {
+    BrokenSiteReasonSection(
+        selectedReason = state.reason,
+        onReasonSelected = { reason -> onAction(WebCompatReporterAction.ReasonChanged(reason)) },
+        onReasonCleared = { onAction(WebCompatReporterAction.ReasonCleared) },
+    )
+
+    if (state.reason != null) {
+        ProblemDetailsSection(
+            state = state,
+            onPreviewReportClick = onPreviewReportClick,
+            showPreviewButton = !isTablet,
+            problemDescriptionRequiredLabel = state.problemDescriptionRequiredLabel,
+            onAction = onAction,
+        )
+    }
+}
+
+@Composable
+private fun ReporterHeader(
+    isTablet: Boolean,
+    state: WebCompatReporterState,
+    baseDomain: String,
+    onPreviewReportClick: () -> Unit,
+    onAction: (WebCompatReporterAction) -> Unit,
+) {
+    if (isTablet) {
+        TabletHeader(
+            state = state,
+            baseDomain = baseDomain,
+            onPreviewReportClick = onPreviewReportClick,
+            onAction = onAction,
+        )
+    } else {
         UrlSection(
             url = state.enteredUrl,
             baseDomain = baseDomain,
             onEditUrlClick = { onAction(WebCompatReporterAction.EditUrlClicked) },
         )
+    }
+}
 
-        BrokenSiteReasonSection(
-            selectedReason = state.reason,
-            onReasonSelected = { reason -> onAction(WebCompatReporterAction.ReasonChanged(reason)) },
-            onReasonCleared = { onAction(WebCompatReporterAction.ReasonCleared) },
-        )
+@Composable
+private fun TabletHeader(
+    state: WebCompatReporterState,
+    baseDomain: String,
+    onPreviewReportClick: () -> Unit,
+    onAction: (WebCompatReporterAction) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(FirefoxTheme.layout.space.static200),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = Modifier.weight(2f)) {
+            UrlSection(
+                url = state.enteredUrl,
+                baseDomain = baseDomain,
+                onEditUrlClick = { onAction(WebCompatReporterAction.EditUrlClicked) },
+                showDivider = false,
+            )
+        }
 
         if (state.reason != null) {
-            ProblemDetailsSection(
-                problemDescription = state.problemDescription,
-                hasDescriptionError = state.hasDescriptionError,
-                onProblemDescriptionChange = { description ->
-                    onAction(WebCompatReporterAction.ProblemDescriptionChanged(description))
-                },
-                includeEtpBlockedUrls = state.includeEtpBlockedUrls,
-                onIncludeEtpBlockedUrlsChange = { include ->
-                    onAction(WebCompatReporterAction.IncludeEtpBlockedUrlsChanged(include))
-                },
-                onPreviewReportClick = onPreviewReportClick,
-            )
-        }
+            VerticalDivider(modifier = Modifier.fillMaxHeight())
 
-        ActionButtonsSection(
-            isSubmitVisible = state.reason != null,
-            isSubmitEnabled = state.isSubmitEnabled,
-            onSendClick = { onAction(WebCompatReporterAction.SendReportClicked) },
-        )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(FirefoxTheme.layout.space.static50),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                TextButton(
+                    text = stringResource(id = R.string.webcompat_reporter_preview_report),
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onPreviewReportClick,
+                )
 
-        if (state.reason == null) {
-            WebCompatReporterFooter(
-                onLearnMoreClick = { onAction(WebCompatReporterAction.LearnMoreClicked) },
-            )
+                ActionButtonsSection(
+                    isSubmitVisible = true,
+                    isSubmitEnabled = state.isSubmitEnabled,
+                    onSendClick = { onAction(WebCompatReporterAction.SendReportClicked) },
+                    modifier = Modifier.fillMaxWidth(),
+                    showDivider = false,
+                )
+            }
         }
     }
+
+    Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static200))
+
+    HorizontalDivider()
+
+    Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static200))
 }
 
 @Composable
@@ -217,10 +315,8 @@ private fun WebCompatReporterDialogs(
 
     if (previewSheetVisible) {
         WebCompatReporterPreviewSheet(
-            previewJSON = state.previewJSON,
+            previewReporterItems = state.previewReporterItems,
             onDismissRequest = onDismissPreview,
-            onSendClick = { onAction(WebCompatReporterAction.SendReportClicked) },
-            isSendButtonEnabled = state.isSubmitEnabled,
         )
     }
 }
@@ -230,6 +326,7 @@ private fun UrlSection(
     url: String,
     baseDomain: String,
     onEditUrlClick: () -> Unit,
+    showDivider: Boolean = true,
 ) {
     ReadOnlyUrlField(
         url = url,
@@ -239,11 +336,37 @@ private fun UrlSection(
         baseDomain = baseDomain,
     )
 
-    Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static200))
+    if (showDivider) {
+        Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static200))
 
-    HorizontalDivider()
+        HorizontalDivider()
 
-    Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static200))
+        Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static200))
+    }
+}
+
+@Composable
+private fun ProblemDetailsSection(
+    state: WebCompatReporterState,
+    onPreviewReportClick: () -> Unit,
+    showPreviewButton: Boolean,
+    problemDescriptionRequiredLabel: Boolean,
+    onAction: (WebCompatReporterAction) -> Unit,
+) {
+    ProblemDetailsSection(
+        problemDescription = state.problemDescription,
+        hasDescriptionError = state.hasDescriptionError,
+        problemDescriptionRequiredLabel = problemDescriptionRequiredLabel,
+        onProblemDescriptionChange = { description ->
+            onAction(WebCompatReporterAction.ProblemDescriptionChanged(description))
+        },
+        includeEtpBlockedUrls = state.includeEtpBlockedUrls,
+        onIncludeEtpBlockedUrlsChange = { include ->
+            onAction(WebCompatReporterAction.IncludeEtpBlockedUrlsChanged(include))
+        },
+        onPreviewReportClick = onPreviewReportClick,
+        showPreviewButton = showPreviewButton,
+    )
 }
 
 @Composable
@@ -251,30 +374,37 @@ private fun ProblemDetailsSection(
     problemDescription: String,
     hasDescriptionError: Boolean,
     includeEtpBlockedUrls: Boolean,
+    problemDescriptionRequiredLabel: Boolean,
     onProblemDescriptionChange: (String) -> Unit,
     onIncludeEtpBlockedUrlsChange: (Boolean) -> Unit,
     onPreviewReportClick: () -> Unit,
+    showPreviewButton: Boolean = true,
 ) {
     Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static150))
 
     ProblemDescriptionInput(
         problemDescription = problemDescription,
         hasDescriptionError = hasDescriptionError,
+        problemDescriptionRequiredLabel = problemDescriptionRequiredLabel,
         onDescriptionChanged = onProblemDescriptionChange,
     )
 
     Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static200))
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = FirefoxTheme.layout.space.static50)
-            .toggleable(
-                value = includeEtpBlockedUrls,
-                role = Role.Checkbox,
-                onValueChange = onIncludeEtpBlockedUrlsChange,
-            )
-            .padding(vertical = 6.dp),
+        modifier =
+            Modifier.fillMaxWidth()
+                .padding(horizontal = FirefoxTheme.layout.space.static50)
+                .toggleable(
+                    value = includeEtpBlockedUrls,
+                    role = Role.Checkbox,
+                    onValueChange = onIncludeEtpBlockedUrlsChange,
+                )
+                .semantics {
+                    testTagsAsResourceId = true
+                    testTag = BROKEN_SITE_REPORTER_INCLUDE_ETP_BLOCKED_URLS_CHECKBOX
+                }
+                .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(
@@ -291,14 +421,15 @@ private fun ProblemDetailsSection(
         )
     }
 
-    Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static200))
+    if (showPreviewButton) {
+        Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static200))
 
-    TextButton(
-        text = stringResource(id = R.string.webcompat_reporter_preview_report),
-        modifier = Modifier
-            .fillMaxWidth(),
-        onClick = onPreviewReportClick,
-    )
+        TextButton(
+            text = stringResource(id = R.string.webcompat_reporter_preview_report),
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onPreviewReportClick,
+        )
+    }
 }
 
 @Composable
@@ -306,49 +437,59 @@ private fun ActionButtonsSection(
     isSubmitVisible: Boolean,
     isSubmitEnabled: Boolean,
     onSendClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    showDivider: Boolean = true,
 ) {
     if (isSubmitVisible) {
-        Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static200))
+        Column(modifier = modifier) {
+            if (showDivider) {
+                HorizontalDivider()
 
-        HorizontalDivider()
+                Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static100))
+            }
 
-        Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static100))
+            val horizontalPadding =
+                if (showDivider) {
+                    FirefoxTheme.layout.space.static200
+                } else {
+                    0.dp
+                }
 
-        FilledButton(
-            text = stringResource(id = R.string.webcompat_reporter_send_report),
-            containerColor = MaterialTheme.colorScheme.primary,
-            enabled = isSubmitEnabled,
-            modifier = Modifier
-                .fillMaxWidth()
-                .semantics {
-                    testTagsAsResourceId = true
-                    testTag = BROKEN_SITE_REPORTER_SEND_BUTTON
-                },
-        ) {
-            onSendClick()
+            FilledButton(
+                text = stringResource(id = R.string.webcompat_reporter_send_report),
+                containerColor = MaterialTheme.colorScheme.primary,
+                enabled = isSubmitEnabled,
+                modifier =
+                    Modifier.fillMaxWidth().padding(horizontal = horizontalPadding).semantics {
+                        testTagsAsResourceId = true
+                        testTag = BROKEN_SITE_REPORTER_SEND_BUTTON
+                    },
+            ) {
+                onSendClick()
+            }
         }
     }
 }
 
 @Composable
-private fun WebCompatReporterFooter(
-    onLearnMoreClick: () -> Unit,
-) {
+private fun WebCompatReporterFooter(onLearnMoreClick: () -> Unit) {
     Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static150))
 
     LinkText(
-        text = stringResource(
-            R.string.webcompat_reporter_description_3,
-            stringResource(R.string.app_name),
-            stringResource(R.string.webcompat_reporter_learn_more),
-        ),
-        linkTextStates = listOf(
-            LinkTextState(
-                text = stringResource(R.string.webcompat_reporter_learn_more),
-                url = "",
-                onClick = { onLearnMoreClick() },
+        text =
+            stringResource(
+                R.string.webcompat_reporter_description_3,
+                stringResource(R.string.app_name),
+                stringResource(R.string.webcompat_reporter_learn_more),
             ),
-        ),
+        linkTextStates =
+            listOf(
+                LinkTextState(
+                    text = stringResource(R.string.webcompat_reporter_learn_more),
+                    url = "",
+                    onClick = { onLearnMoreClick() },
+                )
+            ),
         style = FirefoxTheme.typography.body2.copy(color = MaterialTheme.colorScheme.onSurfaceVariant),
         linkTextColor = MaterialTheme.colorScheme.primary,
         linkTextDecoration = TextDecoration.None,
@@ -361,20 +502,28 @@ private fun WebCompatReporterFooter(
 private fun ProblemDescriptionInput(
     problemDescription: String,
     hasDescriptionError: Boolean,
+    problemDescriptionRequiredLabel: Boolean,
     onDescriptionChanged: (String) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
+        val labelResId =
+            if (problemDescriptionRequiredLabel) {
+                R.string.webcompat_reporter_label_mandatory_description
+            } else {
+                R.string.webcompat_reporter_label_optional_description
+            }
+
         Text(
-            text = stringResource(id = R.string.webcompat_reporter_label_mandatory_description),
+            text = stringResource(id = labelResId),
             style = FirefoxTheme.typography.headline7,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    start = FirefoxTheme.layout.space.static50,
-                    bottom = FirefoxTheme.layout.space.static100,
-                    end = FirefoxTheme.layout.space.static50,
-                ),
+            modifier =
+                Modifier.fillMaxWidth()
+                    .padding(
+                        start = FirefoxTheme.layout.space.static50,
+                        bottom = FirefoxTheme.layout.space.static100,
+                        end = FirefoxTheme.layout.space.static50,
+                    ),
         )
 
         TextField(
@@ -385,10 +534,8 @@ private fun ProblemDescriptionInput(
             isError = hasDescriptionError,
             singleLine = false,
             maxLines = PROBLEM_DESCRIPTION_MAX_LINES,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(225.dp)
-                .semantics {
+            modifier =
+                Modifier.fillMaxWidth().height(225.dp).semantics {
                     testTagsAsResourceId = true
                     testTag = BROKEN_SITE_REPORTER_DESCRIPTION_INPUT
                 },
@@ -398,10 +545,7 @@ private fun ProblemDescriptionInput(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TempAppBar(
-    onCloseClick: () -> Unit,
-    scrollState: ScrollState,
-) {
+private fun TempAppBar(onCloseClick: () -> Unit) {
     TopAppBar(
         title = {
             Text(
@@ -420,17 +564,12 @@ private fun TempAppBar(
                 )
             }
         },
-        windowInsets = WindowInsets(
-            top = 0.dp,
-            bottom = 0.dp,
-        ),
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = if (scrollState.canScrollBackward) {
-                MaterialTheme.colorScheme.surfaceContainerHigh
-            } else {
-                MaterialTheme.colorScheme.surface
-            },
-        ),
+        windowInsets =
+            WindowInsets(
+                top = 0.dp,
+                bottom = 0.dp,
+            ),
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceBright),
     )
 }
 
@@ -450,9 +589,7 @@ private fun BrokenSiteReasonSection(
     Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static100))
 
     if (selectedReason == null) {
-        BrokenSiteReasonList(
-            onReasonSelected = onReasonSelected,
-        )
+        BrokenSiteReasonList(onReasonSelected = onReasonSelected)
     } else {
         BrokenSiteReasonListItem(
             text = stringResource(selectedReason.displayStringId),
@@ -467,25 +604,22 @@ private fun BrokenSiteReasonSection(
 }
 
 @Composable
-private fun BrokenSiteReasonList(
-    onReasonSelected: (BrokenSiteReason) -> Unit,
-) {
+private fun BrokenSiteReasonList(onReasonSelected: (BrokenSiteReason) -> Unit) {
     val reasons = BrokenSiteReason.entries
     val outerCornerRadius = AcornCorners.extraLarge
     val middleCornerRadius = AcornCorners.extraSmall
 
-    Column(
-        verticalArrangement = Arrangement.spacedBy(FirefoxTheme.layout.space.static25),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(FirefoxTheme.layout.space.static25)) {
         reasons.forEachIndexed { index, reason ->
             BrokenSiteReasonListItem(
                 text = stringResource(reason.displayStringId),
-                shape = getReasonListItemShape(
-                    index = index,
-                    lastIndex = reasons.lastIndex,
-                    outerCornerRadius = outerCornerRadius,
-                    middleCornerRadius = middleCornerRadius,
-                ),
+                shape =
+                    getReasonListItemShape(
+                        index = index,
+                        lastIndex = reasons.lastIndex,
+                        outerCornerRadius = outerCornerRadius,
+                        middleCornerRadius = middleCornerRadius,
+                    ),
                 onClick = {
                     onReasonSelected(reason)
                 },
@@ -497,9 +631,8 @@ private fun BrokenSiteReasonList(
 /**
  * Helper that returns the shape for a broken site reason list item based on its position in the list.
  *
- * The first item receives rounded top corners, the last item receives rounded bottom corners,
- * middle items receive a smaller rounded shape, and a single item receives rounded corners on all
- * sides.
+ * The first item receives rounded top corners, the last item receives rounded bottom corners, middle items receive a
+ * smaller rounded shape, and a single item receives rounded corners on all sides.
  *
  * @param index The position of the item in the reason list.
  * @param lastIndex The index of the last item in the reason list.
@@ -516,54 +649,50 @@ private fun getReasonListItemShape(
     return when {
         lastIndex == 0 -> RoundedCornerShape(outerCornerRadius)
 
-        index == 0 -> RoundedCornerShape(
-            topStart = outerCornerRadius,
-            topEnd = outerCornerRadius,
-        )
+        index == 0 ->
+            RoundedCornerShape(
+                topStart = outerCornerRadius,
+                topEnd = outerCornerRadius,
+            )
 
-        index == lastIndex -> RoundedCornerShape(
-            bottomStart = outerCornerRadius,
-            bottomEnd = outerCornerRadius,
-        )
+        index == lastIndex ->
+            RoundedCornerShape(
+                bottomStart = outerCornerRadius,
+                bottomEnd = outerCornerRadius,
+            )
 
         else -> RoundedCornerShape(middleCornerRadius)
     }
 }
 
-private class WebCompatPreviewParameterProvider : ThemedValueProvider<WebCompatReporterState>(
-    sequenceOf(
-        // Initial feature opening
-        WebCompatReporterState(
-            enteredUrl = "www.example.com/url_parameters_that_break_the_page",
-        ),
-        // Error in URL field
-        WebCompatReporterState(
-            enteredUrl = "",
-        ),
-        // Multi-line description
-        WebCompatReporterState(
-            enteredUrl = "www.example.com/url_parameters_that_break_the_page",
-            reason = BrokenSiteReason.Slow,
-            problemDescription = "The site wouldn’t load and after I tried xyz it still wouldn’t " +
-                "load and then again site wouldn’t load and after I tried xyz it still wouldn’t " +
-                "load and then again site wouldn’t load and after I tried xyz it still wouldn’t " +
-                "load and then again site wouldn’t load and after I tried xyz it still wouldn’t " +
-                "load and then again site wouldn’t load and after I tried xyz it still wouldn’t " +
-                "load and then again ",
-        ),
-    ),
-)
+private class WebCompatPreviewParameterProvider :
+    ThemedValueProvider<WebCompatReporterState>(
+        sequenceOf(
+            // Initial feature opening
+            WebCompatReporterState(enteredUrl = "www.example.com/url_parameters_that_break_the_page"),
+            // Error in URL field
+            WebCompatReporterState(enteredUrl = ""),
+            // Multi-line description
+            WebCompatReporterState(
+                enteredUrl = "www.example.com/url_parameters_that_break_the_page",
+                reason = BrokenSiteReason.Slow,
+                problemDescription =
+                    "The site wouldn’t load and after I tried xyz it still wouldn’t " +
+                        "load and then again site wouldn’t load and after I tried xyz it still wouldn’t " +
+                        "load and then again site wouldn’t load and after I tried xyz it still wouldn’t " +
+                        "load and then again site wouldn’t load and after I tried xyz it still wouldn’t " +
+                        "load and then again site wouldn’t load and after I tried xyz it still wouldn’t " +
+                        "load and then again ",
+            ),
+        )
+    )
 
 @Preview
 @Composable
 private fun WebCompatReporterPreview(
-    @PreviewParameter(WebCompatPreviewParameterProvider::class) state: ThemedValue<WebCompatReporterState>,
+    @PreviewParameter(WebCompatPreviewParameterProvider::class) state: ThemedValue<WebCompatReporterState>
 ) {
     FirefoxTheme(state.theme) {
-        WebCompatReporter(
-            store = WebCompatReporterStore(
-                initialState = state.value,
-            ),
-        )
+        WebCompatReporter(store = WebCompatReporterStore(initialState = state.value))
     }
 }

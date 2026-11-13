@@ -3,13 +3,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Swizzle.h"
+
 #include "Logging.h"
-#include "src/base/SkVx.h"
 #include "Orientation.h"
+#include "SwizzleHelpers.h"
 #include "Tools.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/EndianUtils.h"
 #include "mozilla/UniquePtr.h"
+#include "src/base/SkVx.h"
 
 #ifdef USE_SSE2
 #  include "mozilla/SSE.h"
@@ -24,89 +26,6 @@
 
 namespace mozilla {
 namespace gfx {
-
-/**
- * Convenience macros for dispatching to various format combinations.
- */
-
-// Hash the formats to a relatively dense value to optimize jump table
-// generation. The first 6 formats in SurfaceFormat are the 32-bit BGRA variants
-// and are the most common formats dispatched here. Room is reserved in the
-// lowish bits for up to these 6 destination formats. If a destination format is
-// >= 6, the 6th bit is set to avoid collisions.
-#define FORMAT_KEY(aSrcFormat, aDstFormat) \
-  (int(aSrcFormat) * 6 + int(aDstFormat) + (int(int(aDstFormat) >= 6) << 6))
-
-#define FORMAT_CASE_EXPR(aSrcFormat, aDstFormat, ...) \
-  case FORMAT_KEY(aSrcFormat, aDstFormat):            \
-    __VA_ARGS__;                                      \
-    return true;
-
-#define FORMAT_CASE(aSrcFormat, aDstFormat, ...) \
-  FORMAT_CASE_EXPR(aSrcFormat, aDstFormat, FORMAT_CASE_CALL(__VA_ARGS__))
-
-#define FORMAT_CASE_ROW(aSrcFormat, aDstFormat, ...) \
-  case FORMAT_KEY(aSrcFormat, aDstFormat):           \
-    return &__VA_ARGS__;
-
-/**
- * Constexpr functions for analyzing format attributes in templates.
- */
-
-// Whether B comes before R in pixel memory layout.
-static constexpr bool IsBGRFormat(SurfaceFormat aFormat) {
-  return aFormat == SurfaceFormat::B8G8R8A8 ||
-         (std::endian::native == std::endian::little &&
-          aFormat == SurfaceFormat::R5G6B5_UINT16) ||
-         aFormat == SurfaceFormat::B8G8R8X8 || aFormat == SurfaceFormat::B8G8R8;
-}
-
-// Whether the order of B and R need to be swapped to map from src to dst.
-static constexpr bool ShouldSwapRB(SurfaceFormat aSrcFormat,
-                                   SurfaceFormat aDstFormat) {
-  return IsBGRFormat(aSrcFormat) != IsBGRFormat(aDstFormat);
-}
-
-// The starting byte of the RGB components in pixel memory.
-static constexpr uint32_t RGBByteIndex(SurfaceFormat aFormat) {
-  return aFormat == SurfaceFormat::A8R8G8B8 ||
-                 aFormat == SurfaceFormat::X8R8G8B8
-             ? 1
-             : 0;
-}
-
-// The byte of the alpha component, which just comes after RGB.
-static constexpr uint32_t AlphaByteIndex(SurfaceFormat aFormat) {
-  return (RGBByteIndex(aFormat) + 3) % 4;
-}
-
-// The endian-dependent bit shift to access RGB of a UINT32 pixel.
-static constexpr uint32_t RGBBitShift(SurfaceFormat aFormat) {
-  if constexpr (std::endian::native == std::endian::little) {
-    return 8 * RGBByteIndex(aFormat);
-  } else {
-    return 8 - 8 * RGBByteIndex(aFormat);
-  }
-}
-
-// The endian-dependent bit shift to access alpha of a UINT32 pixel.
-static constexpr uint32_t AlphaBitShift(SurfaceFormat aFormat) {
-  return (RGBBitShift(aFormat) + 24) % 32;
-}
-
-// Whether the pixel format should ignore the value of the alpha channel and
-// treat it as opaque.
-static constexpr bool IgnoreAlpha(SurfaceFormat aFormat) {
-  return aFormat == SurfaceFormat::B8G8R8X8 ||
-         aFormat == SurfaceFormat::R8G8B8X8 ||
-         aFormat == SurfaceFormat::X8R8G8B8;
-}
-
-// Whether to force alpha to opaque to map from src to dst.
-static constexpr bool ShouldForceOpaque(SurfaceFormat aSrcFormat,
-                                        SurfaceFormat aDstFormat) {
-  return IgnoreAlpha(aSrcFormat) != IgnoreAlpha(aDstFormat);
-}
 
 #ifdef USE_SSE2
 /**
@@ -162,6 +81,31 @@ void SwizzleRow_SSE2(const uint8_t*, uint8_t*, int32_t);
         SwizzleRow_SSE2<ShouldSwapRB(aSrcFormat, aDstFormat), \
                         ShouldForceOpaque(aSrcFormat, aDstFormat)>)
 
+template <bool aSwapRB, bool aInverted>
+void SwizzleCmykRow_SSE2(const uint8_t*, uint8_t*, int32_t);
+
+#  define SWIZZLE_CMYK_ROW_SSE2(aSrcFormat, aDstFormat)                       \
+    FORMAT_CASE_ROW(aSrcFormat, aDstFormat,                                   \
+                    SwizzleCmykRow_SSE2<ShouldSwapRB(aSrcFormat, aDstFormat), \
+                                        ShouldInvert(aSrcFormat)>)
+
+template <bool aSwapRB, bool aOpaqueAlpha>
+void Swizzle_SSSE3(const uint8_t*, int32_t, uint8_t*, int32_t, IntSize);
+
+#  define SWIZZLE_SSSE3(aSrcFormat, aDstFormat)                     \
+    FORMAT_CASE(aSrcFormat, aDstFormat,                             \
+                Swizzle_SSSE3<ShouldSwapRB(aSrcFormat, aDstFormat), \
+                              ShouldForceOpaque(aSrcFormat, aDstFormat)>)
+
+template <bool aSwapRB, bool aOpaqueAlpha>
+void SwizzleRow_SSSE3(const uint8_t*, uint8_t*, int32_t);
+
+#  define SWIZZLE_ROW_SSSE3(aSrcFormat, aDstFormat)            \
+    FORMAT_CASE_ROW(                                           \
+        aSrcFormat, aDstFormat,                                \
+        SwizzleRow_SSSE3<ShouldSwapRB(aSrcFormat, aDstFormat), \
+                         ShouldForceOpaque(aSrcFormat, aDstFormat)>)
+
 template <bool aSwapRB>
 void UnpackRowRGB24_SSSE3(const uint8_t*, uint8_t*, int32_t);
 
@@ -170,6 +114,55 @@ void UnpackRowRGB24_SSSE3(const uint8_t*, uint8_t*, int32_t);
         SurfaceFormat::R8G8B8, aDstFormat, \
         UnpackRowRGB24_SSSE3<ShouldSwapRB(SurfaceFormat::R8G8B8, aDstFormat)>)
 
+template <bool aSwapRB, bool aOpaqueAlpha>
+void Premultiply_AVX2(const uint8_t*, int32_t, uint8_t*, int32_t, IntSize);
+
+#  define PREMULTIPLY_AVX2(aSrcFormat, aDstFormat)                     \
+    FORMAT_CASE(aSrcFormat, aDstFormat,                                \
+                Premultiply_AVX2<ShouldSwapRB(aSrcFormat, aDstFormat), \
+                                 ShouldForceOpaque(aSrcFormat, aDstFormat)>)
+
+template <bool aSwapRB, bool aOpaqueAlpha>
+void PremultiplyRow_AVX2(const uint8_t*, uint8_t*, int32_t);
+
+#  define PREMULTIPLY_ROW_AVX2(aSrcFormat, aDstFormat)            \
+    FORMAT_CASE_ROW(                                              \
+        aSrcFormat, aDstFormat,                                   \
+        PremultiplyRow_AVX2<ShouldSwapRB(aSrcFormat, aDstFormat), \
+                            ShouldForceOpaque(aSrcFormat, aDstFormat)>)
+
+template <bool aSwapRB>
+void Unpremultiply_AVX2(const uint8_t*, int32_t, uint8_t*, int32_t, IntSize);
+
+#  define UNPREMULTIPLY_AVX2(aSrcFormat, aDstFormat) \
+    FORMAT_CASE(aSrcFormat, aDstFormat,              \
+                Unpremultiply_AVX2<ShouldSwapRB(aSrcFormat, aDstFormat)>)
+
+template <bool aSwapRB>
+void UnpremultiplyRow_AVX2(const uint8_t*, uint8_t*, int32_t);
+
+#  define UNPREMULTIPLY_ROW_AVX2(aSrcFormat, aDstFormat) \
+    FORMAT_CASE_ROW(                                     \
+        aSrcFormat, aDstFormat,                          \
+        UnpremultiplyRow_AVX2<ShouldSwapRB(aSrcFormat, aDstFormat)>)
+
+template <bool aSwapRB, bool aOpaqueAlpha>
+void Swizzle_AVX2(const uint8_t*, int32_t, uint8_t*, int32_t, IntSize);
+
+#  define SWIZZLE_AVX2(aSrcFormat, aDstFormat)                     \
+    FORMAT_CASE(aSrcFormat, aDstFormat,                            \
+                Swizzle_AVX2<ShouldSwapRB(aSrcFormat, aDstFormat), \
+                             ShouldForceOpaque(aSrcFormat, aDstFormat)>)
+
+template <bool aSwapRB, bool aOpaqueAlpha>
+void SwizzleRow_AVX2(const uint8_t*, uint8_t*, int32_t);
+
+#  define SWIZZLE_ROW_AVX2(aSrcFormat, aDstFormat)            \
+    FORMAT_CASE_ROW(                                          \
+        aSrcFormat, aDstFormat,                               \
+        SwizzleRow_AVX2<ShouldSwapRB(aSrcFormat, aDstFormat), \
+                        ShouldForceOpaque(aSrcFormat, aDstFormat)>)
+
 template <bool aSwapRB>
 void UnpackRowRGB24_AVX2(const uint8_t*, uint8_t*, int32_t);
 
@@ -177,6 +170,14 @@ void UnpackRowRGB24_AVX2(const uint8_t*, uint8_t*, int32_t);
     FORMAT_CASE_ROW(                       \
         SurfaceFormat::R8G8B8, aDstFormat, \
         UnpackRowRGB24_AVX2<ShouldSwapRB(SurfaceFormat::R8G8B8, aDstFormat)>)
+
+template <bool aSwapRB, bool aInverted>
+void SwizzleCmykRow_AVX2(const uint8_t*, uint8_t*, int32_t);
+
+#  define SWIZZLE_CMYK_ROW_AVX2(aSrcFormat, aDstFormat)                       \
+    FORMAT_CASE_ROW(aSrcFormat, aDstFormat,                                   \
+                    SwizzleCmykRow_AVX2<ShouldSwapRB(aSrcFormat, aDstFormat), \
+                                        ShouldInvert(aSrcFormat)>)
 
 #endif
 
@@ -241,6 +242,14 @@ void UnpackRowRGB24_NEON(const uint8_t*, uint8_t*, int32_t);
     FORMAT_CASE_ROW(                       \
         SurfaceFormat::R8G8B8, aDstFormat, \
         UnpackRowRGB24_NEON<ShouldSwapRB(SurfaceFormat::R8G8B8, aDstFormat)>)
+
+template <bool aSwapRB, bool aInverted>
+void SwizzleCmykRow_NEON(const uint8_t*, uint8_t*, int32_t);
+
+#  define SWIZZLE_CMYK_ROW_NEON(aSrcFormat, aDstFormat)                       \
+    FORMAT_CASE_ROW(aSrcFormat, aDstFormat,                                   \
+                    SwizzleCmykRow_NEON<ShouldSwapRB(aSrcFormat, aDstFormat), \
+                                        ShouldInvert(aSrcFormat)>)
 #endif
 
 /**
@@ -272,16 +281,16 @@ static void PremultiplyChunkFallback(const uint8_t*& aSrc, uint8_t*& aDst,
     }
     // Approximate the multiply by alpha and divide by 255 which is
     // essentially:
-    // c = c*a + 255; c = (c + (c >> 8)) >> 8;
+    // c = c*a + 128; c = (c + (c >> 8)) >> 8;
     // However, we omit the final >> 8 to fold it with the final shift into
     // place depending on desired output format.
-    rb = rb * a + 0x00FF00FF;
+    rb = rb * a + 0x00800080;
     rb = (rb + ((rb >> 8) & 0x00FF00FF)) & 0xFF00FF00;
 
     // Use same approximation as above, but G is shifted 8 bits left.
     // Alpha is left out and handled separately.
     uint32_t g = color & (0xFF00 << aSrcRGBShift);
-    g = g * a + (0xFF00 << aSrcRGBShift);
+    g = g * a + (0x8000 << aSrcRGBShift);
     g = (g + (g >> 8)) & (0xFF0000 << aSrcRGBShift);
 
     // The above math leaves RGB shifted left by 8 bits.
@@ -352,10 +361,9 @@ static void PremultiplyFallback(const uint8_t* aSrc, int32_t aSrcGap,
 // If rows are tightly packed, and the size of the total area will fit within
 // the precision range of a single row, then process all the data as if it was
 // a single row.
-static inline IntSize CollapseSize(const IntSize& aSize, int32_t aSrcStride,
-                                   int32_t aDstStride) {
-  if (aSrcStride == aDstStride && (aSrcStride & 3) == 0 &&
-      aSrcStride / 4 == aSize.width) {
+static inline IntSize CollapseSize(const IntSize& aSize, int32_t aSrcStrideGap,
+                                   int32_t aDstStrideGap) {
+  if (!aSrcStrideGap && !aDstStrideGap) {
     CheckedInt32 area = CheckedInt32(aSize.width) * CheckedInt32(aSize.height);
     if (area.isValid()) {
       return IntSize(area.value(), 1);
@@ -376,11 +384,11 @@ static inline int32_t GetStrideGap(int32_t aWidth, SurfaceFormat aFormat,
 bool PremultiplyData(const uint8_t* aSrc, int32_t aSrcStride,
                      SurfaceFormat aSrcFormat, uint8_t* aDst,
                      int32_t aDstStride, SurfaceFormat aDstFormat,
-                     const IntSize& aSize) {
+                     const IntSize& aSize,
+                     SwizzleArch aArch /* = SwizzleArch::eAny */) {
   if (aSize.IsEmpty()) {
     return true;
   }
-  IntSize size = CollapseSize(aSize, aSrcStride, aDstStride);
   // Find gap from end of row to the start of the next row.
   int32_t srcGap = GetStrideGap(aSize.width, aSrcFormat, aSrcStride);
   int32_t dstGap = GetStrideGap(aSize.width, aDstFormat, aDstStride);
@@ -388,11 +396,27 @@ bool PremultiplyData(const uint8_t* aSrc, int32_t aSrcStride,
   if (srcGap < 0 || dstGap < 0) {
     return false;
   }
+  IntSize size = CollapseSize(aSize, srcGap, dstGap);
 
 #define FORMAT_CASE_CALL(...) __VA_ARGS__(aSrc, srcGap, aDst, dstGap, size)
 
 #ifdef USE_SSE2
-  if (mozilla::supports_sse2()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eAVX2 && mozilla::supports_avx2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+      PREMULTIPLY_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
+      PREMULTIPLY_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8X8)
+      PREMULTIPLY_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
+      PREMULTIPLY_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8X8)
+      PREMULTIPLY_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::R8G8B8A8)
+      PREMULTIPLY_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::R8G8B8X8)
+      PREMULTIPLY_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8A8)
+      PREMULTIPLY_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8X8)
+      default:
+        break;
+    }
+
+  if (aArch & SwizzleArch::eSSE2 && mozilla::supports_sse2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       PREMULTIPLY_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
       PREMULTIPLY_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8X8)
       PREMULTIPLY_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
@@ -407,7 +431,8 @@ bool PremultiplyData(const uint8_t* aSrc, int32_t aSrcStride,
 #endif
 
 #ifdef USE_NEON
-  if (mozilla::supports_neon()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eNEON && mozilla::supports_neon())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       PREMULTIPLY_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
       PREMULTIPLY_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8X8)
       PREMULTIPLY_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
@@ -421,6 +446,10 @@ bool PremultiplyData(const uint8_t* aSrc, int32_t aSrcStride,
     }
 #endif
 
+  if (!(aArch & SwizzleArch::eFallback)) {
+    return false;
+  }
+
   switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
     PREMULTIPLY_FALLBACK(SurfaceFormat::B8G8R8A8)
     PREMULTIPLY_FALLBACK(SurfaceFormat::R8G8B8A8)
@@ -431,14 +460,29 @@ bool PremultiplyData(const uint8_t* aSrc, int32_t aSrcStride,
 
 #undef FORMAT_CASE_CALL
 
-  MOZ_ASSERT(false, "Unsupported premultiply formats");
+  MOZ_ASSERT_UNREACHABLE("Unsupported premultiply formats");
   return false;
 }
 
-SwizzleRowFn PremultiplyRow(SurfaceFormat aSrcFormat,
-                            SurfaceFormat aDstFormat) {
+SwizzleRowFn PremultiplyRow(SurfaceFormat aSrcFormat, SurfaceFormat aDstFormat,
+                            SwizzleArch aArch /* = SwizzleArch::eAny */) {
 #ifdef USE_SSE2
-  if (mozilla::supports_sse2()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eAVX2 && mozilla::supports_avx2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+      PREMULTIPLY_ROW_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
+      PREMULTIPLY_ROW_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8X8)
+      PREMULTIPLY_ROW_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
+      PREMULTIPLY_ROW_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8X8)
+      PREMULTIPLY_ROW_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::R8G8B8A8)
+      PREMULTIPLY_ROW_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::R8G8B8X8)
+      PREMULTIPLY_ROW_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8A8)
+      PREMULTIPLY_ROW_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8X8)
+      default:
+        break;
+    }
+
+  if (aArch & SwizzleArch::eSSE2 && mozilla::supports_sse2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       PREMULTIPLY_ROW_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
       PREMULTIPLY_ROW_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8X8)
       PREMULTIPLY_ROW_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
@@ -453,7 +497,8 @@ SwizzleRowFn PremultiplyRow(SurfaceFormat aSrcFormat,
 #endif
 
 #ifdef USE_NEON
-  if (mozilla::supports_neon()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eNEON && mozilla::supports_neon())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       PREMULTIPLY_ROW_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
       PREMULTIPLY_ROW_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8X8)
       PREMULTIPLY_ROW_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
@@ -466,6 +511,10 @@ SwizzleRowFn PremultiplyRow(SurfaceFormat aSrcFormat,
         break;
     }
 #endif
+
+  if (!(aArch & SwizzleArch::eFallback)) {
+    return nullptr;
+  }
 
   switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
     PREMULTIPLY_ROW_FALLBACK(SurfaceFormat::B8G8R8A8)
@@ -484,13 +533,26 @@ SwizzleRowFn PremultiplyRow(SurfaceFormat aSrcFormat,
  */
 
 // Generate a table of 8.16 fixed-point reciprocals representing 1/alpha.
+// This generates a table of 8.16 fixed-point reciprocals representing 1/alpha,
+// identical to the scalar fallback's sUnpremultiplyTable (0xFF00FF / alpha).
+// The full reciprocal can need up to 24 bits, so it does not fit in a single
+// 16-bit lane; UnpremultiplyReverse_SIMD splits each entry into a high and low
+// 16-bit half at runtime and computes (channel * reciprocal + 0x8000) >> 16
+// with three 16-bit multiplies. A previous implementation squeezed the
+// reciprocal into 16 bits by scaling it down (by 8 or 0x100), which lost
+// precision and rounded down by 1 LSB on a subset of anti-aliased / alpha
+// pixels, making getImageData() differ by CPU architecture (x86 SSE2 vs
+// scalar/NEON). Using the full reciprocal makes the SSE2 output bit-identical
+// to the scalar/NEON paths. Rounding the product gives (channel * 255 + alpha /
+// 2) / alpha for every valid premultiplied channel (0 <= channel <= alpha),
+// matching PNG export.
 #define UNPREMULQ(x) (0xFF00FFU / (x))
 #define UNPREMULQ_2(x) UNPREMULQ(x), UNPREMULQ((x) + 1)
 #define UNPREMULQ_4(x) UNPREMULQ_2(x), UNPREMULQ_2((x) + 2)
 #define UNPREMULQ_8(x) UNPREMULQ_4(x), UNPREMULQ_4((x) + 4)
 #define UNPREMULQ_16(x) UNPREMULQ_8(x), UNPREMULQ_8((x) + 8)
 #define UNPREMULQ_32(x) UNPREMULQ_16(x), UNPREMULQ_16((x) + 16)
-static const uint32_t sUnpremultiplyTable[256] = {0,
+extern const uint32_t sUnpremultiplyTable[256] = {0,
                                                   UNPREMULQ(1),
                                                   UNPREMULQ_2(2),
                                                   UNPREMULQ_4(4),
@@ -522,12 +584,12 @@ static void UnpremultiplyChunkFallback(const uint8_t*& aSrc, uint8_t*& aDst,
     uint8_t a = aSrc[aSrcAIndex];
 
     // Access the 8.16 reciprocal from the table based on alpha. Multiply by
-    // the reciprocal and shift off the fraction bits to approximate the
+    // the reciprocal and round off the fraction bits to approximate the
     // division by alpha.
     uint32_t q = sUnpremultiplyTable[a];
-    aDst[aDstRGBIndex + 0] = (r * q) >> 16;
-    aDst[aDstRGBIndex + 1] = (g * q) >> 16;
-    aDst[aDstRGBIndex + 2] = (b * q) >> 16;
+    aDst[aDstRGBIndex + 0] = (r * q + 0x8000) >> 16;
+    aDst[aDstRGBIndex + 1] = (g * q + 0x8000) >> 16;
+    aDst[aDstRGBIndex + 2] = (b * q + 0x8000) >> 16;
     aDst[aDstAIndex] = a;
 
     aSrc += 4;
@@ -583,11 +645,11 @@ static void UnpremultiplyFallback(const uint8_t* aSrc, int32_t aSrcGap,
 bool UnpremultiplyData(const uint8_t* aSrc, int32_t aSrcStride,
                        SurfaceFormat aSrcFormat, uint8_t* aDst,
                        int32_t aDstStride, SurfaceFormat aDstFormat,
-                       const IntSize& aSize) {
+                       const IntSize& aSize,
+                       SwizzleArch aArch /* = SwizzleArch::eAny */) {
   if (aSize.IsEmpty()) {
     return true;
   }
-  IntSize size = CollapseSize(aSize, aSrcStride, aDstStride);
   // Find gap from end of row to the start of the next row.
   int32_t srcGap = GetStrideGap(aSize.width, aSrcFormat, aSrcStride);
   int32_t dstGap = GetStrideGap(aSize.width, aDstFormat, aDstStride);
@@ -595,11 +657,23 @@ bool UnpremultiplyData(const uint8_t* aSrc, int32_t aSrcStride,
   if (srcGap < 0 || dstGap < 0) {
     return false;
   }
+  IntSize size = CollapseSize(aSize, srcGap, dstGap);
 
 #define FORMAT_CASE_CALL(...) __VA_ARGS__(aSrc, srcGap, aDst, dstGap, size)
 
 #ifdef USE_SSE2
-  if (mozilla::supports_sse2()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eAVX2 && mozilla::supports_avx2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+      UNPREMULTIPLY_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
+      UNPREMULTIPLY_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
+      UNPREMULTIPLY_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::R8G8B8A8)
+      UNPREMULTIPLY_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8A8)
+      default:
+        break;
+    }
+
+  if (aArch & SwizzleArch::eSSE2 && mozilla::supports_sse2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       UNPREMULTIPLY_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
       UNPREMULTIPLY_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
       UNPREMULTIPLY_SSE2(SurfaceFormat::R8G8B8A8, SurfaceFormat::R8G8B8A8)
@@ -610,7 +684,8 @@ bool UnpremultiplyData(const uint8_t* aSrc, int32_t aSrcStride,
 #endif
 
 #ifdef USE_NEON
-  if (mozilla::supports_neon()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eNEON && mozilla::supports_neon())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       UNPREMULTIPLY_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
       UNPREMULTIPLY_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
       UNPREMULTIPLY_NEON(SurfaceFormat::R8G8B8A8, SurfaceFormat::R8G8B8A8)
@@ -619,6 +694,10 @@ bool UnpremultiplyData(const uint8_t* aSrc, int32_t aSrcStride,
         break;
     }
 #endif
+
+  if (!(aArch & SwizzleArch::eFallback)) {
+    return false;
+  }
 
   switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
     UNPREMULTIPLY_FALLBACK(SurfaceFormat::B8G8R8A8)
@@ -630,14 +709,26 @@ bool UnpremultiplyData(const uint8_t* aSrc, int32_t aSrcStride,
 
 #undef FORMAT_CASE_CALL
 
-  MOZ_ASSERT(false, "Unsupported unpremultiply formats");
+  MOZ_ASSERT_UNREACHABLE("Unsupported unpremultiply formats");
   return false;
 }
 
 SwizzleRowFn UnpremultiplyRow(SurfaceFormat aSrcFormat,
-                              SurfaceFormat aDstFormat) {
+                              SurfaceFormat aDstFormat,
+                              SwizzleArch aArch /* = SwizzleArch::eAny */) {
 #ifdef USE_SSE2
-  if (mozilla::supports_sse2()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eAVX2 && mozilla::supports_avx2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+      UNPREMULTIPLY_ROW_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
+      UNPREMULTIPLY_ROW_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
+      UNPREMULTIPLY_ROW_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::R8G8B8A8)
+      UNPREMULTIPLY_ROW_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8A8)
+      default:
+        break;
+    }
+
+  if (aArch & SwizzleArch::eSSE2 && mozilla::supports_sse2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       UNPREMULTIPLY_ROW_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
       UNPREMULTIPLY_ROW_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
       UNPREMULTIPLY_ROW_SSE2(SurfaceFormat::R8G8B8A8, SurfaceFormat::R8G8B8A8)
@@ -648,7 +739,8 @@ SwizzleRowFn UnpremultiplyRow(SurfaceFormat aSrcFormat,
 #endif
 
 #ifdef USE_NEON
-  if (mozilla::supports_neon()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eNEON && mozilla::supports_neon())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       UNPREMULTIPLY_ROW_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::B8G8R8A8)
       UNPREMULTIPLY_ROW_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
       UNPREMULTIPLY_ROW_NEON(SurfaceFormat::R8G8B8A8, SurfaceFormat::R8G8B8A8)
@@ -657,6 +749,10 @@ SwizzleRowFn UnpremultiplyRow(SurfaceFormat aSrcFormat,
         break;
     }
 #endif
+
+  if (!(aArch & SwizzleArch::eFallback)) {
+    return nullptr;
+  }
 
   switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
     UNPREMULTIPLY_ROW_FALLBACK(SurfaceFormat::B8G8R8A8)
@@ -1075,7 +1171,7 @@ static void UnpackRowRGB24_To_ARGB(const uint8_t* aSrc, uint8_t* aDst,
     if constexpr (std::endian::native == std::endian::little) {
       *--dst = 0x000000FF | (r << 8) | (g << 16) | (b << 24);
     } else {
-      *--dst = 0xFF000000 | (r << 24) | (g << 16) | b;
+      *--dst = 0xFF000000 | (r << 16) | (g << 8) | b;
     }
     src -= 3;
   }
@@ -1084,13 +1180,92 @@ static void UnpackRowRGB24_To_ARGB(const uint8_t* aSrc, uint8_t* aDst,
 #define UNPACK_ROW_RGB_TO_ARGB(aDstFormat) \
   FORMAT_CASE_ROW(SurfaceFormat::R8G8B8, aDstFormat, UnpackRowRGB24_To_ARGB)
 
+// Fallback CMYK conversion implementation that uses splayed pixel math to
+// reduce the multiplications used. That is, the C and M components are isolated
+// from the Y and K components, which then can be multiplied as if they were two
+// 2-component vectors. Otherwise, an approximation of divide-by-255 is used
+// which is faster than an actual division. These optimizations are also used
+// for the xsimd implementations.
+template <bool aSwapRB, bool aInverted, uint32_t aDstRGBShift,
+          uint32_t aDstAShift>
+static void SwizzleCmykRowFallback(const uint8_t* aSrc, uint8_t* aDst,
+                                   int32_t aLength) {
+  // Source is 'Inverted CMYK', output is RGB.
+  // See: http://www.easyrgb.com/math.php?MATH=M12#text12
+  // Or:  http://www.ilkeratalay.com/colorspacesfaq.php#rgb
+
+  // From CMYK to CMY
+  // C = ( C * ( 1 - K ) + K )
+  // M = ( M * ( 1 - K ) + K )
+  // Y = ( Y * ( 1 - K ) + K )
+
+  // From Inverted CMYK to CMY is thus:
+  // C = ( (1-iC) * (1 - (1-iK)) + (1-iK) ) => 1 - iC*iK
+  // Same for M and Y
+
+  // Convert from CMY (0..1) to RGB (0..1)
+  // R = 1 - C => 1 - (1 - iC*iK) => iC*iK
+  // G = 1 - M => 1 - (1 - iM*iK) => iM*iK
+  // B = 1 - Y => 1 - (1 - iY*iK) => iY*iK
+  const uint8_t* end = aSrc + 4 * aLength;
+  do {
+    // Load and process 1 entire pixel at a time. The source is always inverted
+    // CMYK with iC, iM, iY, iK in bytes 0..3, so iK is the high byte, iC/iY
+    // form the even 16-bit lane pair and iM/iK form the odd pair.
+    uint32_t color = *reinterpret_cast<const uint32_t*>(aSrc);
+
+    // Invert if necessary, as the math expects inverted CMYK.
+    if constexpr (!aInverted) {
+      color = ~color;
+    }
+
+    uint32_t ik = color >> 24;
+
+    // Isolate the iC and iY components (the even lanes).
+    uint32_t icy = color & 0x00FF00FF;
+    // Swap the order of iC and iY if necessary.
+    if constexpr (aSwapRB) {
+      icy = (icy >> 16) | (icy << 16);
+    }
+    // Approximate the multiply by iK and divide by 255 which is essentially (ic
+    // means inverted channel here, not the iC channel):
+    // ic = ic*ik; ic = (ic + (ic >> 8) + 1) >> 8;
+    // However, we omit the final >> 8 to fold it with the final shift into
+    // place depending on desired output format.
+    icy = icy * ik;
+    icy = (icy + ((icy >> 8) & 0x00FF00FF) + 0x00010001) & 0xFF00FF00;
+
+    // Do the same for the M and K channels.
+    uint32_t imk = (color >> 8) & 0x00FF00FF;
+    imk = imk * ik;
+    imk = (imk + ((imk >> 8) & 0x00FF00FF) + 0x00010001) & 0xFF00FF00;
+
+    // The above math leaves each channel shifted left by 8 bits. Shift the C/Y
+    // pair and the M channel into their destination positions and force
+    // the alpha opaque.
+    *reinterpret_cast<uint32_t*>(aDst) = (icy >> (8 - aDstRGBShift)) |
+                                         ((imk & 0x0000FF00) << aDstRGBShift) |
+                                         (0xFF << aDstAShift);
+
+    aSrc += 4;
+    aDst += 4;
+  } while (aSrc < end);
+}
+
+#define SWIZZLE_CMYK_ROW(aSrcFormat, aDstFormat)                          \
+  FORMAT_CASE_ROW(                                                        \
+      aSrcFormat, aDstFormat,                                             \
+      SwizzleCmykRowFallback<                                             \
+          ShouldSwapRB(aSrcFormat, aDstFormat), ShouldInvert(aSrcFormat), \
+          RGBBitShift(aDstFormat), AlphaBitShift(aDstFormat)>)
+
 bool SwizzleData(const uint8_t* aSrc, int32_t aSrcStride,
                  SurfaceFormat aSrcFormat, uint8_t* aDst, int32_t aDstStride,
-                 SurfaceFormat aDstFormat, const IntSize& aSize) {
+                 SurfaceFormat aDstFormat, const IntSize& aSize,
+                 SwizzleArch aArch /* = SwizzleArch::eAny */) {
   if (aSize.IsEmpty()) {
     return true;
   }
-  IntSize size = CollapseSize(aSize, aSrcStride, aDstStride);
   // Find gap from end of row to the start of the next row.
   int32_t srcGap = GetStrideGap(aSize.width, aSrcFormat, aSrcStride);
   int32_t dstGap = GetStrideGap(aSize.width, aDstFormat, aDstStride);
@@ -1098,11 +1273,41 @@ bool SwizzleData(const uint8_t* aSrc, int32_t aSrcStride,
   if (srcGap < 0 || dstGap < 0) {
     return false;
   }
+  IntSize size = CollapseSize(aSize, srcGap, dstGap);
 
 #define FORMAT_CASE_CALL(...) __VA_ARGS__(aSrc, srcGap, aDst, dstGap, size)
 
 #ifdef USE_SSE2
-  if (mozilla::supports_sse2()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eAVX2 && mozilla::supports_avx2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+      SWIZZLE_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
+      SWIZZLE_AVX2(SurfaceFormat::B8G8R8X8, SurfaceFormat::R8G8B8X8)
+      SWIZZLE_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8X8)
+      SWIZZLE_AVX2(SurfaceFormat::B8G8R8X8, SurfaceFormat::R8G8B8A8)
+      SWIZZLE_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8A8)
+      SWIZZLE_AVX2(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8X8)
+      SWIZZLE_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8X8)
+      SWIZZLE_AVX2(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8A8)
+      default:
+        break;
+    }
+
+  if (aArch & SwizzleArch::eSSSE3 && mozilla::supports_ssse3())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+      SWIZZLE_SSSE3(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
+      SWIZZLE_SSSE3(SurfaceFormat::B8G8R8X8, SurfaceFormat::R8G8B8X8)
+      SWIZZLE_SSSE3(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8X8)
+      SWIZZLE_SSSE3(SurfaceFormat::B8G8R8X8, SurfaceFormat::R8G8B8A8)
+      SWIZZLE_SSSE3(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8A8)
+      SWIZZLE_SSSE3(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8X8)
+      SWIZZLE_SSSE3(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8X8)
+      SWIZZLE_SSSE3(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8A8)
+      default:
+        break;
+    }
+
+  if (aArch & SwizzleArch::eSSE2 && mozilla::supports_sse2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       SWIZZLE_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
       SWIZZLE_SSE2(SurfaceFormat::B8G8R8X8, SurfaceFormat::R8G8B8X8)
       SWIZZLE_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8X8)
@@ -1117,7 +1322,8 @@ bool SwizzleData(const uint8_t* aSrc, int32_t aSrcStride,
 #endif
 
 #ifdef USE_NEON
-  if (mozilla::supports_neon()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eNEON && mozilla::supports_neon())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       SWIZZLE_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
       SWIZZLE_NEON(SurfaceFormat::B8G8R8X8, SurfaceFormat::R8G8B8X8)
       SWIZZLE_NEON(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8X8)
@@ -1130,6 +1336,10 @@ bool SwizzleData(const uint8_t* aSrc, int32_t aSrcStride,
         break;
     }
 #endif
+
+  if (!(aArch & SwizzleArch::eFallback)) {
+    return false;
+  }
 
   switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
     SWIZZLE_FALLBACK(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
@@ -1185,7 +1395,7 @@ bool SwizzleData(const uint8_t* aSrc, int32_t aSrcStride,
 
 #undef FORMAT_CASE_CALL
 
-  MOZ_ASSERT(false, "Unsupported swizzle formats");
+  MOZ_ASSERT_UNREACHABLE("Unsupported swizzle formats");
   return false;
 }
 
@@ -1260,33 +1470,60 @@ static bool SwizzleYFlipDataInternal(const uint8_t* aSrc, int32_t aSrcStride,
 bool SwizzleYFlipData(const uint8_t* aSrc, int32_t aSrcStride,
                       SurfaceFormat aSrcFormat, uint8_t* aDst,
                       int32_t aDstStride, SurfaceFormat aDstFormat,
-                      const IntSize& aSize) {
+                      const IntSize& aSize,
+                      SwizzleArch aArch /* = SwizzleArch::eAny */) {
   return SwizzleYFlipDataInternal(aSrc, aSrcStride, aSrcFormat, aDst,
                                   aDstStride, aDstFormat, aSize,
-                                  SwizzleRow(aSrcFormat, aDstFormat));
+                                  SwizzleRow(aSrcFormat, aDstFormat, aArch));
 }
 
 bool PremultiplyYFlipData(const uint8_t* aSrc, int32_t aSrcStride,
                           SurfaceFormat aSrcFormat, uint8_t* aDst,
                           int32_t aDstStride, SurfaceFormat aDstFormat,
-                          const IntSize& aSize) {
-  return SwizzleYFlipDataInternal(aSrc, aSrcStride, aSrcFormat, aDst,
-                                  aDstStride, aDstFormat, aSize,
-                                  PremultiplyRow(aSrcFormat, aDstFormat));
+                          const IntSize& aSize,
+                          SwizzleArch aArch /* = SwizzleArch::eAny */) {
+  return SwizzleYFlipDataInternal(
+      aSrc, aSrcStride, aSrcFormat, aDst, aDstStride, aDstFormat, aSize,
+      PremultiplyRow(aSrcFormat, aDstFormat, aArch));
 }
 
-SwizzleRowFn SwizzleRow(SurfaceFormat aSrcFormat, SurfaceFormat aDstFormat) {
+SwizzleRowFn SwizzleRow(SurfaceFormat aSrcFormat, SurfaceFormat aDstFormat,
+                        SwizzleArch aArch /* = SwizzleArch::eAny */) {
 #ifdef USE_SSE2
-  if (mozilla::supports_avx2()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eAVX2 && mozilla::supports_avx2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+      SWIZZLE_ROW_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
+      SWIZZLE_ROW_AVX2(SurfaceFormat::B8G8R8X8, SurfaceFormat::R8G8B8X8)
+      SWIZZLE_ROW_AVX2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8X8)
+      SWIZZLE_ROW_AVX2(SurfaceFormat::B8G8R8X8, SurfaceFormat::R8G8B8A8)
+      SWIZZLE_ROW_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8A8)
+      SWIZZLE_ROW_AVX2(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8X8)
+      SWIZZLE_ROW_AVX2(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8X8)
+      SWIZZLE_ROW_AVX2(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8A8)
       UNPACK_ROW_RGB_AVX2(SurfaceFormat::R8G8B8X8)
       UNPACK_ROW_RGB_AVX2(SurfaceFormat::R8G8B8A8)
       UNPACK_ROW_RGB_AVX2(SurfaceFormat::B8G8R8X8)
       UNPACK_ROW_RGB_AVX2(SurfaceFormat::B8G8R8A8)
+      SWIZZLE_CMYK_ROW_AVX2(SurfaceFormat::CMYK, SurfaceFormat::B8G8R8X8)
+      SWIZZLE_CMYK_ROW_AVX2(SurfaceFormat::CMYK, SurfaceFormat::B8G8R8A8)
+      SWIZZLE_CMYK_ROW_AVX2(SurfaceFormat::InvertedCMYK,
+                            SurfaceFormat::B8G8R8X8)
+      SWIZZLE_CMYK_ROW_AVX2(SurfaceFormat::InvertedCMYK,
+                            SurfaceFormat::B8G8R8A8)
       default:
         break;
     }
 
-  if (mozilla::supports_ssse3()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eSSSE3 && mozilla::supports_ssse3())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+      SWIZZLE_ROW_SSSE3(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
+      SWIZZLE_ROW_SSSE3(SurfaceFormat::B8G8R8X8, SurfaceFormat::R8G8B8X8)
+      SWIZZLE_ROW_SSSE3(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8X8)
+      SWIZZLE_ROW_SSSE3(SurfaceFormat::B8G8R8X8, SurfaceFormat::R8G8B8A8)
+      SWIZZLE_ROW_SSSE3(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8A8)
+      SWIZZLE_ROW_SSSE3(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8X8)
+      SWIZZLE_ROW_SSSE3(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8X8)
+      SWIZZLE_ROW_SSSE3(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8A8)
       UNPACK_ROW_RGB_SSSE3(SurfaceFormat::R8G8B8X8)
       UNPACK_ROW_RGB_SSSE3(SurfaceFormat::R8G8B8A8)
       UNPACK_ROW_RGB_SSSE3(SurfaceFormat::B8G8R8X8)
@@ -1295,7 +1532,8 @@ SwizzleRowFn SwizzleRow(SurfaceFormat aSrcFormat, SurfaceFormat aDstFormat) {
         break;
     }
 
-  if (mozilla::supports_sse2()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eSSE2 && mozilla::supports_sse2())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       SWIZZLE_ROW_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
       SWIZZLE_ROW_SSE2(SurfaceFormat::B8G8R8X8, SurfaceFormat::R8G8B8X8)
       SWIZZLE_ROW_SSE2(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8X8)
@@ -1304,13 +1542,20 @@ SwizzleRowFn SwizzleRow(SurfaceFormat aSrcFormat, SurfaceFormat aDstFormat) {
       SWIZZLE_ROW_SSE2(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8X8)
       SWIZZLE_ROW_SSE2(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8X8)
       SWIZZLE_ROW_SSE2(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8A8)
+      SWIZZLE_CMYK_ROW_SSE2(SurfaceFormat::CMYK, SurfaceFormat::B8G8R8X8)
+      SWIZZLE_CMYK_ROW_SSE2(SurfaceFormat::CMYK, SurfaceFormat::B8G8R8A8)
+      SWIZZLE_CMYK_ROW_SSE2(SurfaceFormat::InvertedCMYK,
+                            SurfaceFormat::B8G8R8X8)
+      SWIZZLE_CMYK_ROW_SSE2(SurfaceFormat::InvertedCMYK,
+                            SurfaceFormat::B8G8R8A8)
       default:
         break;
     }
 #endif
 
 #ifdef USE_NEON
-  if (mozilla::supports_neon()) switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
+  if (aArch & SwizzleArch::eNEON && mozilla::supports_neon())
+    switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
       UNPACK_ROW_RGB_NEON(SurfaceFormat::R8G8B8X8)
       UNPACK_ROW_RGB_NEON(SurfaceFormat::R8G8B8A8)
       UNPACK_ROW_RGB_NEON(SurfaceFormat::B8G8R8X8)
@@ -1323,10 +1568,20 @@ SwizzleRowFn SwizzleRow(SurfaceFormat aSrcFormat, SurfaceFormat aDstFormat) {
       SWIZZLE_ROW_NEON(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8X8)
       SWIZZLE_ROW_NEON(SurfaceFormat::R8G8B8A8, SurfaceFormat::B8G8R8X8)
       SWIZZLE_ROW_NEON(SurfaceFormat::R8G8B8X8, SurfaceFormat::B8G8R8A8)
+      SWIZZLE_CMYK_ROW_NEON(SurfaceFormat::CMYK, SurfaceFormat::B8G8R8X8)
+      SWIZZLE_CMYK_ROW_NEON(SurfaceFormat::CMYK, SurfaceFormat::B8G8R8A8)
+      SWIZZLE_CMYK_ROW_NEON(SurfaceFormat::InvertedCMYK,
+                            SurfaceFormat::B8G8R8X8)
+      SWIZZLE_CMYK_ROW_NEON(SurfaceFormat::InvertedCMYK,
+                            SurfaceFormat::B8G8R8A8)
       default:
         break;
     }
 #endif
+
+  if (!(aArch & SwizzleArch::eFallback)) {
+    return nullptr;
+  }
 
   switch (FORMAT_KEY(aSrcFormat, aDstFormat)) {
     SWIZZLE_ROW_FALLBACK(SurfaceFormat::B8G8R8A8, SurfaceFormat::R8G8B8A8)
@@ -1374,6 +1629,11 @@ SwizzleRowFn SwizzleRow(SurfaceFormat aSrcFormat, SurfaceFormat aDstFormat) {
 
     PACK_ROW_RGB(SurfaceFormat::R8G8B8, PackRowToRGB24)
     PACK_ROW_RGB(SurfaceFormat::B8G8R8, PackRowToRGB24)
+
+    SWIZZLE_CMYK_ROW(SurfaceFormat::CMYK, SurfaceFormat::B8G8R8X8)
+    SWIZZLE_CMYK_ROW(SurfaceFormat::CMYK, SurfaceFormat::B8G8R8A8)
+    SWIZZLE_CMYK_ROW(SurfaceFormat::InvertedCMYK, SurfaceFormat::B8G8R8X8)
+    SWIZZLE_CMYK_ROW(SurfaceFormat::InvertedCMYK, SurfaceFormat::B8G8R8A8)
 
     default:
       break;

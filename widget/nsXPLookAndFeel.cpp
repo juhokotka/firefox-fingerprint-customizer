@@ -2,50 +2,48 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/LookAndFeel.h"
-#include "mozilla/RWLock.h"
-#include "nscore.h"
-
 #include "nsXPLookAndFeel.h"
-#include "nsLookAndFeel.h"
+
+#include <bitset>
+
 #include "HeadlessLookAndFeel.h"
 #include "RemoteLookAndFeel.h"
-#include "nsContentUtils.h"
-#include "nsCRT.h"
-#include "nsFont.h"
-#include "nsIFrame.h"
-#include "nsIXULRuntime.h"
-#include "nsLayoutUtils.h"
-#include "Theme.h"
 #include "SurfaceCacheUtils.h"
-#include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/ContentChild.h"
-#include "mozilla/glean/WidgetMetrics.h"
+#include "Theme.h"
+#include "gfxFont.h"
+#include "gfxPlatform.h"
+#include "mozilla/LookAndFeel.h"
+#include "mozilla/PreferenceSheet.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/RWLock.h"
+#include "mozilla/RelativeLuminanceUtils.h"
 #include "mozilla/Services.h"
-#include "mozilla/ServoStyleSet.h"
 #include "mozilla/ServoCSSParser.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPrefs_editor.h"
 #include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/StaticPrefs_ui.h"
 #include "mozilla/StaticPrefs_widget.h"
-#include "mozilla/dom/Document.h"
-#include "mozilla/PreferenceSheet.h"
-#include "mozilla/gfx/2D.h"
-#include "mozilla/widget/WidgetMessageUtils.h"
-#include "mozilla/dom/KeyboardEventBinding.h"
-#include "mozilla/RelativeLuminanceUtils.h"
-#include "mozilla/glean/GleanMetrics.h"
 #include "mozilla/TelemetryScalarEnums.h"
 #include "mozilla/Try.h"
-
-#include "gfxPlatform.h"
-#include "gfxFont.h"
-
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/KeyboardEventBinding.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/glean/GleanMetrics.h"
+#include "mozilla/glean/WidgetMetrics.h"
+#include "mozilla/widget/WidgetMessageUtils.h"
+#include "nsCRT.h"
+#include "nsContentUtils.h"
+#include "nsFont.h"
+#include "nsIFrame.h"
+#include "nsIXULRuntime.h"
+#include "nsLayoutUtils.h"
+#include "nsLookAndFeel.h"
+#include "nscore.h"
 #include "qcms.h"
-
-#include <bitset>
 
 using namespace mozilla;
 
@@ -546,6 +544,9 @@ static constexpr struct {
     {"browser.display.permit_backplate"_ns, widget::ThemeChangeKind::Style},
     {"ui.use_standins_for_native_colors"_ns, widget::ThemeChangeKind::Style},
     {"privacy.resistFingerprinting"_ns, widget::ThemeChangeKind::Style},
+    // This could be dealt with in nsPresContext::PreferenceChanged but
+    // accessibility telemetry gets recorded in PreferenceSheet.
+    {"layout.css.always_underline_links"_ns, widget::ThemeChangeKind::Style},
     // End of PreferenceSheet prefs.
 };
 
@@ -665,11 +666,11 @@ nscolor nsXPLookAndFeel::GetStandinForNativeColor(ColorID aID,
     case ColorID::Activeborder:
     case ColorID::Inactiveborder:
     case ColorID::Buttonborder:
-      return NS_RGB(0x8f, 0x8f, 0x9d);
+      return NS_RGB(0x81, 0x7f, 0x84);
 
       COLOR(MozButtonhoverborder, 0x67, 0x67, 0x74)
       COLOR(MozButtonactiveborder, 0x48, 0x48, 0x51)
-      COLORA(MozButtondisabledborder, 0x8f, 0x8f, 0x9d, 0x7f)
+      COLORA(MozButtondisabledborder, 0xc7, 0xc6, 0xcb, 0x7f)
 
       COLOR(Graytext, 0x6D, 0x6D, 0x6D)
       COLOR(Highlight, 0x33, 0x99, 0xFF)
@@ -789,8 +790,10 @@ Maybe<nscolor> nsXPLookAndFeel::GenericDarkColor(ColorID aID) {
     case ColorID::Threedlightshadow:
     case ColorID::Threedhighlight:
     case ColorID::Buttonborder:
+      color = NS_RGB(0x94, 0x92, 0x97);
+      break;
     case ColorID::MozButtondisabledborder:
-      color = NS_RGB(0x8f, 0x8f, 0x9d);
+      color = NS_RGBA(0x51, 0x50, 0x54, 0x7f);
       break;
     case ColorID::MozButtonactiveborder:
       color = NS_RGB(0xd0, 0xd0, 0xd7);
@@ -965,8 +968,7 @@ static nsresult SystemColorUseDebuggingColor(LookAndFeel::ColorID aID,
 static nsresult GetPrefColor(const char* aPref, nscolor& aResult) {
   nsAutoCString colorStr;
   MOZ_TRY(Preferences::GetCString(aPref, colorStr));
-  if (!ServoCSSParser::ComputeColor(nullptr, NS_RGB(0, 0, 0), colorStr,
-                                    &aResult)) {
+  if (!ServoCSSParser::ComputeColor(nullptr, colorStr, &aResult)) {
     return NS_ERROR_FAILURE;
   }
   return NS_OK;
@@ -1293,9 +1295,8 @@ bool LookAndFeel::IsDarkColor(nscolor aColor) {
          RelativeLuminanceUtils::Compute(aColor) < kThreshold;
 }
 
-ColorScheme LookAndFeel::ColorSchemeForStyle(
-    const dom::Document& aDoc, const StyleColorSchemeFlags& aFlags,
-    ColorSchemeMode aMode) {
+Maybe<ColorScheme> LookAndFeel::ExplicitColorSchemeForStyle(
+    const dom::Document& aDoc, const StyleColorSchemeFlags& aFlags) {
   const auto& prefs = PreferenceSheet::PrefsFor(aDoc);
   StyleColorSchemeFlags style(aFlags);
   if (!style) {
@@ -1305,27 +1306,41 @@ ColorScheme LookAndFeel::ColorSchemeForStyle(
   const bool supportsLight = bool(style & StyleColorSchemeFlags::LIGHT);
   if (supportsLight && supportsDark) {
     // Both color-schemes are explicitly supported, use the preferred one.
-    return aDoc.PreferredColorScheme();
+    return Some(aDoc.PreferredColorScheme());
   }
   if (supportsDark || supportsLight) {
     // One color-scheme is explicitly supported and one isn't, so use the one
     // the content supports.
-    return supportsDark ? ColorScheme::Dark : ColorScheme::Light;
+    return Some(supportsDark ? ColorScheme::Dark : ColorScheme::Light);
   }
   // No value specified. Chrome docs, and forced-colors mode always supports
   // both, so use the preferred color-scheme.
-  if (aMode == ColorSchemeMode::Preferred || aDoc.ChromeRulesEnabled() ||
-      !prefs.mUseDocumentColors) {
-    return aDoc.PreferredColorScheme();
+  if (aDoc.ChromeRulesEnabled() || !prefs.mUseDocumentColors) {
+    return Some(aDoc.PreferredColorScheme());
   }
-  // Otherwise default content to light.
-  return ColorScheme::Light;
+  return {};
 }
 
-LookAndFeel::ColorScheme LookAndFeel::ColorSchemeForFrame(
-    const nsIFrame* aFrame, ColorSchemeMode aMode) {
+ColorScheme LookAndFeel::ColorSchemeForStyle(
+    const dom::Document& aDoc, const StyleColorSchemeFlags& aFlags,
+    ColorSchemeMode aMode) {
+  if (auto s = ExplicitColorSchemeForStyle(aDoc, aFlags)) {
+    return *s;
+  }
+  return aMode == ColorSchemeMode::Preferred ? aDoc.PreferredColorScheme()
+                                             : ColorScheme::Light;
+}
+
+ColorScheme LookAndFeel::ColorSchemeForFrame(const nsIFrame* aFrame,
+                                             ColorSchemeMode aMode) {
   return ColorSchemeForStyle(*aFrame->PresContext()->Document(),
                              aFrame->StyleUI()->mColorScheme.bits, aMode);
+}
+
+Maybe<ColorScheme> LookAndFeel::ExplicitColorSchemeForFrame(
+    const nsIFrame* aFrame) {
+  return ExplicitColorSchemeForStyle(*aFrame->PresContext()->Document(),
+                                     aFrame->StyleUI()->mColorScheme.bits);
 }
 
 // static

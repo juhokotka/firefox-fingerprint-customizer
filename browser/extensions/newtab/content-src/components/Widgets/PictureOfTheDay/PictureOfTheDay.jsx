@@ -10,10 +10,29 @@ import { useSizeSubmenu } from "../../../lib/utils";
 import { WIDGET_REGISTRY, resolveWidgetSize } from "common/WidgetsRegistry.mjs";
 import { MoveSubmenu } from "../MoveSubmenu";
 import { useWidgetTelemetry } from "../useWidgetTelemetry";
+import { WidgetMenuButton } from "../WidgetMenuButton";
 
 const PICTURE_OF_THE_DAY_ENTRY = WIDGET_REGISTRY.find(
   w => w.id === "pictureOfTheDay"
 );
+
+// Whether the "Set as wallpaper" feature is enabled. The dedicated
+// widgetPictureOfTheDay trainhop object wins, then the legacy widgets.* key, then
+// the pref (each checked with !== undefined so a trainhop `false` can turn the
+// feature off even when the pref default is `true`).
+function resolveSetAsWallpaperEnabled(prefs) {
+  const dedicated =
+    prefs.trainhopConfig?.widgetPictureOfTheDay?.setAsWallpaperEnabled;
+  if (dedicated !== undefined) {
+    return dedicated;
+  }
+  const shared =
+    prefs.trainhopConfig?.widgets?.pictureOfTheDaySetAsWallpaperEnabled;
+  if (shared !== undefined) {
+    return shared;
+  }
+  return Boolean(prefs["widgets.pictureOfTheDay.setAsWallpaper.enabled"]);
+}
 
 // How long the confirmation checkmark shows after setting the wallpaper.
 const JUST_SET_CHECKMARK_MS = 2000;
@@ -22,6 +41,14 @@ const JUST_SET_CHECKMARK_MS = 2000;
 // checkmark during the brief post-set confirmation.
 const SET_WALLPAPER_ICON = "chrome://browser/skin/canvas.svg";
 const SET_WALLPAPER_CHECK_ICON = "chrome://global/skin/icons/check.svg";
+
+// Local midnight for a "YYYY-MM-DD" date, as Fluent's DATETIME takes a timestamp
+// and has no time zone option. Parsing the string directly would read it as UTC.
+const toLocalTimestamp = isoDate => {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const timestamp = new Date(year, month - 1, day).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+};
 
 // The daily Merino picture (image, attribution, description, "Set wallpaper"),
 // or a sunrise-gradient empty state with an eye button when it's hidden/absent.
@@ -32,16 +59,24 @@ const PictureOfTheDay = ({
   widgetEnabledMap,
 }) => {
   const prefs = useSelector(state => state.Prefs.values);
-  const pictureData = useSelector(state => state.PictureOfTheDay);
+  const todaysPicture = useSelector(state => state.PictureOfTheDay);
+  // While today's picture is the wallpaper, show the previous one so the same
+  // image isn't on the page twice (bug 2065871).
+  const pictureData =
+    todaysPicture.previous?.thumbnailUrl &&
+    todaysPicture.publishedDate &&
+    prefs["newtabWallpapers.user.enabled"] &&
+    prefs["widgets.pictureOfTheDay.wallpaperActive"] ===
+      todaysPicture.publishedDate
+      ? todaysPicture.previous
+      : todaysPicture;
   const widgetSize = resolveWidgetSize(PICTURE_OF_THE_DAY_ENTRY, prefs);
 
-  const isSetAsWallpaper = Boolean(
-    prefs["widgets.pictureOfTheDay.setAsWallpaper"]
-  );
-
-  // Only offer the "Set wallpaper" CTA when wallpapers are on and custom
-  // wallpapers are allowed, since this action sets a custom wallpaper.
+  // Only offer the "Set wallpaper" CTA when the feature is enabled and wallpapers
+  // are on and custom wallpapers are allowed, since this action sets a custom
+  // wallpaper.
   const canSetWallpaper = Boolean(
+    resolveSetAsWallpaperEnabled(prefs) &&
     prefs["newtabWallpapers.enabled"] &&
     prefs["newtabWallpapers.customWallpaper.enabled"]
   );
@@ -50,20 +85,42 @@ const PictureOfTheDay = ({
   // URL opened offline, or a broken/404 image) instead of showing a broken
   // image. Reset when a new picture arrives so the next day's image is tried.
   const [imageFailed, setImageFailed] = useState(false);
+  // Keep the picture hidden until it loads so its alt text never flashes.
+  const [imageLoaded, setImageLoaded] = useState(false);
   useEffect(() => {
     setImageFailed(false);
-  }, [pictureData.imageUrl]);
+  }, [pictureData.thumbnailUrl]);
 
   // Dismissal is keyed to the picture's date so a new day's picture shows again
   // automatically (Bug 2050972). Edge case: Merino may omit published_date, and
-  // without a key "Hide today's picture" would silently no-op, so fall back to
+  // without a key "Hide this picture" would silently no-op, so fall back to
   // the local day. Tradeoff: hide then tracks the user's local clock, so an
   // undated picture restores at local midnight even if Merino hasn't rotated it.
   const pictureDate = pictureData.publishedDate || new Date().toDateString();
   const dismissed =
     pictureDate === prefs["widgets.pictureOfTheDay.dismissedDate"];
+  // The picture is the active wallpaper only while the stored published date
+  // matches the currently-shown picture (mirrors the dismissed check above, so a
+  // new day's picture automatically re-offers the CTA) AND wallpapers are toggled
+  // on. Toggling wallpapers off in the Content section keeps the picture selected
+  // but hidden, so the checkmark hides while off and returns when toggled back on.
+  const isSetAsWallpaper =
+    Boolean(prefs["newtabWallpapers.user.enabled"]) &&
+    pictureDate === prefs["widgets.pictureOfTheDay.wallpaperActive"];
   const hasPicture =
-    Boolean(pictureData.imageUrl) && !dismissed && !imageFailed;
+    Boolean(pictureData.thumbnailUrl) && !dismissed && !imageFailed;
+  // Reset only when the image leaves the page. On a new URL, Gecko keeps the
+  // old picture painted until the new one is ready.
+  useEffect(() => {
+    if (!hasPicture) {
+      setImageLoaded(false);
+    }
+  }, [hasPicture]);
+
+  // Show the "New" badge until the user first interacts with the widget;
+  // handleInteraction flips widgets.pictureOfTheDay.interaction on any action,
+  // which removes it.
+  const hasInteracted = prefs["widgets.pictureOfTheDay.interaction"];
 
   // Show a brief checkmark right after the user sets the wallpaper, then settle
   // into the collapsed "already set" state.
@@ -80,6 +137,12 @@ const PictureOfTheDay = ({
   // session so it doesn't pop open to the pill the moment the checkmark clears;
   // a fresh hover (after leaving the widget) expands it again.
   const [suppressExpand, setSuppressExpand] = useState(false);
+
+  // Setting today's picture swaps the previous one in, so drop the checkmark
+  // rather than show it on a picture that isn't the wallpaper.
+  useEffect(() => {
+    setJustSet(false);
+  }, [pictureData.publishedDate]);
 
   const { impressionRef, recordUserAction, recordEnabled } = useWidgetTelemetry(
     { dispatch, widget: PICTURE_OF_THE_DAY_ENTRY, widgetSize }
@@ -192,8 +255,18 @@ const PictureOfTheDay = ({
   // derives the theme, and applies it as the custom wallpaper; show a checkmark
   // confirmation immediately.
   const handleSetWallpaper = () => {
+    // Once the picture is the active wallpaper the button is just a status
+    // checkmark, so clicking it is a no-op.
+    if (isSetAsWallpaper) {
+      return;
+    }
     batch(() => {
-      dispatch(ac.OnlyToMain({ type: at.WIDGETS_PICTURE_SET_WALLPAPER }));
+      dispatch(
+        ac.OnlyToMain({
+          type: at.WIDGETS_PICTURE_SET_WALLPAPER,
+          data: { publishedDate: pictureData.publishedDate },
+        })
+      );
       recordUserAction("set_wallpaper", { source: "widget" });
       handleInteraction();
     });
@@ -201,40 +274,22 @@ const PictureOfTheDay = ({
     setSuppressExpand(true);
   };
 
-  // The image, source line, and description open the picture's source page
-  // (Wikimedia Commons) in a new tab. Only wired when the feed supplies a source
-  // URL; otherwise the elements render as their plain text/image equivalents.
+  // The image, source line, and description are anchors whose href opens the
+  // picture's source page (Wikimedia Commons) in the current tab via native
+  // navigation; the handler only records telemetry (mirrors the Weather widget).
   const canOpenSource = Boolean(pictureData.sourceUrl);
   const handleOpenSource = () => {
-    if (!pictureData.sourceUrl) {
-      return;
-    }
     batch(() => {
-      dispatch(
-        ac.OnlyToMain({
-          type: at.OPEN_LINK,
-          data: { url: pictureData.sourceUrl, where: "tab" },
-        })
-      );
       recordUserAction("open_source", { source: "widget" });
       handleInteraction();
     });
   };
 
-  // The license name links to the license terms (Creative Commons) in a new
-  // tab, separate from the source page link above.
+  // The license name is an anchor whose href opens the license terms (Creative
+  // Commons) in the current tab, separate from the source page link above.
   const canOpenLicense = Boolean(pictureData.licenseUrl);
   const handleOpenLicense = () => {
-    if (!pictureData.licenseUrl) {
-      return;
-    }
     batch(() => {
-      dispatch(
-        ac.OnlyToMain({
-          type: at.OPEN_LINK,
-          data: { url: pictureData.licenseUrl, where: "tab" },
-        })
-      );
       recordUserAction("open_license", { source: "widget" });
       handleInteraction();
     });
@@ -257,21 +312,21 @@ const PictureOfTheDay = ({
     }
     if (canOpenSource) {
       parts.push(
-        <button
+        <a
           key="source"
-          type="button"
+          href={pictureData.sourceUrl}
           className="picture-of-the-day-attribution-link picture-of-the-day-source-link"
           data-l10n-id="newtab-picture-attribution-source-link"
           onClick={handleOpenSource}
-        ></button>
+        ></a>
       );
     }
     if (pictureData.licenseLabel) {
       parts.push(
         canOpenLicense ? (
-          <button
+          <a
             key="license"
-            type="button"
+            href={pictureData.licenseUrl}
             className="picture-of-the-day-attribution-link picture-of-the-day-source-link"
             data-l10n-id="newtab-picture-attribution-license"
             data-l10n-args={JSON.stringify({
@@ -280,7 +335,7 @@ const PictureOfTheDay = ({
             onClick={handleOpenLicense}
           >
             {pictureData.licenseLabel}
-          </button>
+          </a>
         ) : (
           <span key="license" className="picture-of-the-day-attribution-item">
             {pictureData.licenseLabel}
@@ -310,11 +365,19 @@ const PictureOfTheDay = ({
     );
   };
 
+  const headerTimestamp = pictureData.publishedDate
+    ? toLocalTimestamp(pictureData.publishedDate)
+    : null;
+  const headerL10nId = headerTimestamp
+    ? "newtab-picture-header-date"
+    : "newtab-picture-header-main";
+
   const pictureImage = (
     <img
-      className="picture-of-the-day-image"
-      src={pictureData.imageUrl}
+      className={`picture-of-the-day-image${imageLoaded ? " loaded" : ""}`}
+      src={pictureData.thumbnailUrl}
       alt={imageAlt}
+      onLoad={() => setImageLoaded(true)}
       onError={() => setImageFailed(true)}
     />
   );
@@ -337,34 +400,49 @@ const PictureOfTheDay = ({
       <div className="picture-of-the-day-toolbar">
         {hasPicture ? (
           <div className="picture-of-the-day-heading">
-            <p
-              className="picture-of-the-day-source"
-              data-l10n-id="newtab-picture-header-main"
-            ></p>
+            <div className="picture-of-the-day-title-row">
+              {!hasInteracted && (
+                <moz-badge
+                  className="picture-of-the-day-new-badge"
+                  data-l10n-id="newtab-widget-lists-label-new"
+                ></moz-badge>
+              )}
+              <p
+                key={headerL10nId}
+                className="newtab-widget-title picture-of-the-day-source"
+                data-l10n-id={headerL10nId}
+                data-l10n-args={
+                  headerTimestamp
+                    ? JSON.stringify({ date: headerTimestamp })
+                    : undefined
+                }
+              ></p>
+            </div>
             {renderAttribution()}
           </div>
         ) : null}
         <div className="picture-of-the-day-context-menu-wrapper">
-          <moz-button
+          <WidgetMenuButton
             className="picture-of-the-day-context-menu-button"
-            data-l10n-id="newtab-picture-widget-menu-button"
-            iconSrc="chrome://global/skin/icons/more.svg"
             menuId="picture-of-the-day-context-menu"
-            type="ghost"
+            l10nId="newtab-picture-widget-open-menu-button"
           />
-          <panel-list id="picture-of-the-day-context-menu">
+          <panel-list
+            className="panel-list-no-icons"
+            id="picture-of-the-day-context-menu"
+          >
             <panel-item
               data-l10n-id="newtab-picture-menu-manage-wallpaper"
               onClick={handleManageWallpaper}
             />
             {dismissed ? (
               <panel-item
-                data-l10n-id="newtab-picture-menu-show-photo"
+                data-l10n-id="newtab-picture-menu-show-photo2"
                 onClick={() => handleShow("context_menu")}
               />
             ) : (
               <panel-item
-                data-l10n-id="newtab-picture-menu-hide-photo"
+                data-l10n-id="newtab-picture-menu-hide-photo2"
                 onClick={handleHidePhoto}
               />
             )}
@@ -410,13 +488,13 @@ const PictureOfTheDay = ({
       {hasPicture ? (
         <div className="picture-of-the-day-populated">
           {canOpenSource ? (
-            <button
-              type="button"
+            <a
+              href={pictureData.sourceUrl}
               className="picture-of-the-day-image-link"
               onClick={handleOpenSource}
             >
               {pictureImage}
-            </button>
+            </a>
           ) : (
             pictureImage
           )}
@@ -430,13 +508,15 @@ const PictureOfTheDay = ({
               <moz-button
                 className={`picture-of-the-day-set-wallpaper${
                   justSet || isSetAsWallpaper ? " is-collapsed" : ""
-                }${suppressExpand ? " no-expand" : ""}`}
+                }${suppressExpand || isSetAsWallpaper ? " no-expand" : ""}`}
                 type="primary"
                 iconSrc={
-                  justSet ? SET_WALLPAPER_CHECK_ICON : SET_WALLPAPER_ICON
+                  justSet || isSetAsWallpaper
+                    ? SET_WALLPAPER_CHECK_ICON
+                    : SET_WALLPAPER_ICON
                 }
                 onClick={handleSetWallpaper}
-                data-l10n-id="newtab-picture-set-wallpaper"
+                data-l10n-id="newtab-picture-set-wallpaper2"
               ></moz-button>
             ) : null}
           </div>
@@ -447,7 +527,7 @@ const PictureOfTheDay = ({
             type="button"
             className="picture-of-the-day-show-button"
             onClick={() => handleShow("widget")}
-            data-l10n-id="newtab-picture-show-button"
+            data-l10n-id="newtab-picture-show-button2"
           ></button>
           <p
             className="picture-of-the-day-message"

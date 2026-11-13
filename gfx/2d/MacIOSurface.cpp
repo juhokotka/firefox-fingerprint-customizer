@@ -4,10 +4,11 @@
 
 #include "MacIOSurface.h"
 #ifdef XP_MACOSX
-#  include <OpenGL/gl.h>
 #  include <OpenGL/CGLIOSurface.h>
+#  include <OpenGL/gl.h>
 #endif
 #include <QuartzCore/QuartzCore.h>
+
 #include "GLConsts.h"
 #ifdef XP_MACOSX
 #  include "GLContextCGL.h"
@@ -16,11 +17,11 @@
 #  include "GLContextEAGL.h"
 #endif
 #include "gfxMacUtils.h"
-#include "nsPrintfCString.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/RefPtr.h"
-#include "mozilla/gfx/Logging.h"
 #include "mozilla/StaticPrefs_gfx.h"
+#include "mozilla/gfx/Logging.h"
+#include "nsPrintfCString.h"
 
 using namespace mozilla;
 

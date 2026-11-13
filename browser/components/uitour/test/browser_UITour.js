@@ -9,6 +9,7 @@ var gContentAPI;
 ChromeUtils.defineESModuleGetters(this, {
   AppProvidedConfigEngine:
     "moz-src:///toolkit/components/search/ConfigSearchEngine.sys.mjs",
+  ASRouter: "resource:///modules/asrouter/ASRouter.sys.mjs",
   ProfileAge: "resource://gre/modules/ProfileAge.sys.mjs",
   UpdateUtils: "resource://gre/modules/UpdateUtils.sys.mjs",
   CustomizableUITestUtils:
@@ -263,11 +264,10 @@ var tests = [
   },
   function test_highlight_effect(done) {
     function waitForHighlightWithEffect(highlightEl, effect, next, error) {
-      return waitForCondition(
+      return TestUtils.waitForCondition(
         () => highlightEl.getAttribute("active") == effect,
-        next,
         error
-      );
+      ).then(next, reason => ok(false, reason));
     }
     function checkDefaultEffect() {
       is(
@@ -325,11 +325,10 @@ var tests = [
     }
     function checkRandomEffect() {
       function waitForActiveHighlight(highlightEl, next, error) {
-        return waitForCondition(
+        return TestUtils.waitForCondition(
           () => highlightEl.hasAttribute("active"),
-          next,
           error
-        );
+        ).then(next, reason => ok(false, reason));
       }
 
       gContentAPI.hideHighlight();
@@ -582,6 +581,26 @@ var tests = [
       });
     });
   },
+  taskify(async function test_getConfigurationActivitySignals() {
+    await ASRouter.waitForInitialized;
+
+    let previousSessionEnd = Date.now() - 42 * 24 * 60 * 60 * 1000;
+    let originalPreviousSessionEnd = ASRouter.state.previousSessionEnd;
+    await ASRouter.setState({ previousSessionEnd });
+    registerCleanupFunction(() =>
+      ASRouter.setState({ previousSessionEnd: originalPreviousSessionEnd })
+    );
+
+    let result = await new Promise(resolve =>
+      gContentAPI.getConfiguration("appinfo", resolve)
+    );
+
+    is(
+      result.previousSessionEnd,
+      previousSessionEnd,
+      "previousSessionEnd should reflect ASRouter state."
+    );
+  }),
   function test_addToolbarButton(done) {
     let placement = CustomizableUI.getPlacementOfWidget("panic-button");
     is(placement, null, "default UI has panic button in the palette");
@@ -695,6 +714,35 @@ var tests = [
     await gContentAPI.getTreatmentTag("foobar", data => {
       is(data.value, "baz", "set and retrieved treatmentTag");
     });
+  }),
+  taskify(async function test_set_newtab_wallpaper() {
+    const ENABLED_PREF =
+      "browser.newtabpage.activity-stream.newtabWallpapers.user.enabled";
+    const WALLPAPER_PREF =
+      "browser.newtabpage.activity-stream.newtabWallpapers.wallpaper";
+    const INITIAL_WALLPAPER_PREF =
+      "browser.newtabpage.activity-stream.newtabWallpapers.initialWallpaper";
+    registerCleanupFunction(() => {
+      Services.prefs.clearUserPref(ENABLED_PREF);
+      Services.prefs.clearUserPref(WALLPAPER_PREF);
+      Services.prefs.clearUserPref(INITIAL_WALLPAPER_PREF);
+    });
+
+    Services.prefs.setBoolPref(ENABLED_PREF, false);
+    await gContentAPI.setNewtabWallpaper("moon");
+    await TestUtils.waitForCondition(
+      () => Services.prefs.getStringPref(WALLPAPER_PREF, "") == "moon",
+      "Wallpaper pref should be set to 'moon'"
+    );
+    is(
+      Services.prefs.getStringPref(WALLPAPER_PREF, ""),
+      "moon",
+      "wallpaper pref was set"
+    );
+    ok(
+      Services.prefs.getBoolPref(ENABLED_PREF, false),
+      "wallpaper feature was force-enabled"
+    );
   }),
 
   // Make sure this test is last in the file so the appMenu gets left open and done will confirm it got tore down.

@@ -2,14 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
-});
+import { UrlbarShared } from "chrome://browser/content/urlbar/UrlbarShared.mjs";
 
 /**
- * @typedef L10nCachedMessage
+ * @typedef {object} L10nCachedMessage
  *   A cached L10n message object is similar to `L10nMessage` (defined in
  *   Localization.webidl) but its attributes are stored differently for
  *   convenience.
@@ -91,11 +87,6 @@ export class L10nCache {
    */
   constructor(l10n) {
     this.l10n = l10n ?? document.l10n;
-    this.QueryInterface = ChromeUtils.generateQI([
-      "nsIObserver",
-      "nsISupportsWeakReference",
-    ]);
-    Services.obs.addObserver(this, "intl:app-locales-changed", true);
   }
 
   /**
@@ -128,7 +119,7 @@ export class L10nCache {
    */
   async add({ id, args = undefined }) {
     let messages = await this.l10n.formatMessages([{ id, args }]);
-    if (!messages?.length) {
+    if (!messages?.[0]) {
       console.error(
         "l10n.formatMessages returned an unexpected value for ID: ",
         id
@@ -245,7 +236,7 @@ export class L10nCache {
    * @param {object} [options.argsHighlights]
    *   If this is set, apply substring highlighting to the corresponding l10n
    *   arguments in `args`. Each value in this object should be an array of
-   *   highlights as returned by `UrlbarUtils.getTokenMatches()` or
+   *   highlights as returned by `UrlbarShared.getTokenMatches()` or
    *   `UrlbarResult.getDisplayableValueAndHighlights()`.
    * @param {string} [options.attribute]
    *   If the string applies to an attribute on the element, pass the name of
@@ -305,7 +296,7 @@ export class L10nCache {
 
       let span = element.ownerDocument.createElement("span");
       for (let key in argsHighlights) {
-        lazy.UrlbarUtils.addTextContentWithHighlights(
+        UrlbarShared.addTextContentWithHighlights(
           span,
           args[key],
           argsHighlights[key]
@@ -357,23 +348,6 @@ export class L10nCache {
     }
     element.removeAttribute("data-l10n-id");
     element.removeAttribute("data-l10n-args");
-  }
-
-  /**
-   * Observer method from Services.obs.addObserver.
-   *
-   * @param {nsISupports} subject
-   *   The subject of the notification.
-   * @param {string} topic
-   *   The topic of the notification.
-   */
-  async observe(subject, topic) {
-    switch (topic) {
-      case "intl:app-locales-changed": {
-        this.clear();
-        break;
-      }
-    }
   }
 
   /**

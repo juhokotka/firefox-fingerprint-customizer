@@ -6,17 +6,17 @@
 #define nsFileStreams_h_
 
 #include "mozilla/UniquePtr.h"
-#include "nsIFileStreams.h"
-#include "nsIFile.h"
+#include "nsCOMPtr.h"
 #include "nsICloneableInputStream.h"
+#include "nsIFile.h"
+#include "nsIFileStreams.h"
+#include "nsIIPCSerializableInputStream.h"
 #include "nsIInputStream.h"
+#include "nsILineInputStream.h"
 #include "nsIOutputStream.h"
 #include "nsIRandomAccessStream.h"
 #include "nsISafeOutputStream.h"
 #include "nsISeekableStream.h"
-#include "nsILineInputStream.h"
-#include "nsCOMPtr.h"
-#include "nsIIPCSerializableInputStream.h"
 #include "nsReadLine.h"
 
 namespace mozilla {
@@ -149,7 +149,7 @@ class nsFileInputStream : public nsFileStreamBase,
   // Overrided from nsFileStreamBase
   NS_IMETHOD Seek(int32_t aWhence, int64_t aOffset) override;
 
-  nsFileInputStream() : mLineBuffer(nullptr) {}
+  nsFileInputStream() = default;
 
   static nsresult Create(REFNSIID aIID, void** aResult);
 

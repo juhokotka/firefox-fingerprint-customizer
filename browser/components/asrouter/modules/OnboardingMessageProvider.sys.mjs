@@ -19,6 +19,11 @@ const { AppConstants } = ChromeUtils.importESModule(
 );
 
 import { FeatureCalloutMessages } from "resource:///modules/asrouter/FeatureCalloutMessages.sys.mjs";
+import {
+  WIN_OS_PIN_PROMPT_ENABLED,
+  SET_DEFAULT_OS_PROMPT_ENABLED,
+  FXA_NOT_SIGNED_IN,
+} from "resource:///modules/asrouter/MessagingTargetingConstants.sys.mjs";
 
 const lazy = {};
 
@@ -55,12 +60,82 @@ const L10N = new Localization([
 
 const HOMEPAGE_PREF = "browser.startup.homepage";
 const NEWTAB_PREF = "browser.newtabpage.enabled";
-const FOURTEEN_DAYS_IN_MS = 14 * 24 * 60 * 60 * 1000;
 const isMSIX =
   AppConstants.platform === "win" &&
   Services.sysinfo.getProperty("hasWinPackageId", false);
 
 const BASE_MESSAGES = () => [
+  {
+    id: "LOGIN_STATUS_ADVISORY",
+    template: "feature_callout",
+    groups: ["cfr"],
+    skip_in_tests: "don't show in tests",
+    content: {
+      id: "LOGIN_STATUS_ADVISORY",
+      template: "multistage",
+      backdrop: "transparent",
+      transitions: false,
+      disableHistoryUpdates: true,
+      screens: [
+        {
+          id: "LOGIN_STATUS_ADVISORY_A",
+          anchors: [
+            {
+              selector: "#fxa-toolbar-menu-button",
+              panel_position: {
+                anchor_attachment: "bottomcenter",
+                callout_attachment: "topright",
+                panel_position_string: "bottomcenter topright",
+              },
+              no_open_on_anchor: true,
+              arrow_width: "19.79899",
+            },
+          ],
+          content: {
+            position: "callout",
+            width: "fit-content",
+            padding: "0",
+            autohide: true,
+            title: {
+              string_id: "login-status-advisory-title",
+              marginInline: "16px",
+              marginBlock: "10px",
+              fontWeight: "normal",
+              fontSize: "0.6875em",
+              lineHeight: "1",
+              letterSpacing: "0",
+            },
+            page_event_listeners: [
+              {
+                params: {
+                  type: "tourend",
+                  options: {
+                    once: true,
+                  },
+                },
+                action: {
+                  dismiss: true,
+                },
+              },
+            ],
+          },
+        },
+      ],
+    },
+    targeting: `source == 'startup' && previousSessionEnd && !willShowDefaultPrompt && !activeNotifications && ${FXA_NOT_SIGNED_IN} && (currentDate|date - profileAgeCreated|date) / 86400000 >= 7`,
+    frequency: {
+      custom: [
+        {
+          cap: 1,
+          period: 604800000,
+        },
+      ],
+      lifetime: 3,
+    },
+    trigger: {
+      id: "defaultBrowserCheck",
+    },
+  },
   {
     id: "MENU_MESSAGE_DEFAULT_CTA_ILLUSTRATION_LAYOUT",
     template: "menu_message",
@@ -87,6 +162,12 @@ const BASE_MESSAGES = () => [
             {
               type: "SET_DEFAULT_BROWSER",
             },
+            {
+              type: "BLOCK_MESSAGE",
+              data: {
+                id: "MENU_MESSAGE_DEFAULT_CTA_ILLUSTRATION_LAYOUT",
+              },
+            },
           ],
         },
       },
@@ -98,7 +179,7 @@ const BASE_MESSAGES = () => [
       },
     },
     targeting:
-      "'browser.nova.enabled'|preferenceValue != true && source == 'app_menu' && os.isWindows && os.windowsVersion >= 10 && !isDefaultBrowserUncached && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features' | preferenceValue != false",
+      "'browser.nova.enabled'|preferenceValue != true && source == 'app_menu' && os.isWindows && os.windowsVersion >= 10 && !isDefaultBrowser && !hasAttemptedSetDefault && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features' | preferenceValue != false",
     trigger: {
       id: "menuOpened",
     },
@@ -134,6 +215,12 @@ const BASE_MESSAGES = () => [
             {
               type: "PIN_FIREFOX_TO_TASKBAR",
             },
+            {
+              type: "BLOCK_MESSAGE",
+              data: {
+                id: "MENU_MESSAGE_DEFAULT_CTA_ILLUSTRATION_LAYOUT",
+              },
+            },
           ],
         },
       },
@@ -145,7 +232,7 @@ const BASE_MESSAGES = () => [
       },
     },
     targeting:
-      "'browser.nova.enabled'|preferenceValue != true && source == 'app_menu' && os.isMac && !isDefaultBrowserUncached && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features' | preferenceValue != false",
+      "'browser.nova.enabled'|preferenceValue != true && source == 'app_menu' && os.isMac && !isDefaultBrowser && !hasAttemptedSetDefault && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features' | preferenceValue != false",
     trigger: {
       id: "menuOpened",
     },
@@ -181,6 +268,12 @@ const BASE_MESSAGES = () => [
             {
               type: "SET_DEFAULT_BROWSER",
             },
+            {
+              type: "BLOCK_MESSAGE",
+              data: {
+                id: "MENU_MESSAGE_DEFAULT_CTA_ILLUSTRATION_LAYOUT",
+              },
+            },
           ],
         },
       },
@@ -192,7 +285,7 @@ const BASE_MESSAGES = () => [
       },
     },
     targeting:
-      "'browser.nova.enabled'|preferenceValue == true && source == 'app_menu' && os.isWindows && os.windowsVersion >= 10 && !isDefaultBrowserUncached && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features'| preferenceValue != false",
+      "'browser.nova.enabled'|preferenceValue == true && source == 'app_menu' && os.isWindows && os.windowsVersion >= 10 && !isDefaultBrowser && !hasAttemptedSetDefault && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features'| preferenceValue != false",
     trigger: {
       id: "menuOpened",
     },
@@ -230,6 +323,12 @@ const BASE_MESSAGES = () => [
             {
               type: "PIN_FIREFOX_TO_TASKBAR",
             },
+            {
+              type: "BLOCK_MESSAGE",
+              data: {
+                id: "MENU_MESSAGE_DEFAULT_CTA_ILLUSTRATION_LAYOUT",
+              },
+            },
           ],
         },
       },
@@ -241,7 +340,7 @@ const BASE_MESSAGES = () => [
       },
     },
     targeting:
-      "'browser.nova.enabled'|preferenceValue == true && source == 'app_menu' && os.isMac && !isDefaultBrowserUncached && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features'| preferenceValue != false",
+      "'browser.nova.enabled'|preferenceValue == true && source == 'app_menu' && os.isMac && !isDefaultBrowser && !hasAttemptedSetDefault && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features'| preferenceValue != false",
     trigger: {
       id: "menuOpened",
     },
@@ -258,7 +357,7 @@ const BASE_MESSAGES = () => [
       id: "openURL",
       patterns: ["https://accounts.firefox.com/?*service=smartwindow*"],
     },
-    targeting: `localeLanguageCode == 'en' && region in ['CA', 'US'] && !('termsofuse.bypassNotification'|preferenceValue) && ('termsofuse.acceptedVersion'|preferenceValue < 4) && ('browser.smartwindow.enabled'|preferenceValue)`,
+    targeting: `!('termsofuse.bypassNotification'|preferenceValue) && ('termsofuse.acceptedVersion'|preferenceValue < 4) && ('browser.smartwindow.enabled'|preferenceValue)`,
     content: {
       template: "multistage",
       id: "AI_WINDOW_TOU_EXISTING_USERS_MODAL",
@@ -1209,53 +1308,6 @@ const BASE_MESSAGES = () => [
     trigger: { id: "toolbarBadgeUpdate" },
   },
   {
-    id: "MILESTONE_MESSAGE_87",
-    groups: ["cfr"],
-    content: {
-      text: "",
-      layout: "short_message",
-      buttons: {
-        primary: {
-          event: "PROTECTION",
-          label: {
-            string_id: "cfr-doorhanger-milestone-ok-button",
-          },
-          action: {
-            type: "OPEN_PROTECTION_REPORT",
-          },
-        },
-        secondary: [
-          {
-            event: "DISMISS",
-            label: {
-              string_id: "cfr-doorhanger-milestone-close-button",
-            },
-            action: {
-              type: "CANCEL",
-            },
-          },
-        ],
-      },
-      category: "cfrFeatures",
-      anchor_id: "tracking-protection-icon-container",
-      bucket_id: "CFR_MILESTONE_MESSAGE",
-      heading_text: {
-        string_id: "cfr-doorhanger-milestone-heading2",
-      },
-      notification_text: "",
-      skip_address_bar_notifier: true,
-    },
-    trigger: {
-      id: "contentBlocking",
-      params: ["ContentBlockingMilestone"],
-    },
-    template: "milestone_message",
-    frequency: {
-      lifetime: 7,
-    },
-    targeting: "pageLoad >= 4 && userPrefs.cfrFeatures",
-  },
-  {
     id: "FX_MR_106_UPGRADE",
     template: "spotlight",
     targeting: "true",
@@ -1275,7 +1327,7 @@ const BASE_MESSAGES = () => [
             },
             progress_bar: "true",
             background:
-              "url('chrome://activity-stream/content/data/content/assets/mr-pintaskbar.svg') var(--mr-secondary-position) no-repeat var(--mr-screen-background-color)",
+              "url('chrome://activity-stream/content/data/content/assets/br-set-default-fox-heart.svg') var(--mr-secondary-position) no-repeat light-dark(rgba(252, 245, 240, 1), rgba(33, 3, 64, 1))",
             logo: {},
             title: {
               string_id: "mr2022-onboarding-existing-pin-header",
@@ -1351,7 +1403,7 @@ const BASE_MESSAGES = () => [
             },
             progress_bar: "true",
             background:
-              "url('chrome://activity-stream/content/data/content/assets/mr-settodefault.svg') var(--mr-secondary-position) no-repeat var(--mr-screen-background-color)",
+              "url('chrome://activity-stream/content/data/content/assets/br-gratitude-fox-rock.svg') var(--mr-secondary-position) no-repeat light-dark(rgba(252, 245, 240, 1), rgba(33, 3, 64, 1)",
             logo: {},
             title: {
               string_id: "mr2022-onboarding-set-default-title",
@@ -1389,9 +1441,15 @@ const BASE_MESSAGES = () => [
               string_id: "mr2022-onboarding-import-image-alt",
             },
             background:
-              "url('chrome://activity-stream/content/data/content/assets/mr-import.svg') var(--mr-secondary-position) no-repeat var(--mr-screen-background-color)",
+              "url('chrome://activity-stream/content/data/content/assets/br-import-fox-house.svg') var(--mr-secondary-position) no-repeat light-dark(rgba(252, 245, 240, 1), rgba(33, 3, 64, 1)",
             progress_bar: true,
             hide_secondary_section: "responsive",
+            title: {
+              string_id: "onboarding-refresh-import-title",
+            },
+            subtitle: {
+              string_id: "onboarding-refresh-import-subtitle",
+            },
             migrate_start: {
               action: {},
             },
@@ -1420,7 +1478,7 @@ const BASE_MESSAGES = () => [
               string_id: "mr2022-onboarding-mobile-download-image-alt",
             },
             background:
-              "url('chrome://activity-stream/content/data/content/assets/mr-mobilecrosspromo.svg') var(--mr-secondary-position) no-repeat var(--mr-screen-background-color)",
+              "url('chrome://activity-stream/content/data/content/assets/backdrop-adaptive.svg') no-repeat center / cover",
             progress_bar: true,
             logo: {},
             title: {
@@ -1468,7 +1526,7 @@ const BASE_MESSAGES = () => [
             },
             progress_bar: "true",
             background:
-              "url('chrome://activity-stream/content/data/content/assets/mr-pinprivate.svg') var(--mr-secondary-position) no-repeat var(--mr-screen-background-color)",
+              "url('https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/ms-images/20260630170340--kit-lock-hold--ee927c95-6161-4aa0-9b3a-12dec66b7cad.svg') var(--mr-secondary-position) no-repeat light-dark(rgba(252, 245, 240, 1), rgba(33, 3, 64, 1)",
             logo: {},
             title: {
               string_id: "mr2022-upgrade-onboarding-pin-private-window-header",
@@ -1511,7 +1569,7 @@ const BASE_MESSAGES = () => [
             },
             progress_bar: "true",
             background:
-              "url('chrome://activity-stream/content/data/content/assets/mr-privacysegmentation.svg') var(--mr-secondary-position) no-repeat var(--mr-screen-background-color)",
+              "url('chrome://activity-stream/content/data/content/assets/br-migration-fox-juggle.svg') var(--mr-secondary-position) no-repeat light-dark(rgba(252, 245, 240, 1), rgba(33, 3, 64, 1)",
             logo: {},
             title: {
               string_id: "mr2022-onboarding-privacy-segmentation-title",
@@ -1569,7 +1627,7 @@ const BASE_MESSAGES = () => [
               string_id: "mr2022-onboarding-gratitude-image-alt",
             },
             background:
-              "url('chrome://activity-stream/content/data/content/assets/mr-gratitude.svg') var(--mr-secondary-position) no-repeat var(--mr-screen-background-color)",
+              "url('chrome://activity-stream/content/data/content/assets/br-kit-with-heart.svg') var(--mr-secondary-position) no-repeat light-dark(rgba(252, 245, 240, 1), rgba(33, 3, 64, 1)",
             logo: {},
             title: {
               string_id: "mr2022-onboarding-gratitude-title",
@@ -1660,297 +1718,6 @@ const BASE_MESSAGES = () => [
     },
   },
   {
-    id: "PB_NEWTAB_FOCUS_PROMO",
-    type: "default",
-    template: "pb_newtab",
-    groups: ["pbNewtab"],
-    content: {
-      promoEnabled: true,
-      promoType: "FOCUS",
-      promoHeader: "fluent:about-private-browsing-focus-promo-header-c",
-      promoImageLarge: "chrome://browser/content/assets/focus-promo.png",
-      promoLinkText: "fluent:about-private-browsing-focus-promo-cta",
-      promoLinkType: "button",
-      promoSectionStyle: "below-search",
-      promoTitle: "fluent:about-private-browsing-focus-promo-text-c",
-      promoTitleEnabled: true,
-      promoButton: {
-        action: {
-          type: "SHOW_SPOTLIGHT",
-          data: {
-            content: {
-              id: "FOCUS_PROMO",
-              template: "multistage",
-              modal: "tab",
-              backdrop: "transparent",
-              screens: [
-                {
-                  id: "DEFAULT_MODAL_UI",
-                  content: {
-                    logo: {
-                      imageURL:
-                        "chrome://browser/content/assets/focus-logo.svg",
-                      height: "48px",
-                    },
-                    title: {
-                      string_id: "spotlight-focus-promo-title",
-                    },
-                    subtitle: {
-                      string_id: "spotlight-focus-promo-subtitle",
-                    },
-                    dismiss_button: {
-                      action: {
-                        navigate: true,
-                      },
-                    },
-                    ios: {
-                      action: {
-                        data: {
-                          args: "https://app.adjust.com/167k4ih?campaign=firefox-desktop&adgroup=pb&creative=focus-omc172&redirect=https%3A%2F%2Fapps.apple.com%2Fus%2Fapp%2Ffirefox-focus-privacy-browser%2Fid1055677337",
-                          where: "tabshifted",
-                        },
-                        type: "OPEN_URL",
-                        navigate: true,
-                      },
-                    },
-                    android: {
-                      action: {
-                        data: {
-                          args: "https://app.adjust.com/167k4ih?campaign=firefox-desktop&adgroup=pb&creative=focus-omc172&redirect=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dorg.mozilla.focus",
-                          where: "tabshifted",
-                        },
-                        type: "OPEN_URL",
-                        navigate: true,
-                      },
-                    },
-                    tiles: {
-                      type: "mobile_downloads",
-                      data: {
-                        QR_code: {
-                          image_url:
-                            "chrome://browser/content/assets/focus-qr-code.svg",
-                          alt_text: {
-                            string_id: "spotlight-focus-promo-qr-code",
-                          },
-                        },
-                        marketplace_buttons: ["ios", "android"],
-                      },
-                    },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      },
-    },
-    priority: 2,
-    frequency: {
-      custom: [
-        {
-          cap: 3,
-          period: 604800000, // Max 3 per week
-        },
-      ],
-      lifetime: 12,
-    },
-    // Exclude the next 2 messages: 1) Klar for en 2) Klar for de
-    targeting:
-      "!(region in [ 'DE', 'AT', 'CH'] && localeLanguageCode == 'en') && localeLanguageCode != 'de'",
-  },
-  {
-    id: "PB_NEWTAB_KLAR_PROMO",
-    type: "default",
-    template: "pb_newtab",
-    groups: ["pbNewtab"],
-    content: {
-      promoEnabled: true,
-      promoType: "FOCUS",
-      promoHeader: "fluent:about-private-browsing-focus-promo-header-c",
-      promoImageLarge: "chrome://browser/content/assets/focus-promo.png",
-      promoLinkText: "Download Firefox Klar",
-      promoLinkType: "button",
-      promoSectionStyle: "below-search",
-      promoTitle:
-        "Firefox Klar clears your history every time while blocking ads and trackers.",
-      promoTitleEnabled: true,
-      promoButton: {
-        action: {
-          type: "SHOW_SPOTLIGHT",
-          data: {
-            content: {
-              id: "KLAR_PROMO",
-              template: "multistage",
-              modal: "tab",
-              backdrop: "transparent",
-              screens: [
-                {
-                  id: "DEFAULT_MODAL_UI",
-                  order: 0,
-                  content: {
-                    logo: {
-                      imageURL:
-                        "chrome://browser/content/assets/focus-logo.svg",
-                      height: "48px",
-                    },
-                    title: "Get Firefox Klar",
-                    subtitle: {
-                      string_id: "spotlight-focus-promo-subtitle",
-                    },
-                    dismiss_button: {
-                      action: {
-                        navigate: true,
-                      },
-                    },
-                    ios: {
-                      action: {
-                        data: {
-                          args: "https://app.adjust.com/a8bxj8j?campaign=firefox-desktop&adgroup=pb&creative=focus-omc172&redirect=https%3A%2F%2Fapps.apple.com%2Fde%2Fapp%2Fklar-by-firefox%2Fid1073435754",
-                          where: "tabshifted",
-                        },
-                        type: "OPEN_URL",
-                        navigate: true,
-                      },
-                    },
-                    android: {
-                      action: {
-                        data: {
-                          args: "https://app.adjust.com/a8bxj8j?campaign=firefox-desktop&adgroup=pb&creative=focus-omc172&redirect=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dorg.mozilla.klar",
-                          where: "tabshifted",
-                        },
-                        type: "OPEN_URL",
-                        navigate: true,
-                      },
-                    },
-                    tiles: {
-                      type: "mobile_downloads",
-                      data: {
-                        QR_code: {
-                          image_url:
-                            "chrome://browser/content/assets/klar-qr-code.svg",
-                          alt_text: "Scan the QR code to get Firefox Klar",
-                        },
-                        marketplace_buttons: ["ios", "android"],
-                      },
-                    },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      },
-    },
-    priority: 2,
-    frequency: {
-      custom: [
-        {
-          cap: 3,
-          period: 604800000, // Max 3 per week
-        },
-      ],
-      lifetime: 12,
-    },
-    targeting: "region in [ 'DE', 'AT', 'CH'] && localeLanguageCode == 'en'",
-  },
-  {
-    id: "PB_NEWTAB_KLAR_PROMO_DE",
-    type: "default",
-    template: "pb_newtab",
-    groups: ["pbNewtab"],
-    content: {
-      promoEnabled: true,
-      promoType: "FOCUS",
-      promoHeader: "fluent:about-private-browsing-focus-promo-header-c",
-      promoImageLarge: "chrome://browser/content/assets/focus-promo.png",
-      promoLinkText: "fluent:about-private-browsing-focus-promo-cta",
-      promoLinkType: "button",
-      promoSectionStyle: "below-search",
-      promoTitle: "fluent:about-private-browsing-focus-promo-text-c",
-      promoTitleEnabled: true,
-      promoButton: {
-        action: {
-          type: "SHOW_SPOTLIGHT",
-          data: {
-            content: {
-              id: "FOCUS_PROMO",
-              template: "multistage",
-              modal: "tab",
-              backdrop: "transparent",
-              screens: [
-                {
-                  id: "DEFAULT_MODAL_UI",
-                  content: {
-                    logo: {
-                      imageURL:
-                        "chrome://browser/content/assets/focus-logo.svg",
-                      height: "48px",
-                    },
-                    title: {
-                      string_id: "spotlight-focus-promo-title",
-                    },
-                    subtitle: {
-                      string_id: "spotlight-focus-promo-subtitle",
-                    },
-                    dismiss_button: {
-                      action: {
-                        navigate: true,
-                      },
-                    },
-                    ios: {
-                      action: {
-                        data: {
-                          args: "https://app.adjust.com/a8bxj8j?campaign=firefox-desktop&adgroup=pb&creative=focus-omc172&redirect=https%3A%2F%2Fapps.apple.com%2Fde%2Fapp%2Fklar-by-firefox%2Fid1073435754",
-                          where: "tabshifted",
-                        },
-                        type: "OPEN_URL",
-                        navigate: true,
-                      },
-                    },
-                    android: {
-                      action: {
-                        data: {
-                          args: "https://app.adjust.com/a8bxj8j?campaign=firefox-desktop&adgroup=pb&creative=focus-omc172&redirect=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dorg.mozilla.klar",
-                          where: "tabshifted",
-                        },
-                        type: "OPEN_URL",
-                        navigate: true,
-                      },
-                    },
-                    tiles: {
-                      type: "mobile_downloads",
-                      data: {
-                        QR_code: {
-                          image_url:
-                            "chrome://browser/content/assets/klar-qr-code.svg",
-                          alt_text: {
-                            string_id: "spotlight-focus-promo-qr-code",
-                          },
-                        },
-                        marketplace_buttons: ["ios", "android"],
-                      },
-                    },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      },
-    },
-    priority: 2,
-    frequency: {
-      custom: [
-        {
-          cap: 3,
-          period: 604800000, // Max 3 per week
-        },
-      ],
-      lifetime: 12,
-    },
-    targeting: "localeLanguageCode == 'de'",
-  },
-  {
     id: "PB_NEWTAB_PIN_PROMO",
     template: "pb_newtab",
     type: "default",
@@ -2011,185 +1778,242 @@ const BASE_MESSAGES = () => [
       ],
       lifetime: 12,
     },
-    targeting: "doesAppNeedPrivatePin",
+    targeting:
+      "doesAppNeedPrivatePin && !'browser.privateWindowRedesign.enabled'|preferenceValue",
   },
   {
-    id: "PB_NEWTAB_COOKIE_BANNERS_PROMO",
+    id: "PB_NEWTAB_RELAY_PROMO",
     template: "pb_newtab",
     type: "default",
     groups: ["pbNewtab"],
     content: {
       promoEnabled: true,
-      promoType: "COOKIE_BANNERS",
-      promoHeader: "fluent:about-private-browsing-cookie-banners-promo-heading",
-      promoImageLarge:
-        "chrome://browser/content/assets/cookie-banners-begone.svg",
-      promoLinkText: "fluent:about-private-browsing-learn-more-link",
-      promoLinkType: "link",
+      promoType: "RELAY",
+      promoHeader: "fluent:about-private-browsing-relay-promo-header",
+      promoImageLarge: "chrome://browser/content/assets/relay-promo.svg",
+      promoLinkText: "fluent:about-private-browsing-relay-promo-link-text",
+      promoLinkType: "button",
       promoSectionStyle: "below-search",
-      promoTitle: "fluent:about-private-browsing-cookie-banners-promo-body",
+      promoTitle: "fluent:about-private-browsing-relay-promo-title",
       promoTitleEnabled: true,
       promoButton: {
         action: {
-          type: "MULTI_ACTION",
+          type: "OPEN_URL",
           data: {
-            actions: [
-              {
-                type: "OPEN_URL",
-                data: {
-                  args: "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/cookie-banner-reduction",
-                  where: "tabshifted",
-                },
-              },
-              {
-                type: "BLOCK_MESSAGE",
-                data: {
-                  id: "PB_NEWTAB_COOKIE_BANNERS_PROMO",
-                },
-              },
-            ],
+            args: "https://relay.firefox.com/?utm_medium=referral&utm_source=firefox-desktop&utm_campaign=pbw&utm_content=prevent-inbox-spam-global",
+            where: "tabshifted",
           },
         },
       },
     },
-    priority: 4,
+    priority: 3,
     frequency: {
       custom: [
         {
-          cap: 3,
-          period: 604800000, // Max 3 per week
+          cap: 1,
+          period: 86400000,
         },
       ],
       lifetime: 12,
     },
-    targeting: `'cookiebanners.service.mode.privateBrowsing'|preferenceValue != 0 || 'cookiebanners.service.mode'|preferenceValue != 0`,
+    targeting:
+      "'browser.privateWindowRedesign.enabled'|preferenceValue && 'signon.firefoxRelay.feature'|preferenceValue != 'enabled' && 'signon.firefoxRelay.feature'|preferenceValue != 'disabled'",
   },
   {
-    id: "INFOBAR_LAUNCH_ON_LOGIN",
-    groups: ["cfr"],
-    template: "infobar",
+    id: "PRIVATE_WINDOW_BASICS_SPOTLIGHT",
+    template: "spotlight",
+    trigger: {
+      id: "privateWindowBasicsLinkClick",
+    },
+    targeting: "'browser.privateWindowRedesign.enabled'|preferenceValue",
     content: {
-      type: "global",
-      text: {
-        string_id: "launch-on-login-infobar-message",
-      },
-      buttons: [
+      template: "multistage",
+      id: "PRIVATE_WINDOW_BASICS_SPOTLIGHT",
+      modal: "tab",
+      screens: [
         {
-          label: {
-            string_id: "launch-on-login-learnmore",
-          },
-          supportPage: "make-firefox-automatically-open-when-you-start",
-          action: {
-            type: "CANCEL",
-          },
-        },
-        {
-          label: { string_id: "launch-on-login-infobar-reject-button" },
-          action: {
-            type: "CANCEL",
-          },
-        },
-        {
-          label: { string_id: "launch-on-login-infobar-confirm-button" },
-          primary: true,
-          action: {
-            type: "MULTI_ACTION",
-            data: {
-              actions: [
+          id: "PRIVATE_WINDOW_BASICS_SCREEN",
+          force_hide_steps_indicator: true,
+          content: {
+            position: "center",
+            zap_border: true,
+            zap_shadow: true,
+            screen_style: {
+              width: "639px",
+            },
+            dismiss_button: { size: "small", action: { dismiss: true } },
+            title: {
+              string_id: "about-private-browsing-spotlight-basics-title",
+              letterSpacing: "revert",
+              lineHeight: "20px",
+              marginBlockStart: "30px",
+              marginBlockEnd: "13px",
+              fontSize: "20px",
+            },
+            subtitle: {
+              string_id: "about-private-browsing-spotlight-basics-subtitle",
+              fontSize: "14px",
+              letterSpacing: "revert",
+              marginInline: "30px",
+              textAlign: "left",
+              fontWeight: "200",
+              color: "var(--text-color)",
+            },
+            tiles: {
+              type: "single-select",
+              selected: "all",
+              action: {
+                picker: "<event>",
+              },
+              data: [
                 {
-                  type: "SET_PREF",
-                  data: {
-                    pref: {
-                      name: "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
-                      value: true,
-                    },
+                  inert: true,
+                  type: "backup",
+                  style: {
+                    border: "none",
+                    width: "100%",
+                    marginBlockStart: "-80px",
                   },
-                },
-                {
-                  type: "CONFIRM_LAUNCH_ON_LOGIN",
+                  id: "all",
+                  body: {
+                    items: [
+                      {
+                        text: {
+                          string_id:
+                            "about-private-browsing-spotlight-basics-what-to-know",
+                          marginBlockStart: "38px",
+                          fontSize: "15px",
+                          fontWeight: "600",
+                          color: "var(--text-color)",
+                        },
+                      },
+                      {
+                        style: {
+                          display: "list-item",
+                          listStyle: "disc",
+                          marginInlineStart: "30px",
+                        },
+                        text: {
+                          string_id:
+                            "about-private-browsing-spotlight-basics-activity-seen",
+                          fontSize: "14px",
+                          fontWeight: "200",
+                          color: "var(--text-color)",
+                          marginBlockStart: "-10px",
+                        },
+                      },
+                      {
+                        style: {
+                          display: "list-item",
+                          listStyle: "disc",
+                          marginInlineStart: "30px",
+                        },
+                        text: {
+                          string_id:
+                            "about-private-browsing-spotlight-basics-bookmarks-downloads",
+                          fontSize: "14px",
+                          fontWeight: "200",
+                          color: "var(--text-color)",
+                          marginBlockStart: "-10px",
+                          marginBlockEnd: "18px",
+                        },
+                      },
+                      {
+                        text: {
+                          string_id:
+                            "about-private-browsing-spotlight-basics-more-privacy",
+                          fontSize: "15px",
+                          fontWeight: "600",
+                          color: "var(--text-color)",
+                        },
+                      },
+                      {
+                        style: {
+                          display: "list-item",
+                          listStyle: "disc",
+                          marginInlineStart: "30px",
+                        },
+                        text: {
+                          string_id:
+                            "about-private-browsing-spotlight-basics-malware-alerts",
+                          fontSize: "14px",
+                          fontWeight: "200",
+                          color: "var(--text-color)",
+                          marginBlockStart: "-10px",
+                        },
+                      },
+                      {
+                        style: {
+                          display: "list-item",
+                          listStyle: "disc",
+                          marginInlineStart: "30px",
+                        },
+                        text: {
+                          string_id:
+                            "about-private-browsing-spotlight-basics-no-sell-data",
+                          fontSize: "14px",
+                          fontWeight: "200",
+                          color: "var(--text-color)",
+                          marginBlockStart: "-10px",
+                        },
+                      },
+                      {
+                        style: {
+                          display: "list-item",
+                          listStyle: "disc",
+                          marginInlineStart: "30px",
+                        },
+                        text: {
+                          string_id:
+                            "about-private-browsing-spotlight-basics-vpn",
+                          fontSize: "14px",
+                          fontWeight: "200",
+                          color: "var(--text-color)",
+                          marginBlockStart: "-10px",
+                        },
+                      },
+                      {
+                        style: {
+                          display: "list-item",
+                          listStyle: "disc",
+                          marginInlineStart: "30px",
+                        },
+                        text: {
+                          string_id:
+                            "about-private-browsing-spotlight-basics-strict-tracking",
+                          fontSize: "14px",
+                          fontWeight: "200",
+                          color: "var(--text-color)",
+                          marginBlockStart: "-10px",
+                        },
+                      },
+                    ],
+                  },
                 },
               ],
             },
-          },
-        },
-      ],
-    },
-    frequency: {
-      lifetime: 1,
-    },
-    trigger: { id: "defaultBrowserCheck" },
-    targeting: `source == 'newtab'
-    && 'browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt'|preferenceValue == false
-    && 'browser.startup.windowsLaunchOnLogin.enabled'|preferenceValue == true && isDefaultBrowser && !activeNotifications
-    && !launchOnLoginEnabled`,
-  },
-  {
-    id: "INFOBAR_LAUNCH_ON_LOGIN_FINAL",
-    groups: ["cfr"],
-    template: "infobar",
-    content: {
-      type: "global",
-      text: {
-        string_id: "launch-on-login-infobar-final-message",
-      },
-      buttons: [
-        {
-          label: {
-            string_id: "launch-on-login-learnmore",
-          },
-          supportPage: "make-firefox-automatically-open-when-you-start",
-          action: {
-            type: "CANCEL",
-          },
-        },
-        {
-          label: { string_id: "launch-on-login-infobar-final-reject-button" },
-          action: {
-            type: "SET_PREF",
-            data: {
-              pref: {
-                name: "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
-                value: true,
+            additional_button: {
+              style: "link",
+              label: {
+                string_id: "about-private-browsing-spotlight-basics-learn-more",
+                fontSize: "15px",
+                minHeight: "24px",
+                minWidth: "revert",
+                lineHeight: "100%",
+              },
+              action: {
+                type: "OPEN_URL",
+                navigate: true,
+                data: {
+                  args: "https://support.mozilla.org/%LOCALE%/kb/private-browsing-use-firefox-without-history",
+                  where: "tabshifted",
+                },
               },
             },
           },
         },
-        {
-          label: { string_id: "launch-on-login-infobar-confirm-button" },
-          primary: true,
-          action: {
-            type: "MULTI_ACTION",
-            data: {
-              actions: [
-                {
-                  type: "SET_PREF",
-                  data: {
-                    pref: {
-                      name: "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
-                      value: true,
-                    },
-                  },
-                },
-                {
-                  type: "CONFIRM_LAUNCH_ON_LOGIN",
-                },
-              ],
-            },
-          },
-        },
       ],
     },
-    frequency: {
-      lifetime: 1,
-    },
-    trigger: { id: "defaultBrowserCheck" },
-    targeting: `source == 'newtab'
-    && 'browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt'|preferenceValue == false
-    && 'browser.startup.windowsLaunchOnLogin.enabled'|preferenceValue == true && isDefaultBrowser && !activeNotifications
-    && messageImpressions.INFOBAR_LAUNCH_ON_LOGIN[messageImpressions.INFOBAR_LAUNCH_ON_LOGIN | length - 1]
-    && messageImpressions.INFOBAR_LAUNCH_ON_LOGIN[messageImpressions.INFOBAR_LAUNCH_ON_LOGIN | length - 1] <
-      currentDate|date - ${FOURTEEN_DAYS_IN_MS}
-    && !launchOnLoginEnabled`,
   },
   {
     id: "RESTORE_FROM_BACKUP",
@@ -2520,6 +2344,52 @@ const BASE_MESSAGES = () => [
     },
   },
   {
+    // Silently pins for users Windows will itself ask to consent to pin via
+    // an OS-level prompt, in lieu of the AW_EASY_SETUP pin checkbox.
+    id: "PIN_FIREFOX_TASKBAR_WIN_OS_PROMPT",
+    template: "action_only",
+    skip_in_tests: "it silently triggers a real OS-level pin request",
+    content: {
+      action: {
+        type: "PIN_FIREFOX_TO_TASKBAR",
+      },
+    },
+    // `profileGroupProfileCount == 0` used to ensure this only shows on the first profile, to be replaced with "profileScope: 'single' when bug 2074258 is fixed
+    targeting: `source == 'startup' && !previousSessionEnd && profileGroupProfileCount == 0 && doesAppNeedPin && ${WIN_OS_PIN_PROMPT_ENABLED} && (unhandledCampaignAction != 'PIN_FIREFOX_TO_TASKBAR') && (unhandledCampaignAction != 'PIN_AND_DEFAULT')`,
+    trigger: {
+      id: "defaultBrowserCheck",
+    },
+    frequency: {
+      lifetime: 1,
+    },
+    priority: 5,
+  },
+  {
+    // Silently triggers set default for users on Mac, and on Windows when
+    // one-click set default isn't available (so this falls back to Windows'
+    // own "Choose default apps" settings UI), in lieu of the AW_EASY_SETUP
+    // default checkbox. Never fired when one-click set default IS available,
+    // since that would silently rewrite the UserChoice registry with no
+    // consent surface at all.
+    id: "SET_DEFAULT_MAC_AND_WINDOWS_OS_PROMPT",
+    template: "action_only",
+    skip_in_tests: "it silently triggers a real OS-level set default request",
+    content: {
+      action: {
+        type: "SET_DEFAULT_BROWSER",
+      },
+    },
+    // `profileGroupProfileCount == 0` used to ensure this only shows on the first profile, to be replaced with "profileScope: 'single' when bug 2074258 is fixed
+    targeting: `source == 'newtab'  && profileGroupProfileCount == 0 && !previousSessionEnd && 'browser.shell.checkDefaultBrowser'|preferenceValue && !isDefaultBrowser && ${SET_DEFAULT_OS_PROMPT_ENABLED} && (unhandledCampaignAction != 'SET_DEFAULT_BROWSER') && (unhandledCampaignAction != 'PIN_AND_DEFAULT')`,
+    trigger: {
+      id: "defaultBrowserCheck",
+    },
+    frequency: {
+      lifetime: 1,
+    },
+    priority: 5,
+  },
+  {
     id: "SET_DEFAULT_BROWSER_GUIDANCE_NOTIFICATION_WIN10",
     template: "toast_notification",
     content: {
@@ -2574,42 +2444,16 @@ const BASE_MESSAGES = () => [
     template: "toast_notification",
     content: {
       title: {
-        string_id: "default-browser-guidance-notification-title",
+        string_id: "default-browser-guidance-notification-auto-trigger-title",
       },
       body: {
-        string_id:
-          "default-browser-guidance-notification-body-instruction-win11",
+        string_id: "default-browser-guidance-notification-auto-trigger-body",
       },
-      launch_action: {
-        type: "OPEN_URL",
-        data: {
-          args: "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/win-set-firefox-default-browser",
-          where: "tabshifted",
-        },
-      },
+      image_url:
+        "chrome://browser/content/asrouter/assets/windows-guidance.gif",
+      reduced_motion_image_url:
+        "chrome://browser/content/asrouter/assets/windows-guidance-static.svg",
       requireInteraction: true,
-      actions: [
-        {
-          action: "info-page",
-          title: {
-            string_id: "default-browser-guidance-notification-info-page",
-          },
-          launch_action: {
-            type: "OPEN_URL",
-            data: {
-              args: "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/win-set-firefox-default-browser",
-              where: "tabshifted",
-            },
-          },
-        },
-        {
-          action: "dismiss",
-          title: {
-            string_id: "default-browser-guidance-notification-dismiss",
-          },
-          windowsSystemActivationType: true,
-        },
-      ],
       tag: "set-default-guidance-notification",
     },
     // Both Windows 10 and 11 return `os.windowsVersion == 10.0`. We limit to
@@ -2839,6 +2683,7 @@ const BASE_MESSAGES = () => [
                   action: {
                     type: "MULTI_ACTION",
                     dismiss: true,
+                    sendDismissTelemetry: true,
                     data: {
                       actions: [
                         {
@@ -2884,6 +2729,30 @@ const BASE_MESSAGES = () => [
                 },
               ],
             },
+            remove_checklist_button: {
+              label: { string_id: "onboarding-checklist-remove-2" },
+              source_id: "remove_checklist_button",
+              action: {
+                type: "MULTI_ACTION",
+                dismiss: true,
+                data: {
+                  actions: [
+                    {
+                      type: "BLOCK_MESSAGE",
+                      data: {
+                        id: "FINISH_SETUP_CHECKLIST",
+                      },
+                    },
+                    {
+                      type: "DESTROY_UIWIDGET",
+                      data: {
+                        widget_id: "fxms-bmb-button",
+                      },
+                    },
+                  ],
+                },
+              },
+            },
           },
         },
       ],
@@ -2924,6 +2793,88 @@ const BASE_MESSAGES = () => [
     trigger: {
       id: "selectableProfilesUpdated",
     },
+  },
+  {
+    id: "REFRESH_UNUSED_PROFILE_INFOBAR",
+    template: "infobar",
+    content: {
+      type: "global",
+      priority: 1,
+      text: { string_id: "refresh-unused-profile-infobar-message" },
+      buttons: [
+        {
+          label: { string_id: "refresh-profile-infobar-button" },
+          action: { type: "RESET_PROFILE" },
+        },
+      ],
+    },
+    trigger: {
+      id: "defaultBrowserCheck",
+    },
+    skip_in_tests: "fires on startup, may interfere with other tests",
+    priority: 1,
+    targeting:
+      "source == 'startup' && canResetProfile && !'browser.disableResetPrompt'|preferenceValue && profileLastUse && currentDate|date - profileLastUse >= 5184000000 && !activeNotifications",
+  },
+  {
+    id: "REFRESH_REINSTALLED_PROFILE_INFOBAR",
+    template: "infobar",
+    content: {
+      type: "global",
+      priority: 1,
+      text: { string_id: "refresh-reinstalled-profile-infobar-message" },
+      buttons: [
+        {
+          label: { string_id: "refresh-profile-infobar-button" },
+          action: { type: "RESET_PROFILE" },
+        },
+      ],
+    },
+    trigger: {
+      id: "defaultBrowserCheck",
+    },
+    skip_in_tests: "fires on startup, may interfere with other tests",
+    targeting:
+      "source == 'startup' && isFirefoxReinstalled && canResetProfile && !'browser.disableResetPrompt'|preferenceValue && !activeNotifications",
+  },
+  {
+    id: "RESTORE_SESSION_STARTUP_INFOBAR",
+    template: "infobar",
+    content: {
+      type: "tab",
+      priority: 2,
+      text: { string_id: "restore-session-startup-suggestion-message" },
+      inline_icons: {
+        icon: { imageURL: "chrome://browser/skin/menu.svg" },
+      },
+      buttons: [
+        {
+          label: { string_id: "restore-session-startup-suggestion-button" },
+          primary: true,
+          action: {
+            type: "SELECT_AND_MARK_MENU_ITEM",
+            data: {
+              itemIds: ["appMenu-history-button", "appMenu-restoreSession"],
+            },
+          },
+        },
+      ],
+      impression_action: {
+        type: "SET_PREF",
+        data: {
+          pref: {
+            name: "browser.startup.couldRestoreSession.count",
+            value: 2,
+          },
+        },
+      },
+    },
+    trigger: {
+      id: "defaultBrowserCheck",
+    },
+    skip_in_tests: "fires on startup, may interfere with other tests",
+    targeting:
+      "source == 'startup' && canRestoreLastSession && !activeNotifications && 'browser.startup.couldRestoreSession.count'|preferenceValue == 1",
   },
   {
     id: "updated-privacy-notice-notification-infobar",
@@ -3165,7 +3116,7 @@ const BASE_MESSAGES = () => [
                   id: "chat-log-preview",
                   content: "",
                   style: {
-                    backgroundColor: "#F9F9FB",
+                    backgroundColor: "var(--background-color-box)",
                     maxHeight: "130px",
                   },
                 },
@@ -3311,7 +3262,7 @@ const BASE_MESSAGES = () => [
                   id: "chat-log-preview",
                   content: "",
                   style: {
-                    backgroundColor: "#F9F9FB",
+                    backgroundColor: "var(--background-color-box)",
                     maxHeight: "130px",
                   },
                 },
@@ -3600,6 +3551,39 @@ export const OnboardingMessageProvider = {
     return PREONBOARDING_MESSAGES();
   },
 
+  /**
+   * Fill in Nimbus `preonboarding` feature variables from the default
+   * preonboarding message when preonboarding is the unconfigured default
+   * (`enabled === null`) or enabled without screens. Supplied values win,
+   * except nulls and empty arrays, which fall back to the default message's
+   * values. Explicitly disabled (`enabled === false`) variables are returned
+   * unchanged.
+   *
+   * @param {object} variables Nimbus `preonboarding` feature variables.
+   * @return {object} the variables, merged over the default message if needed.
+   */
+  getPreonboardingVariablesWithDefaults(variables) {
+    if (
+      variables.enabled !== null &&
+      !(variables.enabled && !variables.screens?.length)
+    ) {
+      return variables;
+    }
+
+    const preonboardingMessage = this.getPreonboardingMessages().find(
+      m => m.id === "NEW_USER_TOU_ONBOARDING"
+    );
+    return {
+      ...preonboardingMessage,
+      ...Object.fromEntries(
+        Object.entries(variables).filter(
+          ([_, value]) =>
+            value !== null && !(Array.isArray(value) && !value.length)
+        )
+      ),
+    };
+  },
+
   // If the user has restored from a backup, mutate the restore from backup message to appear once per backup by using the restoration timestamp as the unique message id
   getRestoredFromBackupMessage(messages) {
     const backupRestorationTimestamp = Services.prefs.getIntPref(
@@ -3663,7 +3647,7 @@ export const OnboardingMessageProvider = {
       "browser.shell.checkDefaultBrowser",
       false
     );
-    let isDefault = await lazy.ShellService.isDefaultBrowser();
+    let isDefault = await lazy.ShellService.isDefaultBrowserAsync();
     return checkDefault && !isDefault;
   },
 

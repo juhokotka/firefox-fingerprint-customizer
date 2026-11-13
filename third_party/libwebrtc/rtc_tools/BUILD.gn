@@ -167,6 +167,7 @@ if (!is_component_build) {
     deps = [
       "../api:field_trials",
       "../api:field_trials_view",
+      "../api:rtp_header_extension_id",
       "../api:rtp_parameters",
       "../api/environment",
       "../api/environment:environment_factory",
@@ -311,6 +312,7 @@ if (!build_with_chromium) {
         "../api:field_trials_view",
         "../api:function_view",
         "../api:make_ref_counted",
+        "../api:rtp_header_extension_id",
         "../api:rtp_headers",
         "../api:rtp_parameters",
         "../api:scoped_refptr",
@@ -345,6 +347,7 @@ if (!build_with_chromium) {
         "../modules/congestion_controller/goog_cc:estimators",
         "../modules/congestion_controller/rtp:transport_feedback",
         "../modules/congestion_controller/scream:scream_v2",
+        "../modules/congestion_controller/scream:scream_v2_parameters",
         "../modules/pacing",
         "../modules/remote_bitrate_estimator",
         "../modules/rtp_rtcp",
@@ -361,7 +364,6 @@ if (!build_with_chromium) {
         "../rtc_base/network:sent_packet",
         "../system_wrappers",
         "//third_party/abseil-cpp/absl/algorithm:container",
-        "//third_party/abseil-cpp/absl/base:core_headers",
         "//third_party/abseil-cpp/absl/functional:bind_front",
         "//third_party/abseil-cpp/absl/strings:string_view",
       ]
@@ -393,6 +395,7 @@ if (!build_with_chromium) {
       deps = [
         ":chart_proto",
         ":event_log_visualizer_bindings",
+        "../api/environment:force_test_environment",
         "//rtc_base:protobuf_utils",
         "//rtc_base/system:file_wrapper",
         "//test:fileutils",
@@ -508,7 +511,6 @@ if (rtc_include_tests) {
           "../rtc_base:checks",
           "../rtc_base:logging",
           "../rtc_base:stringutils",
-          "//third_party/abseil-cpp/absl/base:core_headers",
           "//third_party/abseil-cpp/absl/flags:flag",
           "//third_party/abseil-cpp/absl/flags:parse",
           "//third_party/abseil-cpp/absl/flags:usage",
@@ -579,9 +581,6 @@ if (rtc_include_tests) {
       }
 
       data = tools_unittests_resources
-      if (is_android) {
-        shard_timeout = 900
-      }
       if (is_ios) {
         deps += [ ":tools_unittests_bundle_data" ]
       }

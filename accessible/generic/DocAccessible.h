@@ -5,15 +5,14 @@
 #ifndef mozilla_a11y_DocAccessible_h_
 #define mozilla_a11y_DocAccessible_h_
 
-#include "HyperTextAccessible.h"
 #include "AccEvent.h"
-#include "nsAccessibilityService.h"
-
-#include "nsClassHashtable.h"
-#include "nsTHashMap.h"
+#include "HyperTextAccessible.h"
 #include "mozilla/UniquePtr.h"
+#include "nsAccessibilityService.h"
+#include "nsClassHashtable.h"
 #include "nsIDocumentObserver.h"
 #include "nsITimer.h"
+#include "nsTHashMap.h"
 #include "nsTHashSet.h"
 #include "nsWeakReference.h"
 
@@ -80,7 +79,6 @@ class DocAccessible : public HyperTextAccessible,
   virtual nsRect RelativeBounds(nsIFrame** aRelativeFrame) const override;
 
   // ActionAccessible
-  virtual bool HasPrimaryAction() const override;
   virtual void ActionNameAt(uint8_t aIndex, nsAString& aName) override;
 
   // HyperTextAccessible
@@ -153,7 +151,9 @@ class DocAccessible : public HyperTextAccessible,
 
   bool IsHidden() const;
 
-  void SetViewportCacheDirty(bool aDirty) { mViewportCacheDirty = aDirty; }
+  void SetViewportCacheDirty(bool aDirty) {
+    mViewportCacheDirty = aDirty && IPCDoc();
+  }
 
   /**
    * Document load states.
@@ -211,7 +211,8 @@ class DocAccessible : public HyperTextAccessible,
   void FireEventsOnInsertion(LocalAccessible* aContainer);
 
   /**
-   * Fire value change event on the given accessible if applicable.
+   * Fire value change event on the given accessible, or the nearest ancestor
+   * whose value might depend on it, if applicable.
    */
   void MaybeNotifyOfValueChange(LocalAccessible* aAccessible);
 
@@ -239,6 +240,25 @@ class DocAccessible : public HyperTextAccessible,
   void HandleNotification(
       Class* aInstance,
       typename TNotification<Class, Args...>::Callback aMethod, Args*... aArgs);
+
+  /**
+   * Return false unless ALL of the following are true:
+   * - mContent is non null
+   * - the given aNode is equal to mContent
+   * - mContent is the root element of mDocumentNode
+   */
+  bool IsRootContent(nsINode* aNode) const;
+
+  /**
+   * Return true if the given aNode is this document's body element.
+   */
+  bool IsBodyElement(const nsINode* aNode) const;
+
+  /**
+   * Returns the doc accessible when aNode is the root element, otherwise
+   * behaves identically to GetAccessible below.
+   */
+  LocalAccessible* GetAccessibleOrDocument(nsINode* aNode) const;
 
   /**
    * Return the cached accessible by the given DOM node if it's in subtree of
@@ -458,6 +478,17 @@ class DocAccessible : public HyperTextAccessible,
   void ARIAAttributeDefaultChanged(dom::Element* aElement, nsAtom* aAttribute,
                                    AttrModType aModType);
 
+  bool ShouldSendToParentProcess() const {
+    // For most documents, we should only send accessibility info to the parent
+    // process if the accessibility service is running there. It might not be
+    // running there if accessibility was started only in a content process,
+    // which happens in automation scenarios such as WebDriver. However, for
+    // print documents, we must send the tree regardless in order to generate a
+    // tagged PDF.
+    return IPCAccessibilityActive() &&
+           (nsAccessibilityService::IsRunningInParentProcess() || IsPrintDoc());
+  }
+
  protected:
   virtual ~DocAccessible();
 
@@ -482,9 +513,18 @@ class DocAccessible : public HyperTextAccessible,
   virtual void DoInitialUpdate();
 
   /**
-   * Updates root element and picks up ARIA role on it if any.
+   * Assign mContent to the root element, and call UpdateDocRoleMapEntry.
    */
-  void UpdateRootElIfNeeded();
+  void UpdateRootElement();
+
+  /**
+   * Adjust the role exposed on this document and fire a role change event.
+   * When a role is exposed on the body, we use that role as the document's
+   * role. Otherwise, we check for a role on the root element and use that.
+   * In both cases, this function verifies the retrieved role is valid for the
+   * document before using it.
+   */
+  void UpdateDocRoleMapEntry();
 
   /**
    * Process document load notification, fire document load and state busy
@@ -710,8 +750,11 @@ class DocAccessible : public HyperTextAccessible,
    *    insertion.
    *
    * Returns true if the root node should be reinserted.
+   *
+   * aIsInsertRoot is true when aRoot was reported as inserted, and false when
+   * we reached it by descending into an insert root's subtree.
    */
-  bool PruneOrInsertSubtree(nsIContent* aRoot);
+  bool PruneOrInsertSubtree(nsIContent* aRoot, bool aIsInsertRoot = true);
 
  protected:
   /**
@@ -868,8 +911,6 @@ class DocAccessible : public HyperTextAccessible,
   friend class ::nsAccessibilityService;
 
  private:
-  void SetRoleMapEntryForDoc(dom::Element* aElement);
-
   /**
    * This must be called whenever an Accessible is moved in a content process.
    * It keeps track of Accessibles moved during this tick.
@@ -883,9 +924,8 @@ class DocAccessible : public HyperTextAccessible,
 
   PresShell* mPresShell;
 
-  // Exclusively owned by IPDL so don't manually delete it!
-  // Cleared in ActorDestroy
-  DocAccessibleChild* mIPCDoc;
+  // Cleared in ActorDestroy.
+  RefPtr<DocAccessibleChild> mIPCDoc;
 
   // These data structures map between LocalAccessibles and CacheDomains,
   // tracking cache updates that have been queued during the current tick but

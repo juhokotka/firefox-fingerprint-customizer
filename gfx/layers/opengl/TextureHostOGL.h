@@ -7,13 +7,14 @@
 
 #include <stddef.h>  // for size_t
 #include <stdint.h>  // for uint64_t
+
 #include "CompositableHost.h"
 #include "GLContextTypes.h"  // for GLContext
 #include "GLDefs.h"          // for GLenum, LOCAL_GL_CLAMP_TO_EDGE, etc
 #include "GLTextureImage.h"  // for TextureImage
 #include "gfxTypes.h"
-#include "mozilla/GfxMessageUtils.h"         // for gfxContentType
 #include "mozilla/Assertions.h"              // for MOZ_ASSERT, etc
+#include "mozilla/GfxMessageUtils.h"         // for gfxContentType
 #include "mozilla/RefPtr.h"                  // for RefPtr
 #include "mozilla/gfx/Matrix.h"              // for Matrix4x4
 #include "mozilla/gfx/Point.h"               // for IntSize, IntPoint
@@ -86,14 +87,6 @@ class TextureSourceOGL {
 
   virtual void BindTexture(GLenum aTextureUnit,
                            gfx::SamplingFilter aSamplingFilter) = 0;
-
-  // To be overridden in textures that need this. This method will be called
-  // when the compositor has used the texture to draw. This allows us to set
-  // a fence with glFenceSync which we can wait on later to ensure the GPU
-  // is done with the draw calls using that texture. We would like to be able
-  // to simply use glFinishObjectAPPLE, but this returns earlier than
-  // expected with nvidia drivers.
-  virtual void MaybeFenceTexture() {}
 
   virtual gfx::IntSize GetSize() const = 0;
 
@@ -268,39 +261,6 @@ class GLTextureSource : public DataTextureSource, public TextureSourceOGL {
   GLenum mTextureTarget;
   gfx::IntSize mSize;
   gfx::SurfaceFormat mFormat;
-};
-
-// This texture source try to wrap "aSurface" in ctor for compositor direct
-// access. Since we can't know the timing for gpu buffer access, the surface
-// should be alive until the ~ClientStorageTextureSource(). And if we try to
-// update the surface we mapped before, we need to call Sync() to make sure
-// the surface is not used by compositor.
-class DirectMapTextureSource : public GLTextureSource {
- public:
-  DirectMapTextureSource(gl::GLContext* aContext,
-                         gfx::DataSourceSurface* aSurface);
-  DirectMapTextureSource(TextureSourceProvider* aProvider,
-                         gfx::DataSourceSurface* aSurface);
-  ~DirectMapTextureSource();
-
-  bool Update(gfx::DataSourceSurface* aSurface,
-              nsIntRegion* aDestRegion = nullptr,
-              gfx::IntPoint* aSrcOffset = nullptr,
-              gfx::IntPoint* aDstOffset = nullptr) override;
-
-  // If aBlocking is false, check if this texture is no longer being used
-  // by the GPU - if aBlocking is true, this will block until the GPU is
-  // done with it.
-  bool Sync(bool aBlocking) override;
-
-  void MaybeFenceTexture() override;
-
- private:
-  bool UpdateInternal(gfx::DataSourceSurface* aSurface,
-                      nsIntRegion* aDestRegion, gfx::IntPoint* aSrcOffset,
-                      bool aInit);
-
-  GLsync mSync;
 };
 
 class GLTextureHost : public TextureHost {
@@ -641,6 +601,9 @@ class AndroidImageReaderImageTextureHost : public TextureHost {
   // SurfaceTexture uses android fence internally,
   bool NeedsDeferredDeletion() const override { return false; }
 
+  SurfaceDescriptor GetSurfaceDescriptor() override;
+
+  const AndroidImageReaderImageDescriptor mDescriptor;
   const layers::GpuProcessAndroidImageReaderId mImageReaderId;
   const layers::AndroidMediaCodecFrameId mFrameId;
   const gfx::IntSize mSize;

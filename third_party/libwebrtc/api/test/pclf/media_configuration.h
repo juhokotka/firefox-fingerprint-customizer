@@ -366,12 +366,13 @@ struct AudioConfig {
   // According to bugs.webrtc.org/4762 WebRTC supports synchronization only
   // for pair of single audio and single video stream.
   std::optional<std::string> sync_group;
+  // If true, the input file will be repeated for the duration of the call.
+  bool repeat = true;
 };
 
 struct VideoCodecConfig {
   explicit VideoCodecConfig(absl::string_view name);
-  VideoCodecConfig(absl::string_view name,
-                   std::map<std::string, std::string> required_params);
+  VideoCodecConfig(absl::string_view name, CodecParameterMap required_params);
   // Next two fields are used to specify concrete video codec, that should be
   // used in the test. Video code will be negotiated in SDP during offer/
   // answer exchange.
@@ -384,7 +385,7 @@ struct VideoCodecConfig {
   // a parameter with name equal to this key and parameter value will be equal
   // to the value from `required_params` for this key.
   // If empty then only name will be used to match the codec.
-  std::map<std::string, std::string> required_params;
+  CodecParameterMap required_params;
 };
 
 // Subscription to the remote video streams. It declares which remote stream

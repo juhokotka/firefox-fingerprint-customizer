@@ -8,25 +8,24 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/StaticPrefsBase.h"
 #include "mozilla/extensions/StreamFilterParent.h"
+#include "mozilla/net/ChannelEventQueue.h"
+#include "mozilla/net/DNS.h"
 #include "mozilla/net/HttpBaseChannel.h"
 #include "mozilla/net/NeckoTargetHolder.h"
 #include "mozilla/net/PHttpChannelChild.h"
-#include "mozilla/net/ChannelEventQueue.h"
-
-#include "nsIStreamListener.h"
-#include "nsIInterfaceRequestor.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "nsIProgressEventSink.h"
+#include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsICacheEntry.h"
 #include "nsICacheInfoChannel.h"
-#include "nsIResumableChannel.h"
-#include "nsIProxiedChannel.h"
-#include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsIChildChannel.h"
 #include "nsIHttpChannelChild.h"
+#include "nsIInterfaceRequestor.h"
+#include "nsIInterfaceRequestorUtils.h"
 #include "nsIMultiPartChannel.h"
+#include "nsIProgressEventSink.h"
+#include "nsIProxiedChannel.h"
+#include "nsIResumableChannel.h"
+#include "nsIStreamListener.h"
 #include "nsIThreadRetargetableRequest.h"
-#include "mozilla/net/DNS.h"
 
 class nsIEventTarget;
 class nsIInterceptedBodyCallback;
@@ -355,6 +354,18 @@ class HttpChannelChild final : public PHttpChannelChild,
   // True if we need to tell the parent the size of unreported received data
   Atomic<bool, SequentiallyConsistent> mNeedToReportBytesRead{true};
   Atomic<uint32_t, mozilla::Relaxed> mOnProgressEventSent{false};
+  enum class AkamaiWafState : uint32_t {
+    // Not an Akamai response, or already reported.
+    None,
+    // Akamai response
+    AkamaiResponse,
+    // Maybe blocked akamai response
+    MaybeBlocked,
+    // The body matched the WAF block page; reported in OnStopRequest.
+    Blocked,
+  };
+  Atomic<AkamaiWafState, mozilla::Relaxed> mAkamaiWafState{
+      AkamaiWafState::None};
   // Attached StreamFilterParents
   // Using raw pointer here since StreamFilterParent owns the channel.
   // Should be only accessed on the main thread.
@@ -369,7 +380,7 @@ class HttpChannelChild final : public PHttpChannelChild,
   bool mEverHadBgChildAtAsyncOpen = false;
   bool mEverHadBgChildAtConnectParent = false;
   bool mCreateBackgroundChannelFailed = false;
-  bool mBgInitFailCallbackTriggered = false;
+  Atomic<bool, Relaxed> mBgInitFailCallbackTriggered{false};
   bool mCanSendAtCancel = false;
   // State of the HttpBackgroundChannelChild's event queue during destruction.
   enum BckChildQueueStatus {
@@ -477,6 +488,14 @@ class HttpChannelChild final : public PHttpChannelChild,
 
   // Collect telemetry for mixed content.
   void CollectMixedContentTelemetry();
+
+  // Collect telemetry for Akamai responses and Akamai WAF block pages.
+  void CollectAkamaiResponseTelemetry();
+  void MaybeCollectAkamaiWafBlockTelemetry();
+
+  // Stream listener placed after the content decoders that inspects the
+  // decoded body for the Akamai WAF block page.
+  class AkamaiWafBlockDetector;
 
   friend class HttpAsyncAborter<HttpChannelChild>;
   friend class InterceptStreamListener;

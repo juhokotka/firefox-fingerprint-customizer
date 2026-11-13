@@ -5,6 +5,7 @@
 #ifndef MOZILLA_GFX_COMPOSITINGRENDERTARGETOGL_H
 #define MOZILLA_GFX_COMPOSITINGRENDERTARGETOGL_H
 
+#include "GLContext.h"
 #include "GLContextTypes.h"             // for GLContext
 #include "GLDefs.h"                     // for GLenum, LOCAL_GL_FRAMEBUFFER, etc
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
@@ -12,8 +13,8 @@
 #include "mozilla/gfx/Point.h"          // for IntSize, IntSizeTyped
 #include "mozilla/gfx/Types.h"          // for SurfaceFormat, etc
 #include "mozilla/layers/Compositor.h"  // for SurfaceInitMode, etc
-#include "mozilla/layers/TextureHost.h"    // for CompositingRenderTarget
 #include "mozilla/layers/CompositorOGL.h"  // for CompositorOGL
+#include "mozilla/layers/TextureHost.h"    // for CompositingRenderTarget
 #include "mozilla/mozalloc.h"              // for operator new
 #include "nsAString.h"
 #include "nsCOMPtr.h"  // for already_AddRefed

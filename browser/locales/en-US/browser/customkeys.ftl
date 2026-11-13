@@ -20,6 +20,8 @@ customkeys-reset-all-button = Restore defaults
 
 ## Shortcut actions
 
+# Displayed below the action label (e.g. "Undo") when the shortcut cannot be changed.
+customkeys-key-unchangeable = (cannot be changed)
 customkeys-key-new =
   .label = Press new key:
 # Displayed in the new key field when the key that was pressed isn't valid.
@@ -47,6 +49,11 @@ customkeys-conflict-confirm-title = Remove another shortcut?
 customkeys-conflict-confirm-body = This key is already used by “{ $conflict }”.
 customkeys-conflict-confirm-button-confirm = Use anyway
 customkeys-conflict-confirm-button-cancel = Cancel
+
+customkeys-conflict-unusable-title = Key cannot be used
+# Variables
+# $conflict (string) - The title of the conflicting shortcut.
+customkeys-conflict-unusable-body = This key is already used by “{ $conflict }” and cannot be used.
 
 customkeys-reset-all-confirm-title = Restore defaults?
 customkeys-reset-all-confirm-body = Any custom keyboard shortcuts you’ve created will be removed.

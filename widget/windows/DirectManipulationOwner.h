@@ -6,6 +6,7 @@
 #define DirectManipulationOwner_h_
 
 #include <windows.h>
+
 #include "Units.h"
 #include "nsIWidget.h"  // for TouchpadGesturePhase
 
@@ -40,7 +41,7 @@ class DirectManipulationOwner {
 
  private:
   nsWindow* mWindow;
-  DWORD mDmViewportHandlerCookie;
+  DWORD mDmViewportHandlerCookie = 0;
   RefPtr<IDirectManipulationManager> mDmManager;
   RefPtr<IDirectManipulationUpdateManager> mDmUpdateManager;
   RefPtr<IDirectManipulationViewport> mDmViewport;

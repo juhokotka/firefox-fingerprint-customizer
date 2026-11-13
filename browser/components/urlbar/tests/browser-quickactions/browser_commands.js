@@ -80,6 +80,8 @@ add_setup(async function setup() {
       ["browser.preferences.experimental.hidden", false],
     ],
   });
+
+  registerCleanupFunction(NimbusTestUtils.disableSignatureVerification());
 });
 
 const LOAD_TYPE = {
@@ -87,6 +89,16 @@ const LOAD_TYPE = {
   NEW_TAB: 2,
   PRE_LOADED: 3,
 };
+
+async function loadInCurrentTab(uri) {
+  const onLoad = BrowserTestUtils.browserLoaded(
+    gBrowser.selectedBrowser,
+    false,
+    uri
+  );
+  BrowserTestUtils.startLoadingURIString(gBrowser.selectedBrowser, uri);
+  await onLoad;
+}
 
 let COMMANDS_TESTS = [
   {
@@ -154,18 +166,7 @@ let COMMANDS_TESTS = [
   },
   {
     cmd: "add-ons",
-    setup: async () => {
-      const onLoad = BrowserTestUtils.browserLoaded(
-        gBrowser.selectedBrowser,
-        false,
-        "https://example.com/"
-      );
-      BrowserTestUtils.startLoadingURIString(
-        gBrowser.selectedBrowser,
-        "https://example.com/"
-      );
-      await onLoad;
-    },
+    setup: () => loadInCurrentTab("https://example.com/"),
     uri: "about:addons",
     loadType: LOAD_TYPE.NEW_TAB,
     testFun: async () =>
@@ -176,18 +177,7 @@ let COMMANDS_TESTS = [
   },
   {
     cmd: "extensions",
-    setup: async () => {
-      const onLoad = BrowserTestUtils.browserLoaded(
-        gBrowser.selectedBrowser,
-        false,
-        "https://example.com/"
-      );
-      BrowserTestUtils.startLoadingURIString(
-        gBrowser.selectedBrowser,
-        "https://example.com/"
-      );
-      await onLoad;
-    },
+    setup: () => loadInCurrentTab("https://example.com/"),
     uri: "about:addons",
     loadType: LOAD_TYPE.NEW_TAB,
     testFun: async () =>
@@ -199,18 +189,7 @@ let COMMANDS_TESTS = [
   },
   {
     cmd: "themes",
-    setup: async () => {
-      const onLoad = BrowserTestUtils.browserLoaded(
-        gBrowser.selectedBrowser,
-        false,
-        "https://example.com/"
-      );
-      BrowserTestUtils.startLoadingURIString(
-        gBrowser.selectedBrowser,
-        "https://example.com/"
-      );
-      await onLoad;
-    },
+    setup: () => loadInCurrentTab("https://example.com/"),
     uri: "about:addons",
     loadType: LOAD_TYPE.NEW_TAB,
     testFun: async () =>
@@ -228,6 +207,22 @@ let COMMANDS_TESTS = [
       });
       const libraryWindow = Services.wm.getMostRecentWindow("Places:Organizer");
       libraryWindow?.close();
+      return true;
+    },
+  },
+  {
+    // An about:preferences tab that is already open has to be navigated to the
+    // pane the action asks for, rather than only focused.
+    cmd: "manage ai",
+    setup: () => loadInCurrentTab("about:preferences"),
+    uri: "about:preferences#ai",
+    loadType: LOAD_TYPE.PRE_LOADED,
+    testFun: async () => {
+      await TestUtils.waitForCondition(
+        () =>
+          gBrowser.selectedBrowser.currentURI.spec == "about:preferences#ai",
+        "waiting for the open preferences tab to switch pane"
+      );
       return true;
     },
   },
@@ -283,19 +278,22 @@ add_task(async function test_pages() {
     }
     EventUtils.synthesizeKey("KEY_Enter", {}, window);
 
-    let newTab;
-    if (loadType == LOAD_TYPE.PRE_LOADED) {
-      newTab = gBrowser.selectedTab;
-    } else if (onLoad) {
-      newTab = await onLoad;
-    } else {
-      newTab = null;
+    let newTab = null;
+    if (loadType != LOAD_TYPE.PRE_LOADED && onLoad) {
+      newTab = (await onLoad) ?? null;
     }
 
     Assert.ok(
       await testFun(),
       `The command "${cmd}" passed completed its test`
     );
+
+    if (loadType == LOAD_TYPE.PRE_LOADED) {
+      // The action opens and selects the tab from a parent-side engagement
+      // hook, which is async on the actor message path, so capture it only
+      // after testFun has confirmed the page is loaded.
+      newTab = gBrowser.selectedTab;
+    }
 
     if ([LOAD_TYPE.NEW_TAB, LOAD_TYPE.PRE_LOADED].includes(loadType)) {
       await BrowserTestUtils.removeTab(newTab);

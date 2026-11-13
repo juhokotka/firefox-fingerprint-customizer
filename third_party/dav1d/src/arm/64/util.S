@@ -36,6 +36,23 @@
 #define __has_feature(x) 0
 #endif
 
+.macro  ldrel rd, raddr, val, offset=0
+#if defined(__APPLE__)
+        adrp            \raddr, \val+(\offset)@PAGE
+        ldr             \rd, [\raddr, \val+(\offset)@PAGEOFF]
+#elif defined(_MSC_VER)
+        movrel          \raddr, \val, \offset
+        ldr             \rd, [\raddr]
+#elif __has_feature(hwaddress_sanitizer)
+        adrp            \raddr, :pg_hi21_nc:\val+(\offset)
+        movk            \raddr, #:prel_g3:\val+0x100000000
+        ldr             \rd, [\raddr, :lo12:\val+(\offset)]
+#else
+        adrp            \raddr, \val+(\offset)
+        ldr             \rd, [\raddr, :lo12:\val+(\offset)]
+#endif
+.endm
+
 .macro  movrel rd, val, offset=0
 #if defined(__APPLE__)
   .if \offset < 0
@@ -46,7 +63,7 @@
         adrp            \rd, \val+(\offset)@PAGE
         add             \rd, \rd, \val+(\offset)@PAGEOFF
   .endif
-#elif defined(PIC) && defined(_WIN32)
+#elif defined(_WIN32)
   .if \offset < 0
         adrp            \rd, \val
         add             \rd, \rd, :lo12:\val
@@ -59,11 +76,9 @@
         adrp            \rd, :pg_hi21_nc:\val+(\offset)
         movk            \rd, #:prel_g3:\val+0x100000000
         add             \rd, \rd, :lo12:\val+(\offset)
-#elif defined(PIC)
+#else
         adrp            \rd, \val+(\offset)
         add             \rd, \rd, :lo12:\val+(\offset)
-#else
-        ldr             \rd, =\val+\offset
 #endif
 .endm
 

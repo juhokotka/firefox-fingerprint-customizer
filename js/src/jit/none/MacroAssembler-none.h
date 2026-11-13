@@ -11,7 +11,7 @@
 #include "wasm/WasmCodegenTypes.h"
 #include "wasm/WasmTypeDecls.h"
 
-using js::wasm::FaultingCodeOffsetPair;
+using js::wasm::FaultingCodeRangePair;
 
 namespace js {
 namespace jit {
@@ -38,6 +38,7 @@ class MacroAssemblerNone : public Assembler {
   MoveResolver moveResolver_;
 
   size_t size() const { MOZ_CRASH(); }
+  size_t readableSize() const { MOZ_CRASH(); }
   size_t bytesNeeded() const { MOZ_CRASH(); }
   size_t jumpRelocationTableBytes() const { MOZ_CRASH(); }
   size_t dataRelocationTableBytes() const { MOZ_CRASH(); }
@@ -85,6 +86,7 @@ class MacroAssemblerNone : public Assembler {
   void jump(T) {
     MOZ_CRASH();
   }
+  void retarget(Label*, Label*) { MOZ_CRASH(); }
   void writeCodePointer(CodeLabel* label) { MOZ_CRASH(); }
   void haltingAlign(size_t) { MOZ_CRASH(); }
   void nopAlign(size_t) { MOZ_CRASH(); }
@@ -161,6 +163,14 @@ class MacroAssemblerNone : public Assembler {
   CodeOffset pushWithPatch(T) {
     MOZ_CRASH();
   }
+  template <typename... Ts>
+  inline void pushRegs(const Ts&...) {
+    MOZ_CRASH();
+  };
+  template <typename... Ts>
+  inline void popRegs(const Ts&...) {
+    MOZ_CRASH();
+  };
 
   void testNullSet(Condition, ValueOperand, Register) { MOZ_CRASH(); }
   void testObjectSet(Condition, ValueOperand, Register) { MOZ_CRASH(); }
@@ -212,11 +222,11 @@ class MacroAssemblerNone : public Assembler {
   }
 
   template <typename T>
-  FaultingCodeOffset loadPtr(T, Register) {
+  FaultingCodeRange loadPtr(T, Register) {
     MOZ_CRASH();
   }
   template <typename T>
-  FaultingCodeOffset load32(T, Register) {
+  FaultingCodeRange load32(T, Register) {
     MOZ_CRASH();
   }
   template <typename T>
@@ -224,15 +234,15 @@ class MacroAssemblerNone : public Assembler {
     MOZ_CRASH();
   }
   template <typename T>
-  FaultingCodeOffset loadFloat16(T, FloatRegister, Register) {
+  FaultingCodeRange loadFloat16(T, FloatRegister, Register) {
     MOZ_CRASH();
   }
   template <typename T>
-  FaultingCodeOffset loadFloat32(T, FloatRegister) {
+  FaultingCodeRange loadFloat32(T, FloatRegister) {
     MOZ_CRASH();
   }
   template <typename T>
-  FaultingCodeOffset loadDouble(T, FloatRegister) {
+  FaultingCodeRange loadDouble(T, FloatRegister) {
     MOZ_CRASH();
   }
   template <typename T>
@@ -240,15 +250,15 @@ class MacroAssemblerNone : public Assembler {
     MOZ_CRASH();
   }
   template <typename T>
-  FaultingCodeOffset load8SignExtend(T, Register) {
+  FaultingCodeRange load8SignExtend(T, Register) {
     MOZ_CRASH();
   }
   template <typename T>
-  FaultingCodeOffset load8ZeroExtend(T, Register) {
+  FaultingCodeRange load8ZeroExtend(T, Register) {
     MOZ_CRASH();
   }
   template <typename T>
-  FaultingCodeOffset load16SignExtend(T, Register) {
+  FaultingCodeRange load16SignExtend(T, Register) {
     MOZ_CRASH();
   }
   template <typename T>
@@ -256,7 +266,7 @@ class MacroAssemblerNone : public Assembler {
     MOZ_CRASH();
   }
   template <typename T>
-  FaultingCodeOffset load16ZeroExtend(T, Register) {
+  FaultingCodeRange load16ZeroExtend(T, Register) {
     MOZ_CRASH();
   }
   template <typename T>
@@ -265,12 +275,12 @@ class MacroAssemblerNone : public Assembler {
   }
 #ifdef JS_64BIT
   template <typename T>
-  FaultingCodeOffset load64(T, Register64) {
+  FaultingCodeRange load64(T, Register64) {
     MOZ_CRASH();
   }
 #else
   template <typename T>
-  FaultingCodeOffsetPair load64(T, Register64) {
+  FaultingCodeRangePair load64(T, Register64) {
     MOZ_CRASH();
   }
 #endif
@@ -280,11 +290,11 @@ class MacroAssemblerNone : public Assembler {
   }
 
   template <typename T, typename S>
-  FaultingCodeOffset storePtr(const T&, S) {
+  FaultingCodeRange storePtr(const T&, S) {
     MOZ_CRASH();
   }
   template <typename T, typename S>
-  FaultingCodeOffset store32(T, S) {
+  FaultingCodeRange store32(T, S) {
     MOZ_CRASH();
   }
   template <typename T, typename S>
@@ -300,11 +310,11 @@ class MacroAssemblerNone : public Assembler {
     MOZ_CRASH();
   }
   template <typename T, typename S>
-  FaultingCodeOffset store8(T, S) {
+  FaultingCodeRange store8(T, S) {
     MOZ_CRASH();
   }
   template <typename T, typename S>
-  FaultingCodeOffset store16(T, S) {
+  FaultingCodeRange store16(T, S) {
     MOZ_CRASH();
   }
   template <typename T, typename S>
@@ -313,12 +323,12 @@ class MacroAssemblerNone : public Assembler {
   }
 #ifdef JS_64BIT
   template <typename T, typename S>
-  FaultingCodeOffset store64(T, S) {
+  FaultingCodeRange store64(T, S) {
     MOZ_CRASH();
   }
 #else
   template <typename T, typename S>
-  FaultingCodeOffsetPair store64(T, S) {
+  FaultingCodeRangePair store64(T, S) {
     MOZ_CRASH();
   }
 #endif

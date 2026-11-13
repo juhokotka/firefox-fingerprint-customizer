@@ -2,7 +2,6 @@
 prefs = [
   "dom.origin-trials.enabled=true",
   "dom.origin-trials.test-key.enabled=true",
-  "dom.origin-trials.private-attribution.state=0",
   "browser.tabs.remote.coep.credentialless=false",
 ]
 support-files = [
@@ -12,12 +11,8 @@ support-files = [
 #  * Test interfaces only exposed on DEBUG builds.
 #  * xorigin tests run in example.org rather than example.com, so token
 #    verification fails, expectedly.
-skip-if = [
-  "asan",
-  "ccov",
-  "opt",
-  "tsan",
-  "xorigin",
+run-if = [
+  "debug && !xorigin",
 ]
 
 # We want to test that trials are exposed in worklets, and AudioWorklet
@@ -41,7 +36,5 @@ skip-if = [
 ]
 
 ["test_trial_hidden.html"]
-
-["test_trial_hidden_deprecated.html"]
 
 ["test_wrong_origin.html"]

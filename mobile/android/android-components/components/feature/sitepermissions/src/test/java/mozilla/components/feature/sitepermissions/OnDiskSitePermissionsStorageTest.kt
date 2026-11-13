@@ -4,10 +4,10 @@
 
 package mozilla.components.feature.sitepermissions
 
-import android.os.Looper.getMainLooper
 import androidx.paging.DataSource
 import androidx.room.InvalidationTracker
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import mozilla.components.concept.engine.DataCleanable
 import mozilla.components.concept.engine.Engine.BrowsingData
@@ -39,7 +39,6 @@ import org.mockito.Mockito.doReturn
 import org.mockito.Mockito.spy
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
-import org.robolectric.Shadows.shadowOf
 
 @RunWith(AndroidJUnit4::class)
 class OnDiskSitePermissionsStorageTest {
@@ -47,20 +46,22 @@ class OnDiskSitePermissionsStorageTest {
     private lateinit var mockDAO: SitePermissionsDao
     private lateinit var storage: OnDiskSitePermissionsStorage
     private lateinit var mockDataCleanable: DataCleanable
+    private val testScope = TestScope()
 
     @Before
     fun setup() {
         mockDAO = mock()
         mockDataCleanable = mock()
-        storage = spy(
-            OnDiskSitePermissionsStorage(mock(), mockDataCleanable).apply {
-                databaseInitializer = { mockDatabase(mockDAO) }
-            },
-        )
+        storage =
+            spy(
+                OnDiskSitePermissionsStorage(mock(), testScope, mockDataCleanable).apply {
+                    databaseInitializer = { mockDatabase(mockDAO) }
+                }
+            )
     }
 
     @Test
-    fun `save a new SitePermission`() = runTest {
+    fun `save a new SitePermission`() = testScope.runTest {
         val sitePermissions = createNewSitePermission()
 
         storage.save(sitePermissions, private = false)
@@ -69,7 +70,7 @@ class OnDiskSitePermissionsStorageTest {
     }
 
     @Test
-    fun `GIVEN a private permission WHEN save THEN the SitePermission is not store`() = runTest {
+    fun `GIVEN a private permission WHEN save THEN the SitePermission is not store`() = testScope.runTest {
         val sitePermissions = createNewSitePermission()
 
         storage.save(sitePermissions, private = true)
@@ -78,41 +79,42 @@ class OnDiskSitePermissionsStorageTest {
     }
 
     @Test
-    fun `update a SitePermission`() = runTest {
+    fun `update a SitePermission`() = testScope.runTest {
         val sitePermissions = createNewSitePermission()
 
         storage.update(sitePermissions, private = false)
-        shadowOf(getMainLooper()).idle()
+        testScope.testScheduler.advanceUntilIdle()
 
         verify(mockDAO).update(any())
         verify(mockDataCleanable).clearData(BrowsingData.select(BrowsingData.PERMISSIONS), sitePermissions.origin)
     }
 
     @Test
-    fun `GIVEN a private permission WHEN update THEN the SitePermission is not store`() = runTest {
+    fun `GIVEN a private permission WHEN update THEN the SitePermission is not store`() = testScope.runTest {
         val sitePermissions = createNewSitePermission()
 
         storage.update(sitePermissions, private = true)
-        shadowOf(getMainLooper()).idle()
+        testScheduler.advanceUntilIdle()
 
         verify(mockDAO, times(0)).update(any())
-        verify(mockDataCleanable, times(0)).clearData(
-            BrowsingData.select(BrowsingData.PERMISSIONS),
-            sitePermissions.origin,
-        )
+        verify(mockDataCleanable, times(0))
+            .clearData(
+                BrowsingData.select(BrowsingData.PERMISSIONS),
+                sitePermissions.origin,
+            )
     }
 
     @Test
-    fun `find a SitePermissions by origin`() = runTest {
+    fun `find a SitePermissions by origin`() = testScope.runTest {
         storage.findSitePermissionsBy("mozilla.org", private = false)
 
         verify(mockDAO).getSitePermissionsBy("mozilla.org")
     }
 
     @Test
-    fun `GIVEN private sitePermissions WHEN findSitePermissionsBy THEN reset SitePermissions`() =
-        runTest {
-            val dbPermission = SitePermissionsEntity(
+    fun `GIVEN private sitePermissions WHEN findSitePermissionsBy THEN reset SitePermissions`() = testScope.runTest {
+        val dbPermission =
+            SitePermissionsEntity(
                 origin = "mozilla.dev",
                 localStorage = ALLOWED,
                 crossOriginStorageAccess = ALLOWED,
@@ -129,19 +131,16 @@ class OnDiskSitePermissionsStorageTest {
                 savedAt = 0,
             )
 
-            doReturn(dbPermission).`when`(mockDAO)
-                .getSitePermissionsBy(origin = dbPermission.origin)
+        doReturn(dbPermission).`when`(mockDAO).getSitePermissionsBy(origin = dbPermission.origin)
 
-            val foundPermissions =
-                storage.findSitePermissionsBy(dbPermission.origin, private = true)
+        val foundPermissions = storage.findSitePermissionsBy(dbPermission.origin, private = true)
 
-            assertNull(foundPermissions)
-        }
+        assertNull(foundPermissions)
+    }
 
     @Test
-    fun `find all sitePermissions grouped by permission`() = runTest {
-        doReturn(dummySitePermissionEntitiesList())
-            .`when`(mockDAO).getSitePermissions()
+    fun `find all sitePermissions grouped by permission`() = testScope.runTest {
+        doReturn(dummySitePermissionEntitiesList()).`when`(mockDAO).getSitePermissions()
 
         val map = storage.findAllSitePermissionsGroupedByPermission()
 
@@ -158,37 +157,38 @@ class OnDiskSitePermissionsStorageTest {
     }
 
     @Test
-    fun `remove a SitePermissions`() = runTest {
+    fun `remove a SitePermissions`() = testScope.runTest {
         val sitePermissions = createNewSitePermission()
 
         storage.remove(sitePermissions, private = false)
-
-        shadowOf(getMainLooper()).idle()
+        testScope.testScheduler.advanceUntilIdle()
 
         verify(mockDAO).deleteSitePermissions(any())
         verify(mockDataCleanable).clearData(BrowsingData.select(BrowsingData.PERMISSIONS), sitePermissions.origin)
     }
 
     @Test
-    fun `remove all SitePermissions`() = runTest {
+    fun `remove all SitePermissions`() = testScope.runTest {
         storage.removeAll()
-        shadowOf(getMainLooper()).idle()
+        testScope.testScheduler.advanceUntilIdle()
 
         verify(mockDAO).deleteAllSitePermissions()
         verify(mockDataCleanable).clearData(BrowsingData.select(BrowsingData.PERMISSIONS))
     }
 
     @Test
-    fun `get all SitePermissions paged`() = runTest {
+    fun `get all SitePermissions paged`() = testScope.runTest {
         val mockDataSource: DataSource<Int, SitePermissionsEntity> = mock()
 
         doReturn(
-            object : DataSource.Factory<Int, SitePermissionsEntity>() {
-                override fun create(): DataSource<Int, SitePermissionsEntity> {
-                    return mockDataSource
+                object : DataSource.Factory<Int, SitePermissionsEntity>() {
+                    override fun create(): DataSource<Int, SitePermissionsEntity> {
+                        return mockDataSource
+                    }
                 }
-            },
-        ).`when`(mockDAO).getSitePermissionsPaged()
+            )
+            .`when`(mockDAO)
+            .getSitePermissionsPaged()
 
         storage.getSitePermissionsPaged()
 
@@ -245,9 +245,12 @@ class OnDiskSitePermissionsStorageTest {
         )
     }
 
-    private fun mockDatabase(dao: SitePermissionsDao) = object : SitePermissionsDatabase() {
-        override fun sitePermissionsDao() = dao
-        override fun createInvalidationTracker(): InvalidationTracker = mock()
-        override fun clearAllTables() = Unit
-    }
+    private fun mockDatabase(dao: SitePermissionsDao) =
+        object : SitePermissionsDatabase() {
+            override fun sitePermissionsDao() = dao
+
+            override fun createInvalidationTracker(): InvalidationTracker = mock()
+
+            override fun clearAllTables() = Unit
+        }
 }

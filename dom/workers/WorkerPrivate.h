@@ -9,7 +9,6 @@
 
 #include "FontVisibilityProvider.h"
 #include "MainThreadUtils.h"
-#include "ScriptLoader.h"
 #include "js/ContextOptions.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
@@ -596,6 +595,30 @@ class WorkerPrivate final
   MOZ_CAN_RUN_SCRIPT void ProcessSingleDebuggerRunnable();
   void ClearDebuggerEventQueue();
 
+  // True if the debugger queue holds any RemoteWorkerDebugger IPC handshake
+  // runnable that a nested sync loop should service right now
+  // (mProcessDebuggerIPCHandshake is set and this worker uses the remote
+  // debugger). Scans the whole queue, not just the front: an IPC handshake
+  // reply can sit behind a deferred debugger script/message runnable, and it
+  // must still run so the blocked parent thread proceeds. See bug 2053827.
+  bool HasPendingDebuggerIPCHandshakeRunnable() MOZ_REQUIRES(mMutex);
+
+  // Remove and return the first (FIFO) RemoteWorkerDebugger IPC handshake
+  // runnable in the debugger queue, leaving every other runnable queued in its
+  // original relative order (so deferred debugger script/message runnables stay
+  // deferred). Returns nullptr if there is none; the caller owns the result.
+  WorkerRunnable* TakeFirstDebuggerIPCHandshakeRunnable() MOZ_REQUIRES(mMutex);
+
+  // Run a single debugger IPC handshake runnable (see above) if one is queued.
+  // RunCurrentSyncLoop calls this one runnable at a time, re-checking control
+  // runnables between each, so IPC handshake runnables take priority over
+  // deferred debugger runnables without starving control runnables.
+  //
+  // Deliberately not MOZ_CAN_RUN_SCRIPT: IPC handshake runnables only mutate
+  // debugger state and dispatch follow-up work, never running script, so this
+  // can be called from RunCurrentSyncLoop (which is not MOZ_CAN_RUN_SCRIPT).
+  void ProcessNextDebuggerIPCHandshakeRunnable();
+
   void OnProcessNextEvent();
 
   void AfterProcessNextEvent();
@@ -765,6 +788,11 @@ class WorkerPrivate final
   // worker, so WorkerPrivate* should be safe in the moment of calling.
   // We would like to have stronger type-system annotated/enforced handling.
   WorkerPrivate* GetParent() const { return mParent; }
+
+  nsISerialEventTarget* GetSchedulingEventTarget() {
+    WorkerPrivate* parent = GetParent();
+    return parent ? parent->ControlEventTarget() : MainThreadEventTarget();
+  }
 
   // Returns the top level worker. It can be the current worker if it's the top
   // level one.
@@ -966,12 +994,14 @@ class WorkerPrivate final
 
   void EvictFromBFCache();
 
-  nsIContentSecurityPolicy* GetCsp() const {
+  PolicyContainer* GetPolicyContainer() const {
     AssertIsOnMainThread();
-    return mLoadInfo.mCSP;
+    return mLoadInfo.mPolicyContainer;
   }
 
-  nsresult SetCsp(nsIContentSecurityPolicy* aCSP);
+  nsIContentSecurityPolicy* GetCsp() const {
+    return PolicyContainer::GetCSP(GetPolicyContainer());
+  }
 
   nsresult SetCSPFromHeaderValues(const nsACString& aCSPHeaderValue,
                                   const nsACString& aCSPReportOnlyHeaderValue);
@@ -1101,8 +1131,9 @@ class WorkerPrivate final
   // Whether this worker exposes its debugger through the parent-process
   // RemoteWorkerDebugger mechanism (true) or registers its nsIWorkerDebugger on
   // the local main thread (false). Latched at construction from
-  // dom.worker.remoteDebugger.enabled; always false in the parent process. The
-  // two mechanisms are mutually exclusive for a given worker.
+  // dom.worker.remoteDebugger.enabled, and for a parent-process worker also
+  // from RemoteWorkerService::IsInitialized(); see the mUseRemoteDebugger
+  // initializer. The two mechanisms are mutually exclusive for a given worker.
   bool UseRemoteDebugger() const { return mUseRemoteDebugger; }
 
   void SetIsQueued(const bool& aQueued);
@@ -1122,12 +1153,13 @@ class WorkerPrivate final
 
   void CycleCollect();
 
-  nsresult SetPrincipalsAndCSPOnMainThread(nsIPrincipal* aPrincipal,
-                                           nsIPrincipal* aPartitionedPrincipal,
-                                           nsILoadGroup* aLoadGroup,
-                                           nsIContentSecurityPolicy* aCsp);
+  nsresult SetPrincipalsOnMainThread(nsIPrincipal* aPrincipal,
+                                     nsIPrincipal* aPartitionedPrincipal,
+                                     nsILoadGroup* aLoadGroup);
 
-  nsresult SetPrincipalsAndCSPFromChannel(nsIChannel* aChannel);
+  nsresult SetPolicyContainerOnMainThread(PolicyContainer* aPolicyContainer);
+
+  nsresult SetPrincipalsAndPolicyContainerFromChannel(nsIChannel* aChannel);
 
   bool FinalChannelPrincipalIsValid(nsIChannel* aChannel);
 
@@ -1580,6 +1612,23 @@ class WorkerPrivate final
   mozilla::ipc::Endpoint<PRemoteWorkerDebuggerParent> mDebuggerParentEp;
   bool mRemoteDebuggerRegistered MOZ_GUARDED_BY(mMutex);
   bool mRemoteDebuggerReady MOZ_GUARDED_BY(mMutex);
+  // Whether the worker thread has finished trying to bind the current
+  // PRemoteWorkerDebugger child endpoint, either by binding it or by ending
+  // without one. Until then mRemoteDebugger being null is not conclusive, so
+  // this is the predicate EnableRemoteDebugger waits on. Cleared whenever
+  // CreateRemoteDebuggerEndpoints arms a new endpoint pair, so that a
+  // freeze/thaw cycle waits for the new binding rather than the old one.
+  bool mRemoteDebuggerBindingDone MOZ_GUARDED_BY(mMutex);
+  // True while the parent thread is blocked in Enable/DisableRemoteDebugger
+  // waiting for the register/unregister handshake reply (RecvRegisterDone /
+  // RecvUnregisterDone) to run on the worker thread. That reply is delivered on
+  // the worker's debugger queue, which a nested sync loop (RunCurrentSyncLoop)
+  // does not otherwise drain, so if the worker is in such a loop the parent
+  // thread would block forever (bug 2053827). While this is set,
+  // RunCurrentSyncLoop services the debugger queue's IPC-message runnables so
+  // the handshake can complete. Set/cleared on the parent thread and read on
+  // the worker thread, both under mMutex.
+  bool mProcessDebuggerIPCHandshake MOZ_GUARDED_BY(mMutex);
   bool mIsQueued;  // Should only touched on parent thread.
   // Immutable after construction, safe to read from any thread.
   const bool mUseRemoteDebugger;

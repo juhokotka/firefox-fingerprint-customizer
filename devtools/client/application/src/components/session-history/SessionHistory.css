@@ -20,6 +20,25 @@
   width: var(--col-width);
 }
 
+#diagram-container-table thead th button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  width: 100%;
+  padding: 0;
+  cursor: pointer;
+}
+
+#diagram-container-table thead th#current button {
+  cursor: default;
+}
+
+#diagram-container-table thead th.disabled button {
+  cursor: default;
+}
+
 #diagram-container-table tbody td:not([aria-hidden]) {
   --cell-padding: 4px;
   --cell-border: 1px;
@@ -42,6 +61,7 @@
   border-inline-start-style: dotted;
 }
 
+/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
 #diagram-container-table tbody td:has(+ td.same-document-nav) {
   border-inline-end-style: dotted;
 }
@@ -63,11 +83,13 @@
   );
 }
 
+/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
 #diagram-container-table td:has(:popover-open) button {
   background-color: var(--theme-selection-background);
   color: var(--theme-selection-color);
 }
 
+/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
 #diagram-container-table td:has(:popover-open) {
   anchor-name: --selected-session-history-entry-info;
 }

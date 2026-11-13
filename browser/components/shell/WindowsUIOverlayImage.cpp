@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <objbase.h>
+#include <propvarutil.h>
 #include <uiautomation.h>
 #include <utility>
 #include <wincodec.h>
@@ -14,9 +15,12 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/SyncRunnable.h"
+#include "mozilla/TimeStamp.h"
+#include "nsCOMPtr.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsIFile.h"
+#include "nsString.h"
 #include "nsThreadUtils.h"
 
 namespace mozilla {
@@ -84,33 +88,49 @@ static void RegisterWindowClass() {
   RegisterClassExW(&wc);
 }
 
-static bool LoadFrame(IWICImagingFactory* aFactory, IWICBitmapDecoder* aDecoder,
-                      UINT aIndex, int aWidth, int aHeight,
-                      std::vector<std::vector<uint8_t>>& aFrames) {
-  RefPtr<IWICBitmapFrameDecode> frame;
-  HRESULT hr{aDecoder->GetFrame(aIndex, getter_AddRefs(frame))};
+TimeDuration GetFrameDuration(IWICBitmapFrameDecode* aFrame,
+                              TimeDuration aDefaultFrameDuration) {
+  TimeDuration frameDuration{aDefaultFrameDuration};
+
+  RefPtr<IWICMetadataQueryReader> metadata;
+  HRESULT hr{aFrame->GetMetadataQueryReader(getter_AddRefs(metadata))};
   if (FAILED(hr)) {
-    return false;
+    return frameDuration;
   }
 
+  // GIF frames store their delay in the Graphic Control Extension
+  PROPVARIANT delay;
+  PropVariantInit(&delay);
+  hr = metadata->GetMetadataByName(L"/grctlext/Delay", &delay);
+  if (SUCCEEDED(hr) && delay.vt == VT_UI2 && delay.uiVal > 0) {
+    // The delay is stored in hundredths of a second
+    frameDuration = TimeDuration::FromMilliseconds(delay.uiVal * 10);
+  }
+  PropVariantClear(&delay);
+  return frameDuration;
+}
+
+static mozilla::Maybe<std::vector<uint8_t>> GetFramePixels(
+    IWICImagingFactory* aFactory, IWICBitmapFrameDecode* aFrame, int aWidth,
+    int aHeight) {
   RefPtr<IWICBitmapSource> converted;
-  hr = WICConvertBitmapSource(GUID_WICPixelFormat32bppPBGRA, frame,
-                              getter_AddRefs(converted));
+  HRESULT hr{WICConvertBitmapSource(GUID_WICPixelFormat32bppPBGRA, aFrame,
+                                    getter_AddRefs(converted))};
   if (FAILED(hr)) {
-    return false;
+    return mozilla::Nothing();
   }
 
   RefPtr<IWICBitmapScaler> scaler;
   hr = aFactory->CreateBitmapScaler(getter_AddRefs(scaler));
   if (FAILED(hr)) {
-    return false;
+    return mozilla::Nothing();
   }
 
   hr = scaler->Initialize(converted, static_cast<UINT>(aWidth),
                           static_cast<UINT>(aHeight),
                           WICBitmapInterpolationModeFant);
   if (FAILED(hr)) {
-    return false;
+    return mozilla::Nothing();
   }
 
   constexpr size_t kBytesPerPixel{4};
@@ -120,10 +140,30 @@ static bool LoadFrame(IWICImagingFactory* aFactory, IWICBitmapDecoder* aDecoder,
   hr = scaler->CopyPixels(nullptr, stride, static_cast<UINT>(pixels.size()),
                           pixels.data());
   if (FAILED(hr)) {
+    return mozilla::Nothing();
+  }
+
+  return mozilla::Some(std::move(pixels));
+}
+
+static bool LoadFrame(IWICImagingFactory* aFactory, IWICBitmapDecoder* aDecoder,
+                      UINT aIndex, int aWidth, int aHeight,
+                      std::vector<WindowsUIOverlayImage::Frame>& aFrames) {
+  RefPtr<IWICBitmapFrameDecode> frame;
+  HRESULT hr{aDecoder->GetFrame(aIndex, getter_AddRefs(frame))};
+  if (FAILED(hr)) {
     return false;
   }
 
-  aFrames.push_back(std::move(pixels));
+  mozilla::Maybe<std::vector<uint8_t>> framePixels{
+      GetFramePixels(aFactory, frame, aWidth, aHeight)};
+  if (!framePixels) {
+    return false;
+  }
+  // Kit image (kit.gif) frame duration is 40 ms
+  const TimeDuration kDefaultFrameDuration{TimeDuration::FromMilliseconds(40)};
+  aFrames.push_back(WindowsUIOverlayImage::Frame{
+      std::move(*framePixels), GetFrameDuration(frame, kDefaultFrameDuration)});
 
   return true;
 }
@@ -131,7 +171,8 @@ static bool LoadFrame(IWICImagingFactory* aFactory, IWICBitmapDecoder* aDecoder,
 static bool LoadFrames(WindowsUIOverlayImage::DisplayMode aDisplayMode,
                        IWICImagingFactory* aFactory,
                        IWICBitmapDecoder* aDecoder, UINT aFrameCount,
-                       SIZE aSize, std::vector<std::vector<uint8_t>>& aFrames) {
+                       SIZE aSize,
+                       std::vector<WindowsUIOverlayImage::Frame>& aFrames) {
   if (aDisplayMode == WindowsUIOverlayImage::DisplayMode::Static) {
     // Load just the last frame
     aFrames.reserve(1);
@@ -185,7 +226,7 @@ static mozilla::Maybe<UINT> LoadFrameCount(IWICBitmapDecoder* aDecoder) {
   return mozilla::Some(frameCount);
 }
 
-static RefPtr<IWICBitmapDecoder> CreateWICBitmapDecoder(
+RefPtr<IWICBitmapDecoder> CreateWICBitmapDecoder(
     RefPtr<IWICImagingFactory> aFactory, nsIFile* aImageFile) {
   nsAutoString imagePath;
   aImageFile->GetPath(imagePath);
@@ -197,9 +238,17 @@ static RefPtr<IWICBitmapDecoder> CreateWICBitmapDecoder(
 }
 
 static already_AddRefed<nsIFile> GetImageFile() {
+  nsresult rv{NS_ERROR_FAILURE};
   nsCOMPtr<nsIFile> file;
-  nsresult rv{NS_GetSpecialDirectory(NS_GRE_BIN_DIR, getter_AddRefs(file))};
-  if (NS_FAILED(rv)) {
+  // The directory service must be used on the main thread
+  const nsresult dispatchToThreadRv{mozilla::SyncRunnable::DispatchToThread(
+      mozilla::GetMainThreadSerialEventTarget(),
+      NS_NewRunnableFunction(
+          "WindowsUIOverlayImage::GetImageFile", [&rv, &file] {
+            rv = NS_GetSpecialDirectory(NS_GRE_BIN_DIR, getter_AddRefs(file));
+          }))};
+
+  if (NS_FAILED(dispatchToThreadRv) || NS_FAILED(rv)) {
     return nullptr;
   }
 
@@ -213,7 +262,7 @@ static already_AddRefed<nsIFile> GetImageFile() {
   return file.forget();
 }
 
-static RefPtr<IWICImagingFactory> CreateWICImagingFactory() {
+RefPtr<IWICImagingFactory> CreateWICImagingFactory() {
   RefPtr<IWICImagingFactory> factory;
   HRESULT hr{CoCreateInstance(CLSID_WICImagingFactory, nullptr,
                               CLSCTX_INPROC_SERVER, IID_IWICImagingFactory,
@@ -239,6 +288,7 @@ WindowsUIOverlayImage::WindowsUIOverlayImage(
       mElement{aElement},
       mDisplayMode{aDisplayMode},
       mSize{},
+      mAccumulatedTime{},
       mDibBits{nullptr},
       mOldBmp{nullptr},
       mRect{},
@@ -290,17 +340,35 @@ bool WindowsUIOverlayImage::IsVisible() {
   return true;
 }
 
-void WindowsUIOverlayImage::AdvanceFrame() {
+size_t ComputeAdvancedFrame(
+    const std::vector<WindowsUIOverlayImage::Frame>& aFrames,
+    size_t aCurrentFrame, TimeDuration& aAccumulatedTime) {
+  // Advance as many frames as the accumulated time covers, so the animation
+  // speed stays independent of the tick rate, even when a tick lasts longer
+  // than a frame's duration
+  while (aCurrentFrame + 1 < aFrames.size() &&
+         aAccumulatedTime >= aFrames[aCurrentFrame].duration) {
+    aAccumulatedTime -= aFrames[aCurrentFrame].duration;
+    ++aCurrentFrame;
+  }
+  return aCurrentFrame;
+}
+
+void WindowsUIOverlayImage::AdvanceAnimation(TimeDuration aElapsed) {
   if (!mOverlayWindow || mDisplayMode != DisplayMode::Animated ||
-      mFrames.empty()) {
+      mFrames.empty() || mCurrentFrame + 1 >= mFrames.size()) {
     return;
   }
-  if (mCurrentFrame + 1 >= mFrames.size()) {
-    return;
+
+  mAccumulatedTime += aElapsed;
+
+  size_t newFrame{
+      ComputeAdvancedFrame(mFrames, mCurrentFrame, mAccumulatedTime)};
+  if (newFrame != mCurrentFrame) {
+    mCurrentFrame = newFrame;
+    PaintOverlayFrame(mOverlayWindow, mMemDC, mSize, mDibBits,
+                      mFrames[mCurrentFrame].pixels);
   }
-  ++mCurrentFrame;
-  PaintOverlayFrame(mOverlayWindow, mMemDC, mSize, mDibBits,
-                    mFrames[mCurrentFrame]);
 }
 
 bool WindowsUIOverlayImage::Initialize() {
@@ -366,7 +434,7 @@ bool WindowsUIOverlayImage::Initialize() {
   mCurrentFrame =
       mDisplayMode == DisplayMode::Animated ? 0 : mFrames.size() - 1;
   PaintOverlayFrame(mOverlayWindow, mMemDC, mSize, mDibBits,
-                    mFrames[mCurrentFrame]);
+                    mFrames[mCurrentFrame].pixels);
 
   ShowWindow(mOverlayWindow, SW_SHOWNOACTIVATE);
   return true;

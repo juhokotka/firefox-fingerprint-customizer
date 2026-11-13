@@ -2,12 +2,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-<toolbox id="navigator-toolbox" class="chrome-block">
+<toolbox id="navigator-toolbox">
   <script src="chrome://browser/content/navigator-toolbox.js" />
 
   <!-- Menu -->
   <toolbar type="menubar" id="toolbar-menubar"
-           class="browser-toolbar chromeclass-menubar browser-titlebar"
+           class="browser-toolbar browser-titlebar"
            customizable="true"
            mode="icons"
            autohide="true"
@@ -45,8 +45,10 @@
               stopwatchid="tabClick">
 # If the name (tabbrowser-arrowscrollbox) or structure of this changes
 # significantly, there is an optimization in
-# DisplayPortUtils::MaybeCreateDisplayPortInFirstScrollFrameEncountered based
-# the current structure that we may want to revisit.
+# DisplayPortUtils::MaybeCreateDisplayPortInFirstScrollFrameEncountered based on
+# the current structure that we may want to revisit. It relies on the
+# arrowscrollbox's own scroll container being a direct child frame, so that it
+# can be given a displayport without walking the tabs inside it.
           <div id="pinned-drop-indicator">
             <html:img id="pinned-drop-indicator-icon" src="chrome://browser/skin/pin.svg" role="presentation" loading="lazy"/>
             <span id="pinned-drop-indicator-text" data-l10n-id="pinned-tabs-drop-indicator"></span>
@@ -83,27 +85,20 @@
                        cui-areatype="toolbar"
                        removable="true"/>
 
+        <toolbarspring cui-areatype="toolbar"
+                       class="chromeclass-toolbar-additional"/>
+
         <toolbarbutton id="alltabs-button"
                        class="toolbarbutton-1 chromeclass-toolbar-additional tabs-alltabs-button"
                        delegatesanchor="true"
                        badged="true"
-                       data-l10n-id="tabs-toolbar-list-all-tabs"
+                       data-l10n-id="tabs-toolbar-list-all-tabs-2"
                        closemenu="none"
                        removable="true"/>
       </hbox>
     </hbox>
 
-    <hbox class="titlebar-spacer" type="post-tabs"/>
-
-<!-- #include private-browsing-indicator.inc.xhtml -->
-
-    <toolbarbutton id="ai-window-toggle"
-                    class="toolbarbutton-1 chromeclass-toolbar-additional"
-                    data-l10n-id="toolbar-button-ai-window-toggle"
-                    cui-areatype="toolbar"
-                    removable="false"
-                    aria-haspopup="true"
-                    hidden="true"/>
+#include private-browsing-indicator.inc.xhtml
 
     <toolbarbutton class="content-analysis-indicator toolbarbutton-1 content-analysis-indicator-icon"/>
 
@@ -112,7 +107,7 @@
   </toolbar>
 
   <toolbar id="nav-bar"
-           class="browser-toolbar chromeclass-location"
+           class="browser-toolbar"
            data-l10n-id="navbar-accessible"
            fullscreentoolbar="true" mode="icons" customizable="true"
            customizationtarget="nav-bar-customization-target"
@@ -131,38 +126,30 @@
 
     <hbox id="nav-bar-customization-target" flex="1">
       <toolbarbutton id="back-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
-                     data-l10n-id="toolbar-button-back-2"
+                     data-l10n-id="toolbar-button-back-3"
                      removable="false" overflows="false"
                      keepbroadcastattributeswhencustomizing="true"
                      command="Browser:BackOrBackDuplicate"
                      tooltip="back-button-tooltip"
                      context="backForwardMenu"/>
       <toolbarbutton id="forward-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
-                     data-l10n-id="toolbar-button-forward-2"
+                     data-l10n-id="toolbar-button-forward-3"
                      removable="false" overflows="false"
                      keepbroadcastattributeswhencustomizing="true"
                      command="Browser:ForwardOrForwardDuplicate"
                      tooltip="forward-button-tooltip"
                      context="backForwardMenu"/>
       <toolbaritem id="stop-reload-button" class="chromeclass-toolbar-additional"
-                   data-l10n-id="toolbar-button-stop-reload"
+                   data-l10n-id="toolbar-button-stop-reload-2"
                    removable="true" overflows="false">
         <toolbarbutton id="reload-button" class="toolbarbutton-1"
-                       data-l10n-id="toolbar-button-reload"
+                       data-l10n-id="toolbar-button-reload-2"
                        command="Browser:ReloadOrDuplicate"
-                       tooltip="dynamic-shortcut-tooltip">
-          <box class="toolbarbutton-animatable-box">
-            <image class="toolbarbutton-animatable-image"/>
-          </box>
-        </toolbarbutton>
+                       tooltip="dynamic-shortcut-tooltip"/>
         <toolbarbutton id="stop-button" class="toolbarbutton-1"
-                       data-l10n-id="toolbar-button-stop"
+                       data-l10n-id="toolbar-button-stop-2"
                        command="Browser:Stop"
-                       tooltip="dynamic-shortcut-tooltip">
-          <box class="toolbarbutton-animatable-box">
-            <image class="toolbarbutton-animatable-image"/>
-          </box>
-        </toolbarbutton>
+                       tooltip="dynamic-shortcut-tooltip"/>
       </toolbaritem>
       <toolbarspring cui-areatype="toolbar" class="chromeclass-toolbar-additional"/>
       <toolbarspring cui-areatype="toolbar"
@@ -174,26 +161,10 @@
                    class="urlbar-container"
                    removable="false"
                    overflows="false">
-        <menupopup id="urlbarView-context-menu">
-          <menuitem id="urlbar-view-context-menu-open-in-tab"
-                    data-l10n-id="urlbar-view-context-menu-open-in-tab"/>
-          <menu id="urlbarView-context-menu-open-in-container-tab"
-                data-l10n-id="urlbar-view-context-menu-open-in-container-tab"
-                selection-type="single"
-                node-type="link"
-                hide-if-private-browsing="true"
-                hide-if-usercontext-disabled="true">
-            <menupopup id="urlbarView-context-menu-open-in-container-tab-popup"/>
-          </menu>
-          <menuitem id="urlbarView-context-menu-open-in-window"
-                    data-l10n-id="urlbar-view-context-menu-open-in-window"/>
-          <!--menuitem id="urlbarView-context-menu-open-in-private-window"
-                    data-l10n-id="urlbar-view-context-menu-open-in-private-window"/-->
-        </menupopup>
         <toolbartabstop/>
         <html:moz-urlbar id="urlbar"
               class="urlbar"
-              popover="manual"
+              role="group"
               pageproxystate="invalid"
               unifiedsearchbutton-available=""
               sap-name="urlbar">
@@ -205,9 +176,27 @@
             <image id="remote-control-icon"/>
           </box>
 
-          <box id="trust-icon-container" align="center" role="button" data-l10n-id="urlbar-identity-button" urlbar-slot="site-info">
+          <box
+            id="trust-icon-container"
+            align="center"
+            role="button"
+            data-l10n-id="urlbar-identity-button2"
+            data-l10n-args='{"count":0}'
+            data-l10n-attrs="aria-label"
+            urlbar-slot="site-info"
+          >
             <image id="trust-icon"/>
             <label id="trust-label" crop="center" flex="1" data-l10n-id="urlbar-trust-icon-notsecure-label" />
+            <span id="trust-icon-tracker-count-longform-wrapper">
+              <label
+                id="trust-icon-tracker-count-longform"
+                data-l10n-id="urlbar-trust-icon-trackers-blocked-longform-label"
+                data-l10n-args='{"count":0}'
+              />
+            </span>
+            <span id="trust-icon-tracker-count-shortform-wrapper">
+              <label id="trust-icon-tracker-count-shortform" />
+            </span>
           </box>
 
           <!-- Use onclick instead of normal popup= syntax since the popup
@@ -228,10 +217,15 @@
                 class="identity-box"
                 pageproxystate="invalid"
                 urlbar-slot="site-info">
+            <!-- Shown when trustPanel.featureGate is off, or for
+            chromeUI/extensionPage where tracker blocking never runs, so we
+            never update `data-l10n-args`. -->
             <box id="identity-icon-box"
                   role="button"
                   align="center"
-                  data-l10n-id="urlbar-identity-button"
+                  data-l10n-id="urlbar-identity-button2"
+                  data-l10n-args='{"count":0}'
+                  data-l10n-attrs="aria-label"
                   class="identity-box-button">
               <image id="identity-icon"/>
               <label id="identity-icon-label" crop="center" flex="1"/>
@@ -362,16 +356,6 @@
 
           <hbox id="page-action-buttons" context="pageActionContextMenu" align="center" urlbar-slot="page-actions">
             <toolbartabstop/>
-            <hbox id="contextual-feature-recommendation" role="button" hidden="true">
-              <hbox id="cfr-label-container">
-                <label id="cfr-label"/>
-              </hbox>
-              <hbox id="cfr-button"
-                    role="presentation"
-                    class="urlbar-page-action">
-                <image class="urlbar-icon"/>
-              </hbox>
-            </hbox>
             <hbox id="userContext-icons" hidden="true"
                   role="button">
               <label id="userContext-label"/>
@@ -418,6 +402,15 @@
                   data-l10n-id="urlbar-split-view-button"
                   hidden="true">
               <image class="urlbar-icon" id="split-view-button-icon" />
+            </hbox>
+            <hbox id="share-button"
+                  class="urlbar-page-action"
+                  role="button"
+                  aria-haspopup="dialog"
+                  aria-expanded="false"
+                  data-l10n-id="urlbar-share-button"
+                  hidden="true">
+              <image class="urlbar-icon"/>
             </hbox>
             <hbox id="pageActionButton"
                   class="urlbar-page-action"
@@ -485,7 +478,6 @@
                   </hbox>
       </toolbarbutton>
 
-
       <toolbarbutton id="unified-extensions-button"
                      class="toolbarbutton-1 chromeclass-toolbar-additional"
                      delegatesanchor="true"
@@ -501,6 +493,18 @@
 
     <toolbarbutton id="taskbar-tabs-audio" class="toolbarbutton-1 chromeclass-toolbar-additional"
                     removable="false" overflows="false"/>
+
+    <toolbarbutton id="mini-window-audio-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
+                    data-l10n-id="mini-window-audio-mute"
+                    removable="false" overflows="false"/>
+
+    <toolbarbutton id="mini-window-restore-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
+                    data-l10n-id="mini-window-restore-button"
+                    hidden="" removable="false" overflows="false"/>
+
+    <toolbarbutton id="mini-window-close-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
+                    data-l10n-id="mini-window-close-button"
+                    hidden="" removable="false" overflows="false"/>
 
     <toolbaritem id="smartwindow-ask-button"
                  class="chromeclass-toolbar-additional"
@@ -534,14 +538,14 @@
                      data-l10n-id="appmenu-menu-button-closed2"/>
     </toolbaritem>
     <hbox class="titlebar-spacer" type="post-tabs"/>
-<!-- #include private-browsing-indicator.inc.xhtml -->
+#include private-browsing-indicator.inc.xhtml
     <toolbarbutton class="content-analysis-indicator toolbarbutton-1 content-analysis-indicator-icon"/>
 #include titlebar-items.inc.xhtml
   </toolbar>
 
   <toolbar id="PersonalToolbar"
            mode="icons"
-           class="browser-toolbar chromeclass-directories"
+           class="browser-toolbar"
            context="toolbar-context-menu"
            data-l10n-id="bookmarks-toolbar"
            data-l10n-attrs="toolbarname"
@@ -704,13 +708,13 @@
                  persist="width">
       <toolbartabstop/>
       <searchbar id="searchbar" flex="1"/>
-      <html:moz-urlbar id="searchbar-new"
+      <html:moz-searchbar id="searchbar-new"
               class="urlbar"
-              popover="manual"
+              role="group"
               pageproxystate="invalid"
               unifiedsearchbutton-available=""
               sap-name="searchbar">
-      </html:moz-urlbar>
+      </html:moz-searchbar>
       <toolbartabstop/>
     </toolbaritem>
 

@@ -47,11 +47,12 @@
  */
 
 #include "gfxScriptItemizer.h"
-#include "mozilla/intl/UnicodeProperties.h"
+
+#include "harfbuzz/hb.h"
 #include "mozilla/Utf16.h"
+#include "mozilla/intl/UnicodeProperties.h"
 #include "nsCharTraits.h"
 #include "nsUnicodeProperties.h"
-#include "harfbuzz/hb.h"
 
 using namespace mozilla::intl;
 using namespace mozilla::unicode;

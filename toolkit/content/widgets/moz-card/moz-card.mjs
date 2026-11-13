@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/// <reference path="./moz-card.tagmap.d.ts" />
+
 import {
   html,
   staticHtml,
@@ -33,9 +35,24 @@ import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
  *  expanded or not. Can be used to expand the content section of the
  *  accordion card on initial render.
  * @property {string} role - (optional) Role of the article element in the card.
+ * @property {number} summaryTabIndex - (optional) tabindex for the accordion summary.
+ * @property {boolean} treeItem - (optional) Whether the accordion summary is an
+ *   item of a tree. When set, the summary gets the treeitem role, the card's
+ *   article is presentational and no longer labelled by the heading, and the
+ *   heading is always rendered as a span, ignoring headingLevel, so heading
+ *   navigation doesn't land inside the tree. The expanded state comes from the
+ *   details element, so there is no aria-expanded to keep in sync. Ignored
+ *   unless the type is "accordion".
+ * @property {string} ariaLevel - (optional) aria-level of the accordion summary.
+ * @property {string} ariaPosInSet - (optional) aria-posinset of the accordion
+ *   summary.
+ * @property {string} ariaSetSize - (optional) aria-setsize of the accordion
+ *   summary. With ariaLevel and ariaPosInSet, this lets a tree item say where
+ *   it is when its siblings are in other cards. All three are set on the card
+ *   and moved to the summary, and are ignored unless treeItem is set.
  * @slot content - The content to show inside of the card.
  */
-export default class MozCard extends MozLitElement {
+export class MozCard extends MozLitElement {
   static queries = {
     detailsEl: "#moz-card-details",
     headingEl: "#heading",
@@ -52,6 +69,11 @@ export default class MozCard extends MozLitElement {
     spacing: { type: String, reflect: true },
     expanded: { type: Boolean },
     role: { type: String, mapped: true },
+    summaryTabIndex: { type: Number },
+    treeItem: { type: Boolean },
+    ariaLevel: { type: String, mapped: true },
+    ariaPosInSet: { type: String, mapped: true },
+    ariaSetSize: { type: String, mapped: true },
   };
 
   constructor() {
@@ -59,6 +81,7 @@ export default class MozCard extends MozLitElement {
     this.type = "default";
     this.spacing = "default";
     this.expanded = false;
+    this.treeItem = false;
     /* When set to 1-6, it uses h1-h6 around the heading */
     this.headingLevel = 0;
   }
@@ -73,8 +96,14 @@ export default class MozCard extends MozLitElement {
       literal`h5`,
       literal`h6`,
     ];
-    const tagName = headingLevels[this.headingLevel] || headingLevels[0];
+    const tagName =
+      (!this.#isTreeItem && headingLevels[this.headingLevel]) ||
+      headingLevels[0];
     return staticHtml`<${tagName} id="heading" title=${ifDefined(this.heading)} part="heading">${this.heading}</${tagName}>`;
+  }
+
+  get #isTreeItem() {
+    return this.type === "accordion" && this.treeItem;
   }
 
   headingTemplate() {
@@ -104,19 +133,38 @@ export default class MozCard extends MozLitElement {
   cardTemplate() {
     if (this.type === "accordion") {
       return html`
-        <details
-          id="moz-card-details"
-          @toggle=${this.onToggle}
-          ?open=${this.expanded}
-        >
-          <summary part="summary">${this.headingTemplate()}</summary>
-          <div id="content"><slot id="content-slot"></slot></div>
-        </details>
+        <div class="moz-card-wrapper">
+          <div id="cover-image"><slot name="cover-image"></slot></div>
+          <details
+            id="moz-card-details"
+            @toggle=${this.onToggle}
+            ?open=${this.expanded}
+          >
+            <summary
+              part="summary"
+              role=${ifDefined(this.#isTreeItem ? "treeitem" : undefined)}
+              aria-level=${ifDefined(
+                this.#isTreeItem ? this.ariaLevel : undefined
+              )}
+              aria-posinset=${ifDefined(
+                this.#isTreeItem ? this.ariaPosInSet : undefined
+              )}
+              aria-setsize=${ifDefined(
+                this.#isTreeItem ? this.ariaSetSize : undefined
+              )}
+              tabindex=${ifDefined(this.summaryTabIndex)}
+            >
+              ${this.headingTemplate()}
+            </summary>
+            <div id="content"><slot id="content-slot"></slot></div>
+          </details>
+        </div>
       `;
     }
 
     return html`
       <div id="moz-card-details">
+        <div id="cover-image"><slot name="cover-image"></slot></div>
         ${this.headingTemplate()}
         <div id="content" aria-describedby="content">
           <slot></slot>
@@ -146,9 +194,11 @@ export default class MozCard extends MozLitElement {
         href="chrome://global/content/elements/moz-card.css"
       />
       <article
-        role=${ifDefined(this.role)}
+        role=${ifDefined(this.#isTreeItem ? "none" : this.role)}
         class="moz-card"
-        aria-labelledby=${ifDefined(this.heading ? "heading" : undefined)}
+        aria-labelledby=${ifDefined(
+          this.heading && !this.#isTreeItem ? "heading" : undefined
+        )}
       >
         ${this.cardTemplate()}
       </article>

@@ -6,17 +6,20 @@
  * API functions and methods used by the rest of SpiderMonkey and by embeddings.
  */
 
+#include "gc/GC.h"
+
 #include "mozilla/TimeStamp.h"
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
 
-#include "gc/GC.h"
 #include "gc/PublicIterators.h"
 #include "jit/JitZone.h"
+#include "js/friend/PerformanceHint.h"  // js::SetRealmIsDyingHint
 #include "js/HeapAPI.h"
 #include "js/Value.h"
 #include "util/DifferentialTesting.h"
+#include "vm/GlobalObject.h"
 #include "vm/HelperThreads.h"
 #include "vm/Realm.h"
 #include "vm/Scope.h"
@@ -95,7 +98,7 @@ void js::ReleaseAllJITCode(JS::GCContext* gcx) {
   js::CancelOffThreadCompile(gcx->runtime());
 
   for (ZonesIter zone(gcx->gcRuntime(), SkipAtoms); !zone.done(); zone.next()) {
-    zone->forceDiscardJitCode(gcx);
+    zone->discardJitCodeForAllRealms(gcx);
     if (jit::JitZone* jitZone = zone->jitZone()) {
       jitZone->discardStubs();
     }
@@ -800,6 +803,11 @@ JS_PUBLIC_API void js::gc::SetPerformanceHint(JSContext* cx,
   cx->runtime()->gc.setPerformanceHint(hint);
 }
 
+JS_PUBLIC_API void js::SetRealmIsDyingHint(JSObject* global) {
+  MOZ_ASSERT(global->is<GlobalObject>());
+  global->as<GlobalObject>().realm()->setIsDyingHint();
+}
+
 AutoSelectGCHeap::AutoSelectGCHeap(JSContext* cx,
                                    size_t allowedNurseryCollections)
     : cx_(cx), allowedNurseryCollections_(allowedNurseryCollections) {
@@ -843,6 +851,15 @@ JS_PUBLIC_API void js::gc::LockSweepingLock(JSRuntime* runtime) {
 JS_PUBLIC_API void js::gc::UnlockSweepingLock(JSRuntime* runtime) {
   MOZ_ASSERT(runtime);
   runtime->gc.unlockSweepingLock();
+}
+
+bool js::IsGCParameterFuzzingSafe(JSGCParamKey key) {
+  switch (key) {
+    case JSGC_SEMISPACE_NURSERY_ENABLED:
+      return false;
+    default:
+      return true;
+  }
 }
 
 #ifdef JS_GC_ZEAL

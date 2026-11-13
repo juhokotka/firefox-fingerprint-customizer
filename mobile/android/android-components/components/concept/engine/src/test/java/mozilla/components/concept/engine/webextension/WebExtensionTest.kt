@@ -31,7 +31,7 @@ class WebExtensionTest {
 
         tabHandler.onUpdateTab(mock(), mock(), false, "")
         tabHandler.onCloseTab(mock(), mock())
-        tabHandler.onNewTab(mock(), mock(), false, "")
+        tabHandler.onNewTab(mock(), mock(), false, "", false)
     }
 
     @Test
@@ -46,19 +46,20 @@ class WebExtensionTest {
     @Test
     fun `port holds engine session`() {
         val engineSession: EngineSession = mock()
-        val port = object : Port(engineSession) {
-            override fun name(): String {
-                return "test"
+        val port =
+            object : Port(engineSession) {
+                override fun name(): String {
+                    return "test"
+                }
+
+                override fun disconnect() {}
+
+                override fun senderUrl(): String {
+                    return "https://foo.bar"
+                }
+
+                override fun postMessage(message: JSONObject) {}
             }
-
-            override fun disconnect() {}
-
-            override fun senderUrl(): String {
-                return "https://foo.bar"
-            }
-
-            override fun postMessage(message: JSONObject) { }
-        }
 
         assertSame(engineSession, port.engineSession)
     }

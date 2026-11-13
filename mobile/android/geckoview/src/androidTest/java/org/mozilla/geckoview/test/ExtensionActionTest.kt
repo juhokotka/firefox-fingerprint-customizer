@@ -34,15 +34,14 @@ class ExtensionActionTest : BaseSessionTest() {
     companion object {
         @get:Parameterized.Parameters(name = "{0}")
         @JvmStatic
-        val parameters = listOf(
-            arrayOf("#pageAction"),
-            arrayOf("#browserAction"),
-        )
+        val parameters =
+            listOf(
+                arrayOf("#pageAction"),
+                arrayOf("#browserAction"),
+            )
     }
 
-    @field:Parameterized.Parameter(0)
-    @JvmField
-    var id: String = ""
+    @field:Parameterized.Parameter(0) @JvmField var id: String = ""
 
     private val controller
         get() = sessionRule.runtime.webExtensionController
@@ -59,14 +58,12 @@ class ExtensionActionTest : BaseSessionTest() {
         val windowPortResult = GeckoResult<WebExtension.Port>()
         val backgroundPortResult = GeckoResult<WebExtension.Port>()
 
-        extension = sessionRule.waitForResult(
-            controller.installBuiltIn("resource://android/assets/web_extensions/actions/"),
-        )
+        extension =
+            sessionRule.waitForResult(controller.installBuiltIn("resource://android/assets/web_extensions/actions/"))
         // Another dummy extension, only used to check restrictions related to setting
         // another extension url as a popup url, and so there is no delegate needed for it.
-        otherExtension = sessionRule.waitForResult(
-            controller.installBuiltIn("resource://android/assets/web_extensions/dummy/"),
-        )
+        otherExtension =
+            sessionRule.waitForResult(controller.installBuiltIn("resource://android/assets/web_extensions/dummy/"))
 
         mainSession.webExtensionController.setMessageDelegate(
             extension!!,
@@ -91,11 +88,20 @@ class ExtensionActionTest : BaseSessionTest() {
             extension!!::setActionDelegate,
             { extension!!.setActionDelegate(null) },
             object : WebExtension.ActionDelegate {
-                override fun onBrowserAction(extension: WebExtension, session: GeckoSession?, action: WebExtension.Action) {
+                override fun onBrowserAction(
+                    extension: WebExtension,
+                    session: GeckoSession?,
+                    action: WebExtension.Action,
+                ) {
                     assertEquals(action.title, "Test action default")
                     browserActionDefaultResult.complete(action)
                 }
-                override fun onPageAction(extension: WebExtension, session: GeckoSession?, action: WebExtension.Action) {
+
+                override fun onPageAction(
+                    extension: WebExtension,
+                    session: GeckoSession?,
+                    action: WebExtension.Action,
+                ) {
                     assertEquals(action.title, "Test action default")
                     pageActionDefaultResult.complete(action)
                 }
@@ -108,11 +114,12 @@ class ExtensionActionTest : BaseSessionTest() {
         val pageAction = sessionRule.waitForResult(pageActionDefaultResult)
         val browserAction = sessionRule.waitForResult(browserActionDefaultResult)
 
-        default = when (id) {
-            "#pageAction" -> pageAction
-            "#browserAction" -> browserAction
-            else -> throw IllegalArgumentException()
-        }
+        default =
+            when (id) {
+                "#pageAction" -> pageAction
+                "#browserAction" -> browserAction
+                else -> throw IllegalArgumentException()
+            }
 
         windowPort = sessionRule.waitForResult(windowPortResult)
         backgroundPort = sessionRule.waitForResult(backgroundPortResult)
@@ -126,11 +133,20 @@ class ExtensionActionTest : BaseSessionTest() {
     }
 
     private val type: String
-        get() = when (id) {
-            "#pageAction" -> "pageAction"
-            "#browserAction" -> "browserAction"
-            else -> throw IllegalArgumentException()
-        }
+        get() =
+            when (id) {
+                "#pageAction" -> "pageAction"
+                "#browserAction" -> "browserAction"
+                else -> throw IllegalArgumentException()
+            }
+
+    private val actionCallbackName: String
+        get() =
+            when (id) {
+                "#pageAction" -> "onPageAction"
+                "#browserAction" -> "onBrowserAction"
+                else -> throw IllegalArgumentException()
+            }
 
     @After
     fun tearDown() {
@@ -151,14 +167,16 @@ class ExtensionActionTest : BaseSessionTest() {
         val json = JSONObject(message)
         json.put("type", type)
 
-        backgroundPort!!.postMessage(json)
-
         sessionRule.addExternalDelegateDuringNextWait(
             WebExtension.ActionDelegate::class,
             extension!!::setActionDelegate,
             { extension!!.setActionDelegate(null) },
             object : WebExtension.ActionDelegate {
-                override fun onBrowserAction(extension: WebExtension, session: GeckoSession?, action: WebExtension.Action) {
+                override fun onBrowserAction(
+                    extension: WebExtension,
+                    session: GeckoSession?,
+                    action: WebExtension.Action,
+                ) {
                     if (sessionRule.currentCall.counter == 1) {
                         // When attaching the delegate, we will receive a default message, ignore it
                         return
@@ -168,7 +186,12 @@ class ExtensionActionTest : BaseSessionTest() {
                     tester(action)
                     result.complete(null)
                 }
-                override fun onPageAction(extension: WebExtension, session: GeckoSession?, action: WebExtension.Action) {
+
+                override fun onPageAction(
+                    extension: WebExtension,
+                    session: GeckoSession?,
+                    action: WebExtension.Action,
+                ) {
                     if (sessionRule.currentCall.counter == 1) {
                         // When attaching the delegate, we will receive a default message, ignore it
                         return
@@ -181,48 +204,50 @@ class ExtensionActionTest : BaseSessionTest() {
             },
         )
 
+        backgroundPort!!.postMessage(json)
+
         sessionRule.waitForResult(result)
     }
 
     private fun testSetPopup(popupUrl: String, isUrlAllowed: Boolean) {
         val setPopupResult = GeckoResult<Void>()
 
-        backgroundPort!!.setDelegate(object : WebExtension.PortDelegate {
-            override fun onPortMessage(message: Any, port: WebExtension.Port) {
-                val json = message as JSONObject
-                if (json.getString("resultFor") == "setPopup" &&
-                    json.getString("type") == type
-                ) {
-                    if (isUrlAllowed != json.getBoolean("success")) {
-                        val expectedResString = when (isUrlAllowed) {
-                            true -> "allowed"
-                            else -> "disallowed"
+        backgroundPort!!.setDelegate(
+            object : WebExtension.PortDelegate {
+                override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                    val json = message as JSONObject
+                    if (json.getString("resultFor") == "setPopup" && json.getString("type") == type) {
+                        if (isUrlAllowed != json.getBoolean("success")) {
+                            val expectedResString =
+                                when (isUrlAllowed) {
+                                    true -> "allowed"
+                                    else -> "disallowed"
+                                }
+                            setPopupResult.completeExceptionally(
+                                IllegalArgumentException("Expected \"${popupUrl}\" to be ${ expectedResString }")
+                            )
+                        } else {
+                            setPopupResult.complete(null)
                         }
+                    } else {
+                        // We should NOT receive the expected message result.
                         setPopupResult.completeExceptionally(
                             IllegalArgumentException(
-                                "Expected \"${popupUrl}\" to be ${ expectedResString }",
-                            ),
+                                "Received unexpected result for: ${json.getString("type")} ${json.getString("resultFor")}"
+                            )
                         )
-                    } else {
-                        setPopupResult.complete(null)
                     }
-                } else {
-                    // We should NOT receive the expected message result.
-                    setPopupResult.completeExceptionally(
-                        IllegalArgumentException(
-                            "Received unexpected result for: ${json.getString("type")} ${json.getString("resultFor")}",
-                        ),
-                    )
                 }
             }
-        })
+        )
 
-        var json = JSONObject(
-            """{
+        var json =
+            JSONObject(
+                """{
            "action": "setPopupCheckRestrictions",
            "popup": "$popupUrl"
-        }""",
-        )
+        }"""
+            )
 
         json.put("type", type)
         windowPort!!.postMessage(json)
@@ -231,12 +256,8 @@ class ExtensionActionTest : BaseSessionTest() {
     }
 
     private fun testActionApi(message: String, tester: (WebExtension.Action) -> Unit) {
-        val result = GeckoResult<Void>()
-
         val json = JSONObject(message)
         json.put("type", type)
-
-        windowPort!!.postMessage(json)
 
         sessionRule.addExternalDelegateDuringNextWait(
             WebExtension.ActionDelegate::class,
@@ -245,22 +266,34 @@ class ExtensionActionTest : BaseSessionTest() {
             },
             { mainSession.webExtensionController.setActionDelegate(extension!!, null) },
             object : WebExtension.ActionDelegate {
-                override fun onBrowserAction(extension: WebExtension, session: GeckoSession?, action: WebExtension.Action) {
+                override fun onBrowserAction(
+                    extension: WebExtension,
+                    session: GeckoSession?,
+                    action: WebExtension.Action,
+                ) {
                     assertEquals(id, "#browserAction")
                     val resolved = action.withDefault(default!!)
                     tester(resolved)
-                    result.complete(null)
                 }
-                override fun onPageAction(extension: WebExtension, session: GeckoSession?, action: WebExtension.Action) {
+
+                override fun onPageAction(
+                    extension: WebExtension,
+                    session: GeckoSession?,
+                    action: WebExtension.Action,
+                ) {
                     assertEquals(id, "#pageAction")
                     val resolved = action.withDefault(default!!)
                     tester(resolved)
-                    result.complete(null)
                 }
             },
         )
 
-        sessionRule.waitForResult(result)
+        windowPort!!.postMessage(json)
+
+        sessionRule.waitUntilCalled(
+            WebExtension.ActionDelegate::class,
+            actionCallbackName,
+        )
     }
 
     @Test
@@ -273,38 +306,34 @@ class ExtensionActionTest : BaseSessionTest() {
 
     @Test
     fun attachingDelegateTriggersDefaultUpdate() {
-        val result = GeckoResult<Void>()
-
         // We should always get a default update after we attach the delegate
-        when (id) {
-            "#browserAction" -> {
-                extension!!.setActionDelegate(object : WebExtension.ActionDelegate {
-                    override fun onBrowserAction(
-                        extension: WebExtension,
-                        session: GeckoSession?,
-                        action: WebExtension.Action,
-                    ) {
-                        assertEquals(action.title, "Test action default")
-                        result.complete(null)
-                    }
-                })
-            }
-            "#pageAction" -> {
-                extension!!.setActionDelegate(object : WebExtension.ActionDelegate {
-                    override fun onPageAction(
-                        extension: WebExtension,
-                        session: GeckoSession?,
-                        action: WebExtension.Action,
-                    ) {
-                        assertEquals(action.title, "Test action default")
-                        result.complete(null)
-                    }
-                })
-            }
-            else -> throw IllegalArgumentException()
-        }
+        sessionRule.addExternalDelegateDuringNextWait(
+            WebExtension.ActionDelegate::class,
+            { delegate -> extension!!.setActionDelegate(delegate) },
+            { extension!!.setActionDelegate(null) },
+            object : WebExtension.ActionDelegate {
+                override fun onBrowserAction(
+                    extension: WebExtension,
+                    session: GeckoSession?,
+                    action: WebExtension.Action,
+                ) {
+                    assertEquals(action.title, "Test action default")
+                }
 
-        sessionRule.waitForResult(result)
+                override fun onPageAction(
+                    extension: WebExtension,
+                    session: GeckoSession?,
+                    action: WebExtension.Action,
+                ) {
+                    assertEquals(action.title, "Test action default")
+                }
+            },
+        )
+
+        sessionRule.waitUntilCalled(
+            WebExtension.ActionDelegate::class,
+            actionCallbackName,
+        )
     }
 
     @Test
@@ -327,7 +356,7 @@ class ExtensionActionTest : BaseSessionTest() {
             """{
                "action": "setTitle",
                "title": "overridden title"
-            }""",
+            }"""
         ) { action ->
             assertEquals(action.title, "overridden title")
             assertEquals(action.enabled, true)
@@ -342,7 +371,7 @@ class ExtensionActionTest : BaseSessionTest() {
             """{
            "action": "setBadgeText",
            "text": "12"
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "Test action default")
             assertEquals(action.badgeText, "12")
@@ -371,17 +400,18 @@ class ExtensionActionTest : BaseSessionTest() {
             """{
            "action": "$actionName",
            "color": $color
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "Test action default")
             assertEquals(action.badgeText, "")
             assertEquals(action.enabled, true)
 
-            val result = when (actionName) {
-                "setBadgeTextColor" -> action.badgeTextColor!!
-                "setBadgeBackgroundColor" -> action.badgeBackgroundColor!!
-                else -> throw IllegalArgumentException()
-            }
+            val result =
+                when (actionName) {
+                    "setBadgeTextColor" -> action.badgeTextColor!!
+                    "setBadgeBackgroundColor" -> action.badgeBackgroundColor!!
+                    else -> throw IllegalArgumentException()
+                }
 
             val hexColor = String.format("#%08X", result)
             assertEquals(hexColor, expectedHex)
@@ -410,7 +440,7 @@ class ExtensionActionTest : BaseSessionTest() {
             """{
             "action": "setTitle",
             "title": "new default title"
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "new default title")
             assertEquals(action.badgeText, "")
@@ -422,7 +452,7 @@ class ExtensionActionTest : BaseSessionTest() {
             """{
            "action": "setTitle",
            "title": "test override"
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "test override")
             assertEquals(action.badgeText, "")
@@ -434,7 +464,7 @@ class ExtensionActionTest : BaseSessionTest() {
             """{
            "action": "setTitle",
            "title": null
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "new default title")
             assertEquals(action.badgeText, "")
@@ -446,7 +476,7 @@ class ExtensionActionTest : BaseSessionTest() {
             """{
            "action": "setTitle",
            "title": null
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "Test action default")
             assertEquals(action.badgeText, "")
@@ -455,8 +485,7 @@ class ExtensionActionTest : BaseSessionTest() {
     }
 
     private fun compareBitmap(expectedLocation: String, actual: Bitmap) {
-        val stream = InstrumentationRegistry.getInstrumentation().targetContext.assets
-            .open(expectedLocation)
+        val stream = InstrumentationRegistry.getInstrumentation().targetContext.assets.open(expectedLocation)
 
         val expected = BitmapFactory.decodeStream(stream)
         for (x in 0 until actual.height) {
@@ -474,7 +503,7 @@ class ExtensionActionTest : BaseSessionTest() {
             """{
            "action": "setIcon",
            "path": "button/icon.svg"
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "Test action default")
             assertEquals(action.enabled, true)
@@ -494,12 +523,18 @@ class ExtensionActionTest : BaseSessionTest() {
 
         val png32 = GeckoResult<Void>()
 
-        default!!.icon!!.getBitmap(32).accept({ actual ->
-            compareBitmap("web_extensions/actions/button/beasts-32.png", actual!!)
-            png32.complete(null)
-        }, { error ->
-            png32.completeExceptionally(error!!)
-        })
+        default!!
+            .icon!!
+            .getBitmap(32)
+            .accept(
+                { actual ->
+                    compareBitmap("web_extensions/actions/button/beasts-32.png", actual!!)
+                    png32.complete(null)
+                },
+                { error ->
+                    png32.completeExceptionally(error!!)
+                },
+            )
 
         sessionRule.waitForResult(png32)
     }
@@ -518,7 +553,7 @@ class ExtensionActionTest : BaseSessionTest() {
              "19": "button/geo-19.png",
              "38": "button/geo-38.png"
            }
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "Test action default")
             assertEquals(action.enabled, true)
@@ -558,16 +593,21 @@ class ExtensionActionTest : BaseSessionTest() {
             """{
             "action": "setIcon",
             "path": "invalid/path/image.png"
-        }""",
+        }"""
         ) { action ->
-            action.icon!!.getBitmap(38).accept({
-                error.completeExceptionally(RuntimeException("Should not succeed."))
-            }, { exception ->
-                if (!(exception is ImageProcessingException)) {
-                    throw exception!!
-                }
-                error.complete(null)
-            })
+            action.icon!!
+                .getBitmap(38)
+                .accept(
+                    {
+                        error.completeExceptionally(RuntimeException("Should not succeed."))
+                    },
+                    { exception ->
+                        if (!(exception is ImageProcessingException)) {
+                            throw exception!!
+                        }
+                        error.complete(null)
+                    },
+                )
         }
 
         sessionRule.waitForResult(error)
@@ -587,40 +627,38 @@ class ExtensionActionTest : BaseSessionTest() {
     @GeckoSessionTestRule.WithDisplay(width = 100, height = 100)
     fun testOpenPopup() {
         // First, let's make sure we have a popup set
-        val actionResult = GeckoResult<Void>()
         testActionApi(
             """{
            "action": "setPopup",
            "popup": "test-popup.html"
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "Test action default")
             assertEquals(action.enabled, true)
-
-            actionResult.complete(null)
         }
-        sessionRule.waitForResult(actionResult)
 
-        val url = when (id) {
-            "#browserAction" -> "test-open-popup-browser-action.html"
-            "#pageAction" -> "test-open-popup-page-action.html"
-            else -> throw IllegalArgumentException()
-        }
+        val url =
+            when (id) {
+                "#browserAction" -> "test-open-popup-browser-action.html"
+                "#pageAction" -> "test-open-popup-page-action.html"
+                else -> throw IllegalArgumentException()
+            }
 
         var location = extension!!.metaData.baseUrl
         mainSession.loadUri("$location$url")
         sessionRule.waitForPageStop()
 
-        val openPopup = GeckoResult<Void>()
-        mainSession.webExtensionController.setActionDelegate(
-            extension!!,
+        sessionRule.addExternalDelegateDuringNextWait(
+            WebExtension.ActionDelegate::class,
+            { delegate -> mainSession.webExtensionController.setActionDelegate(extension!!, delegate) },
+            { mainSession.webExtensionController.setActionDelegate(extension!!, null) },
             object : WebExtension.ActionDelegate {
+                @AssertCalled(count = 1)
                 override fun onOpenPopup(
                     extension: WebExtension,
                     popupAction: WebExtension.Action,
                 ): GeckoResult<GeckoSession>? {
-                    assertEquals(extension, this@ExtensionActionTest.extension)
-                    openPopup.complete(null)
+                    assertEquals(this@ExtensionActionTest.extension!!.id, extension.id)
                     return null
                 }
             },
@@ -629,28 +667,28 @@ class ExtensionActionTest : BaseSessionTest() {
         // openPopup needs user activation
         mainSession.synthesizeTap(50, 50)
 
-        sessionRule.waitForResult(openPopup)
+        sessionRule.waitUntilCalled(WebExtension.ActionDelegate::class, "onOpenPopup")
     }
 
     @Test
     fun testClickWhenPopupIsNotDefined() {
         val pong = GeckoResult<Void>()
 
-        backgroundPort!!.setDelegate(object : WebExtension.PortDelegate {
-            override fun onPortMessage(message: Any, port: WebExtension.Port) {
-                val json = message as JSONObject
-                if (json.getString("method") == "pong") {
-                    pong.complete(null)
-                } else {
-                    // We should NOT receive onClicked here
-                    pong.completeExceptionally(
-                        IllegalArgumentException(
-                            "Received unexpected: ${json.getString("method")}",
-                        ),
-                    )
+        backgroundPort!!.setDelegate(
+            object : WebExtension.PortDelegate {
+                override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                    val json = message as JSONObject
+                    if (json.getString("method") == "pong") {
+                        pong.complete(null)
+                    } else {
+                        // We should NOT receive onClicked here
+                        pong.completeExceptionally(
+                            IllegalArgumentException("Received unexpected: ${json.getString("method")}")
+                        )
+                    }
                 }
             }
-        })
+        )
 
         val actionResult = GeckoResult<WebExtension.Action>()
 
@@ -658,7 +696,7 @@ class ExtensionActionTest : BaseSessionTest() {
             """{
            "action": "setPopup",
            "popup": "test-popup.html"
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "Test action default")
             assertEquals(action.enabled, true)
@@ -666,34 +704,38 @@ class ExtensionActionTest : BaseSessionTest() {
             actionResult.complete(action)
         }
 
-        val togglePopup = GeckoResult<Void>()
         val action = sessionRule.waitForResult(actionResult)
 
-        extension!!.setActionDelegate(object : WebExtension.ActionDelegate {
-            override fun onTogglePopup(
-                extension: WebExtension,
-                popupAction: WebExtension.Action,
-            ): GeckoResult<GeckoSession>? {
-                assertEquals(extension, this@ExtensionActionTest.extension)
-                assertEquals(popupAction, action)
-                togglePopup.complete(null)
-                return null
-            }
-        })
+        sessionRule.addExternalDelegateDuringNextWait(
+            WebExtension.ActionDelegate::class,
+            { delegate -> extension!!.setActionDelegate(delegate) },
+            { extension!!.setActionDelegate(null) },
+            object : WebExtension.ActionDelegate {
+                @AssertCalled(count = 1)
+                override fun onTogglePopup(
+                    extension: WebExtension,
+                    popupAction: WebExtension.Action,
+                ): GeckoResult<GeckoSession>? {
+                    assertEquals(this@ExtensionActionTest.extension!!.id, extension.id)
+                    assertEquals(popupAction, action)
+                    return null
+                }
+            },
+        )
 
         // This click() will not cause an onClicked callback because popup is set
         action.click()
 
         // but it will cause togglePopup to be called
-        sessionRule.waitForResult(togglePopup)
+        sessionRule.waitUntilCalled(WebExtension.ActionDelegate::class, "onTogglePopup")
 
         // If the response to ping reaches us before the onClicked we know onClicked wasn't called
         backgroundPort!!.postMessage(
             JSONObject(
                 """{
             "type": "ping"
-        }""",
-            ),
+        }"""
+            )
         )
 
         sessionRule.waitForResult(pong)
@@ -702,20 +744,22 @@ class ExtensionActionTest : BaseSessionTest() {
     @Test
     fun testClickWhenPopupIsDefined() {
         val onClicked = GeckoResult<Void>()
-        backgroundPort!!.setDelegate(object : WebExtension.PortDelegate {
-            override fun onPortMessage(message: Any, port: WebExtension.Port) {
-                val json = message as JSONObject
-                assertEquals(json.getString("method"), "onClicked")
-                assertEquals(json.getString("type"), type)
-                onClicked.complete(null)
+        backgroundPort!!.setDelegate(
+            object : WebExtension.PortDelegate {
+                override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                    val json = message as JSONObject
+                    assertEquals(json.getString("method"), "onClicked")
+                    assertEquals(json.getString("type"), type)
+                    onClicked.complete(null)
+                }
             }
-        })
+        )
 
         testActionApi(
             """{
            "action": "setPopup",
            "popup": null
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "Test action default")
             assertEquals(action.enabled, true)
@@ -736,7 +780,7 @@ class ExtensionActionTest : BaseSessionTest() {
             """{
            "action": "setPopup",
            "popup": "test-popup-messaging.html"
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "Test action default")
             assertEquals(action.enabled, true)
@@ -746,47 +790,48 @@ class ExtensionActionTest : BaseSessionTest() {
         val messages = mutableListOf<String>()
         val messageResult = GeckoResult<List<String>>()
         val portResult = GeckoResult<WebExtension.Port>()
-        val messageDelegate = object : WebExtension.MessageDelegate {
-            override fun onMessage(
-                nativeApp: String,
-                message: Any,
-                sender: WebExtension.MessageSender,
-            ): GeckoResult<Any>? {
-                assertEquals(extension!!.id, sender.webExtension.id)
-                assertEquals(
-                    WebExtension.MessageSender.ENV_TYPE_EXTENSION,
-                    sender.environmentType,
-                )
-                assertEquals(sender.isTopLevel, true)
-                assertEquals(
-                    "${extension!!.metaData.baseUrl}test-popup-messaging.html",
-                    sender.url,
-                )
-                assertEquals(sender.session, popupSession)
-                messages.add(message as String)
-                if (messages.size == 2) {
-                    messageResult.complete(messages)
-                    return null
-                } else {
-                    return GeckoResult.fromValue("TEST_RESPONSE")
+        val messageDelegate =
+            object : WebExtension.MessageDelegate {
+                override fun onMessage(
+                    nativeApp: String,
+                    message: Any,
+                    sender: WebExtension.MessageSender,
+                ): GeckoResult<Any>? {
+                    assertEquals(extension!!.id, sender.webExtension.id)
+                    assertEquals(
+                        WebExtension.MessageSender.ENV_TYPE_EXTENSION,
+                        sender.environmentType,
+                    )
+                    assertEquals(sender.isTopLevel, true)
+                    assertEquals(
+                        "${extension!!.metaData.baseUrl}test-popup-messaging.html",
+                        sender.url,
+                    )
+                    assertEquals(sender.session, popupSession)
+                    messages.add(message as String)
+                    if (messages.size == 2) {
+                        messageResult.complete(messages)
+                        return null
+                    } else {
+                        return GeckoResult.fromValue("TEST_RESPONSE")
+                    }
+                }
+
+                override fun onConnect(port: WebExtension.Port) {
+                    assertEquals(extension!!.id, port.sender.webExtension.id)
+                    assertEquals(
+                        WebExtension.MessageSender.ENV_TYPE_EXTENSION,
+                        port.sender.environmentType,
+                    )
+                    assertEquals(true, port.sender.isTopLevel)
+                    assertEquals(
+                        "${extension!!.metaData.baseUrl}test-popup-messaging.html",
+                        port.sender.url,
+                    )
+                    assertEquals(port.sender.session, popupSession)
+                    portResult.complete(port)
                 }
             }
-
-            override fun onConnect(port: WebExtension.Port) {
-                assertEquals(extension!!.id, port.sender.webExtension.id)
-                assertEquals(
-                    WebExtension.MessageSender.ENV_TYPE_EXTENSION,
-                    port.sender.environmentType,
-                )
-                assertEquals(true, port.sender.isTopLevel)
-                assertEquals(
-                    "${extension!!.metaData.baseUrl}test-popup-messaging.html",
-                    port.sender.url,
-                )
-                assertEquals(port.sender.session, popupSession)
-                portResult.complete(port)
-            }
-        }
 
         popupSession.webExtensionController.setMessageDelegate(
             extension!!,
@@ -795,16 +840,18 @@ class ExtensionActionTest : BaseSessionTest() {
         )
 
         val action = sessionRule.waitForResult(actionResult)
-        extension!!.setActionDelegate(object : WebExtension.ActionDelegate {
-            override fun onTogglePopup(
-                extension: WebExtension,
-                popupAction: WebExtension.Action,
-            ): GeckoResult<GeckoSession>? {
-                assertEquals(extension, this@ExtensionActionTest.extension)
-                assertEquals(popupAction, action)
-                return GeckoResult.fromValue(popupSession)
+        extension!!.setActionDelegate(
+            object : WebExtension.ActionDelegate {
+                override fun onTogglePopup(
+                    extension: WebExtension,
+                    popupAction: WebExtension.Action,
+                ): GeckoResult<GeckoSession>? {
+                    assertEquals(this@ExtensionActionTest.extension!!.id, extension.id)
+                    assertEquals(popupAction, action)
+                    return GeckoResult.fromValue(popupSession)
+                }
             }
-        })
+        )
 
         action.click()
 
@@ -816,19 +863,21 @@ class ExtensionActionTest : BaseSessionTest() {
                 listOf(
                     "testPopupMessage",
                     "response: TEST_RESPONSE",
-                ),
+                )
             ),
         )
 
         val port = sessionRule.waitForResult(portResult)
         val portMessageResult = GeckoResult<String>()
 
-        port.setDelegate(object : WebExtension.PortDelegate {
-            override fun onPortMessage(message: Any, p: WebExtension.Port) {
-                assertEquals(port, p)
-                portMessageResult.complete(message as String)
+        port.setDelegate(
+            object : WebExtension.PortDelegate {
+                override fun onPortMessage(message: Any, p: WebExtension.Port) {
+                    assertEquals(port, p)
+                    portMessageResult.complete(message as String)
+                }
             }
-        })
+        )
 
         val portMessage = sessionRule.waitForResult(portMessageResult)
         assertThat(
@@ -840,43 +889,45 @@ class ExtensionActionTest : BaseSessionTest() {
 
     @Test
     fun testPopupsCanCloseThemselves() {
-        val onCloseRequestResult = GeckoResult<Void>()
         val popupSession = sessionRule.createOpenSession()
-        popupSession.delegateUntilTestEnd(object : GeckoSession.ContentDelegate {
-            @AssertCalled(count = 1, order = [1])
-            override fun onCloseRequest(session: GeckoSession) {
-                onCloseRequestResult.complete(null)
+        popupSession.delegateUntilTestEnd(
+            object : GeckoSession.ContentDelegate {
+                @AssertCalled(count = 1, order = [1]) override fun onCloseRequest(session: GeckoSession) {}
             }
-        })
+        )
 
         val actionResult = GeckoResult<WebExtension.Action>()
         testActionApi(
             """{
            "action": "setPopup",
            "popup": "test-popup.html"
-        }""",
+        }"""
         ) { action ->
             assertEquals(action.title, "Test action default")
             assertEquals(action.enabled, true)
             actionResult.complete(action)
         }
 
-        val togglePopup = GeckoResult<Void>()
         val action = sessionRule.waitForResult(actionResult)
-        extension!!.setActionDelegate(object : WebExtension.ActionDelegate {
-            override fun onTogglePopup(
-                extension: WebExtension,
-                popupAction: WebExtension.Action,
-            ): GeckoResult<GeckoSession>? {
-                assertEquals(extension, this@ExtensionActionTest.extension)
-                assertEquals(popupAction, action)
-                togglePopup.complete(null)
-                return GeckoResult.fromValue(popupSession)
-            }
-        })
+        sessionRule.addExternalDelegateDuringNextWait(
+            WebExtension.ActionDelegate::class,
+            { delegate -> extension!!.setActionDelegate(delegate) },
+            { extension!!.setActionDelegate(null) },
+            object : WebExtension.ActionDelegate {
+                @AssertCalled(count = 1)
+                override fun onTogglePopup(
+                    extension: WebExtension,
+                    popupAction: WebExtension.Action,
+                ): GeckoResult<GeckoSession>? {
+                    assertEquals(this@ExtensionActionTest.extension!!.id, extension.id)
+                    assertEquals(popupAction, action)
+                    return GeckoResult.fromValue(popupSession)
+                }
+            },
+        )
         action.click()
-        sessionRule.waitForResult(togglePopup)
+        sessionRule.waitUntilCalled(WebExtension.ActionDelegate::class, "onTogglePopup")
 
-        sessionRule.waitForResult(onCloseRequestResult)
+        popupSession.waitUntilCalled(GeckoSession.ContentDelegate::class, "onCloseRequest")
     }
 }

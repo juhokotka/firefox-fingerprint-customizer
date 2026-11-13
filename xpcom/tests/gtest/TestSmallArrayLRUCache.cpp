@@ -2,13 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gtest/gtest.h"
-
-#include "mozilla/SmallArrayLRUCache.h"
-
 #include <algorithm>
 #include <cstring>
 #include <utility>
+
+#include "gtest/gtest.h"
+#include "mozilla/SmallArrayLRUCache.h"
 
 using Key = unsigned;
 
@@ -16,8 +15,7 @@ struct Value {
   Value() : m(unsigned(-1)) {}
   explicit Value(unsigned a) : m(a) {}
 
-  bool operator==(const Value& aOther) const { return m == aOther.m; }
-  bool operator!=(const Value& aOther) const { return m != aOther.m; }
+  bool operator==(const Value& aOther) const = default;
 
   unsigned m;
 };

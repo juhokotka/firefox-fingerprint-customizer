@@ -11,7 +11,6 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/MathAlgorithms.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/SegmentedVector.h"
 #include "mozilla/Sprintf.h"
@@ -148,6 +147,11 @@ class Handle;
 #define MemCopy memcpy
 
 #define PROFILE(isolate, event)
+
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && \
+    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#  define V8_TARGET_LITTLE_ENDIAN 1
+#endif
 
 // Origin:
 // https://github.com/v8/v8/blob/855591a54d160303349a5f0a32fab15825c708d1/src/base/macros.h#L310-L319
@@ -383,17 +387,16 @@ inline uint64_t CountTrailingZeros(uint64_t value) {
   return std::countr_zero(value);
 }
 
-inline constexpr size_t RoundUpToPowerOfTwo32(size_t value) {
-  return mozilla::RoundUpPow2(value);
-}
-
-inline constexpr size_t RoundUpToPowerOfTwo(size_t value) {
-  return mozilla::RoundUpPow2(value);
+template <typename T>
+inline constexpr unsigned CountLeadingZeros(T value) {
+  static_assert(std::is_unsigned_v<T>);
+  return std::countl_zero(value);
 }
 
 template <typename T>
 constexpr bool IsPowerOfTwo(T value) {
-  return std::has_single_bit(value);
+  static_assert(std::is_integral_v<T>);
+  return value > 0 && (value & (value - 1)) == 0;
 }
 
 constexpr uint32_t CountPopulation(uint32_t value) {
@@ -1096,7 +1099,7 @@ inline Handle<To> CheckedCast(Handle<From> value) {
 template <typename T>
 class MOZ_NONHEAP_CLASS MaybeHandle final {
  public:
-  MaybeHandle() : location_(nullptr) {}
+  MaybeHandle() = default;
 
   // Constructor for handling automatic up casting from Handle.
   // Ex. Handle<JSArray> can be passed when MaybeHandle<Object> is expected.
@@ -1122,7 +1125,7 @@ class MOZ_NONHEAP_CLASS MaybeHandle final {
   }
 
  private:
-  JS::Value* location_;
+  JS::Value* location_{nullptr};
 };
 
 // From v8/src/handles/handles-inl.h
@@ -1153,14 +1156,10 @@ using DisallowGarbageCollection = JS::AutoAssertNoGC;
 
 // V8 uses this inside DisallowGarbageCollection regions to turn
 // allocation back on before throwing a stack overflow exception or
-// handling interrupts. AutoSuppressGC is sufficient for the former
-// case, but not for the latter: handling interrupts can execute
-// arbitrary script code, and V8 jumps through some scary hoops to
-// "manually relocate unhandlified references" afterwards. To keep
-// things sane, we don't try to handle interrupts while regex code is
-// still on the stack. Instead, we return EXCEPTION and handle
-// interrupts in the caller. (See RegExpShared::execute.)
-
+// handling interrupts. We instead arrange to throw exceptions and do
+// any necessary work in the caller. See Isolate::StackOverflow and
+// Isolate::HandleInterrupts. AllowGarbageCollection is therefore a
+// no-op for us.
 class AllowGarbageCollection {
  public:
   AllowGarbageCollection() = default;
@@ -1330,6 +1329,45 @@ class RegExpData : public HeapObject {
 
   Tagged<String> escaped_source() const { return String(inner()->getSource()); }
 
+  static constexpr int kQuickCheckBitsetChars =
+      js::RegExpShared::QuickCheckBitsetChars;
+  static constexpr int kQuickCheckBitsetBitsPerWord =
+      js::RegExpShared::QuickCheckBitsetBitsPerWord;
+  static constexpr int kQuickCheckBitsetWords =
+      js::RegExpShared::QuickCheckBitsetWords;
+
+  enum InternalFlags : uint8_t {
+    kHasQuickCheck =
+        static_cast<uint8_t>(js::RegExpShared::InternalFlag::HasQuickCheck),
+  };
+
+  static constexpr std::pair<int, uint32_t> QuickCheckBitsetBit(uint8_t c) {
+    return js::RegExpShared::quickCheckBitsetBit(c);
+  }
+
+  inline uint32_t quick_check_mask() const { return inner()->quickCheckMask(); }
+  inline void set_quick_check_mask(uint32_t value) {
+    inner()->setQuickCheckMask(value);
+  }
+
+  inline uint32_t quick_check_value() const {
+    return inner()->quickCheckValue();
+  }
+  inline void set_quick_check_value(uint32_t value) {
+    inner()->setQuickCheckValue(value);
+  }
+
+  inline void set_quick_check_reject_bitset_word(int index, uint32_t value) {
+    inner()->setQuickCheckRejectBitsetWord(index, value);
+  }
+
+  inline uint8_t internal_flags() const { return inner()->internalFlags(); }
+  inline void set_internal_flags(uint32_t value) {
+    inner()->setInternalFlags(value);
+  }
+
+  inline void clear_quick_check() { inner()->clearQuickCheck(); }
+
  private:
   js::RegExpShared* inner() const {
     return value().toGCThing()->as<js::RegExpShared>();
@@ -1359,6 +1397,9 @@ inline bool IsSticky(regexp::Flags flags) { return flags.sticky(); }
 inline bool IsUnicodeSets(regexp::Flags flags) { return flags.unicodeSets(); }
 inline bool IsEitherUnicode(regexp::Flags flags) {
   return flags.unicode() || flags.unicodeSets();
+}
+inline bool ShouldOptionallyStepBackToLeadSurrogate(regexp::Flags flags) {
+  return IsEitherUnicode(flags) && (IsGlobal(flags) || IsSticky(flags));
 }
 
 inline std::optional<regexp::Flag> TryFlagFromChar(char c) {
@@ -1421,9 +1462,9 @@ class Isolate {
   js::LifoAlloc* allocator() { return &cx_->tempLifoAlloc(); }
 
   // This is called from inside no-GC code. Instead of suppressing GC
-  // to allocate the error, we return false from Execute and call
-  // ReportOverRecursed in the caller.
-  void StackOverflow() {}
+  // to allocate the error, we set a flag on the context, return false
+  // from Execute and call ReportOverRecursed in the caller.
+  void StackOverflow() { cx_->noteDelayedOverRecursed(); }
 
 #ifndef V8_INTL_SUPPORT
   unibrow::Mapping<unibrow::Ecma262UnCanonicalize>* jsregexp_uncanonicalize() {
@@ -1551,6 +1592,11 @@ class StackLimitCheck {
 
   // Use this to check for interrupt request in C++ code.
   bool InterruptRequested() {
+#ifdef DEBUG
+    if (cx_->isolate->shouldSimulateInterrupt_) {
+      return true;
+    }
+#endif
     return cx_->hasPendingInterrupt(js::InterruptReason::CallbackUrgent);
   }
 
@@ -1567,6 +1613,8 @@ class StackLimitCheck {
 class ExternalReference {
  public:
   static const void* TopOfRegexpStack(Isolate* isolate);
+  static const void* RegexpStackPointer(Isolate* isolate);
+  static const void* RegexpStackLimit(Isolate* isolate);
   static size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                     regexp::Stack* regexpStack);
 };

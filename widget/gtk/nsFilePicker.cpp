@@ -2,37 +2,39 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsFilePicker.h"
+
 #include <dlfcn.h>
 #include <gtk/gtk.h>
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
-#include "AsyncDBus.h"
-#include "nsGtkUtils.h"
-#include "nsIFileURL.h"
-#include "nsIGIOService.h"
-#include "nsIURI.h"
-#include "nsIWidget.h"
-#include "nsIFile.h"
-#include "nsIStringBundle.h"
-#include "nsWindow.h"
-#include "mozilla/Components.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/dom/Promise.h"
-#include "mozilla/dom/Document.h"
+#include <utility>
 
-#include "nsArrayEnumerator.h"
-#include "nsEnumeratorUtils.h"
-#include "nsNetUtil.h"
-#include "nsReadableUtils.h"
+#include "AsyncDBus.h"
+#include "GRefPtr.h"
 #include "MozContainer.h"
 #include "WidgetUtilsGtk.h"
-
 #include "gfxPlatform.h"
+#include "mozilla/Components.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/Promise.h"
+#include "nsArrayEnumerator.h"
+#include "nsEnumeratorUtils.h"
+#include "nsGtkUtils.h"
+#include "nsIFile.h"
+#include "nsIFileURL.h"
+#include "nsIGIOService.h"
+#include "nsIStringBundle.h"
+#include "nsIURI.h"
+#include "nsIWidget.h"
+#include "nsNetUtil.h"
+#include "nsReadableUtils.h"
+#include "nsThreadUtils.h"
+#include "nsWindow.h"
 #include "nsXULAppAPI.h"
-#include "GRefPtr.h"
-#include "nsFilePicker.h"
 
 #undef LOG
 #ifdef MOZ_LOGGING
@@ -51,14 +53,6 @@ using mozilla::dom::Promise;
 #define MAX_PREVIEW_SOURCE_SIZE 8192
 
 static nsIFile* sPrevDisplayDirectory = nullptr;
-
-// Use an application-defined response ID (non-negative) for the accept button
-// instead of GTK_RESPONSE_ACCEPT (-3). GTK's built-in negative response IDs
-// cause the button to be treated as the dialog's default widget, meaning it
-// activates on Enter. A non-negative ID prevents this, so a page that tricks
-// the user into holding Enter before the dialog appears cannot auto-confirm
-// an unintended file upload. See bug 2033848 and the equivalent Chrome fix.
-static const gint kFilePickerAccept = 0;
 
 void nsFilePicker::Shutdown() { NS_IF_RELEASE(sPrevDisplayDirectory); }
 
@@ -673,7 +667,7 @@ void nsFilePicker::DonePortal(GVariant* aResult) {
   }
 
   ClearPortalState();
-  DoneCommon(result);
+  DoneCommon(result, std::move(mCallback));
 }
 #endif
 
@@ -698,7 +692,7 @@ void nsFilePicker::OpenNonPortal() {
 
   GtkFileChooser* file_chooser = GTK_FILE_CHOOSER(gtk_file_chooser_dialog_new(
       title.get(), parent_widget, action, g_dgettext("gtk30", "_Cancel"),
-      GTK_RESPONSE_CANCEL, accept_button, kFilePickerAccept, nullptr));
+      GTK_RESPONSE_CANCEL, accept_button, GTK_RESPONSE_ACCEPT, nullptr));
 
   // If we have --enable-proxy-bypass-protection, then don't allow
   // remote URLs to be used.
@@ -774,6 +768,11 @@ void nsFilePicker::OpenNonPortal() {
     }
   }
 
+  if (GTK_IS_DIALOG(file_chooser)) {
+    gtk_dialog_set_default_response(GTK_DIALOG(file_chooser),
+                                    GTK_RESPONSE_ACCEPT);
+  }
+
   size_t count = mFilters.Length();
   for (size_t i = 0; i < count; ++i) {
     GtkFileFilter* filter = NewFilter(mFilters[i], mFilterNames[i]);
@@ -797,6 +796,7 @@ void nsFilePicker::OpenNonPortal() {
                    this);
   g_signal_connect(file_chooser, "destroy", G_CALLBACK(OnNonPortalDestroy),
                    this);
+  RecordLastShownTime();
   gtk_widget_show(GTK_WIDGET(file_chooser));
 }
 
@@ -807,6 +807,11 @@ already_AddRefed<nsIFile> nsFilePicker::GetDefaultPath() {
   } else if (sPrevDisplayDirectory) {
     sPrevDisplayDirectory->Clone(getter_AddRefs(defaultPath));
   }
+
+  if (!defaultPath || !IsPotentiallyReadableDirectory(*defaultPath)) {
+    return nullptr;
+  }
+
   return defaultPath.forget();
 }
 
@@ -873,13 +878,26 @@ bool nsFilePicker::WarnForNonReadableFile() {
 }
 
 void nsFilePicker::DoneNonPortal(GtkWidget* file_chooser, gint response) {
+  // Ignore a confirmation that arrives before the input-protection time range
+  // has passed, leaving the dialog open. (GTK emits GTK_RESPONSE_ACCEPT on a
+  // double-click.)
+  if ((response == GTK_RESPONSE_OK || response == GTK_RESPONSE_ACCEPT) &&
+      IsPickerInputProtected()) {
+    return;
+  }
+
+  // A null callback means a re-entrant call; the outer one owns the teardown.
+  nsCOMPtr<nsIFilePickerShownCallback> callback = std::move(mCallback);
+  if (!callback) {
+    return;
+  }
+
   mFileChooser = nullptr;
 
   nsIFilePicker::ResultCode result;
   switch (response) {
     case GTK_RESPONSE_OK:
-    case GTK_RESPONSE_ACCEPT:  // emitted by GTK internally on double-click
-    case kFilePickerAccept:
+    case GTK_RESPONSE_ACCEPT:
       ReadValuesFromNonPortalFileChooser(GTK_FILE_CHOOSER(file_chooser));
       result = nsIFilePicker::returnOK;
       break;
@@ -923,11 +941,12 @@ void nsFilePicker::DoneNonPortal(GtkWidget* file_chooser, gint response) {
     mFileChooserDelegate = nullptr;
   }
 
-  DoneCommon(result);
+  DoneCommon(result, std::move(callback));
   NS_RELEASE_THIS();
 }
 
-void nsFilePicker::DoneCommon(ResultCode aResult) {
+void nsFilePicker::DoneCommon(ResultCode aResult,
+                              nsCOMPtr<nsIFilePickerShownCallback> aCallback) {
   if (aResult == ResultCode::returnOK) {
     if (mMode == nsIFilePicker::modeSave) {
       nsCOMPtr<nsIFile> file;
@@ -957,10 +976,74 @@ void nsFilePicker::DoneCommon(ResultCode aResult) {
     }
   }
 
-  if (mCallback) {
-    mCallback->Done(aResult);
-    mCallback = nullptr;
+  if (aResult != nsIFilePicker::returnCancel && ShouldRunContentAnalysis()) {
+    CheckContentAnalysis(GetSelectedFilesOrFolder())
+        ->Then(
+            GetMainThreadSerialEventTarget(), __func__,
+            [self = RefPtr{this}, callback = aCallback,
+             aResult](nsCOMArray<nsIFile> aAllowedFiles) {
+              if (aAllowedFiles.IsEmpty()) {
+                self->ClearSelection();
+                if (callback) {
+                  callback->Done(nsIFilePicker::returnCancel);
+                }
+                return;
+              }
+              // If the mode is `modeOpen` (i.e. a single file), either:
+              //  - the file was blocked, so `aAllowedFiles` will be empty,
+              //    so we will have returned above
+              //  - the file was allowed, so the one file in `mFiles` and
+              //    `mFileURL` is still correct, so we don't need to do
+              //    any processing here.
+              if (self->mMode == nsIFilePicker::modeOpenMultiple) {
+                self->mFiles.Clear();
+                aAllowedFiles.SwapElements(self->mFiles);
+                // The portal also records the first selected file in
+                // mFileURL; keep it pointing at an allowed file.
+                if (!self->mFileURL.IsEmpty()) {
+                  NS_GetURLSpecFromFile(self->mFiles[0], self->mFileURL);
+                }
+              }
+              if (callback) {
+                callback->Done(aResult);
+              }
+            },
+            [self = RefPtr{this}, callback = aCallback](nsresult aError) {
+              self->ClearSelection();
+              if (callback) {
+                callback->Done(nsIFilePicker::returnCancel);
+              }
+            });
+    return;
   }
+
+  if (aCallback) {
+    aCallback->Done(aResult);
+  }
+}
+
+nsCOMArray<nsIFile> nsFilePicker::GetSelectedFilesOrFolder() {
+  nsCOMArray<nsIFile> files;
+  if (mMode == nsIFilePicker::modeOpenMultiple) {
+    for (nsIFile* file : mFiles) {
+      if (file) {
+        files.AppendElement(file);
+      }
+    }
+  } else {
+    // Fails for non-file: URIs, which leaves the list empty so that Content
+    // Analysis rejects the selection.
+    nsCOMPtr<nsIFile> file;
+    if (NS_SUCCEEDED(GetFile(getter_AddRefs(file))) && file) {
+      files.AppendElement(file);
+    }
+  }
+  return files;
+}
+
+void nsFilePicker::ClearSelection() {
+  mFiles.Clear();
+  mFileURL.Truncate();
 }
 
 #undef LOG

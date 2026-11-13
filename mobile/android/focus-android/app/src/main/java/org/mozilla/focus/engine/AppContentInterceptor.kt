@@ -5,9 +5,11 @@
 package org.mozilla.focus.engine
 
 import android.content.Context
+import mozilla.components.browser.errorpages.DefaultErrorStringsProvider
 import mozilla.components.browser.errorpages.ErrorPages
-import mozilla.components.browser.errorpages.ErrorType
+import mozilla.components.browser.errorpages.ErrorStrings
 import mozilla.components.concept.engine.EngineSession
+import mozilla.components.concept.engine.request.ErrorType
 import mozilla.components.concept.engine.request.RequestInterceptor
 import org.mozilla.focus.R
 import org.mozilla.focus.ext.components
@@ -19,9 +21,7 @@ import org.mozilla.focus.utils.SupportUtils
  *
  * Handles special URIs like `about:crashes` and provides custom error pages.
  */
-class AppContentInterceptor(
-    private val context: Context,
-) : RequestInterceptor {
+class AppContentInterceptor(private val context: Context) : RequestInterceptor {
     override fun onLoadRequest(
         engineSession: EngineSession,
         uri: String,
@@ -34,22 +34,21 @@ class AppContentInterceptor(
     ): RequestInterceptor.InterceptionResponse? {
         return when (uri) {
             "about:crashes" -> {
-                context.components.appStore.dispatch(
-                    AppAction.OpenCrashList,
-                )
+                context.components.appStore.dispatch(AppAction.OpenCrashList)
                 RequestInterceptor.InterceptionResponse.Url("about:blank")
             }
 
-            else -> context.components.appLinksInterceptor.onLoadRequest(
-                engineSession,
-                uri,
-                lastUri,
-                hasUserGesture,
-                isSameDomain,
-                isRedirect,
-                isDirectNavigation,
-                isSubframeRequest,
-            )
+            else ->
+                context.components.appLinksInterceptor.onLoadRequest(
+                    engineSession,
+                    uri,
+                    lastUri,
+                    hasUserGesture,
+                    isSameDomain,
+                    isRedirect,
+                    isDirectNavigation,
+                    isSubframeRequest,
+                )
         }
     }
 
@@ -58,35 +57,40 @@ class AppContentInterceptor(
         errorType: ErrorType,
         uri: String?,
     ): RequestInterceptor.ErrorResponse {
-        val errorPage = ErrorPages.createUrlEncodedErrorPage(
-            context,
-            errorType,
-            uri,
-            titleOverride = { type -> getErrorPageTitle(context, type) },
-            descriptionOverride = { type -> getErrorPageDescription(context, type) },
-        )
+        val errorPage =
+            ErrorPages.createUrlEncodedErrorPage(
+                context,
+                errorType,
+                uri,
+                errorStringsProvider = FocusErrorStringsProvider(),
+            )
         return RequestInterceptor.ErrorResponse(errorPage)
     }
 
     override fun interceptsAppInitiatedRequests() = true
 }
 
-private fun getErrorPageTitle(context: Context, type: ErrorType): String? {
-    if (type == ErrorType.ERROR_HTTPS_ONLY) {
-        return context.getString(R.string.errorpage_httpsonly_title2)
-    }
-    // Returning `null` here will let the component use its default title for this error type
-    return null
-}
+/**
+ * Focus-specific [ErrorStrings] provider.
+ *
+ * Configure error messages (and some error display behaviour) in Focus-specific ways here.
+ */
+class FocusErrorStringsProvider : DefaultErrorStringsProvider() {
+    override fun errorStringsFor(context: Context, errorType: ErrorType, uri: String?): ErrorStrings {
+        val defaultStrings = super.errorStringsFor(context, errorType, uri)
+        return when (errorType) {
+            ErrorType.ERROR_HTTPS_ONLY ->
+                defaultStrings.copy(
+                    title = context.getString(R.string.errorpage_httpsonly_title2),
+                    message =
+                        context.getString(
+                            R.string.errorpage_httpsonly_message2,
+                            context.getString(R.string.app_name),
+                            SupportUtils.getGenericSumoURLForTopic(SupportUtils.SumoTopic.HTTPS_ONLY),
+                        ),
+                )
 
-private fun getErrorPageDescription(context: Context, type: ErrorType): String? {
-    if (type == ErrorType.ERROR_HTTPS_ONLY) {
-        return context.getString(
-            R.string.errorpage_httpsonly_message2,
-            context.getString(R.string.app_name),
-            SupportUtils.getGenericSumoURLForTopic(SupportUtils.SumoTopic.HTTPS_ONLY),
-        )
+            else -> defaultStrings
+        }
     }
-    // Returning `null` here will let the component use its default description for this error type
-    return null
 }

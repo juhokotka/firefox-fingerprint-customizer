@@ -14,7 +14,7 @@ use crate::prim_store::image::ImageCacheKey;
 use crate::prim_store::line_dec::LineDecorationCacheKey;
 use crate::quad::QuadCacheKey;
 use crate::resource_cache::CacheItem;
-use std::{mem, usize, f32, i32};
+use std::mem;
 use crate::surface::SurfaceBuilder;
 use crate::texture_cache::{TextureCache, TextureCacheHandle, Eviction, TargetShader};
 use crate::renderer::GpuBufferBuilderF;
@@ -109,7 +109,7 @@ impl RenderTaskCache {
         texture_cache: &mut TextureCache,
     ) {
         self.frame_id += 1;
-        profile_scope!("begin_frame");
+        tracy_rs::profile_scope!("begin_frame");
         // Drop any items from the cache that have been
         // evicted from the texture cache.
         //

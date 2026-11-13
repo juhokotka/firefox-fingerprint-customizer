@@ -1,26 +1,27 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#include "InputData.h"
 #include "HeadlessWidget.h"
+
+#include "BasicEvents.h"
 #include "ErrorList.h"
 #include "HeadlessCompositorWidget.h"
-#include "BasicEvents.h"
+#include "HeadlessKeyBindings.h"
+#include "InputData.h"
 #include "MouseEvents.h"
-#include "mozilla/gfx/gfxVars.h"
+#include "UnitTransforms.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/NativeKeyBindingsType.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TextEventDispatcher.h"
 #include "mozilla/TextEvents.h"
-#include "UnitTransforms.h"
 #include "mozilla/WritingModes.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/widget/HeadlessWidgetTypes.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
 #include "mozilla/widget/Screen.h"
 #include "nsIScreen.h"
-#include "HeadlessKeyBindings.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -72,7 +73,7 @@ HeadlessWidget::HeadlessWidget()
       mVisible(false),
       mDestroyed(false),
       mAlwaysOnTop(false),
-      mCompositorWidget(nullptr),
+      mCompositorWidgetDelegate(nullptr),
       mSizeMode(nsSizeMode_Normal),
       mLastSizeMode(nsSizeMode_Normal),
       mEffectiveSizeMode(nsSizeMode_Normal),
@@ -237,15 +238,8 @@ WindowRenderer* HeadlessWidget::GetWindowRenderer() {
 }
 
 void HeadlessWidget::SetCompositorWidgetDelegate(
-    CompositorWidgetDelegate* delegate) {
-  if (delegate) {
-    mCompositorWidget = delegate->AsHeadlessCompositorWidget();
-    MOZ_ASSERT(mCompositorWidget,
-               "HeadlessWidget::SetCompositorWidgetDelegate called with a "
-               "non-HeadlessCompositorWidget");
-  } else {
-    mCompositorWidget = nullptr;
-  }
+    CompositorWidgetDelegate* aDelegate) {
+  mCompositorWidgetDelegate = aDelegate;
 }
 
 void HeadlessWidget::Resize(const DesktopSize& aSize, bool aRepaint) {
@@ -259,8 +253,8 @@ void HeadlessWidget::ResizeInternal(int32_t aWidth, int32_t aHeight,
   ConstrainSize(&aWidth, &aHeight);
   mBounds.SizeTo(LayoutDeviceIntSize(aWidth, aHeight));
 
-  if (mCompositorWidget) {
-    mCompositorWidget->NotifyClientSizeChanged(mBounds.Size());
+  if (mCompositorWidgetDelegate) {
+    mCompositorWidgetDelegate->NotifyClientSizeChanged(mBounds.Size());
   }
   if (mWidgetListener) {
     mWidgetListener->WindowResized(this, mBounds.Size());

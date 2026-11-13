@@ -33,7 +33,7 @@
   background-color: var(--button-background-color-menu);
   text-align: start;
 
-  &:not([disabled]):hover {
+  &:not([aria-disabled]):hover {
     color: var(--button-text-color-menu-hover);
     background-color: var(--button-background-color-menu-hover);
 
@@ -43,12 +43,17 @@
     }
   }
 
+  /* Keep idle items transparent so only hovered/current items stand out. */
+  @media (forced-colors) {
+    background-color: transparent;
+  }
+
   &:focus-visible {
     outline: var(--focus-outline);
     outline-offset: var(--focus-outline-inset);
   }
 
-  &[aria-checked="true"] {
+  &[aria-selected="true"] {
     background-color: var(--button-background-color-menu-selected);
     color: var(--button-text-color-menu-selected);
     .location-check {

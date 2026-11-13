@@ -7,9 +7,9 @@
 
 #include "ConnectionAttempt.h"
 #include "DashboardTypes.h"
+#include "PendingTransactionInfo.h"
 #include "nsHashKeys.h"
 #include "nsTHashMap.h"
-#include "PendingTransactionInfo.h"
 
 namespace mozilla {
 namespace net {

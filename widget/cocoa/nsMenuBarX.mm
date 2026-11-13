@@ -10,30 +10,49 @@
 #include "nsCocoaWindow.h"
 #include "nsMenuBarX.h"
 #include "nsMenuGroupOwnerX.h"
+#include "nsMenuItemIconX.h"
 #include "nsMenuItemX.h"
 #include "nsMenuUtilsX.h"
 #include "nsMenuX.h"
 
 #include "nsCOMPtr.h"
-#include "nsString.h"
 #include "nsGkAtoms.h"
 #include "nsObjCExceptions.h"
+#include "nsString.h"
 #include "nsThreadUtils.h"
 
-#include "nsIContent.h"
-#include "nsIShellService.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/dom/Document.h"
 #include "nsIAppStartup.h"
+#include "nsIContent.h"
+#include "nsIShellService.h"
 #include "nsIStringBundle.h"
 #include "nsToolkitCompsCID.h"
 
 #include "mozilla/Components.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/glean/WidgetCocoaMetrics.h"
-#include "mozilla/Preferences.h"
 
 using namespace mozilla;
 using mozilla::dom::Element;
+
+class nsAppMenuItemIcon final : public nsMenuItemIconX::Listener {
+ public:
+  nsAppMenuItemIcon(NSMenuItem* aMenuItem, Element* aElement)
+      : mMenuItem([aMenuItem retain]), mIcon(this) {
+    mIcon.SetupIcon(aElement);
+    IconUpdated();
+  }
+
+  ~nsAppMenuItemIcon() { [mMenuItem release]; }
+
+  void IconUpdated() override { mMenuItem.image = mIcon.GetIconImage(); }
+
+ private:
+  NSMenuItem* mMenuItem;  // [strong]
+  nsMenuItemIconX mIcon;
+};
 
 NativeMenuItemTarget* nsMenuBarX::sNativeEventTarget = nil;
 nsMenuBarX* nsMenuBarX::sLastGeckoMenuBarPainted = nullptr;
@@ -57,6 +76,7 @@ extern BOOL sTouchBarIsInitialized;
 static nsIContent* sAboutItemContent = nullptr;
 static nsIContent* sPrefItemContent = nullptr;
 static nsIContent* sSetAsDefaultItemContent = nullptr;
+static nsIContent* sReferralsPageItemContent = nullptr;
 static nsIContent* sAccountItemContent = nullptr;
 static nsIContent* sQuitItemContent = nullptr;
 
@@ -79,6 +99,14 @@ static nsIContent* sQuitItemContent = nullptr;
 
 - (NSMenuItem*)setAsDefaultMenuItem {
   return mSetAsDefaultMenuItem;
+}
+
+- (void)setReferralsPageMenuItem:(NSMenuItem*)menuItem {
+  mReferralsPageMenuItem = menuItem;
+}
+
+- (NSMenuItem*)referralsPageMenuItem {
+  return mReferralsPageMenuItem;
 }
 
 - (void)menuWillOpen:(NSMenu*)menu {
@@ -604,6 +632,16 @@ void nsMenuBarX::ApplicationMenuOpened() {
     // Nimbus wants it hidden
     [[mApplicationMenuDelegate setAsDefaultMenuItem] setHidden:true];
   }
+
+#endif
+
+#ifdef MOZ_BUILD_APP_IS_BROWSER
+  // Only show the Share item if referrals are enabled
+  if (!Preferences::GetBool("browser.referrals.enabled")) {
+    [[mApplicationMenuDelegate referralsPageMenuItem] setHidden:true];
+  } else {
+    [[mApplicationMenuDelegate referralsPageMenuItem] setHidden:false];
+  }
 #endif
 }
 
@@ -649,7 +687,7 @@ RefPtr<Element> nsMenuBarX::HideItem(mozilla::dom::Document* aDocument,
   RefPtr<Element> menuElement = aDocument->GetElementById(aID);
   if (menuElement) {
     menuElement->SetAttr(kNameSpaceID_None, nsGkAtoms::hidden, u"true"_ns,
-                         false);
+                         false, dom::IsKnownNewAttr::No);
   }
   return menuElement;
 }
@@ -694,6 +732,12 @@ void nsMenuBarX::AquifyMenuBar() {
     mSetAsDefaultItemContent = HideItem(domDoc, u"menu_setAsDefault"_ns);
     if (!sSetAsDefaultItemContent) {
       sSetAsDefaultItemContent = mSetAsDefaultItemContent;
+    }
+
+    // remove Referrals item.
+    mReferralsPageItemContent = HideItem(domDoc, u"menu_referralsPage"_ns);
+    if (!sReferralsPageItemContent) {
+      sReferralsPageItemContent = mReferralsPageItemContent;
     }
 
     // remove Account Settings item.
@@ -788,6 +832,14 @@ NSMenuItem* nsMenuBarX::CreateNativeAppMenuItem(nsMenuX* aMenu,
   newMenuItem.keyEquivalentModifierMask = macKeyModifiers;
   newMenuItem.representedObject = mMenuGroupOwner->GetRepresentedObject();
 
+  // While "regular" menuitems can load images via CSS, we don't want to load
+  // all the relevant CSS in the hidden window, so we only support the image
+  // attribute for now.
+  if (menuItem->HasAttr(nsGkAtoms::image)) {
+    mAppMenuIcons.AppendElement(
+        MakeUnique<nsAppMenuItemIcon>(newMenuItem, menuItem));
+  }
+
   return newMenuItem;
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
@@ -796,6 +848,8 @@ NSMenuItem* nsMenuBarX::CreateNativeAppMenuItem(nsMenuX* aMenu,
 // build the Application menu shared by all menu bars
 void nsMenuBarX::CreateApplicationMenu(nsMenuX* aMenu) {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  mAppMenuIcons.Clear();
 
   // At this point, the application menu is the application menu from
   // the nib in cocoa widgets. We do not have a way to create an application
@@ -809,6 +863,7 @@ void nsMenuBarX::CreateApplicationMenu(nsMenuX* aMenu) {
 
     ========================
     = About This App       = <- aboutName
+    = Share This App       = <- menu_referralsPage   Only if enabled
     ========================
     = Preferences...       = <- menu_preferences
     = Set As Default       = <- menu_setAsDefault    Only if browser is not
@@ -866,6 +921,20 @@ void nsMenuBarX::CreateApplicationMenu(nsMenuX* aMenu) {
 
       addAboutSeparator = TRUE;
     }
+
+#ifdef MOZ_BUILD_APP_IS_BROWSER
+    // Add the Referrals menu item
+    itemBeingAdded = CreateNativeAppMenuItem(
+        aMenu, u"menu_referralsPage"_ns, @selector(menuItemHit:),
+        eCommand_ID_ReferralsPage, nsMenuBarX::sNativeEventTarget);
+    if (itemBeingAdded) {
+      [sApplicationMenu addItem:itemBeingAdded];
+      [mApplicationMenuDelegate setReferralsPageMenuItem:itemBeingAdded];
+
+      [itemBeingAdded release];
+      itemBeingAdded = nil;
+    }
+#endif
 
     // Add separator if either the About item or software update item exists
     if (addAboutSeparator) {
@@ -1084,6 +1153,16 @@ void nsMenuBarX::CreateApplicationMenu(nsMenuX* aMenu) {
     return [super performKeyEquivalent:aEvent];
   }
 
+  // Handle only shortcuts that include Command here, whichever window has
+  // focus, and leave plain keys to that window. Native text fields read such
+  // keys as plain editing or navigation keys, and a Gecko window that does not
+  // handle one hands it back to the menu bar afterwards through
+  // nsCocoaWindow::PostHandleKeyEvent, so matching plain keys here buys
+  // nothing and can cost a menu flash on every keystroke.
+  if (!(aEvent.modifierFlags & NSEventModifierFlagCommand)) {
+    return NO;
+  }
+
   NSResponder* firstResponder = keyWindow.firstResponder;
 
   if ([keyWindow isKindOfClass:[BaseWindow class]]) {
@@ -1212,6 +1291,18 @@ void nsMenuBarX::CreateApplicationMenu(nsMenuX* aMenu) {
     }
     return;
   }
+  if (tag == eCommand_ID_ReferralsPage) {
+    nsIContent* mostSpecificContent = sReferralsPageItemContent;
+    if (menuBar && menuBar->mReferralsPageItemContent) {
+      mostSpecificContent = menuBar->mReferralsPageItemContent;
+    }
+
+    if (mostSpecificContent) {
+      nsMenuUtilsX::DispatchCommandTo(mostSpecificContent, modifierFlags,
+                                      button);
+    }
+    return;
+  }
   if (tag == eCommand_ID_Prefs) {
     nsIContent* mostSpecificContent = sPrefItemContent;
     if (menuBar && menuBar->mPrefItemContent) {
@@ -1278,8 +1369,7 @@ void nsMenuBarX::CreateApplicationMenu(nsMenuX* aMenu) {
       nsCOMPtr<nsIAppStartup> appStartup =
           mozilla::components::AppStartup::Service();
       if (appStartup) {
-        bool userAllowedQuit = true;
-        appStartup->Quit(nsIAppStartup::eAttemptQuit, 0, &userAllowedQuit);
+        appStartup->Quit(nsIAppStartup::eAttemptQuit, 0);
       }
     }
     return;

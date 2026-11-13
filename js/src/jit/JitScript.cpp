@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/JitScript-inl.h"
-
 #include "mozilla/BinarySearch.h"
 #include "mozilla/CheckedInt.h"
 
@@ -30,6 +28,7 @@
 #include "vm/JSScript.h"
 
 #include "gc/GCContext-inl.h"
+#include "jit/JitScript-inl.h"
 #include "jit/JSJitFrameIter-inl.h"
 #include "vm/JSContext-inl.h"
 #include "vm/JSScript-inl.h"
@@ -513,7 +512,7 @@ void JitScript::purgeInactiveICScripts() {
   }
 }
 
-void JitScript::purgeStubs(JSScript* script, ICStubSpace& newStubSpace) {
+void JitScript::purgeStubs(JSScript* script) {
   MOZ_ASSERT(script->jitScript() == this);
 
   Zone* zone = script->zone();
@@ -528,6 +527,10 @@ void JitScript::purgeStubs(JSScript* script, ICStubSpace& newStubSpace) {
 
   JitSpew(JitSpew_BaselineIC, "Purging optimized stubs");
 
+  // We can use the stub space of the outer script's JitRealm for all ICScripts
+  // because we never inline cross-realm calls.
+  ICStubSpace& newStubSpace = *script->realm()->jitRealm().stubSpace();
+
   forEachICScript(
       [&](ICScript* script) { script->purgeStubs(zone, newStubSpace); });
 
@@ -535,6 +538,8 @@ void JitScript::purgeStubs(JSScript* script, ICStubSpace& newStubSpace) {
 }
 
 void ICScript::purgeStubs(Zone* zone, ICStubSpace& newStubSpace) {
+  gc::AutoMarkingLock lock(zone, markingLock());
+
   for (size_t i = 0; i < numICEntries(); i++) {
     ICEntry& entry = icEntry(i);
     ICFallbackStub* fallback = fallbackStub(i);
@@ -578,7 +583,7 @@ void ICScript::purgeStubs(Zone* zone, ICStubSpace& newStubSpace) {
 
     MOZ_ASSERT(!hasInlinedChild(fallback->pcOffset()));
 
-    fallback->discardStubs(zone, &entry);
+    fallback->discardStubs(zone, &entry, lock);
     fallback->state().reset();
   }
 }
@@ -767,9 +772,18 @@ using StubHashMap = HashMap<ICCacheIRStub*, ICCacheIRStub*,
 
 static void MarkActiveICScriptsAndCopyStubs(
     JSContext* cx, const JitActivationIterator& activation,
-    ICStubSpace& newStubSpace, StubHashMap& alreadyClonedStubs) {
+    StubHashMap& alreadyClonedStubs) {
+  auto isPreservingCode = [](JSScript* script) {
+    return script->realm()->jitRealm().isPreservingCode();
+  };
+
   for (OnlyJSJitFrameIter iter(activation); !iter.done(); ++iter) {
     const JSJitFrameIter& frame = iter.frame();
+
+    if (frame.isScripted() && isPreservingCode(frame.script())) {
+      continue;
+    }
+
     switch (frame.type()) {
       case FrameType::BaselineJS:
         frame.script()->jitScript()->icScript()->setActive();
@@ -782,18 +796,29 @@ static void MarkActiveICScriptsAndCopyStubs(
       case FrameType::BaselineStub: {
         auto* layout = reinterpret_cast<BaselineStubFrameLayout*>(frame.fp());
         if (layout->maybeStubPtr() && !layout->maybeStubPtr()->isFallback()) {
-          ICCacheIRStub* stub = layout->maybeStubPtr()->toCacheIRStub();
-          auto lookup = alreadyClonedStubs.lookupForAdd(stub);
-          if (!lookup) {
-            ICCacheIRStub* newStub =
-                stub->clone(cx->runtime(), newStubSpace,
-                            ICCacheIRStub::ICScriptHandling::MarkActive);
-            AutoEnterOOMUnsafeRegion oomUnsafe;
-            if (!alreadyClonedStubs.add(lookup, stub, newStub)) {
-              oomUnsafe.crash("MarkActiveICScriptsAndCopyStubs");
+          // The stub belongs to the caller's JitScript, so clone it into the
+          // stub space for the caller's realm.
+          OnlyJSJitFrameIter callerIter(iter);
+          ++callerIter;
+          MOZ_RELEASE_ASSERT(callerIter.frame().type() ==
+                             FrameType::BaselineJS);
+          JSScript* callerScript = callerIter.frame().script();
+          if (!isPreservingCode(callerScript)) {
+            ICCacheIRStub* stub = layout->maybeStubPtr()->toCacheIRStub();
+            auto lookup = alreadyClonedStubs.lookupForAdd(stub);
+            if (!lookup) {
+              ICStubSpace& newStubSpace =
+                  *callerScript->realm()->jitRealm().stubSpace();
+              ICCacheIRStub* newStub =
+                  stub->clone(cx->runtime(), newStubSpace,
+                              ICCacheIRStub::ICScriptHandling::MarkActive);
+              AutoEnterOOMUnsafeRegion oomUnsafe;
+              if (!alreadyClonedStubs.add(lookup, stub, newStub)) {
+                oomUnsafe.crash("MarkActiveICScriptsAndCopyStubs");
+              }
             }
+            layout->setStubPtr(lookup->value());
           }
-          layout->setStubPtr(lookup->value());
         }
         break;
       }
@@ -803,7 +828,9 @@ static void MarkActiveICScriptsAndCopyStubs(
               frame.exitFrame()->as<LazyLinkExitFrameLayout>();
           JSScript* script =
               ScriptFromCalleeToken(ll->jsFrame()->calleeToken());
-          script->jitScript()->icScript()->setActive();
+          if (!isPreservingCode(script)) {
+            script->jitScript()->icScript()->setActive();
+          }
         }
         break;
       case FrameType::Bailout:
@@ -825,8 +852,7 @@ static void MarkActiveICScriptsAndCopyStubs(
   }
 }
 
-void jit::MarkActiveICScriptsAndCopyStubs(Zone* zone,
-                                          ICStubSpace& newStubSpace) {
+void jit::MarkActiveICScriptsAndCopyStubs(Zone* zone) {
   if (zone->isAtomsZone()) {
     return;
   }
@@ -834,8 +860,7 @@ void jit::MarkActiveICScriptsAndCopyStubs(Zone* zone,
   JSContext* cx = TlsContext.get();
   for (JitActivationIterator iter(cx); !iter.done(); ++iter) {
     if (iter->compartment()->zone() == zone) {
-      MarkActiveICScriptsAndCopyStubs(cx, iter, newStubSpace,
-                                      alreadyClonedStubs);
+      MarkActiveICScriptsAndCopyStubs(cx, iter, alreadyClonedStubs);
     }
   }
 }

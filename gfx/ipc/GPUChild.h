@@ -6,9 +6,9 @@
 
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/ipc/CrashReporterHelper.h"
 #include "mozilla/gfx/PGPUChild.h"
 #include "mozilla/gfx/gfxVarReceiver.h"
+#include "mozilla/ipc/CrashReporterHelper.h"
 
 namespace mozilla {
 
@@ -109,7 +109,7 @@ class GPUChild final : public mozilla::ipc::CrashReporterHelper<GPUChild>,
 
   void OnInitComplete(const GPUDeviceData& aData);
 
-  GPUProcessHost* mHost;
+  RefPtr<GPUProcessHost> mHost;
   UniquePtr<MemoryReportRequestHost> mMemoryReportRequest;
   bool mGPUReady;
   bool mUnexpectedShutdown = false;

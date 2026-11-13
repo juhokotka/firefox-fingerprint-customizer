@@ -1,7 +1,6 @@
 // |jit-test| skip-if: !hasDisassembler() || wasmCompileMode() != "ion" || !getBuildConfiguration("riscv64"); include:codegen-riscv64-test.js
 
-const WasmTrapIns = `csrwi     csr_cycle, 0x6
-                     ebreak`;
+const WasmTrapIns = `csrwi     csr_cycle, 0x6`;
 
 // Signed 32-bit division with constants.
 const i32_div_s = [
@@ -36,7 +35,7 @@ const i32_div_s = [
   {
     divisor: -1,
     expected: `lui       t4, 0xfff80000
-               bne       a0, t4, 12 -> 0x${HEX}+
+               bne       a0, t4, 8 -> 0x${HEX}+
                ${WasmTrapIns}
                negw      a0, a0`,
   },
@@ -221,7 +220,7 @@ const i64_div_s = [
   // Power of two divisor
   {
     divisor: 1,
-    expected: `mv        a0, a0`,
+    expected: ``,
   },
   {
     divisor: 2,
@@ -247,9 +246,10 @@ const i64_div_s = [
   // Division by -1 needs an overflow check.
   {
     divisor: -1,
-    expected: `li        t4, -1
-               slli      t4, t4, 63
-               bne       a0, t4, 12 -> 0x${HEX}+
+    expected: `(bseti    t4, zero, 63)
+            | (li        t4, -1
+               slli      t4, t4, 63)
+               bne       a0, t4, 8 -> 0x${HEX}+
                ${WasmTrapIns}
                neg       a0, a0`,
   },
@@ -260,9 +260,9 @@ const i64_div_s = [
     expected:  `mv        t1, a0
                 mv        t0, t1
                 lui       t4, 0x55555
-                addi      t4, t4, 1366
+                addiw?    t4, t4, 1366
                 lui       t5, 0x55555
-                addi      t5, t5, 1365
+                addiw?    t5, t5, 1365
                 slli      t5, t5, 32
                 add       t4, t4, t5
                 mulh      a0, t0, t4
@@ -274,9 +274,9 @@ const i64_div_s = [
     expected: `mv        t1, a0
                mv        t0, t1
                lui       t4, 0x66666
-               addi      t4, t4, 1639
+               addiw?    t4, t4, 1639
                lui       t5, 0x66666
-               addi      t5, t5, 1638
+               addiw?    t5, t5, 1638
                slli      t5, t5, 32
                add       t4, t4, t5
                mulh      a0, t0, t4
@@ -289,9 +289,9 @@ const i64_div_s = [
     expected: `mv        t1, a0
                mv        t0, t1
                lui       t4, 0x24925
-               addi      t4, t4, -1755
+               addiw?    t4, t4, -1755
                lui       t5, 0x49249
-               addi      t5, t5, 585
+               addiw?    t5, t5, 585
                slli      t5, t5, 32
                add       t4, t4, t5
                mulh      a0, t0, t4
@@ -304,9 +304,9 @@ const i64_div_s = [
     expected: `mv        t1, a0
                mv        t0, t1
                lui       t4, 0x71c72
-               addi      t4, t4, -910
+               addiw?    t4, t4, -910
                lui       t5, 0x1c71c
-               addi      t5, t5, 1820
+               addiw?    t5, t5, 1820
                slli      t5, t5, 32
                add       t4, t4, t5
                mulh      a0, t0, t4
@@ -318,9 +318,9 @@ const i64_div_s = [
     expected: `mv        t1, a0
                mv        t0, t1
                lui       t4, 0xfffaaaab
-               addi      t4, t4, -1365
+               addiw?    t4, t4, -1365
                lui       t5, 0x2aaab
-               addi      t5, t5, -1365
+               addiw?    t5, t5, -1365
                slli      t5, t5, 32
                add       t4, t4, t5
                mulh      a0, t0, t4
@@ -361,7 +361,7 @@ const i64_div_u = [
   // Power of two divisor
   {
     divisor: 1,
-    expected: `mv        a0, a0`,
+    expected: ``,
   },
   {
     divisor: 2,
@@ -382,10 +382,8 @@ const i64_div_u = [
     expected:  `mv        t1, a0
                 mv        t0, t1
                 lui       t4, 0xfffaaaab
-                addi      t4, t4, -1365
-                lui       t5, 0xfffaaaab
-                addi      t5, t5, -1365
-                slli      t5, t5, 32
+                addiw?    t4, t4, -1365
+                slli      t5, t4, 32
                 add       t4, t4, t5
                 mulhu     a0, t0, t4
                 srli      a0, a0, 1`,
@@ -395,10 +393,8 @@ const i64_div_u = [
     expected: `mv        t1, a0
                mv        t0, t1
                lui       t4, 0xfffccccd
-               addi      t4, t4, -819
-               lui       t5, 0xfffccccd
-               addi      t5, t5, -819
-               slli      t5, t5, 32
+               addiw?    t4, t4, -819
+               slli      t5, t4, 32
                add       t4, t4, t5
                mulhu     a0, t0, t4
                srli      a0, a0, 2`,
@@ -408,9 +404,9 @@ const i64_div_u = [
     expected: `mv        t1, a0
                mv        t0, t1
                lui       t4, 0xfff92492
-               addi      t4, t4, 1171
+               addiw?    t4, t4, 1171
                lui       t5, 0x24925
-               addi      t5, t5, -1755
+               addiw?    t5, t5, -1755
                slli      t5, t5, 32
                add       t4, t4, t5
                mulhu     a0, t0, t4
@@ -424,9 +420,9 @@ const i64_div_u = [
     expected: `mv        t1, a0
                mv        t0, t1
                lui       t4, 0xfff8e38e
-               addi      t4, t4, 911
+               addiw?    t4, t4, 911
                lui       t5, 0xfffe38e4
-               addi      t5, t5, -1820
+               addiw?    t5, t5, -1820
                slli      t5, t5, 32
                add       t4, t4, t5
                mulhu     a0, t0, t4
@@ -437,10 +433,8 @@ const i64_div_u = [
     expected: `mv        t1, a0
                mv        t0, t1
                lui       t4, 0xfffaaaab
-               addi      t4, t4, -1365
-               lui       t5, 0xfffaaaab
-               addi      t5, t5, -1365
-               slli      t5, t5, 32
+               addiw?    t4, t4, -1365
+               slli      t5, t4, 32
                add       t4, t4, t5
                mulhu     a0, t0, t4
                srli      a0, a0, 33`,
@@ -680,7 +674,7 @@ const i64_rem_s = [
                neg       a0, a0
               (zext\\.w  a0, a0)
             | (slli      a0, a0, 32
-               srli      a0, a0, 32) 
+               srli      a0, a0, 32)
                neg       a0, a0`,
   },
   {
@@ -701,9 +695,9 @@ const i64_rem_s = [
     expected: `mv        t1, a0
                mv        t0, t1
                lui       t4, 0xfffaaaab
-               addi      t4, t4, -1365
+               addiw?    t4, t4, -1365
                lui       t5, 0x2aaab
-               addi      t5, t5, -1365
+               addiw?    t5, t5, -1365
                slli      t5, t5, 32
                add       t4, t4, t5
                mulh      a0, t0, t4
@@ -719,9 +713,9 @@ const i64_rem_s = [
     negative: `mv        t1, a0
                mv        t0, t1
                lui       t4, 0xfffaaaab
-               addi      t4, t4, -1365
+               addiw?    t4, t4, -1365
                lui       t5, 0x2aaab
-               addi      t5, t5, -1365
+               addiw?    t5, t5, -1365
                slli      t5, t5, 32
                add       t4, t4, t5
                mulh      a0, t0, t4
@@ -809,10 +803,8 @@ const i64_rem_u = [
     expected: `mv        t1, a0
                mv        t0, t1
                lui       t4, 0xfffaaaab
-               addi      t4, t4, -1365
-               lui       t5, 0xfffaaaab
-               addi      t5, t5, -1365
-               slli      t5, t5, 32
+               addiw?    t4, t4, -1365
+               slli      t5, t4, 32
                add       t4, t4, t5
                mulhu     a0, t0, t4
                srli      a0, a0, 33

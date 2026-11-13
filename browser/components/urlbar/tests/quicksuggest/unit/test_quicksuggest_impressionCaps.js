@@ -3194,16 +3194,13 @@ async function checkSearch({ name, searchString, expectedResults }) {
   if (quickSuggestProviderInstance._resultFromLastQuery) {
     quickSuggestProviderInstance._resultFromLastQuery.isVisible = true;
   }
-  const controller = UrlbarTestUtils.newMockController({
+  const controller = UrlbarTestUtils.mockChildController({
     input: {
       isPrivate: true,
-      onFirstResult() {
-        return false;
-      },
       getSearchSource() {
         return "dummy-search-source";
       },
-      window: {
+      browserWindow: {
         location: {
           href: AppConstants.BROWSER_CHROME_URL,
         },

@@ -1,27 +1,104 @@
-From: Andreas Pehrson <apehrson@mozilla.com>
-Date: Thu, 29 Aug 2024 08:31:00 +0000
-Subject: Bug 1914837 - Always initialize DesktopCapturer::pid.
- r=webrtc-reviewers,ng
+From: Michael Froman <mfroman@mozilla.com>
+Date: Tue, 1 Oct 2024 21:05:00 +0000
+Subject: Bug 1921706 - use relative paths on deps in a few places to avoid
+ future issues. r=ng,webrtc-reviewers DONTBUILD
 
-This member is patched on top of libwebrtc. New backends could be added from
-under us. It needs to be initialized.
+Note: this produces no changes in the generated moz.build files.
 
-Differential Revision: https://phabricator.services.mozilla.com/D220265
-Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/fdf5b0a81b0c0e87d31c5963091681a0e5960678
+Differential Revision: https://phabricator.services.mozilla.com/D224070
+Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/bbec1b95ddb5e00967a0fb002f54f8f24336b904
 ---
- modules/desktop_capture/desktop_capturer.h | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
+ modules/audio_coding/BUILD.gn  |  2 +-
+ modules/portal/BUILD.gn        |  8 ++++----
+ modules/video_capture/BUILD.gn |  2 +-
+ sdk/BUILD.gn                   | 14 ++++++++++++++
+ test/BUILD.gn                  |  6 ++++++
+ 5 files changed, 26 insertions(+), 6 deletions(-)
 
-diff --git a/modules/desktop_capture/desktop_capturer.h b/modules/desktop_capture/desktop_capturer.h
-index 0e32474543..c85d0eba7a 100644
---- a/modules/desktop_capture/desktop_capturer.h
-+++ b/modules/desktop_capture/desktop_capturer.h
-@@ -80,7 +80,7 @@ class RTC_EXPORT DesktopCapturer {
-   struct Source {
-     // The unique id to represent a Source of current DesktopCapturer.
-     SourceId id;
--    pid_t pid;
-+    pid_t pid = 0;
+diff --git a/modules/audio_coding/BUILD.gn b/modules/audio_coding/BUILD.gn
+index 1f910eb0e8..43d4c7ff57 100644
+--- a/modules/audio_coding/BUILD.gn
++++ b/modules/audio_coding/BUILD.gn
+@@ -339,7 +339,7 @@ rtc_library("webrtc_opus_wrapper") {
+     deps += [ rtc_opus_dir ]
+     public_configs = [ "//third_party/opus:opus_config" ]
+   } else if (build_with_mozilla) {
+-    public_configs = [ "//third_party/opus:opus_config" ]
++    public_configs = [ "../../third_party/opus:opus_config" ]
+   }
+ }
  
-     // Title of the window or screen in UTF-8 encoding, maybe empty. This field
-     // should not be used to identify a source.
+diff --git a/modules/portal/BUILD.gn b/modules/portal/BUILD.gn
+index d2ddaa3b38..43317503c1 100644
+--- a/modules/portal/BUILD.gn
++++ b/modules/portal/BUILD.gn
+@@ -146,10 +146,10 @@ if (!build_with_mozilla) {
+       deps -= [ ":pipewire_stubs" ]
+       defines -= [ "WEBRTC_DLOPEN_PIPEWIRE" ]
+       public_deps = [
+-        "//third_party/pipewire",
+-        "//third_party/drm",
+-        "//third_party/gbm",
+-        "//third_party/libepoxy"
++        "../../third_party/pipewire",
++        "../../third_party/drm",
++        "../../third_party/gbm",
++        "../../third_party/libepoxy"
+       ]
+     }
+   }
+diff --git a/modules/video_capture/BUILD.gn b/modules/video_capture/BUILD.gn
+index 83dc72ba53..dbcc162510 100644
+--- a/modules/video_capture/BUILD.gn
++++ b/modules/video_capture/BUILD.gn
+@@ -114,7 +114,7 @@ if (!build_with_chromium || is_linux || is_chromeos) {
+         ]
+         if (build_with_mozilla) {
+           configs -= [ "../portal:pipewire_base" ]
+-          public_deps = [ "//third_party/pipewire" ]
++          public_deps = [ "../../third_party/pipewire" ]
+         }
+       }
+     }
+diff --git a/sdk/BUILD.gn b/sdk/BUILD.gn
+index 0f599c5a0c..ac7adc4a26 100644
+--- a/sdk/BUILD.gn
++++ b/sdk/BUILD.gn
+@@ -623,6 +623,20 @@ if (is_ios || is_mac) {
+         "CoreGraphics.framework",
+         "CoreVideo.framework",
+       ]
++      if (build_with_mozilla) {
++        deps -= [
++          "//api/video:video_frame",
++          "//api/video:video_rtp_headers",
++          "//common_video",
++          "//rtc_base:checks",
++        ]
++        deps += [
++          "../api/video:video_frame",
++          "../api/video:video_rtp_headers",
++          "../common_video",
++          "../rtc_base:checks",
++        ]
++      }
+     }
+ 
+     if (!build_with_mozilla) {
+diff --git a/test/BUILD.gn b/test/BUILD.gn
+index 3c9baafe9e..f2abed9bf9 100644
+--- a/test/BUILD.gn
++++ b/test/BUILD.gn
+@@ -499,6 +499,12 @@ rtc_source_set("test_support") {
+     "//testing/gmock",
+     "//testing/gtest",
+   ]
++  if (build_with_mozilla) {
++    all_dependent_configs -= [
++      "//third_party/googletest:gmock_config",
++      "//third_party/googletest:gtest_config",
++    ]
++  }
+ }
+ 
+ rtc_library("fixed_fps_video_frame_writer_adapter") {

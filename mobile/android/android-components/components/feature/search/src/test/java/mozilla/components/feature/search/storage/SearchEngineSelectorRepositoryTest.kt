@@ -4,7 +4,11 @@
 
 package mozilla.components.feature.search.storage
 
-import kotlinx.coroutines.test.StandardTestDispatcher
+import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.Executors
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.test.runTest
 import mozilla.appservices.remotesettings.RemoteSettingsClient
 import mozilla.appservices.search.RefinedSearchConfig
@@ -27,8 +31,6 @@ import org.mockito.Mockito.doNothing
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
-import java.util.Locale
-import kotlin.coroutines.CoroutineContext
 
 class SearchEngineSelectorRepositoryTest {
 
@@ -47,32 +49,35 @@ class SearchEngineSelectorRepositoryTest {
         searchConfigIconsUpdateService = mock<SearchConfigIconsUpdateService>()
 
         // Mocking SearchEngineSelectorConfig with a fake app configuration
-        mockConfig = SearchEngineSelectorConfig(
-            appName = SearchApplicationName.FIREFOX_ANDROID,
-            appVersion = "1.0.0",
-            deviceType = SearchDeviceType.SMARTPHONE,
-            experiment = "test_experiment",
-            updateChannel = SearchUpdateChannel.RELEASE,
-            service = mockService,
-        )
+        mockConfig =
+            SearchEngineSelectorConfig(
+                appName = SearchApplicationName.FIREFOX_ANDROID,
+                appVersion = "1.0.0",
+                deviceType = SearchDeviceType.SMARTPHONE,
+                experiment = "test_experiment",
+                updateChannel = SearchUpdateChannel.RELEASE,
+                service = mockService,
+            )
 
         // Mock the useRemoteSettingsServer to avoid API calls
         doNothing().`when`(mockSelector).useRemoteSettingsServer(service = any(), applyEngineOverrides = eq(false))
 
         // Instantiate the repository with the mocked config
-        repository = SearchEngineSelectorRepository(
-            context = mock(),
-            searchEngineSelectorConfig = mockConfig,
-            defaultSearchEngineIcon = mock(),
-            selector = mockSelector,
-            client = mockClient,
-        )
+        repository =
+            SearchEngineSelectorRepository(
+                context = mock(),
+                searchEngineSelectorConfig = mockConfig,
+                defaultSearchEngineIcon = mock(),
+                selector = mockSelector,
+                client = mockClient,
+            )
     }
 
     @Test
     fun `test repository initialization calls useRemoteSettingsServer`() {
         // Verify that useRemoteSettingsServer was called once with correct arguments
-        verify(mockSelector, times(1)).useRemoteSettingsServer(service = mockService.remoteSettingsService, applyEngineOverrides = false)
+        verify(mockSelector, times(1))
+            .useRemoteSettingsServer(service = mockService.remoteSettingsService, applyEngineOverrides = false)
     }
 
     @Test
@@ -81,19 +86,21 @@ class SearchEngineSelectorRepositoryTest {
         val fakeLocale = Locale.US
         val fakeDistribution = "test_distribution"
         val fakeSearchExtraParams: SearchExtraParams? = null
-        val fakeCoroutineContext: CoroutineContext = StandardTestDispatcher()
+        val fakeCoroutineContext: CoroutineContext = coroutineContext
 
-        val expectedBundle = SearchMiddleware.BundleStorage.Bundle(
-            emptyList(),
-            defaultSearchEngineId = "",
-            searchEnvironmentId = null,
-        )
+        val expectedBundle =
+            SearchMiddleware.BundleStorage.Bundle(
+                emptyList(),
+                defaultSearchEngineId = "",
+                searchEnvironmentId = null,
+            )
 
-        val expectedConfig = RefinedSearchConfig(
-            emptyList(),
-            appDefaultEngineId = null,
-            appPrivateDefaultEngineId = null,
-        ) // Fake response
+        val expectedConfig =
+            RefinedSearchConfig(
+                emptyList(),
+                appDefaultEngineId = null,
+                appPrivateDefaultEngineId = null,
+            ) // Fake response
 
         // Mock the filterEngineConfiguration to return our fake config
         `when`(mockSelector.filterEngineConfiguration(any())).thenReturn(expectedConfig)
@@ -102,7 +109,8 @@ class SearchEngineSelectorRepositoryTest {
         `when`(searchConfigIconsUpdateService.fetchIconsRecords(any())).thenReturn(emptyList())
 
         // Run the repository load function
-        val result = repository.load(fakeRegion, fakeLocale, fakeDistribution, fakeSearchExtraParams, fakeCoroutineContext)
+        val result =
+            repository.load(fakeRegion, fakeLocale, fakeDistribution, fakeSearchExtraParams, fakeCoroutineContext)
 
         // Verify that filterEngineConfiguration was called once
         verify(mockSelector, times(1)).filterEngineConfiguration(any())
@@ -117,19 +125,21 @@ class SearchEngineSelectorRepositoryTest {
         val fakeLocale = Locale.US
         val fakeDistribution = null
         val fakeSearchExtraParams: SearchExtraParams? = null
-        val fakeCoroutineContext: CoroutineContext = StandardTestDispatcher()
+        val fakeCoroutineContext: CoroutineContext = coroutineContext
 
-        val expectedBundle = SearchMiddleware.BundleStorage.Bundle(
-            emptyList(),
-            defaultSearchEngineId = "",
-            searchEnvironmentId = null,
-        )
+        val expectedBundle =
+            SearchMiddleware.BundleStorage.Bundle(
+                emptyList(),
+                defaultSearchEngineId = "",
+                searchEnvironmentId = null,
+            )
 
-        val expectedConfig = RefinedSearchConfig(
-            emptyList(),
-            appDefaultEngineId = null,
-            appPrivateDefaultEngineId = null,
-        ) // Fake response
+        val expectedConfig =
+            RefinedSearchConfig(
+                emptyList(),
+                appDefaultEngineId = null,
+                appPrivateDefaultEngineId = null,
+            ) // Fake response
 
         // Mock the filterEngineConfiguration to return our fake config
         `when`(mockSelector.filterEngineConfiguration(any())).thenReturn(expectedConfig)
@@ -138,12 +148,47 @@ class SearchEngineSelectorRepositoryTest {
         `when`(searchConfigIconsUpdateService.fetchIconsRecords(any())).thenReturn(emptyList())
 
         // Run the repository load function
-        val result = repository.load(fakeRegion, fakeLocale, fakeDistribution, fakeSearchExtraParams, fakeCoroutineContext)
+        val result =
+            repository.load(fakeRegion, fakeLocale, fakeDistribution, fakeSearchExtraParams, fakeCoroutineContext)
 
         // Verify that filterEngineConfiguration was called once
         verify(mockSelector, times(1)).filterEngineConfiguration(any())
 
         // Assert that the returned configuration matches the expected one
         assertEquals(expectedBundle, result)
+    }
+
+    @Test
+    fun `load uses provided coroutine context`() = runTest {
+        val fakeRegion = RegionState("US", "US")
+        val fakeLocale = Locale.US
+        val fakeDistribution = null
+        val threadName = "SearchEngineSelectorRepositoryTest-${UUID.randomUUID()}"
+        val dispatcher =
+            Executors.newSingleThreadExecutor { runnable ->
+                    Thread(runnable, threadName)
+                }
+                .asCoroutineDispatcher()
+        var observedThreadName: String? = null
+
+        try {
+            `when`(mockSelector.filterEngineConfiguration(any())).thenAnswer {
+                observedThreadName = Thread.currentThread().name
+                RefinedSearchConfig(
+                    emptyList(),
+                    appDefaultEngineId = null,
+                    appPrivateDefaultEngineId = null,
+                )
+            }
+
+            repository.load(fakeRegion, fakeLocale, fakeDistribution, null, dispatcher)
+
+            assertEquals(
+                threadName,
+                observedThreadName,
+            )
+        } finally {
+            dispatcher.close()
+        }
     }
 }

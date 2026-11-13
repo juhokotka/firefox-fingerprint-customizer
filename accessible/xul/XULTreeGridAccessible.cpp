@@ -5,26 +5,26 @@
 #include "XULTreeGridAccessible.h"
 
 #include <stdint.h>
-#include "AccAttributes.h"
-#include "LocalAccessible-inl.h"
-#include "nsAccCache.h"
-#include "nsAccessibilityService.h"
-#include "nsAccUtils.h"
-#include "DocAccessible.h"
-#include "nsEventShell.h"
-#include "Relation.h"
-#include "mozilla/a11y/Role.h"
-#include "States.h"
-#include "nsQueryObject.h"
-#include "nsTreeColumns.h"
 
-#include "nsITreeSelection.h"
-#include "nsComponentManagerUtils.h"
+#include "AccAttributes.h"
+#include "DocAccessible.h"
+#include "LocalAccessible-inl.h"
+#include "Relation.h"
+#include "States.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/a11y/Role.h"
 #include "mozilla/a11y/TableAccessible.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TreeColumnBinding.h"
 #include "mozilla/dom/XULTreeElementBinding.h"
+#include "nsAccCache.h"
+#include "nsAccUtils.h"
+#include "nsAccessibilityService.h"
+#include "nsComponentManagerUtils.h"
+#include "nsEventShell.h"
+#include "nsITreeSelection.h"
+#include "nsQueryObject.h"
+#include "nsTreeColumns.h"
 
 using namespace mozilla::a11y;
 using namespace mozilla;
@@ -128,7 +128,7 @@ void XULTreeGridAccessible::ColDescription(uint32_t aColIdx,
   }
 }
 
-bool XULTreeGridAccessible::IsColSelected(uint32_t aColIdx) {
+bool XULTreeGridAccessible::IsColSelected(uint32_t /*aColIdx*/) {
   // If all the row has been selected, then all the columns are selected.
   // Because we can't select a column alone.
   return SelectedItemCount() == RowCount();
@@ -146,7 +146,8 @@ bool XULTreeGridAccessible::IsRowSelected(uint32_t aRowIdx) {
   return isSelected;
 }
 
-bool XULTreeGridAccessible::IsCellSelected(uint32_t aRowIdx, uint32_t aColIdx) {
+bool XULTreeGridAccessible::IsCellSelected(uint32_t aRowIdx,
+                                           uint32_t /*aColIdx*/) {
   return IsRowSelected(aRowIdx);
 }
 
@@ -269,7 +270,7 @@ ENameValueFlag XULTreeGridRowAccessible::DirectName(nsString& aName) const {
 }
 
 LocalAccessible* XULTreeGridRowAccessible::LocalChildAtPoint(
-    int32_t aX, int32_t aY, EWhichChildAtPoint aWhichChild) {
+    int32_t aX, int32_t aY, EWhichChildAtPoint /*aWhichChild*/) {
   nsIFrame* frame = GetFrame();
   if (!frame) return nullptr;
 
@@ -572,7 +573,8 @@ uint64_t XULTreeGridCellAccessible::NativeInteractiveState() const {
 
 int32_t XULTreeGridCellAccessible::IndexInParent() const { return ColIdx(); }
 
-Relation XULTreeGridCellAccessible::RelationByType(RelationType aType) const {
+Relation XULTreeGridCellAccessible::RelationByType(
+    RelationType /*aType*/) const {
   return Relation();
 }
 
@@ -590,7 +592,7 @@ bool XULTreeGridCellAccessible::CellInvalidated() {
           MakeRefPtr<AccStateChangeEvent>(this, states::CHECKED, isEnabled);
       nsEventShell::FireEvent(accEvent);
 
-      mCachedTextEquiv = textEquiv;
+      mCachedTextEquiv = std::move(textEquiv);
       return true;
     }
 
@@ -600,7 +602,7 @@ bool XULTreeGridCellAccessible::CellInvalidated() {
   mTreeView->GetCellText(mRow, mColumn, textEquiv);
   if (mCachedTextEquiv != textEquiv) {
     nsEventShell::FireEvent(nsIAccessibleEvent::EVENT_NAME_CHANGE, this);
-    mCachedTextEquiv = textEquiv;
+    mCachedTextEquiv = std::move(textEquiv);
     return true;
   }
 
@@ -635,7 +637,7 @@ LocalAccessible* XULTreeGridCellAccessible::GetSiblingAtOffset(
 }
 
 void XULTreeGridCellAccessible::DispatchClickEvent(
-    uint32_t aActionIndex) const {
+    uint32_t /*aActionIndex*/) const {
   if (IsDefunct()) return;
 
   RefPtr<dom::XULTreeElement> tree = mTree;

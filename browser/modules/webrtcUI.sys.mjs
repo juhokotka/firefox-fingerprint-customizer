@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { EventEmitter } from "resource:///modules/syncedtabs/EventEmitter.sys.mjs";
+import { EventEmitter } from "moz-src:///browser/components/syncedtabs/EventEmitter.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
@@ -830,7 +830,9 @@ export var webrtcUI = {
     if (this.showGlobalIndicator) {
       if (!gIndicatorWindow) {
         gIndicatorWindow = getGlobalIndicator();
-      } else {
+      } else if (gIndicatorWindow.updateIndicatorState) {
+        // Until its script has loaded, the indicator can't be updated, but it
+        // updates itself once loaded.
         try {
           gIndicatorWindow.updateIndicatorState();
         } catch (err) {

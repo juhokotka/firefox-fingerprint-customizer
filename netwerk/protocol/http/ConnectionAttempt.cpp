@@ -3,8 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ConnectionAttempt.h"
-#include "nsHttpTransaction.h"
+
 #include "nsHttpConnectionInfo.h"
+#include "nsHttpTransaction.h"
 
 namespace mozilla::net {
 
@@ -18,6 +19,8 @@ ConnectionAttempt::ConnectionAttempt(nsHttpConnectionInfo* ci,
       mCaps(caps),
       mSpeculative(speculative),
       mUrgentStart(urgentStart) {}
+
+void ConnectionAttempt::ForgetRealTransaction() { mTransaction = nullptr; }
 
 bool ConnectionAttempt::AcceptsTransaction(nsHttpTransaction* trans) const {
   // When marked as urgent start, only accept urgent start marked transactions.

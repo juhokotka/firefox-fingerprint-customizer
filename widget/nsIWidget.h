@@ -7,9 +7,10 @@
 
 #include <cmath>
 #include <cstdint>
-#include "imgIContainer.h"
+
 #include "ErrorList.h"
 #include "Units.h"
+#include "imgIContainer.h"
 #include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
@@ -21,11 +22,12 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/gfx/Matrix.h"
 #include "mozilla/gfx/Rect.h"
+#include "mozilla/image/Resolution.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/layers/ScrollableLayerGuid.h"
 #include "mozilla/layers/ZoomConstraints.h"
-#include "mozilla/image/Resolution.h"
 #include "mozilla/widget/IMEData.h"
+#include "mozilla/widget/InitData.h"
 #include "nsCOMPtr.h"
 #include "nsColor.h"
 #include "nsDebug.h"
@@ -41,7 +43,6 @@
 #include "nsTArray.h"
 #include "nsTHashMap.h"
 #include "nsWeakReference.h"
-#include "mozilla/widget/InitData.h"
 #include "nsXULAppAPI.h"
 
 // Windows specific constant indicating the maximum number of touch points the
@@ -81,6 +82,7 @@ enum class HapticFeedbackType : uint8_t {
   ShortPress = 0,
   LongPress = 1,
   TextHandleMove = 2,
+  ThresholdCrossing = 3,
 
   End,  // Not a feedback type, only to mark the upper boundary
 };
@@ -313,7 +315,7 @@ namespace mozilla::widget {
  * the constraints.
  */
 struct SizeConstraints {
-  SizeConstraints() : mMaxSize(MOZ_WIDGET_MAX_SIZE, MOZ_WIDGET_MAX_SIZE) {}
+  SizeConstraints() = default;
 
   SizeConstraints(mozilla::DesktopIntSize aMinSize,
                   mozilla::DesktopIntSize aMaxSize)
@@ -327,7 +329,7 @@ struct SizeConstraints {
   }
 
   mozilla::DesktopIntSize mMinSize;
-  mozilla::DesktopIntSize mMaxSize;
+  mozilla::DesktopIntSize mMaxSize{MOZ_WIDGET_MAX_SIZE, MOZ_WIDGET_MAX_SIZE};
 };
 
 class MOZ_RAII AutoSynthesizedEventCallbackNotifier final {
@@ -1088,14 +1090,6 @@ class nsIWidget : public nsSupportsWeakReference {
   virtual void SetInputRegion(const InputRegion&) {}
 
   /*
-   * On macOS, this method shows or hides the pill button in the titlebar
-   * that's used to collapse the toolbar.
-   *
-   * Ignored on child widgets and on non-Mac platforms.
-   */
-  virtual void SetShowsToolbarButton(bool aShow) {}
-
-  /*
    * On macOS, this method determines whether we tell cocoa that the window
    * supports native full screen. If we do so, and another window is in
    * native full screen, this window will also appear in native full screen.
@@ -1260,9 +1254,6 @@ class nsIWidget : public nsSupportsWeakReference {
    */
   virtual void ReportSwipeStarted(uint64_t aInputBlockId, bool aStartSwipe);
 
-  // Returns true if |aPanInput| event was used for SwipeTracker, false
-  // otherwise.
-  bool MayStartSwipeForNonAPZ(const mozilla::PanGestureInput& aPanInput);
   void TrackScrollEventAsSwipe(const mozilla::PanGestureInput& aSwipeStartEvent,
                                uint32_t aAllowedDirections,
                                uint64_t aInputBlockId);
@@ -1273,7 +1264,7 @@ class nsIWidget : public nsSupportsWeakReference {
   SwipeInfo SendMayStartSwipe(const mozilla::PanGestureInput& aSwipeStartEvent);
   // Returns a WidgetWheelEvent which needs to be handled by APZ regardless of
   // whether |aPanInput| event was used for SwipeTracker or not.
-  mozilla::WidgetWheelEvent MayStartSwipeForAPZ(
+  mozilla::WidgetWheelEvent MayStartSwipe(
       const mozilla::PanGestureInput& aPanInput,
       const mozilla::layers::APZEventResult& aApzResult);
 
@@ -1379,6 +1370,8 @@ class nsIWidget : public nsSupportsWeakReference {
  protected:
   // Returns whether compositing should use an external surface size.
   virtual bool UseExternalCompositingSurface() const { return false; }
+
+  void SetIsTiled(bool);
 
   /**
    * Starts the OMTC compositor destruction sequence.
@@ -1812,19 +1805,19 @@ class nsIWidget : public nsSupportsWeakReference {
   virtual void StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics);
 
   /**
-   * Notify APZ to start autoscrolling.
+   * Notify APZ to start autoscrolling. APZ may still reject the autoscroll,
+   * in which case it notifies content itself.
    * @param aAnchorLocation the location of the autoscroll anchor
    * @param aGuid identifies the scroll frame to be autoscrolled
-   * @return true if APZ has been successfully notified
    */
-  virtual bool StartAsyncAutoscroll(const ScreenPoint& aAnchorLocation,
-                                    const ScrollableLayerGuid& aGuid);
+  void StartAsyncAutoscroll(const ScreenPoint& aAnchorLocation,
+                            const ScrollableLayerGuid& aGuid);
 
   /**
    * Notify APZ to stop autoscrolling.
    * @param aGuid identifies the scroll frame which is being autoscrolled.
    */
-  virtual void StopAsyncAutoscroll(const ScrollableLayerGuid& aGuid);
+  void StopAsyncAutoscroll(const ScrollableLayerGuid& aGuid);
 
   virtual LayersId GetRootLayerTreeId();
 
@@ -1991,6 +1984,18 @@ class nsIWidget : public nsSupportsWeakReference {
    * submenu, and we want to activate the 5th item within that submenu.
    */
   virtual nsresult ActivateNativeMenuItemAt(const nsAString& indexString) {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+
+  /**
+   * This is used for native menu system testing.
+   *
+   * Returns the key equivalent carried by the native menu item built from the
+   * element with id aElementId, as "<modifiers>|<key>", or the empty string if
+   * it has none. Fails if no menu item was built from that element.
+   */
+  virtual nsresult GetNativeMenuItemKeyEquivalent(const nsAString& aElementId,
+                                                  nsAString& aResult) {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
@@ -2304,11 +2309,11 @@ class nsIWidget : public nsSupportsWeakReference {
   }
 
   /**
-   * NotifyCompositorScrollUpdate notify widget about an update to the
+   * NotifyCompositorScrollUpdates notify widget about an update to the
    * composited scroll offset and zoom
    */
-  virtual void NotifyCompositorScrollUpdate(
-      const mozilla::layers::CompositorScrollUpdate& aUpdate) {}
+  virtual void NotifyCompositorScrollUpdates(
+      const nsTArray<mozilla::layers::CompositorScrollUpdate>& aUpdates) {}
 
 #if defined(MOZ_WIDGET_ANDROID)
   /**
@@ -2434,13 +2439,6 @@ class nsIWidget : public nsSupportsWeakReference {
   // if the window is fully occluded (rendering may be paused in response)
   bool mIsFullyOccluded;
   bool mNeedFastSnaphot;
-  // This flag is only used when APZ is off. It indicates that the current pan
-  // gesture was processed as a swipe. Sometimes the swipe animation can finish
-  // before momentum events of the pan gesture have stopped firing, so this
-  // flag tells us that we shouldn't allow the remaining events to cause
-  // scrolling. It is reset to false once a new gesture starts (as indicated by
-  // a PANGESTURE_(MAY)START event).
-  bool mCurrentPanGestureBelongsToSwipe;
 
   mozilla::widget::PiPType mPiPType;
 

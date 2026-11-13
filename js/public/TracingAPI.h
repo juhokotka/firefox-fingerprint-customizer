@@ -120,6 +120,12 @@ class TracingContext {
   constexpr static size_t InvalidIndex = size_t(-1);
   size_t index() const { return index_; }
 
+  // Gets the nesting level. Sometimes, when logging from the CC, we skip GC
+  // cells and simply attribute their edges to the current node. This value
+  // is set from AutoClearTracingContext in that case to indicate how nested
+  // we are in that cycle.
+  size_t nesting() const { return nesting_; }
+
   // Build a description of this edge in the heap graph. This call may invoke
   // the context functor, if set, which may inspect arbitrary areas of the
   // heap. On the other hand, the description provided by this method may be
@@ -142,8 +148,14 @@ class TracingContext {
   friend class AutoTracingIndex;
   size_t index_ = InvalidIndex;
 
+  friend class AutoClearTracingContext;
+  size_t nesting_ = 0;
+
   friend class AutoTracingDetails;
   Functor* functor_ = nullptr;
+
+  friend class AutoTracingWeakEdge;
+  bool weak_ = false;
 };
 
 }  // namespace JS
@@ -174,7 +186,10 @@ class JS_PUBLIC_API JSTracer {
   // override them to receive notifications when an edge of each type is
   // visited.
   //
-  // The caller updates the edge with the return value (if different).
+  // The implementation may update |*thingp| with a different pointer.
+  //
+  // A return value of false indicates than an existing edge should be removed
+  // (e.g. when the referent is dying). The edge is not updated in this case.
   //
   // In C++, overriding a method hides all methods in the base class with that
   // name, not just methods with that signature. Thus, the typed edge methods
@@ -185,6 +200,11 @@ class JS_PUBLIC_API JSTracer {
   virtual bool on##name##Edge(type** thingp, const char* name) = 0;
   JS_FOR_EACH_TRACEKIND(DEFINE_ON_EDGE_METHOD)
 #undef DEFINE_ON_EDGE_METHOD
+
+  // Buffers have no TraceKind of their own and so are not covered by
+  // the macro above. Tracers that care about buffer edges should override
+  // this. The default behavior is to ignore these edges.
+  virtual bool onBufferEdge(void** bufferp, const char* name) { return true; }
 
  protected:
   JSTracer(JSRuntime* rt, JS::TracerKind kind,
@@ -271,6 +291,21 @@ class MOZ_RAII AutoTracingIndex {
   }
 };
 
+// Sets a bool on the tracer's context indicating a weak edge
+class MOZ_RAII AutoTracingWeakEdge {
+  JSTracer* trc_;
+
+ public:
+  explicit AutoTracingWeakEdge(JSTracer* trc) : trc_(trc) {
+    MOZ_ASSERT(!trc_->context().weak_);
+    trc_->context().weak_ = true;
+  }
+  ~AutoTracingWeakEdge() {
+    MOZ_ASSERT(trc_->context().weak_);
+    trc_->context().weak_ = false;
+  }
+};
+
 // Set a context callback for the trace callback to use, if it needs a detailed
 // edge description.
 class MOZ_RAII AutoTracingDetails {
@@ -296,6 +331,7 @@ class MOZ_RAII AutoClearTracingContext {
   explicit AutoClearTracingContext(JSTracer* trc)
       : trc_(trc), prev_(trc->context()) {
     trc_->context() = TracingContext();
+    trc_->context().nesting_ = prev_.nesting_ + 1;
   }
 
   ~AutoClearTracingContext() { trc_->context() = prev_; }

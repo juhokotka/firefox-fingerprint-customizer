@@ -57,15 +57,15 @@
 #include <utility>
 
 #include "js/Debug.h"
-#include "js/RealmOptions.h"
-#include "js/friend/CycleCollector.h"
-#include "js/friend/DumpFunctions.h"  // js::DumpHeap
 #include "js/GCAPI.h"
 #include "js/HeapAPI.h"
 #include "js/Object.h"  // JS::GetClass, JS::GetCompartment, JS::GetPrivate
 #include "js/PropertyAndElement.h"  // JS_DefineProperty
-#include "js/Warnings.h"            // JS::SetWarningReporter
+#include "js/RealmOptions.h"
 #include "js/SliceBudget.h"
+#include "js/Warnings.h"  // JS::SetWarningReporter
+#include "js/friend/CycleCollector.h"
+#include "js/friend/DumpFunctions.h"  // js::DumpHeap
 #include "jsfriendapi.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/CycleCollectedJSContext.h"
@@ -76,7 +76,6 @@
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/StaticPrefs_javascript.h"
-#include "mozilla/glean/XpcomMetrics.h"
 #include "mozilla/UseCounter.h"
 #include "mozilla/dom/AutoEntryScript.h"
 #include "mozilla/dom/DOMJSClass.h"
@@ -85,6 +84,7 @@
 #include "mozilla/dom/PromiseBinding.h"
 #include "mozilla/dom/PromiseDebugging.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/glean/XpcomMetrics.h"
 #include "nsContentUtils.h"
 #include "nsCycleCollectionNoteRootCallback.h"
 #include "nsCycleCollectionParticipant.h"
@@ -236,7 +236,7 @@ void NoteWeakMapsTracer::trace(JSObject* aMap, JS::GCCellPtr aKey,
     mChildTracer.mKey = aKey;
     mChildTracer.mKeyDelegate = kdelegate;
 
-    if (!aValue.is<JSString>()) {
+    if (aValue && !aValue.is<JSString>()) {
       JS::TraceChildren(&mChildTracer, aValue);
     }
 
@@ -495,8 +495,6 @@ static void MozCrashWarningReporter(JSContext*, JSErrorReport*) {
   MOZ_CRASH("Why is someone touching JSAPI without an AutoJSAPI?");
 }
 
-JSHolderMap::Entry::Entry() : Entry(nullptr, nullptr, nullptr) {}
-
 JSHolderMap::Entry::Entry(void* aHolder, nsScriptObjectTracer* aTracer,
                           JS::Zone* aZone)
     : mHolder(aHolder),
@@ -560,8 +558,6 @@ void JSHolderMap::Iter::UpdateForRemovals() {
   mIter.Settle();
   Settle();
 }
-
-JSHolderMap::JSHolderMap() : mJSHolderMap(256) {}
 
 bool JSHolderMap::RemoveEntry(EntryVector& aJSHolders, Entry* aEntry) {
   MOZ_ASSERT(aEntry);
@@ -1220,12 +1216,44 @@ struct GCMajorMarker : public BaseMarkerType<GCMajorMarker> {
 
   using MS = MarkerSchema;
   static constexpr MS::PayloadField PayloadFields[] = {
+      // This marker has a special handling for its visualization in the
+      // frontend.
       {"timings", MS::InputType::CString, "GC timings", MS::Format::String,
        MS::PayloadFlags::Hidden}};
 
   static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
                                                MS::Location::MarkerTable,
                                                MS::Location::TimelineMemory};
+  static constexpr MS::ETWMarkerGroup Group = MS::ETWMarkerGroup::Memory;
+
+  static void StreamJSONMarkerData(
+      mozilla::baseprofiler::SpliceableJSONWriter& aWriter,
+      const mozilla::ProfilerString8View& aTimingJSON) {
+    if (aTimingJSON.Length() != 0) {
+      aWriter.SplicedJSONProperty("timings", aTimingJSON);
+    } else {
+      aWriter.NullProperty("timings");
+    }
+  }
+};
+
+struct GCSliceMarker : public BaseMarkerType<GCSliceMarker> {
+  static constexpr const char* Name = "GCSlice";
+  using MS = MarkerSchema;
+  static constexpr const MS::Location Locations[] = {
+      MS::Location::MarkerChart,
+      MS::Location::MarkerTable,
+      MS::Location::TimelineMemory,
+  };
+  static constexpr const MS::PayloadField PayloadFields[] = {
+      // This marker has a special handling for its visualization in the
+      // frontend.
+      {"timings", MS::InputType::CString, "GC timings", MS::Format::String,
+       MS::PayloadFlags::Hidden},
+  };
+  static constexpr const char* Description =
+      "One slice of an incremental garbage collection (GC). The main "
+      "thread is blocked during this time.";
   static constexpr MS::ETWMarkerGroup Group = MS::ETWMarkerGroup::Memory;
 
   static void StreamJSONMarkerData(
@@ -1255,33 +1283,6 @@ void CycleCollectedJSRuntime::GCSliceCallback(JSContext* aContext,
                           ProfilerString8View::WrapNullTerminatedString(
                               aDesc.formatJSONProfiler(aContext).get()));
     } else if (aProgress == JS::GC_SLICE_END) {
-      struct GCSliceMarker {
-        static constexpr mozilla::Span<const char> MarkerTypeName() {
-          return mozilla::MakeStringSpan("GCSlice");
-        }
-        static void StreamJSONMarkerData(
-            mozilla::baseprofiler::SpliceableJSONWriter& aWriter,
-            const mozilla::ProfilerString8View& aTimingJSON) {
-          if (aTimingJSON.Length() != 0) {
-            aWriter.SplicedJSONProperty("timings", aTimingJSON);
-          } else {
-            aWriter.NullProperty("timings");
-          }
-        }
-        static mozilla::MarkerSchema MarkerTypeDisplay() {
-          using MS = mozilla::MarkerSchema;
-          MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable,
-                    MS::Location::TimelineMemory};
-          schema.AddStaticLabelValue(
-              "Description",
-              "One slice of an incremental garbage collection (GC). The main "
-              "thread is blocked during this time.");
-          // No display instructions here, there is special handling in the
-          // front-end.
-          return schema;
-        }
-      };
-
       profiler_add_marker("GCSlice", baseprofiler::category::GCCC,
                           MarkerTiming::Interval(aDesc.lastSliceStart(aContext),
                                                  aDesc.lastSliceEnd(aContext)),
@@ -1765,6 +1766,23 @@ nsresult CycleCollectedJSRuntime::TraverseRoots(
   NoteWeakMapsTracer trc(mJSRuntime, aCb);
   js::TraceWeakMaps(&trc);
 
+  // Ensure WeakRef targets are represented in the graph so that we can check
+  // whether they are garbage with IsGCThingWhiteInCCGraph in
+  // ClearWhiteJSWeakRefTargets.
+  //
+  // Only objects are added. Symbols can be gray, but the only way they can
+  // reach anything else the CC cares about is by being a weak map key, in which
+  // case NoteWeakMapping has already added them to the graph.
+  JS::NoteWeakRefTargets(
+      mJSRuntime,
+      [](JS::GCCellPtr aTarget, void* aData) {
+        auto& cb = *static_cast<nsCycleCollectionNoteRootCallback*>(aData);
+        if (aTarget.is<JSObject>() && JS::GCThingIsMarkedGrayInCC(aTarget)) {
+          cb.NoteJSRoot(&aTarget.as<JSObject>());
+        }
+      },
+      &aCb);
+
   return NS_OK;
 }
 
@@ -1860,12 +1878,21 @@ void CycleCollectedJSRuntime::DeferredFinalize(
     void* aThing) {
   // Tell the analysis that the function pointers will not GC.
   JS::AutoSuppressGCAnalysis suppress;
+
+  if (aFunc == mLastDeferredFinalizeFunction) {
+    // aAppendFunc returns aData unchanged when it is non-null.
+    aAppendFunc(mLastDeferredFinalizeData, aThing);
+    return;
+  }
+
   mDeferredFinalizerTable.WithEntryHandle(aFunc, [&](auto&& entry) {
     if (entry) {
       aAppendFunc(entry.Data(), aThing);
+      mLastDeferredFinalizeData = entry.Data();
     } else {
-      entry.Insert(aAppendFunc(nullptr, aThing));
+      mLastDeferredFinalizeData = entry.Insert(aAppendFunc(nullptr, aThing));
     }
+    mLastDeferredFinalizeFunction = aFunc;
   });
 }
 
@@ -2022,6 +2049,10 @@ void CycleCollectedJSRuntime::FinalizeDeferredThings(
 
   mFinalizeRunnable =
       new IncrementalFinalizeRunnable(this, mDeferredFinalizerTable);
+
+  // The runnable took every entry, so the memoized one is stale.
+  mLastDeferredFinalizeFunction = nullptr;
+  mLastDeferredFinalizeData = nullptr;
 
   // Everything should be gone now.
   MOZ_ASSERT(mDeferredFinalizerTable.Count() == 0);

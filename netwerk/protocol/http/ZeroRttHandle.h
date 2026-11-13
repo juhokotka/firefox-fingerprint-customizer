@@ -7,8 +7,8 @@
 #define ZeroRttHandle_h_
 
 #include "mozilla/Maybe.h"
-#include "nsIWeakReferenceUtils.h"
 #include "nsISupportsImpl.h"
+#include "nsIWeakReferenceUtils.h"
 #include "nscore.h"
 
 namespace mozilla::net {
@@ -115,7 +115,7 @@ class ZeroRttHandle {
   void Cleanup();
 
  private:
-  ~ZeroRttHandle() = default;
+  ~ZeroRttHandle();
 
   // Lifecycle state.
   //   Open           : default. Race in progress. Do0RTT and Finish0RTT

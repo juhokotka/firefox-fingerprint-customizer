@@ -3,6 +3,8 @@
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 import argparse
 import os
+import shutil
+import sys
 
 from mozlog.commandline import add_logging_group
 
@@ -27,6 +29,7 @@ ANDROID_APPS = FIREFOX_ANDROID_APPS + CHROME_ANDROID_APPS
 FIREFOX_APPS = FIREFOX_ANDROID_APPS + [FIREFOX]
 
 CHROMIUM_DISTROS = [CHROME, CHROMIUM_RELEASE]
+SAFARI_APPS = [SAFARI, SAFARI_TP]
 APPS = {
     FIREFOX: {"long_name": "Firefox Desktop"},
     CHROME: {"long_name": "Google Chrome Desktop"},
@@ -67,12 +70,52 @@ TRACE_APPS = (CHROME, CHROMIUM_RELEASE)
 
 SIMPLEPERF_APPS = (FENIX, GECKOVIEW)
 
+SAMPLY_PROFILE_APPS = (FIREFOX,)
+
+PERF_PROFILE_APPS = (FIREFOX,)
+
 APP_BINARIES = {
     "fenix": "org.mozilla.fenix",
     "focus": "org.mozilla.focus",
     "geckoview": "org.mozilla.geckoview_example",
     "refbrow": "org.mozilla.reference.browser",
 }
+
+
+def default_desktop_binary(app):
+    """Return the usual install location of a non-Firefox desktop browser on
+    this platform, or None if it isn't installed there."""
+    candidates = []
+    if app == CHROME:
+        if sys.platform == "darwin":
+            candidates = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            ]
+        elif sys.platform == "win32":
+            candidates = [
+                os.path.join(
+                    os.environ[var], "Google", "Chrome", "Application", "chrome.exe"
+                )
+                for var in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA")
+                if os.environ.get(var)
+            ]
+        else:
+            candidates = [
+                shutil.which("google-chrome"),
+                shutil.which("google-chrome-stable"),
+                "/usr/bin/google-chrome",
+            ]
+    elif app == SAFARI and sys.platform == "darwin":
+        candidates = ["/Applications/Safari.app/Contents/MacOS/Safari"]
+    elif app == SAFARI_TP and sys.platform == "darwin":
+        candidates = [
+            "/Applications/Safari Technology Preview.app/Contents/MacOS/"
+            "Safari Technology Preview"
+        ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 def print_all_activities():
@@ -244,8 +287,21 @@ def create_parser(mach_interface=False):
         action="store_true",
         dest="etw_profile",
         default=False,
-        help="Enable system-wide ETW profiling on Windows (captures all system activity). "
-        "Profile will be saved to $MOZ_UPLOAD_DIR and automatically symbolicated.",
+        help="Enable system-wide ETW profiling via Xperf (Windows only). ",
+    )
+    add_arg(
+        "--samply-profile",
+        action="store_true",
+        dest="samply_profile",
+        default=False,
+        help="Enable system-wide profiling via Samply (macOS only).",
+    )
+    add_arg(
+        "--perf-profile",
+        action="store_true",
+        dest="perf_profile",
+        default=False,
+        help="Enable system-wide profiling via perf (Linux only).",
     )
     add_arg(
         "--symbolsPath",
@@ -324,14 +380,6 @@ def create_parser(mach_interface=False):
         action="store_false",
         default=True,
         help="Disable Fission (site isolation) in Gecko.",
-    )
-    add_arg(
-        "--enable-fission-mobile",
-        dest="fission_mobile",
-        action="store_true",
-        default=False,
-        help="Temporary work-around to enable fission on mobile as it is enabled "
-        "by default for desktop now but not mobile.",
     )
     add_arg(
         "--setpref",
@@ -581,9 +629,11 @@ def create_parser(mach_interface=False):
 def verify_options(parser, args):
     ctx = vars(args)
     if args.binary is None and args.app != "chrome-m":
-        args.binary = APP_BINARIES.get(args.app, None)
+        args.binary = APP_BINARIES.get(args.app) or default_desktop_binary(args.app)
         if args.binary is None:
-            parser.error("--binary is required!")
+            parser.error(
+                f"Couldn't find an installed {args.app}, pass --binary <path/to/binary>"
+            )
         else:
             print(f"Using {args.binary} as default binary argument for {args.app} app")
 

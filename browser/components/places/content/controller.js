@@ -77,7 +77,8 @@ function PlacesController(aView) {
   });
 
   ChromeUtils.defineESModuleGetters(this, {
-    ForgetAboutSite: "resource://gre/modules/ForgetAboutSite.sys.mjs",
+    ForgetAboutSite:
+      "moz-src:///toolkit/components/forgetaboutsite/ForgetAboutSite.sys.mjs",
   });
 }
 
@@ -556,6 +557,8 @@ PlacesController.prototype = {
    *     hide a menuitem if containers are disabled.
    * 12) The boolean `hide-if-single-click-opens` attribute may be set to hide a
    *     menuitem in views opening entries with a single click.
+   * 13) The boolean `hide-if-no-URI-children` attribute may be set to hide a menuitem
+   *     if the selected folder is empty or has no links with content.
    *
    * @param {object} aPopup
    *        The menupopup to build children into.
@@ -569,6 +572,19 @@ PlacesController.prototype = {
     var separator = null;
     var visibleItemsBeforeSep = false;
     var usableItemCount = 0;
+
+    var hasURIChildren = false;
+    var selectedNode = this._view.selectedNodes[0];
+    if (
+      Services.prefs.getBoolPref("browser.contentsharing.enabled") &&
+      selectedNode
+    ) {
+      const regex = /^https?:\/\//;
+      var checkIsHttp = uri => regex.test(uri);
+      var container = PlacesUtils.asContainer(selectedNode);
+      hasURIChildren = PlacesUtils.hasChildURIs(container, checkIsHttp);
+    }
+
     for (var i = 0; i < aPopup.children.length; ++i) {
       var item = aPopup.children[i];
       if (item.getAttribute("ignore-item") == "true") {
@@ -591,11 +607,15 @@ PlacesController.prototype = {
           (!this._view.selectedNode ||
             !this._view.selectedNode.parent ||
             !PlacesUtils.nodeIsQuery(this._view.selectedNode.parent));
+        let hideIfNoURIChildren =
+          item.getAttribute("hide-if-no-URI-children") == "true" &&
+          !hasURIChildren;
 
         let shouldHideItem =
           hideIfNoIP ||
           hideIfSingleClickOpens ||
           hideIfNotSearch ||
+          hideIfNoURIChildren ||
           !this._shouldShowMenuItem(item, metadata);
         item.hidden = shouldHideItem;
         item.disabled =
@@ -1616,7 +1636,7 @@ var PlacesControllerDragHelper = {
         if (
           !flavor.startsWith("text/x-moz-place") &&
           (validNodes.length > 1 || dropCount > 1) &&
-          validNodes.some(n => n.uri?.startsWith("javascript:"))
+          validNodes.some(n => URL.parse(n.uri)?.protocol === "javascript:")
         ) {
           return false;
         }
@@ -1708,18 +1728,14 @@ var PlacesControllerDragHelper = {
     if (
       externalDrag &&
       (nodes.length > 1 || dropCount > 1) &&
-      nodes.some(n => n.uri?.startsWith("javascript:"))
+      nodes.some(n => URL.parse(n.uri)?.protocol === "javascript:")
     ) {
       throw new Error("Javascript bookmarklet passed with uris");
     }
 
     // If a single javascript url is being dropped from the urlbar or an external source,
     // show the bookmark dialog as a speedbump protection against malicious cases.
-    if (
-      nodes.length == 1 &&
-      externalDrag &&
-      nodes[0].uri?.startsWith("javascript")
-    ) {
+    if (nodes.length == 1 && externalDrag) {
       let uri;
       try {
         uri = Services.io.newURI(nodes[0].uri);
@@ -1727,7 +1743,7 @@ var PlacesControllerDragHelper = {
         // Invalid uri, we skip this code and the entry will be discarded later.
       }
 
-      if (uri) {
+      if (uri?.scheme === "javascript") {
         let bookmarkGuid = await PlacesUIUtils.showBookmarkDialog(
           {
             action: "add",

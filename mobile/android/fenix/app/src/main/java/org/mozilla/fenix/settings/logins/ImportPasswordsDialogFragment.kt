@@ -8,8 +8,13 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.annotation.VisibleForTesting
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.compose.content
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.coroutineScope
+import androidx.lifecycle.withStarted
+import kotlinx.coroutines.launch
 import mozilla.components.concept.passwords.file.PasswordsFileImporter
 import mozilla.components.feature.password.importer.PasswordsImporter
 import mozilla.components.feature.password.importer.PasswordsImporterResult
@@ -23,13 +28,14 @@ internal class ImportPasswordsDialogFragment : DialogFragment() {
         savedInstanceState: Bundle?,
     ): View = content {
         PasswordsImporter(
-            importer = PasswordsFileImporter.csvImporter(
-                context = requireContext(),
-                loginsStorage = requireComponents.core.passwordsStorage,
-            ),
+            importer =
+                PasswordsFileImporter.csvImporter(
+                    context = requireContext(),
+                    loginsStorage = requireComponents.core.passwordsStorage,
+                ),
             onFinished = { result ->
                 parentFragmentManager.setFragmentResult(REQUEST_KEY, encodeResult(result))
-                dismiss()
+                dismissWhenStarted(lifecycle) { dismiss() }
             },
         )
     }
@@ -52,15 +58,21 @@ internal class ImportPasswordsDialogFragment : DialogFragment() {
                 else -> null
             }
 
-        private fun encodeResult(result: PasswordsImporterResult): Bundle = Bundle().apply {
-            when (result) {
-                is PasswordsImporterResult.Success -> {
-                    putString(KEY_RESULT, RESULT_SUCCESS)
-                    putInt(KEY_COUNT, result.importCount)
+        private fun encodeResult(result: PasswordsImporterResult): Bundle =
+            Bundle().apply {
+                when (result) {
+                    is PasswordsImporterResult.Success -> {
+                        putString(KEY_RESULT, RESULT_SUCCESS)
+                        putInt(KEY_COUNT, result.importCount)
+                    }
+                    PasswordsImporterResult.Failure -> putString(KEY_RESULT, RESULT_FAILURE)
+                    PasswordsImporterResult.Canceled -> putString(KEY_RESULT, RESULT_CANCELLED)
                 }
-                PasswordsImporterResult.Failure -> putString(KEY_RESULT, RESULT_FAILURE)
-                PasswordsImporterResult.Canceled -> putString(KEY_RESULT, RESULT_CANCELLED)
             }
-        }
     }
+}
+
+@VisibleForTesting
+internal fun dismissWhenStarted(lifecycle: Lifecycle, dismiss: () -> Unit) {
+    lifecycle.coroutineScope.launch { lifecycle.withStarted(dismiss) }
 }

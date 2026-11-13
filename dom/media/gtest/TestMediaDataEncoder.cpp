@@ -4,10 +4,12 @@
 
 #include <algorithm>
 
+#include "AOMDecoder.h"
 #include "AnnexB.h"
 #include "BufferReader.h"
 #include "H264.h"
 #include "ImageContainer.h"
+#include "MediaData.h"
 #include "PEMFactory.h"
 #include "TimeUnits.h"
 #include "VPXDecoder.h"
@@ -16,6 +18,7 @@
 #include "mozilla/AbstractThread.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/SpinEventLoopUntil.h"
+#include "mozilla/gtest/ScopedPrefSetter.h"
 #include "mozilla/gtest/WaitFor.h"
 #include "mozilla/media/MediaUtils.h"  // For media::Await
 
@@ -72,6 +75,12 @@ using namespace mozilla;
 
 static gfx::IntSize kImageSize(640, 480);
 static gfx::IntSize kImageSize4K(3840, 2160);
+// The resolution Gecko computes as the H264 Annex A Table A-1 macroblock-cap
+// for level 5 (mbs=589824, fs=22080) at a 12800x7200-ish source aspect
+// ratio; see bug 2064678. Exceeds Android's real per-frame macroblock
+// budget (see H264EncodesLevel5CapAnnexBRealtime below), independent of the
+// declared level.
+static gfx::IntSize kImageSizeLevel5Cap(3160, 1776);
 // Set codec to avc1.42001E - Base profile, constraint 0, level 30.
 MOZ_RUNINIT const H264Specific kH264SpecificAnnexB(H264_PROFILE_BASE,
                                                    H264_LEVEL::H264_LEVEL_3,
@@ -79,17 +88,24 @@ MOZ_RUNINIT const H264Specific kH264SpecificAnnexB(H264_PROFILE_BASE,
 MOZ_RUNINIT const H264Specific kH264SpecificAVCC(H264_PROFILE_BASE,
                                                  H264_LEVEL::H264_LEVEL_3,
                                                  H264BitStreamFormat::AVC);
+// Same as kH264SpecificAnnexB, but declaring level 5 -- matching
+// kImageSizeLevel5Cap's macroblock budget, unlike level 3's (used by
+// kH264SpecificAnnexB), which is nowhere near enough for that resolution.
+MOZ_RUNINIT const H264Specific kH264SpecificLevel5AnnexB(
+    H264_PROFILE_BASE, H264_LEVEL::H264_LEVEL_5, H264BitStreamFormat::ANNEXB);
 
 class MediaDataEncoderTest : public testing::Test {
  protected:
   void SetUp() override {
     mData.Init(kImageSize);
     mData4K.Init(kImageSize4K);
+    mDataLevel5Cap.Init(kImageSizeLevel5Cap);
   }
 
   void TearDown() override {
     mData.Deinit();
     mData4K.Deinit();
+    mDataLevel5Cap.Deinit();
   }
 
  public:
@@ -108,8 +124,9 @@ class MediaDataEncoderTest : public testing::Test {
       mYUV.mYStride = aSize.width;
       mYUV.mCbCrStride = (aSize.width + 1) / 2;
       mYUV.mChromaSubsampling = gfx::ChromaSubsampling::HALF_WIDTH_AND_HEIGHT;
-      auto ySize = mYUV.YDataSize();
-      auto cbcrSize = mYUV.CbCrDataSize();
+      const auto sizes = mYUV.GetPlaneSizes();
+      const auto& ySize = sizes->mY;
+      const auto& cbcrSize = sizes->mCbCr;
       size_t bufferSize =
           mYUV.mYStride * ySize.height + 2 * mYUV.mCbCrStride * cbcrSize.height;
       mBuffer = MakeUnique<uint8_t[]>(bufferSize);
@@ -133,7 +150,7 @@ class MediaDataEncoderTest : public testing::Test {
           new layers::RecyclingPlanarYCbCrImage(mRecycleBin);
       img->CopyData(mYUV);
       RefPtr<MediaData> frame = VideoData::CreateFromImage(
-          kImageSize, 0,
+          mSize, 0,
           // The precise time unit should be media::TimeUnit(1, FRAME_RATE)
           // instead of media::TimeUnit(FRAME_DURATION, USECS_PER_S)
           // (FRAME_DURATION microseconds), but this setting forces us to take
@@ -177,8 +194,7 @@ class MediaDataEncoderTest : public testing::Test {
     }
 
     void Draw(const size_t aIndex) {
-      auto ySize = mYUV.YDataSize();
-      DrawChessboard(mYUV.mYChannel, ySize.width, ySize.height, aIndex << 1);
+      DrawChessboard(mYUV.mYChannel, mSize.width, mSize.height, aIndex << 1);
       int16_t color = AssertedCast<int16_t>(mYUV.mCbChannel[0] + mColorStep);
       if (color > 255 || color < 0) {
         mColorStep = AssertedCast<int16_t>(-mColorStep);
@@ -195,11 +211,13 @@ class MediaDataEncoderTest : public testing::Test {
  public:
   FrameSource mData;
   FrameSource mData4K;
+  FrameSource mDataLevel5Cap;
 };
 
 already_AddRefed<MediaDataEncoder> CreateVideoEncoder(
     CodecType aCodec, Usage aUsage, EncoderConfig::SampleFormat aFormat,
-    gfx::IntSize aSize, ScalabilityMode aScalabilityMode,
+    gfx::IntSize aSize, BitrateMode aBitrateMode,
+    HardwarePreference aHardwarePreference, ScalabilityMode aScalabilityMode,
     const EncoderConfig::CodecSpecific& aSpecific) {
   RefPtr<PEMFactory> f(new PEMFactory());
 
@@ -210,8 +228,7 @@ already_AddRefed<MediaDataEncoder> CreateVideoEncoder(
   const EncoderConfig config(
       aCodec, aSize, aUsage, aFormat, FRAME_RATE /* FPS */,
       KEYFRAME_INTERVAL /* keyframe interval */, BIT_RATE /* bitrate */, 0, 0,
-      BIT_RATE_MODE, HardwarePreference::None /* hardware preference */,
-      aScalabilityMode, aSpecific);
+      aBitrateMode, aHardwarePreference, aScalabilityMode, aSpecific);
   if (f->Supports(config).isEmpty()) {
     return nullptr;
   }
@@ -425,6 +442,7 @@ static already_AddRefed<MediaDataEncoder> CreateH264Encoder(
     const EncoderConfig::CodecSpecific& aSpecific =
         AsVariant(kH264SpecificAnnexB)) {
   return CreateVideoEncoder(CodecType::H264, aUsage, aFormat, aSize,
+                            BIT_RATE_MODE, HardwarePreference::None,
                             aScalabilityMode, aSpecific);
 }
 
@@ -454,7 +472,8 @@ TEST_F(MediaDataEncoderTest, H264Inits) {
 
 static void H264EncodesTest(Usage aUsage,
                             const EncoderConfig::CodecSpecific& aSpecific,
-                            MediaDataEncoderTest::FrameSource& aFrameSource) {
+                            MediaDataEncoderTest::FrameSource& aFrameSource,
+                            bool aToleratesInitFailureOnAndroid = false) {
   ASSERT_TRUE(aSpecific.is<H264Specific>());
   ASSERT_TRUE(aSpecific.as<H264Specific>().mFormat ==
                   H264BitStreamFormat::ANNEXB ||
@@ -468,7 +487,13 @@ static void H264EncodesTest(Usage aUsage,
     RefPtr<MediaDataEncoder> e = CreateH264Encoder(
         aUsage, EncoderConfig::SampleFormat(dom::ImageBitmapFormat::YUV420P),
         aFrameSource.GetSize(), ScalabilityMode::None, aSpecific);
-    EXPECT_TRUE(EnsureInit(e));
+    bool initOk = EnsureInit(e);
+#ifdef MOZ_WIDGET_ANDROID
+    if (!initOk && aToleratesInitFailureOnAndroid) {
+      return;
+    }
+#endif
+    EXPECT_TRUE(initOk);
     MediaDataEncoder::EncodedData output =
         GET_OR_RETURN_ON_ERROR(Encode(e, 1UL, aFrameSource));
     EXPECT_EQ(output.Length(), 1UL);
@@ -529,6 +554,38 @@ TEST_F(MediaDataEncoderTest, H264Encodes4KAVCCRecord) {
 TEST_F(MediaDataEncoderTest, H264Encodes4KAVCCRealtime) {
   SKIP_IF_ANDROID_SW();  // Android SW can't encode 4K.
   H264EncodesTest(Usage::Realtime, AsVariant(kH264SpecificAVCC), mData4K);
+}
+
+// This resolution is well within what H264 level 5 permits, but exceeds the
+// real per-frame macroblock budget Android's encoders actually have
+// (roughly level 4-equivalent, independent of the declared level) -- see
+// bug 2064678. Tolerate a graceful init failure there, but nowhere else:
+// on every other platform this resolution is expected to encode fine.
+//
+// NB: kH264SpecificAnnexB declares level 3, whose macroblock budget is far
+// too small for this resolution -- this deliberately mismatches declared
+// level vs. actual resolution, to check whether that mismatch itself (as
+// opposed to the resolution alone) is what breaks encoder init. Compare
+// against H264EncodesLevel5CapMatchedLevelAnnexBRealtime below.
+TEST_F(MediaDataEncoderTest, H264EncodesLevel5CapAnnexBRealtime) {
+#ifdef XP_MACOSX
+  GTEST_SKIP() << "Bug 2074146: VideoToolbox drops frames at this size";
+#else
+  H264EncodesTest(Usage::Realtime, AsVariant(kH264SpecificAnnexB),
+                  mDataLevel5Cap, /* aToleratesInitFailureOnAndroid */ true);
+#endif
+}
+
+// Same resolution as above, but with a level that actually matches it. Fails
+// the same way on Android, for the same reason: the declared level was never
+// the limiting factor, the platform's real macroblock budget is.
+TEST_F(MediaDataEncoderTest, H264EncodesLevel5CapMatchedLevelAnnexBRealtime) {
+#ifdef XP_MACOSX
+  GTEST_SKIP() << "Bug 2074146: VideoToolbox drops frames at this size";
+#else
+  H264EncodesTest(Usage::Realtime, AsVariant(kH264SpecificLevel5AnnexB),
+                  mDataLevel5Cap, /* aToleratesInitFailureOnAndroid */ true);
+#endif
 }
 
 static void H264EncodeBatchTest(
@@ -766,6 +823,67 @@ TEST_F(MediaDataEncoderTest, H264AVCC) {
 }
 #endif
 
+#ifdef XP_MACOSX
+static already_AddRefed<MediaData> CreateNV12Frame(const gfx::IntSize& aSize) {
+  layers::PlanarYCbCrData data;
+  data.mPictureRect = gfx::IntRect(0, 0, aSize.width, aSize.height);
+  data.mYStride = aSize.width;
+  data.mCbCrStride = aSize.width;
+  data.mChromaSubsampling = gfx::ChromaSubsampling::HALF_WIDTH_AND_HEIGHT;
+  data.mCbSkip = 1;
+  data.mCrSkip = 1;
+  const auto sizes = data.GetPlaneSizes();
+  const auto& ySize = sizes->mY;
+  const auto& cbcrSize = sizes->mCbCr;
+  const size_t yBytes = static_cast<size_t>(data.mYStride) * ySize.height;
+  const size_t cbcrBytes =
+      static_cast<size_t>(data.mCbCrStride) * cbcrSize.height;
+  auto buffer = MakeUnique<uint8_t[]>(yBytes + cbcrBytes);
+  std::fill_n(buffer.get(), yBytes, static_cast<uint8_t>(235));
+  std::fill_n(buffer.get() + yBytes, cbcrBytes, static_cast<uint8_t>(128));
+  data.mYChannel = buffer.get();
+  data.mCbChannel = buffer.get() + yBytes;
+  data.mCrChannel = data.mCbChannel + 1;
+  RefPtr<layers::NVImage> image = new layers::NVImage();
+  if (NS_FAILED(image->SetData(data))) {
+    return nullptr;
+  }
+  RefPtr<MediaData> frame = VideoData::CreateFromImage(
+      aSize, 0, media::TimeUnit::Zero(),
+      media::TimeUnit::FromMicroseconds(FRAME_DURATION), image, true,
+      media::TimeUnit::Zero());
+  return frame.forget();
+}
+
+TEST_F(MediaDataEncoderTest, H264EncodeNV12Input) {
+  RUN_IF_SUPPORTED(CodecType::H264, []() {
+    const gfx::IntSize size(640, 480);
+    RefPtr<MediaDataEncoder> encoder = CreateH264Encoder(
+        Usage::Record,
+        EncoderConfig::SampleFormat(dom::ImageBitmapFormat::YUV420SP_NV12),
+        size, ScalabilityMode::None, AsVariant(kH264SpecificAVCC));
+    if (!encoder) {
+      return;
+    }
+    ASSERT_TRUE(EnsureInit(encoder));
+    RefPtr<MediaData> frame = CreateNV12Frame(size);
+    ASSERT_TRUE(frame);
+    auto encoded = WaitFor(encoder->Encode(frame));
+    ASSERT_TRUE(encoded.isOk());
+    MediaDataEncoder::EncodedData output = encoded.unwrap();
+    auto drained = Drain(encoder);
+    ASSERT_TRUE(drained.isOk());
+    output.AppendElements(std::move(drained.unwrap()));
+    WaitForShutdown(encoder);
+    CheckH264EncodeOutput(output, 1, 1, Usage::Record,
+                          /* aIs4KOrLarger */ false,
+                          /* aIsAVCC */ true,
+                          /* aToleratesKeyframeDrop */ false);
+  });
+}
+
+#endif
+
 // For Android HW encoder only.
 #ifdef MOZ_WIDGET_ANDROID
 TEST_F(MediaDataEncoderTest, AndroidNotSupportedSize) {
@@ -790,6 +908,7 @@ static already_AddRefed<MediaDataEncoder> CreateVP8Encoder(
     ScalabilityMode aScalabilityMode = ScalabilityMode::None,
     const EncoderConfig::CodecSpecific& aSpecific = AsVariant(VP8Specific())) {
   return CreateVideoEncoder(CodecType::VP8, aUsage, aFormat, aSize,
+                            BIT_RATE_MODE, HardwarePreference::None,
                             aScalabilityMode, aSpecific);
 }
 
@@ -801,6 +920,7 @@ static already_AddRefed<MediaDataEncoder> CreateVP9Encoder(
     ScalabilityMode aScalabilityMode = ScalabilityMode::None,
     const EncoderConfig::CodecSpecific& aSpecific = AsVariant(VP9Specific())) {
   return CreateVideoEncoder(CodecType::VP9, aUsage, aFormat, aSize,
+                            BIT_RATE_MODE, HardwarePreference::None,
                             aScalabilityMode, aSpecific);
 }
 
@@ -1164,6 +1284,383 @@ TEST_F(MediaDataEncoderTest, VP9EncodeWithScalabilityModeL1T3) {
 }
 #  endif
 #endif
+
+already_AddRefed<MediaDataEncoder> CreateAudioEncoder(
+    CodecType aCodec, uint32_t aChannels, uint32_t aSampleRate,
+    uint32_t aBitrate, BitrateMode aBitrateMode,
+    const EncoderConfig::CodecSpecific& aSpecific =
+        EncoderConfig::CodecSpecific(void_t{})) {
+  RefPtr<PEMFactory> f(new PEMFactory());
+
+  if (f->SupportsCodec(aCodec).isEmpty()) {
+    return nullptr;
+  }
+
+  const EncoderConfig config(aCodec, aChannels, aBitrateMode, aSampleRate,
+                             aBitrate, aSpecific);
+  if (f->Supports(config).isEmpty()) {
+    return nullptr;
+  }
+
+  const RefPtr<TaskQueue> taskQueue(
+      TaskQueue::Create(GetMediaThreadPool(MediaThreadType::PLATFORM_ENCODER),
+                        "TestMediaDataEncoder"));
+  RefPtr<MediaDataEncoder> e = f->CreateEncoder(config, taskQueue);
+  return e.forget();
+}
+
+TEST_F(MediaDataEncoderTest, RejectsOversizedOutput) {
+  ScopedPrefSetter encoderEnabled("media.ffmpeg.encoder.enabled", true);
+
+  // Opus only supports a fixed set of sample rates, so FFmpegAudioEncoder snaps
+  // this 1 Hz request up to Opus's lowest supported rate, 8000 Hz, and installs
+  // a 1 -> 8000 resampler. At that 8000x ratio, kOverLargeFrameCount input
+  // frames resample to more than UINT32_MAX output frames, which the encoder
+  // cannot represent, so Encode() rejects the AudioData.
+  const uint32_t kChannels = 1;
+  const uint32_t kInputRate = 1;
+  const size_t kOverLargeFrameCount = 600000;
+
+  RefPtr<MediaDataEncoder> e =
+      CreateAudioEncoder(CodecType::Opus, kChannels, kInputRate,
+                         128000 /* bitrate */, BitrateMode::Constant);
+  EXPECT_TRUE(EnsureInit(e));
+
+  AlignedAudioBuffer data(kOverLargeFrameCount * kChannels);
+  ASSERT_TRUE(!!data);
+  RefPtr<MediaData> frame =
+      new AudioData(0, media::TimeUnit::Zero(kInputRate), std::move(data),
+                    kChannels, kInputRate);
+  nsTArray<RefPtr<MediaData>> batch;
+  batch.AppendElement(std::move(frame));
+
+  EXPECT_TRUE(WaitFor(e->Encode(std::move(batch))).isErr());
+  EXPECT_TRUE(WaitFor(e->Drain()).isOk());
+
+  WaitForShutdown(e);
+}
+
+TEST_F(MediaDataEncoderTest, SmallDownsampledInput) {
+  ScopedPrefSetter encoderEnabled("media.ffmpeg.encoder.enabled", true);
+
+  // libopus's maximum supported sample rate.
+  constexpr uint32_t kCodecRate = 48000;
+  // Above 48 kHz libopus snaps the rate down to kCodecRate; 384000 Hz gives an
+  // 8:1 downsample through the resampler.
+  constexpr uint32_t kInputRate = 384000;
+  // kInputCount below divides by kInputRate / kCodecRate and relies on libopus
+  // snapping kInputRate down to kCodecRate, so the ratio must be a whole number
+  // greater than one.
+  static_assert(kInputRate > kCodecRate && kInputRate % kCodecRate == 0,
+                "kInputRate must be a whole multiple of kCodecRate above it");
+
+  // Pin the shortest Opus frame (2.5 ms) so a packet needs the fewest input
+  // frames. The codec-rate packet size is kCodecRate * frame duration.
+  const uint32_t kFrameDurationUs = 2500;  // microseconds
+  OpusSpecific opus;
+  opus.mFrameDuration = kFrameDurationUs;
+  const uint32_t kCodecFramesPerPacket =
+      kCodecRate * kFrameDurationUs / 1000000;
+
+  constexpr uint32_t kChannels = 2;
+  RefPtr<MediaDataEncoder> e = CreateAudioEncoder(
+      CodecType::Opus, kChannels, kInputRate, 128000 /* bitrate */,
+      BitrateMode::Constant, AsVariant(opus));
+  EXPECT_TRUE(EnsureInit(e));
+
+  // The resampler delivers floor(N / R) - L frames to the packetizer, where
+  //   N = kInputCount, the input frames fed,
+  //   R = kInputRate / kCodecRate, the downsample ratio,
+  //   L = the speex resampler's filter latency: output frames still inside the
+  //       filter, never flushed because the encoder drains the packetizer, not
+  //       the resampler.
+  //
+  // To emit a whole packet the resampler must deliver at least
+  // kCodecFramesPerPacket frames:
+  //   floor(N / R) - L >= kCodecFramesPerPacket
+  //   => N >= R * (kCodecFramesPerPacket + L)
+  //
+  // The resampler latency stays below one packet, so for any
+  // L <= kCodecFramesPerPacket:
+  //   R * (kCodecFramesPerPacket + L) <= 2 * R * kCodecFramesPerPacket
+  // Hence N = 2 * R * kCodecFramesPerPacket always clears a full packet,
+  // regardless of the exact latency. (With the bug every input is dropped, so
+  // nothing accumulates and output stays empty.)
+  const size_t kInputCount =
+      2 * kCodecFramesPerPacket * (kInputRate / kCodecRate);
+  nsTArray<RefPtr<MediaData>> batch;
+  for (size_t i = 0; i < kInputCount; i++) {
+    AlignedAudioBuffer data(kChannels);  // one frame, two channels
+    ASSERT_TRUE(!!data);
+    // One frame per input keeps every call on the small-downsample path whose
+    // per-call output capacity floors to zero.
+    RefPtr<MediaData> frame =
+        new AudioData(0, media::TimeUnit::Zero(kInputRate), std::move(data),
+                      kChannels, kInputRate);
+    batch.AppendElement(std::move(frame));
+  }
+
+  auto result = WaitFor(e->Encode(std::move(batch)));
+  ASSERT_TRUE(result.isOk());
+  MediaDataEncoder::EncodedData output = result.unwrap();
+
+  auto drained = WaitFor(e->Drain());
+  ASSERT_TRUE(drained.isOk());
+  output.AppendElements(drained.unwrap());
+
+  EXPECT_GT(output.Length(), 0u)
+      << "small downsampled input was dropped instead of consumed";
+
+  WaitForShutdown(e);
+}
+
+static already_AddRefed<MediaDataEncoder> CreateAV1Encoder(
+    Usage aUsage = Usage::Realtime,
+    EncoderConfig::SampleFormat aFormat =
+        EncoderConfig::SampleFormat(dom::ImageBitmapFormat::YUV420P),
+    gfx::IntSize aSize = kImageSize, BitrateMode aBitrateMode = BIT_RATE_MODE,
+    HardwarePreference aHardwarePreference = HardwarePreference::None,
+    ScalabilityMode aScalabilityMode = ScalabilityMode::None) {
+  return CreateVideoEncoder(CodecType::AV1, aUsage, aFormat, aSize,
+                            aBitrateMode, aHardwarePreference, aScalabilityMode,
+                            AsVariant(void_t{}));
+}
+
+struct AV1ColorTestData {
+  gfx::ColorRange mRange;
+  gfx::YUVColorSpace mMatrix;
+  gfx::ColorSpace2 mPrimaries;
+  gfx::TransferFunction mTransfer;
+  gfx::CICP::ColourPrimaries mExpectedPrimaries;
+  gfx::CICP::TransferCharacteristics mExpectedTransfer;
+  gfx::CICP::MatrixCoefficients mExpectedMatrix;
+};
+
+static constexpr AV1ColorTestData kBT2020PQFull{
+    gfx::ColorRange::FULL,    gfx::YUVColorSpace::BT2020,
+    gfx::ColorSpace2::BT2020, gfx::TransferFunction::PQ,
+    gfx::CICP::CP_BT2020,     gfx::CICP::TC_SMPTE2084,
+    gfx::CICP::MC_BT2020_NCL,
+};
+
+static constexpr AV1ColorTestData kBT709Limited{
+    gfx::ColorRange::LIMITED, gfx::YUVColorSpace::BT709,
+    gfx::ColorSpace2::BT709,  gfx::TransferFunction::BT709,
+    gfx::CICP::CP_BT709,      gfx::CICP::TC_BT709,
+    gfx::CICP::MC_BT709,
+};
+
+static constexpr AV1ColorTestData kUnspecifiedPrimaries{
+    gfx::ColorRange::LIMITED,  gfx::YUVColorSpace::BT709,
+    gfx::ColorSpace2::UNKNOWN, gfx::TransferFunction::BT709,
+    gfx::CICP::CP_UNSPECIFIED, gfx::CICP::TC_BT709,
+    gfx::CICP::MC_BT709,
+};
+
+static void SetFrameColor(MediaDataEncoderTest::FrameSource& aSource,
+                          const AV1ColorTestData& aColor) {
+  aSource.mYUV.mColorRange = aColor.mRange;
+  aSource.mYUV.mYUVColorSpace = aColor.mMatrix;
+  aSource.mYUV.mColorPrimaries = aColor.mPrimaries;
+  aSource.mYUV.mTransferFunction = aColor.mTransfer;
+}
+
+static EncoderConfig::SampleFormat AV1ColorFormat(
+    const AV1ColorTestData& aColor) {
+  return EncoderConfig::SampleFormat(
+      dom::ImageBitmapFormat::YUV420P,
+      EncoderConfig::VideoColorSpace(aColor.mRange, aColor.mMatrix,
+                                     aColor.mPrimaries, aColor.mTransfer));
+}
+
+static void ExpectAV1Color(const MediaRawData& aPacket,
+                           const AV1ColorTestData& aExpected) {
+  AOMDecoder::AV1SequenceInfo info;
+  MediaResult result = AOMDecoder::ReadSequenceHeaderInfo(
+      Span(aPacket.Data(), aPacket.Size()), info);
+  ASSERT_EQ(result.Code(), NS_OK) << "packet must contain the sequence header";
+  EXPECT_EQ(info.mColorSpace.mPrimaries, aExpected.mExpectedPrimaries);
+  EXPECT_EQ(info.mColorSpace.mTransfer, aExpected.mExpectedTransfer);
+  EXPECT_EQ(info.mColorSpace.mMatrix, aExpected.mExpectedMatrix);
+  EXPECT_EQ(info.mColorSpace.mRange, aExpected.mRange);
+}
+
+static Result<bool, MediaResult> EncodeAV1ColorFrame(
+    const RefPtr<MediaDataEncoder>& aEncoder,
+    MediaDataEncoderTest::FrameSource& aSource, size_t aIndex,
+    const AV1ColorTestData& aColor, MediaDataEncoder::EncodedData& aOutput) {
+  SetFrameColor(aSource, aColor);
+  RefPtr<MediaData> frame = aSource.GetFrame(aIndex);
+  bool requestedKeyframe = frame->mKeyframe;
+  aOutput.AppendElements(MOZ_TRY(WaitFor(aEncoder->Encode(frame))));
+  return requestedKeyframe;
+}
+
+TEST_F(MediaDataEncoderTest, AV1SignalsColorConfigInSequenceHeader) {
+  RUN_IF_SUPPORTED(CodecType::AV1, [this]() {
+    SetFrameColor(mData, kBT2020PQFull);
+
+    RefPtr<MediaDataEncoder> e =
+        CreateAV1Encoder(Usage::Record, AV1ColorFormat(kBT2020PQFull));
+    EXPECT_TRUE(EnsureInit(e));
+
+    MediaDataEncoder::EncodedData output =
+        GET_OR_RETURN_ON_ERROR(Encode(e, 1UL, mData));
+    EXPECT_EQ(output.Length(), 1UL);
+
+    ExpectAV1Color(*output[0], kBT2020PQFull);
+
+    WaitForShutdown(e);
+  });
+}
+
+TEST_F(MediaDataEncoderTest, AV1FrameColorOverridesConfig) {
+  RUN_IF_SUPPORTED(CodecType::AV1, [this]() {
+    SetFrameColor(mData, kBT2020PQFull);
+    RefPtr<MediaDataEncoder> e = CreateAV1Encoder(
+        Usage::Record, AV1ColorFormat(kBT709Limited), kImageSize, BIT_RATE_MODE,
+        HardwarePreference::RequireSoftware);
+    ASSERT_TRUE(EnsureInit(e));
+
+    auto r = Encode(e, 1U, mData);
+    ASSERT_TRUE(r.isOk());
+    MediaDataEncoder::EncodedData output = r.unwrap();
+    ASSERT_EQ(output.Length(), 1u);
+    ExpectAV1Color(*output[0], kBT2020PQFull);
+
+    WaitForShutdown(e);
+  });
+}
+
+static Maybe<uint8_t> GetAV1FrameTemporalId(const MediaRawData& aPacket) {
+  auto data = Span(aPacket.Data(), aPacket.Size());
+  auto iter = AOMDecoder::ReadOBUs(data);
+  while (iter.HasNext()) {
+    AOMDecoder::OBUInfo obu = iter.Next();
+    if (obu.mType == AOMDecoder::OBUType::FrameHeader ||
+        obu.mType == AOMDecoder::OBUType::Frame) {
+      return Some(obu.mTemporalId);
+    }
+  }
+  return Nothing();
+}
+
+TEST_F(MediaDataEncoderTest, AV1SVCTemporalIdsMatchBitstream) {
+  RUN_IF_SUPPORTED(CodecType::AV1, [this]() {
+    RefPtr<MediaDataEncoder> e = CreateAV1Encoder(
+        Usage::Record,
+        EncoderConfig::SampleFormat(dom::ImageBitmapFormat::YUV420P),
+        kImageSize, BitrateMode::Constant, HardwarePreference::RequireSoftware,
+        ScalabilityMode::L1T3);
+    ASSERT_TRUE(EnsureInit(e));
+
+    MediaDataEncoder::EncodedData output;
+    for (size_t i = 0; i <= KEYFRAME_INTERVAL; ++i) {
+      RefPtr<MediaData> frame = mData.GetFrame(i);
+      frame->mKeyframe = i == 0;
+      output.AppendElements(GET_OR_RETURN_ON_ERROR(WaitFor(e->Encode(frame))));
+    }
+    output.AppendElements(GET_OR_RETURN_ON_ERROR(Drain(e)));
+
+    ASSERT_EQ(output.Length(), size_t{KEYFRAME_INTERVAL + 1});
+    for (size_t i = 0; i < output.Length(); ++i) {
+      SCOPED_TRACE(i);
+      Maybe<uint8_t> temporalId = GetAV1FrameTemporalId(*output[i]);
+      ASSERT_TRUE(temporalId);
+      EXPECT_EQ(output[i]->mTemporalLayerId, temporalId);
+    }
+
+    const RefPtr<MediaRawData>& keyframe = output[KEYFRAME_INTERVAL];
+    ASSERT_TRUE(keyframe->mKeyframe);
+    EXPECT_EQ(GetAV1FrameTemporalId(*keyframe), Some(uint8_t{1}));
+
+    WaitForShutdown(e);
+  });
+}
+
+TEST_F(MediaDataEncoderTest, AV1ColorChangeForcesKeyframe) {
+  RUN_IF_SUPPORTED(CodecType::AV1, [this]() {
+    RefPtr<MediaDataEncoder> e = CreateAV1Encoder(
+        Usage::Realtime, AV1ColorFormat(kBT709Limited), kImageSize,
+        BIT_RATE_MODE, HardwarePreference::RequireSoftware);
+    ASSERT_TRUE(EnsureInit(e));
+
+    MediaDataEncoder::EncodedData output;
+    auto firstResult = EncodeAV1ColorFrame(e, mData, 0, kBT709Limited, output);
+    ASSERT_TRUE(firstResult.isOk());
+    EXPECT_TRUE(firstResult.unwrap());
+
+    auto secondResult = EncodeAV1ColorFrame(e, mData, 1, kBT2020PQFull, output);
+    ASSERT_TRUE(secondResult.isOk());
+    EXPECT_FALSE(secondResult.unwrap());
+
+    auto thirdResult =
+        EncodeAV1ColorFrame(e, mData, 2, kUnspecifiedPrimaries, output);
+    ASSERT_TRUE(thirdResult.isOk());
+    EXPECT_FALSE(thirdResult.unwrap());
+
+    auto drainResult = Drain(e);
+    ASSERT_TRUE(drainResult.isOk());
+    output.AppendElements(drainResult.unwrap());
+
+    ASSERT_EQ(output.Length(), 3u);
+    EXPECT_TRUE(output[0]->mKeyframe);
+    EXPECT_TRUE(output[1]->mKeyframe);
+    EXPECT_TRUE(output[2]->mKeyframe);
+    ExpectAV1Color(*output[0], kBT709Limited);
+    ExpectAV1Color(*output[1], kBT2020PQFull);
+    ExpectAV1Color(*output[2], kUnspecifiedPrimaries);
+
+    WaitForShutdown(e);
+  });
+}
+
+TEST_F(MediaDataEncoderTest, AV1SVCColorChangeResetsTemporalLayer) {
+  RUN_IF_SUPPORTED(CodecType::AV1, [this]() {
+    RefPtr<MediaDataEncoder> e = CreateAV1Encoder(
+        Usage::Record, AV1ColorFormat(kBT709Limited), kImageSize,
+        BitrateMode::Constant, HardwarePreference::RequireSoftware,
+        ScalabilityMode::L1T2);
+    ASSERT_TRUE(EnsureInit(e));
+
+    MediaDataEncoder::EncodedData output;
+    auto firstResult = EncodeAV1ColorFrame(e, mData, 0, kBT709Limited, output);
+    ASSERT_TRUE(firstResult.isOk());
+    EXPECT_TRUE(firstResult.unwrap());
+
+    auto secondResult = EncodeAV1ColorFrame(e, mData, 1, kBT2020PQFull, output);
+    ASSERT_TRUE(secondResult.isOk());
+    EXPECT_FALSE(secondResult.unwrap());
+
+    auto thirdResult =
+        EncodeAV1ColorFrame(e, mData, 2, kUnspecifiedPrimaries, output);
+    ASSERT_TRUE(thirdResult.isOk());
+    EXPECT_FALSE(thirdResult.unwrap());
+
+    auto fourthResult =
+        EncodeAV1ColorFrame(e, mData, 3, kUnspecifiedPrimaries, output);
+    ASSERT_TRUE(fourthResult.isOk());
+    EXPECT_FALSE(fourthResult.unwrap());
+
+    auto drainResult = Drain(e);
+    ASSERT_TRUE(drainResult.isOk());
+    output.AppendElements(drainResult.unwrap());
+
+    ASSERT_EQ(output.Length(), 4u);
+    EXPECT_TRUE(output[0]->mKeyframe);
+    EXPECT_TRUE(output[1]->mKeyframe);
+    EXPECT_TRUE(output[2]->mKeyframe);
+    EXPECT_FALSE(output[3]->mKeyframe);
+    EXPECT_EQ(output[1]->mTemporalLayerId, Some(uint8_t{0}));
+    EXPECT_EQ(output[2]->mTemporalLayerId, Some(uint8_t{0}));
+    EXPECT_EQ(output[3]->mTemporalLayerId, Some(uint8_t{1}));
+    EXPECT_EQ(GetAV1FrameTemporalId(*output[1]), Some(uint8_t{0}));
+    EXPECT_EQ(GetAV1FrameTemporalId(*output[2]), Some(uint8_t{0}));
+    EXPECT_EQ(GetAV1FrameTemporalId(*output[3]), Some(uint8_t{1}));
+
+    WaitForShutdown(e);
+  });
+}
 
 #undef BLOCK_SIZE
 #undef GET_OR_RETURN_ON_ERROR

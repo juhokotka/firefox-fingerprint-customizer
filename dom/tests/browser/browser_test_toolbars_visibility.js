@@ -152,7 +152,7 @@ function testNonDefaultContentToolbarsFromChrome(toolbars) {
     !toolbars.personalbar,
     "personalbar shouldn't be visible when personalbar=no"
   );
-  // statusbar will report visible=true even when it's hidden because of bug#55820
+  // statusbar will report visible=true always on chrome.
   todo(!toolbars.statusbar, "statusbar shouldn't be visible when status=no");
   ok(
     toolbars.scrollbars,
@@ -169,29 +169,23 @@ function testNonDefaultContentToolbarsFromChrome(toolbars) {
  *        the visibility state of the toolbar elements
  */
 function testNonDefaultChromeToolbars(toolbars) {
-  // None of the toolbars should be visible if hidden with chrome privileges
-  ok(
-    !toolbars.locationbar,
-    "locationbar should not be visible with location=no"
-  );
   ok(!toolbars.menubar, "menubar should not be visible with menubar=no");
   ok(
     !toolbars.personalbar,
     "personalbar should not be visible with personalbar=no"
   );
-  ok(!toolbars.statusbar, "statusbar should not be visible with status=no");
+  // See above.
+  todo(!toolbars.statusbar, "statusbar shouldn't be visible when status=no");
+  ok(!toolbars.toolbar, "toolbar should not be visible with toolbar=no");
+  ok(
+    toolbars.locationbar,
+    "locationbar should be visible even with location=no"
+  );
   ok(
     toolbars.scrollbars,
     "scrollbars should be visible even with scrollbars=no"
   );
-  ok(!toolbars.toolbar, "toolbar should not be visible with toolbar=no");
 }
-
-add_setup(async function () {
-  await SpecialPowers.pushPrefEnv({
-    set: [["test.wait300msAfterTabSwitch", true]],
-  });
-});
 
 /**
  * Ensure that toolbars of a window opened in the content context have the

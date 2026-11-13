@@ -120,30 +120,25 @@ memory_phc:
     description: >
       Over-allocation due to PHC's rounding (aka internal
       fragmentation).  Measured in bytes.
-
-      This metric was generated to correspond to the Legacy Telemetry
-      exponential histogram MEMORY_PHC_SLOP.
     memory_unit: byte
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1829127
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1892149
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1969177
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2026442
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2072826
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1829127
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1892149
     notification_emails:
       - memshrink-telemetry-alerts@mozilla.com
       - pbone@mozilla.com
-    expires: 160
+    expires: 173
 
   slots_allocated:
     type: custom_distribution
     description: >
       Number of PHC slots currently allocated
-
-      This metric was generated to correspond to the Legacy Telemetry
-      exponential histogram MEMORY_PHC_SLOTS_ALLOCATED.
     range_min: 1
     range_max: 16384
     bucket_count: 64
@@ -154,21 +149,19 @@ memory_phc:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1892149
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1969177
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2026442
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2072826
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1829127
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1892149
     notification_emails:
       - memshrink-telemetry-alerts@mozilla.com
       - pbone@mozilla.com
-    expires: 160
+    expires: 173
 
   slots_freed:
     type: custom_distribution
     description: >
       Number of PHC slots allocated-then-freed
-
-      This metric was generated to correspond to the Legacy Telemetry
-      exponential histogram MEMORY_PHC_SLOTS_FREED.
     range_min: 1
     range_max: 16384
     bucket_count: 64
@@ -179,13 +172,14 @@ memory_phc:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1892149
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1969177
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2026442
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2072826
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1829127
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1892149
     notification_emails:
       - memshrink-telemetry-alerts@mozilla.com
       - pbone@mozilla.com
-    expires: 160
+    expires: 173
 
 cycle_collector:
   time:
@@ -235,7 +229,6 @@ cycle_collector:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: CYCLE_COLLECTOR_VISITED_REF_COUNTED
 
   worker_visited_ref_counted:
     type: custom_distribution
@@ -256,7 +249,6 @@ cycle_collector:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: CYCLE_COLLECTOR_WORKER_VISITED_REF_COUNTED
 
   visited_gced:
     type: custom_distribution
@@ -277,7 +269,6 @@ cycle_collector:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: CYCLE_COLLECTOR_VISITED_GCED
 
   worker_visited_gced:
     type: custom_distribution
@@ -298,7 +289,6 @@ cycle_collector:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: CYCLE_COLLECTOR_WORKER_VISITED_GCED
 
   collected:
     type: custom_distribution
@@ -319,7 +309,6 @@ cycle_collector:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: CYCLE_COLLECTOR_COLLECTED
 
   worker_collected:
     type: custom_distribution
@@ -340,7 +329,6 @@ cycle_collector:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: CYCLE_COLLECTOR_WORKER_COLLECTED
 
   need_gc:
     type: labeled_counter
@@ -359,7 +347,6 @@ cycle_collector:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: h#CYCLE_COLLECTOR_NEED_GC
 
   worker_need_gc:
     type: labeled_counter
@@ -378,7 +365,6 @@ cycle_collector:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: h#CYCLE_COLLECTOR_WORKER_NEED_GC
 
   full:
     type: labeled_timing_distribution
@@ -427,7 +413,6 @@ cycle_collector:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: h#CYCLE_COLLECTOR_FINISH_IGC
 
   sync_skippable:
     type: labeled_counter
@@ -446,7 +431,6 @@ cycle_collector:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: h#CYCLE_COLLECTOR_SYNC_SKIPPABLE
 
   time_between:
     type: labeled_timing_distribution
@@ -481,7 +465,6 @@ cycle_collector:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: CYCLE_COLLECTOR_SLICE_DURING_IDLE
 
   async_snow_white_freeing:
     type: labeled_timing_distribution
@@ -1430,58 +1413,12 @@ system.os:
       - update
       - third-party-modules
 
-  service_pack_major:
-    type: quantity
-    unit: version
-    lifetime: application
-    description: |
-      The Windows service pack's major version, according to WindowsVersionInfo.
-      Windows only.
-      e.g. 0
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950409
-    data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950409
-    data_sensitivity:
-      - technical
-    notification_emails:
-      - gijs@mozilla.com
-    expires: never
-    send_in_pings:
-      - metrics
-      - sync
-      - update
-      - third-party-modules
-
-  service_pack_minor:
-    type: quantity
-    unit: version
-    lifetime: application
-    description: |
-      The Windows service pack's minor version, according to WindowsVersionInfo.
-      Windows only.
-      e.g. 0
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950409
-    data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950409
-    data_sensitivity:
-      - technical
-    notification_emails:
-      - gijs@mozilla.com
-    expires: never
-    send_in_pings:
-      - metrics
-      - sync
-      - update
-      - third-party-modules
-
   windows_build_number:
     type: quantity
     unit: build number
     lifetime: application
     description: |
-      The Windows build number, according to WindowsVersionInfo.
+      The Windows build number, according to 'CurrentBuild' in the Windows registry.
       Windows only.
       e.g. 26100
       Expected in most cases to be identical to `client_info.windows_build_number`.

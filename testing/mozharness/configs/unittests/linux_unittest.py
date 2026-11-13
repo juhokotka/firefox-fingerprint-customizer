@@ -94,7 +94,6 @@ config = {
                 "--setpref=webgl.force-enabled=true",
                 "--quiet",
                 "--log-errorsummary=%(error_summary_file)s",
-                "--log-testsummary=%(test_summary_file)s",
                 "--use-test-media-devices",
                 "--screenshot-on-fail",
                 "--cleanup-crashes",
@@ -102,6 +101,7 @@ config = {
                 "--sandbox-read-whitelist=%(abs_work_dir)s",
             ],
             "run_filename": "runtests.py",
+            "test_summary": True,
             "testsdir": "mochitest",
         },
         "reftest": {
@@ -123,10 +123,10 @@ config = {
                 "--self-test",
                 "--symbols-path=%(symbols_path)s",
                 "--log-errorsummary=%(error_summary_file)s",
-                "--log-testsummary=%(test_summary_file)s",
                 "--utility-path=tests/bin",
             ],
             "run_filename": "runxpcshelltests.py",
+            "test_summary": True,
             "testsdir": "xpcshell",
         },
         "gtest": {
@@ -155,6 +155,7 @@ config = {
         "mochitest-plain-gpu": ["--subsuite=gpu"],
         "mochitest-plain-coverage": ["--timeout=1200"],
         "mochitest-media": ["--subsuite=media"],
+        "mochitest-speech-recognition": ["--subsuite=speech-recognition"],
         "mochitest-chrome": ["--flavor=chrome", "--disable-e10s"],
         "mochitest-chrome-gpu": ["--flavor=chrome", "--subsuite=gpu", "--disable-e10s"],
         "mochitest-browser-chrome": ["--flavor=browser"],
@@ -181,11 +182,20 @@ config = {
             "--subsuite=devtools",
             "--timeout=1200",
         ],
+        # Only runs through scripts/devtools_compat.py, which provisions a server.
+        "mochitest-devtools-compat": [
+            "--flavor=browser",
+            "--subsuite=devtools-compat",
+        ],
         "mochitest-browser-a11y": ["--flavor=browser", "--subsuite=a11y"],
         "mochitest-browser-media": ["--flavor=browser", "--subsuite=media-bc"],
         "mochitest-browser-translations": [
             "--flavor=browser",
             "--subsuite=translations",
+        ],
+        "mochitest-browser-chrome-ml-models": [
+            "--flavor=browser",
+            "--subsuite=ml-models",
         ],
         "mochitest-a11y": ["--flavor=a11y", "--disable-e10s"],
         "mochitest-remote": ["--flavor=browser", "--subsuite=remote"],

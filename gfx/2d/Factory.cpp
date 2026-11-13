@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <cstring>
+
 #include "2D.h"
 #include "Swizzle.h"
 
@@ -15,38 +17,33 @@
 #include "PathSkia.h"
 #include "ScaledFontBase.h"
 
-#if defined(WIN32)
-#  include "ScaledFontWin.h"
-#  include "NativeFontResourceGDI.h"
-#  include "UnscaledFontGDI.h"
-#endif
-
 #ifdef XP_DARWIN
-#  include "ScaledFontMac.h"
 #  include "NativeFontResourceMac.h"
+#  include "ScaledFontMac.h"
 #  include "UnscaledFontMac.h"
 #endif
 
 #ifdef MOZ_WIDGET_GTK
-#  include "ScaledFontFontconfig.h"
 #  include "NativeFontResourceFreeType.h"
+#  include "ScaledFontFontconfig.h"
 #  include "UnscaledFontFreeType.h"
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
-#  include "ScaledFontFreeType.h"
 #  include "NativeFontResourceFreeType.h"
+#  include "ScaledFontFreeType.h"
 #  include "UnscaledFontFreeType.h"
 #endif
 
 #ifdef WIN32
-#  include "ScaledFontDWrite.h"
-#  include "NativeFontResourceDWrite.h"
-#  include "UnscaledFontDWrite.h"
 #  include <d3d10_1.h>
 #  include <stdlib.h>
+
 #  include "HelpersWin.h"
 #  include "ImageContainer.h"
+#  include "NativeFontResourceDWrite.h"
+#  include "ScaledFontDWrite.h"
+#  include "UnscaledFontDWrite.h"
 #  include "mozilla/layers/LayersSurfaces.h"
 #  include "mozilla/layers/TextureD3D11.h"
 #  include "mozilla/layers/VideoProcessorD3D11.h"
@@ -56,10 +53,9 @@
 #include "DrawTargetOffset.h"
 #include "DrawTargetRecording.h"
 #include "PathRecording.h"
-
 #include "SourceSurfaceRawData.h"
-
 #include "mozilla/CheckedInt.h"
+#include "mozilla/PodOperations.h"
 
 #ifdef MOZ_ENABLE_FREETYPE
 #  include "ft2build.h"
@@ -124,25 +120,6 @@ namespace mozilla::gfx {
 #ifdef MOZ_ENABLE_FREETYPE
 FT_Library Factory::mFTLibrary = nullptr;
 StaticMutex Factory::mFTLock;
-
-already_AddRefed<SharedFTFace> FTUserFontData::CloneFace(int aFaceIndex) {
-  if (mFontData) {
-    RefPtr<SharedFTFace> face = Factory::NewSharedFTFaceFromData(
-        nullptr, mFontData, mLength, aFaceIndex, this);
-    if (!face ||
-        (FT_Select_Charmap(face->GetFace(), FT_ENCODING_UNICODE) != FT_Err_Ok &&
-         FT_Select_Charmap(face->GetFace(), FT_ENCODING_MS_SYMBOL) !=
-             FT_Err_Ok)) {
-      return nullptr;
-    }
-    return face.forget();
-  }
-  FT_Face face = Factory::NewFTFace(nullptr, mFilename.c_str(), aFaceIndex);
-  if (face) {
-    return MakeAndAddRef<SharedFTFace>(face, this);
-  }
-  return nullptr;
-}
 #endif
 
 #ifdef WIN32
@@ -412,19 +389,15 @@ already_AddRefed<NativeFontResource> Factory::CreateNativeFontResource(
 #ifdef WIN32
     case FontType::DWRITE:
       return NativeFontResourceDWrite::Create(aData, aSize);
-    case FontType::GDI:
-      return NativeFontResourceGDI::Create(aData, aSize);
 #elif defined(XP_DARWIN)
     case FontType::MAC:
       return NativeFontResourceMac::Create(aData, aSize);
 #elif defined(MOZ_WIDGET_GTK)
     case FontType::FONTCONFIG:
-      return NativeFontResourceFontconfig::Create(
-          aData, aSize, static_cast<FT_Library>(aFontContext));
+      return NativeFontResourceFontconfig::Create(aData, aSize);
 #elif defined(MOZ_WIDGET_ANDROID)
     case FontType::FREETYPE:
-      return NativeFontResourceFreeType::Create(
-          aData, aSize, static_cast<FT_Library>(aFontContext));
+      return NativeFontResourceFreeType::Create(aData, aSize);
 #endif
     default:
       gfxWarning()
@@ -441,9 +414,6 @@ already_AddRefed<UnscaledFont> Factory::CreateUnscaledFontFromFontDescriptor(
     case FontType::DWRITE:
       return UnscaledFontDWrite::CreateFromFontDescriptor(aData, aDataLength,
                                                           aIndex);
-    case FontType::GDI:
-      return UnscaledFontGDI::CreateFromFontDescriptor(aData, aDataLength,
-                                                       aIndex);
 #elif defined(XP_DARWIN)
     case FontType::MAC:
       return UnscaledFontMac::CreateFromFontDescriptor(aData, aDataLength,
@@ -498,22 +468,14 @@ void Factory::SetSubpixelOrder(SubpixelOrder aOrder) {
 SubpixelOrder Factory::GetSubpixelOrder() { return mSubpixelOrder; }
 
 #ifdef MOZ_ENABLE_FREETYPE
-SharedFTFace::SharedFTFace(FT_Face aFace, SharedFTFaceData* aData)
-    : mFace(aFace),
-      mData(aData),
-      mLock("SharedFTFace::mLock"),
-      mLastLockOwner(nullptr) {
-  if (mData) {
-    mData->BindData();
-  }
-}
+SharedFTFace::SharedFTFace(FT_Face aFace, UniquePtr<char[]>&& aFilename,
+                           int aFaceIndex)
+    : mFace(aFace), mFilename(std::move(aFilename)), mFaceIndex(aFaceIndex) {}
 
-SharedFTFace::~SharedFTFace() {
-  Factory::ReleaseFTFace(mFace);
-  if (mData) {
-    mData->ReleaseData();
-  }
-}
+SharedFTFace::SharedFTFace(FT_Face aFace, FontData* aFontData, int aFaceIndex)
+    : mFace(aFace), mFontData(aFontData), mFaceIndex(aFaceIndex) {}
+
+SharedFTFace::~SharedFTFace() { Factory::ReleaseFTFace(mFace); }
 
 void Factory::SetFTLibrary(FT_Library aFTLibrary) { mFTLibrary = aFTLibrary; }
 
@@ -557,34 +519,28 @@ FT_Face Factory::NewFTFace(FT_Library aFTLibrary, const char* aFileName,
   return face;
 }
 
-already_AddRefed<SharedFTFace> Factory::NewSharedFTFace(FT_Library aFTLibrary,
-                                                        const char* aFilename,
+already_AddRefed<SharedFTFace> Factory::NewSharedFTFace(const char* aFilename,
                                                         int aFaceIndex) {
-  FT_Face face = NewFTFace(aFTLibrary, aFilename, aFaceIndex);
+  // Allocate filename first so its memory can be passed to FT and SharedFTFace.
+  // Its lifetime must be at least as long as SharedFTFace, which manages it.
+  size_t length = strlen(aFilename) + 1;
+  UniquePtr<char[]> filename = MakeUniqueFallible<char[]>(length);
+  PodCopy(filename.get(), aFilename, length);
+  FT_Face face = NewFTFace(nullptr, filename.get(), aFaceIndex);
   if (!face) {
     return nullptr;
   }
-
-  RefPtr<FTUserFontData> data;
-#  ifdef ANDROID
-  // If the font has variations, we may later need to "clone" it in
-  // UnscaledFontFreeType::CreateScaledFont. To support this, we attach an
-  // FTUserFontData that records the filename used to instantiate the face.
-  if (face->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS) {
-    data = new FTUserFontData(aFilename);
-  }
-#  endif
-  return MakeAndAddRef<SharedFTFace>(face, data);
+  return MakeAndAddRef<SharedFTFace>(face, std::move(filename), aFaceIndex);
 }
 
 FT_Face Factory::NewFTFaceFromData(FT_Library aFTLibrary, const uint8_t* aData,
-                                   size_t aDataSize, int aFaceIndex) {
+                                   uint32_t aLength, int aFaceIndex) {
   StaticMutexAutoLock lock(mFTLock);
   if (!aFTLibrary) {
     aFTLibrary = mFTLibrary;
   }
   FT_Face face;
-  if (FT_New_Memory_Face(aFTLibrary, aData, aDataSize, aFaceIndex, &face) !=
+  if (FT_New_Memory_Face(aFTLibrary, aData, aLength, aFaceIndex, &face) !=
       FT_Err_Ok) {
     return nullptr;
   }
@@ -592,14 +548,28 @@ FT_Face Factory::NewFTFaceFromData(FT_Library aFTLibrary, const uint8_t* aData,
 }
 
 already_AddRefed<SharedFTFace> Factory::NewSharedFTFaceFromData(
-    FT_Library aFTLibrary, const uint8_t* aData, size_t aDataSize,
-    int aFaceIndex, SharedFTFaceData* aSharedData) {
-  if (FT_Face face =
-          NewFTFaceFromData(aFTLibrary, aData, aDataSize, aFaceIndex)) {
-    return MakeAndAddRef<SharedFTFace>(face, aSharedData);
-  } else {
+    FontData* aFontData, int aFaceIndex) {
+  FT_Face face = NewFTFaceFromData(nullptr, aFontData->Data(),
+                                   aFontData->Length(), aFaceIndex);
+  if (!face) {
     return nullptr;
   }
+  if (FT_Select_Charmap(face, FT_ENCODING_UNICODE) != FT_Err_Ok &&
+      FT_Select_Charmap(face, FT_ENCODING_MS_SYMBOL) != FT_Err_Ok) {
+    ReleaseFTFace(face);
+    return nullptr;
+  }
+  return MakeAndAddRef<SharedFTFace>(face, aFontData, aFaceIndex);
+}
+
+already_AddRefed<SharedFTFace> SharedFTFace::CloneFace() {
+  if (mFontData) {
+    return Factory::NewSharedFTFaceFromData(mFontData, mFaceIndex);
+  }
+  if (mFilename) {
+    return Factory::NewSharedFTFace(mFilename.get(), mFaceIndex);
+  }
+  return nullptr;
 }
 
 void Factory::ReleaseFTFace(FT_Face aFace) {
@@ -712,19 +682,12 @@ already_AddRefed<ScaledFont> Factory::CreateScaledFontForDWriteFont(
       aFontFace, aUnscaledFont, aSize, aUseEmbeddedBitmap, aUseMultistrikeBold,
       aGDIForced, aStyle);
 }
-
-already_AddRefed<ScaledFont> Factory::CreateScaledFontForGDIFont(
-    const void* aLogFont, const RefPtr<UnscaledFont>& aUnscaledFont,
-    Float aSize) {
-  return MakeAndAddRef<ScaledFontWin>(static_cast<const LOGFONT*>(aLogFont),
-                                      aUnscaledFont, aSize);
-}
 #endif  // WIN32
 
 already_AddRefed<DrawTarget> Factory::CreateDrawTargetWithSkCanvas(
-    SkCanvas* aCanvas) {
+    SkCanvas* aCanvas, bool aSupportsGlyphSourceText) {
   RefPtr newTarget = MakeRefPtr<DrawTargetSkia>();
-  if (!newTarget->Init(aCanvas)) {
+  if (!newTarget->Init(aCanvas, aSupportsGlyphSourceText)) {
     return nullptr;
   }
   return newTarget.forget();

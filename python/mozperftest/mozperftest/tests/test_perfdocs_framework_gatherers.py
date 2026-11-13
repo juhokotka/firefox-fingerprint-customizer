@@ -181,14 +181,20 @@ def test_raptor_get_ci_tasks_dict_type(structured_logger):
         g = _make_gatherer(RaptorGatherer, top_dir)
         g._taskgraph = {
             "test-linux64/opt-raptor-tp6": {
-                "task": {"payload": {"command": [" '--test tp6 '"]}},
+                "task": {
+                    "payload": {"command": [" '--test tp6 '"]},
+                    "provisionerId": "releng-hardware",
+                    "workerType": "gecko-t-linux-talos-2404",
+                },
                 "attributes": {"run_on_projects": ["mozilla-central"]},
             }
         }
         g._get_ci_tasks()
         assert "tp6" in g._task_list
         assert "test-linux64/opt" in g._task_list["tp6"]
-        assert g._task_list["tp6"]["test-linux64/opt"][0]["test_name"] == "raptor-tp6"
+        task = g._task_list["tp6"]["test-linux64/opt"][0]
+        assert task["test_name"] == "raptor-tp6"
+        assert task["worker_pool"] == "releng-hardware/gecko-t-linux-talos-2404"
 
 
 def test_raptor_get_ci_tasks_object_type(structured_logger):
@@ -199,7 +205,11 @@ def test_raptor_get_ci_tasks_object_type(structured_logger):
         from mozperftest.perfdocs.framework_gatherers import RaptorGatherer
 
         task_obj = MagicMock()
-        task_obj.task = {"payload": {"command": [" '--test tp6 '"]}}
+        task_obj.task = {
+            "payload": {"command": [" '--test tp6 '"]},
+            "provisionerId": "releng-hardware",
+            "workerType": "gecko-t-linux-talos-2404",
+        }
         task_obj.attributes = {"run_on_projects": ["autoland"]}
 
         g = _make_gatherer(RaptorGatherer, top_dir)
@@ -361,6 +371,7 @@ def test_raptor_build_test_description_with_task_list(structured_logger):
                 {
                     "test_name": "my_test-e10s",
                     "run_on_projects": ["mozilla-central"],
+                    "worker_pool": "releng-hardware/gecko-t-linux-talos-2404",
                 }
             ]
         }
@@ -478,6 +489,8 @@ def test_talos_get_ci_tasks_dict_type(structured_logger):
                 "task": {
                     "extra": {"suite": "talos"},
                     "payload": {"command": [" '--suite ts '"]},
+                    "provisionerId": "releng-hardware",
+                    "workerType": "gecko-t-linux-talos-2404",
                 },
                 "attributes": {"run_on_projects": ["mozilla-central"]},
             }
@@ -496,6 +509,8 @@ def test_talos_get_ci_tasks_object_type(structured_logger):
         task_obj.task = {
             "extra": {"suite": "talos"},
             "payload": {"command": [" '--suite ts '"]},
+            "provisionerId": "releng-hardware",
+            "workerType": "gecko-t-linux-talos-2404",
         }
         task_obj.attributes = {"run_on_projects": ["autoland"]}
 
@@ -540,7 +555,8 @@ def test_talos_build_test_description_example_data(structured_logger):
             suite_name="Talos Tests",
         )
         text = result[0]
-        assert "code-block" in text
+        assert "```" in text
+        assert "sample: 42" in text
 
 
 def test_talos_build_test_description_sub_list(structured_logger):
@@ -594,7 +610,11 @@ def test_talos_build_test_description_with_task_list(structured_logger):
         g = _make_gatherer(TalosGatherer, top_dir)
         g._task_list["ts_paint"] = {
             "test-linux64/opt": [
-                {"test_name": "ts_paint-e10s", "run_on_projects": ["mozilla-central"]}
+                {
+                    "test_name": "ts_paint-e10s",
+                    "run_on_projects": ["mozilla-central"],
+                    "worker_pool": "releng-hardware/gecko-t-linux-talos-2404",
+                }
             ]
         }
 
@@ -619,8 +639,8 @@ def test_talos_build_suite_section(structured_logger):
 
         g = _make_gatherer(TalosGatherer, top_dir)
         section = g.build_suite_section("talos tests", "Some content")
-        assert section[0] == "talos tests"
-        assert section[1] == "*" * len("talos tests")
+        assert section[0] == "## talos tests"
+        assert section[2] == "Some content"
 
 
 def _awsy_gatherer(tmp_path):
@@ -639,7 +659,11 @@ def test_awsy_generate_ci_tasks_dict_type(structured_logger):
         g = _awsy_gatherer(top_dir)
         g._taskgraph = {
             "test-linux64/opt-awsy-tp6": {
-                "task": {"extra": {"suite": "awsy-tp6"}},
+                "task": {
+                    "extra": {"suite": "awsy-tp6"},
+                    "provisionerId": "gecko-t",
+                    "workerType": "t-linux-docker-noscratch-amd",
+                },
                 "attributes": {"run_on_projects": ["mozilla-central"]},
             }
         }
@@ -647,6 +671,7 @@ def test_awsy_generate_ci_tasks_dict_type(structured_logger):
         assert "test-linux64/opt" in g._task_list
         tasks = g._task_list["test-linux64/opt"]
         assert tasks[0]["test_name"] == "awsy-tp6"
+        assert tasks[0]["worker_pool"] == "gecko-t/t-linux-docker-noscratch-amd"
 
 
 def test_awsy_generate_ci_tasks_object_type(structured_logger):
@@ -655,7 +680,11 @@ def test_awsy_generate_ci_tasks_object_type(structured_logger):
         _setup_fg_logger(MagicMock(), structured_logger, top_dir)
 
         task_obj = MagicMock()
-        task_obj.task = {"extra": {"suite": "awsy-base"}}
+        task_obj.task = {
+            "extra": {"suite": "awsy-base"},
+            "provisionerId": "gecko-t",
+            "workerType": "t-linux-docker-noscratch-amd",
+        }
         task_obj.attributes = {"run_on_projects": ["autoland"]}
 
         g = _awsy_gatherer(top_dir)
@@ -682,8 +711,8 @@ def test_awsy_build_suite_section(structured_logger):
 
         g = _awsy_gatherer(top_dir)
         section = g.build_suite_section("awsy tests", "Some content")
-        assert section[0] == "Awsy tests"
-        assert section[1] == "-" * len("Awsy tests")
+        assert section[0] == "## Awsy tests"
+        assert section[2] == "Some content"
 
 
 def test_awsy_build_test_description_tp6(structured_logger):
@@ -693,7 +722,11 @@ def test_awsy_build_test_description_tp6(structured_logger):
 
         g = _awsy_gatherer(top_dir)
         g._task_list["test-linux64/opt"] = [
-            {"test_name": "awsy-tp6", "run_on_projects": ["mozilla-central"]}
+            {
+                "test_name": "awsy-tp6",
+                "run_on_projects": ["mozilla-central"],
+                "worker_pool": "gecko-t/t-linux-docker-noscratch-amd",
+            }
         ]
 
         result = g.build_test_description("tp6", "Base memory", suite_name="Awsy tests")
@@ -713,7 +746,11 @@ def test_awsy_build_test_description_tp5_uses_awsy_e10s_tag(structured_logger):
 
         g = _awsy_gatherer(top_dir)
         g._task_list["test-linux64/opt"] = [
-            {"test_name": "awsy-e10s-tp5", "run_on_projects": []},
+            {
+                "test_name": "awsy-e10s-tp5",
+                "run_on_projects": [],
+                "worker_pool": "gecko-t/t-linux-docker-noscratch-amd",
+            },
         ]
 
         result = g.build_test_description("tp5", "TP5 test", suite_name="Awsy tests")
@@ -729,7 +766,13 @@ def test_awsy_build_test_description_empty_run_on_projects(structured_logger):
         _setup_fg_logger(MagicMock(), structured_logger, top_dir)
 
         g = _awsy_gatherer(top_dir)
-        g._task_list["test-linux64/opt"] = [{"test_name": "tp6", "run_on_projects": []}]
+        g._task_list["test-linux64/opt"] = [
+            {
+                "test_name": "tp6",
+                "run_on_projects": [],
+                "worker_pool": "gecko-t/t-linux-docker-noscratch-amd",
+            }
+        ]
 
         result = g.build_test_description("tp6", "desc", suite_name="Awsy tests")
         assert "None" in result[0]

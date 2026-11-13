@@ -17,14 +17,14 @@
  *          cancelPendingInstall, mockAboutNewTabUninit, server,
  *          BUILTIN_ADDON_ID, BUILTIN_ADDON_VERSION,
  *          BUILTIN_LOCATION_NAME, PROFILE_LOCATION_NAME,
- *          TRAINHOP_NIMBUS_FEATURE_ID,
+ *          TRAINHOP_NIMBUS_DEPLOYMENT_FEATURE_ID,
  *          TRAINHOP_SCHEDULED_UPDATE_STATE_DELAY_PREF,
  *          TRAINHOP_SCHEDULED_UPDATE_STATE_TIMEOUT_PREF */
 
 const {
   AboutNewTabResourceMapping,
   BUILTIN_ADDON_ID,
-  TRAINHOP_NIMBUS_FEATURE_ID,
+  TRAINHOP_NIMBUS_DEPLOYMENT_FEATURE_ID,
   TRAINHOP_NIMBUS_FIRST_STARTUP_FEATURE_ID,
   TRAINHOP_XPI_BASE_URL_PREF,
   TRAINHOP_SCHEDULED_UPDATE_STATE_TIMEOUT_PREF,
@@ -89,11 +89,17 @@ add_setup(async function nimbusTestsSetup() {
  * @param {object} params
  * @param {string} [params.updateAddonVersion]
  *   The version of the train-hop add-on to set in the simulated feature enrolling.
+ * @param {string} [params.featureId]
+ *   The Nimbus feature id to enroll in (defaults to the co-enrollment
+ *   newtabTrainhopAddonDeployment feature).
  * @returns {Promise<object>} A promise that resolves with an object containing:
  *   - fakeNimbusVariables: The fake Nimbus feature variables used in the simulated Nimbus feature enrolling.
  *   - nimbusFeatureCleanup: The cleanup function for the Nimbus feature.
  */
-async function setupNimbusTrainhopAddon({ updateAddonVersion }) {
+async function setupNimbusTrainhopAddon({
+  updateAddonVersion,
+  featureId = TRAINHOP_NIMBUS_DEPLOYMENT_FEATURE_ID,
+}) {
   info(`Setting up simulated train-hop add-on version ${updateAddonVersion}`);
   let fakeNewTabXPI = AddonTestUtils.createTempWebExtensionFile({
     manifest: {
@@ -111,7 +117,7 @@ async function setupNimbusTrainhopAddon({ updateAddonVersion }) {
     },
   });
 
-  const xpi_download_path = "data/newtab.xpi";
+  const xpi_download_path = `data/${updateAddonVersion}/newtab.xpi`;
 
   server.registerFile(`/${xpi_download_path}`, fakeNewTabXPI, () => {
     info(`Server got request for ${xpi_download_path}`);
@@ -125,16 +131,18 @@ async function setupNimbusTrainhopAddon({ updateAddonVersion }) {
   await ExperimentAPI.ready();
   const nimbusFeatureCleanup = await NimbusTestUtils.enrollWithFeatureConfig(
     {
-      featureId: TRAINHOP_NIMBUS_FEATURE_ID,
+      featureId,
       value: fakeNimbusVariables,
     },
     { isRollout: true }
   );
-  // Sanity checks.
+  // Sanity check.
   Assert.deepEqual(
-    NimbusFeatures[TRAINHOP_NIMBUS_FEATURE_ID].getAllVariables(),
+    NimbusFeatures[featureId]
+      .getAllEnrollments()
+      .find(e => e.value.addon_version === updateAddonVersion)?.value,
     fakeNimbusVariables,
-    "Got the expected variables from the nimbus feature"
+    "Got the expected enrollment for the nimbus feature"
   );
 
   return { fakeNimbusVariables, nimbusFeatureCleanup };
@@ -213,40 +221,67 @@ async function asyncAssertNimbusTrainhopAddonStaged({ updateAddonVersion }) {
  *
  * @param {object}  params
  * @param {boolean} params.expectedExposure
+ * @param {string}  [params.featureId]
+ *   The Nimbus feature id whose exposure to assert (defaults to the
+ *   co-enrollment newtabTrainhopAddonDeployment feature).
  */
-function assertTrainhopAddonNimbusExposure({ expectedExposure }) {
-  const enrollmentMetadata =
-    NimbusFeatures[TRAINHOP_NIMBUS_FEATURE_ID].getEnrollmentMetadata();
-  Assert.deepEqual(
+function assertTrainhopAddonNimbusExposure({
+  expectedExposure,
+  featureId = TRAINHOP_NIMBUS_DEPLOYMENT_FEATURE_ID,
+}) {
+  const exposureEvents =
     Glean.nimbusEvents.exposure
       .testGetValue("events")
       ?.map(ev => ev.extra)
-      .filter(ev => ev.feature_id == TRAINHOP_NIMBUS_FEATURE_ID) ?? [],
-    expectedExposure
-      ? [
-          {
-            feature_id: TRAINHOP_NIMBUS_FEATURE_ID,
-            branch: enrollmentMetadata.branch,
-            experiment: enrollmentMetadata.slug,
-          },
-        ]
-      : [],
-    expectedExposure
-      ? "Got the expected exposure Glean event for the newtabTrainhopAddon Nimbus feature"
-      : "Got no exposure Glean event for the newtabTrainhopAddon as expected"
+      .filter(ev => ev.feature_id == featureId) ?? [];
+
+  if (!expectedExposure) {
+    Assert.deepEqual(
+      exposureEvents,
+      [],
+      `Got no exposure Glean event for ${featureId} as expected`
+    );
+    return;
+  }
+
+  const allMeta = NimbusFeatures[featureId].getAllEnrollmentMetadata();
+  Assert.equal(
+    allMeta.length,
+    1,
+    "Expected exactly one active enrollment when asserting exposure"
+  );
+  const enrollmentMetadata = allMeta[0];
+  Assert.deepEqual(
+    exposureEvents,
+    [
+      {
+        feature_id: featureId,
+        branch: enrollmentMetadata.branch,
+        experiment: enrollmentMetadata.slug,
+      },
+    ],
+    `Got the expected exposure Glean event for the ${featureId} Nimbus feature`
+  );
+}
+
+// The winning train-hop version is tracked by the front-end in
+// `browser.newtabpage.trainhopAddonDeployment.version` (owned exclusively by
+// AboutNewTabResourceMapping for the co-enrollment newtabTrainhopAddonDeployment
+// feature). Early startup keeps the train-hop XPI while it is non-empty.
+function trainhopEffectiveVersionPref() {
+  return Services.prefs.getStringPref(
+    "browser.newtabpage.trainhopAddonDeployment.version",
+    ""
   );
 }
 
 function assertTrainhopAddonVersionPref(expectedTrainhopAddonVersion) {
   Assert.equal(
-    Services.prefs.getStringPref(
-      "browser.newtabpage.trainhopAddon.version",
-      ""
-    ),
+    trainhopEffectiveVersionPref(),
     expectedTrainhopAddonVersion,
     expectedTrainhopAddonVersion
-      ? "Expect browser.newtab.trainhopAddon.version about:config pref to be set while client is enrolled"
-      : "Expect browser.newtab.trainhopAddon.version about:config pref to be empty while client is unenrolled"
+      ? "Expect the train-hop add-on version to be set while client is enrolled"
+      : "Expect the train-hop add-on version to be empty while client is unenrolled"
   );
 }
 

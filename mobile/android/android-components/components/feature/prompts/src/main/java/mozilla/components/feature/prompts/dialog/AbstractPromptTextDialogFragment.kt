@@ -4,7 +4,6 @@
 
 package mozilla.components.feature.prompts.dialog
 
-import android.annotation.SuppressLint
 import android.text.method.ScrollingMovementMethod
 import android.view.LayoutInflater
 import android.view.View
@@ -19,20 +18,13 @@ import mozilla.components.feature.prompts.ext.Truncation
 internal const val KEY_MANY_ALERTS = "KEY_MANY_ALERTS"
 internal const val KEY_USER_CHECK_BOX = "KEY_USER_CHECK_BOX"
 
-/**
- * An abstract alert for showing a text message plus a checkbox for handling [hasShownManyDialogs].
- */
+/** An abstract alert for showing a text message plus a checkbox for handling [hasShownManyDialogs]. */
 internal abstract class AbstractPromptTextDialogFragment : PromptDialogFragment() {
 
-    /**
-     * Tells if a checkbox should be shown for preventing this [sessionId] from showing more dialogs.
-     */
+    /** Tells if a checkbox should be shown for preventing this [sessionId] from showing more dialogs. */
     internal val hasShownManyDialogs: Boolean by lazy { safeArguments.getBoolean(KEY_MANY_ALERTS) }
 
-    /**
-     * Stores the user's decision from the checkbox
-     * for preventing this [sessionId] from showing more dialogs.
-     */
+    /** Stores the user's decision from the checkbox for preventing this [sessionId] from showing more dialogs. */
     internal var userSelectionNoMoreDialogs: Boolean
         get() = safeArguments.getBoolean(KEY_USER_CHECK_BOX)
         set(value) {
@@ -40,10 +32,9 @@ internal abstract class AbstractPromptTextDialogFragment : PromptDialogFragment(
         }
 
     /**
-     * Creates custom view that adds a [TextView] + [CheckBox] and attach the corresponding
-     * events for handling [hasShownManyDialogs].
+     * Creates custom view that adds a [TextView] + [CheckBox] and attach the corresponding events for handling
+     * [hasShownManyDialogs].
      */
-    @SuppressLint("InflateParams")
     internal fun setCustomMessageView(builder: MaterialAlertDialogBuilder): MaterialAlertDialogBuilder {
         val inflater = LayoutInflater.from(requireContext())
         val view = inflater.inflate(R.layout.mozac_feature_prompt_with_check_box, null)
@@ -59,8 +50,8 @@ internal abstract class AbstractPromptTextDialogFragment : PromptDialogFragment(
     }
 
     /**
-     * Truncates the message to prevent ANR during text measurement.
-     * Long strings can cause Android's native text layout engine to timeout.
+     * Truncates the message to prevent ANR during text measurement. Long strings can cause Android's native text layout
+     * engine to timeout.
      */
     private fun truncateMessage(text: String): String {
         return if (text.length > Truncation.MAX_MESSAGE_LENGTH) {

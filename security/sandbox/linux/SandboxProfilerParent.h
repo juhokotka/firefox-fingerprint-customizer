@@ -5,8 +5,8 @@
 #ifndef SANDBOX_PROFILER_PARENT_H
 #define SANDBOX_PROFILER_PARENT_H
 
-#include "SandboxProfiler.h"
 #include "SandboxInfo.h"
+#include "SandboxProfiler.h"
 #include "public/GeckoTraceEvent.h"
 
 #if defined(HAVE_REPORT_UPROFILER_CHILD)

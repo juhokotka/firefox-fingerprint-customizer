@@ -13,9 +13,13 @@ transforms:
     - gecko_taskgraph.transforms.task:transforms
 
 task-defaults:
-    run-on-repo-type: [hg]
     attributes:
         retrigger: true
+    priority:
+        by-project:
+            autoland: high
+            mozilla-central: medium
+            default: null
     run-on-projects: ['integration', 'release']
     treeherder:
         tier: 1
@@ -30,27 +34,6 @@ task-defaults:
     use-python: default
 
 tasks:
-    lint-tidy:
-        description: Runs linting checks on WebRender code
-        worker-type: b-linux
-        worker:
-            docker-image: {in-tree: webrender}
-        run:
-            using: run-task
-            cwd: '{checkout}/gfx/wr'
-            command: >-
-                pushd /tmp &&
-                python3 -m pip install six &&
-                python3 -m pip install -e 'git+https://github.com/servo/servo.git@65a4d1646da46c37fe748add6dcf24b62ebb602a#egg=servo_tidy&subdirectory=python/tidy' &&
-                popd &&
-                servo-tidy
-        treeherder:
-            platform: linux64-qr/opt
-            symbol: WR(tidy)
-        when:
-            files-changed:
-                - 'gfx/wr/**'
-
     linux64-release:
         description: Runs release-mode WebRender CI tests on a Linux worker
         worker-type: b-linux
@@ -113,15 +96,15 @@ tasks:
                   name: public/build/wrench-macos-headless.tar.bz2
                   path: /builds/worker/artifacts/wrench-macos-headless.tar.bz2
         dependencies:
-            # Using libLLVM and headers for gallium, which require an older version
-            macosx64-clang-14: toolchain-macosx64-clang-14-raw
+            # Using libLLVM and headers for gallium
+            macosx64-clang: toolchain-macosx64-clang-22-raw
         fetches:
             toolchain:
                 - linux64-rust-macos
                 - linux64-clang
-                - macosx64-sdk-13.3
+                - macosx64-sdk
                 - wrench-deps
-            macosx64-clang-14:
+            macosx64-clang:
                 - artifact: clang.tar.zst
                   dest: clang-mac
         run:
@@ -133,6 +116,7 @@ tasks:
         when:
             files-changed:
                 - 'gfx/wr/**'
+                - 'taskcluster/scripts/misc/macos-setup.sh'
                 - 'taskcluster/scripts/misc/wr-macos-cross-build-setup.sh'
                 - 'taskcluster/scripts/misc/wrench-macos-build.sh'
 
@@ -189,6 +173,7 @@ tasks:
         when:
             files-changed:
                 - 'gfx/wr/**'
+                - 'taskcluster/scripts/misc/macos-setup.sh'
                 - 'taskcluster/scripts/misc/wr-cargotest-macos-build.sh'
                 - 'taskcluster/scripts/misc/wr-macos-cross-build-setup.sh'
 
@@ -241,6 +226,8 @@ tasks:
         when:
             files-changed:
                 - 'gfx/wr/**'
+                - 'taskcluster/scripts/misc/vs-cleanup.sh'
+                - 'taskcluster/scripts/misc/vs-setup.sh'
                 - 'taskcluster/scripts/misc/wrench-windows-tests.sh'
 
     wrench-android-debug:

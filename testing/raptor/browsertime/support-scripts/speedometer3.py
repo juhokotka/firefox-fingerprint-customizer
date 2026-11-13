@@ -4,28 +4,34 @@
 
 import filters
 from base_python_support import BasePythonSupport
+from cmdline import FIREFOX_APPS
 from logger.logger import RaptorLogger
 from utils import flatten
 
 LOG = RaptorLogger(component="raptor-speedometer3-support")
 
+CRITICAL_PLATFORMS = ("windows11-64-24h2-shippable",)
+
 
 class Speedometer3Support(BasePythonSupport):
-    nova = None
+    profiling = False
 
     def setup_test(self, test, args):
         super().setup_test(test, args)
 
-        if args.extra_prefs.get("browser.nova.enabled", False):
-            self.nova = True
-
-        if args.etw_profile:
-            test["etw_profile"] = True
-            if args.browser_cycles is None:
-                test["browser_cycles"] = 20
-            test["browsertime_args"] = (
-                f"{test.get('browsertime_args', '')} --browsertime.post_startup_delay=2000".strip()
-            )
+        for profile_type, profile_enabled in [
+            ("etw_profile", args.etw_profile),
+            ("samply_profile", args.samply_profile),
+            ("perf_profile", args.perf_profile),
+        ]:
+            if profile_enabled:
+                test[profile_type] = True
+                if args.browser_cycles is None:
+                    test["browser_cycles"] = 20
+                test["browsertime_args"] = (
+                    f"{test.get('browsertime_args', '')} --browsertime.post_startup_delay=2000".strip()
+                )
+                self.profiling = True
 
         if args.simpleperf:
             # Each test suite runs in its own browser cycle.
@@ -46,6 +52,7 @@ class Speedometer3Support(BasePythonSupport):
             # For correctness (should not affect functionality), set
             # test["apps"] to apps that work with Simpleperf profiling.
             test["apps"] = "fenix, geckoview"
+            self.profiling = True
 
     def handle_result(self, bt_result, raw_result, **kwargs):
         """Parse a result for the required results.
@@ -74,6 +81,13 @@ class Speedometer3Support(BasePythonSupport):
             for k, v in clean_flat_internal_metrics.items():
                 bt_result["measurements"].setdefault(k, []).extend(v)
 
+    def reports_critical_alerts(self):
+        """
+        Only Firefox on the platforms above does. Everything else stays
+        sub-critical, and non-Firefox browsers get no severity at all.
+        """
+        return self.app in FIREFOX_APPS and self.test_platform in CRITICAL_PLATFORMS
+
     def _build_subtest(self, measurement_name, replicates, test):
         unit = test.get("unit", "ms")
         if test.get("subtest_unit"):
@@ -86,14 +100,13 @@ class Speedometer3Support(BasePythonSupport):
             lower_is_better = False
             unit = "score"
 
-        alert_severity = "subcritical"
-        if measurement_name == "score" and self.platform == "Windows":
-            alert_severity = "critical"
+        alert_threshold = test.get("alert_threshold", 2.0)
+        if measurement_name != "score":
+            alert_threshold = test.get("subtest_alert_threshold", alert_threshold)
 
         subtest = {
             "unit": unit,
-            "alertThreshold": float(test.get("alert_threshold", 2.0)),
-            "alertSeverity": alert_severity,
+            "alertThreshold": float(alert_threshold),
             "lowerIsBetter": lower_is_better,
             "minBackWindow": 24,
             "maxBackWindow": 48,
@@ -102,6 +115,9 @@ class Speedometer3Support(BasePythonSupport):
             "shouldAlert": True,
             "value": round(filters.mean(replicates), 3),
         }
+
+        if measurement_name == "score" and self.reports_critical_alerts():
+            subtest["alertSeverity"] = "critical"
 
         if "score-internal" in measurement_name:
             subtest["shouldAlert"] = False
@@ -137,6 +153,14 @@ class Speedometer3Support(BasePythonSupport):
         self.add_additional_metrics(test, suite, **kwargs)
         suite["subtests"].sort(key=lambda subtest: subtest["name"])
 
+        if self.app in FIREFOX_APPS:
+            suite["alertSeverity"] = (
+                "critical" if self.reports_critical_alerts() else "subcritical"
+            )
+            # Perfherder makes subtests with no severity inherit the suite's
+            for subtest in suite["subtests"]:
+                subtest.setdefault("alertSeverity", "subcritical")
+
         score = 0
         replicates = []
         for subtest in suite["subtests"]:
@@ -146,17 +170,11 @@ class Speedometer3Support(BasePythonSupport):
                 break
         suite["value"] = score
         suite["replicates"] = replicates
-        suite["alertSeverity"] = "subcritical"
-        if self.platform == "Windows":
-            suite["alertSeverity"] = "critical"
 
-        if test.get("simpleperf", False) or test.get("etw_profile", False):
+        if self.profiling:
             suite["shouldAlert"] = False
             for subtest in suite.get("subtests", []):
                 subtest["shouldAlert"] = False
-
-        if self.nova:
-            suite["extraOptions"].append("nova")
 
     def modify_command(self, cmd, test):
         """Modify the browsertime command for speedometer 3.

@@ -5,11 +5,10 @@
 #ifndef MOZILLA_GFX_FILTERS_H_
 #define MOZILLA_GFX_FILTERS_H_
 
+#include "Matrix.h"
+#include "Point.h"
 #include "Types.h"
 #include "mozilla/RefCounted.h"
-
-#include "Point.h"
-#include "Matrix.h"
 
 namespace mozilla {
 namespace gfx {
@@ -181,7 +180,7 @@ enum ConvolveMatrixEdgeMode {
 enum ConvolveMatrixInputs { IN_CONVOLVE_MATRIX_IN = 0 };
 
 enum DisplacementMapAtts {
-  ATT_DISPLACEMENT_MAP_SCALE = 0,  // Float
+  ATT_DISPLACEMENT_MAP_SCALE = 0,  // Size
   ATT_DISPLACEMENT_MAP_X_CHANNEL,  // ColorChannel
   ATT_DISPLACEMENT_MAP_Y_CHANNEL   // ColorChannel
 };

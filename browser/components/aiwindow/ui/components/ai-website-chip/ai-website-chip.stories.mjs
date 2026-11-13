@@ -13,6 +13,10 @@ export default {
       control: "select",
       options: ["in-line", "context-chip"],
     },
+    size: {
+      control: "select",
+      options: ["default", "small"],
+    },
     label: {
       control: "text",
     },
@@ -21,6 +25,24 @@ export default {
     },
     href: {
       control: "text",
+    },
+    isTabGroup: {
+      control: "boolean",
+    },
+    tabGroupColor: {
+      control: "select",
+      options: [
+        "",
+        "blue",
+        "cyan",
+        "gray",
+        "green",
+        "orange",
+        "pink",
+        "purple",
+        "red",
+        "yellow",
+      ],
     },
     removable: {
       control: "boolean",
@@ -35,12 +57,31 @@ aiwindow-website-chip-remove-button =
   },
 };
 
-const Template = ({ type, label, iconSrc, href, removable }) => html`
+// A tab group chip is tinted with the --tab-group-* tokens.
+const tabGroupTokens = html`<link
+  rel="stylesheet"
+  href="chrome://browser/skin/tabbrowser/tab.tokens.css"
+/>`;
+
+const Template = ({
+  type,
+  size,
+  label,
+  iconSrc,
+  href,
+  isTabGroup,
+  tabGroupColor,
+  removable,
+}) => html`
+  ${isTabGroup ? tabGroupTokens : ""}
   <ai-website-chip
     .type=${type}
+    .size=${size}
     .label=${label}
     .iconSrc=${iconSrc}
     .href=${href || ""}
+    .isTabGroup=${isTabGroup ?? false}
+    .tabGroupColor=${tabGroupColor || ""}
     .removable=${removable ?? false}
   ></ai-website-chip>
 `;
@@ -78,6 +119,15 @@ ContextChip.args = {
   removable: true,
 };
 
+export const ContextChipSmall = Template.bind({});
+ContextChipSmall.args = {
+  type: "context-chip",
+  size: "small",
+  label: "example.com",
+  iconSrc: "chrome://branding/content/icon16.png",
+  href: "https://example.com",
+};
+
 export const MixedCollection = () => html`
   <div style="display: flex; flex-wrap: wrap; gap: 8px;">
     <ai-website-chip
@@ -93,5 +143,55 @@ export const MixedCollection = () => html`
       href="https://example.com"
       .removable=${true}
     ></ai-website-chip>
+    <ai-website-chip
+      type="context-chip"
+      size="small"
+      label="example.com"
+      iconSrc="chrome://branding/content/icon16.png"
+      href="https://example.com"
+    ></ai-website-chip>
+  </div>
+`;
+
+export const TabGroupContextChip = Template.bind({});
+TabGroupContextChip.args = {
+  type: "context-chip",
+  label: "Trip planning",
+  isTabGroup: true,
+  tabGroupColor: "purple",
+  removable: true,
+};
+
+export const TabGroupInLine = Template.bind({});
+TabGroupInLine.args = {
+  type: "in-line",
+  label: "Trip planning",
+  isTabGroup: true,
+  tabGroupColor: "blue",
+};
+
+export const TabGroupColors = () => html`
+  ${tabGroupTokens}
+  <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+    ${[
+      "blue",
+      "cyan",
+      "gray",
+      "green",
+      "orange",
+      "pink",
+      "purple",
+      "red",
+      "yellow",
+    ].map(
+      color =>
+        html`<ai-website-chip
+          type="context-chip"
+          .label=${color}
+          .isTabGroup=${true}
+          .tabGroupColor=${color}
+          .removable=${true}
+        ></ai-website-chip>`
+    )}
   </div>
 `;

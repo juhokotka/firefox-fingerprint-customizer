@@ -6,12 +6,11 @@
 #define mozilla_net_BaseWebSocketChannel_h
 
 #include "mozilla/DataMutex.h"
-#include "nsIWebSocketChannel.h"
-#include "nsIWebSocketListener.h"
-#include "nsIProtocolHandler.h"
+#include "nsCOMPtr.h"
 #include "nsIThread.h"
 #include "nsIThreadRetargetableRequest.h"
-#include "nsCOMPtr.h"
+#include "nsIWebSocketChannel.h"
+#include "nsIWebSocketListener.h"
 #include "nsString.h"
 
 namespace mozilla {
@@ -21,12 +20,10 @@ const static int32_t kDefaultWSPort = 80;
 const static int32_t kDefaultWSSPort = 443;
 
 class BaseWebSocketChannel : public nsIWebSocketChannel,
-                             public nsIProtocolHandler,
                              public nsIThreadRetargetableRequest {
  public:
   BaseWebSocketChannel();
 
-  NS_DECL_NSIPROTOCOLHANDLER
   NS_DECL_NSITHREADRETARGETABLEREQUEST
 
   NS_IMETHOD QueryInterface(const nsIID& uuid, void** result) override = 0;

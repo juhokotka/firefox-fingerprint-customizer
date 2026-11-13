@@ -6,17 +6,18 @@
 #include "GPUProcessHost.h"
 #include "GPUProcessManager.h"
 #include "GfxInfoBase.h"
+#include "ProfilerParent.h"
 #include "TelemetryProbesReporter.h"
-#include "VideoUtils.h"
 #include "VRProcessManager.h"
+#include "VideoUtils.h"
 #include "gfxConfig.h"
 #include "gfxPlatform.h"
 #include "mozilla/Components.h"
 #include "mozilla/FOGIPC.h"
+#include "mozilla/HangDetails.h"
+#include "mozilla/RemoteMediaManagerChild.h"  // For RemoteMediaIn
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_media.h"
-#include "mozilla/glean/GfxMetrics.h"
-#include "mozilla/glean/IpcMetrics.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TelemetryIPC.h"
 #include "mozilla/dom/CheckerboardReportService.h"
@@ -24,16 +25,15 @@
 #include "mozilla/dom/MemoryReportRequest.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/gfxVars.h"
-#include "mozilla/HangDetails.h"
-#include "mozilla/RemoteMediaManagerChild.h"  // For RemoteMediaIn
+#include "mozilla/glean/GfxMetrics.h"
+#include "mozilla/glean/IpcMetrics.h"
 #include "mozilla/ipc/Endpoint.h"
-#include "mozilla/layers/APZInputBridgeChild.h"
+#include "mozilla/layers/APZBridgeChild.h"
 #include "mozilla/layers/LayerTreeOwnerTracker.h"
 #include "nsHashPropertyBag.h"
 #include "nsIGfxInfo.h"
 #include "nsIObserverService.h"
 #include "nsIPropertyBag2.h"
-#include "ProfilerParent.h"
 
 namespace mozilla {
 namespace gfx {
@@ -352,6 +352,7 @@ void GPUChild::ActorDestroy(ActorDestroyReason aWhy) {
 
   gfxVars::RemoveReceiver(this);
   mHost->OnChannelClosed();
+  mHost = nullptr;
 }
 
 mozilla::ipc::IPCResult GPUChild::RecvUpdateFeature(

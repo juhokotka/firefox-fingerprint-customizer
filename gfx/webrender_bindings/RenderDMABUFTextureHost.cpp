@@ -5,8 +5,8 @@
 #include "RenderDMABUFTextureHost.h"
 
 #include "GLContextEGL.h"
-#include "mozilla/gfx/Logging.h"
 #include "ScopedGLHelpers.h"
+#include "mozilla/gfx/Logging.h"
 
 namespace mozilla::wr {
 
@@ -48,7 +48,7 @@ wr::WrExternalImage RenderDMABUFTextureHost::Lock(uint8_t aChannelIndex,
   }
 
   if (!mSurface->GetTexture(aChannelIndex)) {
-    if (!mSurface->CreateTexture(mGL, aChannelIndex)) {
+    if (!mSurface->CreateTextures(mGL)) {
       return InvalidToWrExternalImage();
     }
     ActivateBindAndTexParameteri(mGL, LOCAL_GL_TEXTURE0, LOCAL_GL_TEXTURE_2D,

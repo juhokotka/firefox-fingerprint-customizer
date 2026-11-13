@@ -8,7 +8,7 @@
  */
 
 const kEmbeddedDocUrl =
-  'data:text/html,<textarea id="docTextarea">value</textarea><button id="docButton"></button>';
+  getRootDirectory(gTestPath) + "file_embedded_document.html";
 
 let gAnchor;
 let gPanel;
@@ -589,6 +589,28 @@ add_task(async function testActivationMousedown() {
   EventUtils.synthesizeKey(" ");
   ok(activated, "mousedown activated after space");
   gMainButton1.onmousedown = null;
+  await hidePopup();
+});
+
+// Test that keyboard activation doesn't leave the mouse button pressed, which
+// would suppress drag and drop on the next window move or resize.
+add_task(async function testActivationMouseup() {
+  await openPopup();
+  await expectFocusAfterKey("ArrowDown", gMainButton1);
+  let events = [];
+  let listener = e => events.push(e.type);
+  for (let type of ["mousedown", "mouseup", "click"]) {
+    gMainButton1.addEventListener(type, listener);
+  }
+  EventUtils.synthesizeKey(" ");
+  Assert.deepEqual(
+    events,
+    ["mousedown", "mouseup", "click"],
+    "mouseup dispatched between mousedown and click"
+  );
+  for (let type of ["mousedown", "mouseup", "click"]) {
+    gMainButton1.removeEventListener(type, listener);
+  }
   await hidePopup();
 });
 

@@ -174,7 +174,7 @@ contains a strong reference to the EventListenerManager
 `0x7f0899b4e550`. "[via hash] mListenerManager" is a description of
 that strong reference. Together, these lines show a chain of strong
 references from an object the cycle collector thinks needs to be kept
-alive, `0x7f0899b4e550`, to the object` 0x7f0897082c00` that you asked
+alive, `0x7f0899b4e550`, to the object `0x7f0897082c00` that you asked
 about. Most of the time, the actual chain is not important, because the
 cycle collector can only tell us about what went right. Let us call the
 address of the leaking object (`0x7f0882fe3230` in this case)
@@ -209,7 +209,7 @@ This can take a few minutes due to symbolification, but you only need to
 run it once on a log file.
 
 You can also locally symbolicate stacks from DMD logs generated on TreeHerder,
-but it will [take a few extra steps](/contributing/debugging/local_symbols.rst)
+but it will [take a few extra steps](/contributing/debugging/local_symbols.md)
 that you need to do before running `dmd.py`.
 
 After that is done, we can finally find out which objects (possibly)

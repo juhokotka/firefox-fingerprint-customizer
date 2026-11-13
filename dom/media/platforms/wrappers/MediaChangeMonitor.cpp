@@ -210,8 +210,8 @@ class H264ChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
     if (H264::DecodeSPSFromExtraData(aExtraData, spsdata) &&
         spsdata.pic_width > 0 && spsdata.pic_height > 0) {
       H264::EnsureSPSIsSane(spsdata);
-      mCurrentConfig.mImage.width = spsdata.pic_width;
-      mCurrentConfig.mImage.height = spsdata.pic_height;
+      mCurrentConfig.AdoptImageSize(
+          gfx::IntSize(spsdata.pic_width, spsdata.pic_height));
       mCurrentConfig.mDisplay.width = spsdata.display_width;
       mCurrentConfig.mDisplay.height = spsdata.display_height;
       mCurrentConfig.mColorDepth = spsdata.ColorDepth();
@@ -444,8 +444,7 @@ class HEVCChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
       mSPS.AppendElements(nalu->mNALU);
       if (auto rv = H265::DecodeSPSFromSPSNALU(*nalu); rv.isOk()) {
         const auto sps = rv.unwrap();
-        mCurrentConfig.mImage.width = sps.GetImageSize().Width();
-        mCurrentConfig.mImage.height = sps.GetImageSize().Height();
+        mCurrentConfig.AdoptImageSize(sps.GetImageSize());
         if (const auto& vui = sps.vui_parameters;
             vui && vui->HasValidAspectRatio()) {
           mCurrentConfig.mDisplay = ApplyPixelAspectRatio(
@@ -920,6 +919,9 @@ RefPtr<PlatformDecoderModule::CreateDecoderPromise> MediaChangeMonitor::Create(
   RefPtr<MediaChangeMonitor> instance = new MediaChangeMonitor(
       aPDMFactory, std::move(changeMonitor), nullptr, updatedParams);
 
+  MOZ_ASSERT_IF(aParams.mOptions.contains(
+                    CreateDecoderParams::Option::AssertCanInstantiate),
+                instance->mChangeMonitor->CanBeInstantiated());
   if (instance->mChangeMonitor->CanBeInstantiated()) {
     RefPtr<PlatformDecoderModule::CreateDecoderPromise> p =
         instance->CreateDecoder()->Then(
@@ -1124,6 +1126,10 @@ bool MediaChangeMonitor::IsHardwareAccelerated(
   if (mDecoder) {
     return mDecoder->IsHardwareAccelerated(aFailureReason);
   }
+  MOZ_ASSERT(!mParams.mOptions.contains(
+                 CreateDecoderParams::Option::AssertCanInstantiate),
+             "Should not get here if the underlying decoder could not be "
+             "instantiated");
 #ifdef MOZ_APPLEMEDIA
   // On mac, we can assume H264 is hardware accelerated for now.
   // This allows MediaCapabilities to report that playback will be smooth.

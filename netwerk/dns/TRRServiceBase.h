@@ -8,9 +8,9 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/DataMutex.h"
 #include "mozilla/net/rust_helper.h"
-#include "nsString.h"
 #include "nsIDNSService.h"
 #include "nsIProtocolProxyService2.h"
+#include "nsString.h"
 #include "nsTHashMap.h"
 
 class nsICancelable;

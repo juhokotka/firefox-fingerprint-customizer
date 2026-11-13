@@ -19,10 +19,13 @@
 #include "mozilla/StaticPrefs_test.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextControlElement.h"
+#include "mozilla/TextControlState.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/AncestorIterator.h"
 #include "mozilla/dom/Document.h"
+#include "mozilla/dom/EditContext.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/Range.h"
 #include "mozilla/dom/Selection.h"
 #include "nsAtom.h"
 #include "nsContentUtils.h"
@@ -35,7 +38,6 @@
 #include "nsIWeakReferenceUtils.h"
 #include "nsIWidget.h"
 #include "nsPresContext.h"
-#include "nsRange.h"
 #include "nsRefreshDriver.h"
 #include "nsString.h"
 
@@ -260,20 +262,30 @@ bool IMEContentObserver::InitWithEditor(nsPresContext& aPresContext,
 
   RefPtr<PresShell> presShell = aPresContext.GetPresShell();
 
-  RefPtr selection = GetSelection();
-  if (NS_WARN_IF(!selection)) {
-    return false;
-  }
+  if (EditContext* editContext = aEditorBase.ComputeEditContext()) {
+    mIsForEditContext = true;
+    // If there's an active EditContext, set mRootElement from it directly,
+    // instead of using ComputeRootElement(), since that looks at the selection
+    // (see bug 2055955).
+    mRootElement = editContext->GetAssociatedElement();
+    MOZ_ASSERT(mRootElement,
+               "Active EditContext should always have an associated element.");
+  } else {
+    RefPtr selection = GetSelection();
+    if (NS_WARN_IF(!selection)) {
+      return false;
+    }
 
-  mRootElement = ComputeRootElement(presShell);
-  // If we're in the design mode, but there are no contents, this document
-  // is not editable. However, this is not illegal. Don't warn.
-  if (!mRootElement && IsForDesignMode()) {
-    return false;
-  }
-  // Otherwise, there must be a root editable element.
-  if (NS_WARN_IF(!mRootElement)) {
-    return false;
+    mRootElement = ComputeRootElement(presShell);
+    // If we're in the design mode, but there are no contents, this document
+    // is not editable. However, this is not illegal. Don't warn.
+    if (!mRootElement && IsForDesignMode()) {
+      return false;
+    }
+    // Otherwise, there must be a root editable element.
+    if (NS_WARN_IF(!mRootElement)) {
+      return false;
+    }
   }
 
   if (mEditorBase->IsTextEditor()) {
@@ -312,7 +324,7 @@ Element* IMEContentObserver::ComputeRootElement(PresShell* aPresShell) const {
 
   // If there is a selection range, we should compute our root element from the
   // first range.
-  if (const nsRange* selRange = selection->GetRangeAt(0)) {
+  if (const dom::Range* selRange = selection->GetRangeAt(0)) {
     MOZ_ASSERT(!mIsTextControl);
     if (NS_WARN_IF(!selRange->GetStartContainer())) {
       return nullptr;
@@ -386,13 +398,18 @@ void IMEContentObserver::ObserveEditableNode() {
           ("0x%p ObserveEditableNode(), starting to observe 0x%p (%s)", this,
            mRootElement.get(), ToString(*mRootElement).c_str()));
 
-  mRootElement->AddMutationObserver(this);
-  // If it's in a document (should be so), we can use document observer to
-  // reduce redundant computation of text change offsets.
-  Document* doc = mRootElement->GetComposedDoc();
-  if (doc) {
-    RefPtr<DocumentObserver> documentObserver = mDocumentObserver;
-    documentObserver->Observe(doc);
+  // For EditContext, we shouldn't observe the element for mutations,
+  // since updating the text is only done through the updateText() method
+  // or text input.
+  if (!mIsForEditContext) {
+    mRootElement->AddMutationObserver(this);
+    // If it's in a document (should be so), we can use document observer to
+    // reduce redundant computation of text change offsets.
+    Document* doc = mRootElement->GetComposedDoc();
+    if (doc) {
+      RefPtr<DocumentObserver> documentObserver = mDocumentObserver;
+      documentObserver->Observe(doc);
+    }
   }
 
   if (mDocShell) {
@@ -533,6 +550,14 @@ bool IMEContentObserver::IsObserving(const nsPresContext& aPresContext,
   else if (!mIsTextControl) {
     return false;
   }
+  const bool hasEditContext =
+      aElement && aElement->HasFlag(ELEMENT_HAS_EDIT_CONTEXT);
+  if (hasEditContext != mIsForEditContext) {
+    // For EditContext, we don't observe DOM mutations. So we should
+    // return false here if aElement has an EditContext and we don't,
+    // or vice versa.
+    return false;
+  }
   return IsObservingElement(aPresContext, aElement);
 }
 
@@ -621,7 +646,17 @@ bool IMEContentObserver::IsObservingElement(const nsPresContext& aPresContext,
     return !aElement->IsInDesignMode() &&
            aElement == mRootEditableNodeOrTextControlElement;
   }
-  if (!mRootEditableNodeOrTextControlElement) {
+  if (!mRootEditableNodeOrTextControlElement || !mRootElement) [[unlikely]] {
+    return false;
+  }
+  // If mRootElement is not an inclusive descendant of the root editable node,
+  // it means that mRootElement was a nested editing host in the focused editing
+  // host, but now it's moved outside the editing host. In this case, we should
+  // not reuse this instance because we need to observe the focused editing
+  // host, but we have observed the nested editing host which is now not
+  // focused.
+  if (!mRootElement->IsInclusiveDescendantOf(
+          mRootEditableNodeOrTextControlElement)) [[unlikely]] {
     return false;
   }
   // If design mode state has been changed, IMEContentObserver shouldn't be
@@ -680,6 +715,20 @@ bool IMEContentObserver::IsEditorHandlingEventForComposition() const {
   return composition->EditorIsHandlingLatestChange();
 }
 
+bool IMEContentObserver::IsPreparingTextEditor() const {
+  if (!mIsTextControl || !mRootEditableNodeOrTextControlElement) [[unlikely]] {
+    return false;
+  }
+  const auto* textControl =
+      TextControlElement::FromNode(mRootEditableNodeOrTextControlElement);
+  MOZ_ASSERT(textControl);
+  const auto* state = textControl->GetTextControlState();
+  if (!state) [[unlikely]] {
+    return false;
+  }
+  return state->IsPreparingEditor();
+}
+
 bool IMEContentObserver::IsEditorComposing() const {
   // Note that don't use TextComposition here. The important thing is,
   // whether the editor already started to handle composition because
@@ -705,17 +754,25 @@ nsresult IMEContentObserver::GetSelectionAndRoot(Selection** aSelection,
 }
 
 void IMEContentObserver::OnSelectionChange(Selection& aSelection) {
-  if (!mIsObserving) {
+  if (!mIsObserving || !mWidget) {
+    return;
+  }
+  if (mIsForEditContext) {
+    // For EditContext, we notify the IME of selection change only when
+    // EditContext.updateSelection() is called, since the DOM selection
+    // should not be used by the IME.
     return;
   }
 
-  if (mWidget) {
-    bool causedByComposition = IsEditorHandlingEventForComposition();
-    bool causedBySelectionEvent = TextComposition::IsHandlingSelectionEvent();
-    bool duringComposition = IsEditorComposing();
-    MaybeNotifyIMEOfSelectionChange(causedByComposition, causedBySelectionEvent,
-                                    duringComposition);
-  }
+  bool duringComposition = IsEditorComposing();
+  bool causedByComposition =
+      IsEditorHandlingEventForComposition() ||
+      // Treat the selection changes during initializing `TextEditor` because it
+      // inherits the composition from the previous one.
+      (mIsTextControl && duringComposition && IsPreparingTextEditor());
+  bool causedBySelectionEvent = TextComposition::IsHandlingSelectionEvent();
+  MaybeNotifyIMEOfSelectionChange(causedByComposition, causedBySelectionEvent,
+                                  duringComposition);
 }
 
 void IMEContentObserver::ScrollPositionChanged() {
@@ -845,17 +902,25 @@ nsresult IMEContentObserver::MaybeHandleSelectionEvent(
     nsPresContext* aPresContext, WidgetSelectionEvent* aEvent) {
   MOZ_ASSERT(aEvent);
   MOZ_ASSERT(aEvent->mMessage == eSetSelection);
-  NS_ASSERTION(!mNeedsToNotifyIMEOfSelectionChange,
-               "Selection cache has not been updated yet");
+  if (mIsForEditContext) {
+    // It's possible for this to fail if the web app does not handle
+    // EditContext characterboundsupdate events, since we suppress
+    // IME notifications until updateCharacterBounds() is called.
+    NS_WARNING_ASSERTION(!mNeedsToNotifyIMEOfSelectionChange,
+                         "Selection cache has not been updated yet");
+  } else {
+    NS_ASSERTION(!mNeedsToNotifyIMEOfSelectionChange,
+                 "Selection cache has not been updated yet");
+  }
 
-  MOZ_LOG(sIMECOLog, LogLevel::Debug,
-          ("0x%p MaybeHandleSelectionEvent(aEvent={ "
-           "mMessage=%s, mOffset=%u, mLength=%u, mReversed=%s, "
-           "mExpandToClusterBoundary=%s }), "
-           "mSelectionData=%s",
-           this, ToChar(aEvent->mMessage), aEvent->mOffset, aEvent->mLength,
-           ToChar(aEvent->mReversed), ToChar(aEvent->mExpandToClusterBoundary),
-           ToString(mSelectionData).c_str()));
+  MOZ_LOG_FMT(sIMECOLog, LogLevel::Debug,
+              "{} MaybeHandleSelectionEvent(aEvent={{ "
+              "mMessage={}, mOffset={}, mLength={}, mDirection={}, "
+              "mExpandToClusterBoundary={} }}), "
+              "mSelectionData={}",
+              static_cast<void*>(this), ToChar(aEvent->mMessage),
+              aEvent->mOffset, aEvent->mLength, aEvent->mDirection,
+              aEvent->mExpandToClusterBoundary, ToString(mSelectionData));
 
   // When we have Selection cache, and the caller wants to set same selection
   // range, we shouldn't try to compute same range because it may be impossible
@@ -866,7 +931,8 @@ nsresult IMEContentObserver::MaybeHandleSelectionEvent(
   if (!mNeedsToNotifyIMEOfSelectionChange && mSelectionData.IsInitialized() &&
       mSelectionData.HasRange() &&
       mSelectionData.StartOffset() == aEvent->mOffset &&
-      mSelectionData.Length() == aEvent->mLength) {
+      mSelectionData.Length() == aEvent->mLength &&
+      mSelectionData.mReversed == aEvent->IsReversed()) {
     if (RefPtr<Selection> selection = GetSelection()) {
       selection->ScrollIntoView(nsISelectionController::SELECTION_FOCUS_REGION);
     }
@@ -1530,11 +1596,12 @@ void IMEContentObserver::CancelNotifyingIMEOfTextChange() {
 void IMEContentObserver::MaybeNotifyIMEOfSelectionChange(
     bool aCausedByComposition, bool aCausedBySelectionEvent,
     bool aOccurredDuringComposition) {
-  MOZ_LOG(
-      sIMECOLog, LogLevel::Debug,
-      ("0x%p MaybeNotifyIMEOfSelectionChange(aCausedByComposition=%s, "
-       "aCausedBySelectionEvent=%s, aOccurredDuringComposition)",
-       this, ToChar(aCausedByComposition), ToChar(aCausedBySelectionEvent)));
+  MOZ_LOG_FMT(sIMECOLog, LogLevel::Info,
+              "{} MaybeNotifyIMEOfSelectionChange(aCausedByComposition={}, "
+              "aCausedBySelectionEvent={}, aOccurredDuringComposition={})",
+              static_cast<void*>(this), TrueOrFalse(aCausedByComposition),
+              TrueOrFalse(aCausedBySelectionEvent),
+              TrueOrFalse(aOccurredDuringComposition));
 
   mSelectionData.AssignReason(aCausedByComposition, aCausedBySelectionEvent,
                               aOccurredDuringComposition);
@@ -1568,9 +1635,11 @@ void IMEContentObserver::CancelNotifyingIMEOfPositionChange() {
   mTicksUntilNotifyIMEOfPositionChange = 0;
 }
 
-void IMEContentObserver::MaybeNotifyCompositionEventHandled() {
-  MOZ_LOG(sIMECOLog, LogLevel::Debug,
-          ("0x%p MaybeNotifyCompositionEventHandled()", this));
+void IMEContentObserver::MaybeNotifyCompositionEventHandled(
+    EventMessage aEventMessage) {
+  MOZ_LOG_FMT(sIMECOLog, LogLevel::Info,
+              "{} MaybeNotifyCompositionEventHandled(aEventMessage={})",
+              static_cast<void*>(this), ToChar(aEventMessage));
 
   PostCompositionEventHandledNotification();
   FlushMergeableNotifications();

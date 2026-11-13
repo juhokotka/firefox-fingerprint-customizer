@@ -49,6 +49,9 @@ ChromeUtils.defineLazyGetter(lazy, "isRunningTests", () => {
   return false;
 });
 
+const REMOTE_ACTIVITY_DISABLED =
+  Services.env.get("MOZ_REMOTE_SETTINGS_DISABLED") === "1";
+
 // Overriding the server URL is normally disabled on Beta and Release channels,
 // except under some conditions.
 ChromeUtils.defineLazyGetter(lazy, "allowServerURL", () => {
@@ -119,6 +122,9 @@ export var Utils = {
   log,
 
   get shouldSkipRemoteActivity() {
+    if (REMOTE_ACTIVITY_DISABLED) {
+      return true;
+    }
     if (
       (lazy.isRunningTests || Cu.isInAutomation) &&
       this.SERVER_URL == "data:,#remote-settings-dummy/v1"
@@ -243,6 +249,7 @@ export var Utils = {
   async fetch(input, init = {}) {
     return new Promise(function (resolve, reject) {
       const request = new ServiceRequest();
+      const { method = "GET", headers = {}, bypassProxy = false } = init;
       function fallbackOrReject(err) {
         if (
           // At most one recursive Utils.fetch call (bypassProxy=false to true).
@@ -287,8 +294,6 @@ export var Utils = {
         };
         resolve(new Response(request.response, responseAttributes));
       };
-
-      const { method = "GET", headers = {}, bypassProxy = false } = init;
 
       request.open(method, input, { bypassProxy });
       // By default, XMLHttpRequest converts the response based on the

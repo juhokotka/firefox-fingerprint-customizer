@@ -20,9 +20,7 @@ enum class BindingKind : uint8_t {
   Var,
   Let,
   Const,
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
   Using,
-#endif
 
   // So you think named lambda callee names are consts? Nope! They don't
   // throw when being assigned to in sloppy mode.
@@ -39,11 +37,8 @@ enum class BindingKind : uint8_t {
 };
 
 static inline bool BindingKindIsLexical(BindingKind kind) {
-  return kind == BindingKind::Let || kind == BindingKind::Const
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-         || kind == BindingKind::Using
-#endif
-      ;
+  return kind == BindingKind::Let || kind == BindingKind::Const ||
+         kind == BindingKind::Using;
 }
 
 class BindingLocation {
@@ -90,13 +85,7 @@ class BindingLocation {
     return BindingLocation(Kind::NamedLambdaCallee, UINT32_MAX);
   }
 
-  bool operator==(const BindingLocation& other) const {
-    return kind_ == other.kind_ && slot_ == other.slot_;
-  }
-
-  bool operator!=(const BindingLocation& other) const {
-    return !operator==(other);
-  }
+  bool operator==(const BindingLocation& other) const = default;
 
   Kind kind() const { return kind_; }
 

@@ -29,10 +29,11 @@
 #include "api/environment/environment.h"
 #include "api/field_trials_view.h"
 #include "api/make_ref_counted.h"
+#include "api/rtp_packet_infos.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
 #include "api/task_queue/task_queue_base.h"
-#include "api/transport/rtp/rtp_source.h"
+#include "api/units/timestamp.h"
 #include "api/video/recordable_encoded_frame.h"
 #include "api/video/video_bitrate_allocator_factory.h"
 #include "api/video/video_sink_interface.h"
@@ -194,10 +195,6 @@ void FakeVoiceMediaReceiveChannel::SetRawAudioSink(
 void FakeVoiceMediaReceiveChannel::SetDefaultRawAudioSink(
     std::unique_ptr<AudioSinkInterface> sink) {
   sink_ = std::move(sink);
-}
-std::vector<RtpSource> FakeVoiceMediaReceiveChannel::GetSources(
-    uint32_t /* ssrc */) const {
-  return std::vector<RtpSource>();
 }
 bool FakeVoiceMediaReceiveChannel::SetRecvCodecs(
     const std::vector<Codec>& codecs) {
@@ -396,9 +393,6 @@ FakeVideoMediaSendChannel::~FakeVideoMediaSendChannel() = default;
 const std::vector<Codec>& FakeVideoMediaSendChannel::send_codecs() const {
   return send_codecs_;
 }
-const std::vector<Codec>& FakeVideoMediaSendChannel::codecs() const {
-  return send_codecs();
-}
 const VideoOptions& FakeVideoMediaSendChannel::options() const {
   return options_;
 }
@@ -476,13 +470,10 @@ void FakeVideoMediaSendChannel::GenerateSendKeyFrame(
     const std::vector<std::string>& /* rids */) {}
 
 FakeVideoMediaReceiveChannel::FakeVideoMediaReceiveChannel(
-    const VideoOptions& options,
     TaskQueueBase* network_thread)
     : RtpReceiveChannelHelper<VideoMediaReceiveChannelInterface>(
           network_thread),
-      max_bps_(-1) {
-  SetOptions(options);
-}
+      max_bps_(-1) {}
 FakeVideoMediaReceiveChannel::~FakeVideoMediaReceiveChannel() = default;
 const std::vector<Codec>& FakeVideoMediaReceiveChannel::recv_codecs() const {
   return recv_codecs_;
@@ -490,9 +481,7 @@ const std::vector<Codec>& FakeVideoMediaReceiveChannel::recv_codecs() const {
 bool FakeVideoMediaReceiveChannel::rendering() const {
   return playout();
 }
-const VideoOptions& FakeVideoMediaReceiveChannel::options() const {
-  return options_;
-}
+
 const std::map<uint32_t, VideoSinkInterface<VideoFrame>*>&
 FakeVideoMediaReceiveChannel::sinks() const {
   return sinks_;
@@ -540,10 +529,6 @@ bool FakeVideoMediaReceiveChannel::RemoveRecvStream(uint32_t ssrc) {
   output_delays_.erase(ssrc);
   return true;
 }
-std::vector<RtpSource> FakeVideoMediaReceiveChannel::GetSources(
-    uint32_t /* ssrc */) const {
-  return {};
-}
 bool FakeVideoMediaReceiveChannel::SetBaseMinimumPlayoutDelayMs(uint32_t ssrc,
                                                                 int delay_ms) {
   if (output_delays_.find(ssrc) == output_delays_.end()) {
@@ -568,10 +553,6 @@ bool FakeVideoMediaReceiveChannel::SetRecvCodecs(
     return false;
   }
   recv_codecs_ = codecs;
-  return true;
-}
-bool FakeVideoMediaReceiveChannel::SetOptions(const VideoOptions& options) {
-  options_ = options;
   return true;
 }
 
@@ -637,7 +618,10 @@ FakeVoiceEngine::CreateReceiveChannel(
     Call* call,
     const MediaConfig& /* config */,
     const AudioOptions& options,
-    const CryptoOptions& /* crypto_options */) {
+    const CryptoOptions& /* crypto_options */,
+    absl::AnyInvocable<void(uint32_t ssrc)> /*on_first_packet*/,
+    absl::AnyInvocable<void(uint32_t ssrc, const RtpPacketInfos&, Timestamp)
+                           const> /* on_frame_delivered_callback */) {
   std::unique_ptr<FakeVoiceMediaReceiveChannel> ch =
       std::make_unique<FakeVoiceMediaReceiveChannel>(options,
                                                      call->network_thread());
@@ -716,11 +700,12 @@ FakeVideoEngine::CreateReceiveChannel(
     const Environment& /* env */,
     Call* call,
     const MediaConfig& /* config */,
-    const VideoOptions& options,
-    const CryptoOptions& /* crypto_options */) {
+    const CryptoOptions& /* crypto_options */,
+    absl::AnyInvocable<void(uint32_t ssrc)> /*on_first_packet*/,
+    absl::AnyInvocable<void(uint32_t ssrc, const RtpPacketInfos&, Timestamp)
+                           const> /* on_frame_delivered_callback */) {
   std::unique_ptr<FakeVideoMediaReceiveChannel> ch =
-      std::make_unique<FakeVideoMediaReceiveChannel>(options,
-                                                     call->network_thread());
+      std::make_unique<FakeVideoMediaReceiveChannel>(call->network_thread());
   return ch;
 }
 std::vector<Codec> FakeVideoEngine::LegacySendCodecs(bool use_rtx) const {

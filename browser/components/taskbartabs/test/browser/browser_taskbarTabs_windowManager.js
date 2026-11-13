@@ -7,15 +7,16 @@ ChromeUtils.defineESModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.sys.mjs",
   ShellService: "moz-src:///browser/components/shell/ShellService.sys.mjs",
   sinon: "resource://testing-common/Sinon.sys.mjs",
-  TaskbarTabs: "resource:///modules/taskbartabs/TaskbarTabs.sys.mjs",
-  TaskbarTabsUtils: "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs",
+  TaskbarTabs: "moz-src:///browser/components/taskbartabs/TaskbarTabs.sys.mjs",
+  TaskbarTabsUtils:
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsUtils.sys.mjs",
 });
 
 XPCOMUtils.defineLazyServiceGetters(this, {
   WinTaskbar: ["@mozilla.org/windows-taskbar;1", Ci.nsIWinTaskbar],
 });
 
-const registry = new TaskbarTabsRegistry();
+const registry = createInMemoryRegistry();
 
 const url1 = Services.io.newURI("https://example.com");
 const userContextId1 = 0;

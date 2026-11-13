@@ -6,6 +6,7 @@ package mozilla.components.browser.storage.sync
 
 import android.content.Context
 import androidx.annotation.VisibleForTesting
+import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import mozilla.appservices.places.PlacesApi
@@ -19,26 +20,18 @@ import mozilla.components.concept.toolbar.AutocompleteResult
 import mozilla.components.support.base.log.logger.Logger
 import mozilla.components.support.utils.doesUrlStartsWithText
 import mozilla.components.support.utils.segmentAwareDomainMatch
-import kotlin.coroutines.resume
 
-@VisibleForTesting
-internal const val BOOKMARKS_AUTOCOMPLETE_SOURCE_NAME = "placesBookmarks"
+@VisibleForTesting internal const val BOOKMARKS_AUTOCOMPLETE_SOURCE_NAME = "placesBookmarks"
 
-/**
- * How many bookmarks to try and find from which to pick one that can be an autocomplete suggestion.
- */
+/** How many bookmarks to try and find from which to pick one that can be an autocomplete suggestion. */
 private const val BOOKMARKS_AUTOCOMPLETE_QUERY_LIMIT = 20
 
-/**
- * Implementation of the [BookmarksStorage] which is backed by a Rust Places lib via [PlacesApi].
- */
+/** Implementation of the [BookmarksStorage] which is backed by a Rust Places lib via [PlacesApi]. */
 open class PlacesBookmarksStorage(
     context: Context,
     override val autocompletePriority: Int = 0,
-) : PlacesStorage(context),
-    BookmarksStorage,
-    SyncableStore,
-    AutocompleteProvider {
+    private val currentTimeMillis: () -> Long = { System.currentTimeMillis() },
+) : PlacesStorage(context), BookmarksStorage, SyncableStore, AutocompleteProvider {
 
     override val logger = Logger("PlacesBookmarksStorage")
 
@@ -103,24 +96,21 @@ open class PlacesBookmarksStorage(
      *
      * @param limit The maximum number of entries to return.
      * @param maxAge Optional parameter used to filter out entries older than this number of milliseconds.
-     * @param currentTime Optional parameter for current time. Defaults toSystem.currentTimeMillis()
      * @return The list of matching bookmark nodes up to the limit number of items.
      */
     override suspend fun getRecentBookmarks(
         limit: Int,
         maxAge: Long?,
-        @VisibleForTesting currentTime: Long,
     ): Result<List<BookmarkNode>> {
         return withContext(readScope.coroutineContext) {
-            val threshold = if (maxAge != null) {
-                currentTime - maxAge
-            } else {
-                0
-            }
+            val threshold =
+                if (maxAge != null) {
+                    currentTimeMillis() - maxAge
+                } else {
+                    0
+                }
             Result.runCatching {
-                reader.getRecentBookmarks(limit)
-                .map { it.asBookmarkNode() }
-                .filter { it.dateAdded >= threshold }
+                reader.getRecentBookmarks(limit).map { it.asBookmarkNode() }.filter { it.dateAdded >= threshold }
             }
         }
     }
@@ -200,23 +190,28 @@ open class PlacesBookmarksStorage(
      *
      * @return Whether the bookmark existed or not.
      */
-    override suspend fun deleteNode(guid: String): Result<Boolean> = withContext(writeScope.coroutineContext) {
-        Result.runCatching { writer.deleteBookmarkNode(guid) }
-    }
+    override suspend fun deleteNode(guid: String): Result<Boolean> =
+        withContext(writeScope.coroutineContext) {
+            Result.runCatching { writer.deleteBookmarkNode(guid) }
+        }
 
     /**
      * Counts the number of items in the bookmark trees under the specified GUIDs.
-
+     *
      * @param guids The guids of folders to query.
-     * @return Count of all bookmark items (ie, not folders or separators) in all specified folders
-     * recursively. Empty folders, non-existing GUIDs and non-existing items will return zero.
-     * The result is implementation dependant if the trees overlap.
+     * @return Count of all bookmark items (ie, not folders or separators) in all specified folders recursively. Empty
+     *   folders, non-existing GUIDs and non-existing items will return zero. The result is implementation dependant if
+     *   the trees overlap.
      */
     override suspend fun countBookmarksInTrees(guids: List<String>): UInt {
         return withContext(readScope.coroutineContext) {
-            handlePlacesExceptions("countBookmarksInTrees", 0U, {
-                reader.countBookmarksInTrees(guids)
-            })
+            handlePlacesExceptions(
+                "countBookmarksInTrees",
+                0U,
+                {
+                    reader.countBookmarksInTrees(guids)
+                },
+            )
         }
     }
 
@@ -226,10 +221,8 @@ open class PlacesBookmarksStorage(
 
     override suspend fun getAutocompleteSuggestion(query: String): AutocompleteResult? =
         searchBookmarks(query, BOOKMARKS_AUTOCOMPLETE_QUERY_LIMIT).getOrNull()?.let { bookmarks ->
-            val bookmarkUrl = bookmarks
-                .mapNotNull { it.url }
-                .firstOrNull { doesUrlStartsWithText(it, query) }
-                ?: return null
+            val bookmarkUrl =
+                bookmarks.mapNotNull { it.url }.firstOrNull { doesUrlStartsWithText(it, query) } ?: return null
 
             val resultText = segmentAwareDomainMatch(query, arrayListOf(bookmarkUrl))
             resultText?.let {

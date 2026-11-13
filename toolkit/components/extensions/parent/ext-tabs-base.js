@@ -127,12 +127,9 @@ class TabBase {
       return options.format === "jpeg" ? GRAY_1PX_JPEG : BLACK_1PX_PNG;
     }
 
-    let image = await wgp.drawSnapshot(
-      rect,
-      scale * zoom,
-      "white",
-      resetScrollPosition
-    );
+    let image = await wgp.drawSnapshot(rect, scale * zoom, "white", {
+      resetScrollPosition,
+    });
 
     let canvas = new OffscreenCanvas(image.width, image.height);
     let ctx = canvas.getContext("bitmaprenderer", { alpha: false });
@@ -1483,7 +1480,7 @@ class TabTrackerBase extends EventEmitter {
    *
    * @param {integer} _tabId
    *        The numeric ID of the tab to return.
-   * @param {*} _default
+   * @param {any} _default
    *        The value to return if no tab exists with the given ID.
    *
    * @returns {NativeTab}
@@ -2423,7 +2420,7 @@ class WindowManagerBase {
    *
    * @param {DOMWindow} window
    *        The browser window to convert.
-   * @param {*} args
+   * @param {any} args
    *        Additional arguments to be passed to {@link WindowBase#convert}.
    *
    * @returns {object}

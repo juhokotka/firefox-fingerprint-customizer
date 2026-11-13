@@ -306,6 +306,63 @@ add_task(async function () {
     checkTabs(1);
   }
 
+  {
+    info("Bug 2070184: Test previews when the tab list shifts under the panel");
+
+    checkTabs(1);
+
+    await SpecialPowers.pushPrefEnv({
+      set: [["browser.pagethumbnails.capturing_disabled", false]],
+    });
+
+    for (let i = 0; i < 5; i++) {
+      await BrowserTestUtils.openNewForegroundTab(
+        gBrowser,
+        `${getRootDirectory(gTestPath)}dummy_page.html`
+      );
+    }
+
+    let visiblePreviews = () =>
+      ctrlTab.previews.filter(preview => preview._tab && !preview.hidden);
+    let hasThumbnail = preview =>
+      preview._canvas.firstElementChild &&
+      !preview._canvas.firstElementChild.classList.contains(
+        "ctrlTab-placeholder"
+      );
+
+    await pressCtrlTab();
+    await TestUtils.waitForCondition(
+      () => visiblePreviews().every(hasThumbnail),
+      "Every preview should have a thumbnail"
+    );
+
+    // Two tabs, because the first close is what replaces the freshly captured
+    // thumbnails with the images cached on the tabs, and it's those that the
+    // second close shifts from one preview to another.
+    for (let i = 0; i < 2; i++) {
+      info("Closing the selected tab while the panel is open");
+      await synthesizeCtrlW();
+      await TestUtils.waitForCondition(
+        () => visiblePreviews().every(hasThumbnail),
+        "Every preview should still have a thumbnail after a tab is closed"
+      );
+    }
+
+    let widths = new Set(
+      visiblePreviews().map(preview =>
+        Math.round(preview._canvas.getBoundingClientRect().width)
+      )
+    );
+    is(widths.size, 1, "The previews are all the same width");
+
+    await releaseCtrl();
+
+    for (let i = gBrowser.tabs.length - 1; i > 0; i--) {
+      await BrowserTestUtils.removeTab(gBrowser.tabs[i]);
+    }
+    checkTabs(1);
+  }
+
   /* private utility functions */
 
   /**
@@ -460,5 +517,125 @@ add_task(async function () {
       keyupEvents.every(isKeyupHappned => !isKeyupHappned),
       "Content document doesn't capture Keyup event during cycling tabs"
     );
+  }
+});
+
+add_task(async function test_maxPreviews_pref() {
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["browser.ctrlTab.sortByRecentlyUsed", true],
+      ["browser.ctrlTab.maxPreviews", 10],
+    ],
+  });
+
+  while (gBrowser.tabs.length < 12) {
+    BrowserTestUtils.addTab(gBrowser);
+  }
+
+  async function openPanel() {
+    let shown = BrowserTestUtils.waitForEvent(ctrlTab.panel, "popupshown");
+    EventUtils.synthesizeKey("VK_TAB", { ctrlKey: true });
+    await shown;
+    // Prevent mouse events from interfering with the panel's selection.
+    for (let node of ctrlTab.previews) {
+      node.style.pointerEvents = "none";
+    }
+  }
+
+  async function closePanel() {
+    let hidden = BrowserTestUtils.waitForEvent(ctrlTab.panel, "popuphidden");
+    EventUtils.synthesizeKey("VK_CONTROL", { type: "keyup" });
+    await hidden;
+  }
+
+  await openPanel();
+
+  let previews = ctrlTab.previews.filter(p => p != ctrlTab.showAllButton);
+  is(previews.length, 10, "10 preview buttons are created for maxPreviews=10");
+  ok(
+    previews.every(p => !p.hidden),
+    "all 10 previews are visible with 12 open tabs"
+  );
+
+  let rowTops = new Set(previews.map(p => p.getBoundingClientRect().top));
+  is(rowTops.size, 2, "previews wrap onto two rows of at most 7");
+
+  let innerRect = p =>
+    p.querySelector(".ctrlTab-preview-inner").getBoundingClientRect();
+  let [firstRowTop, secondRowTop] = [...rowTops].sort((a, b) => a - b);
+  let rowOf = top => previews.filter(p => p.getBoundingClientRect().top == top);
+  Assert.greaterOrEqual(
+    Math.min(...rowOf(secondRowTop).map(p => innerRect(p).top)),
+    Math.max(...rowOf(firstRowTop).map(p => innerRect(p).bottom)),
+    "the second row does not overlap the first row"
+  );
+
+  await closePanel();
+
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.ctrlTab.maxPreviews", 100]],
+  });
+  is(ctrlTab.maxTabPreviews, 49, "maxPreviews pref is clamped to 49");
+
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.ctrlTab.maxPreviews", 0]],
+  });
+  is(ctrlTab.maxTabPreviews, 4, "maxPreviews pref is clamped to 4");
+
+  await openPanel();
+  is(
+    ctrlTab.previews.length,
+    5,
+    "preview buttons are rebuilt when the pref changes"
+  );
+  await closePanel();
+
+  while (gBrowser.tabs.length > 1) {
+    BrowserTestUtils.removeTab(gBrowser.tabs[gBrowser.tabs.length - 1]);
+  }
+});
+
+add_task(async function test_previews_shrink_in_a_narrow_panel() {
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["browser.ctrlTab.sortByRecentlyUsed", true],
+      ["browser.ctrlTab.maxPreviews", 7],
+    ],
+  });
+
+  while (gBrowser.tabs.length < 9) {
+    BrowserTestUtils.addTab(gBrowser);
+  }
+
+  let shown = BrowserTestUtils.waitForEvent(ctrlTab.panel, "popupshown");
+  EventUtils.synthesizeKey("VK_TAB", { ctrlKey: true });
+  await shown;
+
+  let previews = ctrlTab.previews.filter(p => p != ctrlTab.showAllButton);
+  is(previews.length, 7, "7 previews fill a single row");
+
+  // The panel can end up narrower than the width _openPanel asks for, e.g.
+  // because the window manager confines the popup to the browser window.
+  for (let width of [1000, 600, 400]) {
+    ctrlTab.panel.style.width = width + "px";
+    let rowTops = new Set(previews.map(p => p.getBoundingClientRect().top));
+    is(
+      rowTops.size,
+      1,
+      `previews stay on one row at a panel width of ${width}`
+    );
+    Assert.lessOrEqual(
+      ctrlTab.previewsContainer.getBoundingClientRect().bottom,
+      ctrlTab.panel.getBoundingClientRect().bottom,
+      `previews stay within the panel at a panel width of ${width}`
+    );
+  }
+
+  let hidden = BrowserTestUtils.waitForEvent(ctrlTab.panel, "popuphidden");
+  EventUtils.synthesizeKey("VK_CONTROL", { type: "keyup" });
+  await hidden;
+
+  while (gBrowser.tabs.length > 1) {
+    BrowserTestUtils.removeTab(gBrowser.tabs[gBrowser.tabs.length - 1]);
   }
 });

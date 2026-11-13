@@ -195,12 +195,12 @@ diff --git a/sandbox/win/src/sandbox_nt_util.cc b/sandbox/win/src/sandbox_nt_uti
 diff --git a/sandbox/win/src/signed_interception.cc b/sandbox/win/src/signed_interception.cc
 --- a/sandbox/win/src/signed_interception.cc
 +++ b/sandbox/win/src/signed_interception.cc
-@@ -69,17 +69,17 @@ TargetNtCreateSection(NtCreateSectionFun
-                                     path_buffer_size, &out_buffer_size);
- 
-     if (!NT_SUCCESS(status)) {
+@@ -70,11 +70,11 @@ TargetNtCreateSection(NtCreateSectionFunction orig_CreateSection,
        break;
      }
+ 
+-    SYSCALL_BROKERING_WITH_CONTEXT(&path->ObjectName);
++    SYSCALL_BROKERING_WITH_CONTEXT(&path->Name);
  
      CountedParameterSet<NameBased> params;
      std::wstring_view object_name =
@@ -209,11 +209,6 @@ diff --git a/sandbox/win/src/signed_interception.cc b/sandbox/win/src/signed_int
      params[NameBased::NAME] = ParamPickerMake(object_name);
  
      // Check if this will be sent to the broker.
-     if (!QueryBroker(IpcTag::NTCREATESECTION, params.GetBase()))
-       break;
- 
-     if (!ValidParameter(section_handle, sizeof(HANDLE), WRITE))
-       break;
 diff --git a/sandbox/win/src/win_utils.cc b/sandbox/win/src/win_utils.cc
 --- a/sandbox/win/src/win_utils.cc
 +++ b/sandbox/win/src/win_utils.cc

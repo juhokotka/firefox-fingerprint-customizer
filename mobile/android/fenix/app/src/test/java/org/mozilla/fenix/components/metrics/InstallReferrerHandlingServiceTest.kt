@@ -11,13 +11,13 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import mozilla.components.support.test.robolectric.testContext
 import mozilla.components.support.utils.ext.packageManagerWrapper
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -33,6 +33,7 @@ import org.mozilla.fenix.distributions.DistributionSettings
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.nimbus.FxNimbus
 import org.mozilla.fenix.nimbus.MarketingOnboardingCard
+import org.mozilla.fenix.nimbus.PairingSigninPrompt
 import org.mozilla.fenix.utils.Settings
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -43,36 +44,40 @@ internal class InstallReferrerHandlingServiceTest {
     private var storedId: String? = null
     private var savedId: String = ""
 
-    private val testDistributionProviderChecker = object : DistributionProviderChecker {
-        override suspend fun queryProvider(): String? = providerValue
-    }
-
-    private val testBrowserStoreProvider = object : DistributionBrowserStoreProvider {
-        override fun getDistributionId(): String? = storedId
-
-        override fun updateDistributionId(id: String) {
-            storedId = id
-        }
-    }
-
-    private val testDistributionSettings = object : DistributionSettings {
-        override fun getDistributionId(): String = savedId
-
-        override fun saveDistributionId(id: String) {
-            savedId = id
+    private val testDistributionProviderChecker =
+        object : DistributionProviderChecker {
+            override suspend fun queryProvider(): String? = providerValue
         }
 
-        override fun setMarketingTelemetryPreferences() = Unit
-    }
+    private val testBrowserStoreProvider =
+        object : DistributionBrowserStoreProvider {
+            override fun getDistributionId(): String? = storedId
 
-    val distributionIdManager = DistributionIdManager(
-        packageManager = testContext.packageManagerWrapper,
-        testBrowserStoreProvider,
-        distributionProviderChecker = testDistributionProviderChecker,
-        distributionSettings = testDistributionSettings,
-        metricController = FakeMetricController(),
-        appPreinstalledOnVivoDevice = { true },
-    )
+            override fun updateDistributionId(id: String) {
+                storedId = id
+            }
+        }
+
+    private val testDistributionSettings =
+        object : DistributionSettings {
+            override fun getDistributionId(): String = savedId
+
+            override fun saveDistributionId(id: String) {
+                savedId = id
+            }
+
+            override fun setMarketingTelemetryPreferences() = Unit
+        }
+
+    val distributionIdManager =
+        DistributionIdManager(
+            packageManager = testContext.packageManagerWrapper,
+            testBrowserStoreProvider,
+            distributionProviderChecker = testDistributionProviderChecker,
+            distributionSettings = testDistributionSettings,
+            metricController = FakeMetricController(),
+            appPreinstalledOnVivoDevice = { true },
+        )
 
     @Before
     fun setUp() {
@@ -82,14 +87,20 @@ internal class InstallReferrerHandlingServiceTest {
         FxNimbus.features.marketingOnboardingCard.withCachedValue(MarketingOnboardingCard(enabled = true))
     }
 
+    @After
+    fun tearDown() {
+        FxNimbus.features.pairingSigninPrompt.withCachedValue(null)
+    }
+
     @Test
     fun `GIVEN a null referrer on OK response WHEN start is called THEN response is not stored and shouldShowMarketingOnboarding is false`() =
         runTest {
-            val service = fakeService(
-                responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
-                referrerResponse = null,
-                scope = this,
-            )
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = null,
+                    scope = this,
+                )
 
             service.start()
             advanceUntilIdle()
@@ -99,57 +110,84 @@ internal class InstallReferrerHandlingServiceTest {
         }
 
     @Test
-    fun `GIVEN a non-null referrer on OK response WHEN start is called THEN response is stored`() {
+    fun `GIVEN a non-null referrer on OK response WHEN start is called THEN response is stored`() = runTest {
         val referrer = "utm_source=addons.mozilla.org&utm_medium=referral&utm_content=rta%3Atest"
-        val service = fakeService(responseCode = InstallReferrerClient.InstallReferrerResponse.OK, referrerResponse = referrer)
+        val service =
+            fakeService(
+                responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                referrerResponse = referrer,
+                scope = this,
+            )
 
         service.start()
+        advanceUntilIdle()
 
         assertEquals(referrer, InstallReferrerHandlingService.response)
     }
 
     @Test
-    fun `GIVEN FEATURE_NOT_SUPPORTED WHEN start is called THEN shouldShowMarketingOnboarding is false`() {
-        val service = fakeService(responseCode = InstallReferrerClient.InstallReferrerResponse.FEATURE_NOT_SUPPORTED)
+    fun `GIVEN FEATURE_NOT_SUPPORTED WHEN start is called THEN shouldShowMarketingOnboarding is false`() = runTest {
+        val service =
+            fakeService(
+                responseCode = InstallReferrerClient.InstallReferrerResponse.FEATURE_NOT_SUPPORTED,
+                scope = this,
+            )
 
         service.start()
+        advanceUntilIdle()
 
         assertNull(InstallReferrerHandlingService.response)
         assertFalse(testContext.components.settings.shouldShowMarketingOnboarding)
     }
 
     @Test
-    fun `GIVEN DEVELOPER_ERROR WHEN start is called THEN shouldShowMarketingOnboarding is false`() {
-        val service = fakeService(responseCode = InstallReferrerClient.InstallReferrerResponse.DEVELOPER_ERROR)
+    fun `GIVEN DEVELOPER_ERROR WHEN start is called THEN shouldShowMarketingOnboarding is false`() = runTest {
+        val service =
+            fakeService(
+                responseCode = InstallReferrerClient.InstallReferrerResponse.DEVELOPER_ERROR,
+                scope = this,
+            )
 
         service.start()
+        advanceUntilIdle()
 
         assertFalse(testContext.components.settings.shouldShowMarketingOnboarding)
     }
 
     @Test
-    fun `GIVEN SERVICE_UNAVAILABLE WHEN start is called THEN shouldShowMarketingOnboarding is false`() {
-        val service = fakeService(responseCode = InstallReferrerClient.InstallReferrerResponse.SERVICE_UNAVAILABLE)
+    fun `GIVEN SERVICE_UNAVAILABLE WHEN start is called THEN shouldShowMarketingOnboarding is false`() = runTest {
+        val service =
+            fakeService(
+                responseCode = InstallReferrerClient.InstallReferrerResponse.SERVICE_UNAVAILABLE,
+                scope = this,
+            )
 
         service.start()
+        advanceUntilIdle()
 
         assertFalse(testContext.components.settings.shouldShowMarketingOnboarding)
     }
 
     @Test
-    fun `GIVEN PERMISSION_ERROR WHEN start is called THEN shouldShowMarketingOnboarding is false`() {
-        val service = fakeService(responseCode = InstallReferrerClient.InstallReferrerResponse.PERMISSION_ERROR)
+    fun `GIVEN PERMISSION_ERROR WHEN start is called THEN shouldShowMarketingOnboarding is false`() = runTest {
+        val service =
+            fakeService(
+                responseCode = InstallReferrerClient.InstallReferrerResponse.PERMISSION_ERROR,
+                scope = this,
+            )
 
         service.start()
+        advanceUntilIdle()
 
         assertFalse(testContext.components.settings.shouldShowMarketingOnboarding)
     }
 
     @Test
-    fun `GIVEN a service disconnect WHEN start is called THEN shouldShowMarketingOnboarding is false`() {
-        val service = fakeService(simulateDisconnect = true)
+    fun `GIVEN a service disconnect WHEN start is called THEN shouldShowMarketingOnboarding is false`() = runTest {
+        val service = fakeService(simulateDisconnect = true, scope = this)
 
         service.start()
+        advanceUntilIdle()
 
         assertFalse(testContext.components.settings.shouldShowMarketingOnboarding)
     }
@@ -158,60 +196,115 @@ internal class InstallReferrerHandlingServiceTest {
         responseCode: Int = InstallReferrerClient.InstallReferrerResponse.OK,
         referrerResponse: String? = null,
         simulateDisconnect: Boolean = false,
-        scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
-    ) = InstallReferrerHandlingService(testContext, scope = scope).apply {
-        clientFactory = {
-            FakeReferrerClient(
-                responseCode = responseCode,
-                referrerResponse = referrerResponse,
-                simulateDisconnect = simulateDisconnect,
-            )
+        scope: CoroutineScope,
+    ) =
+        InstallReferrerHandlingService(testContext, scope = scope).apply {
+            clientFactory = {
+                FakeReferrerClient(
+                    responseCode = responseCode,
+                    referrerResponse = referrerResponse,
+                    simulateDisconnect = simulateDisconnect,
+                )
+            }
         }
-    }
 
     @Test
     fun `WHEN the marketing onboarding Nimbus flag is disabled THEN we should not show marketing onboarding`() =
         runBlocking {
             FxNimbus.features.marketingOnboardingCard.withCachedValue(MarketingOnboardingCard(enabled = false))
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager))
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager)
+            )
         }
 
     @Test
     fun `WHEN the marketing onboarding Nimbus flag is enabled THEN we should show marketing onboarding`() =
         runBlocking {
-            assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager))
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager)
+            )
         }
 
     @Test
-    fun `WHEN installReferrerResponse is empty or null THEN we should not show marketing onboarding`() =
-        runBlocking {
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding(null, distributionIdManager))
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("", distributionIdManager))
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding(" ", distributionIdManager))
-        }
+    fun `WHEN installReferrerResponse is empty or null THEN we should not show marketing onboarding`() = runBlocking {
+        assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding(null, distributionIdManager))
+        assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("", distributionIdManager))
+        assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding(" ", distributionIdManager))
+    }
 
     @Test
     fun `WHEN installReferrerResponse is in the marketing prefixes THEN we should show marketing onboarding`() =
         runBlocking {
             assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=", distributionIdManager))
-            assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager))
-            assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=CjwKCAjw&utm_source=google&utm_medium=cpc&utm_campaign=Search_Brand&utm_content=ad_variation_1&utm_term=firefox+browser", distributionIdManager))
-            assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding("adjust_reftag=", distributionIdManager))
-            assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding("adjust_reftag=test", distributionIdManager))
-            assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding("adjust_reftag=abc123&utm_source=adjust&utm_medium=paid&utm_campaign=winter_promo&utm_content=banner_1&utm_term=", distributionIdManager))
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager)
+            )
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(
+                    "gclid=CjwKCAjw&utm_source=google&utm_medium=cpc&utm_campaign=Search_Brand&utm_content=ad_variation_1&utm_term=firefox+browser",
+                    distributionIdManager,
+                )
+            )
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding("adjust_reftag=", distributionIdManager)
+            )
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(
+                    "adjust_reftag=test",
+                    distributionIdManager,
+                )
+            )
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(
+                    "adjust_reftag=abc123&utm_source=adjust&utm_medium=paid&utm_campaign=winter_promo&utm_content=banner_1&utm_term=",
+                    distributionIdManager,
+                )
+            )
         }
 
     @Test
     fun `WHEN installReferrerResponse is not in the marketing prefixes THEN we should not show marketing onboarding`() =
         runBlocking {
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding(" gclid=12345", distributionIdManager))
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("utm_source=google&utm_medium=cpc&utm_campaign=brand&utm_content=gclid%3D12345&utm_term=", distributionIdManager))
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("utm_source=google-play&utm_medium=organic", distributionIdManager))
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("utm_source=(not%20set)&utm_medium=(not%20set)", distributionIdManager))
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("utm_source=eea-browser-choice&utm_medium=preload", distributionIdManager))
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("utm_source=addons.mozilla.org&utm_medium=referral&utm_campaign=amo-fx-cta-869140&utm_content=rta%3AezU4YzMyYWM0LTBkNmMtNGQ2Zi1hZTJjLTk2YWFmOGZmY2I2Nn0&utm_term=", distributionIdManager))
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(" gclid=12345", distributionIdManager)
+            )
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(
+                    "utm_source=google&utm_medium=cpc&utm_campaign=brand&utm_content=gclid%3D12345&utm_term=",
+                    distributionIdManager,
+                )
+            )
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(
+                    "utm_source=google-play&utm_medium=organic",
+                    distributionIdManager,
+                )
+            )
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(
+                    "utm_source=(not%20set)&utm_medium=(not%20set)",
+                    distributionIdManager,
+                )
+            )
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(
+                    "utm_source=eea-browser-choice&utm_medium=preload",
+                    distributionIdManager,
+                )
+            )
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(
+                    "utm_source=addons.mozilla.org&utm_medium=referral&utm_campaign=amo-fx-cta-869140&utm_content=rta%3AezU4YzMyYWM0LTBkNmMtNGQ2Zi1hZTJjLTk2YWFmOGZmY2I2Nn0&utm_term=",
+                    distributionIdManager,
+                )
+            )
             assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclida=", distributionIdManager))
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("adjust_reftag_test", distributionIdManager))
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(
+                    "adjust_reftag_test",
+                    distributionIdManager,
+                )
+            )
             assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("test", distributionIdManager))
         }
 
@@ -219,41 +312,56 @@ internal class InstallReferrerHandlingServiceTest {
     fun `GIVEN a partnership distribution that skips the consent screen WHEN referrer is present THEN we should not show marketing onboarding`() =
         runBlocking {
             distributionIdManager.setDistribution(DistributionIdManager.Distribution.VIVO_001)
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager))
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager)
+            )
 
             distributionIdManager.setDistribution(DistributionIdManager.Distribution.DT_001)
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager))
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager)
+            )
 
             distributionIdManager.setDistribution(DistributionIdManager.Distribution.DT_002)
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager))
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager)
+            )
 
             distributionIdManager.setDistribution(DistributionIdManager.Distribution.DT_003)
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager))
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager)
+            )
 
             distributionIdManager.setDistribution(DistributionIdManager.Distribution.XIAOMI_001)
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager))
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager)
+            )
 
             distributionIdManager.setDistribution(DistributionIdManager.Distribution.AURA_001)
-            assertFalse(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager))
+            assertFalse(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", distributionIdManager)
+            )
         }
 
     @Test
     fun `GIVEN a partnership distribution that should show the consent screen THEN we should show marketing onboarding`() =
         runBlocking {
-            val mockedDistributionIdManager = mockk<DistributionIdManager> {
-                coEvery { isPartnershipDistribution() } returns true
-                coEvery { shouldSkipMarketingConsentScreen() } returns false
-            }
+            val mockedDistributionIdManager =
+                mockk<DistributionIdManager> {
+                    coEvery { isPartnershipDistribution() } returns true
+                    coEvery { shouldSkipMarketingConsentScreen() } returns false
+                }
             assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding(null, mockedDistributionIdManager))
-            assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", mockedDistributionIdManager))
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding("gclid=12345", mockedDistributionIdManager)
+            )
         }
 
     @Test
-    fun `WHEN installReferrerResponse is a Meta attribution THEN we should show marketing onboarding`() =
-        runBlocking {
-            val metaReferrer = """utm_source=apps.facebook.com&utm_medium=paid&utm_content={"app":12345,"t":1234567890,"source":{"data":"DATA","nonce":"NONCE"}}"""
-            assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding(metaReferrer, distributionIdManager))
-        }
+    fun `WHEN installReferrerResponse is a Meta attribution THEN we should show marketing onboarding`() = runBlocking {
+        val metaReferrer =
+            """utm_source=apps.facebook.com&utm_medium=paid&utm_content={"app":12345,"t":1234567890,"source":{"data":"DATA","nonce":"NONCE"}}"""
+        assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding(metaReferrer, distributionIdManager))
+    }
 
     @Test
     fun `WHEN installReferrerResponse is null or blank or malformed THEN isMetaAttribution returns false`() {
@@ -288,28 +396,35 @@ internal class InstallReferrerHandlingServiceTest {
     }
 
     @Test
-    fun `GIVEN a Meta-attributed referrer on OK response WHEN start is called THEN isUserMetaAttributed is true`() {
-        val referrer =
-            """utm_source=apps.facebook.com&utm_medium=paid&utm_content={"app":12345,"t":1234567890,"source":{"data":"DATA","nonce":"NONCE"}}"""
-        val service = fakeService(
-            responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
-            referrerResponse = referrer,
-        )
+    fun `GIVEN a Meta-attributed referrer on OK response WHEN start is called THEN isUserMetaAttributed is true`() =
+        runTest {
+            val referrer =
+                """utm_source=apps.facebook.com&utm_medium=paid&utm_content={"app":12345,"t":1234567890,"source":{"data":"DATA","nonce":"NONCE"}}"""
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = referrer,
+                    scope = this,
+                )
 
-        service.start()
+            service.start()
+            advanceUntilIdle()
 
-        assertTrue(testContext.components.settings.isUserMetaAttributed)
-    }
+            assertTrue(testContext.components.settings.isUserMetaAttributed)
+        }
 
     @Test
-    fun `GIVEN a non-Meta referrer on OK response WHEN start is called THEN isUserMetaAttributed is false`() {
+    fun `GIVEN a non-Meta referrer on OK response WHEN start is called THEN isUserMetaAttributed is false`() = runTest {
         testContext.components.settings.isUserMetaAttributed = true
-        val service = fakeService(
-            responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
-            referrerResponse = "utm_source=google&utm_medium=cpc",
-        )
+        val service =
+            fakeService(
+                responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                referrerResponse = "utm_source=google&utm_medium=cpc",
+                scope = this,
+            )
 
         service.start()
+        advanceUntilIdle()
 
         assertFalse(testContext.components.settings.isUserMetaAttributed)
     }
@@ -323,26 +438,22 @@ internal class InstallReferrerHandlingServiceTest {
 
     @Test
     fun `WHEN installReferrerResponse has a dotted TikTok adjust_external_click_id THEN isTikTokAttribution returns true`() {
-        assertTrue(
-            InstallReferrerHandlingService.isTikTokAttribution(
-                "adjust_external_click_id=E.C.P.C.04.AAAQzv8mYx",
-            ),
-        )
+        assertTrue(InstallReferrerHandlingService.isTikTokAttribution("adjust_external_click_id=E.C.P.C.04.AAAQzv8mYx"))
     }
 
     @Test
     fun `WHEN installReferrerResponse has an underscored TikTok adjust_external_click_id THEN isTikTokAttribution returns true`() {
-        assertTrue(
-            InstallReferrerHandlingService.isTikTokAttribution(
-                "adjust_external_click_id=E_C_P_C_12_AAAQzv8mYx",
-            ),
-        )
+        assertTrue(InstallReferrerHandlingService.isTikTokAttribution("adjust_external_click_id=E_C_P_C_12_AAAQzv8mYx"))
     }
 
     @Test
     fun `WHEN installReferrerResponse has a lowercase TikTok adjust_external_click_id THEN isTikTokAttribution returns true`() {
-        assertTrue(InstallReferrerHandlingService.isTikTokAttribution("adjust_external_click_id=e_c_p_c_abc_aaaqzv8myx"))
-        assertTrue(InstallReferrerHandlingService.isTikTokAttribution("adjust_external_click_id%3De_c_p_c_08aaaBBB8myx"))
+        assertTrue(
+            InstallReferrerHandlingService.isTikTokAttribution("adjust_external_click_id=e_c_p_c_abc_aaaqzv8myx")
+        )
+        assertTrue(
+            InstallReferrerHandlingService.isTikTokAttribution("adjust_external_click_id%3De_c_p_c_08aaaBBB8myx")
+        )
         assertTrue(InstallReferrerHandlingService.isTikTokAttribution("adjust_external_click_id%3DE_c_p_c_14a"))
         assertTrue(InstallReferrerHandlingService.isTikTokAttribution("adjust_external_click_id%3DE.c.P.c_24bbbCCc"))
     }
@@ -351,9 +462,7 @@ internal class InstallReferrerHandlingServiceTest {
     fun `WHEN installReferrerResponse has a malformed percent escape THEN isTikTokAttribution falls back to raw parsing`() {
         // The lone trailing % causes URLDecoder to throw IllegalArgumentException
         assertTrue(
-            InstallReferrerHandlingService.isTikTokAttribution(
-                "adjust_external_click_id=E_C_P_C_04_AAA&malformed=%",
-            ),
+            InstallReferrerHandlingService.isTikTokAttribution("adjust_external_click_id=E_C_P_C_04_AAA&malformed=%")
         )
     }
 
@@ -361,8 +470,8 @@ internal class InstallReferrerHandlingServiceTest {
     fun `WHEN installReferrerResponse has a non-TikTok adjust_external_click_id THEN isTikTokAttribution returns false`() {
         assertFalse(
             InstallReferrerHandlingService.isTikTokAttribution(
-                "adjust_external_click_id=EAIaIQobChMI4t7Y8KOM_wIVDpRoCR1RAQ7t",
-            ),
+                "adjust_external_click_id=EAIaIQobChMI4t7Y8KOM_wIVDpRoCR1RAQ7t"
+            )
         )
     }
 
@@ -372,36 +481,46 @@ internal class InstallReferrerHandlingServiceTest {
     }
 
     @Test
-    fun `GIVEN a TikTok-attributed referrer on OK response WHEN start is called THEN isUserTikTokAttributed is true`() {
-        val referrer = "adjust_external_click_id=E.C.P.C.04.AAA&utm_medium=paid"
-        val service = fakeService(
-            responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
-            referrerResponse = referrer,
-        )
+    fun `GIVEN a TikTok-attributed referrer on OK response WHEN start is called THEN isUserTikTokAttributed is true`() =
+        runTest {
+            val referrer = "adjust_external_click_id=E.C.P.C.04.AAA&utm_medium=paid"
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = referrer,
+                    scope = this,
+                )
 
-        service.start()
+            service.start()
+            advanceUntilIdle()
 
-        assertTrue(testContext.components.settings.isUserTikTokAttributed)
-    }
+            assertTrue(testContext.components.settings.isUserTikTokAttributed)
+        }
 
     @Test
-    fun `GIVEN a non-TikTok referrer on OK response WHEN start is called THEN isUserTikTokAttributed is false`() {
-        testContext.components.settings.isUserTikTokAttributed = true
-        val service = fakeService(
-            responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
-            referrerResponse = "utm_source=google&utm_medium=cpc",
-        )
+    fun `GIVEN a non-TikTok referrer on OK response WHEN start is called THEN isUserTikTokAttributed is false`() =
+        runTest {
+            testContext.components.settings.isUserTikTokAttributed = true
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = "utm_source=google&utm_medium=cpc",
+                    scope = this,
+                )
 
-        service.start()
+            service.start()
+            advanceUntilIdle()
 
-        assertFalse(testContext.components.settings.isUserTikTokAttributed)
-    }
+            assertFalse(testContext.components.settings.isUserTikTokAttributed)
+        }
 
     @Test
     fun `WHEN installReferrerResponse is a TikTok attribution THEN we should show marketing onboarding`() =
         runBlocking {
             val tiktokReferrer = "adjust_external_click_id=E.C.P.C.04.AAA&utm_medium=paid"
-            assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding(tiktokReferrer, distributionIdManager))
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(tiktokReferrer, distributionIdManager)
+            )
         }
 
     @Test
@@ -413,11 +532,7 @@ internal class InstallReferrerHandlingServiceTest {
 
     @Test
     fun `WHEN installReferrerResponse has a Reddit adjust_external_click_id THEN isRedditAttribution returns true`() {
-        assertTrue(
-            InstallReferrerHandlingService.isRedditAttribution(
-                "adjust_external_click_id=reddit_abc123XYZ",
-            ),
-        )
+        assertTrue(InstallReferrerHandlingService.isRedditAttribution("adjust_external_click_id=reddit_abc123XYZ"))
     }
 
     @Test
@@ -449,18 +564,14 @@ internal class InstallReferrerHandlingServiceTest {
     @Test
     fun `WHEN installReferrerResponse has a malformed percent escape THEN isRedditAttribution falls back to raw parsing`() {
         assertTrue(
-            InstallReferrerHandlingService.isRedditAttribution(
-                "adjust_external_click_id=reddit_abc123&malformed=%",
-            ),
+            InstallReferrerHandlingService.isRedditAttribution("adjust_external_click_id=reddit_abc123&malformed=%")
         )
     }
 
     @Test
     fun `WHEN installReferrerResponse has a non-Reddit adjust_external_click_id THEN isRedditAttribution returns false`() {
         assertFalse(
-            InstallReferrerHandlingService.isRedditAttribution(
-                "adjust_external_click_id=E.C.P.C.04.AAAQzv8mYx",
-            ),
+            InstallReferrerHandlingService.isRedditAttribution("adjust_external_click_id=E.C.P.C.04.AAAQzv8mYx")
         )
     }
 
@@ -470,36 +581,46 @@ internal class InstallReferrerHandlingServiceTest {
     }
 
     @Test
-    fun `GIVEN a Reddit-attributed referrer on OK response WHEN start is called THEN isUserRedditAttributed is true`() {
-        val referrer = "adjust_external_click_id=reddit_abc123&utm_medium=paid"
-        val service = fakeService(
-            responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
-            referrerResponse = referrer,
-        )
+    fun `GIVEN a Reddit-attributed referrer on OK response WHEN start is called THEN isUserRedditAttributed is true`() =
+        runTest {
+            val referrer = "adjust_external_click_id=reddit_abc123&utm_medium=paid"
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = referrer,
+                    scope = this,
+                )
 
-        service.start()
+            service.start()
+            advanceUntilIdle()
 
-        assertTrue(testContext.components.settings.isUserRedditAttributed)
-    }
+            assertTrue(testContext.components.settings.isUserRedditAttributed)
+        }
 
     @Test
-    fun `GIVEN a non-Reddit referrer on OK response WHEN start is called THEN isUserRedditAttributed is false`() {
-        testContext.components.settings.isUserRedditAttributed = true
-        val service = fakeService(
-            responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
-            referrerResponse = "utm_source=google&utm_medium=cpc",
-        )
+    fun `GIVEN a non-Reddit referrer on OK response WHEN start is called THEN isUserRedditAttributed is false`() =
+        runTest {
+            testContext.components.settings.isUserRedditAttributed = true
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = "utm_source=google&utm_medium=cpc",
+                    scope = this,
+                )
 
-        service.start()
+            service.start()
+            advanceUntilIdle()
 
-        assertFalse(testContext.components.settings.isUserRedditAttributed)
-    }
+            assertFalse(testContext.components.settings.isUserRedditAttributed)
+        }
 
     @Test
     fun `WHEN installReferrerResponse is a Reddit attribution THEN we should show marketing onboarding`() =
         runBlocking {
             val redditReferrer = "adjust_external_click_id=reddit_abc123&utm_medium=paid"
-            assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding(redditReferrer, distributionIdManager))
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(redditReferrer, distributionIdManager)
+            )
         }
 
     @Test
@@ -543,36 +664,431 @@ internal class InstallReferrerHandlingServiceTest {
     }
 
     @Test
-    fun `GIVEN an X-attributed referrer on OK response WHEN start is called THEN isUserXTwitterAttributed is true`() {
-        val referrer = "utm_source=x&utm_medium=paid"
-        val service = fakeService(
-            responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
-            referrerResponse = referrer,
-        )
+    fun `GIVEN an X-attributed referrer on OK response WHEN start is called THEN isUserXTwitterAttributed is true`() =
+        runTest {
+            val referrer = "utm_source=x&utm_medium=paid"
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = referrer,
+                    scope = this,
+                )
 
-        service.start()
+            service.start()
+            advanceUntilIdle()
 
-        assertTrue(testContext.components.settings.isUserXTwitterAttributed)
+            assertTrue(testContext.components.settings.isUserXTwitterAttributed)
+        }
+
+    @Test
+    fun `GIVEN a non-X referrer on OK response WHEN start is called THEN isUserXTwitterAttributed is false`() =
+        runTest {
+            testContext.components.settings.isUserXTwitterAttributed = true
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = "utm_source=google&utm_medium=cpc",
+                    scope = this,
+                )
+
+            service.start()
+            advanceUntilIdle()
+
+            assertFalse(testContext.components.settings.isUserXTwitterAttributed)
+        }
+
+    @Test
+    fun `WHEN installReferrerResponse is an X attribution THEN we should show marketing onboarding`() = runBlocking {
+        val xReferrer = "utm_source=x&utm_medium=paid"
+        assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding(xReferrer, distributionIdManager))
     }
 
     @Test
-    fun `GIVEN a non-X referrer on OK response WHEN start is called THEN isUserXTwitterAttributed is false`() {
-        testContext.components.settings.isUserXTwitterAttributed = true
-        val service = fakeService(
-            responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
-            referrerResponse = "utm_source=google&utm_medium=cpc",
-        )
-
-        service.start()
-
-        assertFalse(testContext.components.settings.isUserXTwitterAttributed)
+    fun `WHEN installReferrerResponse is null or blank THEN isMolocoAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isMolocoAttribution(null))
+        assertFalse(InstallReferrerHandlingService.isMolocoAttribution(""))
+        assertFalse(InstallReferrerHandlingService.isMolocoAttribution(" "))
     }
 
     @Test
-    fun `WHEN installReferrerResponse is an X attribution THEN we should show marketing onboarding`() =
+    fun `WHEN installReferrerResponse has a Moloco adjust_external_click_id THEN isMolocoAttribution returns true`() {
+        assertTrue(
+            InstallReferrerHandlingService.isMolocoAttribution(
+                "adjust_external_click_id=moloco_9b1deb4d-3b7d-4bad-9bdd-2b0d7b3d41a6"
+            )
+        )
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a mixed-case Moloco adjust_external_click_id THEN isMolocoAttribution returns true`() {
+        assertTrue(InstallReferrerHandlingService.isMolocoAttribution("adjust_external_click_id=Moloco_abc"))
+        assertTrue(InstallReferrerHandlingService.isMolocoAttribution("adjust_external_click_id=MOLOCO_abc"))
+        assertTrue(InstallReferrerHandlingService.isMolocoAttribution("adjust_external_click_id%3Dmoloco_abc"))
+        assertTrue(InstallReferrerHandlingService.isMolocoAttribution("adjust_external_click_id%3DMoLoCo_abc"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a malformed percent escape THEN isMolocoAttribution falls back to raw parsing`() {
+        assertTrue(
+            InstallReferrerHandlingService.isMolocoAttribution("adjust_external_click_id=moloco_abc123&malformed=%")
+        )
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a non-Moloco adjust_external_click_id THEN isMolocoAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isMolocoAttribution("adjust_external_click_id=reddit_abc123"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has no adjust_external_click_id THEN isMolocoAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isMolocoAttribution("utm_source=google&utm_medium=cpc"))
+    }
+
+    @Test
+    fun `GIVEN a Moloco-attributed referrer on OK response WHEN start is called THEN isUserMolocoAttributed is true`() =
+        runTest {
+            val referrer = "adjust_external_click_id=moloco_9b1deb4d-3b7d-4bad-9bdd-2b0d7b3d41a6&utm_medium=paid"
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = referrer,
+                    scope = this,
+                )
+
+            service.start()
+            advanceUntilIdle()
+
+            assertTrue(testContext.components.settings.isUserMolocoAttributed)
+        }
+
+    @Test
+    fun `GIVEN a non-Moloco referrer on OK response WHEN start is called THEN isUserMolocoAttributed is false`() =
+        runTest {
+            testContext.components.settings.isUserMolocoAttributed = true
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = "utm_source=google&utm_medium=cpc",
+                    scope = this,
+                )
+
+            service.start()
+            advanceUntilIdle()
+
+            assertFalse(testContext.components.settings.isUserMolocoAttributed)
+        }
+
+    @Test
+    fun `WHEN installReferrerResponse is a Moloco attribution THEN we should show marketing onboarding`() =
         runBlocking {
-            val xReferrer = "utm_source=x&utm_medium=paid"
-            assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding(xReferrer, distributionIdManager))
+            val molocoReferrer = "adjust_external_click_id=moloco_9b1deb4d-3b7d-4bad-9bdd-2b0d7b3d41a6&utm_medium=paid"
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(molocoReferrer, distributionIdManager)
+            )
+        }
+
+    @Test
+    fun `WHEN installReferrerResponse is null or blank THEN isRakutenAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isRakutenAttribution(null))
+        assertFalse(InstallReferrerHandlingService.isRakutenAttribution(""))
+        assertFalse(InstallReferrerHandlingService.isRakutenAttribution(" "))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has utm_source Rakuten THEN isRakutenAttribution returns true`() {
+        assertTrue(InstallReferrerHandlingService.isRakutenAttribution("utm_source=Rakuten&utm_medium=paid"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a mixed-case utm_source Rakuten THEN isRakutenAttribution returns true`() {
+        assertTrue(InstallReferrerHandlingService.isRakutenAttribution("utm_source=rakuten&utm_medium=paid"))
+        assertTrue(InstallReferrerHandlingService.isRakutenAttribution("utm_source%3DRAKUTEN&utm_medium=paid"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a malformed percent escape THEN isRakutenAttribution falls back to raw parsing`() {
+        assertTrue(InstallReferrerHandlingService.isRakutenAttribution("utm_source=Rakuten&malformed=%"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a non-Rakuten utm_source THEN isRakutenAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isRakutenAttribution("utm_source=google&utm_medium=cpc"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a utm_source that merely starts with Rakuten THEN isRakutenAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isRakutenAttribution("utm_source=Rakutens&utm_medium=cpc"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has no utm_source THEN isRakutenAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isRakutenAttribution("adjust_external_click_id=reddit_abc"))
+    }
+
+    @Test
+    fun `GIVEN a Rakuten-attributed referrer on OK response WHEN start is called THEN isUserRakutenAttributed is true`() =
+        runTest {
+            val referrer = "utm_source=Rakuten&utm_medium=paid"
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = referrer,
+                    scope = this,
+                )
+
+            service.start()
+            advanceUntilIdle()
+
+            assertTrue(testContext.components.settings.isUserRakutenAttributed)
+        }
+
+    @Test
+    fun `GIVEN a non-Rakuten referrer on OK response WHEN start is called THEN isUserRakutenAttributed is false`() =
+        runTest {
+            testContext.components.settings.isUserRakutenAttributed = true
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = "utm_source=google&utm_medium=cpc",
+                    scope = this,
+                )
+
+            service.start()
+            advanceUntilIdle()
+
+            assertFalse(testContext.components.settings.isUserRakutenAttributed)
+        }
+
+    @Test
+    fun `WHEN installReferrerResponse is a Rakuten attribution THEN we should show marketing onboarding`() =
+        runBlocking {
+            val rakutenReferrer = "utm_source=Rakuten&utm_medium=paid"
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(rakutenReferrer, distributionIdManager)
+            )
+        }
+
+    @Test
+    fun `WHEN installReferrerResponse is null or blank THEN isSkyflagAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isSkyflagAttribution(null))
+        assertFalse(InstallReferrerHandlingService.isSkyflagAttribution(""))
+        assertFalse(InstallReferrerHandlingService.isSkyflagAttribution(" "))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has utm_source skyflag THEN isSkyflagAttribution returns true`() {
+        assertTrue(InstallReferrerHandlingService.isSkyflagAttribution("utm_source=skyflag&utm_medium=paid"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a mixed-case utm_source skyflag THEN isSkyflagAttribution returns true`() {
+        assertTrue(InstallReferrerHandlingService.isSkyflagAttribution("utm_source=Skyflag&utm_medium=paid"))
+        assertTrue(InstallReferrerHandlingService.isSkyflagAttribution("utm_source%3Dskyflag&utm_medium=paid"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a non-Skyflag utm_source THEN isSkyflagAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isSkyflagAttribution("utm_source=google&utm_medium=cpc"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a utm_source that merely starts with skyflag THEN isSkyflagAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isSkyflagAttribution("utm_source=skyflagged&utm_medium=cpc"))
+    }
+
+    @Test
+    fun `GIVEN a Skyflag-attributed referrer on OK response WHEN start is called THEN isUserSkyflagAttributed is true`() =
+        runTest {
+            val referrer = "utm_source=skyflag&utm_medium=paid"
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = referrer,
+                    scope = this,
+                )
+
+            service.start()
+            advanceUntilIdle()
+
+            assertTrue(testContext.components.settings.isUserSkyflagAttributed)
+        }
+
+    @Test
+    fun `GIVEN a non-Skyflag referrer on OK response WHEN start is called THEN isUserSkyflagAttributed is false`() =
+        runTest {
+            testContext.components.settings.isUserSkyflagAttributed = true
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = "utm_source=google&utm_medium=cpc",
+                    scope = this,
+                )
+
+            service.start()
+            advanceUntilIdle()
+
+            assertFalse(testContext.components.settings.isUserSkyflagAttributed)
+        }
+
+    @Test
+    fun `WHEN installReferrerResponse is a Skyflag attribution THEN we should show marketing onboarding`() =
+        runBlocking {
+            val skyflagReferrer = "utm_source=skyflag&utm_medium=paid"
+            assertTrue(
+                InstallReferrerHandlingService.shouldShowMarketingOnboarding(skyflagReferrer, distributionIdManager)
+            )
+        }
+
+    @Test
+    fun `WHEN installReferrerResponse is null or blank THEN isQuoraAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isQuoraAttribution(null))
+        assertFalse(InstallReferrerHandlingService.isQuoraAttribution(""))
+        assertFalse(InstallReferrerHandlingService.isQuoraAttribution(" "))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has utm_source quora THEN isQuoraAttribution returns true`() {
+        assertTrue(InstallReferrerHandlingService.isQuoraAttribution("utm_source=quora&utm_medium=paid"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a mixed-case utm_source quora THEN isQuoraAttribution returns true`() {
+        assertTrue(InstallReferrerHandlingService.isQuoraAttribution("utm_source=Quora&utm_medium=paid"))
+        assertTrue(InstallReferrerHandlingService.isQuoraAttribution("utm_source%3DQUORA&utm_medium=paid"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a malformed percent escape THEN isQuoraAttribution falls back to raw parsing`() {
+        assertTrue(InstallReferrerHandlingService.isQuoraAttribution("utm_source=quora&malformed=%"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a non-Quora utm_source THEN isQuoraAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isQuoraAttribution("utm_source=google&utm_medium=cpc"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has a utm_source that merely starts with quora THEN isQuoraAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isQuoraAttribution("utm_source=quorable&utm_medium=cpc"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse has no utm_source THEN isQuoraAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isQuoraAttribution("adjust_external_click_id=reddit_abc"))
+    }
+
+    @Test
+    fun `GIVEN a Quora-attributed referrer on OK response WHEN start is called THEN isUserQuoraAttributed is true`() =
+        runTest {
+            val referrer = "utm_source=quora&utm_medium=paid"
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = referrer,
+                    scope = this,
+                )
+
+            service.start()
+            advanceUntilIdle()
+
+            assertTrue(testContext.components.settings.isUserQuoraAttributed)
+        }
+
+    @Test
+    fun `GIVEN a non-Quora referrer on OK response WHEN start is called THEN isUserQuoraAttributed is false`() =
+        runTest {
+            testContext.components.settings.isUserQuoraAttributed = true
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = "utm_source=google&utm_medium=cpc",
+                    scope = this,
+                )
+
+            service.start()
+            advanceUntilIdle()
+
+            assertFalse(testContext.components.settings.isUserQuoraAttributed)
+        }
+
+    @Test
+    fun `WHEN installReferrerResponse is a Quora attribution THEN we should show marketing onboarding`() = runBlocking {
+        val quoraReferrer = "utm_source=quora&utm_medium=paid"
+        assertTrue(InstallReferrerHandlingService.shouldShowMarketingOnboarding(quoraReferrer, distributionIdManager))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse is null or blank THEN isPairingCampaignAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isPairingCampaignAttribution(null, "pairing123"))
+        assertFalse(InstallReferrerHandlingService.isPairingCampaignAttribution("", "pairing123"))
+        assertFalse(InstallReferrerHandlingService.isPairingCampaignAttribution(" ", "pairing123"))
+    }
+
+    @Test
+    fun `WHEN no campaign utm_content is configured THEN isPairingCampaignAttribution returns false`() {
+        assertFalse(
+            InstallReferrerHandlingService.isPairingCampaignAttribution("utm_source=google&utm_content=pairing123", "")
+        )
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse utm_content matches the configured campaign value THEN isPairingCampaignAttribution returns true`() {
+        assertTrue(
+            InstallReferrerHandlingService.isPairingCampaignAttribution(
+                "utm_source=google&utm_content=pairing123",
+                "pairing123",
+            )
+        )
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse utm_content differs only by case THEN isPairingCampaignAttribution returns true`() {
+        assertTrue(InstallReferrerHandlingService.isPairingCampaignAttribution("utm_content=Pairing123", "pairing123"))
+    }
+
+    @Test
+    fun `WHEN installReferrerResponse utm_content does not match the configured campaign value THEN isPairingCampaignAttribution returns false`() {
+        assertFalse(InstallReferrerHandlingService.isPairingCampaignAttribution("utm_content=other", "pairing123"))
+    }
+
+    @Test
+    fun `GIVEN a pairing-attributed referrer on OK response WHEN start is called THEN isUserPairingCampaignAttributed is true`() =
+        runTest {
+            FxNimbus.features.pairingSigninPrompt.withCachedValue(
+                PairingSigninPrompt(campaignUtmContent = "pairing123")
+            )
+            val referrer = "utm_source=google&utm_content=pairing123"
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = referrer,
+                    scope = this,
+                )
+
+            service.start()
+            advanceUntilIdle()
+
+            assertTrue(testContext.components.settings.isUserPairingCampaignAttributed)
+        }
+
+    @Test
+    fun `GIVEN a non-pairing referrer on OK response WHEN start is called THEN isUserPairingCampaignAttributed is false`() =
+        runTest {
+            FxNimbus.features.pairingSigninPrompt.withCachedValue(
+                PairingSigninPrompt(campaignUtmContent = "pairing123")
+            )
+            testContext.components.settings.isUserPairingCampaignAttributed = true
+            val service =
+                fakeService(
+                    responseCode = InstallReferrerClient.InstallReferrerResponse.OK,
+                    referrerResponse = "utm_source=google&utm_content=pairing456",
+                    scope = this,
+                )
+
+            service.start()
+            advanceUntilIdle()
+
+            assertFalse(testContext.components.settings.isUserPairingCampaignAttributed)
         }
 }
 

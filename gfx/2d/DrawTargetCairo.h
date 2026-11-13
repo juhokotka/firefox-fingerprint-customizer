@@ -5,11 +5,11 @@
 #ifndef MOZILLA_GFX_DRAWTARGET_CAIRO_H_
 #define MOZILLA_GFX_DRAWTARGET_CAIRO_H_
 
-#include "2D.h"
-#include "cairo.h"
-#include "PathCairo.h"
-
 #include <vector>
+
+#include "2D.h"
+#include "PathCairo.h"
+#include "cairo.h"
 
 namespace mozilla {
 namespace gfx {
@@ -142,6 +142,8 @@ class DrawTargetCairo final : public DrawTarget {
       const NativeSurface& aSurface) const override;
   already_AddRefed<DrawTarget> CreateSimilarDrawTarget(
       const IntSize& aSize, SurfaceFormat aFormat) const override;
+  bool CanCreateSimilarDrawTarget(const IntSize& aSize,
+                                  SurfaceFormat aFormat) const override;
   already_AddRefed<DrawTarget> CreateShadowDrawTarget(
       const IntSize& aSize, SurfaceFormat aFormat, float aSigma) const override;
   RefPtr<DrawTarget> CreateClippedDrawTarget(const Rect& aBounds,

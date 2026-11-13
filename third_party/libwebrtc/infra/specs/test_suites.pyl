@@ -22,15 +22,14 @@
       # keep-sorted start block=yes
       'AppRTCMobile_test_apk': {},
       'android_instrumentation_test_apk': {},
+      'audio_coding_unittests': {},
       'audio_decoder_unittests': {},
       'audio_engine_tests': {},
+      'audio_processing_unittests': {},
       'call_tests': {},
       'common_audio_unittests': {},
       'common_video_unittests': {},
       'dcsctp_unittests': {},
-      'modules_tests': {
-        'mixins': ['shards-2'],
-      },
       'modules_unittests': {
         'mixins': ['shards-6'],
       },
@@ -45,6 +44,7 @@
       'rtc_unittests': {
         'mixins': ['shards-6'],
       },
+      'rtp_rtcp_unittests': {},
       'slow_peer_connection_unittests': {},
       'svc_tests': {
         'mixins': ['shards-8'],
@@ -53,10 +53,12 @@
       'test_support_unittests': {},
       'tools_unittests': {},
       'video_adaptation_tests': {},
+      'video_coding_unittests': {},
       'video_tests': {
         'mixins': ['shards-4'],
       },
       'video_timing_tests': {},
+      'videocodec_test_mediacodec': {},
       'voip_unittests': {},
       'webrtc_nonparallel_tests': {},
       # keep-sorted end
@@ -73,15 +75,16 @@
     },
     'desktop_tests': {
       # keep-sorted start block=yes
+      'audio_coding_unittests': {},
       'audio_decoder_unittests': {},
       'audio_engine_tests': {},
+      'audio_processing_unittests': {},
       'call_tests': {},
       'common_audio_unittests': {},
       'common_video_unittests': {},
       'dcsctp_unittests': {},
-      'modules_tests': {
-        'mixins': ['shards-2'],
-      },
+      'desktop_capture_modules_tests': {},
+      'desktop_capture_unittests': {},
       'modules_unittests': {
         'mixins': ['shards-6'],
       },
@@ -96,6 +99,7 @@
       'rtc_unittests': {
         'mixins': ['shards-6'],
       },
+      'rtp_rtcp_unittests': {},
       'rust_tests': {},
       'slow_peer_connection_unittests': {},
       'svc_tests': {
@@ -107,14 +111,19 @@
       },
       'tools_unittests': {},
       'video_adaptation_tests': {},
+      'video_coding_unittests': {},
       'video_tests': {},
       'video_timing_tests': {},
       'voip_unittests': {},
       'webrtc_nonparallel_tests': {},
+      'xvfb_capture_tests': {},
       # keep-sorted end
     },
     'desktop_tests_linux_specific': {
       'shared_screencast_stream_test': {},
+    },
+    'desktop_tests_mac_specific': {
+      'desktop_capture_mac_unittests': {},
     },
     'desktop_tests_try_server_specific': {
       'video_codec_perf_tests': {
@@ -125,6 +134,9 @@
         'remove_mixins': ['resultdb-json-format'],
         'mixins': ['quick-perf-tests', 'resultdb-gtest-json-format'],
       }
+    },
+    'desktop_tests_win_specific': {
+      'desktop_capture_win_unittests': {},
     },
     'fuchsia_compatible_tests': {
       # keep-sorted start block=yes
@@ -163,23 +175,23 @@
       'apprtcmobile_tests': {
         'mixins': ['xcodebuild_sim_runner']
       },
+      'audio_coding_unittests': {},
       'audio_decoder_unittests': {},
       'audio_engine_tests': {},
+      'audio_processing_unittests': {},
       'call_tests': {},
       'common_audio_unittests': {},
       'common_video_unittests': {},
       'dcsctp_unittests': {},
-      'modules_tests': {
-        'mixins': ['shards-2'],
-      },
       'modules_unittests': {
-        'mixins': ['shards-6', 'cores-12'],
+        'mixins': ['shards-6'],
       },
       'resource_adaptation_tests': {},
       'rtc_media_unittests': {},
       'rtc_p2p_unittests': {},
       'rtc_pc_unittests': {},
       'rtc_stats_unittests': {},
+      'rtp_rtcp_unittests': {},
       # TODO: b/402029695 - Re-enable these tests.
       # 'rtc_unittests': {
       #   'mixins': ['shards-6'],
@@ -191,12 +203,13 @@
         'mixins': ['xcodebuild_sim_runner']
       },
       'svc_tests': {
-        'mixins': ['shards-4', 'cores-12'],
+        'mixins': ['shards-8'],
       },
       'system_wrappers_unittests': {},
       'test_support_unittests': {},
       'tools_unittests': {},
       'video_adaptation_tests': {},
+      'video_coding_unittests': {},
       'video_tests': {
         'mixins': ['shards-4'],
       },
@@ -244,18 +257,32 @@
       'android_tests',
       'android_tests_tryserver_specific',
     ],
-    'desktop_tests_tryserver': [
-      'desktop_tests',
-      'desktop_tests_try_server_specific',
-    ],
-    'linux_desktop_tests_tryserver': [
-      'desktop_tests',
-      'desktop_tests_linux_specific',
-      'desktop_tests_try_server_specific',
-    ],
     'linux_tests': [
       'desktop_tests',
       'desktop_tests_linux_specific',
+    ],
+    'linux_tests_tryserver': [
+      'desktop_tests',
+      'desktop_tests_linux_specific',
+      'desktop_tests_try_server_specific',
+    ],
+    'mac_tests': [
+      'desktop_tests',
+      'desktop_tests_mac_specific',
+    ],
+    'mac_tests_tryserver': [
+      'desktop_tests',
+      'desktop_tests_mac_specific',
+      'desktop_tests_try_server_specific',
+    ],
+    'win_tests': [
+      'desktop_tests',
+      'desktop_tests_win_specific',
+    ],
+    'win_tests_tryserver': [
+      'desktop_tests',
+      'desktop_tests_try_server_specific',
+      'desktop_tests_win_specific',
     ],
   },
 

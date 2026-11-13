@@ -29,7 +29,7 @@ function injectValues(queryMap) {
   document.title = queryMap.title;
   tryAgainButton.innerHTML = queryMap.button;
   continueHttpButton.innerHTML = queryMap.continueHttpButton;
-  backFromHttpButton.innerHTML = queryMap.badCertGoBack;
+  backFromHttpButton.innerHTML = queryMap.backFromHttpButton;
   document.getElementById("errorTitleText").innerHTML = queryMap.title;
   document.getElementById("errorShortDesc").innerHTML = queryMap.description;
   document.getElementById("advancedButton").innerHTML =
@@ -64,6 +64,152 @@ function injectValues(queryMap) {
     const errorCode = document.getElementById("errorCode");
     errorCode.textContent = queryMap.errorCode;
   }
+
+  // Only offer an archived copy when we were given a cleaned http(s) URL for the
+  // page that failed to load. The labels are localized and passed as query params.
+  if (queryMap.archiveUrl) {
+    document.getElementById("viewArchivedButton").textContent =
+      queryMap.archiveCheckButtonLabel;
+    document.getElementById("viewArchivedButton").style.display = "block";
+    injectArchiveDescription(queryMap);
+    document.getElementById("archiveNotFoundText").textContent =
+      queryMap.archiveNotFoundMessage;
+    document.getElementById("archiveSearchWebLink").textContent =
+      queryMap.archiveSearchWebLabel;
+    document.getElementById("archiveUnreachableText").textContent =
+      queryMap.archiveUnreachableMessage;
+    document.getElementById("archiveRetryLink").textContent =
+      queryMap.archiveRetryLabel;
+  }
+}
+
+// Custom scheme used to hand archive actions back to native code, where the
+// default search engine lives. Intercepted by AppRequestInterceptor.
+const ERROR_PAGE_ACTION_PREFIX = "firefox-error-action://";
+
+// Landing page of the archive service the button queries, linked from the
+// service's name in the explanatory text under the button.
+const WAYBACK_MACHINE_URL = "https://web.archive.org/";
+
+/**
+ * Fills in and shows the text under the archive button, turning the archive service's
+ * name into a link to that service.
+ */
+function injectArchiveDescription(queryMap) {
+  const description = document.getElementById("archiveDescription");
+  const sentence = queryMap.archiveDescriptionMessage;
+  if (!sentence) {
+    return;
+  }
+  const label = queryMap.archiveDescriptionLinkLabel;
+  const labelIndex = label ? sentence.indexOf(label) : -1;
+  if (labelIndex === -1) {
+    description.textContent = sentence;
+  } else {
+    const link = document.createElement("a");
+    link.href = WAYBACK_MACHINE_URL;
+    link.textContent = label;
+    description.replaceChildren(
+      sentence.slice(0, labelIndex),
+      link,
+      sentence.slice(labelIndex + label.length)
+    );
+  }
+  description.hidden = false;
+}
+
+/**
+ * Ask the availability API for the closest archived snapshot of the failed page
+ * and open it if one exists. While the request is in flight the button shows a
+ * spinner. If nothing is archived the button is replaced with a warning offering
+ * a web search instead; if the archive service can't be reached the button is
+ * replaced with a warning offering to retry the lookup.
+ */
+async function viewArchivedVersion(queryMap) {
+  const button = document.getElementById("viewArchivedButton");
+  button.disabled = true;
+  button.textContent = "";
+  const spinner = document.createElement("span");
+  spinner.className = "spinner";
+  button.appendChild(spinner);
+  button.appendChild(document.createTextNode(queryMap.archiveCheckingLabel));
+  let data;
+  try {
+    const response = await fetch(
+      "https://archive.org/wayback/available?url=" +
+        encodeURIComponent(queryMap.archiveUrl)
+    );
+    if (!response.ok) {
+      showArchiveError(queryMap);
+      return;
+    }
+    data = await response.json();
+  } catch (e) {
+    // Network failure or an unparseable response: the service is unreachable.
+    showArchiveError(queryMap);
+    return;
+  }
+  const snapshot = data?.archived_snapshots?.closest;
+  if (snapshot?.available && snapshot.url) {
+    window.location.href =
+      ERROR_PAGE_ACTION_PREFIX + "open?url=" + encodeURIComponent(snapshot.url);
+    return;
+  }
+  showNoArchiveFound(queryMap.archiveUrl);
+}
+
+/**
+ * Hide the archive button and show a warning offering to search the web for the
+ * failed page instead.
+ */
+function showNoArchiveFound(archiveUrl) {
+  document.getElementById("viewArchivedButton").style.display = "none";
+  document.getElementById("archiveDescription").hidden = true;
+  document.getElementById("archiveWarningContent").hidden = false;
+  document
+    .getElementById("archiveSearchWebLink")
+    .addEventListener("click", e => {
+      e.preventDefault();
+      searchTheWeb(archiveUrl);
+    });
+}
+
+/**
+ * Hide the archive button and show a warning that the archive service couldn't
+ * be reached, offering to retry the lookup. Uses `onclick` (rather than an added
+ * listener) so repeated failures don't stack duplicate retry handlers.
+ */
+function showArchiveError(queryMap) {
+  document.getElementById("viewArchivedButton").style.display = "none";
+  document.getElementById("archiveDescription").hidden = true;
+  const errorContent = document.getElementById("archiveErrorContent");
+  errorContent.hidden = false;
+  document.getElementById("archiveRetryLink").onclick = e => {
+    e.preventDefault();
+    errorContent.hidden = true;
+    document.getElementById("viewArchivedButton").style.display = "block";
+    document.getElementById("archiveDescription").hidden = false;
+    viewArchivedVersion(queryMap);
+  };
+}
+
+/**
+ * Tell native code the archive button was clicked so it can record usage telemetry,
+ * regardless of the lookup outcome. Fire-and-forget: native records the event and denies
+ * the navigation, so the page stays put and the availability lookup proceeds.
+ */
+function recordArchiveButtonClicked() {
+  window.location.href = ERROR_PAGE_ACTION_PREFIX + "attempt";
+}
+
+/**
+ * Hand the cleaned URL to native code as a search query (rather than an address)
+ * so it is searched with the user's default search engine.
+ */
+function searchTheWeb(archiveUrl) {
+  const query = archiveUrl.replace(/^https?:\/\//, "");
+  window.location.href =
+    ERROR_PAGE_ACTION_PREFIX + "search?q=" + encodeURIComponent(query);
 }
 
 let advancedVisible = false;
@@ -165,6 +311,18 @@ document.addEventListener("DOMContentLoaded", function () {
   document
     .getElementById("continueHttp")
     .addEventListener("click", () => document.reloadWithHttpsOnlyException());
+
+  const query = Object.fromEntries(
+    new URLSearchParams(document.documentURI.split("?")[1] || "").entries()
+  );
+  if (query.archiveUrl) {
+    document
+      .getElementById("viewArchivedButton")
+      .addEventListener("click", () => {
+        recordArchiveButtonClicked();
+        viewArchivedVersion(query);
+      });
+  }
 });
 
 parseQuery(document.documentURI);

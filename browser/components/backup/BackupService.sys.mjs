@@ -2,16 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import * as DefaultBackupResources from "resource:///modules/backup/BackupResources.sys.mjs";
+import * as DefaultBackupResources from "moz-src:///browser/components/backup/BackupResources.sys.mjs";
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
-import { BackupResource } from "resource:///modules/backup/BackupResource.sys.mjs";
+import { BackupResource } from "moz-src:///browser/components/backup/resources/BackupResource.sys.mjs";
 import {
   MeasurementUtils,
   BYTES_IN_KILOBYTE,
   BYTES_IN_MEGABYTE,
   BYTES_IN_MEBIBYTE,
-} from "resource:///modules/backup/MeasurementUtils.sys.mjs";
+} from "moz-src:///browser/components/backup/MeasurementUtils.sys.mjs";
 
 import {
   ERRORS,
@@ -19,7 +19,7 @@ import {
   RESTORE_STEPS,
   errorString,
 } from "chrome://browser/content/backup/backup-constants.mjs";
-import { BackupError } from "resource:///modules/backup/BackupError.mjs";
+import { BackupError } from "moz-src:///browser/components/backup/BackupError.mjs";
 
 const BACKUP_DIR_PREF_NAME = "browser.backup.location";
 const BACKUP_ERROR_CODE_PREF_NAME = "browser.backup.errorCode";
@@ -73,10 +73,11 @@ ChromeUtils.defineLazyGetter(lazy, "fxAccounts", () => {
 
 ChromeUtils.defineESModuleGetters(lazy, {
   AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
-  ArchiveDecryptor: "resource:///modules/backup/ArchiveEncryption.sys.mjs",
+  ArchiveDecryptor:
+    "moz-src:///browser/components/backup/ArchiveEncryption.sys.mjs",
   ArchiveEncryptionState:
-    "resource:///modules/backup/ArchiveEncryptionState.sys.mjs",
-  ArchiveUtils: "resource:///modules/backup/ArchiveUtils.sys.mjs",
+    "moz-src:///browser/components/backup/ArchiveEncryptionState.sys.mjs",
+  ArchiveUtils: "moz-src:///browser/components/backup/ArchiveUtils.sys.mjs",
   BasePromiseWorker: "resource://gre/modules/PromiseWorker.sys.mjs",
   ClientID: "resource://gre/modules/ClientID.sys.mjs",
   DeferredTask: "resource://gre/modules/DeferredTask.sys.mjs",
@@ -875,7 +876,11 @@ export class BackupService extends EventTarget {
     backupInProgress: false,
     scheduledBackupsEnabled: lazy.scheduledBackupsPref,
     encryptionEnabled: false,
-    /** @type {number?} Number of seconds since UNIX epoch */
+    /**
+     * Number of seconds since UNIX epoch
+     *
+     * @type {number?}
+     */
     lastBackupDate: null,
     lastBackupFileName: lazy.lastBackupFileName,
     supportBaseLink: Services.urlFormatter.formatURLPref("app.support.baseURL"),
@@ -2539,7 +2544,7 @@ export class BackupService extends EventTarget {
     );
 
     let worker = new lazy.BasePromiseWorker(
-      "resource:///modules/backup/Archive.worker.mjs",
+      "moz-src:///browser/components/backup/Archive.worker.mjs",
       { type: "module" }
     );
     worker.ExceptionHandlers[BackupError.name] = BackupError.fromMsg;
@@ -2840,7 +2845,7 @@ export class BackupService extends EventTarget {
    */
   async sampleArchive(archivePath) {
     let worker = new lazy.BasePromiseWorker(
-      "resource:///modules/backup/Archive.worker.mjs",
+      "moz-src:///browser/components/backup/Archive.worker.mjs",
       { type: "module" }
     );
     worker.ExceptionHandlers[BackupError.name] = BackupError.fromMsg;
@@ -2956,7 +2961,8 @@ export class BackupService extends EventTarget {
    *   The path to write the extracted file to.
    * @param {string} [recoveryCode=null]
    *   The recovery code to decrypt an encrypted backup with.
-   * @returns {Promise<undefined, Error>}
+   * @returns {Promise<{isEncrypted: boolean}, Error>}
+   *   Resolves with whether the archive was encrypted.
    */
   async extractCompressedSnapshotFromArchive(
     archivePath,
@@ -3015,6 +3021,8 @@ export class BackupService extends EventTarget {
         decryptor.OSKeyStoreSecret
       );
     }
+
+    return { isEncrypted };
   }
 
   /**
@@ -3250,11 +3258,12 @@ export class BackupService extends EventTarget {
         BackupService.RECOVERY_ZIP_FILE_NAME
       );
       currentStep = RESTORE_STEPS.RESTORE_EXTRACT_SNAPSHOT;
-      await this.extractCompressedSnapshotFromArchive(
-        archivePath,
-        RECOVERY_FILE_DEST_PATH,
-        recoveryCode
-      );
+      let { isEncrypted } =
+        (await this.extractCompressedSnapshotFromArchive(
+          archivePath,
+          RECOVERY_FILE_DEST_PATH,
+          recoveryCode
+        )) ?? {};
 
       const RECOVERY_FOLDER_DEST_PATH = PathUtils.join(
         profilePath,
@@ -3330,14 +3339,16 @@ export class BackupService extends EventTarget {
               null,
               profileRootPath,
               manifest,
-              replaceCurrentProfile
+              replaceCurrentProfile,
+              isEncrypted
             );
         } else {
           newProfile = await this.recoverFromSnapshotFolder(
             RECOVERY_FOLDER_DEST_PATH,
             shouldLaunchOrQuit,
             profileRootPath,
-            manifest
+            manifest,
+            isEncrypted
           );
         }
 
@@ -3585,10 +3596,12 @@ export class BackupService extends EventTarget {
    * @param {string} recoveryPath The path to the decompressed backup archive
    *   on the file system.
    * @param {string} profilePath The path of the newly recovered profile
+   * @param {boolean} wasEncrypted Whether the source archive was encrypted.
+   *   Resources that require encryption are skipped when this is false.
    * @returns {object}
    *   An object containing post recovery data for each resource.
    */
-  async #recoverResources(manifest, recoveryPath, profilePath) {
+  async #recoverResources(manifest, recoveryPath, profilePath, wasEncrypted) {
     let postRecovery = {};
 
     // Iterate over each resource in the manifest and call recover() on each
@@ -3598,6 +3611,16 @@ export class BackupService extends EventTarget {
       let resourceClass = this.#resources.get(resourceKey);
       if (!resourceClass) {
         lazy.logConsole.error(`No BackupResource found for key ${resourceKey}`);
+        continue;
+      }
+
+      // A resource that requires encryption should only have been written into
+      // an encrypted archive. If the archive isn't encrypted, refuse to recover it.
+      if (resourceClass.requiresEncryption && !wasEncrypted) {
+        lazy.logConsole.warn(
+          `Skipping resource ${resourceKey}: requires encryption but the ` +
+            `archive is not encrypted.`
+        );
         continue;
       }
 
@@ -3679,6 +3702,9 @@ export class BackupService extends EventTarget {
    * @param {object} [manifest=null]
    *   If we've already read and validated the manifest, we can avoid redoing that work
    *   by passing this in as a parameter.
+   * @param {boolean} [wasEncrypted=false]
+   *   Whether the source archive was encrypted. Resources that require
+   *   encryption are skipped during recovery when this is false.
    * @returns {Promise<nsIToolkitProfile>}
    *   The nsIToolkitProfile that was created for the recovered profile.
    * @throws {Exception}
@@ -3688,7 +3714,8 @@ export class BackupService extends EventTarget {
     recoveryPath,
     shouldLaunch = false,
     profileRootPath = null,
-    manifest = null
+    manifest = null,
+    wasEncrypted = false
   ) {
     lazy.logConsole.debug("Recovering from backup at ", recoveryPath);
 
@@ -3724,7 +3751,8 @@ export class BackupService extends EventTarget {
       let postRecovery = await this.#recoverResources(
         manifest,
         recoveryPath,
-        profile.rootDir.path
+        profile.rootDir.path,
+        wasEncrypted
       );
 
       restoreStep = RESTORE_STEPS.RESTORE_WRITE_POST_RECOVERY;
@@ -3841,6 +3869,9 @@ export class BackupService extends EventTarget {
    *   by passing this in as a parameter.
    * @param {boolean} [replaceCurrentProfile=false]
    *   Indicates if we are replacing the current running profile or adding to the group
+   * @param {boolean} [wasEncrypted=false]
+   *   Whether the source archive was encrypted. Resources that require
+   *   encryption are skipped during recovery when this is false.
    * @returns {Promise<SelectableProfile>}
    *   The SelectableProfile that was created for the recovered profile.
    * @throws {Exception}
@@ -3852,7 +3883,8 @@ export class BackupService extends EventTarget {
     copiedProfile = null,
     profileRootPath = null,
     manifest = null,
-    replaceCurrentProfile = false
+    replaceCurrentProfile = false,
+    wasEncrypted = false
   ) {
     lazy.logConsole.debug(
       "Recovering SelectableProfile from backup at ",
@@ -3895,7 +3927,8 @@ export class BackupService extends EventTarget {
       let postRecovery = await this.#recoverResources(
         manifest,
         recoveryPath,
-        profile.path
+        profile.path,
+        wasEncrypted
       );
 
       if (copiedProfile) {
@@ -4396,13 +4429,14 @@ export class BackupService extends EventTarget {
     await this.loadEncryptionState();
     Glean.browserBackup.pswdEncrypted.set(this.#_state.encryptionEnabled);
 
-    const USING_DEFAULT_DIR_PATH =
-      lazy.backupDirPref ==
-      PathUtils.join(
-        BackupService.DEFAULT_PARENT_DIR_PATH,
-        BackupService.BACKUP_DIR_NAME
-      );
-    Glean.browserBackup.locationOnDevice.set(USING_DEFAULT_DIR_PATH ? 1 : 2);
+    // No default location to compare against, so leave locationOnDevice unset.
+    let defaultParentDirPath = BackupService.DEFAULT_PARENT_DIR_PATH;
+    if (defaultParentDirPath) {
+      const USING_DEFAULT_DIR_PATH =
+        lazy.backupDirPref ==
+        PathUtils.join(defaultParentDirPath, BackupService.BACKUP_DIR_NAME);
+      Glean.browserBackup.locationOnDevice.set(USING_DEFAULT_DIR_PATH ? 1 : 2);
+    }
 
     // Next, we'll measure the available disk space on the storage
     // device that the profile directory is on.
@@ -4961,7 +4995,10 @@ export class BackupService extends EventTarget {
   async onIdle() {
     lazy.logConsole.debug("Saw idle callback");
     if (!this.#takenMeasurements) {
-      this.takeMeasurements();
+      // Measurement failures should not block other onIdle backup activity.
+      this.takeMeasurements().catch(e =>
+        lazy.logConsole.error("Failed to take Telemetry measurements", e)
+      );
       this.#takenMeasurements = true;
     }
 
@@ -5222,19 +5259,28 @@ export class BackupService extends EventTarget {
   }
 
   /**
+   * Sets the backup file path to restore from and updates state.
+   *
+   * @param {string} backupFilePath path to the backup file.
+   */
+  setBackupFileToRestore(backupFilePath) {
+    this.#_state.backupFileToRestore = backupFilePath;
+    this.stateUpdate();
+  }
+
+  /**
    * Gets a sample from a given backup file and sets a subset of that as
    * the backupFileInfo in the backup service state.
    *
-   * Called when getting a info for an archive to potentially restore.
+   * Called when loading info for an archive to potentially restore.
    *
    * @param {string} backupFilePath path to the backup file to sample.
    */
-  async getBackupFileInfo(backupFilePath) {
+  async loadBackupFileInfo(backupFilePath) {
     lazy.logConsole.debug(`Getting info from backup file at ${backupFilePath}`);
 
     this.#_state.restoreID = Services.uuid.generateUUID().toString();
     this.#_state.backupFileInfo = null;
-    this.#_state.backupFileToRestore = backupFilePath;
     this.#_state.backupFileCoarseLocation =
       this.classifyLocationForTelemetry(backupFilePath);
 
@@ -5434,7 +5480,7 @@ export class BackupService extends EventTarget {
       for (const file of maybeBackupFiles) {
         if (validateFile) {
           try {
-            await this.getBackupFileInfo(file);
+            await this.loadBackupFileInfo(file);
           } catch (e) {
             lazy.logConsole.log(
               "Not a valid backup file in the default folder",
@@ -5618,7 +5664,7 @@ export class BackupService extends EventTarget {
           // folder. If not, delete that folder too.
           let children = await IOUtils.getChildren(lazy.backupDirPref);
           if (!children.length) {
-            await IOUtils.remove(lazy.backupDirPref, { retryReadony: true });
+            await IOUtils.remove(lazy.backupDirPref, { retryReadonly: true });
           }
         }
       }

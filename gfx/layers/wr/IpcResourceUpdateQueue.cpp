@@ -3,8 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "IpcResourceUpdateQueue.h"
+
 #include <string.h>
+
 #include <algorithm>
+
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/layers/PTextureChild.h"
@@ -327,6 +330,11 @@ void IpcResourceUpdateQueue::AddSnapshotImage(SnapshotImageKey aKey) {
   mUpdates.AppendElement(layers::OpAddSnapshotImage(aKey));
 }
 
+void IpcResourceUpdateQueue::AdoptSnapshotImage(SnapshotImageKey aFrom,
+                                                SnapshotImageKey aKey) {
+  mUpdates.AppendElement(layers::OpAdoptSnapshotImage(aFrom, aKey));
+}
+
 bool IpcResourceUpdateQueue::AddBlobImage(BlobImageKey key,
                                           const ImageDescriptor& aDescriptor,
                                           Range<uint8_t> aBytes,
@@ -355,16 +363,6 @@ void IpcResourceUpdateQueue::PushExternalImageForTexture(
                      mWriter.WrBridge()->GetIPCChannel());
   mUpdates.AppendElement(layers::OpPushExternalImageForTexture(
       aExtId, aKey, WrapNotNull(aTexture->GetIPDLActor()), aIsUpdate));
-}
-
-bool IpcResourceUpdateQueue::UpdateImageBuffer(
-    ImageKey aKey, const ImageDescriptor& aDescriptor, Range<uint8_t> aBytes) {
-  auto bytes = mWriter.Write(aBytes);
-  if (!bytes.length()) {
-    return false;
-  }
-  mUpdates.AppendElement(layers::OpUpdateImage(aDescriptor, bytes, aKey));
-  return true;
 }
 
 bool IpcResourceUpdateQueue::UpdateBlobImage(BlobImageKey aKey,
@@ -435,7 +433,7 @@ void IpcResourceUpdateQueue::AddFontInstance(
     wr::FontInstanceKey aKey, wr::FontKey aFontKey, float aGlyphSize,
     const wr::FontInstanceOptions* aOptions,
     const wr::FontInstancePlatformOptions* aPlatformOptions,
-    Range<const gfx::FontVariation> aVariations) {
+    Range<const wr::FontVariation> aVariations) {
   auto bytes = mWriter.WriteAsBytes(aVariations);
   mUpdates.AppendElement(layers::OpAddFontInstance(
       aOptions ? Some(*aOptions) : Nothing(),

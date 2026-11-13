@@ -111,6 +111,12 @@ add_task(async function test_about_pages() {
       EventUtils.synthesizeKey("KEY_Tab", {}, window);
     }
     EventUtils.synthesizeKey("KEY_Enter", {}, window);
+    // The refocus action runs parent-side, so on the actor message path the tab
+    // switch happens asynchronously after the pick rather than synchronously.
+    await TestUtils.waitForCondition(
+      () => gBrowser.selectedTab == firstTab,
+      "Refocused the tab that opened the about page"
+    );
     Assert.equal(
       gBrowser.selectedTab,
       firstTab,

@@ -37,13 +37,15 @@ class DefaultOnboardingTermsOfServiceEventHandlerTest {
         telemetryRecorder = mockk(relaxed = true)
         settings = Settings(testContext)
 
-        eventHandler = DefaultOnboardingTermsOfServiceEventHandler(
-            telemetryRecorder = telemetryRecorder,
-            openLink = { openLinkUrl = it },
-            showManagePrivacyPreferencesDialog = { showManagePrivacyPreferencesDialogCalled = true },
-            settings = settings,
-            startGlean = { gleanStarted = true },
-        )
+        eventHandler =
+            DefaultOnboardingTermsOfServiceEventHandler(
+                telemetryRecorder = telemetryRecorder,
+                openLink = { openLinkUrl = it },
+                showManagePrivacyPreferencesDialog = { showManagePrivacyPreferencesDialogCalled = true },
+                settings = settings,
+                startGlean = { gleanStarted = true },
+                currentTimeMillis = { TIME_IN_MILLIS },
+            )
     }
 
     @Test
@@ -82,7 +84,7 @@ class DefaultOnboardingTermsOfServiceEventHandlerTest {
 
     @Test
     fun onAcceptTermsButtonClicked() {
-        eventHandler.onAcceptTermsButtonClicked(nowMillis = TIME_IN_MILLIS)
+        eventHandler.onAcceptTermsButtonClicked()
 
         verify {
             telemetryRecorder.onTermsOfServiceManagerAcceptTermsButtonClick()

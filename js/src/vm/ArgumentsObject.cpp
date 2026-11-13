@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "vm/ArgumentsObject-inl.h"
-
 #include "mozilla/PodOperations.h"
 
 #include <algorithm>
@@ -17,6 +15,7 @@
 
 #include "gc/BufferAllocator-inl.h"
 #include "gc/Nursery-inl.h"
+#include "vm/ArgumentsObject-inl.h"
 #include "vm/FrameIter-inl.h"  // js::FrameIter::unaliasedForEachActual
 #include "vm/NativeObject-inl.h"
 #include "vm/Stack-inl.h"
@@ -80,7 +79,7 @@ void ArgumentsObject::MaybeForwardToCallObject(AbstractFramePtr frame,
                                                ArgumentsData* data) {
   JSScript* script = frame.script();
   if (frame.callee()->needsCallObject() && script->argsObjAliasesFormals()) {
-    obj->initFixedSlot(MAYBE_CALL_SLOT, ObjectValue(frame.callObj()));
+    obj->initFixedSlotTyped(MAYBE_CALL_SLOT, ObjectValue(frame.callObj()));
     for (PositionalFormalParameterIter fi(script); fi; fi++) {
       if (fi.closedOver()) {
         data->args.setElement(obj, fi.argumentSlot(),
@@ -99,7 +98,7 @@ void ArgumentsObject::MaybeForwardToCallObject(JSFunction* callee,
   JSScript* script = callee->nonLazyScript();
   if (callee->needsCallObject() && script->argsObjAliasesFormals()) {
     MOZ_ASSERT(callObj && callObj->is<CallObject>());
-    obj->initFixedSlot(MAYBE_CALL_SLOT, ObjectValue(*callObj));
+    obj->initFixedSlotTyped(MAYBE_CALL_SLOT, ObjectValue(*callObj));
     for (PositionalFormalParameterIter fi(script); fi; fi++) {
       if (fi.closedOver()) {
         data->args.setElement(obj, fi.argumentSlot(),
@@ -269,7 +268,7 @@ ArgumentsObject* ArgumentsObject::createTemplateObject(JSContext* cx,
     return nullptr;
   }
 
-  obj->initFixedSlot(ArgumentsObject::DATA_SLOT, PrivateValue(nullptr));
+  obj->initFixedSlotTyped(ArgumentsObject::DATA_SLOT, PrivateValue(nullptr));
   return obj;
 }
 
@@ -331,16 +330,16 @@ ArgumentsObject* ArgumentsObject::create(JSContext* cx, HandleFunction callee,
       AllocateCellBuffer<uint8_t>(cx, obj, numBytes));
   if (!data) {
     // Make the object safe for GC.
-    obj->initFixedSlot(DATA_SLOT, PrivateValue(nullptr));
+    obj->initFixedSlotTyped(DATA_SLOT, PrivateValue(nullptr));
     return nullptr;
   }
 
   new (data) ArgumentsData(numArgs);
 
-  obj->initReservedSlot(DATA_SLOT, PrivateValue(data));
-  obj->initFixedSlot(CALLEE_SLOT, ObjectValue(*callee));
-  obj->initFixedSlot(INITIAL_LENGTH_SLOT,
-                     Int32Value(numActuals << PACKED_BITS_COUNT));
+  obj->initReservedSlotTyped(DATA_SLOT, PrivateValue(data));
+  obj->initFixedSlotTyped(CALLEE_SLOT, ObjectValue(*callee));
+  obj->initFixedSlotTyped(INITIAL_LENGTH_SLOT,
+                          Int32Value(numActuals << PACKED_BITS_COUNT));
 
   // Copy [0, numActuals) into data->args.
   copy.copyActualArgs(obj, data->args, numActuals);
@@ -441,17 +440,17 @@ ArgumentsObject* ArgumentsObject::finishPure(
     // Make the object safe for GC. Don't report OOM, the slow path will
     // retry the allocation.
     cx->recoverFromOutOfMemory();
-    obj->initFixedSlot(DATA_SLOT, PrivateValue(nullptr));
+    obj->initFixedSlotTyped(DATA_SLOT, PrivateValue(nullptr));
     return nullptr;
   }
 
   new (data) ArgumentsData(numArgs);
 
-  obj->initFixedSlot(INITIAL_LENGTH_SLOT,
-                     Int32Value(numActuals << PACKED_BITS_COUNT));
-  obj->initFixedSlot(DATA_SLOT, PrivateValue(data));
-  obj->initFixedSlot(MAYBE_CALL_SLOT, UndefinedValue());
-  obj->initFixedSlot(CALLEE_SLOT, ObjectValue(*callee));
+  obj->initFixedSlotTyped(INITIAL_LENGTH_SLOT,
+                          Int32Value(numActuals << PACKED_BITS_COUNT));
+  obj->initFixedSlotTyped(DATA_SLOT, PrivateValue(data));
+  obj->initFixedSlotTyped(MAYBE_CALL_SLOT, UndefinedValue());
+  obj->initFixedSlotTyped(CALLEE_SLOT, ObjectValue(*callee));
 
   copy.copyActualArgs(obj, data->args, numActuals);
 
@@ -515,7 +514,7 @@ bool ArgumentsObject::obj_delProperty(JSContext* cx, HandleObject obj,
                                       HandleId id, ObjectOpResult& result) {
   ArgumentsObject& argsobj = obj->as<ArgumentsObject>();
   if (id.isInt()) {
-    unsigned arg = unsigned(id.toInt());
+    uint32_t arg = id.toInt();
     if (argsobj.isElement(arg)) {
       if (!argsobj.markElementDeleted(cx, arg)) {
         return false;
@@ -551,7 +550,7 @@ bool js::MappedArgGetter(JSContext* cx, HandleObject obj, HandleId id,
      * arg can exceed the number of arguments if a script changed the
      * prototype to point to another Arguments object with a bigger argc.
      */
-    unsigned arg = unsigned(id.toInt());
+    uint32_t arg = id.toInt();
     if (argsobj.isElement(arg)) {
       vp.set(argsobj.element(arg));
     }
@@ -573,7 +572,7 @@ bool js::MappedArgSetter(JSContext* cx, HandleObject obj, HandleId id,
   Handle<MappedArgumentsObject*> argsobj = obj.as<MappedArgumentsObject>();
 
   if (id.isInt()) {
-    unsigned arg = unsigned(id.toInt());
+    uint32_t arg = id.toInt();
     if (argsobj->isElement(arg)) {
       argsobj->setElement(arg, v);
       return result.succeed();
@@ -633,6 +632,10 @@ bool ArgumentsObject::reifyIterator(JSContext* cx,
   return true;
 }
 
+JSFunction& MappedArgumentsObject::callee() const {
+  return getFixedSlotTyped(CALLEE_SLOT).toObject().as<JSFunction>();
+}
+
 /* static */
 bool MappedArgumentsObject::reifyCallee(JSContext* cx,
                                         Handle<MappedArgumentsObject*> obj) {
@@ -685,7 +688,7 @@ bool MappedArgumentsObject::obj_resolve(JSContext* cx, HandleObject obj,
   PropertyFlags flags = {PropertyFlag::CustomDataProperty,
                          PropertyFlag::Configurable, PropertyFlag::Writable};
   if (id.isInt()) {
-    uint32_t arg = uint32_t(id.toInt());
+    uint32_t arg = id.toInt();
     if (!argsobj->isElement(arg)) {
       return true;
     }
@@ -820,8 +823,7 @@ bool MappedArgumentsObject::obj_defineProperty(JSContext* cx, HandleObject obj,
   // Steps 2-3.
   bool isMapped = false;
   if (id.isInt()) {
-    unsigned arg = unsigned(id.toInt());
-    isMapped = argsobj->isElement(arg);
+    isMapped = argsobj->isElement(id.toInt());
   }
 
   // Step 4.
@@ -866,7 +868,7 @@ bool MappedArgumentsObject::obj_defineProperty(JSContext* cx, HandleObject obj,
 
   // Step 8.
   if (isMapped) {
-    unsigned arg = unsigned(id.toInt());
+    uint32_t arg = id.toInt();
     if (desc.isAccessorDescriptor()) {
       bool ok = argsobj->markElementDeleted(cx, arg);
       MOZ_RELEASE_ASSERT(ok, "shouldn't fail after getOrCreateRareData");
@@ -894,7 +896,7 @@ bool js::UnmappedArgGetter(JSContext* cx, HandleObject obj, HandleId id,
      * arg can exceed the number of arguments if a script changed the
      * prototype to point to another Arguments object with a bigger argc.
      */
-    unsigned arg = unsigned(id.toInt());
+    uint32_t arg = id.toInt();
     if (argsobj.isElement(arg)) {
       vp.set(argsobj.element(arg));
     }
@@ -912,7 +914,7 @@ bool js::UnmappedArgSetter(JSContext* cx, HandleObject obj, HandleId id,
   Handle<UnmappedArgumentsObject*> argsobj = obj.as<UnmappedArgumentsObject>();
 
   if (id.isInt()) {
-    unsigned arg = unsigned(id.toInt());
+    uint32_t arg = id.toInt();
     if (argsobj->isElement(arg)) {
       argsobj->setElement(arg, v);
       return result.succeed();
@@ -964,7 +966,7 @@ bool UnmappedArgumentsObject::obj_resolve(JSContext* cx, HandleObject obj,
   PropertyFlags flags = {PropertyFlag::CustomDataProperty,
                          PropertyFlag::Configurable, PropertyFlag::Writable};
   if (id.isInt()) {
-    uint32_t arg = uint32_t(id.toInt());
+    uint32_t arg = id.toInt();
     if (!argsobj->isElement(arg)) {
       return true;
     }
@@ -1025,7 +1027,7 @@ void ArgumentsObject::trace(JSTracer* trc, JSObject* obj) {
       TraceBufferEdge(trc, &buffer->rareData, "RareArgumentsData");
     }
     if (buffer != copiedBuffer) {
-      argsobj.setFixedSlot(DATA_SLOT, PrivateValue(buffer));
+      argsobj.setFixedSlotTyped(DATA_SLOT, PrivateValue(buffer));
     }
     buffer->args.trace(trc);
   }
@@ -1050,7 +1052,7 @@ size_t ArgumentsObject::objectMoved(JSObject* dst, JSObject* src) {
   Nursery::WasBufferMoved result =
       nursery.maybeMoveBufferOnPromotion(&data, dst, nDataBytes);
   if (result == Nursery::BufferMoved) {
-    ndst->initFixedSlot(DATA_SLOT, PrivateValue(data));
+    ndst->initFixedSlotTyped(DATA_SLOT, PrivateValue(data));
     nbytesTotal += nDataBytes;
   }
 

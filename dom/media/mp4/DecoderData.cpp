@@ -196,7 +196,7 @@ MediaResult MP4AudioInfo::Update(const Mp4parseTrackInfo* aTrack,
           encoderDelayFrameCount);
     }
 
-    uint64_t mediaFrameCount = 0;
+    Maybe<uint64_t> mediaFrameCount;
     // Pass the padding number, in frames, to the AAC decoder as well.
     if (aIndices) {
       MP4SampleIndex::Indice firstIndice = {0};
@@ -213,10 +213,10 @@ MediaResult MP4AudioInfo::Update(const Mp4parseTrackInfo* aTrack,
         // duration of the media in microseconds, excluding decoder delay and
         // padding. Convert to frames and give to the decoder so that trimming
         // can be done properly.
-        mediaFrameCount =
-            lastIndice.end_composition - firstIndice.start_composition;
+        mediaFrameCount.emplace(lastIndice.end_composition -
+                                firstIndice.start_composition);
         LOG("AAC stream in MP4 container, total media duration is {} frames",
-            mediaFrameCount);
+            mediaFrameCount.value());
       } else {
         LOG("AAC stream in MP4 container, couldn't determine total media time");
       }
@@ -287,6 +287,8 @@ MediaResult MP4AudioInfo::Update(const Mp4parseTrackInfo* aTrack,
         AudioCodecSpecificVariant{std::move(codecSpecificBinaryBlob)};
   }
 
+  SetOpusOutputChannels(*this);
+
   return NS_OK;
 }
 
@@ -339,6 +341,10 @@ MediaResult MP4VideoInfo::Update(const Mp4parseTrackInfo* track,
   mDisplay.height = AssertedCast<int32_t>(video->display_height);
   mImage.width = video->sample_info[0].image_width;
   mImage.height = video->sample_info[0].image_height;
+  if (!IsValidVideoDisplaySize(mDisplay)) {
+    return MediaResult(NS_ERROR_DOM_MEDIA_METADATA_ERR,
+                       RESULT_DETAIL("MP4 track display size is invalid"));
+  }
   mRotation = ToSupportedRotation(video->rotation);
   Mp4parseByteData extraData = video->sample_info[0].extra_data;
   // If length is 0 we append nothing
@@ -358,7 +364,10 @@ MediaResult MP4VideoInfo::Update(const Mp4parseTrackInfo* track,
     mColorRange =
         si.full_range_flag ? gfx::ColorRange::FULL : gfx::ColorRange::LIMITED;
   }
-  if (si.has_mastering_display || si.has_content_light_level) {
+  bool isHDR = mTransferFunction.isSome() &&
+               (*mTransferFunction == gfx::TransferFunction::PQ ||
+                *mTransferFunction == gfx::TransferFunction::HLG);
+  if (isHDR || si.has_mastering_display || si.has_content_light_level) {
     gfx::HDRMetadata hdr;
     if (si.has_mastering_display) {
       const auto& md = si.mastering_display;
@@ -376,11 +385,24 @@ MediaResult MP4VideoInfo::Update(const Mp4parseTrackInfo* track,
       smpte.maxLuminance = md.max_display_mastering_luminance / 10000.0f;
       smpte.minLuminance = md.min_display_mastering_luminance / 10000.0f;
       hdr.mSmpte2086 = Some(smpte);
+    } else {
+      // Provide BT2020 defaults.
+      gfx::Smpte2086Metadata smpte;
+      smpte.displayPrimaryRed = {0.708, 0.292};
+      smpte.displayPrimaryGreen = {0.170, 0.797};
+      smpte.displayPrimaryBlue = {0.131, 0.046};
+      smpte.whitePoint = {0.3127, 0.3290};
+      smpte.maxLuminance = 1000.0f;
+      smpte.minLuminance = 0.001f;
+      hdr.mSmpte2086 = Some(smpte);
     }
     if (si.has_content_light_level) {
       const auto& cll = si.content_light_level;
       hdr.mContentLightLevel = Some(gfx::ContentLightLevel{
           cll.max_content_light_level, cll.max_pic_average_light_level});
+    } else {
+      // Provide defaults.
+      hdr.mContentLightLevel = Some(gfx::ContentLightLevel{1000, 400});
     }
     mHDRMetadata = Some(hdr);
   }

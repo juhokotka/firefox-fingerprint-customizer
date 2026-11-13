@@ -182,7 +182,7 @@ class Builtin:
 
 builtinNames = [
     Builtin("boolean", "bool", "bool", "boolean"),
-    Builtin("void", "void", "libc::c_void", "void"),
+    Builtin("void", "void", "()", "void"),
     Builtin("int8_t", "int8_t", "i8", "i8", True, True),
     Builtin("int16_t", "int16_t", "i16", "i16", True, True),
     Builtin("int32_t", "int32_t", "i32", "i32", True, True),
@@ -1211,7 +1211,8 @@ class CEnum:
 def ensureInfallibleIsSound(methodOrAttribute):
     if not methodOrAttribute.infallible:
         return
-    if methodOrAttribute.realtype.kind not in [
+    ty = unaliasType(methodOrAttribute.realtype)
+    if ty.kind not in [
         "builtin",
         "interface",
         "forward",
@@ -1274,9 +1275,7 @@ def ensureBuiltinClassIfNeeded(methodOrAttribute):
     # parameters are always passed indirectly, so do not impact calling
     # conventions.
     def typeNeedsBuiltinclass(type):
-        inner = type
-        while inner.kind == "typedef":
-            inner = inner.realtype
+        inner = unaliasType(type)
         return (
             inner.kind == "native"
             and inner.specialtype is None

@@ -6,6 +6,7 @@
 
 const {
   createElement,
+  createRef,
   PureComponent,
 } = require("resource://devtools/client/shared/vendor/react.mjs");
 const dom = require("resource://devtools/client/shared/vendor/react-dom-factories.js");
@@ -43,14 +44,33 @@ class Message extends PureComponent {
       className: PropTypes.string,
       isCloseable: PropTypes.bool,
       level: PropTypes.oneOf(Object.values(MESSAGE_LEVEL)).isRequired,
+      messageId: PropTypes.string,
+      // "alert" makes the message focus on mount so screen readers announce it.
+      role: PropTypes.string,
     };
+  }
+
+  static getDerivedStateFromProps(props, state) {
+    // Reset closed state if messageId changed.
+    if (props.messageId !== state.messageId) {
+      return { messageId: props.messageId, isClosed: false };
+    }
+    return null;
   }
 
   constructor(props) {
     super(props);
+    this.messageRef = createRef();
     this.state = {
       isClosed: false,
+      messageId: props.messageId,
     };
+  }
+
+  componentDidMount() {
+    if (this.props.role === "alert" && this.messageRef.current) {
+      this.messageRef.current.focus();
+    }
   }
 
   closeMessage() {
@@ -68,7 +88,7 @@ class Message extends PureComponent {
   }
 
   render() {
-    const { children, className, level, isCloseable } = this.props;
+    const { children, className, level, isCloseable, role } = this.props;
     const { isClosed } = this.state;
 
     if (isClosed) {
@@ -80,6 +100,9 @@ class Message extends PureComponent {
         className:
           `message message--level-${level}  qa-message` +
           (className ? ` ${className}` : ""),
+        role,
+        tabIndex: role === "alert" ? -1 : null,
+        ref: this.messageRef,
       },
       dom.img({
         className: "message__icon",

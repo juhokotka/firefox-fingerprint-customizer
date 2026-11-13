@@ -5,30 +5,23 @@
 ## Names of the default containers in Firefox.
 ## See https://support.mozilla.org/kb/how-use-firefox-containers
 
-user-context-personal =
+user-context-personal2 =
     .label = Personal
-    .accesskey = P
-user-context-work =
+user-context-work2 =
     .label = Work
-    .accesskey = W
-user-context-banking =
+user-context-banking2 =
     .label = Banking
-    .accesskey = B
-user-context-shopping =
+user-context-shopping2 =
     .label = Shopping
-    .accesskey = S
 
 ##
 
-user-context-new-tab =
+user-context-new-tab2 =
     .label = New Tab
-    .accesskey = N
-user-context-add-container =
+user-context-add-container2 =
     .label = Add new container
-    .accesskey = A
-user-context-manage-containers =
+user-context-manage-containers2 =
     .label = Manage containers
-    .accesskey = o
 
 ## Privacy Mode toggle (per-window switch for fingerprint profileMode).
 
@@ -36,8 +29,14 @@ user-context-privacy-mode =
     .label = Privacy Mode
     .accesskey = v
 
-## Container colors, shown as selectable swatches in the container
-## creation/edit dialog.
+# The below strings need separate messages for use in panel-list implementations,
+# which take their label from the message value rather than a .label attribute.
+
+user-context-new-tab2-panel-item = New Tab
+user-context-add-container2-panel-item = Add new container
+user-context-manage-containers2-panel-item = Manage containers
+
+## Container colors, shown as selectable swatches in the container creation/edit dialog.
 
 user-context-color-blue =
     .label = Blue

@@ -11,11 +11,13 @@ const lazy = XPCOMUtils.declareLazy({
   AboutReaderParent: "resource:///actors/AboutReaderParent.sys.mjs",
   ASRouterTargeting: "resource:///modules/asrouter/ASRouterTargeting.sys.mjs",
   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   EveryWindow: "resource:///modules/EveryWindow.sys.mjs",
   FeatureCalloutBroker:
     "resource:///modules/asrouter/FeatureCalloutBroker.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+  UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
   clearTimeout: "resource://gre/modules/Timer.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
 
@@ -30,9 +32,29 @@ const lazy = XPCOMUtils.declareLazy({
     pref: "browser.newtabpage.enabled",
     default: true,
   },
+
+  // These defaults are only used as a fallback if the corresponding pref
+  // isn't declared at all; the real defaults live in firefox.js, which is
+  // what lets SpecialPowers.pushPrefEnv/popPrefEnv restore them cleanly in
+  // tests.
+  splitViewTriggerDelay: {
+    pref: "browser.tabs.splitview.trigger.delay_ms",
+    default: 15000,
+  },
+
+  splitViewCreateCount: {
+    pref: "browser.tabs.splitview.trigger.createCount",
+    default: 0,
+  },
 });
 
 const FEW_MINUTES = 15 * 60 * 1000; // 15 mins
+
+// How long after a "urlbar-user-start-navigation" notification matching
+// onLocationChange is still considered to be the result of that address bar
+// interaction. Location changes normally follow within milliseconds; this is
+// generous to allow for slow loads and redirect chains.
+const RECENT_URLBAR_NAVIGATION_MAX_AGE_MS = 10000;
 
 function isPrivateWindow(win) {
   return (
@@ -92,9 +114,17 @@ function checkURLMatch(
   const originalLocation = aRequest.QueryInterface(Ci.nsIChannel).originalURI;
   // We have been redirected
   if (originalLocation.spec !== aLocationURI.spec) {
-    if (hosts.has(originalLocation.host)) {
+    let originalHost;
+    try {
+      originalHost = originalLocation.host;
+    } catch (e) {
+      // nsIURI.host can throw for non-nsStandardURL nsIURIs
+      return false;
+    }
+
+    if (hosts.has(originalHost)) {
       return {
-        host: originalLocation.host,
+        host: originalHost,
         url: originalLocation.spec,
       };
     }
@@ -103,7 +133,7 @@ function checkURLMatch(
       for (const regex of regexPatterns) {
         if (regex.test(originalLocation.spec)) {
           return {
-            host: originalLocation.host,
+            host: originalHost,
             url: originalLocation.spec,
           };
         }
@@ -112,6 +142,31 @@ function checkURLMatch(
   }
 
   return false;
+}
+
+/**
+ * Classifies a urlbar result picked from "urlbar-user-start-navigation" as a
+ * direct navigation to a URL destination (typed, pasted, autofilled, or
+ * picked from the dropdown as a bookmark/history/top-site match), as opposed
+ * to a search query, a sponsored/Suggest result, or a synced-device (remote
+ * tab) result.
+ *
+ * @returns {boolean}
+ */
+function isDirectNavigationUrlbarResult(result) {
+  if (!result) {
+    // The heuristic default match was accepted verbatim, e.g. by pressing
+    // Enter without picking anything from the results list.
+    return true;
+  }
+  return (
+    result.type === lazy.UrlbarShared.RESULT_TYPE.URL &&
+    [
+      lazy.UrlbarShared.RESULT_SOURCE.HISTORY,
+      lazy.UrlbarShared.RESULT_SOURCE.BOOKMARKS,
+      lazy.UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
+    ].includes(result.source)
+  );
 }
 
 function createMatchPatternSet(patterns, flags) {
@@ -309,6 +364,149 @@ export const ASRouterTriggerListeners = new Map([
       },
     },
   ],
+
+  /**
+   * Notifies the trigger handler whenever the user adds a bookmark through any
+   * UI path (URL bar star, menus, keyboard shortcut, "Bookmark Link", "Bookmark
+   * All Tabs", or the Library). Bulk and non-interactive sources (import,
+   * restore, sync) and tag operations are ignored. Fires at most once per
+   * Places notification so a batch add results in a single trigger. Does not
+   * fire in private windows.
+   */
+  [
+    "bookmarkAdded",
+    {
+      id: "bookmarkAdded",
+      _initialized: false,
+      _triggerHandler: null,
+      _sourcesToIgnore: null,
+
+      init(triggerHandler) {
+        if (!this._initialized) {
+          this.handlePlacesEvents = this.handlePlacesEvents.bind(this);
+          // Bulk and non-interactive sources to ignore
+          this._sourcesToIgnore = [
+            lazy.PlacesUtils.bookmarks.SOURCES.IMPORT,
+            lazy.PlacesUtils.bookmarks.SOURCES.RESTORE,
+            lazy.PlacesUtils.bookmarks.SOURCES.RESTORE_ON_STARTUP,
+            lazy.PlacesUtils.bookmarks.SOURCES.SYNC,
+            lazy.PlacesUtils.bookmarks.SOURCES
+              .SYNC_REPARENT_REMOVED_FOLDER_CHILDREN,
+          ];
+          lazy.PlacesUtils.observers.addListener(
+            ["bookmark-added"],
+            this.handlePlacesEvents
+          );
+          this._initialized = true;
+        }
+        this._triggerHandler = triggerHandler;
+      },
+
+      uninit() {
+        if (this._initialized) {
+          lazy.PlacesUtils.observers.removeListener(
+            ["bookmark-added"],
+            this.handlePlacesEvents
+          );
+          this._initialized = false;
+          this._triggerHandler = null;
+        }
+      },
+
+      handlePlacesEvents(aEvents) {
+        const window = Services.wm.getMostRecentBrowserWindow();
+        if (!window || isPrivateWindow(window)) {
+          return;
+        }
+        const browser = window.gBrowser.selectedBrowser;
+
+        for (let ev of aEvents) {
+          if (
+            ev.itemType === lazy.PlacesUtils.bookmarks.TYPE_BOOKMARK &&
+            !ev.isTagging &&
+            !this._sourcesToIgnore.includes(ev.source)
+          ) {
+            this._triggerHandler(browser, { id: this.id });
+
+            // Don't fire more than once per Places notification.
+            break;
+          }
+        }
+      },
+    },
+  ],
+
+  /**
+   * Notifies the trigger handler whenever the user navigates a top-level
+   * document to a URL that is already bookmarked. Does not fire in private
+   * windows.
+   */
+  [
+    "visitBookmarkedURL",
+    {
+      id: "visitBookmarkedURL",
+      _initialized: false,
+      _triggerHandler: null,
+
+      init(triggerHandler) {
+        if (!this._initialized) {
+          this.onLocationChange = this.onLocationChange.bind(this);
+          lazy.EveryWindow.registerCallback(
+            this.id,
+            win => {
+              if (!isPrivateWindow(win)) {
+                win.gBrowser.addTabsProgressListener(this);
+              }
+            },
+            win => {
+              if (!isPrivateWindow(win)) {
+                win.gBrowser.removeTabsProgressListener(this);
+              }
+            }
+          );
+          this._initialized = true;
+        }
+        this._triggerHandler = triggerHandler;
+      },
+
+      uninit() {
+        if (this._initialized) {
+          lazy.EveryWindow.unregisterCallback(this.id);
+          this._initialized = false;
+          this._triggerHandler = null;
+        }
+      },
+
+      async onLocationChange(
+        aBrowser,
+        aWebProgress,
+        aRequest,
+        aLocationURI,
+        aFlags
+      ) {
+        const isSameDocument = !!(
+          aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT
+        );
+        if (!aWebProgress.isTopLevel || isSameDocument) {
+          return;
+        }
+
+        let isBookmarked = false;
+        try {
+          isBookmarked = !!(await lazy.PlacesUtils.bookmarks.fetch({
+            url: aLocationURI,
+          }));
+        } catch (e) {
+          // fetch throws for URLs it can't normalize
+          return;
+        }
+
+        if (isBookmarked && this._triggerHandler) {
+          this._triggerHandler(aBrowser, { id: this.id });
+        }
+      },
+    },
+  ],
   [
     "frequentVisits",
     {
@@ -474,7 +672,19 @@ export const ASRouterTriggerListeners = new Map([
       _hosts: null,
       _matchPatternSet: null,
       _visits: null,
+      // Running count of every matched visit this session, across all hosts
+      // and patterns registered by any active openURL message.
+      _totalVisits: 0,
       _regexPatterns: null,
+      // WeakMap<browser, timestamp> of browsers whose most recent address
+      // bar interaction was a direct navigation to a URL, per
+      // `isDirectNavigationUrlbarResult`. Populated from
+      // "urlbar-user-start-navigation" and consumed by the next
+      // `onLocationChange` for that browser, so we can tell `openURL` matches
+      // caused by that navigation apart from ones caused by a search
+      // redirect, a link click, back/forward navigation, or another
+      // programmatic load.
+      _recentUrlbarNavigations: null,
 
       /*
        * If the listener is already initialised, `init` will replace the trigger
@@ -496,8 +706,11 @@ export const ASRouterTriggerListeners = new Map([
               }
             }
           );
+          Services.obs.addObserver(this, "urlbar-user-start-navigation");
 
           this._visits = new Map();
+          this._totalVisits = 0;
+          this._recentUrlbarNavigations = new WeakMap();
           this._initialized = true;
         }
         this._triggerHandler = triggerHandler;
@@ -524,14 +737,49 @@ export const ASRouterTriggerListeners = new Map([
       uninit() {
         if (this._initialized) {
           lazy.EveryWindow.unregisterCallback(this.id);
+          Services.obs.removeObserver(this, "urlbar-user-start-navigation");
 
           this._initialized = false;
           this._triggerHandler = null;
           this._hosts = null;
           this._matchPatternSet = null;
           this._visits = null;
+          this._totalVisits = 0;
           this._regexPatterns = null;
+          this._recentUrlbarNavigations = null;
         }
+      },
+
+      observe(subject, topic) {
+        if (topic !== "urlbar-user-start-navigation") {
+          return;
+        }
+        if (!isDirectNavigationUrlbarResult(subject.wrappedJSObject.result)) {
+          return;
+        }
+        const window = lazy.BrowserWindowTracker.getTopWindow();
+        if (!window || isPrivateWindow(window)) {
+          return;
+        }
+        const browser = window.gBrowser?.selectedBrowser;
+        if (browser) {
+          this._recentUrlbarNavigations.set(browser, Date.now());
+        }
+      },
+
+      /**
+       * Returns whether `browser`'s most recent address bar interaction was
+       * a direct navigation to a URL, per `isDirectNavigationUrlbarResult`,
+       * and consumes that record so it can't be attributed to a later,
+       * unrelated navigation.
+       */
+      _isAddressBarUrlNavigation(browser) {
+        const timestamp = this._recentUrlbarNavigations.get(browser);
+        this._recentUrlbarNavigations.delete(browser);
+        return (
+          !!timestamp &&
+          Date.now() - timestamp <= RECENT_URLBAR_NAVIGATION_MAX_AGE_MS
+        );
       },
 
       onLocationChange(aBrowser, aWebProgress, aRequest, aLocationURI, aFlags) {
@@ -542,6 +790,8 @@ export const ASRouterTriggerListeners = new Map([
           aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT
         );
         if (aWebProgress.isTopLevel && !isSameDocument) {
+          const isAddressBarUrlNavigation =
+            this._isAddressBarUrlNavigation(aBrowser);
           const match = checkURLMatch(
             aLocationURI,
             {
@@ -554,10 +804,17 @@ export const ASRouterTriggerListeners = new Map([
           if (match) {
             let visitsCount = (this._visits.get(match.url) || 0) + 1;
             this._visits.set(match.url, visitsCount);
+            this._totalVisits++;
             this._triggerHandler(aBrowser, {
               id: this.id,
               param: match,
-              context: { visitsCount, url: match.url, host: match.host },
+              context: {
+                visitsCount,
+                totalVisitsCount: this._totalVisits,
+                url: match.url,
+                host: match.host,
+                isAddressBarUrlNavigation,
+              },
             });
           }
         }
@@ -1494,93 +1751,6 @@ export const ASRouterTriggerListeners = new Map([
     },
   ],
   [
-    "cookieBannerDetected",
-    {
-      id: "cookieBannerDetected",
-      _initialized: false,
-      _triggerHandler: null,
-
-      init(triggerHandler) {
-        this._triggerHandler = triggerHandler;
-        if (!this._initialized) {
-          lazy.EveryWindow.registerCallback(
-            this.id,
-            win => {
-              win.addEventListener("cookiebannerdetected", this);
-            },
-            win => {
-              win.removeEventListener("cookiebannerdetected", this);
-            }
-          );
-          this._initialized = true;
-        }
-      },
-      handleEvent(event) {
-        if (this._initialized) {
-          const win = event.target || Services.wm.getMostRecentBrowserWindow();
-          if (!win) {
-            return;
-          }
-          this._triggerHandler(win.gBrowser.selectedBrowser, {
-            id: this.id,
-          });
-        }
-      },
-      uninit() {
-        if (this._initialized) {
-          lazy.EveryWindow.unregisterCallback(this.id);
-          this._initialized = false;
-          this._triggerHandler = null;
-        }
-      },
-    },
-  ],
-  [
-    "cookieBannerHandled",
-    {
-      id: "cookieBannerHandled",
-      _initialized: false,
-      _triggerHandler: null,
-
-      init(triggerHandler) {
-        this._triggerHandler = triggerHandler;
-        if (!this._initialized) {
-          lazy.EveryWindow.registerCallback(
-            this.id,
-            win => {
-              win.addEventListener("cookiebannerhandled", this);
-            },
-            win => {
-              win.removeEventListener("cookiebannerhandled", this);
-            }
-          );
-          this._initialized = true;
-        }
-      },
-      handleEvent(event) {
-        if (this._initialized) {
-          const browser =
-            event.detail.windowContext.rootFrameLoader?.ownerElement;
-          const win = browser?.documentGlobal;
-          // We only want to show messages in the active browser window.
-          if (
-            win === Services.wm.getMostRecentBrowserWindow() &&
-            browser === win.gBrowser.selectedBrowser
-          ) {
-            this._triggerHandler(browser, { id: this.id });
-          }
-        }
-      },
-      uninit() {
-        if (this._initialized) {
-          lazy.EveryWindow.unregisterCallback(this.id);
-          this._initialized = false;
-          this._triggerHandler = null;
-        }
-      },
-    },
-  ],
-  [
     "pdfJsFeatureCalloutCheck",
     {
       id: "pdfJsFeatureCalloutCheck",
@@ -1974,6 +2144,111 @@ export const ASRouterTriggerListeners = new Map([
           this._initialized = false;
           this._triggerHandler = null;
           this._elementIds = [];
+        }
+      },
+    },
+  ],
+  [
+    "splitViewUsed",
+    {
+      id: "splitViewUsed",
+      _initialized: false,
+      _triggerHandler: null,
+      _visits: new Map(),
+
+      init(triggerHandler) {
+        if (!this._initialized) {
+          lazy.EveryWindow.registerCallback(
+            this.id,
+            win => {
+              win.addEventListener("SplitViewCreated", this);
+              win.addEventListener("TabSplitViewActivate", this);
+              win.addEventListener("TabSplitViewDeactivate", this);
+            },
+            win => {
+              win.removeEventListener("SplitViewCreated", this);
+              win.removeEventListener("TabSplitViewActivate", this);
+              win.removeEventListener("TabSplitViewDeactivate", this);
+              this._clearVisit(win);
+            }
+          );
+          this._initialized = true;
+        }
+        this._triggerHandler = triggerHandler;
+      },
+
+      uninit() {
+        if (this._initialized) {
+          lazy.EveryWindow.unregisterCallback(this.id);
+          for (const visit of this._visits.values()) {
+            if (visit.timerId !== undefined) {
+              lazy.clearTimeout(visit.timerId);
+            }
+          }
+          this._visits.clear();
+          this._initialized = false;
+          this._triggerHandler = null;
+        }
+      },
+
+      _clearVisit(win) {
+        const visit = this._visits.get(win);
+        if (visit?.timerId !== undefined) {
+          lazy.clearTimeout(visit.timerId);
+        }
+        this._visits.delete(win);
+      },
+
+      handleEvent(event) {
+        const win = event.target.documentGlobal;
+        if (!win || isPrivateWindow(win)) {
+          return;
+        }
+        if (event.type === "SplitViewCreated") {
+          // Tracks how many distinct Split Views the user has created, for
+          // message targeting (e.g. to skip messaging the first time a split view is
+          // used or created in a session).
+          // Kept separate from the continuous-use timer below, so briefly
+          // switching away from and back to an existing Split View doesn't
+          // inflate this count.
+          Services.prefs.setIntPref(
+            "browser.tabs.splitview.trigger.createCount",
+            lazy.splitViewCreateCount + 1
+          );
+        } else if (event.type === "TabSplitViewActivate") {
+          // Don't restart the timer if one is already pending for this
+          // window, e.g. when the user switches between tabs within the same
+          // Split View, and don't fire again if we already fired during this
+          // visit.
+          const existing = this._visits.get(win);
+          if (existing?.timerId !== undefined || existing?.fired) {
+            return;
+          }
+          const visit = { timerId: undefined, fired: false };
+          visit.timerId = lazy.setTimeout(() => {
+            visit.timerId = undefined;
+
+            const browser = win.gBrowser.selectedBrowser;
+            if (
+              !browser ||
+              !this._triggerHandler ||
+              win !== lazy.BrowserWindowTracker.getTopWindow()
+            ) {
+              return;
+            }
+
+            visit.fired = true;
+            this._triggerHandler(browser, {
+              id: this.id,
+              context: { splitViewCreateCount: lazy.splitViewCreateCount },
+            });
+          }, lazy.splitViewTriggerDelay);
+          this._visits.set(win, visit);
+        } else if (event.type === "TabSplitViewDeactivate") {
+          // Leaving Split View ends the current visit; a later return starts
+          // a fresh visit with its own timer, but does not affect the create
+          // count since no new Split View was created.
+          this._clearVisit(win);
         }
       },
     },

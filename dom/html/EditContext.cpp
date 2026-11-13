@@ -12,6 +12,7 @@
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/InputEventOptions.h"
 #include "mozilla/MiscEvents.h"
+#include "mozilla/TextComposition.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/AnonymousContent.h"
 #include "mozilla/dom/CharacterBoundsUpdateEvent.h"
@@ -23,18 +24,33 @@
 #include "mozilla/dom/TextUpdateEvent.h"
 #include "mozilla/intl/Segmenter.h"
 #include "nsDOMCSSDeclaration.h"
+#include "nsFocusManager.h"
 #include "nsGenericHTMLElement.h"
+#include "nsLayoutUtils.h"
 #include "nsTextNode.h"
 
 namespace mozilla::dom {
+
+mozilla::LazyLogModule gEditContextLog("EditContext");
 
 using InlineDir = WritingMode::InlineDir;
 using LineStyle = TextRangeStyle::LineStyle;
 
 NS_IMPL_ADDREF_INHERITED(EditContext, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(EditContext, DOMEventTargetHelper)
-NS_IMPL_CYCLE_COLLECTION_INHERITED(EditContext, DOMEventTargetHelper,
-                                   mAssociatedElement, mText, mTextContainer)
+NS_IMPL_CYCLE_COLLECTION_CLASS(EditContext)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(EditContext,
+                                                DOMEventTargetHelper)
+  tmp->UnsuppressNotifyingIME();
+  MOZ_ASSERT(!tmp->mSuppressNotifyingIMETimer);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAssociatedElement, mText, mTextContainer)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_PTR
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(EditContext,
+                                                  DOMEventTargetHelper)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAssociatedElement, mText, mTextContainer,
+                                    mSuppressNotifyingIMETimer)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(EditContext)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
@@ -47,7 +63,8 @@ already_AddRefed<EditContext> EditContext::Constructor(
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
-  RefPtr<EditContext> context = new EditContext(global, aInit, aRv);
+  RefPtr<EditContext> context = new EditContext(global);
+  context->Init(aInit, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -87,23 +104,30 @@ void EditContext::SetForElement(const Element& aElement,
   }
   if (aEditContext) {
     sEditContextHashMap->InsertOrUpdate(&aElement, aEditContext);
+    MOZ_LOG_FMT(gEditContextLog, LogLevel::Info,
+                "[{}] Attach EditContext to {}",
+                static_cast<void*>(aEditContext), aElement);
   } else {
+    if (MOZ_LOG_TEST(gEditContextLog, LogLevel::Info)) {
+      const auto* htmlElement = nsGenericHTMLElement::FromNode(&aElement);
+      EditContext* editContext =
+          htmlElement ? htmlElement->GetEditContext() : nullptr;
+      if (editContext) {
+        MOZ_LOG_FMT(gEditContextLog, LogLevel::Info,
+                    "[{}] Detach EditContext from {}",
+                    static_cast<void*>(editContext), aElement);
+      }
+    }
     sEditContextHashMap->Remove(&aElement);
   }
 }
 
 void EditContext::Deactivate() {
-  // https://w3c.github.io/edit-context/#dfn-deactivate-an-editcontext
-
-  // https://github.com/w3c/edit-context/pull/123
-  if (!mIsComposing) {
-    return;
-  }
-
-  // 1. Set editContext's is composing to false.
-  // 2. Fire an event named compositionend at editContext using
-  //    CompositionEvent.
-  // TODO
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Info, "[{}] Deactivate EditContext",
+              static_cast<void*>(this));
+  MOZ_ASSERT(!mIsComposing,
+             "Should have committed the composition before calling this.");
+  UnsuppressNotifyingIME();
 }
 
 bool EditContext::IsActive() const {
@@ -117,16 +141,18 @@ bool EditContext::IsAnyAttached() {
   return sEditContextHashMap && !sEditContextHashMap->IsEmpty();
 }
 
-EditContext::EditContext(nsIGlobalObject* aGlobalObject,
-                         const EditContextInit& aInit, ErrorResult& aRv)
-    : DOMEventTargetHelper(aGlobalObject) {
-  auto window = aGlobalObject->GetAsInnerWindow();
+EditContext::EditContext(nsIGlobalObject* aGlobalObject)
+    : DOMEventTargetHelper(aGlobalObject) {}
+
+void EditContext::Init(const EditContextInit& aInit, ErrorResult& aRv) {
+  nsPIDOMWindowInner* window = GetParentObject()->GetAsInnerWindow();
   MOZ_ASSERT(window);
-  auto* document = window->GetDoc();
+  RefPtr<Document> document = window->GetDoc();
   MOZ_ASSERT(document);
   RefPtr<AnonymousContent> anonymousContent =
       document->InsertAnonymousContent(aRv);
   if (NS_WARN_IF(!anonymousContent)) {
+    aRv.Throw(NS_ERROR_FAILURE);
     return;
   }
   RefPtr<Element> textContainer =
@@ -139,14 +165,24 @@ EditContext::EditContext(nsIGlobalObject* aGlobalObject,
   MOZ_ASSERT(mTextContainer);
   mText = document->CreateTextNode(u""_ns);
   mText->MarkAsMaybeModifiedFrequently();
-  mTextContainer->AppendChild(*mText, IgnoreErrors());
-  anonymousContent->Root()->AppendChild(*mTextContainer, IgnoreErrors());
+  mTextContainer->AppendChild(*mText, aRv);
+  anonymousContent->Root()->AppendChild(*mTextContainer, aRv);
   mText->SetEditableFlag(true);
   mTextContainer->SetEditableFlag(true);
   mTextContainer->Style()->SetProperty("visibility"_ns, "hidden"_ns, ""_ns,
-                                       IgnoreErrors());
-  UpdateSelection(aInit.mSelectionStart, aInit.mSelectionEnd);
-  UpdateText(0, 0, aInit.mText, aRv);
+                                       aRv);
+  // For computing target ranges for backspace, etc.,
+  // we shouldn't treat consecutive spaces as collapsed.
+  mTextContainer->Style()->SetProperty("white-space"_ns, "pre"_ns, ""_ns, aRv);
+  // Document-level anonymous content (created with InsertAnonymousContent)
+  // all lives in the same container. So we need to set position: absolute
+  // on all of them to prevent them from being positioned relative to
+  // each other.
+  mTextContainer->Style()->SetProperty("position"_ns, "absolute"_ns, ""_ns,
+                                       aRv);
+  mSelectionStart = aInit.mSelectionStart;
+  mSelectionEnd = aInit.mSelectionEnd;
+  UpdateTextInternal(0, 0, aInit.mText, aRv);
 }
 
 void EditContext::SetAssociatedElement(nsGenericHTMLElement* aElement) {
@@ -159,7 +195,7 @@ void EditContext::SetAssociatedElement(nsGenericHTMLElement* aElement) {
 void EditContext::GetText(nsAString& aText) const { mText->GetData(aText); }
 
 void EditContext::GetTextSubstring(uint32_t aStart, uint32_t aEnd,
-                                   nsAString& aText) {
+                                   nsAString& aText) const {
   mText->SubstringData(aStart, aEnd - aStart, aText, IgnoreErrors());
 }
 
@@ -172,25 +208,134 @@ auto EditContext::ToRect(const DOMRect& aRect) const -> Rect {
   return Rect(aRect.X(), aRect.Y(), aRect.Width(), aRect.Height());
 }
 
-LayoutDeviceIntRect EditContext::ToDeviceRect(const nsPresContext& aPresContext,
-                                              const Rect& aRect) {
-  CSSIntRect rect;
-  aRect.ToIntRect(&rect);
-  LayoutDeviceIntRect deviceRect;
-  deviceRect.x = aPresContext.CSSPixelsToDevPixels(rect.x);
-  deviceRect.y = aPresContext.CSSPixelsToDevPixels(rect.y);
+LayoutDeviceIntRect EditContext::ToRootRelativeDeviceRect(
+    const nsPresContext& aPresContext, const Rect& aRect) {
+  CSSIntRect cssRect;
+  aRect.ToIntRect(&cssRect);
+  return ToRootRelativeDeviceRect(aPresContext, Rect::ToAppUnits(cssRect));
+}
+
+LayoutDeviceIntRect EditContext::ToRootRelativeDeviceRect(
+    const nsPresContext& aPresContext, const nsRect& aRect) {
+  nsRect rect = aRect;
+  if (!aPresContext.IsRoot()) {
+    nsPresContext* rootPC = aPresContext.GetRootPresContext();
+    if (NS_WARN_IF(!rootPC)) {
+      return {0, 0, 1, 1};
+    }
+    nsIFrame* documentRootFrame = aPresContext.PresShell()->GetRootFrame();
+    nsIFrame* topLevelRootFrame = rootPC->PresShell()->GetRootFrame();
+    if (NS_WARN_IF(!documentRootFrame) || NS_WARN_IF(!topLevelRootFrame)) {
+      return {0, 0, 1, 1};
+    }
+    rect = nsLayoutUtils::TransformFrameRectToAncestor(documentRootFrame, rect,
+                                                       topLevelRootFrame);
+  }
+  LayoutDeviceIntRect deviceRect = LayoutDeviceIntRect::FromAppUnitsToOutside(
+      rect, aPresContext.AppUnitsPerDevPixel());
   // ContentCache, etc. is confused if the rectangles are empty,
   // so ensure that they aren't.
-  deviceRect.width = std::max(1, aPresContext.CSSPixelsToDevPixels(rect.width));
-  deviceRect.height =
-      std::max(1, aPresContext.CSSPixelsToDevPixels(rect.height));
+  deviceRect.width = std::max(1, deviceRect.width);
+  deviceRect.height = std::max(1, deviceRect.height);
   return deviceRect;
+}
+
+// Suppress IME notifications until this goes out of scope.
+class MOZ_STACK_CLASS EditContext::AutoSuppressIMENotifications {
+ public:
+  AutoSuppressIMENotifications() {
+    if (IMEContentObserver* observer =
+            IMEStateManager::GetActiveContentObserver()) {
+      MOZ_LOG_FMT(
+          gEditContextLog, LogLevel::Verbose,
+          "[AutoSuppressIMENotifications] Suppressing IME notifications");
+      observer->SuppressNotifyingIME();
+      mObserver = observer;
+    }
+  }
+
+  ~AutoSuppressIMENotifications() {
+    if (mObserver) {
+      MOZ_LOG_FMT(
+          gEditContextLog, LogLevel::Verbose,
+          "[AutoSuppressIMENotifications] Unsuppressing IME notifications");
+      mObserver->UnsuppressNotifyingIME();
+    }
+  }
+
+ private:
+  RefPtr<IMEContentObserver> mObserver;
+};
+
+void EditContext::SuppressNotifyingIME(IsFromFocus aIsFromFocus) {
+  IMEContentObserver* observer = IMEStateManager::GetActiveContentObserver();
+  if (!observer) {
+    return;
+  }
+
+  // We want to avoid suppressing NOTIFY_IME_OF_FOCUS for too long, since
+  // it may cause text input not to be handled by the IME. So we have a shorter
+  // timeout, and don't extend it even if new character bounds are needed.
+  if (aIsFromFocus == IsFromFocus::Yes) {
+    mIsSuppressingFocusNotification = true;
+  } else if (mIsSuppressingFocusNotification) {
+    return;
+  }
+
+  // We don't want to suppress forever - if the web app doesn't give
+  // us character bounds quickly, we give up and unsuppress notifications.
+  const char* suppressNotifyingIMETimeoutPref =
+      aIsFromFocus == IsFromFocus::Yes
+          ? "dom.editcontext.suppress_notifying_ime_timeout_focus"
+          : "dom.editcontext.suppress_notifying_ime_timeout";
+  const uint32_t timeoutMillis =
+      Preferences::GetUint(suppressNotifyingIMETimeoutPref);
+  WeakPtr<EditContext> editContextWeak(this);
+  auto unsuppressCallback =
+      [editContextWeak]([[maybe_unused]] nsITimer* aTimer) {
+        EditContext* editContext = editContextWeak.get();
+        MOZ_ASSERT(editContext,
+                   "We should have cancelled the timer when the EditContext "
+                   "was destroyed.");
+        editContext->UnsuppressNotifyingIME();
+      };
+  auto result = NS_NewTimerWithCallback(
+      unsuppressCallback, timeoutMillis, nsITimer::TYPE_ONE_SHOT,
+      "EditContext::UnsuppressNotifyingIME"_ns);
+  if (result.isErr()) {
+    NS_WARNING("NS_NewTimerWithCallback() failed.");
+    return;
+  }
+  MOZ_LOG_FMT(
+      gEditContextLog, LogLevel::Verbose,
+      "[{}] Suppressing IME notifications for {}ms (had previous timer = {})",
+      static_cast<void*>(this), timeoutMillis,
+      YesOrNo(mSuppressNotifyingIMETimer));
+  if (mSuppressNotifyingIMETimer) {
+    mSuppressNotifyingIMETimer->Cancel();
+  } else {
+    observer->SuppressNotifyingIME();
+  }
+  mSuppressNotifyingIMETimer = result.unwrap();
+}
+
+void EditContext::UpdateText(uint32_t aRangeStart, uint32_t aRangeEnd,
+                             const nsAString& aText, ErrorResult& aRv) {
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Info,
+              "[{}] updateText() with range {}-{} and text {}",
+              static_cast<void*>(this), aRangeStart, aRangeEnd,
+              ToString(aText));
+  UpdateTextInternal(aRangeStart, aRangeEnd, aText, aRv);
+  FireCharacterBoundsUpdateIfNeeded();
 }
 
 void EditContext::UpdateSelection(uint32_t aStart, uint32_t aEnd) {
   if (aStart == mSelectionStart && aEnd == mSelectionEnd) {
     return;
   }
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Info, "[{}] Update selection to {}-{}",
+              static_cast<void*>(this), aStart, aEnd);
+
   mSelectionStart = aStart;
   mSelectionEnd = aEnd;
   // Changing selection, so there may now be different
@@ -198,6 +343,7 @@ void EditContext::UpdateSelection(uint32_t aStart, uint32_t aEnd) {
   mTextNextToCaretChangedByTextUpdateHandler = true;
 
   if (IsActive()) {
+    FireCharacterBoundsUpdateIfNeeded();
     if (IMEContentObserver* observer =
             IMEStateManager::GetActiveContentObserver()) {
       observer->EditContextSelectionChanged();
@@ -205,16 +351,49 @@ void EditContext::UpdateSelection(uint32_t aStart, uint32_t aEnd) {
   }
 }
 
+template <typename T>
+static nsCString SequenceOwningNonNullToString(
+    const Sequence<OwningNonNull<T>>& aSequence) {
+  nsCString string("[");
+  for (size_t i = 0; i < aSequence.Length(); i++) {
+    const T& element = aSequence.ElementAt(i);
+    if (i > 0) {
+      string.AppendLiteral(", ");
+    }
+    if (i > 8) {
+      string.AppendLiteral("...");
+      break;
+    }
+    string.Append(ToString(element));
+  }
+  string.Append(']');
+  return string;
+}
+
 void EditContext::UpdateCharacterBounds(
     uint32_t aRangeStart,
     const Sequence<OwningNonNull<DOMRect>>& aCharacterBounds) {
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug,
+              "[{}] Update character bounds starting at {} to {}"
+              " (firing characterboundsupdate = {})",
+              static_cast<void*>(this), aRangeStart,
+              SequenceOwningNonNullToString(aCharacterBounds),
+              mIsFiringCharacterBoundsUpdate);
   mCodepointRectsStartIndex = aRangeStart;
   mCodepointRects.Clear();
   mCodepointRects.SetCapacity(aCharacterBounds.Length());
   for (const auto& rect : aCharacterBounds) {
     mCodepointRects.AppendElement(ToRect(rect));
   }
-  if (!mExpectingCharacterBounds && IsActive()) {
+
+  // Reset last requested character bounds.
+  // If we request the bounds for some range A, and then later
+  // the web app provides bounds for range B which we didn't request,
+  // then we want the character bounds for range A again, we should fire
+  // another characterboundsupdate event.
+  mLastRequestedCharacterBoundsRange = {};
+
+  if (!mIsFiringCharacterBoundsUpdate && IsActive()) {
     // Web app sent new character bounds of its own accord, without
     // a characterboundsupdate event - inform IME that position may
     // have changed
@@ -223,6 +402,7 @@ void EditContext::UpdateCharacterBounds(
       observer->EditContextPositionChanged();
     }
   }
+  UnsuppressNotifyingIME();
 }
 
 void EditContext::CharacterBounds(nsTArray<RefPtr<DOMRect>>& aRetVal) const {
@@ -245,8 +425,8 @@ WritingMode EditContext::WritingMode() const {
   return frame->GetWritingMode();
 }
 
-void EditContext::UpdateText(uint32_t aRangeStart, uint32_t aRangeEnd,
-                             const nsAString& aText, ErrorResult& aRv) {
+void EditContext::UpdateTextInternal(uint32_t aRangeStart, uint32_t aRangeEnd,
+                                     const nsAString& aText, ErrorResult& aRv) {
   if (NS_WARN_IF(!mText->DataBuffer().CanGrowBy(aText.Length()))) {
     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
     return;
@@ -264,6 +444,13 @@ void EditContext::UpdateText(uint32_t aRangeStart, uint32_t aRangeEnd,
     mTextNextToCaretChangedByTextUpdateHandler = true;
   }
   mText->ReplaceData(start, end - start, aText, IgnoreErrors());
+  // Check if the existing codepoint rects are affected by this change.
+  // If the text being changed is after the last stored codepoint rect,
+  // then the codepoint rects most likely won't be affected, so we don't
+  // need to fire characterboundsupdate again.
+  if (start < CodepointRectsEndIndex()) {
+    mCodepointRectsTextChanged = true;
+  }
   // XXX: Perhaps mSelectionStart/End should be clamped to new length
   //      of text? See https://github.com/w3c/edit-context/issues/88
   if (IsActive()) {
@@ -273,17 +460,34 @@ void EditContext::UpdateText(uint32_t aRangeStart, uint32_t aRangeEnd,
           SelectionEndClamped() != prevSelectionEnd) {
         observer->EditContextSelectionChanged();
       }
-      observer->EditContextTextChanged(aRangeStart, aRangeEnd, aText);
+      observer->EditContextTextChanged(start, end, aText);
     }
   }
 }
 
-void EditContext::UpdateControlBounds(DOMRect& aControlBounds) {
-  mControlBounds = Some(ToRect(aControlBounds));
+void EditContext::UpdateControlBounds(const DOMRect& aControlBounds) {
+  Rect newRect = ToRect(aControlBounds);
+  if (mControlBounds == Some(newRect)) {
+    // Same rect as before - don't notify IME.
+    return;
+  }
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Info,
+              "[{}] Update control bounds to {}", static_cast<void*>(this),
+              ToString(aControlBounds));
+  mControlBounds = Some(newRect);
+  // Character bounds may have changed due to editor rectangle changing.
+  FireCharacterBoundsUpdateIfNeeded();
+  if (IMEContentObserver* observer =
+          IMEStateManager::GetActiveContentObserver()) {
+    observer->EditContextPositionChanged();
+  }
 }
 
-void EditContext::UpdateSelectionBounds(DOMRect& aSelectionBounds) {
+void EditContext::UpdateSelectionBounds(const DOMRect& aSelectionBounds) {
   mSelectionBounds = Some(ToRect(aSelectionBounds));
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Info,
+              "[{}] Update selection bounds to {}", static_cast<void*>(this),
+              ToString(aSelectionBounds));
 }
 
 void EditContext::UpdateTextAndFireEvent(
@@ -298,8 +502,13 @@ void EditContext::UpdateTextAndFireEvent(
   if (aStart > aEnd) {
     std::swap(aStart, aEnd);
   }
+
+  // Suppress IME notifications at least until this method returns.
+  // FireCharacterBoundsUpdateIfNeeded may cause it to be suppressed
+  // for longer.
+  AutoSuppressIMENotifications suppress;
   IgnoredErrorResult rv;
-  UpdateText(aStart, aEnd, aString, rv);
+  UpdateTextInternal(aStart, aEnd, aString, rv);
   if (rv.Failed()) {
     return;
   }
@@ -316,18 +525,34 @@ void EditContext::UpdateTextAndFireEvent(
   } else {
     mSelectionStart = mSelectionEnd = aStart + aString.Length();
   }
+  FireTextUpdate(aStart, aEnd, aString);
+  // Request new character bounds.
+  FireCharacterBoundsUpdateIfNeeded();
+}
+
+void EditContext::FireTextUpdate(uint32_t aUpdateRangeStart,
+                                 uint32_t aUpdateRangeEnd,
+                                 const nsAString& aText) {
   TextUpdateEventInit options;
-  options.mText = aString;
+  options.mText = aText;
   options.mSelectionStart = mSelectionStart;
   options.mSelectionEnd = mSelectionEnd;
-  options.mUpdateRangeStart = aStart;
-  options.mUpdateRangeEnd = aEnd;
+  options.mUpdateRangeStart = aUpdateRangeStart;
+  options.mUpdateRangeEnd = aUpdateRangeEnd;
   options.mBubbles = false;
   options.mCancelable = true;
   RefPtr<TextUpdateEvent> e =
       TextUpdateEvent::Constructor(this, u"textupdate"_ns, options);
   e->SetTrusted(true);
   mTextNextToCaretChangedByTextUpdateHandler = false;
+
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug,
+              "[{}] Dispatch textupdate event selection={}-{}, "
+              "updateRange={}-{}, text={}",
+              static_cast<void*>(this), options.mSelectionStart,
+              options.mSelectionEnd, options.mUpdateRangeStart,
+              options.mUpdateRangeEnd, ToString(options.mText));
+
   // textupdate can be fired recursively if the editor is blurred
   // during a composition (since that cancels the composition).
   // XXX: Some web apps may not handle this properly
@@ -337,7 +562,36 @@ void EditContext::UpdateTextAndFireEvent(
   DispatchEvent(*e);
 }
 
+void EditContext::DoSetSelection(WidgetSelectionEvent& aEvent) {
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug,
+              "[{}] {} with offset={} length={} direction={} "
+              "expandToClusterBoundary={}",
+              static_cast<void*>(this), __func__, aEvent.mOffset,
+              aEvent.mLength, aEvent.mDirection,
+              aEvent.mExpandToClusterBoundary);
+  TextRange range(std::min(aEvent.mOffset, TextLength()),
+                  std::min(aEvent.mOffset + aEvent.mLength, TextLength()));
+  if (aEvent.ShouldExpandToClusterBoundary()) {
+    range = ExpandRangeToClusterBoundaries(range);
+  }
+  mSelectionStart = range.mStart;
+  mSelectionEnd = range.mEnd;
+  if (aEvent.IsReversed()) {
+    std::swap(mSelectionStart, mSelectionEnd);
+  }
+  if (IMEContentObserver* observer =
+          IMEStateManager::GetActiveContentObserver()) {
+    observer->EditContextSelectionChanged();
+  }
+  // We need to fire textupdate so that the web app is aware that the
+  // selection has changed.
+  FireTextUpdate(0, 0, u""_ns);
+  FireCharacterBoundsUpdateIfNeeded();
+}
+
 void EditContext::StartComposition(const WidgetCompositionEvent& aEvent) {
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug, "[{}] Start composition",
+              static_cast<void*>(this));
   MOZ_ASSERT(!mIsComposing);
   WidgetCompositionEvent event(aEvent);
   RefPtr presContext = mText->OwnerDoc()->GetPresContext();
@@ -346,6 +600,8 @@ void EditContext::StartComposition(const WidgetCompositionEvent& aEvent) {
 }
 
 void EditContext::EndComposition(const WidgetCompositionEvent& aEvent) {
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug, "[{}] End composition",
+              static_cast<void*>(this));
   MOZ_ASSERT(mIsComposing);
   WidgetCompositionEvent event(aEvent);
   RefPtr presContext = mText->OwnerDoc()->GetPresContext();
@@ -365,6 +621,12 @@ void EditContext::DoContentCommandReplaceText(
   nsAutoString text;
   const uint32_t replaceOffset = aEvent.mSelection.mOffset;
   const uint32_t replaceLength = aEvent.mSelection.mReplaceSrcString.Length();
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug,
+              "[{}] Do ContentCommandReplaceText offset={} replaceSrcString={} "
+              "string={}",
+              static_cast<void*>(this), replaceOffset,
+              ToString(aEvent.mSelection.mReplaceSrcString),
+              ToString(aEvent.mString));
   mText->SubstringData(replaceOffset, replaceLength, text, IgnoreErrors());
   if (text != aEvent.mSelection.mReplaceSrcString) {
     // String to replace doesn't match the text.
@@ -395,10 +657,9 @@ void EditContext::DoContentCommandReplaceText(
     return;
   }
   // Dispatch textupdate
-  UpdateTextAndFireEvent(
-      replaceOffset, replaceOffset + replaceLength, *aEvent.mString,
-      aEvent.mSelection.mPreventSetSelection ? PreventSetSelection::Yes
-                                             : PreventSetSelection::No);
+  UpdateTextAndFireEvent(replaceOffset, replaceOffset + replaceLength,
+                         *aEvent.mString,
+                         aEvent.mSelection.mPreventSetSelection);
   aEvent.mSucceeded = true;
 }
 
@@ -428,7 +689,7 @@ void EditContext::FireTextFormatUpdate(const TextRangeArray* aRanges,
   eventOptions.mBubbles = false;
   eventOptions.mCancelable = true;
   if (aRanges) {
-    for (const TextRange& range : *aRanges) {
+    for (const mozilla::TextRange& range : *aRanges) {
       if (range.Length() == 0) {
         // Empty ranges probably aren't useful?
         continue;
@@ -461,6 +722,11 @@ void EditContext::FireTextFormatUpdate(const TextRangeArray* aRanges,
       NS_WARNING_ASSERTION(element, "TextFormat array allocation failed");
     }
   }
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug,
+              "[{}] Fire textformatupdate with formats {}",
+              static_cast<void*>(this),
+              SequenceOwningNonNullToString(eventOptions.mTextFormats));
+
   RefPtr<TextFormatUpdateEvent> e = MakeRefPtr<TextFormatUpdateEvent>(
       this, u"textformatupdate"_ns, eventOptions);
   e->SetTrusted(true);
@@ -482,9 +748,177 @@ static InlineDir ReverseInlineDir(InlineDir dir) {
   return InlineDir::LTR;
 }
 
-nsresult EditContext::FireCharacterBoundsUpdateAndGetRects(
-    uint32_t aStart, uint32_t aEnd, nsTArray<LayoutDeviceIntRect>& aRects) {
+void EditContext::UnsuppressNotifyingIME() {
+  if (mSuppressNotifyingIMETimer) {
+    MOZ_LOG_FMT(gEditContextLog, LogLevel::Verbose,
+                "[{}] Unsuppressing IME notifications",
+                static_cast<void*>(this));
+    mSuppressNotifyingIMETimer->Cancel();
+    mSuppressNotifyingIMETimer = nullptr;
+    mIsSuppressingFocusNotification = false;
+    if (IMEContentObserver* observer =
+            IMEStateManager::GetActiveContentObserver()) {
+      observer->UnsuppressNotifyingIME();
+    }
+  }
+}
+
+bool EditContext::ShouldFireNewCharacterBoundsUpdateForRange(
+    TextRange aRange) const {
+  if (mCodepointRectsTextChanged) {
+    // Text at or before existing rects has changed, so we should fire again.
+    return true;
+  }
+  if (mControlBoundsAtLastCharacterBoundsUpdate !=
+      GetControlBoundsOrClientRect()) {
+    // Control bounds changed, so we should fire again.
+    return true;
+  }
+  if (aRange.IsContainedIn(mCodepointRectsStartIndex,
+                           CodepointRectsEndIndex())) {
+    // We already have these character bounds.
+    return false;
+  }
+  if (aRange.IsContainedIn(mLastRequestedCharacterBoundsRange)) {
+    // We already requested these character bounds.
+    return false;
+  }
+  return true;
+}
+
+auto EditContext::ExpandRangeToClusterBoundaries(TextRange aRange) const
+    -> TextRange {
+  // Number of code units of context to use when determining the
+  // grapheme cluster boundaries.
+  constexpr uint32_t kContext = 16;
+  const uint32_t start = aRange.mStart;
+  const uint32_t end = aRange.mEnd;
+  uint32_t startExtendedToGraphemeCluster = start;
+  {
+    nsAutoString startText;
+    uint32_t startTextOffset = std::max(start, kContext) - kContext;
+    GetTextSubstring(startTextOffset, std::min(start + kContext, TextLength()),
+                     startText);
+    intl::GraphemeClusterBreakIteratorUtf16 iter(startText);
+    // find first grapheme cluster break before or equal to aStart
+    while (Maybe<uint32_t> i = iter.Next()) {
+      if (startTextOffset + *i > start) {
+        break;
+      }
+      startExtendedToGraphemeCluster = startTextOffset + *i;
+    }
+  }
+  uint32_t endExtendedToGraphemeCluster = end;
+  {
+    nsAutoString endText;
+    uint32_t endTextOffset = std::max(end, kContext) - kContext;
+    GetTextSubstring(endTextOffset, std::min(end + kContext, TextLength()),
+                     endText);
+    // find first grapheme cluster break after or equal to aEnd
+    intl::GraphemeClusterBreakIteratorUtf16 iter(endText);
+    while (Maybe<uint32_t> i = iter.Next()) {
+      if (endTextOffset + *i >= end) {
+        endExtendedToGraphemeCluster = endTextOffset + *i;
+        break;
+      }
+    }
+  }
+  return {startExtendedToGraphemeCluster, endExtendedToGraphemeCluster};
+}
+
+void EditContext::FireCharacterBoundsUpdateIfNeeded(IsFromFocus aIsFromFocus) {
+  // If characterboundsupdate handler changes text or something, don't fire
+  // another characterboundsupdate to avoid infinite recursion.
+  if (mIsFiringCharacterBoundsUpdate || !IsActive()) {
+    return;
+  }
+  uint32_t start = SelectionMinClamped();
+  uint32_t end = SelectionMaxClamped();
+  MOZ_ASSERT(mAssociatedElement, "Should have associated element if active.");
+  if (HTMLEditor* editor = mAssociatedElement->OwnerDoc()->GetHTMLEditor()) {
+    if (TextComposition* composition = editor->GetComposition()) {
+      start = composition->ClampedStartOffsetInTextNode();
+      end = composition->EndOffsetMaybeInFollowingTextNode();
+    }
+  }
+  if (start == end) {
+    // Extend empty range to include one character.
+    if (end < TextLength()) {
+      end++;
+    } else if (start) {
+      start--;
+    } else {
+      // Text is empty - can't request character bounds.
+      return;
+    }
+  }
+  MOZ_ASSERT(start < end);
+
+  // Extend requested range to grapheme cluster boundaries,
+  // in case web app has poor handling of ranges starting/ending
+  // in the middle of a grapheme cluster.
+  const TextRange requestRange = ExpandRangeToClusterBoundaries({start, end});
+  // If we already have the requested character bounds or we already
+  // requested them, and nothing relevant has changed, don't fire
+  // characterboundsupdate again.
+  if (!ShouldFireNewCharacterBoundsUpdateForRange(requestRange)) {
+    return;
+  }
+  // We set all this stuff here instead of in updateCharacterBounds(),
+  // since we don't want to fire characterupdatebounds repeatedly even
+  // if the web app never calls updateCharacterBounds().
+  mControlBoundsAtLastCharacterBoundsUpdate = GetControlBoundsOrClientRect();
+  mLastRequestedCharacterBoundsRange = requestRange;
+  mCodepointRectsTextChanged = false;
+
+  // We want to suppress notifying the IME of
+  // NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED, etc. until the character bounds
+  // are provided, to avoid the IME user interface moving around too much.
+  SuppressNotifyingIME(aIsFromFocus);
+
+  CharacterBoundsUpdateEventInit eventOptions;
+  eventOptions.mBubbles = false;
+  eventOptions.mCancelable = true;
+  eventOptions.mRangeStart = requestRange.mStart;
+  eventOptions.mRangeEnd = requestRange.mEnd;
+  mIsFiringCharacterBoundsUpdate = true;
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug,
+              "[{}] Fire characterboundsupdate with range {}-{} "
+              "(isFromFocus = {})",
+              static_cast<void*>(this), eventOptions.mRangeStart,
+              eventOptions.mRangeEnd,
+              YesOrNo(aIsFromFocus == IsFromFocus::Yes));
+  RefPtr event = CharacterBoundsUpdateEvent::Constructor(
+      this, u"characterboundsupdate"_ns, eventOptions);
+  event->SetTrusted(true);
+  DispatchEvent(*event);
+  mIsFiringCharacterBoundsUpdate = false;
+  if (!requestRange.IsContainedIn(mCodepointRectsStartIndex,
+                                  CodepointRectsEndIndex())) {
+    MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug,
+                "[{}] characterboundsupdate handler didn't provide requested "
+                "bounds synchronously - want {}-{}, but have {}-{}",
+                static_cast<void*>(this), requestRange.mStart,
+                requestRange.mEnd, mCodepointRectsStartIndex,
+                CodepointRectsEndIndex());
+    if (!mWarnedAboutUpdateCharacterBoundsNotCalled) {
+      nsContentUtils::ReportToConsole(
+          nsIScriptError::warningFlag, "DOM"_ns, mText->OwnerDoc(),
+          PropertiesFile::DOM_PROPERTIES, "EditContextCharacterBoundsWarning");
+      mWarnedAboutUpdateCharacterBoundsNotCalled = true;
+    }
+  };
+}
+
+nsresult EditContext::GetCharacterBounds(
+    uint32_t aStart, uint32_t aEnd,
+    nsTArray<LayoutDeviceIntRect>& aRects) const {
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Verbose,
+              "[{}] Getting character bounds for range {}-{}, have {}-{}",
+              static_cast<const void*>(this), aStart, aEnd,
+              mCodepointRectsStartIndex, CodepointRectsEndIndex());
   MOZ_ASSERT(aRects.IsEmpty());
+  MOZ_ASSERT(aStart <= aEnd);
   aStart = std::min(aStart, TextLength());
   aEnd = std::min(aEnd, TextLength());
   enum class CollapseDirection {
@@ -517,73 +951,37 @@ nsresult EditContext::FireCharacterBoundsUpdateAndGetRects(
       collapse = CollapseDirection::Next;
     }
   }
-  MOZ_ASSERT(aStart < aEnd);
-
-  // Extend requested range to grapheme cluster boundaries,
-  // in case web app has poor handling of ranges starting/ending
-  // in the middle of a grapheme cluster.
-  uint32_t startExtendedToGraphemeCluster = aStart;
-  // Number of code units of context to use when determining the
-  // grapheme cluster boundaries.
-  constexpr uint32_t kContext = 16;
-  {
-    nsAutoString startText;
-    uint32_t startTextOffset = std::max(aStart, kContext) - kContext;
-    GetTextSubstring(startTextOffset, std::min(aStart + kContext, TextLength()),
-                     startText);
-    intl::GraphemeClusterBreakIteratorUtf16 iter(startText);
-    // find first grapheme cluster break before or equal to aStart
-    while (Maybe<uint32_t> i = iter.Next()) {
-      if (startTextOffset + *i > aStart) {
-        break;
-      }
-      startExtendedToGraphemeCluster = startTextOffset + *i;
-    }
-  }
-  uint32_t endExtendedToGraphemeCluster = aEnd;
-  {
-    nsAutoString endText;
-    uint32_t endTextOffset = std::max(aEnd, kContext) - kContext;
-    GetTextSubstring(endTextOffset, std::min(aEnd + kContext, TextLength()),
-                     endText);
-    // find first grapheme cluster break after or equal to aEnd
-    intl::GraphemeClusterBreakIteratorUtf16 iter(endText);
-    while (Maybe<uint32_t> i = iter.Next()) {
-      if (endTextOffset + *i >= aEnd) {
-        endExtendedToGraphemeCluster = endTextOffset + *i;
-        break;
-      }
-    }
+  nsPresContext* presContext = mText->OwnerDoc()->GetPresContext();
+  if (NS_WARN_IF(!presContext)) {
+    return NS_ERROR_FAILURE;
   }
 
-  RefPtr<nsPresContext> presContext = mText->OwnerDoc()->GetPresContext();
-
-  CharacterBoundsUpdateEventInit eventOptions;
-  eventOptions.mBubbles = false;
-  eventOptions.mCancelable = true;
-  eventOptions.mRangeStart = startExtendedToGraphemeCluster;
-  eventOptions.mRangeEnd = endExtendedToGraphemeCluster;
-  {
-    AutoRestore restore(mExpectingCharacterBounds);
-    mExpectingCharacterBounds = true;
-    RefPtr event = CharacterBoundsUpdateEvent::Constructor(
-        this, u"characterboundsupdate"_ns, eventOptions);
-    event->SetTrusted(true);
-    DispatchEvent(*event);
-  }
   aRects.SetCapacity(aEnd - aStart);
-  for (uint32_t i = aStart; i < aEnd; i++) {
-    CheckedUint32 indexInCodepointRects =
-        CheckedUint32(i) - mCodepointRectsStartIndex;
-    if (!indexInCodepointRects.isValid() ||
-        indexInCodepointRects.value() >= mCodepointRects.Length()) {
-      // Web app did not provide correct character bounds synchronously in the
-      // event handler.
-      // XXX: Should we emit a console warning about this?
-      return NS_ERROR_FAILURE;
+  if (mCodepointRects.IsEmpty()) {
+    // Web app never provided any character bounds - in this case,
+    // for DOM-based EditContext, we try to get the rectangles from the DOM
+    // in ContentEventHandler. For canvas-based EditContext, we end up
+    // using EditContext::FallbackBounds().
+    return NS_ERROR_FAILURE;
+  }
+  for (int64_t i = aStart; i < aEnd; i++) {
+    const int64_t indexInCodepointRects = i - mCodepointRectsStartIndex;
+    const int64_t clampedIndex = std::clamp<int64_t>(
+        indexInCodepointRects, 0, mCodepointRects.Length() - 1);
+    Rect cssRect = mCodepointRects[clampedIndex];
+    if (clampedIndex != indexInCodepointRects) {
+      // Web app didn't provide the requested bounds -
+      // use either the selection or the closest available
+      // character bound, whichever is closer.
+      int64_t distanceFromSelection = std::abs(i - mSelectionStart);
+      int64_t distanceFromClamped =
+          std::abs(indexInCodepointRects - clampedIndex);
+      if (mSelectionBounds && distanceFromSelection < distanceFromClamped) {
+        cssRect = *mSelectionBounds;
+      }
     }
-    Rect cssRect = mCodepointRects[indexInCodepointRects.value()];
-    LayoutDeviceIntRect deviceRect = ToDeviceRect(*presContext, cssRect);
+    LayoutDeviceIntRect deviceRect =
+        ToRootRelativeDeviceRect(*presContext, cssRect);
     aRects.AppendElement(deviceRect);
   }
   if (collapse != CollapseDirection::None) {
@@ -628,7 +1026,7 @@ Maybe<LayoutDeviceIntRect> EditContext::GetControlBounds() const {
     // Control bounds were never set.
     return Nothing();
   }
-  return Some(ToDeviceRect(*presContext, *mControlBounds));
+  return Some(ToRootRelativeDeviceRect(*presContext, *mControlBounds));
 }
 
 Maybe<LayoutDeviceIntRect> EditContext::GetSelectionBounds() const {
@@ -637,7 +1035,19 @@ Maybe<LayoutDeviceIntRect> EditContext::GetSelectionBounds() const {
     // Selection bounds were never set.
     return Nothing();
   }
-  return Some(ToDeviceRect(*presContext, *mSelectionBounds));
+  return Some(ToRootRelativeDeviceRect(*presContext, *mSelectionBounds));
+}
+
+Maybe<nsRect> EditContext::GetControlBoundsOrClientRect() const {
+  if (mControlBounds) {
+    CSSIntRect intRect;
+    mControlBounds->ToIntRect(&intRect);
+    return Some(Rect::ToAppUnits(intRect));
+  }
+  if (!mAssociatedElement || !mAssociatedElement->GetPrimaryFrame()) {
+    return Nothing();
+  }
+  return Some(mAssociatedElement->GetPrimaryFrame()->GetRect());
 }
 
 LayoutDeviceIntRect EditContext::FallbackBounds() const {
@@ -647,24 +1057,72 @@ LayoutDeviceIntRect EditContext::FallbackBounds() const {
   if (Maybe<LayoutDeviceIntRect> bounds = GetControlBounds()) {
     return *bounds;
   }
-  if (NS_WARN_IF(!mAssociatedElement) ||
-      NS_WARN_IF(!mAssociatedElement->GetPrimaryFrame())) {
+  Maybe<nsRect> appUnitsRect = GetControlBoundsOrClientRect();
+  if (NS_WARN_IF(!appUnitsRect)) {
     // Nothing good we can return here.
     return {0, 0, 1, 1};
   }
   nsPresContext* presContext =
       mAssociatedElement->GetPrimaryFrame()->PresContext();
-  nsRect appUnitsRect = mAssociatedElement->GetPrimaryFrame()->GetRect();
-  LayoutDeviceIntRect deviceRect;
-  deviceRect.x = presContext->AppUnitsToDevPixels(appUnitsRect.x);
-  deviceRect.y = presContext->AppUnitsToDevPixels(appUnitsRect.y);
-  // ContentCache, etc. is confused if the rectangles are empty,
-  // so ensure that they aren't.
-  deviceRect.width =
-      std::max(1, presContext->AppUnitsToDevPixels(appUnitsRect.width));
-  deviceRect.height =
-      std::max(1, presContext->AppUnitsToDevPixels(appUnitsRect.height));
-  return deviceRect;
+  return ToRootRelativeDeviceRect(*presContext, *appUnitsRect);
+}
+
+// static
+void EditContext::NotifyActiveEditContextChanged(Document& aDocument) {
+  if (RefPtr newEditContext = aDocument.GetActiveEditContext()) {
+    newEditContext->FireCharacterBoundsUpdateIfNeeded(IsFromFocus::Yes);
+  }
+
+  RefPtr<HTMLEditor> editor = aDocument.GetHTMLEditor();
+  if (!editor) {
+    return;
+  }
+
+  RefPtr<Element> focusedElement = editor->GetFocusedElement();
+  if (!focusedElement ||
+      focusedElement != IMEStateManager::GetFocusedElement()) {
+    // We will handle this in IMEStateManager::OnChangeFocus.
+    // Calling UpdateIMEState() here is only needed when the editor
+    // changes between EditContext an non-EditContext without the
+    // focused element changing.
+    return;
+  }
+  auto newStateOrError = editor->GetPreferredIMEState();
+  // Currently, HTMLEditor::GetPreferredIMEState cannot fail.
+  MOZ_ASSERT(newStateOrError.isOk(),
+             "HTMLEditor::GetPreferredIMEState() failed");
+  const widget::IMEState defaultState(widget::IMEEnabled::Disabled);
+  IMEStateManager::UpdateIMEState(newStateOrError.unwrapOr(defaultState),
+                                  focusedElement, *editor);
+  // (Note that window may have been destroyed by UpdateIMEState.)
+}
+
+bool EditContext::IsCanvas() const {
+  return mAssociatedElement &&
+         mAssociatedElement->IsHTMLElement(nsGkAtoms::canvas);
+}
+
+std::ostream& operator<<(std::ostream& aStream,
+                         const EditContext& aEditContext) {
+  nsAutoString debugText;
+  aEditContext.GetText(debugText);
+  if (debugText.Length() > 15) {
+    debugText.Truncate(12);
+    debugText.AppendLiteral(u"...");
+  }
+  debugText.ReplaceSubstring(u"\"", u"\\\"");
+  debugText.ReplaceSubstring(u"\\", u"\\\\");
+  debugText.ReplaceSubstring(u"\n", u"\\n");
+  aStream << "EditContext@" << &aEditContext << " { text=\"" << debugText
+          << "\", selection=" << aEditContext.SelectionStart() << "-"
+          << aEditContext.SelectionEnd() << ", associatedElement=";
+  if (Element* element = aEditContext.GetAssociatedElement()) {
+    aStream << *element;
+  } else {
+    aStream << "none";
+  }
+  return aStream << ", isComposing=" << TrueOrFalse(aEditContext.mIsComposing)
+                 << " }";
 }
 
 }  // namespace mozilla::dom

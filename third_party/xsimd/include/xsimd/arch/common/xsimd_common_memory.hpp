@@ -312,7 +312,7 @@ namespace xsimd
             template <class A, class T_in, class T_out>
             XSIMD_INLINE batch<T_out, A> load_aligned(T_in const* mem, convert<T_out>, requires_arch<common>, with_slow_conversion) noexcept
             {
-                static_assert(!std::is_same<T_in, T_out>::value, "there should be a direct load for this type combination");
+                static_assert(!std::is_same_v<T_in, T_out>, "there should be a direct load for this type combination");
                 using batch_type_out = batch<T_out, A>;
                 alignas(A::alignment()) T_out buffer[batch_type_out::size];
                 std::copy(mem, mem + batch_type_out::size, std::begin(buffer));
@@ -339,7 +339,7 @@ namespace xsimd
             template <class A, class T_in, class T_out>
             XSIMD_INLINE batch<T_out, A> load_unaligned(T_in const* mem, convert<T_out> cvt, requires_arch<common>, with_slow_conversion) noexcept
             {
-                static_assert(!std::is_same<T_in, T_out>::value, "there should be a direct load for this type combination");
+                static_assert(!std::is_same_v<T_in, T_out>, "there should be a direct load for this type combination");
                 return load_aligned<A>(mem, cvt, common {}, with_slow_conversion {});
             }
         }
@@ -376,10 +376,10 @@ namespace xsimd
             // otherwise the scalar-buffer fallback is used. Names no architecture.
             template <class A, class T_in, class T_out>
             using masked_memory_uses_fp_bitcast = std::integral_constant<bool,
-                                                                         std::is_same<T_in, T_out>::value
-                                                                             && std::is_integral<T_out>::value
-                                                                             && !std::is_void<sized_fp_t<sizeof(T_out)>>::value
-                                                                             && types::has_simd_register<sized_fp_t<sizeof(T_out)>, A>::value>;
+                                                                         std::is_same_v<T_in, T_out>
+                                                                             && std::is_integral_v<T_out>
+                                                                             && !std::is_void_v<sized_fp_t<sizeof(T_out)>>
+                                                                             && types::has_simd_register_v<sized_fp_t<sizeof(T_out)>, A>>;
 
             // Scalar-buffer fallback: materialize masked-off lanes as zero, then load.
             template <class A, class T_in, class T_out, bool... Values, class alignment>
@@ -437,11 +437,38 @@ namespace xsimd
             return detail::load_masked_common(mem, mask, cvt, mode, detail::masked_memory_uses_fp_bitcast<A, T_in, T_out> {});
         }
 
+        template <class A, class T, class Mode>
+        XSIMD_INLINE batch<T, A>
+        load_masked(T const* mem, batch_bool<T, A> mask, convert<T>, Mode, requires_arch<common>) noexcept
+        {
+            // Scalar fallback: only active lanes are touched. Arches with
+            // hardware predicated loads should override this.
+            constexpr std::size_t size = batch<T, A>::size;
+            alignas(A::alignment()) std::array<T, size> buffer;
+            for (std::size_t i = 0; i < size; ++i)
+                buffer[i] = mask.get(i) ? mem[i] : T(0);
+            return batch<T, A>::load_aligned(buffer.data());
+        }
+
         template <class A, class T_in, class T_out, bool... Values, class alignment>
         XSIMD_INLINE void
         store_masked(T_out* mem, batch<T_in, A> const& src, batch_bool_constant<T_in, A, Values...> mask, alignment mode, requires_arch<common>) noexcept
         {
             detail::store_masked_common(mem, src, mask, mode, detail::masked_memory_uses_fp_bitcast<A, T_in, T_out> {});
+        }
+
+        template <class A, class T, class Mode>
+        XSIMD_INLINE void
+        store_masked(T* mem, batch<T, A> const& src, batch_bool<T, A> mask, Mode, requires_arch<common>) noexcept
+        {
+            // Scalar fallback: only active lanes are touched. Arches with
+            // hardware predicated stores should override this.
+            constexpr std::size_t size = batch<T, A>::size;
+            alignas(A::alignment()) std::array<T, size> src_buf;
+            src.store_aligned(src_buf.data());
+            for (std::size_t i = 0; i < size; ++i)
+                if (mask.get(i))
+                    mem[i] = src_buf[i];
         }
 
         template <class A, class T_in, class T_out>
@@ -628,27 +655,27 @@ namespace xsimd
             static_assert(bsize == batch<T, A>::size, "valid shuffle");
 
             // Detect common patterns
-            XSIMD_IF_CONSTEXPR(detail::is_swizzle_fst(bsize, Indices...))
+            if constexpr (detail::is_swizzle_fst(bsize, Indices...))
             {
                 return swizzle(x, batch_constant<ITy, A, ((Indices >= bsize) ? 0 /* never happens */ : Indices)...>());
             }
 
-            XSIMD_IF_CONSTEXPR(detail::is_swizzle_snd(bsize, Indices...))
+            if constexpr (detail::is_swizzle_snd(bsize, Indices...))
             {
                 return swizzle(y, batch_constant<ITy, A, ((Indices >= bsize) ? (Indices - bsize) : 0 /* never happens */)...>());
             }
 
-            XSIMD_IF_CONSTEXPR(detail::is_zip_lo(bsize, Indices...))
+            if constexpr (detail::is_zip_lo(bsize, Indices...))
             {
                 return zip_lo(x, y);
             }
 
-            XSIMD_IF_CONSTEXPR(detail::is_zip_hi(bsize, Indices...))
+            if constexpr (detail::is_zip_hi(bsize, Indices...))
             {
                 return zip_hi(x, y);
             }
 
-            XSIMD_IF_CONSTEXPR(detail::is_select(bsize, Indices...))
+            if constexpr (detail::is_select(bsize, Indices...))
             {
                 return select(batch_bool_constant<T, A, (Indices < bsize)...>(), x, y);
             }
@@ -701,7 +728,7 @@ namespace xsimd
         template <class A, class T_in, class T_out>
         XSIMD_INLINE void store_aligned(T_out* mem, batch<T_in, A> const& self, requires_arch<common>) noexcept
         {
-            static_assert(!std::is_same<T_in, T_out>::value, "there should be a direct store for this type combination");
+            static_assert(!std::is_same_v<T_in, T_out>, "there should be a direct store for this type combination");
             alignas(A::alignment()) T_in buffer[batch<T_in, A>::size];
             store_aligned(&buffer[0], self);
             std::copy(std::begin(buffer), std::end(buffer), mem);
@@ -711,7 +738,7 @@ namespace xsimd
         template <class A, class T_in, class T_out>
         XSIMD_INLINE void store_unaligned(T_out* mem, batch<T_in, A> const& self, requires_arch<common>) noexcept
         {
-            static_assert(!std::is_same<T_in, T_out>::value, "there should be a direct store for this type combination");
+            static_assert(!std::is_same_v<T_in, T_out>, "there should be a direct store for this type combination");
             return store_aligned<A>(mem, self, common {});
         }
 
@@ -765,19 +792,19 @@ namespace xsimd
             template <class A, class T>
             XSIMD_INLINE batch<std::complex<T>, A> load_complex(batch<T, A> const& /*hi*/, batch<T, A> const& /*lo*/, requires_arch<common>) noexcept
             {
-                static_assert(std::is_same<T, void>::value, "load_complex not implemented for the required architecture");
+                static_assert(std::is_same_v<T, void>, "load_complex not implemented for the required architecture");
             }
 
             template <class A, class T>
             XSIMD_INLINE batch<T, A> complex_high(batch<std::complex<T>, A> const& /*src*/, requires_arch<common>) noexcept
             {
-                static_assert(std::is_same<T, void>::value, "complex_high not implemented for the required architecture");
+                static_assert(std::is_same_v<T, void>, "complex_high not implemented for the required architecture");
             }
 
             template <class A, class T>
             XSIMD_INLINE batch<T, A> complex_low(batch<std::complex<T>, A> const& /*src*/, requires_arch<common>) noexcept
             {
-                static_assert(std::is_same<T, void>::value, "complex_low not implemented for the required architecture");
+                static_assert(std::is_same_v<T, void>, "complex_low not implemented for the required architecture");
             }
         }
 

@@ -7,10 +7,10 @@
 
 #include <IOSurface/IOSurfaceRef.h>
 
+#include "NativeLayerCA.h"
 #include "mozilla/layers/NativeLayer.h"
 #include "mozilla/layers/NativeLayerCommandQueue.h"
 #include "mozilla/layers/NativeLayerMacSurfaceHandler.h"
-#include "NativeLayerCA.h"
 #include "nsRegion.h"
 
 namespace mozilla {
@@ -59,7 +59,7 @@ class NativeLayerRemoteMac final : public NativeLayer {
   bool SurfaceIsFlipped() override;
 
   void AttachExternalImage(wr::RenderTextureHost* aExternalImage) override;
-  GpuFence* GetGpuFence() override;
+  RefPtr<GpuFence> GetGpuFence() override;
 
   Maybe<SurfaceWithInvalidRegion> FrontSurface();
 

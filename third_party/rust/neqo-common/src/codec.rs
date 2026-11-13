@@ -9,7 +9,7 @@ use std::{
     io::{self, Cursor},
 };
 
-use crate::hex_with_len;
+use crate::{Length, expect_usize, hex::HexWithLen, to_u64};
 
 pub const MAX_VARINT: u64 = (1 << 62) - 1;
 
@@ -52,8 +52,7 @@ impl<'a> Decoder<'a> {
     /// Only use this for tests because we panic rather than reporting a result.
     #[cfg(any(test, feature = "test-fixture"))]
     fn skip_inner(&mut self, n: Option<u64>) {
-        #[expect(clippy::unwrap_used, reason = "Only used in tests.")]
-        self.skip(usize::try_from(n.expect("invalid length")).unwrap());
+        self.skip(expect_usize(n.expect("invalid length")));
     }
 
     /// Skip a vector.  Panics if there isn't enough space.
@@ -134,14 +133,31 @@ impl<'a> Decoder<'a> {
 
     /// Decodes a QUIC varint.
     pub fn decode_varint(&mut self) -> Option<u64> {
-        let b1 = self.decode_n(1)?;
-        match b1 >> 6 {
-            0 => Some(b1),
-            1 => Some(((b1 & 0x3f) << 8) | self.decode_n(1)?),
-            2 => Some(((b1 & 0x3f) << 24) | self.decode_n(3)?),
-            3 => Some(((b1 & 0x3f) << 56) | self.decode_n(7)?),
-            _ => unreachable!(),
+        let first = *self.buf.get(self.offset)?;
+        // The first byte's two most significant bits encode the length: 1, 2, 4 or 8 bytes.
+        // Range checks on that byte keep the common one-byte case a predictable branch, and
+        // each arm is a single fixed-width load with those bits masked off.
+        if first < 0x40 {
+            self.offset += 1;
+            return Some(u64::from(first));
         }
+        if first < 0x80 {
+            let v = u64::from(u16::from_be_bytes(
+                *self.buf.get(self.offset..)?.first_chunk()?,
+            )) & 0x3fff;
+            self.offset += 2;
+            return Some(v);
+        }
+        if first < 0xc0 {
+            let v = u64::from(u32::from_be_bytes(
+                *self.buf.get(self.offset..)?.first_chunk()?,
+            )) & 0x3fff_ffff;
+            self.offset += 4;
+            return Some(v);
+        }
+        let v = u64::from_be_bytes(*self.buf.get(self.offset..)?.first_chunk()?) & MAX_VARINT;
+        self.offset += 8;
+        Some(v)
     }
 
     /// Decodes the rest of the buffer.  Infallible.
@@ -185,7 +201,7 @@ impl<'a> AsRef<[u8]> for Decoder<'a> {
 
 impl Debug for Decoder<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.write_str(&hex_with_len(self.as_ref()))
+        HexWithLen::fmt(f, self)
     }
 }
 
@@ -315,17 +331,18 @@ impl<B: Buffer> Encoder<B> {
         }
     }
 
+    /// Encode a length or byte count as a QUIC varint, accepting either `usize` or `u64`.
+    pub fn encode_len<T: Length>(&mut self, v: T) -> &mut Self {
+        self.encode_varint(v.as_u64())
+    }
+
     /// Encode a vector in TLS style.
     ///
     /// # Panics
     ///
     /// When `v` is longer than 2^n.
     pub fn encode_vec(&mut self, n: usize, v: &[u8]) -> &mut Self {
-        self.encode_uint(
-            n,
-            u64::try_from(v.as_ref().len()).expect("v is longer than 2^64"),
-        )
-        .encode(v)
+        self.encode_uint(n, to_u64(v.as_ref().len())).encode(v)
     }
 
     /// Encode a vector in TLS style using a closure for the contents.
@@ -356,8 +373,7 @@ impl<B: Buffer> Encoder<B> {
     ///
     /// When `v` is longer than 2^62.
     pub fn encode_vvec(&mut self, v: &[u8]) -> &mut Self {
-        self.encode_varint(u64::try_from(v.as_ref().len()).expect("v is longer than 2^64"))
-            .encode(v)
+        self.encode_len(v.as_ref().len()).encode(v)
     }
 
     /// Encode a vector with a varint length using a closure.
@@ -386,7 +402,7 @@ impl<B: Buffer> Encoder<B> {
         // As long as encoding more than 63 bytes is rare, this won't cost much relative
         // to the convenience of being able to use this function.
 
-        let v = u64::try_from(len).expect("encoded value fits in a u64");
+        let v = to_u64(len);
         // The lower order byte fits before the inserted block of bytes.
         self.buf.write_at(start, (v & 0xff) as u8);
         let (count, bits) = match () {
@@ -452,8 +468,8 @@ impl Encoder<Vec<u8>> {
     ///
     /// When `len` doesn't fit in a `u64`.
     #[must_use]
-    pub fn vvec_len(len: usize) -> usize {
-        Self::varint_len(u64::try_from(len).expect("usize should fit into u64")) + len
+    pub const fn vvec_len(len: usize) -> usize {
+        Self::varint_len(to_u64(len)) + len
     }
 
     /// Construction of a buffer with a predetermined capacity.
@@ -499,7 +515,7 @@ impl Default for Encoder {
 
 impl Debug for Encoder {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.write_str(&hex_with_len(self))
+        HexWithLen::fmt(f, self)
     }
 }
 
@@ -662,7 +678,7 @@ impl Buffer for &mut Vec<u8> {
 
 impl Buffer for Cursor<&mut [u8]> {
     fn position(&self) -> usize {
-        usize::try_from(self.position()).expect("memory allocation not to exceed usize")
+        expect_usize(self.position())
     }
 
     fn as_slice(&self) -> &[u8] {
@@ -677,16 +693,16 @@ impl Buffer for Cursor<&mut [u8]> {
     fn truncate(&mut self, len: usize) {
         let old_position = Buffer::position(self);
         if len < old_position {
-            self.set_position(u64::try_from(len).expect("Position cannot exceed u64"));
+            self.set_position(to_u64(len));
             self.get_mut()[len..old_position].fill(0);
         }
     }
 
     fn pad_to(&mut self, n: usize, v: u8) {
-        let start = usize::try_from(self.position()).expect("Buffer length does not exceed usize");
+        let start = expect_usize(self.position());
 
         self.get_mut()[start..n].fill(v);
-        self.set_position(u64::try_from(n).expect("Position cannot exceed u64"));
+        self.set_position(to_u64(n));
     }
 
     fn write_at(&mut self, pos: usize, data: u8) {

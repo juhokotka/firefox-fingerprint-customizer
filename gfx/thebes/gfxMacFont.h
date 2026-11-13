@@ -5,10 +5,10 @@
 #ifndef GFX_MACFONT_H
 #define GFX_MACFONT_H
 
-#include "mozilla/MemoryReporting.h"
-#include "gfxFont.h"
 #include <CoreText/CoreText.h>
 
+#include "gfxFont.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/gfx/UnscaledFontMac.h"
 
 class CTFontEntry;
@@ -56,8 +56,6 @@ class gfxMacFont final : public gfxFont {
  protected:
   ~gfxMacFont() override;
 
-  const Metrics& GetHorizontalMetrics() const override { return mMetrics; }
-
   // override to prefer CoreText shaping with fonts that depend on AAT
   bool ShapeText(const char16_t* aText, uint32_t aOffset, uint32_t aLength,
                  Script aScript, nsAtom* aLanguage, bool aVertical,
@@ -71,6 +69,9 @@ class gfxMacFont final : public gfxFont {
   gfxFloat GetCharWidth(CFDataRef aCmap, char16_t aUniChar, uint32_t* aGlyphID,
                         gfxFloat aConvFactor);
 
+  // Init some metrics that may be based on measuring glyphs.
+  void InitMetricsByGlyphMeasurement(CFDataRef aCmap, gfxFloat aConvFactor);
+
   // a strong reference to the CoreGraphics font
   CGFontRef mCGFont;
 
@@ -79,8 +80,6 @@ class gfxMacFont final : public gfxFont {
   CTFontRef mCTFont;
 
   mozilla::UniquePtr<gfxFontShaper> mCoreTextShaper;
-
-  Metrics mMetrics;
 
   bool mVariationFont;  // true if font has OpenType variations
 };

@@ -18,15 +18,15 @@ private const val KEY_ID_PREFIX = "id."
  * @param fileName The shared preference file that should be used to save ID assignments.
  * @param idLifeTime The maximum time an ID can be unused until it is cleared.
  * @param offset The [Int] offset from which this instance should start providing IDs.
+ * @param now provider for the current time in milliseconds, injectable for testing.
  */
 internal class SharedIds(
     private val fileName: String,
     private val idLifeTime: Long,
     private val offset: Int = 0,
+    now: () -> Long = { System.currentTimeMillis() },
 ) {
-    /**
-     * Get a unique ID for the provided unique tag.
-     */
+    /** Get a unique ID for the provided unique tag. */
     @Synchronized
     fun getIdForTag(context: Context, tag: String): Int {
         val preferences = preferences(context)
@@ -54,9 +54,7 @@ internal class SharedIds(
         return nextId
     }
 
-    /**
-     * Get the next available unique ID for the provided unique tag.
-     */
+    /** Get the next available unique ID for the provided unique tag. */
     @Synchronized
     fun getNextIdForTag(context: Context, tag: String): Int {
         val preferences = preferences(context)
@@ -94,12 +92,13 @@ internal class SharedIds(
      * @param preferences The [SharedPreferences] instance.
      */
     private fun removeExpiredIds(preferences: SharedPreferences) {
-        val expiredEntries = preferences.all.entries
-            .filter { it.key.startsWith(KEY_LAST_USED_PREFIX) }
-            .filter {
-                val lastUsed = it.value as? Long
-                lastUsed != null && lastUsed < (now() - idLifeTime)
-            }
+        val expiredEntries =
+            preferences.all.entries
+                .filter { it.key.startsWith(KEY_LAST_USED_PREFIX) }
+                .filter {
+                    val lastUsed = it.value as? Long
+                    lastUsed != null && lastUsed < (now() - idLifeTime)
+                }
 
         if (expiredEntries.isNotEmpty()) {
             preferences.edit {
@@ -113,7 +112,9 @@ internal class SharedIds(
         }
     }
 
-    fun clear(context: Context) { preferences(context).edit { clear() } }
+    fun clear(context: Context) {
+        preferences(context).edit { clear() }
+    }
 
-    internal var now: () -> Long = { System.currentTimeMillis() }
+    internal var now: () -> Long = now
 }

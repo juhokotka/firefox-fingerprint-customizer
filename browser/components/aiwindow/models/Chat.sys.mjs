@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-import { openAIEngine } from "moz-src:///browser/components/aiwindow/models/openAIEngine.sys.mjs";
+import { AuthProvider } from "moz-src:///browser/components/aiwindow/models/AuthProvider.sys.mjs";
 import { MESSAGE_ROLE } from "moz-src:///browser/components/aiwindow/models/Conversation.sys.mjs";
 import {
   toolsConfig,
@@ -18,15 +18,19 @@ import {
   GET_USER_MEMORIES,
   GET_NAVIGATION_INFO,
   MANAGE_TABS,
-  WORLD_CUP_MATCHES,
-  WORLD_CUP_LIVE,
-  WORLD_CUP_TOOLS,
-  WORLD_CUP_PREF,
+  AITAB_PREF,
+  AITAB_TOOLS,
+  GENERATE_AITAB,
   ADD_MEMORY,
+  SEARCH_THE_WEB,
+  searchTheWebToolConfig,
+  GET_SKILL,
 } from "moz-src:///browser/components/aiwindow/models/Tools.sys.mjs";
+import { runSearchTheWeb } from "moz-src:///browser/components/aiwindow/models/search/SearchWorkflow.sys.mjs";
 
 import { expandUrlTokensInToolParams } from "moz-src:///browser/components/aiwindow/models/ChatUtils.sys.mjs";
 import { runLLMaJTelemetry } from "moz-src:///browser/components/aiwindow/models/TelemetryUtils.sys.mjs";
+import { getSmartPageName } from "chrome://browser/content/aiwindow/modules/TrustedInternalURLs.mjs";
 
 /**
  * Execute a specific tool and return the result
@@ -38,7 +42,6 @@ import { runLLMaJTelemetry } from "moz-src:///browser/components/aiwindow/models
  * @param {ChatConversation} conversation - The conversation context
  * @param {BrowsingContext} browsingContext - The browsing context (can be null for some tools)
  * @param {string} mode - The mode of operation (e.g., "fullpage", "sidebar", "urlbar")
- * @param {number} currentTurn - The current turn number in the conversation
  * @returns {Promise<object>} The result of the tool execution
  * @private
  */
@@ -48,14 +51,16 @@ export async function executeToolByName(
   toolCallId,
   conversation,
   browsingContext,
-  mode,
-  currentTurn
+  mode
 ) {
   let result;
   switch (toolName) {
     case GET_PAGE_CONTENT: {
       const startTime = new Date();
-      result = await GetPageContent.getPageContent(toolParams, conversation);
+      result = await GetPageContent.getPageContentText(
+        toolParams,
+        conversation
+      );
       Glean.smartWindow.getPageContent.record({
         location: mode,
         chat_id: conversation.id,
@@ -79,11 +84,10 @@ export async function executeToolByName(
         provider: engine.name ?? "unknown",
         model: conversation.engine?.model,
       });
-      conversation._searchExecutedTurn = currentTurn;
       break;
     }
     case GET_OPEN_TABS:
-      result = await toolFns.getOpenTabs(conversation);
+      result = await toolFns.getOpenTabs(toolParams, conversation);
       break;
     case SEARCH_BROWSING_HISTORY:
       result = await toolFns.searchBrowsingHistory(toolParams, conversation);
@@ -93,6 +97,12 @@ export async function executeToolByName(
       break;
     case GET_NAVIGATION_INFO:
       result = await toolFns.getNavigationInfo(toolParams);
+      break;
+    case GET_SKILL:
+      result = await toolFns.getSkill({
+        toolParams,
+        model: conversation.engine?.model,
+      });
       break;
     case MANAGE_TABS: {
       const { toolResult, uiData } = await toolFns.manageTabs(
@@ -121,34 +131,169 @@ export async function executeToolByName(
   return result;
 }
 
-// Hard limit on how many times run_search can execute per conversation turn.
-// Prevents infinite tool-call loops when the model repeatedly requests search.
-// Bug 2024006.
-const MAX_RUN_SEARCH_PER_TURN = 3;
-
 /**
  * Handlers for tools that are feature-gated by a pref and intended to be
  * added or removed independently of the main tool dispatch. Lookups happen
  * before the main switch so each new gated tool does not grow
  * fetchWithHistory's cyclomatic complexity.
+ *
  */
 const FEATURE_GATED_HANDLERS = new Map([
-  [WORLD_CUP_MATCHES, toolFns.worldCupMatches],
-  [WORLD_CUP_LIVE, toolFns.worldCupLive],
+  [SEARCH_THE_WEB, runSearchTheWeb],
+  [GENERATE_AITAB, runGenerateAiTab],
 ]);
 
 /**
+ * @typedef {object} GenerateAiTabFailure
+ * @property {false} success - If the AITab was generated successfully
+ * @property {string} toolResult - A tool result message
+ */
+
+/**
+ * @typedef {object} GenerateAiTabToolUI
+ * @property {"aitab"} uiType - The ToolUI type
+ * @property {{
+ *  state: "choose",
+ *  viewerURL: string,
+ *  title: string
+ * }} properties - The ToolUI update data for the AITab progress card
+ */
+
+/**
+ * @typedef {object} GenerateAiTabSuccess
+ * @property {true} success - If the AITab was generated successfully
+ * @property {{message: string, page: {slug: string}}} toolResult - The
+ *   model response and the stored page's slug
+ * @property {GenerateAiTabToolUI} [uiData] - Data to update the ToolUI,
+ *   absent for a modification
+ */
+
+/**
+ * @typedef {object} GenerateAiTabResult
+ * @property {boolean} success - If the AITab was generated successfully
+ * @property {GenerateAiTabSuccess["toolResult"] | string} toolResult - The
+ *   tool result for the model
+ * @property {boolean} endsTurn - Whether the ToolUI card is the response, so
+ *   the model gets no follow-up turn
+ */
+
+/**
+ * Tool entrypoint for generate_aitab. Attaches the AITab options
+ * after the page has been generated and saved.
+ *
+ * @param {object} params
+ * @param {string[]} [params.url_list] - List of URLs to use to generate the AITab
+ * @param {string} [params.focus] - A focus string used to generate the AITab
+ * @param {ChatConversation} conversation - ChatConversation that initiated AITab
+ * @param {AbortSignal} [signal] - Cancels in-flight page extractions.
+ * @param {any} _mode - Operation mode, unused
+ * @param {string} [toolCallId] - The tool call's ID
+ * @param {BrowsingContext} [browsingContext] - The chat's browsing context,
+ *   used to find the selected tab of its window
+ *
+ * @returns {Promise<GenerateAiTabResult>} The tool response after attaching
+ *   its UI data to the conversation.
+ */
+async function runGenerateAiTab(
+  params,
+  conversation,
+  signal,
+  _mode,
+  toolCallId,
+  browsingContext
+) {
+  const { success, toolResult, uiData } = await toolFns.createAITab(
+    params,
+    conversation,
+    signal
+  );
+
+  if (toolCallId && uiData) {
+    conversation.addUIToolToCurrentMessage(toolCallId, uiData);
+  } else if (success) {
+    reloadSelectedSmartPage(browsingContext, toolResult.page.slug);
+  }
+
+  return { success, toolResult, endsTurn: success && !!uiData };
+}
+
+/**
+ * Reloads the selected tab of the chat's window when it shows the page with
+ * `slug`, so a modified page displays its new version.
+ *
+ * @param {BrowsingContext} [browsingContext]
+ * @param {string} slug
+ */
+function reloadSelectedSmartPage(browsingContext, slug) {
+  const browser = browsingContext?.topChromeWindow?.gBrowser?.selectedBrowser;
+  const url = browser?.currentURI && URL.parse(browser.currentURI.spec);
+  if (getSmartPageName(url) === slug) {
+    browser.reload();
+  }
+}
+
+/**
+ * Slow tools that surface the action log's pending row before their handler
+ * resolves (not the same as feature-gating). Pending rows use a placeholder
+ * body, so tools with body-dependent labels must provide a pendingLabel.
+ */
+const TOOLS_WITH_PENDING_ACTION_LOG = new Set([SEARCH_THE_WEB, GENERATE_AITAB]);
+
+/**
+ * Splits a tool result into the reply the tool is writing for the user, if any,
+ * and the body that stays in the conversation. Only the answers path of
+ * search_the_web sets `directAnswerStream`; it is lifted out both because a
+ * generator is not something to serialize into a tool message, and because the
+ * prose it carries becomes the assistant turn rather than history the model
+ * answers from.
+ *
+ * Requiring an async-iterable `directAnswerStream` is the whole guard: it
+ * already excludes every other result shape a tool returns, including the
+ * arrays and strings the rest-destructure below would otherwise mangle.
+ *
+ * @param {unknown} result
+ * @returns {{directAnswerStream: AsyncGenerator<object>|null, toolBody: unknown}}
+ */
+function splitDirectAnswerStream(result) {
+  if (
+    typeof result?.directAnswerStream?.[Symbol.asyncIterator] !== "function"
+  ) {
+    return { directAnswerStream: null, toolBody: result };
+  }
+  const { directAnswerStream, ...toolBody } = result;
+  return { directAnswerStream, toolBody };
+}
+
+/**
  * Removes any feature-gated tools whose enable pref is currently off, so the
- * model is never offered tools the build is not configured to support.
+ * model is never offered tools the build is not configured to support, and
+ * swaps in pref-selected variants of a tool's config.
+ *
+ * Treats `tools` as read-only: it only ever drops or substitutes whole entries,
+ * so every operation here must be non-mutating (`filter`/`map`/`toSorted`, never
+ * `splice`/`sort`/index assignment). Callers pass the shared `toolsConfig`
+ * constant, and when no gate applies it is returned by identity.
  *
  * @param {object[]} tools
+ * @param {ChatConversation} conversation
  * @returns {object[]}
  */
-function filterFeatureGatedTools(tools) {
-  if (Services.prefs.getBoolPref(WORLD_CUP_PREF, false)) {
-    return tools;
+function filterFeatureGatedTools(tools, conversation) {
+  let filtered = tools;
+  // The three search_the_web paths return different shapes, so the description
+  // and parameters the model sees have to match the path that will run. Both
+  // this and runSearchTheWeb's dispatch read the same selectSearchTheWebPath,
+  // so they cannot disagree about which one that is.
+  const searchTheWebConfig = searchTheWebToolConfig(conversation);
+  if (searchTheWebConfig) {
+    filtered = filtered.map(t =>
+      t.function?.name === SEARCH_THE_WEB ? searchTheWebConfig : t
+    );
   }
-  return tools.filter(t => !WORLD_CUP_TOOLS.has(t.function?.name));
+  if (!Services.prefs.getBoolPref(AITAB_PREF, false)) {
+    filtered = filtered.filter(t => !AITAB_TOOLS.has(t.function?.name));
+  }
+  return filtered;
 }
 
 const lazy = {};
@@ -261,9 +406,31 @@ function logConversationStream(turn, action, data = null, extraText = "") {
   }
 }
 
+/** @typedef {{modify_slug: string | undefined}} AITabToolUIArgs */
+/** @typedef {AITabToolUIArgs | undefined} ToolUIArgs */
+
+/**
+ * Gets the necessary ToolUI args for a particular ToolUI
+ * so it can add the args to the tool message
+ *
+ * @param {string} toolName
+ * @param {object} toolParams
+ *
+ * @returns {ToolUIArgs}
+ */
+function getToolUIArgs(toolName, toolParams) {
+  switch (toolName) {
+    case GENERATE_AITAB:
+      return { modify_slug: toolParams.modify_slug };
+    default:
+      return undefined;
+  }
+}
+
 Object.assign(Chat, {
   lastUsage: null,
 
+  /* eslint-disable complexity -- TODO Bug 2075083 - complexity 58/54 over limit */
   /**
    * Stream assistant output with tool-call support.
    * Yields assistant text chunks as they arrive. If the model issues tool calls,
@@ -275,8 +442,17 @@ Object.assign(Chat, {
    * @param {BrowsingContext} options.browsingContext - Omitted for tests only.
    * @param {"fullpage" | "sidebar" | "urlbar"} options.mode - See the MODE in ai-window.mjs
    * @param {AbortSignal} [options.signal]
+   * @param {Promise<string|null>} [options.tokenPromise] - A token
+   *   fetch the caller already started, so a cold or expired token resolves
+   *   alongside prompt construction rather than after it. Omit to fetch here.
    */
-  async fetchWithHistory({ conversation, browsingContext, mode, signal }) {
+  async fetchWithHistory({
+    conversation,
+    browsingContext,
+    mode,
+    signal,
+    tokenPromise,
+  }) {
     if (!browsingContext && !Cu.isInAutomation) {
       const err = new Error(
         "The browsingContext must exist for fetchWithHistory unless we're in automation."
@@ -284,37 +460,49 @@ Object.assign(Chat, {
       err.clientReason = "missingBrowsingContext";
       throw err;
     }
-    const fxAccountToken = await openAIEngine.getFxAccountToken();
-    if (!fxAccountToken) {
+    const token = await (tokenPromise ?? AuthProvider.getToken());
+    if (!token) {
       console.error("fetchWithHistory Account Token null or undefined");
-      const fxaError = new Error("FxA token unavailable");
-      fxaError.clientReason = "fxaTokenUnavailable";
-      throw fxaError;
+      const tokenError = new Error("Token unavailable");
+      tokenError.clientReason = "fxaTokenUnavailable";
+      throw tokenError;
     }
 
     const currentTurn = conversation.currentTurnIndex();
 
     /**
-     * For the first turn only, we use exactly what the user typed as the `run_search` search query.
-     * To make that work, we use a different tool definition for the first turn vs. all subsequent turns.
+     * On the first turn if `search_the_web` fallbacks to run_search, uses the
+     * user's verbatim query; later turns use a model-generated query. See
+     * comment above tool execution for further details.
      */
-    let chatToolsConfig = structuredClone(toolsConfig);
-    let isVerbatimQuery = true;
-    if (currentTurn > 0) {
-      chatToolsConfig =
-        RunSearch.setGeneratedSearchQueryDescription(chatToolsConfig);
-      isVerbatimQuery = false;
-    }
-
-    chatToolsConfig = filterFeatureGatedTools(chatToolsConfig);
+    const isVerbatimQuery = currentTurn === 0;
+    const chatToolsConfig = filterFeatureGatedTools(toolsConfig, conversation);
 
     let fullResponseText = "";
+
+    // A search handoff sets `_searchExecutedTurn` (in executeToolByName). If a
+    // later re-entry on the same turn (openSidebarAndContinue -> fetchWithHistory)
+    // sees it, we block a repeat search_the_web so the handoff can't re-trigger
+    // itself in a loop; the model stays free to answer or call another tool.
     const searchExecuted = conversation._searchExecutedTurn === currentTurn;
-    let blockedSearchAttempts = 0;
 
     const streamModelResponse = () => {
       const snapshot = conversation.compactChatCompletions();
 
+      const stream = conversation.runWithGenerator({
+        streamOptions: { enabled: true },
+        token,
+        chatId: conversation.id,
+        tools: chatToolsConfig,
+        args: snapshot,
+        inferenceParams: { tool_choice: "auto" },
+        signal,
+      });
+
+      // Logged after runWithGenerator, which is what commits the flags, so the
+      // ones printed are the ones this request is actually governed by. The
+      // generator body does not run until it is iterated, so nothing has been
+      // sent yet.
       lazy.console.log(
         `Request (${conversation.securityProperties.getLogText()})`,
         snapshot.at(-1)
@@ -323,15 +511,7 @@ Object.assign(Chat, {
       // Debug logging: Record only the latest message being sent to the model
       logConversationStream(currentTurn, "CHAT SEND", snapshot.at(-1));
 
-      return conversation.runWithGenerator({
-        streamOptions: { enabled: true },
-        fxAccountToken,
-        chatId: conversation.id,
-        tool_choice: "auto",
-        tools: chatToolsConfig,
-        args: snapshot,
-        signal,
-      });
+      return stream;
     };
 
     while (true) {
@@ -389,47 +569,38 @@ Object.assign(Chat, {
         return;
       }
 
-      // Guard: if the first pending tool call is a duplicate run_search,
-      // return an error tool result so the model continues without
-      // executing the search or navigating the browser.
-      // Bug 2024006: after MAX_RUN_SEARCH_PER_TURN blocked attempts, remove
-      // the tool entirely so the model is forced to respond with text.
-      // @todo Bug 2006159 - Check all pending tool calls, not just the first
       const firstPending = pendingToolCalls[0]?.function;
-      if (firstPending?.name === RUN_SEARCH && searchExecuted) {
-        blockedSearchAttempts++;
-
-        const blockedCalls = pendingToolCalls.slice(0, 1).map(tc => ({
-          id: tc.id,
-          type: "function",
-          function: {
-            name: tc.function.name,
-            arguments: tc.function.arguments || "{}",
-          },
-        }));
-        conversation.addAssistantMessage("function", {
-          tool_calls: blockedCalls,
-        });
-
+      // A search handoff already ran this turn (a prior fetchWithHistory that
+      // openSidebarAndContinue re-entered on the same turn). Block a repeat
+      // search_the_web and force a text-only turn so the assistant wraps up
+      // rather than re-triggering the handoff, which would loop indefinitely.
+      if (firstPending?.name === SEARCH_THE_WEB && searchExecuted) {
         for (const tc of pendingToolCalls.slice(0, 1)) {
-          const content = {
+          // Append the tool_call before the error result so the message order
+          // satisfies OpenAI's assistant-then-tool sequence.
+          conversation.addAssistantMessage("function", {
+            tool_calls: [
+              {
+                id: tc.id,
+                type: "function",
+                function: {
+                  name: tc.function.name,
+                  arguments: tc.function.arguments || "{}",
+                },
+              },
+            ],
+          });
+          conversation.addToolCallMessage({
             tool_call_id: tc.id,
-            body: "ERROR: run_search tool call error: You may only run one search per user message. Respond to the user with what you have already found and ask if they want you to proceed with the next search. Do not hallucinate search results.",
+            body: "ERROR: search_the_web tool call error: You have already searched this turn. Respond to the user with what you found and ask if they want you to search again.",
             name: tc.function.name,
-          };
-          conversation.addToolCallMessage(content);
+          });
           recordToolCallEvent({
             toolName: tc.function.name,
             mode,
             conversation,
             error: "duplicate_search",
           });
-        }
-
-        if (blockedSearchAttempts === MAX_RUN_SEARCH_PER_TURN) {
-          chatToolsConfig = chatToolsConfig.filter(
-            t => t.function?.name !== RUN_SEARCH
-          );
         }
         continue;
       }
@@ -536,15 +707,6 @@ Object.assign(Chat, {
           continue;
         }
 
-        // Make sure we aren't using a generated query when we shouldn't be
-        if (
-          toolName === RUN_SEARCH &&
-          isVerbatimQuery &&
-          toolParams.hasOwnProperty("query")
-        ) {
-          delete toolParams.query;
-        }
-
         // Capture the embedder element before running tools, as navigation during
         // a tool call such as search handoff can replace the browsing context.
         const originalEmbedderElement = browsingContext?.embedderElement;
@@ -552,21 +714,69 @@ Object.assign(Chat, {
         // Dispatch the required arguments to different tool calls. Wrap this in a
         // try/catch so the conversation can be updated for failed calls.
         let result;
+        let aiTabEndsTurn = false;
         let toolCallError = "";
+        let isSearchHandoff = false;
+        // Set when the tool is writing the user-facing reply itself, in which
+        // case it is delivered below and the model gets no follow-up turn.
+        let directAnswerStream = null;
         const featureGatedHandler = FEATURE_GATED_HANDLERS.get(toolName);
+        const dispatchTool = name =>
+          executeToolByName(
+            name,
+            toolParams,
+            id,
+            conversation,
+            browsingContext,
+            mode
+          );
+
+        // Emit the tool message up front with a `pending`-marked placeholder
+        // body so the action log renders its pending row while the slow work
+        // runs; the real result is reconciled into the same row below.
+        const toolUIArgs = getToolUIArgs(toolName, toolParams);
+        let pendingToolMessage = null;
+        if (TOOLS_WITH_PENDING_ACTION_LOG.has(toolName)) {
+          pendingToolMessage = conversation.addToolCallMessage({
+            tool_call_id: id,
+            body: { pending: true },
+            name: toolName,
+            args: toolUIArgs,
+          });
+        }
+
         try {
           if (featureGatedHandler) {
-            result = await featureGatedHandler(toolParams, conversation);
-          } else {
-            result = await executeToolByName(
-              toolName,
+            result = await featureGatedHandler(
               toolParams,
-              toolCall.id,
               conversation,
-              browsingContext,
+              signal,
               mode,
-              currentTurn
+              id,
+              browsingContext
             );
+            if (toolName === GENERATE_AITAB) {
+              aiTabEndsTurn = result.endsTurn;
+              result = result.toolResult;
+            }
+            /**
+             * On the first invocation of search_the_web, SearchProvider-powered
+             * web search is done. On the second invocation, search handoff (previously
+             * run_search tool) is called. The logic for run_search is maintained, including
+             * the instruction to use the user's original query if this is the first turn
+             */
+            if (result.requiresSearchHandoff) {
+              isSearchHandoff = true;
+              // Mark the turn as having handed off, so a re-entry on the same
+              // turn (via openSidebarAndContinue) blocks a repeat search.
+              conversation._searchExecutedTurn = currentTurn;
+              if (isVerbatimQuery) {
+                delete toolParams.query;
+              }
+              result = await dispatchTool(RUN_SEARCH);
+            }
+          } else {
+            result = await dispatchTool(toolName);
           }
 
           // Debug logging: Record the data returned by the tool before feeding it to the model
@@ -583,8 +793,15 @@ Object.assign(Chat, {
             `chat-run-tool-complete(${toolName})`
           );
 
-          const content = { tool_call_id: id, body: result, name: toolName };
-          conversation.addToolCallMessage(content);
+          const split = splitDirectAnswerStream(result);
+          directAnswerStream = split.directAnswerStream;
+          const content = {
+            tool_call_id: id,
+            body: split.toolBody,
+            name: toolName,
+            args: toolUIArgs,
+          };
+          conversation.updateToolCallMessage(pendingToolMessage, content);
         } catch (error) {
           console.error(error);
           toolCallError = "execution_failed";
@@ -594,8 +811,26 @@ Object.assign(Chat, {
             { startTime: toolStart },
             `chat-run-tool-error(${toolName})`
           );
-          const content = { tool_call_id: id, body: result };
-          conversation.addToolCallMessage(content);
+          // Only carry `name` (which drives the action-log card) when we
+          // already showed a pending row, so it resolves. Otherwise a failed
+          // call renders nothing, as before.
+          const content = { tool_call_id: id, body: result, args: toolUIArgs };
+          if (pendingToolMessage) {
+            content.name = toolName;
+          }
+          conversation.updateToolCallMessage(pendingToolMessage, content);
+        }
+
+        // A failed search returns an error-bearing result rather than
+        // throwing, which would otherwise count as a success. The precise
+        // category is on the search_the_web event.
+        if (
+          !toolCallError &&
+          !isSearchHandoff &&
+          toolName === SEARCH_THE_WEB &&
+          result?.error
+        ) {
+          toolCallError = "execution_failed";
         }
 
         recordToolCallEvent({
@@ -609,40 +844,35 @@ Object.assign(Chat, {
           ?.updateConversation(conversation)
           .catch(() => {});
 
-        // MANAGE_TABS is terminal - UI handles the interaction.
-        if (toolName === MANAGE_TABS) {
+        // These successful tools finish their turns in the UI.
+        if (toolName === MANAGE_TABS || aiTabEndsTurn) {
+          // These tool calls need to return early so any staged
+          // security flags that have accumulated up to this point
+          // need to be committed before returning since the commit
+          // at the end of the loop will not be reached.
           conversation.securityProperties.commit();
           return;
         }
 
-        // Perform the search handoff if the RUN_SEARCH tool was run.
-        if (toolName === RUN_SEARCH) {
-          // Commit here because we return early below and never reach the
-          // post-loop commit.
-          conversation.securityProperties.commit();
-          lazy.console.log(
-            `Security commit ${conversation.securityProperties.getLogText()}`
-          );
+        // Also terminal: the tool is writing the reply itself (the answers path
+        // of search_the_web), so stream it into the assistant message rather
+        // than spending another model turn rewriting prose we already have.
+        // Same receiveResponse the model's own output goes through, so it picks
+        // up the streaming updates, citations, persistence and completion.
+        if (directAnswerStream) {
+          await conversation.receiveResponse(directAnswerStream);
+          logConversationStream(currentTurn, "STREAM END", null, toolName);
+          return;
+        }
 
+        // Perform the search handoff if the RUN_SEARCH tool was run.
+        if (isSearchHandoff) {
           const win = originalEmbedderElement?.documentGlobal;
           if (!win || win.closed) {
             console.error(
-              "run_search: Associated window not available or closed, aborting search handoff"
+              "search_the_web: Associated window not available or closed, aborting search handoff"
             );
             return;
-          }
-
-          const searchHandoffTab = win.gBrowser.getTabForBrowser(
-            originalEmbedderElement
-          );
-          if (!searchHandoffTab) {
-            console.error(
-              "run_search: Original tab no longer exists, aborting search handoff"
-            );
-            return;
-          }
-          if (!searchHandoffTab.selected) {
-            win.gBrowser.selectedTab = searchHandoffTab;
           }
 
           lazy.AIWindow.openSidebarAndContinue(win, conversation);
@@ -652,13 +882,6 @@ Object.assign(Chat, {
         // @todo Bug 2006159 - Implement parallel tool calling
         break;
       }
-
-      // Commit flags once all tool calls in this batch have finished so that
-      // no tool call can observe flags staged by a sibling call.
-      conversation.securityProperties.commit();
-      lazy.console.log(
-        `Security commit ${conversation.securityProperties.getLogText()}`
-      );
     }
   },
 });

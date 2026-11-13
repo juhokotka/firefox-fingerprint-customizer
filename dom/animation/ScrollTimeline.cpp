@@ -20,6 +20,7 @@
 #include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/dom/ScrollTimelineBinding.h"
+#include "mozilla/dom/TimelineName.h"
 #include "nsIFrame.h"
 #include "nsLayoutUtils.h"
 #include "nsRefreshDriver.h"
@@ -36,11 +37,16 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(ScrollTimeline,
   tmp->Teardown();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mScrollerInfo.ElementForCycleCollection())
+  tmp->mCachedStateSnapshot.reset();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ScrollTimeline,
                                                   AnimationTimeline)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mScrollerInfo.ElementForCycleCollection())
+  if (tmp->mCachedStateSnapshot) {
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(
+        mCachedStateSnapshot->SourceElementForCycleCollection())
+  }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(ScrollTimeline,
@@ -66,6 +72,8 @@ already_AddRefed<ScrollTimeline> ScrollTimeline::Constructor(
   // <https://drafts.csswg.org/scroll-animations-1/#dom-scrolltimeline-scrolltimeline>
 
   // Step 2 -- get the source for the timeline.
+  // The scrollingElement depends on style/layout-tree in quirks mode, and we
+  // expect to get the up-to-date scrolling element, so it may flush the layout.
   Element* source = aOptions.mSource.WasPassed()
                         ? aOptions.mSource.Value().get()
                         : doc->GetScrollingElement();
@@ -100,7 +108,7 @@ already_AddRefed<ScrollTimeline> ScrollTimeline::Constructor(
 
 Element* ScrollTimeline::GetSource() const { return SourceElement(); }
 
-ScrollTimeline::State ScrollTimeline::GetState() const {
+ScrollTimeline::StateSnapshot ScrollTimeline::ComputeSnapshot() const {
   const auto source = mScrollerInfo.Source();
   // Use document.scrollingElement to tell whether it's the root scroll
   // container. Note that we can't use mScrollerInfo.mType since Type::Nearest
@@ -109,7 +117,11 @@ ScrollTimeline::State ScrollTimeline::GetState() const {
       source.mElement &&
       source.mElement->OwnerDoc()->GetScrollingElementNoFlush() ==
           source.mElement;
-  return State{source, mAxis, isRoot};
+  return StateSnapshot{source, mAxis, isRoot};
+}
+
+ScrollTimeline::StateSnapshot ScrollTimeline::GetSnapshot() const {
+  return mCachedStateSnapshot.valueOr(StateSnapshot{});
 }
 
 dom::ScrollAxis ScrollTimeline::GetScrollAxis() const {
@@ -300,8 +312,43 @@ bool ScrollTimeline::SourceMatches(
   return source.mElement == aElement && source.mPseudoRequest == aPseudoRequest;
 }
 
-layers::ScrollDirection ScrollTimeline::State::Axis() const {
-  const auto* e = mSource.mElement;
+ScrollTimeline::StateSnapshot::StateSnapshot(
+    const NonOwningAnimationTarget& aResolvedSource, StyleScrollAxis aAxis,
+    bool aIsRoot)
+    : mSource{aResolvedSource.mElement, aResolvedSource.mPseudoRequest},
+      mAxis{aAxis},
+      mIsRoot{aIsRoot} {
+  Element* e = mSource.mElement;
+  // If there is no principal box, this timeline is inactive.
+  if (!e || !e->GetPrimaryFrame()) {
+    return;
+  }
+
+  // If the source is not a scroll container, this timeline is inactive.
+  const ScrollContainerFrame* scrollContainerFrame = GetScrollContainerFrame();
+  if (!scrollContainerFrame) {
+    return;
+  }
+
+  mActive = true;
+  mPhysicalAxis = ComputePhysicalAxis();
+  mScrollingDirectionAvailable =
+      scrollContainerFrame->GetAvailableScrollingDirections().contains(
+          mPhysicalAxis);
+
+  const ScrollStyles scrollStyles = scrollContainerFrame->GetScrollStyles();
+  mSourceScrollStyle = mPhysicalAxis == layers::ScrollDirection::eHorizontal
+                           ? scrollStyles.mHorizontal
+                           : scrollStyles.mVertical;
+
+  mAPZIsActiveForSource = gfxPlatform::AsyncPanZoomEnabled() &&
+                          !nsLayoutUtils::ShouldDisableApzForElement(e) &&
+                          DisplayPortUtils::HasNonMinimalNonZeroDisplayPort(e);
+}
+
+layers::ScrollDirection ScrollTimeline::StateSnapshot::ComputePhysicalAxis()
+    const {
+  const Element* e = mSource.mElement;
   MOZ_ASSERT(e && e->GetPrimaryFrame());
   const WritingMode wm = e->GetPrimaryFrame()->GetWritingMode();
   return mAxis == StyleScrollAxis::X ||
@@ -311,38 +358,9 @@ layers::ScrollDirection ScrollTimeline::State::Axis() const {
              : layers::ScrollDirection::eVertical;
 }
 
-StyleOverflow ScrollTimeline::State::SourceScrollStyle() const {
-  DebugOnly<const Element*> e = mSource.mElement;
-  MOZ_ASSERT(e && e->GetPrimaryFrame());
-
-  const ScrollContainerFrame* scrollContainerFrame = GetScrollContainerFrame();
-  MOZ_ASSERT(scrollContainerFrame);
-
-  const ScrollStyles scrollStyles = scrollContainerFrame->GetScrollStyles();
-
-  return Axis() == layers::ScrollDirection::eHorizontal
-             ? scrollStyles.mHorizontal
-             : scrollStyles.mVertical;
-}
-
-bool ScrollTimeline::State::APZIsActiveForSource() const {
-  auto* e = mSource.mElement;
-  MOZ_ASSERT(e, "HasNonMinimalNonZeroDisplayPort requires a source element");
-  return gfxPlatform::AsyncPanZoomEnabled() &&
-         !nsLayoutUtils::ShouldDisableApzForElement(e) &&
-         DisplayPortUtils::HasNonMinimalNonZeroDisplayPort(e);
-}
-
-bool ScrollTimeline::State::ScrollingDirectionIsAvailable() const {
-  const ScrollContainerFrame* scrollContainerFrame = GetScrollContainerFrame();
-  MOZ_ASSERT(scrollContainerFrame);
-  return scrollContainerFrame->GetAvailableScrollingDirections().contains(
-      Axis());
-}
-
-const ScrollContainerFrame* ScrollTimeline::State::GetScrollContainerFrame()
-    const {
-  auto* e = mSource.mElement;
+const ScrollContainerFrame*
+ScrollTimeline::StateSnapshot::GetScrollContainerFrame() const {
+  Element* e = mSource.mElement;
   if (!e) {
     return nullptr;
   }
@@ -355,12 +373,18 @@ const ScrollContainerFrame* ScrollTimeline::State::GetScrollContainerFrame()
     }
     return nullptr;
   }
-  return nsLayoutUtils::FindScrollContainerFrameFor(e);
+
+  auto* pseudo = e->GetPseudoElement(mSource.mPseudoRequest);
+  if (!pseudo) {
+    return nullptr;
+  }
+
+  return nsLayoutUtils::FindScrollContainerFrameFor(pseudo);
 }
 
 void ScrollTimeline::ReplacePropertiesWith(
     const Element* aReferenceElement, const PseudoStyleRequest& aPseudoRequest,
-    nsAtom* aName, StyleScrollAxis aAxis) {
+    const dom::ScopedTimelineName& aName, StyleScrollAxis aAxis) {
   MOZ_ASSERT(!mScrollerInfo.IsAnonymous());
   MOZ_ASSERT(aReferenceElement == mScrollerInfo.Source().mElement &&
              aPseudoRequest == mScrollerInfo.Source().mPseudoRequest);
@@ -383,28 +407,21 @@ bool ScrollTimeline::UpdateCachedCurrentTime() {
 
   mCachedCurrentTime.reset();
 
-  const auto state = GetState();
-  // If no layout box, this timeline is inactive.
-  if (const auto* e = state.mSource.mElement; !e || !e->GetPrimaryFrame()) {
-    return prevCachedCurrentTime.isSome();
-  }
-
-  // if this is not a scroller container, this timeline is inactive.
-  const ScrollContainerFrame* scrollContainerFrame =
-      state.GetScrollContainerFrame();
-  if (!scrollContainerFrame) {
-    return prevCachedCurrentTime.isSome();
-  }
-
-  const auto orientation = state.Axis();
-
-  // If there is no scrollable overflow, then the ScrollTimeline is inactive.
+  mCachedStateSnapshot = Some(ComputeSnapshot());
+  // The timeline is inactive if it has no principal box or its source is not a
+  // scroll container, and it has no current time if there is no scrollable
+  // overflow in its axis.
   // https://drafts.csswg.org/scroll-animations-1/#scrolltimeline-interface
-  if (!scrollContainerFrame->GetAvailableScrollingDirections().contains(
-          orientation)) {
+  if (!mCachedStateSnapshot->IsActive() ||
+      !mCachedStateSnapshot->ScrollingDirectionIsAvailable()) {
     return prevCachedCurrentTime.isSome();
   }
 
+  const ScrollContainerFrame* scrollContainerFrame =
+      mCachedStateSnapshot->GetScrollContainerFrame();
+  MOZ_ASSERT(scrollContainerFrame);
+
+  const auto orientation = mCachedStateSnapshot->Axis();
   const nsPoint& scrollPosition = scrollContainerFrame->GetScrollPosition();
   const nsRect& scrollRange = scrollContainerFrame->GetScrollRange();
 
@@ -453,6 +470,20 @@ void ScrollTimeline::AutoAlignStartTime() {
   for (Animation* animation : mAnimations) {
     animation->AutoAlignStartTime();
   }
+}
+
+bool ScrollTimeline::IsReusableAnonymousTimeline(
+    const StyleScrollFunction& aScroll) const {
+  if (!mScrollerInfo.IsAnonymous()) {
+    return false;
+  }
+
+  if (mAxis != aScroll.axis) {
+    return false;
+  }
+
+  return ScrollerInfo::TypeFromStyleScroller(aScroll.scroller) ==
+         mScrollerInfo.mType;
 }
 
 Maybe<ScrollTimeline::ComputedTimelineData>
@@ -522,18 +553,18 @@ NonOwningAnimationTarget ScrollTimeline::ScrollerInfo::Source() const {
           PseudoStyleRequest{}};
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(InactiveTimeline)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(InactiveTimeline,
+NS_IMPL_CYCLE_COLLECTION_CLASS(UnresolvedTimeline)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(UnresolvedTimeline,
                                                 ScrollTimeline)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(InactiveTimeline,
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(UnresolvedTimeline,
                                                   ScrollTimeline)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(InactiveTimeline,
+NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(UnresolvedTimeline,
                                                AnimationTimeline)
 
-InactiveTimeline::InactiveTimeline(Document* aDocument)
+UnresolvedTimeline::UnresolvedTimeline(Document* aDocument)
     : ScrollTimeline{
           aDocument,
           ScrollerInfo::Anonymous(ScrollerInfo::Type::Provided, nullptr, {}),

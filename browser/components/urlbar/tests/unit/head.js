@@ -8,10 +8,12 @@ const { AppConstants } = ChromeUtils.importESModule(
   "resource://gre/modules/AppConstants.sys.mjs"
 );
 
-var { UrlbarMuxer, UrlbarProvider, UrlbarQueryContext, UrlbarUtils } =
-  ChromeUtils.importESModule(
-    "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs"
-  );
+var { UrlbarMuxer, UrlbarProvider, UrlbarUtils } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs"
+);
+var { UrlbarQueryContext } = ChromeUtils.importESModule(
+  "chrome://browser/content/urlbar/UrlbarQueryContext.mjs"
+);
 
 ChromeUtils.defineESModuleGetters(this, {
   HttpServer: "resource://testing-common/httpd.sys.mjs",
@@ -191,7 +193,7 @@ function convertToUtf8(str) {
  * @param {Array} results The results for the provider to return.
  * @param {Function} [onCancel] Optional, called when the query provider
  *                              receives a cancel instruction.
- * @param {UrlbarUtils.PROVIDER_TYPE} type The provider type.
+ * @param {UrlbarShared.PROVIDER_TYPE} type The provider type.
  * @param {string} [name] Optional, use as the provider name.
  *                        If none, a default name is chosen.
  * @returns {UrlbarProvider} The provider
@@ -395,7 +397,7 @@ function testEngine_setup() {
       Services.prefs.clearUserPref("browser.urlbar.suggest.searches");
       Services.prefs.clearUserPref("browser.urlbar.contextualSearch.enabled");
       Services.prefs.clearUserPref(
-        "browser.search.separatePrivateDefault.ui.enabled"
+        "browser.search.separatePrivateDefault.featureGate"
       );
       SearchService.setDefault(
         oldDefaultEngine,
@@ -405,7 +407,7 @@ function testEngine_setup() {
 
     SearchService.setDefault(engine, SearchService.CHANGE_REASON.UNKNOWN);
     Services.prefs.setBoolPref(
-      "browser.search.separatePrivateDefault.ui.enabled",
+      "browser.search.separatePrivateDefault.featureGate",
       false
     );
     Services.prefs.setBoolPref("browser.urlbar.suggest.searches", false);
@@ -450,6 +452,18 @@ async function cleanupPlaces() {
  *   The date the bookmark was last visited in ms since epoch.
  *   For `check_results()`, leave this undefined to ignore the actual value.
  *   Pass zero to assert that the actual value is falsey.
+ * @param {boolean} [options.isPinned]
+ *   Whether the result is pinned. Relevant to results from
+ *   UrlbarProviderTopSites.
+ * @param {boolean} [options.isSponsored]
+ *   Whether the result is sponsored. Relevant to results from
+ *   UrlbarProviderTopSites.
+ * @param {boolean} [options.isBlockable]
+ *   Whether the result can be dismissed. Pass a value to override the default,
+ *   which is based on the result's source.
+ * @param {string} [options.providerName]
+ *   The name of the provider offering this result. The test suite will not
+ *   check which provider offered a result unless this option is specified.
  * @returns {UrlbarResult}
  */
 function makeBookmarkResult(
@@ -463,6 +477,10 @@ function makeBookmarkResult(
     source = UrlbarShared.RESULT_SOURCE.BOOKMARKS,
     bookmarkDateMs = undefined,
     lastVisit = undefined,
+    isPinned = undefined,
+    isSponsored = undefined,
+    isBlockable = undefined,
+    providerName = undefined,
   }
 ) {
   let payload = {
@@ -490,12 +508,22 @@ function makeBookmarkResult(
   if (lastVisit !== undefined) {
     payload.lastVisit = lastVisit;
   }
+  if (isPinned !== undefined) {
+    payload.isPinned = isPinned;
+  }
+  if (isSponsored !== undefined) {
+    payload.isSponsored = isSponsored;
+  }
+  if (isBlockable !== undefined) {
+    payload.isBlockable = isBlockable;
+  }
 
   return new UrlbarResult({
     type: UrlbarShared.RESULT_TYPE.URL,
     source,
     heuristic,
     payload,
+    providerName,
   });
 }
 
@@ -561,7 +589,7 @@ function makeOmniboxResult(
       title: description,
       content,
       keyword,
-      icon: UrlbarUtils.ICON.EXTENSION,
+      icon: UrlbarShared.ICON.EXTENSION,
     },
   });
 }
@@ -610,7 +638,7 @@ function makeTabSwitchResult(
     title,
     // Check against undefined so consumers can pass in the empty string.
     icon: typeof iconUri != "undefined" ? iconUri : `page-icon:${uri}`,
-    userContextId: userContextId || 0,
+    userContext: UrlbarUtils.getUserContextData(userContextId || 0),
     tabGroup,
   };
 
@@ -854,10 +882,10 @@ function makeSearchResult(
   }
 
   if (isRichSuggestion) {
-    payload.icon = UrlbarUtils.getRemoteIconUrl(
-      "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==",
-      UrlbarProviderSearchSuggestions.RICH_ICON_SIZE
-    );
+    payload.icon = UrlbarUtils.getRemoteImageUrl({
+      url: "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==",
+      size: UrlbarProviderSearchSuggestions.RICH_ICON_SIZE,
+    });
     payload.description = "description";
   }
 
@@ -902,6 +930,15 @@ function makeSearchResult(
  *   The date the URL was last visited in ms since epoch.
  *   For `check_results()`, leave this undefined to ignore the actual value.
  *   Pass zero to assert that the actual value is falsey.
+ * @param {boolean} [options.isPinned]
+ *   Whether the result is pinned. Relevant to results from
+ *   UrlbarProviderTopSites.
+ * @param {boolean} [options.isSponsored]
+ *   Whether the result is sponsored. Relevant to results from
+ *   UrlbarProviderTopSites.
+ * @param {boolean} [options.isBlockable]
+ *   Whether the result can be dismissed. Pass a value to override the default,
+ *   which is based on the result's source and provider.
  * @returns {UrlbarResult}
  */
 function makeVisitResult(
@@ -917,6 +954,9 @@ function makeVisitResult(
     isAutofillFallback = false,
     bookmarkDateMs = undefined,
     lastVisit = undefined,
+    isPinned = undefined,
+    isSponsored = undefined,
+    isBlockable = undefined,
   }
 ) {
   let payload = {
@@ -932,10 +972,17 @@ function makeVisitResult(
   if (lastVisit !== undefined) {
     payload.lastVisit = lastVisit;
   }
+  if (isPinned !== undefined) {
+    payload.isPinned = isPinned;
+  }
+  if (isSponsored !== undefined) {
+    payload.isSponsored = isSponsored;
+  }
 
   if (
     !heuristic &&
     providerName != "UrlbarProviderAboutPages" &&
+    providerName != "UrlbarProviderTopSites" &&
     source == UrlbarShared.RESULT_SOURCE.HISTORY
   ) {
     payload.isBlockable = true;
@@ -943,6 +990,10 @@ function makeVisitResult(
     payload.helpUrl =
       Services.urlFormatter.formatURLPref("app.support.baseURL") +
       "awesome-bar-result-menu";
+  }
+
+  if (isBlockable !== undefined) {
+    payload.isBlockable = isBlockable;
   }
 
   if (iconUri) {
@@ -1047,10 +1098,9 @@ function makeGlobalActionsResult({
  * @param {string} [options.completed]
  *   The value that would be filled if the autofill result was confirmed.
  *   Has no effect if `autofilled` is not specified.
- * @param {object} [options.conditionalPayloadProperties]
- *   An object mapping payload property names to objects
- *   { optional, ignore, custom }.
- *   See the code below.
+ * @param {object} [options.payloadRules]
+ *   An object mapping payload keys to validation rules. Each rule is an object
+ *   `{ optional, ignore, validate }`. See the code below.
  * @param {Array} options.matches
  *   An array of UrlbarResults.
  */
@@ -1060,7 +1110,7 @@ async function check_results({
   autofilled,
   completed,
   matches = [],
-  conditionalPayloadProperties = {},
+  payloadRules = {},
 } = {}) {
   if (!context) {
     return;
@@ -1072,16 +1122,13 @@ async function check_results({
   // return reliable resultsets, thus we have to wait.
   await PlacesFrecencyRecalculator.recalculateAnyOutdatedFrecencies();
 
-  const controller = UrlbarTestUtils.newMockController({
+  const controller = UrlbarTestUtils.mockChildController({
     input: {
       isPrivate: context.isPrivate,
-      onFirstResult() {
-        return false;
-      },
       getSearchSource() {
         return "dummy-search-source";
       },
-      window: {
+      browserWindow: {
         location: {
           href: AppConstants.BROWSER_CHROME_URL,
         },
@@ -1095,6 +1142,7 @@ async function check_results({
     controller: {
       removeResult() {},
     },
+    clearTopSitesCache() {},
   });
 
   if (incompleteSearch) {
@@ -1151,7 +1199,7 @@ async function check_results({
   // expected date is zero, the actual date is asserted to be falsey.
   let optionalDateValidator = {
     optional: true,
-    custom(resultIndex, actualResult, payloadKey) {
+    validate(resultIndex, actualResult, payloadKey) {
       if (matches[resultIndex].payload[payloadKey] === 0) {
         Assert.ok(
           !actualResult.payload[payloadKey],
@@ -1163,23 +1211,29 @@ async function check_results({
     },
   };
 
-  // Payload properties to conditionally check. Properties not specified here
-  // will always be checked. For each entry in this object, the key is the
-  // payload property name and the value is a validator object that can have the
-  // following keys, each optional:
+  // Payload validation rules. Payload properties not specified here will be
+  // validated in a default manner. For each entry in this object, the key is
+  // the payload key and the value is a validation rule, which is an object that
+  // can have the following optional keys:
   //
-  // {Function} custom
-  //   A function called to validate the payload property. It will be called
-  //   like: `custom(resultIndex, actualResult, payloadKey)`
-  //   It will be called before any other validation is performed for the given
-  //   payload property. It should return true if validation should stop or
-  //   false if it should continue as usual.
+  // {Function} validate
+  //   A validation function. It will be called before any other validation is
+  //   performed for the given payload property, like this:
+  //
+  //   ```
+  //   validate(resultIndex, actualResult, payloadKey)
+  //   ```
+  //
+  //   It should return true if the function handled the validation, and in that
+  //   case no other validation will be performed for the property. Otherwise it
+  //   should return false, and in that case validation will continue as usual
+  //   for the property.
   // {boolean} ignore
   //   Whether the payload property should always be ignored.
   // {boolean} optional
   //   When true, the payload property will be ignored if it's not in the
   //   payload of the expected result.
-  conditionalPayloadProperties = {
+  payloadRules = {
     bookmarkDateMs: optionalDateValidator,
     frecency: { optional: true },
     lastVisit: optionalDateValidator,
@@ -1188,7 +1242,21 @@ async function check_results({
     // payload object, so ignore it. There are Suggest tests specifically for
     // dismissals that indirectly test the important aspects of this property.
     suggestionObject: { ignore: true },
-    ...conditionalPayloadProperties,
+    // Set by the providers manager on dynamic results, not by their provider.
+    viewTemplate: { optional: true },
+    viewUpdate: { optional: true },
+    icon: {
+      validate(resultIndex, actualResult, _payloadKey) {
+        let actualIcon = actualResult.payload.icon;
+        let expectedIcon = matches[resultIndex].payload.icon;
+        if (!actualIcon || !expectedIcon) {
+          return false;
+        }
+        UrlbarTestUtils.checkImageUrl(actualIcon, expectedIcon);
+        return true;
+      },
+    },
+    ...payloadRules,
   };
 
   for (let i = 0; i < matches.length; i++) {
@@ -1231,10 +1299,10 @@ async function check_results({
       try {
         const payloadUrlProtocol = new URL(actual.payload.url).protocol;
         if (
-          !UrlbarUtils.PROTOCOLS_WITH_ICONS.includes(payloadUrlProtocol) &&
+          !UrlbarShared.PROTOCOLS_WITH_ICONS.includes(payloadUrlProtocol) &&
           actual.source != UrlbarShared.RESULT_SOURCE.OTHER_LOCAL
         ) {
-          expected.payload.icon = UrlbarUtils.ICON.DEFAULT;
+          expected.payload.icon = UrlbarShared.ICON.DEFAULT;
         }
       } catch (e) {
         console.error(e);
@@ -1246,16 +1314,16 @@ async function check_results({
       let actualKeys = new Set(Object.keys(actual.payload));
 
       for (let key of actualKeys.union(expectedKeys)) {
-        let condition = conditionalPayloadProperties[key];
+        let rule = payloadRules[key];
 
-        if (condition?.custom?.(i, actual, key)) {
-          // The custom assertion consumed this assertion.
+        if (rule?.validate?.(i, actual, key)) {
+          // The function consumed this validation.
           continue;
         }
 
         if (
-          condition?.ignore ||
-          (condition?.optional && !expected.payload.hasOwnProperty(key))
+          rule?.ignore ||
+          (rule?.optional && !expected.payload.hasOwnProperty(key))
         ) {
           continue;
         }

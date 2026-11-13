@@ -1135,11 +1135,10 @@ void ServoStyleSet::AssertTreeIsClean() {
 bool ServoStyleSet::GetKeyframesForName(
     const Element& aElement, const ComputedStyle& aStyle, nsAtom* aName,
     const StyleComputedTimingFunction& aTimingFunction,
-    const StyleAnimationComposition aComposition,
     nsTArray<Keyframe>& aKeyframes) {
   MOZ_ASSERT(!StylistNeedsUpdate());
   if (Servo_StyleSet_GetKeyframesForName(mRawData.get(), &aElement, &aStyle,
-                                         aName, &aTimingFunction, aComposition,
+                                         aName, &aTimingFunction,
                                          &aKeyframes)) {
     return true;
   }
@@ -1398,6 +1397,7 @@ void ServoStyleSet::UpdateStylist() {
   Servo_StyleSet_FlushStyleSheets(mRawData.get(), root, snapshots,
                                   &nonDocumentStyles);
   mStylistState = StylistState::NotDirty;
+  mDocument->StylistUpdated();
 }
 
 void ServoStyleSet::MaybeGCRuleTree() {

@@ -23,6 +23,7 @@ task-defaults:
             - linux64-jdk-repack
             - linux64-node
     run:
+        clone-with: hg
         using: gradlew
     treeherder:
         kind: test

@@ -4,32 +4,30 @@
 
 #include "AccessibleWrap.h"
 
-#include "LocalAccessible-inl.h"
 #include "AccAttributes.h"
 #include "ApplicationAccessibleWrap.h"
-#include "InterfaceInitFuncs.h"
-#include "nsAccUtils.h"
-#include "mozilla/a11y/PDocAccessible.h"
-#include "OuterDocAccessible.h"
-#include "RemoteAccessible.h"
 #include "DocAccessibleParent.h"
-#include "RootAccessible.h"
-#include "mozilla/a11y/TableAccessible.h"
-#include "mozilla/a11y/TableCellAccessible.h"
-#include "nsMai.h"
-#include "nsMaiHyperlink.h"
-#include "nsString.h"
-#include "nsStateMap.h"
-#include "mozilla/a11y/Platform.h"
+#include "InterfaceInitFuncs.h"
+#include "LocalAccessible-inl.h"
+#include "OuterDocAccessible.h"
 #include "Relation.h"
+#include "RemoteAccessible.h"
 #include "RootAccessible.h"
 #include "States.h"
-#include "nsIAccessibleAnnouncementEvent.h"
-#include "nsISimpleEnumerator.h"
-
 #include "mozilla/Sprintf.h"
+#include "mozilla/a11y/PDocAccessible.h"
+#include "mozilla/a11y/Platform.h"
+#include "mozilla/a11y/TableAccessible.h"
+#include "mozilla/a11y/TableCellAccessible.h"
+#include "nsAccUtils.h"
 #include "nsAccessibilityService.h"
 #include "nsComponentManagerUtils.h"
+#include "nsIAccessibleAnnouncementEvent.h"
+#include "nsISimpleEnumerator.h"
+#include "nsMai.h"
+#include "nsMaiHyperlink.h"
+#include "nsStateMap.h"
+#include "nsString.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -1022,8 +1020,9 @@ void a11y::PlatformFocusEvent(Accessible* aTarget) {
 }
 
 void a11y::PlatformCaretMoveEvent(Accessible* aTarget, int32_t aOffset,
-                                  bool aIsSelectionCollapsed,
-                                  int32_t aGranularity, bool aFromUser) {
+                                  bool /*aIsSelectionCollapsed*/,
+                                  int32_t /*aGranularity*/,
+                                  bool /*aFromUser*/) {
   AtkObject* wrapper = GetWrapperFor(aTarget);
   g_signal_emit_by_name(wrapper, "text_caret_moved", aOffset);
 }
@@ -1219,7 +1218,7 @@ void AccessibleWrap::GetKeyBinding(Accessible* aAccessible,
       keyBinding.AppendToString(keyBindingsStr, KeyBinding::eAtkFormat);
     }
   }
-  aResult = keyBindingsStr;
+  aResult = std::move(keyBindingsStr);
 }
 
 // static

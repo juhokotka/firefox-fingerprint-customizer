@@ -17,43 +17,39 @@ describe("Action Checklist component", () => {
         raw: "Test subtitle",
       },
       tiles: {
+        type: "action_checklist",
         data: [
           {
-            type: "action_checklist",
-            data: [
-              {
-                id: "action-checklist-test",
-                targeting: "false",
-                label: {
-                  raw: "Test label",
-                },
-                action: {
-                  data: {
-                    pref: {
-                      name: "messaging-system-action.test1",
-                      value: "false",
-                    },
-                  },
-                  type: "SET_PREF",
+            id: "action-checklist-test",
+            targeting: "false",
+            label: {
+              raw: "Test label",
+            },
+            action: {
+              data: {
+                pref: {
+                  name: "messaging-system-action.test1",
+                  value: "false",
                 },
               },
-              {
-                id: "action-checklist-test2",
-                targeting: "false",
-                label: {
-                  raw: "Test label 2",
-                },
-                action: {
-                  data: {
-                    pref: {
-                      name: "messaging-system-action.test2",
-                      value: "false",
-                    },
-                  },
-                  type: "SET_PREF",
+              type: "SET_PREF",
+            },
+          },
+          {
+            id: "action-checklist-test2",
+            targeting: "false",
+            label: {
+              raw: "Test label 2",
+            },
+            action: {
+              data: {
+                pref: {
+                  name: "messaging-system-action.test2",
+                  value: "false",
                 },
               },
-            ],
+              type: "SET_PREF",
+            },
           },
         ],
       },
@@ -88,8 +84,109 @@ describe("Action Checklist component", () => {
     it("should render a number of action checklist items equal to the number of items in its configuration", async () => {
       const wrapper = mount(<ActionChecklist content={mockContent} />);
 
-      assert.equal(wrapper.children().length, mockContent.tiles.data.length);
-      assert.ok(wrapper.exists());
+      assert.equal(
+        wrapper.find(".action-checklist-items").children().length,
+        mockContent.tiles.data.length
+      );
+    });
+
+    const mockRemoveButton = {
+      label: { raw: "Remove checklist" },
+      source_id: "remove_checklist_button",
+      action: {
+        type: "MULTI_ACTION",
+        dismiss: true,
+        data: {
+          actions: [
+            { type: "BLOCK_MESSAGE", data: { id: "FINISH_SETUP_CHECKLIST" } },
+            {
+              type: "DESTROY_UIWIDGET",
+              data: { widget_id: "fxms-bmb-button" },
+            },
+          ],
+        },
+      },
+    };
+
+    const mockContentWithRemoveButton = {
+      ...mockContent,
+      remove_checklist_button: mockRemoveButton,
+    };
+
+    describe("remove checklist button", () => {
+      it("should not render when no actions are complete", async () => {
+        const wrapper = mount(
+          <ActionChecklist
+            content={mockContentWithRemoveButton}
+            message_id="TEST"
+          />
+        );
+        await new Promise(resolve => setTimeout(resolve, 0));
+        wrapper.update();
+        assert.isFalse(
+          wrapper.find(".action-checklist-complete-button").exists()
+        );
+      });
+
+      it("should not render when actions are only partially complete", async () => {
+        // AWEvaluateAttributeTargeting is called in two places when ActionChecklist
+        // mounts: once per ActionChecklistItem useEffect (calls 0 and 1, children run
+        // before parent), then once per tile inside evaluateAllActionsTargeting (calls 2
+        // and 3). Only the latter set drives numberOfCompletedActions, so to simulate
+        // one of two tiles complete we target call index 2.
+        sandbox
+          .stub(window, "AWEvaluateAttributeTargeting")
+          .resolves(false)
+          .onCall(2)
+          .resolves(true);
+        const wrapper = mount(
+          <ActionChecklist
+            content={mockContentWithRemoveButton}
+            message_id="TEST"
+          />
+        );
+        await new Promise(resolve => setTimeout(resolve, 0));
+        wrapper.update();
+        assert.isFalse(
+          wrapper.find(".action-checklist-complete-button").exists()
+        );
+      });
+
+      it("should render when all actions are complete", async () => {
+        sandbox.stub(window, "AWEvaluateAttributeTargeting").resolves(true);
+        const wrapper = mount(
+          <ActionChecklist
+            content={mockContentWithRemoveButton}
+            message_id="TEST"
+          />
+        );
+        await new Promise(resolve => setTimeout(resolve, 0));
+        wrapper.update();
+        assert.isTrue(
+          wrapper.find(".action-checklist-complete-button").exists()
+        );
+      });
+
+      it("should call handleAction with the remove button action when clicked", async () => {
+        sandbox.stub(window, "AWEvaluateAttributeTargeting").resolves(true);
+        const handleAction = sandbox.stub();
+        const wrapper = mount(
+          <ActionChecklist
+            content={mockContentWithRemoveButton}
+            message_id="TEST"
+            handleAction={handleAction}
+          />
+        );
+        await new Promise(resolve => setTimeout(resolve, 0));
+        wrapper.update();
+        wrapper.find(".action-checklist-complete-button").simulate("click");
+        assert.calledOnce(handleAction);
+        assert.calledWith(
+          handleAction,
+          sinon.match({ source: mockRemoveButton.source_id }),
+          mockRemoveButton.action
+        );
+      });
     });
   });
 
@@ -208,9 +305,16 @@ describe("Action Checklist component", () => {
   });
 
   describe("<ActionChecklistProgressbar>", () => {
+    it("should render the progress bar container", async () => {
+      const wrapper = shallow(<ActionChecklistProgressBar progress={0} />);
+      assert.ok(
+        wrapper.find(".action-checklist-progress-bar-container").exists()
+      );
+    });
+
     it("should render the progress bar", async () => {
       const wrapper = shallow(<ActionChecklistProgressBar progress={0} />);
-      assert.ok(wrapper.exists());
+      assert.ok(wrapper.find(".action-checklist-progress-bar").exists());
     });
 
     it("should render the progress bar indicator with a width based on the progress", async () => {
@@ -224,6 +328,25 @@ describe("Action Checklist component", () => {
           "--action-checklist-progress-bar-progress"
         ];
       assert.equal(indicatorWidth, `${progressPercent}%`);
+    });
+
+    it("should display the progress percentage", async () => {
+      const progressPercent = 75;
+      const wrapper = shallow(
+        <ActionChecklistProgressBar progress={progressPercent} />
+      );
+      const progressText = wrapper.find(".action-checklist-progress-text");
+      assert.ok(progressText.exists());
+      assert.equal(progressText.text(), `${progressPercent}%`);
+    });
+
+    it("should round the progress percentage", async () => {
+      const progressPercent = 66.7;
+      const wrapper = shallow(
+        <ActionChecklistProgressBar progress={progressPercent} />
+      );
+      const progressText = wrapper.find(".action-checklist-progress-text");
+      assert.equal(progressText.text(), "67%");
     });
   });
 });

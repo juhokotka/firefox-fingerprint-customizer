@@ -112,7 +112,7 @@
   <!-- Header for the select password prompt to allow users to fill a form with a saved password -->
   <string name="mozac_feature_prompts_saved_logins_2">Cyfrineiriau wedi\'u cadw</string>
   <!-- Content description for the suggest strong password prompt to allow users to fill a form with a suggested strong password -->
-  <string name="mozac_feature_prompts_suggest_strong_password_content_description">Awgrym o gyfrinair cryf</string>
+  <string name="mozac_feature_prompts_suggest_strong_password_content_description">Awgrymu cyfrinair cryf</string>
   <!-- Header for the suggest strong password prompt to allow users to fill a form with a suggested strong password -->
   <string name="mozac_feature_prompts_suggest_strong_password_2">Defnyddiwch gyfrinair cryf</string>
   <!-- Title for using the suggest strong password confirmation dialog. %1$s will be replaced with the generated password -->
@@ -141,7 +141,7 @@
   <!-- Pressing this will dismiss the dialog and allow to upload folder -->
   <string name="mozac_feature_prompt_folder_upload_confirm_positive_button_text">Llwytho i fyny</string>
   <!-- Pressing this will dismiss the dialog and disallow to upload folder -->
-  <string name="mozac_feature_prompt_folder_upload_confirm_negative_button_text">Diddymu</string>
+  <string name="mozac_feature_prompt_folder_upload_confirm_negative_button_text">Na</string>
   <!--
     Credit Card Autofill
 
@@ -157,7 +157,7 @@
   <!-- Text for the title of a save credit card dialog. -->
   <string name="mozac_feature_prompts_save_credit_card_prompt_title">Cadw’r cerdyn hwn yn ddiogel?</string>
   <!-- Text for the title of an update credit card dialog. -->
-  <string name="mozac_feature_prompts_update_credit_card_prompt_title">Diweddaru dyddiad dod i ben cerdyn?</string>
+  <string name="mozac_feature_prompts_update_credit_card_prompt_title">Diweddaru dyddiad daw i ben cerdyn?</string>
   <!-- Subtitle text displayed under the title of the saved card dialog. %s is the name of the app (for example "Firefox"). -->
   <string name="mozac_feature_prompts_save_credit_card_prompt_body_2">Mae %s yn amgryptio rhif eich cerdyn. Ni fydd eich cod diogelwch yn cael ei gadw.</string>
   <!--
@@ -174,6 +174,8 @@
   <string name="mozac_feature_prompts_manage_address">Rheoli cyfeiriadau</string>
   <!-- Text for the title of a save address dialog. -->
   <string name="mozac_feature_prompts_save_address_prompt_title">Cadw cyfeiriad?</string>
+  <!-- Text for the title of an update address dialog, shown when the address adds information to an already saved address. -->
+  <string name="mozac_feature_prompts_update_address_prompt_title">Diweddaru\'r cyfeiriad?</string>
   <!--
     Federated Credential Management prompts
 
@@ -197,7 +199,7 @@
 
     Text for the email mask prompt to allow users to fill an email input field in a sign up form with an email mask.
   -->
-  <string name="mozac_feature_relay_chip_text">Defnyddiwch arallenw e-bost</string>
+  <string name="mozac_feature_relay_chip_text">Defnyddiwch arallenw ebost</string>
   <!-- Informational text for the contextual feature recommendation (CFR) enabling the email mask aliases. The %s is the name of the service, "Firefox Relay". -->
-  <string name="mozac_feature_relay_email_masks_cfr">Newydd! Mae %s arallenwau e-bost bellach ar gael ar ffôn symudol.</string>
+  <string name="mozac_feature_relay_email_masks_cfr">Newydd! Mae %s arallenwau ebost bellach ar gael ar ffôn symudol.</string>
 </resources>

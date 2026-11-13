@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "IdleTaskRunner.h"
+
 #include "mozilla/AppShutdown.h"
 #include "mozilla/TaskController.h"
 #include "nsRefreshDriver.h"
@@ -136,7 +137,7 @@ void IdleTaskRunner::Run() {
   }
 }
 
-void IdleTaskRunner::TimedOut(nsITimer* aTimer, void* aClosure) {
+void IdleTaskRunner::TimedOut(nsITimer* /*aTimer*/, void* aClosure) {
   RefPtr<IdleTaskRunner> runner = static_cast<IdleTaskRunner*>(aClosure);
   runner->mTimerActive = false;
   runner->Run();
@@ -166,7 +167,7 @@ void IdleTaskRunner::Cancel() {
   mCallback = nullptr;
 }
 
-static void ScheduleTimedOut(nsITimer* aTimer, void* aClosure) {
+static void ScheduleTimedOut(nsITimer* /*aTimer*/, void* aClosure) {
   RefPtr<IdleTaskRunner> runnable = static_cast<IdleTaskRunner*>(aClosure);
   runnable->Schedule(true);
 }
@@ -178,6 +179,11 @@ void IdleTaskRunner::Schedule(bool aAllowIdleDispatch) {
   }
 
   if (mMayStopProcessing && mMayStopProcessing()) {
+    Cancel();
+    return;
+  }
+
+  if (AppShutdown::IsInOrBeyond(ShutdownPhase::XPCOMShutdownThreads)) {
     Cancel();
     return;
   }

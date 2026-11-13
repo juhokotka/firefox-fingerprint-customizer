@@ -170,9 +170,9 @@ class nsDisplaySVGEffectGeometry : public nsDisplayItemGeometry {
   void MoveBy(const nsPoint& aOffset) override;
 
   gfxRect mBBox;
-  gfxPoint mUserSpaceOffset;
+  CSSPoint mUserSpaceOffset;
   nsPoint mFrameOffsetToReferenceFrame;
-  bool mHandleOpacity;
+  bool mHandleOpacity = false;
 };
 
 class nsDisplayMasksAndClipPathsGeometry : public nsDisplaySVGEffectGeometry {

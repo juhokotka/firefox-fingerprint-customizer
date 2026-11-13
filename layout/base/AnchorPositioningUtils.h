@@ -26,6 +26,12 @@ class ShadowRoot;
 
 class nsDisplayListBuilder;
 
+struct AnchorPosAnchorInfo {
+  explicit AnchorPosAnchorInfo(nsIFrame* aAnchor);
+  nsIFrame* mAnchor;
+  uint32_t mFrameTreeDepth;
+};
+
 struct AnchorPosInfo {
   // Border-box of the anchor frame, offset against the positioned frame's
   // absolute containing block's padding box.
@@ -43,7 +49,6 @@ class DistanceToNearestScrollContainer {
   bool Valid() const { return mDistance != kInvalid; }
 
   bool operator==(const DistanceToNearestScrollContainer&) const = default;
-  bool operator!=(const DistanceToNearestScrollContainer&) const = default;
 
  private:
   // 0 is invalid - a frame itself cannot be its own nearest scroll container.
@@ -123,9 +128,11 @@ struct AnchorPosResolutionData {
 // * Cached offset/size resolution, if resolution was valid,
 // * Compensating for scroll [1]
 // * Default scroll shift [2]
+// * Remembered scroll offset [3]
 //
 // [1]: https://drafts.csswg.org/css-anchor-position-1/#compensate-for-scroll
 // [2]: https://drafts.csswg.org/css-anchor-position-1/#default-scroll-shift
+// [3]: https://drafts.csswg.org/css-anchor-position-1/#remembered-scroll-offset
 class AnchorPosReferenceData {
  private:
   using ResolutionMap =
@@ -174,6 +181,38 @@ class AnchorPosReferenceData {
     return mCompensatingForScroll;
   }
 
+  // The remembered scroll offset of a positioned frame's default anchor. We
+  // capture it at the positioned frame's first scroll shift update, which we
+  // treat as the anchor recalculation point when the frame starts generating
+  // boxes, and when the frame changes position fallbacks.
+  // https://drafts.csswg.org/css-anchor-position-1/#remembered-scroll-offset
+  //
+  // Bug 1987962: Anchor references to other anchors don't have remembered
+  // scroll offsets, and resolve as if their scroll containers were at their
+  // initial scroll position.
+  struct RememberedScrollOffset {
+    // The default anchor this offset was captured for.
+    RefPtr<const nsAtom> mAnchorName;
+    StyleCascadeLevel mAnchorTreeScope = StyleCascadeLevel::Default();
+    nsPoint mOffset;
+  };
+
+  // Remember all of the scroll shift applied so far as the remembered scroll
+  // offset of the default anchor.
+  void RememberScrollOffset();
+
+  // Remember the scroll offset if it hasn't been remembered yet.
+  void MaybeRememberScrollOffset();
+
+  void ForgetRememberedScrollOffsetIfDefaultAnchorChanged();
+
+  // The total scroll shift currently applied to the positioned frame's
+  // position.
+  nsPoint AppliedScrollShift() const;
+
+  // Reset the data for a new reflow while keeping the persistent data.
+  void Reset();
+
   PositionTryBackup TryPositionWithSameDefaultAnchor() {
     auto compensatingForScroll = std::exchange(mCompensatingForScroll, {});
     auto defaultScrollShift = std::exchange(mDefaultScrollShift, {});
@@ -195,19 +234,29 @@ class AnchorPosReferenceData {
 
   // Distance from the default anchor to the nearest scroll container.
   DistanceToNearestScrollContainer mDistanceToDefaultScrollContainer;
+
+  // Nothing until the remembered scroll offset is captured. This is a
+  // persistent field that is preserved across reflows.
+  Maybe<RememberedScrollOffset> mRememberedScrollOffset;
+
+  // The scroll shift on top of mRememberedScrollOffset. It doesn't contribute
+  // to the scrollable overflow. Until mRememberedScrollOffset is captured, it
+  // holds all of the scroll shift at reflow, which counts as layout.
   // https://drafts.csswg.org/css-anchor-position-1/#default-scroll-shift
   nsPoint mDefaultScrollShift;
+
   // Rect of the original containg block.
   nsRect mOriginalContainingBlockRect;
+
   // Adjusted containing block, by position-area or grid, as per
   // https://drafts.csswg.org/css-position/#original-cb
   // TODO(dshin, bug 2004596): "or" should be "and/or."
   nsRect mAdjustedContainingBlock;
-  // TODO(dshin, bug 1987962): Remembered scroll offset
-  // https://drafts.csswg.org/css-anchor-position-1/#remembered-scroll-offset
+
   // Name of the default used anchor. Not necessarily positioned frame's
   // style, because of fallbacks.
   RefPtr<const nsAtom> mDefaultAnchorName;
+
   // Flag indicating which sides of the containing block attach to the
   // scroll-compensated anchor. Whenever a scroll-compensated anchor scrolls, it
   // effectively moves around w.r.t. its absolute containing block. This
@@ -224,11 +273,13 @@ class AnchorPosReferenceData {
   // those sides by the scroll offset, while pinning the rest of the sides to
   // the original containing block.
   SideBits mScrollCompensatedSides = SideBits::eNone;
+
   // Resolved insets for this positioned element. Modifies the adjusted &
   // scrolled containing block.
   nsMargin mInsets;
 
   StyleCascadeLevel mAnchorTreeScope = StyleCascadeLevel::Default();
+  uint32_t mFrameTreeDepth = 0;
 
  private:
   ResolutionMap mMap;
@@ -317,7 +368,9 @@ struct AnchorPositioningUtils {
    */
   static nsIFrame* FindFirstAcceptableAnchor(
       const ScopedNameRef& aName, const nsIFrame* aPositionedFrame,
-      const nsTArray<nsIFrame*>& aPossibleAnchorFrames);
+      const nsTArray<AnchorPosAnchorInfo>& aPossibleAnchorFrames,
+      uint32_t aPositionedFrameTreeDepth,
+      nsTArray<size_t>* aTopLayerIndexCache);
 
   static Maybe<nsRect> GetAnchorPosRect(
       const nsIFrame* aAbsoluteContainingBlock, const nsIFrame* aAnchor,
@@ -329,7 +382,8 @@ struct AnchorPositioningUtils {
       AnchorPosResolutionCache* aResolutionCache);
 
   static Maybe<nsSize> ResolveAnchorPosSize(
-      const nsIFrame* aPositioned, const ScopedNameRef& aAnchorName,
+      const nsIFrame* aPositioned, const nsIFrame* aAbsoluteContainingBlock,
+      const ScopedNameRef& aAnchorName,
       AnchorPosResolutionCache* aResolutionCache);
 
   /**
@@ -431,6 +485,60 @@ struct AnchorPositioningUtils {
    */
   static nsRect ReassembleAnchorRect(const nsIFrame* aAnchor,
                                      const nsIFrame* aContainingBlock);
+
+  /**
+   * Return the continuation (or IB-split sibling) of aContainingBlock that is a
+   * proper ancestor of aAnchor, which may not be aContainingBlock itself when
+   * the containing block is fragmented. Return nullptr if no continuation of
+   * aContainingBlock contains aAnchor.
+   */
+  static const nsIFrame* GetMatchingContainingBlock(
+      const nsIFrame* aAnchor, const nsIFrame* aContainingBlock);
+
+  struct CombinedFragments {
+    // Previous continuation, if exists, that got skipped due to being on a
+    // different page, or a different containing block continuation.
+    const nsIFrame* mSkippedPrevContinuation = nullptr;
+    // Same as above, but next continuation.
+    const nsIFrame* mSkippedNextContinuation = nullptr;
+    // The overall frame rect formed by unioning the frame's fragment rects.
+    nsRect mRect;
+  };
+  enum class UnionFragments : bool {
+    // Union every fragment of the frame.
+    All,
+    // Union only the fragments under the given containing block continuation.
+    SameContainingBlockOnly,
+  };
+
+  enum class ApplyTransform : bool {
+    // The returned rect is untransformed. The caller is not expected to apply
+    // transforms to it afterwards.
+    No,
+    // The returned rect takes transforms between aFrame and aContainingBlock
+    // into account, if any.
+    Yes,
+  };
+  /**
+   * Get the union of the rects of aFrame and its continuations (but not if the
+   * context is paginated and they're on a different page, as it doesn't make
+   * sense to "merge" their rects in that case).
+   *
+   * @param aFrame The target frame whose combined fragments are wanted.
+   * @param aContainingBlock The frame whose coordinate space the result is
+   * expressed in.
+   * @param aUnionFragments Which of aFrame's fragments to union: all of them,
+   * or only those under aContainingBlock. SameContainingBlockOnly requires
+   * aContainingBlock to be a proper ancestor of aFrame.
+   * @param aApplyTransform Whether the returned mRect takes transforms between
+   * aFrame and aContainingBlock into account per
+   * https://drafts.csswg.org/css-anchor-position-1/#determining. Transforms are
+   * applied only when aContainingBlock is a proper ancestor of aFrame.
+   *
+   */
+  static CombinedFragments GetCombinedFragmentRects(
+      const nsIFrame* aFrame, const nsIFrame* aContainingBlock,
+      UnionFragments aUnionFragments, ApplyTransform aApplyTransform);
 
   // Helper to get shadow root for a property's tree scope
   static const dom::ShadowRoot* GetShadowRootForTreeScope(

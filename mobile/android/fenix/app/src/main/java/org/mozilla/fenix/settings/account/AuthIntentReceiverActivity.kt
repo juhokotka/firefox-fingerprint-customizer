@@ -10,13 +10,11 @@ import android.os.Bundle
 import androidx.annotation.VisibleForTesting
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
-import mozilla.components.feature.ipprotection.IPProtectionFxaAuthFlow.Companion.INTENT_ON_COMPLETE
+import mozilla.components.feature.ipprotection.auth.fxa.IPProtectionFxaAuthFlow.Companion.INTENT_ON_COMPLETE
 import org.mozilla.fenix.HomeActivity
 import org.mozilla.fenix.ext.components
 
-/**
- * Processes incoming intents and sends them to the corresponding activity.
- */
+/** Processes incoming intents and sends them to the corresponding activity. */
 class AuthIntentReceiverActivity : Activity() {
 
     @VisibleForTesting

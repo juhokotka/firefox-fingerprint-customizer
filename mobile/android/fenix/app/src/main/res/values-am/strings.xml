@@ -55,7 +55,11 @@
   <string name="about_content" tools:ignore="BrandUsage">%1$s የሚመረተው በሞዚላ ነው።</string>
   <!-- Private Browsing -->
   <string name="private_browsing_common_myths">ስለግል አሰሳ የተለመዱ አፈ ታሪኮች</string>
-  <!-- Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active. -->
+  <!--
+    Private Browsing
+
+    Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active.
+  -->
   <string name="private_browsing_a11y_session_announcement">የግል የማሰሻ ክፍል</string>
   <!--
     True Private Browsing Mode
@@ -79,14 +83,6 @@
   <string name="open_in_app_cfr_positive_button_text">ወደ ቅንብሮች ይሂዱ</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">አሰናብት</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
-  <!--
-    Address bar swipe "contextual feature recommendation" (CFR)
-
-    Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar.
-  -->
-  <string name="address_bar_swipe_cfr_message_2">ትሮችን ለመቀየር የመሳሪያ አሞሌውን ወደ ግራ ወይም ቀኝ ያንሸራትቱ።</string>
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">የካሜራ ፈቃድ ያስፈልጋል። ወደ አንድሮይድ ቅንብሮች ይሂዱ፣ ፈቃዶችን ይንኩ እና ፍቀድን ይንኩ።</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -124,16 +120,8 @@
   <string name="home_screen_shortcut_open_new_private_tab_2">አዲስ የግል ትር</string>
   <!-- Shortcut action to open Passwords screen -->
   <string name="home_screen_shortcut_passwords">የይለፍ ቃሎች</string>
-  <!--
-    Recent Tabs
-
-    Header text for jumping back into the recent tab in the home screen
-  -->
-  <string name="recent_tabs_header">መልሰው ይዝለሉ</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">ሁሉንም አሳይ</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">ሁሉንም የቅርብ ጊዜ ትሮች ቁልፍ አሳይ</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">ሁሉንም የተመሳሰሉ ትሮችን ይመልከቱ</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -159,11 +147,7 @@
   <string name="recently_visited_menu_item_remove">አስወግድ</string>
   <!-- Content description for the button which navigates the user to show all of their history. -->
   <string name="past_explorations_show_all_content_description_2">ሁሉንም ያለፉ አሰሳዎችን አሳይ</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">ተመለስ</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">አስተላልፍ</string>
@@ -271,14 +255,6 @@
   -->
   <string name="browser_menu_default_banner_title">%1$s ነባሪ ያድርጉት</string>
   <!--
-    Menu "contextual feature recommendation" (CFR)
-
-    Text for the title in the contextual feature recommendation popup promoting the menu feature.
-  -->
-  <string name="menu_cfr_title">አዲስ፡- የተሳለጠ ምናሌ</string>
-  <!-- Text for the message in the contextual feature recommendation popup promoting the menu feature. -->
-  <string name="menu_cfr_body">ከግል አሰሳ እስከ ማስቀመጥ ድርጊቶች ድረስ፣ የሚፈልጉትን በፍጥነት ያግኙ።</string>
-  <!--
     Extensions management fragment
 
     Text displayed when there are no extensions to be shown
@@ -373,10 +349,6 @@
   <string name="onboarding_marketing_body_1" tools:ignore="BrandUsage,UnusedResources">Firfoxን እንዴት እንዳገኙት እና እንደሚጠቀሙበት ከMozilla የግብይት አጋሮች ጋር ያጋሩ። ይህ ውሂብ በጭራሽ አይሸጥም።</string>
   <!-- Marketing onboarding page button label variant. Button to confirm choice and start browsing. -->
   <string name="onboarding_marketing_positive_button_1" tools:ignore="UnusedResources">ይስማሙ እና ማሰስ ይጀምሩ</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Widget Picker
 
@@ -401,7 +373,11 @@
     Title for the settings page
   -->
   <string name="settings">ቅንብሮች</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">አጠቃላይ</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">ስለ</string>
@@ -454,40 +430,6 @@
   <string name="preferences_https_only_title">HTTPS-ብቻ ሁነታ</string>
   <!-- Preference title for using the screen lock to hide tabs in private browsing -->
   <string name="preferences_pbm_lock_screen_title">በግል አሰሳ ውስጥ ትሮችን ለመደበቅ የማያ ገጽ መቆለፊያን ይጠቀሙ</string>
-  <!-- Label for cookie banner section in quick settings panel. -->
-  <string name="cookie_banner_blocker">የኩኪ ባነር ማገጃ</string>
-  <!-- Preference for removing cookie/consent banners from sites automatically in private mode. See reduce_cookie_banner_summary for additional context. -->
-  <string name="preferences_cookie_banner_reduction_private_mode">በግል አሰሳ ውስጥ የኩኪ ባነር ማገጃ</string>
-  <!-- Text for indicating cookie banner handling is off this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_off_for_site">ለዚህ ድረ-ገፅ ጠፍቷል</string>
-  <!-- Text for cancel button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_cancel_button">ተወው</string>
-  <!-- Text for request support button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_request_support_button_2">ጥያቄ ላክ</string>
-  <!-- Text for title indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_title_2">ለዚህ ጣቢያ ድጋፍ ይጠይቁ?</string>
-  <!-- Label for the snackBar, after the user reports with success a website where cookie banner reducer did not work -->
-  <string name="cookie_banner_handling_report_site_snack_bar_text_2">ጥያቄው ተልኳል</string>
-  <!-- Text for indicating cookie banner handling is on this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_on_for_site">ለዚህ ድረ-ገፅ በርቷል</string>
-  <!-- Text for indicating that a request for unsupported site was sent to Nimbus (it's a Mozilla library for experiments), this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site_request_submitted_2">የድጋፍ ጥያቄው ተልኳል</string>
-  <!-- Text for indicating cookie banner handling is currently not supported for this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site">በአሁኑ ጊዜ የማይደገፍ ድረ-ገፅ</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is on this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_on_for_site_1">ለ%1$s የኩኪ ባነር ማገጃ ይብራ?</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is off this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_off_for_site_1">ለ%1$s የኩኪ ባነር ማገጃ ይጥፋ?</string>
-  <!-- Title text for a detail explanation indicating cookie banner reducer didn't work for the current site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_title_unsupported_site_request_2">%1$s በዚህ ጣቢያ ላይ የኩኪ ጥያቄዎችን በራስ ሰር ውድቅ ማድረግ አይችልም። ለወደፊቱ ይህንን ጣቢያ ለመደገፍ ጥያቄ መላክ ይችላሉ።</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is off for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_off_for_site_1">አጥፋ እና %1$s ኩኪዎችን አጽድቶ ይህን ጣቢያ እንደገና ይጭናል። ይህ ሊያስወጣዎት ወይም የግዢ ጋሪዎችን ባዶ ሊያደርግ ይችላል።</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is on for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_on_for_site_3">አብራ እና %1$s በዚህ ጣቢያ ላይ ያሉትን ሁሉንም የኩኪ ባነሮች በራስ ሰር እምቢ ለማለት ይሞክራል።</string>
-  <!-- Title for the cookie banner re-engagement CFR, the placeholder is replaced with app name. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="cookie_banner_cfr_title">%1$s አሁን ለእርስዎ ኩኪዎችን አልተቀበለም</string>
-  <!-- Message for the cookie banner re-engagement CFR -->
-  <string name="cookie_banner_cfr_message">ያነሱ ትኩረትን የሚከፋፍሉ፣ በዚህ ጣቢያ ላይ እርስዎን የሚከታተሉ ኩኪዎች ያነሱ ናቸው።</string>
   <!-- Description of the preference to enable "HTTPS-Only" mode. -->
   <string name="preferences_https_only_summary">ለበለጠ ደህንነት HTTPS ምስጠራ ፕሮቶኮልን በመጠቀም ከድረ-ገፆች ጋር በራስ-ሰር ለመገናኘት ይሞክራል።</string>
   <!-- Summary of https only preference if https only is set to off -->
@@ -648,8 +590,6 @@
   <string name="customize_addon_collection_user_hint">የስብስብ ባለቤት (የተጠቃሚ መታወቂያ)</string>
   <!-- Toast shown after confirming the custom extension collection configuration -->
   <string name="toast_customize_extension_collection_done">የቅጥያ ስብስብ ተስተካክሏል። ለውጦችን ለመተግበር መተግበሪያውን በማቆም ላይ…</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">መልሰው ይዝለሉ</string>
   <!-- Title for the customize home screen section with bookmarks. -->
   <string name="customize_toggle_bookmarks">እልባቶች</string>
   <!--
@@ -994,8 +934,6 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">ትሮች</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">የትር እይታ</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">ዝርዝር</string>
   <!-- Option for a grid tab view -->
@@ -1038,13 +976,7 @@
   <string name="opening_screen_last_tab_summary">በመጨረሻው ትር ላይ ይክፈቱ</string>
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">ከአራት ሰዓታት በኋላ በመነሻ ገጽ ላይ ክፈት</string>
-  <!--
-    Inactive tabs
-
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
-  -->
-  <string name="preferences_inactive_tabs">የቆዩ ትሮችን ወደ እንቅስቃሴ-አልባ ውሰድ</string>
-  <!-- Title of inactive tabs preference -->
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">ለሁለት ሳምንታት ያላዩዋቸው ትሮች ወደ እንቅስቃሴ-አልባ ክፍል ይወሰዳሉ።</string>
   <!--
     Studies
@@ -1116,8 +1048,6 @@
   <string name="history_search_1">የፍለጋ ህብረ ቁምፊ ያስገቡ</string>
   <!-- Text for the button to clear all history -->
   <string name="history_delete_all">ታሪክ ሰርዝ</string>
-  <!-- Text for the snackbar to confirm that multiple browsing history items has been deleted -->
-  <string name="history_delete_multiple_items_snackbar">ታሪክ ተሰርዟል</string>
   <!-- Text for the snackbar to confirm that a single browsing history item has been deleted. %1$s is the shortened URL of the deleted history item. -->
   <string name="history_delete_single_item_snackbar">%1$s ተሰርዟል</string>
   <!-- Context description text for the button to delete a single history item -->
@@ -1127,16 +1057,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d ተመርጧል</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">ዛሬ</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">ትላንት</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">ያለፉት 7 ቀናት</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">ያለፉት 30 ቀናት</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">ይበልጥ የቆየ</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">እዚህ ምንም ታሪክ የለም</string>
   <!--
@@ -1294,16 +1214,8 @@
   <string name="webcompat_reporter_label_url">URL</string>
   <!-- The error message of the URL text field when an invalid URL has been entered. -->
   <string name="webcompat_reporter_url_error_invalid">አባክዎ የሚሰራ URL ያስገቡ</string>
-  <!-- The label/title of a field in the Web Compat Reporter feature for explaining a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_label_whats_broken_2">ምኑ ተበላሽቷል?</string>
-  <!-- The error message of the dropdown, prompting the user to select a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_error">እባክዎ ምክንያት ይምረጡ</string>
-  <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
-  <string name="webcompat_reporter_label_description">ችግሩን ይግለጹ (አማራጭ)</string>
   <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
   <string name="webcompat_reporter_cancel">ሰርዝ</string>
-  <!-- The button text for the send button to submit the provided form data. -->
-  <string name="webcompat_reporter_send">ላክ</string>
   <!--
     These reason strings are dropdown options on a WebCompat reporter form, indicating what is broken on the site.
 
@@ -1322,8 +1234,6 @@
   <string name="webcompat_reporter_reason_account2">መግባት ወይም መመዝገብ አይቻልም</string>
   <!-- Broken site reason text for site asked to turn off ad blocker -->
   <string name="webcompat_reporter_reason_turn_off_adblocker">ጣቢያ የማስታወቂያ ማገጃውን እንዲያጠፋ ተጠይቋል</string>
-  <!-- Broken site reason text for browser isn’t supported or blocked -->
-  <string name="webcompat_reporter_reason_notsupported">አሳሽ አይደገፍም ወይም ታግዷል</string>
   <!-- Broken site reason text for something else -->
   <string name="webcompat_reporter_reason_other">ሌላ ነገር</string>
   <!--
@@ -1448,12 +1358,6 @@
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">ወደ ቅንብሮች ይሂዱ</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">ፈጣን ቅንብሮች ገፅ</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">የሚመከር</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -1808,10 +1712,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">የጥበቃ ቅንብሮች</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">የተሻሻለ የመከታተያ ጥበቃ</string>
   <!-- Preference summary for enhanced tracking protection settings on/off switch -->
   <string name="preference_enhanced_tracking_protection_summary">አሁን አጠቃላይ የኩኪ ጥበቃን በማሳየት ላይ፣ የኛ እጅግ ኃይለኛው ድረ-ገጽ ተሻጋሪ መከታተያዎችን አጋጅ።</string>
@@ -1865,12 +1767,8 @@
   <string name="preference_enhanced_tracking_protection_custom_cryptominers">ምናባዊ ገንዘብ መቆፈርያዎች</string>
   <!-- Preference for enhanced tracking protection for the custom protection settings -->
   <string name="preference_enhanced_tracking_protection_custom_known_fingerprinters">የታወቁ የጣት አሻራ ሰብሳቢዎች</string>
-  <!-- Button label for navigating to the Enhanced Tracking Protection details -->
-  <string name="enhanced_tracking_protection_details">ዝርዝር ማብራሪያዎች</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">ታግዷል</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">ተፈቅዷል</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">ማህበራዊ ሚዲያ መከታተያዎች</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -1893,10 +1791,6 @@
   <string name="etp_tracking_content_title">የመከታተያ ይዘት</string>
   <!-- Description of tracking content that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_description">ከማስታወቂያዎች፣ ቪዲዮዎች እና ሌሎች የክትትል ኮድ የያዙ ሌሎች ይዘቶችን ከመጫን ያቆማል። አንዳንድ የድረ-ገጽ ተግባራትን ሊጎዳ ይችላል።</string>
-  <!-- Enhanced Tracking Protection message that protection is currently on for this site -->
-  <string name="etp_panel_on">ጥበቃዎች ለዚህ ጣቢያ በርተዋል</string>
-  <!-- Enhanced Tracking Protection message that protection is currently off for this site -->
-  <string name="etp_panel_off">ለዚህ ጣቢያ ጥበቃዎች ጠፍተዋል</string>
   <!-- Header for exceptions list for which sites enhanced tracking protection is always off -->
   <string name="enhanced_tracking_protection_exceptions">ለእነዚህ ድረ-ገፆች የተሻሻለ የመከታተያ ጥበቃ ጠፍቷል</string>
   <!--
@@ -1921,13 +1815,6 @@
   <string name="etp_suspected_fingerprinters_description">ጣት አሻራ ጥበቃን የተጠረጠሩ የጣት አሻራ ሰብሳቢዎችን ለማስቆም ያስችላል።</string>
   <!-- Category of trackers (fingerprinters) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_known_fingerprinters_title">የታወቁ የጣት አሻራ ሰብሳቢዎች</string>
-  <!--
-    Description of the SmartBlock Enhanced Tracking Protection feature. The * symbol is intentionally hardcoded here,
-    as we use it on the UI to indicate which trackers have been partially unblocked.
-  -->
-  <string name="preference_etp_smartblock_description">ከዚህ በታች ምልክት የተደረገባቸው አንዳንድ መከታተያዎች በዚህ ገጽ ላይ እገዳው በከፊል ተነስቷል ምክንያቱም ከእነሱ ጋር ስለተገናኙ *።</string>
-  <!-- Text displayed that links to website about enhanced tracking protection SmartBlock -->
-  <string name="preference_etp_smartblock_learn_more">ተጨማሪ ይወቁ</string>
   <!--
     Content description (not visible, for screen readers etc.):
     Enhanced tracking protection exception preference icon for ETP settings.
@@ -2047,12 +1934,8 @@
   <string name="add_to_homescreen_cancel">ተወው</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">ጨምር</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">ወደ ድር ድረ-ገፅ ይቀጥሉ</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">የአቋራጭ ስም</string>
-  <!-- Describes the add to homescreen functionality -->
-  <string name="add_to_homescreen_description_2">ፈጣን መዳረሻ እንዲኖርዎት እና መተግበሪያ በሚመስል ልምድ በፍጥነት ለማሰስ ይህን ድረ-ገጽ በቀላሉ ወደ መሳሪያዎ መነሻ ማያ ገጽ ማከል ይችላሉ።</string>
   <!-- Preference for managing the settings for logins and passwords in Fenix -->
   <string name="preferences_passwords_logins_and_passwords_2">የይለፍ ቃሎች</string>
   <!-- Preference for managing the saving of logins and passwords in Fenix -->
@@ -2261,8 +2144,6 @@
   <string name="addresses_save_button">አስቀምጥ</string>
   <!-- The text for the "Cancel" button for cancelling adding, updating or deleting an address -->
   <string name="addresses_cancel_button">ተወው</string>
-  <!-- The text for the "Delete address" button for deleting an address -->
-  <string name="addressess_delete_address_button">አድራሻ ሰርዝ</string>
   <!-- The title for the "Delete address" confirmation dialog -->
   <string name="addressess_confirm_dialog_message_2">ይህ አድራሻ ይጥፋ?</string>
   <!-- The text for the positive button on "Delete address" dialog -->
@@ -2317,16 +2198,8 @@
   <string name="phone_feature_blocked_step_permissions"><![CDATA[2. <b>ፍቃዶችን</b>ን መታ ያድርጉ]]></string>
   <!-- Third step for the allowing a permission (%1$s is the permission name, for example "Camera"). -->
   <string name="phone_feature_blocked_step_feature"><![CDATA[3. <b>%1$s</b> ን ወደ አብራ ቀይር]]></string>
-  <!-- Label that indicates a site is using a secure connection -->
-  <string name="quick_settings_sheet_secure_connection_2">ግንኙነት ደህንነቱ የተጠበቀ ነው</string>
-  <!-- Label that indicates a site is using a insecure connection -->
-  <string name="quick_settings_sheet_insecure_connection_2">ግንኙነት ደህንነቱ የተጠበቀ አይደለም</string>
-  <!-- Label that indicates a site is displaying a local document -->
-  <string name="quick_settings_sheet_local_page">ይህ ገጽ በመሣሪያዎ ላይ ተከማችቷል።</string>
   <!-- Label to clear site data -->
   <string name="clear_site_data">ኩኪዎች እና የድረ-ገፅ ውሂብ ያጽዱ</string>
-  <!-- Confirmation message for a dialog confirming if the user wants to delete all data for current site. %s is the domain of the site. -->
-  <string name="confirm_clear_site_data"><![CDATA[የ<b>%s</b> ድረ-ገፅን ሁሉንም ኩኪዎች እና ውሂቦች ማጽዳት እንደሚፈልጉ እርግጠኛ ነዎት?]]></string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for all sites -->
   <string name="confirm_clear_permissions_on_all_sites">እርግጠኛ ነዎት በሁሉም ድረ-ገፆች ላይ ያሉትን ሁሉንም ፈቃዶች ማጽዳት ይፈልጋሉ?</string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for a site -->
@@ -2339,11 +2212,6 @@
   <string name="browser_menu_add_to_shortcuts">ወደ አቋራጭ ጨምር</string>
   <!-- Browser menu button that removes a shortcut from the home fragment -->
   <string name="browser_menu_remove_from_shortcuts">ከአቋራጭ ላይ አስወድግ</string>
-  <!--
-    text shown before the issuer name to indicate who its verified by, %1$s is the name of
-    the certificate authority that verified the ticket
-  -->
-  <string name="certificate_info_verified_by">አረጋጋጭ:- %1$s</string>
   <!-- Message in delete confirmation dialog for password -->
   <string name="login_deletion_confirmation_2">እርግጠኛ ነዎት ይህን የይለፍ ቃል መሰረዝ ይፈልጋሉ?</string>
   <!-- Positive action of a dialog asking to delete -->
@@ -2503,8 +2371,6 @@
   <string name="a11y_action_label_expand">ዘርጋ</string>
   <!-- Action label for links to a website containing documentation about a wallpaper collection. Talkback will append this to say "Double tap to open link to learn more about this collection". -->
   <string name="a11y_action_label_wallpaper_collection_learn_more">ስለዚህ ስብስብ የበለጠ ለማወቅ አገናኝ ይክፈቱ</string>
-  <!-- Translations feature -->
-
   <!--
     Translation request dialog
 
@@ -2761,8 +2627,6 @@
     %s is the name of the app (for example "Firefox").
   -->
   <string name="protection_panel_banner_protected_title">%s ጥበቃ ላይ ነው</string>
-  <!-- Description text for the protection panel banner when tracking protection is enabled. -->
-  <string name="protection_panel_banner_protected_description">እርስዎ ጥበቃ ይደረግልዎታል። የሆነ ነገር ካየን፣ እናሳውቅዎታለን።</string>
   <!-- Label text for the Enhanced Tracking Protection toggle. -->
   <string name="protection_panel_etp_toggle_label">የተሻሻለ የክትትል ጥበቃ</string>
   <!--
@@ -2770,21 +2634,8 @@
     %d is a placeholder for the number of trackers blocked.
   -->
   <string name="protection_panel_num_trackers_blocked">መከታተያዎች ታግደዋል፡ %d</string>
-  <!-- Text for when no trackers have been blocked. -->
-  <string name="protection_panel_no_trackers_blocked">ምንም መከታተያዎች አልተገኙም</string>
   <!-- Title text for the protection panel permissions section. -->
   <string name="protection_panel_permissions_title">ፈቃዶች</string>
-  <!--
-    Text for displaying the total number of trackers blocked in the trackers blocked panel.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_total_num_trackers_blocked">መከታተያዎች ታግደዋል፡ %d</string>
-  <!--
-    Text for displaying the number of trackers blocked for a specific tracker category in the trackers blocked panel.
-    %s is a placeholder for the name of the tracker category.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_categorical_num_trackers_blocked">%s፡ %d</string>
   <!--
     Description text for a dialog confirming whether the user wants to delete all data for current site.
     %s is a placeholder for the base domain of website.
@@ -3009,8 +2860,6 @@
   <string name="certificate_warning_push_notification_update_recommended_title" tools:ignore="UnusedResources">ማዘመን ይመከራል</string>
   <!-- Push notification title about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
   <string name="certificate_warning_push_notification_pnw2_title" tools:ignore="BrandUsage,UnusedResources">የቆየ የFirefox ስሪት ላይ ነዎት</string>
-  <!-- TextField Design System Component -->
-
   <!--
     Setup checklist feature
 
@@ -3121,9 +2970,4 @@
   <string name="review_prompt_positive_button">በጣም ጥሩ ነው!</string>
   <!-- Label for a button opening a feedback forum -->
   <string name="review_prompt_feedback_button">አስተያየት ይተው</string>
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

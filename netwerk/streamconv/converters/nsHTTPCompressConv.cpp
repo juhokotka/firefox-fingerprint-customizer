@@ -3,37 +3,39 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsHTTPCompressConv.h"
+
 #include "ErrorList.h"
-#include "nsCOMPtr.h"
-#include "nsCRT.h"
-#include "nsError.h"
-#include "nsIChannel.h"
-#include "nsIForcePendingChannel.h"
-#include "nsIHttpChannel.h"
-#include "nsIRequest.h"
-#include "nsIThreadRetargetableRequest.h"
-#include "nsIThreadRetargetableStreamListener.h"
-#include "nsThreadUtils.h"
-#include "nsStreamUtils.h"
-#include "nsStringStream.h"
-#include "nsComponentManagerUtils.h"
-#include "mozilla/net/Dictionary.h"
+#include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPrefs_network.h"
-#include "mozilla/Logging.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/glean/GleanPings.h"
 #include "mozilla/glean/NetwerkMetrics.h"
+#include "mozilla/net/Dictionary.h"
+#include "nsCOMPtr.h"
+#include "nsCRT.h"
+#include "nsComponentManagerUtils.h"
+#include "nsError.h"
+#include "nsIChannel.h"
 #include "nsIEffectiveTLDService.h"
+#include "nsIForcePendingChannel.h"
+#include "nsIHttpChannel.h"
 #include "nsILoadInfo.h"
-#include "nsServiceManagerUtils.h"
+#include "nsIRequest.h"
+#include "nsIThreadRetargetableRequest.h"
+#include "nsIThreadRetargetableStreamListener.h"
 #include "nsNetCID.h"
+#include "nsNetUtil.h"
+#include "nsServiceManagerUtils.h"
+#include "nsStreamUtils.h"
+#include "nsStringStream.h"
+#include "nsThreadUtils.h"
 
 // brotli headers
 #undef assert
 #include "assert.h"
-#include "state.h"
 #include "brotli/decode.h"
+#include "state.h"
 
 #define ZSTD_STATIC_LINKING_ONLY 1
 #include "zstd/zstd.h"
@@ -945,7 +947,18 @@ nsHTTPCompressConv::OnDataAvailable(nsIRequest* request, nsIInputStream* iStr,
       }
     } break;
 
-    default:
+    default: {
+      // Pass-through modes must honour mDispatchToMainThread as well.
+      // CheckListenerChain() reports success for chains that can only run on
+      // the main thread, on the promise that this converter bounces the data
+      // back there.
+      if (mDispatchToMainThread && !NS_IsMainThread()) {
+        nsAutoCString data;
+        MOZ_TRY(NS_ReadInputStreamToString(iStr, data, streamLen));
+        return do_OnDataAvailable(request, aSourceOffset, data.BeginReading(),
+                                  data.Length());
+      }
+
       nsCOMPtr<nsIStreamListener> listener;
       {
         MutexAutoLock lock(mMutex);
@@ -955,6 +968,7 @@ nsHTTPCompressConv::OnDataAvailable(nsIRequest* request, nsIInputStream* iStr,
       if (NS_FAILED(rv)) {
         return rv;
       }
+    } break;
   } /* switch */
 
   return NS_OK;

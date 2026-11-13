@@ -2,20 +2,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsApplicationChooser.h"
+
+#include <gio/gdesktopappinfo.h>
 #include <gtk/gtk.h>
 
-#include "nsApplicationChooser.h"
+#include <utility>
+
 #include "WidgetUtils.h"
-#include "nsIMIMEInfo.h"
-#include "nsIWidget.h"
-#include "nsIFile.h"
+#include "mozilla/GRefPtr.h"
 #include "nsCExternalHandlerService.h"
 #include "nsComponentManagerUtils.h"
 #include "nsGtkUtils.h"
-#include "nsPIDOMWindow.h"
+#include "nsIFile.h"
 #include "nsIGIOService.h"
-#include <gio/gdesktopappinfo.h>
-#include "mozilla/GRefPtr.h"
+#include "nsIMIMEInfo.h"
+#include "nsIWidget.h"
+#include "nsPIDOMWindow.h"
 
 using namespace mozilla;
 
@@ -74,6 +77,13 @@ void nsApplicationChooser::OnDestroy(GtkWidget* chooser, gpointer user_data) {
 }
 
 void nsApplicationChooser::Done(GtkWidget* chooser, gint response) {
+  // A null callback means a re-entrant call; the outer one owns the teardown.
+  nsCOMPtr<nsIApplicationChooserFinishedCallback> callback =
+      std::move(mCallback);
+  if (!callback) {
+    return;
+  }
+
   nsCOMPtr<nsIGIOHandlerApp> gioHandler;
   switch (response) {
     case GTK_RESPONSE_OK:
@@ -104,9 +114,6 @@ void nsApplicationChooser::Done(GtkWidget* chooser, gint response) {
                                        this);
   gtk_widget_destroy(chooser);
 
-  if (mCallback) {
-    mCallback->Done(gioHandler);
-    mCallback = nullptr;
-  }
+  callback->Done(gioHandler);
   NS_RELEASE_THIS();
 }

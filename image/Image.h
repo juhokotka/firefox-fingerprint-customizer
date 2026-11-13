@@ -5,21 +5,20 @@
 #ifndef mozilla_image_Image_h
 #define mozilla_image_Image_h
 
+#include "ImageContainer.h"
+#include "ImageRegion.h"
+#include "LookupResult.h"
+#include "ProgressTracker.h"
+#include "SurfaceCache.h"
+#include "WebRenderImageProvider.h"
+#include "gfx2DGlue.h"
+#include "imgIContainer.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/SizeOfState.h"
 #include "mozilla/TimeStamp.h"
-
-#include "gfx2DGlue.h"
-#include "imgIContainer.h"
-#include "ImageContainer.h"
-#include "ImageRegion.h"
-#include "LookupResult.h"
 #include "nsStringFwd.h"
-#include "ProgressTracker.h"
-#include "SurfaceCache.h"
-#include "WebRenderImageProvider.h"
 
 class imgRequest;
 class nsIRequest;
@@ -117,9 +116,11 @@ struct SurfaceMemoryCounter {
 };
 
 struct ImageMemoryCounter {
-  ImageMemoryCounter(imgRequest* aRequest, SizeOfState& aState, bool aIsUsed);
+  // If aAnonymize is true, URI() is left empty.
+  ImageMemoryCounter(imgRequest* aRequest, SizeOfState& aState, bool aIsUsed,
+                     bool aAnonymize);
   ImageMemoryCounter(imgRequest* aRequest, Image* aImage, SizeOfState& aState,
-                     bool aIsUsed);
+                     bool aIsUsed, bool aAnonymize);
 
   nsCString& URI() { return mURI; }
   const nsCString& URI() const { return mURI; }

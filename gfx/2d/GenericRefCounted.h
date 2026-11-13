@@ -11,8 +11,9 @@
 
 #include <type_traits>
 
-#include "mozilla/RefPtr.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/RefCounted.h"
+#include "mozilla/RefPtr.h"
 
 namespace mozilla {
 

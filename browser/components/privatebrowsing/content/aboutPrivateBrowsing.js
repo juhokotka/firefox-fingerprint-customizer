@@ -55,18 +55,12 @@ async function renderPromo({
     return false;
   }
 
-  // The dismiss handler and link click/telemetry/action dispatch are shared
-  // across both layouts; only the elements they bind to differ.
-  const dismissBtn = container.querySelector(
-    ".promo-dismiss, #nova-dismiss-btn"
-  );
-
   const onLinkClick = async event => {
     event.preventDefault();
 
-    // Record promo click telemetry and set metrics as allow for spotlight
-    // modal opened on promo click if user is enrolled in an experiment
-    let isExperiment = window.PrivateBrowsingRecordClick("PromoLink");
+    // Set metrics as allow for spotlight modal opened on promo click if user
+    // is enrolled in an experiment
+    let isExperiment = window.PrivateBrowsingIsEnrolledInExperiment();
     const promoButtonData = promoButton?.action?.data;
     if (
       promoButton?.action?.type === "SHOW_SPOTLIGHT" &&
@@ -78,17 +72,18 @@ async function renderPromo({
     await RPMSendQuery("SpecialMessageActionDispatch", promoButton.action);
   };
 
-  const onDismissBtnClick = () => {
+  const onDismiss = () => {
     window.ASRouterMessage({
       type: "BLOCK_MESSAGE_BY_ID",
       data: { id: messageId },
     });
-    window.PrivateBrowsingRecordClick("DismissButton");
     container.remove();
   };
 
-  if (dismissBtn && messageId) {
-    dismissBtn.addEventListener("click", onDismissBtnClick, { once: true });
+  if (!novaEnabled && messageId) {
+    container
+      .querySelector(".promo-dismiss")
+      ?.addEventListener("click", onDismiss, { once: true });
   }
 
   // Without an action the promo link does nothing, so don't show the promo.
@@ -107,6 +102,8 @@ async function renderPromo({
       promoHeader,
       promoImageLarge,
       onLinkClick,
+      onDismiss,
+      dismissable: !!messageId,
     });
   } else {
     renderLegacyPromo({
@@ -130,6 +127,11 @@ async function renderPromo({
  * Resolves a promo text value to a plain string. Values may either be a
  * "fluent:"-prefixed localization id or already-localized plain text.
  *
+ * A missing Fluent message resolves to an empty string rather than throwing,
+ * matching the legacy layout (which uses data-l10n-id and simply renders
+ * nothing for a missing message). Throwing here would abort promo rendering
+ * before the call-to-action click handler is attached.
+ *
  * @param {string} value The "fluent:"-prefixed id or plain text.
  * @returns {Promise<string>} The localized string.
  */
@@ -139,7 +141,14 @@ async function resolvePromoText(value) {
   }
   const fluentId = value.replace(/^fluent:/, "");
   if (fluentId !== value) {
-    return document.l10n.formatValue(fluentId);
+    try {
+      return (await document.l10n.formatValue(fluentId)) ?? "";
+    } catch (e) {
+      // formatValue throws for a missing message under automation; fall back to
+      // empty text so the promo still renders and stays interactive.
+      console.error(e);
+      return "";
+    }
   }
   return value;
 }
@@ -162,6 +171,8 @@ async function renderNovaPromo({
   promoHeader,
   promoImageLarge,
   onLinkClick,
+  onDismiss,
+  dismissable,
 }) {
   const promoEl = container.querySelector("#nova-promo");
   const linkEl = container.querySelector("#nova-promo-link");
@@ -171,6 +182,18 @@ async function renderNovaPromo({
   // it may not be upgraded yet. Wait for it before setting reactive properties.
   await customElements.whenDefined("moz-promo");
   await customElements.whenDefined("moz-button");
+
+  promoEl.dismissable = dismissable;
+  if (dismissable) {
+    promoEl.addEventListener(
+      "promo:user-dismissed",
+      event => {
+        event.preventDefault();
+        onDismiss();
+      },
+      { once: true }
+    );
+  }
 
   if (promoHeader) {
     promoEl.heading = await resolvePromoText(promoHeader);
@@ -272,6 +295,7 @@ function renderLegacyPromo({
   // Only make promo section visible after adding content
   // and translations to prevent layout shifting in page
   container.classList.add("promo-visible");
+  container.hidden = false;
   return true;
 }
 
@@ -328,10 +352,14 @@ async function setupMessageConfig(config = null) {
 
   if (!config) {
     let hideDefault = window.PrivateBrowsingShouldHideDefault();
+    let introPlaying =
+      document.documentElement.classList.contains("intro-playing");
     try {
       let response = await window.ASRouterMessage({
         type: "PBNEWTAB_MESSAGE_REQUEST",
-        data: { hideDefault: !!hideDefault },
+        // introPlaying suppresses messaging for the run the intro animation
+        // plays on, without spending the message's frequency allocation.
+        data: { hideDefault: !!hideDefault, introPlaying },
       });
       message = response?.message;
       config = message?.content;
@@ -380,11 +408,37 @@ document.addEventListener("DOMContentLoaded", function () {
     "href",
     RPMGetFormatURLPref("app.support.baseURL") + "private-browsing-myths"
   );
-  linkEl.addEventListener("click", () => {
-    window.PrivateBrowsingRecordClick("InfoLink");
-  });
 
-  if (RPMGetBoolPref("browser.nova.enabled", false)) {
+  const isNovaEnabled = RPMGetBoolPref("browser.nova.enabled", false);
+  const isPrivateWindowRedesignEnabled =
+    window.PrivateBrowsingRedesignEnabled?.();
+
+  // privateWindowRedesign requires Nova to be enabled
+  if (isPrivateWindowRedesignEnabled && isNovaEnabled) {
+    // For privateWindowRedesign: use custom subheader and hide info-body
+    document.getElementById("info-title").hidden = true;
+    const subheader = document.querySelector(".nova-subheader");
+    if (subheader) {
+      document.l10n.setAttributes(
+        subheader,
+        "about-private-browsing-private-window-redesign-subheader"
+      );
+    }
+    document.getElementById("info-body").hidden = true;
+    document.getElementById("private-browsing-myths").hidden = true;
+
+    const basicsLink = document.getElementById("private-window-basics");
+    basicsLink.hidden = false;
+    basicsLink.addEventListener("click", async e => {
+      e.preventDefault();
+      window.PrivateBrowsingRecordRedesignClick("PrivateWindowBasicsLink");
+      // Trigger the spotlight
+      await RPMSendAsyncMessage("TRIGGER_MESSAGING_EVENT", {
+        id: "privateWindowBasicsLinkClick",
+      });
+    });
+  } else if (isNovaEnabled) {
+    // For nova.enabled only: use nova strings
     document.getElementById("info-title").hidden = true;
     document.l10n.setAttributes(
       document.getElementById("info-body"),
@@ -394,6 +448,35 @@ document.addEventListener("DOMContentLoaded", function () {
       document.getElementById("private-browsing-myths"),
       "about-private-browsing-nova-info-link"
     );
+  }
+
+  // Redesign experiment: swap the static mask for the animated intro, played
+  // once per profile (seen-once flag persisted via RPMSetPref) and skipped
+  // under reduced motion.
+  if (RPMGetBoolPref("browser.privateWindowRedesign.enabled", false)) {
+    const maskIntro = document.getElementById(
+      "about-private-browsing-mask-intro"
+    );
+    window.PrivateBrowsingRedesignExposure();
+
+    const staticLogo = document.getElementById("about-private-browsing-logo");
+    staticLogo.hidden = true;
+    maskIntro.hidden = false;
+
+    const alreadyShown = RPMGetBoolPref(
+      "browser.privatebrowsing.introAnimationShown",
+      false
+    );
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches;
+
+    if (!alreadyShown && !reduceMotion) {
+      maskIntro.play = true;
+      document.documentElement.classList.add("intro-playing");
+      window.PrivateBrowsingRecordIntroAnimation();
+      RPMSetPref("browser.privatebrowsing.introAnimationShown", true);
+    }
   }
 
   // We don't do this setup until now, because we don't want to record any impressions until we're

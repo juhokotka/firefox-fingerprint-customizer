@@ -1,5 +1,5 @@
 apply from: "$appServicesRootDir/build-scripts/component-common.gradle"
-apply from: "$appServicesRootDir/publish.gradle"
+apply from: "$publishDir/publish.gradle"
 
 android {
     namespace 'org.mozilla.appservices.autofill'
@@ -7,14 +7,15 @@ android {
 
 dependencies {
     // Part of the public API.
+    api project(':db-crypto')
     api project(':sync15')
-
-    testImplementation project(":syncmanager")
 
     testImplementation libs.androidx.test.core
     testImplementation libs.androidx.work.testing
+    testImplementation project(":syncmanager")
+    testImplementation project(":init_rust_components")
 }
 
 ext.configureUniFFIBindgen("autofill")
 ext.dependsOnTheMegazord()
-ext.configurePublish()
+ext.configurePublish(appServicesGroupId, project.name, project.ext.description)

@@ -8,6 +8,14 @@ task-defaults:
             .*-qr/.*: 2400
             default: 1800
     suite: raptor
+    dependencies:
+        by-app:
+            firefox:
+                by-test-platform:
+                    macosx(1500|2700)-aarch64(-vms)?-shippable/.*:
+                        build: build-macosx64-aarch64-shippable/opt
+                    default: {}
+            default: {}
     run-on-projects:
         by-test-platform:
             linux.*shippable.*: [mozilla-central]
@@ -15,12 +23,11 @@ task-defaults:
     limit-platforms:
         by-app:
             chrome:
-                - .*64.*shippable.*
+                - (?!macosx1470).*64.*shippable.*
             safari:
-                - .*macosx.*shippable.*
+                - macosx2700.*shippable.*
             safari-tp:
-                - macosx1400.*
-                - macosx1500.*
+                - macosx2700.*
             custom-car:
                 - macosx1500.*shippable.*
                 - linux.*-64.*shippable.*
@@ -63,7 +70,7 @@ task-defaults:
                             - win64-minidump-stackwalk
                             - win64-fix-stacks
                         macosx.*-aarch64.*:
-                            - macosx-arm64-custom-car
+                            - macosx64-aarch64-custom-car
                             - macosx64-aarch64-minidump-stackwalk
                             - macosx64-aarch64-fix-stacks
                         default: []
@@ -102,15 +109,13 @@ browsertime-tp6:
         limit-platforms:
             by-app:
                 chrome:
-                    # - .*shippable.*  # Bug 2038340: temporarily disabled on Windows
-                    - linux.*shippable.*
-                    - macosx.*shippable.*
+                    - (?!macosx1470).*shippable.*
                 safari:
-                    - .*macos.*shippable.*
+                    - (?!macosx1470).*macos.*shippable.*
                 custom-car:
                     - macosx1500.*shippable.*
                     - linux.*shippable.*
-                    # - windows.*-64.*shippable.*  # Bug 2038340: temporarily disabled
+                    - windows.*-64.*shippable.*
                 default: []
         max-run-time:
             by-subtest:
@@ -135,25 +140,15 @@ browsertime-tp6:
                         firefox:
                             by-test-platform:
                                 linux.*shippable.*: [trunk]
-                                # windows.*-64.*shippable.*: [trunk]  # Bug 2038340: temporarily disabled
+                                windows.*-64.*shippable.*: [trunk]
                                 macosx1470.*shippable.*: [trunk]
-                                default: []
-                        default: []
-                twitch:
-                    by-app:
-                        firefox:
-                            by-test-platform:
-                                # windows11-64-24h2.*shippable.*: []
-                                # ^(?!windows11-64-24h2).*64(?!.*nightlyasrelease).*shippable.*: [trunk]
-                                ^(?!.*windows).*64(?!.*nightlyasrelease).*shippable.*: [trunk]  # Bug 2038340: temporarily excludes Windows
                                 default: []
                         default: []
                 default:
                     by-app:
                         firefox:
                             by-test-platform:
-                                # .*64(?!.*nightlyasrelease).*shippable.*: [trunk]  # Bug 2038340: temporarily excludes Windows
-                                ^(?!.*windows).*64(?!.*nightlyasrelease).*shippable.*: [trunk]
+                                .*64(?!.*nightlyasrelease).*shippable.*: [trunk]
                                 default: []
                         default: []
         treeherder-symbol: Btime(tp6)
@@ -175,14 +170,12 @@ browsertime-tp6:
             - linkedin
             - microsoft
             - netflix
-            - nytimes
             - office
             - outlook
             - paypal
             - pinterest
             - reddit
             - tumblr
-            - twitch
             - wikia
             - youtube
     tier:
@@ -201,7 +194,6 @@ browsertime-responsiveness:
         run-visual-metrics: true
         subtests:
             - cnn-nav
-            - [facebook-nav, fbnav]
             - [reddit-billgates-ama, rdt-ama]
             - [reddit-billgates-post-1, rdt-post-1]
             - [reddit-billgates-post-2, rdt-post-2]
@@ -232,11 +224,10 @@ browsertime-tp6-essential:
             by-app:
                 chrome:
                     - linux.*shippable.*
-                    # - windows.*shippable.*  # Bug 2038340: temporarily disabled
-                    - macosx1470.*shippable.*
+                    - windows.*shippable.*
                 custom-car:
                     - linux.*shippable.*
-                    # - windows.*-64.*shippable.*  # Bug 2038340: temporarily disabled
+                    - windows.*-64.*shippable.*
                 default: []
         mozharness:
             extra-options:
@@ -254,11 +245,7 @@ browsertime-tp6-essential:
         raptor:
             apps: [firefox, chrome, custom-car]
             test: tp6
-            run-visual-metrics:
-                by-test-platform:
-                    macosx1400.*shippable.*: false
-                    # Bug 1845014 Resolve osx 1300 vismet permafails
-                    default: true
+            run-visual-metrics: true
             subtests:
                 - amazon
                 - [bing-search, bing]
@@ -273,7 +260,7 @@ browsertime-tp6-essential:
             by-app:
                 firefox:
                     by-test-platform:
-                        .*64(?!.*nightlyasrelease).*shippable.*: [trunk]
+                        (?!macosx1470).*64(?!.*nightlyasrelease).*shippable.*: [trunk]
                         default: []
                 default: []
         tier:
@@ -332,9 +319,9 @@ browsertime-tp7:
         limit-platforms:
             by-app:
                 chrome:
-                    - .*shippable.*
+                    - (?!macosx1470).*shippable.*
                 safari:
-                    - .*macos.*shippable.*
+                    - (?!macosx1470).*macos.*shippable.*
                 custom-car:
                     - macosx1500.*shippable.*
                     - linux.*shippable.*
@@ -378,114 +365,120 @@ browsertime-tp7:
 
 browsertime-benchmark:
     description: Raptor (browsertime) Benchmark tests
+    limit-platforms:
+        by-app:
+            chrome:
+                by-subtest:
+                    media-capabilities:
+                        - .*64.*shippable.*
+                    default:
+                        - (?!macosx1470).*64.*shippable.*
+            safari:
+                - macosx2700.*shippable.*
+            safari-tp:
+                - macosx2700.*
+            custom-car:
+                - macosx1500.*shippable.*
+                - linux.*-64.*shippable.*
+                - windows.*-64.*shippable.*
+            default: []
     raptor:
-        apps: [firefox, chrome, safari, safari-tp, custom-car]
+        apps:
+            by-test-platform:
+                macosx2700.*: [safari, safari-tp]
+                default: [firefox, chrome, safari, safari-tp, custom-car]
         subtests:
-            by-variant:
-                nova:
-                    - [speedometer3, sp3]
-                default:
-                    by-test-platform:
-                        (macosx1400|macosx1500).*shippable.*:
-                            by-app:
-                                safari-tp:
-                                    - [speedometer3, sp3]
-                                    # Bug 1931699, jetstream permafailing
-                                    # - [jetstream2, js2]
-                                    - [jetstream3, js3]
-                                safari:
-                                    - [jetstream3, js3]
-                                    - [speedometer2, sp2]
-                                    - [speedometer3, sp3]
-                                    - [motionmark-1-3, mm-1.3]
-                                    - [motionmark-htmlsuite-1-3, mm-h-1.3]
-                                    # - [jetstream2, js2] Disable jetstream2 on safari on all mac platforms
-                                default:
-                                    - [jetstream3, js3]
-                                    - [speedometer2, sp2]
-                                    - [speedometer3, sp3]
-                                    - [motionmark-1-3, mm-1.3]
-                                    - [motionmark-htmlsuite-1-3, mm-h-1.3]
-                                    - [jetstream2, js2]
-                        windows11-64-.*-hw-ref.*:
-                            by-app:
-                                safari: []
-                                safari-tp: []
-                                default:
-                                    - [speedometer3, sp3]
+            by-test-platform:
+                (macosx1500|macosx2700).*shippable.*:
+                    by-app:
+                        safari-tp:
+                            - [speedometer3, sp3]
+                            - [jetstream3, js3]
+                        safari:
+                            - [jetstream3, js3]
+                            - [speedometer2, sp2]
+                            - [speedometer3, sp3]
+                            - [motionmark-1-3, mm-1.3]
+                            - [motionmark-htmlsuite-1-3, mm-h-1.3]
                         default:
-                            by-app:
-                                firefox:
-                                    - ares6
-                                    - [assorted-dom, dom]
-                                    - [jetstream2, js2]
-                                    - [jetstream3, js3]
-                                    - [matrix-react-bench, mrb]
-                                    - [motionmark-1-3, mm-1.3]
-                                    - [motionmark-htmlsuite-1-3, mm-h-1.3]
-                                    - [speedometer2, sp2]
-                                    - [speedometer3, sp3]
-                                    - [stylebench, sb]
-                                    - [sunspider, ss]
-                                    - [twitch-animation, tw-a]
-                                    - [unity-webgl, ugl]
-                                    - [webaudio, wa]
-                                safari:
-                                    - ares6
-                                    - [assorted-dom, dom]
-                                    # - [jetstream2, js2] Disable jetstream2 on safari on all mac platforms
-                                    - [jetstream3, js3]
-                                    # - [matrix-react-bench, mrb] Perma fails on osx 10.15.x machines (Bug 1807754)
-                                    - [motionmark-1-3, mm-1.3]
-                                    - [motionmark-htmlsuite-1-3, mm-h-1.3]
-                                    - [speedometer2, sp2]
-                                    # - [speedometer3, sp3] Perma fails on osx 10.15.x machines (Bug 1809535)
-                                    - [stylebench, sb]
-                                    - [sunspider, ss]
-                                    # - [unity-webgl, ugl] Almost Perma failing on osx 10.15.x machines (Bug 1888398)
-                                    - [webaudio, wa]
-                                custom-car:
-                                    - [speedometer2, sp2]
-                                    - [speedometer3, sp3]
-                                    - [motionmark-1-3, mm-1.3]
-                                    - [motionmark-htmlsuite-1-3, mm-h-1.3]
-                                    - [jetstream3, js3]
-                                chrome:
-                                    - ares6
-                                    - [assorted-dom, dom]
-                                    - [jetstream2, js2]
-                                    - [jetstream3, js3]
-                                    - [matrix-react-bench, mrb]
-                                    - [motionmark-1-3, mm-1.3]
-                                    - [motionmark-htmlsuite-1-3, mm-h-1.3]
-                                    - [speedometer2, sp2]
-                                    - [speedometer3, sp3]
-                                    - [stylebench, sb]
-                                    - [sunspider, ss]
-                                    - [unity-webgl, ugl]
-                                    - [webaudio, wa]
-                                default:
-                                    - ares6
-                                    - [assorted-dom, dom]
-                                    - [jetstream2, js2]
-                                    - [jetstream3, js3]
-                                    - [matrix-react-bench, mrb]
-                                    - [motionmark-1-3, mm-1.3]
-                                    - [motionmark-htmlsuite-1-3, mm-h-1.3]
-                                    - [speedometer2, sp2]
-                                    - [speedometer3, sp3]
-                                    - [stylebench, sb]
-                                    - [sunspider, ss]
-                                    - [unity-webgl, ugl]
-                                    - [webaudio, wa]
+                            - [jetstream3, js3]
+                            - [speedometer2, sp2]
+                            - [speedometer3, sp3]
+                            - [speedometer-experimental, sp-exp]
+                            - [motionmark-1-3, mm-1.3]
+                            - [motionmark-htmlsuite-1-3, mm-h-1.3]
+                windows11-64-.*-hw-ref.*:
+                    by-app:
+                        safari: []
+                        safari-tp: []
+                        default:
+                            - [speedometer3, sp3]
+                            - [speedometer-experimental, sp-exp]
+                default:
+                    by-app:
+                        firefox:
+                            - [assorted-dom, dom]
+                            - [jetstream3, js3]
+                            - [matrix-react-bench, mrb]
+                            - [media-capabilities, mc]
+                            - [motionmark-1-3, mm-1.3]
+                            - [motionmark-htmlsuite-1-3, mm-h-1.3]
+                            - [speedometer2, sp2]
+                            - [speedometer3, sp3]
+                            - [speedometer-experimental, sp-exp]
+                            - [stylebench, sb]
+                            - [twitch-animation, tw-a]
+                            - [unity-webgl, ugl]
+                            - [webaudio, wa]
+                        safari:
+                            - [assorted-dom, dom]
+                            - [jetstream3, js3]
+                            # - [matrix-react-bench, mrb] Perma fails on osx 10.15.x machines (Bug 1807754)
+                            - [motionmark-1-3, mm-1.3]
+                            - [motionmark-htmlsuite-1-3, mm-h-1.3]
+                            - [speedometer2, sp2]
+                            # - [speedometer3, sp3] Perma fails on osx 10.15.x machines (Bug 1809535)
+                            - [stylebench, sb]
+                            # - [unity-webgl, ugl] Almost Perma failing on osx 10.15.x machines (Bug 1888398)
+                            - [webaudio, wa]
+                        custom-car:
+                            - [speedometer2, sp2]
+                            - [speedometer3, sp3]
+                            - [speedometer-experimental, sp-exp]
+                            - [motionmark-1-3, mm-1.3]
+                            - [motionmark-htmlsuite-1-3, mm-h-1.3]
+                            - [jetstream3, js3]
+                        chrome:
+                            - [assorted-dom, dom]
+                            - [jetstream3, js3]
+                            - [matrix-react-bench, mrb]
+                            - [media-capabilities, mc]
+                            - [motionmark-1-3, mm-1.3]
+                            - [motionmark-htmlsuite-1-3, mm-h-1.3]
+                            - [speedometer2, sp2]
+                            - [speedometer3, sp3]
+                            - [speedometer-experimental, sp-exp]
+                            - [stylebench, sb]
+                            - [unity-webgl, ugl]
+                            - [webaudio, wa]
+                        default:
+                            - [assorted-dom, dom]
+                            - [jetstream3, js3]
+                            - [matrix-react-bench, mrb]
+                            - [motionmark-1-3, mm-1.3]
+                            - [motionmark-htmlsuite-1-3, mm-h-1.3]
+                            - [speedometer2, sp2]
+                            - [speedometer3, sp3]
+                            - [stylebench, sb]
+                            - [unity-webgl, ugl]
+                            - [webaudio, wa]
     treeherder-symbol: Btime()
-    variants:
-        - nova
     tier:
         by-app:
             firefox:
                 by-subtest:
                     jetstream3: 2
+                    speedometer-experimental: 3
                     default:
                         by-test-platform:
                             linux.*clang-trunk.*: 2
@@ -493,11 +486,7 @@ browsertime-benchmark:
             default:
                 by-subtest:
                     unity-webgl: 3
-                    jetstream2:
-                        by-test-platform:
-                            macosx1470.*shippable.*: 3
-                            macosx1500.*shippable.*: 3
-                            default: 2
+                    speedometer-experimental: 3
                     jetstream3: 3
                     default: 2
 
@@ -509,7 +498,6 @@ browsertime-benchmark:
                         by-test-platform:
                             windows11-64-24h2-shippable/opt: [trunk-only]
                             linux.*shippable.*: [trunk-only]
-                            macosx1470.*shippable.*: [trunk-only]
                             macosx1500.*shippable.*: [trunk-only]
                             default: []
                     default: []
@@ -521,15 +509,12 @@ browsertime-benchmark:
                             windows11-64-shippable(-qr)?/opt: [trunk]
                             windows11-64-24h2-shippable/opt: [trunk]
                             linux.*shippable.*: [trunk]
-                            macosx1470.*shippable.*: [trunk]
-                            macosx1400.*shippable.*: [trunk]
                             macosx1500.*shippable.*: [trunk]
                             .*nightlyasrelease.*: [autoland, mozilla-central]
                             default: []
                     safari-tp:
                         by-test-platform:
-                            macosx1400.*: [mozilla-central]
-                            macosx1500.*: [mozilla-central]
+                            macosx2700.*: [mozilla-central]
                             default: []
                     default: []
             unity-webgl:
@@ -541,12 +526,25 @@ browsertime-benchmark:
                             default: []
                     default: []
             speedometer2: []
+            # There is no safari-tp entry because the experimental workloads
+            # aren't in the safari-tp subtest lists.
+            speedometer-experimental:
+                by-app:
+                    firefox:
+                        by-test-platform:
+                            windows11-64-.*-hw-ref-shippable/opt: [trunk]
+                            windows11-64-shippable(-qr)?/opt: [trunk]
+                            windows11-64-24h2-shippable/opt: [trunk]
+                            linux.*shippable.*: [trunk]
+                            macosx1500.*shippable.*: [trunk]
+                            .*nightlyasrelease.*: [autoland, mozilla-central]
+                            default: []
+                    default: []
             motionmark-1-3:
                 by-app:
                     firefox:
                         by-test-platform:
-                            (?!macosx1400|macosx1500).*64.*shippable.*/.*: [trunk]
-                            macosx1400.*shippable.*: [mozilla-central]
+                            (?!macosx1500).*64.*shippable.*/.*: [trunk]
                             macosx1500.*shippable.*: [mozilla-central]
                             default: []
                     default: []
@@ -554,8 +552,7 @@ browsertime-benchmark:
                 by-app:
                     firefox:
                         by-test-platform:
-                            (?!macosx1400|macosx1500).*64.*shippable.*/.*: [trunk]
-                            macosx1400.*shippable.*: [mozilla-central]
+                            (?!macosx1500).*64.*shippable.*/.*: [trunk]
                             macosx1500.*shippable.*: [mozilla-central]
                             default: []
                     default: []
@@ -563,21 +560,16 @@ browsertime-benchmark:
                 by-app:
                     firefox:
                         by-test-platform:
-                            windows.*-64.*shippable.*: []  # Bug 2038340: temporarily disabled
-                            # (?!macosx1400|macosx1500).*64.*shippable.*/.*: [trunk]
-                            ^(?!.*windows)(?!macosx1400|macosx1500).*64.*shippable.*/.*: [trunk]
-                            macosx1400.*shippable.*: [mozilla-central]
+                            (?!macosx1500).*64.*shippable.*/.*: [trunk]
                             macosx1500.*shippable.*: [mozilla-central]
                             default: []
                     default: []
     max-run-time:
         by-subtest:
-            ares6: 1500
             assorted-dom:
                 by-test-platform:
                     .*-qr/.*: 2100
                     default: 1500
-            jetstream2: 8000
             jetstream3: 3000
             matrix-react-bench: 1500
             motionmark-1-3: 3000
@@ -585,8 +577,13 @@ browsertime-benchmark:
             unity-webgl: 2400
             speedometer3:
                 by-test-platform:
-                    macosx1400.*shippable.*: 4200
                     macosx1500.*shippable.*: 4200
+                    macosx1500.*nightlyasrelease.*: 4200
+                    default: 2100
+            speedometer-experimental:
+                by-test-platform:
+                    macosx1500.*shippable.*: 4200
+                    macosx1500.*nightlyasrelease.*: 4200
                     default: 2100
             speedometer2: 2100
             default: 900
@@ -595,21 +592,47 @@ browsertime-benchmark:
             by-subtest:
                 jetstream3:
                     by-test-platform:
-                        macosx1400.*shippable.*:
-                            - --page-timeout=900000
                         macosx1500.*shippable.*:
                             - --page-timeout=900000
                         default: []
-                default:
+                speedometer(3|-experimental):
                     by-test-platform:
-                        macosx1400.*shippable.*:
+                        linux.*shippable.*:
+                            - --power-profile=performance
+                            - --extra-profiler-run
+                        linux.*nightlyasrelease.*:
+                            - --power-profile=performance
+                            - --extra-profiler-run
+                        macosx1500.*shippable.*:
                             - --extra-profiler-run
                             - --page-timeout=900000
-                        macosx1500.*shippable.*:
+                        macosx1500.*nightlyasrelease.*:
                             - --extra-profiler-run
                             - --page-timeout=900000
                         default:
                             - --extra-profiler-run
+                default:
+                    by-test-platform:
+                        macosx1500.*shippable.*:
+                            - --extra-profiler-run
+                            - --page-timeout=900000
+                        macosx1500.*nightlyasrelease.*:
+                            - --extra-profiler-run
+                            - --page-timeout=900000
+                        default:
+                            - --extra-profiler-run
+    fetches:
+        fetch:
+            by-subtest:
+                jetstream3:
+                    - pgo-extended-corpus
+                motionmark-1-3:
+                    - motionmark
+                motionmark-htmlsuite-1-3:
+                    - motionmark
+                speedometer-experimental:
+                    - speedometer-experimental
+                default: []
 
 browsertime-benchmark-wasm:
     description: Raptor (browsertime) WASM benchmarks
@@ -642,9 +665,7 @@ browsertime-benchmark-wasm:
         by-app:
             firefox:
                 by-test-platform:
-                    windows.*-64.*shippable.*: []  # Bug 2038340: temporarily disabled
-                    # .*64(?!.*nightlyasrelease).*shippable.*: [mozilla-central]
-                    ^(?!.*windows).*64(?!.*nightlyasrelease).*shippable.*: [mozilla-central]
+                    .*64(?!.*nightlyasrelease).*shippable.*: [mozilla-central]
                     default: []
             default: []
     max-run-time:
@@ -765,7 +786,6 @@ browsertime-tp6-live:
                     - pinterest
                     - reddit
                     - tumblr
-                    - twitch
                     # - twitter Perma fails on osx 10.15.7
                     - wikipedia
                     - yahoo-mail
@@ -792,7 +812,6 @@ browsertime-tp6-live:
                     - pinterest
                     - reddit
                     - tumblr
-                    - twitch
                     - twitter
                     - wikipedia
                     - yahoo-mail
@@ -819,7 +838,6 @@ browsertime-tp6-live:
                     - pinterest
                     - reddit
                     - tumblr
-                    - twitch
                     - twitter
                     - wikipedia
                     - yahoo-mail
@@ -904,17 +922,58 @@ browsertime-custom:
     tier: 1
     treeherder-symbol: Btime(ps)
 
-browsertime-media-seek:
+browsertime-media-playback:
     raptor:
-        apps: [firefox]
-        subtests: [[media-seek, mseek]]
-    description: Raptor (browsertime) media seek-latency test
+        apps: [firefox, chrome]
+        subtests:
+            by-app:
+                firefox:
+                    - [mp-1080p30-h264-sw, mp-h264-sw]
+                    - [mp-2160p30-h264-hw, mp-h264-4k]
+                    - [mp-idle, mp-idle]
+                default:
+                    - [mp-2160p30-h264-hw, mp-h264-4k]
+                    - [mp-idle, mp-idle]
+    description: Raptor (browsertime) media playback power test
+    limit-platforms:
+        by-app:
+            chrome:
+                - .*64.*shippable.*
+            default: []
     max-run-time: 2700
     run-on-projects:
-        by-test-platform:
-            .*64(?!.*nightlyasrelease).*shippable.*: [trunk]
+        by-app:
+            firefox:
+                by-test-platform:
+                    windows11-64-24h2-shippable(?!.*nightlyasrelease).*: [trunk]
+                    default: []
             default: []
     tier: 2
+    treeherder-symbol: Btime(mp)
+
+browsertime-media-seek:
+    raptor:
+        apps: [firefox, chrome]
+        subtests: [[media-seek, mseek]]
+    description: Raptor (browsertime) media seek-latency test
+    limit-platforms:
+        by-app:
+            chrome:
+                - linux.*shippable.*
+                - macosx1470.*shippable.*
+            default: []
+    max-run-time: 2700
+    run-on-projects:
+        by-app:
+            firefox:
+                by-test-platform:
+                    .*64(?!.*nightlyasrelease).*shippable.*: [trunk]
+                    default: []
+            default: []
+    tier:
+        by-app:
+            firefox: 2
+            default: 3
     treeherder-symbol: Btime(mseek)
 
 browsertime-first-install:
@@ -959,15 +1018,6 @@ browsertime-regression-tests:
     treeherder-symbol: Btime(regressor)
 
 browsertime-upload:
-    limit-platforms:
-        by-app:
-            chrome:
-                # Bug 2038340: temporarily disabled on Windows
-                - linux.*-64.*shippable.*
-                - macosx.*shippable.*
-            safari:
-                - .*macosx.*shippable.*
-            default: []
     raptor:
         apps: [firefox, chrome, safari]
         subtests:
@@ -1082,7 +1132,9 @@ browsertime-nav-bench:
         apps: [firefox]
         subtests: [nav-bench]
         run-visual-metrics: true
-    description: Raptor (browsertime) navigation benchmark across 5 sites
+    description: Raptor (browsertime) navigation benchmark across 9 sites
+    limit-platforms:
+        - (?!macosx1470).*
     max-run-time: 3600
     run-on-projects:
         by-app:
@@ -1092,9 +1144,12 @@ browsertime-nav-bench:
                     macosx1500.*shippable.*: [autoland]
                     windows11-64-.*-hw-ref-shippable/opt: [autoland]
                     windows11-64-24h2-shippable/opt: [autoland]
+                    linux.*nightlyasrelease.*: [autoland]
+                    macosx1500.*nightlyasrelease.*: [autoland]
+                    windows11-64-24h2-nightlyasrelease.*: [autoland]
                     default: []
             default: []
-    tier: 3
+    tier: 2
     treeherder-symbol: Btime(nav-bench)
     mozharness:
         extra-options:
@@ -1120,6 +1175,13 @@ browsertime-video-playback-latency:
                     - vpl-h264
                     - vpl-vp9
     description: Raptor (browsertime) Video playback latency test
+    limit-platforms:
+        by-app:
+            chrome:
+                - .*shippable.*
+            safari:
+                - (?!macosx1470).*macos.*shippable.*
+            default: []
     mozharness:
         extra-options:
             by-test-platform:
@@ -1144,15 +1206,13 @@ browsertime-webcodecs:
     limit-platforms:
         by-app:
             chrome:
-                # - .*64.*shippable.*  # Bug 2038340: temporarily disabled on Windows
-                - linux.*-64.*shippable.*
-                - macosx.*shippable.*
+                - .*64.*shippable.*
             safari:
-                - .*macosx.*shippable.*
+                - macosx2700.*shippable.*
             custom-car:
                 - macosx1500.*shippable.*
                 - linux.*-64.*shippable.*
-                # - windows.*-64.*shippable.*  # Bug 2038340: temporarily disabled
+                - windows.*-64.*shippable.*
             default: []
     raptor:
         apps: [firefox, chrome, safari, custom-car]
@@ -1162,24 +1222,45 @@ browsertime-webcodecs:
             by-test-platform:
                 # Since x264 isn't built into Ubuntu 18.04 by default, we skip it.
                 linux.*.*:
-                    - ve-av1-rt
-                    - ve-av1-q
-                    - ve-vp8-rt
-                    - ve-vp8-q
-                    - ve-vp9-rt
-                    - ve-vp9-q
-                    - [ve-av1-rt-i420, ve-a1rt420]
-                    - [ve-av1-q-i420, ve-a1q420]
-                    - [ve-vp8-rt-i420, ve-v8rt420]
-                    - [ve-vp8-q-i420, ve-v8q420]
-                    - [ve-vp9-rt-i420, ve-v9rt420]
-                    - [ve-vp9-q-i420, ve-v9q420]
-                    - [ve-av1-rt-cam, ve-a1rtcam]
-                    - [ve-av1-q-cam, ve-a1qcam]
-                    - [ve-vp8-rt-cam, ve-v8rtcam]
-                    - [ve-vp8-q-cam, ve-v8qcam]
-                    - [ve-vp9-rt-cam, ve-v9rtcam]
-                    - [ve-vp9-q-cam, ve-v9qcam]
+                    by-app:
+                        firefox:
+                            - ve-av1-rt
+                            - ve-av1-q
+                            - ve-vp8-rt
+                            - ve-vp8-q
+                            - ve-vp9-rt
+                            - ve-vp9-q
+                            - [ve-av1-rt-i420, ve-a1rt420]
+                            - [ve-av1-q-i420, ve-a1q420]
+                            - [ve-vp8-rt-i420, ve-v8rt420]
+                            - [ve-vp8-q-i420, ve-v8q420]
+                            - [ve-vp9-rt-i420, ve-v9rt420]
+                            - [ve-vp9-q-i420, ve-v9q420]
+                            - [ve-av1-rt-cam, ve-a1rtcam]
+                            - [ve-av1-q-cam, ve-a1qcam]
+                            - [ve-vp8-rt-cam, ve-v8rtcam]
+                            - [ve-vp8-q-cam, ve-v8qcam]
+                            - [ve-vp9-rt-cam, ve-v9rtcam]
+                            - [ve-vp9-q-cam, ve-v9qcam]
+                        default:
+                            - ve-av1-rt
+                            - ve-av1-q
+                            - ve-vp8-rt
+                            - ve-vp8-q
+                            - ve-vp9-rt
+                            - ve-vp9-q
+                            - [ve-av1-rt-i420, ve-a1rt420]
+                            - [ve-av1-q-i420, ve-a1q420]
+                            - [ve-vp8-rt-i420, ve-v8rt420]
+                            - [ve-vp8-q-i420, ve-v8q420]
+                            - [ve-vp9-rt-i420, ve-v9rt420]
+                            - [ve-vp9-q-i420, ve-v9q420]
+                            - [ve-av1-rt-cam, ve-a1rtcam]
+                            - [ve-av1-q-cam, ve-a1qcam]
+                            - [ve-vp8-rt-cam, ve-v8rtcam]
+                            - [ve-vp8-q-cam, ve-v8qcam]
+                            - [ve-vp9-rt-cam, ve-v9rtcam]
+                            - [ve-vp9-q-cam, ve-v9qcam]
                 default:
                     by-app:
                         # Chrome currently refuses to encode H264 at larger resolutions like 720p and 1080p.
@@ -1199,6 +1280,14 @@ browsertime-webcodecs:
                             - [ve-vp8-q-i420, ve-v8q420]
                             - [ve-vp9-rt-i420, ve-v9rt420]
                             - [ve-vp9-q-i420, ve-v9q420]
+                            - [ve-av1-rt-cam, ve-a1rtcam]
+                            - [ve-av1-q-cam, ve-a1qcam]
+                            - [ve-h264-rt-sd-cam, ve-24rscam]
+                            - [ve-h264-q-sd-cam, ve-24qscam]
+                            - [ve-vp8-rt-cam, ve-v8rtcam]
+                            - [ve-vp8-q-cam, ve-v8qcam]
+                            - [ve-vp9-rt-cam, ve-v9rtcam]
+                            - [ve-vp9-q-cam, ve-v9qcam]
                         custom-car:
                             - ve-av1-rt
                             - ve-av1-q
@@ -1214,6 +1303,14 @@ browsertime-webcodecs:
                             - [ve-vp8-q-i420, ve-v8q420]
                             - [ve-vp9-rt-i420, ve-v9rt420]
                             - [ve-vp9-q-i420, ve-v9q420]
+                            - [ve-av1-rt-cam, ve-a1rtcam]
+                            - [ve-av1-q-cam, ve-a1qcam]
+                            - [ve-h264-rt-sd-cam, ve-24rscam]
+                            - [ve-h264-q-sd-cam, ve-24qscam]
+                            - [ve-vp8-rt-cam, ve-v8rtcam]
+                            - [ve-vp8-q-cam, ve-v8qcam]
+                            - [ve-vp9-rt-cam, ve-v9rtcam]
+                            - [ve-vp9-q-cam, ve-v9qcam]
                         default:
                             - ve-av1-rt
                             - ve-av1-q
@@ -1246,10 +1343,26 @@ browsertime-webcodecs:
     description: Raptor (browsertime) WebCodecs test
     mozharness:
         extra-options:
-            - --extra-profiler-run
+            by-app:
+                firefox:
+                    - --extra-profiler-run
+                default:
+                    by-test-platform:
+                        # Chrome's out-of-process video capture service crashes on Windows when capturing
+                        # from the fake camera, so run it in the browser process there.
+                        windows.*:
+                            - --extra-profiler-run
+                            - --browsertime-arg=chrome.args=--enable-features=RunVideoCaptureServiceInBrowserProcess
+                        default:
+                            - --extra-profiler-run
     run-on-projects:
         by-app:
-            firefox: [autoland, mozilla-central]
+            firefox:
+                by-test-platform:
+                    linux.*shippable.*: [autoland, mozilla-central]
+                    windows.*shippable.*: [autoland, mozilla-central]
+                    macosx1470.*shippable.*: [autoland, mozilla-central]
+                    default: []
             default: []
     tier:
         by-app:
@@ -1266,6 +1379,11 @@ browsertime-speculation-rules:
             - [prefetch-eager, pf-eag]
             - [prefetch-moderate, pf-mod]
             - [prefetch-conservative, pf-con]
+            - [prefetch-list-immediate, pfl-imm]
+            - [prefetch-list-eager, pfl-eag]
+            - [prefetch-list-moderate, pfl-mod]
+            - [prefetch-list-conservative, pfl-con]
+            - [prefetch-list-inflight, pfl-inf]
     description: Raptor (browsertime) Speculation Rules prefetch pageload test
     limit-platforms:
         by-app:
@@ -1364,13 +1482,11 @@ browsertime-indexeddb:
     limit-platforms:
         by-app:
             chrome:
-                # - .*shippable.*  # Bug 2038340: temporarily disabled on Windows
-                - linux.*shippable.*
-                - macosx.*shippable.*
+                - (?!macosx1470).*shippable.*
             custom-car:
                 - macosx1500.*shippable.*
                 - linux.*shippable.*
-                # - windows.*-64.*shippable.*  # Bug 2038340: temporarily disabled
+                - windows.*-64.*shippable.*
             default: []
     raptor:
         apps: [firefox, chrome]
@@ -1393,6 +1509,9 @@ browsertime-indexeddb:
             - addkBL1
             - addkBLN
             - getkeyrng
+            - idbCurNext
+            - idbCurPKey
+            - idbCurPrev
     run-on-projects:
         by-app:
             firefox:
@@ -1447,6 +1566,23 @@ browsertime-trr-performance:
             default: []
     tier: 3
     treeherder-symbol: Btime(trrperf)
+
+browsertime-doh-busy-site:
+    raptor:
+        apps: [firefox]
+        run-visual-metrics: false
+        subtests:
+            - busydoh
+    description: Raptor (browsertime) DoH lookup timings while replaying recorded news-site request timelines
+    limit-platforms:
+        - .*shippable.*
+    max-run-time: 600
+    mozharness:
+        extra-options:
+            - --extra-profiler-run
+    run-on-projects: []
+    tier: 3
+    treeherder-symbol: Btime(dohbusy)
 
 browsertime-hev3-connection:
     raptor:

@@ -407,6 +407,23 @@ impl FontContext {
         }
     }
 
+    /// Returns whether the font described by `template` actually contains
+    /// embedded bitmap strikes (FreeType `FT_FACE_FLAG_FIXED_SIZES`). The
+    /// `EMBEDDED_BITMAPS` instance flag is unreliable here because on unix it
+    /// only reflects a fontconfig preference and is set even for ordinary
+    /// outline fonts, so anything that needs to know whether a glyph will really
+    /// rasterize to a bitmap must consult the face itself. The face is loaded
+    /// into the shared cache that the rasterizing worker threads reuse, so this
+    /// does not duplicate work.
+    pub fn has_bitmap_strikes(template: &FontTemplate) -> bool {
+        let cached = match FONT_CACHE.lock().unwrap().add_font(template.clone()) {
+            Ok(font) => font,
+            Err(_) => return false,
+        };
+        let cached = cached.lock().unwrap();
+        (unsafe { (*cached.face).face_flags } & (FT_FACE_FLAG_FIXED_SIZES as FT_Long)) != 0
+    }
+
     pub fn delete_font(&mut self, font_key: &FontKey) {
         if let Some(cached) = self.fonts.remove(font_key) {
             // If the only references to this font are the FontCache and this FontContext,
@@ -509,7 +526,7 @@ impl FontContext {
             unsafe { FT_Set_Transform(face, ptr::null_mut(), ptr::null_mut()) };
             Self::choose_bitmap_size(face, req_size * y_scale)
         } else {
-            let mut shape = font.transform.invert_scale(x_scale, y_scale);
+            let mut shape = font.transform;
             if font.flags.contains(FontInstanceFlags::FLIP_X) {
                 shape = shape.flip_x();
             }
@@ -519,6 +536,11 @@ impl FontContext {
             if font.flags.contains(FontInstanceFlags::TRANSPOSE) {
                 shape = shape.swap_xy();
             }
+            // FT_Set_Char_Size scales the glyph before the transform is applied,
+            // so the scale must be taken from the oriented glyph transform. For a
+            // transposed glyph, its x axis maps to the device y axis.
+            let (x_scale, y_scale) = shape.compute_scale().unwrap_or((1.0, 1.0));
+            shape = shape.invert_scale(x_scale, y_scale);
             let (mut tx, mut ty) = (0.0, 0.0);
             if font.synthetic_italics.is_enabled() {
                 let (shape_, (tx_, ty_)) = font.synthesize_italics(shape, y_scale * req_size);

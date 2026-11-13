@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::AU_PER_DEV_PX;
 use euclid::{point2, size2, rect, Box2D};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -48,7 +49,13 @@ impl<'a> RawtestHarness<'a> {
         self.test_blur_cache();
         self.test_capture();
         self.test_zero_height_window();
+        self.test_trim_transient_resources();
         self.test_clear_cache();
+        self.test_pipeline_readded_after_removal();
+        self.test_removed_pipeline_in_rootless_document();
+        self.test_pipeline_moved_to_rootless_document();
+        self.test_backdrop_filter_hidden_after_visible();
+        self.test_offscreen_snapshot_in_rootless_document();
     }
 
     #[allow(dead_code)]
@@ -110,6 +117,7 @@ impl<'a> RawtestHarness<'a> {
 
         txn.set_display_list(
             *epoch,
+            self.wrench.api.get_namespace_id(),
             builder.end(),
         );
         epoch.0 += 1;
@@ -160,7 +168,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         let info = self.make_common_properties(rect(0.0, 0.0, 64.0, 64.0).to_box2d());
 
         builder.push_image(
@@ -188,7 +196,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         let info = self.make_common_properties(rect(0.0, 0.0, 1024.0, 1024.0).to_box2d());
 
         builder.push_image(
@@ -214,7 +222,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         let info = self.make_common_properties(rect(0.0, 0.0, 1024.0, 1024.0).to_box2d());
 
         builder.push_image(
@@ -250,7 +258,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let info = self.make_common_properties(rect(448.9, 74.0, 151.000_03, 56.).to_box2d());
 
@@ -312,7 +320,7 @@ impl<'a> RawtestHarness<'a> {
         });
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let root_space_and_clip = SpaceAndClipInfo::root_scroll(self.wrench.root_pipeline_id);
         let clip_id = builder.define_clip_rect(
@@ -394,7 +402,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let image_size = size2(400.0, 400.0);
 
@@ -489,7 +497,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let root_space_and_clip = SpaceAndClipInfo::root_scroll(self.wrench.root_pipeline_id);
         let clip_id = builder.define_clip_rect(
@@ -535,7 +543,7 @@ impl<'a> RawtestHarness<'a> {
         });
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let root_space_and_clip = SpaceAndClipInfo::root_scroll(self.wrench.root_pipeline_id);
         let clip_id = builder.define_clip_rect(
@@ -583,7 +591,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let root_space_and_clip = SpaceAndClipInfo::root_scroll(self.wrench.root_pipeline_id);
         let clip_id = builder.define_clip_rect(
@@ -647,7 +655,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let info = self.make_common_properties(rect(0., 0.0, 1510., 1510.).to_box2d());
 
@@ -674,7 +682,7 @@ impl<'a> RawtestHarness<'a> {
         let mut epoch = Epoch(1);
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let info = self.make_common_properties(rect(-10000., 0.0, 1510., 1510.).to_box2d());
 
@@ -707,7 +715,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let info = self.make_common_properties(rect(0., 0.0, 1510., 1510.).to_box2d());
 
@@ -774,7 +782,7 @@ impl<'a> RawtestHarness<'a> {
 
         // draw the blob the first time
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         let info = self.make_common_properties(rect(0.0, 60.0, 200.0, 200.0).to_box2d());
 
         builder.push_image(
@@ -798,7 +806,7 @@ impl<'a> RawtestHarness<'a> {
 
         // make a new display list that refers to the first image
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         let info = self.make_common_properties(rect(1.0, 60.0, 200.0, 200.0).to_box2d());
         builder.push_image(
             &info,
@@ -882,7 +890,7 @@ impl<'a> RawtestHarness<'a> {
 
         // create two blob images and draw them
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         let info = self.make_common_properties(rect(0.0, 60.0, 200.0, 200.0).to_box2d());
         let info2 = self.make_common_properties(rect(200.0, 60.0, 200.0, 200.0).to_box2d());
         let push_images = |builder: &mut DisplayListBuilder| {
@@ -929,7 +937,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         push_images(&mut builder);
         self.submit_dl(&mut epoch, builder, txn);
         let _pixels_second = self.render_and_get_pixels(window_rect);
@@ -945,7 +953,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         push_images(&mut builder);
         self.submit_dl(&mut epoch, builder, txn);
         let _pixels_third = self.render_and_get_pixels(window_rect);
@@ -984,7 +992,7 @@ impl<'a> RawtestHarness<'a> {
 
         // draw the blobs the first time
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         let info = self.make_common_properties(rect(0.0, 60.0, 200.0, 200.0).to_box2d());
 
         builder.push_image(
@@ -1013,7 +1021,7 @@ impl<'a> RawtestHarness<'a> {
 
         // make a new display list that refers to the first image
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         let info = self.make_common_properties(rect(0.0, 60.0, 200.0, 200.0).to_box2d());
         builder.push_image(
             &info,
@@ -1039,7 +1047,7 @@ impl<'a> RawtestHarness<'a> {
 
         // make a new display list that refers to the first image
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         let info = self.make_common_properties(rect(0.0, 60.0, 200.0, 200.0).to_box2d());
         builder.push_image(
             &info,
@@ -1070,7 +1078,7 @@ impl<'a> RawtestHarness<'a> {
 
         let mut do_test = |should_try_and_fail| {
             let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-            builder.begin();
+            builder.begin(AU_PER_DEV_PX);
 
             let spatial_id = SpatialId::root_scroll_node(self.wrench.root_pipeline_id);
             let clip_id = builder.define_clip_rect(
@@ -1176,7 +1184,7 @@ impl<'a> RawtestHarness<'a> {
 
         let mut do_test = |shadow_is_red| {
             let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-            builder.begin();
+            builder.begin(AU_PER_DEV_PX);
             let shadow_color = if shadow_is_red {
                 ColorF::new(1.0, 0.0, 0.0, 1.0)
             } else {
@@ -1236,7 +1244,7 @@ impl<'a> RawtestHarness<'a> {
         );
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let info = self.make_common_properties(rect(300.0, 70.0, 150.0, 50.0).to_box2d());
         builder.push_image(
@@ -1252,6 +1260,7 @@ impl<'a> RawtestHarness<'a> {
 
         txn.set_display_list(
             Epoch(0),
+            self.wrench.api.get_namespace_id(),
             builder.end(),
         );
         txn.generate_frame(0, true, false, RenderReasons::TESTING);
@@ -1266,11 +1275,12 @@ impl<'a> RawtestHarness<'a> {
         // 3. set a different scene
 
         builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let mut txn = Transaction::new();
         txn.set_display_list(
             Epoch(1),
+            self.wrench.api.get_namespace_id(),
             builder.end(),
         );
         self.wrench.api.send_transaction(self.wrench.document_id, txn);
@@ -1301,7 +1311,7 @@ impl<'a> RawtestHarness<'a> {
         let doc_id = self.wrench.api.add_document(window_size);
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
         let info = self.make_common_properties(
             LayoutRect::from_size(LayoutSize::new(100.0, 100.0))
         );
@@ -1315,6 +1325,7 @@ impl<'a> RawtestHarness<'a> {
         txn.set_root_pipeline(self.wrench.root_pipeline_id);
         txn.set_display_list(
             Epoch(1),
+            self.wrench.api.get_namespace_id(),
             builder.end(),
         );
         txn.generate_frame(0, true, false, RenderReasons::TESTING);
@@ -1331,7 +1342,7 @@ impl<'a> RawtestHarness<'a> {
 
         let layout_size = LayoutSize::new(400., 400.);
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         // Add a rectangle that covers the entire scene.
         let space_and_clip = SpaceAndClipInfo::root_scroll(self.wrench.root_pipeline_id);
@@ -1359,6 +1370,7 @@ impl<'a> RawtestHarness<'a> {
             ComplexClipRegion::new(
                 *rect,
                 BorderRadius::uniform_size(LayoutSize::new(radius, radius)),
+                LayoutSideOffsets::zero(),
                 ClipMode::Clip
             )
         };
@@ -1449,13 +1461,149 @@ impl<'a> RawtestHarness<'a> {
         test_rounded_rectangle(WorldPoint::new(200., 100.), WorldSize::new(100., 100.), (0, 5));
     }
 
+    fn test_trim_transient_resources(&mut self) {
+        println!("\ttrim transient resources...");
+        self.wrench.api.flush_scene_builder();
+        self.wrench.render();
+        while self.rx.try_recv().is_ok() {}
+
+        let window_size = self.window.get_inner_size();
+        let sample_size = FramebufferIntSize::new(64, 64);
+        let sample_rect = FramebufferIntRect::from_origin_and_size(
+            point2(0, window_size.height - sample_size.height),
+            sample_size,
+        );
+
+        let root_pipeline_id = self.wrench.root_pipeline_id;
+        let root_space_and_clip = SpaceAndClipInfo::root_scroll(root_pipeline_id);
+        let make_scene = |background: ColorF, shadow_color: ColorF| {
+            let mut builder = DisplayListBuilder::new(root_pipeline_id);
+            builder.begin(AU_PER_DEV_PX);
+
+            let background_rect = rect(0.0, 0.0, 400.0, 400.0).to_box2d();
+            let background_info = CommonItemProperties {
+                clip_rect: background_rect,
+                clip_chain_id: root_space_and_clip.clip_chain_id,
+                spatial_id: root_space_and_clip.spatial_id,
+                flags: PrimitiveFlags::default(),
+            };
+            builder.push_rect(&background_info, background_rect, background);
+
+            builder.push_shadow(
+                &root_space_and_clip,
+                Shadow {
+                    offset: LayoutVector2D::new(1.0, 1.0),
+                    blur_radius: 1.0,
+                    color: shadow_color,
+                },
+                true,
+            );
+            let line_rect = rect(110.0, 110.0, 50.0, 2.0).to_box2d();
+            let line_info = CommonItemProperties {
+                clip_rect: line_rect,
+                clip_chain_id: root_space_and_clip.clip_chain_id,
+                spatial_id: root_space_and_clip.spatial_id,
+                flags: PrimitiveFlags::default(),
+            };
+            builder.push_line(
+                &line_info,
+                &line_rect,
+                0.0,
+                LineOrientation::Horizontal,
+                &ColorF::new(0.0, 0.0, 0.0, 1.0),
+                LineStyle::Solid,
+            );
+            builder.pop_all_shadows();
+
+            builder
+        };
+
+        let mut epoch = Epoch(0);
+
+        self.submit_dl(
+            &mut epoch,
+            make_scene(
+                ColorF::new(0.0, 1.0, 0.0, 1.0),
+                ColorF::new(0.0, 0.0, 1.0, 1.0),
+            ),
+            Transaction::new(),
+        );
+        let expected = self.render_and_get_pixels(sample_rect);
+
+        self.submit_dl(
+            &mut epoch,
+            make_scene(
+                ColorF::new(1.0, 0.0, 0.0, 1.0),
+                ColorF::new(1.0, 0.0, 1.0, 1.0),
+            ),
+            Transaction::new(),
+        );
+        let stale = self.render_and_get_pixels(sample_rect);
+        assert_ne!(expected, stale);
+
+        // Queue a replacement frame, but leave its PublishDocument in the
+        // renderer's result queue so the following trim must discard it.
+        self.submit_dl(
+            &mut epoch,
+            make_scene(
+                ColorF::new(0.0, 1.0, 0.0, 1.0),
+                ColorF::new(1.0, 1.0, 0.0, 1.0),
+            ),
+            Transaction::new(),
+        );
+        assert_eq!(
+            self.rx.recv().unwrap(),
+            NotifierEvent::WakeUp {
+                composite_needed: true,
+            }
+        );
+
+        self.wrench.renderer.trim_transient_resources(true);
+
+        // Match WebRenderBridgeParent::ScheduleForcedGenerateFrame(): Resume
+        // sends invalidation and GenerateFrame as separate fast transactions.
+        let mut invalidate = Transaction::new();
+        invalidate.invalidate_rendered_frame(RenderReasons::TESTING);
+        self.wrench
+            .api
+            .send_transaction(self.wrench.document_id, invalidate);
+
+        let mut forced_frame = Transaction::new();
+        forced_frame.generate_frame(0, true, false, RenderReasons::TESTING);
+        self.wrench
+            .api
+            .send_transaction(self.wrench.document_id, forced_frame);
+
+        assert_eq!(
+            self.rx.recv().unwrap(),
+            NotifierEvent::WakeUp {
+                composite_needed: false,
+            }
+        );
+        assert_eq!(
+            self.rx.recv().unwrap(),
+            NotifierEvent::WakeUp {
+                composite_needed: true,
+            }
+        );
+
+        // This is the first renderer update since the queued frame, trim and
+        // forced frame. It must end up with the post-trim PublishDocument.
+        self.wrench.render();
+        let actual = self.wrench.renderer.read_pixels_rgba8(sample_rect);
+        self.compare_pixels(expected, actual, sample_rect.size());
+    }
+
     fn test_clear_cache(&mut self) {
         println!("\tclear cache test...");
 
-        self.wrench.api.send_message(ApiMsg::DebugCommand(DebugCommand::ClearCaches(ClearCache::all())));
+        self.wrench.api.send_message(ApiMsg::DebugCommand(
+            self.wrench.api.backend_id(),
+            DebugCommand::ClearCaches(ClearCache::all()),
+        ));
 
         let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
-        builder.begin();
+        builder.begin(AU_PER_DEV_PX);
 
         let txn = Transaction::new();
         let mut epoch = Epoch(0);
@@ -1463,5 +1611,260 @@ impl<'a> RawtestHarness<'a> {
 
         self.rx.recv().unwrap();
         self.wrench.render();
+    }
+
+    // A document without a root pipeline builds no scene, so the render
+    // backend holds its interning ops back. Removing a pipeline whose namespace
+    // was only opened there must not release that namespace on the render
+    // backend ahead of the open when another document builds a scene.
+    fn test_removed_pipeline_in_rootless_document(&mut self) {
+        println!("\tremoved pipeline in rootless document test...");
+
+        let doc_id = self.wrench.api.add_document(DeviceIntSize::new(100, 100));
+        let pipeline_id = PipelineId(1, 42);
+
+        let mut builder = DisplayListBuilder::new(pipeline_id);
+        builder.begin(AU_PER_DEV_PX);
+        let space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
+        let info = self.make_common_properties_with_clip_and_spatial(
+            LayoutRect::from_size(LayoutSize::new(100.0, 100.0)),
+            space_and_clip.clip_chain_id,
+            space_and_clip.spatial_id,
+        );
+        builder.push_rect(&info, info.clip_rect, ColorF::new(0.0, 1.0, 0.0, 1.0));
+
+        let mut txn = Transaction::new();
+        txn.set_display_list(
+            Epoch(0),
+            self.wrench.api.get_namespace_id(),
+            builder.end(),
+        );
+        self.wrench.api.send_transaction(doc_id, txn);
+
+        let mut txn = Transaction::new();
+        txn.remove_pipeline(pipeline_id);
+        self.wrench.api.send_transaction(doc_id, txn);
+
+        let mut builder = DisplayListBuilder::new(self.wrench.root_pipeline_id);
+        builder.begin(AU_PER_DEV_PX);
+        let info = self.make_common_properties(
+            LayoutRect::from_size(LayoutSize::new(100.0, 100.0))
+        );
+        builder.push_rect(&info, info.clip_rect, ColorF::new(1.0, 0.0, 0.0, 1.0));
+        let mut epoch = Epoch(0);
+        self.submit_dl(&mut epoch, builder, Transaction::new());
+
+        self.rx.recv().unwrap();
+        self.wrench.render();
+
+        self.wrench.api.delete_document(doc_id);
+    }
+
+    // A tab moved to a new window: its pipeline's display lists go to the new
+    // window's document, which has no root pipeline yet so the render backend
+    // holds its interning ops, before the old document removes the pipeline.
+    // The old document's release must leave the new document's namespace alone.
+    fn test_pipeline_moved_to_rootless_document(&mut self) {
+        println!("\tpipeline moved to rootless document test...");
+
+        let namespace = self.wrench.api.get_namespace_id();
+        let root_pipeline_id = self.wrench.root_pipeline_id;
+        let child_id = PipelineId(1, 46);
+
+        let mut txn = Transaction::new();
+        txn.set_display_list(Epoch(0), namespace, self.rect_display_list(root_pipeline_id, Some(child_id)));
+        txn.set_display_list(Epoch(0), namespace, self.rect_display_list(child_id, None));
+        txn.generate_frame(0, true, false, RenderReasons::TESTING);
+        self.wrench.api.send_transaction(self.wrench.document_id, txn);
+        self.rx.recv().unwrap();
+        self.wrench.render();
+
+        let doc_id = self.wrench.api.add_document(DeviceIntSize::new(100, 100));
+        let mut txn = Transaction::new();
+        txn.set_display_list(Epoch(1), namespace, self.rect_display_list(child_id, None));
+        self.wrench.api.send_transaction(doc_id, txn);
+
+        let mut txn = Transaction::new();
+        txn.remove_pipeline(child_id);
+        txn.set_display_list(Epoch(1), namespace, self.rect_display_list(root_pipeline_id, None));
+        txn.generate_frame(0, true, false, RenderReasons::TESTING);
+        self.wrench.api.send_transaction(self.wrench.document_id, txn);
+        self.rx.recv().unwrap();
+        self.wrench.render();
+
+        self.wrench.api.delete_document(doc_id);
+
+        let mut txn = Transaction::new();
+        txn.set_display_list(Epoch(2), namespace, self.rect_display_list(root_pipeline_id, None));
+        txn.generate_frame(0, true, false, RenderReasons::TESTING);
+        self.wrench.api.send_transaction(self.wrench.document_id, txn);
+        self.rx.recv().unwrap();
+        self.wrench.render();
+    }
+
+    fn rect_display_list(&self, pipeline_id: PipelineId, iframe: Option<PipelineId>) -> (PipelineId, BuiltDisplayList) {
+        let mut builder = DisplayListBuilder::new(pipeline_id);
+        builder.begin(AU_PER_DEV_PX);
+        let space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
+        let rect = LayoutRect::from_size(LayoutSize::new(100.0, 100.0));
+        let info = self.make_common_properties_with_clip_and_spatial(
+            rect,
+            space_and_clip.clip_chain_id,
+            space_and_clip.spatial_id,
+        );
+        builder.push_rect(&info, rect, ColorF::new(0.0, 1.0, 0.0, 1.0));
+        if let Some(iframe) = iframe {
+            builder.push_iframe(rect, rect, &space_and_clip, iframe, true);
+        }
+        builder.end()
+    }
+
+    // Removing a pipeline releases its interned items, so a builder that
+    // outlives the removal cannot go on with its delta stream; a pipeline that
+    // comes back does so with a fresh builder.
+    fn test_pipeline_readded_after_removal(&mut self) {
+        println!("\tpipeline re-added after removal test...");
+
+        let namespace = self.wrench.api.get_namespace_id();
+        let root_pipeline_id = self.wrench.root_pipeline_id;
+        let child_id = PipelineId(1, 45);
+        let rect = LayoutRect::from_size(LayoutSize::new(100.0, 100.0));
+        let child_display_list = || {
+            let mut builder = DisplayListBuilder::new(child_id);
+            builder.begin(AU_PER_DEV_PX);
+            let space_and_clip = SpaceAndClipInfo::root_scroll(child_id);
+            let info = CommonItemProperties {
+                clip_rect: rect,
+                clip_chain_id: space_and_clip.clip_chain_id,
+                spatial_id: space_and_clip.spatial_id,
+                flags: PrimitiveFlags::default(),
+            };
+            builder.push_rect(&info, rect, ColorF::new(0.0, 1.0, 0.0, 1.0));
+            builder.end()
+        };
+
+        let mut txn = Transaction::new();
+        txn.set_display_list(Epoch(0), namespace, self.rect_display_list(root_pipeline_id, Some(child_id)));
+        txn.set_display_list(Epoch(0), namespace, child_display_list());
+        txn.generate_frame(0, true, false, RenderReasons::TESTING);
+        self.wrench.api.send_transaction(self.wrench.document_id, txn);
+        self.rx.recv().unwrap();
+        self.wrench.render();
+
+        let mut txn = Transaction::new();
+        txn.remove_pipeline(child_id);
+        txn.set_display_list(Epoch(1), namespace, self.rect_display_list(root_pipeline_id, Some(child_id)));
+        txn.generate_frame(0, true, false, RenderReasons::TESTING);
+        self.wrench.api.send_transaction(self.wrench.document_id, txn);
+        self.rx.recv().unwrap();
+        self.wrench.render();
+
+        let mut txn = Transaction::new();
+        txn.set_display_list(Epoch(1), namespace, child_display_list());
+        txn.set_display_list(Epoch(2), namespace, self.rect_display_list(root_pipeline_id, Some(child_id)));
+        txn.generate_frame(0, true, false, RenderReasons::TESTING);
+        self.wrench.api.send_transaction(self.wrench.document_id, txn);
+        self.rx.recv().unwrap();
+        self.wrench.render();
+    }
+
+    // A backdrop-filter chain picture that becomes invisible keeps the
+    // `raster_config` of the last frame it was drawn in.
+    fn test_backdrop_filter_hidden_after_visible(&mut self) {
+        println!("\tbackdrop-filter hidden after visible test...");
+
+        let opacity_key = PropertyBindingKey::new(0xbacd);
+        let rect = LayoutRect::from_size(LayoutSize::new(256.0, 256.0));
+        let root_pipeline_id = self.wrench.root_pipeline_id;
+
+        let mut builder = DisplayListBuilder::new(root_pipeline_id);
+        builder.begin(AU_PER_DEV_PX);
+        let info = self.make_common_properties(rect);
+        builder.push_rect(&info, rect, ColorF::new(1.0, 0.0, 0.0, 1.0));
+        builder.push_backdrop_filter(
+            &info,
+            &[
+                FilterOp::Sepia(0.5),
+                FilterOp::Opacity(PropertyBinding::Binding(opacity_key, 1.0), 1.0),
+            ],
+            &[],
+        );
+
+        let mut epoch = Epoch(0);
+        let mut txn = Transaction::new();
+        txn.append_dynamic_properties(DynamicProperties {
+            transforms: vec![],
+            floats: vec![PropertyValue { key: opacity_key, value: 1.0 }],
+            colors: vec![],
+        });
+        self.submit_dl(&mut epoch, builder, txn);
+        self.rx.recv().unwrap();
+        self.wrench.render();
+
+        let mut txn = Transaction::new();
+        txn.reset_dynamic_properties();
+        txn.append_dynamic_properties(DynamicProperties {
+            transforms: vec![],
+            floats: vec![PropertyValue { key: opacity_key, value: 0.0 }],
+            colors: vec![],
+        });
+        txn.generate_frame(0, true, false, RenderReasons::TESTING);
+        self.wrench.api.send_transaction(self.wrench.document_id, txn);
+        self.rx.recv().unwrap();
+        self.wrench.render();
+    }
+
+    // A view transition capture sent before the document's root pipeline has a
+    // display list, as after a GPU process restart: the transaction builds an
+    // offscreen scene but no main scene, so the render backend holds its
+    // interning ops while frame-building the offscreen scene.
+    fn test_offscreen_snapshot_in_rootless_document(&mut self) {
+        println!("\toffscreen snapshot in rootless document test...");
+
+        let doc_id = self.wrench.api.add_document(DeviceIntSize::new(100, 100));
+        let pipeline_id = PipelineId(1, 47);
+        let rect = LayoutRect::from_size(LayoutSize::new(100.0, 100.0));
+        let snapshot_key = SnapshotImageKey(self.wrench.api.generate_image_key());
+
+        let mut builder = DisplayListBuilder::new(pipeline_id);
+        builder.begin(AU_PER_DEV_PX);
+        let space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
+        builder.push_stacking_context(
+            space_and_clip.spatial_id,
+            PrimitiveFlags::default(),
+            None,
+            TransformStyle::Flat,
+            MixBlendMode::Normal,
+            &[],
+            &[],
+            RasterSpace::Screen,
+            StackingContextFlags::empty(),
+            Some(SnapshotInfo { key: snapshot_key, area: rect, detached: false }),
+        );
+        let info = self.make_common_properties_with_clip_and_spatial(
+            rect,
+            space_and_clip.clip_chain_id,
+            space_and_clip.spatial_id,
+        );
+        builder.push_rect(&info, rect, ColorF::new(0.0, 1.0, 0.0, 1.0));
+        builder.pop_stacking_context();
+
+        let mut txn = Transaction::new();
+        txn.add_snapshot_image(snapshot_key);
+        txn.set_display_list(
+            Epoch(0),
+            self.wrench.api.get_namespace_id(),
+            builder.end(),
+        );
+        txn.render_offscreen(pipeline_id);
+        txn.remove_pipeline(pipeline_id);
+        self.wrench.api.send_transaction(doc_id, txn);
+        self.rx.recv().unwrap();
+        self.wrench.render();
+
+        let mut txn = Transaction::new();
+        txn.delete_snapshot_image(snapshot_key);
+        self.wrench.api.send_transaction(doc_id, txn);
+        self.wrench.api.delete_document(doc_id);
     }
 }

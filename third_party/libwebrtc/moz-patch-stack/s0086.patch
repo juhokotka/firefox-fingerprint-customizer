@@ -1,37 +1,30 @@
-From: Nico Grunbaum <na-g@nostrum.com>
-Date: Thu, 23 May 2024 17:28:00 +0000
-Subject: Bug 1897459 - P2 - for BSD reference null socket server
- instead;r=mjf,webrtc-reviewers
+From: Byron Campen <docfaraday@gmail.com>
+Date: Thu, 25 Jul 2024 10:07:00 -0500
+Subject: Bug 1909234 - (fix-4fec6f9c67dc) Hollow out the new ssl_adapter lib.
+ r?mjf
 
-Differential Revision: https://phabricator.services.mozilla.com/D211095
-Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/0993ae41fb7db1624dedc5cf2278cd5a505f18f5
+Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/ee2f06666bcc6d22c4d7c93b78fb52d28452d055
 ---
- rtc_base/internal/default_socket_server.cc | 9 +++++++++
- 1 file changed, 9 insertions(+)
+ rtc_base/BUILD.gn | 2 ++
+ 1 file changed, 2 insertions(+)
 
-diff --git a/rtc_base/internal/default_socket_server.cc b/rtc_base/internal/default_socket_server.cc
-index d49c2bba32..521f21f538 100644
---- a/rtc_base/internal/default_socket_server.cc
-+++ b/rtc_base/internal/default_socket_server.cc
-@@ -13,12 +13,21 @@
- #include <memory>
- 
- #include "rtc_base/socket_server.h"
-+
-+#if defined(WEBRTC_BSD)
-+#include "rtc_base/null_socket_server.h"
-+#else
- #include "rtc_base/physical_socket_server.h"
-+#endif
- 
- namespace webrtc {
- 
- std::unique_ptr<SocketServer> CreateDefaultSocketServer() {
-+#if defined(WEBRTC_BSD)
-+  return std::unique_ptr<SocketServer>(new NullSocketServer);
-+#else
-   return std::unique_ptr<SocketServer>(new PhysicalSocketServer);
-+#endif
+diff --git a/rtc_base/BUILD.gn b/rtc_base/BUILD.gn
+index c69e316a58..b5eaae5a56 100644
+--- a/rtc_base/BUILD.gn
++++ b/rtc_base/BUILD.gn
+@@ -1782,6 +1782,7 @@ if (!build_with_mozilla) {
  }
  
- }  // namespace webrtc
+ rtc_library("ssl_adapter") {
++if (!build_with_mozilla) {
+   visibility = [ "*" ]
+   sources = [
+     "openssl_adapter.cc",
+@@ -1838,6 +1839,7 @@ rtc_library("ssl_adapter") {
+     configs += [ "..:external_ssl_library" ]
+   }
+ }
++}
+ 
+ rtc_source_set("gtest_prod") {
+   sources = [ "gtest_prod_util.h" ]

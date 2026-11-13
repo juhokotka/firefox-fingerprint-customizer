@@ -18,7 +18,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ActionsManager: "resource://normandy/lib/ActionsManager.sys.mjs",
   BaseAction: "resource://normandy/actions/BaseAction.sys.mjs",
   CleanupManager: "resource://normandy/lib/CleanupManager.sys.mjs",
-  ClientEnvironment: "resource://normandy/lib/ClientEnvironment.sys.mjs",
+  ClientEnvironmentBase:
+    "resource://gre/modules/components-utils/ClientEnvironment.sys.mjs",
   FilterExpressions:
     "resource://gre/modules/components-utils/FilterExpressions.sys.mjs",
   LegacyHeartbeat: "resource://normandy/lib/LegacyHeartbeat.sys.mjs",
@@ -27,7 +28,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   RemoteSettings: "resource://services-settings/remote-settings.sys.mjs",
   RemoteSettingsClient:
     "resource://services-settings/RemoteSettingsClient.sys.mjs",
-  Storage: "resource://normandy/lib/Storage.sys.mjs",
   TargetingContext: "resource://messaging-system/targeting/Targeting.sys.mjs",
   clearTimeout: "resource://gre/modules/Timer.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
@@ -43,7 +43,6 @@ const FIRST_RUN_PREF = "app.normandy.first_run";
 const SHIELD_ENABLED_PREF = "app.normandy.enabled";
 const DEV_MODE_PREF = "app.normandy.dev_mode";
 const API_URL_PREF = "app.normandy.api_url";
-const LAZY_CLASSIFY_PREF = "app.normandy.experiments.lazy_classify";
 const ONSYNC_SKEW_SEC_PREF = "app.normandy.onsync_skew_sec";
 
 // Timer last update preference.
@@ -309,51 +308,21 @@ export var RecipeRunner = {
       }
 
       this.clearCaches();
-      // Unless lazy classification is enabled, prep the classify cache.
-      if (!Services.prefs.getBoolPref(LAZY_CLASSIFY_PREF, false)) {
-        try {
-          await lazy.ClientEnvironment.getClientClassification();
-        } catch (err) {
-          // Try to go on without this data; the filter expressions will
-          // gracefully fail without this info if they need it.
-        }
-      }
-
-      // Fetch recipes before execution in case we fail and exit early.
-      let recipesAndSignatures;
-      try {
-        recipesAndSignatures = await lazy.gRemoteSettingsClient.get({
-          // Do not return an empty list if an error occurs.
-          emptyListFallback: false,
-        });
-      } catch (e) {
-        return;
-      }
 
       const actionsManager = new lazy.ActionsManager();
-
       const legacyHeartbeat = lazy.LegacyHeartbeat.getHeartbeatRecipe();
-      const noRecipes =
-        !recipesAndSignatures.length && legacyHeartbeat === null;
 
       // Execute recipes, if we have any.
-      if (noRecipes) {
+      if (legacyHeartbeat === null) {
         log.debug("No recipes to execute");
       } else {
-        for (const { recipe, signature } of recipesAndSignatures) {
-          let suitability = await this.getRecipeSuitability(recipe, signature);
-          await actionsManager.processRecipe(recipe, suitability);
-        }
-
-        if (legacyHeartbeat !== null) {
-          await actionsManager.processRecipe(
-            legacyHeartbeat,
-            lazy.BaseAction.suitability.FILTER_MATCH
-          );
-        }
+        await actionsManager.processRecipe(
+          legacyHeartbeat,
+          lazy.BaseAction.suitability.FILTER_MATCH
+        );
       }
 
-      await actionsManager.finalize({ noRecipes });
+      await actionsManager.finalize({ noRecipes: legacyHeartbeat === null });
 
       Services.obs.notifyObservers(null, "recipe-runner:end");
     } finally {
@@ -368,7 +337,7 @@ export var RecipeRunner = {
   },
 
   getFilterContext(recipe) {
-    const environment = cacheProxy(lazy.ClientEnvironment);
+    const environment = cacheProxy(lazy.ClientEnvironmentBase);
     environment.recipe = {
       id: recipe.id,
       arguments: recipe.arguments,
@@ -406,7 +375,7 @@ export var RecipeRunner = {
     // for the `normandy.` namespace, and another for the `env.` namespace.
     capabilities.add("jexl.context.env");
     capabilities.add("jexl.context.normandy");
-    let env = lazy.ClientEnvironment;
+    let env = lazy.ClientEnvironmentBase;
     while (env && env.name) {
       // Walk up the class chain for ClientEnvironment, collecting applicable
       // properties as we go. Stop when we get to an unnamed object, which is
@@ -565,7 +534,6 @@ export var RecipeRunner = {
    * for a clean run.
    */
   clearCaches() {
-    lazy.ClientEnvironment.clearClassifyCache();
     lazy.NormandyApi.clearIndexCache();
   },
 
@@ -579,7 +547,6 @@ export var RecipeRunner = {
     Services.prefs.setCharPref(API_URL_PREF, baseApiUrl);
 
     try {
-      lazy.Storage.clearAllStorage();
       this.clearCaches();
       await this.run();
     } finally {

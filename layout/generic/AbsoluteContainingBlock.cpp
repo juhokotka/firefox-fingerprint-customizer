@@ -146,12 +146,50 @@ static LogicalSize* GetUnfragmentedSize(const ReflowInput& aCBReflowInput,
              : aFrame->FirstInFlow()->GetProperty(UnfragmentedSizeProperty());
 }
 
+// Return aInlineFrame's previous inline continuation if it shares
+// aInlineFrame's fragmentainer, or nullptr otherwise.
+static nsIFrame* GetPrevInlineContinuationInFragmentainer(
+    const nsIFrame* aInlineFrame) {
+  MOZ_ASSERT(aInlineFrame->IsInlineFrameOrSubclass());
+  const nsBlockFrame* myBlock =
+      nsLayoutUtils::FindNearestBlockAncestor(aInlineFrame);
+  for (nsIFrame* prev =
+           nsLayoutUtils::GetPrevContinuationOrIBSplitSibling(aInlineFrame);
+       prev; prev = nsLayoutUtils::GetPrevContinuationOrIBSplitSibling(prev)) {
+    if (prev->IsBlockFrameOrSubclass()) {
+      // Skip IB-split block siblings.
+      continue;
+    }
+    return nsLayoutUtils::FindNearestBlockAncestor(prev) == myBlock ? prev
+                                                                    : nullptr;
+  }
+  return nullptr;
+}
+
+// Return true if aInlineFrame is the first inline continuation in its
+// fragmentainer, i.e. no previous continuation shares its nearest block
+// ancestor.
+static bool IsFirstInlineContinuationInFragmentainer(
+    const nsIFrame* aInlineFrame) {
+  return !GetPrevInlineContinuationInFragmentainer(aInlineFrame);
+}
+
+nsIFrame* AbsoluteContainingBlock::FirstInlineContinuationInFragmentainer(
+    nsIFrame* aInlineFrame) {
+  MOZ_ASSERT(aInlineFrame->IsInlineFrameOrSubclass());
+  nsIFrame* first = aInlineFrame;
+  while (nsIFrame* prev = GetPrevInlineContinuationInFragmentainer(first)) {
+    first = prev;
+  }
+  return first;
+}
+
 // Walk aInlineFrame's continuation chain and return the *first* continuation
 // (near the start-most edges) of the previous fragmentainer (not the first
 // fragment we encountered during the walk). Or return nullptr if no such
 // continuation in the previous fragmentainer or no previous fragmentainer.
 static nsIFrame* GetFirstInlineContinuationInPrevFragmentainer(
-    nsIFrame* aInlineFrame) {
+    const nsIFrame* aInlineFrame) {
   MOZ_ASSERT(aInlineFrame->IsInlineFrameOrSubclass());
   // An inline always has a block ancestor, and that block is continued per
   // fragmentainer, so two continuations share a fragmentainer iff their nearest
@@ -191,7 +229,7 @@ static nsIFrame* GetFirstInlineContinuationInPrevFragmentainer(
 // near the start-most edges of the next fragmentainer. Or return nullptr if no
 // such fragment in the next fragmentainer or no next fragmentainer.
 static nsIFrame* GetFirstInlineContinuationInNextFragmentainer(
-    nsIFrame* aInlineFrame) {
+    const nsIFrame* aInlineFrame) {
   MOZ_ASSERT(aInlineFrame->IsInlineFrameOrSubclass());
   const nsBlockFrame* myBlock =
       nsLayoutUtils::FindNearestBlockAncestor(aInlineFrame);
@@ -214,7 +252,8 @@ static nsIFrame* GetFirstInlineContinuationInNextFragmentainer(
 // CB, multiple fragments can live in a fragmentainer, but only the first
 // fragment in each fragmentainer owns and reflows the abspos children, so we
 // walk back to that first fragment rather than the immediate prev-in-flow.
-static nsIFrame* GetFirstContinuationInPrevFragmentainer(nsIFrame* aFrame) {
+static nsIFrame* GetFirstContinuationInPrevFragmentainer(
+    const nsIFrame* aFrame) {
   return StaticPrefs::layout_abspos_fragment_aware_inline_cb_enabled() &&
                  aFrame->IsInlineFrameOrSubclass()
              ? GetFirstInlineContinuationInPrevFragmentainer(aFrame)
@@ -222,7 +261,8 @@ static nsIFrame* GetFirstContinuationInPrevFragmentainer(nsIFrame* aFrame) {
 }
 
 // See the comment in GetFirstContinuationInPrevFragmentainer().
-static nsIFrame* GetFirstContinuationInNextFragmentainer(nsIFrame* aFrame) {
+static nsIFrame* GetFirstContinuationInNextFragmentainer(
+    const nsIFrame* aFrame) {
   return StaticPrefs::layout_abspos_fragment_aware_inline_cb_enabled() &&
                  aFrame->IsInlineFrameOrSubclass()
              ? GetFirstInlineContinuationInNextFragmentainer(aFrame)
@@ -257,8 +297,53 @@ void AbsoluteContainingBlock::DrainPushedChildList(
   }
 }
 
+void AbsoluteContainingBlock::PullAbsoluteFramesFrom(
+    nsContainerFrame* aDelegatingFrame, nsIFrame* aContinuation,
+    PullKind aPullKind) {
+  AbsoluteContainingBlock* absCB = aContinuation->GetAbsoluteContainingBlock();
+  MOZ_ASSERT(absCB,
+             "If this delegating frame has an absCB, aContinuation must "
+             "have one, too!");
+
+  absCB->DrainPushedChildList(aContinuation);
+
+  for (auto iter = absCB->GetChildList().begin();
+       iter != absCB->GetChildList().end();) {
+    // Advance the iterator first, so it's safe to move |child|.
+    nsIFrame* const child = *iter++;
+    nsIFrame* const childPrevInFlow = child->GetPrevInFlow();
+    if (aPullKind == PullKind::FirstInFlows && childPrevInFlow) {
+      continue;
+    }
+    absCB->StealFrame(child);
+    if (childPrevInFlow && childPrevInFlow->GetParent() == aDelegatingFrame) {
+      // We already hold child's prev-in-flow, so child should be appended
+      // into our pushed child list to keep the continuations in order.
+      mPushedAbsoluteFrames.AppendFrame(aDelegatingFrame, child);
+    } else {
+      // Either child is a first-in-flow or its prev-in-flow lives in another
+      // absolute containing block, so it moves into our child list to be
+      // reflowed.
+      mAbsoluteFrames.AppendFrame(aDelegatingFrame, child);
+      if (!childPrevInFlow) {
+        child->RemoveStateBits(NS_FRAME_IS_PUSHED_OUT_OF_FLOW);
+      }
+    }
+  }
+
+  if (aPullKind == PullKind::All) {
+    // We are told to pull every frame from aContinuation. Move aContinuation's
+    // pushed child list by appending into our pushed child list.
+    nsFrameList pushedFrames = absCB->StealPushedChildList();
+    if (pushedFrames.NotEmpty()) {
+      mPushedAbsoluteFrames.AppendFrames(aDelegatingFrame,
+                                         std::move(pushedFrames));
+    }
+  }
+}
+
 bool AbsoluteContainingBlock::PrepareAbsoluteFrames(
-    nsContainerFrame* aDelegatingFrame) {
+    nsContainerFrame* aDelegatingFrame, PrepareReason aReason) {
   if (const nsIFrame* prev =
           GetFirstContinuationInPrevFragmentainer(aDelegatingFrame)) {
     AbsoluteContainingBlock* prevAbsCB = prev->GetAbsoluteContainingBlock();
@@ -272,27 +357,6 @@ bool AbsoluteContainingBlock::PrepareAbsoluteFrames(
     if (pushedFrames.NotEmpty()) {
       mAbsoluteFrames.InsertFrames(aDelegatingFrame, nullptr,
                                    std::move(pushedFrames));
-
-      // After stealing children from the previous absCB, traverse our children
-      // and see if any child has a prev-in-flow that is also in our child list.
-      // If so, we insert them at the front of our pushed child list.
-      nsFrameList newPushedAbsoluteFrames;
-      for (auto iter = mAbsoluteFrames.begin();
-           iter != mAbsoluteFrames.end();) {
-        // Advance the iterator first, so it's safe to move |child|.
-        nsIFrame* const child = *iter++;
-        nsIFrame* const childPrevInFlow = child->GetPrevInFlow();
-        if (childPrevInFlow &&
-            childPrevInFlow->GetParent() == aDelegatingFrame) {
-          mAbsoluteFrames.RemoveFrame(child);
-          newPushedAbsoluteFrames.AppendFrame(nullptr, child);
-        }
-      }
-      if (newPushedAbsoluteFrames.NotEmpty()) {
-        // Prepend the new pushed frames to the front of mPushedAbsoluteFrames.
-        mPushedAbsoluteFrames.InsertFrames(nullptr, nullptr,
-                                           std::move(newPushedAbsoluteFrames));
-      }
     }
   }
 
@@ -301,28 +365,67 @@ bool AbsoluteContainingBlock::PrepareAbsoluteFrames(
   // our child list.
   DrainPushedChildList(aDelegatingFrame);
 
+  // After column balancing chooses a larger column height, inline continuations
+  // that hold abspos children in a later column may be moved into the current
+  // fragmentainer. Reparent those abspos children under us (the first
+  // continuation in the fragmentainer) so that the rest of the
+  // same-fragmentainer continuations don't have any abspos children. We enforce
+  // this invariant in SanityCheckChildLists().
+  //
+  // Under PrepareReason::Destroy, walk past the fragmentainer boundary as well,
+  // to reparent the abspos children in later fragmentainers under us. This is
+  // to prevent them from being destroyed along with their containing blocks.
+  if (StaticPrefs::layout_abspos_fragment_aware_inline_cb_enabled() &&
+      aDelegatingFrame->IsInlineFrameOrSubclass() &&
+      IsFirstInlineContinuationInFragmentainer(aDelegatingFrame)) {
+    const nsBlockFrame* myBlock =
+        nsLayoutUtils::FindNearestBlockAncestor(aDelegatingFrame);
+    const bool stopAtFragmentainerBoundary = aReason == PrepareReason::Reflow;
+    for (nsIFrame* next = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(
+             aDelegatingFrame);
+         next;
+         next = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(next)) {
+      if (next->IsBlockFrameOrSubclass()) {
+        // Skip IB-split block siblings.
+        continue;
+      }
+      if (stopAtFragmentainerBoundary &&
+          nsLayoutUtils::FindNearestBlockAncestor(next) != myBlock) {
+        // Reached a continuation in a later fragmentainer.
+        break;
+      }
+      PullAbsoluteFramesFrom(aDelegatingFrame, next, PullKind::All);
+    }
+  }
+
   // Steal absolute frame's first-in-flow from the child list of our
   // continuations that appear as the first continuation in each fragmentainer.
   for (nsIFrame* next =
            GetFirstContinuationInNextFragmentainer(aDelegatingFrame);
        next; next = GetFirstContinuationInNextFragmentainer(next)) {
-    AbsoluteContainingBlock* nextAbsCB = next->GetAbsoluteContainingBlock();
-    MOZ_ASSERT(nextAbsCB,
-               "If this delegating frame has an absCB, |next| must "
-               "have one, too!");
+    PullAbsoluteFramesFrom(aDelegatingFrame, next, PullKind::FirstInFlows);
+  }
 
-    nextAbsCB->DrainPushedChildList(next);
-
-    for (auto iter = nextAbsCB->GetChildList().begin();
-         iter != nextAbsCB->GetChildList().end();) {
-      // Advance the iterator first, so it's safe to move |child|.
-      nsIFrame* const child = *iter++;
-      if (!child->GetPrevInFlow()) {
-        nextAbsCB->StealFrame(child);
-        mAbsoluteFrames.AppendFrame(aDelegatingFrame, child);
-        child->RemoveStateBits(NS_FRAME_IS_PUSHED_OUT_OF_FLOW);
-      }
+  // The steps above may leave more than one continuation of the same abspos
+  // frame in our child list. Ensure at most one continuation of each abspos
+  // frame remains in our child list by pushing the rest to our pushed child
+  // list.
+  nsFrameList newPushedAbsoluteFrames;
+  for (auto iter = mAbsoluteFrames.begin(); iter != mAbsoluteFrames.end();) {
+    // Advance the iterator first, so it's safe to move |child|.
+    nsIFrame* const child = *iter++;
+    nsIFrame* const childPrevInFlow = child->GetPrevInFlow();
+    if (childPrevInFlow && childPrevInFlow->GetParent() == aDelegatingFrame) {
+      mAbsoluteFrames.RemoveFrame(child);
+      newPushedAbsoluteFrames.AppendFrame(nullptr, child);
     }
+  }
+  if (newPushedAbsoluteFrames.NotEmpty()) {
+    // These new pushed frames have continuations already in our child list,
+    // preceding anything already deferred to a later containing block
+    // continuation. Prepend to keep mPushedAbsoluteFrames in order.
+    mPushedAbsoluteFrames.InsertFrames(nullptr, nullptr,
+                                       std::move(newPushedAbsoluteFrames));
   }
 
   return HasAbsoluteFrames();
@@ -336,8 +439,21 @@ void AbsoluteContainingBlock::StealFrame(nsIFrame* aFrame) {
 }
 
 #ifdef DEBUG
-void AbsoluteContainingBlock::SanityCheckChildListsBeforeReflow(
+void AbsoluteContainingBlock::SanityCheckChildLists(
     const nsIFrame* aDelegatingFrame) const {
+  if (StaticPrefs::layout_abspos_fragment_aware_inline_cb_enabled() &&
+      aDelegatingFrame->IsInlineFrameOrSubclass() &&
+      !IsFirstInlineContinuationInFragmentainer(aDelegatingFrame)) {
+    // Only the first inline continuation in a fragmentainer serves as the
+    // abspos containing block.
+    MOZ_ASSERT(GetChildList().IsEmpty(),
+               "A non-first inline continuation in a fragmentainer should not "
+               "have any abspos children in the child list!");
+    MOZ_ASSERT(GetPushedChildList().IsEmpty(),
+               "A non-first inline continuation in a fragmentainer should not "
+               "have any abspos children in the pushed child list!");
+  }
+
   // TODO(TYLin): This is potentially O(N^2), where N is the number of
   // continuations that an abspos frame gets. Consider putting this behind an
   // about:config pref if it turns out to slow down debug builds too much.
@@ -476,6 +592,7 @@ static AnchorPosResolutionCache PopulateAnchorResolutionCache(
     const nsIFrame* aKidFrame, AnchorPosReferenceData* aData,
     bool aReuseUnfragmentedAnchorPosReferences) {
   MOZ_ASSERT(aKidFrame->HasAnchorPosReference());
+  aData->mFrameTreeDepth = aKidFrame->GetDepthInFrameTree();
   if (aReuseUnfragmentedAnchorPosReferences) [[unlikely]] {
     MOZ_ASSERT(
         aKidFrame->FirstInFlow()->HasProperty(UnfragmentedPositionProperty()));
@@ -486,7 +603,7 @@ static AnchorPosResolutionCache PopulateAnchorResolutionCache(
       const auto* presShell = aKidFrame->PresShell();
       cache.mAnchor = presShell->GetAnchorPosAnchor(
           ScopedNameRef{aData->mDefaultAnchorName, aData->mAnchorTreeScope},
-          aKidFrame->FirstInFlow());
+          aKidFrame->FirstInFlow(), aData->mFrameTreeDepth);
       MOZ_ASSERT(cache.mAnchor);
       cache.mScrollContainer =
           AnchorPositioningUtils::GetNearestScrollFrame(cache.mAnchor)
@@ -605,7 +722,7 @@ static ModifiedContainingBlock ComputeContainingBlock(
     if (const auto positionArea = aKidFrame->StylePosition()->mPositionArea;
         !positionArea.IsNone()) {
       return ModifiedContainingBlock{
-          referenceData->mDefaultScrollShift,
+          referenceData->AppliedScrollShift(),
           AnchorPositioningUtils::PhysicalizePositionArea(positionArea,
                                                           aKidFrame),
           referenceData->mOriginalContainingBlockRect,
@@ -734,7 +851,7 @@ void AbsoluteContainingBlock::Reflow(nsContainerFrame* aDelegatingFrame,
           : nullptr;
 
 #ifdef DEBUG
-  SanityCheckChildListsBeforeReflow(aDelegatingFrame);
+  SanityCheckChildLists(aDelegatingFrame);
 #endif
 
   if (const nsIFrame* prev =
@@ -778,11 +895,18 @@ void AbsoluteContainingBlock::Reflow(nsContainerFrame* aDelegatingFrame,
         reuseUnfragmentedAnchorPosReferences = true;
       }
       if (!referenceData) {
-        referenceData = kidFrame->SetOrUpdateDeletableProperty(
+        referenceData = kidFrame->GetOrCreateDeletableProperty(
             nsIFrame::AnchorPosReferences());
+        referenceData->Reset();
       }
       anchorPosResolutionCache = Some(PopulateAnchorResolutionCache(
           kidFrame, referenceData, reuseUnfragmentedAnchorPosReferences));
+      // PopulateAnchorResolutionCache() resolves the default anchor, so we can
+      // now tell if the remembered scroll offset is obsolete. The default
+      // anchor can change without a fallback change (e.g. the frame has no
+      // position fallbacks), in which case TriggerFallbackReflow() won't update
+      // the remembered scroll offset, so we forget it here.
+      referenceData->ForgetRememberedScrollOffsetIfDefaultAnchorChanged();
     } else {
       kidFrame->RemoveProperty(nsIFrame::AnchorPosReferences());
     }
@@ -818,7 +942,6 @@ void AbsoluteContainingBlock::Reflow(nsContainerFrame* aDelegatingFrame,
         }
       }
 
-      OverflowAreas kidOverflowAreas;
       nsReflowStatus kidStatus;
       if (!kidFrameNeedsPush) {
         ReflowAbsoluteFrame(aDelegatingFrame, aPresContext, aReflowInput,
@@ -884,8 +1007,9 @@ void AbsoluteContainingBlock::Reflow(nsContainerFrame* aDelegatingFrame,
                           ->CreateContinuingFrame(kidFrame, aDelegatingFrame);
           nextFrame->AddStateBits(NS_FRAME_IS_PUSHED_OUT_OF_FLOW);
           newPushedAbsoluteFrames.AppendFrame(nullptr, nextFrame);
-        } else if (nextFrame->GetParent() !=
-                   aDelegatingFrame->GetNextInFlow()) {
+        } else if (nextFrame->GetParent() != aDelegatingFrame &&
+                   nextFrame->GetParent() !=
+                       aDelegatingFrame->GetNextInFlow()) {
           nextFrame->GetParent()->GetAbsoluteContainingBlock()->StealFrame(
               nextFrame);
           // nextFrame is in a later absCB continuation. To keep the
@@ -942,6 +1066,10 @@ void AbsoluteContainingBlock::Reflow(nsContainerFrame* aDelegatingFrame,
     aReflowStatus.SetOverflowIncomplete();
     aReflowStatus.SetNextInFlowNeedsReflow();
   }
+
+#ifdef DEBUG
+  SanityCheckChildLists(aDelegatingFrame);
+#endif
 }
 
 static inline bool IsFixedPaddingSize(const LengthPercentage& aCoord) {
@@ -1654,8 +1782,8 @@ void AbsoluteContainingBlock::ReflowAbsoluteFrame(
   if (nsBlockFrame::gNoisyReflow) {
     nsIFrame::IndentBy(stdout, nsBlockFrame::gNoiseIndent);
     fmt::println("abspos {}: begin reflow: availSize={}, orig cbRect={}",
-                 aKidFrame->ListTag(), ToString(aReflowInput.AvailableSize()),
-                 ToString(aContainingBlockRects.mLocal));
+                 aKidFrame->ListTag(), aReflowInput.AvailableSize(),
+                 aContainingBlockRects.mLocal);
   }
   AutoNoisyIndenter indent(nsBlockFrame::gNoisy);
 #endif  // DEBUG
@@ -2147,8 +2275,10 @@ void AbsoluteContainingBlock::ReflowAbsoluteFrame(
             aAnchorPosResolutionCache->mDefaultAnchorCache);
       }();
       if (aAnchorPosResolutionCache) {
-        aAnchorPosResolutionCache->mReferenceData->mDefaultScrollShift =
-            scrollShift;
+        auto* referenceData = aAnchorPosResolutionCache->mReferenceData;
+        const auto& remembered = referenceData->mRememberedScrollOffset;
+        referenceData->mDefaultScrollShift =
+            remembered ? scrollShift - remembered->mOffset : scrollShift;
       }
       r -= scrollShift;
       aKidFrame->SetRect(r);
@@ -2174,24 +2304,16 @@ void AbsoluteContainingBlock::ReflowAbsoluteFrame(
     // containing-block, see:
     // https://drafts.csswg.org/css-anchor-position-1/#fallback-apply
     const auto fits = aStatus.IsComplete() && FitsInContainingBlock();
+    // If the position-try-order is normal and the base style fits, we
+    // can skip the comparison of other styles. However, if position-try-order
+    // is anything other than normal, we have to check all the styles in that
+    // order including the base style.
     if (fallbacks.IsEmpty() || finalizing ||
-        (fits && (tryOrder == StylePositionTryOrder::Normal ||
-                  currentFallbackIndex == firstTryIndex))) {
+        (fits && tryOrder == StylePositionTryOrder::Normal)) {
       // We completed the reflow - Either we had a fallback that fit, or we
       // didn't have any to try in the first place.
       isOverflowingCB = !fits;
       fallback.CommitCurrentFallback();
-      if (currentFallbackIndex.isNothing()) {
-        if (auto* prop = aKidFrame->GetProperty(
-                nsIFrame::LastSuccessfulPositionFallback())) {
-          // When the fallback list changes, we clear the recorded fallback data
-          // as per spec, so we shouldn't get there in this case.
-          MOZ_ASSERT(!fallbacks.IsEmpty(), "how?");
-          prop->mLastIndex.reset();
-          prop->mLastStyle = nullptr;
-          prop->mTriedAllFallbacks = isOverflowingCB;
-        }
-      }
       break;
     }
 
@@ -2280,11 +2402,14 @@ void AbsoluteContainingBlock::ReflowAbsoluteFrame(
     }
   }();
 
-  if (currentFallbackIndex) {
-    auto* lastSuccessfulPosition = aKidFrame->GetOrCreateDeletableProperty(
-        nsIFrame::LastSuccessfulPositionFallback());
-    // NOTE: We don't touch the last recorded index, that's done at resize
-    // observer time.
+  // NOTE: We don't touch the last recorded index, that's done at resize
+  // observer time.
+  auto* lastSuccessfulPosition =
+      currentFallbackIndex
+          ? aKidFrame->GetOrCreateDeletableProperty(
+                nsIFrame::LastSuccessfulPositionFallback())
+          : aKidFrame->GetProperty(nsIFrame::LastSuccessfulPositionFallback());
+  if (lastSuccessfulPosition) {
     lastSuccessfulPosition->mLastIndex = currentFallbackIndex;
     lastSuccessfulPosition->mLastStyle = std::move(currentFallbackStyle);
     lastSuccessfulPosition->mTriedAllFallbacks = isOverflowingCB;
@@ -2293,8 +2418,8 @@ void AbsoluteContainingBlock::ReflowAbsoluteFrame(
 #ifdef DEBUG
   if (nsBlockFrame::gNoisyReflow) {
     nsIFrame::IndentBy(stdout, nsBlockFrame::gNoiseIndent - 1);
-    fmt::println("abspos {}: rect {}", aKidFrame->ListTag().get(),
-                 ToString(aKidFrame->GetRect()));
+    fmt::println("abspos {}: rect {}", aKidFrame->ListTag(),
+                 aKidFrame->GetRect());
   }
 #endif
   // If author asked for `position-visibility: no-overflow` and we overflow

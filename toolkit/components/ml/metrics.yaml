@@ -74,8 +74,10 @@ firefox.ai.runtime:
       Records a successful engine creation within a tracked flow
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1997016
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
     data_reviews:
       - https://phabricator.services.mozilla.com/D270909
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
     data_sensitivity:
       - interaction
     notification_emails:
@@ -83,6 +85,12 @@ firefox.ai.runtime:
     expires: never
     extra_keys:
       flow_id: *flow_id
+      host_process: &host_process
+        description: >
+          The process serving the engine: "inference" for the content
+          inference process, "hwinference" for the HWInference utility
+          process.
+        type: string
       engineId:
         type: string
         description: >
@@ -131,9 +139,11 @@ firefox.ai.runtime:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1891685
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1997016
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
     data_reviews:
       - https://phabricator.services.mozilla.com/D238583
       - https://phabricator.services.mozilla.com/D270909
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
     data_sensitivity:
       - interaction
     notification_emails:
@@ -141,6 +151,7 @@ firefox.ai.runtime:
     expires: never
     extra_keys:
       flow_id: *flow_id
+      host_process: *host_process
       modelId:
         type: string
         description: model id
@@ -164,9 +175,11 @@ firefox.ai.runtime:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1891685
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1997016
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
     data_reviews:
       - https://phabricator.services.mozilla.com/D238583
       - https://phabricator.services.mozilla.com/D270909
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
     data_sensitivity:
       - interaction
     notification_emails:
@@ -174,6 +187,7 @@ firefox.ai.runtime:
     expires: never
     extra_keys:
       flow_id: *flow_id
+      host_process: *host_process
       modelId:
         type: string
         description: model id
@@ -193,8 +207,10 @@ firefox.ai.runtime:
       Records a successful inference run within a tracked flow
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1997016
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
     data_reviews:
       - https://phabricator.services.mozilla.com/D270909
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
     data_sensitivity:
       - interaction
     notification_emails:
@@ -202,6 +218,7 @@ firefox.ai.runtime:
     expires: never
     extra_keys:
       flow_id: *flow_id
+      host_process: *host_process
       tokenizing_time:
         type: quantity
         description: >
@@ -258,6 +275,7 @@ firefox.ai.runtime:
       A model is downloaded
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1891685
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2015825
     data_reviews:
       - https://phabricator.services.mozilla.com/D238583
     data_sensitivity:
@@ -279,10 +297,16 @@ firefox.ai.runtime:
         type: string
         description: model id
       step:
-        description: start / cancel / error / complete
+        description: >
+          One of start_download, start_file_download,
+          end_file_download_success, end_file_download_failed,
+          end_download_success, end_download_failed.
         type: string
       duration:
-        description: how long it took to reach the step from start
+        description: >
+          Milliseconds elapsed to reach the step from its start. For
+          end_file_download_* this is the time to download a single file; for
+          end_download_* this is the total time to download the whole model.
         type: quantity
       when:
         description: when the event was recorded
@@ -327,6 +351,7 @@ firefox.ai.runtime:
       The performance and memory characteristics of a single run of the inference engine.
     extra_keys:
       flow_id: *flow_id
+      host_process: *host_process
       cpu_milliseconds:
         description: The combined milliseconds of every cpu core that was running.
         type: quantity
@@ -359,12 +384,30 @@ firefox.ai.runtime:
           e.g. Xenova/all-MiniLM-L6-v2
       backend:
         type: string
-        description: The backend that is being used, e.g. onnx, onnx-native, wllama
+        description: The backend that is being used, e.g. onnx, onnx-native, llama.cpp
+      backend_source_revision:
+        type: string
+        description: >
+          Version identifier of the backend library. Populated per-backend when
+          the running library exposes a version; null otherwise.
       token_count:
         description: The number of tokens generated for text generation tasks.
         type: quantity
       character_count:
         description: The number of characters generated for text generation tasks.
+        type: quantity
+      time_to_first_chunk:
+        description: >
+          Milliseconds from the run request being dispatched until the first
+          generated (non-prompt) chunk is received by the consumer. Measured in
+          the parent process end-to-end, so it includes IPC and streaming
+          overhead, and is populated for all streaming backends.
+        type: quantity
+      average_chunk_time:
+        description: >
+          The mean milliseconds elapsed between consecutive generated
+          (non-prompt) chunks for a streamed text generation run. Null when
+          fewer than two generated chunks were produced.
         type: quantity
       system_memory_mb:
         description: The total physical system memory in MB.
@@ -373,9 +416,14 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1992779
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1997016
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2029250
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2016214
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2047026
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1992779
       - https://phabricator.services.mozilla.com/D270909
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2016214
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
     data_sensitivity:
       - interaction
     notification_emails:

@@ -95,6 +95,7 @@ Function PrepareTelemetryPing
     nsJSON::Set /tree ping "Data" "distribution_version" /value '"0"'
   ${EndIf}
 
+  ClearErrors
   ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "UBR"
   ${If} ${Errors}
     StrCpy $0 "-1" ; Assign -1 if an error occured during registry read
@@ -102,6 +103,7 @@ Function PrepareTelemetryPing
 
   nsJSON::Set /tree ping "Data" "windows_ubr" /value '$0'
 
+  ClearErrors
   ${GetParameters} $0
   ${GetOptions} $0 "/LaunchedFromMSI" $0
   ${IfNot} ${Errors}
@@ -157,6 +159,9 @@ Function PrepareTelemetryPing
       ${EndIf}
     ${EndIf}
   ${EndIf}
+
+  nsJSON::Set /tree ping "Data" "notification_helper_stop_exit_code" \
+    /value '"$NotificationHelperStopExitCode"'
 
   ; $PostSigningData should only be empty if we didn't try to copy the
   ; postSigningData file at all. If we did try and the file was missing

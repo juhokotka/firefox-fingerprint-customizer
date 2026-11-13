@@ -1053,7 +1053,6 @@ class Toolbox extends EventEmitter {
       this.#buildInitialPanelDefinitions();
       this.#setDebugTargetData();
 
-      this.#addWindowListeners();
       this.#addChromeEventHandlerEvents();
 
       // Get the tab bar of the ToolboxController to attach the "keypress" event listener to.
@@ -1158,6 +1157,10 @@ class Toolbox extends EventEmitter {
       if (this.#descriptorFront.isLocalTab) {
         await lazy.LocalModeMappings.setup(this);
       }
+
+      // The requestIdleCallback in this method may not have run yet, and
+      // consumers expect a usable toolbar once the toolbox is open.
+      this.component?.setCanRender();
 
       this.emit("ready");
       this.#resolveIsOpen();
@@ -1291,12 +1294,11 @@ class Toolbox extends EventEmitter {
   #addShortcuts() {
     // Create shortcuts instance for the toolbox
     if (!this.shortcuts) {
-      this.shortcuts = new KeyShortcuts({
-        window: this.doc.defaultView,
+      this.shortcuts = new KeyShortcuts(
         // The toolbox key shortcuts should be triggered from any frame in DevTools.
         // Use the chromeEventHandler as the target to catch events from all frames.
-        target: this.getChromeEventHandler(),
-      });
+        this.getChromeEventHandler()
+      );
     }
 
     // Listen for the shortcut key to show the frame list
@@ -1413,12 +1415,11 @@ class Toolbox extends EventEmitter {
     }
 
     if (!this.#windowHostShortcuts) {
-      this.#windowHostShortcuts = new KeyShortcuts({
-        window: this.win,
+      this.#windowHostShortcuts = new KeyShortcuts(
         // The window host key shortcuts should be triggered from any frame in DevTools.
         // Use the chromeEventHandler as the target to catch events from all frames.
-        target: this.getChromeEventHandler(),
-      });
+        this.getChromeEventHandler()
+      );
     }
 
     const shortcuts = this.#windowHostShortcuts;
@@ -2000,12 +2001,14 @@ class Toolbox extends EventEmitter {
   postMessage(msg) {
     // We sometime try to send messages in middle of destroy(), where the
     // toolbox iframe may already be detached.
-    if (!this.#destroyer) {
-      // Toolbox document is still chrome and disallow identifying message
-      // origin via event.source as it is null. So use a custom id.
-      msg.frameId = this.frameId;
-      this.topWindow.postMessage(msg, "*");
+    if (this.#destroyer) {
+      return;
     }
+
+    // Toolbox document is still chrome and disallow identifying message
+    // origin via event.source as it is null. So use a custom id.
+    msg.frameId = this.frameId;
+    this.topWindow.postMessage(msg, "*");
   }
 
   /**
@@ -2077,6 +2080,10 @@ class Toolbox extends EventEmitter {
         this.#URL
       );
     });
+
+    // We have to wait for the document to be loaded, otherwise we may receive
+    // unexpected "unload" events.
+    this.#addWindowListeners();
 
     // Setup the Toolbox Browser Loader, used to load React component modules
     // which expect to be loaded with toolbox.xhtml document as global scope.
@@ -2470,30 +2477,6 @@ class Toolbox extends EventEmitter {
     await this.commands.threadConfigurationCommand.updateConfiguration(
       threadConfiguration
     );
-
-    // @backward-compat { version 153 } Fx 153 unified the two following pref into a unique one.
-    // Migrate the value from old profiles.
-    const requestBodyLimit = Services.prefs.getIntPref(
-      "devtools.netmonitor.requestBodyLimit",
-      1048576
-    );
-    const responseBodyLimit = Services.prefs.getIntPref(
-      "devtools.netmonitor.responseBodyLimit",
-      1048576
-    );
-    if (responseBodyLimit != 1048576) {
-      Services.prefs.setIntPref(
-        "devtools.netmonitor.bodyLimit",
-        responseBodyLimit
-      );
-    } else if (requestBodyLimit != 1048576) {
-      Services.prefs.setIntPref(
-        "devtools.netmonitor.bodyLimit",
-        requestBodyLimit
-      );
-    }
-    Services.prefs.clearUserPref("devtools.netmonitor.requestBodyLimit");
-    Services.prefs.clearUserPref("devtools.netmonitor.responseBodyLimit");
   }
 
   /**
@@ -2551,19 +2534,12 @@ class Toolbox extends EventEmitter {
    *        page is going to navigate
    */
   updateToolboxButtonsVisibility({ fromWillNavigate = false } = {}) {
-    const inspectorFront = this.target.getCachedFront("inspector");
-
     let toggledHighlighters = false;
     for (const button of this.toolbarButtons) {
       button.isVisible = this.#commandIsVisible(button);
 
       // We want to hide highlighters when the toolbox button is disabled from the options panel
-      if (
-        inspectorFront &&
-        button.highlighterTypes &&
-        !button.isVisible &&
-        button.isChecked
-      ) {
+      if (button.highlighterTypes && !button.isVisible && button.isChecked) {
         button.onClick({});
         toggledHighlighters = true;
       }
@@ -3813,6 +3789,9 @@ class Toolbox extends EventEmitter {
     if (frameInfo.targetFront) {
       const inspectorFront = await frameInfo.targetFront.getFront("inspector");
       nodeFront = await inspectorFront.walker.documentElement();
+      if (!nodeFront) {
+        return null;
+      }
     } else {
       const inspectorFront = await this.target.getFront("inspector");
       nodeFront = await inspectorFront.walker.getNodeActorFromWindowID(
@@ -4769,9 +4748,10 @@ class Toolbox extends EventEmitter {
 
     // Instead view the stylesheet in the debugger since the pref is enabled
     if (Services.prefs.getBoolPref(DEVTOOLS_STYLESHEETS_IN_DEBUGGER)) {
+      Glean.devtoolsDebuggerStylesheets.linksOpenedInDebuggerCount.add(1);
       return viewSource.viewSourceInDebugger(this, url, line, column, null);
     }
-
+    Glean.devtoolsStyleeditorStylesheets.linksOpenedInStyleEditorCount.add(1);
     return viewSource.viewSourceInStyleEditor(this, url, line, column);
   }
 
@@ -4798,6 +4778,7 @@ class Toolbox extends EventEmitter {
 
     // Instead view the stylesheet in the debugger since the pref is enabled
     if (Services.prefs.getBoolPref(DEVTOOLS_STYLESHEETS_IN_DEBUGGER)) {
+      Glean.devtoolsDebuggerStylesheets.linksOpenedInDebuggerCount.add(1);
       return viewSource.viewSourceInDebugger(
         this,
         stylesheetResource.href,
@@ -4806,7 +4787,7 @@ class Toolbox extends EventEmitter {
         stylesheetResource.resourceId
       );
     }
-
+    Glean.devtoolsStyleeditorStylesheets.linksOpenedInStyleEditorCount.add(1);
     return viewSource.viewSourceInStyleEditor(
       this,
       stylesheetResource,
@@ -4996,7 +4977,7 @@ class Toolbox extends EventEmitter {
    * and emit a "webextension-registered" event to allow toolbox-options.js
    * to refresh the listed tools accordingly.
    *
-   * @see browser/components/extensions/ext-devtools.js
+   * @see browser/components/extensions/parent/ext-devtools.js
    */
   registerWebExtension(extensionUUID, { name, pref }) {
     // Ensure that an installed extension (active in the AddonManager) which
@@ -5012,7 +4993,7 @@ class Toolbox extends EventEmitter {
    * name), and emit a "webextension-unregistered" event to allow toolbox-options.js
    * to refresh the listed tools accordingly.
    *
-   * @see browser/components/extensions/ext-devtools.js
+   * @see browser/components/extensions/parent/ext-devtools.js
    */
   unregisterWebExtension(extensionUUID) {
     // Ensure that an extension that has been disabled/uninstalled from the AddonManager
@@ -5026,7 +5007,7 @@ class Toolbox extends EventEmitter {
    * as active for the toolbox and has its related devtools about:config preference set
    * to true.
    *
-   * @see browser/components/extensions/ext-devtools.js
+   * @see browser/components/extensions/parent/ext-devtools.js
    */
   isWebExtensionEnabled(extensionUUID) {
     const extInfo = this.#webExtensions.get(extensionUUID);

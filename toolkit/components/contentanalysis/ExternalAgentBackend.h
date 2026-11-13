@@ -57,6 +57,13 @@ class ExternalAgentBackend final : public ContentAnalysisBackend {
  protected:
   ~ExternalAgentBackend() override;
 
+  // Adds the print data / file path / text content to the base class's
+  // conversion: ExternalAgentBackend is the only backend that needs these
+  // inline in the protobuf it sends.
+  nsresult ConvertRequestToProtobuf(
+      nsIContentAnalysisRequest* aRequest,
+      content_analysis::sdk::ContentAnalysisRequest* aOut) override;
+
  private:
   // Only call this through CreateClientIfNecessary(), as it provides
   // synchronization to avoid doing this multiple times at once.
@@ -115,14 +122,6 @@ class ExternalAgentBackend final : public ContentAnalysisBackend {
   };
   DataMutex<nsTHashMap<nsCString, UniquePtr<BasicRequestInfo>>>
       mRequestTokenToBasicRequestInfoMap;
-
-  // Build a framework ContentAnalysisResponse from an SDK protobuf. Returns
-  // nullptr if the SDK response could not be interpreted (e.g. a result has a
-  // non-SUCCESS status). Lives here rather than on ContentAnalysisResponse so
-  // the framework class stays free of SDK types in its public surface.
-  static already_AddRefed<ContentAnalysisResponse> ConvertResponseFromProtobuf(
-      content_analysis::sdk::ContentAnalysisResponse&& aResponse,
-      const nsCString& aUserActionId);
 
   // Safe to call from any thread; goes through the XPCOM service lookup.
   static bool IsContentAnalysisShutDown();

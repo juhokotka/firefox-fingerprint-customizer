@@ -12,16 +12,44 @@ const { MESSAGE_ROLE } = ChromeUtils.importESModule(
 const { Chat } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/Chat.sys.mjs"
 );
+const { Conversation } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/models/Conversation.sys.mjs"
+);
 const { MemoryStore } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs"
 );
-const { MODEL_FEATURES, SERVICE_TYPES, PURPOSES } = ChromeUtils.importESModule(
-  "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs"
-);
+const { FEATURE_MAJOR_VERSIONS, MODEL_FEATURES, SERVICE_TYPES, PURPOSES } =
+  ChromeUtils.importESModule(
+    "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs"
+  );
 
 const { PlacesTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/PlacesTestUtils.sys.mjs"
 );
+const { AIWindowTestUtils, MockEngineManager } = ChromeUtils.importESModule(
+  "resource://testing-common/AIWindowTestUtils.sys.mjs"
+);
+const { AIWindowUI } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/ui/modules/AIWindowUI.sys.mjs"
+);
+const { AITabStore } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/ui/modules/AITabStore.sys.mjs"
+);
+const { IntentClassifier } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/models/IntentClassifier.sys.mjs"
+);
+const { GET_PAGE_CONTENT } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/models/Tools.sys.mjs"
+);
+const { _setRemoteClientForTesting, _clearRemoteClientForTesting } =
+  ChromeUtils.importESModule(
+    "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs"
+  );
+const { _setLoadPromptForTesting } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/ui/modules/ChatConversation.sys.mjs"
+);
+
+AIWindowTestUtils.init(this, window);
 
 const TEST_MODEL = "test-model";
 
@@ -492,5 +520,332 @@ add_task(async function test_chat_tool_call_get_user_memories() {
     for (const memory of postTestMemories) {
       await MemoryStore.hardDeleteMemory(memory.id);
     }
+  }
+});
+
+// End-to-end check that inference parameters actually reach the model request.
+// Uses the real engine + a real local server (withServer), and asserts against
+// the parsed body the server received:
+//   1. params configured on the conversation (e.g. from the RS model config),
+//   2. response_format,
+//   3. tool_choice.
+add_task(async function test_run_forwards_params_to_model_request() {
+  const requests = [];
+  await withServer(
+    {
+      streamChunks: ["ok"],
+      onRequest: body => requests.push(body),
+    },
+    async () => {
+      const engine = await openAIEngine.build({
+        model: TEST_MODEL,
+        serviceType: SERVICE_TYPES.AI,
+        purpose: PURPOSES.CHAT,
+        flowId: null,
+        feature: MODEL_FEATURES.CHAT,
+      });
+
+      const conversation = new Conversation({
+        engine,
+        parameters: { temperature: 0.42, top_p: 0.9 },
+      });
+      conversation.setSystemMessage("system");
+      conversation.addUserMessage("hello");
+
+      const responseFormat = {
+        type: "json_schema",
+        json_schema: {
+          name: "Test",
+          strict: false,
+          schema: { type: "object" },
+        },
+      };
+
+      const generator = conversation.runWithGenerator({
+        streamOptions: { enabled: true },
+        inferenceParams: {
+          tool_choice: "auto",
+          response_format: responseFormat,
+        },
+      });
+      // eslint-disable-next-line no-unused-vars
+      for await (const _chunk of generator) {
+        // Drain the stream so the request completes.
+      }
+
+      Assert.equal(requests.length, 1, "One request reached the model");
+      const body = requests[0];
+
+      // (1) conversation.parameters reach the request.
+      Assert.equal(
+        body.temperature,
+        0.42,
+        "temperature from conversation.parameters reaches the request"
+      );
+      Assert.equal(
+        body.top_p,
+        0.9,
+        "top_p from conversation.parameters reaches the request"
+      );
+
+      // (2) response_format reaches the request.
+      Assert.deepEqual(
+        body.response_format,
+        responseFormat,
+        "response_format reaches the request"
+      );
+
+      // (3) tool_choice reaches the request.
+      Assert.equal(body.tool_choice, "auto", "tool_choice reaches the request");
+    }
+  );
+});
+
+async function setupSmartPageChatEnvironment() {
+  const version = feature => `v${FEATURE_MAJOR_VERSIONS[feature]}.0`;
+  const records = [
+    MODEL_FEATURES.CHAT,
+    MODEL_FEATURES.TITLE_GENERATION,
+    MODEL_FEATURES.CONVERSATION_STARTERS_SIDEBAR_SYSTEM,
+    MODEL_FEATURES.CONVERSATION_SUGGESTIONS_SIDEBAR_STARTER,
+    MODEL_FEATURES.CONVERSATION_SUGGESTIONS_ASSISTANT_LIMITATIONS,
+  ].map(feature => ({
+    feature,
+    model: feature === MODEL_FEATURES.CHAT ? "generic" : "test-model",
+    service_type: "ai",
+    parameters: {},
+    prompts:
+      feature === MODEL_FEATURES.CONVERSATION_SUGGESTIONS_SIDEBAR_STARTER
+        ? "Generate {n} prompts for {current_tab}.\nOpen tabs: {open_tabs}"
+        : "Test system prompt.",
+    version: version(feature),
+    is_default: true,
+  }));
+  records.push({
+    kind: "params",
+    feature: MODEL_FEATURES.CHAT,
+    model: "generic",
+    model_choice_id: "0",
+    service_type: "ai",
+    purpose: "chat",
+    parameters: {},
+    version: version(MODEL_FEATURES.CHAT),
+    is_default: true,
+  });
+
+  _setRemoteClientForTesting({ get: async () => records });
+  _setLoadPromptForTesting(async () => "Test system prompt.");
+
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["browser.smartwindow.aitab.enabled", true],
+      ["browser.smartwindow.sidebar.openByDefault", false],
+      ["browser.search.suggest.enabled", false],
+      ["browser.smartwindow.firstrun.hasCompleted", true],
+      ["browser.smartwindow.chat.interactionCount", 0],
+      ["browser.smartwindow.endpoint", "http://localhost:0/v1"],
+    ],
+  });
+
+  const intentStub = sinon.stub(IntentClassifier, "_createEngine").resolves({
+    run: () => [{ label: "chat", score: 1 }],
+  });
+  return { intentStub, mockEngine: new MockEngineManager() };
+}
+
+function seedSmartPageRecord(bodyText) {
+  return AITabStore.create({
+    convId: "smartpage-browser-test",
+    slug: "test_page",
+    title: "Stored test page",
+    components: {
+      surface: {
+        components: [
+          {
+            id: "root",
+            component: "Page",
+            header: "header",
+            children: ["body"],
+          },
+          {
+            id: "header",
+            component: "Header",
+            title: "Stored test page",
+          },
+          { id: "body", component: "TextBlock", lead: bodyText },
+        ],
+        dataModel: {},
+      },
+    },
+  });
+}
+
+async function openSmartPageSidebar(win, smartPageUrl) {
+  const smartPageBrowser = win.gBrowser.selectedBrowser;
+  BrowserTestUtils.startLoadingURIString(smartPageBrowser, smartPageUrl);
+  await BrowserTestUtils.browserLoaded(smartPageBrowser, {
+    wantLoad: smartPageUrl,
+  });
+
+  // make sure the smart page is loaded
+  await SpecialPowers.spawn(smartPageBrowser, [], async () => {
+    await content.customElements.whenDefined("aitab-page");
+    const page = content.document.querySelector("aitab-page").wrappedJSObject;
+    await ContentTaskUtils.waitForCondition(
+      () => page.status != "loading",
+      "The Smart Page finishes loading"
+    );
+    Assert.equal(page.status, "ready", "The Smart Page is available");
+    await page.updateComplete;
+    await Promise.all(
+      [...page.shadowRoot.querySelectorAll("*")].map(
+        element => element.updateComplete
+      )
+    );
+  });
+
+  await BrowserTestUtils.openNewForegroundTab(
+    win.gBrowser,
+    "https://example.com/",
+    true
+  );
+  if (!AIWindowUI.isSidebarOpen(win)) {
+    AIWindowUI.toggleSidebar(win);
+  }
+  const sidebarBrowser = win.document.getElementById("ai-window-browser");
+  await BrowserTestUtils.waitForMutationCondition(
+    sidebarBrowser,
+    { attributes: true, attributeFilter: ["data-conversation-id"] },
+    () => sidebarBrowser.hasAttribute("data-conversation-id")
+  );
+  await AIWindowUI.openSidebar(win, null);
+  return sidebarBrowser;
+}
+
+async function submitSmartPageChatPrompt(sidebarBrowser, prompt) {
+  await SpecialPowers.spawn(sidebarBrowser, [prompt], async inputText => {
+    const aiWindow = content.document.querySelector("ai-window");
+    await ContentTaskUtils.waitForMutationCondition(
+      aiWindow.shadowRoot,
+      { childList: true, subtree: true },
+      () => aiWindow.shadowRoot.querySelector("#ai-window-smartbar")
+    );
+    const smartbar = aiWindow.shadowRoot.querySelector("#ai-window-smartbar");
+    const chips = smartbar.querySelector(".smartbar-context-chips-header");
+    await ContentTaskUtils.waitForMutationCondition(
+      chips.shadowRoot,
+      { childList: true, subtree: true },
+      () => chips.websites?.length === 1
+    );
+    // Remove the implicit current-tab chip so it cannot set privateData
+    // before GetPageContent runs.
+    smartbar.removeContextMention(chips.websites[0].url);
+
+    smartbar.inputField.focus();
+    EventUtils.sendString(inputText, content);
+    await smartbar.lastQueryContextPromise;
+  });
+  await AIWindowTestUtils.selectExplicitSmartbarAction(sidebarBrowser, "chat");
+  await AIWindowTestUtils.waitForSmartbarAction(sidebarBrowser, "chat");
+  await SpecialPowers.spawn(sidebarBrowser, [], async () => {
+    content.document
+      .querySelector("ai-window")
+      .shadowRoot.querySelector("#ai-window-smartbar")
+      .inputField.focus();
+    EventUtils.synthesizeKey("KEY_Enter", {}, content);
+  });
+}
+
+add_task(async function test_chat_tool_call_reads_smartpage_and_sets_flags() {
+  const smartPageUrl = "about:smartpage?page=test_page";
+  const bodyText = "Stored smart page body text.";
+  const { intentStub, mockEngine } = await setupSmartPageChatEnvironment();
+  let win;
+  let page;
+
+  try {
+    page = await seedSmartPageRecord(bodyText);
+    win = await AIWindowTestUtils.openReadyAIWindow();
+    const sidebarBrowser = await openSmartPageSidebar(win, smartPageUrl);
+    await submitSmartPageChatPrompt(
+      sidebarBrowser,
+      "Read the stored test page."
+    );
+
+    const firstTurn = await mockEngine.captureRequest({ purpose: "chat" });
+    const conversation = await TestUtils.waitForCondition(
+      () => AIWindow.getActiveConversation(win),
+      "A fresh sidebar conversation exists"
+    );
+
+    Assert.equal(
+      conversation.securityProperties.privateData,
+      false,
+      "Private data has not been read before the tool call"
+    );
+    Assert.equal(
+      conversation.securityProperties.untrustedInput,
+      false,
+      "Untrusted input has not been read before the tool call"
+    );
+
+    firstTurn.respond({
+      text: "",
+      tokens: null,
+      isPrompt: false,
+      toolCalls: [
+        {
+          id: "call_read_smartpage",
+          function: {
+            name: GET_PAGE_CONTENT,
+            arguments: JSON.stringify({ url_list: [smartPageUrl] }),
+          },
+        },
+      ],
+    });
+
+    const toolMessage = await TestUtils.waitForCondition(
+      () =>
+        conversation.messages.find(
+          message => message.role === MESSAGE_ROLE.TOOL
+        ),
+      "The tool adds a result to the sidebar conversation"
+    );
+    Assert.equal(toolMessage.content.name, GET_PAGE_CONTENT);
+    Assert.ok(
+      toolMessage.content.body[0].includes(bodyText),
+      "The tool result contains text extracted from the stored page"
+    );
+
+    const followup = await mockEngine.captureRequest({ purpose: "chat" });
+    Assert.equal(
+      conversation.securityProperties.privateData,
+      true,
+      "The chat committed the private-data flag"
+    );
+    Assert.equal(
+      conversation.securityProperties.untrustedInput,
+      true,
+      "The chat committed the untrusted-input flag"
+    );
+
+    followup.respond("I read the stored page.");
+    await mockEngine.respondTo({
+      purpose: "title-generation",
+      response: "Stored page",
+    });
+  } finally {
+    await mockEngine.rejectAllRequests();
+    mockEngine.cleanupMocks();
+    if (win) {
+      await BrowserTestUtils.closeWindow(win);
+    }
+    if (page) {
+      await AITabStore.deleteBySlug(page.slug);
+    }
+    intentStub.restore();
+    _setLoadPromptForTesting(null);
+    _clearRemoteClientForTesting();
+    await SpecialPowers.popPrefEnv();
   }
 });

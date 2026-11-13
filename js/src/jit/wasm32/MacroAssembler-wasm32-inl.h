@@ -75,6 +75,8 @@ void MacroAssembler::andPtr(Imm32 imm, Register src, Register dest) {
   MOZ_CRASH();
 }
 
+void MacroAssembler::andPtr(Imm32 imm, const Address& dest) { MOZ_CRASH(); }
+
 void MacroAssembler::and64(Imm64 imm, Register64 dest) { MOZ_CRASH(); }
 
 void MacroAssembler::or64(Imm64 imm, Register64 dest) { MOZ_CRASH(); }
@@ -178,9 +180,22 @@ void MacroAssembler::rshiftPtrArithmetic(Register shift, Register srcDest) {
 
 void MacroAssembler::lshift64(Imm32 imm, Register64 dest) { MOZ_CRASH(); }
 
+void MacroAssembler::lshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_CRASH();
+}
+
 void MacroAssembler::rshift64(Imm32 imm, Register64 dest) { MOZ_CRASH(); }
 
+void MacroAssembler::rshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_CRASH();
+}
+
 void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 dest) {
+  MOZ_CRASH();
+}
+
+void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 src,
+                                        Register64 dest) {
   MOZ_CRASH();
 }
 
@@ -270,6 +285,10 @@ void MacroAssembler::xor32(Imm32 imm, Register src, Register dest) {
 void MacroAssembler::xor32(Imm32 imm, const Address& dest) { MOZ_CRASH(); }
 
 void MacroAssembler::xor32(const Address& src, Register dest) { MOZ_CRASH(); }
+
+void MacroAssembler::nor32(Imm32 imm, Register src, Register dest) {
+  MOZ_CRASH();
+}
 
 void MacroAssembler::byteSwap16SignExtend(Register reg) { MOZ_CRASH(); }
 
@@ -899,33 +918,33 @@ void MacroAssembler::spectreMovePtr(Condition cond, Register src,
   MOZ_CRASH();
 }
 
-FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
+FaultingCodeRange MacroAssembler::storeDouble(FloatRegister src,
+                                              const Address& dest) {
+  MOZ_CRASH();
+}
+
+FaultingCodeRange MacroAssembler::storeDouble(FloatRegister src,
+                                              const BaseIndex& dest) {
+  MOZ_CRASH();
+}
+
+FaultingCodeRange MacroAssembler::storeFloat32(FloatRegister src,
                                                const Address& dest) {
   MOZ_CRASH();
 }
 
-FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
+FaultingCodeRange MacroAssembler::storeFloat32(FloatRegister src,
                                                const BaseIndex& dest) {
   MOZ_CRASH();
 }
 
-FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
-                                                const Address& dest) {
+FaultingCodeRange MacroAssembler::storeFloat16(FloatRegister src,
+                                               const Address& dest, Register) {
   MOZ_CRASH();
 }
-
-FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
-                                                const BaseIndex& dest) {
-  MOZ_CRASH();
-}
-
-FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
-                                                const Address& dest, Register) {
-  MOZ_CRASH();
-}
-FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
-                                                const BaseIndex& dest,
-                                                Register) {
+FaultingCodeRange MacroAssembler::storeFloat16(FloatRegister src,
+                                               const BaseIndex& dest,
+                                               Register) {
   MOZ_CRASH();
 }
 
@@ -1255,6 +1274,29 @@ void MacroAssembler::rotateRight64(Imm32 count, Register64 input,
 
 void MacroAssembler::rotateRight64(Register count, Register64 input,
                                    Register64 dest, Register temp) {
+  MOZ_CRASH();
+}
+
+// ===============================================================
+// Shift or rotate, then combine with another register
+
+void MacroAssembler::lshift32ThenAdd(Imm32 shift, Register rhs,
+                                     Register srcDest) {
+  MOZ_CRASH();
+}
+
+void MacroAssembler::lshift32ThenOr(Imm32 shift, Register rhs,
+                                    Register srcDest) {
+  MOZ_CRASH();
+}
+
+void MacroAssembler::rshiftPtrThenXor(Imm32 shift, Register rhs,
+                                      Register srcDest) {
+  MOZ_CRASH();
+}
+
+void MacroAssembler::rotateLeft64ThenXor(Imm32 count, Register64 rhs,
+                                         Register64 srcDest) {
   MOZ_CRASH();
 }
 

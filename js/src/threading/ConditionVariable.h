@@ -21,7 +21,7 @@ namespace js {
 template <class T>
 class ExclusiveData;
 
-enum class CVStatus { NoTimeout, Timeout };
+using mozilla::CVStatus;
 
 template <typename T>
 using UniqueLock = LockGuard<T>;
@@ -34,6 +34,9 @@ class ConditionVariable {
   ConditionVariable() = default;
   ~ConditionVariable() = default;
 
+  ConditionVariable(const ConditionVariable&) = delete;
+  ConditionVariable& operator=(const ConditionVariable&) = delete;
+
   // Wake one thread that is waiting on this condition.
   void notify_one() { impl_.notify_one(); }
 
@@ -43,14 +46,7 @@ class ConditionVariable {
   // Block the current thread of execution until this condition variable is
   // woken from another thread via notify_one or notify_all.
   void wait(Mutex& lock) {
-#ifdef DEBUG
-    lock.preUnlockChecks();
-#endif
-    impl_.wait(lock.impl_);
-#ifdef DEBUG
-    lock.preLockChecks();
-    lock.postLockChecks();
-#endif
+    lock.checkScopedUnlock([&]() { impl_.wait(lock); });
   }
   void wait(UniqueLock<Mutex>& lock) { wait(lock.mutex); }
 
@@ -96,17 +92,9 @@ class ConditionVariable {
   // encounter substantially longer delays, depending on system load.
   CVStatus wait_for(UniqueLock<Mutex>& lock,
                     const mozilla::TimeDuration& rel_time) {
-#ifdef DEBUG
-    lock.mutex.preUnlockChecks();
-#endif
-    CVStatus res =
-        impl_.wait_for(lock.mutex.impl_, rel_time) == mozilla::CVStatus::Timeout
-            ? CVStatus::Timeout
-            : CVStatus::NoTimeout;
-#ifdef DEBUG
-    lock.mutex.preLockChecks();
-    lock.mutex.postLockChecks();
-#endif
+    CVStatus res;
+    lock.mutex.checkScopedUnlock(
+        [&]() { res = impl_.wait_for(lock.mutex, rel_time); });
     return res;
   }
 
@@ -122,8 +110,6 @@ class ConditionVariable {
   }
 
  private:
-  ConditionVariable(const ConditionVariable&) = delete;
-  ConditionVariable& operator=(const ConditionVariable&) = delete;
   template <class T>
   friend class ExclusiveWaitableData;
 

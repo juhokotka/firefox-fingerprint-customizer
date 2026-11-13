@@ -82,7 +82,7 @@ function formatInstallDate(sec) {
 }
 
 add_task(async function () {
-  await openPreferencesViaOpenPreferencesAPI("general", { leaveOpen: true });
+  await openPreferencesViaOpenPreferencesAPI("about", { leaveOpen: true });
   let doc = gBrowser.selectedBrowser.contentDocument;
 
   let showBtn = doc.getElementById("showUpdateHistory");
@@ -164,7 +164,7 @@ add_task(async function () {
 
   // Test the dialog window closes
   let closeBtn = dialogOverlay.querySelector(".dialogClose");
-  closeBtn.doCommand();
+  closeBtn.click();
   ok(
     BrowserTestUtils.isHidden(dialogOverlay),
     "The dialog should be invisible"

@@ -5,8 +5,9 @@
 #ifndef jit_arm64_SharedICHelpers_arm64_inl_h
 #define jit_arm64_SharedICHelpers_arm64_inl_h
 
-#include "jit/BaselineFrame.h"
 #include "jit/SharedICHelpers.h"
+
+#include "jit/BaselineFrame.h"
 
 #include "jit/MacroAssembler-inl.h"
 
@@ -59,8 +60,7 @@ inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register scratch) {
   // Push frame descriptor and return address.
   // Save old frame pointer, stack pointer, and stub reg.
   masm.Push(FrameDescriptor(FrameType::BaselineJS));
-  masm.Push(ICTailCallReg);
-  masm.Push(FramePointer);
+  masm.PushRegs(ICTailCallReg, FramePointer);
 
   // Update the frame register.
   masm.Mov(FramePointer64, masm.GetStackPointer64());

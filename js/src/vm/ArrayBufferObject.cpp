@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "vm/ArrayBufferObject-inl.h"
 #include "vm/ArrayBufferObject.h"
 
 #include "mozilla/Assertions.h"
@@ -16,6 +15,8 @@
 #include <algorithm>  // std::max, std::min
 #include <memory>     // std::uninitialized_copy_n
 #include <string.h>
+
+#include "vm/ArrayBufferObject-inl.h"
 #if !defined(XP_WIN) && !defined(__wasi__)
 #  include <sys/mman.h>
 #endif
@@ -1864,11 +1865,12 @@ uint8_t* ImmutableArrayBufferObject::inlineDataPointer() const {
 }
 
 uint8_t* ArrayBufferObject::dataPointer() const {
-  return static_cast<uint8_t*>(getFixedSlot(DATA_SLOT).toPrivate());
+  return static_cast<uint8_t*>(getFixedSlotTyped(DATA_SLOT).toPrivate());
 }
 
 SharedMem<uint8_t*> ArrayBufferObject::dataPointerShared() const {
-  return SharedMem<uint8_t*>::unshared(getFixedSlot(DATA_SLOT).toPrivate());
+  return SharedMem<uint8_t*>::unshared(
+      getFixedSlotTyped(DATA_SLOT).toPrivate());
 }
 
 ArrayBufferObject::FreeInfo* ArrayBufferObject::freeInfo() const {
@@ -1919,10 +1921,19 @@ void ArrayBufferObject::releaseData(JS::GCContext* gcx) {
   }
 }
 
-void ArrayBufferObject::setDataPointer(BufferContents contents) {
-  setFixedSlot(DATA_SLOT, PrivateValue(contents.data()));
-  setFlags((flags() & ~KIND_MASK) | contents.kind());
+void ArrayBufferObject::initDataPointer(BufferContents contents) {
+  initFixedSlotTyped(DATA_SLOT, PrivateValue(contents.data()));
+  initFlags((flags() & ~KIND_MASK) | contents.kind());
+  setFreeInfo(contents);
+}
 
+void ArrayBufferObject::setDataPointer(BufferContents contents) {
+  setFixedSlotTyped(DATA_SLOT, PrivateValue(contents.data()));
+  setFlags((flags() & ~KIND_MASK) | contents.kind());
+  setFreeInfo(contents);
+}
+
+void ArrayBufferObject::setFreeInfo(BufferContents contents) {
   if (isExternal()) {
     auto info = freeInfo();
     info->freeFunc = contents.freeFunc();
@@ -1931,7 +1942,7 @@ void ArrayBufferObject::setDataPointer(BufferContents contents) {
 }
 
 size_t ArrayBufferObject::byteLength() const {
-  return size_t(getFixedSlot(BYTE_LENGTH_SLOT).toPrivate());
+  return size_t(getFixedSlotTyped(BYTE_LENGTH_SLOT).toPrivate());
 }
 
 inline size_t ArrayBufferObject::associatedBytes() const {
@@ -1944,9 +1955,14 @@ inline size_t ArrayBufferObject::associatedBytes() const {
   MOZ_CRASH("Unexpected buffer kind");
 }
 
+void ArrayBufferObject::initByteLength(size_t length) {
+  MOZ_ASSERT(length <= ArrayBufferObject::ByteLengthLimit);
+  initFixedSlotTyped(BYTE_LENGTH_SLOT, PrivateValue(length));
+}
+
 void ArrayBufferObject::setByteLength(size_t length) {
   MOZ_ASSERT(length <= ArrayBufferObject::ByteLengthLimit);
-  setFixedSlot(BYTE_LENGTH_SLOT, PrivateValue(length));
+  setFixedSlotTyped(BYTE_LENGTH_SLOT, PrivateValue(length));
 }
 
 size_t ArrayBufferObject::wasmMappedSize() const {
@@ -2176,11 +2192,15 @@ void ArrayBufferObject::wasmDiscard(Handle<ArrayBufferObject*> buf,
 }
 
 uint32_t ArrayBufferObject::flags() const {
-  return uint32_t(getFixedSlot(FLAGS_SLOT).toInt32());
+  return uint32_t(getFixedSlotTyped(FLAGS_SLOT).toInt32());
+}
+
+void ArrayBufferObject::initFlags(uint32_t flags) {
+  initFixedSlotTyped(FLAGS_SLOT, Int32Value(flags));
 }
 
 void ArrayBufferObject::setFlags(uint32_t flags) {
-  setFixedSlot(FLAGS_SLOT, Int32Value(flags));
+  setFixedSlotTyped(FLAGS_SLOT, Int32Value(flags));
 }
 
 static constexpr js::gc::AllocKind GetArrayBufferGCObjectKind(size_t numSlots) {
@@ -2844,6 +2864,28 @@ ImmutableArrayBufferObject* ImmutableArrayBufferObject::createZeroed(
   return buffer;
 }
 
+FixedLengthArrayBufferObject* ArrayBufferObject::createCopied(
+    JSContext* cx, mozilla::Span<const uint8_t> src,
+    HandleObject proto /* = nullptr */) {
+  size_t nbytes = src.LengthBytes();
+  if (!CheckArrayBufferTooLarge(cx, nbytes)) {
+    MOZ_DIAGNOSTIC_ASSERT(!cx->brittleMode, "buffer too large");
+    return nullptr;
+  }
+
+  AutoSetNewObjectMetadata metadata(cx);
+  auto [buffer, toFill] = createBufferAndData<FixedLengthArrayBufferObject,
+                                              FillContents::Uninitialized>(
+      cx, nbytes, metadata, proto);
+  if (!buffer) {
+    return nullptr;
+  }
+  if (nbytes > 0) {
+    memcpy(toFill, src.data(), nbytes);
+  }
+  return buffer;
+}
+
 FixedLengthArrayBufferObject* ArrayBufferObject::createEmpty(JSContext* cx) {
   AutoSetNewObjectMetadata metadata(cx);
   auto* obj = NewArrayBufferObject(cx);
@@ -3104,16 +3146,34 @@ bool ArrayBufferObject::ensureNonInline(JSContext* cx,
     return true;
   }
 
+  BufferContents inlineContents = buffer->contents();
+  if (inlineContents.kind() != INLINE_DATA) {
+    // The data is already out-of-line, so there is nothing to move and the pin
+    // (if any) does not block us. A pin here means this call is nested inside
+    // another pinned access of the same buffer, which is memory-safe (the pin
+    // keeps the out-of-line data stable and prevents detach/resize). But it
+    // usually means unintended re-entrancy -- e.g. running script while a
+    // buffer is pinned. To make it get noticed, crash in brittle mode (which is
+    // set during operations where we want to see the exact reason for certain
+    // failures) in a diagnostic build. In other situations, allow it to succeed
+    // without doing anything.
+    MOZ_DIAGNOSTIC_ASSERT(
+        !(buffer->isLengthPinned() && cx->brittleMode),
+        "nested pin of out-of-line ArrayBuffer: safe, but suggests unexpected "
+        "re-entrant access to the buffer outside the enclosing pinned region");
+    return true;
+  }
+
   if (buffer->isLengthPinned()) {
+    // The data is inline and its length is pinned, so we genuinely cannot move
+    // it out-of-line. Unlike the out-of-line case above, this is neither benign
+    // nor merely a violation of convention. Pinning only sets a flag without
+    // moving data, so a buffer can be both inline and pinned (e.g. wasm's
+    // AutoPinBufferSourceLength). Throw a JS exception.
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                               JSMSG_ARRAYBUFFER_LENGTH_PINNED);
     MOZ_DIAGNOSTIC_ASSERT(!cx->brittleMode, "ArrayBuffer length pinned");
     return false;
-  }
-
-  BufferContents inlineContents = buffer->contents();
-  if (inlineContents.kind() != INLINE_DATA) {
-    return true;
   }
 
   size_t nbytes = buffer->maxByteLength();
@@ -3225,20 +3285,24 @@ size_t ArrayBufferObject::objectMoved(JSObject* obj, JSObject* old) {
 
   // Fix up possible inline data pointer.
   if (src.hasInlineData()) {
-    dst.setFixedSlot(DATA_SLOT, PrivateValue(dst.inlineDataPointer()));
+    dst.setFixedSlotTyped(DATA_SLOT, PrivateValue(dst.inlineDataPointer()));
   }
 
   return 0;
 }
 
 JSObject* ArrayBufferObject::firstView() {
-  return getFixedSlot(FIRST_VIEW_SLOT).isObject()
-             ? &getFixedSlot(FIRST_VIEW_SLOT).toObject()
+  return getFixedSlotTyped(FIRST_VIEW_SLOT).isObject()
+             ? &getFixedSlotTyped(FIRST_VIEW_SLOT).toObject()
              : nullptr;
 }
 
+void ArrayBufferObject::initFirstView() {
+  initFixedSlotTyped(FIRST_VIEW_SLOT, NullValue());
+}
+
 void ArrayBufferObject::setFirstView(ArrayBufferViewObject* view) {
-  setFixedSlot(FIRST_VIEW_SLOT, ObjectOrNullValue(view));
+  setFixedSlotTyped(FIRST_VIEW_SLOT, ObjectOrNullValue(view));
 }
 
 bool ArrayBufferObject::addView(JSContext* cx, ArrayBufferViewObject* view) {
@@ -3306,7 +3370,7 @@ void ForEachArrayBufferFlag(uint32_t flags, KnownF known, UnknownF unknown) {
 
 void ArrayBufferObject::dumpOwnFields(js::JSONPrinter& json) const {
   json.formatProperty("byteLength", "%zu",
-                      size_t(getFixedSlot(BYTE_LENGTH_SLOT).toPrivate()));
+                      size_t(getFixedSlotTyped(BYTE_LENGTH_SLOT).toPrivate()));
 
   BufferKindToString(
       bufferKind(),
@@ -3331,7 +3395,7 @@ void ArrayBufferObject::dumpOwnFields(js::JSONPrinter& json) const {
 
 void ArrayBufferObject::dumpOwnStringContent(js::GenericPrinter& out) const {
   out.printf("byteLength=%zu, ",
-             size_t(getFixedSlot(BYTE_LENGTH_SLOT).toPrivate()));
+             size_t(getFixedSlotTyped(BYTE_LENGTH_SLOT).toPrivate()));
 
   BufferKindToString(
       bufferKind(),
@@ -3666,6 +3730,14 @@ JS_PUBLIC_API JSObject* JS::NewArrayBuffer(JSContext* cx, size_t nbytes) {
   return ArrayBufferObject::createZeroed(cx, nbytes);
 }
 
+JS_PUBLIC_API JSObject* JS::NewArrayBuffer(
+    JSContext* cx, mozilla::Span<const uint8_t> source) {
+  AssertHeapIsIdle();
+  CHECK_THREAD(cx);
+
+  return ArrayBufferObject::createCopied(cx, source);
+}
+
 JS_PUBLIC_API JSObject* JS::NewArrayBufferWithContents(
     JSContext* cx, size_t nbytes,
     mozilla::UniquePtr<void, JS::FreePolicy> contents) {
@@ -3884,6 +3956,13 @@ const JSClass* const JS::ArrayBuffer::GrowableSharedClass =
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
   return JS::ArrayBuffer(ArrayBufferObject::createZeroed(cx, nbytes));
+}
+
+/* static */ JS::ArrayBuffer JS::ArrayBuffer::create(
+    JSContext* cx, mozilla::Span<const uint8_t> src) {
+  AssertHeapIsIdle();
+  CHECK_THREAD(cx);
+  return JS::ArrayBuffer(ArrayBufferObject::createCopied(cx, src));
 }
 
 mozilla::Span<uint8_t> JS::ArrayBuffer::getData(

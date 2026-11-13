@@ -5,17 +5,14 @@
 #ifndef GFX_FT2FONTLIST_H
 #define GFX_FT2FONTLIST_H
 
-#include "mozilla/MemoryReporting.h"
 #include "gfxFT2FontBase.h"
 #include "gfxPlatformFontList.h"
+#include "mozilla/MemoryReporting.h"
 #include "nsTHashSet.h"
 
 namespace mozilla {
 namespace dom {
 class SystemFontListEntry;
-};
-namespace gfx {
-class FTUserFontData;
 };
 };  // namespace mozilla
 
@@ -28,7 +25,6 @@ class FT2FontEntry final : public gfxFT2FontEntryBase {
   friend class gfxFT2FontList;
 
   using FontListEntry = mozilla::dom::SystemFontListEntry;
-  using FTUserFontData = mozilla::gfx::FTUserFontData;
 
  public:
   explicit FT2FontEntry(const nsACString& aFaceName)
@@ -40,8 +36,8 @@ class FT2FontEntry final : public gfxFT2FontEntryBase {
 
   // create a font entry for a downloaded font
   static already_AddRefed<FT2FontEntry> CreateFontEntry(
-      const nsACString& aFontName, WeightRange aWeight, StretchRange aStretch,
-      SlantStyleRange aStyle, const uint8_t* aFontData, uint32_t aLength);
+      const nsACString& aFontName, WeightRange aWeight, WidthRange aWidth,
+      SlantStyleRange aStyle, FontData* aFontData);
 
   // create a font entry representing an installed font, identified by
   // a FontListEntry; the freetype and cairo faces will not be instantiated
@@ -64,16 +60,7 @@ class FT2FontEntry final : public gfxFT2FontEntryBase {
 
   nsresult ReadCMAP(FontInfoData* aFontInfoData = nullptr) override;
 
-  hb_blob_t* GetFontTable(uint32_t aTableTag) override;
-
-  bool HasFontTable(uint32_t aTableTag) override;
   nsresult CopyFontTable(uint32_t aTableTag, nsTArray<uint8_t>&) override;
-
-  bool HasVariations() override;
-  void GetVariationAxes(
-      nsTArray<gfxFontVariationAxis>& aVariationAxes) override;
-  void GetVariationInstances(
-      nsTArray<gfxFontVariationInstance>& aInstances) override;
 
   // Check for various kinds of brokenness, and set flags on the entry
   // accordingly so that we avoid using bad font tables
@@ -81,7 +68,7 @@ class FT2FontEntry final : public gfxFT2FontEntryBase {
   void CheckForBrokenFont(const nsACString& aFamilyKey);
 
   already_AddRefed<mozilla::gfx::SharedFTFace> GetFTFace(bool aCommit = false);
-  FTUserFontData* GetUserFontData() override;
+  FontData* GetUserFontData() override;
 
   FT_MM_Var* GetMMVar() override;
 
@@ -116,6 +103,16 @@ class FT2FontEntry final : public gfxFT2FontEntryBase {
   // Protected destructor, to discourage deletion outside of Release():
   ~FT2FontEntry();
 
+  bool HasVariationsInternal() override;
+  void GetVariationAxesInternal(
+      nsTArray<gfxFontVariationAxis>& aVariationAxes) override;
+  void GetVariationInstancesInternal(
+      nsTArray<gfxFontVariationInstance>& aInstances) override;
+
+  hb_blob_t* GetFontTableInternal(uint32_t aTableTag) override;
+
+  bool HasFontTableInternal(uint32_t aTableTag) override;
+
   FontTableCache* GetFontTableCache(bool aCreate) override;
 
   mozilla::Atomic<FontTableCache*> mFontTableCache;
@@ -128,7 +125,8 @@ class FT2FontEntry final : public gfxFT2FontEntryBase {
 
   FT_MM_Var* mMMVar = nullptr;
 
-  mozilla::ThreadSafeWeakPtr<mozilla::gfx::UnscaledFontFreeType> mUnscaledFont;
+  mozilla::ThreadSafeWeakPtr<mozilla::gfx::UnscaledFontFreeType> mUnscaledFont
+      MOZ_GUARDED_BY(mLock);
 
   nsTHashSet<uint32_t> mAvailableTables;
 
@@ -170,12 +168,12 @@ class gfxFT2FontList final : public gfxPlatformFontList {
   already_AddRefed<gfxFontEntry> LookupLocalFont(
       FontVisibilityProvider* aFontVisibilityProvider,
       const nsACString& aFontName, WeightRange aWeightForEntry,
-      StretchRange aStretchForEntry, SlantStyleRange aStyleForEntry) override;
+      WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry) override;
 
   already_AddRefed<gfxFontEntry> MakePlatformFont(
       const nsACString& aFontName, WeightRange aWeightForEntry,
-      StretchRange aStretchForEntry, SlantStyleRange aStyleForEntry,
-      const uint8_t* aFontData, uint32_t aLength) override;
+      WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry,
+      FontData* aFontData) override;
 
   void WriteCache();
 

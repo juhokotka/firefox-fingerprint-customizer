@@ -3,10 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 const { TabStateFlusher } = ChromeUtils.importESModule(
-  "resource:///modules/sessionstore/TabStateFlusher.sys.mjs"
+  "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs"
 );
 const { CustomizableUITestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/CustomizableUITestUtils.sys.mjs"
+);
+const { sinon } = ChromeUtils.importESModule(
+  "resource://testing-common/Sinon.sys.mjs"
 );
 
 add_setup(async function () {
@@ -336,7 +339,28 @@ add_task(async function test_contextMenus() {
     "open",
     "open-tab-group-context-menu opened"
   );
+  Assert.ok(
+    openContextMenu.querySelector("#open-tab-group-context-menu_share").hidden,
+    "Share Group item is hidden when content sharing is disabled"
+  );
   await closeContextMenu(openContextMenu);
+
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.contentsharing.enabled", true]],
+  });
+  menuShown = BrowserTestUtils.waitForPopupEvent(openContextMenu, "shown");
+  EventUtils.synthesizeMouseAtCenter(
+    openRow,
+    { type: "contextmenu", button: 2 },
+    window
+  );
+  await menuShown;
+  Assert.ok(
+    !openContextMenu.querySelector("#open-tab-group-context-menu_share").hidden,
+    "Share Group item is shown when content sharing is enabled"
+  );
+  await closeContextMenu(openContextMenu);
+  await SpecialPowers.popPrefEnv();
 
   let savedRow = subView.querySelector(".tab-group-row[data-saved]");
   let savedContextMenu = document.getElementById(
@@ -358,5 +382,127 @@ add_task(async function test_contextMenus() {
   await closeContextMenu(savedContextMenu);
   await closeAppMenu();
   await removeTabGroup(openGroup);
+  TabGroupTestUtils.forgetSavedTabGroups();
+});
+
+add_task(async function test_shareGroupClosesPanel() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.contentsharing.enabled", true]],
+  });
+  let openGroup = await createTestGroup({ label: "Context Share" });
+
+  let subView = await openTabGroupsSubView();
+  let openRow = subView.querySelector(".tab-group-row:not([data-saved])");
+  let openContextMenu = document.getElementById("open-tab-group-context-menu");
+  let menuShown = BrowserTestUtils.waitForPopupEvent(openContextMenu, "shown");
+  EventUtils.synthesizeMouseAtCenter(
+    openRow,
+    { type: "contextmenu", button: 2 },
+    window
+  );
+  await menuShown;
+
+  // Stub out the actual share flow; we only want to verify the panel closes.
+  let shareStub = sinon
+    .stub(ContentSharingUtils, "handleShareTabGroup")
+    .resolves();
+  let widgetPanel = openRow.closest("panel");
+  let panelHidden = BrowserTestUtils.waitForPopupEvent(widgetPanel, "hidden");
+  openContextMenu.activateItem(
+    openContextMenu.querySelector("#open-tab-group-context-menu_share")
+  );
+  await panelHidden;
+
+  Assert.equal(
+    widgetPanel.state,
+    "closed",
+    "List all tabs panel is closed when the share dialog opens"
+  );
+  Assert.ok(
+    shareStub.calledOnce,
+    "handleShareTabGroup was called for the shared tab group"
+  );
+
+  shareStub.restore();
+  await removeTabGroup(openGroup);
+  TabGroupTestUtils.forgetSavedTabGroups();
+  await SpecialPowers.popPrefEnv();
+});
+
+// Right-clicking on a row's label makes the popup's triggerNode the label
+// element rather than the row button carrying data-tab-group-id, so this
+// exercises resolving the tab group from a descendant trigger node.
+add_task(async function test_contextMenuDeleteFromRowLabel() {
+  let openGroup = await createTestGroup({ label: "Delete Open" });
+  let savedGroup = await createTestGroup({ label: "Delete Saved" });
+  let savedGroupId = savedGroup.id;
+  await TabGroupTestUtils.saveAndCloseTabGroup(savedGroup);
+
+  let subView = await openTabGroupsSubView();
+
+  let openLabel = subView.querySelector(
+    ".tab-group-row:not([data-saved]) .tab-group-row-label"
+  );
+  let openContextMenu = document.getElementById("open-tab-group-context-menu");
+  let menuShown = BrowserTestUtils.waitForPopupEvent(openContextMenu, "shown");
+  EventUtils.synthesizeMouseAtCenter(
+    openLabel,
+    { type: "contextmenu", button: 2 },
+    window
+  );
+  await menuShown;
+  let menuHidden = BrowserTestUtils.waitForPopupEvent(
+    openContextMenu,
+    "hidden"
+  );
+  let panelHidden = BrowserTestUtils.waitForPopupEvent(
+    subView.closest("panel"),
+    "hidden"
+  );
+  openContextMenu.activateItem(
+    document.getElementById("open-tab-group-context-menu_delete")
+  );
+  await Promise.all([menuHidden, panelHidden]);
+  await TestUtils.waitForCondition(
+    () => !gBrowser.getTabGroupById(openGroup.id),
+    "open tab group was deleted"
+  );
+  Assert.ok(
+    !gBrowser.getTabGroupById(openGroup.id),
+    "open tab group was deleted from the context menu"
+  );
+
+  subView = await openTabGroupsSubView();
+  let savedLabel = subView.querySelector(
+    ".tab-group-row[data-saved] .tab-group-row-label"
+  );
+  let savedContextMenu = document.getElementById(
+    "saved-tab-group-context-menu"
+  );
+  menuShown = BrowserTestUtils.waitForPopupEvent(savedContextMenu, "shown");
+  EventUtils.synthesizeMouseAtCenter(
+    savedLabel,
+    { type: "contextmenu", button: 2 },
+    window
+  );
+  await menuShown;
+  menuHidden = BrowserTestUtils.waitForPopupEvent(savedContextMenu, "hidden");
+  panelHidden = BrowserTestUtils.waitForPopupEvent(
+    subView.closest("panel"),
+    "hidden"
+  );
+  savedContextMenu.activateItem(
+    document.getElementById("saved-tab-group-context-menu_delete")
+  );
+  await Promise.all([menuHidden, panelHidden]);
+  await TestUtils.waitForCondition(
+    () => !SessionStore.savedGroups.some(group => group.id == savedGroupId),
+    "saved tab group was forgotten"
+  );
+  Assert.ok(
+    !SessionStore.savedGroups.some(group => group.id == savedGroupId),
+    "saved tab group was forgotten from the context menu"
+  );
+
   TabGroupTestUtils.forgetSavedTabGroups();
 });

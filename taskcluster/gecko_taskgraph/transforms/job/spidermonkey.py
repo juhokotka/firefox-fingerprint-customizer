@@ -24,6 +24,9 @@ class SmRunSchema(Schema, kw_only=True):
     # Base work directory used to set up the task.
     workdir: Optional[str] = None
     tooltool_downloads: Union[bool, Literal["public", "internal"]]
+    # How to clone the upstream repo for the checkout, either "hg" or "git"
+    # (default: "git")
+    clone_with: Optional[Literal["hg", "git"]] = "git"
 
     def __post_init__(self):
         if self.tooltool_downloads is True:
@@ -81,8 +84,7 @@ def generic_worker_spidermonkey(config, job, taskdesc):
         "MOZ_SCM_LEVEL": config.params["level"],
         "SCCACHE_DISABLE": "1",
         "WORK": ".",  # Override the defaults in build scripts
-        "GECKO_PATH": "./src",  # with values suiteable for windows generic worker
-        "UPLOAD_DIR": "./public/build",
+        "UPLOAD_DIR": "./public/build",  # with values suiteable for windows generic worker
     })
     if "spidermonkey-platform" in run:
         env["SPIDERMONKEY_PLATFORM"] = run.pop("spidermonkey-platform")
@@ -96,7 +98,7 @@ def generic_worker_spidermonkey(config, job, taskdesc):
     run["using"] = "run-task"
     run["command"] = [
         "c:\\mozilla-build\\msys2\\usr\\bin\\bash.exe "  # string concat
-        '"./src/taskcluster/scripts/builder/%s"' % script
+        '"./build/src/taskcluster/scripts/builder/%s"' % script
     ]
 
     configure_taskdesc_for_run(config, job, taskdesc, worker["implementation"])

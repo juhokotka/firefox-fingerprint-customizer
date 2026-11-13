@@ -13,20 +13,21 @@ import android.net.Uri
 import android.os.Binder
 import android.os.ParcelFileDescriptor
 import android.os.Process
+import java.io.IOException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import mozilla.components.support.base.log.logger.Logger
 import org.mozilla.fenix.ext.components
-import java.io.IOException
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
 
 /**
- * Content Provider that enables stopping the Firefox Profiler and retrieving profile data via ADB.
- * The caller will receive the profiler data as a streams as a  raw gzip-compressed profile data.
+ * Content Provider that enables stopping the Firefox Profiler and retrieving profile data via ADB. The caller will
+ * receive the profiler data as a streams as a raw gzip-compressed profile data.
  *
  * Usage: adb shell content read --uri content://<applicationId>.profiler/stop-and-upload > profile.gz
  *
@@ -38,6 +39,8 @@ class ProfilerProvider : ContentProvider() {
         private const val PATH_STOP_AND_UPLOAD = "stop-and-upload"
         private const val CODE_STOP_AND_UPLOAD = 1
     }
+
+    private val logger = Logger("ProfilerProvider")
 
     // Needed to inject dispatcher for tests
     internal var ioDispatcher: CoroutineDispatcher = Dispatchers.IO
@@ -59,10 +62,11 @@ class ProfilerProvider : ContentProvider() {
         return true
     }
 
-    override fun getType(uri: Uri): String? = when (match(uri)) {
-        CODE_STOP_AND_UPLOAD -> "application/octet-stream"
-        else -> null
-    }
+    override fun getType(uri: Uri): String? =
+        when (match(uri)) {
+            CODE_STOP_AND_UPLOAD -> "application/octet-stream"
+            else -> null
+        }
 
     override fun query(
         uri: Uri,
@@ -92,9 +96,7 @@ class ProfilerProvider : ContentProvider() {
         }
     }
 
-    /**
-     * Creates a pipe to handle profiler stop operations and stream raw profile data asynchronously.
-     */
+    /** Creates a pipe to handle profiler stop operations and stream raw profile data asynchronously. */
     private fun openStopAndUploadPipe(): ParcelFileDescriptor {
         val pipe = ParcelFileDescriptor.createPipe()
         val appContext = context!!.applicationContext
@@ -106,16 +108,20 @@ class ProfilerProvider : ContentProvider() {
                     throw IllegalStateException("Profiler is not active")
                 }
 
-                val data = withContext(Dispatchers.Main) {
-                    suspendCoroutine { continuation ->
-                        profiler.stopProfiler(
-                            onSuccess = { data -> continuation.resume(data) },
-                            onError = { throwable ->
-                                continuation.resumeWithException(throwable)
-                            },
-                        )
+                val data =
+                    withContext(Dispatchers.Main) {
+                        suspendCancellableCoroutine { continuation ->
+                            profiler.stopProfiler(
+                                onSuccess = { data -> continuation.resume(data) },
+                                onError = { throwable ->
+                                    continuation.resumeWithException(throwable)
+                                },
+                            )
+                            continuation.invokeOnCancellation {
+                                logger.info("Profiler stop operation cancelled")
+                            }
+                        }
                     }
-                }
 
                 if (data == null) {
                     throw IOException("Profiler returned empty data")
@@ -141,12 +147,10 @@ class ProfilerProvider : ContentProvider() {
         }
     }
 
-    /**
-     * Matches a URI against the registered pattern CODE_STOP_AND_UPLOAD
-     * to determine the operation code.
-     */
-    private fun match(uri: Uri): Int = when (uriMatcher.match(uri)) {
-        CODE_STOP_AND_UPLOAD -> CODE_STOP_AND_UPLOAD
-        else -> -1
-    }
+    /** Matches a URI against the registered pattern CODE_STOP_AND_UPLOAD to determine the operation code. */
+    private fun match(uri: Uri): Int =
+        when (uriMatcher.match(uri)) {
+            CODE_STOP_AND_UPLOAD -> CODE_STOP_AND_UPLOAD
+            else -> -1
+        }
 }

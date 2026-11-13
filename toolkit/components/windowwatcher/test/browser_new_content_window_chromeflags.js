@@ -10,10 +10,6 @@
 //   defaults_to: <what this feature defaults to normally>
 // }
 const DISALLOWED = {
-  location: {
-    flag: Ci.nsIWebBrowserChrome.CHROME_LOCATIONBAR,
-    defaults_to: true,
-  },
   chrome: {
     flag: Ci.nsIWebBrowserChrome.CHROME_OPENAS_CHROME,
     defaults_to: false,
@@ -45,8 +41,8 @@ const DISALLOWED = {
     flag: Ci.nsIWebBrowserChrome.CHROME_SUPPRESS_ANIMATION,
     defaults_to: false,
   },
-  extrachrome: {
-    flag: Ci.nsIWebBrowserChrome.CHROME_EXTRA,
+  suppressinitialfullscreen: {
+    flag: Ci.nsIWebBrowserChrome.CHROME_SUPPRESS_INITIAL_FULLSCREEN,
     defaults_to: false,
   },
   centerscreen: {
@@ -65,16 +61,8 @@ const DISALLOWED = {
     flag: Ci.nsIWebBrowserChrome.CHROME_TITLEBAR,
     defaults_to: true,
   },
-  close: {
-    flag: Ci.nsIWebBrowserChrome.CHROME_WINDOW_CLOSE,
-    defaults_to: true,
-  },
   resizable: {
     flag: Ci.nsIWebBrowserChrome.CHROME_WINDOW_RESIZE,
-    defaults_to: true,
-  },
-  status: {
-    flag: Ci.nsIWebBrowserChrome.CHROME_STATUSBAR,
     defaults_to: true,
   },
 };
@@ -225,40 +213,6 @@ add_task(async function test_disallowed_flags() {
         Ci.nsIWebBrowserChrome.CHROME_ALL,
         "Should not have been able to set CHROME_ALL"
       );
-      await BrowserTestUtils.closeWindow(win);
-    }
-  );
-});
-
-/**
- * Opens a window with some chrome flags specified, which should not affect
- * scrollbars flag which defaults to true when not disabled explicitly.
- */
-add_task(async function test_scrollbars_flag() {
-  const SCRIPT = 'window.open("about:blank", "_blank", "toolbar=0");';
-  const SCRIPT_PAGE = `data:text/html,<script>${SCRIPT}</script>`;
-
-  let newWinPromise = BrowserTestUtils.waitForNewWindow();
-  await BrowserTestUtils.withNewTab(
-    {
-      gBrowser,
-      url: SCRIPT_PAGE,
-    },
-    async function () {
-      let win = await newWinPromise;
-
-      let parentChromeFlags = getParentChromeFlags(win);
-      Assert.ok(
-        parentChromeFlags & Ci.nsIWebBrowserChrome.CHROME_SCROLLBARS,
-        "Should have scrollbars when not disabled explicitly"
-      );
-
-      let contentChromeFlags = await getContentChromeFlags(win);
-      Assert.ok(
-        contentChromeFlags & Ci.nsIWebBrowserChrome.CHROME_SCROLLBARS,
-        "Should have scrollbars when not disabled explicitly"
-      );
-
       await BrowserTestUtils.closeWindow(win);
     }
   );

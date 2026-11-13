@@ -5,15 +5,14 @@
 #ifndef StaticComponents_h
 #define StaticComponents_h
 
+#include "StaticComponentData.h"
 #include "mozilla/AlreadyAddRefed.h"
+#include "mozilla/Components.h"
 #include "mozilla/Module.h"
 #include "mozilla/Span.h"
 #include "nsID.h"
 #include "nsStringFwd.h"
 #include "nscore.h"
-
-#include "mozilla/Components.h"
-#include "StaticComponentData.h"
 
 class nsIFactory;
 class nsIUTF8StringEnumerator;
@@ -95,6 +94,12 @@ struct StaticModule {
   StringOffset mContractID;
   Module::ProcessSelector mProcessSelector;
 
+  // Does the object returned by CreateInstance implement nsISerializable?
+  bool mIsSerializable;
+
+  // If this module is a singleton, don't allow CreateInstance.
+  bool mIsSingleton;
+
   const nsID& CID() const { return mCID; }
 
   ModuleID ID() const { return ModuleID(this - gStaticModules); }
@@ -135,6 +140,8 @@ struct StaticModule {
 
   nsISupports* ServiceInstance() const;
   void SetServiceInstance(already_AddRefed<nsISupports> aInst) const;
+
+  bool IsSingleton() const { return mIsSingleton; }
 };
 
 /**

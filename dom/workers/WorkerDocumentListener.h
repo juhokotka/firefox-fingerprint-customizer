@@ -7,18 +7,17 @@
 
 #include "mozilla/Mutex.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/dom/WorkerRef.h"
 #include "nsISupportsImpl.h"
 
 namespace mozilla::dom {
-class ThreadSafeWorkerRef;
 class WorkerPrivate;
-class WeakWorkerRef;
 
 class WorkerDocumentListener final {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WorkerDocumentListener)
 
  public:
-  WorkerDocumentListener();
+  WorkerDocumentListener() = default;
 
   void OnVisible(bool aVisible);
   void SetListening(uint64_t aWindowID, bool aListen);
@@ -27,9 +26,10 @@ class WorkerDocumentListener final {
   static RefPtr<WorkerDocumentListener> Create(WorkerPrivate* aWorkerPrivate);
 
  private:
-  ~WorkerDocumentListener();
+  ~WorkerDocumentListener() = default;
 
-  Mutex mMutex MOZ_UNANNOTATED;  // protects mWorkerRef
+  Mutex mMutex MOZ_UNANNOTATED{
+      "mozilla::dom::WorkerDocumentListener::mMutex"};  // protects mWorkerRef
   RefPtr<ThreadSafeWorkerRef> mWorkerRef;
 };
 

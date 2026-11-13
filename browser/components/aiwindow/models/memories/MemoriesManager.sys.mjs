@@ -12,7 +12,9 @@ import { runHeuristicGate } from "./MemoriesSessionGate.sys.mjs";
 import {
   MODEL_FEATURES,
   renderPrompt,
+  parseAndExtractJSON,
 } from "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs";
+import { AuthProvider } from "moz-src:///browser/components/aiwindow/models/AuthProvider.sys.mjs";
 import { openAIEngine } from "moz-src:///browser/components/aiwindow/models/openAIEngine.sys.mjs";
 import {
   buildConversation,
@@ -35,32 +37,74 @@ import {
   PREF_GENERATE_MEMORIES_FROM_HISTORY,
   PREF_GENERATE_MEMORIES_FROM_CONVERSATION,
   MAX_MEMORY_SUMMARY_LENGTH,
+  MEMORY_FRECENCY_MAX_DAYS,
+  MEMORY_MERGE_MIN_MEMORY_COUNT,
+  MAX_SESSIONS_FIRST_RUN,
+  MAX_SESSIONS_DELTA_RUN,
+  MEMORY_TYPE_PROFILE_FACT,
+  DEFAULT_RELEVANT_MEMORIES_TOP_K,
+  DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD,
 } from "moz-src:///browser/components/aiwindow/models/memories/MemoriesConstants.sys.mjs";
 import {
   getFormattedMemoryAttributeList,
-  parseAndExtractJSON,
   runSessionMemoryPipeline,
+  isShouldDeleteMemoryDueToDecay,
+  computeMemoryFrecency,
+  computeMemoryStrength,
+  classifyMemoryAndCapStrength,
+  getMergeMemoryCandidates,
+  createMergedMemories,
 } from "moz-src:///browser/components/aiwindow/models/memories/Memories.sys.mjs";
-import { MEMORIES_MESSAGE_CLASSIFY_SCHEMA } from "moz-src:///browser/components/aiwindow/models/memories/MemoriesSchemas.sys.mjs";
 import { AIWindow } from "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs";
 import { EveryWindow } from "resource:///modules/EveryWindow.sys.mjs";
-import { AIWindowAccountAuth } from "moz-src:///browser/components/aiwindow/ui/modules/AIWindowAccountAuth.sys.mjs";
-import { EmbeddingsGenerator } from "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs";
-import { cosSim } from "chrome://global/content/ml/NLPUtils.sys.mjs";
 
-const DEFAULT_HISTORY_FULL_LOOKUP_DAYS = 20;
-const DEFAULT_HISTORY_FULL_MAX_RESULTS = 3000;
+const lazy = {};
+ChromeUtils.defineLazyGetter(lazy, "console", function () {
+  return console.createInstance({
+    prefix: "MemoriesManager",
+    maxLogLevelPref: "browser.smartwindow.memoriesLogLevel",
+  });
+});
+
+const DEFAULT_HISTORY_FULL_LOOKUP_DAYS = 7;
+const DEFAULT_HISTORY_FULL_MAX_RESULTS = 500;
 const DEFAULT_HISTORY_DELTA_MAX_RESULTS = 500;
 const DEFAULT_CHAT_FULL_MAX_RESULTS = 50;
 const DEFAULT_CHAT_HALF_LIFE_DAYS_FULL_RESULTS = 7;
 
 const LAST_SESSION_MEMORY_TS_ATTRIBUTE = "last_session_memory_ts";
+const LAST_GENERATION_RUN_TS_ATTRIBUTE = "last_generation_run_ts";
 
 const PREF_FIRSTRUN_HAS_COMPLETED = "browser.smartwindow.firstrun.hasCompleted";
 
 // Single shared detector instance, mirroring MemoriesChatSource /
 // MemoriesHistorySource usage.
 const _sensitiveInfoDetector = new SensitiveInfoDetector();
+
+/**
+ * Keeps at most `maxSessions` sessions, selecting the most recent ones.
+ *
+ * Selection is newest-first so that a backlog contributes its most recent
+ * activity rather than an arbitrary prefix. The result is returned in
+ * chronological order because the pipeline batches sessions in array order and
+ * advances `processedThroughMs` monotonically as batches complete, so an
+ * ascending run keeps that watermark contiguous with the work actually done.
+ *
+ * @param {Array<object>} sessions  Gated session bundles from `buildSessions`
+ * @param {number} maxSessions      Hard cap on sessions handed to the pipeline
+ * @returns {Array<object>}
+ *        At most `maxSessions` sessions, ascending by `session_end_ms`.
+ */
+function takeMostRecentSessions(sessions, maxSessions) {
+  if (sessions.length <= maxSessions) {
+    return sessions;
+  }
+  return sessions
+    .slice()
+    .sort((a, b) => b.session_end_ms - a.session_end_ms)
+    .slice(0, maxSessions)
+    .reverse();
+}
 
 /**
  * MemoriesManager class
@@ -78,15 +122,9 @@ export class MemoriesManager {
   // Cached Conversation for memory usage (classification, relevance).
   // Same serial-only contract.
   static #usageConversationPromise = null;
-
-  // Embeddings cache for semantic memory search
-  static #embeddingsGenerator = null;
-  static #memoryEmbeddingsCache = null;
-  static #memoryCacheKey = null;
-
   /**
    * Returns a Conversation wired to the memory-generation feature. Used for:
-   * initial generation, deduplication, sensitivity filter.
+   * initial generation, sensitivity filter.
    *
    * @returns {Promise<Conversation>}
    */
@@ -151,6 +189,81 @@ export class MemoriesManager {
   }
 
   /**
+   * Updates or deletes memories in the MemoryStore
+   *
+   * Memories are deleted if 1 of these conditions is met:
+   * 1. Soft deletion from natural language command: NL delete memories flags a memory for deletion, so the action can be
+   *    undone in the same session if the user picked the wrong one. We permanently delete them here.
+   * 2. Decay: We determine if a memory should be deleted by checking its position on the Ebbinghaus Forgetting Curve
+   *    using its strength attribute and the number of days since it was last accessed. We compare the resulting value
+   *    to {@link MEMORY_DECAY_THRESHOLD}.
+   *
+   * If a memory is not deleted, we update its attributes. Attribute updates and the
+   * decay check are per-memory daily: each memory tracks its own day in `updated_at`
+   * and is skipped until a full day has elapsed for it.
+   */
+  static async runMemoryMaintenance() {
+    const now = Date.now();
+
+    // Tracks whether the in-memory state of the MemoryStore changed while this function
+    // is running to request a save at the end
+    let changed = false;
+
+    // Pull all memories, including soft deleted ones
+    const allMemories = await MemoryStore.getMemories({
+      includeSoftDeleted: true,
+    });
+
+    // Hard delete any soft deleted memories first
+    for (const memory of allMemories.filter(mem => mem.is_deleted)) {
+      await MemoryStore.hardDeleteMemory(memory.id);
+      changed = true;
+    }
+
+    // Filter for the remainder that aren't soft deleted
+    const liveMemories = allMemories.filter(memory => !memory.is_deleted);
+
+    for (const memory of liveMemories) {
+      const daysElapsed = Math.floor(
+        (now - memory.updated_at) / (24 * 60 * 60 * 1000)
+      );
+      // Skip if a full day hasn't passed since last update
+      if (daysElapsed < 1) {
+        continue;
+      }
+
+      // Age the rolling usage window by however many whole days have elapsed
+      const shifted = {};
+      for (let day = 0; day < MEMORY_FRECENCY_MAX_DAYS; day++) {
+        const source = day - daysElapsed;
+        shifted[day] =
+          source >= 0 ? (memory.recent_accessed_counts[source] ?? 0) : 0;
+      }
+      memory.recent_accessed_counts = shifted;
+
+      // Update computed properties
+      memory.frecency = computeMemoryFrecency(memory);
+      memory.strength = computeMemoryStrength(memory);
+      classifyMemoryAndCapStrength(memory);
+
+      // Set updated_at to now, starting this memory's next day
+      memory.updated_at = now;
+
+      changed = true;
+
+      // If a memory should be deleted due to decay, hard delete it now that its strength is updated
+      if (isShouldDeleteMemoryDueToDecay(memory)) {
+        await MemoryStore.hardDeleteMemory(memory.id);
+      }
+    }
+
+    // If anything was changed to the in-memory MemoryStore, save it to disk
+    if (changed) {
+      await MemoryStore.requestSave();
+    }
+  }
+
+  /**
    * Unified entry point: generates and persists memories from cross-modal
    * session bundles built from the user's recent browsing history AND chats.
    *
@@ -158,9 +271,12 @@ export class MemoriesManager {
    *  2. Reads the single {@link getLastSessionMemoryTimestamp} watermark and
    *     pulls recent history rows and/or chat messages since it (delta), or a
    *     full lookup on first run. Disabled sources contribute `[]`.
-   *  3. Builds unified sessions via {@link buildSessions} and drops sessions
-   *     the heuristic gate marks `SKIP`.
-   *  4. Runs the batched generate -> global filter -> global dedup pipeline.
+   *  3. Builds unified sessions via {@link buildSessions}, drops sessions the
+   *     heuristic gate marks `SKIP`, and keeps only the most recent
+   *     {@link MAX_SESSIONS_FIRST_RUN} (first run) or
+   *     {@link MAX_SESSIONS_DELTA_RUN} (delta) survivors, so one run cannot
+   *     issue an unbounded number of LLM calls.
+   *  4. Runs the batched generate -> global filter pipeline.
    *  5. Persists survivors once and advances the unified watermark to the
    *     contiguous successfully-processed point.
    *
@@ -182,12 +298,13 @@ export class MemoriesManager {
 
     const watermarkMs = await this.getLastSessionMemoryTimestamp();
     const isDelta = watermarkMs > 0;
+    const deltaStartMs = this.getSessionMemoryDeltaStartMs(watermarkMs);
 
     let historyRows = [];
     if (historyEnabled) {
       const recentHistoryOpts = isDelta
         ? {
-            sinceMicros: watermarkMs * 1000,
+            sinceMicros: deltaStartMs * 1000,
             maxResults: DEFAULT_HISTORY_DELTA_MAX_RESULTS,
           }
         : {
@@ -200,16 +317,30 @@ export class MemoriesManager {
     let chatMessages = [];
     if (conversationEnabled) {
       chatMessages = await this._getRecentChats(
-        isDelta ? watermarkMs : 0,
+        deltaStartMs,
         DEFAULT_CHAT_FULL_MAX_RESULTS,
         DEFAULT_CHAT_HALF_LIFE_DAYS_FULL_RESULTS
       );
     }
 
     const sessions = buildSessions(historyRows, chatMessages);
-    const retainedSessions = sessions.filter(
+    const gatedSessions = sessions.filter(
       session => runHeuristicGate(session).decision !== GATE_SKIP
     );
+
+    // Cap sessions after gating.
+    const maxSessions = isDelta
+      ? MAX_SESSIONS_DELTA_RUN
+      : MAX_SESSIONS_FIRST_RUN;
+    const retainedSessions = takeMostRecentSessions(gatedSessions, maxSessions);
+    if (retainedSessions.length < gatedSessions.length) {
+      lazy.console.debug(
+        "[generateMemoriesFromSessions] " +
+          `Capped ${gatedSessions.length} sessions to the ${maxSessions} most ` +
+          `recent; the older ${gatedSessions.length - retainedSessions.length} ` +
+          "will not be processed."
+      );
+    }
 
     if (!retainedSessions.length) {
       // Since no retainedSessions are present due to SKIP decisions, then advance
@@ -222,17 +353,12 @@ export class MemoriesManager {
       if (maxSessionEndMs > watermarkMs) {
         await this.setLastSessionMemoryTimestamp(maxSessionEndMs);
       }
-      console.warn(
-        "MemoriesManager.generateMemoriesFromSessions: " +
+      lazy.console.debug(
+        "[generateMemoriesFromSessions] " +
           "No sessions to process after gating; skipping memory generation."
       );
       return [];
     }
-
-    const existingMemories = await this.getAllMemories();
-    const existingMemoriesSummaries = existingMemories.map(
-      i => i.memory_summary
-    );
 
     const conversation = await this.ensureConversationForGeneration();
 
@@ -241,7 +367,6 @@ export class MemoriesManager {
       result = await runSessionMemoryPipeline(
         conversation,
         retainedSessions,
-        existingMemoriesSummaries,
         pipelineOpts
       );
     } catch (e) {
@@ -270,6 +395,61 @@ export class MemoriesManager {
   }
 
   /**
+   * Merges memories by topic or theme to form stronger, more general, and more durable memories over time
+   *
+   * Profile facts are never merged.
+   *
+   * @param {object} [options]
+   * @param {number} [options.minMemoryCount]
+   *   Number of mergeable memories that must be exceeded before a merge pass
+   *   runs. Only overridden by tests, which set it to 0 to exercise merging on
+   *   small fixtures.
+   */
+  static async mergeMemories({
+    minMemoryCount = MEMORY_MERGE_MIN_MEMORY_COUNT,
+  } = {}) {
+    // Pull all memories, not including soft deleted ones
+    const allMemories = await MemoryStore.getMemories();
+
+    // Filter out profile facts
+    const mergeableMemories = allMemories.filter(
+      memory => memory.type !== MEMORY_TYPE_PROFILE_FACT
+    );
+
+    // Return immediately if there aren't enough memories to merge
+    // Too few memories and memory merging results in too much compression.
+    if (mergeableMemories.length <= minMemoryCount) {
+      return;
+    }
+
+    // Create merge candidate memory objects
+    const conversation = await this.ensureConversationForGeneration();
+    const mergeMemoryCandidates = await getMergeMemoryCandidates(
+      conversation,
+      mergeableMemories
+    );
+    const { finalMergedMemories, componentMemoryIdsToDelete } =
+      createMergedMemories(mergeMemoryCandidates, mergeableMemories);
+
+    // Save merge candidates in the MemoryStore and delete their component memories
+    const mergedMemoryIds = new Set();
+    for (const finalMergedMemory of finalMergedMemories) {
+      const saved = await MemoryStore.addMemory(finalMergedMemory);
+      mergedMemoryIds.add(saved.id);
+    }
+
+    for (const componentMemoryId of componentMemoryIdsToDelete) {
+      // Guard to make sure we don't delete a merged memory if its ID happens to be the same as a candidate
+      // Memory IDs are hashes computed from the memory summary, so it may be possible that a merged memory
+      // has the same ID as an existing component
+      if (mergedMemoryIds.has(componentMemoryId)) {
+        continue;
+      }
+      await this.hardDeleteMemoryById(componentMemoryId);
+    }
+  }
+
+  /**
    * Retrieves all stored memories.
    * This is a quick-access wrapper around MemoryStore.getMemories() with no additional processing.
    *
@@ -292,6 +472,58 @@ export class MemoriesManager {
    */
   static async getMemoriesByID(memoryIds) {
     return await MemoryStore.getMemories({ memoryIds });
+  }
+
+  /**
+   * Records that a set of memories was used and resolves them to full memory
+   * objects. Consumers should call this function instead of touching counts,
+   * themselves.
+   *
+   * For each used memory, this:
+   * - Increments lifetime_accessed_count
+   * - Increments today's bucket (day 0) in recent_accessed_counts
+   * - Stamps last_accessed with the current time
+   *
+   * @param {Iterable<string>} memoryIds        IDs of the memories that were used
+   * @returns {Promise<Array<object>>}          The used memory objects
+   */
+  static async resolveUsedMemories(memoryIds) {
+    const ids = new Set(memoryIds);
+    if (!ids.size) {
+      return [];
+    }
+
+    const used = (await this.getAllMemories()).filter(memory =>
+      ids.has(memory.id)
+    );
+    if (!used.length) {
+      return [];
+    }
+
+    const now = Date.now();
+    for (const memory of used) {
+      memory.lifetime_accessed_count += 1;
+      memory.recent_accessed_counts[0] =
+        (memory.recent_accessed_counts[0] ?? 0) + 1;
+      memory.last_accessed = now;
+    }
+
+    await MemoryStore.requestSave();
+
+    return used;
+  }
+
+  /**
+   * Public API wrapper around MemoryStore.getMemories
+   *
+   * @param {Array<object>} [attributeFilters]     // Filtering options
+   * @param {string} [attributeFilters.field]      // Memory field (attribute) on which to filter
+   * @param {string} [attributeFilters.value]      // The value to filter against
+   * @param {string} [attributeFilters.comparator] // How the filter should be applied (equal to, greater than, less than, etc.)
+   * @returns {Array<object>}                      // Array of filtered memories
+   */
+  static async getMemoriesByAttribute(attributeFilters) {
+    return await MemoryStore.getMemories({ attributeFilters });
   }
 
   /**
@@ -318,6 +550,18 @@ export class MemoriesManager {
   }
 
   /**
+   * Converts the session-memory watermark into the start of the not-yet-processed
+   * range. The watermark is the last timestamp already processed. The next session
+   * must be +1 milliseconds later to avoid pulling events included in the last session.
+   *
+   * @param {number} watermarkMs   Value from {@link getLastSessionMemoryTimestamp}
+   * @returns {number}             Inclusive start for a delta read, 0 on first run
+   */
+  static getSessionMemoryDeltaStartMs(watermarkMs) {
+    return watermarkMs > 0 ? watermarkMs + 1 : 0;
+  }
+
+  /**
    * Persists the unified session-memory watermark.
    *
    * @param {number} tsMs  Milliseconds since Unix epoch
@@ -325,6 +569,29 @@ export class MemoriesManager {
    */
   static async setLastSessionMemoryTimestamp(tsMs) {
     await MemoryStore.updateMeta({ [LAST_SESSION_MEMORY_TS_ATTRIBUTE]: tsMs });
+  }
+
+  /**
+   * Returns when generation last ran (ms since Unix epoch).
+   *
+   * Profiles written before this was persisted seed from the last session
+   * memory watermark, which is never newer than the run that wrote it.
+   *
+   * @returns {Promise<number>}  Milliseconds since Unix epoch (0 if never run)
+   */
+  static async getLastGenerationRunTimestamp() {
+    const meta = await MemoryStore.getMeta();
+    return meta.last_generation_run_ts || meta.last_session_memory_ts || 0;
+  }
+
+  /**
+   * Persists when generation last ran.
+   *
+   * @param {number} tsMs  Milliseconds since Unix epoch
+   * @returns {Promise<void>}
+   */
+  static async setLastGenerationRunTimestamp(tsMs) {
+    await MemoryStore.updateMeta({ [LAST_GENERATION_RUN_TS_ATTRIBUTE]: tsMs });
   }
 
   /**
@@ -471,11 +738,7 @@ export class MemoriesManager {
     conversation.setSystemMessage(systemPrompt);
     conversation.addUserMessage(userPrompt);
     const response = await conversation.run({
-      responseFormat: {
-        type: "json_schema",
-        schema: MEMORIES_MESSAGE_CLASSIFY_SCHEMA,
-      },
-      fxAccountToken: await openAIEngine.getFxAccountToken(),
+      token: await AuthProvider.getToken(),
     });
 
     const parsed = parseAndExtractJSON(response, {
@@ -490,100 +753,34 @@ export class MemoriesManager {
   }
 
   /**
-   * Clears the embeddings cache. Used for testing.
+   * Clears the embeddings cache in MemoryStore. Used for testing.
    *
    * @private
    */
   static _clearEmbeddingsCache() {
-    this.#memoryEmbeddingsCache = null;
-    this.#memoryCacheKey = null;
+    MemoryStore._clearEmbeddingsCache();
   }
 
   /**
-   * Computes a hash of memories for cache invalidation.
-   * Uses incremental FNV-1a hashing to avoid allocating large concatenated strings
-   * based on https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash
-   *
-   * @param {Array} memories  Array of memory objects with id and updated_at fields
-   * @returns {number}        32-bit hash representing the memories state
-   */
-  static #computeMemoriesHash(memories) {
-    // FNV-1a offset basis (32-bit)
-    let hash = 0x811c9dc5;
-
-    for (const m of memories) {
-      const str = `${m.id}-${m.updated_at}`;
-      for (let i = 0; i < str.length; i++) {
-        hash ^= str.charCodeAt(i);
-        // FNV prime, keep 32-bit
-        hash = (hash * 0x01000193) >>> 0;
-      }
-    }
-
-    return hash;
-  }
-
-  /**
-   * Fetches relevant memories for a given user message using semantic similarity.
-   * Uses embeddings and cosine similarity for fast, accurate memory retrieval.
+   * Public API wrapper around MemoryStore.getRelevantMemories
    *
    * @param {string} message                  User message to find relevant memories for
-   * @param {number} topK                     Number of top relevant memories to return (default: 5)
-   * @param {number} similarityThreshold      Minimum similarity score (0-1) to include (default: 0.22)
-   * @returns {Promise<Array<object>>}           List of relevant memories sorted by similarity
+   * @param {number} topK                     Number of top relevant memories to return
+   *                                          (default: {@link DEFAULT_RELEVANT_MEMORIES_TOP_K})
+   * @param {number} similarityThreshold      Minimum similarity score (0-1) to include
+   *                                          (default: {@link DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD})
+   * @returns {Promise<Array<object>>}        List of relevant memories sorted by similarity
    */
   static async getRelevantMemories(
     message,
-    topK = 5,
-    similarityThreshold = 0.22
+    topK = DEFAULT_RELEVANT_MEMORIES_TOP_K,
+    similarityThreshold = DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD
   ) {
-    const memories = await MemoriesManager.getAllMemories();
-
-    if (memories.length === 0) {
-      return [];
-    }
-
-    // Lazy initialize embeddings generator
-    if (!this.#embeddingsGenerator) {
-      this.#embeddingsGenerator = EmbeddingsGenerator.forGeneral();
-    }
-
-    // Re-embed memories only if cache is invalid
-    const currentCacheKey = this.#computeMemoriesHash(memories);
-    if (
-      !this.#memoryEmbeddingsCache ||
-      this.#memoryCacheKey !== currentCacheKey
-    ) {
-      const memoryTexts = memories.map(m => {
-        const summary = m.memory_summary?.toLowerCase() || "";
-        const reasoning = m.reasoning?.toLowerCase() || "";
-        return reasoning ? `${summary}. ${reasoning}` : summary;
-      });
-      const result = await this.#embeddingsGenerator.embedMany(memoryTexts);
-      this.#memoryEmbeddingsCache = result.output || result;
-      this.#memoryCacheKey = currentCacheKey;
-    }
-
-    const queryResult = await this.#embeddingsGenerator.embed(
-      message.toLowerCase()
+    return await MemoryStore.getRelevantMemories(
+      message,
+      topK,
+      similarityThreshold
     );
-    let queryEmbedding = queryResult.output || queryResult;
-
-    if (Array.isArray(queryEmbedding) && queryEmbedding.length === 1) {
-      queryEmbedding = queryEmbedding[0];
-    }
-
-    // Calculate cosine similarity
-    const similarities = this.#memoryEmbeddingsCache.map((memEmb, idx) => ({
-      ...memories[idx],
-      similarity: cosSim(queryEmbedding, memEmb),
-    }));
-
-    // Filter by threshold, sort by similarity, and return top K
-    return similarities
-      .filter(m => m.similarity >= similarityThreshold)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, topK);
   }
 
   /**
@@ -622,7 +819,7 @@ export class MemoriesManager {
       );
     }
 
-    const hasConsent = AIWindowAccountAuth.hasToSConsent;
+    const hasConsent = AuthProvider.hasToSConsent;
 
     const hasFirstrunCompleted = Services.prefs.getBoolPref(
       PREF_FIRSTRUN_HAS_COMPLETED,

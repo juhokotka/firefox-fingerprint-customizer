@@ -9,29 +9,49 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.DependencySubstitution
-import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
-import org.gradle.api.attributes.Bundling
 import org.gradle.api.artifacts.component.ModuleComponentSelector
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.logging.Logger
 import org.gradle.api.logging.StandardOutputListener
+import org.gradle.api.artifacts.ArtifactView
+import org.gradle.api.artifacts.component.ComponentIdentifier
+import org.gradle.api.artifacts.transform.InputArtifact
+import org.gradle.api.artifacts.transform.TransformAction
+import org.gradle.api.artifacts.transform.TransformOutputs
+import org.gradle.api.artifacts.transform.TransformParameters
+import org.gradle.api.artifacts.transform.TransformSpec
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
+import org.gradle.api.file.FileSystemLocation
 import org.gradle.api.plugins.AppliedPlugin
+import org.gradle.api.provider.Property
+import org.gradle.api.provider.Provider
+import org.gradle.api.specs.Spec
+import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.JavaExec
+import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.TestDescriptor
 import org.gradle.api.tasks.testing.TestListener
 import org.gradle.api.tasks.testing.TestOutputEvent
 import org.gradle.api.tasks.testing.TestOutputListener
 import org.gradle.api.tasks.testing.TestResult
+import org.gradle.process.CommandLineArgumentProvider
+import org.mozilla.conventions.ktfmt.configureKtfmt
 import java.io.File
+import java.util.concurrent.Callable
+import java.util.zip.ZipFile
 
 class ProjectPlugin : Plugin<Project> {
     @Suppress("UNCHECKED_CAST")
     override fun apply(project: Project) {
         val mozilla = project.extensions.create("mozilla", ProjectExtension::class.java)
         mozilla.androidComponentsProject.convention(false)
-        mozilla.ktlintSourcePaths.convention(emptyList())
+        mozilla.ktfmtSourcePaths.convention(emptyList())
+        mozilla.detektSourcePaths.convention(emptyList())
+        mozilla.detektAutoCorrect.convention(true)
+        mozilla.detektReports.convention(emptyMap())
 
         val extraProperties = project.gradle.extensions.extraProperties
         val mozconfig = extraProperties["mozconfig"] as Map<String, Any>
@@ -54,10 +74,13 @@ class ProjectPlugin : Plugin<Project> {
         configureAppServicesSubstitution(project, extraProperties, substs)
         configureGleanSubstitution(project, extraProperties)
         configureGleanVersionResolution(project)
-        configureKtlint(project, mozilla)
-        configureTestOutputFormatting(project)
+        configureKtfmt(project, mozilla)
+        configureDetekt(project, mozilla)
+        configureAndroidComponentsLint(project, mozilla, topsrcdir)
+        configureUnitTests(project)
         configurePackagingResourcesExcludes(project)
         registerPrintVariantsTask(project)
+        configureNativeLibsForTests(project, substs)
     }
 
     // Initialize the project buildDir to be in ${topobjdir} to follow
@@ -135,6 +158,94 @@ class ProjectPlugin : Plugin<Project> {
         if (extraProperties.has("localProperties.autoPublish.glean.dir")) {
             substituteWithMavenLocal(project, "local-glean", GLEAN_GROUPS)
         }
+    }
+
+    // Extract native libs from libsForTests JARs so transitive .so dependencies
+    // (e.g. libmozsqlite3.so needed by libmegazord.so) can be found by the OS
+    // dynamic linker during JVM unit tests.
+    private fun configureNativeLibsForTests(project: Project, substs: Map<String, Any>) {
+        if (substs["DOWNLOAD_ALL_GRADLE_DEPENDENCIES"].isTruthy()) {
+            return
+        }
+
+        val osName = System.getProperty("os.name", "").lowercase()
+        val osArch = System.getProperty("os.arch", "").lowercase()
+        val osPrefix = when {
+            osName.contains("linux") -> "linux"
+            osName.contains("mac") || osName.contains("darwin") -> "darwin"
+            osName.contains("win") -> "win32"
+            else -> return
+        }
+        val archSuffix = when {
+            osArch.contains("aarch64") || osArch.contains("arm64") -> "aarch64"
+            osArch.contains("x86_64") || osArch.contains("amd64") -> "x86-64"
+            else -> return
+        }
+        val jnaPlatform = "$osPrefix-$archSuffix"
+        val nativeLibsType = "mozilla-native-libs-for-tests"
+
+        // Unpack the libsForTests JAR's native libs through an artifact transform.
+        // The transform is cached and only runs for configurations that actually
+        // resolve the JAR, so test tasks without the dependency see an empty view.
+        project.dependencies.registerTransform(
+            ExtractNativeLibsForTests::class.java,
+            Action<TransformSpec<ExtractNativeLibsForTests.Parameters>> {
+                from.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                to.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, nativeLibsType)
+                parameters.jnaPlatform.set(jnaPlatform)
+            }
+        )
+
+        val nativeLibs = project.files(Callable {
+            project.configurations
+                .filter { it.isCanBeResolved && it.name.contains("UnitTestRuntimeClasspath") }
+                .map { config ->
+                    config.incoming.artifactView(Action<ArtifactView.ViewConfiguration> {
+                        attributes.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, nativeLibsType)
+                        componentFilter(Spec<ComponentIdentifier> { id ->
+                            id is ModuleComponentIdentifier && id.module.contains("libsForTests")
+                        })
+                        lenient(true)
+                    }).files
+                }
+        })
+
+        // Stage the extracted libs into a fixed directory so the test tasks have
+        // a stable location to point their library paths at.
+        val stageNativeLibs = project.tasks.register(
+            "stageNativeLibsForTests",
+            Sync::class.java,
+            Action<Sync> {
+                from(nativeLibs)
+                into(project.layout.buildDirectory.dir("nativeLibsForTests"))
+            }
+        )
+        val nativeLibsDir = project.layout.buildDirectory.dir("nativeLibsForTests").get().asFile
+        val hostPath = project.providers.environmentVariable("PATH")
+
+        project.tasks.withType(Test::class.java).configureEach(Action<Test> {
+            val testTask = this
+            testTask.dependsOn(stageNativeLibs)
+            testTask.inputs.files(stageNativeLibs).withPropertyName("nativeLibsForTests")
+            testTask.jvmArgumentProviders.add(CommandLineArgumentProvider {
+                if (nativeLibsDir.list().isNullOrEmpty()) {
+                    emptyList()
+                } else {
+                    listOf(
+                        "-Djna.library.path=${nativeLibsDir.absolutePath}",
+                        "-Djava.library.path=${nativeLibsDir.absolutePath}",
+                    )
+                }
+            })
+            // Windows has no rpath; nss3 loads softokn3/freebl3 through the OS
+            // DLL search, so put the staged libs directory on the test JVM PATH.
+            if (osPrefix == "win32") {
+                testTask.environment(
+                    "PATH",
+                    "${nativeLibsDir.absolutePath}${File.pathSeparator}${hostPath.getOrElse("")}",
+                )
+            }
+        })
     }
 
     // Substitutes dependencies to use locally published versions from mavenLocal.
@@ -292,9 +403,14 @@ class ProjectPlugin : Plugin<Project> {
                     }
                     capabilitiesResolution {
                         withCapability("org.mozilla.telemetry:glean-native") {
+                            // GeckoView provides Glean either as an in-build project or as a
+                            // published module, depending on the build composition.
                             val toBeSelected = candidates.find {
-                                it.id is ModuleComponentIdentifier &&
-                                    (it.id as ModuleComponentIdentifier).module.contains("geckoview")
+                                when (val id = it.id) {
+                                    is ProjectComponentIdentifier -> id.projectName.contains("geckoview")
+                                    is ModuleComponentIdentifier -> id.module.contains("geckoview")
+                                    else -> false
+                                }
                             }
                             if (toBeSelected != null) {
                                 select(toBeSelected)
@@ -315,87 +431,178 @@ class ProjectPlugin : Plugin<Project> {
         private val GLEAN_GROUPS = setOf("org.mozilla.telemetry")
     }
 
-    private fun configureKtlint(project: Project, mozilla: ProjectExtension) {
-        val sourcePaths = mozilla.ktlintSourcePaths
 
-        val ktlintConfig = project.configurations.register("ktlint")
+    private fun configureDetekt(project: Project, mozilla: ProjectExtension) {
+        val sourcePaths = mozilla.detektSourcePaths
 
-        val ktlintDep = project.provider {
+        val detektConfig = project.configurations.register("detektCli")
+        val detektDep = project.provider {
             val versionCatalogs = project.extensions.getByType(VersionCatalogsExtension::class.java)
             val libs = versionCatalogs.named("libs")
-            val dep = project.dependencies.create(libs.findLibrary("ktlint").get().get())
-            if (dep is ExternalModuleDependency) {
-                dep.attributes {
-                    attribute(Bundling.BUNDLING_ATTRIBUTE, project.objects.named(Bundling::class.java, Bundling.EXTERNAL))
-                }
-            }
-            dep
+            project.dependencies.create(libs.findLibrary("detekt-cli").get().get())
         }
-        ktlintConfig.configure { dependencies.addLater(ktlintDep) }
-        val ktlintClasspath = project.files(ktlintConfig)
+        detektConfig.configure { dependencies.addLater(detektDep) }
+        val detektClasspath = project.files(detektConfig)
 
-        // Resolve the include/exclude globs (with leading "!" meaning exclude)
-        // into a FileTree rooted at projectDir, so Gradle can use the actual
-        // Kotlin source set to compute UP-TO-DATE / build cache keys.
-        fun ktlintSourceTree() = project.fileTree(project.projectDir).matching {
-            sourcePaths.get().forEach { pattern ->
-                if (pattern.startsWith("!")) {
-                    exclude(pattern.removePrefix("!"))
+        // Subproject's build.gradle can add dependencies like
+        // detektPlugins project(":components:tooling-detekt")
+        val detektPlugins = project.configurations.register("detektPlugins") {
+            isCanBeConsumed = false
+            isCanBeResolved = true
+        }
+        val detektPluginFiles = project.files(detektPlugins)
+
+        val projectDir = project.projectDir
+
+        fun JavaExec.configureCommon() {
+            classpath = detektClasspath
+            mainClass.set("io.gitlab.arturbosch.detekt.cli.Main")
+            // Resolve the include/exclude globs (with leading "!" meaning exclude)
+            // into a FileTree rooted at projectDir, so Gradle can use the actual
+            // Kotlin source set to compute UP-TO-DATE / build cache keys.
+            val detektSourceTree =
+                if (sourcePaths.get().none { !it.startsWith("!") }) {
+                    project.files()
                 } else {
-                    include(pattern)
+                    project.fileTree(projectDir).matching {
+                        sourcePaths.get().forEach { pattern ->
+                            if (pattern.startsWith("!")) {
+                                exclude(pattern.removePrefix("!"))
+                            } else {
+                                include(pattern)
+                            }
+                        }
+                    }
                 }
-            }
-        }
+            onlyIf { !detektSourceTree.isEmpty }
 
-        project.tasks.register("ktlint", JavaExec::class.java) {
-            group = "verification"
-            description = "Check Kotlin code style."
-            classpath = ktlintClasspath
-            mainClass.set("com.pinterest.ktlint.Main")
-            onlyIf { sourcePaths.get().isNotEmpty() }
-            sourcePaths.get().forEach { args(it) }
-            args("--reporter=json,output=build/reports/ktlint/ktlint.json")
-            args("--reporter=plain")
-            inputs.files(ktlintSourceTree())
-                .withPropertyName("ktlintSources")
+            mozilla.detektConfig.orNull?.let {
+                val file = project.file(it)
+                args("--config", file.absolutePath)
+                inputs.file(file).withPropertyName("detektConfig")
+            }
+
+            inputs.files(detektSourceTree)
+                .withPropertyName("detektSources")
                 .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
                 .skipWhenEmpty()
-            outputs.file(project.file("build/reports/ktlint/ktlint.json"))
-                .withPropertyName("ktlintReport")
+            inputs.files(detektPluginFiles)
+                .withPropertyName("detektPlugins")
+                .optional(true)
+
+            val includes = sourcePaths.get().filter { !it.startsWith("!") }
+            val excludes = sourcePaths.get().filter { it.startsWith("!") }.map {it.removePrefix("!") }
+            args("--input", projectDir.absolutePath)
+            if (includes.isNotEmpty()) args("--includes", includes.joinToString(","))
+            if (excludes.isNotEmpty()) args("--excludes", excludes.joinToString(","))
+
+            argumentProviders.add(CommandLineArgumentProvider {
+                val plugins = detektPluginFiles.files.filter { it.exists() }
+                if (plugins.isNotEmpty()) {
+                    listOf("--plugins", plugins.joinToString(",") { it.absolutePath })
+                } else {
+                    emptyList()
+                }
+            })
+        }
+
+        project.tasks.register("detekt", JavaExec::class.java) {
+            group = "verification"
+            description = "Run detekt static analysis."
+            configureCommon()
+
+            if (mozilla.detektAutoCorrect.get()) {
+                args("--auto-correct")
+                jvmArgs("--add-opens", "java.base/java.lang=ALL-UNNAMED")
+            }
+
+            mozilla.detektBaseline.orNull?.let {
+                val file = project.file(it)
+                if (file.exists()) {
+                    args("--baseline", file.absolutePath)
+                    inputs.file(file).withPropertyName("detektBaseline").optional(true)
+                }
+            }
+            mozilla.detektReports.get().forEach { (id, path) -> args("--report", "$id:$path") }
+            mozilla.detektReports.get().values.forEach { outputs.file(project.file(it)) }
             outputs.cacheIf { true }
         }
 
-        project.tasks.register("ktlintFormat", JavaExec::class.java) {
-            group = "formatting"
-            description = "Fix Kotlin code style deviations."
-            classpath = ktlintClasspath
-            mainClass.set("com.pinterest.ktlint.Main")
-            onlyIf { sourcePaths.get().isNotEmpty() }
-            args("-F")
-            sourcePaths.get().forEach { args(it) }
-            args("--reporter=json,output=build/reports/ktlint/ktlintFormat.json")
-            args("--reporter=plain")
-            jvmArgs("--add-opens", "java.base/java.lang=ALL-UNNAMED")
-            inputs.files(ktlintSourceTree())
-                .withPropertyName("ktlintFormatSources")
-                .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
-                .skipWhenEmpty()
-            outputs.file(project.file("build/reports/ktlint/ktlintFormat.json"))
-                .withPropertyName("ktlintFormatReport")
+        project.tasks.register("detektBaseline", JavaExec::class.java) {
+            group = "verification"
+            description = "Regenerate the detekt baseline."
+            configureCommon()
+            val baselineFile = mozilla.detektBaseline.orNull?.let { project.file(it) }
+            onlyIf { baselineFile != null }
+            args("--create-baseline")
+            baselineFile?.let { args("--baseline", it.absolutePath) }
         }
     }
 
-    // Translates JUnit test events into Mozilla's TBPL-like textual format that Taskcluster
-    // log parsing expects. See also: testing/mozbase/mozlog/mozlog/formatters/tbplformatter.py
-    private fun configureTestOutputFormatting(project: Project) {
+    @Suppress("UNCHECKED_CAST")
+    private fun configureAndroidComponentsLint(project: Project, mozilla: ProjectExtension, topsrcdir: String) {
+        val action = Action<AppliedPlugin> {
+            if (!mozilla.androidComponentsProject.get()) {
+                return@Action
+            }
+            val sarifOutput = File(
+                topsrcdir,
+                "mobile/android/android-components/build/reports/lint/lint-report-${project.name}.sarif.json",
+            )
+            val android = project.extensions.getByName("android")
+            val lint = android.javaClass.getMethod("getLint").invoke(android)
+            lint.javaClass.getMethod("setBaseline", File::class.java)
+                .invoke(lint, project.file("lint-baseline.xml"))
+            lint.javaClass.getMethod("setWarningsAsErrors", Boolean::class.javaPrimitiveType)
+                .invoke(lint, true)
+            lint.javaClass.getMethod("setAbortOnError", Boolean::class.javaPrimitiveType)
+                .invoke(lint, false)
+            lint.javaClass.getMethod("setSarifReport", Boolean::class.javaPrimitiveType)
+                .invoke(lint, true)
+            lint.javaClass.getMethod("setSarifOutput", File::class.java)
+                .invoke(lint, sarifOutput)
+            val disable = lint.javaClass.getMethod("getDisable").invoke(lint) as MutableSet<String>
+            disable.addAll(
+                listOf(
+                    "MissingTranslation",
+                    "ExtraTranslation",
+                    "MissingDefaultResource",
+                    // We do not want to enforce this as a generic rule for all languages (see #6117, #6056, #6118)
+                    "TypographyEllipsis",
+                    // https://github.com/mozilla-mobile/android-components/issues/10641
+                    "UnspecifiedImmutableFlag",
+                    // https://bugzilla.mozilla.org/show_bug.cgi?id=1795427
+                    "UnusedResources",
+                    // "We do not impose rules on locales"
+                    // https://github.com/mozilla-mobile/android-components/pull/11069
+                    "TypographyDashes",
+                ),
+            )
+        }
+        project.pluginManager.withPlugin("com.android.library", action)
+        project.pluginManager.withPlugin("com.android.application", action)
+    }
+
+    private fun configureUnitTests(project: Project) {
+        val automation = project.providers.environmentVariable("MOZ_AUTOMATION").isPresent
+        val fetches = project.providers.environmentVariable("MOZ_FETCHES_DIR")
         project.pluginManager.withPlugin("com.android.base") {
             project.tasks.withType(Test::class.java).configureEach {
                 systemProperty("robolectric.logging", "stdout")
                 systemProperty("logging.test-mode", "true")
                 systemProperty("javax.net.ssl.trustStoreType", "JKS")
+                if (automation) {
+                    systemProperty(
+                        "robolectric.dependency.dir",
+                        File(fetches.get(), "robolectric-android-all").path,
+                    )
+                }
 
                 testLogging.events = emptySet()
 
+                // Translates JUnit test events into Mozilla's TBPL-like textual format that
+                // Taskcluster log parsing expects.
+                // See also: testing/mozbase/mozlog/mozlog/formatters/tbplformatter.py
                 val listener = MozillaTestOutputListener(logger)
                 addTestListener(listener)
                 addTestOutputListener(listener)
@@ -546,5 +753,35 @@ private class MozillaTestOutputListener(
 
     override fun onOutput(testDescriptor: TestDescriptor, outputEvent: TestOutputEvent) {
         taskLogger.lifecycle("    ${outputEvent.message.trim()}")
+    }
+}
+
+// Unpacks the host platform native libs (the `<jna platform>/` entries) out of a
+// libsForTests JAR into a flat directory, so JVM unit tests can load them.
+abstract class ExtractNativeLibsForTests : TransformAction<ExtractNativeLibsForTests.Parameters> {
+    interface Parameters : TransformParameters {
+        @get:Input
+        val jnaPlatform: Property<String>
+    }
+
+    @get:InputArtifact
+    abstract val inputArtifact: Provider<FileSystemLocation>
+
+    override fun transform(outputs: TransformOutputs) {
+        val jar = inputArtifact.get().asFile
+        val platform = parameters.jnaPlatform.get()
+        val outputDir = outputs.dir("native-libs")
+        ZipFile(jar).use { zip ->
+            zip.entries().asSequence()
+                .filter { it.name.startsWith("$platform/") && !it.isDirectory }
+                .forEach { entry ->
+                    val outFile = File(outputDir, entry.name.substringAfterLast("/"))
+                    zip.getInputStream(entry).use { input ->
+                        outFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+        }
     }
 }

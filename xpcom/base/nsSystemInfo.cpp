@@ -2,23 +2,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsAppRunner.h"
 #include "nsSystemInfo.h"
-#include "prsystem.h"
-#include "prio.h"
-#include "mozilla/SSE.h"
-#include "mozilla/arm.h"
-#include "mozilla/dom/DOMMozPromiseRequestHolder.h"
+
+#include "js/PropertyAndElement.h"  // JS_SetProperty
+#include "jsapi.h"
 #include "mozilla/Hal.h"
 #include "mozilla/LazyIdleThread.h"
 #include "mozilla/LookAndFeel.h"
+#include "mozilla/SSE.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Try.h"
 #include "mozilla/Vector.h"
-#include "jsapi.h"
-#include "js/PropertyAndElement.h"  // JS_SetProperty
+#include "mozilla/arm.h"
+#include "mozilla/dom/DOMMozPromiseRequestHolder.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/glean/XpcomMetrics.h"
+#include "nsAppRunner.h"
+#include "prio.h"
+#include "prsystem.h"
 
 #ifdef XP_WIN
 #  include <comutil.h>
@@ -32,16 +33,16 @@
 #    include <wrl.h>
 #    include <wscapi.h>
 #  endif  // __MINGW32__
+#  include "WinUtils.h"
 #  include "base/scoped_handle_win.h"
 #  include "mozilla/DynamicallyLinkedFunctionPtr.h"
+#  include "mozilla/NotNull.h"
 #  include "mozilla/WindowsVersion.h"
 #  include "nsAppDirectoryServiceDefs.h"
 #  include "nsDirectoryServiceDefs.h"
 #  include "nsDirectoryServiceUtils.h"
-#  include "nsWindowsHelpers.h"
 #  include "nsIWindowsRegKey.h"
-#  include "WinUtils.h"
-#  include "mozilla/NotNull.h"
+#  include "nsWindowsHelpers.h"
 
 #endif
 
@@ -50,23 +51,25 @@
 #endif
 
 #ifdef MOZ_WIDGET_GTK
-#  include <gtk/gtk.h>
 #  include <dlfcn.h>
+#  include <gtk/gtk.h>
+
 #  include "mozilla/WidgetUtilsGtk.h"
 #endif
 
 #if defined(XP_LINUX)
 #  include <unistd.h>
+
 #  include <fstream>
 #  ifndef ANDROID
 #    include <link.h>
 #  endif
+#  include <map>
+#  include <string>
+
 #  include "mozilla/Tokenizer.h"
 #  include "mozilla/widget/LSBUtils.h"
 #  include "nsCharSeparatedTokenizer.h"
-
-#  include <map>
-#  include <string>
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
@@ -1329,7 +1332,7 @@ nsresult CollectProcessInfo(ProcessInfo& info) {
     glean::system_cpu::logical_cores.Set(info.cpuCount);
   }
 #endif
-  if (Maybe<hal::HeterogeneousCpuInfo> hetCpuInfo =
+  if (const Maybe<hal::HeterogeneousCpuInfo>& hetCpuInfo =
           hal::GetHeterogeneousCpuInfo()) {
     info.cpuPCount = int32_t(hetCpuInfo->mBigCpus.Count());
     info.cpuMCount = int32_t(hetCpuInfo->mMediumCpus.Count());
@@ -1771,6 +1774,7 @@ nsresult nsSystemInfo::Init() {
   nsCString dist, desc, release, codename;
   if (widget::lsb::GetLSBRelease(dist, desc, release, codename)) {
     SetPropertyAsACString(u"distro"_ns, dist);
+    SetPropertyAsACString(u"distroDesc"_ns, desc);
     SetPropertyAsACString(u"distroVersion"_ns, release);
   }
 
@@ -2350,4 +2354,15 @@ nsSystemInfo::GetProcessInfo(JSContext* aCx, Promise** aResult) {
   promise.forget(aResult);
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSystemInfo::IsWindows10BuildOrLater(uint32_t aBuildNumber, bool* aResult) {
+#ifdef XP_WIN
+  NS_ENSURE_ARG_POINTER(aResult);
+  *aResult = mozilla::IsWindows10BuildOrLater(aBuildNumber);
+  return NS_OK;
+#else
+  return NS_ERROR_NOT_AVAILABLE;
+#endif
 }

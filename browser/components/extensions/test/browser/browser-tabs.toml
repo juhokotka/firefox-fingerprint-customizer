@@ -1,7 +1,4 @@
 [DEFAULT]
-skip-if = [
-	"debug && standalone", # TODO bug 2048260: Drop skip-if = standalone
-]
 tags = "webextensions"
 prefs = [
   # We don't want to reset this at the end of the test, so that we don't have
@@ -50,12 +47,6 @@ support-files = [
   "context.html",
   "context_frame.html",
   "ctxmenu-image.png",
-]
-skip-if = [
-  "os == 'win' && os_version == '11.26100' && arch == 'x86' && debug", # Bug 1786601
-  "os == 'win' && os_version == '11.26100' && arch == 'x86_64'", # Bug 1786601
-  "os == 'win' && os_version == '11.26200' && arch == 'x86' && debug", # Bug 1786601
-  "os == 'win' && os_version == '11.26200' && arch == 'x86_64'", # Bug 1786601
 ]
 
 ["browser_ext_tabs_events_order.js"]

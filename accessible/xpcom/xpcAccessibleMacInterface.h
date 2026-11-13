@@ -38,6 +38,10 @@ class xpcAccessibleMacInterface : public xpcAccessibleMacNSObjectWrapper,
   // associated with this accessible.
   explicit xpcAccessibleMacInterface(Accessible* aObj);
 
+  xpcAccessibleMacInterface(const xpcAccessibleMacInterface&) = delete;
+  xpcAccessibleMacInterface& operator=(const xpcAccessibleMacInterface&) =
+      delete;
+
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIACCESSIBLEMACINTERFACE
 
@@ -47,7 +51,7 @@ class xpcAccessibleMacInterface : public xpcAccessibleMacNSObjectWrapper,
                                     JS::MutableHandleValue aResult);
 
  protected:
-  virtual ~xpcAccessibleMacInterface() {}
+  virtual ~xpcAccessibleMacInterface() = default;
 
   // Return true if our native object responds to this selector and
   // if it implements isAccessibilitySelectorAllowed check that it returns true
@@ -70,11 +74,6 @@ class xpcAccessibleMacInterface : public xpcAccessibleMacNSObjectWrapper,
   // a "object" and "objcetType" property.
   id JsValueToSpecifiedNSObject(JS::HandleObject aObject, JSContext* aCx,
                                 nsresult* aResult);
-
- private:
-  xpcAccessibleMacInterface(const xpcAccessibleMacInterface&) = delete;
-  xpcAccessibleMacInterface& operator=(const xpcAccessibleMacInterface&) =
-      delete;
 };
 
 class xpcAccessibleMacEvent : public nsIAccessibleMacEvent {

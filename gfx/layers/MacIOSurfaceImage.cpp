@@ -2,15 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "MacIOSurfaceHelpers.h"
 #include "MacIOSurfaceImage.h"
+
+#include "MacIOSurfaceHelpers.h"
+#include "YCbCrUtils.h"
 #include "gfxPlatform.h"
+#include "mozilla/StaticPrefs_layers.h"
 #include "mozilla/layers/CompositableClient.h"
 #include "mozilla/layers/CompositableForwarder.h"
 #include "mozilla/layers/MacIOSurfaceTextureClientOGL.h"
 #include "mozilla/layers/TextureForwarder.h"
-#include "mozilla/StaticPrefs_layers.h"
-#include "YCbCrUtils.h"
 
 using namespace mozilla::layers;
 using namespace mozilla::gfx;
@@ -78,11 +79,16 @@ bool MacIOSurfaceImage::SetData(ImageContainer* aContainer,
       return false;
   }
 
+  const auto sizes = aData.GetPlaneSizes();
+  if (!sizes) {
+    return false;
+  }
+
   RefPtr<MacIOSurfaceRecycleAllocator> allocator =
       aContainer->GetMacIOSurfaceRecycleAllocator();
 
-  auto ySize = aData.YDataSize();
-  auto cbcrSize = aData.CbCrDataSize();
+  const auto& ySize = sizes->mY;
+  const auto& cbcrSize = sizes->mCbCr;
   RefPtr<MacIOSurface> surf = allocator->Allocate(
       ySize, cbcrSize, aData.mChromaSubsampling, aData.mYUVColorSpace,
       aData.mTransferFunction, aData.mColorRange, aData.mColorDepth);

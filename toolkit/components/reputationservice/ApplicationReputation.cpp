@@ -173,6 +173,7 @@ const char* const ApplicationReputationService::kBinaryFileExtensions[] = {
     //".air", exec // Adobe AIR installer; excluded from apprep checks.
     ".apk",  // Android package
     //".app", exec  // Executable application
+    //".appcontent-ms", exec
     ".applescript",
     //".application", exec // MS ClickOnce
     //".appref-ms", exec // MS ClickOnce
@@ -432,7 +433,8 @@ const char* const ApplicationReputationService::kBinaryFileExtensions[] = {
     ".scptd",  // AppleScript
     //".scr", exec         // Windows
     //".sct", exec         // Windows shell
-    //".search-ms", exec         // Windows Saved Search
+    //".search-ms", exec          // Windows Saved Search
+    //".searchConnector-ms", exec // Windows Search Connector
     ".seplugin",  // AppleScript
     ".service",   // Systemd service unit file
     //".settingcontent-ms", exec // Windows settings
@@ -867,7 +869,7 @@ PendingDBLookup::HandleEvent(const nsACString& tables) {
   // Blocklisting trumps allowlisting.
   nsAutoCString blockList;
   Preferences::GetCString(PREF_DOWNLOAD_BLOCK_TABLE, blockList);
-  if ((mLookupType != LookupType::AllowlistOnly) &&
+  if ((mLookupType != LookupType::AllowlistOnly) && !blockList.IsEmpty() &&
       FindInReadable(blockList, tables)) {
     mPendingLookup->mBlocklistCount++;
     mozilla::glean::application_reputation::local.AccumulateSingleSample(
@@ -880,7 +882,7 @@ PendingDBLookup::HandleEvent(const nsACString& tables) {
 
   nsAutoCString allowList;
   Preferences::GetCString(PREF_DOWNLOAD_ALLOW_TABLE, allowList);
-  if ((mLookupType != LookupType::BlocklistOnly) &&
+  if ((mLookupType != LookupType::BlocklistOnly) && !allowList.IsEmpty() &&
       FindInReadable(allowList, tables)) {
     mPendingLookup->mAllowlistCount++;
     mozilla::glean::application_reputation::local.AccumulateSingleSample(
@@ -936,7 +938,8 @@ static const char* GetFileExt(const nsACString& aFilename,
                               const char* const aFileExtensions[],
                               const size_t aLength) {
   for (size_t i = 0; i < aLength; ++i) {
-    if (StringEndsWith(aFilename, nsDependentCString(aFileExtensions[i]))) {
+    if (StringEndsWith(aFilename, nsDependentCString(aFileExtensions[i]),
+                       nsCaseInsensitiveCStringComparator)) {
       return aFileExtensions[i];
     }
   }
@@ -976,37 +979,42 @@ ClientDownloadRequest::DownloadType PendingLookup::GetDownloadType(
     const nsACString& aFilename) {
   MOZ_ASSERT(IsBinary(aFilename));
 
+  // Extensions are matched case-insensitively, so compare against a lowercased
+  // copy of the filename.
+  nsAutoCString fileName(aFilename);
+  ToLowerCase(fileName);
+
   // From
   // https://cs.chromium.org/chromium/src/chrome/common/safe_browsing/download_protection_util.cc?l=17
-  if (StringEndsWith(aFilename, ".zip"_ns)) {
+  if (StringEndsWith(fileName, ".zip"_ns)) {
     return ClientDownloadRequest::ZIPPED_EXECUTABLE;
-  } else if (StringEndsWith(aFilename, ".apk"_ns)) {
+  } else if (StringEndsWith(fileName, ".apk"_ns)) {
     return ClientDownloadRequest::ANDROID_APK;
-  } else if (StringEndsWith(aFilename, ".app"_ns) ||
-             StringEndsWith(aFilename, ".applescript"_ns) ||
-             StringEndsWith(aFilename, ".cdr"_ns) ||
-             StringEndsWith(aFilename, ".dart"_ns) ||
-             StringEndsWith(aFilename, ".dc42"_ns) ||
-             StringEndsWith(aFilename, ".diskcopy42"_ns) ||
-             StringEndsWith(aFilename, ".dmg"_ns) ||
-             StringEndsWith(aFilename, ".dmgpart"_ns) ||
-             StringEndsWith(aFilename, ".dvdr"_ns) ||
-             StringEndsWith(aFilename, ".img"_ns) ||
-             StringEndsWith(aFilename, ".imgpart"_ns) ||
-             StringEndsWith(aFilename, ".iso"_ns) ||
-             StringEndsWith(aFilename, ".mpkg"_ns) ||
-             StringEndsWith(aFilename, ".ndif"_ns) ||
-             StringEndsWith(aFilename, ".osas"_ns) ||
-             StringEndsWith(aFilename, ".osax"_ns) ||
-             StringEndsWith(aFilename, ".pkg"_ns) ||
-             StringEndsWith(aFilename, ".scpt"_ns) ||
-             StringEndsWith(aFilename, ".scptd"_ns) ||
-             StringEndsWith(aFilename, ".seplugin"_ns) ||
-             StringEndsWith(aFilename, ".smi"_ns) ||
-             StringEndsWith(aFilename, ".sparsebundle"_ns) ||
-             StringEndsWith(aFilename, ".sparseimage"_ns) ||
-             StringEndsWith(aFilename, ".toast"_ns) ||
-             StringEndsWith(aFilename, ".udif"_ns)) {
+  } else if (StringEndsWith(fileName, ".app"_ns) ||
+             StringEndsWith(fileName, ".applescript"_ns) ||
+             StringEndsWith(fileName, ".cdr"_ns) ||
+             StringEndsWith(fileName, ".dart"_ns) ||
+             StringEndsWith(fileName, ".dc42"_ns) ||
+             StringEndsWith(fileName, ".diskcopy42"_ns) ||
+             StringEndsWith(fileName, ".dmg"_ns) ||
+             StringEndsWith(fileName, ".dmgpart"_ns) ||
+             StringEndsWith(fileName, ".dvdr"_ns) ||
+             StringEndsWith(fileName, ".img"_ns) ||
+             StringEndsWith(fileName, ".imgpart"_ns) ||
+             StringEndsWith(fileName, ".iso"_ns) ||
+             StringEndsWith(fileName, ".mpkg"_ns) ||
+             StringEndsWith(fileName, ".ndif"_ns) ||
+             StringEndsWith(fileName, ".osas"_ns) ||
+             StringEndsWith(fileName, ".osax"_ns) ||
+             StringEndsWith(fileName, ".pkg"_ns) ||
+             StringEndsWith(fileName, ".scpt"_ns) ||
+             StringEndsWith(fileName, ".scptd"_ns) ||
+             StringEndsWith(fileName, ".seplugin"_ns) ||
+             StringEndsWith(fileName, ".smi"_ns) ||
+             StringEndsWith(fileName, ".sparsebundle"_ns) ||
+             StringEndsWith(fileName, ".sparseimage"_ns) ||
+             StringEndsWith(fileName, ".toast"_ns) ||
+             StringEndsWith(fileName, ".udif"_ns)) {
     return ClientDownloadRequest::MAC_EXECUTABLE;
   }
 

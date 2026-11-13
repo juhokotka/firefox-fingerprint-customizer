@@ -57,6 +57,7 @@
     <command id="cmd_translate" />
     <command id="cmd_openAboutTranslations" />
     <command id="cmd_editPDF" />
+    <command id="cmd_openReferrals" />
     <!-- work-around bug 392512 -->
     <command id="Browser:AddBookmarkAs" />
     <command id="Browser:SearchBookmarks" />
@@ -109,15 +110,18 @@
     <command id="Tools:ChatsHistory" />
     <command id="Tools:ClassicWindow" />
     <command id="Tools:Sanitize" />
-    <!--command id="Tools:PrivateBrowsing" /-->
+    <command id="Tools:PrivateBrowsing" />
     <command id="Browser:Screenshot" />
     <command id="History:UndoCloseTab" data-l10n-args='{"tabCount": 1}' />
     <command id="History:UndoCloseWindow" />
     <command id="History:RestoreLastClosedTabOrWindowOrSession" />
     <command id="History:SearchHistory" />
+    <command id="Browser:SearchTabs" />
 
-    <command id="wrCaptureCmd" disabled="true"/>
-    <command id="wrToggleCaptureSequenceCmd" disabled="true"/>
+    <!-- The keys for these commands are registered dynamically by gGfxUtils
+         when gfx.webrender.debug.enable-capture is set. -->
+    <command id="wrCaptureCmd"/>
+    <command id="wrToggleCaptureSequenceCmd"/>
 #ifdef NIGHTLY_BUILD
     <command id="windowRecordingCmd" />
 #endif
@@ -181,7 +185,7 @@
          modifiers="accel"
 #endif
          command="Tools:Downloads"/>
-    <key id="key_openAddons" data-l10n-id="addons-shortcut" command="Tools:Addons" modifiers="accel,shift"/>
+    <key id="key_openAddons" data-l10n-id="addons-shortcut-2" command="Tools:Addons" modifiers="accel,shift"/>
     <key id="openFileKb" data-l10n-id="file-open-shortcut" command="Browser:OpenFile"  modifiers="accel"/>
     <key id="key_savePage" data-l10n-id="save-page-shortcut" command="Browser:SavePage" modifiers="accel"/>
     <key id="printKb" data-l10n-id="print-shortcut" command="cmd_print"  modifiers="accel"/>
@@ -344,9 +348,10 @@
 
     <key id="key_switchTextDirection" data-l10n-id="bidi-switch-direction-shortcut" command="cmd_switchTextDirection" modifiers="accel,shift" />
 
-    <!--key id="key_privatebrowsing" command="Tools:PrivateBrowsing" data-l10n-id="private-browsing-shortcut"
-         modifiers="accel,shift" reserved="true"/-->
+    <key id="key_privatebrowsing" command="Tools:PrivateBrowsing" data-l10n-id="private-browsing-shortcut"
+         modifiers="accel,shift" reserved="true"/>
     <key id="key_screenshot" data-l10n-id="screenshot-shortcut" command="Browser:Screenshot" modifiers="accel,shift"/>
+    <key id="key_searchTabs" data-l10n-id="search-tabs-shortcut" command="Browser:SearchTabs" modifiers="accel,shift"/>
     <key id="key_sanitize" command="Tools:Sanitize" keycode="VK_DELETE" modifiers="accel,shift"/>
 #ifdef XP_MACOSX
     <key id="key_sanitize_mac" command="Tools:Sanitize" keycode="VK_BACK" modifiers="accel,shift"/>
@@ -390,20 +395,6 @@
 #expand    <key id="key_selectTab8" key="8" modifiers="__NUM_SELECT_TAB_MODIFIER__"/>
 #expand    <key id="key_selectLastTab" key="9" modifiers="__NUM_SELECT_TAB_MODIFIER__"/>
 
-    <key id="key_wrCaptureCmd"
-#ifdef XP_MACOSX
-    key="3" modifiers="control,shift"
-#else
-    key="#" modifiers="control"
-#endif
-    command="wrCaptureCmd"/>
-    <key id="key_wrToggleCaptureSequenceCmd"
-#ifdef XP_MACOSX
-    key="6" modifiers="control,shift"
-#else
-    key="^" modifiers="control"
-#endif
-    command="wrToggleCaptureSequenceCmd"/>
 #ifdef NIGHTLY_BUILD
     <key id="key_windowRecordingCmd"
 #ifdef XP_MACOSX

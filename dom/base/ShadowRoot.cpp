@@ -21,6 +21,7 @@
 #include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/dom/DirectionalityUtils.h"
+#include "mozilla/dom/DocumentBinding.h"
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementBinding.h"
@@ -45,10 +46,18 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(ShadowRoot)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ShadowRoot, DocumentFragment)
   DocumentOrShadowRoot::Traverse(tmp, cb);
+  if (tmp->GetCustomElementRegistryState() ==
+      CustomElementRegistryState::Scoped) {
+    RefPtr<CustomElementRegistry> registry =
+        CustomElementRegistry::GetScopedRegistry(*tmp);
+    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "scoped CustomElementRegistry");
+    cb.NoteXPCOMChild(registry);
+  }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ShadowRoot)
   DocumentOrShadowRoot::Unlink(tmp);
+  CustomElementRegistry::RemoveScopedRegistry(*tmp);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END_INHERITED(DocumentFragment)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ShadowRoot)
@@ -68,15 +77,6 @@ ShadowRoot::ShadowRoot(Element* aElement, ShadowRootMode aMode,
                        const Maybe<RefPtr<CustomElementRegistry>> aRegistry,
                        already_AddRefed<mozilla::dom::NodeInfo> aNodeInfo)
     : DocumentFragment(std::move(aNodeInfo)), DocumentOrShadowRoot(this) {
-  if (StaticPrefs::dom_scoped_custom_element_registries_enabled() &&
-      aRegistry.isSome()) {
-    if (*aRegistry) {
-      SetCustomElementRegistry(*aRegistry);
-    } else {
-      SetKeepCustomElementRegistryNull();
-    }
-  }
-
   // nsINode.h relies on this.
   MOZ_ASSERT(static_cast<nsINode*>(this) == reinterpret_cast<nsINode*>(this));
   MOZ_ASSERT(static_cast<nsIContent*>(this) ==
@@ -107,6 +107,14 @@ ShadowRoot::ShadowRoot(Element* aElement, ShadowRootMode aMode,
     flags |= SHADOW_ROOT_HAS_CUSTOM_SLOT_DISPATCH;
   }
   SetFlags(flags);
+  if (StaticPrefs::dom_scoped_custom_element_registries_enabled() &&
+      aRegistry.isSome()) {
+    if (*aRegistry) {
+      SetCustomElementRegistry(*aRegistry);
+    } else {
+      SetNullCustomElementRegistry();
+    }
+  }
   if (Host()->IsInNativeAnonymousSubtree()) {
     // NOTE(emilio): We could consider just propagating the
     // IN_NATIVE_ANONYMOUS_SUBTREE flag (not making this an anonymous root), but
@@ -127,10 +135,9 @@ ShadowRoot::~ShadowRoot() {
   }
   MOZ_DIAGNOSTIC_ASSERT(!OwnerDoc()->IsComposedDocShadowRoot(*this));
 
-  if (StaticPrefs::dom_scoped_custom_element_registries_enabled() &&
-      GetCustomElementRegistryState() == CustomElementRegistryState::Scoped) {
-    CustomElementRegistry::RemoveScopedRegistry(*this);
-  }
+  MOZ_DIAGNOSTIC_ASSERT(
+      GetCustomElementRegistryState() != CustomElementRegistryState::Scoped,
+      "Scoped registry should have been removed in LastRelease or Unlink");
 
   DocumentOrShadowRoot::Unlink(this);
 }
@@ -583,8 +590,10 @@ void ShadowRoot::AppendBuiltInStyleSheet(BuiltInStyleSheet aSheet) {
   // NOTE(emilio): It's important to Clone() the stylesheet to avoid leaking,
   // since the built-in sheet is kept alive forever, and AppendStyleSheet will
   // set the associated global of the stylesheet.
-  RefPtr sheet = cache->BuiltInSheet(aSheet)->Clone(nullptr, nullptr);
-  AppendStyleSheet(*sheet);
+  if (auto* builtin = cache->GetBuiltInSheet(aSheet)) [[likely]] {
+    RefPtr sheet = builtin->Clone(nullptr, nullptr);
+    AppendStyleSheet(*sheet);
+  }
 }
 
 void ShadowRoot::RemoveSheetFromStyles(StyleSheet& aSheet) {
@@ -795,7 +804,9 @@ nsINode* ShadowRoot::ImportNodeAndAppendChildAt(nsINode& aParentNode,
     return nullptr;
   }
 
-  RefPtr<nsINode> node = OwnerDoc()->ImportNode(aNode, aDeep, rv);
+  BooleanOrImportNodeOptions options;
+  options.SetAsBoolean() = aDeep;
+  RefPtr<nsINode> node = OwnerDoc()->ImportNode(aNode, options, rv);
   if (rv.Failed()) {
     return nullptr;
   }
@@ -1026,8 +1037,10 @@ void ShadowRoot::SetCustomElementRegistry(CustomElementRegistry* aRegistry) {
       GetCustomElementRegistryState() != CustomElementRegistryState::Scoped,
       "We shouldn't override an already assigned scoped registry");
   if (aRegistry->IsScoped()) {
-    SetCustomElementRegistryState(CustomElementRegistryState::Scoped);
     CustomElementRegistry::SetScopedRegistry(*this, *aRegistry);
+    // https://html.spec.whatwg.org/#scoped-document-set
+    // Append shadow root's node document to the registry's scoped document set.
+    aRegistry->AddToScopedDocumentSet(OwnerDoc());
   } else {
     MOZ_ASSERT(aRegistry == OwnerDoc()->GetCustomElementRegistry(),
                "Tried to set a global registry different to docs");
@@ -1035,17 +1048,8 @@ void ShadowRoot::SetCustomElementRegistry(CustomElementRegistry* aRegistry) {
   }
 }
 
-/* https://dom.spec.whatwg.org/#shadowroot-keep-custom-element-registry-null */
-void ShadowRoot::SetKeepCustomElementRegistryNull() {
-  MOZ_ASSERT(StaticPrefs::dom_scoped_custom_element_registries_enabled());
-  MOZ_ASSERT(!HasCustomElementRegistry(),
-             "We shouldn't set a custom element registry without clearing "
-             "first");
-  SetCustomElementRegistryState(CustomElementRegistryState::Null);
-}
-
 /* https://dom.spec.whatwg.org/#shadowroot-custom-element-registry */
-CustomElementRegistry* ShadowRoot::GetCustomElementRegistry() {
+CustomElementRegistry* ShadowRoot::GetCustomElementRegistry() const {
   MOZ_ASSERT(StaticPrefs::dom_scoped_custom_element_registries_enabled());
   switch (GetCustomElementRegistryState()) {
     case CustomElementRegistryState::Global:

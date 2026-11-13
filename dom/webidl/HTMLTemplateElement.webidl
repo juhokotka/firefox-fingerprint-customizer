@@ -14,6 +14,8 @@ interface HTMLTemplateElement : HTMLElement {
   [HTMLConstructor] constructor();
 
   readonly attribute DocumentFragment content;
+  [CEReactions, Pref="dom.template-for.enabled"]
+  attribute DOMString htmlFor;
   [CEReactions]
   attribute DOMString shadowRootMode;
   [CEReactions, SetterThrows]
@@ -26,4 +28,6 @@ interface HTMLTemplateElement : HTMLElement {
   attribute DOMString? shadowRootReferenceTarget;
   [CEReactions, Pref="dom.shadowdom.shadowRootSlotAssignment.enabled"]
   attribute DOMString shadowRootSlotAssignment;
+  [CEReactions, Pref="dom.scoped-custom-element-registries.enabled"]
+  attribute DOMString shadowRootCustomElementRegistry;
 };

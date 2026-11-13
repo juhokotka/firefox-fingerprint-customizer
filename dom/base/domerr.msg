@@ -35,6 +35,9 @@ DOM4_MSG_DEF(NotAllowedError, "The request is not allowed by the user agent or t
 /* StringEncoding API errors from http://wiki.whatwg.org/wiki/StringEncoding */
 DOM4_MSG_DEF(EncodingError, "The given encoding is not supported.", NS_ERROR_DOM_ENCODING_NOT_SUPPORTED_ERR)
 
+/* Web Serial API errors from https://wicg.github.io/serial/ */
+DOM4_MSG_DEF(ParityError, "A parity error occurred while reading from the serial port.", NS_ERROR_DOM_SERIAL_PARITY_ERROR)
+
 /* WebCrypto API errors from http://www.w3.org/TR/WebCryptoAPI/ */
 DOM4_MSG_DEF(UnknownError, "The operation failed for an unknown transient reason", NS_ERROR_DOM_UNKNOWN_ERR)
 DOM4_MSG_DEF(DataError, "Data provided to an operation does not meet requirements", NS_ERROR_DOM_DATA_ERR)
@@ -60,6 +63,7 @@ DOM4_MSG_DEF(VersionError, "The operation failed because the stored database is 
 DOM4_MSG_DEF(NotFoundError, "The operation failed because the requested database object could not be found. For example, an object store did not exist but was being opened.", NS_ERROR_DOM_INDEXEDDB_NOT_FOUND_ERR)
 DOM4_MSG_DEF(InvalidStateError, "A mutation operation was attempted on a database that did not allow mutations.", NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR)
 DOM4_MSG_DEF(AbortError, "A request was aborted, for example through a call to IDBTransaction.abort.", NS_ERROR_DOM_INDEXEDDB_ABORT_ERR)
+DOM4_MSG_DEF(NotReadableError, "The operation failed because the underlying storage containing the requested data could not be read.", NS_ERROR_DOM_INDEXEDDB_NOT_READABLE_ERR)
 DOM4_MSG_DEF(QuotaExceededError, "The current transaction exceeded its quota limitations.", NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR)
 
 /* FileSystem DOM errors. */

@@ -22,6 +22,7 @@ class DataChannelConnectionDcSctp : public DataChannelConnection,
   // DataChannelConnection API
   void Destroy() override;
   bool RaiseStreamLimitTo(uint16_t aNewLimit) override;
+  uint16_t GetStreamIdCeiling() const override;
   void OnTransportReady() override;
   bool Init(const uint16_t aLocalPort, const uint16_t aNumStreams) override;
   int SendMessage(DataChannel& aChannel, OutgoingMsg&& aMsg) override;
@@ -55,6 +56,12 @@ class DataChannelConnectionDcSctp : public DataChannelConnection,
   std::unique_ptr<Timeout> CreateTimeout(
       webrtc::TaskQueueBase::DelayPrecision aPrecision) override;
   void HandleTimeout(TimeoutID aId);
+
+  // Returns the current time (from any epoch).
+  //
+  // Note that it's NOT ALLOWED to call into this library from within this
+  // callback.
+  webrtc::Timestamp Now() override;
 
   // Called when the library needs a random number uniformly distributed between
   // `low` (inclusive) and `high` (exclusive). The random numbers used by the

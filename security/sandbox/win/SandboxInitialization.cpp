@@ -5,11 +5,11 @@
 #include "SandboxInitialization.h"
 
 #include "base/memory/ref_counted.h"
+#include "mozilla/DebugOnly.h"
+#include "mozilla/WindowsProcessMitigations.h"
 #include "nsWindowsDllInterceptor.h"
 #include "sandbox/win/src/process_mitigations.h"
 #include "sandbox/win/src/sandbox_factory.h"
-#include "mozilla/DebugOnly.h"
-#include "mozilla/WindowsProcessMitigations.h"
 
 namespace mozilla {
 namespace sandboxing {

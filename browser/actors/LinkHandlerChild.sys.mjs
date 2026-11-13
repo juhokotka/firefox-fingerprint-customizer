@@ -129,13 +129,6 @@ export class LinkHandlerChild extends JSWindowActorChild {
           }
           break;
         case "search":
-          if (
-            Services.policies &&
-            !Services.policies.isAllowed("installSearchEngine")
-          ) {
-            break;
-          }
-
           if (!searchAdded && event.type == "DOMLinkAdded") {
             let type = link.type && link.type.toLowerCase();
             type = type.replace(/^\s+|\s*(?:;.*)?$/g, "");

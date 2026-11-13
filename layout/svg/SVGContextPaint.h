@@ -16,6 +16,7 @@
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/gfx/2D.h"
 #include "nsColor.h"
+#include "nsISupportsImpl.h"
 #include "nsRefPtrHashtable.h"
 #include "nsStyleStruct.h"
 #include "nsTArray.h"
@@ -59,7 +60,7 @@ struct MaxContiguousEnumValue<SVGContextPaintTypeTag> {
  * SVGContextPaint instances are stored in a local RefPtr and only last for the
  * duration of a function call.
  */
-class SVGContextPaint : public RefCounted<SVGContextPaint> {
+class SVGContextPaint {
  public:
   using DrawTarget = mozilla::gfx::DrawTarget;
   using Float = mozilla::gfx::Float;
@@ -76,13 +77,13 @@ class SVGContextPaint : public RefCounted<SVGContextPaint> {
   SVGContextPaint(Maybe<nscolor> aFill, Maybe<float> aFillOpacity,
                   Maybe<nscolor> aStroke, Maybe<float> aStrokeOpacity) {
     if (aFill) {
-      mPaint[Tag::Fill].SetColor(aFill.value());
+      mPaint[Tag::Fill].SetColor(*aFill);
     }
-    mOpacity[Tag::Fill] = aFillOpacity ? aFillOpacity.value() : 1.0f;
+    mOpacity[Tag::Fill] = aFillOpacity.valueOr(1.0f);
     if (aStroke) {
-      mPaint[Tag::Stroke].SetColor(aStroke.value());
+      mPaint[Tag::Stroke].SetColor(*aStroke);
     }
-    mOpacity[Tag::Stroke] = aStrokeOpacity ? aStrokeOpacity.value() : 1.0f;
+    mOpacity[Tag::Stroke] = aStrokeOpacity.valueOr(1.0f);
   }
 
   bool operator==(const SVGContextPaint& aOther) const {
@@ -98,6 +99,8 @@ class SVGContextPaint : public RefCounted<SVGContextPaint> {
   }
 
   MOZ_DECLARE_REFCOUNTED_TYPENAME(SVGContextPaint)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_WITH_DELETE_ON_MAIN_THREAD(
+      SVGContextPaint)
 
   bool IsSolidColor(Tag aTag) const;
   gfx::DeviceColor AsSolidColor(Tag aTag) const;
@@ -189,6 +192,11 @@ class SVGContextPaint : public RefCounted<SVGContextPaint> {
 
     bool IsSolidColor() const { return mPaintType == Tag::Color; }
 
+    nscolor AsSolidColor() const {
+      MOZ_ASSERT(IsSolidColor(), "Must be solid color");
+      return mPaintDefinition.mColor;
+    }
+
     void SetPattern(gfxPattern* aPattern, const gfxMatrix& aCTM) {
       mPaintType = Tag::Pattern;
       mPaintDefinition.mPattern = aPattern;
@@ -238,6 +246,8 @@ class SVGContextPaint : public RefCounted<SVGContextPaint> {
   DrawMode GetDrawMode() const { return mDrawMode; }
 
  private:
+  ~SVGContextPaint() = default;
+
   EnumeratedArray<Tag, Paint> mPaint;
   EnumeratedArray<Tag, float> mOpacity;
 

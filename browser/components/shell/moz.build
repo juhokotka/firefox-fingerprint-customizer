@@ -17,6 +17,14 @@ XPIDL_SOURCES += [
     "nsIShellService.idl",
 ]
 
+SOURCES += [
+    "nsShellService.cpp",
+]
+
+SOURCE_HEADERS += [
+    "nsShellService.h",
+]
+
 if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
     XPIDL_SOURCES += [
         "nsIMacShellService.idl",
@@ -24,6 +32,10 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
 
     SOURCES += [
         "nsMacShellService.mm",
+    ]
+
+    SOURCE_HEADERS += [
+        "nsMacShellService.h",
     ]
 
     LOCAL_INCLUDES += [
@@ -47,6 +59,9 @@ elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
     SOURCES += [
         "nsGNOMEShellService.cpp",
     ]
+    SOURCE_HEADERS += [
+        "nsGNOMEShellService.h",
+    ]
     LOCAL_INCLUDES += [
         "/widget",
         "/widget/gtk",  # for nsWindow
@@ -56,7 +71,12 @@ elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
             "nsGNOMEShellDBusHelper.cpp",
             "nsGNOMEShellSearchProvider.cpp",
         ]
+        SOURCE_HEADERS += [
+            "nsGNOMEShellDBusHelper.h",
+            "nsGNOMEShellSearchProvider.h",
+        ]
         include("/ipc/chromium/chromium-config.mozbuild")
+
 
 elif CONFIG["OS_ARCH"] == "WINNT":
     XPIDL_SOURCES += [
@@ -66,7 +86,6 @@ elif CONFIG["OS_ARCH"] == "WINNT":
     ]
     SOURCES += [
         "nsWindowsShellService.cpp",
-        "Windows11TaskbarPinning.cpp",
         "WindowsDefaultBrowser.cpp",
         "WindowsUIElement.cpp",
         "WindowsUIOverlayImage.cpp",
@@ -101,6 +120,15 @@ elif CONFIG["OS_ARCH"] == "WINNT":
         "components.conf",
     ]
 
+    SOURCE_HEADERS += [
+        "nsWindowsShellService.h",
+        "nsWindowsShellServiceInternal.h",
+        "WindowsDefaultBrowser.h",
+        "WindowsUIElement.h",
+        "WindowsUIOverlayImage.h",
+        "WindowsUserChoice.h",
+    ]
+
 XPIDL_MODULE = "shellservice"
 
 if SOURCES:
@@ -128,6 +156,11 @@ for var in (
 
 if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
     CXXFLAGS += CONFIG["MOZ_GTK3_CFLAGS"]
+
+SPHINX_TREES["/widget/windows/shell"] = "docs"
+
+with Files("docs/**"):
+    SCHEDULES.exclusive = ["docs"]
 
 with Files("**"):
     BUG_COMPONENT = ("Firefox", "Shell Integration")

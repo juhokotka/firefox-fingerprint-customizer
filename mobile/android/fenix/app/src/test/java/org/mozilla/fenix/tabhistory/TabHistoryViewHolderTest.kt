@@ -23,8 +23,7 @@ import org.junit.Test
 
 class TabHistoryViewHolderTest {
 
-    @RelaxedMockK
-    private lateinit var view: WidgetSiteItemView
+    @RelaxedMockK private lateinit var view: WidgetSiteItemView
 
     @MockK private lateinit var interactor: TabHistoryViewInteractor
 
@@ -32,18 +31,20 @@ class TabHistoryViewHolderTest {
     private lateinit var holder: TabHistoryViewHolder
     private lateinit var onClick: CapturingSlot<View.OnClickListener>
 
-    private val selectedItem = TabHistoryItem(
-        title = "Mozilla",
-        url = "https://mozilla.org",
-        index = 0,
-        isSelected = true,
-    )
-    private val unselectedItem = TabHistoryItem(
-        title = "Firefox",
-        url = "https://firefox.com",
-        index = 1,
-        isSelected = false,
-    )
+    private val selectedItem =
+        TabHistoryItem(
+            title = "Mozilla",
+            url = "https://mozilla.org",
+            index = 0,
+            isSelected = true,
+        )
+    private val unselectedItem =
+        TabHistoryItem(
+            title = "Firefox",
+            url = "https://firefox.com",
+            index = 1,
+            isSelected = false,
+        )
 
     @Before
     fun setup() {
@@ -72,6 +73,15 @@ class TabHistoryViewHolderTest {
 
         verify { view.setText(label = "Firefox", caption = "https://firefox.com") }
         verify { icons.loadIntoView(view.iconView, IconRequest("https://firefox.com")) }
+    }
+
+    @Test
+    fun `binds a readable caption and loads the icon for the canonical url`() {
+        val url = "https://mozilla.org/%D1%82%D0%B5%D1%81%D1%82%20a"
+        holder.bind(unselectedItem.copy(url = url))
+
+        verify { view.setText(label = "Firefox", caption = "https://mozilla.org/тест%20a") }
+        verify { icons.loadIntoView(view.iconView, IconRequest(url)) }
     }
 
     @Test

@@ -73,77 +73,71 @@
 #include "mozilla/CycleCollectedJSRuntime.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/DefineEnum.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/PodOperations.h"
 #include "mozilla/mozalloc.h"
+#include "mozilla/PodOperations.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Vector.h"
 
-#include "mozilla/dom/ScriptSettings.h"
-
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "MainThreadUtils.h"
+#include "nsBaseHashtable.h"
+#include "nsCOMArray.h"
+#include "nsCOMPtr.h"
+#include "nscore.h"
+#include "nsCycleCollectionParticipant.h"
+#include "nsDebug.h"
+#include "nsDeque.h"
+#include "nsHashKeys.h"
+#include "nsIClassInfoImpl.h"
+#include "nsIComponentManager.h"
+#include "nsIComponentRegistrar.h"
+#include "nsIConsoleService.h"
+#include "nsIObserver.h"
+#include "nsIPrincipal.h"
+#include "nsIScriptObjectPrincipal.h"
+#include "nsIScriptSecurityManager.h"
+#include "nsIServiceManager.h"
+#include "nsISimpleEnumerator.h"
+#include "nsISupports.h"
+#include "nsISupportsPrimitives.h"
+#include "nsIXPConnect.h"
+#include "nsIXPCScriptable.h"
+#include "nsJSPrincipals.h"
+#include "nsReadableUtils.h"
+#include "nsString.h"
+#include "nsTArray.h"
+#include "nsVariant.h"
+#include "nsWeakReference.h"
+#include "nsWrapperCache.h"
+#include "nsXPCOM.h"
+#include "nsXPTCUtils.h"
+#include "prcvar.h"
+#include "prenv.h"
+#include "SandboxPrivate.h"
+#include "SystemGlobal.h"
+#include "xpccomponents.h"
+#include "XPCForwards.h"
+#include "XPCLog.h"
+#include "xpcObjectHelper.h"
 #include "xpcpublic.h"
+#include "xptinfo.h"
+
 #include "js/friend/CycleCollector.h"
-#include "js/HashTable.h"
 #include "js/GCHashTable.h"
+#include "js/HashTable.h"
 #include "js/Object.h"              // JS::GetClass, JS::GetCompartment
 #include "js/PropertyAndElement.h"  // JS_DefineProperty
 #include "js/TracingAPI.h"
 #include "js/WeakMapPtr.h"
-#include "nscore.h"
-#include "nsXPCOM.h"
-#include "nsCycleCollectionParticipant.h"
-#include "nsDebug.h"
-#include "nsISupports.h"
-#include "nsIServiceManager.h"
-#include "nsIClassInfoImpl.h"
-#include "nsIComponentManager.h"
-#include "nsIComponentRegistrar.h"
-#include "nsISupportsPrimitives.h"
-#include "nsISimpleEnumerator.h"
-#include "nsIXPConnect.h"
-#include "nsIXPCScriptable.h"
-#include "nsIObserver.h"
-#include "nsWeakReference.h"
-#include "nsCOMPtr.h"
-#include "nsXPTCUtils.h"
-#include "xptinfo.h"
-#include "XPCForwards.h"
-#include "XPCLog.h"
-#include "xpccomponents.h"
-#include "prenv.h"
-#include "prcvar.h"
-#include "nsString.h"
-#include "nsReadableUtils.h"
-
-#include "MainThreadUtils.h"
-
-#include "nsIConsoleService.h"
-
-#include "nsVariant.h"
-#include "nsCOMArray.h"
-#include "nsTArray.h"
-#include "nsBaseHashtable.h"
-#include "nsHashKeys.h"
-#include "nsWrapperCache.h"
-#include "nsDeque.h"
-
-#include "nsIScriptSecurityManager.h"
-
-#include "nsIPrincipal.h"
-#include "nsJSPrincipals.h"
-#include "nsIScriptObjectPrincipal.h"
-#include "xpcObjectHelper.h"
-
-#include "SandboxPrivate.h"
-#include "SystemGlobal.h"
 
 #ifdef XP_WIN
 // Nasty MS defines
@@ -161,13 +155,6 @@ class AutoEntryScript;
 class Exception;
 }  // namespace dom
 }  // namespace mozilla
-
-/***************************************************************************/
-// data declarations...
-extern const char XPC_EXCEPTION_CONTRACTID[];
-extern const char XPC_CONSOLE_CONTRACTID[];
-extern const char XPC_SCRIPT_ERROR_CONTRACTID[];
-extern const char XPC_XPCONNECT_CONTRACTID[];
 
 /***************************************************************************/
 // Helper function.
@@ -373,10 +360,8 @@ class XPCJSContext final : public mozilla::CycleCollectedJSContext,
     IDX_INDEXEDDB,
     IDX_STRUCTUREDCLONE,
     IDX_LOCKS,
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
     IDX_SUPPRESSED,
     IDX_ERROR,
-#endif
     IDX_TOTAL_COUNT  // just a count of the above
   };
 
@@ -644,6 +629,10 @@ class MOZ_STACK_CLASS XPCCallContext final {
 
   virtual ~XPCCallContext();
 
+  // no copy ctor or assignment allowed
+  XPCCallContext(const XPCCallContext& r) = delete;
+  XPCCallContext& operator=(const XPCCallContext& r) = delete;
+
   inline bool IsValid() const;
 
   inline XPCJSContext* GetContext() const;
@@ -687,11 +676,6 @@ class MOZ_STACK_CLASS XPCCallContext final {
   void SystemIsBeingShutDown();
 
   operator JSContext*() const { return GetJSContext(); }
-
- private:
-  // no copy ctor or assignment allowed
-  XPCCallContext(const XPCCallContext& r) = delete;
-  XPCCallContext& operator=(const XPCCallContext& r) = delete;
 
  private:
   // posible values for mState
@@ -842,6 +826,8 @@ class XPCWrappedNativeScope final
                         JS::HandleObject aFirstGlobal);
   virtual ~XPCWrappedNativeScope();
 
+  XPCWrappedNativeScope() = delete;
+
   mozilla::UniquePtr<JSObject2JSObjectMap> mWaiverWrapperMap;
 
   JS::Compartment* Compartment() const { return mCompartment; }
@@ -859,9 +845,6 @@ class XPCWrappedNativeScope final
   JS::Heap<JSObject*> mIDProto;
   JS::Heap<JSObject*> mIIDProto;
   JS::Heap<JSObject*> mCIDProto;
-
- protected:
-  XPCWrappedNativeScope() = delete;
 
  private:
   mozilla::UniquePtr<Native2WrappedNativeMap> mWrappedNativeMap;
@@ -1029,20 +1012,20 @@ class XPCNativeInterface final {
 
   void Trace(JSTracer* trc);
 
+  XPCNativeInterface() = delete;
+  XPCNativeInterface(const XPCNativeInterface& r) = delete;
+  XPCNativeInterface& operator=(const XPCNativeInterface& r) = delete;
+
  protected:
   static already_AddRefed<XPCNativeInterface> NewInstance(
       JSContext* cx, IID2NativeInterfaceMap* aMap,
       const nsXPTInterfaceInfo* aInfo);
 
-  XPCNativeInterface() = delete;
   XPCNativeInterface(const nsXPTInterfaceInfo* aInfo, jsid aName)
       : mInfo(aInfo), mName(aName), mMemberCount(0) {}
   ~XPCNativeInterface();
 
   void* operator new(size_t, void* p) noexcept(true) { return p; }
-
-  XPCNativeInterface(const XPCNativeInterface& r) = delete;
-  XPCNativeInterface& operator=(const XPCNativeInterface& r) = delete;
 
   static void DestroyInstance(XPCNativeInterface* inst);
 
@@ -1160,6 +1143,10 @@ class XPCNativeSet final {
   static void DestroyInstance(XPCNativeSet* inst);
 
  private:
+  // The number of interfaces a set can hold is bounded by the width of
+  // mInterfaceCount.
+  static constexpr size_t kMaxInterfaceCount = UINT16_MAX;
+
   uint16_t mInterfaceCount;
   // Always last - object sized for array.
   // These are strong references.
@@ -1223,11 +1210,11 @@ class XPCWrappedNativeProto final {
 
   ~XPCWrappedNativeProto();
 
- protected:
   // disable copy ctor and assignment
   XPCWrappedNativeProto(const XPCWrappedNativeProto& r) = delete;
   XPCWrappedNativeProto& operator=(const XPCWrappedNativeProto& r) = delete;
 
+ protected:
   // hide ctor
   XPCWrappedNativeProto(XPCWrappedNativeScope* Scope, nsIClassInfo* ClassInfo,
                         RefPtr<XPCNativeSet>&& Set);
@@ -1279,6 +1266,9 @@ class XPCWrappedNativeTearOff final {
   }
   ~XPCWrappedNativeTearOff();
 
+  XPCWrappedNativeTearOff(const XPCWrappedNativeTearOff& r) = delete;
+  XPCWrappedNativeTearOff& operator=(const XPCWrappedNativeTearOff& r) = delete;
+
   // NOP. This is just here to make the AutoMarkingPtr code compile.
   inline void TraceJS(JSTracer* trc) {}
   inline void AutoTrace(JSTracer* trc) {}
@@ -1294,10 +1284,6 @@ class XPCWrappedNativeTearOff final {
   }
 
   XPCWrappedNativeTearOff* GetNextTearOff() { return mNextTearOff.get(); }
-
- private:
-  XPCWrappedNativeTearOff(const XPCWrappedNativeTearOff& r) = delete;
-  XPCWrappedNativeTearOff& operator=(const XPCWrappedNativeTearOff& r) = delete;
 
  private:
   XPCNativeInterface* mInterface;
@@ -1487,10 +1473,10 @@ class XPCWrappedNative final : public nsIXPConnectWrappedNative {
   void Suspect(nsCycleCollectionNoteRootCallback& cb);
   void NoteTearoffs(nsCycleCollectionTraversalCallback& cb);
 
-  // Make ctor and dtor protected (rather than private) to placate nsCOMPtr.
- protected:
   XPCWrappedNative() = delete;
 
+  // Make ctor and dtor protected (rather than private) to placate nsCOMPtr.
+ protected:
   // This ctor is used if this object will have a proto.
   XPCWrappedNative(nsCOMPtr<nsISupports>&& aIdentity,
                    XPCWrappedNativeProto* aProto);
@@ -1643,9 +1629,9 @@ class nsXPCWrappedJS final : protected nsAutoXPTCStub,
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
   virtual ~nsXPCWrappedJS();
+  nsXPCWrappedJS() = delete;
 
  protected:
-  nsXPCWrappedJS() = delete;
   nsXPCWrappedJS(JSContext* cx, JSObject* aJSObj,
                  const nsXPTInterfaceInfo* aInfo, nsXPCWrappedJS* root,
                  nsresult* rv);
@@ -1803,6 +1789,8 @@ class XPCConvert {
                                      mozilla::dom::Exception** exception,
                                      JSContext* cx, JS::Value* jsExceptionPtr);
 
+  XPCConvert() = delete;
+
  private:
   /**
    * Convert a native array into a JS::Value.
@@ -1839,8 +1827,6 @@ class XPCConvert {
                              const nsXPTType& aEltType, const nsIID* aIID,
                              nsresult* pErr,
                              const ArrayAllocFixupLen& aAllocFixupLen);
-
-  XPCConvert() = delete;
 };
 
 /***************************************************************************/
@@ -1940,15 +1926,15 @@ class MOZ_RAII AutoScriptEvaluate {
    */
   ~AutoScriptEvaluate();
 
+  // No copying or assignment allowed
+  AutoScriptEvaluate(const AutoScriptEvaluate&) = delete;
+  AutoScriptEvaluate& operator=(const AutoScriptEvaluate&) = delete;
+
  private:
   JSContext* mJSContext;
   mozilla::Maybe<JS::AutoSaveExceptionState> mState;
   bool mEvaluated;
   mozilla::Maybe<JSAutoRealm> mAutoRealm;
-
-  // No copying or assignment allowed
-  AutoScriptEvaluate(const AutoScriptEvaluate&) = delete;
-  AutoScriptEvaluate& operator=(const AutoScriptEvaluate&) = delete;
 };
 
 /***************************************************************************/
@@ -2269,6 +2255,7 @@ class MOZ_STACK_CLASS SandboxOptions : public OptionsBase {
         wantExportHelpers(false),
         isWebExtensionContentScript(false),
         proto(cx),
+        associatedWindow(cx),
         sameZoneAs(cx),
         forceSecureContext(false),
         freshCompartment(false),
@@ -2289,6 +2276,7 @@ class MOZ_STACK_CLASS SandboxOptions : public OptionsBase {
   bool wantExportHelpers;
   bool isWebExtensionContentScript;
   JS::RootedObject proto;
+  JS::RootedObject associatedWindow;
   mozilla::Maybe<nsString> sandboxContentSecurityPolicy;
   nsCString sandboxName;
   JS::RootedObject sameZoneAs;
@@ -2537,9 +2525,6 @@ class CompartmentOriginInfo {
 // information needed to select the right security policy for cross-compartment
 // wrappers.
 class CompartmentPrivate {
-  CompartmentPrivate() = delete;
-  CompartmentPrivate(const CompartmentPrivate&) = delete;
-
  public:
   CompartmentPrivate(JS::Compartment* c,
                      mozilla::UniquePtr<XPCWrappedNativeScope> scope,
@@ -2547,6 +2532,9 @@ class CompartmentPrivate {
                      const mozilla::SiteIdentifier& site);
 
   ~CompartmentPrivate();
+
+  CompartmentPrivate() = delete;
+  CompartmentPrivate(const CompartmentPrivate&) = delete;
 
   static CompartmentPrivate* Get(JS::Compartment* compartment) {
     MOZ_ASSERT(compartment);
@@ -2645,13 +2633,13 @@ inline void CrashIfNotInAutomation() { MOZ_RELEASE_ASSERT(IsInAutomation()); }
 // Window) and its associated scripts and objects; a compartment may contain
 // several same-origin realms.
 class RealmPrivate {
-  RealmPrivate() = delete;
-  RealmPrivate(const RealmPrivate&) = delete;
-
  public:
   enum LocationHint { LocationHintRegular, LocationHintAddon };
 
   explicit RealmPrivate(JS::Realm* realm);
+
+  RealmPrivate() = delete;
+  RealmPrivate(const RealmPrivate&) = delete;
 
   // Creates the RealmPrivate and CompartmentPrivate (if needed) for a new
   // global.

@@ -33,9 +33,9 @@ smartwindow-document-title = New Tab
 
 ## Smart Window Toggle Button
 
-toolbar-button-ai-window-toggle =
-    .label = Window Type
-    .tooltiptext = Switch between Smart and Classic windows.
+toolbar-switcher-customizable-label-v2 =
+    .label = { -smart-window-brand-name } switcher
+    .tooltiptext = Switch between Smart and Classic Windows
 
 ai-window-toggleview-switch-classic =
     .label = Classic Window
@@ -98,6 +98,7 @@ smartbar-placeholder-hint-4 = Search the web…
 
 smartbar-mention-typing-placeholder = Tag a tab or site
 smartbar-mentions-list-no-results-label = No results found
+smartbar-mentions-list-tab-groups-label = Recent groups
 smartbar-mentions-list-recent-tabs-label = Recent tabs
 
 ## Context mentions menu toggle button
@@ -117,16 +118,33 @@ aiwindow-website-chip-remove-button =
 
 aiwindow-firstrun-title = Welcome to { -smart-window-brand-name }
 aiwindow-firstrun-model-title = What’s important to you?
+aiwindow-firstrun-model-title-v2 = Pick a model to start
 aiwindow-firstrun-model-subtitle = Pick a model to power { -smart-window-brand-name }. Switch anytime.
-aiwindow-firstrun-model-fast-label = Fast
-aiwindow-firstrun-model-fast-body = Answers quickly
+aiwindow-firstrun-model-subtitle-v2 = Each model can help you to summarize, compare, and explore across your tabs. Switch anytime.
+
 # $model (string) - The name of the AI model
 # $ownerName (string) - The name of the model owner/provider
+# $shortName (string) - The short name of the model version
 aiwindow-firstrun-model-chip-subtitle = Model { $model } by { $ownerName }
-aiwindow-firstrun-model-allpurpose-label = Flexible
-aiwindow-firstrun-model-allpurpose-body = Solid fit for most needs
 aiwindow-firstrun-model-personal-label = Personal
 aiwindow-firstrun-model-personal-body = Most tailored answers
+# $shortName (string) - The short name of the model version
+aiwindow-firstrun-model-personal-label-v2 = Personal: { $shortName }
+aiwindow-firstrun-model-personal-body-v2 = Built for personalized help across languages
+aiwindow-firstrun-model-fast-label = Fast
+aiwindow-firstrun-model-fast-body = Answers quickly
+# $shortName (string) - The short name of the model version
+aiwindow-firstrun-model-fast-label-v2 = Fast: { $shortName }
+aiwindow-firstrun-model-fast-body-v2 = Best for quick answers when you’re moving fast
+aiwindow-firstrun-model-allpurpose-label = Flexible
+aiwindow-firstrun-model-allpurpose-body = Solid fit for most needs
+# $shortName (string) - The short name of the model version
+aiwindow-firstrun-model-flexible-label = Flexible: { $shortName }
+aiwindow-firstrun-model-flexible-body = Ready for a variety of tasks
+
+# Recommended represents the chat brand and model we recommend for users. Only affects European users.
+aiwindow-firstrun-model-recommended = Recommended
+
 aiwindow-firstrun-button = Let’s go
 aiwindow-firstrun-back-button = Back
 aiwindow-firstrun-next-button = Next
@@ -137,6 +155,7 @@ aiwindow-input-model-select-button-label-fast = Fast
 aiwindow-input-model-select-button-label-allpurpose = Flexible
 aiwindow-input-model-select-button-label-personal = Personal
 aiwindow-input-model-select-button-label-custom = Custom
+aiwindow-input-model-select-button-description-custom = Use your own LLM
 
 # Variables:
 # $ownerName (string) - The name of the model owner/provider
@@ -200,6 +219,39 @@ aiwindow-new-chat =
 aiwindow-close-sidebar =
     .tooltiptext = Close
     .aria-label = Close
+
+## Chat History Menu
+## The menu opened from the "..." button next to the new chat button. Its main
+## view links to the chat history subview and Smart Window settings; the chat
+## history subview lists recent chats and a shortcut to all chats.
+
+aiwindow-history-menu =
+    .tooltiptext = More options
+    .aria-label = More options
+
+aiwindow-history-menu-chat-history = Chat history
+
+aiwindow-history-menu-back =
+    .tooltiptext = Back
+    .aria-label = Back
+
+aiwindow-history-menu-view-all-chats = View all chats
+
+aiwindow-history-menu-settings = { -smart-window-brand-name } settings
+
+## Fullpage top actions
+## Labeled buttons shown at the top of the fullpage Smart Window.
+
+aiwindow-fullpage-new-chat =
+    .label = New chat
+aiwindow-fullpage-chat-history =
+    .label = Chat history
+# "More" is the label for a button that opens a menu of additional Smart Window
+# options (currently Smart Window settings) — i.e. "more actions/options", not
+# more content or more chat history.
+aiwindow-fullpage-more =
+    .label = More
+    .title = More
 
 ## Sign out dialog
 
@@ -338,3 +390,38 @@ aiwindow-ai-chat-grid-list-view =
 aiwindow-ai-chat-grid-grid-view =
     .aria-label = Switch mode: Grid View
     .tooltiptext = Grid View
+
+## Smart Window new-tab conversation starters
+## These are short suggested user queries used to prompt the AI assistant when clicked on.
+## They then become the first message in the conversation.
+## When localizing, please write them as short instructions a user would give to an assistant.
+## They should also be concise and direct, but not at the expense of losing meaning.
+
+aiwindow-starter-writing-first-draft = Write a first draft
+aiwindow-starter-writing-improve = Improve writing
+aiwindow-starter-writing-proofread = Proofread a message
+
+aiwindow-starter-planning-simplify = Simplify a topic
+aiwindow-starter-planning-brainstorm = Brainstorm ideas
+aiwindow-starter-planning-plan = Help make a plan
+
+aiwindow-starter-browsing-history = Find tabs in history
+aiwindow-starter-browsing-summarize = Summarize tabs
+aiwindow-starter-browsing-compare = Compare tabs
+
+## Conversation Starter Scroll Buttons
+## Scrolls the conversation-starter pill row toward its start/end.
+
+aiwindow-starter-scroll-start =
+    .tooltiptext = Scroll back
+    .aria-label = Scroll back
+aiwindow-starter-scroll-end =
+    .tooltiptext = Scroll forward
+    .aria-label = Scroll forward
+
+# Dismisses a "pick up where you left off" resume-activity suggestion pill.
+# Variables:
+#   $text (String) - The suggestion headline being dismissed
+aiwindow-starter-dismiss =
+    .title = Dismiss { $text }
+    .aria-label = Dismiss { $text }

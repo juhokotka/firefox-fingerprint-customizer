@@ -4,9 +4,9 @@
 
 This page explains how to add, build, link, and vendor Rust crates.
 
-The [code documentation](../../writing-rust-code) explains how to write and
+The [code documentation](/writing-rust-code/index.md) explains how to write and
 work with Rust code in Firefox. The
-[test documentation](../../testing-rust-code) explains how to test and debug
+[test documentation](/testing-rust-code/index.md) explains how to test and debug
 Rust code in Firefox.
 
 ## Linking Rust crates into libxul
@@ -50,7 +50,7 @@ To link Rust code into libraries other than libxul, create a directory with a
 `Cargo.toml` file for your crate, and a `moz.build` file that contains:
 
 ```python
-RustLibrary('crate_name')
+RustLibrary("crate_name")
 ```
 
 where `crate_name` matches the name from the `[package]` section of your
@@ -84,7 +84,7 @@ because it's shipped with Firefox) then add this rule to the `moz.build`
 file:
 
 ```python
-RUST_PROGRAMS = ['prog_name']
+RUST_PROGRAMS = ["prog_name"]
 ```
 
 where *prog_name* is the name of the executable as specified in the

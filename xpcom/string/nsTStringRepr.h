@@ -11,15 +11,14 @@
 
 #include "fmt/format.h"
 #include "fmt/xchar.h"
-
 #include "mozilla/Char16.h"
 #include "mozilla/CheckedInt.h"
-#include "mozilla/fallible.h"
 #include "mozilla/StringBuffer.h"
+#include "mozilla/fallible.h"
+#include "nsCharTraits.h"
 #include "nsStringFlags.h"
 #include "nsStringFwd.h"
 #include "nsStringIterator.h"
-#include "nsCharTraits.h"
 
 template <typename T>
 class nsTSubstringTuple;
@@ -223,7 +222,7 @@ class nsTStringRepr {
   }
 
   constexpr char_type CharAt(index_type aIndex) const {
-    NS_ASSERTION(aIndex < Length(), "index exceeds allowable range");
+    MOZ_ASSERT(aIndex < Length(), "index exceeds allowable range");
     return mData[aIndex];
   }
 
@@ -351,6 +350,10 @@ class nsTStringRepr {
                 reinterpret_cast<uintptr_t>(mData + mLength) &&
             reinterpret_cast<uintptr_t>(aEnd) >
                 reinterpret_cast<uintptr_t>(mData));
+  }
+
+  bool Contains(const string_view& aString) const {
+    return Find(aString) != kNotFound;
   }
 
   /**
@@ -523,18 +526,6 @@ inline constexpr bool operator!=(const mozilla::detail::nsTStringRepr<T>& aLhs,
 }
 
 template <typename T>
-inline bool operator<(const mozilla::detail::nsTStringRepr<T>& aLhs,
-                      const mozilla::detail::nsTStringRepr<T>& aRhs) {
-  return Compare(aLhs, aRhs) < 0;
-}
-
-template <typename T>
-inline bool operator<=(const mozilla::detail::nsTStringRepr<T>& aLhs,
-                       const mozilla::detail::nsTStringRepr<T>& aRhs) {
-  return Compare(aLhs, aRhs) <= 0;
-}
-
-template <typename T>
 inline bool operator==(const mozilla::detail::nsTStringRepr<T>& aLhs,
                        const mozilla::detail::nsTStringRepr<T>& aRhs) {
   return aLhs.Equals(aRhs);
@@ -547,15 +538,10 @@ inline bool operator==(const mozilla::detail::nsTStringRepr<T>& aLhs,
 }
 
 template <typename T>
-inline bool operator>=(const mozilla::detail::nsTStringRepr<T>& aLhs,
-                       const mozilla::detail::nsTStringRepr<T>& aRhs) {
-  return Compare(aLhs, aRhs) >= 0;
-}
-
-template <typename T>
-inline bool operator>(const mozilla::detail::nsTStringRepr<T>& aLhs,
-                      const mozilla::detail::nsTStringRepr<T>& aRhs) {
-  return Compare(aLhs, aRhs) > 0;
+inline std::strong_ordering operator<=>(
+    const mozilla::detail::nsTStringRepr<T>& aLhs,
+    const mozilla::detail::nsTStringRepr<T>& aRhs) {
+  return Compare(aLhs, aRhs) <=> 0;
 }
 
 template <typename Char>

@@ -11,18 +11,17 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.mozilla.fenix.ext.isOnline
 
 /**
- * An IdlingResource implementation that waits until the network connection is online or offline.
- * The networkConnected parameter sets the expected connection status.
- * Only after connecting/disconnecting has completed further actions will be performed.
+ * An IdlingResource implementation that waits until the network connection is online or offline. The networkConnected
+ * parameter sets the expected connection status. Only after connecting/disconnecting has completed further actions will
+ * be performed.
  */
-
 class NetworkConnectionIdlingResource(private val networkConnected: Boolean) : IdlingResource {
     private var resourceCallback: IdlingResource.ResourceCallback? = null
     private val connectionManager =
         InstrumentationRegistry.getInstrumentation().context.getSystemService<ConnectivityManager>()
 
     override fun getName(): String {
-        return this::javaClass.name
+        return javaClass.name
     }
 
     override fun isIdleNow(): Boolean {

@@ -31,6 +31,8 @@
   <string name="history_search_hint">تارىختىن ئىزدەيدۇ</string>
   <!-- Placeholder text shown in search bar when using bookmarks search -->
   <string name="bookmark_search_hint">خەتكۈچ ئىزدەيدۇ</string>
+  <!-- Content description for the toolbar back button while searching bookmarks -->
+  <string name="bookmark_close_search_description">قايتىپ ۋە ئىزدەشنى تاقا</string>
   <!-- Placeholder text shown in search bar when using tabs search -->
   <string name="tab_search_hint">بەتكۈچ ئىزدەيدۇ</string>
   <!-- Placeholder text shown in the search bar when using application search engines -->
@@ -75,7 +77,11 @@
   <string name="about_content" tools:ignore="BrandUsage">%1$s نى Mozilla ياسىغان.</string>
   <!-- Private Browsing -->
   <string name="private_browsing_common_myths">شەخسىيەت زىيارىتى ھەققىدە كۆپ ئۇچرايدىغان قاراشلار</string>
-  <!-- Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active. -->
+  <!--
+    Private Browsing
+
+    Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active.
+  -->
   <string name="private_browsing_a11y_session_announcement">شەخسىي زىيارەت سۆزلەشكۈ</string>
   <!--
     True Private Browsing Mode
@@ -104,14 +110,6 @@
   <string name="open_in_app_cfr_positive_button_text">تەڭشەككە يۆتكەل</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">بولدىلا</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
-  <!--
-    Address bar swipe "contextual feature recommendation" (CFR)
-
-    Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar.
-  -->
-  <string name="address_bar_swipe_cfr_message_2">قورال بالداق ئوڭ ياكى سولغا سۈرۈلسە بەتكۈچ ئالمىشىدۇ.</string>
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">كامېرا ئىجازىتى زۆرۈر. ئاندىرويىد تەڭشىكىگە يۆتكىلىپ، ئىجازەتنى چېكىپ، ئاندىن يول قوينى چېكىڭ.</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -149,16 +147,16 @@
   <string name="home_screen_shortcut_open_new_private_tab_2">يېڭى شەخسىي بەتكۈچ</string>
   <!-- Shortcut action to open Passwords screen -->
   <string name="home_screen_shortcut_passwords">ئىم</string>
+  <!-- Shortcut action to open uninstall survey -->
+  <string name="home_screen_shortcut_uninstall_survey">سۆك، نېمىشقا؟</string>
   <!--
     Recent Tabs
 
-    Header text for jumping back into the recent tab in the home screen
+    Header text on the homescreen for continuing to browse the most recent browser tab
   -->
-  <string name="recent_tabs_header">ئالدىنقى بەتكە قايت</string>
+  <string name="recent_tabs_header_2">داۋاملاشتۇر</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">ھەممىنى كۆرسەت</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">يېقىنقى ھەممە بەتكۈچنى كۆرسەت توپچە</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">قەدەمداشلانغان ھەممە بەتكۈچلەرنى كۆرسەت</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -184,11 +182,7 @@
   <string name="recently_visited_menu_item_remove">چىقىرىۋەت</string>
   <!-- Content description for the button which navigates the user to show all of their history. -->
   <string name="past_explorations_show_all_content_description_2">ئىلگىرىكى ئىزدىنىشلەرنىڭ ھەممىسىنى كۆرسەت</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">قايتىش</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">ئالدىغا</string>
@@ -311,18 +305,8 @@
   <string name="browser_menu_default_banner_title">%1$s نى كۆڭۈلدىكى توركۆرگۈگە تەڭشەيدۇ</string>
   <!-- Label text within the set as default banner -->
   <string name="browser_menu_default_banner_subtitle_2">تېز، شەخسىي ۋە سىز ئۈچۈن ياسالغان.</string>
-  <!-- Content description (not visible, for screen readers etc.) for the button that dismisses the set as default banner in the menu -->
-  <string name="browser_menu_default_banner_dismiss_promotion">تەشۋىقاتقا پەرۋا قىلما</string>
   <!-- Content description (not visible, for screen readers etc.) for recommended extensions in main menu -->
   <string name="browser_menu_recommended_extensions_content_description">تەپسىلاتى</string>
-  <!--
-    Menu "contextual feature recommendation" (CFR)
-
-    Text for the title in the contextual feature recommendation popup promoting the menu feature.
-  -->
-  <string name="menu_cfr_title">يېڭى: ئېقىم سىزىقلىق تىزىملىكى</string>
-  <!-- Text for the message in the contextual feature recommendation popup promoting the menu feature. -->
-  <string name="menu_cfr_body">مەيلى شەخسىي زىيارەت ھالىتى ياكى ساقلاش مەشغۇلاتى بولسۇن، لازىملىق ئىقتىدارلارنى ئاسانلا تاپقىلى بولىدۇ.</string>
   <!--
     Extensions management fragment
 
@@ -391,6 +375,8 @@
   <string name="ai_controls_voice_search_description">ئاۋاز Google تاۋۇش مۇلازىمىتى ئارقىلىق تېكىستكە ئايلاندۇرۇلىدۇ.</string>
   <!-- Title for the block AI enhancements confirmation dialog -->
   <string name="ai_controls_block_dialog_title">سۈنئىي ئەقىلنىڭ كۈچەيتىلگەن ئىقتىدارىنى توسامدۇ؟</string>
+  <!-- Body text for the block AI enhancements confirmation dialog. %1$s is the name of the app (for example "Firefox"). -->
+  <string name="ai_controls_block_dialog_body">سىز %1$s دىكى يېڭى ياكى نۆۋەتتىكى سۈنئىي ئەقىل كۈچەيتىلگەن ئىقتىدارى ياكى ئۇلار ھەققىدىكى قاڭقىش كۆزنىكىنى كۆرەلمەيسىز. ئىشلىتىشنى داۋاملاشتۇرماقچى بولغان ھەر قانداق نەرسىنى توسمىسىڭىز بولىدۇ. توسۇش سۈنئىي ئەقىل ئارقىلىق %1$s تەمىنلىگەن كېڭەيتىلمىگىمۇ تەسىر كۆرسىتىدۇ.</string>
   <!-- Label shown above the list of features that will be blocked in the block AI dialog -->
   <string name="ai_controls_block_dialog_what_will_be_blocked">نېمە توسۇلىدۇ:</string>
   <!-- Cancel button text in the block AI enhancements confirmation dialog -->
@@ -551,8 +537,6 @@
   <string name="onboarding_marketing_body_1" tools:ignore="BrandUsage,UnusedResources">Firefox نى قانداق بايقىغانلىقىڭىز ۋە ئۇنى ئىشلىتىشنى Mozilla نىڭ بازارچىلىق ھەمكارلاشقۇچىلىرى بىلەن ھەمبەھىرلەڭ. بۇ سانلىق مەلۇماتلار ھەرگىز سېتىلمايدۇ.</string>
   <!-- Marketing onboarding page button label variant. Button to confirm choice and start browsing. -->
   <string name="onboarding_marketing_positive_button_1" tools:ignore="UnusedResources">ساقلاپ كۆز يۈگۈرتۈشنى باشلا</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
   <!-- "Continue" onboarding button. -->
   <string name="nova_onboarding_continue_button">داۋاملاشتۇر</string>
   <!-- "Continue browsing" onboarding button. -->
@@ -621,6 +605,39 @@
     %1$s is replaced by an active link, using nova_onboarding_marketing_body_link_text as text (“How we use the data”).
   -->
   <string name="nova_onboarding_marketing_body" tools:ignore="BrandUsage,UnusedResources">Firefox نى قانداق بايقىغانلىقىڭىز ۋە ئۇنى ئىشلىتىشنى Mozilla نىڭ بازارچىلىق ھەمكارلاشقۇچىلىرى بىلەن ھەمبەھىرلەڭ. بۇ سانلىق مەلۇماتلار ھەرگىز سېتىلمايدۇ. %1$s</string>
+  <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
+  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage,UnusedResources">Firefox نى قانداق بايقىغانلىقىڭىز ۋە ئۇنى ئىشلىتىشنى Mozilla نىڭ بازارچىلىق ھەمكارلاشقۇچىلىرى بىلەن ھەمبەھىرلەڭ. بۇ سانلىق مەلۇماتلار ھەرگىز سېتىلمايدۇ.</string>
+  <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
+  <string name="nova_onboarding_marketing_body_3" tools:ignore="BrandUsage,UnusedResources">Firefox ئىشلىتىۋاتقانلىقىڭىزنى Mozilla نىڭ Firefox كېڭەيتىش قانىلىمىزغا بىلدۈرۈشىگە يول قويۇش ئارقىلىق تېخىمۇ كۆپ كىشى بىلەن ئۇچرىشىشىمىزغا ياردەم قىلالايسىز.</string>
+  <!--
+    Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded.
+    “Platform you came from” refers to the external app, website, store, campaign, or other source that directed the user to Firefox.
+  -->
+  <string name="nova_onboarding_marketing_body_4" tools:ignore="BrandUsage,UnusedResources">Firefox ئىشلىتىۋاتقانلىقىڭىزنى Mozilla نىڭ مەنبە سۇپىڭىزغا بىلدۈرۈشىگە يول قويۇش ئارقىلىق تېخىمۇ كۆپ كىشى بىلەن ئۇچرىشىشىمىزغا ياردەم قىلالايسىز.</string>
+  <!--
+    Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded.
+    “Platform you came from” refers to the external app, website, store, campaign, or other source that directed the user to Firefox.
+  -->
+  <string name="nova_onboarding_marketing_body_5" tools:ignore="BrandUsage,UnusedResources">Firefox ئىشلىتىۋاتقانلىقىڭىزنى Mozilla نىڭ مەنبە سۇپىڭىزغا بىلدۈرۈشىگە يول قويۇش ئارقىلىق تېخىمۇ كۆپ كىشى بىلەن ئۇچرىشىشىمىزغا ياردەم قىلىڭ.</string>
+  <!--
+    Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded.
+    “Platform you came from” refers to the external app, website, store, campaign, or other source that directed the user to Firefox.
+    %1$s is replaced by an active link, using nova_onboarding_marketing_body_link_text as text (“How we use the data”).
+  -->
+  <string name="nova_onboarding_marketing_body_6" tools:ignore="BrandUsage,UnusedResources">Firefox ئىشلىتىۋاتقانلىقىڭىزنى Mozilla نىڭ مەنبە سۇپىڭىزغا بىلدۈرۈشىگە يول قويۇش ئارقىلىق تېخىمۇ كۆپ كىشى بىلەن ئۇچرىشىشىمىزغا ياردەم قىلىڭ. %1$s</string>
+  <!--
+    Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded.
+    “Platform you came from” refers to the external app, website, store, campaign, or other source that directed the user to Firefox.
+    %1$s is replaced by an active link, using nova_onboarding_marketing_body_link_text_1 as text (“Learn More”).
+  -->
+  <string name="nova_onboarding_marketing_body_7" tools:ignore="BrandUsage">Firefox ئىشلىتىۋاتقانلىقىڭىزنى Mozilla نىڭ مەنبە سۇپىڭىزغا بىلدۈرۈشىگە يول قويۇش ئارقىلىق تېخىمۇ كۆپ كىشى بىلەن ئۇچرىشىشىمىزغا ياردەم قىلالايسىز. %1$s</string>
+  <!-- Marketing onboarding additional body text. 'Firefox' is intentionally hardcoded. -->
+  <string name="nova_onboarding_marketing_body_line_two" tools:ignore="BrandUsage">Firefox مۇستەقىللىقتىن پەخىرلىنىدۇ ۋە ئوچۇق تورنىڭ تېخنىكا مونوپۇللۇقىنىڭ زىيانكەشلىكىگە ئۇچرىشىدىن قوغدايدۇ.</string>
+  <!--
+    Marketing onboarding additional body text. 'Firefox' is intentionally hardcoded.
+    “Allowing” refers to the main button “Allow and Continue”; the ask for the user is to allow communicating back to the platform.
+  -->
+  <string name="nova_onboarding_marketing_body_line_three" tools:ignore="BrandUsage">Firefox نىڭ مۇۋەپپەقىيەت قازىنىشىغا ياردەملىشىشنى ئويلىشىڭ.</string>
   <!-- Marketing onboarding body link text. -->
   <string name="nova_onboarding_marketing_body_link_text">سانلىق مەلۇماتنى قانداق ئىشلىتىمىز</string>
   <!-- Marketing onboarding body link text. -->
@@ -628,9 +645,11 @@
   <!-- Marketing onboarding primary button text. 'Firefox' is intentionally hardcoded. -->
   <string name="nova_onboarding_marketing_primary_button_text" tools:ignore="BrandUsage,UnusedResources">Firefox ياردەم</string>
   <!-- Marketing onboarding primary button text. -->
-  <string name="nova_onboarding_marketing_primary_button_text_2">يول قويۇپ ۋە داۋاملاشتۇر</string>
+  <string name="nova_onboarding_marketing_primary_button_text_3">ھەئە</string>
   <!-- Marketing onboarding secondary button text. -->
   <string name="nova_onboarding_marketing_secondary_button_text" tools:ignore="UnusedResources">ياق رەھمەت</string>
+  <!-- Marketing onboarding secondary button text. -->
+  <string name="nova_onboarding_marketing_secondary_button_text_2">ياق</string>
   <!-- Notifications onboarding title. 'Firefox' is intentionally hardcoded. -->
   <string name="nova_onboarding_notifications_title" tools:ignore="BrandUsage,UnusedResources">ئۇقتۇرۇش Firefox ئارقىلىق تېخىمۇ بىخەتەر بولۇشىڭىزغا ياردەم بېرىدۇ</string>
   <!-- Notifications onboarding subtitle. 'Firefox' is intentionally hardcoded. -->
@@ -662,8 +681,6 @@
   <string name="nova_onboarding_app_icon_prompt_title" tools:ignore="UnusedResources">ئىختىيارى ئەپ سىنبەلگىسى تاللىنىدۇ</string>
   <!-- App icon onboarding body. -->
   <string name="nova_onboarding_app_icon_prompt_body" tools:ignore="UnusedResources">باش ئېكرانىڭىزغا خاسلىق ئاتا قىلىدۇ.</string>
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Widget Picker
 
@@ -688,7 +705,11 @@
     Title for the settings page
   -->
   <string name="settings">تەڭشەك</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">ئادەتتىكى</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">ھەققىدە</string>
@@ -751,40 +772,6 @@
   <string name="preferences_pbm_lock_screen_title">شەخسىي تور زىيارەت ھالىتىدە ئېكران قۇلۇپى ئارقىلىق بەتكۈچنى يوشۇرىدۇ</string>
   <!-- Informs the user how to access the tabs when "Use screen lock to hide tabs in private browsing" is enabled -->
   <string name="preferences_pbm_lock_screen_summary_3">بارماق ئىزى، PIN ياكى چىرايدا قۇلۇپ ئېچىپ بەتكۈچنى كۆرگىلى بولىدۇ. بۇ ئېچىلغاندىن كېيىن ئېكران كۆرۈنۈشىدىن سۈرەت تۇتۇش ۋە ھەمبەھىرلەش چەكلىنىدۇ.</string>
-  <!-- Label for cookie banner section in quick settings panel. -->
-  <string name="cookie_banner_blocker">cookie لوزۇنكىسى توسقۇچ</string>
-  <!-- Preference for removing cookie/consent banners from sites automatically in private mode. See reduce_cookie_banner_summary for additional context. -->
-  <string name="preferences_cookie_banner_reduction_private_mode">شەخسىي تور زىيارەتتىكى cookie لوزۇنكىسىنى توسقۇچ</string>
-  <!-- Text for indicating cookie banner handling is off this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_off_for_site">بۇ تور بېكەتكە تاقاق</string>
-  <!-- Text for cancel button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_cancel_button">ۋاز كەچ</string>
-  <!-- Text for request support button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_request_support_button_2">ئىلتىماس يوللا</string>
-  <!-- Text for title indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_title_2">بۇ تور بېكەتنى قوللاشنى ئىلتىماس قىلامسىز؟</string>
-  <!-- Label for the snackBar, after the user reports with success a website where cookie banner reducer did not work -->
-  <string name="cookie_banner_handling_report_site_snack_bar_text_2">ئىلتىماس يوللاندى</string>
-  <!-- Text for indicating cookie banner handling is on this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_on_for_site">بۇ تور بېكەتكە ئوچۇق</string>
-  <!-- Text for indicating that a request for unsupported site was sent to Nimbus (it's a Mozilla library for experiments), this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site_request_submitted_2">قوللاش ئىلتىماسى يوللاندى</string>
-  <!-- Text for indicating cookie banner handling is currently not supported for this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site">بېكەت ھازىر قوللىمايدۇ</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is on this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_on_for_site_1">%1$s غا cookie لوزۇنكىسى توسقۇچنى ئاچامدۇ؟</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is off this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_off_for_site_1">%1$s غا cookie لوزۇنكىسى توسقۇچنى تاقامدۇ؟</string>
-  <!-- Title text for a detail explanation indicating cookie banner reducer didn't work for the current site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_title_unsupported_site_request_2">%1$s بۇ تور بېكەتنىڭ ساقلانما ئىلتىماسىنى ئۆزلۈكىدىن رەت قىلالمايدۇ. كەلگۈسىدە بۇ تور بېكەتنى قوللاش ئىلتىماسىنى ئەۋەتسىڭىز بولىدۇ.</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is off for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_off_for_site_1">تاقالسا ۋە %1$s ساقلانمىنى تازىلاپ بۇ تور بېكەتنى قايتا يۈكلەيدۇ. سىز تىزىمدىن چىقىپ كېتىشىڭىز ياكى مال ھارۋىسى بوشىتىلىشى مۇمكىن.</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is on for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_on_for_site_3">ئېچىلسا، %1$s بۇ تور بېكەتتىكى بارلىق ساقلانما لوزۇنكىسىنى ئۆزلۈكىدىن رەت قىلىشنى سىنايدۇ.</string>
-  <!-- Title for the cookie banner re-engagement CFR, the placeholder is replaced with app name. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="cookie_banner_cfr_title">%1$s سىز ئۈچۈن ساقلانمىنى رەت قىلدى</string>
-  <!-- Message for the cookie banner re-engagement CFR -->
-  <string name="cookie_banner_cfr_message">بۇ تور بېكەتتە دىققەتنى چاچىدىغان ئىشلار ئاز، ساقلانما ئاز.</string>
   <!-- Description of the preference to enable "HTTPS-Only" mode. -->
   <string name="preferences_https_only_summary">بىخەتەرلىكنى ئۆستۈرۈش ئۈچۈن HTTPS مەخپىيلەشتۈرۈش كېلىشىمنامىسى ئارقىلىق تور بېكەتلەرگە ئاپتوماتىك ئۇلىنىدۇ.</string>
   <!-- Summary of https only preference if https only is set to off -->
@@ -829,6 +816,8 @@
   <string name="preferences_toolbar_shortcut">قورال بالداق تېزلەتمىسى</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_toolbar_select_shortcut">تېزلەتمە تاللىنىدۇ</string>
+  <!-- Title of a menu option allowing to change the shortcut button shown in the toolbar -->
+  <string name="toolbar_shortcut_menu_edit_option">تېزلەتمە تەھرىر</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_gestures">قول ئىشارىسى</string>
   <!-- Preference for settings related to visual options -->
@@ -914,6 +903,8 @@
   <string name="preference_downloads_folder_permission_lost" tools:ignore="UnusedResources">بۇ قىسقۇچنى ئىشلىتىش ئىجازىتىڭىز يوق. باشقا بىرىنى تاللاپ سىناڭ.</string>
   <!-- Preference title for choosing an app to handle downloads -->
   <string name="preferences_choose_app_for_downloads">چۈشۈرۈشنى باشقا ئەپتە باشقۇرىدۇ</string>
+  <!-- Message shown when no app is available to let the user pick a download folder. -->
+  <string name="preferences_downloads_no_folder_picker_available">بۇ ئۈسكۈنىدىكى قىسقۇچ تاللىغۇچنى ئاچقىلى بولمىدى.</string>
   <!-- Preference category for deleting or removing downloads -->
   <string name="preferences_category_delete_or_remove_downloads">چۈشۈرۈلمنى ئۆچۈرۈپ ياكى چىقىرىۋېتىدۇ</string>
   <string name="preferences_downloads_delete_from_device">ئۈسكۈنىدىن ئۆچۈر</string>
@@ -937,6 +928,12 @@
   <string name="notifications_allowed_summary">يول قويغان</string>
   <!-- Summary for notification preference indicating notifications are not allowed -->
   <string name="notifications_not_allowed_summary">يول قويمايدۇ</string>
+  <!-- Preference for local network access / nearby devices in Android 17 -->
+  <string name="preferences_local_network_access">يەرلىك تور / ئەتراپتىكى ئۈسكۈنە زىيارىتى</string>
+  <!-- Summary for local network access preference indicating access is allowed -->
+  <string name="local_network_access_allowed_summary">يول قويغان</string>
+  <!-- Summary for local network access preference indicating access is not allowed -->
+  <string name="local_network_access_not_allowed_summary">يول قويمايدۇ</string>
   <!--
     Add-on Permissions
 
@@ -981,8 +978,8 @@
     Title for the customize home screen section with privacy report.
   -->
   <string name="customize_toggle_privacy_report">شەخسىيەت دوكلاتى</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">كەينىگە قايت</string>
+  <!-- Title for a customize home screen section. Continue is a section that displays the most recent browser tab, so users can continue browsing where they left off. -->
+  <string name="customize_toggle_continue">داۋاملاشتۇر</string>
   <!-- Title for the customize home screen section with bookmarks. -->
   <string name="customize_toggle_bookmarks">خەتكۈچ</string>
   <!--
@@ -996,12 +993,10 @@
   <string name="customize_toggle_pocket_sponsored">قوللىغان ھېكايىلەر</string>
   <!-- Title for the opening wallpaper settings screen -->
   <string name="customize_wallpapers">تام قەغىزى</string>
-  <!-- Label for the menu item that opens the wallpaper settings screen. -->
-  <string name="browser_menu_change_wallpaper">تام قەغەز ئۆزگەرت</string>
+  <!-- Label for the menu item that opens the customize homepage settings screen. -->
+  <string name="browser_menu_customize_homepage">باش بەتنى خاسلاشتۇر</string>
   <!-- Title for the customize home screen section with sponsored shortcuts. -->
   <string name="customize_toggle_contile">قوللايدىغان تېزلەتمىلەر</string>
-  <!-- Title for the customize home screen section that toggles the Homepage sports widget. -->
-  <string name="customize_toggle_world_cup">دۇنيا لوڭقىسى</string>
   <!--
     Wallpapers
 
@@ -1126,6 +1121,8 @@
   <string name="extension_process_crash_dialog_retry_button_text" tools:ignore="UnusedResources">كېڭەيتىلمىنى قايتا قوزغىتىشنى سىناۋاتىدۇ</string>
   <!-- Button text on the extension crash dialog to prompt the user to continue with all extensions disabled. -->
   <string name="extension_process_crash_dialog_disable_extensions_button_text">كېڭەيتىلمىنى چەكلەپ داۋاملاشتۇرىدۇ</string>
+  <!-- Text shown in the snackbar action button that lets the user retry an add-on operation that just failed. -->
+  <string name="addon_failure_retry_action">قايتا سىنا</string>
   <!--
     Account Preferences
 
@@ -1269,8 +1266,6 @@
   <string name="preference_simple_toolbar">ئاددىي</string>
   <!-- Preference for using expanded toolbar -->
   <string name="preference_expanded_toolbar">يېيىلدى</string>
-  <!-- Preference description indicating the toolbar location preference is disabled when the tab strip is enabled -->
-  <string name="preference_toolbar_pref_disabled_explanation">بەتكۈچ بالداق كۆرسىتىلگەندە ئادرېس بالداق چوقۇم چوققىدا بولۇشى كېرەك.</string>
   <!-- New tab shortcut in toolbar customization -->
   <string name="toolbar_customize_shortcut_new_tab">يېڭى بەتكۈچ ئاچ</string>
   <!-- Share shortcut in toolbar customization -->
@@ -1299,6 +1294,11 @@
   <string name="preference_light_theme">يورۇق</string>
   <!-- Preference for using dark theme -->
   <string name="preference_dark_theme">قاراڭغۇ</string>
+  <!--
+    Preference for using the OLED theme. For localization, this can be translated as "True Black", "Maximum Darkness",
+    or "Full dark" if needed.
+  -->
+  <string name="preference_oled_theme">قاپقاراڭغۇ</string>
   <!-- Preference for using using dark or light theme automatically set by battery -->
   <string name="preference_auto_battery_theme">توك تېجىگۈچ تەڭشىدى</string>
   <!-- Preference for using following device theme -->
@@ -1391,8 +1391,6 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">بەتكۈچ</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">بەتكۈچ كۆرۈنۈش</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">تىزىم</string>
   <!-- Option for a grid tab view -->
@@ -1437,14 +1435,16 @@
   <string name="opening_screen_last_tab_summary">ئاخىرقى بەتكۈچتە ئاچ</string>
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">تۆت سائەتتىن كېيىن باش بەتتە ئاچ</string>
-  <!--
-    Inactive tabs
-
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
-  -->
-  <string name="preferences_inactive_tabs">كونا بەتكۈچنى ئاكتىپسىز ھالەتكە يۆتكەيدۇ</string>
-  <!-- Title of inactive tabs preference -->
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">سىز ئىككى ھەپتە كۆرمىگەن بەتكۈچلەر ئاكتىپسىز بۆلەككە يۆتكىلىدۇ.</string>
+  <!--
+    Privacy report
+
+    Category header of a preference that allows a user to enable or disable the privacy report feature
+  -->
+  <string name="preferences_privacy_report">شەخسىيەت دوكلاتى</string>
+  <!-- Title of the privacy report preference that allows a user to enable or disable the feature -->
+  <string name="preferences_privacy_report_title">شەخسىيەت دوكلاتىنى قوزغات</string>
   <!--
     Studies
 
@@ -1500,6 +1500,8 @@
   <string name="add_tab">بەتكۈچ قوش</string>
   <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
   <string name="add_private_tab">شەخسىي بەتكۈچ قوش</string>
+  <!-- Content description (not visible, for screen readers etc.): Create tab group button. Opens the create tab group sheet when pressed -->
+  <string name="create_tab_group_content_description">بەتكۈچ گۇرۇپپىسى قۇر</string>
   <!-- Text for the tab search bar placeholder -->
   <string name="tab_manager_search_bar_placeholder">بەتكۈچ ئىزدەيدۇ</string>
   <!-- Text shown in the menu to view recently closed tabs -->
@@ -1622,15 +1624,6 @@
     <item quantity="one">بەتكۈچ گۇرۇپپىسى %1$s غا قوشىدۇ، %2$d بەتكۈچ، رەڭگى %3$s</item>
     <item quantity="other">بەتكۈچ گۇرۇپپىسى %1$s غا قوشىدۇ، %2$d بەتكۈچ، رەڭگى %3$s</item>
   </plurals>
-  <plurals name="share_tab_group_button_content_description">
-    <!--
-      Content Description for share tab group button.
-      %1$s is the name of the tab group.
-      %2$d is the number of tabs in a tab group.
-    -->
-    <item quantity="one">%1$s بەتكۈچ گۇرۇپپىسىنى %2$d بەتكۈچكە ھەمبەھىرلەيدۇ</item>
-    <item quantity="other">%1$s بەتكۈچ گۇرۇپپىسىنى %2$d بەتكۈچكە ھەمبەھىرلەيدۇ</item>
-  </plurals>
   <!-- Content description for the grabber/handle of the tab group bottom sheet. -->
   <string name="tab_group_sheet_dismiss_description">بەتكۈچ گۇرۇپپىسىنى كۆرسىتىپ، سۆرەش تۇتقۇچىنى يىغىدۇ</string>
   <plurals name="expanded_tab_group_header_description">
@@ -1657,6 +1650,36 @@
   <string name="close_tab_and_delete_group_confirmation_dialog_confirm">گۇرۇپپا ئۆچۈر</string>
   <!-- Text shown on the cancel button in the Close last tab and delete tab group confirmation dialog. -->
   <string name="close_tab_and_delete_group_confirmation_dialog_cancel">ۋاز كەچ</string>
+  <!-- Content description for the three dot button next to a tab group" -->
+  <string name="tab_group_three_dot_button_content_description">تېخىمۇ كۆپ تاللانما</string>
+  <!-- Text shown on the edit button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_edit">تەھرىر</string>
+  <!-- Text shown on the ungroup button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_ungroup">گۇرۇپپىلىما</string>
+  <!-- Text shown on the delete button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_delete">ئۆچۈر</string>
+  <!-- Text shown on the share button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_share">ھەمبەھىر</string>
+  <!-- Text shown on the close button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_close">ياپ</string>
+  <!-- Title for the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_title">بەتكۈچ گۇرۇپپىسىنى ئۆچۈرەمدۇ؟</string>
+  <!-- Text shown in the body of the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_body">بەتكۈچلەر بۇ ئۈسكۈنىدە ئوچۇق تۇرىدۇ ئەمما گۇرۇپپا ئۆچۈرۈلىدۇ.</string>
+  <!-- Text shown on the Don't Ask Again checkbox button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_dont_ask_again">قايتا سورىما</string>
+  <!-- Text shown on the confirm button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_confirm">گۇرۇپپىلىما</string>
+  <!-- Text shown on the cancel button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_cancel">ۋاز كەچ</string>
+  <!-- Custom accessibility action to reorder a tab up rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_up">بەتكۈچنى ئۈستىگە يۆتكە</string>
+  <!-- Custom accessibility action to reorder a tab left rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_left">بەتكۈچنى سولغا يۆتكە</string>
+  <!-- Custom accessibility action to reorder a tab right rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_right">بەتكۈچنى ئوڭغا يۆتكە</string>
+  <!-- Custom accessibility action to reorder a tab down rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_down">بەتكۈچنى ئاستىغا يۆتكە</string>
   <!--
     Color labels for tab groups, used for accessibility and selection UI.
 
@@ -1671,8 +1694,6 @@
   <string name="tab_group_color_pink">ھالرەڭ</string>
   <!-- Tab group color: Purple -->
   <string name="tab_group_color_purple">بىنەپشە</string>
-  <!-- Tab group color: Violet -->
-  <string name="tab_group_color_violet">كۆكۈچ سۆسۈن</string>
   <!-- Tab group color: Blue -->
   <string name="tab_group_color_blue">كۆك</string>
   <!-- Tab group color: Cyan -->
@@ -1689,8 +1710,6 @@
   <string name="history_search_1">ئىزدەيدىغان ئاتالغۇ كىرگۈزۈلىدۇ</string>
   <!-- Text for the button to clear all history -->
   <string name="history_delete_all">تارىخنى ئۆچۈر</string>
-  <!-- Text for the snackbar to confirm that multiple browsing history items has been deleted -->
-  <string name="history_delete_multiple_items_snackbar">تارىخ ئۆچۈرۈلدى</string>
   <!-- Text for the snackbar to confirm that a single browsing history item has been deleted. %1$s is the shortened URL of the deleted history item. -->
   <string name="history_delete_single_item_snackbar">%1$s ئۆچۈرۈلدى</string>
   <!-- Context description text for the button to delete a single history item -->
@@ -1700,16 +1719,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d تاللاندى</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">بۈگۈن</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">تۈنۈگۈن</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">ئاخىرقى 7 كۈن</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">ئاخىرقى 30 كۈن</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">تېخىمۇ بۇرۇن</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">ھېچقانداق تارىخ خاتىرىسى يوق</string>
   <!--
@@ -1932,34 +1941,30 @@
   <string name="webcompat_reporter_clear_reason_content_description">تاللانغان سەۋەبنى تازىلا</string>
   <!-- The error message of the description when the user selects "Something else" as the reason, but left the description empty or too short. -->
   <string name="webcompat_reporter_description_error">كەم دېگەندە 10 ھەرپ كىرگۈزۈڭ</string>
-  <!-- The label/title of a field in the Web Compat Reporter feature for explaining a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_label_whats_broken_2">نېمە بۇزۇلدى؟</string>
-  <!-- The placeholder text for the dropdown where a user selects a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_2">سەۋەب تاللىنىدۇ</string>
-  <!-- The error message of the dropdown, prompting the user to select a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_error">سەۋەبىنى تاللاڭ</string>
-  <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
-  <string name="webcompat_reporter_label_description">مەسىلە بايانى (تاللاشچان)</string>
-  <!-- The button text for navigating away from the feature to provide more information on the broken site's bug report. -->
-  <string name="webcompat_reporter_add_more_info">تېخىمۇ كۆپ ئۇچۇر قوش</string>
+  <!-- The label/title of a mandatory field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_mandatory_description">مەسىلىنى تەكشۈرۈشىمىزگە ياردەم بېرىش ئۈچۈن مەسىلىنى تەپسىلىي چۈشەندۈرۈڭ</string>
+  <!-- The label/title of a optional field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_optional_description">مەسىلىنى تەكشۈرۈشىمىزگە ياردەم بېرىش ئۈچۈن مەسىلىنى تەپسىلىي چۈشەندۈرۈڭ (تاللاشچان)</string>
   <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
   <string name="webcompat_reporter_cancel">ۋاز كەچ</string>
   <!-- The button text for the send button to submit the provided form data. -->
-  <string name="webcompat_reporter_send">يوللا</string>
+  <string name="webcompat_reporter_send_report">دوكلات يوللا</string>
   <!-- Text for a snackbar to confirm the successful submission of a WebCompat report. -->
   <string name="webcompat_reporter_success_snackbar_text_2">دوكلات يوللاندى</string>
   <!-- Placeholder text for the description field to prompt the user on what they should type. -->
-  <string name="webcompat_reporter_problem_description_placeholder_text">نېمە ئىش بولدى؟ نېمە ئىش بولۇشى كېرەك ئىدى؟</string>
+  <string name="webcompat_reporter_problem_description_placeholder_text_2">نېمە ئىش يۈز بەردى؟ نېمە ئىش بولۇشىنى ئۈمىد قىلغان ئىدىڭىز؟ مەسىلە قايتا كۆرۈلىدىغان قەدەم باسقۇچنى تەمىنلەڭ.</string>
   <!-- Label of the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. -->
-  <string name="webcompat_reporter_etp_checkbox_text">ئىزلاشتىن قوغداشتا توسۇلغان تور ئادرېسىنى يوللايدۇ</string>
-  <!-- Description text for the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. It informs the user when checked, the report will include the list of URLs that were blocked by Enhanced Tracking Protection on the current page. -->
-  <string name="webcompat_reporter_etp_checkbox_description">كۈچەيتىلگەن ئىزلاشتىن قوغداش ئىقتىدارى بەزى تور بېكەتنىڭ ئادەتتىكىدەك ئىجرا قىلىنىشىغا زۆرۈر بولغان ئىزلىغۇچ ۋە قوليازما كودىنىمۇ توسىدۇ.</string>
+  <string name="webcompat_reporter_etp_checkbox_text_2">ئىزلاشتىن قوغداشتا توسۇلغان تۈر تىزىمىنى يوللايدۇ</string>
   <!-- The button text for the preview report button to view a preview of the report. -->
   <string name="webcompat_reporter_preview_report">دوكلاتنى ئالدىن كۆزەت</string>
   <!-- The title shown at the top of the WebCompat Report preview panel. This appears after the user taps the “Preview” button before sending a report. -->
   <string name="webcompat_reporter_preview_bottom_sheet_header">دوكلاتنى ئالدىن كۆزىتىش</string>
-  <!-- Label for the “Send” button shown in the WebCompat Report preview panel, which the user taps to submit the report. -->
-  <string name="webcompat_reporter_preview_bottom_sheet_send">يوللا</string>
+  <!-- Title for the Edit URL confirmation dialog in the WebCompatReporter -->
+  <string name="webcompat_reporter_edit_url_dialog_title">تور بېكەت ئادرېس تەھرىر</string>
+  <!-- Text shown on the save button for the Edit URL confirmation dialog in the WebCompatReporter. -->
+  <string name="webcompat_reporter_edit_url_dialog_save">ساقلا</string>
+  <!-- Text shown on the dismiss button for the Edit URL confirmation dialog in the WebCompatReporter. -->
+  <string name="webcompat_reporter_edit_url_dialog_dismiss">بولدىلا</string>
   <!--
     These reason strings are dropdown options on a WebCompat reporter form, indicating what is broken on the site.
 
@@ -1979,7 +1984,9 @@
   <!-- Broken site reason text for site asked to turn off ad blocker -->
   <string name="webcompat_reporter_reason_turn_off_adblocker">تور بېكەت ئېلان توسقۇچنى تاقاشنى تەلەپ قىلدى</string>
   <!-- Broken site reason text for browser isn’t supported or blocked -->
-  <string name="webcompat_reporter_reason_notsupported">توركۆرگۈنى قوللىمايدۇ ياكى توسۇلغان</string>
+  <string name="webcompat_reporter_reason_notsupported_2">توركۆرگۈ توسۇلغان ياكى قوللىمايدۇ</string>
+  <!-- Broken site reason text for the site being deceptive -->
+  <string name="webcompat_reporter_reason_site_is_deceptive">بۇ تور بېكەت ئالدامچى</string>
   <!-- Broken site reason text for something else -->
   <string name="webcompat_reporter_reason_other">باشقا سەۋەب</string>
   <!--
@@ -2141,18 +2148,16 @@
   <string name="bookmark_select_folder_new_folder_button_title">يېڭى قىسقۇچ</string>
   <!-- Bookmark snackbar message for moving a single item. %1$s is the title of the item being moved and %2$s is the new parent folder of the bookmark -->
   <string name="bookmark_moved_single_item">%1$s دىن %2$s غا يۆتكەلدى</string>
+  <!-- Text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results">ماس كەلگىنى تېپىلمىدى.</string>
+  <!-- Additional text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results_additional_text">باشقىسىنى ئىزدەپ بېقىڭ!</string>
   <!--
     Site Permissions
 
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">تەڭشەككە يۆتكەل</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">تېز تەڭشەك جەدۋىلى</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">تەۋسىيەلەندى</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -2322,8 +2327,14 @@
   <string name="qr_code_display_close">ياپ</string>
   <!-- Heading on the QR code display screen -->
   <string name="qr_code_display_share_nearby">ئۇلانمىنى يېقىن ئەتراپقا ھەمبەھىرلە</string>
+  <!-- Body text on the QR code display screen instructing the user to have others scan the code -->
+  <string name="qr_code_display_instructions">بۇ ئۇلانمىنى يېقىن ئەتراپتىكى كىشىلەرگە ھەمبەھىرلەشتە، ئۇلار تۆۋەندىكى QR كودىنى تارىشى كېرەك.</string>
   <!-- Label for the download button on the QR code display screen -->
   <string name="qr_code_display_download">چۈشۈر</string>
+  <!-- Toast shown when the QR code is successfully saved to Downloads -->
+  <string name="qr_code_download_success">QR كودى چۈشۈرۈلمىگە ساقلاندى</string>
+  <!-- Toast shown when saving the QR code to Downloads fails -->
+  <string name="qr_code_download_failure">QR كودىنى ساقلىيالمىدى</string>
   <!-- Sub-header in the dialog to share a link to an app from the full list -->
   <string name="share_link_all_apps_subheader">بارلىق مەشغۇلات</string>
   <!-- Sub-header in the dialog to share a link to an app from the most-recent sorted list -->
@@ -2360,6 +2371,20 @@
   <string name="sent_from_firefox_template" tools:ignore="UnusedResources">%1$s\n\nيوللىغۇچى %2$s 🦊 كۆچمە توركۆرگۈنى سىناڭ: %3$s</string>
   <!-- A short message template for the shared link with a footer. %1$s is the shared link, %2$s is the app name (e.g. Firefox) and %3$s is a download link for the app. -->
   <string name="sent_from_firefox_template_short" tools:ignore="UnusedResources">%1$s\n\nيوللىغۇچى %2$s 🦊 %3$s</string>
+  <!-- Send tab to synced devices: Authentication error title - Message asking the user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_title">قايتا تىزىمغا كىرسە ئۈسكۈنە ئارىسىدا بەتكۈچنى يوللىيالايدۇ</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_button">تىزىمغا كىرىڭ</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to remove the currently connected account -->
+  <string name="sync_send_tab_error_auth_remove_account">ھېسابنى چىقىرىۋەت</string>
+  <!-- Send tab to synced devices: Empty state title - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_title">ھېچقانداق ئۈسكۈنە باغلانمىدى</string>
+  <!-- Send tab to synced devices: Empty state message - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_description" tools:ignore="BrandUsage">ئاز دېگەندە بىر ئۈسكۈنىدە Firefox تىزىمغا كىرگەندە ئاندىن بەتكۈچ يوللىيالايدۇ.</string>
+  <!-- Send tab to synced devices: Connectivity Error title -->
+  <string name="sync_send_tab_error_connection_title">ئىنتېرنېت باغلىنىشىڭىزنى تەكشۈرۈڭ</string>
+  <!-- Send tab to synced devices: Connectivity Error message - Suggested user action after internet connection has been established -->
+  <string name="sync_send_tab_error_connection_text">ئاندىن بەتكۈچنى قايتا يوللاشنى سىناڭ.</string>
   <!--
     Notifications
 
@@ -2382,6 +2407,18 @@
   -->
   <string name="nimbus_notification_default_browser_text" tools:ignore="BrandUsage,UnusedResources">Firefox نى كۆڭۈلدىكى توركۆرگۈ قىلىڭ</string>
   <!--
+    Privacy report notification
+
+    Name of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app.
+  -->
+  <string name="notification_privacy_report_channel_name">شەخسىيەت دوكلاتى</string>
+  <!-- Description of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_channel_description">%1$s تور زىيارىتى جەريانىدا قانچە ئىز قوغلىغۇچنىڭ توسۇلغانلىقىنى كۆرسىتىدۇ.</string>
+  <!-- Body text for the weekly privacy report notification for when trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_body_has_trackers">تور زىيارىتىنى داۋاملاشتۇرۇڭ. %1$s توسۇشنى داۋاملاشتۇرىدۇ.</string>
+  <!-- Headline text of the weekly privacy report notification for when no trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_headline_no_trackers">%1$s تور زىيارەت جەريانىدا ئىزلىغۇچنى توسىدۇ. ئۇلارنى بۇ جايدا كۆرىسىز.</string>
+  <!--
     Survey
 
     Text shown in the fullscreen message that pops up to ask user to take a short survey.
@@ -2392,6 +2429,8 @@
   <string name="preferences_take_survey">تەكشۈرۈشكە قاتنىشىڭ</string>
   <!-- Preference for not taking the short survey. -->
   <string name="preferences_not_take_survey">ياق رەھمەت</string>
+  <!-- Error message shown in a Toast when the system fails to trigger the device uninstallation prompt. -->
+  <string name="uninstall_survey_error_failed">سىستېما سۆكۈش ئەسكەرتىشىنى ئاچالمىدى، بىۋاسىتە سىستېما سۆكۈش مەشغۇلاتىنى ئىشلىتىڭ.</string>
   <!--
     Snackbar
 
@@ -2537,10 +2576,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">قوغداش تەڭشەكلىرى</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">كۈچەيتىلگەن ئىزلاشتىن قوغداش</string>
   <!-- Preference summary for enhanced tracking protection settings on/off switch -->
   <string name="preference_enhanced_tracking_protection_summary">ھازىر ئومۇمىيەت ساقلانما قوغداش ئىقتىدارى بار، تور بېكەت ھالقىغان ئىز قوغلىغۇچىلارغا قارشى ئەڭ كۈچلۈك توساق.</string>
@@ -2548,17 +2585,19 @@
   <string name="preference_enhanced_tracking_protection_explanation_2">%s سىزنى توردىكى ئىشلىرىڭىزغا ئەگىشىدىغان كۆپ ئۇچرايدىغان ئىزچىلاردىن قوغدايدۇ.</string>
   <!-- Text displayed that links to website about enhanced tracking protection -->
   <string name="preference_enhanced_tracking_protection_explanation_learn_more">تەپسىلاتى</string>
-  <plurals name="trackers_blocked_count">
+  <plurals name="trackers_blocked_count_2">
     <!--
       Trackers blocked card on homepage
 
       Text shown on the trackers blocked card. %d is the number of trackers blocked.
     -->
-    <item quantity="one">%d ئىزلىغۇچ توسۇلدى</item>
-    <item quantity="other">%d ئىزلىغۇچ توسۇلدى</item>
+    <item quantity="one">%d ئىزلىغۇچى توسۇلدى</item>
+    <item quantity="other">%d ئىزلىغۇچى توسۇلدى</item>
   </plurals>
   <!-- Text shown on the trackers blocked card when no trackers have been blocked yet -->
   <string name="trackers_blocked_empty">قوغدالدىڭىز</string>
+  <!-- Text shown below the trackers blocked card with typing animation -->
+  <string name="help_catch_trackers">ئىزلىغۇچىنى تۇتۇشقا ياردەم قىلىڭ</string>
   <!-- Preference for enhanced tracking protection for the standard protection settings -->
   <string name="preference_enhanced_tracking_protection_standard_default_1">ئۆلچەملىك (كۆڭۈلدىكى)</string>
   <!-- Preference description for enhanced tracking protection for the standard protection settings -->
@@ -2627,12 +2666,8 @@
   <string name="preference_enhanced_tracking_protection_custom_cryptominers">شىفىرلىق پۇل قازغۇچ</string>
   <!-- Preference for enhanced tracking protection for the custom protection settings -->
   <string name="preference_enhanced_tracking_protection_custom_known_fingerprinters">مەلۇملۇق ئىز قالدۇرغۇ</string>
-  <!-- Button label for navigating to the Enhanced Tracking Protection details -->
-  <string name="enhanced_tracking_protection_details">تەپسىلاتى</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">توسۇلغان</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">يول قويغان</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">ئىجتىمائىي تاراتقۇ ئىزلىغۇچ</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -2655,10 +2690,6 @@
   <string name="etp_tracking_content_title">ئىز قوغلاش مەزمۇنى</string>
   <!-- Description of tracking content that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_description">ئىز قوغلاش كودى بار ئېلان، سىن ۋە باشقا مەزمۇنلارنى يۈكلەشتىن توختىتىدۇ. بەزى تور بېكەتلەرنىڭ ئىقتىدارىغا تەسىر كۆرسىتىشى مۇمكىن.</string>
-  <!-- Enhanced Tracking Protection message that protection is currently on for this site -->
-  <string name="etp_panel_on">قوغداش بۇ بېكەتكە ئوچۇق</string>
-  <!-- Enhanced Tracking Protection message that protection is currently off for this site -->
-  <string name="etp_panel_off">قوغداش بۇ بېكەتكە تاقاق</string>
   <!-- Header for exceptions list for which sites enhanced tracking protection is always off -->
   <string name="enhanced_tracking_protection_exceptions">كۈچەيتىلگەن ئىز قوغلاشتىن قوغداش بۇ تور بېكەتلەر ئۈچۈن تاقالغان</string>
   <!--
@@ -2683,13 +2714,6 @@
   <string name="etp_suspected_fingerprinters_description">گۇمانلىق ئىز قالدۇرغۇنى توختىتىشتا ئىز قالدۇرغۇدىن قوغداش قوزغىتىلىدۇ.</string>
   <!-- Category of trackers (fingerprinters) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_known_fingerprinters_title">مەلۇملۇق ئىز قالدۇرغۇ</string>
-  <!--
-    Description of the SmartBlock Enhanced Tracking Protection feature. The * symbol is intentionally hardcoded here,
-    as we use it on the UI to indicate which trackers have been partially unblocked.
-  -->
-  <string name="preference_etp_smartblock_description">بۇ بەتتىكى تۆۋەندە بەلگە قويۇلغان بەزى ئىزچىلار قىسمەن قۇلۇپلانمىدى، چۈنكى سىز ئۇلار بىلەن تەسىرلەشتىڭىز*.</string>
-  <!-- Text displayed that links to website about enhanced tracking protection SmartBlock -->
-  <string name="preference_etp_smartblock_learn_more">تەپسىلاتى</string>
   <!--
     Content description (not visible, for screen readers etc.):
     Enhanced tracking protection exception preference icon for ETP settings.
@@ -2819,12 +2843,8 @@
   <string name="add_to_homescreen_cancel">ۋاز كەچ</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">قوشاي</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">توربېكەتنى داۋاملاشتۇر</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">تېزلەتمە ئىسمى</string>
-  <!-- Describes the add to homescreen functionality -->
-  <string name="add_to_homescreen_description_2">تېز سۈرئەتتە زىيارەت قىلىش ۋە ئەپكە ئوخشاش زىيارەت تۇيغۇسىغا ئېرىشىش ئۈچۈن، مەزكۇر تور بېكەتنى باش ئېكرانغا ئاسانلا قوشالايسىز.</string>
   <!-- Preference for managing the settings for logins and passwords in Fenix -->
   <string name="preferences_passwords_logins_and_passwords_2">ئىم</string>
   <!-- Preference for managing the saving of logins and passwords in Fenix -->
@@ -2937,6 +2957,8 @@
   <string name="saved_logins_sort_strategy_last_used">ئاخىرقى قېتىم ئىشلىتىلگەن</string>
   <!-- Content description (not visible, for screen readers etc.) -->
   <string name="saved_logins_menu_dropdown_chevron_icon_content_description_2">ئىم تىزىملىكىنى تەرتىپلە</string>
+  <!-- Label for button to import passwords from file. -->
+  <string name="passwords_import_menu_button">ھۆججەتتىن ئەكىر</string>
   <!--
     Email Masks
 
@@ -2955,14 +2977,39 @@
   <string name="email_masks_max_free_tier_reached">سىز 5 ھەقسىز ئېلخەت نىقابىنى ئىشلەتتىڭىز شۇڭا قايتا ئىشلىتىشىڭىز ئۈچۈن بىرنى تاللىدۇق.</string>
   <!-- The message displayed when there was an error with the email mask or Firefox Account services. -->
   <string name="email_masks_error_retrieving_masks">ھازىر ئىلخەت نىقابىنى ئىشلەتكىلى بولمايدۇ. بىر قانچە مىنۇتتىن كېيىن قايتا سىناڭ.</string>
+  <!--
+    Firefox browser VPN (a browser-only proxy, distinct from the Mozilla VPN service)
+
+    Title for the browser VPN entry in the settings list
+  -->
+  <string name="preferences_ip_protection_title_2">ئىچىدىكى VPN</string>
   <!-- Label for the BETA badge for the browser VPN entry in the settings list -->
   <string name="preferences_ip_protection_beta_badge_label">سىناق نەشرى</string>
   <!-- Title for the browser VPN settings screen (displayed in the app bar) -->
-  <string name="ip_protection_title">VPN</string>
+  <string name="ip_protection_settings_title">ئىچىدىكى VPN</string>
   <!-- Label for the browser VPN toggle on the settings screen -->
   <string name="ip_protection_toggle_label">VPN</string>
+  <!-- Content description for the browser VPN settings screen top bar back button -->
+  <string name="ip_protection_navigate_back_button_content_description">كەينىگە قايت</string>
+  <!-- Headline for the browser VPN promo card. %s is the name of the app (for example "Firefox"). -->
+  <string name="ip_protection_promo_headline">%s نىڭ ئىچىدىكى VPN</string>
+  <!-- Body text for the browser VPN settings header, shown when no promo is running. %s is a learn more link using ip_protection_learn_more as text. -->
+  <string name="ip_protection_promo_body_2">ھەتتا ئاممىۋى Wi-Fi بولغان تەقدىردىمۇ ئورنىڭىزنى يوشۇرۇپ تور زىيارىتىدە قوشۇمچە قوغداشقا ئېرىشىڭ. %s</string>
   <!-- Link text that opens additional information about the browser VPN -->
   <string name="ip_protection_learn_more">تەپسىلاتى</string>
+  <!-- Label for the monthly data allowance section on the browser VPN settings screen -->
+  <string name="ip_protection_data_limit_label">ئايلىق سانلىق مەلۇمات چەكلىمىسى</string>
+  <!--
+    Data usage shown on the browser VPN settings screen.
+    %1$.1f is the data remaining in GB (for example "8.3").
+    %2$.1f is the total monthly allowance in GB (for example "50.0").
+  -->
+  <string name="ip_protection_data_limit_value">%1$.1f GB /%2$.1f GB قالدى</string>
+  <!--
+    Text shown below the data usage bar describing when the monthly allowance resets.
+    %1$.0f is the total monthly data allowance in GB (for example "50").
+  -->
+  <string name="ip_protection_data_reset_info">ھەر ئاينىڭ بېشىدا %1$.0f GB غا ئەسلىگە قايتۇرۇلىدۇ.</string>
   <!-- Header for the browser VPN `location` section -->
   <string name="ip_protection_location_section">ئورنى</string>
   <!-- Label for the recommended automatic location option on the browser VPN settings screen -->
@@ -2971,14 +3018,99 @@
   <string name="preferences_ip_protection_on">ئوچۇق</string>
   <!-- Badge label shown in the menu item when the browser VPN is off -->
   <string name="preferences_ip_protection_off">تاقاق</string>
+  <!-- Badge label shown in the menu item while the browser VPN is connecting -->
+  <string name="ip_protection_menu_connecting">باغلىنىۋاتىدۇ…</string>
+  <!-- Badge label shown in the menu item when the browser VPN is paused -->
+  <string name="ip_protection_menu_paused">ۋاقىتلىق توختىدى</string>
   <!-- Badge label shown in the menu item when the browser VPN has an error -->
   <string name="ip_protection_menu_error">خاتالىق</string>
+  <!-- Badge label shown in the VPN menu item when the user is eligible for the feature but needs to authenticate / authorize to enable it -->
+  <string name="ip_protection_menu_try_vpn_cta">سىناش ھەقسىز</string>
+  <!-- Content description for the chevron button that opens the browser VPN settings screen -->
+  <string name="ip_protection_navigate_settings">VPN تەڭشەكنى ئاچ</string>
+  <!--
+    Subtitle shown below the VPN label in menus when the monthly data allowance is exhausted.
+    %1$d is the total monthly allowance in GB (for example "50").
+  -->
+  <string name="ip_protection_menu_limit_reached">%1$d GB چېكىگە يەتتى</string>
+  <!--
+    Error message shown on the browser VPN settings screen when the monthly data allowance is exhausted.
+    %1$d is the total monthly allowance in GB (for example "50").
+  -->
+  <string name="ip_protection_data_limit_reached_description">سىز %1$d GB مەۋھۇم شەخسىي تور يەنى VPN سانلىق مەلۇماتىڭىزنىڭ ھەممىنى ئىشلىتىپ بولدىڭىز. زىيارەت ئىجازىتىڭىز كېيىنكى ئايدا ئەسلىگە قايتۇرۇلىدۇ.</string>
+  <!-- Label shown next to the browser protection icon in the address bar when the browser VPN is active -->
+  <string name="ip_protection_toolbar_pill_label">VPN ئوچۇق</string>
+  <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has been activated -->
+  <string name="ip_protection_toolbar_pill_description">VPN ئاكتىپ.</string>
+  <!-- Label shown next to the browser protection icon in the address bar when the browser VPN turns off -->
+  <string name="ip_protection_toolbar_pill_label_off">VPN تاقاق</string>
+  <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has turned off -->
+  <string name="ip_protection_toolbar_pill_description_off">VPN تاقاق.</string>
+  <!-- Label for the button that starts the browser VPN authentication or authorization flow on the settings screen -->
+  <string name="ip_protection_get_started">باشلا</string>
   <!-- Label for the "connecting" state of the button that starts the browser VPN authentication or authorization flow on the settings screen -->
   <string name="ip_protection_connecting">باغلىنىۋاتىدۇ…</string>
+  <!-- Headline for the browser VPN onboarding card. %s is the name of the app (for example "Firefox"). -->
+  <string name="ip_protection_onboarding_card_headline">%s نىڭ ئىچىدىكى VPN نى سىناڭ</string>
+  <!--
+    The body of the VPN onboarding card.
+    %1$s is a link using ip_protection_onboarding_body_link (“Browse with extra protection”) as text. It links to a support article about VPN on Firefox.
+    %2$d is the total monthly allowance in GB (for example "50").
+  -->
+  <string name="ip_protection_onboarding_body">ئاممىۋى Wi-Fi بولغان تەقدىردىمۇ %1$s ئارقىلىق ھەقىقىي ئورنىڭىزنى يوشۇرىدۇ. ھەر ئايدا %2$d GB ھەقسىز ئېقىمغا ئېرىشەلەيسىز.</string>
+  <!-- Used as text for a link in ip_protection_onboarding_body. Make sure to adapt capitalization if the link is in the middle of the sentence. -->
+  <string name="ip_protection_onboarding_body_link">تور زىيارىتىدە قوشۇمچە قوغداشقا ئېرىشىدۇ</string>
+  <!--
+    The body of the VPN onboarding card for a promotion that provides unlimited data bandwidth for a certain time.
+    %1$s is a localized date (for example "Jun 9") indicating the end of the promotional period.
+    %2$s is a link using ip_protection_onboarding_body_link_promo (“Learn more”) as text. It links to a support article about VPN on Firefox.
+  -->
+  <string name="ip_protection_onboarding_body_promo">زىيارەتنى تېخىمۇ مەخپىي ۋە ئىزلاشنى تەسلەشتۈرۈش ئۈچۈن ئۇنى ئېچىڭ. %1$s غىچە چەكسىز تور ئېقىمىغا ئېرىشىش ئۈچۈن ھازىر سىناڭ. %2$s</string>
   <!-- Used as text for a link in ip_protection_onboarding_body. Make sure to adapt capitalization if the link is in the middle of the sentence. -->
   <string name="ip_protection_onboarding_body_link_promo">تەپسىلاتى</string>
   <!-- Label for the dismiss button on the onboarding bottom sheet. -->
   <string name="ip_protection_onboarding_not_now_button">ھازىر ئەمەس</string>
+  <!-- Snackbar (in-app pop-up notification) text to signal the browser VPN connection error -->
+  <string name="ip_protection_connection_error_snackbar">مەۋھۇم شەخسىي تور يەنى VPN غا باغلىنالمىدى. بىر قانچە مىنۇتتىن كېيىن قايتا سىناڭ.</string>
+  <!-- Snackbar (in-app pop-up notification) text to signal the VPN location has been reset due to the previously selected VPN location being no longer available. -->
+  <string name="ip_protection_location_selection_reset_snackbar">تاللىغان VPN ئورنى ئىناۋەتسىز. تەۋسىيە قىلىنغان ئورۇنغا ئالماشتۇرۇلدى.</string>
+  <!--
+    Snackbar (in-app pop-up notification) text to signal the browser VPN has reached the monthly data limit.
+    %1$d is the total monthly allowance in GB (for example "50").
+  -->
+  <string name="ip_protection_data_limit_reached_snackbar">مەۋھۇم شەخسىي تور ئېقىم سانلىق مەلۇماتىدىن %1$d GB ئىشلەتتى. زىيارەت ئىجازىتىڭىز كېيىنكى ئايدا ئەسلىگە قايتۇرۇلىدۇ.</string>
+  <!-- Snackbar (in-app pop-up notification) action button text that takes the user to the VPN settings screen. -->
+  <string name="ip_protection_open_settings_snackbar_action">تەڭشەك</string>
+  <!-- Description shown on the browser VPN settings screen prompting the user to turn the VPN on. -->
+  <string name="ip_protection_settings_description" tools:ignore="UnusedResources">ئىزلاشنى قىيىنلاشتۇرۇپ ۋە تور زىيارىتىنى تېخىمۇ مەخپىي قىلىش ئۈچۈن VPN نى ئېچىڭ.</string>
+  <!-- Title shown on the browser VPN settings screen for location selection section. -->
+  <string name="ip_protection_location_title" tools:ignore="UnusedResources">ئورنى</string>
+  <!-- Label for the Recommended server location option which is automatically selected by the browser. -->
+  <string name="ip_protection_recommended_location" tools:ignore="UnusedResources">تەۋسىيەلەندى</string>
+  <!-- Headline for the card that promotes the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_headline" tools:ignore="UnusedResources,BrandUsage">Mozilla VPN بىلەن تېخىمۇ كۆپ قوغدايدۇ</string>
+  <!-- Body for the card that promotes the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_body" tools:ignore="UnusedResources">300 دىن ئارتۇق ئورۇندىن تاللاپ، ئەڭ كۆپ بولغاندا 5 ئۈسكۈنىدە ھەممە ئەپنى قوغدىيالايسىز.</string>
+  <!-- Label for the button that takes the user to get the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_button" tools:ignore="UnusedResources,BrandUsage">Mozilla VPN غا ئېرىش</string>
+  <!-- Title for the browser VPN location picker screen. -->
+  <string name="ip_protection_location_picker_title" tools:ignore="UnusedResources">VPN ئورنى تاللىنىدۇ</string>
+  <!-- Description for what it means to use the Recommended setting and let the app automatically pick the best server location. -->
+  <string name="ip_protection_location_fastest_description" tools:ignore="BrandUsage">Firefox ئەڭ تېز ئورۇننى ئىزدەيدۇ</string>
+  <!-- Description for an unavailable VPN location in the location list. -->
+  <string name="ip_protection_location_unavailable_description">ئىشلەتكىلى بولمايدۇ</string>
+  <!-- Error message shown when the selected browser VPN location is unavailable. -->
+  <string name="ip_protection_location_unavailable" tools:ignore="UnusedResources">ئورۇننى ئىشلەتكىلى بولمايدۇ. باشقا ئورۇننى تاللاڭ.</string>
+  <!-- Snackbar (in-app pop-up notification) text shown when the previously selected browser VPN location is unavailable and the recommended location was used instead. -->
+  <string name="ip_protection_location_unavailable_recommended_snackbar" tools:ignore="UnusedResources">تاللىغان VPN نى ئىشلەتكىلى بولمايدۇ. تەۋسىيە قىلىنغان ئورۇنغا باغلاندى.</string>
+  <!-- Title for the card shown to the user when we are unable to fetch server locations -->
+  <string name="ip_protection_locations_unavailable_title">ئورۇن ئۇچۇرى يوق</string>
+  <!-- Description for the card shown to the user when we are unable to fetch server locations -->
+  <string name="ip_protection_locations_unavailable_description">تەۋسىيە قىلىنغان ئورۇنغا ئالماشتى.</string>
+  <!-- Title for the browser VPN location selection screen (displayed in the app bar) -->
+  <string name="ip_protection_locations_title">VPN ئورنى تاللىنىدۇ</string>
+  <!-- Content description for the browser VPN location selection screen top bar back button -->
+  <string name="ip_protection_locations_navigate_back_button_content_description">كەينىگە قايت</string>
   <!--
     Autofill
 
@@ -3131,8 +3263,6 @@
   <string name="addresses_save_button">ساقلا</string>
   <!-- The text for the "Cancel" button for cancelling adding, updating or deleting an address -->
   <string name="addresses_cancel_button">ۋاز كەچ</string>
-  <!-- The text for the "Delete address" button for deleting an address -->
-  <string name="addressess_delete_address_button">ئادرېس ئۆچۈر</string>
   <!-- The title for the "Delete address" confirmation dialog -->
   <string name="addressess_confirm_dialog_message_2">بۇ ئادرېسنى ئۆچۈرەمدۇ؟</string>
   <!-- The text for the positive button on "Delete address" dialog -->
@@ -3187,16 +3317,8 @@
   <string name="phone_feature_blocked_step_permissions"><![CDATA[2. <b>ئىجازەت</b> نى چېكىڭ]]></string>
   <!-- Third step for the allowing a permission (%1$s is the permission name, for example "Camera"). -->
   <string name="phone_feature_blocked_step_feature"><![CDATA[3. <b>%1$s</b> نى ئوچۇققا ئالماشتۇرۇڭ]]></string>
-  <!-- Label that indicates a site is using a secure connection -->
-  <string name="quick_settings_sheet_secure_connection_2">باغلىنىش بىخەتەر</string>
-  <!-- Label that indicates a site is using a insecure connection -->
-  <string name="quick_settings_sheet_insecure_connection_2">باغلىنىش بىخەتەر ئەمەس</string>
-  <!-- Label that indicates a site is displaying a local document -->
-  <string name="quick_settings_sheet_local_page">بۇ بەت ئۈسكۈنىڭىزگە ساقلاندى.</string>
   <!-- Label to clear site data -->
   <string name="clear_site_data">Cookies ۋە تور بېكەت سانلىق مەلۇماتلىرىنى ئۆچۈرىدۇ</string>
-  <!-- Confirmation message for a dialog confirming if the user wants to delete all data for current site. %s is the domain of the site. -->
-  <string name="confirm_clear_site_data"><![CDATA[بۇ <b>%s</b> تور بېكەتنىڭ بارلىق cookies ۋە سانلىق مەلۇماتلىرىنى راستىنلا تازىلامسىز؟]]></string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for all sites -->
   <string name="confirm_clear_permissions_on_all_sites">بارلىق تور بېكەتلەردىكى ھەممە ئىجازەتلەرنى راستىنلا ئۆچۈرەمسىز؟</string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for a site -->
@@ -3209,11 +3331,6 @@
   <string name="browser_menu_add_to_shortcuts">تېزلەتمىگە قوش</string>
   <!-- Browser menu button that removes a shortcut from the home fragment -->
   <string name="browser_menu_remove_from_shortcuts">تېزلەتمىدىن چىقىرىۋەت</string>
-  <!--
-    text shown before the issuer name to indicate who its verified by, %1$s is the name of
-    the certificate authority that verified the ticket
-  -->
-  <string name="certificate_info_verified_by">دەلىللىگۈچى: %1$s</string>
   <!-- Message in delete confirmation dialog for password -->
   <string name="login_deletion_confirmation_2">بۇ ئىمنى راستىنلا ئۆچۈرەمسىز؟</string>
   <!-- Positive action of a dialog asking to delete -->
@@ -3277,6 +3394,16 @@
     which navigates the user to a screen displaying all the shortcuts.
   -->
   <string name="homepage_shortcuts_show_all_content_description">ھەممە تېزلەتمىنى كۆرسىتىدۇ</string>
+  <!--
+    Label for the button in the shortcuts home screen section that expands the section to show
+    every shortcut.
+  -->
+  <string name="homepage_shortcuts_show_all">ھەممىنى كۆرسەت</string>
+  <!--
+    Label for the button in the shortcuts home screen section that collapses the section back
+    to showing only the first shortcuts.
+  -->
+  <string name="homepage_shortcuts_show_less">ئازراق كۆرسەت</string>
   <!-- Label for the "Add shortcut" button displayed as a tile. -->
   <string name="homepage_shortcuts_add_shortcut">تېزلەتمىگە قوش</string>
   <!-- Title for the "Add to homepage" bottom sheet. -->
@@ -3408,8 +3535,6 @@
   <string name="a11y_action_label_expand">ياي</string>
   <!-- Action label for links to a website containing documentation about a wallpaper collection. Talkback will append this to say "Double tap to open link to learn more about this collection". -->
   <string name="a11y_action_label_wallpaper_collection_learn_more">بۇ يىغقۇچ ھەققىدە تېخىمۇ كۆپ ئۇچۇرنى بىلمەكچى بولسىڭىز ئۇلانمىنى ئېچىڭ</string>
-  <!-- Translations feature -->
-
   <!--
     Translation request dialog
 
@@ -3687,8 +3812,6 @@
     and there are no trackers blocked.
   -->
   <string name="protection_panel_banner_protected_no_blocked_trackers_description">قوغدالدىڭىز.</string>
-  <!-- Description text for the protection panel banner when tracking protection is enabled. -->
-  <string name="protection_panel_banner_protected_description">قوغدالدىڭىز. ئەگەر بىرەر نەرسە بايقىساق، سىزگە بىلدۈرىمىز.</string>
   <!-- Label text for the Enhanced Tracking Protection toggle. -->
   <string name="protection_panel_etp_toggle_label">كۈچەيتىلگەن ئىزلاشتىن قوغداش</string>
   <!-- Toggle if Enhanced Tracking Protection is turned on -->
@@ -3704,25 +3827,68 @@
     %d is a placeholder for the number of trackers blocked.
   -->
   <string name="protection_panel_num_trackers_blocked">ئىزلىغۇچى توسۇلدى: %d</string>
-  <!-- Text for when no trackers have been blocked. -->
-  <string name="protection_panel_no_trackers_blocked">ھېچقانداق ئىزلىغۇچى تېپىلمىدى</string>
   <!-- Text for when tracking protection is disabled and no trackers are blocked. -->
   <string name="protection_panel_etp_disabled_no_trackers_blocked">ئىزلىغۇچ توسۇلمىدى</string>
   <!-- Link text to navigate to privacy and security settings from the protection panel. -->
   <string name="protection_panel_privacy_and_security_settings_2">شەخسىيەت تەڭشىكى</string>
   <!-- Title text for the protection panel permissions section. -->
   <string name="protection_panel_permissions_title">ئىجازەت</string>
-  <!--
-    Text for displaying the total number of trackers blocked in the trackers blocked panel.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_total_num_trackers_blocked">ئىزلىغۇچى توسۇلدى: %d</string>
-  <!--
-    Text for displaying the number of trackers blocked for a specific tracker category in the trackers blocked panel.
-    %s is a placeholder for the name of the tracker category.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_categorical_num_trackers_blocked">%s: %d</string>
+  <plurals name="trackers_blocked_panel_total_num_trackers_blocked_2">
+    <!--
+      Text for displaying the total number of trackers blocked in the trackers blocked panel.
+      %1$d is a placeholder for the number of trackers blocked.
+    -->
+    <item quantity="one">بۇ تور بېكەتتە %1$d ئىزلىغۇچ توسۇلغان</item>
+    <item quantity="other">بۇ تور بېكەتتە %1$d ئىزلىغۇچ توسۇلغان</item>
+  </plurals>
+  <plurals name="trackers_blocked_panel_num_social_media_trackers">
+    <!--
+      Text for displaying in the trackers blocked panel the total number of blocked social media trackers.
+      %1$d is a placeholder for the number of social media trackers blocked.
+    -->
+    <item quantity="one">%1$d ئىجتىمائىي تاراتقۇ ئىزلىغۇچ</item>
+    <item quantity="other">%1$d ئىجتىمائىي تاراتقۇ ئىزلىغۇچ</item>
+  </plurals>
+  <plurals name="trackers_blocked_panel_num_cross_site_cookies">
+    <!--
+      Text for displaying in the trackers blocked panel the total number of blocked cross-site tracking cookies.
+      %1$d is a placeholder for the number of cross-site tracking cookies blocked.
+    -->
+    <item quantity="one">%1$d بېكەت ھالقىغان ئىزلاش ساقلانمىسى</item>
+    <item quantity="other">%1$d بېكەت ھالقىغان ئىزلاش ساقلانمىسى</item>
+  </plurals>
+  <plurals name="trackers_blocked_panel_num_cryptominers">
+    <!--
+      Text for displaying in the trackers blocked panel the total number of blocked cryptomining scripts.
+      %1$d is a placeholder for the number of cryptominers blocked.
+    -->
+    <item quantity="one">%1$d شىفىرلىق پۇل قازغۇچ</item>
+    <item quantity="other">%1$d شىفىرلىق پۇل قازغۇچ</item>
+  </plurals>
+  <plurals name="trackers_blocked_panel_num_fingerprinters">
+    <!--
+      Text for displaying in the trackers blocked panel the total number of blocked fingerprinter scripts.
+      %1$d is a placeholder for the number of fingerprinters blocked.
+    -->
+    <item quantity="one">%1$d بارماق ئىزى ئىزلىغۇچ</item>
+    <item quantity="other">%1$d بارماق ئىزى ئىزلىغۇچ</item>
+  </plurals>
+  <plurals name="trackers_blocked_panel_num_trackers_2">
+    <!--
+      Text for displaying in the trackers blocked panel the total number of blocked generic tracking scripts.
+      %1$d is a placeholder for the number of trackers blocked.
+    -->
+    <item quantity="one">%1$d ئىز قوغلاش مەزمۇنى</item>
+    <item quantity="other">%1$d ئىز قوغلاش مەزمۇنى</item>
+  </plurals>
+  <plurals name="trackers_blocked_panel_num_trackers_blocked_this_week_2">
+    <!--
+      Text for displaying the number of trackers blocked this week in the trackers blocked panel.
+      %1$d is a placeholder for the number of trackers blocked this week.
+    -->
+    <item quantity="one">بۇ ھەپتە %1$d ئىزلىغۇچ توسۇلغان</item>
+    <item quantity="other">بۇ ھەپتە %1$d ئىزلىغۇچ توسۇلغان</item>
+  </plurals>
   <!--
     Description text for a dialog confirming whether the user wants to delete all data for current site.
     %s is a placeholder for the base domain of website.
@@ -3743,6 +3909,8 @@
     %s is a placeholder for the name of the certificate authority that issued the certificate.
   -->
   <string name="connection_security_panel_verified_by">دەلىللىگۈچى %s</string>
+  <!-- Content description (not visible, for screen readers etc.) for the handle used to drag the protections dashboard to the bottom of the screen and close it. -->
+  <string name="tracker_protections_dashboard_close_handlebar_content_description">باشقۇرۇش تاختىسىنى تاقاش</string>
   <!--
     Text for the connection security panel when the site uses a QWAC.
     %s is a placeholder for the organization for which the certificate was issued.
@@ -3866,6 +4034,26 @@
   <string name="microsurvey_sync_title" tools:ignore="BrandUsage,UnusedResources">Firefox نىڭ قەدەمداش كەچمىشىگە بولغان رازىمەنلىكىڭىز قانداق؟</string>
   <!-- Text shown in the survey title for 'describe your experience so far' microsurvey. Note: The word "Firefox" should NOT be translated. -->
   <string name="microsurvey_describe_your_experience_title" tools:ignore="BrandUsage,UnusedResources">Firefox نى ياخشىلىشىمىزغا ياردەم بېرىڭ. ھازىرغىچە ئىشلەتكەن تەسىراتىڭىزغا تۆۋەندىكىلەردىن قايسىسى ئەڭ ماس كېلىدۇ؟</string>
+  <!--
+    Uninstall Survey
+
+    Title text for the uninstall survey dialog, asking the user for the reason they are removing the app
+  -->
+  <string name="microsurvey_uninstall_survey_title">قايتۇرما ئىنكاسىڭىز بىز ئۈچۈن بەك مۇھىم. نېمە ئۈچۈن سۆكۈۋېتىسىز؟</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_1_v2">ئاستا ياكى ئىشەنچسىز</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_2_v2">تور بېكەت ئادەتتىكىدەك ئىشلىمىدى</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_3_v2">ماڭا كېرەكلىك ئىقتىدار يوق</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_4_v2">سىن، چۈشۈرۈش ياكى ۋاسىتە ئىشلىمىدى</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_5_v2">ئىشلىتىش تەس ياكى لايىھەسى ناچار</string>
+  <!-- Uninstall survey answer option -->
+  <string name="uninstall_survey_option_6_v2">شەخسىيەت ياكى بىخەتەرلىك مەسىلىسى</string>
+  <!-- Button label shown at the bottom of the uninstall survey -->
+  <string name="uninstall_survey_button_label">قايتۇرما ئىنكاس يوللاپ ئاندىن سۆك</string>
   <!--
     Accessibility
 
@@ -4014,8 +4202,6 @@
   <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">قوشۇلما ۋە باشقا ئىقتىدارلارنى ئىشلىتىش ئۈچۈن 14-مارتتىن ئىلگىرى يېڭىلاش كېرەك.</string>
   <!-- Push notification message about old Firefox version -->
   <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">بەزى ئىقتىدارلار ئەتە ئىشلىمەيدۇ.</string>
-  <!-- TextField Design System Component -->
-
   <!--
     Setup checklist feature
 
@@ -4174,8 +4360,6 @@
   <string name="settings_search_no_results_message">باشقىسىنى ئىزدەپ باقامدۇ؟</string>
   <!-- Content Description for the button to open Settings Search (to search through settings). -->
   <string name="settings_search_button_content_description">ئىزدەش تەڭشىكى توپچىسى</string>
-  <!-- ==== Terms of use pop up prompt ==== -->
-
   <!-- Title for the pop up prompt -->
   <string name="terms_of_use_prompt_title">يېڭىلىدۇق</string>
   <!--
@@ -4200,8 +4384,6 @@
   <string name="terms_of_use_prompt_accept">قوشۇل</string>
   <!-- Label for a button to postpone accepting the terms of use -->
   <string name="terms_of_use_prompt_postpone">مېنى كېيىن ئەسكەرت</string>
-  <!-- ==== Experiment strings. ==== -->
-
   <!-- A title for the popup prompt. -->
   <string name="terms_of_use_prompt_title_option_a" tools:ignore="UnusedResources">ئىشلىتىش شەرتلىرى</string>
   <!--
@@ -4217,96 +4399,6 @@
   <!-- Link text for terms_of_use_prompt_body_line_two_alternative that links to a site with more information about the Terms of Use -->
   <string name="terms_of_use_prompt_body_line_two_alternative_link" tools:ignore="UnusedResources">بۇ جاي</string>
   <!--
-    Sports widget
-
-    Title text shown at the top of the sports widget country selector, encouraging the user to pick a national team to follow.
-  -->
-  <string name="sports_widget_country_selector_title">كوماندىڭىزغا ئەگىشىڭ</string>
-  <!-- Section header for the North America region in the sports widget country selector. -->
-  <string name="sports_widget_confederation_north_america">شىمالىي ئامېرىكا</string>
-  <!-- Section header for the Africa confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_africa">ئافرىقا</string>
-  <!-- Section header for the Asia confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_asia">ئاسىيا</string>
-  <!-- Section header for the Europe confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_europe">ياۋروپا</string>
-  <!-- Section header for the South America confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_south_america">جەنۇبىي ئامېرىكا</string>
-  <!-- Country name for England in the sports widget. England cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_england">ئەنگلىيە</string>
-  <!-- Title shown on the sports widget champion scoreboard row celebrating the soccer tournament winner. -->
-  <string name="sports_widget_champions_title">2026-يىللىق دۇنيا لوڭقىسى چېمپىيونى</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament runners-up. Runners-up means second place. -->
-  <string name="sports_widget_runner_up_title" tools:ignore="UnusedResources">ئىككىنچىلەر</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament third place winners. -->
-  <string name="sports_widget_third_place_title">ئۈچىنچىلەر</string>
-  <!-- Sports widget action label to refresh match data after an error. -->
-  <string name="sports_widget_error_refresh">يېڭىلا</string>
-  <!-- Sports widget group stage label for group A in the soccer tournament. -->
-  <string name="sports_widget_group_a">A گۇرۇپپا</string>
-  <!-- Sports widget group stage label for group B in the soccer tournament. -->
-  <string name="sports_widget_group_b">B گۇرۇپپا</string>
-  <!-- Sports widget group stage label for group C in the soccer tournament. -->
-  <string name="sports_widget_group_c">C گۇرۇپپا</string>
-  <!-- Sports widget group stage label for group D in the soccer tournament. -->
-  <string name="sports_widget_group_d">D گۇرۇپپا</string>
-  <!-- Sports widget group stage label for group E in the soccer tournament. -->
-  <string name="sports_widget_group_e">E گۇرۇپپا</string>
-  <!-- Sports widget group stage label for group F in the soccer tournament. -->
-  <string name="sports_widget_group_f">F گۇرۇپپا</string>
-  <!-- Sports widget group stage label for group G in the soccer tournament. -->
-  <string name="sports_widget_group_g">G گۇرۇپپا</string>
-  <!-- Sports widget group stage label for group H in the soccer tournament. -->
-  <string name="sports_widget_group_h">H گۇرۇپپا</string>
-  <!-- Sports widget group stage label for group I in the soccer tournament. -->
-  <string name="sports_widget_group_i">I گۇرۇپپا</string>
-  <!-- Sports widget group stage label for group J in the soccer tournament. -->
-  <string name="sports_widget_group_j">J گۇرۇپپا</string>
-  <!-- Sports widget group stage label for group K in the soccer tournament. -->
-  <string name="sports_widget_group_k">K گۇرۇپپا</string>
-  <!-- Sports widget group stage label for group L in the soccer tournament. -->
-  <string name="sports_widget_group_l">L گۇرۇپپا</string>
-  <!-- Sports widget button label to see match results. -->
-  <string name="sports_widget_see_results" tools:ignore="UnusedResources">مۇسابىقە نەتىجىسىنى كۆرسەت</string>
-  <!-- Sports widget button label to view details of a soccer match results. -->
-  <string name="sports_widget_view_match_details" tools:ignore="UnusedResources">مۇسابىقە تەپسىلاتىنى كۆرسەت</string>
-  <!-- Sports widget section header for related soccer matches in the same group. -->
-  <string name="sports_widget_related_matches" tools:ignore="UnusedResources">مۇناسىۋەتلىك مۇسابىقە</string>
-  <!--
-    Sports widget card title encouraging the user to follow the soccer tournament. “Keep tabs on” is an informal expression
-    meaning to stay updated on or regularly follow something (in this case, World Cup matches and updates).
-    It’s playfully related to Firefox in that “tabs” are a browser feature.
-    It suggests ongoing awareness rather than active monitoring or control. Not to be translated literally as physical “tabs”
-    or tracking in a technical sense; the meaning is about staying informed.
-  -->
-  <string name="sports_widget_card_title">دۇنيا لوڭقىسى مۇسابىقە ئۇچۇرى</string>
-  <!-- Sports widget menu item to change the selected team. -->
-  <string name="sports_widget_change_team">كوماندا ئالماشتۇر</string>
-  <!-- Sports widget menu item to remove the widget from the homepage. -->
-  <string name="sports_widget_remove">چىقىرىۋەت</string>
-  <!-- Sports widget button label to follow another team after the current team is eliminated. -->
-  <string name="sports_widget_follow_another_team">باشقا كوماندىغا ئەگەش</string>
-  <!-- Sports widget button label that dismisses the step of choosing a team to follow. -->
-  <string name="sports_widget_skip">ئاتلا</string>
-  <!--
-    Sports widget countdown label for days. D is short for Day. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that (e.g. T for German).
-    Your translation will be automatically truncated at 2 characters to avoid layout issues.
-  -->
-  <string name="sports_widget_countdown_days">ك</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget card. -->
-  <string name="sports_widget_close_content_description">ياپ</string>
-  <!-- Content description (for accessibility, not displayed) for the overflow (more options) menu button on the sports widget card. -->
-  <string name="sports_widget_more_options_content_description">تېخىمۇ كۆپ تاللانما</string>
-  <!-- Sports widget error card description shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_description">ئىنتېرنېت باغلىنىشىڭىزنى تەكشۈرۈپ ئاندىن قايتا سىناڭ.</string>
-  <!-- Sports widget error card title shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed_title">ھازىرچە مۇسابىقە ئۇچۇرى يوق.</string>
-  <!-- Sports widget error card description shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed_description">بىر نەچچە مىنۇتتىن كېيىن يېڭىلاپ كۆرۈڭ.</string>
-  <!-- ==== End of Terms of use popup prompt. ==== -->
-
-  <!--
     Privacy notice homepage banner
 
     A message we show the user on the homepage when there is a new version of the privacy notice. 'Firefox' is intentionally hardcoded.
@@ -4318,4 +4410,128 @@
   <string name="privacy_notice_updated_homepage_message_privacy_notice" tools:ignore="UnusedResources">شەخسىيەت ئۇقتۇرۇشى</string>
   <!-- The second active link used in privacy_notice_updated_homepage_message -->
   <string name="privacy_notice_updated_homepage_message_learn_more" tools:ignore="UnusedResources">مول بىلىم</string>
+  <!--
+    Collections migration homepage card
+
+    Title shown on the collections to tab groups migration card on the homepage.
+  -->
+  <string name="collections_migration_homepage_banner_title">ھازىر توپلام گۇرۇپپىغا ئۆزگەردى</string>
+  <!-- Message shown on the collections to tab groups migration card on the homepage. -->
+  <string name="collections_migration_homepage_card_message">بەتكۈچنى رەتلىك ساقلاشنىڭ ئاددىي ئۇسۇلى بار</string>
+  <!-- Link text shown on the collections to tab groups migration card that opens the tab groups page in the tab manager. -->
+  <string name="collections_migration_homepage_card_link">بەتكۈچ گۇرۇپپىسىنى كۆرسەت</string>
+  <!-- Google Lens prototype related strings -->
+  <string name="preferences_debug_settings_google_lens_integration">Google Lens توپلاشتۇرۇشنى قوزغات</string>
+  <!-- Lens image search button content description -->
+  <string name="lens_search_content_description">سۈرەت بىلەن ئىزدە</string>
+  <!-- Content description for the gallery picker button in the Lens camera screen -->
+  <string name="content_description_gallery">سۈرەت توپلىمىدىن تاللاپ Google Lens غا يوللايدۇ</string>
+  <!-- Content description for the shutter button in the Lens camera screen -->
+  <string name="content_description_take_photo">سۈرەت تارتىپ Google Lens غا يوللايدۇ</string>
+  <!-- Image context menu entry that sends the long-pressed image to Google Lens -->
+  <string name="context_menu_open_image_with_google_lens">Google Lens بىلەن ئىزدە</string>
+  <!-- Toast shown when the user denies the camera permission requested by the Lens camera screen -->
+  <string name="lens_camera_permission_denied">ئىجازەت رەت قىلىندى</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the photo they capture will be sent to Google Lens for a visual search.
+  -->
+  <string name="lens_camera_title_lens">Google Lens</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the camera is being used to scan a QR code.
+  -->
+  <string name="lens_camera_title_qr">QR كودى</string>
+  <!-- Title for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_title">Google Lens ئىزدەشنى قوزغات</string>
+  <!-- Description for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_description">كۆرۈنۈش بويىچە ئىزدەش ئۈچۈن سۈرەت ۋە رەسىمنى يوللايدۇ.</string>
+  <!-- Caption shown under the Google Lens toggle clarifying when the feature is available -->
+  <string name="preferences_google_lens_availability_caption">پەقەت ئۈستىدە Google نى قوزغىتىپ، توركۆرگۈنىڭ ئاكتىپ ئىزدەش موتورى سۈپىتىدە ئاكتىپلاندىلا ئىشلەتكىلى بولىدۇ.</string>
+  <!-- Content description for the Google Lens half of the camera mode toggle -->
+  <string name="lens_camera_mode_lens">Google Lens</string>
+  <!-- Content description for the QR scanner half of the camera mode toggle -->
+  <string name="lens_camera_mode_qr">QR تارىغۇچ</string>
+  <!-- Toast shown when the user picks an image from the gallery in QR mode but no QR code is found in it -->
+  <string name="lens_camera_qr_no_code_found">سۈرەتتە ھېچقانداق QR كودى تېپىلمىدى</string>
+  <!-- Title of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
+  <string name="lens_opt_out_title">Google Lens بىلەن ئىزدە</string>
+  <!-- Description of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
+  <string name="lens_opt_out_description">Google Lens دىن نەتىجىگە ئېرىشىش ئۈچۈن بىر سۈرەت تاللاڭ ياكى كامېرايىڭىزنى ئىشلىڭ.</string>
+  <!-- Text of the link in the first-run Google Lens bottom sheet that opens the Search settings page -->
+  <string name="lens_opt_out_settings_link">Google Lens تەڭشىكى</string>
+  <!-- Button in the first-run Google Lens bottom sheet that dismisses it and starts the camera -->
+  <string name="lens_opt_out_try_it_now_button">ھازىر سىنا</string>
+  <!-- Button in the first-run Google Lens bottom sheet that leaves Google Lens without using it -->
+  <string name="lens_opt_out_not_now_button">ھازىر ئەمەس</string>
+  <!--
+    Firefox Labs
+
+    Firefox Labs is the name of a screen in Settings to allow users to learn about
+    experimental and in-development features, and turn those features on and off.
+    The "Labs" portion can be localized, "Firefox" must be treated as a brand and kept
+    in English.
+  -->
+  <string name="firefox_labs_title" tools:ignore="BrandUsage">Firefox تەجرىبەخانىسى</string>
+  <!-- Banner title text on the Firefox Labs screen. -->
+  <string name="firefox_labs_banner_title_2">تەجرىبە خاراكتېرلىك ئىقتىدارنى سىناڭ!</string>
+  <!--
+    Banner description text on the Firefox Labs screen. Provides information on what Firefox Labs does. %s is the name of the app (for example "Firefox Nightly").
+    Text will appear under the Firefox Labs banner title.
+  -->
+  <string name="firefox_labs_experimental_description">بۇ ئىقتىدار ئىجادىيەت باسقۇچىدا ۋە ياخشىلىنىۋاتىدۇ، %s ئىشلىشىگە تەسىر كۆرسىتىشى مۇمكىن.</string>
+  <!-- The link text shown when a feedback URL for a Firefox Labs feature is available. The feedback URL page will allow users to provide opinions and suggestions. -->
+  <string name="firefox_labs_share_feedback">قايتۇرما ئىنكاس ھەمبەھىر</string>
+  <!-- Content description for the share feedback link on a Firefox Labs feature. This text will be used by screen readers to provide more context on the feedback link. %s is the name of the Firefox Labs feature. -->
+  <string name="firefox_labs_share_feedback_content_description">«%s» نىڭ قايتۇرما ئىنكاسىنى ھەمبەھىرلەيدۇ.</string>
+  <!-- Button text on the Firefox Labs screen for restoring all toggles back to the default settings. The button will turn off any experimental features. -->
+  <string name="firefox_labs_restore_default_button_text">كۆڭۈلدىكىگە ئەسلىگە كەلتۈر</string>
+  <!-- The title used in a confirmation dialog on the Firefox Labs screen when toggling "on" or "off" an experimental feature that requires a restart. -->
+  <string name="firefox_labs_feature_dialog_title">قايتا قوزغىتىش زۆرۈر</string>
+  <!-- The text on the dialog on the Firefox Labs screen for the positive button when toggling "on" and "off" experimental features. This prompts the user to confirm that they want to restart the app. -->
+  <string name="firefox_labs_dialog_restart_button">قايتا قوزغات</string>
+  <!-- The text on the dialog on the Firefox Labs screen for the negative button when toggling "on" and "off" experimental features. This is used to cancel the action and return to the previous screen. -->
+  <string name="firefox_labs_dialog_cancel_button">ۋاز كەچ</string>
+  <!-- The title used in a confirmation dialog on the Firefox Labs screen when restoring the application to its defaults by turning "off" any experimental features. -->
+  <string name="firefox_labs_restore_defaults_dialog_title">قايتا قوزغىتىش زۆرۈر</string>
+  <!-- The description used in a confirmation dialog on the Firefox Labs screen when restoring the application to its defaults by turning "off" any experimental features. %s is the name of the app (for example "Firefox Nightly") -->
+  <string name="firefox_labs_restore_defaults_dialog_message">كۆڭۈلدىكىگە ئەسلىگە كەلتۈرۈش ئۈچۈن %s نى قايتا قوزغىتىش كېرەك.</string>
+  <!-- The description text that is displayed in the confirmation dialog on the Firefox Labs screen for toggling "on" experimental features. %s is the name of the app (for example "Firefox Nightly") -->
+  <string name="firefox_labs_feature_enable_dialog_message">بۇ ئىقتىدارنى قوزغىتىش ئۈچۈن، %s نى قايتا قوزغىتىش كېرەك.</string>
+  <!-- The description text that is displayed in the confirmation dialog on the Firefox Labs screen for toggling "off" experimental features. %s is the name of the app (for example "Firefox Nightly") -->
+  <string name="firefox_labs_feature_disable_dialog_message">بۇ ئىقتىدارنى تاقاش ئۈچۈن، %s نى قايتا قوزغىتىش كېرەك.</string>
+  <!-- Helper text shown beneath a Firefox Labs item when it is blocked from being turned on. -->
+  <string name="firefox_labs_feature_conflict">بۇ ئىقتىدارنى سىنىغىلى بولمايدۇ.</string>
+  <!-- Text displayed on the Firefox Labs screen when there are no Labs experimental features present. -->
+  <string name="firefox_labs_no_labs_available_description">ھازىرچە سىنايدىغان سىناق خاراكتېرلىك ئىقتىدارى يوق</string>
+  <!-- Title of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_title" tools:ignore="UnusedResources">تور بېكەت ئايرىش</string>
+  <!-- Description of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_description" tools:ignore="UnusedResources">ئوخشاش بولمىغان بېكەت ئارىسىدا يەنە بىر قوشۇمچە توسۇق قوشۇپ بەتكۈچ ھالقىغان سانلىق مەلۇماتنى قوغداشقا ياردەم بېرىدۇ. بەلكىم ئۈنۈم، مۇقىملىق، تور بېكەت ماسلىشىشچانلىقى ۋە تور زىيارەت تارىخىنىڭ قانداق ساقلىنىشىغا تەسىر كۆرسىتىشى مۇمكىن.</string>
+  <!--
+    PDF viewer toolbar and buttons
+
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description">PDF كە ئىمزا قوي</string>
+  <!-- Content description for accessibility (used by screen readers): Description of the button that downloads the PDF displayed on the screen to the user's device. -->
+  <string name="pdf_tools_download_content_description">PDF چۈشۈر</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the printing dialogue window for the PDF displayed on the screen. -->
+  <string name="pdf_tools_print_content_description">PDF نى باس</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the sharing options for the PDF being displayed on the screen. -->
+  <string name="pdf_tools_share_content_description">PDFھەمبەھىر</string>
+  <!--
+    PDF viewer add a signature dialog
+
+    The title of the dialog for adding a signature to a PDF.
+  -->
+  <string name="pdf_tools_signature_title">ئىمزا قوش</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that closes the dialog for adding a signature to a PDF. -->
+  <string name="pdf_tools_signature_close_content_description">PDF ئىمزا كۆزنەكچىسىنى ياپىدۇ</string>
+  <!-- The placeholder text shown in the empty text input field where users can enter the signature they wish to add to a PDF. -->
+  <string name="pdf_tools_signature_placeholder">ئىمزا كىرگۈزۈلىدۇ</string>
+  <!-- The text for the button that erases the text the user entered in the "add a signature" field. -->
+  <string name="pdf_tools_signature_clear_button">تازىلا</string>
+  <!-- The text for the button that adds the signature the user has typed to the PDF. -->
+  <string name="pdf_tools_signature_add_button">قوش</string>
 </resources>

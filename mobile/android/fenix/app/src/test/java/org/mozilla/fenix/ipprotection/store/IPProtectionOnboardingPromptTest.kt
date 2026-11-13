@@ -11,8 +11,10 @@ import kotlinx.coroutines.test.runTest
 import mozilla.components.ExperimentalAndroidComponentsApi
 import mozilla.components.feature.ipprotection.store.IPProtectionAction
 import mozilla.components.feature.ipprotection.store.IPProtectionStore
+import mozilla.components.feature.ipprotection.store.state.AccountState
+import mozilla.components.feature.ipprotection.store.state.AccountStatus
 import mozilla.components.feature.ipprotection.store.state.EligibilityStatus
-import mozilla.components.support.utils.FakeDateTimeProvider
+import mozilla.components.feature.ipprotection.store.state.IPProtectionState
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.mozilla.fenix.ipprotection.FakeIPProtectionPromptRepository
@@ -20,14 +22,230 @@ import org.mozilla.fenix.ipprotection.FakeIPProtectionPromptRepository
 class IPProtectionOnboardingPromptTest {
     private val testDispatcher = StandardTestDispatcher()
 
+    private val accountReadyStatuses =
+        listOf(
+            AccountStatus.NoAccount,
+            AccountStatus.NeedsAuthorization,
+            AccountStatus.NeedsAuthentication,
+            AccountStatus.Authenticated,
+            AccountStatus.EnrolledAndEntitled,
+        )
+
+    private val accountInitializingStatuses =
+        listOf(
+            AccountStatus.Uninitialized,
+            AccountStatus.WarmingUp,
+        )
+
     @Test
-    fun `GIVEN repository allows the prompt WHEN eligibility becomes Eligible THEN onShowOnboarding is invoked`() =
+    fun `GIVEN repository allows the prompt WHEN eligibility becomes Eligible AND account is ready THEN onShowOnboarding is invoked`() =
+        runTest(testDispatcher) {
+            accountReadyStatuses.forEach { status ->
+                val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = true)
+                var shownCount = 0
+                val store = buildStore(status)
+
+                startBinding(repository, store, onShowOnboarding = { shownCount++ })
+
+                store.dispatch(IPProtectionAction.EligibilityChanged(EligibilityStatus.Eligible))
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                assertEquals(1, shownCount)
+            }
+        }
+
+    @Test
+    fun `GIVEN repository does not allow the prompt WHEN eligibility becomes Eligible AND account is ready THEN onAlreadySatisfied is invoked instead of onShowOnboarding`() =
+        runTest(testDispatcher) {
+            accountReadyStatuses.forEach { status ->
+                val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = false)
+                var shownCount = 0
+                var alreadySatisfiedCount = 0
+                val store = buildStore(status)
+
+                startBinding(
+                    repository,
+                    store,
+                    onShowOnboarding = { shownCount++ },
+                    onAlreadySatisfied = { alreadySatisfiedCount++ },
+                )
+
+                store.dispatch(IPProtectionAction.EligibilityChanged(EligibilityStatus.Eligible))
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                assertEquals(0, shownCount)
+                assertEquals(1, alreadySatisfiedCount)
+            }
+        }
+
+    @Test
+    fun `GIVEN repository does not allow the prompt WHEN eligibility becomes Ineligible or UnsupportedRegion THEN onIneligible is invoked and onAlreadySatisfied is not`() =
+        runTest(testDispatcher) {
+            listOf(EligibilityStatus.Ineligible, EligibilityStatus.UnsupportedRegion).forEach { ineligibleStatus ->
+                val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = false)
+                var ineligibleCount = 0
+                var alreadySatisfiedCount = 0
+                val store = buildStore()
+
+                startBinding(
+                    repository,
+                    store,
+                    onShowOnboarding = {},
+                    onIneligible = { ineligibleCount++ },
+                    onAlreadySatisfied = { alreadySatisfiedCount++ },
+                )
+
+                store.dispatch(IPProtectionAction.EligibilityChanged(ineligibleStatus))
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                assertEquals(1, ineligibleCount)
+                assertEquals(0, alreadySatisfiedCount)
+            }
+        }
+
+    @Test
+    fun `GIVEN repository does not allow the prompt WHEN eligibility is Eligible AND account is not ready THEN onAlreadySatisfied is not invoked`() =
+        runTest(testDispatcher) {
+            accountInitializingStatuses.forEach { status ->
+                val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = false)
+                var alreadySatisfiedCount = 0
+                val store = buildStore(eligibilityStatus = EligibilityStatus.Eligible)
+
+                startBinding(repository, store, onShowOnboarding = {}, onAlreadySatisfied = { alreadySatisfiedCount++ })
+
+                store.dispatch(IPProtectionAction.AccountStateChanged(status))
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                assertEquals(0, alreadySatisfiedCount)
+            }
+        }
+
+    @Test
+    fun `GIVEN repository allows the prompt WHEN eligibility becomes Eligible AND account is ready THEN onAlreadySatisfied is not invoked`() =
         runTest(testDispatcher) {
             val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = true)
-            var shownCount = 0
-            val store = IPProtectionStore()
+            var alreadySatisfiedCount = 0
+            val store = buildStore(AccountStatus.NoAccount)
 
-            startBinding(repository, store) { shownCount++ }
+            startBinding(repository, store, onShowOnboarding = {}, onAlreadySatisfied = { alreadySatisfiedCount++ })
+
+            store.dispatch(IPProtectionAction.EligibilityChanged(EligibilityStatus.Eligible))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(0, alreadySatisfiedCount)
+        }
+
+    @Test
+    fun `WHEN eligibility is not Eligible THEN onShowOnboarding is not invoked`() =
+        runTest(testDispatcher) {
+            (accountReadyStatuses + accountInitializingStatuses).forEach { status ->
+                val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = true)
+                var shownCount = 0
+                val store = buildStore(status)
+
+                startBinding(repository, store, onShowOnboarding = { shownCount++ })
+
+                store.dispatch(IPProtectionAction.EligibilityChanged(EligibilityStatus.Ineligible))
+                store.dispatch(IPProtectionAction.EligibilityChanged(EligibilityStatus.UnsupportedRegion))
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                assertEquals(0, shownCount)
+            }
+        }
+
+    @Test
+    fun `WHEN eligibility becomes Ineligible or UnsupportedRegion THEN onIneligible is invoked`() =
+        runTest(testDispatcher) {
+            listOf(EligibilityStatus.Ineligible, EligibilityStatus.UnsupportedRegion).forEach { ineligibleStatus ->
+                val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = true)
+                var ineligibleCount = 0
+                val store = buildStore()
+
+                startBinding(repository, store, onShowOnboarding = {}, onIneligible = { ineligibleCount++ })
+
+                store.dispatch(IPProtectionAction.EligibilityChanged(ineligibleStatus))
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                assertEquals(1, ineligibleCount)
+            }
+        }
+
+    @Test
+    fun `WHEN eligibility is Eligible THEN onIneligible is not invoked`() =
+        runTest(testDispatcher) {
+            val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = true)
+            var ineligibleCount = 0
+            val store = buildStore()
+
+            startBinding(repository, store, onShowOnboarding = {}, onIneligible = { ineligibleCount++ })
+
+            store.dispatch(IPProtectionAction.EligibilityChanged(EligibilityStatus.Eligible))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(0, ineligibleCount)
+        }
+
+    @Test
+    fun `WHEN eligibility becomes Unknown THEN onIneligible is not invoked`() =
+        runTest(testDispatcher) {
+            val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = true)
+            var ineligibleCount = 0
+            val store = buildStore(eligibilityStatus = EligibilityStatus.Eligible)
+
+            startBinding(repository, store, onShowOnboarding = {}, onIneligible = { ineligibleCount++ })
+
+            store.dispatch(IPProtectionAction.EligibilityChanged(EligibilityStatus.Unknown))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(0, ineligibleCount)
+        }
+
+    @Test
+    fun `GIVEN eligibility is Eligible WHEN account is not ready THEN onShowOnboarding is not invoked`() =
+        runTest(testDispatcher) {
+            accountInitializingStatuses.forEach { status ->
+                val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = true)
+                var shownCount = 0
+                val store = buildStore(eligibilityStatus = EligibilityStatus.Eligible)
+
+                startBinding(repository, store, onShowOnboarding = { shownCount++ })
+
+                store.dispatch(IPProtectionAction.AccountStateChanged(status))
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                assertEquals(0, shownCount)
+            }
+        }
+
+    @Test
+    fun `GIVEN eligibility is Eligible WHEN account is ready THEN onShowOnboarding is invoked`() =
+        runTest(testDispatcher) {
+            accountReadyStatuses.forEach { status ->
+                val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = true)
+                var shownCount = 0
+                val store = buildStore(eligibilityStatus = EligibilityStatus.Eligible)
+
+                startBinding(repository, store, onShowOnboarding = { shownCount++ })
+
+                store.dispatch(IPProtectionAction.AccountStateChanged(status))
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                assertEquals(1, shownCount)
+            }
+        }
+
+    @Test
+    fun `GIVEN showOnboardingBottomSheet is true and account is ready WHEN eligibility becomes Eligible THEN onShowOnboarding is invoked`() =
+        runTest(testDispatcher) {
+            val repository =
+                FakeIPProtectionPromptRepository(
+                    canShowIPProtectionPrompt = true,
+                    showOnboardingBottomSheet = true,
+                )
+            var shownCount = 0
+            val store = buildStore(accountStatus = AccountStatus.NoAccount)
+
+            startBinding(repository, store, onShowOnboarding = { shownCount++ })
 
             store.dispatch(IPProtectionAction.EligibilityChanged(EligibilityStatus.Eligible))
             testDispatcher.scheduler.advanceUntilIdle()
@@ -36,31 +254,19 @@ class IPProtectionOnboardingPromptTest {
         }
 
     @Test
-    fun `GIVEN repository does not allow the prompt WHEN eligibility becomes Eligible THEN onShowOnboarding is not invoked`() =
+    fun `GIVEN showOnboardingBottomSheet is false WHEN eligibility becomes Eligible THEN onShowOnboarding is not invoked`() =
         runTest(testDispatcher) {
-            val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = false)
+            val repository =
+                FakeIPProtectionPromptRepository(
+                    canShowIPProtectionPrompt = false,
+                    showOnboardingBottomSheet = false,
+                )
             var shownCount = 0
             val store = IPProtectionStore()
 
-            startBinding(repository, store) { shownCount++ }
+            startBinding(repository, store, onShowOnboarding = { shownCount++ })
 
             store.dispatch(IPProtectionAction.EligibilityChanged(EligibilityStatus.Eligible))
-            testDispatcher.scheduler.advanceUntilIdle()
-
-            assertEquals(0, shownCount)
-        }
-
-    @Test
-    fun `WHEN eligibility is not Eligible THEN onShowOnboarding is not invoked`() =
-        runTest(testDispatcher) {
-            val repository = FakeIPProtectionPromptRepository(canShowIPProtectionPrompt = true)
-            var shownCount = 0
-            val store = IPProtectionStore()
-
-            startBinding(repository, store) { shownCount++ }
-
-            store.dispatch(IPProtectionAction.EligibilityChanged(EligibilityStatus.Ineligible))
-            store.dispatch(IPProtectionAction.EligibilityChanged(EligibilityStatus.UnsupportedRegion))
             testDispatcher.scheduler.advanceUntilIdle()
 
             assertEquals(0, shownCount)
@@ -70,14 +276,31 @@ class IPProtectionOnboardingPromptTest {
         repository: FakeIPProtectionPromptRepository,
         store: IPProtectionStore,
         onShowOnboarding: () -> Unit,
+        onIneligible: () -> Unit = {},
+        onAlreadySatisfied: () -> Unit = {},
     ) {
         IPProtectionOnboardingPrompt(
-            repository = repository,
-            onShowOnboarding = onShowOnboarding,
-            timeProvider = FakeDateTimeProvider(),
-            mainDispatcher = testDispatcher,
-            store = store,
-        ).start()
+                repository = repository,
+                onShowOnboarding = onShowOnboarding,
+                onIneligible = onIneligible,
+                onAlreadySatisfied = onAlreadySatisfied,
+                mainDispatcher = testDispatcher,
+                store = store,
+            )
+            .start()
         testDispatcher.scheduler.advanceUntilIdle()
+    }
+
+    private fun buildStore(
+        accountStatus: AccountStatus = AccountStatus.Uninitialized,
+        eligibilityStatus: EligibilityStatus = EligibilityStatus.Unknown,
+    ): IPProtectionStore {
+        return IPProtectionStore(
+            initialState =
+                IPProtectionState(
+                    eligibilityStatus = eligibilityStatus,
+                    accountState = AccountState(accountStatus),
+                )
+        )
     }
 }

@@ -13,21 +13,19 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/Mutex.h"
-#include "nsSocketTransportService2.h"
-#include "nsString.h"
-#include "nsCOMPtr.h"
-
-#include "nsIInterfaceRequestor.h"
-#include "nsISocketTransport.h"
-#include "nsIAsyncInputStream.h"
-#include "nsIAsyncOutputStream.h"
-#include "nsIDNSListener.h"
-#include "nsIDNSRecord.h"
-#include "nsIClassInfo.h"
 #include "mozilla/glean/NetwerkMetrics.h"
 #include "mozilla/net/DNS.h"
 #include "nsASocketHandler.h"
-
+#include "nsCOMPtr.h"
+#include "nsIAsyncInputStream.h"
+#include "nsIAsyncOutputStream.h"
+#include "nsIClassInfo.h"
+#include "nsIDNSListener.h"
+#include "nsIDNSRecord.h"
+#include "nsIInterfaceRequestor.h"
+#include "nsISocketTransport.h"
+#include "nsSocketTransportService2.h"
+#include "nsString.h"
 #include "prerror.h"
 #include "ssl.h"
 
@@ -304,6 +302,9 @@ class nsSocketTransport final : public nsASocketHandler,
 
   // called when the socket is connected
   void OnSocketConnected();
+  // Returns true if aFd is connected to a port blocked via
+  // nsIIOService::addBlockedLocalPort on this machine.
+  bool IsConnectedToBlockedLocalPort(PRFileDesc* aFd);
 
   //-------------------------------------------------------------------------
   // socket input/output objects.  these may be accessed on any thread with

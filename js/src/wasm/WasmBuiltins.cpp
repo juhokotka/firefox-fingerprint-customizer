@@ -24,6 +24,7 @@
 #include "fdlibm.h"
 
 #include "builtin/Math.h"
+#include "gc/GC.h"
 #include "jit/AtomicOperations.h"
 #include "jit/InlinableNatives.h"
 #include "jit/JitRuntime.h"
@@ -35,6 +36,7 @@
 #include "js/friend/StackLimits.h"    // js::AutoCheckRecursionLimit
 #include "js/Printf.h"                // JS_smprintf
 #include "threading/Mutex.h"
+#include "util/Denormals.h"
 #include "util/Memory.h"
 #include "util/Poison.h"
 #include "util/PortableMath.h"
@@ -406,7 +408,7 @@ constexpr SymbolicAddressSignature SASigArrayCopy = {
 #ifdef ENABLE_WASM_JSPI
 constexpr SymbolicAddressSignature SASigContNew = {
     SymbolicAddress::ContNew, _RoN, _FailOnNullPtr,
-    _ThrowReported,           2,    {_PTR, _RoN, _END}};
+    _ThrowReported,           3,    {_PTR, _RoN, _PTR, _END}};
 constexpr SymbolicAddressSignature SASigContNewEmpty = {
     SymbolicAddress::ContNewEmpty,
     _RoN,
@@ -607,8 +609,10 @@ static WasmExceptionObject* GetOrWrapWasmException(JitActivation* activation,
   // Traps are generally not catchable as wasm exceptions. The only case in
   // which they are catchable is for Trap::ThrowReported, which the wasm
   // compiler uses to throw exceptions and is the source of exceptions from C++.
-  if (activation->isWasmTrapping() &&
-      activation->wasmTrapData().trap != Trap::ThrowReported
+  bool isTrapThrowReported =
+      activation->isWasmTrapping() &&
+      activation->wasmTrapData().trap == Trap::ThrowReported;
+  if (activation->isWasmTrapping() && !isTrapThrowReported
 #ifdef ENABLE_WASM_JSPI
       && activation->wasmTrapData().trap != Trap::ThrowSuspendError
 #endif
@@ -618,6 +622,11 @@ static WasmExceptionObject* GetOrWrapWasmException(JitActivation* activation,
 
   if (cx->isThrowingOverRecursed() || cx->isThrowingOutOfMemory()) {
     return nullptr;
+  }
+
+  mozilla::Maybe<gc::AutoSuppressGC> suppress;
+  if (isTrapThrowReported) {
+    suppress.emplace(cx);
   }
 
   // Write the exception out here to exn to avoid having to get the pending
@@ -760,6 +769,20 @@ static void WasmHandleRequestTierUp(Instance* instance) {
   }
 }
 
+#ifdef JS_HW_SHADOW_STACK
+// Advance the tracked shadow stack pointer by exactly one entry with the
+// provided return address.
+static void UnwindShadowStackEntry(ResumeFromException* rfe,
+                                   uintptr_t returnAddress) {
+  if (!rfe->shadowStackPointer) {
+    return;
+  }
+
+  MOZ_RELEASE_ASSERT(*rfe->shadowStackPointer == returnAddress);
+  rfe->shadowStackPointer++;
+}
+#endif
+
 // Unwind the activation in response to a thrown exception. This function is
 // responsible for notifying the debugger of each unwound frame.
 //
@@ -800,6 +823,21 @@ void wasm::HandleExceptionWasm(JSContext* cx, JitFrameIter& iter,
   // re-added to the map of live frames, right as it becomes trash).
   iter.asWasm().setIsLeavingFrames();
 
+#ifdef JS_HW_SHADOW_STACK
+  if (activation->isWasmTrapping()) {
+    const TrapData& trapData = activation->wasmTrapData();
+    if (trapData.unwoundFrame) {
+      // wasm::StartUnwinding() unwound the frame where the trap occurred.
+      UnwindShadowStackEntry(rfe,
+                             reinterpret_cast<uintptr_t>(trapData.unwoundPC));
+    }
+  } else {
+    // Non-trapping iteration starts after the Wasm exit frame.
+    UnwindShadowStackEntry(rfe, reinterpret_cast<uintptr_t>(
+                                    iter.asWasm().resumePCinCurrentFrame()));
+  }
+#endif
+
   // Get (or wrap) the exception that we'll search for catch handlers for.
   Rooted<WasmExceptionObject*> wasmExn(cx,
                                        GetOrWrapWasmException(activation, cx));
@@ -807,10 +845,29 @@ void wasm::HandleExceptionWasm(JSContext* cx, JitFrameIter& iter,
 #ifdef ENABLE_WASM_JSPI
   // Track the previous stack we were on so that we can free it once we've
   // unwound past it.
-  wasm::ContStack* wasmPreviousStack = nullptr;
+  // Initialize it with any continuation stack the trap unwound out
+  // of without leaving a frame to visit (a return_call signature mismatch
+  // in a continuation's entry function): it has no iterated frame, so it must
+  // be freed when we cross the first stack switch.
+  wasm::ContStack* wasmPreviousStack = iter.asWasm().unwoundContStack();
 #endif
 
-  for (; !iter.done() && iter.isWasm(); ++iter) {
+  auto advanceFrame = [&] {
+#ifdef JS_HW_SHADOW_STACK
+    auto returnAddress =
+        reinterpret_cast<uintptr_t>(iter.asWasm().frame()->returnAddress());
+#endif
+    ++iter;
+#ifdef JS_HW_SHADOW_STACK
+    // We don't want to unwind past the shadow stack entry of the frame
+    // we will resume in.
+    if (!iter.done()) {
+      UnwindShadowStackEntry(rfe, returnAddress);
+    }
+#endif
+  };
+
+  for (; !iter.done() && iter.isWasm(); advanceFrame()) {
     // Wasm code can enter same-compartment realms, so reset cx->realm to
     // this frame's realm.
     WasmFrameIter& wasmFrame = iter.asWasm();
@@ -941,6 +998,7 @@ void wasm::HandleExceptionWasm(JSContext* cx, JitFrameIter& iter,
 static void* WasmHandleThrow(jit::ResumeFromException* rfe) {
   // Return a pointer to the exception handler trampoline code to jump to from
   // the throw stub.
+  MOZ_ASSERT(!DenormalsDisabled());
   JSContext* cx = TlsContext.get();
 #ifdef ENABLE_WASM_JSPI
   MOZ_ASSERT(!cx->wasm().onContStack());
@@ -971,6 +1029,7 @@ static void* CheckInterrupt(JSContext* cx, JitActivation* activation) {
 //   - return the (non-null) resumePC that should be jumped if execution should
 //     resume after the trap.
 static void* WasmHandleTrap() {
+  MOZ_RELEASE_ASSERT(!DenormalsDisabled());
   JSContext* cx = TlsContext.get();  // Cold code
   JitActivation* activation = CallingActivation(cx);
 #ifdef ENABLE_WASM_JSPI
@@ -1064,12 +1123,6 @@ static void* WasmHandleTrap() {
   }
 
   MOZ_CRASH("unexpected trap");
-}
-
-static void WasmReportV128JSCall() {
-  JSContext* cx = TlsContext.get();  // Cold code
-  JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
-                           JSMSG_WASM_BAD_VAL_TYPE);
 }
 
 static int32_t CoerceInPlace_ToInt32(Value* rawVal) {
@@ -1434,9 +1487,6 @@ void* wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType) {
     case SymbolicAddress::HandleTrap:
       *abiType = Args_General0;
       return FuncCast(WasmHandleTrap, *abiType);
-    case SymbolicAddress::ReportV128JSCall:
-      *abiType = Args_General0;
-      return FuncCast(WasmReportV128JSCall, *abiType);
     case SymbolicAddress::CallImport_General:
       *abiType = Args_Int32_GeneralInt32Int32General;
       return FuncCast(Instance::callImport_general, *abiType);
@@ -1749,7 +1799,7 @@ void* wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType) {
       return FuncCast(Instance::arrayCopy, *abiType);
 #ifdef ENABLE_WASM_JSPI
     case SymbolicAddress::ContNew:
-      *abiType = Args_General2;
+      *abiType = Args_General3;
       MOZ_ASSERT(*abiType == ToABIType(SASigContNew));
       return FuncCast(Instance::contNew, *abiType);
     case SymbolicAddress::ContNewEmpty:
@@ -1910,7 +1960,6 @@ bool wasm::NeedsBuiltinThunk(SymbolicAddress sym) {
     case SymbolicAddress::WakeM32:
     case SymbolicAddress::WakeM64:
     case SymbolicAddress::CoerceInPlace_JitEntry:
-    case SymbolicAddress::ReportV128JSCall:
     case SymbolicAddress::MemCopyM32:
     case SymbolicAddress::MemCopySharedM32:
     case SymbolicAddress::MemCopyM64:

@@ -5,17 +5,18 @@
 #ifndef MOZILLA_GFX_TYPES_H_
 #define MOZILLA_GFX_TYPES_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <bit>
+#include <iosfwd>  // for ostream
+#include <optional>
+
 #include "mozilla/DefineEnum.h"  // for MOZ_DEFINE_ENUM_CLASS_WITH_BASE
 #include "mozilla/EnumeratedRange.h"
 #include "mozilla/MacroArgs.h"  // for MOZ_CONCAT
 #include "mozilla/Maybe.h"
 #include "mozilla/TypedEnumBits.h"
-
-#include <bit>
-#include <iosfwd>  // for ostream
-#include <stddef.h>
-#include <stdint.h>
-#include <optional>
 
 namespace mozilla {
 namespace gfx {
@@ -102,6 +103,9 @@ enum class SurfaceFormat : int8_t {
   // 4 half-float (f16) components in RGBA order for HDR rendering, each is
   // machine endian.
   R16G16B16A16F,
+
+  CMYK,
+  InvertedCMYK,
 
   // This represents the unknown format.
   UNKNOWN,  // TODO: Replace uses with Maybe<SurfaceFormat>.
@@ -192,6 +196,12 @@ inline std::optional<SurfaceFormatInfo> Info(const SurfaceFormat aFormat) {
       info.isYuv = false;
       break;
 
+    case SurfaceFormat::CMYK:
+    case SurfaceFormat::InvertedCMYK:
+      info.hasColor = true;
+      info.hasAlpha = false;
+      break;
+
     case SurfaceFormat::UNKNOWN:
       break;
   }
@@ -207,6 +217,8 @@ inline std::optional<SurfaceFormatInfo> Info(const SurfaceFormat aFormat) {
     case SurfaceFormat::R8G8B8X8:
     case SurfaceFormat::X8R8G8B8:
     case SurfaceFormat::R16G16:
+    case SurfaceFormat::CMYK:
+    case SurfaceFormat::InvertedCMYK:
       info.bytesPerPixel = 4;
       break;
 
@@ -320,6 +332,8 @@ static inline int BytesPerPixel(SurfaceFormat aFormat) {
     case SurfaceFormat::R10G10B10A2_UINT32:
     case SurfaceFormat::R10G10B10X2_UINT32:
     case SurfaceFormat::R16G16:
+    case SurfaceFormat::CMYK:
+    case SurfaceFormat::InvertedCMYK:
       return 4;
     case SurfaceFormat::R16G16B16A16F:
       return 8;
@@ -369,6 +383,8 @@ inline bool IsOpaque(SurfaceFormat aFormat) {
     case SurfaceFormat::NV16:
     case SurfaceFormat::P210:
     case SurfaceFormat::YUY2:
+    case SurfaceFormat::CMYK:
+    case SurfaceFormat::InvertedCMYK:
       return true;
     case SurfaceFormat::B8G8R8A8:
     case SurfaceFormat::R8G8B8A8:
@@ -532,6 +548,9 @@ enum class YUVColorSpace : uint8_t {
   _Last = Identity,
 };
 
+std::ostream& operator<<(std::ostream& aOut,
+                         const YUVColorSpace& aYUVColorSpace);
+
 enum class ColorDepth : uint8_t {
   COLOR_8,
   COLOR_10,
@@ -590,12 +609,17 @@ enum class TransferFunction : uint8_t {
   Default = BT709,
 };
 
+std::ostream& operator<<(std::ostream& aOut,
+                         const TransferFunction& aTransferFunction);
+
 enum class ColorRange : uint8_t {
   LIMITED,
   FULL,
   _First = LIMITED,
   _Last = FULL,
 };
+
+std::ostream& operator<<(std::ostream& aOut, const ColorRange& aColorRange);
 
 // HDR metadata structures, populated from codec-level signalling.
 struct Chromaticity {
@@ -700,6 +724,8 @@ enum class ColorSpace2 : uint8_t {
   _Last = BT2020,
 };
 
+std::ostream& operator<<(std::ostream& aOut, const ColorSpace2& aColorSpace2);
+
 inline ColorSpace2 ToColorSpace2(const YUVColorSpace in) {
   switch (in) {
     case YUVColorSpace::BT601:
@@ -711,7 +737,7 @@ inline ColorSpace2 ToColorSpace2(const YUVColorSpace in) {
     case YUVColorSpace::Identity:
       return ColorSpace2::SRGB;
   }
-  MOZ_ASSERT_UNREACHABLE();
+  MOZ_CRASH("bad YUVColorSpace");
 }
 
 inline YUVColorSpace ToYUVColorSpace(const ColorSpace2 in) {
@@ -729,7 +755,7 @@ inline YUVColorSpace ToYUVColorSpace(const ColorSpace2 in) {
     case ColorSpace2::DISPLAY_P3:
       MOZ_CRASH("Bad ColorSpace2 for ToYUVColorSpace");
   }
-  MOZ_ASSERT_UNREACHABLE();
+  MOZ_CRASH("bad ColorSpace2");
 }
 
 struct FromYUVRangedColorSpaceT final {
@@ -917,15 +943,24 @@ enum class ChromaSubsampling : uint8_t {
   _Last = HALF_WIDTH_AND_HEIGHT,
 };
 
+std::ostream& operator<<(std::ostream& aOut,
+                         const ChromaSubsampling& aChromaSubsampling);
+
 template <typename T>
 static inline T ChromaSize(const T& aYSize, ChromaSubsampling aSubsampling) {
+  MOZ_ASSERT(aYSize.width >= 0 && aYSize.height >= 0);
+  // Equivalent to (aDimension + 1) / 2 for non-negative dimensions without
+  // overflowing at the maximum value.
+  const auto halfCeil = [](auto aDimension) {
+    return aDimension - aDimension / 2;
+  };
   switch (aSubsampling) {
     case ChromaSubsampling::FULL:
       return aYSize;
     case ChromaSubsampling::HALF_WIDTH:
-      return T((aYSize.width + 1) / 2, aYSize.height);
+      return T(halfCeil(aYSize.width), aYSize.height);
     case ChromaSubsampling::HALF_WIDTH_AND_HEIGHT:
-      return T((aYSize.width + 1) / 2, (aYSize.height + 1) / 2);
+      return T(halfCeil(aYSize.width), halfCeil(aYSize.height));
   }
   MOZ_CRASH("bad ChromaSubsampling");
 }
@@ -987,14 +1022,7 @@ enum class RecorderType : int8_t {
   WEBRENDER
 };
 
-enum class FontType : int8_t {
-  DWRITE,
-  GDI,
-  MAC,
-  FONTCONFIG,
-  FREETYPE,
-  UNKNOWN
-};
+enum class FontType : int8_t { DWRITE, MAC, FONTCONFIG, FREETYPE, UNKNOWN };
 
 enum class NativeSurfaceType : int8_t {
   D3D10_TEXTURE,
@@ -1156,11 +1184,7 @@ struct sRGBColor {
            uint32_t(r * 255.0f) << 16 | uint32_t(a * 255.0f) << 24;
   }
 
-  bool operator==(const sRGBColor& aColor) const {
-    return r == aColor.r && g == aColor.g && b == aColor.b && a == aColor.a;
-  }
-
-  bool operator!=(const sRGBColor& aColor) const { return !(*this == aColor); }
+  bool operator==(const sRGBColor& aColor) const = default;
 
   Float r, g, b, a;
 };
@@ -1226,13 +1250,7 @@ struct DeviceColor {
            uint32_t(r * 255.0f) << 16 | uint32_t(a * 255.0f) << 24;
   }
 
-  bool operator==(const DeviceColor& aColor) const {
-    return r == aColor.r && g == aColor.g && b == aColor.b && a == aColor.a;
-  }
-
-  bool operator!=(const DeviceColor& aColor) const {
-    return !(*this == aColor);
-  }
+  bool operator==(const DeviceColor& aColor) const = default;
 
   friend std::ostream& operator<<(std::ostream& aOut,
                                   const DeviceColor& aColor);
@@ -1275,8 +1293,9 @@ enum class DeviceResetDetectPlace {
   WR_SIMULATE,
   WIDGET,
   CANVAS_TRANSLATOR,
+  WR_BEFORE_READBACK,
   _First = WR_BEGIN_FRAME,
-  _Last = CANVAS_TRANSLATOR,
+  _Last = WR_BEFORE_READBACK,
 };
 
 enum class ForcedDeviceResetReason {

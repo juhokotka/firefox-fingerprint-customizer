@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import argparse
 import ast
 import difflib
@@ -63,6 +65,9 @@ MACH_COMMANDS = {
     "bhr-aggregate": MachCommandReference(
         "toolkit/components/backgroundhangmonitor/mach_commands.py"
     ),
+    "bhr-timeseries": MachCommandReference(
+        "toolkit/components/backgroundhangmonitor/mach_commands.py"
+    ),
     "bootstrap": MachCommandReference(
         "python/mozboot/mozboot/mach_commands.py",
     ),
@@ -98,7 +103,9 @@ MACH_COMMANDS = {
     "data-review": MachCommandReference(
         "toolkit/components/glean/build_scripts/mach_commands.py"
     ),
+    "devtools-compat-test": MachCommandReference("devtools/mach_commands.py"),
     "devtools-node-test": MachCommandReference("devtools/mach_commands.py"),
+    "devtools-update-compat-data": MachCommandReference("devtools/mach_commands.py"),
     "doc": MachCommandReference("tools/moztreedocs/mach_commands.py"),
     "doctor": MachCommandReference("python/mozbuild/mozbuild/mach_commands.py"),
     "environment": MachCommandReference("python/mozbuild/mozbuild/mach_commands.py"),
@@ -158,6 +165,9 @@ MACH_COMMANDS = {
     "jsshell-bench": MachCommandReference("testing/mach_commands.py"),
     "jstestbrowser": MachCommandReference("layout/tools/reftest/mach_commands.py"),
     "jstests": MachCommandReference("testing/mach_commands.py"),
+    "licenses": MachCommandReference(
+        "python/mozbuild/mozbuild/licensing_commands.py",
+    ),
     "lint": MachCommandReference("tools/lint/mach_commands.py"),
     "logspam": MachCommandReference("tools/mach_commands.py"),
     "mach-commands": MachCommandReference("python/mach/mach/commands/commandinfo.py"),
@@ -218,6 +228,9 @@ MACH_COMMANDS = {
     "run": MachCommandReference("python/mozbuild/mozbuild/mach_commands.py"),
     "run-condprofile": MachCommandReference("testing/condprofile/mach_commands.py"),
     "rusttests": MachCommandReference("testing/mach_commands.py"),
+    "sbom": MachCommandReference(
+        "python/mozbuild/mozbuild/licensing_commands.py",
+    ),
     "settings": MachCommandReference("python/mach/mach/commands/settings.py"),
     "shell-test": MachCommandReference("browser/installer/linux/mach_commands.py"),
     "show-log": MachCommandReference("python/mozbuild/mozbuild/mach_commands.py"),

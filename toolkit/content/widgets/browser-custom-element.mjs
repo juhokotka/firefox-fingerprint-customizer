@@ -14,6 +14,10 @@ const { XPCOMUtils } = ChromeUtils.importESModule(
   "resource://gre/modules/XPCOMUtils.sys.mjs"
 );
 
+/**
+ * @import { PopupAndRedirectBlocker } from "moz-src:///toolkit/actors/PopupAndRedirectBlockingParent.sys.mjs";
+ */
+
 let lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -22,8 +26,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   Finder: "resource://gre/modules/Finder.sys.mjs",
   FinderParent: "resource://gre/modules/FinderParent.sys.mjs",
   PopupAndRedirectBlocker:
-    "resource://gre/actors/PopupAndRedirectBlockingParent.sys.mjs",
-  SelectParentHelper: "resource://gre/actors/SelectParent.sys.mjs",
+    "moz-src:///toolkit/actors/PopupAndRedirectBlockingParent.sys.mjs",
+  SelectParentHelper: "moz-src:///toolkit/actors/SelectParent.sys.mjs",
   RemoteWebNavigation:
     "moz-src:///toolkit/components/remotebrowserutils/RemoteWebNavigation.sys.mjs",
 });
@@ -63,7 +67,8 @@ Object.defineProperty(lazy, "ProcessHangMonitor", {
 Object.defineProperty(lazy, "SessionStore", {
   configurable: true,
   get() {
-    const kURL = "resource:///modules/sessionstore/SessionStore.sys.mjs";
+    const kURL =
+      "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs";
     if (Cu.isESModuleLoaded(kURL)) {
       let { SessionStore } = ChromeUtils.importESModule(kURL);
       // eslint-disable-next-line mozilla/valid-lazy
@@ -93,6 +98,21 @@ window.addEventListener(
  * @implements {nsIBrowser}
  */
 export class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
+  /**
+   * The URI the tabbrowser has registered with UrlbarProviderOpenTabs.
+   *
+   * @type {nsIURI}
+   */
+  registeredOpenURI;
+
+  /**
+   * The device sharing state, set by the WebRTC parent actor and read by the
+   * tabbrowser and the site permission panel.
+   *
+   * @type {any}
+   */
+  _sharingState;
+
   static get observedAttributes() {
     return ["remote"];
   }
@@ -123,7 +143,13 @@ export class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     this.droppedLinkHandler = null;
     this.mIconURL = null;
     this.lastURI = null;
+    /** @type {number} */
+    this.lastLocationChange;
 
+    /**
+     * @type {PopupAndRedirectBlocker}
+     */
+    this.popupAndRedirectBlocker;
     ChromeUtils.defineLazyGetter(this, "popupAndRedirectBlocker", () => {
       return new lazy.PopupAndRedirectBlocker(this);
     });
@@ -632,7 +658,9 @@ export class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   get browsingContext() {
     if (this.frameLoader) {
-      return this.frameLoader.browsingContext;
+      return /** @type {CanonicalBrowsingContext} */ (
+        this.frameLoader.browsingContext
+      );
     }
     return null;
   }
@@ -1835,7 +1863,7 @@ export class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
   async drawSnapshot(x, y, w, h, scale, backgroundColor, fullViewport = false) {
     let rect = fullViewport ? null : new DOMRect(x, y, w, h);
     try {
-      return this.browsingContext.currentWindowGlobal.drawSnapshot(
+      return await this.browsingContext.currentWindowGlobal.drawSnapshot(
         rect,
         scale,
         backgroundColor

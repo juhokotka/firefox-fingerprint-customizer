@@ -4,29 +4,23 @@
 
 package org.mozilla.focus.menu
 
-import mozilla.components.browser.menu.BrowserMenuBuilder
-import mozilla.components.browser.menu.item.BrowserMenuItemToolbar
-
 /**
  * Interface representing the toolbar menu in the application.
  *
- * This interface defines the structure and behavior of the toolbar menu,
- * including its items and related components.
+ * This interface defines the structure and behavior of the toolbar menu, including its items and related components.
  */
 interface ToolbarMenu {
     /**
      * Interface representing an item in the Focus toolbar menu.
      *
-     * This interface serves as a marker for items that can be included
-     * in the Focus toolbar menu.
+     * This interface serves as a marker for items that can be included in the Focus toolbar menu.
      */
     interface FocusMenuItem
 
     /**
      * Represents the items available in the toolbar menu.
      *
-     * This sealed class defines all possible actions that can be
-     * present in the browser tab toolbar menu.
+     * This sealed class defines all possible actions that can be present in the browser tab toolbar menu.
      */
     sealed class Item : FocusMenuItem {
         /** Toggles desktop site mode. */
@@ -53,6 +47,9 @@ interface ToolbarMenu {
         /** Finds text within the current page. */
         object FindInPage : Item()
 
+        /** Reports the current page as broken, through the WebCompat Reporter extension. */
+        object ReportSiteIssue : Item()
+
         /** Adds the current page to the home screen. */
         object AddToHomeScreen : Item()
 
@@ -69,8 +66,7 @@ interface ToolbarMenu {
     /**
      * Represents the menu items specific to the custom tab feature.
      *
-     * This sealed class defines the available menu items when Focus is used
-     * as a custom tab.
+     * This sealed class defines the available menu items when Focus is used as a custom tab.
      */
     sealed class CustomTabItem : FocusMenuItem {
         /** Toggles desktop site mode for the custom tab. */
@@ -91,6 +87,9 @@ interface ToolbarMenu {
         /** Finds text within the current page in the custom tab. */
         object FindInPage : CustomTabItem()
 
+        /** Reports the current page as broken, through the WebCompat Reporter extension. */
+        object ReportSiteIssue : CustomTabItem()
+
         /** Adds the current page in the custom tab to the home screen. */
         object AddToHomeScreen : CustomTabItem()
 
@@ -100,7 +99,4 @@ interface ToolbarMenu {
         /** Opens the current page from the custom tab in an external app. */
         object OpenInApp : CustomTabItem()
     }
-
-    val menuBuilder: BrowserMenuBuilder
-    val menuToolbar: BrowserMenuItemToolbar
 }

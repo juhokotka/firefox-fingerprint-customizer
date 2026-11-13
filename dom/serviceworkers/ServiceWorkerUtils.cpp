@@ -22,12 +22,38 @@
 #include "nsCOMPtr.h"
 #include "nsContentPolicyUtils.h"
 #include "nsIContentSecurityPolicy.h"
+#include "nsIEnterprisePolicies.h"
 #include "nsIGlobalObject.h"
 #include "nsIPrincipal.h"
 #include "nsIURL.h"
 #include "nsPrintfCString.h"
 
 namespace mozilla::dom {
+
+bool IsServiceWorkersDisabledByPolicy(nsIURI* aURI) {
+  if (!aURI) {
+    return false;
+  }
+
+  // The policy service only controls http-like requests
+  if (!net::SchemeIsHttpOrHttps(aURI)) {
+    return false;
+  }
+
+  nsCOMPtr<nsIEnterprisePolicies> policyService =
+      do_GetService("@mozilla.org/enterprisepolicies;1");
+  if (!policyService) {
+    return false;
+  }
+
+  bool isAllowed = true;
+  if (NS_FAILED(policyService->IsAllowedForURI("serviceworkers"_ns, aURI,
+                                               &isAllowed))) {
+    return false;
+  }
+
+  return !isAllowed;
+}
 
 static bool IsServiceWorkersTestingEnabledInGlobal(JSObject* const aGlobal) {
   if (const nsCOMPtr<nsPIDOMWindowInner> innerWindow =
@@ -66,8 +92,18 @@ bool ServiceWorkersEnabled(JSContext* aCx, JSObject* aGlobal) {
     // a moz-extension url only if 'extensions.service_worker_register.allowed'
     // is true.
     if (!StaticPrefs::extensions_serviceWorkerRegister_allowed()) {
-      if (principal->GetIsAddonOrExpandedAddonPrincipal()) {
+      if (principal->GetIsAddonPrincipal()) {
         return false;
+      }
+    }
+
+    // Check whether service workers are disabled by an enterprise policy.
+    if (const nsCOMPtr<nsPIDOMWindowInner> innerWindow =
+            Navigator::GetWindowFromGlobal(jsGlobal)) {
+      if (BrowsingContext* bc = innerWindow->GetBrowsingContext()) {
+        if (bc->Top()->ServiceWorkersDisabledByPolicy()) {
+          return false;
+        }
       }
     }
   }
@@ -106,7 +142,6 @@ bool ServiceWorkersStorageAllowedForGlobal(nsIGlobalObject* aGlobal) {
           (storageAllowed == StorageAccess::ePrivateBrowsing &&
            StaticPrefs::dom_serviceWorkers_privateBrowsing_enabled()) ||
           (ShouldPartitionStorage(storageAllowed) &&
-           StaticPrefs::privacy_partition_serviceWorkers() &&
            StoragePartitioningEnabled(storageAllowed, cookieJarSettings) &&
            (!principal->GetIsInPrivateBrowsing() ||
             StaticPrefs::dom_serviceWorkers_privateBrowsing_enabled())));
@@ -126,7 +161,6 @@ bool ServiceWorkersStorageAllowedForClient(
           (storageAllowed == StorageAccess::ePrivateBrowsing &&
            StaticPrefs::dom_serviceWorkers_privateBrowsing_enabled()) ||
           (ShouldPartitionStorage(storageAllowed) &&
-           StaticPrefs::privacy_partition_serviceWorkers() &&
            /* note: no call to StoragePartitioningEnabled here */
            (!info.IsPrivateBrowsing() ||
             StaticPrefs::dom_serviceWorkers_privateBrowsing_enabled())));
@@ -144,7 +178,7 @@ class WorkerCheckMayLoadSyncRunnable final : public WorkerMainThreadRunnable {
       std::function<void(ErrorResult&)>&& aCheckFunc)
       : WorkerMainThreadRunnable(GetCurrentThreadWorkerPrivate(),
                                  "WorkerCheckMayLoadSyncRunnable"_ns),
-        mCheckFunc(aCheckFunc) {}
+        mCheckFunc(std::move(aCheckFunc)) {}
 
   bool MainThreadRun() override {
     ErrorResult localResult;
@@ -219,6 +253,59 @@ void CheckMayLoadOnMainThread(ErrorResult& aRv,
 
 }  // anonymous namespace
 
+static bool hasValidURISchemes(nsIURI* aURI, bool isExtension) {
+  if (isExtension) {
+    return aURI->SchemeIs("moz-extension");
+  };
+  return net::SchemeIsHttpOrHttps(aURI);
+}
+
+void ServiceWorkerScopeIsValid(nsIPrincipal* aPrincipal, nsIURI* aScopeURI,
+                               ErrorResult& aRv) {
+  bool isExtension =
+      aPrincipal->GetIsAddonPrincipal() &&
+      StaticPrefs::extensions_backgroundServiceWorker_enabled_AtStartup();
+
+  // https://w3c.github.io/ServiceWorker/#start-register-algorithm
+  // Step 8: If scopeURL’s scheme is not one of "http" and "https", reject
+  // promise with a TypeError and abort these steps.
+  if (!hasValidURISchemes(aScopeURI, isExtension)) {
+    auto message = !isExtension
+                       ? "Scope URL's scheme is not 'http' or 'https'"_ns
+                       : "Scope URL's scheme is not 'moz-extension'"_ns;
+    aRv.ThrowTypeError(message);
+    return;
+  }
+
+  // https://w3c.github.io/ServiceWorker/#start-register-algorithm
+  // Step 9: If any of the strings in scopeURL’s path contains either ASCII
+  // case-insensitive "%2f" or ASCII case-insensitive "%5c", reject promise with
+  // a TypeError and abort these steps.
+  CheckForSlashEscapedCharsInPath(aScopeURI, "scope URL", aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
+
+  // https://w3c.github.io/ServiceWorker/#register-algorithm
+  // Step 3: If job’s scope url’s origin and job’s referrer’s origin are not
+  // same origin, then:
+  if (!aPrincipal->IsSameOrigin(aScopeURI)) {
+    // Step 3.1: Invoke Reject Job Promise with job and "SecurityError"
+    // DOMException.
+    aRv.ThrowSecurityError("Non-same-origin scope URL");
+    return;
+  }
+
+  // The refs should really be empty coming in here, but if someone
+  // injects bad data into IPC, who knows.  So let's revalidate that.
+  nsAutoCString ref;
+  (void)aScopeURI->GetRef(ref);
+  if (NS_WARN_IF(!ref.IsEmpty())) {
+    aRv.ThrowSecurityError("Non-empty fragment on scope URL");
+    return;
+  }
+}
+
 void ServiceWorkerScopeAndScriptAreValid(const ClientInfo& aClientInfo,
                                          nsIURI* aScopeURI, nsIURI* aScriptURI,
                                          ErrorResult& aRv,
@@ -232,20 +319,16 @@ void ServiceWorkerScopeAndScriptAreValid(const ClientInfo& aClientInfo,
     return;
   }
 
-  auto hasHTTPScheme = [](nsIURI* aURI) -> bool {
-    return net::SchemeIsHttpOrHttps(aURI);
-  };
-  auto hasMozExtScheme = [](nsIURI* aURI) -> bool {
-    return aURI->SchemeIs("moz-extension");
-  };
-
   nsCOMPtr<nsIPrincipal> principal = principalOrErr.unwrap();
 
-  auto isExtension = principal->GetIsAddonOrExpandedAddonPrincipal();
-  auto hasValidURISchemes = !isExtension ? hasHTTPScheme : hasMozExtScheme;
+  bool isExtension =
+      principal->GetIsAddonPrincipal() &&
+      StaticPrefs::extensions_backgroundServiceWorker_enabled_AtStartup();
 
-  // https://w3c.github.io/ServiceWorker/#start-register-algorithm step 3.
-  if (!hasValidURISchemes(aScriptURI)) {
+  // https://w3c.github.io/ServiceWorker/#start-register-algorithm
+  // Step 3: If scriptURL’s scheme is not one of "http" and "https", reject
+  // promise with a TypeError and abort these steps.
+  if (!hasValidURISchemes(aScriptURI, isExtension)) {
     auto message = !isExtension
                        ? "Script URL's scheme is not 'http' or 'https'"_ns
                        : "Script URL's scheme is not 'moz-extension'"_ns;
@@ -253,36 +336,23 @@ void ServiceWorkerScopeAndScriptAreValid(const ClientInfo& aClientInfo,
     return;
   }
 
-  // https://w3c.github.io/ServiceWorker/#start-register-algorithm step 4.
+  // https://w3c.github.io/ServiceWorker/#start-register-algorithm
+  // Step 4: If any of the strings in scriptURL’s path contains either ASCII
+  // case-insensitive "%2f" or ASCII case-insensitive "%5c", reject promise with
+  // a TypeError and abort these steps.
   CheckForSlashEscapedCharsInPath(aScriptURI, "script URL", aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
 
-  // https://w3c.github.io/ServiceWorker/#start-register-algorithm step 8.
-  if (!hasValidURISchemes(aScopeURI)) {
-    auto message = !isExtension
-                       ? "Scope URL's scheme is not 'http' or 'https'"_ns
-                       : "Scope URL's scheme is not 'moz-extension'"_ns;
-    aRv.ThrowTypeError(message);
+  // https://w3c.github.io/ServiceWorker/#start-register-algorithm step 8 and 9,
+  // and https://w3c.github.io/ServiceWorker/#register-algorithm step 3:
+  ServiceWorkerScopeIsValid(principal, aScopeURI, aRv);
+  if (aRv.Failed()) {
     return;
   }
 
-  // https://w3c.github.io/ServiceWorker/#start-register-algorithm step 9.
-  CheckForSlashEscapedCharsInPath(aScopeURI, "scope URL", aRv);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return;
-  }
-
-  // The refs should really be empty coming in here, but if someone
-  // injects bad data into IPC, who knows.  So let's revalidate that.
   nsAutoCString ref;
-  (void)aScopeURI->GetRef(ref);
-  if (NS_WARN_IF(!ref.IsEmpty())) {
-    aRv.ThrowSecurityError("Non-empty fragment on scope URL");
-    return;
-  }
-
   (void)aScriptURI->GetRef(ref);
   if (NS_WARN_IF(!ref.IsEmpty())) {
     aRv.ThrowSecurityError("Non-empty fragment on script URL");

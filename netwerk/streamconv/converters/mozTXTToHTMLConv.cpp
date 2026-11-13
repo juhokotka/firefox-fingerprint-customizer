@@ -2,24 +2,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/TextUtils.h"
 #include "mozTXTToHTMLConv.h"
-#include "mozilla/intl/Segmenter.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/Utf16.h"
-#include "nsIThreadRetargetableStreamListener.h"
-#include "nsNetUtil.h"
-#include "nsUnicharUtils.h"
-#include "nsUnicodeProperties.h"
-#include "nsCRT.h"
-#include "nsIExternalProtocolHandler.h"
-#include "nsIURI.h"
 
 #include <algorithm>
 
+#include "mozilla/Maybe.h"
+#include "mozilla/TextUtils.h"
+#include "mozilla/Utf16.h"
+#include "mozilla/intl/Segmenter.h"
+#include "nsCRT.h"
+#include "nsIExternalProtocolHandler.h"
+#include "nsIThreadRetargetableStreamListener.h"
+#include "nsIURI.h"
+#include "nsNetUtil.h"
+#include "nsUnicharUtils.h"
+#include "nsUnicodeProperties.h"
+
 #ifdef DEBUG_BenB_Perf
-#  include "prtime.h"
 #  include "prinrval.h"
+#  include "prtime.h"
 #endif
 
 using mozilla::IsAscii;

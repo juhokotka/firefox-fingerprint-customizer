@@ -9,6 +9,8 @@ import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnySibling
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
@@ -22,18 +24,18 @@ import org.mozilla.fenix.R
 import org.mozilla.fenix.helpers.Constants.RETRY_COUNT
 import org.mozilla.fenix.helpers.Constants.TAG
 import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
-import org.mozilla.fenix.helpers.MatcherHelper.assertItemIsChecked
 import org.mozilla.fenix.helpers.MatcherHelper.assertUIObjectExists
 import org.mozilla.fenix.helpers.MatcherHelper.itemContainingText
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithDescription
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTime
-import org.mozilla.fenix.helpers.TestHelper.mDevice
 
 class SettingsTranslationsRobot(private val composeTestRule: ComposeTestRule) {
 
     fun clickDownloadLanguagesButton() {
         Log.i(TAG, "clickDownloadLanguagesButton: Trying to click the \"Download languages\" button")
-        composeTestRule.onNodeWithText(getStringResource(R.string.translation_settings_download_language)).performClick()
+        composeTestRule
+            .onNodeWithText(getStringResource(R.string.translation_settings_download_language))
+            .performClick()
         Log.i(TAG, "clickDownloadLanguagesButton: Clicked the \"Download languages\" button")
     }
 
@@ -47,11 +49,12 @@ class SettingsTranslationsRobot(private val composeTestRule: ComposeTestRule) {
     fun verifyDownloadedLanguage(downloadedLanguage: String) {
         Log.i(TAG, "verifyDownloadedLanguage: Waiting until $downloadedLanguage is downloaded")
         composeTestRule.waitUntil(timeoutMillis = 30_000) {
-            composeTestRule.onAllNodes(hasContentDescription("$downloadedLanguage", substring = true))
-                .fetchSemanticsNodes().isNotEmpty()
+            composeTestRule
+                .onAllNodes(hasContentDescription("$downloadedLanguage", substring = true))
+                .fetchSemanticsNodes()
+                .isNotEmpty()
         }
-        composeTestRule.onNodeWithContentDescription("$downloadedLanguage", substring = true)
-            .assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("$downloadedLanguage", substring = true).assertIsDisplayed()
         Log.i(TAG, "verifyDownloadedLanguage: Verified that $downloadedLanguage is downloaded")
     }
 
@@ -78,18 +81,25 @@ class SettingsTranslationsRobot(private val composeTestRule: ComposeTestRule) {
 
     fun clickAutomaticTranslationButton() {
         Log.i(TAG, "clickAutomaticTranslationButton: Trying to click the \"Automatic translation\" button")
-        composeTestRule.onNodeWithText(getStringResource(R.string.translation_settings_automatic_translation)).performClick()
+        composeTestRule
+            .onNodeWithText(getStringResource(R.string.translation_settings_automatic_translation))
+            .performClick()
         Log.i(TAG, "clickAutomaticTranslationButton: Clicked the \"Automatic translation\" button")
     }
 
     fun clickNeverTranslateTheseSitesButton() {
         Log.i(TAG, "clickNeverTranslateTheseSitesButton: Trying to click the \"Never translate these sites\" button")
-        composeTestRule.onNodeWithText(getStringResource(R.string.translation_settings_automatic_never_translate_sites)).performClick()
+        composeTestRule
+            .onNodeWithText(getStringResource(R.string.translation_settings_automatic_never_translate_sites))
+            .performClick()
         Log.i(TAG, "clickNeverTranslateTheseSitesButton: Clicked the \"Never translate these sites\" button")
     }
 
     fun verifyNeverTranslateThisSiteRemoveButton(url: String) {
-        Log.i(TAG, "verifyNeverTranslateThisSiteRemoveButton: Trying to verify that the \"Remove $url\" button is displayed")
+        Log.i(
+            TAG,
+            "verifyNeverTranslateThisSiteRemoveButton: Trying to verify that the \"Remove $url\" button is displayed",
+        )
         composeTestRule.onNodeWithContentDescription("Remove $url").assertIsDisplayed()
         Log.i(TAG, "verifyNeverTranslateThisSiteRemoveButton: Verified that the \"Remove $url\" button is displayed")
     }
@@ -101,20 +111,27 @@ class SettingsTranslationsRobot(private val composeTestRule: ComposeTestRule) {
     }
 
     fun verifyDeleteNeverTranslateThisSiteDialog(url: String) {
-        Log.i(TAG, "verifyDeleteNeverTranslateThisSiteDialog: Trying to verify that the \"Delete $url?\" dialog is displayed")
+        Log.i(
+            TAG,
+            "verifyDeleteNeverTranslateThisSiteDialog: Trying to verify that the \"Delete $url?\" dialog is displayed",
+        )
         assertUIObjectExists(itemContainingText("Delete $url?"))
         Log.i(TAG, "verifyDeleteNeverTranslateThisSiteDialog: Verified that the \"Delete $url?\" dialog is displayed")
     }
 
     fun clickCancelDeleteNeverTranslateThisSiteDialog() {
         Log.i(TAG, "clickCancelDeleteNeverTranslateThisSiteDialog: Trying to click the \"Cancel\" dialog button")
-        composeTestRule.onNodeWithText(getStringResource(R.string.dialog_delete_negative)).performClick()
+        composeTestRule
+            .onNodeWithText(getStringResource(R.string.never_translate_site_dialog_cancel_preference))
+            .performClick()
         Log.i(TAG, "clickCancelDeleteNeverTranslateThisSiteDialog: Clicked the \"Cancel\" dialog button")
     }
 
     fun clickConfirmDeleteNeverTranslateThisSiteDialog() {
         Log.i(TAG, "clickConfirmDeleteNeverTranslateThisSiteDialog: Trying to click the \"Delete\" dialog button")
-        composeTestRule.onNodeWithText(getStringResource(R.string.dialog_delete_positive)).performClick()
+        composeTestRule
+            .onNodeWithText(getStringResource(R.string.never_translate_site_dialog_confirm_delete_preference))
+            .performClick()
         Log.i(TAG, "clickConfirmDeleteNeverTranslateThisSiteDialog: Clicked the \"Delete\" dialog button")
     }
 
@@ -123,27 +140,50 @@ class SettingsTranslationsRobot(private val composeTestRule: ComposeTestRule) {
         for (i in 1..RETRY_COUNT) {
             Log.i(TAG, "verifyAlwaysAutomaticallyTranslateForLanguage: Started try #$i")
             try {
-                Log.i(TAG, "verifyAlwaysAutomaticallyTranslateForLanguage: Waiting for $waitingTime ms until $languageToTranslate language exists")
+                Log.i(
+                    TAG,
+                    "verifyAlwaysAutomaticallyTranslateForLanguage: Waiting for $waitingTime ms until $languageToTranslate language exists",
+                )
                 composeTestRule.waitUntilExactlyOneExists(hasText(languageToTranslate), waitingTime)
-                Log.i(TAG, "verifyAlwaysAutomaticallyTranslateForLanguage: Waited for $waitingTime ms until $languageToTranslate language exists")
+                Log.i(
+                    TAG,
+                    "verifyAlwaysAutomaticallyTranslateForLanguage: Waited for $waitingTime ms until $languageToTranslate language exists",
+                )
 
                 break
             } catch (e: ComposeTimeoutException) {
-                Log.i(TAG, "verifyAlwaysAutomaticallyTranslateForLanguage: ComposeTimeoutException caught, executing fallback methods")
+                Log.i(
+                    TAG,
+                    "verifyAlwaysAutomaticallyTranslateForLanguage: ComposeTimeoutException caught, executing fallback methods",
+                )
                 if (i == RETRY_COUNT) {
                     throw e
                 } else {
-                    Log.i(TAG, "verifyAlwaysAutomaticallyTranslateForLanguage: Trying to perform a one step scroll to end")
+                    Log.i(
+                        TAG,
+                        "verifyAlwaysAutomaticallyTranslateForLanguage: Trying to perform a one step scroll to end",
+                    )
                     UiScrollable(UiSelector().scrollable(true)).scrollToEnd(1)
                     Log.i(TAG, "verifyAlwaysAutomaticallyTranslateForLanguage: Performed a one step scroll to end")
                 }
             }
         }
 
-        Log.i(TAG, "verifyNeverAutomaticallyTranslateForLanguage: Trying to verify that $languageToTranslate language is set to \"Never translate\"")
-        composeTestRule.onNodeWithText(languageToTranslate, useUnmergedTree = true)
-            .assert(hasAnySibling(hasText(getStringResource(R.string.automatic_translation_option_always_translate_title_preference))))
-        Log.i(TAG, "verifyNeverAutomaticallyTranslateForLanguage: Verified that $languageToTranslate language is set to \"Never translate\"")
+        Log.i(
+            TAG,
+            "verifyNeverAutomaticallyTranslateForLanguage: Trying to verify that $languageToTranslate language is set to \"Never translate\"",
+        )
+        composeTestRule
+            .onNodeWithText(languageToTranslate, useUnmergedTree = true)
+            .assert(
+                hasAnySibling(
+                    hasText(getStringResource(R.string.automatic_translation_option_always_translate_title_preference))
+                )
+            )
+        Log.i(
+            TAG,
+            "verifyNeverAutomaticallyTranslateForLanguage: Verified that $languageToTranslate language is set to \"Never translate\"",
+        )
     }
 
     @OptIn(ExperimentalTestApi::class)
@@ -151,53 +191,86 @@ class SettingsTranslationsRobot(private val composeTestRule: ComposeTestRule) {
         for (i in 1..RETRY_COUNT) {
             Log.i(TAG, "verifyNeverAutomaticallyTranslateForLanguage: Started try #$i")
             try {
-                Log.i(TAG, "verifyNeverAutomaticallyTranslateForLanguage: Waiting for $waitingTime ms until $languageToTranslate language exists")
+                Log.i(
+                    TAG,
+                    "verifyNeverAutomaticallyTranslateForLanguage: Waiting for $waitingTime ms until $languageToTranslate language exists",
+                )
                 composeTestRule.waitUntilExactlyOneExists(hasText(languageToTranslate), waitingTime)
-                Log.i(TAG, "verifyNeverAutomaticallyTranslateForLanguage: Waited for $waitingTime ms until $languageToTranslate language exists")
+                Log.i(
+                    TAG,
+                    "verifyNeverAutomaticallyTranslateForLanguage: Waited for $waitingTime ms until $languageToTranslate language exists",
+                )
 
                 break
             } catch (e: ComposeTimeoutException) {
-                Log.i(TAG, "verifyNeverAutomaticallyTranslateForLanguage: ComposeTimeoutException caught, executing fallback methods")
+                Log.i(
+                    TAG,
+                    "verifyNeverAutomaticallyTranslateForLanguage: ComposeTimeoutException caught, executing fallback methods",
+                )
                 if (i == RETRY_COUNT) {
                     throw e
                 } else {
-                    Log.i(TAG, "verifyNeverAutomaticallyTranslateForLanguage: Trying to perform a one step scroll to end")
+                    Log.i(
+                        TAG,
+                        "verifyNeverAutomaticallyTranslateForLanguage: Trying to perform a one step scroll to end",
+                    )
                     UiScrollable(UiSelector().scrollable(true)).scrollToEnd(1)
                     Log.i(TAG, "verifyNeverAutomaticallyTranslateForLanguage: Performed a one step scroll to end")
                 }
             }
         }
-        Log.i(TAG, "verifyNeverAutomaticallyTranslateForLanguage: Trying to verify that $languageToTranslate language is set to \"Never translate\"")
-        composeTestRule.onNodeWithText(languageToTranslate, useUnmergedTree = true)
-            .assert(hasAnySibling(hasText(getStringResource(R.string.automatic_translation_option_never_translate_title_preference))))
-        Log.i(TAG, "verifyNeverAutomaticallyTranslateForLanguage: Verified that $languageToTranslate language is set to \"Never translate\"")
+        Log.i(
+            TAG,
+            "verifyNeverAutomaticallyTranslateForLanguage: Trying to verify that $languageToTranslate language is set to \"Never translate\"",
+        )
+        composeTestRule
+            .onNodeWithText(languageToTranslate, useUnmergedTree = true)
+            .assert(
+                hasAnySibling(
+                    hasText(getStringResource(R.string.automatic_translation_option_never_translate_title_preference))
+                )
+            )
+        Log.i(
+            TAG,
+            "verifyNeverAutomaticallyTranslateForLanguage: Verified that $languageToTranslate language is set to \"Never translate\"",
+        )
     }
 
     fun clickLanguageFromAutomaticTranslationMenu(languageToTranslate: String) {
-        Log.i(TAG, "clickLanguageFromAutomaticTranslationMenu: Trying to click $languageToTranslate language from the \"Automatic translation\" menu")
+        Log.i(
+            TAG,
+            "clickLanguageFromAutomaticTranslationMenu: Trying to click $languageToTranslate language from the \"Automatic translation\" menu",
+        )
         composeTestRule.onNodeWithText(languageToTranslate).performClick()
-        Log.i(TAG, "clickLanguageFromAutomaticTranslationMenu: Clicked $languageToTranslate language from the \"Automatic translation\" menu")
+        Log.i(
+            TAG,
+            "clickLanguageFromAutomaticTranslationMenu: Clicked $languageToTranslate language from the \"Automatic translation\" menu",
+        )
     }
 
     fun verifyAlwaysTranslateOptionState(isChecked: Boolean) =
-        assertItemIsChecked(
-            mDevice.findObject(
-                UiSelector()
-                    .index(1)
-                    .className("android.view.View"),
-            ),
-            isChecked = isChecked,
+        assertAutomaticTranslationOptionState(
+            R.string.automatic_translation_option_always_translate_title_preference,
+            isChecked,
         )
 
     fun verifyNeverTranslateOptionState(isChecked: Boolean) =
-        assertItemIsChecked(
-            mDevice.findObject(
-                UiSelector()
-                    .index(2)
-                    .className("android.view.View"),
-            ),
-            isChecked = isChecked,
+        assertAutomaticTranslationOptionState(
+            R.string.automatic_translation_option_never_translate_title_preference,
+            isChecked,
         )
+
+    /**
+     * Retrieve RadioButtonListItem by its label, rather than by its position, and assert it has the expected selection
+     * state.
+     */
+    private fun assertAutomaticTranslationOptionState(titleId: Int, isSelected: Boolean) {
+        val label = getStringResource(titleId)
+        Log.i(TAG, "assertAutomaticTranslationOptionState: Asserting $label is selected: $isSelected")
+        val option = composeTestRule.onNodeWithText(label)
+        if (isSelected) option.assertIsSelected() else option.assertIsNotSelected()
+        Log.i(TAG, "assertAutomaticTranslationOptionState: Asserted $label is selected: $isSelected")
+    }
 
     class Transition(private val composeTestRule: ComposeTestRule) {
         fun goBackToAutomaticTranslationSubMenu(interact: SettingsTranslationsRobot.() -> Unit): Transition {

@@ -13,9 +13,12 @@
 #include "mozilla/DeclarationBlock.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Maybe.h"  // For Maybe
+#include "mozilla/ServoBindings.h"  // For Servo_SerializeTimelineRangeName, Servo_LengthPercentage_ToCss
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/dom/AnimatableBinding.h"  // For the rangeStart/rangeEnd union
 #include "mozilla/dom/AnimationBinding.h"
+#include "mozilla/dom/CSSNumericValue.h"  // For CSSNumericValue::Parse
 #include "mozilla/dom/CSSNumericValueBinding.h"
 #include "mozilla/dom/CSSTransition.h"
 #include "mozilla/dom/Document.h"
@@ -178,7 +181,7 @@ already_AddRefed<Animation> Animation::Constructor(
 
   RefPtr<Animation> animation = new Animation(global);
   // JS side can't refer to timeline by name.
-  animation->SetTimelineNoUpdate(timeline, nullptr, FromJS::Yes);
+  animation->SetTimelineNoUpdate(timeline, {}, FromJS::Yes);
   animation->SetEffectNoUpdate(aEffect);
 
   return animation.forget();
@@ -297,17 +300,18 @@ void Animation::RemovedNamedTimelineReferenceFromJS(const nsAtom* aName) {
 }
 
 void Animation::SetTimelineFromJS(AnimationTimeline* aTimeline) {
-  TimelineWillSetFromJS();
+  PropertiesWillSetFromJS(CSSAnimationProperties::Timeline);
   // Can't refer to timeline by name from JS side.
   const auto prevTimelineName = GetTimelineName();
-  SetTimeline(aTimeline, nullptr, FromJS::Yes);
-  if (prevTimelineName) {
-    RemovedNamedTimelineReferenceFromJS(prevTimelineName);
+  SetTimeline(aTimeline, {}, FromJS::Yes);
+  if (prevTimelineName.mName) {
+    RemovedNamedTimelineReferenceFromJS(prevTimelineName.mName);
   }
 }
 
 bool Animation::SetTimeline(AnimationTimeline* aTimeline,
-                            const nsAtom* aTimelineName, FromJS aFromJS) {
+                            const ScopedTimelineName& aTimelineName,
+                            FromJS aFromJS) {
   const auto updated = SetTimelineNoUpdate(aTimeline, aTimelineName, aFromJS);
   PostUpdate();
   return updated;
@@ -315,9 +319,10 @@ bool Animation::SetTimeline(AnimationTimeline* aTimeline,
 
 // https://drafts.csswg.org/web-animations-2/#setting-the-timeline
 bool Animation::SetTimelineNoUpdate(AnimationTimeline* aTimeline,
-                                    const nsAtom* aTimelineName,
+                                    const ScopedTimelineName& aTimelineName,
                                     FromJS aFromJS) {
-  if (aFromJS == FromJS::No && TimelineOverridenByJS()) {
+  if (aFromJS == FromJS::No &&
+      (PropertiesOverridenByJS() & CSSAnimationProperties::Timeline)) {
     return false;
   }
   // 1. Let old timeline be the current timeline of animation, if any.
@@ -326,7 +331,7 @@ bool Animation::SetTimelineNoUpdate(AnimationTimeline* aTimeline,
   if (mTimeline == aTimeline) {
     // nullptr -> nullptr but going from/to named timeline is significant.
     if (mTimelineName != aTimelineName) {
-      mTimelineName = aTimelineName;
+      mTimelineName = OwningScopedTimelineName{aTimelineName};
     }
     // Timeline still didn't update, so...
     return false;
@@ -351,6 +356,12 @@ bool Animation::SetTimelineNoUpdate(AnimationTimeline* aTimeline,
                                   ? 0.0
                                   : previousCurrentTime.Value().ToSeconds() /
                                         endTime.ToSeconds());
+  } else if (mTimeline && mTimeline->IsUnresolvedTimeline()) {
+    // If we're switching out of an unresolved timeline into the document
+    // timeline, we want to make sure that we trigger the animation.
+    // This doesn't (& shouldn't) have any impact going into a finite timeline,
+    // as the unresolved timeline does not have a resolved current time.
+    previousProgress.SetValue(0.0);
   }
 
   // We compute the active time for the old timeline because we will use it to
@@ -373,7 +384,7 @@ bool Animation::SetTimelineNoUpdate(AnimationTimeline* aTimeline,
     oldTimeline->RemoveAnimation(this);
   }
   mTimeline = aTimeline;
-  mTimelineName = aTimelineName;
+  mTimelineName = OwningScopedTimelineName{aTimelineName};
   // Update the normalized timing and keyframe timeline range ofset because we
   // are using the new timeline.
   if (mEffect) {
@@ -421,19 +432,36 @@ bool Animation::SetTimelineNoUpdate(AnimationTimeline* aTimeline,
         break;
     }
   } else if (fromFiniteTimeline) {
-    // mAutoAlignStartTime is only meaningful for finite timelines; clear it
-    // here. Transitioning into a new finite timeline is handled by the
-    // toFiniteTimeline branch above. This clearing is a deviation from spec
-    // [1], which only acts when previousProgress is resolved; without it the
-    // flag's invariant (true only while the timeline is finite) is violated
-    // and AutoAlignStartTime would later fire on a monotonic timeline.
-    // [1] https://drafts.csswg.org/web-animations-2/#setting-the-timeline
-    mAutoAlignStartTime = false;
-    if (!previousProgress.IsNull()) {
+    const auto timeToSet = [&]() -> Maybe<TimeDuration> {
+      const auto autoAlignStartTimePending = mAutoAlignStartTime;
+      // mAutoAlignStartTime is only meaningful for finite timelines; clear it
+      // here. Transitioning into a new finite timeline is handled by the
+      // toFiniteTimeline branch above. This clearing is a deviation from spec
+      // [1], which only acts when previousProgress is resolved; without it the
+      // flag's invariant (true only while the timeline is finite) is violated
+      // and AutoAlignStartTime would later fire on a monotonic timeline.
+      // [1] https://drafts.csswg.org/web-animations-2/#setting-the-timeline
+      if (mAutoAlignStartTime) {
+        mAutoAlignStartTime = false;
+      }
+      if (autoAlignStartTimePending && mHoldTime.IsNull() &&
+          mStartTime.IsNull()) {
+        // If we don't have the start time aligned, and no valid (normalized)
+        // time.
+        return Some(TimeDuration::FromMilliseconds(0.0));
+      }
+
+      if (previousProgress.IsNull()) {
+        return Nothing{};
+      }
+
+      return Some(
+          TimeDuration(EffectEnd().MultDouble(previousProgress.Value())));
+    }();
+    if (timeToSet) {
       // If from finite timeline and previous progress is resolved, run the
       // procedure to set the current time to previous progress * end time.
-      SetCurrentTimeNoUpdate(
-          TimeDuration(EffectEnd().MultDouble(previousProgress.Value())));
+      SetCurrentTimeNoUpdate(TimeDuration(*timeToSet));
     }
   }
   // 10. If the start time of animation is resolved, make animation’s hold time
@@ -456,12 +484,13 @@ bool Animation::SetTimelineNoUpdate(AnimationTimeline* aTimeline,
   return true;
 }
 
-void Animation::SetTimelineRange(AnimationRange&& aRange) {
-  SetTimelineRangeNoUpdate(std::move(aRange));
+void Animation::SetTimelineRange(AnimationRange&& aRange, FromJS aFromJS) {
+  SetTimelineRangeNoUpdate(std::move(aRange), aFromJS);
   PostUpdate();
 }
 
-void Animation::SetTimelineRangeNoUpdate(AnimationRange&& aRange) {
+void Animation::SetTimelineRangeNoUpdate(AnimationRange&& aRange,
+                                         FromJS aFromJS) {
   if (mTimelineRange == aRange) {
     return;
   }
@@ -472,7 +501,23 @@ void Animation::SetTimelineRangeNoUpdate(AnimationRange&& aRange) {
   //
   // For now, this is not exposed and is set during initialization of the CSS
   // Animations.
-  mTimelineRange = std::move(aRange);
+  const auto overridden = PropertiesOverridenByJS();
+  const auto startOverridden =
+      aFromJS == FromJS::No &&
+      (overridden & CSSAnimationProperties::AnimationRangeStart);
+  const auto endOverridden =
+      aFromJS == FromJS::No &&
+      (overridden & CSSAnimationProperties::AnimationRangeEnd);
+  if (startOverridden && endOverridden) {
+    return;
+  }
+
+  if (!startOverridden) {
+    mTimelineRange.mStart = std::move(aRange.mStart);
+  }
+  if (!endOverridden) {
+    mTimelineRange.mEnd = std::move(aRange.mEnd);
+  }
 
   if (mEffect) {
     mEffect->UpdateNormalizedTiming();
@@ -619,8 +664,9 @@ Nullable<double> Animation::GetOverallProgress() const {
   return result;
 }
 
-// https://drafts.csswg.org/web-animations/#set-the-playback-rate
+// https://drafts.csswg.org/web-animations-1/#set-the-playback-rate
 void Animation::SetPlaybackRate(double aPlaybackRate) {
+  // 1. Clear any pending playback rate on animation.
   mPendingPlaybackRate.reset();
 
   if (aPlaybackRate == mPlaybackRate) {
@@ -629,10 +675,37 @@ void Animation::SetPlaybackRate(double aPlaybackRate) {
 
   AutoMutationBatchForAnimation mb(*this);
 
-  Nullable<TimeDuration> previousTime = GetCurrentTimeAsDuration();
+  // 2. Let previous time be the value of the current time of animation before
+  // changing the playback rate.
+  const Nullable<TimeDuration> previousTime = GetCurrentTimeAsDuration();
+
+  // 3. Let previous playback rate be the current effective playback rate of
+  // animation.
+  const double previousPlaybackRate = CurrentOrPendingPlaybackRate();
+
+  // 4. Set the playback rate to new playback rate.
   mPlaybackRate = aPlaybackRate;
-  if (!HasFiniteTimeline() && !previousTime.IsNull()) {
+
+  // 5. Perform the steps corresponding to the first matching condition from the
+  //    following, if any:
+  if (mTimeline && mTimeline->IsMonotonicallyIncreasing() &&
+      !previousTime.IsNull()) {
+    // If animation is associated with a monotonically increasing timeline and
+    // the previous time is resolved,
+    // Set the current time of animation to previous time.
     SetCurrentTime(previousTime.Value());
+  } else if (mTimeline && !mTimeline->IsMonotonicallyIncreasing() &&
+             !mStartTime.IsNull() && EffectEnd() != TimeDuration::Forever() &&
+             ((previousPlaybackRate < 0.0 && aPlaybackRate >= 0.0) ||
+              (previousPlaybackRate >= 0.0 && aPlaybackRate < 0.0))) {
+    // If animation is associated with a non-null timeline that is not
+    // monotonically increasing, the start time of animation is resolved,
+    // associated effect end is not infinity, and either:
+    // - the previous playback rate < 0 and the new playback rate ≥ 0, or
+    // - the previous playback rate ≥ 0 and the new playback rate < 0,
+    // Set animation’s start time to the result of evaluating
+    // "associated effect end − start time" for animation.
+    mStartTime.SetValue(TimeDuration(EffectEnd()) - mStartTime.Value());
   }
 
   // In the case where GetCurrentTimeAsDuration() returns the same result before
@@ -904,7 +977,7 @@ void Animation::Play(ErrorResult& aRv, LimitBehavior aLimitBehavior) {
   PostUpdate();
 }
 
-// https://drafts.csswg.org/web-animations/#reverse-an-animation
+// https://drafts.csswg.org/web-animations-1/#reverse-an-animation
 void Animation::Reverse(ErrorResult& aRv) {
   if (!mTimeline) {
     return aRv.ThrowInvalidStateError(
@@ -915,15 +988,17 @@ void Animation::Reverse(ErrorResult& aRv) {
         "Can't reverse an animation associated with an inactive timeline");
   }
 
-  double effectivePlaybackRate = mPendingPlaybackRate.valueOr(mPlaybackRate);
-
-  if (effectivePlaybackRate == 0.0) {
-    return;
-  }
+  const double effectivePlaybackRate = CurrentOrPendingPlaybackRate();
 
   Maybe<double> originalPendingPlaybackRate = mPendingPlaybackRate;
 
-  mPendingPlaybackRate = Some(-effectivePlaybackRate);
+  // We still call Play() even if the playback rate is 0 to make sure we update
+  // the animation synchronously (e.g. start time / hold time).
+  // Also, per spec, we do have to call Play() even if the playback rate is 0.
+  // Note: If playback rate is 0, we have to preserve it, i.e. we don't set the
+  // playback rate to -0.
+  mPendingPlaybackRate =
+      Some(effectivePlaybackRate == 0 ? 0 : -effectivePlaybackRate);
 
   Play(aRv, LimitBehavior::AutoRewind);
 
@@ -1137,6 +1212,98 @@ void Animation::SetCurrentTime(const Nullable<CSSNumberish>& aCurrentTime,
   SetCurrentTime(seekTime.Value());
 }
 
+// https://drafts.csswg.org/web-animations-2/#dom-animation-rangestart
+static void RangeBoundaryToTimelineRangeValue(
+    StyleTimelineRangeName aName, const StyleLengthPercentage& aOffset,
+    nsIGlobalObject* aParent,
+    OwningTimelineRangeOffsetOrCSSNumericValueOrCSSKeywordValueOrUTF8String&
+        aRetVal) {
+  if (aName == StyleTimelineRangeName::Normal) {
+    aRetVal.SetAsUTF8String().AssignLiteral("normal");
+    return;
+  }
+
+  TimelineRangeOffset& result = aRetVal.SetAsTimelineRangeOffset();
+  if (aName != StyleTimelineRangeName::None) {
+    nsAutoCString rangeName;
+    Servo_SerializeTimelineRangeName(aName, &rangeName);
+    result.mRangeName.Construct(std::move(rangeName));
+  }
+  // else: a bare <length-percentage>, so rangeName is left null.
+
+  // If CSS Typed OM is disabled, we are not able to set the CSSNumericValue,
+  // i.e. TimelineRangeOffset.offset below, so return early.
+  if (!StaticPrefs::layout_css_typed_om_enabled()) {
+    return;
+  }
+
+  // Serialize the computed offset and re-parse it into a CSSNumericValue so
+  // percentages, absolute lengths and calc() (including length/percentage
+  // mixes) all round-trip. The text came from the style system, so parsing it
+  // back should not fail; if it somehow does, leave the offset unset.
+  nsAutoCString offsetCss;
+  Servo_LengthPercentage_ToCss(&aOffset, &offsetCss);
+  if (RefPtr<CSSNumericValue> offset =
+          CSSNumericValue::Parse(aParent, offsetCss, IgnoreErrors())) {
+    MOZ_ASSERT(offset);
+    result.mOffset.Construct(offset.forget());
+  }
+}
+
+void Animation::GetRangeStart(JSContext* aCx,
+                              JS::MutableHandle<JS::Value> aRetVal,
+                              ErrorResult& aRv) {
+  OwningTimelineRangeOffsetOrCSSNumericValueOrCSSKeywordValueOrUTF8String value;
+  RangeBoundaryToTimelineRangeValue(mTimelineRange.mStart.name,
+                                    mTimelineRange.mStart.lp, GetParentObject(),
+                                    value);
+  if (!value.ToJSVal(aCx, nullptr, aRetVal)) {
+    aRv.NoteJSContextException(aCx);
+  }
+}
+
+void Animation::GetRangeEnd(JSContext* aCx,
+                            JS::MutableHandle<JS::Value> aRetVal,
+                            ErrorResult& aRv) {
+  OwningTimelineRangeOffsetOrCSSNumericValueOrCSSKeywordValueOrUTF8String value;
+  RangeBoundaryToTimelineRangeValue(mTimelineRange.mEnd.name,
+                                    mTimelineRange.mEnd.lp, GetParentObject(),
+                                    value);
+  if (!value.ToJSVal(aCx, nullptr, aRetVal)) {
+    aRv.NoteJSContextException(aCx);
+  }
+}
+
+void Animation::SetRangeStart(JSContext* aCx, JS::Handle<JS::Value> aValue,
+                              ErrorResult& aRv) {
+  OwningTimelineRangeOffsetOrCSSNumericValueOrCSSKeywordValueOrUTF8String value;
+  if (!value.Init(aCx, aValue, "Animation.rangeStart")) {
+    aRv.NoteJSContextException(aCx);
+    return;
+  }
+  AnimationRange range = mTimelineRange;
+  if (!AnimationUtils::SetAnimationRangeStart(value, range, aRv)) {
+    return;
+  }
+  PropertiesWillSetFromJS(CSSAnimationProperties::AnimationRangeStart);
+  SetTimelineRange(std::move(range), FromJS::Yes);
+}
+
+void Animation::SetRangeEnd(JSContext* aCx, JS::Handle<JS::Value> aValue,
+                            ErrorResult& aRv) {
+  OwningTimelineRangeOffsetOrCSSNumericValueOrCSSKeywordValueOrUTF8String value;
+  if (!value.Init(aCx, aValue, "Animation.rangeEnd")) {
+    aRv.NoteJSContextException(aCx);
+    return;
+  }
+  AnimationRange range = mTimelineRange;
+  if (!AnimationUtils::SetAnimationRangeEnd(value, range, aRv)) {
+    return;
+  }
+  PropertiesWillSetFromJS(CSSAnimationProperties::AnimationRangeEnd);
+  SetTimelineRange(std::move(range), FromJS::Yes);
+}
+
 // ---------------------------------------------------------------------------
 
 void Animation::Tick(AnimationTimeline::TickState& aTickState) {
@@ -1196,7 +1363,7 @@ bool Animation::TryTriggerNow() {
   // Note(dshin): Don't try to trigger inactive timelines, since they won't
   // tick in any meaningful way. This has implications on fulfilling the ready
   // promise - See https://github.com/w3c/csswg-drafts/issues/9256
-  if (mTimeline->IsInactiveTimeline()) {
+  if (mTimeline->IsUnresolvedTimeline()) {
     return false;
   }
 
@@ -1263,6 +1430,24 @@ TimeStamp Animation::ElapsedTimeToTimeStamp(
     const StickyTimeDuration& aElapsedTime) const {
   TimeDuration delay =
       mEffect ? mEffect->NormalizedTiming().Delay() : TimeDuration();
+  if (MOZ_UNLIKELY((delay == -TimeDuration::Forever() &&
+                    aElapsedTime == TimeDuration::Forever()) ||
+                   (delay == TimeDuration::Forever() &&
+                    aElapsedTime == -TimeDuration::Forever()))) {
+    // It's possible to have a negative infinite delay, e.g. using an extreme
+    // small value like -1e18s, or use calc() like
+    // `animation-delay: calc(-infinity * 1s)`. Also, it's possible to have a
+    // positive infinite |aElaspedTime| by specifying the infinite iteration
+    // count or the infinite duration. In these cases, we may try to calculate
+    // "inf + -inf", which results in an unexpected behavior, so here we just
+    // return the current timeline time to avoid breaking the sorting of events
+    // (this is the same as the cancel event to make sure we sort cancel first).
+    // Note: The return TimeStamp of this function is used as
+    // AnimationEventInfo::mScheduledEventTimeStamp for event sorting, and we
+    // also use GetTimelineCurrentTimeAsTimeStamp() for some events. It should
+    // be fine to use it as the fallback way.
+    return GetTimelineCurrentTimeAsTimeStamp();
+  }
   return AnimationTimeToTimeStamp(aElapsedTime + delay);
 }
 
@@ -1530,6 +1715,9 @@ void Animation::ComposeStyle(
   if (!mEffect) {
     return;
   }
+  if (mTimeline && mTimeline->IsUnresolvedTimeline()) {
+    return;
+  }
 
   // In order to prevent flicker, there are a few cases where we want to use
   // a different time for rendering that would otherwise be returned by
@@ -1629,8 +1817,8 @@ void Animation::PlayNoUpdate(ErrorResult& aRv, LimitBehavior aLimitBehavior) {
   bool hasPendingReadyPromise = false;
   const bool hasFiniteTimeline = HasFiniteTimeline();
   const Nullable<TimeDuration> prevCurrentTime = GetCurrentTimeAsDuration();
-  const bool enableSeek =
-      (aLimitBehavior == LimitBehavior::AutoRewind) && !hasFiniteTimeline;
+  const bool autoRewindIsTrue = aLimitBehavior == LimitBehavior::AutoRewind;
+  const bool enableSeek = autoRewindIsTrue && !hasFiniteTimeline;
 
   // 6. Perform the steps corresponding to the first matching condition from the
   // following, if any:
@@ -1671,10 +1859,12 @@ void Animation::PlayNoUpdate(ErrorResult& aRv, LimitBehavior aLimitBehavior) {
     mHoldTime = TimeDuration();
   }
 
-  // 7. If has finite timeline and previous current time is unresolved:
-  if (hasFiniteTimeline && prevCurrentTime.IsNull()) {
+  // 7. If has finite timeline and auto-rewind is true:
+  if (hasFiniteTimeline && autoRewindIsTrue) {
     // Set the flag auto align start time to true.
     mAutoAlignStartTime = true;
+    // Set the animation’s hold time to previous current time.
+    mHoldTime = prevCurrentTime;
   }
 
   // Note: This is a special case mentioned in web-animations-1, but not in
@@ -1685,15 +1875,6 @@ void Animation::PlayNoUpdate(ErrorResult& aRv, LimitBehavior aLimitBehavior) {
   // browsers, especially for a null timeline with the false auto-rewind flag.
   // [1] https://github.com/w3c/csswg-drafts/issues/7145
   if (!hasFiniteTimeline && prevCurrentTime.IsNull() && mHoldTime.IsNull()) {
-    mHoldTime = TimeDuration();
-  }
-
-  const bool hasInactiveTimeline = mTimeline && mTimeline->IsInactiveTimeline();
-  if (hasInactiveTimeline && mHoldTime.IsNull()) {
-    // Note(dshin): If we're inactive state and trying to play, hold at zero.
-    // This isn't part of the spec (Spec discusses inactive timelines very
-    // little), but this falls out of inactive timeline behing a finite timeline
-    // (See the class definition for why).
     mHoldTime = TimeDuration();
   }
 
@@ -2027,51 +2208,43 @@ void Animation::ResetPendingTasks() {
   }
 }
 
-// https://drafts.csswg.org/web-animations-2/#at-progress-timeline-boundary
-/* static*/ Animation::ProgressTimelinePosition
-Animation::AtProgressTimelineBoundary(
-    const Nullable<TimeDuration>& aTimelineDuration,
-    const Nullable<TimeDuration>& aCurrentTime,
-    const TimeDuration& aEffectStartTime, const double aPlaybackRate) {
-  // Based on changed defined in: https://github.com/w3c/csswg-drafts/pull/6702
-  // 1.  If any of the following conditions are true:
-  //     * the associated animation's timeline is not a progress-based timeline,
-  //     or
-  //     * the associated animation's timeline duration is unresolved or zero,
-  //     or
-  //     * the animation's playback rate is zero
-  //     return false
-  // Note: We can detect a progress-based timeline by relying on the fact that
-  // monotonic timelines (i.e. non-progress-based timelines) have an unresolved
-  // timeline duration.
-  if (aTimelineDuration.IsNull() || aTimelineDuration.Value().IsZero() ||
-      aPlaybackRate == 0.0) {
+// https://drafts.csswg.org/web-animations-2/#at-timeline-boundary
+/* static*/ Animation::ProgressTimelinePosition Animation::AtTimelineBoundary(
+    const Nullable<TimeDuration>& aTimelineTime,
+    const TimeDuration& aMinimumTimelineTime,
+    const TimeDuration& aMaximumTimelineTime) {
+  const auto timelineTime =
+      aTimelineTime.IsNull() ? TimeDuration{} : aTimelineTime.Value();
+  if (AnimationUtils::IsWithinAnimationTimeTolerance(timelineTime,
+                                                     aMinimumTimelineTime) ||
+      AnimationUtils::IsWithinAnimationTimeTolerance(timelineTime,
+                                                     aMaximumTimelineTime)) {
+    return ProgressTimelinePosition::Boundary;
+  }
+
+  return ProgressTimelinePosition::NotBoundary;
+}
+
+Animation::ProgressTimelinePosition Animation::AtTimelineBoundary() const {
+  if (!mTimeline || !mTimeline->IsScrollTimeline() ||
+      mTimeline->IsUnresolvedTimeline()) {
+    // Null or unresolved timelines have no start and end time to speak of.
+    // Document timelines technically have range of [-Infinity, Infinity],
+    // making them effectively never be at boundaries.
+    // https://drafts.csswg.org/web-animations-2/#minimum-timeline-time
+    // https://drafts.csswg.org/web-animations-2/#maximum-timeline-time
     return ProgressTimelinePosition::NotBoundary;
   }
 
-  // 2.  Let effective start time be the animation's start time if resolved, or
-  // zero otherwise.
-  const TimeDuration& effectiveStartTime = aEffectStartTime;
+  const auto timelineRange =
+      mTimeline->AsScrollTimeline()->IntervalForAttachmentRange(mTimelineRange);
 
-  // 3.  Let effective timeline time be (animation's current time / animation's
-  // playback rate) + effective start time.
-  // Note: we use zero if the current time is unresolved. See the spec issue:
-  // https://github.com/w3c/csswg-drafts/issues/7458
-  const TimeDuration effectiveTimelineTime =
-      (aCurrentTime.IsNull()
-           ? TimeDuration()
-           : aCurrentTime.Value().MultDouble(1.0 / aPlaybackRate)) +
-      effectiveStartTime;
-
-  // 4.  Let effective timeline progress be (effective timeline time / timeline
-  // duration)
-  // 5.  If effective timeline progress is 0 or 1, return true,
-  // We avoid the division here but it is effectively the same as 4 & 5 above.
-  return effectiveTimelineTime.IsZero() ||
-                 (AnimationUtils::IsWithinAnimationTimeTolerance(
-                     effectiveTimelineTime, aTimelineDuration.Value()))
-             ? ProgressTimelinePosition::Boundary
-             : ProgressTimelinePosition::NotBoundary;
+  return AtTimelineBoundary(
+      mTimeline->GetCurrentTimeAsDuration(),
+      TimeDuration::FromMilliseconds(timelineRange.first *
+                                     PROGRESS_TIMELINE_DURATION_MILLISEC),
+      TimeDuration::FromMilliseconds(timelineRange.second *
+                                     PROGRESS_TIMELINE_DURATION_MILLISEC));
 }
 
 void Animation::UpdateNormalizedTimingForTimelineDataChange() {
@@ -2305,6 +2478,9 @@ void Animation::AutoAlignStartTime() {
   mStartTime.SetValue(TimeDuration::FromMilliseconds(
       (effectivePlaybackRate >= 0.0 ? startOffset : endOffset) *
       PROGRESS_TIMELINE_DURATION_MILLISEC));
+
+  // Apply any pending playback rate on animation.
+  ApplyPendingPlaybackRate();
 
   // Clear hold time.
   mHoldTime.SetNull();

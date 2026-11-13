@@ -60,6 +60,9 @@ class MozharnessTestRunSchema(Schema, kw_only=True):
     test: MozharnessTestSchema  # noqa: F821
     # Base work directory used to set up the task.
     workdir: Optional[str] = None
+    # How to clone the upstream repo for the checkout, either "hg" or "git"
+    # (default: "git")
+    clone_with: Optional[Literal["hg", "git"]] = "git"
 
 
 def test_packages_url(taskdesc):
@@ -89,7 +92,12 @@ def installer_url(taskdesc):
     return f"<{upstream_task}/{mozharness['build-artifact-name']}>"
 
 
-@run_job_using("docker-worker", "mozharness-test", schema=MozharnessTestRunSchema)
+@run_job_using(
+    "docker-worker",
+    "mozharness-test",
+    schema=MozharnessTestRunSchema,
+    defaults={"clone-with": "hg"},
+)
 def mozharness_test_on_docker(config, job, taskdesc):
     run = job["run"]
     test = taskdesc["run"]["test"]
@@ -140,24 +148,12 @@ def mozharness_test_on_docker(config, job, taskdesc):
     env.update({
         "MOZHARNESS_CONFIG": " ".join(mozharness["config"]),
         "MOZHARNESS_SCRIPT": mozharness["script"],
-        "MOZILLA_BUILD_URL": {"artifact-reference": installer},
         "NEED_WINDOW_MANAGER": "true",
         "ENABLE_E10S": str(bool(test.get("e10s"))).lower(),
         "WORKING_DIR": "/builds/worker",
     })
 
     env["PYTHON"] = "python3"
-
-    if test.get("docker-image", {}).get("in-tree") == "ubuntu1804-test":
-        env["NEED_PULSEAUDIO"] = "true"
-
-        # Bug 1602701/1601828 - use compiz on ubuntu1804 due to GTK asynchiness
-        # when manipulating windows.
-        if "wdspec" in job["run"]["test"]["suite"] or (
-            "marionette" in job["run"]["test"]["suite"]
-            and "headless" not in job["label"]
-        ):
-            env.update({"NEED_COMPIZ": "true"})
 
     if test.get("docker-image", {}).get("in-tree") == "ubuntu2404-test":
         env["NEED_PIPEWIRE"] = "true"
@@ -248,6 +244,7 @@ def mozharness_test_on_docker(config, job, taskdesc):
     use_caches = test.get("use-caches", ["checkout", "pip", "uv"])
     job["run"] = {
         "workdir": run["workdir"],
+        "clone-with": run["clone-with"],
         "tooltool-downloads": mozharness["tooltool-downloads"],
         "checkout": test["checkout"],
         "command": command,
@@ -257,8 +254,14 @@ def mozharness_test_on_docker(config, job, taskdesc):
     configure_taskdesc_for_run(config, job, taskdesc, worker["implementation"])
 
 
-@run_job_using("generic-worker", "mozharness-test", schema=MozharnessTestRunSchema)
+@run_job_using(
+    "generic-worker",
+    "mozharness-test",
+    schema=MozharnessTestRunSchema,
+    defaults={"clone-with": "hg"},
+)
 def mozharness_test_on_generic_worker(config, job, taskdesc):
+    run = job["run"]
     test = taskdesc["run"]["test"]
     mozharness = test["mozharness"]
     worker = taskdesc["worker"] = job["worker"]
@@ -368,12 +371,12 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
             "MOZHARNESS_URL": {
                 "artifact-reference": "<build/public/build/mozharness.zip>"
             },
-            "MOZILLA_BUILD_URL": {"artifact-reference": installer},
             "NEED_XVFB": "false",
             "XPCOM_DEBUG_BREAK": "warn",
             "NO_FAIL_ON_TEST_ERRORS": "1",
             "MOZ_HIDE_RESULTS_TABLE": "1",
             "MOZ_NODE_PATH": "/usr/local/bin/node",
+            "PYTHONUNBUFFERED": "1",
             "TASKCLUSTER_WORKER_TYPE": job["worker-type"],
         })
 
@@ -395,17 +398,32 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
         }
 
     if is_windows:
-        py_binary = "c:\\mozilla-build\\{python}\\{python}.exe".format(python="python3")
-        mh_command = [
-            py_binary,
-            "-u",
-            "mozharness\\scripts\\" + normpath(mozharness["script"]),
-        ]
+        script = "mozharness\\scripts\\" + normpath(mozharness["script"])
+        if job.get("use-python", "system") == "system":
+            py_binary = "c:\\mozilla-build\\python3\\python3.exe"
+            mh_command = [py_binary, "-u", script]
+        else:
+            # A bare `python3` is resolved by CreateProcess against the calling
+            # executable's directory (mozilla-build) before PATH, so it would
+            # ignore the fetched CI Python that run-task puts first on PATH.
+            # `env` resolves python3 through PATH itself and execs it by full
+            # path, so the fetched Python is used -- matching the other
+            # platforms and the (uv-created) venv.
+            py_binary = "python3"
+            mh_command = ["env", "python3", "-u", script]
     elif is_bitbar or is_lambda:
         py_binary = "python3"
         mh_command = ["bash", f"./{bitbar_script}"]
     elif is_macosx:
-        py_binary = "/usr/local/bin/{}".format("python3")
+        if job.get("use-python", "system") == "system":
+            py_binary = "/usr/local/bin/{}".format("python3")
+        else:
+            # run-task prepends $MOZ_PYTHON_HOME/bin to PATH, so resolving
+            # python3 via PATH picks the fetched CI Python rather than the
+            # absolute system framework Python. This keeps mozharness on the
+            # same interpreter as the (uv-created) venv; otherwise spawned
+            # subprocesses mix the two stdlibs and fail on macOS.
+            py_binary = "python3"
         mh_command = [
             py_binary,
             "-u",
@@ -413,11 +431,13 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
         ]
     else:
         # is_linux
-        py_binary = "/usr/bin/{}".format("python3")
+        if job.get("use-python", "system") == "system":
+            py_binary = "/usr/bin/python3"
+        else:
+            # run-task prepends $MOZ_PYTHON_HOME/bin to PATH, so a bare python3
+            # resolves to the fetched CI Python.
+            py_binary = "python3"
         mh_command = [
-            # Using /usr/bin/python2.7 rather than python2.7 because
-            # /usr/local/bin/python2.7 is broken on the mac workers.
-            # See bug #1547903.
             py_binary,
             "-u",
             "mozharness/scripts/" + mozharness["script"],
@@ -485,6 +505,7 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
     use_caches = test.get("use-caches", ["checkout", "pip", "uv"])
     job["run"] = {
         "tooltool-downloads": mozharness["tooltool-downloads"],
+        "clone-with": run["clone-with"],
         "checkout": test["checkout"],
         "command": mh_command,
         "use-caches": use_caches,

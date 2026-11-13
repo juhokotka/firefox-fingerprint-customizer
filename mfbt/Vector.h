@@ -20,6 +20,7 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/OperatorNewExtensions.h"
+#include "mozilla/PodOperations.h"
 #include "mozilla/ReentrancyGuard.h"
 #include "mozilla/Span.h"
 
@@ -36,7 +37,7 @@ namespace detail {
  * power-of-two as possible. growStorageBy() is responsible for ensuring this.
  */
 template <size_t EltSize>
-static bool CapacityHasExcessSpace(size_t aCapacity) {
+bool CapacityHasExcessSpace(size_t aCapacity) {
   size_t size = aCapacity * EltSize;
   return RoundUpPow2(size) - size >= EltSize;
 }
@@ -121,14 +122,14 @@ inline size_t GrowEltsByDoubling(size_t aOldElts, size_t aIncr) {
 
 // Fallback version.
 template <typename AP, size_t EltSize>
-static size_t ComputeGrowth(size_t aOldElts, size_t aIncr, int) {
+size_t ComputeGrowth(size_t aOldElts, size_t aIncr, int) {
   return GrowEltsByDoubling<EltSize>(aOldElts, aIncr);
 }
 
 // If the AllocPolicy provides its own computeGrowth<EltSize> implementation,
 // use that.
 template <typename AP, size_t EltSize>
-static size_t ComputeGrowth(
+size_t ComputeGrowth(
     size_t aOldElts, size_t aIncr,
     decltype(std::declval<AP>().template computeGrowth<EltSize>(0, 0),
              bool()) aOverloadSelector) {
@@ -271,16 +272,13 @@ struct VectorImpl<T, N, AP, true> {
   template <typename U>
   static inline void copyConstruct(T* aDst, const U* aSrcStart,
                                    const U* aSrcEnd) {
-    /*
-     * See above memset comment. Also, notice that copyConstruct is
-     * currently templated (T != U), so memcpy won't work without
-     * requiring T == U.
-     *
-     * memcpy(aDst, aSrcStart, sizeof(T) * (aSrcEnd - aSrcStart));
-     */
     MOZ_ASSERT(aSrcStart <= aSrcEnd);
-    for (const U* p = aSrcStart; p < aSrcEnd; ++p, ++aDst) {
-      new_(aDst, *p);
+    if constexpr (std::is_same_v<T, U>) {
+      PodCopy(aDst, aSrcStart, PointerRangeSize(aSrcStart, aSrcEnd));
+    } else {
+      for (const U* p = aSrcStart; p < aSrcEnd; ++p, ++aDst) {
+        new_(aDst, *p);
+      }
     }
   }
 
@@ -545,6 +543,9 @@ class MOZ_NON_PARAM MOZ_GSL_OWNER Vector final : private AllocPolicy {
   Vector& operator=(Vector&&); /* Move assignment. */
   ~Vector();
 
+  Vector(const Vector&) = delete;
+  void operator=(const Vector&) = delete;
+
   /* accessors */
 
   const AllocPolicy& allocPolicy() const { return *this; }
@@ -558,6 +559,22 @@ class MOZ_NON_PARAM MOZ_GSL_OWNER Vector final : private AllocPolicy {
   bool empty() const { return mLength == 0; }
 
   size_t capacity() const { return mTail.mCapacity; }
+
+#ifdef DEBUG
+  /**
+   * True unless mBegin is stale relative to this vector's own address.
+   * usingInlineStorage() reports whether mBegin points at this vector's own
+   * embedded storage; that self-reference goes stale if a struct embedding this
+   * vector is relocated via a raw byte copy that skips the struct's move
+   * constructor, e.g. by nsTArray's default (memmove) element-relocation
+   * strategy. (To fix that particular case, use
+   * MOZ_DECLARE_RELOCATE_USING_MOVE_CONSTRUCTOR on the element type so nsTArray
+   * uses its move constructor instead.)
+   */
+  bool isStorageConsistent() const {
+    return usingInlineStorage() == (mTail.mCapacity == kInlineCapacity);
+  }
+#endif
 
   T* begin() {
     MOZ_ASSERT(!mEntered);
@@ -939,10 +956,6 @@ class MOZ_NON_PARAM MOZ_GSL_OWNER Vector final : private AllocPolicy {
       aTraceFunc(&mBegin);
     }
   }
-
- private:
-  Vector(const Vector&) = delete;
-  void operator=(const Vector&) = delete;
 };
 
 /* This does the re-entrancy check plus several other sanity checks. */

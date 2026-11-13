@@ -5,6 +5,7 @@
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  AppInfo: "chrome://remote/content/shared/AppInfo.sys.mjs",
   Deferred: "chrome://remote/content/shared/Sync.sys.mjs",
   EnvironmentPrefs: "chrome://remote/content/marionette/prefs.sys.mjs",
   Log: "chrome://remote/content/shared/Log.sys.mjs",
@@ -22,10 +23,17 @@ ChromeUtils.defineLazyGetter(lazy, "textEncoder", () => new TextEncoder());
 
 const NOTIFY_LISTENING = "marionette-listening";
 const SHARED_DATA_ACTIVE_KEY = "Marionette:Active";
+const SHARED_DATA_IS_BROWSER_AUTOMATION_KEY =
+  "Marionette:IsBrowserAutomationRunning";
+
+const PREF_DYNAMIC_START_ENABLED = "remote.experimental.dynamicstart.enabled";
+
+// Locked by the DisableDeveloperTools enterprise policy.
+const PREF_POLICY_DISABLED = "remote.policy.disabled";
 
 // Complements -marionette flag for starting the Marionette server.
-// We also set this if Marionette is running in order to start the server
-// again after a Firefox restart.
+// We also set this if Marionette is running for browser automation in order to
+// start the server again after a Firefox restart.
 const ENV_ENABLED = "MOZ_MARIONETTE";
 
 // Besides starting based on existing prefs in a profile and a command
@@ -41,11 +49,15 @@ const ENV_ENABLED = "MOZ_MARIONETTE";
 // pref being set to 4444.
 const ENV_PRESERVE_PREFS = "MOZ_MARIONETTE_PREF_STATE_ACROSS_RESTARTS";
 
+const EXIT_CODE_NOT_AVAILABLE = 69;
+
 const isRemote =
   Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT;
 
 class MarionetteParentProcess {
   #browserStartupFinished;
+  #isBrowserAutomation;
+  #portFilePath;
 
   constructor() {
     this.server = null;
@@ -53,6 +65,15 @@ class MarionetteParentProcess {
 
     // Initially set the enabled state based on the environment variable.
     this.enabled = Services.env.exists(ENV_ENABLED);
+
+    // Whether the running instance belongs to a browser automation session.
+    // True for command line startup. Optional for startAtRuntime.
+    this.#isBrowserAutomation = true;
+
+    // Path to the file where the Marionette port should be saved, in addition
+    // to the one saved in the profile. This path is only used when starting
+    // Marionette dynamically via startAtRuntime().
+    this.#portFilePath = null;
 
     this.#browserStartupFinished = lazy.Deferred();
   }
@@ -78,12 +99,25 @@ class MarionetteParentProcess {
       return;
     }
 
+    if (Services.prefs.getBoolPref(PREF_POLICY_DISABLED, false)) {
+      lazy.logger.warn("Marionette is disabled by enterprise policy");
+      return;
+    }
+
     this._enabled = value;
-    lazy.logger.info(`Marionette enabled`);
+    lazy.logger.info(value ? "Marionette enabled" : "Marionette disabled");
   }
 
   get running() {
     return !!this.server && this.server.alive;
+  }
+
+  get isBrowserAutomationRunning() {
+    return this.running && this.#isBrowserAutomation;
+  }
+
+  get isDynamicStartRunning() {
+    return this.running && !this.#isBrowserAutomation;
   }
 
   /**
@@ -93,6 +127,10 @@ class MarionetteParentProcess {
    */
   updateWebdriverActiveFlag(value) {
     Services.ppmm.sharedData.set(SHARED_DATA_ACTIVE_KEY, value);
+    Services.ppmm.sharedData.set(
+      SHARED_DATA_IS_BROWSER_AUTOMATION_KEY,
+      value && this.#isBrowserAutomation
+    );
     Services.ppmm.sharedData.flush();
   }
 
@@ -111,6 +149,7 @@ class MarionetteParentProcess {
       lazy.logger.trace(`Received observer notification ${topic}`);
     }
 
+    let hasBeforeCancelObserver = false;
     switch (topic) {
       case "profile-after-change":
         Services.obs.addObserver(this, "command-line-startup");
@@ -171,11 +210,15 @@ class MarionetteParentProcess {
       case "final-ui-startup":
         Services.obs.removeObserver(this, topic);
 
-        Services.obs.addObserver(this, "before-cancel-download-prompt");
         Services.obs.addObserver(this, "browser-idle-startup-tasks-finished");
         Services.obs.addObserver(this, "mail-idle-startup-tasks-finished");
-        Services.obs.addObserver(this, "quit-application");
 
+        // startAtRuntime will not hit this path, and the observer should not
+        // be removed on quit-application.
+        Services.obs.addObserver(this, "before-cancel-download-prompt");
+        hasBeforeCancelObserver = true;
+
+        Services.obs.addObserver(this, "quit-application");
         Services.obs.addObserver(this, "xpcom-shutdown");
         Services.obs.addObserver(this, "xpcom-shutdown-threads");
 
@@ -195,10 +238,14 @@ class MarionetteParentProcess {
 
       case "quit-application":
         Services.obs.removeObserver(this, topic);
-        // Remove this observer here rather than inside the handler itself,
-        // because on some platforms the notification fires multiple times
-        // and removing an already-removed observer would throw.
-        Services.obs.removeObserver(this, "before-cancel-download-prompt");
+
+        if (hasBeforeCancelObserver) {
+          // Remove this observer here rather than inside the handler itself,
+          // because on some platforms the notification fires multiple times
+          // and removing an already-removed observer would throw.
+          Services.obs.removeObserver(this, "before-cancel-download-prompt");
+        }
+
         lazy.logger.trace(
           `Application is shutting down with reason: "${data || "unknown"}"`
         );
@@ -246,18 +293,29 @@ class MarionetteParentProcess {
       return;
     }
 
+    lazy.logger.debug("Initializing Marionette");
+
     try {
       this.server = new lazy.TCPListener(lazy.MarionettePrefs.port);
       await this.server.start();
     } catch (e) {
       lazy.logger.fatal("Marionette server failed to start", e);
-      Services.startup.quit(Ci.nsIAppStartup.eForceQuit);
+      Services.startup.quit(
+        Ci.nsIAppStartup.eForceQuit,
+        EXIT_CODE_NOT_AVAILABLE
+      );
       return;
     }
 
     this.updateWebdriverActiveFlag(true);
 
-    Services.env.set(ENV_ENABLED, "1");
+    // Only set MOZ_MARIONETTE environment variable when using marionette for
+    // regular browser automation. Dynamically starting marionette for tooling
+    // or ai remote control should not set the variable.
+    if (this.#isBrowserAutomation) {
+      Services.env.set(ENV_ENABLED, "1");
+    }
+
     Services.obs.notifyObservers(this, NOTIFY_LISTENING, true);
     lazy.logger.debug("Marionette is listening");
 
@@ -277,6 +335,123 @@ class MarionetteParentProcess {
     }
   }
 
+  /**
+   * Start Marionette at runtime, unless it was already enabled via command line
+   * arguments.
+   *
+   * @param {object=} options
+   * @param {boolean=} options.isBrowserAutomation
+   *     True if the server is started for regular browser automation (as
+   *     opposed to tooling, agentic assisted browsing etc.). Defaults to true.
+   * @param {string=} options.portFilePath
+   *     Path to a file where the Marionette port should be written once the
+   *     server is listening. The parent directory has to exist.
+   *     Defaults to null, in which case no additional file is written.
+   *
+   * @returns {number}
+   *     The port on which Marionette was started. -1 if it could not be started.
+   */
+  async startAtRuntime(options = {}) {
+    const { isBrowserAutomation = true, portFilePath = null } = options;
+
+    if (!Services.prefs.getBoolPref(PREF_DYNAMIC_START_ENABLED, false)) {
+      lazy.logger.debug(
+        `Start aborted, ${PREF_DYNAMIC_START_ENABLED} is disabled`
+      );
+      return -1;
+    }
+
+    if (Services.prefs.getBoolPref(PREF_POLICY_DISABLED, false)) {
+      lazy.logger.warn("Start aborted, Marionette is disabled by policy");
+      return -1;
+    }
+
+    if (this.running) {
+      lazy.logger.debug(
+        `Start aborted, Marionette already running (running=${this.running})`
+      );
+      return -1;
+    }
+
+    if (!lazy.AppInfo.isFirefox) {
+      throw new Error("Marionette start is only supported for Firefox Desktop");
+    }
+
+    lazy.logger.debug("Starting Marionette");
+
+    // Make sure the application window is ready.
+    const win = Services.wm.getMostRecentBrowserWindow();
+    if (win && win.gBrowserInit.idleTasksFinished) {
+      lazy.logger.debug("Waiting for gBrowserInit.idleTasksFinished");
+
+      await win.gBrowserInit.idleTasksFinished;
+
+      // Explicitly resolve() browserStartupFinished because in most cases the
+      // startup should already be done at this point and we can't monitor the
+      // observer notification.
+      this.#browserStartupFinished.resolve();
+    } else {
+      throw new Error(
+        "Could not start Marionette dynamically with no window available"
+      );
+    }
+
+    if (Services.startup.startingUp) {
+      throw new Error(
+        "Could not start remote agent dynamically, application window still starting up"
+      );
+    }
+
+    this.#isBrowserAutomation = isBrowserAutomation;
+
+    // Enable marionette explicitly, the `running` flag is inferred from the
+    // server status.
+    this.enabled = true;
+
+    Services.obs.addObserver(this, "quit-application");
+    Services.obs.addObserver(this, "xpcom-shutdown");
+    Services.obs.addObserver(this, "xpcom-shutdown-threads");
+
+    try {
+      await this.init();
+    } catch (e) {
+      throw Error(`Unable to start Marionette: ${e}`);
+    }
+
+    this.#portFilePath = portFilePath;
+    if (this.#portFilePath !== null) {
+      try {
+        await IOUtils.write(
+          this.#portFilePath,
+          lazy.textEncoder.encode(`${this.server.port}`)
+        );
+      } catch (e) {
+        lazy.logger.warn(
+          `Failed to create ${this.#portFilePath} (${e.message})`
+        );
+      }
+    }
+
+    return this.server.port;
+  }
+
+  /**
+   * Stop Marionette during runtime. This entry point is only meant to be
+   * called if Marionette was started via startAtRuntime.
+   */
+  async stopAtRuntime() {
+    await this.uninit();
+
+    Services.obs.removeObserver(this, "quit-application");
+    Services.obs.removeObserver(this, "xpcom-shutdown");
+    Services.obs.removeObserver(this, "xpcom-shutdown-threads");
+
+    // Note: directly flip the private _enabled property here, as set enabled()
+    // prevents flipping the flag back to false and changing this breaks tests
+    // relying on in-app restarts.
+    this._enabled = false;
+  }
+
   async uninit() {
     if (this.running) {
       await this.server.stop();
@@ -290,6 +465,16 @@ class MarionetteParentProcess {
         lazy.logger.warn(
           `Failed to remove ${this._activePortPath} (${e.message})`
         );
+      }
+
+      if (this.#portFilePath !== null) {
+        try {
+          await IOUtils.remove(this.#portFilePath, { ignoreAbsent: true });
+        } catch (e) {
+          lazy.logger.warn(
+            `Failed to remove ${this.#portFilePath} (${e.message})`
+          );
+        }
       }
 
       lazy.logger.debug("Marionette stopped listening");
@@ -310,6 +495,13 @@ class MarionetteParentProcess {
 class MarionetteContentProcess {
   get running() {
     return Services.cpmm.sharedData.get(SHARED_DATA_ACTIVE_KEY) ?? false;
+  }
+
+  get isBrowserAutomationRunning() {
+    return (
+      Services.cpmm.sharedData.get(SHARED_DATA_IS_BROWSER_AUTOMATION_KEY) ??
+      false
+    );
   }
 
   // XPCOM

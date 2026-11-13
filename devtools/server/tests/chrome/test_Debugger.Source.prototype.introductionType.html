@@ -18,7 +18,7 @@ JavaScrip appearing in an inline event handler attribute.
 <script>
 "use strict";
 
-const {addSandboxedDebuggerToGlobal} = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs");
+const {addSandboxedDebuggerToGlobal} = ChromeUtils.importESModule("moz-src:///devtools/platform/jsdebugger.sys.mjs");
 addSandboxedDebuggerToGlobal(globalThis);
 
 let dbg;
@@ -33,8 +33,7 @@ window.onload = function() {
 addTest(function setup() {
   // Create an iframe to debug.
   const iframe = document.createElement("iframe");
-  iframe.srcdoc = "<div id='Tootles' onclick='debugger;'>I'm a DIV!</div>" +
-                  "<script id='Auddie'>function auddie() { debugger; }<\/script>";
+  iframe.src = "doc_Debugger.Source.prototype.introductionType.html";
   iframe.onload = onLoadHandler;
   document.body.appendChild(iframe);
 

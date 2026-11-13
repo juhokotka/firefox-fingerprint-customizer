@@ -5,10 +5,10 @@
 #ifndef MOZILLA_ATOMICREFCOUNTEDWITHFINALIZE_H_
 #define MOZILLA_ATOMICREFCOUNTEDWITHFINALIZE_H_
 
-#include "mozilla/RefPtr.h"
 #include "MainThreadUtils.h"
 #include "base/message_loop.h"
 #include "base/task.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/gfx/Logging.h"
 
 #define ADDREF_MANUALLY(obj) \
@@ -53,6 +53,21 @@ class AtomicRefCountedWithFinalize {
     if (mRefCount >= 0) {
       gfxCriticalError() << "Deleting referenced object? " << mRefCount;
     }
+  }
+
+  already_AddRefed<T> TryAddRef() {
+    // A weak reference must not revive an object after its count reaches zero.
+    int currCount = mRefCount;
+    while (currCount > 0) {
+      if (mRefCount.compareExchange(currCount, currCount + 1)) {
+#ifdef NS_BUILD_REFCNT_LOGGING
+        NS_LOG_ADDREF(this, currCount + 1, mName, sizeof(*this));
+#endif
+        return already_AddRefed<T>(static_cast<T*>(this));
+      }
+      currCount = mRefCount;
+    }
+    return nullptr;
   }
 
  public:

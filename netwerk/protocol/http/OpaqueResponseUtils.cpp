@@ -4,18 +4,18 @@
 
 #include "mozilla/net/OpaqueResponseUtils.h"
 
-#include "mozilla/dom/Document.h"
-#include "mozilla/StaticPrefs_browser.h"
-#include "mozilla/dom/JSValidatorParent.h"
 #include "ErrorList.h"
+#include "HttpBaseChannel.h"
+#include "mozilla/StaticPrefs_browser.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/JSValidatorParent.h"
 #include "nsContentUtils.h"
 #include "nsHttpResponseHead.h"
 #include "nsISupports.h"
 #include "nsMimeTypes.h"
 #include "nsStreamUtils.h"
-#include "nsThreadUtils.h"
 #include "nsStringStream.h"
-#include "HttpBaseChannel.h"
+#include "nsThreadUtils.h"
 
 static mozilla::LazyLogModule gORBLog("ORB");
 

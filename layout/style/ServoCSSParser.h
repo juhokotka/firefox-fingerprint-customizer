@@ -25,7 +25,7 @@ class ServoStyleSet;
 struct URLExtraData;
 struct StyleAbsoluteColor;
 struct StyleFontFamilyList;
-struct StyleFontStretch;
+struct StyleFontWidth;
 struct StyleFontWeight;
 struct StyleFontStyle;
 struct StyleLockedDeclarationBlock;
@@ -72,37 +72,38 @@ class ServoCSSParser {
   static bool IsValidCSSImage(const nsACString& aValue);
 
   /**
-   * Computes an nscolor from the given CSS <color> value.
+   * Computes an nscolor from the given CSS <color> value, with black used as
+   * current color.
    *
    * @param aStyleData The style data to compute system colors and other special
    *   color values.
-   * @param aCurrentColor The color value that currentcolor should compute to.
    * @param aValue The CSS <color> value.
    * @param aResultColor The resulting computed color value.
    * @param aWasCurrentColor Whether aValue was currentcolor. Can be nullptr
    *   if the caller doesn't care.
+   *
+   * FIXME(emilio): This argument seems fundamentally wrong, it should really be
+   * "depends on currentcolor". But that means we probably need to keep the
+   * whole StyleColor around.
+   *
    * @param aLoader The CSS loader for document we're parsing a color for,
    *   so that parse errors can be reported to the console. If nullptr, errors
    *   won't be reported to the console.
    * @return Whether aValue was successfully parsed and aResultColor was set.
    */
   static bool ComputeColor(const StylePerDocumentStyleData* aStyleData,
-                           nscolor aCurrentColor, const nsACString& aValue,
-                           nscolor* aResultColor,
+                           const nsACString& aValue, nscolor* aResultColor,
                            bool* aWasCurrentColor = nullptr,
                            css::Loader* aLoader = nullptr);
 
   /**
-   * Computes a StyleAbsoluteColor from the given CSS <color> value.
-   *
-   * @param aStyleData The style data to compute system colors and other special
-   *   color values.
-   * @param aValue The CSS <color> value.
-   * @return The resulting computed color value. For invalid color value,
-   *   Nothing() will be returned.
+   * Computes a StyleAbsoluteColor from the given CSS <color> value, with black
+   * used as current color. Same argument meanings as the function above, except
+   * returned as a Maybe<> rather than bool + out-param.
    */
   static Maybe<StyleAbsoluteColor> ComputeAbsoluteColor(
-      const StylePerDocumentStyleData* aStyleData, const nsACString& aValue);
+      const StylePerDocumentStyleData* aStyleData, const nsACString& aValue,
+      bool* aWasCurrentColor = nullptr, css::Loader* aLoader = nullptr);
 
   /**
   * Takes a CSS <color> and convert it to another color space.
@@ -161,17 +162,28 @@ class ServoCSSParser {
    * then compute it as StyleViewTimelineInset.
    * https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
    *
+   * Only accept absolute lengths and percentages, so we don't need the style
+   * context to compute it.
+   * https://github.com/w3c/csswg-drafts/issues/13852
+   *
    * @param aValue The specified value.
-   * @param aSubject The subject element of the view timeline.
-   * @param aStyle The style of the subject element.
-   * @param aRawData The style data of the document.
    * @param aResult The output view timeline inset. (output)
    * @return Whether the value was successfully parsed.
    */
-  static bool ParseAndComputeViewTimelineInset(
-      const nsACString& aValue, const dom::Element* aSubject,
-      const ComputedStyle* aStyle, const StylePerDocumentStyleData* aRawData,
-      StyleViewTimelineInset& aResult);
+  static bool ParseViewTimelineInset(const nsACString& aValue,
+                                     StyleViewTimelineInset& aResult);
+
+  /**
+   * Parse a length percentage but accept absolute lenghts only, and then
+   * compute it as StyleLengthPercentage.
+   * https://github.com/w3c/csswg-drafts/issues/13852
+   *
+   * @param aValue The specified value.
+   * @param aResult The output as StyleLengthPercentage. (output)
+   * @return Whether the value was successfully parsed.
+   */
+  static bool ParseLengthPercentageForAbsoluteLengths(
+      const nsACString& aValue, StyleLengthPercentage& aResult);
 
   /**
    * Parse a specified transform list into a gfx matrix.
@@ -188,13 +200,13 @@ class ServoCSSParser {
 
   /**
    * Parse a font shorthand for FontFaceSet matching, so we only care about
-   * FontFamily, FontStyle, FontStretch, and FontWeight.
+   * FontFamily, FontStyle, FontWidth, and FontWeight.
    *
    * @param aValue The specified value.
    * @param aUrl The parser url extra data.
    * @param aList The parsed FontFamily list. (output)
    * @param aStyle The parsed FontStyle. (output)
-   * @param aStretch The parsed FontStretch. (output)
+   * @param aWidth The parsed FontWidth. (output)
    * @param aWeight The parsed FontWeight. (output)
    * @param aSize If non-null, returns the parsed font size. (output)
    * @param aSmallCaps If non-null, whether small-caps was specified (output)
@@ -202,9 +214,8 @@ class ServoCSSParser {
    */
   static bool ParseFontShorthandForMatching(
       const nsACString& aValue, URLExtraData* aUrl, StyleFontFamilyList& aList,
-      StyleFontStyle& aStyle, StyleFontStretch& aStretch,
-      StyleFontWeight& aWeight, float* aSize = nullptr,
-      bool* aSmallCaps = nullptr);
+      StyleFontStyle& aStyle, StyleFontWidth& aWidth, StyleFontWeight& aWeight,
+      float* aSize = nullptr, bool* aSmallCaps = nullptr);
 
   /**
    * Get a URLExtraData from a document.

@@ -5,7 +5,6 @@
 package mozilla.components.feature.recentlyclosed
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import mozilla.components.browser.state.action.BrowserAction
@@ -26,7 +25,7 @@ import mozilla.components.lib.state.Store
 class RecentlyClosedMiddleware(
     private val storage: Lazy<Storage>,
     private val maxSavedTabs: Int,
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+    private val scope: CoroutineScope,
 ) : Middleware<BrowserState, BrowserAction> {
 
     override fun invoke(
@@ -41,8 +40,8 @@ class RecentlyClosedMiddleware(
                     // private tabs.
                     store.dispatch(
                         RecentlyClosedAction.AddClosedTabsAction(
-                            store.state.undoHistory.tabs.filter { tab -> !tab.state.private },
-                        ),
+                            store.state.undoHistory.tabs.filter { tab -> !tab.state.private }
+                        )
                     )
                 }
             }
@@ -53,8 +52,8 @@ class RecentlyClosedMiddleware(
                     // the clear call above.
                     store.dispatch(
                         RecentlyClosedAction.AddClosedTabsAction(
-                            store.state.undoHistory.tabs.filter { tab -> !tab.state.private },
-                        ),
+                            store.state.undoHistory.tabs.filter { tab -> !tab.state.private }
+                        )
                     )
                 }
             }
@@ -86,26 +85,20 @@ class RecentlyClosedMiddleware(
         }
     }
 
-    private fun initializeRecentlyClosed(
-        store: Store<BrowserState, BrowserAction>,
-    ) = scope.launch {
+    private fun initializeRecentlyClosed(store: Store<BrowserState, BrowserAction>) = scope.launch {
         storage.value.getTabs().collect { tabs ->
             store.dispatch(RecentlyClosedAction.ReplaceTabsAction(tabs))
         }
     }
 
-    private fun addTabsToStorage(
-        tabList: List<RecoverableTab>,
-    ) = scope.launch {
+    private fun addTabsToStorage(tabList: List<RecoverableTab>) = scope.launch {
         storage.value.addTabsToCollectionWithMax(
             tabList,
             maxSavedTabs,
         )
     }
 
-    private fun removeTab(
-        action: RecentlyClosedAction.RemoveClosedTabAction,
-    ) = scope.launch {
+    private fun removeTab(action: RecentlyClosedAction.RemoveClosedTabAction) = scope.launch {
         storage.value.removeTab(action.tab)
     }
 
@@ -113,28 +106,20 @@ class RecentlyClosedMiddleware(
         storage.value.removeAllTabs()
     }
 
-    /**
-     * Interface for a storage saving snapshots of recently closed tabs / sessions.
-     */
+    /** Interface for a storage saving snapshots of recently closed tabs / sessions. */
     interface Storage {
-        /**
-         * Returns an observable list of recently closed tabs as List of [RecoverableTab]s.
-         */
+        /** Returns an observable list of recently closed tabs as List of [RecoverableTab]s. */
         suspend fun getTabs(): Flow<List<TabState>>
 
-        /**
-         * Removes the given saved [RecoverableTab].
-         */
+        /** Removes the given saved [RecoverableTab]. */
         suspend fun removeTab(recentlyClosedTab: TabState)
 
-        /**
-         * Removes all saved [RecoverableTab]s.
-         */
+        /** Removes all saved [RecoverableTab]s. */
         suspend fun removeAllTabs()
 
         /**
-         * Adds up to [maxTabs] [TabSessionState]s to storage, and then prunes storage to keep only
-         * the newest [maxTabs].
+         * Adds up to [maxTabs] [TabSessionState]s to storage, and then prunes storage to keep only the newest
+         * [maxTabs].
          */
         suspend fun addTabsToCollectionWithMax(tabs: List<RecoverableTab>, maxTabs: Int)
     }

@@ -5,8 +5,9 @@
 #ifndef SHARED_SURFACEIO_H_
 #define SHARED_SURFACEIO_H_
 
-#include "mozilla/RefPtr.h"
 #include "SharedSurface.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/layers/LayersTypes.h"
 
 class MacIOSurface;
 
@@ -19,12 +20,15 @@ class SharedSurface_IOSurface final : public SharedSurface {
  public:
   const UniquePtr<Texture> mTex;
   const RefPtr<MacIOSurface> mIOSurf;
+  const Maybe<layers::CompositeProcessFencesHolderId> mFencesHolderId;
 
   static UniquePtr<SharedSurface_IOSurface> Create(const SharedSurfaceDesc&);
 
  private:
-  SharedSurface_IOSurface(const SharedSurfaceDesc&, UniquePtr<MozFramebuffer>,
-                          UniquePtr<Texture>, const RefPtr<MacIOSurface>&);
+  SharedSurface_IOSurface(
+      const SharedSurfaceDesc& aDesc, UniquePtr<MozFramebuffer> aFb,
+      UniquePtr<Texture> aTex, const RefPtr<MacIOSurface>& aIOSurf,
+      const Maybe<layers::CompositeProcessFencesHolderId> aFencesHolderId);
 
  public:
   ~SharedSurface_IOSurface();
@@ -32,8 +36,11 @@ class SharedSurface_IOSurface final : public SharedSurface {
   virtual void LockProdImpl() override {}
   virtual void UnlockProdImpl() override {}
 
-  virtual void ProducerAcquireImpl() override {}
+  virtual void ProducerAcquireImpl() override;
   virtual void ProducerReleaseImpl() override;
+  // Empty override to avoid the default calling ProducerReleaseImpl() which
+  // creates a GPU Fence.
+  virtual void ProducerReadReleaseImpl() override {}
 
   virtual bool NeedsIndirectReads() const override { return true; }
 

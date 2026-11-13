@@ -120,6 +120,9 @@ const shortcutHandlers = {
     }
   },
   "markupView.edit.key": markupView => {
+    if (!markupView.canEditSelectedNodeHTML()) {
+      return;
+    }
     markupView.beginEditingHTML(markupView._selectedContainer.node);
   },
   "markupView.scrollInto.key": markupView => {
@@ -873,7 +876,7 @@ class MarkupView extends EventEmitter {
         // There is a limit to how many grid highlighters can be active at the same time.
         // If the limit was reached, disable all non-active grid badges.
         if (data.type === this.inspector.highlighters.TYPES.GRID) {
-          // Matches badges for "grid", "inline-grid" and "subgrid"
+          // Matches badges for "grid", "inline-grid", "subgrid", "grid-lanes" and "inline-grid-lanes".
           const selector = "[data-display*='grid']:not(.active)";
           const isLimited =
             this.inspector.highlighters.isGridHighlighterLimitReached();
@@ -1416,9 +1419,7 @@ class MarkupView extends EventEmitter {
    * Register all key shortcuts.
    */
   _initShortcuts() {
-    const shortcuts = new KeyShortcuts({
-      window: this.win,
-    });
+    const shortcuts = new KeyShortcuts(this.win);
 
     // Keep a pointer on shortcuts to destroy them when destroying the markup
     // view.
@@ -2227,6 +2228,16 @@ class MarkupView extends EventEmitter {
         }
       );
     });
+  }
+
+  canEditSelectedNodeHTML() {
+    const { selection } = this.inspector;
+    const isFragment = selection.isDocumentFragmentNode();
+    const isAnonymous = selection.isNativeAnonymousNode();
+    const isElement =
+      selection.isElementNode() && !selection.isPseudoElementNode();
+
+    return !isAnonymous && (isElement || isFragment);
   }
 
   /**

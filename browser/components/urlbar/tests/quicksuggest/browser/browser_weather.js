@@ -73,6 +73,15 @@ async function doShowLessFrequentlyCapReachedManySearches() {
     gURLBar.view.isOpen,
     "The view should remain open clicking the command"
   );
+
+  // The feedback acknowledgment is applied to the row content-side; on the
+  // message path it arrives asynchronously over the actor. Immediate in-process.
+  await BrowserTestUtils.waitForMutationCondition(
+    details.element.row,
+    { attributes: true, attributeFilter: ["feedback-acknowledgment"] },
+    () => details.element.row.hasAttribute("feedback-acknowledgment")
+  );
+
   Assert.ok(
     details.element.row.hasAttribute("feedback-acknowledgment"),
     "Row should have feedback acknowledgment after clicking command"
@@ -137,12 +146,22 @@ async function doDismissTest(command) {
   let dismissalPromise = TestUtils.topicObserved(
     "quicksuggest-dismissals-changed"
   );
+
+  // The dismissal round-trips over the actor on the message path: the engagement
+  // runs parent-side, calls removeResult and notifies back, so the row is
+  // replaced asynchronously. The notification fires synchronously in-process.
+  let promiseRemoved = UrlbarTestUtils.promiseControllerNotification(
+    window,
+    "onQueryResultRemoved"
+  );
+
   await UrlbarTestUtils.openResultMenuAndClickItem(window, command, {
     resultIndex: EXPECTED_RESULT_INDEX,
     openByMouse: true,
   });
   info("Awaiting dismissal promise");
   await dismissalPromise;
+  await promiseRemoved;
 
   Assert.ok(
     !UrlbarPrefs.get("suggest.weather"),
@@ -249,6 +268,15 @@ async function doSessionOngoingCommandTest(command) {
     gURLBar.view.isOpen,
     "The view should remain open clicking the command"
   );
+
+  // The feedback acknowledgment is applied to the row content-side; on the
+  // message path it arrives asynchronously over the actor. Immediate in-process.
+  await BrowserTestUtils.waitForMutationCondition(
+    details.element.row,
+    { attributes: true, attributeFilter: ["feedback-acknowledgment"] },
+    () => details.element.row.hasAttribute("feedback-acknowledgment")
+  );
+
   Assert.ok(
     details.element.row.hasAttribute("feedback-acknowledgment"),
     "Row should have feedback acknowledgment after clicking command"
@@ -397,13 +425,6 @@ add_task(async function simplerAndFullUi() {
         ".urlbarView-dynamic-weather-summaryText"
       );
 
-      // `getViewUpdate()` is allowed to be async and `UrlbarView` awaits it even
-      // though the `Weather` implementation is not async. That means the summary
-      // text content will be updated asyncly, so we need to wait for it.
-      await TestUtils.waitForCondition(
-        () => summary.textContent == expectedSummary,
-        "Waiting for the row's summary text to be updated"
-      );
       Assert.equal(
         summary.textContent,
         expectedSummary,
@@ -417,10 +438,6 @@ add_task(async function simplerAndFullUi() {
         WEATHER_SUGGESTION.region_code,
       ].join(" ");
       let title = row.querySelector(".urlbarView-dynamic-weather-title");
-      await TestUtils.waitForCondition(
-        () => title.textContent == expectedTitle,
-        "Waiting for the row's title text to be updated"
-      );
       Assert.equal(
         title.textContent,
         expectedTitle,
@@ -457,7 +474,7 @@ function assertIsWeatherResult(result, isWeatherResult) {
       "Result should be from UrlbarProviderQuickSuggest"
     );
     Assert.equal(
-      UrlbarUtils.searchEngagementTelemetryType(result),
+      UrlbarShared.searchEngagementTelemetryType(result),
       "weather",
       "Result telemetry type should be 'weather'"
     );
@@ -468,7 +485,7 @@ function assertIsWeatherResult(result, isWeatherResult) {
       "Result should not be from UrlbarProviderQuickSuggest"
     );
     Assert.notEqual(
-      UrlbarUtils.searchEngagementTelemetryType(result),
+      UrlbarShared.searchEngagementTelemetryType(result),
       "weather",
       "Result telemetry type should not be 'weather'"
     );

@@ -33,7 +33,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M1",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -56,7 +56,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M1",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -79,7 +79,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M2",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -102,7 +102,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M2",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -125,7 +125,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M2 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -148,7 +148,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M3",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -171,7 +171,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M3",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -194,7 +194,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M3 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -217,7 +217,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M3 Max",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -240,7 +240,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -263,7 +263,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -286,7 +286,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M4 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -309,7 +309,7 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M4 Max",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -332,7 +332,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M2",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -355,7 +355,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M2 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -378,7 +378,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -401,7 +401,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M4 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -424,7 +424,7 @@ const DEVICE_DATABASE = {
     {
       name: "iMac 24-inch M3",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -447,7 +447,7 @@ const DEVICE_DATABASE = {
     {
       name: "iMac 24-inch M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.2",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -470,7 +470,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac Studio M2 Max",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -493,7 +493,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac Studio M2 Ultra",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -516,7 +516,7 @@ const DEVICE_DATABASE = {
     {
       name: "Mac Pro M2 Ultra",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Intel Mac OS X 26.5.1",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
@@ -541,7 +541,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Ubuntu, NVIDIA RTX 3060)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -564,7 +564,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Ubuntu, Intel UHD 770)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -587,7 +587,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Ubuntu, AMD RX 7600)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -610,7 +610,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Fedora, NVIDIA RTX 4070)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -633,7 +633,7 @@ const DEVICE_DATABASE = {
     {
       name: "Laptop (Ubuntu, Intel Iris Xe)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -658,7 +658,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Desktop (Intel i7, UHD 770)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -681,7 +681,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Desktop (AMD Ryzen 9, RTX 4070)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -704,7 +704,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Desktop (Intel i9, RTX 4090)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -727,7 +727,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Desktop (AMD Ryzen 7, RX 7800 XT)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -750,7 +750,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Laptop (Intel i5, Iris Xe)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -773,7 +773,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 11 Laptop (AMD Ryzen 7, Radeon 780M)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",
@@ -796,7 +796,7 @@ const DEVICE_DATABASE = {
     {
       name: "Windows 10 Desktop (Intel i7, GTX 1660)",
       platform: "Win32",
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Windows NT 10.0; Win64; x64",
       appVersion: "5.0 (Windows)",
       navigatorPlatform: "Win32",

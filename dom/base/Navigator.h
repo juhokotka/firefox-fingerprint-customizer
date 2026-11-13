@@ -45,7 +45,6 @@ class Clipboard;
 class LockManager;
 class ModelContext;
 class NavigatorLogin;
-class PrivateAttribution;
 class HTMLMediaElement;
 class AudioContext;
 class WakeLockJS;
@@ -117,7 +116,7 @@ class Navigator final : public nsISupports, public nsWrapperCache {
                      ErrorResult& aRv) const;
   void GetPlatform(nsAString& aPlatform, CallerType aCallerType,
                    ErrorResult& aRv) const;
-  void GetUserAgent(nsAString& aUserAgent, CallerType aCallerType,
+  void GetUserAgent(nsACString& aUserAgent, CallerType aCallerType,
                     ErrorResult& aRv) const;
   bool OnLine();
   void CheckProtocolHandlerAllowed(const nsAString& aScheme,
@@ -149,7 +148,7 @@ class Navigator final : public nsISupports, public nsWrapperCache {
   static nsresult GetUserAgent(nsPIDOMWindowInner* aWindow,
                                Document* aCallerDoc,
                                Maybe<bool> aShouldResistFingerprinting,
-                               nsAString& aUserAgent);
+                               nsACString& aUserAgent);
 
   // Clears the language cache by calling:
   // Navigator_Binding::ClearCachedLanguageValue(this); and
@@ -226,8 +225,6 @@ class Navigator final : public nsISupports, public nsWrapperCache {
   dom::LockManager* Locks();
   NavigatorLogin* Login();
   dom::ModelContext* ModelContext();
-  dom::PrivateAttribution* PrivateAttribution();
-
   static bool Webdriver();
 
   void GetLanguages(nsTArray<nsString>& aLanguages);
@@ -329,7 +326,6 @@ class Navigator final : public nsISupports, public nsWrapperCache {
   RefPtr<LockManager> mLocks;
   RefPtr<NavigatorLogin> mLogin;
   RefPtr<dom::ModelContext> mModelContext;
-  RefPtr<dom::PrivateAttribution> mPrivateAttribution;
   RefPtr<dom::UserActivation> mUserActivation;
   RefPtr<dom::WakeLockJS> mWakeLock;
 };

@@ -4,18 +4,17 @@
 
 #include "HTMLSelectAccessible.h"
 
-#include "LocalAccessible-inl.h"
 #include "DocAccessible-inl.h"
-#include "nsAccessibilityService.h"
-#include "nsAccUtils.h"
 #include "DocAccessible.h"
-#include "mozilla/a11y/Role.h"
+#include "LocalAccessible-inl.h"
 #include "States.h"
-
-#include "nsCOMPtr.h"
-#include "mozilla/dom/HTMLOptionElement.h"
+#include "mozilla/a11y/Role.h"
 #include "mozilla/dom/HTMLOptGroupElement.h"
+#include "mozilla/dom/HTMLOptionElement.h"
 #include "mozilla/dom/HTMLSelectElement.h"
+#include "nsAccUtils.h"
+#include "nsAccessibilityService.h"
+#include "nsCOMPtr.h"
 #include "nsComboboxControlFrame.h"
 #include "nsContainerFrame.h"
 #include "nsListControlFrame.h"
@@ -91,10 +90,12 @@ LocalAccessible* HTMLSelectListAccessible::CurrentItem() const {
 }
 
 void HTMLSelectListAccessible::SetCurrentItem(const LocalAccessible* aItem) {
-  if (!aItem->GetContent()->IsElement()) return;
-
-  aItem->GetContent()->AsElement()->SetAttr(
-      kNameSpaceID_None, nsGkAtoms::selected, u"true"_ns, true);
+  if (!aItem->GetContent()->IsElement()) {
+    return;
+  }
+  aItem->GetContent()->AsElement()->SetAttr(kNameSpaceID_None,
+                                            nsGkAtoms::selected, u"true"_ns,
+                                            true, IsKnownNewAttr::No);
 }
 
 bool HTMLSelectListAccessible::IsAcceptableChild(nsIContent* aEl) const {

@@ -5,12 +5,28 @@
 var { XPCOMUtils } = ChromeUtils.importESModule(
   "resource://gre/modules/XPCOMUtils.sys.mjs"
 );
-const lazy = {};
-ChromeUtils.defineESModuleGetters(lazy, {
-  PageWireframes: "resource:///modules/sessionstore/PageWireframes.sys.mjs",
+const lazy = XPCOMUtils.declareLazy({
+  ContextualIdentityService:
+    "moz-src:///toolkit/components/contextualidentity/ContextualIdentityService.sys.mjs",
+  PageThumbs: "resource://gre/modules/PageThumbs.sys.mjs",
+  PageWireframes:
+    "moz-src:///browser/components/sessionstore/PageWireframes.sys.mjs",
   SponsorProtection:
     "moz-src:///browser/components/newtab/SponsorProtection.sys.mjs",
+  Tabbrowser: "moz-src:///browser/components/tabbrowser/Tabbrowser.sys.mjs",
   TabNotes: "moz-src:///browser/components/tabnotes/TabNotes.sys.mjs",
+  prefDisableAutohide: { pref: "ui.popup.disable_autohide", default: false },
+  novaEnabled: { pref: "browser.nova.enabled", default: false },
+  prefDisplayThumbnail: {
+    pref: "browser.tabs.hoverPreview.showThumbnails",
+    default: false,
+  },
+  prefCollectWireframes: {
+    pref: "browser.history.collectWireframes",
+    default: false,
+  },
+  prefUseTabNotes: { pref: "browser.tabs.notes.enabled", default: false },
+  prefPreviewDelay: { pref: "ui.tooltip.delay_ms", default: 500 },
 });
 
 // Denotes the amount of time (in ms) that the panel will *not* respect
@@ -46,13 +62,6 @@ export default class TabHoverPanelSet {
    * @param {Window} win
    */
   constructor(win) {
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "_prefDisableAutohide",
-      "ui.popup.disable_autohide",
-      false
-    );
-
     this.#win = win;
     this.#deactivateTimers = new WeakMap();
     this.#activePanel = null;
@@ -80,8 +89,8 @@ export default class TabHoverPanelSet {
       const target = event.target.closest?.("tab, .tab-group-label");
       if (
         target &&
-        (this.#win.gBrowser.isTab(target) ||
-          this.#win.gBrowser.isTabGroupLabel(target))
+        (lazy.Tabbrowser.isTab(target) ||
+          lazy.Tabbrowser.isTabGroupLabel(target))
       ) {
         this.deactivate(null, { force: true });
       }
@@ -103,14 +112,14 @@ export default class TabHoverPanelSet {
       return;
     }
 
-    if (this.#win.gBrowser.isTab(tabOrGroup)) {
+    if (lazy.Tabbrowser.isTab(tabOrGroup)) {
       // Don't activate tab preview if hovering over the note icon
       if (tabOrGroup._noteIconHover) {
         return;
       }
       this.#setActivePanel(this.tabPanel);
       this.tabPanel.activate(tabOrGroup);
-    } else if (this.#win.gBrowser.isTabGroup(tabOrGroup)) {
+    } else if (lazy.Tabbrowser.isTabGroup(tabOrGroup)) {
       if (!tabOrGroup.collapsed) {
         return;
       }
@@ -132,20 +141,22 @@ export default class TabHoverPanelSet {
    * Panels linger briefly to allow the mouse to travel between the anchor and
    * panel; passing `force` skips that delay.
    *
-   * @param {MozTabbrowserTab|MozTabbrowserTabGroup|null} tabOrGroup - The tab or group to activate the panel on.
-   * @param {bool} [options.force] - If true, force immediate deactivation of the panels.
+   * @param {MozTabbrowserTab|MozTabbrowserTabGroup|null} [tabOrGroup] - The tab or group to activate the panel on.
+   * @param {object} [options]
+   * @param {boolean} [options.force] - If true, force immediate deactivation of the panels.
    */
   deactivate(tabOrGroup, { force = false } = {}) {
-    if (this._prefDisableAutohide) {
+    if (lazy.prefDisableAutohide) {
       return;
     }
 
-    if (this.#win.gBrowser.isTab(tabOrGroup) || !tabOrGroup) {
-      this.tabPanel.deactivate(tabOrGroup, { force });
-      this.tabNotePanel.deactivate(tabOrGroup, { force });
+    const tab = lazy.Tabbrowser.isTab(tabOrGroup) ? tabOrGroup : null;
+    if (tab || !tabOrGroup) {
+      this.tabPanel.deactivate(tab, { force });
+      this.tabNotePanel.deactivate(tab, { force });
     }
 
-    if (this.#win.gBrowser.isTabGroup(tabOrGroup) || !tabOrGroup) {
+    if (lazy.Tabbrowser.isTabGroup(tabOrGroup) || !tabOrGroup) {
       this.tabGroupPanel.deactivate({ force });
     }
   }
@@ -159,7 +170,7 @@ export default class TabHoverPanelSet {
   }
 
   deactivateNotePanel(tab) {
-    if (this._prefDisableAutohide) {
+    if (lazy.prefDisableAutohide) {
       return;
     }
     this.tabNotePanel.deactivate(tab);
@@ -200,6 +211,25 @@ export default class TabHoverPanelSet {
   }
 
   #doDeactivate(panel) {
+    // Hiding a popup that has not finished showing cancels the in-flight show,
+    // so popupshown never fires. Mark the panel inactive now and complete the
+    // hide once the show settles, unless it gets reactivated in the meantime.
+    if (panel.panelElement.state == "showing") {
+      if (this.#activePanel == panel) {
+        this.#activePanel = null;
+      }
+      panel.panelElement.addEventListener(
+        "popupshown",
+        () => {
+          if (this.#activePanel != panel) {
+            this.#doDeactivate(panel);
+          }
+        },
+        { once: true }
+      );
+      return;
+    }
+
     panel.onBeforeHide();
     panel.panelElement.hidePopup();
     this.panelOpener.clear(panel);
@@ -208,6 +238,31 @@ export default class TabHoverPanelSet {
     if (this.#activePanel == panel) {
       this.#activePanel = null;
     }
+  }
+
+  forceReset() {
+    for (let panel of [this.tabPanel, this.tabGroupPanel, this.tabNotePanel]) {
+      this.#clearDeactivateTimer(panel);
+      panel.onBeforeHide();
+      panel.panelElement.hidePopup();
+    }
+    // Reset last: TabNotePanel.onBeforeHide re-arms the zero-delay timer, so the
+    // opener must be cleared after all panels have been hidden.
+    this.panelOpener.reset();
+    this.#activePanel = null;
+  }
+
+  /**
+   * Whether the given node is one of the hover preview panels managed here,
+   * as opposed to an unrelated panel or menupopup.
+   *
+   * @param {Node} node
+   * @returns {boolean}
+   */
+  isHoverPanel(node) {
+    return [this.tabPanel, this.tabGroupPanel, this.tabNotePanel].some(
+      panel => panel.panelElement == node
+    );
   }
 
   shouldActivate() {
@@ -272,10 +327,9 @@ class HoverPanel {
     return this.panelElement.state == "open";
   }
 
-  deactivate({ force = false } = {}) {
-    this.panelSet.requestDeactivate(this, { force });
-  }
-
+  /**
+   * @returns {Element[]}
+   */
   get hoverTargets() {
     return [this.panelElement];
   }
@@ -287,35 +341,17 @@ class TabPanel extends HoverPanel {
   /** @type {MozTabbrowserTab|null} */
   #tab;
 
-  /** @type {DOMElement|null} */
+  /** @type {HTMLCanvasElement|SVGElement|null} */
   #thumbnailElement;
 
-  /** @type {DOMElement|null} */
+  /** @type {Element|null} */
   #interactiveArea;
 
-  /** @type {DOMElement|null} */
+  /** @type {Element|null} */
   #addNoteButton;
 
   constructor(panel, panelSet) {
     super(panel, panelSet);
-
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "_prefDisplayThumbnail",
-      "browser.tabs.hoverPreview.showThumbnails",
-      false
-    );
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "_prefCollectWireframes",
-      "browser.history.collectWireframes"
-    );
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "_prefUseTabNotes",
-      "browser.tabs.notes.enabled",
-      false
-    );
 
     this.#tab = null;
     this.#thumbnailElement = null;
@@ -325,13 +361,11 @@ class TabPanel extends HoverPanel {
 
     // #tabPreviewPanelTemplate is currently just the .tab-preview-add-note
     // button element, and it needs to be added the tab preview panel body manually.
-    /** @type {HTMLTemplateElement} */
-    const tabPreviewTemplate = this.win.document.getElementById(
-      "tabPreviewPanelTemplate"
+    const tabPreviewTemplate = /** @type {HTMLTemplateElement} */ (
+      this.win.document.getElementById("tabPreviewPanelTemplate")
     );
-    const importedFragment = this.win.document.importNode(
-      tabPreviewTemplate.content,
-      true
+    const importedFragment = /** @type {DocumentFragment} */ (
+      this.win.document.importNode(tabPreviewTemplate.content, true)
     );
     this.#addNoteButton = importedFragment.firstElementChild;
 
@@ -355,16 +389,18 @@ class TabPanel extends HoverPanel {
       case "TabSelect":
         this.deactivate(null, { force: true });
         break;
-      case "mouseout":
+      case "mouseout": {
+        let { relatedTarget } = /** @type {MouseEvent} */ (e);
         // Ignore mouseouts from descendant elements of the target -- we only want to know
         // when the user has moused out from the target itself
         if (
           this.mouseoutTarget &&
-          !this.mouseoutTarget.contains(e.relatedTarget)
+          !this.mouseoutTarget.contains(/** @type {Element} */ (relatedTarget))
         ) {
           this.deactivate();
         }
         break;
+      }
     }
   }
 
@@ -416,7 +452,7 @@ class TabPanel extends HoverPanel {
    * @param {boolean} [options.force=false]
    */
   deactivate(leavingTab = null, { force = false } = {}) {
-    if (!this._prefUseTabNotes) {
+    if (!lazy.prefUseTabNotes) {
       force = true;
     }
     if (leavingTab) {
@@ -430,7 +466,7 @@ class TabPanel extends HoverPanel {
       });
       return;
     }
-    super.deactivate({ force });
+    this.panelSet.requestDeactivate(this, { force });
   }
 
   onBeforeHide() {
@@ -482,8 +518,8 @@ class TabPanel extends HoverPanel {
 
   #hasValidWireframeState(tab) {
     return (
-      this._prefCollectWireframes &&
-      this._prefDisplayThumbnail &&
+      lazy.prefCollectWireframes &&
+      lazy.prefDisplayThumbnail &&
       tab &&
       !tab.selected &&
       !!lazy.PageWireframes.getWireframeState(tab)
@@ -492,7 +528,7 @@ class TabPanel extends HoverPanel {
 
   #hasValidThumbnailState(tab) {
     return (
-      this._prefDisplayThumbnail &&
+      lazy.prefDisplayThumbnail &&
       tab &&
       tab.linkedBrowser &&
       !tab.getAttribute("pending") &&
@@ -515,13 +551,13 @@ class TabPanel extends HoverPanel {
     thumbnailCanvas.width = 280 * this.win.devicePixelRatio;
     thumbnailCanvas.height = 140 * this.win.devicePixelRatio;
 
-    this.win.PageThumbs.captureTabPreviewThumbnail(
+    lazy.PageThumbs.captureTabPreviewThumbnail(
       tab.linkedBrowser,
       thumbnailCanvas
     )
-      .then(() => {
+      .then(captured => {
         // in case we've changed tabs after capture started, ensure we still want to show the thumbnail
-        if (this.#tab == tab && this.#hasValidThumbnailState(tab)) {
+        if (captured && this.#tab == tab && this.#hasValidThumbnailState(tab)) {
           this.#thumbnailElement = thumbnailCanvas;
           this.#updatePreview();
         }
@@ -567,6 +603,40 @@ class TabPanel extends HoverPanel {
       : "";
   }
 
+  #updateContainerIndicator() {
+    const indicator = /** @type {HTMLElement} */ (
+      this.panelElement.querySelector(".tab-preview-container-indicator")
+    );
+
+    for (let className of [...indicator.classList]) {
+      if (
+        className.startsWith("identity-color-") ||
+        className.startsWith("identity-icon-")
+      ) {
+        indicator.classList.remove(className);
+      }
+    }
+
+    const userContextId = this.#tab?.userContextId;
+    const identity = userContextId
+      ? lazy.ContextualIdentityService.getPublicIdentityFromId(userContextId)
+      : null;
+    if (!identity) {
+      indicator.hidden = true;
+      return;
+    }
+
+    if (identity.color) {
+      indicator.classList.add(`identity-color-${identity.color}`);
+    }
+    if (identity.icon) {
+      indicator.classList.add(`identity-icon-${identity.icon}`);
+    }
+    indicator.querySelector(".tab-preview-container-label").textContent =
+      lazy.ContextualIdentityService.getUserContextLabel(userContextId);
+    indicator.hidden = false;
+  }
+
   /**
    * Opens the tab note menu in the context of the current tab. Since only
    * one panel should be open at a time, this also closes the tab hover preview
@@ -590,7 +660,9 @@ class TabPanel extends HoverPanel {
     this.panelElement.querySelector(".tab-preview-uri").textContent =
       this.#displayURI;
 
-    if (this.win.gBrowser.showPidAndActiveness) {
+    this.#updateContainerIndicator();
+
+    if (lazy.Tabbrowser.prefs.showPidAndActiveness) {
       this.panelElement.querySelector(".tab-preview-pid").textContent =
         this.#displayPids;
       this.panelElement.querySelector(".tab-preview-activeness").textContent =
@@ -601,7 +673,7 @@ class TabPanel extends HoverPanel {
         "";
     }
 
-    if (this._prefUseTabNotes && lazy.TabNotes.isEligible(this.#tab)) {
+    if (lazy.prefUseTabNotes && lazy.TabNotes.isEligible(this.#tab)) {
       let note = await lazy.TabNotes.get(this.#tab);
 
       if (note) {
@@ -635,7 +707,7 @@ class TabPanel extends HoverPanel {
         thumbnailContainer.appendChild(this.#thumbnailElement);
       }
       this.panelElement.dispatchEvent(
-        new CustomEvent("previewThumbnailUpdated", {
+        new CustomEvent("TabPreviewThumbnailUpdated", {
           detail: {
             thumbnail: this.#thumbnailElement,
           },
@@ -644,6 +716,10 @@ class TabPanel extends HoverPanel {
     }
 
     this.#movePanel();
+
+    this.panelElement.dispatchEvent(
+      new CustomEvent("TabPreviewUpdated", { bubbles: true })
+    );
   }
 
   #movePanel() {
@@ -734,6 +810,10 @@ class TabGroupPanel extends HoverPanel {
     }
   }
 
+  deactivate({ force = false } = {}) {
+    this.panelSet.requestDeactivate(this, { force });
+  }
+
   /**
    * Move keyboard focus into the group preview panel.
    *
@@ -756,10 +836,11 @@ class TabGroupPanel extends HoverPanel {
   #updatePanelContent() {
     const fragment = this.win.document.createDocumentFragment();
     for (let tab of this.#group.tabs) {
+      /** @type {XULElement & { tab?: MozTabbrowserTab }} */
       let tabbutton = this.win.document.createXULElement("toolbarbutton");
       tabbutton.setAttribute("role", "button");
-      tabbutton.setAttribute("keyNav", false);
-      tabbutton.setAttribute("tabindex", 0);
+      tabbutton.setAttribute("keyNav", "false");
+      tabbutton.setAttribute("tabindex", "0");
       tabbutton.setAttribute("label", tab.label);
       if (tab.linkedBrowser) {
         tabbutton.setAttribute(
@@ -780,6 +861,10 @@ class TabGroupPanel extends HoverPanel {
       fragment.appendChild(tabbutton);
     }
     this.panelContent.replaceChildren(fragment);
+
+    this.panelElement.dispatchEvent(
+      new CustomEvent("TabGroupPreviewUpdated", { bubbles: true })
+    );
   }
 
   handleEvent(event) {
@@ -831,6 +916,7 @@ class TabGroupPanel extends HoverPanel {
   }
 
   get hoverTargets() {
+    /** @type {Element[]} */
     let targets = [this.panelElement];
     if (this.#popupTarget) {
       targets.push(this.#popupTarget);
@@ -839,24 +925,29 @@ class TabGroupPanel extends HoverPanel {
   }
 
   get popupOptions() {
-    if (!this.win.gBrowser.tabContainer.verticalMode) {
+    // With Nova enabled, offset the panel by the border-radius (16px).
+
+    const nova = lazy.novaEnabled;
+
+    if (this.win.gBrowser.tabContainer.verticalMode) {
       return {
-        position: "bottomleft topleft",
+        position: this.win.SidebarController._positionStart
+          ? "topright topleft"
+          : "topleft topright",
         x: 0,
-        y: 0,
+        y: nova ? -16 : -5,
       };
     }
-    if (!this.win.SidebarController._positionStart) {
-      return {
-        position: "topleft topright",
-        x: 0,
-        y: -5,
-      };
+
+    if (!nova) {
+      return { position: "bottomleft topleft", x: 0, y: 0 };
     }
+
+    const rtl = this.win.RTL_UI;
     return {
-      position: "topright topleft",
-      x: 0,
-      y: -5,
+      position: rtl ? "bottomright topright" : "bottomleft topleft",
+      x: rtl ? 16 : -16,
+      y: 0,
     };
   }
 
@@ -1000,7 +1091,7 @@ class TabNotePanel extends HoverPanel {
       });
       return;
     }
-    super.deactivate({ force });
+    this.panelSet.requestDeactivate(this, { force });
   }
 
   onBeforeHide() {
@@ -1021,8 +1112,8 @@ class TabNotePanel extends HoverPanel {
     let currentTab = this.#tab;
     let currentUrl = currentTab?.canonicalUrl;
 
-    const noteTextContainer = this.panelElement.querySelector(
-      ".tab-note-preview-text"
+    const noteTextContainer = /** @type {HTMLElement} */ (
+      this.panelElement.querySelector(".tab-note-preview-text")
     );
     const note = await lazy.TabNotes.get(currentTab);
 
@@ -1037,8 +1128,8 @@ class TabNotePanel extends HoverPanel {
     this.#noteOverflow =
       noteTextContainer.scrollHeight > noteTextContainer.clientHeight;
 
-    let actionsContainer = this.panelElement.querySelector(
-      ".tab-note-preview-actions"
+    let actionsContainer = /** @type {HTMLElement} */ (
+      this.panelElement.querySelector(".tab-note-preview-actions")
     );
     noteTextContainer.style.setProperty(
       "--tab-note-expand-toggle-width",
@@ -1046,6 +1137,10 @@ class TabNotePanel extends HoverPanel {
     );
 
     this.#movePanel();
+
+    this.panelElement.dispatchEvent(
+      new CustomEvent("TabNotePreviewUpdated", { bubbles: true })
+    );
   }
 
   #movePanel() {
@@ -1108,21 +1203,15 @@ class TabPreviewPanelTimedFunction {
   /** @type {function(): void | null} */
   #target;
 
-  /** @type {TabPanel} */
+  /** @type {HoverPanel} */
   #from;
 
   constructor(zeroDelayTime, win) {
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "_prefPreviewDelay",
-      "ui.tooltip.delay_ms"
-    );
-
     this.#zeroDelayTime = zeroDelayTime;
     this.#win = win;
 
     this.#timer = null;
-    this.#useZeroDelay = false;
+    this.#useZeroDelay = null;
 
     this.#target = null;
     this.#from = null;
@@ -1148,7 +1237,7 @@ class TabPreviewPanelTimedFunction {
    *
    * @param {function(): void | null} target
    *   The function to execute
-   * @param {TabPanel} from
+   * @param {HoverPanel} from
    *   The calling panel
    */
   execute(target, from) {
@@ -1167,7 +1256,7 @@ class TabPreviewPanelTimedFunction {
         this.#timer = null;
         this.#target();
       },
-      this.#useZeroDelay ? 0 : this._prefPreviewDelay
+      this.#useZeroDelay ? 0 : lazy.prefPreviewDelay
     );
   }
 
@@ -1175,7 +1264,7 @@ class TabPreviewPanelTimedFunction {
    * Clear the timer, if it is active, for example when a user moves off a panel.
    * This has the effect of suppressing the delayed function execution.
    *
-   * @param {TabPanel} from
+   * @param {HoverPanel} from
    *   The calling panel. This must be the same as the panel that most recently
    *   called `execute`. If it is not, the call will be ignored. This is
    *   necessary to prevent, e.g., the tab hover panel from inadvertently
@@ -1209,5 +1298,22 @@ class TabPreviewPanelTimedFunction {
 
   get delayActive() {
     return this.#timer !== null;
+  }
+
+  get zeroDelayActive() {
+    return !!this.#useZeroDelay;
+  }
+
+  reset() {
+    if (this.#timer) {
+      this.#win.clearTimeout(this.#timer);
+      this.#timer = null;
+    }
+    if (this.#useZeroDelay) {
+      this.#win.clearTimeout(this.#useZeroDelay);
+      this.#useZeroDelay = null;
+    }
+    this.#target = null;
+    this.#from = null;
   }
 }

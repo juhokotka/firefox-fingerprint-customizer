@@ -388,7 +388,7 @@
           border: 1px solid var(--fc-border);
           box-shadow: 0 2px 5px rgba(0, 0, 0, 15%);
           border-radius: var(--panel-border-radius, var(--border-radius-large));
-          padding: var(--callout-padding, var(--dimension-20));
+          padding: var(--callout-padding, 20px);
           width: 25em;
           gap: 16px;
           background: var(--fc-background);
@@ -511,7 +511,7 @@
             // 16px is the callout's default bottom padding. The CTAs are 24px
             // tall by default, and the steps are 8px tall. So we need to offset
             // the steps by half the difference in order to center them.
-            bottom: calc(var(--callout-padding, var(--dimension-20)) + (var(--cta-height, var(--button-min-height-small, 24px)) / 2) - 4px);
+            bottom: calc(var(--callout-padding, 20px) + (var(--cta-height, var(--button-min-height-small, 24px)) / 2) - 4px);
             padding-block: 0;
 
             .indicator {
@@ -781,10 +781,21 @@
           margin-block: 0;
           width: 100%;
           color: var(--fc-button-background);
+
+          @media (-moz-pref('browser.nova.enabled')) {
+            color: var(--fc-button-background-active);
+          }
+        }
+
+        .action-checklist-progress-bar-container {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-block-end: 16px;
         }
 
         .action-checklist-progress-bar {
-          width: 100%;
+          flex: 1;
           height: 6px;
           padding-block: 0;
           background-color: color-mix(in srgb, var(--fc-color) 25%, transparent);
@@ -793,7 +804,6 @@
           border-radius: 8px;
           display: flex;
           justify-content: flex-start;
-          margin-block-end: 16px;
 
           .indicator {
             width: var(--action-checklist-progress-bar-progress);
@@ -804,6 +814,14 @@
             opacity: 1;
             transition: var(--progress-bar-transition);
           }
+        }
+
+        .action-checklist-progress-text {
+          min-width: 30px;
+          text-align: end;
+          font-size: 0.875em;
+          font-weight: 600;
+          color: var(--fc-color);
         }
 
         .action-checklist-items {
@@ -879,6 +897,26 @@
             border: none;
             border-radius: 4px;
             padding-block: 8px;
+          }
+        }
+
+        .action-checklist-complete-button {
+          background-color: var(--fc-accent-color);
+          color: var(--fc-primary-button-color);
+          border: none;
+          border-radius: 4px;
+          padding-block: 8px;
+          padding-inline: 16px;
+          margin-block-start: 16px;
+          font-weight: 600;
+          cursor: pointer;
+
+          &:hover {
+            opacity: 0.9;
+          }
+
+          &:active {
+            opacity: 0.8;
           }
         }
       }

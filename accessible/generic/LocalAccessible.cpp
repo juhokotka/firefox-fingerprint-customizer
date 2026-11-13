@@ -3,77 +3,32 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "AccEvent.h"
-#include "LocalAccessible-inl.h"
-
-#include "EmbeddedObjCollector.h"
 #include "AccGroupInfo.h"
 #include "AccIterator.h"
-#include "CachedTableAccessible.h"
-#include "CssAltContent.h"
-#include "DocAccessible-inl.h"
-#include "mozilla/a11y/AccAttributes.h"
-#include "mozilla/a11y/DocAccessibleChild.h"
-#include "mozilla/a11y/Platform.h"
-#include "mozilla/FocusModel.h"
-#include "nsAccUtils.h"
-#include "nsMenuPopupFrame.h"
-#include "nsAccessibilityService.h"
 #include "ApplicationAccessible.h"
-#include "mozilla/dom/ContentList.h"
-#include "nsGenericHTMLElement.h"
-#include "NotificationController.h"
-#include "nsEventShell.h"
-#include "nsTextEquivUtils.h"
+#include "CachedTableAccessible.h"
+#include "DocAccessible-inl.h"
+#include "EmbeddedObjCollector.h"
 #include "EventTree.h"
+#include "HTMLElementAccessibles.h"
+#include "HTMLSelectAccessible.h"
+#include "HTMLTableAccessible.h"
+#include "ImageAccessible.h"
+#include "LocalAccessible-inl.h"
+#include "NotificationController.h"
 #include "OuterDocAccessible.h"
 #include "Pivot.h"
 #include "Relation.h"
-#include "mozilla/a11y/Role.h"
 #include "RootAccessible.h"
 #include "States.h"
 #include "TextLeafAccessible.h"
 #include "TextLeafRange.h"
 #include "TextRange.h"
-#include "HTMLElementAccessibles.h"
-#include "HTMLSelectAccessible.h"
-#include "HTMLTableAccessible.h"
-#include "ImageAccessible.h"
-
-#include "nsComputedDOMStyle.h"
-#include "nsGkAtoms.h"
-#include "nsIDOMXULButtonElement.h"
-#include "nsIDOMXULSelectCntrlEl.h"
-#include "nsIDOMXULSelectCntrlItemEl.h"
-#include "nsIMutationObserver.h"
-
-#include "mozilla/dom/Document.h"
-#include "mozilla/dom/HTMLAnchorElement.h"
-#include "mozilla/dom/HTMLFormElement.h"
-#include "mozilla/dom/HTMLHeadingElement.h"
-#include "mozilla/dom/HTMLInputElement.h"
-#include "mozilla/dom/NodeList.h"
-#include "mozilla/dom/PopoverData.h"
-#include "mozilla/gfx/Matrix.h"
-#include "nsIContent.h"
-#include "nsIFormControl.h"
-
-#include "nsDisplayList.h"
-#include "nsLayoutUtils.h"
-#include "nsPresContext.h"
-#include "nsIFrame.h"
-#include "nsTextFrame.h"
-#include "nsIDocShellTreeItem.h"
-#include "nsStyleStructInlines.h"
-#include "nsFocusManager.h"
-
-#include "nsString.h"
-#include "nsAtom.h"
-#include "nsContainerFrame.h"
-
 #include "mozilla/Assertions.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/FocusModel.h"
 #include "mozilla/PerfStats.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/ProfilerMarkers.h"
@@ -81,11 +36,50 @@
 #include "mozilla/StaticPrefs_accessibility.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_ui.h"
+#include "mozilla/a11y/AccAttributes.h"
+#include "mozilla/a11y/DocAccessibleChild.h"
+#include "mozilla/a11y/Platform.h"
+#include "mozilla/a11y/Role.h"
+#include "mozilla/dom/ContentList.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLAnchorElement.h"
+#include "mozilla/dom/HTMLFormElement.h"
+#include "mozilla/dom/HTMLHeadingElement.h"
+#include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLLabelElement.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
+#include "mozilla/dom/NodeList.h"
+#include "mozilla/dom/PopoverData.h"
 #include "mozilla/dom/TreeWalker.h"
 #include "mozilla/dom/UserActivation.h"
+#include "mozilla/gfx/Matrix.h"
+#include "nsAccUtils.h"
+#include "nsAccessibilityService.h"
+#include "nsAtom.h"
+#include "nsComputedDOMStyle.h"
+#include "nsContainerFrame.h"
+#include "nsCoreUtils.h"
+#include "nsDisplayList.h"
+#include "nsEventShell.h"
+#include "nsFocusManager.h"
+#include "nsGenericHTMLElement.h"
+#include "nsGkAtoms.h"
+#include "nsIContent.h"
+#include "nsIDOMXULButtonElement.h"
+#include "nsIDOMXULSelectCntrlEl.h"
+#include "nsIDOMXULSelectCntrlItemEl.h"
+#include "nsIDocShellTreeItem.h"
+#include "nsIFormControl.h"
+#include "nsIFrame.h"
+#include "nsIMutationObserver.h"
+#include "nsLayoutUtils.h"
+#include "nsMenuPopupFrame.h"
+#include "nsPresContext.h"
+#include "nsString.h"
+#include "nsStyleStructInlines.h"
+#include "nsTextEquivUtils.h"
+#include "nsTextFrame.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -153,12 +147,12 @@ ENameValueFlag LocalAccessible::Name(nsString& aName) const {
     return eNameFromTooltip;
   }
 
-  if (auto cssAlt = CssAltContent(mContent)) {
+  if (Maybe<nsString> cssAlt = nsCoreUtils::GetCssAltContent(mContent)) {
     // This covers two cases:
     // 1. The CSS content property replaces the content of an element with an
     // image plus alt text.
     // 2. Alt text is provided for a pseudo-element image.
-    cssAlt.AppendToString(aName);
+    aName.Append(*cssAlt);
     return eNameOK;
   }
 
@@ -599,9 +593,10 @@ LocalAccessible* LocalAccessible::LocalChildAtPoint(
   return accessible;
 }
 
-nsIFrame* LocalAccessible::FindNearestAccessibleAncestorFrame() {
+nsIFrame* LocalAccessible::FindNearestAccessibleAncestorFrame() const {
   nsIFrame* frame = GetFrame();
-  if (frame->StyleDisplay()->mPosition == StylePositionProperty::Fixed &&
+  if (frame &&
+      frame->StyleDisplay()->mPosition == StylePositionProperty::Fixed &&
       nsLayoutUtils::IsReallyFixedPos(frame)) {
     return mDoc->PresShellPtr()->GetRootFrame();
   }
@@ -623,8 +618,8 @@ nsIFrame* LocalAccessible::FindNearestAccessibleAncestorFrame() {
     ancestor = ancestor->LocalParent();
   }
 
-  MOZ_ASSERT_UNREACHABLE("No ancestor with frame?");
-  return nsLayoutUtils::GetContainingBlockForClientRect(frame);
+  return frame ? nsLayoutUtils::GetContainingBlockForClientRect(frame)
+               : nullptr;
 }
 
 nsRect LocalAccessible::ParentRelativeBounds() {
@@ -889,12 +884,16 @@ nsresult LocalAccessible::HandleAccEvent(AccEvent* aEvent) {
 
   if (IPCAccessibilityActive() && Document()) {
     DocAccessibleChild* ipcDoc = mDoc->IPCDoc();
-    // If ipcDoc is null, we can't fire the event to the client. We shouldn't
-    // have fired the event in the first place, since this makes events
-    // inconsistent for local and remote documents. To avoid this, don't call
-    // nsEventShell::FireEvent on a DocAccessible for which
-    // HasLoadState(eTreeConstructed) is false.
-    MOZ_ASSERT(ipcDoc);
+    // If ipcDoc is null, we can't fire the event to the client in the parent
+    // process. This could happen for two reasons:
+    // 1. There is no client in the parent process, so we didn't create a
+    // DocAccessibleChild.
+    // 2. A DocAccessibleChild would have been created, but we incorrectly fired
+    // an event before that happened. In this case, we shouldn't have fired the
+    // event in the first place, since this makes events inconsistent for local
+    // and remote documents. To avoid this, don't call nsEventShell::FireEvent
+    // on a DocAccessible for which HasLoadState(eTreeConstructed) is false.
+    MOZ_ASSERT(mDoc->HasLoadState(DocAccessible::eTreeConstructed));
     if (ipcDoc) {
       uint64_t id = aEvent->GetAccessible()->ID();
 
@@ -1369,8 +1368,6 @@ void LocalAccessible::DOMAttributeChanged(int32_t aNameSpaceID,
   // DOM attribute & resulting layout to actually change. Otherwise,
   // assistive technology will retrieve the wrong state/value/selection info.
 
-  CssAltContent::HandleAttributeChange(mContent, aNameSpaceID, aAttribute);
-
   // XXX todo
   // We still need to handle special HTML cases here
   // For example, if an <img>'s usemap attribute is modified
@@ -1592,6 +1589,32 @@ void LocalAccessible::DOMAttributeChanged(int32_t aNameSpaceID,
   // ARIA or XUL selection
   if ((mContent->IsXULElement() && aAttribute == nsGkAtoms::selected) ||
       aAttribute == nsGkAtoms::aria_selected) {
+    if (aAttribute == nsGkAtoms::aria_selected) {
+      const nsRoleMapEntry* roleMapEntry = ARIARoleMap();
+      if (!roleMapEntry && IsHTMLTableCell() && Role() == roles::GRID_CELL) {
+        // This is a <td> inside a role="grid"; see the similar case in
+        // ApplyARIAState.
+        roleMapEntry = aria::GetRoleMap(nsGkAtoms::gridcell);
+      }
+      if (roleMapEntry && roleMapEntry->IsSelectableIfDefined()) {
+        // For these roles, whether aria-selected is "defined" (present and
+        // neither empty nor "undefined") determines the selectable state.
+        // For other selectable roles (option, tab, treeitem, etc.), the
+        // selectable state doesn't depend on aria-selected's definedness, so
+        // don't fire this there.
+        const bool wasDefined =
+            aOldValue && !aOldValue->IsEmptyString() &&
+            !aOldValue->Equals(nsGkAtoms::_undefined, eCaseMatters);
+        const bool isDefined =
+            nsAccUtils::HasDefinedARIAToken(elm, nsGkAtoms::aria_selected);
+        if (wasDefined != isDefined) {
+          auto stateChangeEvent = MakeRefPtr<AccStateChangeEvent>(
+              this, states::SELECTABLE, isDefined);
+          mDoc->FireDelayedEvent(stateChangeEvent);
+        }
+      }
+    }
+
     LocalAccessible* widget = nsAccUtils::GetSelectableContainer(this, State());
     if (widget) {
       AccSelChangeEvent::SelChangeType selChangeType;
@@ -1878,7 +1901,7 @@ double LocalAccessible::CurValue() const {
   return checkValue;
 }
 
-bool LocalAccessible::SetCurValue(double aValue) { return false; }
+bool LocalAccessible::SetCurValue(double /*aValue*/) { return false; }
 
 role LocalAccessible::NativeRole() const { return roles::NOTHING; }
 
@@ -2584,6 +2607,9 @@ Relation LocalAccessible::RelationByType(RelationType aType) const {
     }
 
     case RelationType::ERRORMSG:
+      if (!(ExplicitState() & states::INVALID)) {
+        return Relation();
+      }
       return Relation(new AssociatedElementsIterator(
           mDoc, mContent, nsGkAtoms::aria_errormessage));
 
@@ -2614,7 +2640,7 @@ void LocalAccessible::DoCommand(uint32_t aActionIndex) const {
       }));
 }
 
-void LocalAccessible::DispatchClickEvent(uint32_t aActionIndex) const {
+void LocalAccessible::DispatchClickEvent(uint32_t /*aActionIndex*/) const {
   if (IsDefunct()) return;
   MOZ_ASSERT(mContent);
 
@@ -2910,6 +2936,12 @@ void LocalAccessible::BindToParent(LocalAccessible* aParent,
   } else {
     mContextFlags &= ~eHasDescriptionDependent;
   }
+  if (mParent->HasValueDependent() ||
+      nsAccUtils::ShouldFireValueChangeForDescendantChanges(mParent)) {
+    mContextFlags |= eHasValueDependent;
+  } else {
+    mContextFlags &= ~eHasValueDependent;
+  }
 
   // Add name/description dependent flags for dependent content once
   // a name/description provider is added to doc.
@@ -2974,7 +3006,7 @@ void LocalAccessible::UnbindFromParent() {
 
   delete mGroupInfo;
   mGroupInfo = nullptr;
-  mContextFlags &= ~eHasNameDependent & ~eInsideAlert;
+  mContextFlags &= ~eHasNameDependent & ~eHasValueDependent & ~eInsideAlert;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -3608,10 +3640,8 @@ already_AddRefed<AccAttributes> LocalAccessible::BundleFieldsForCache(
       fields->SetAttribute(CacheKey::Tooltip, DeleteEntry());
     }
 
-    nsString cssAltContent;
-    if (auto cssAlt = CssAltContent(mContent)) {
-      cssAlt.AppendToString(cssAltContent);
-      fields->SetAttribute(CacheKey::CssAltContent, std::move(cssAltContent));
+    if (Maybe<nsString> cssAlt = nsCoreUtils::GetCssAltContent(mContent)) {
+      fields->SetAttribute(CacheKey::CssAltContent, std::move(*cssAlt));
     } else if (IsUpdatePush(CacheDomain::NameAndDescription)) {
       fields->SetAttribute(CacheKey::CssAltContent, DeleteEntry());
     }
@@ -4773,14 +4803,14 @@ void LocalAccessible::StaticAsserts() const {
 }
 
 TableAccessible* LocalAccessible::AsTable() {
-  if (IsTable() && !mContent->IsXULElement()) {
+  if (IsTable() && !IsCustomTable()) {
     return CachedTableAccessible::GetFrom(this);
   }
   return nullptr;
 }
 
 TableCellAccessible* LocalAccessible::AsTableCell() {
-  if (IsTableCell() && !mContent->IsXULElement()) {
+  if (IsTableCell()) {
     return CachedTableCellAccessible::GetFrom(this);
   }
   return nullptr;

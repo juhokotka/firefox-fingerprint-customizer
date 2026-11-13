@@ -24,15 +24,15 @@
 #include "Http2WebTransportSession.h"
 #include "LoadContextInfo.h"
 #include "mozilla/EndianUtils.h"
-#include "mozilla/glean/NetwerkMetrics.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/StaticPrefs_network.h"
+#include "mozilla/glean/NetwerkMetrics.h"
 #include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
 #include "nsHttp.h"
 #include "nsHttpConnection.h"
-#include "nsHttpHandler.h"
 #include "nsHttpConnectionMgr.h"
+#include "nsHttpHandler.h"
 #include "nsIRequestContext.h"
 #include "nsISupportsPriority.h"
 #include "nsITLSSocketControl.h"
@@ -278,7 +278,10 @@ void Http2Session::ShutdownStream(Http2StreamBase* aStream, nsresult aReason) {
   } else if (!mCleanShutdown && PossibleZeroRTTRetryError(aReason)) {
     CloseStream(aStream, aReason);
   } else {
-    CloseStream(aStream, NS_ERROR_ABORT);
+    // The connection went away without a clean GOAWAY-based shutdown, but
+    // this stream never received any response data, so it is safe to retry
+    // it on a new connection.
+    CloseStream(aStream, NS_ERROR_NET_UNCLEAN_SHUTDOWN);
   }
 }
 
@@ -1400,6 +1403,8 @@ void Http2Session::CleanupStream(Http2StreamBase* aStream, nsresult aResult,
     LOG3(("Http2Session::CleanupStream failed to verify stream\n"));
     return;
   }
+
+  RefPtr<Http2Session> self(this);
 
   // don't reset a stream that has recevied a fin or rst
   if (!aStream->RecvdFin() && !aStream->RecvdReset() && aStream->StreamID() &&
@@ -3942,7 +3947,14 @@ nsresult Http2Session::ConfirmTLSProfile() {
     return SessionError(INADEQUATE_SECURITY);
   }
 
-  if (kea != ssl_kea_dh && kea != ssl_kea_ecdh && kea != ssl_kea_ecdh_hybrid) {
+  if (kea == ssl_kea_kem && !StaticPrefs::security_tls_enable_mlkem1024()) {
+    LOG3(("Http2Session::ConfirmTLSProfile %p FAILED due to disabled KEA %d\n",
+          this, kea));
+    return SessionError(INADEQUATE_SECURITY);
+  }
+
+  if (kea != ssl_kea_dh && kea != ssl_kea_ecdh && kea != ssl_kea_ecdh_hybrid &&
+      kea != ssl_kea_kem) {
     LOG3(("Http2Session::ConfirmTLSProfile %p FAILED due to invalid KEA %d\n",
           this, kea));
     return SessionError(INADEQUATE_SECURITY);

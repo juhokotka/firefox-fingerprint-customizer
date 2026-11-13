@@ -2,63 +2,53 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <aclapi.h>
+#include <direct.h>
+#include <fileapi.h>
+#include <io.h>
+#include <mbstring.h>
+#include <shlwapi.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <windows.h>
+
+#include "SpecialSystemDirectory.h"
+#include "WinUtils.h"
+#include "mozIDOMWindow.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/FilePreferences.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Mutex.h"
 #include "mozilla/ProfilerLabels.h"
+#include "mozilla/ShellHeaderOnlyUtils.h"
 #include "mozilla/TextUtils.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/Utf8.h"
+#include "mozilla/WidgetUtils.h"
 #include "mozilla/WinHeaderOnlyUtils.h"
-
 #include "nsCOMPtr.h"
-
+#include "nsHashKeys.h"
+#include "nsIDirectoryEnumerator.h"
+#include "nsIWidget.h"
+#include "nsIWindowMediator.h"
 #include "nsLocalFile.h"
 #include "nsLocalFileCommon.h"
-#include "nsIDirectoryEnumerator.h"
 #include "nsNativeCharsetUtils.h"
-
-#include "nsSimpleEnumerator.h"
-#include "prio.h"
-#include "private/pprio.h"  // To get PR_ImportFile
-#include "nsHashKeys.h"
-
-#include "nsString.h"
+#include "nsPIDOMWindow.h"
 #include "nsReadableUtils.h"
-
-#include <direct.h>
-#include <fileapi.h>
-#include <windows.h>
-#include <shlwapi.h>
-#include <aclapi.h>
-
-#include "shellapi.h"
-#include "shlguid.h"
-
-#include <io.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <mbstring.h>
-
-#include "prproces.h"
-#include "prlink.h"
-
-#include "mozilla/FilePreferences.h"
-#include "mozilla/Mutex.h"
-#include "SpecialSystemDirectory.h"
-
+#include "nsSimpleEnumerator.h"
+#include "nsString.h"
+#include "nsThreadUtils.h"
 #include "nsTraceRefcnt.h"
 #include "nsXPCOMCIDInternal.h"
-#include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
-#include "nsIWindowMediator.h"
-
-#include "mozIDOMWindow.h"
-#include "nsPIDOMWindow.h"
-#include "nsIWidget.h"
-#include "mozilla/ShellHeaderOnlyUtils.h"
-#include "mozilla/WidgetUtils.h"
-#include "WinUtils.h"
+#include "prio.h"
+#include "private/pprio.h"  // To get PR_ImportFile
+#include "prlink.h"
+#include "prproces.h"
+#include "shellapi.h"
+#include "shlguid.h"
 
 using namespace mozilla;
 using mozilla::FilePreferences::kDevicePathSpecifier;
@@ -770,7 +760,7 @@ static nsresult ReadDir(nsDir* aDir, PRDirFlags aFlags, nsString& aName) {
     return NS_ERROR_INVALID_ARG;
   }
 
-  while (1) {
+  while (true) {
     BOOL rv;
     if (aDir->firstEntry) {
       aDir->firstEntry = false;
@@ -3059,15 +3049,9 @@ nsresult nsLocalFile::LookupExtensionIn(const char* const* aExtensionsArray,
   // Get extension.
   int32_t dotIdx = path.RFindChar(char16_t('.'));
   if (dotIdx != kNotFound) {
-    // Convert extension to lower case.
-    char16_t* p = path.BeginWriting();
-    for (p += dotIdx + 1; *p; ++p) {
-      *p += (*p >= L'A' && *p <= L'Z') ? 'a' - 'A' : 0;
-    }
-
     nsDependentSubstring ext = Substring(path, dotIdx);
     for (size_t i = 0; i < aArrayLength; ++i) {
-      if (ext.EqualsASCII(aExtensionsArray[i])) {
+      if (ext.EqualsIgnoreCase(aExtensionsArray[i])) {
         // Found a match.  Set result and quit.
         *aResult = true;
         break;
@@ -3731,7 +3715,7 @@ NS_IMPL_ISUPPORTS_INHERITED(nsDriveEnumerator, nsSimpleEnumerator,
 nsDriveEnumerator::nsDriveEnumerator(bool aUseDOSDevicePathSyntax)
     : mUseDOSDevicePathSyntax(aUseDOSDevicePathSyntax) {}
 
-nsDriveEnumerator::~nsDriveEnumerator() {}
+nsDriveEnumerator::~nsDriveEnumerator() = default;
 
 nsresult nsDriveEnumerator::Init() {
   /* If the length passed to GetLogicalDriveStrings is smaller

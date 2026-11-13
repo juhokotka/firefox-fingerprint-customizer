@@ -9,6 +9,7 @@
  *          openBrowserActionPanel
  *          closeBrowserAction closePageAction
  *          promisePopupShown promisePopupHidden promisePopupNotificationShown
+ *          dismissTabHideDoorhanger
  *          toggleBookmarksToolbar
  *          openContextMenu closeContextMenu promiseContextMenuClosed
  *          openContextMenuInSidebar openContextMenuInPopup
@@ -234,6 +235,22 @@ function promisePopupHidden(popup) {
 }
 
 /**
+ * Waits for the doorhanger that tabs.hide() shows to inform the user that an
+ * extension is hiding tabs, and dismisses it. Tests that hide tabs need to do
+ * this, otherwise the doorhanger stays open for the rest of the test file.
+ */
+async function dismissTabHideDoorhanger() {
+  const { ExtensionControlledPopup } = ChromeUtils.importESModule(
+    "resource:///modules/ExtensionControlledPopup.sys.mjs"
+  );
+  let panel = ExtensionControlledPopup._getAndMaybeCreatePanel(document);
+  await promisePopupShown(panel);
+  let hidden = promisePopupHidden(panel);
+  panel.hidePopup();
+  await hidden;
+}
+
+/**
  * Wait for the given PopupNotification to display
  *
  * @param {string} name
@@ -249,6 +266,14 @@ function promisePopupNotificationShown(name, win = window) {
     function popupshown() {
       let notification = win.PopupNotifications.getNotification(name);
       if (!notification) {
+        return;
+      }
+      // Don't use PopupNotifications.isPanelOpen here: it also returns true
+      // while the panel is still in the "showing" state, in which case the
+      // popup frame isn't open yet and its contents aren't focusable.
+      let panelState = win.PopupNotifications.panel.state;
+      if (panelState != "open") {
+        info(`Ignoring popupshown for ${name}, panel state: ${panelState}`);
         return;
       }
 
@@ -507,7 +532,7 @@ async function openContextMenuInPopup(
   );
   await BrowserTestUtils.synthesizeMouseAtCenter(
     selector,
-    { type: "mousedown", button: 2 },
+    { button: 2 },
     browser
   );
   await BrowserTestUtils.synthesizeMouseAtCenter(
@@ -557,7 +582,7 @@ async function openContextMenuInSidebar(selector = "body") {
   info("Opening context menu in sidebarAction panel");
   await BrowserTestUtils.synthesizeMouseAtCenter(
     selector,
-    { type: "mousedown", button: 2 },
+    { button: 2 },
     browser
   );
   await BrowserTestUtils.synthesizeMouseAtCenter(
@@ -599,7 +624,7 @@ async function openContextMenu(selector = "#img1", win = window) {
   );
   await BrowserTestUtils.synthesizeMouseAtCenter(
     selector,
-    { type: "mousedown", button: 2 },
+    { button: 2 },
     win.gBrowser.selectedBrowser
   );
   await BrowserTestUtils.synthesizeMouseAtCenter(

@@ -51,6 +51,7 @@ const backgroundtaskPhases = {
         "@mozilla.org/categorymanager;1",
         "@mozilla.org/chrome/chrome-registry;1",
         "@mozilla.org/cookieService;1",
+        "@mozilla.org/cspservice;1",
         "@mozilla.org/docloaderservice;1",
         "@mozilla.org/embedcomp/window-watcher;1",
         "@mozilla.org/enterprisepolicies;1",
@@ -58,6 +59,7 @@ const backgroundtaskPhases = {
         "@mozilla.org/intl/stringbundle;1",
         "@mozilla.org/layout/content-policy;1",
         "@mozilla.org/memory-reporter-manager;1",
+        "@mozilla.org/mixedcontentblocker;1",
         "@mozilla.org/network/captive-portal-service;1",
         "@mozilla.org/network/dns-service;1",
         "@mozilla.org/network/oblivious-http-service;1",
@@ -70,13 +72,9 @@ const backgroundtaskPhases = {
         "@mozilla.org/network/protocol;1?name=resource",
         "@mozilla.org/network/socket-transport-service;1",
         "@mozilla.org/network/stream-transport-service;1",
-        "@mozilla.org/network/url-parser;1?auth=maybe",
-        "@mozilla.org/network/url-parser;1?auth=no",
-        "@mozilla.org/network/url-parser;1?auth=yes",
         "@mozilla.org/observer-service;1",
         "@mozilla.org/power/powermanagerservice;1",
         "@mozilla.org/preferences-service;1",
-        "@mozilla.org/process/environment;1",
         "@mozilla.org/storage/service;1",
         "@mozilla.org/thirdpartyutil;1",
         "@mozilla.org/toolkit/app-startup;1",
@@ -104,7 +102,7 @@ const backgroundtaskPhases = {
         // We have a profile marker for this, even though it failed to load!
         "resource:///modules/backgroundtasks/BackgroundTask_wait.sys.mjs",
 
-        "resource://gre/modules/ConsoleAPIStorage.sys.mjs",
+        "moz-src:///dom/console/ConsoleAPIStorage.sys.mjs",
         "resource://gre/modules/Timer.sys.mjs",
 
         // We have a profile marker for this, even though it failed to load!
@@ -112,7 +110,11 @@ const backgroundtaskPhases = {
 
         "resource://testing-common/backgroundtasks/BackgroundTask_wait.sys.mjs",
       ],
-      services: ["@mozilla.org/consoleAPI-storage;1"],
+      services: [
+        "@mozilla.org/consoleAPI-storage;1",
+        "@mozilla.org/network/protocol;1?name=moz-src",
+        "@mozilla.org/process/environment;1",
+      ],
     },
   },
   AfterAwaitRunBackgroundTask: {
@@ -239,7 +241,9 @@ add_task(async function test_xpcom_graph_wait() {
       markerName == "ChromeUtils.importESModule" ||
       markerName == "ChromeUtils.importESModule static import"
     ) {
-      let module = markerData.name;
+      // The Text marker's "name" field is a unique string, so the payload
+      // holds an index into the thread's string table.
+      let module = profile.stringTable[markerData.name];
       if (!markersForAllPhases.modules.includes(module)) {
         markersForAllPhases.modules.push(module);
         markersForCurrentPhase.modules.push(module);
@@ -257,7 +261,9 @@ add_task(async function test_xpcom_graph_wait() {
       // between `--backgroundtask` and `xpcshell`, but that's not an issue
       // right at this moment.  It's worth noting that one CID can (and
       // sometimes does) correspond to more than one contract ID.
-      let cid = markerData.name;
+      // The Text marker's "name" field is a unique string, so the payload
+      // holds an index into the thread's string table.
+      let cid = profile.stringTable[markerData.name];
 
       if (!markersForAllPhases.services.includes(cid)) {
         markersForAllPhases.services.push(cid);

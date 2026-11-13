@@ -5,21 +5,21 @@
 #ifndef GFX_WEBRENDERTYPES_H
 #define GFX_WEBRENDERTYPES_H
 
+#include <tuple>
+
 #include "ImageTypes.h"
-#include "mozilla/webrender/webrender_ffi.h"
+#include "Units.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/gfx/Matrix.h"
-#include "mozilla/gfx/Types.h"
-#include "mozilla/gfx/Tools.h"
-#include "mozilla/gfx/Rect.h"
-#include "mozilla/layers/LayersTypes.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
 #include "mozilla/ScrollGeneration.h"
-#include "Units.h"
+#include "mozilla/gfx/Matrix.h"
+#include "mozilla/gfx/Rect.h"
+#include "mozilla/gfx/Tools.h"
+#include "mozilla/gfx/Types.h"
+#include "mozilla/layers/LayersTypes.h"
+#include "mozilla/webrender/webrender_ffi.h"
 #include "nsIWidgetListener.h"
-
-#include <tuple>
 
 namespace mozilla {
 
@@ -485,40 +485,6 @@ static inline wr::BorderRadius ToBorderRadius(const nsRectCornerRadii& aRadii,
   return br;
 }
 
-static inline wr::ComplexClipRegion ToComplexClipRegion(
-    const nsRect& aRect, const nsRectCornerRadii& aRadii,
-    int32_t aAppUnitsPerDevPixel) {
-  wr::ComplexClipRegion ret;
-  ret.rect =
-      ToLayoutRect(LayoutDeviceRect::FromAppUnits(aRect, aAppUnitsPerDevPixel));
-  ret.radii = ToBorderRadius(aRadii, aAppUnitsPerDevPixel);
-  ret.mode = ClipMode::Clip;
-  return ret;
-}
-
-static inline wr::ComplexClipRegion ToComplexClipRegion(
-    const gfx::RoundedRect& rect) {
-  wr::ComplexClipRegion ret;
-  ret.rect = ToLayoutRect(rect.rect);
-  ret.radii = ToBorderRadius(rect.corners);
-  ret.mode = wr::ClipMode::Clip;
-  return ret;
-}
-
-static inline wr::ComplexClipRegion SimpleRadii(const wr::LayoutRect& aRect,
-                                                float aRadii) {
-  wr::ComplexClipRegion ret;
-  wr::LayoutSize radii{aRadii, aRadii};
-  ret.rect = aRect;
-  ret.radii = EmptyBorderRadius();
-  ret.radii.top_left = radii;
-  ret.radii.top_right = radii;
-  ret.radii.bottom_left = radii;
-  ret.radii.bottom_right = radii;
-  ret.mode = wr::ClipMode::Clip;
-  return ret;
-}
-
 static inline wr::DeviceIntSideOffsets ToDeviceIntSideOffsets(int32_t top,
                                                               int32_t right,
                                                               int32_t bottom,
@@ -548,6 +514,18 @@ static inline wr::LayoutSideOffsets ToLayoutSideOffsets(
                              aMargin.left);
 }
 
+static inline wr::LayoutSideOffsets ToLayoutSideOffsets(
+    const nsMargin& aMargin, int32_t aAppUnitsPerDevPixel) {
+  return ToLayoutSideOffsets(aMargin.top / float(aAppUnitsPerDevPixel),
+                             aMargin.right / float(aAppUnitsPerDevPixel),
+                             aMargin.bottom / float(aAppUnitsPerDevPixel),
+                             aMargin.left / float(aAppUnitsPerDevPixel));
+}
+
+static inline wr::LayoutSideOffsets EmptyLayoutSideOffsets() {
+  return ToLayoutSideOffsets(0.0f, 0.0f, 0.0f, 0.0f);
+}
+
 static inline wr::LayoutSideOffsets ToBorderWidths(float top, float right,
                                                    float bottom, float left) {
   return ToLayoutSideOffsets(top, right, bottom, left);
@@ -558,6 +536,55 @@ static inline wr::LayoutSideOffsets ToBorderWidths(const gfx::Margin& aMargin) {
 }
 
 wr::RepeatMode ToRepeatMode(StyleBorderImageRepeatKeyword);
+
+static inline wr::ComplexClipRegion SimpleRadii(const wr::LayoutRect& aRect,
+                                                float aRadii) {
+  wr::ComplexClipRegion ret;
+  wr::LayoutSize radii{aRadii, aRadii};
+  ret.rect = aRect;
+  ret.radii = EmptyBorderRadius();
+  ret.radii.top_left = radii;
+  ret.radii.top_right = radii;
+  ret.radii.bottom_left = radii;
+  ret.radii.bottom_right = radii;
+  ret.inset = EmptyLayoutSideOffsets();
+  ret.mode = wr::ClipMode::Clip;
+  return ret;
+}
+
+static inline wr::ComplexClipRegion ToComplexClipRegion(
+    const gfx::RoundedRect& rect) {
+  wr::ComplexClipRegion ret;
+  ret.rect = ToLayoutRect(rect.rect);
+  ret.radii = ToBorderRadius(rect.corners);
+  ret.inset = EmptyLayoutSideOffsets();
+  ret.mode = wr::ClipMode::Clip;
+  return ret;
+}
+
+static inline wr::ComplexClipRegion ToComplexClipRegion(
+    const nsRect& aRect, const nsRectCornerRadii& aRadii,
+    int32_t aAppUnitsPerDevPixel) {
+  wr::ComplexClipRegion ret;
+  ret.rect =
+      ToLayoutRect(LayoutDeviceRect::FromAppUnits(aRect, aAppUnitsPerDevPixel));
+  ret.radii = ToBorderRadius(aRadii, aAppUnitsPerDevPixel);
+  ret.inset = EmptyLayoutSideOffsets();
+  ret.mode = ClipMode::Clip;
+  return ret;
+}
+
+static inline wr::ComplexClipRegion ToComplexClipRegion(
+    const nsRect& aRect, const nsRectCornerRadii& aRadii,
+    const nsMargin& aInset, int32_t aAppUnitsPerDevPixel) {
+  wr::ComplexClipRegion ret;
+  ret.rect =
+      ToLayoutRect(LayoutDeviceRect::FromAppUnits(aRect, aAppUnitsPerDevPixel));
+  ret.radii = ToBorderRadius(aRadii, aAppUnitsPerDevPixel);
+  ret.inset = ToLayoutSideOffsets(aInset, aAppUnitsPerDevPixel);
+  ret.mode = ClipMode::Clip;
+  return ret;
+}
 
 template <class S, class T>
 static inline wr::WrTransformProperty ToWrTransformProperty(
@@ -602,7 +629,7 @@ static inline wr::WrExternalImage RawDataToWrExternalImage(const uint8_t* aBuff,
 }
 
 static inline wr::WrExternalImage NativeTextureToWrExternalImage(
-    uint32_t aHandle, float u0, float v0, float u1, float v1) {
+    uint64_t aHandle, float u0, float v0, float u1, float v1) {
   return wr::WrExternalImage{wr::WrExternalImageType::NativeTexture,
                              aHandle,
                              u0,
@@ -680,9 +707,11 @@ struct Vec<uint8_t> final {
 
   size_t Capacity() { return inner.capacity; }
 
-  Range<uint8_t> GetRange() { return Range<uint8_t>(Data(), Length()); }
+  mozilla::Range<uint8_t> GetRange() {
+    return mozilla::Range<uint8_t>(Data(), Length());
+  }
 
-  void PushBytes(Range<uint8_t> aBytes) {
+  void PushBytes(mozilla::Range<uint8_t> aBytes) {
     wr_vec_u8_push_bytes(&inner, RangeToByteSlice(aBytes));
   }
 
@@ -748,11 +777,13 @@ struct ByteBuffer {
     }
   }
 
-  const Range<uint8_t> AsSlice() const {
-    return Range<uint8_t>(mData, mLength);
+  const mozilla::Range<uint8_t> AsSlice() const {
+    return mozilla::Range<uint8_t>(mData, mLength);
   }
 
-  Range<uint8_t> AsSlice() { return Range<uint8_t>(mData, mLength); }
+  mozilla::Range<uint8_t> AsSlice() {
+    return mozilla::Range<uint8_t>(mData, mLength);
+  }
 
   bool operator==(const ByteBuffer& other) const {
     return mLength == other.mLength && !(memcmp(mData, other.mData, mLength));
@@ -766,6 +797,9 @@ struct ByteBuffer {
 struct BuiltDisplayList {
   wr::VecU8 dl_items;
   wr::VecU8 dl_spatial_tree;
+  // Encoded delta for the items this display list's builder interned. See
+  // gfx/wr/webrender/doc/dl-builder-interning.md.
+  wr::VecU8 dl_interner_delta;
   wr::BuiltDisplayListDescriptor dl_desc;
 };
 
@@ -774,7 +808,7 @@ struct BuiltDisplayList {
 struct WrClipChainId {
   uint64_t id;
 
-  bool operator==(const WrClipChainId& other) const { return id == other.id; }
+  bool operator==(const WrClipChainId& other) const = default;
 
   static WrClipChainId Empty() {
     WrClipChainId id = {0};

@@ -4,24 +4,25 @@
 
 #include "CacheObserver.h"
 
-#include "CacheCrypto.h"
-#include "CacheStorageService.h"
-#include "CacheFileIOManager.h"
-#include "CacheIndex.h"
-#include "LoadContextInfo.h"
-#include "nsICacheStorage.h"
-#include "nsIObserverService.h"
-#include "mozilla/Services.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/TimeStamp.h"
-#include "nsServiceManagerUtils.h"
-#include "mozilla/net/NeckoCommon.h"
-#include "prsystem.h"
-#include <time.h>
 #include <math.h>
-#include "nsIUserIdleService.h"
+#include <time.h>
 
 #include <numbers>
+
+#include "CacheCrypto.h"
+#include "CacheFileIOManager.h"
+#include "CacheIndex.h"
+#include "CacheStorageService.h"
+#include "LoadContextInfo.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/Services.h"
+#include "mozilla/TimeStamp.h"
+#include "mozilla/net/NeckoCommon.h"
+#include "nsICacheStorage.h"
+#include "nsIObserverService.h"
+#include "nsIUserIdleService.h"
+#include "nsServiceManagerUtils.h"
+#include "prsystem.h"
 
 namespace mozilla::net {
 
@@ -213,9 +214,10 @@ CacheObserver::Observe(nsISupports* aSubject, const char* aTopic,
   if (!strcmp(aTopic, "profile-do-change")) {
     AttachToPreferences();
     CacheFileIOManager::Init();
-    // Load the encryption key (no-op while the feature pref is off) before
-    // OnProfile() kicks off the index read: that read runs on the cache I/O
-    // thread and consults CacheCrypto's state, which must be set first.
+    // Start the encryption key load (a no-op while the feature pref is off)
+    // before OnProfile() queues the index read and before any entry can be
+    // opened. The load completes on the cache I/O thread ahead of both,
+    // because it is queued first and at the highest priority level.
     CacheCrypto::Init();
     CacheFileIOManager::OnProfile();
     return NS_OK;

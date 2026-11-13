@@ -9,23 +9,24 @@
 #include "AutoClose.h"
 #include "HttpBaseChannel.h"
 #include "HttpTransactionShell.h"
-#include "nsHttpResponseHead.h"
-#include "nsIReplacedHttpResponse.h"
 #include "TimingStruct.h"
 #include "mozilla/AtomicBitfields.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/extensions/PStreamFilterParent.h"
 #include "mozilla/net/DocumentLoadListener.h"
+#include "nsHttpResponseHead.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsICacheEntry.h"
 #include "nsICacheEntryOpenCallback.h"
+#include "nsICacheStorage.h"
 #include "nsICachingChannel.h"
 #include "nsICorsPreflightCallback.h"
 #include "nsIDNSListener.h"
 #include "nsIEarlyHintObserver.h"
 #include "nsIHttpAuthenticableChannel.h"
 #include "nsIProtocolProxyCallback.h"
+#include "nsIReplacedHttpResponse.h"
 #include "nsIRequestContext.h"
 #include "nsIStreamListener.h"
 #include "nsIThreadRetargetableRequest.h"
@@ -95,7 +96,6 @@ class nsHttpChannel final : public HttpBaseChannel,
   // nsIHttpAuthenticableChannel. We can't use
   // NS_DECL_NSIHTTPAUTHENTICABLECHANNEL because it duplicates cancel() and
   // others.
-  NS_IMETHOD GetIsSSL(bool* aIsSSL) override;
   NS_IMETHOD GetProxyMethodIsConnect(bool* aProxyMethodIsConnect) override;
   NS_IMETHOD GetServerResponseHeader(
       nsACString& aServerResponseHeader) override;
@@ -231,6 +231,14 @@ class nsHttpChannel final : public HttpBaseChannel,
 
   [[nodiscard]] nsresult OpenCacheEntry(bool isHttps);
   [[nodiscard]] nsresult OpenCacheEntryInternal(bool isHttps);
+  // Records whether the entry the cache handed us is keyed on mCacheEntryURI or
+  // was found through a No-Vary-Search secondary lookup.
+  void NoteCacheEntryKeyMatch(nsICacheEntry* aEntry);
+  // Picks the cache storage matching the channel's current persistence flags.
+  [[nodiscard]] nsresult GetCacheStorage(nsICacheStorage** aStorage);
+  // Before writing a response, swaps out a cache entry that belongs to another
+  // URL (No-Vary-Search match) for a writable entry keyed on mCacheEntryURI.
+  [[nodiscard]] nsresult MaybeReplaceNoVarySearchAliasEntry();
   [[nodiscard]] nsresult ContinueConnect();
 
   [[nodiscard]] nsresult StartRedirectChannelToURI(nsIURI*, uint32_t);
@@ -307,6 +315,10 @@ class nsHttpChannel final : public HttpBaseChannel,
   // (including DNS prefetch and speculative connection.)
   void MaybeResolveProxyAndBeginConnect();
   void MaybeStartDNSPrefetch();
+
+  // Whether the browsing context this load is performed by, or associated
+  // with, is forced offline (BrowsingContext.forceOffline).
+  bool IsForcedOffline() const;
 
   // Based on the proxy configuration determine the strategy for resolving the
   // end server host name.
@@ -544,6 +556,10 @@ class nsHttpChannel final : public HttpBaseChannel,
   [[nodiscard]] nsresult SetupByteRangeRequest(int64_t partialLen);
   void UntieByteRangeRequest();
   void UntieValidationRequest();
+  // Drop everything OnCacheEntryCheck armed on this channel (conditional or
+  // byte-range headers, the cached response head, the cache input stream and
+  // the alt-data type) once the entry it examined is not going to be used.
+  void DiscardCacheEntryCheckState();
   [[nodiscard]] nsresult OpenCacheInputStream(nsICacheEntry* cacheEntry,
                                               bool startBuffering);
 
@@ -618,7 +634,7 @@ class nsHttpChannel final : public HttpBaseChannel,
   RefPtr<HttpTransactionShell> mTransaction;
   RefPtr<HttpTransactionShell> mTransactionSticky;
 
-  uint64_t mLogicalOffset{0};
+  Atomic<uint64_t, Relaxed> mLogicalOffset{0};
 
   // cache specific data
   nsCOMPtr<nsICacheEntry> mCacheEntry;
@@ -759,7 +775,12 @@ class nsHttpChannel final : public HttpBaseChannel,
     (uint32_t, HTTPSSVCTelemetryReported, 1),
     (uint32_t, EchConfigUsed, 1),
     (uint32_t, AuthRedirectedChannel, 1),
-    (uint32_t, StorageAccessReloadChannel, 1)
+    (uint32_t, StorageAccessReloadChannel, 1),
+    // True when the cache handed us an entry that is stored under a URL other
+    // than mCacheEntryURI, which only happens when the No-Vary-Search secondary
+    // lookup matched. Such an entry may be revalidated against, but a full
+    // response must not be written back to it.
+    (uint32_t, CacheEntryIsNoVarySearchMatch, 1)
   ))
   // clang-format on
   enum CachedContentValidity : uint8_t { Unset = 0, Invalid = 1, Valid = 2 };
@@ -865,8 +886,16 @@ class nsHttpChannel final : public HttpBaseChannel,
   // Backstop timer armed while parked in AwaitingCacheCallbacks(); if the
   // cache entry callback never arrives we give up and race to the network.
   nsCOMPtr<nsITimer> mCacheWaitTimer;
+  // Serializes OnCacheEntryCheck, which the cache may run on its I/O thread,
+  // with the main-thread backstop timeout.  OnCacheEntryCheck holds it for its
+  // whole run, so the timeout either fires before the check (which then sees
+  // mCacheWaitTimedOut and declines) or after it has completely armed the
+  // cached state (which the timeout then discards); never in between.
+  Mutex mCacheWaitLock{"nsHttpChannel::mCacheWaitLock"};
   // Set once the cache-wait backstop has fired and we've forced the network,
-  // so a late OnCacheEntryAvailable callback is ignored.
+  // so a late OnCacheEntryCheck or OnCacheEntryAvailable callback is declined.
+  // Written on the main thread under mCacheWaitLock; OnCacheEntryCheck reads
+  // it under the lock, main-thread readers need no lock.
   bool mCacheWaitTimedOut{false};
   // Tri-state to track whether anti-tracking classification happened
   // and has completed or not.

@@ -1,7 +1,4 @@
 [DEFAULT]
-skip-if = [
-  "isolated_process", # Bug 1709948
-]
 subsuite = "media"
 tags = "webvtt"
 support-files = [
@@ -71,6 +68,8 @@ skip-if = [
 ["test_webvtt_overlapping_time.html"]
 
 ["test_webvtt_positionalign.html"]
+
+["test_webvtt_process_cues_exception.html"]
 
 ["test_webvtt_resistfingerprinting.html"]
 support-files = [

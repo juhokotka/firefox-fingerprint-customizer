@@ -11,7 +11,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
   UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
   UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
 });
 
 const RESULT_MENU_COMMAND = {
@@ -81,7 +80,7 @@ export class MDNSuggestions extends SuggestProvider {
         },
       },
       highlights: {
-        title: lazy.UrlbarUtils.HIGHLIGHT.TYPED,
+        title: lazy.UrlbarShared.HIGHLIGHT.TYPED,
       },
     });
   }
@@ -130,6 +129,12 @@ export class MDNSuggestions extends SuggestProvider {
     return commands;
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   * @param {string} searchString
+   */
   onEngagement(queryContext, controller, details, searchString) {
     let { result } = details;
     switch (details.selType) {
@@ -139,24 +144,22 @@ export class MDNSuggestions extends SuggestProvider {
       // selType == "dismiss" when the user presses the dismiss key shortcut.
       case RESULT_MENU_COMMAND.DISMISS:
         lazy.QuickSuggest.dismissResult(result);
-        result.acknowledgeDismissalL10n = {
-          id: "firefox-suggest-dismissal-acknowledgment-one-mdn",
-        };
-        controller.removeResult(result);
+        controller.removeResult(result, {
+          acknowledgeDismissalL10n: {
+            id: "firefox-suggest-dismissal-acknowledgment-one-mdn",
+          },
+        });
         break;
       case RESULT_MENU_COMMAND.NOT_INTERESTED:
         lazy.UrlbarPrefs.set("suggest.mdn", false);
-        result.acknowledgeDismissalL10n = {
-          id: "firefox-suggest-dismissal-acknowledgment-all-mdn",
-        };
-        controller.removeResult(result);
+        controller.removeResult(result, {
+          acknowledgeDismissalL10n: {
+            id: "firefox-suggest-dismissal-acknowledgment-all-mdn",
+          },
+        });
         break;
       case RESULT_MENU_COMMAND.SHOW_LESS_FREQUENTLY:
-        controller.view.acknowledgeFeedback(result);
-        this.incrementShowLessFrequentlyCount();
-        if (!this.canShowLessFrequently) {
-          controller.view.invalidateResultMenuCommands();
-        }
+        this.handleShowLessFrequently(controller, result);
         lazy.UrlbarPrefs.set("mdn.minKeywordLength", searchString.length + 1);
         break;
     }

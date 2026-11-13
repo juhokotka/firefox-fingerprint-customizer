@@ -102,7 +102,7 @@ static constexpr uint32_t JitStackAlignment = 16;
 static constexpr uint32_t JitStackValueAlignment =
     JitStackAlignment / sizeof(Value);
 static const uint32_t WasmStackAlignment = 16;
-static const uint32_t WasmTrapInstructionLength = 2 * kInstrSize;
+static const uint32_t WasmTrapInstructionLength = kInstrSize;
 // See comments in wasm::GenerateFunctionPrologue.  The difference between these
 // is the size of the largest callable prologue on the platform.
 static constexpr uint32_t WasmCheckedCallEntryOffset = 0u;
@@ -164,11 +164,6 @@ class Assembler : public AssemblerShared,
   Buffer m_buffer;
   bool isFinished = false;
 
-  // Return the Instruction at a given byte offset.
-  Instruction* getInstructionAt(BufferOffset offset) {
-    return m_buffer.getInst(offset);
-  }
-
   struct RelativePatch {
     // the offset within the code buffer where the value is loaded that
     // we want to fix-up
@@ -228,9 +223,11 @@ class Assembler : public AssemblerShared,
 
   void finish() {
     MOZ_ASSERT(!isFinished);
+    flush();
     isFinished = true;
   }
 
+  void flush() { m_buffer.flushPool(); }
   void flushBuffer() { m_buffer.flushPool(); }
 
   void enterNoPool(size_t maxInst, size_t maxNewDeadlines = 0) {
@@ -242,8 +239,12 @@ class Assembler : public AssemblerShared,
   void leaveNoNops() { m_buffer.leaveNoNops(); }
 
   bool swapBuffer(wasm::Bytes& bytes);
-  // Size of the instruction stream, in bytes.
+  // Size of the instruction stream, in bytes.  Note this doesn't take
+  // into account the size of any un-flushed constant pools.
   size_t size() const;
+  // Returns the size of the buffer we can currently read, hence ignoring any
+  // un-flushed data in currently-under-construction constant pool(s).
+  size_t readableSize() const;
   // Size of the data table, in bytes.
   size_t bytesNeeded() const;
   // Size of the jump relocation table, in bytes.
@@ -262,6 +263,11 @@ class Assembler : public AssemblerShared,
                              BufferOffset dest);
 
   void processCodeLabels(uint8_t* rawCode);
+
+  // Return the Instruction at a given byte offset.
+  Instruction* getInstructionAt(BufferOffset offset) {
+    return m_buffer.getInst(offset);
+  }
 
   // Get the next usable buffer offset. Note that a constant pool may be placed
   // here before the next instruction is emitted.
@@ -339,20 +345,22 @@ class Assembler : public AssemblerShared,
   static void disassembleInstr(Instruction* instr) {}
 #endif
 
+ private:
   BufferOffset jumpChainGetNextLink(BufferOffset pos);
 
   void jumpChainPutTargetAt(BufferOffset pos, BufferOffset target_pos);
 
- private:
+ public:
+  // Branch offset for short or long branches.
   int32_t branchOffset(Label* L, OffsetSize bits,
                        BufferOffset next_instr_offset);
 
- public:
-  // Branch offset for short branches (jal, branch, etc.).
-  int32_t branchOffset(Label* L, OffsetSize bits);
-
   // Branch offset for long branches (auipc + jalr).
   int32_t branchOffset(Label* L);
+
+  // Register branch deadline for forward branches.
+  void registerBranchDeadline(Label* L, OffsetSize bits,
+                              BufferOffset next_instr_offset);
 
   void nopAlign(int m) { m_buffer.align(m); }
 
@@ -490,16 +498,14 @@ class Assembler : public AssemblerShared,
 
   // Assembler Pseudo Instructions (Tables 25.2, 25.3, RISC-V Unprivileged ISA)
   void break_(uint32_t code, bool break_as_stop = false);
+
+  // Load an immediate. A variable number of instructions is generated.
+  //
+  // In most cases the immediate is 32-bit and 2 instructions are generated. If
+  // a temporary register is available, in the worst case, 6 instructions are
+  // generated for a full 64-bit immediate. If temporay register isn't available
+  // the maximum will be 8 instructions.
   void RV_li(Register rd, int64_t imm);
-  static int RV_li_count(int64_t imm, bool is_get_temp_reg = false);
-  void GeneralLi(Register rd, int64_t imm);
-  static int GeneralLiCount(int64_t imm, bool is_get_temp_reg = false);
-  void RecursiveLiImpl(Register rd, int64_t imm);
-  void RecursiveLi(Register rd, int64_t imm);
-  static int RecursiveLiCount(int64_t imm);
-  static int RecursiveLiImplCount(int64_t imm);
-  // Returns the number of instructions required to load the immediate
-  static int li_estimate(int64_t imm, bool is_get_temp_reg = false);
 
   // Loads an immediate, always using 8 instructions, regardless of the value,
   // so that it can be modified later.
@@ -514,17 +520,26 @@ class Assembler : public AssemblerShared,
       sext_b(rd, rs);
       return;
     }
-    slli(rd, rs, xlen - 8);
-    srai(rd, rd, xlen - 8);
+    slli(rd, rs, 56);
+    srai(rd, rd, 56);
   }
+  void ZeroExtendByte(Register rd, Register rs) { zext_b(rd, rs); }
 
   void SignExtendShort(Register rd, Register rs) {
     if (HasZbbExtension()) {
       sext_h(rd, rs);
       return;
     }
-    slli(rd, rs, xlen - 16);
-    srai(rd, rd, xlen - 16);
+    slli(rd, rs, 48);
+    srai(rd, rd, 48);
+  }
+  void ZeroExtendShort(Register rd, Register rs) {
+    if (HasZbbExtension()) {
+      zext_h(rd, rs);
+      return;
+    }
+    slli(rd, rs, 48);
+    srli(rd, rd, 48);
   }
 
   void SignExtendWord(Register rd, Register rs) { sext_w(rd, rs); }

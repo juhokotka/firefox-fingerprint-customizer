@@ -657,13 +657,17 @@ function _maybeSynthesizeDragOver(left, top, aEvent, aWindow) {
  * @property {boolean} [isWidgetEventSynthesized] - Controls WidgetMouseEvent.mReason value.
  * @property {boolean} [metaKey] - If set to `true`, the Meta key will
  *     be considered pressed.
+ * @property {number} [movementX] - Raw movement delta, standing in for the delta a
+ *     platform widget reports while the native pointer is locked. Must be specified
+ *     together with `movementY`.
+ * @property {number} [movementY] - See `movementX`.
  * @property {number} [pressure=0] - Touch input pressure (0.0 -> 1.0).
  * @property {boolean} [shiftKey] - If set to `true`, the Shift key will
  *     be considered pressed.
  * @property {string} [type] - Event type to synthesize. If not specified
  *     a `mousedown` followed by a `mouseup` are performed.
  *
- * @see nsIDOMWindowUtils.sendMouseEvent
+ * @see SynthesizeMouseEventData defined in Window.webidl
  */
 
 /**
@@ -793,6 +797,8 @@ function synthesizeMouseAtPoint(
           modifiers,
           pressure: aEvent.pressure,
           inputSource,
+          movementX: aEvent.movementX,
+          movementY: aEvent.movementY,
         },
         {
           isDOMEventSynthesized,
@@ -814,6 +820,8 @@ function synthesizeMouseAtPoint(
           modifiers,
           pressure: aEvent.pressure,
           inputSource,
+          movementX: aEvent.movementX,
+          movementY: aEvent.movementY,
         },
         {
           isDOMEventSynthesized,
@@ -834,6 +842,8 @@ function synthesizeMouseAtPoint(
           modifiers,
           pressure: aEvent.pressure,
           inputSource,
+          movementX: aEvent.movementX,
+          movementY: aEvent.movementY,
         },
         {
           isDOMEventSynthesized,
@@ -878,45 +888,45 @@ function synthesizeMouseAtCenter(aTarget, aEvent, aWindow, aCallback) {
 
 /**
  * @typedef {object} TouchEventData
- * @property {boolean} [asyncEnabled] - If `true`, the event is
- * dispatched to the parent process through APZ, without being injected
- * into the OS event queue.
+ *
  * @property {string} [type] - The touch event type. If undefined,
- * "touchstart" and "touchend" will be synthesized at same point.
- * @property {number | number[]} [id] - The touch id. If you don't specify this,
- * default touch id will be used for first touch and further touch ids
- * are the values incremented from the first id.
- * @property {number | number[]} [rx] - The X radius in CSS pixels of the touch
- * @property {number | number[]} [ry] - The Y radius in CSS pixels of the touch
- * @property {number | number[]} [angle] - The angle in degrees
- * @property {number | number[]} [force] - The force of the touch
- * @property {number | number[]} [tiltX] - The X tilt of the touch
- * @property {number | number[]} [tiltY] - The Y tilt of the touch
- * @property {number | number[]} [twist] - The twist of the touch
- * @property {number | number[]} [altitudeAngle] - The altitude angle of the touch
- * @property {number | number[]} [azimuthAngle] - The azimuth angle of the touch
+ *     "touchstart" and "touchend" will be synthesized at same point.
+ * @property {number | Array<number>} [id] - The touch id. If you don't specify this,
+ *     default touch id will be used for first touch and further touch ids
+ *     are the values incremented from the first id.
+ * @property {boolean} [asyncEnabled] - If `true`, the event is
+ *     dispatched to the parent process through APZ, without being injected
+ *     into the OS event queue.
+ * @property {number | Array<number>} [rx] - The X radius in CSS pixels of the touch
+ * @property {number | Array<number>} [ry] - The Y radius in CSS pixels of the touch
+ * @property {number | Array<number>} [angle] - The angle in degrees
+ * @property {number | Array<number>} [force] - The force of the touch
+ * @property {number | Array<number>} [tiltX] - The X tilt of the touch
+ * @property {number | Array<number>} [tiltY] - The Y tilt of the touch
+ * @property {number | Array<number>} [twist] - The twist of the touch
+ * @property {number | Array<number>} [altitudeAngle] - The altitude angle of the touch
+ * @property {number | Array<number>} [azimuthAngle] - The azimuth angle of the touch
  */
 
 /**
- * Synthesize one or more touches on aTarget. aTarget can be either Element
- * or Array of Elements.  aOffsetX, aOffsetY, aEvent.id, aEvent.rx, aEvent.ry,
- * aEvent.angle, aEvent.force, aEvent.tiltX, aEvent.tiltY and aEvent.twist can
- * be either number or array of numbers (can be mixed).  If you specify array
- * to synthesize a multi-touch, you need to specify same length arrays.  If
- * you don't specify array to them, same values (or computed default values for
- * aEvent.id) are used for all touches.
+ * Synthesize one or more touches on aTarget.
  *
- * @param {Element | Element[]} aTarget - The target element which you specify
- * relative offset from its top-left.
- * @param {number | number[]} aOffsetX - The relative offset from left of aTarget.
- * @param {number | number[]} aOffsetY - The relative offset from top of aTarget.
+ * Parameters except `aWindow`, `aCallback`, `aEvent.type` and
+ * `aEvent.asyncEnabled` can be either number or an array of
+ * numbers (can be mixed). If you specify an array to synthesize
+ * a multi-touch, all arrays need the same length. If you don't
+ * specify array to them, same values are used for all touches.
+ *
+ * @param {Element | Array<Element>} aTarget - DOM element(s) to dispatch the event on.
+ * @param {number | Array<number>} aOffsetX - The relative offset from left of `aTarget`.
+ * @param {number | Array<number>} aOffsetY - The relative offset from top of `aTarget`.
  * @param {TouchEventData} aEvent - Details of the touch event to dispatch
- * @param {DOMWindow} [aWindow] - DOM window used to dispatch the event.
+ * @param {DOMWindow} [aWindow=window] - DOM window used to dispatch the event.
  * @param {Function} [aCallback] - A callback function that is invoked when the
  *                                 touch event is dispatched.
  *
- * @returns true if and only if aEvent.type is specified and default of the
- * event is prevented.
+ * @returns true if and only if aEvent.type is specified
+ *          and default of the event is prevented.
  */
 function synthesizeTouch(
   aTarget,
@@ -942,6 +952,7 @@ function synthesizeTouch(
     rectX = [rect.left];
     rectY = [rect.top];
   }
+
   const offsetX = (() => {
     if (Array.isArray(aOffsetX)) {
       let ret = [];
@@ -952,6 +963,7 @@ function synthesizeTouch(
     }
     return aOffsetX + rectX[0];
   })();
+
   const offsetY = (() => {
     if (Array.isArray(aOffsetY)) {
       let ret = [];
@@ -962,26 +974,58 @@ function synthesizeTouch(
     }
     return aOffsetY + rectY[0];
   })();
+
   return synthesizeTouchAtPoint(offsetX, offsetY, aEvent, aWindow, aCallback);
 }
 
 /**
- * Synthesize one or more touches at the points. aLeft, aTop, aEvent.id,
- * aEvent.rx, aEvent.ry, aEvent.angle, aEvent.force, aEvent.tiltX, aEvent.tiltY
- * and aEvent.twist can be either number or array of numbers (can be mixed).
- * If you specify array to synthesize a multi-touch, you need to specify same
- * length arrays.  If you don't specify array to them, same values are used for
- * all touches.
+ * Synthesize a touch event at the center of `aTarget`.
  *
- * @param {number | number[]} aLeft - The relative offset from left of aTarget.
- * @param {number | number[]} aTop - The relative offset from top of aTarget.
- * @param {TouchEventData} aEvent - Details of the touch event to dispatch
+ * Parameters except `aTarget`, `aWindow`, `aCallback`, `aEvent.type`
+ * and `aEvent.asyncEnabled` can be either number or an array of
+ * numbers (can be mixed). If you specify an array to synthesize
+ * a multi-touch, all arrays need the same length. If you don't
+ * specify array to them, same values are used for all touches.
+ *
+ * @param {Element} aTarget - DOM element to dispatch the event on.
+ * @param {TouchEventData} aEvent - Details of the touch event to dispatch.
+ * @param {DOMWindow} [aWindow=window] - DOM window used to dispatch the event.
+ * @param {Function} [aCallback] - A callback function that is invoked when the
+ *     touch event is dispatched.
+ *
+ * @returns true if and only if aEvent.type is specified
+ *          and default of the event is prevented.
+ */
+function synthesizeTouchAtCenter(aTarget, aEvent, aWindow, aCallback) {
+  const rect = aTarget.getBoundingClientRect();
+
+  return synthesizeTouchAtPoint(
+    rect.left + rect.width / 2,
+    rect.top + rect.height / 2,
+    aEvent,
+    aWindow,
+    aCallback
+  );
+}
+
+/**
+ * Synthesize one or more touches at the points.
+ *
+ * Parameters except `aWindow`, `aCallback`, `aEvent.type` and
+ * `aEvent.asyncEnabled` can be either number or an array of
+ * numbers (can be mixed). If you specify an array to synthesize
+ * a multi-touch, all arrays need the same length. If you don't
+ * specify array to them, same values are used for all touches.
+ *
+ * @param {number | Array<number>} aLeft - Floating-point value for the X offset in CSS pixels.
+ * @param {number | Array<number>} aTop - Floating-point value for the Y offset in CSS pixels.
+ * @param {TouchEventData} aEvent - Details of the touch event to dispatch.
  * @param {DOMWindow} [aWindow=window] - DOM window used to dispatch the event.
  * @param {Function} [aCallback] - A callback function that is invoked when the
  *                                 touch event is dispatched.
  *
- * @returns true if and only if aEvent.type is specified and default of the
- * event is prevented.
+ * @returns true if and only if aEvent.type is specified
+ *          and default of the event is prevented.
  */
 function synthesizeTouchAtPoint(
   aLeft,
@@ -1014,6 +1058,7 @@ function synthesizeTouchAtPoint(
       throw new Error(`${aName} is different length array`);
     }
   }
+
   const leftArray = (() => {
     if (Array.isArray(aLeft)) {
       for (let i = 0; i < aLeft.length; i++) {
@@ -1023,6 +1068,7 @@ function synthesizeTouchAtPoint(
     }
     return new Array(arrayLength).fill(_EU_roundDevicePixels(aLeft));
   })();
+
   const topArray = (() => {
     if (Array.isArray(aTop)) {
       throwExceptionIfDifferentLengthArray(aTop, "aTop");
@@ -1033,6 +1079,7 @@ function synthesizeTouchAtPoint(
     }
     return new Array(arrayLength).fill(_EU_roundDevicePixels(aTop));
   })();
+
   const idArray = (() => {
     if ("id" in aEvent && Array.isArray(aEvent.id)) {
       throwExceptionIfDifferentLengthArray(aEvent.id, "aEvent.id");
@@ -1045,6 +1092,7 @@ function synthesizeTouchAtPoint(
     }
     return ret;
   })();
+
   function getSameLengthArrayOfEventProperty(aProperty, aDefaultValue) {
     if (aProperty in aEvent && Array.isArray(aEvent[aProperty])) {
       throwExceptionIfDifferentLengthArray(
@@ -1056,6 +1104,7 @@ function synthesizeTouchAtPoint(
     }
     return new Array(arrayLength).fill(aEvent[aProperty] || aDefaultValue);
   }
+
   const rxArray = getSameLengthArrayOfEventProperty("rx", 1);
   const ryArray = getSameLengthArrayOfEventProperty("ry", 1);
   const angleArray = getSameLengthArrayOfEventProperty("angle", 0);
@@ -1110,29 +1159,8 @@ function synthesizeTouchAtPoint(
 
   _EU_maybeWrap(aWindow).synthesizeTouchEvent("touchstart", ...args);
   _EU_maybeWrap(aWindow).synthesizeTouchEvent("touchend", ...args, aCallback);
-  return false;
-}
 
-/**
- * Synthesize one or more touches at the center of your target
- *
- * @param {Element | Element[]} aTarget - The target element
- * @param {TouchEventData} aEvent - Details of the touch event to dispatch
- * @param {DOMWindow} [aWindow=window] - DOM window used to dispatch the event.
- * @param {Function} [aCallback] - A callback function that is invoked when the
- *                                 touch event is dispatched.
- *
- * @returns {boolean} Whether the event had preventDefault() called on it.
- */
-function synthesizeTouchAtCenter(aTarget, aEvent, aWindow, aCallback) {
-  var rect = aTarget.getBoundingClientRect();
-  return synthesizeTouchAtPoint(
-    rect.left + rect.width / 2,
-    rect.top + rect.height / 2,
-    aEvent,
-    aWindow,
-    aCallback
-  );
+  return false;
 }
 
 /**
@@ -1792,7 +1820,7 @@ function synthesizeAndWaitNativeMouseMove(
  * @param {number} [aEvent.repeat]
  *        If you emulate auto-repeat, you should set the count of repeat.
  *        This method will automatically synthesize keydown (and keypress).
- * @param {*} aEvent.location
+ * @param {any} aEvent.location
  *        If you want to specify this, you can specify this explicitly.
  *        However, if you don't specify this value, it will be computed
  *        from code value.
@@ -3061,8 +3089,6 @@ const QUERY_CONTENT_FLAG_SELECTION_URLSTRIKEOUT = 0x0200;
 
 const QUERY_CONTENT_FLAG_OFFSET_RELATIVE_TO_INSERTION_POINT = 0x0400;
 
-const SELECTION_SET_FLAG_USE_NATIVE_LINE_BREAK = 0x0000;
-const SELECTION_SET_FLAG_USE_XP_LINE_BREAK = 0x0001;
 const SELECTION_SET_FLAG_REVERSE = 0x0002;
 
 /**
@@ -3151,13 +3177,15 @@ function synthesizeQueryCaretRect(aOffset, aWindow) {
  * @param aReverse If true, the selection is from |aOffset + aLength| to
  *                 |aOffset|.  Otherwise, from |aOffset| to |aOffset + aLength|.
  * @param aWindow  Optional (If null, current |window| will be used)
+ * @param aFlags   Additional eSetSelection event flags.
  * @return         True, if succeeded.  Otherwise false.
  */
 async function synthesizeSelectionSet(
   aOffset,
   aLength,
   aReverse,
-  aWindow = window
+  aWindow = window,
+  aFlags = 0
 ) {
   const utils = _getDOMWindowUtils(aWindow);
   if (!utils) {
@@ -3169,7 +3197,7 @@ async function synthesizeSelectionSet(
   await new Promise(resolve =>
     aWindow.requestAnimationFrame(() => aWindow.requestAnimationFrame(resolve))
   );
-  const flags = aReverse ? SELECTION_SET_FLAG_REVERSE : 0;
+  const flags = aFlags | (aReverse ? SELECTION_SET_FLAG_REVERSE : 0);
   return utils.sendSelectionSetEvent(aOffset, aLength, flags);
 }
 
@@ -3450,7 +3478,7 @@ function synthesizeDragOver(
  * Emulate the drop event and mouseup event.
  * This should be called after synthesizeDragOver.
  *
- * @param {*} aResult
+ * @param {any} aResult
  *        The first element of the array returned from ``synthesizeDragOver``.
  * @param {DataTransfer} aDataTransfer
  *        The second element of the array returned from ``synthesizeDragOver``.
@@ -3490,14 +3518,16 @@ function synthesizeDropAfterDragOver(
     );
     sendDragEvent(event, aDestElement, aDestWindow);
   }
-  // Don't run accessibility checks for this click, since we're not actually
+  // Don't run the click checks for this click, since we're not actually
   // clicking. It's just generated as part of the drop.
-  // this.AccessibilityUtils might not be set if this isn't a browser test or
-  // if a browser test has loaded its own copy of EventUtils for some reason.
-  // In the latter case, the test probably shouldn't do that.
+  // this.ClickChecks and this.AccessibilityUtils might not be set if this isn't
+  // a browser test or if a browser test has loaded its own copy of EventUtils
+  // for some reason. In the latter case, the test probably shouldn't do that.
   this.AccessibilityUtils?.suppressClickHandling(true);
+  this.ClickChecks?.suppressClickHandling(true);
   synthesizeMouse(aDestElement, 2, 2, { type: "mouseup" }, aDestWindow);
   this.AccessibilityUtils?.suppressClickHandling(false);
+  this.ClickChecks?.suppressClickHandling(false);
 
   return effect;
 }
@@ -3533,7 +3563,16 @@ function startDragSession(aWindow, aDropEffect) {
       throw new Error(`${aDropEffect} is an invalid drop effect value`);
   }
 
-  ds.startDragSessionForTests(aWindow, dropAction);
+  try {
+    ds.startDragSessionForTests(aWindow, dropAction);
+  } catch (e) {
+    if (e.name == "NS_ERROR_NOT_AVAILABLE") {
+      throw new Error(
+        "Cannot start a drag session: the drag service is suppressed; a previous test may have left the mouse button pressed"
+      );
+    }
+    throw e;
+  }
 }
 
 /**
@@ -3941,6 +3980,7 @@ async function synthesizePlainDragAndDrop(aParams) {
     let srcSession = srcWindowUtils.dragSession;
     if (!srcSession) {
       if (expectCancelDragStart) {
+        this.AccessibilityUtils?.suppressClickHandling(true);
         synthesizeMouse(
           srcElement,
           finalX,
@@ -3948,6 +3988,7 @@ async function synthesizePlainDragAndDrop(aParams) {
           { type: "mouseup", id },
           srcWindow
         );
+        this.AccessibilityUtils?.suppressClickHandling(false);
         return;
       }
       throw new Error("drag hasn't been started by the operation");

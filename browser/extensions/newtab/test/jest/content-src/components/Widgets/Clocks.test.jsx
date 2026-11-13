@@ -9,6 +9,10 @@ import { INITIAL_STATE, reducers } from "common/Reducers.sys.mjs";
 import { actionTypes as at } from "common/Actions.mjs";
 import { Clocks } from "content-src/components/Widgets/Clocks/Clocks";
 import { isValidPaletteName } from "content-src/components/Widgets/Clocks/ClocksHelpers";
+import {
+  CLOCK_CITIES,
+  clockCityFluentId,
+} from "content-src/components/Widgets/Clocks/ClockCityRegistry.mjs";
 
 jest.mock("content-src/components/Widgets/Clocks/ClocksHelpers.mjs", () => ({
   ...jest.requireActual(
@@ -31,6 +35,27 @@ afterAll(() => {
   Intl.DateTimeFormat.prototype.resolvedOptions = originalResolvedOptions;
 });
 
+// jsdom has no document.l10n; about:newtab always does. Resolve every curated
+// city's Fluent id to its en-US name, as the browser would.
+const CITY_NAME_BY_FLUENT_ID = new Map(
+  CLOCK_CITIES.map(city => [clockCityFluentId(city.id), city.fallbackName])
+);
+const mockDocumentL10n = () => {
+  document.l10n = {
+    formatValues: jest.fn(async ids =>
+      ids.map(({ id }) => CITY_NAME_BY_FLUENT_ID.get(id) ?? null)
+    ),
+  };
+};
+beforeEach(mockDocumentL10n);
+afterEach(() => {
+  delete document.l10n;
+});
+
+// The add form resolves curated city names on mount; flush that effect so its
+// state update lands inside act().
+const flushCityNames = () => act(async () => {});
+
 const mockState = {
   ...INITIAL_STATE,
   Prefs: {
@@ -51,13 +76,31 @@ function WrapWithProvider({ children, state = INITIAL_STATE }) {
   return <Provider store={store}>{children}</Provider>;
 }
 
-function renderClocks(size = "large", state = mockState, dispatch = jest.fn()) {
+function renderClocks(
+  size = "large",
+  state = mockState,
+  dispatch = jest.fn(),
+  handleUserInteraction = jest.fn()
+) {
+  const stateWithSize = {
+    ...state,
+    Prefs: {
+      ...state.Prefs,
+      values: {
+        ...state.Prefs.values,
+        "widgets.clocks.size": size,
+      },
+    },
+  };
   const { container, unmount, rerender } = render(
-    <WrapWithProvider state={state}>
-      <Clocks dispatch={dispatch} size={size} />
+    <WrapWithProvider state={stateWithSize}>
+      <Clocks
+        dispatch={dispatch}
+        handleUserInteraction={handleUserInteraction}
+      />
     </WrapWithProvider>
   );
-  return { container, unmount, rerender, dispatch };
+  return { container, unmount, rerender, dispatch, handleUserInteraction };
 }
 
 const withClockZones = zones => ({
@@ -112,7 +155,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
       ).not.toBeInTheDocument();
       expect(
         container.querySelector(
-          "moz-button[data-l10n-id='newtab-clock-widget-menu-button']"
+          "moz-button[data-l10n-id='newtab-clock-widget-open-menu-button']"
         )
       ).toBeInTheDocument();
     });
@@ -496,7 +539,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
       const { container } = renderClocks();
       expect(
         container.querySelector(
-          ".clocks-context-menu-button[data-l10n-id='newtab-clock-widget-menu-button']"
+          ".clocks-context-menu-button[data-l10n-id='newtab-clock-widget-open-menu-button']"
         )
       ).toBeInTheDocument();
     });
@@ -650,7 +693,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
       expect(addButton).not.toBeInTheDocument();
     });
 
-    it("opens the add clock form when fewer than four clocks are saved", () => {
+    it("opens the add clock form when fewer than four clocks are saved", async () => {
       const { container } = renderClocks(
         "large",
         withClockZones([
@@ -663,6 +706,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
 
       expect(addButton.hasAttribute("disabled")).toBe(false);
       fireEvent.click(addButton);
+      await flushCityNames();
 
       expect(container.querySelector(".clocks-add-form")).toBeInTheDocument();
       expect(
@@ -672,7 +716,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
       ).toBeInTheDocument();
     });
 
-    it("shows filtered location results when a search query is entered", () => {
+    it("shows filtered location results when a search query is entered", async () => {
       const { container } = renderClocks(
         "large",
         withClockZones([
@@ -684,6 +728,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
           "moz-button[data-l10n-id='newtab-clock-widget-button-add']"
         )
       );
+      await flushCityNames();
       const searchInput = container.querySelector(
         ".clocks-search-location-input"
       );
@@ -735,6 +780,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
               {
                 timeZone: "Europe/Berlin",
                 city: "Berlin",
+                cityId: "de-berlin",
                 label: null,
                 labelColor: null,
               },
@@ -831,6 +877,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
               {
                 timeZone: "Australia/Sydney",
                 city: "Sydney",
+                cityId: "au-sydney",
                 label: null,
                 labelColor: null,
               },
@@ -869,7 +916,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("Add clock button inside the form is disabled until a location is selected", () => {
+    it("Add clock button inside the form is disabled until a location is selected", async () => {
       const { container } = renderClocks(
         "large",
         withClockZones([
@@ -881,6 +928,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
           "moz-button[data-l10n-id='newtab-clock-widget-button-add']"
         )
       );
+      await flushCityNames();
 
       const addClockButton = container.querySelector(
         "moz-button.clocks-form-submit"
@@ -951,6 +999,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
               {
                 timeZone: "Australia/Sydney",
                 city: "Sydney",
+                cityId: "au-sydney",
                 label: "Work",
                 labelColor: "cyan",
               },
@@ -1171,6 +1220,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
               {
                 timeZone: "Australia/Sydney",
                 city: "Sydney",
+                cityId: "au-sydney",
                 label: "Very Long W",
                 labelColor: "cyan",
               },
@@ -1208,7 +1258,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
       );
     });
 
-    it("pressing Enter on Cancel does not save the form", () => {
+    it("pressing Enter on Cancel does not save the form", async () => {
       const { container, dispatch } = renderClocks(
         "large",
         withClockZones([
@@ -1220,6 +1270,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
           "moz-button[data-l10n-id='newtab-clock-widget-button-add']"
         )
       );
+      await flushCityNames();
       const searchInput = container.querySelector(
         ".clocks-search-location-input"
       );
@@ -1244,7 +1295,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
       expect(container.querySelector(".clocks-add-form")).toBeInTheDocument();
     });
 
-    it("keeps the form open when blur has no next focused element", () => {
+    it("keeps the form open when blur has no next focused element", async () => {
       const { container } = renderClocks(
         "large",
         withClockZones([
@@ -1256,6 +1307,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
           "moz-button[data-l10n-id='newtab-clock-widget-button-add']"
         )
       );
+      await flushCityNames();
 
       fireEvent.blur(container.querySelector(".clocks-add-form"), {
         relatedTarget: null,
@@ -1856,7 +1908,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("clicking the inline row edit button opens the clock form", () => {
+    it("clicking the inline row edit button opens the clock form", async () => {
       const { container } = renderClocks(
         "large",
         withClockZones([
@@ -1866,6 +1918,7 @@ describe("<Clocks> (Widgets/Clocks)", () => {
       );
 
       fireEvent.click(container.querySelector(".clocks-row-edit-button"));
+      await flushCityNames();
 
       expect(container.querySelector(".clocks-add-form")).toBeInTheDocument();
       expect(
@@ -1974,6 +2027,64 @@ describe("<Clocks> (Widgets/Clocks)", () => {
           widget_size: "large",
         }),
       });
+    });
+  });
+
+  describe("handleUserInteraction", () => {
+    it("calls handleUserInteraction when the user toggles hour format", () => {
+      const handleUserInteraction = jest.fn();
+      const state = {
+        ...mockState,
+        Prefs: {
+          ...mockState.Prefs,
+          values: {
+            ...mockState.Prefs.values,
+            "widgets.clocks.hourFormat": "12",
+          },
+        },
+      };
+      const { container } = renderClocks(
+        "large",
+        state,
+        jest.fn(),
+        handleUserInteraction
+      );
+      const item = container.querySelector(
+        "panel-item[data-l10n-id='newtab-clock-widget-menu-switch-to-24h']"
+      );
+      fireEvent.click(item);
+      expect(handleUserInteraction).toHaveBeenCalledWith("clocks");
+    });
+    it("calls handleUserInteraction when the user adds a clock", async () => {
+      const handleUserInteraction = jest.fn();
+      const { container } = renderClocks(
+        "large",
+        withClockZones([
+          { timeZone: "Europe/Berlin", label: null, labelColor: null },
+        ]),
+        jest.fn(),
+        handleUserInteraction
+      );
+      const addButton = container.querySelector(
+        "moz-button[data-l10n-id='newtab-clock-widget-button-add']"
+      );
+      fireEvent.click(addButton);
+      await flushCityNames();
+      expect(handleUserInteraction).toHaveBeenCalledWith("clocks");
+    });
+    it("does NOT call handleUserInteraction when the user hides the widget", () => {
+      const handleUserInteraction = jest.fn();
+      const { container } = renderClocks(
+        "large",
+        mockState,
+        jest.fn(),
+        handleUserInteraction
+      );
+      const hideItem = container.querySelector(
+        "panel-item[data-l10n-id='newtab-widget-menu-hide']"
+      );
+      fireEvent.click(hideItem);
+      expect(handleUserInteraction).not.toHaveBeenCalled();
     });
   });
 });

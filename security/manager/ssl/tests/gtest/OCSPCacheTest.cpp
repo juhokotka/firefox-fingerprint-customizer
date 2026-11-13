@@ -9,9 +9,9 @@
 #include "mozilla/Casting.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Sprintf.h"
-#include "nss.h"
 #include "mozpkix/pkixtypes.h"
 #include "mozpkix/test/pkixtestutil.h"
+#include "nss.h"
 #include "prerr.h"
 #include "secerr.h"
 

@@ -22,7 +22,7 @@ namespace mozilla {
  */
 class WindowsUIElement final {
  public:
-  NS_INLINE_DECL_REFCOUNTING(WindowsUIElement)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WindowsUIElement)
 
   /**
    * Constructor.
@@ -32,18 +32,6 @@ class WindowsUIElement final {
    */
   explicit WindowsUIElement(HWND aWindow,
                             RefPtr<IUIAutomationElement> aElement);
-
-  /**
-   * Returns whether the element is visible.
-   *
-   * Checks that all four corners of the element's bounding rectangle belong to
-   * the element's window (or a child of it). If a corner belongs to a different
-   * window, it indicates that another window is covering part of the element,
-   * which is therefore considered not visible.
-   *
-   * @return true whether the element is visible, false otherwise.
-   */
-  bool IsVisible();
 
   /**
    * Returns whether the element is moving.

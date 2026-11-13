@@ -6,11 +6,11 @@ https://creativecommons.org/publicdomain/zero/1.0/ */
 const { IPPAlwaysOnSingleton } = ChromeUtils.importESModule(
   "resource://testing-common/ipprotection/IPPAlwaysOn.sys.mjs"
 );
-const { IPPEarlyStartupFilter } = ChromeUtils.importESModule(
-  "moz-src:///toolkit/components/ipprotection/IPPEarlyStartupFilter.sys.mjs"
-);
 const { IPProtectionServerlist, PrefServerList } = ChromeUtils.importESModule(
   "moz-src:///toolkit/components/ipprotection/IPProtectionServerlist.sys.mjs"
+);
+const { TestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/TestUtils.sys.mjs"
 );
 
 const TEST_SERVER = {
@@ -69,6 +69,23 @@ function restoreHelpers() {
   IPProtectionActivator.setupHelpers();
 }
 
+/**
+ * Stops the proxy for cleanup, first letting any in-flight (re)start settle.
+ * Stopping mid-ACTIVATING races start()'s activation promise and throws
+ * missing-activation-promise. Callers should uninit their alwaysOn helper
+ * first so no further restart is scheduled.
+ */
+async function stopProxyForCleanup() {
+  if (IPPProxyManager.state === IPPProxyStates.ACTIVATING) {
+    await waitForEvent(
+      IPPProxyManager,
+      "IPPProxyManager:StateChanged",
+      () => IPPProxyManager.state !== IPPProxyStates.ACTIVATING
+    );
+  }
+  await IPPProxyManager.stop(false);
+}
+
 add_task(async function test_init_skipped_without_policy() {
   const sandbox = sinon.createSandbox();
   setupStubs(sandbox);
@@ -123,44 +140,22 @@ add_task(async function test_proxy_starts_on_service_ready() {
   sandbox.restore();
 });
 
-add_task(async function test_proxy_starts_when_early_filter_marked_active() {
+add_task(async function test_traffic_is_held_from_init() {
   const sandbox = sinon.createSandbox();
   setupStubs(sandbox);
 
-  // Regression: IPPEarlyStartupFilter registering the channel filter causes
-  // IPPProxyManager to report ACTIVE before start() is called. #tryStart() must
-  // not bail in this case — it checks channelFilter()?.proxyInfo to distinguish
-  // a registered-but-uninitialised filter from a truly established connection.
   const alwaysOn = makeAlwaysOn(sandbox);
-  const earlyFilter = new IPPEarlyStartupFilter(() => alwaysOn.alwaysOnEnabled);
-  IPProtectionActivator.addHelpers([alwaysOn, earlyFilter]);
-  IPProtectionActivator.setupHelpers();
+  registerAsHelper(alwaysOn);
 
-  // The premature ACTIVE fires first (filter registered, proxyInfo null).
-  // Wait for the second ACTIVE where proxyInfo is set.
-  const waitForTrulyActive = waitForEvent(
-    IPPProxyManager,
-    "IPPProxyManager:StateChanged",
-    () =>
-      IPPProxyManager.state === IPPProxyStates.ACTIVE &&
-      !!IPPProxyManager.channelFilter()?.proxyInfo
-  );
   IPProtectionService.init();
-  await waitForTrulyActive;
 
-  Assert.equal(
-    IPPProxyManager.state,
-    IPPProxyStates.ACTIVE,
-    "Proxy should be ACTIVE"
-  );
   Assert.ok(
-    IPPProxyManager.channelFilter()?.proxyInfo,
-    "proxyInfo should be set, not just the filter registered"
+    IPPProxyManager.channelFilter()?.active,
+    "Traffic should be held as soon as always-on is initialized"
   );
 
   alwaysOn.uninit();
-  earlyFilter.uninit();
-  await IPPProxyManager.stop(false);
+  await stopProxyForCleanup();
   IPProtectionService.uninit();
   restoreHelpers();
   sandbox.restore();
@@ -199,10 +194,10 @@ add_task(async function test_proxy_restarts_on_unexpected_stop() {
     "Proxy should restart immediately after an unexpected stop"
   );
 
-  // Uninit before stopping: with #pass cached, the restart path resolves faster
-  // and can race uninit(), causing a missing-activation-promise rejection.
+  // Uninit before stopping so no further restart is scheduled, then let any
+  // in-flight restart settle before stopping.
   alwaysOn.uninit();
-  await IPPProxyManager.stop(false);
+  await stopProxyForCleanup();
   IPProtectionService.uninit();
   restoreHelpers();
   sandbox.restore();
@@ -241,7 +236,7 @@ add_task(async function test_proxy_restarts_after_error() {
   );
 
   alwaysOn.uninit();
-  await IPPProxyManager.stop(false);
+  await stopProxyForCleanup();
   IPProtectionService.uninit();
   restoreHelpers();
   sandbox.restore();
@@ -307,6 +302,87 @@ add_task(async function test_proxy_not_restarted_when_service_unavailable() {
   );
 
   restoreHelpers();
+  sandbox.restore();
+});
+
+add_task(async function test_failing_start_does_not_starve_event_loop() {
+  const sandbox = sinon.createSandbox();
+  setupStubs(sandbox);
+
+  // A non-empty list whose only server is quarantined: selectServer() returns
+  // null, so every start() fails with SERVER_NOT_FOUND and lands in ERROR,
+  // whose handler stops then restarts. Before the fix that restart ran
+  // synchronously and spun the main thread; the fix defers it onto a timer.
+  const quarantinedCountry = {
+    ...TEST_COUNTRY,
+    cities: [
+      {
+        name: "Test City",
+        code: "TC",
+        servers: [{ ...TEST_SERVER, quarantined: true }],
+      },
+    ],
+  };
+  Services.prefs.setCharPref(
+    PrefServerList.PREF_NAME,
+    JSON.stringify([quarantinedCountry])
+  );
+  await IPProtectionServerlist.maybeFetchList(true);
+
+  let startCount = 0;
+  const realStart = IPPProxyManager.start.bind(IPPProxyManager);
+  sandbox.stub(IPPProxyManager, "start").callsFake((...args) => {
+    startCount++;
+    return realStart(...args);
+  });
+
+  const alwaysOn = makeAlwaysOn(sandbox);
+  registerAsHelper(alwaysOn);
+
+  // The first start reaches ACTIVATING, then fails into ERROR.
+  const firstAttempt = waitForEvent(
+    IPPProxyManager,
+    "IPPProxyManager:StateChanged",
+    () => IPPProxyManager.state === IPPProxyStates.ACTIVATING
+  );
+  IPProtectionService.init();
+  await firstAttempt;
+
+  // Pump ticks without advancing real time. Before the fix the retry ran
+  // synchronously and startCount would climb (or the test would hang); with
+  // the fix it's deferred past RESTART_BASE_DELAY_MS, so only the first
+  // attempt has run and control returned to the loop.
+  for (let i = 0; i < 50; i++) {
+    await TestUtils.waitForTick();
+  }
+
+  Assert.equal(
+    startCount,
+    1,
+    `The failing start is deferred, not synchronously re-triggered (saw ${startCount} attempts)`
+  );
+
+  // Let real time pass so the backed-off retry fires: the proxy keeps trying.
+  const secondAttempt = waitForEvent(
+    IPPProxyManager,
+    "IPPProxyManager:StateChanged",
+    () => IPPProxyManager.state === IPPProxyStates.ACTIVATING
+  );
+  await secondAttempt;
+  Assert.equal(startCount, 2, "A throttled retry eventually fires");
+
+  alwaysOn.uninit();
+  await stopProxyForCleanup();
+  IPProtectionService.uninit();
+  restoreHelpers();
+
+  // Restore the valid serverlist for subsequent tests.
+  Services.prefs.setCharPref(
+    PrefServerList.PREF_NAME,
+    JSON.stringify([TEST_COUNTRY])
+  );
+  await IPProtectionServerlist.maybeFetchList(true);
+
   sandbox.restore();
 });
 

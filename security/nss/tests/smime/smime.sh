@@ -201,6 +201,14 @@ mime_init()
   tr -d "\r\n" < alice.txt >>${OUT}
   echo -n "</body></html>" >>${OUT}
   sed -i"" "s/\$/${CR}/" ${OUT}
+
+  # HTML payload that wants to load a remote image
+  OUT="tb/alice.remoteimage"
+  echo "${header_html}" >>${OUT}
+  echo -n "<html><body>" >>${OUT}
+  tr -d "\r\n" < alice.txt >>${OUT}
+  echo -n '<img id="testelement" src="http://mochi.test:8888/browser/comm/mail/test/browser/content-policy/html/pass.png"></body></html>' >>${OUT}
+  sed -i"" "s/\$/${CR}/" ${OUT}
 }
 
 smime_enveloped()
@@ -216,6 +224,16 @@ smime_enveloped()
   echo -n "${header_mime_from_to_subject}" >>${OUT}
   echo "enveloped ${SIG}" >>${OUT}
   cat "tb/alice.env" >>${OUT}
+  sed -i"" "s/\$/${CR}/" ${OUT}
+
+  ${PROFTOOL} ${BINDIR}/cmsutil -E -r bob@example.com -i tb/alice.remoteimage -d ${P_R_ALICEDIR} -p nss -o tb/alice.remoteimage.env
+
+  OUT="tb/alice.remoteimage.env.eml"
+  echo -n "${header_mime_from_to_subject}" >>${OUT}
+  echo "enveloped remote image" >>${OUT}
+  echo "${header_enveloped}" >>${OUT}
+  cat "tb/alice.remoteimage.env" | ${BINDIR}/btoa | sed 's/\r$//' >>${OUT}
+  echo >>${OUT}
   sed -i"" "s/\$/${CR}/" ${OUT}
 }
 
@@ -484,7 +502,7 @@ smime_p7()
   ${PROFTOOL} ${BINDIR}/p7content -d ${P_R_ALICEDIR} -i alice_p7.env -o alice_p7.data -p nss
   html_msg $? 0 "Verifying file delivered to user Alice" "."
 
-  sed -e '3,3p' -n alice_p7.data > alice_p7.data.sed
+  head -n 3 alice_p7.data | tail -n 1 > alice_p7.data.sed
 
   echo "diff alice.txt alice_p7.data.sed"
   diff alice.txt alice_p7.data.sed

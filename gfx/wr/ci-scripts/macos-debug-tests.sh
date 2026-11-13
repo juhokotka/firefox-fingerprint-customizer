@@ -27,7 +27,7 @@ python3 -m pip install -r $(dirname ${0})/requirements.txt
 pushd webrender
 cargo check ${CARGOFLAGS} --no-default-features
 cargo check ${CARGOFLAGS} --no-default-features --features capture
-cargo check ${CARGOFLAGS} --features capture,profiler
+cargo check ${CARGOFLAGS} --features capture,tracy
 cargo check ${CARGOFLAGS} --features replay
 popd
 
@@ -40,5 +40,4 @@ cargo check ${CARGOFLAGS}
 popd
 
 cargo test ${CARGOFLAGS} ${CARGOTESTFLAGS} \
-    --all --exclude compositor --exclude compositor-wayland \
-    --exclude compositor-windows --exclude glsl-to-cxx --exclude swgl
+    --all --exclude glsl-to-cxx --exclude swgl

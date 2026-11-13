@@ -9,49 +9,49 @@
  * nsWindow - Native window management and event handling.
  */
 
-#include "mozilla/RefPtr.h"
-#include "nsIWidget.h"
-#include "CompositorWidget.h"
-#include "mozilla/EventForwards.h"
-#include "nsClassHashtable.h"
 #include <windows.h>
-#include "touchinjection_sdk80.h"
-#include "nsdefs.h"
-#include "nsUserIdleService.h"
-#include "nsToolkit.h"
-#include "nsString.h"
-#include "nsTArray.h"
-#include "gfxWindowsPlatform.h"
-#include "gfxWindowsSurface.h"
-#include "nsWindowDbg.h"
-#include "cairo.h"
-#include "nsRegion.h"
-#include "mozilla/EnumeratedArray.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/MouseEvents.h"
-#include "mozilla/TimeStamp.h"
-#include "mozilla/webrender/WebRenderTypes.h"
-#include "mozilla/dom/MouseEventBinding.h"
-#include "mozilla/DataMutex.h"
-#include "mozilla/UniquePtr.h"
-#include "nsMargin.h"
-#include "nsRegionFwd.h"
 
-#include "nsWinGesture.h"
+#include "CompositorWidget.h"
+#include "TaskbarWindowPreview.h"
 #include "WinPointerEvents.h"
 #include "WinUtils.h"
 #include "WindowHook.h"
-#include "TaskbarWindowPreview.h"
+#include "cairo.h"
+#include "gfxWindowsPlatform.h"
+#include "gfxWindowsSurface.h"
+#include "gtest/MozGtestFriend.h"
+#include "mozilla/DataMutex.h"
+#include "mozilla/EnumeratedArray.h"
+#include "mozilla/EventForwards.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/MouseEvents.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/TimeStamp.h"
+#include "mozilla/UniquePtr.h"
+#include "mozilla/dom/MouseEventBinding.h"
+#include "mozilla/webrender/WebRenderTypes.h"
+#include "nsClassHashtable.h"
+#include "nsIWidget.h"
+#include "nsMargin.h"
+#include "nsRegion.h"
+#include "nsRegionFwd.h"
+#include "nsString.h"
+#include "nsTArray.h"
+#include "nsToolkit.h"
+#include "nsUserIdleService.h"
+#include "nsWinGesture.h"
+#include "nsWindowDbg.h"
+#include "nsdefs.h"
+#include "touchinjection_sdk80.h"
 
 #ifdef ACCESSIBILITY
-#  include "oleacc.h"
 #  include "mozilla/a11y/LocalAccessible.h"
+#  include "oleacc.h"
 #endif
 
-#include "nsIUserIdleServiceInternal.h"
-
-#include "IMMHandler.h"
 #include "CheckInvariantWrapper.h"
+#include "IMMHandler.h"
+#include "nsIUserIdleServiceInternal.h"
 
 /**
  * Forward class definitions
@@ -95,12 +95,8 @@ struct WindowStyles {
 
   static WindowStyles FromHWND(HWND);
 
-  constexpr bool operator==(WindowStyles const& that) const {
-    return style == that.style && ex == that.ex;
-  }
-  constexpr bool operator!=(WindowStyles const& that) const {
-    return !(*this == that);
-  }
+  constexpr bool operator==(WindowStyles const& that) const = default;
+
   constexpr WindowStyles operator|(WindowStyles const& that) const {
     return WindowStyles{.style = style | that.style, .ex = ex | that.ex};
   }
@@ -308,7 +304,7 @@ class nsWindow final : public nsIWidget {
       IsNonclient aIgnoreAPZ = IsNonclient::No,
       mozilla::Maybe<LayoutDeviceIntPoint> aMovement = mozilla::Nothing());
   void DispatchPendingEvents();
-  void DispatchCustomEvent(const nsString& eventName);
+  MOZ_CAN_RUN_SCRIPT void DispatchCustomEvent(const nsString& eventName);
 
 #ifdef ACCESSIBILITY
   /**
@@ -524,8 +520,8 @@ class nsWindow final : public nsIWidget {
    */
   static LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam,
                                      LPARAM lParam);
-  static LRESULT CALLBACK WindowProcInternal(HWND hWnd, UINT msg, WPARAM wParam,
-                                             LPARAM lParam);
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY static LRESULT CALLBACK
+  WindowProcInternal(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
   static BOOL CALLBACK DispatchStarvedPaints(HWND aTopWindow, LPARAM aMsg);
   static BOOL CALLBACK RegisterTouchForDescendants(HWND aTopWindow,
@@ -570,11 +566,12 @@ class nsWindow final : public nsIWidget {
   HWND GetTopLevelForFocus(HWND aCurWnd);
   void DispatchFocusToTopLevelWindow(bool aIsActivate);
   void RelayMouseEvent(UINT aMsg, WPARAM wParam, LPARAM lParam);
-  bool ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
-                      LRESULT* aRetValue);
+  MOZ_CAN_RUN_SCRIPT bool ProcessMessage(UINT msg, WPARAM& wParam,
+                                         LPARAM& lParam, LRESULT* aRetValue);
   // We wrap this in ProcessMessage so we can log the return value
-  bool ProcessMessageInternal(UINT msg, WPARAM& wParam, LPARAM& lParam,
-                              LRESULT* aRetValue);
+  MOZ_CAN_RUN_SCRIPT bool ProcessMessageInternal(UINT msg, WPARAM& wParam,
+                                                 LPARAM& lParam,
+                                                 LRESULT* aRetValue);
   bool ExternalHandlerProcessMessage(UINT aMessage, WPARAM& aWParam,
                                      LPARAM& aLParam, MSGResult& aResult);
   LRESULT ProcessCharMessage(const MSG& aMsg, bool* aEventDispatched);
@@ -623,7 +620,7 @@ class nsWindow final : public nsIWidget {
    */
   void UserActivity();
 
-  DWORD WindowStyle();
+  DWORD WindowStyle() const;
   DWORD WindowExStyle();
 
   /**
@@ -664,6 +661,7 @@ class nsWindow final : public nsIWidget {
    */
   void StopFlashing();
   static HWND WindowAtMouse();
+  static HWND NsWindowAtMouse();
   static bool IsTopLevelMouseExit(HWND aWnd);
   LayoutDeviceIntRegion GetRegionToPaint(const PAINTSTRUCT& ps, HDC aDC) const;
 
@@ -678,6 +676,7 @@ class nsWindow final : public nsIWidget {
   bool NeedsToTrackWindowOcclusionState();
 
   void AsyncUpdateWorkspaceID();
+  FRIEND_TEST(WinWorkspaceID, HungQueryDoesNotBlockShutdown);
 
   // See bug 603793
   static bool HasBogusPopupsDropShadowOnMultiMonitor();
@@ -799,6 +798,19 @@ class nsWindow final : public nsIWidget {
   HICON mIconBig = nullptr;
   HWND mLastKillFocusWindow = nullptr;
   PlatformCompositorWidgetDelegate* mCompositorWidgetDelegate = nullptr;
+
+  // Whether this window's style includes a caption.
+  bool HasCaption() const;
+
+  struct ResizeMargins {
+    mozilla::LayoutDeviceIntCoord mHorizontal;
+    mozilla::LayoutDeviceIntCoord mVertical;
+  };
+  ResizeMargins DefaultResizeMargins(UINT aDpi) const;
+
+  // The distance by which this window's frame extends beyond its visible
+  // edges.
+  LayoutDeviceIntMargin ResizeBorderOverhang() const;
 
   LayoutDeviceIntMargin NonClientSizeMargin() const {
     return NonClientSizeMargin(mCustomNonClientMetrics.mOffset);
@@ -939,6 +951,10 @@ class nsWindow final : public nsIWidget {
       mWindowBtnRect;
 
   nsString mDesktopId MOZ_GUARDED_BY(mozilla::sMainThreadCapability);
+  bool mDesktopIdUpdatePending MOZ_GUARDED_BY(mozilla::sMainThreadCapability) =
+      false;
+  static uint32_t sDesktopIdRequestsInFlight;
+  static bool sDesktopIdHangForTesting;
 
   friend class nsWindowGfx;
 

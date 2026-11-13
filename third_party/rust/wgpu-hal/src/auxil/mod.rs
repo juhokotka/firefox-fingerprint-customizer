@@ -4,6 +4,9 @@
 #[cfg(any(dx12, all(vulkan, windows)))]
 pub(super) mod dxgi;
 
+#[cfg(any(dx12, all(vulkan, windows)))]
+pub(super) mod dyn_lib;
+
 #[cfg(all(native, feature = "renderdoc"))]
 pub(super) mod renderdoc;
 
@@ -49,6 +52,11 @@ pub mod db {
     pub mod qualcomm {
         /// cbindgen:ignore
         pub const VENDOR: u32 = 0x5143;
+    }
+    pub mod verisilicon {
+        // `VK_VENDOR_ID_VSI`; VeriSilicon does not use a PCI vendor id for its GPUs.
+        /// cbindgen:ignore
+        pub const VENDOR: u32 = 0x10002;
     }
 }
 
@@ -163,6 +171,32 @@ pub(crate) fn adjust_raw_limits(mut limits: wgt::Limits) -> wgt::Limits {
         ],
         max_per_stage_resources,
     );
+    // TODO: Remove this when compat mode is implemented, see
+    // <https://github.com/gfx-rs/wgpu/issues/8124>.
+    for (per_shader_stage, in_stage) in [
+        (
+            limits.max_storage_buffers_per_shader_stage,
+            [
+                &mut limits.max_storage_buffers_in_vertex_stage,
+                &mut limits.max_storage_buffers_in_fragment_stage,
+            ],
+        ),
+        (
+            limits.max_storage_textures_per_shader_stage,
+            [
+                &mut limits.max_storage_textures_in_vertex_stage,
+                &mut limits.max_storage_textures_in_fragment_stage,
+            ],
+        ),
+    ] {
+        for stage in in_stage {
+            assert_eq!(
+                *stage, 0,
+                "`max_storage_*_in_*_stage` limits must be 0 from HAL (for now)"
+            );
+            *stage = per_shader_stage;
+        }
+    }
 
     // Not required by the spec but dynamic buffers count
     // towards non-dynamic buffer limits as well.

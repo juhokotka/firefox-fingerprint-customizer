@@ -5,8 +5,8 @@
 #ifndef MOZ_DMABUF_FORMATS_H_
 #define MOZ_DMABUF_FORMATS_H_
 
-#include "nsTArray.h"
 #include "mozilla/gfx/Types.h"
+#include "nsTArray.h"
 
 #ifdef MOZ_WAYLAND
 struct zwp_linux_dmabuf_v1;
@@ -131,6 +131,7 @@ class GlobalDMABufFormats final {
   RefPtr<DRMFormat> mFormatP010;
   RefPtr<DRMFormat> mFormatNV12;
   RefPtr<DRMFormat> mFormatYUV420;
+  RefPtr<DRMFormat> mFormatABGR2101010;
 };
 
 GlobalDMABufFormats* GetGlobalDMABufFormats();

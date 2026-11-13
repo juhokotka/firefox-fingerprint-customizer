@@ -6,9 +6,11 @@
 #define NSPOINT_H
 
 #include <cstdint>
-#include "nsCoord.h"
+
+#include "fmt/ostream.h"
 #include "mozilla/gfx/BasePoint.h"
 #include "mozilla/gfx/Point.h"
+#include "nsCoord.h"
 
 // nsIntPoint represents a point in one of the types of pixels.
 // Uses of nsIntPoint should eventually be converted to CSSIntPoint,
@@ -89,5 +91,8 @@ inline nsPoint ToAppUnits(const nsIntPoint& aPoint, nscoord aAppUnitsPerPixel) {
   return nsPoint(NSIntPixelsToAppUnits(aPoint.x, aAppUnitsPerPixel),
                  NSIntPixelsToAppUnits(aPoint.y, aAppUnitsPerPixel));
 }
+
+template <>
+struct fmt::formatter<nsPoint> : fmt::ostream_formatter {};
 
 #endif /* NSPOINT_H */

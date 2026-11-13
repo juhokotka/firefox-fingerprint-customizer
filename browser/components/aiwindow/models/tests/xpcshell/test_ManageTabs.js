@@ -4,7 +4,7 @@
 
 do_get_profile();
 
-const { manageTabsAction, CLOSE_TABS } = ChromeUtils.importESModule(
+const { manageTabsAction, CLOSE_TABS, GROUP_TABS } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/ManageTabs.sys.mjs"
 );
 
@@ -192,7 +192,7 @@ add_task(async function test_manageTabsAction_direct_close_path() {
     );
 
     sb.stub(ToolUI, "closeSelectedTabs").resolves({
-      operationId: "op-1",
+      operationIds: ["op-1"],
       closedTabs: [],
       failedTabs: [],
     });
@@ -214,7 +214,7 @@ add_task(async function test_manageTabsAction_direct_close_path() {
       "uiData uiType is ai-action-result"
     );
 
-    const { selectedTabs: uiTabs, operationId } =
+    const { selectedTabs: uiTabs, operationIds } =
       uiData.properties.confirmedData;
     Assert.equal(uiTabs.length, 1, "1 tab is returned to the UI");
     Assert.ok(uiTabs[0].token, "UI tab carries a resolution token");
@@ -232,7 +232,11 @@ add_task(async function test_manageTabsAction_direct_close_path() {
       },
       "single UI tab should be correct"
     );
-    Assert.equal(operationId, "op-1", "operationId is propagated from ToolUI");
+    Assert.deepEqual(
+      operationIds,
+      ["op-1"],
+      "operationIds are propagated from ToolUI"
+    );
 
     Assert.deepEqual(
       result.selectedTabs,
@@ -244,6 +248,195 @@ add_task(async function test_manageTabsAction_direct_close_path() {
         },
       ],
       "toolResult selectedTabs annotates each tab as closed"
+    );
+  } finally {
+    sb.restore();
+  }
+});
+
+// Regression: the ask_confirmation=false group_tabs path must forward
+// `tabKeyByToken` to `createTabGroup`, otherwise `#verifyAndCollectTabs`
+// bails on the missing map and the tool returns "group_tabs action failed".
+add_task(async function test_manageTabsAction_direct_group_path() {
+  const sb = sinon.createSandbox();
+  try {
+    const url1 = "https://example.com/a";
+    const url2 = "https://example.com/b";
+    const targetTab1 = createFakeTab(url1, "Example A", {
+      linkedPanel: "panel-1",
+    });
+    const targetTab2 = createFakeTab(url2, "Example B", {
+      linkedPanel: "panel-2",
+    });
+    const otherTab = createFakeTab("https://example.com/c", "Other");
+    // Selected tab is unrelated so no override triggers a confirmation.
+    setupBrowserWindowTracker(
+      sb,
+      createFakeWindow([targetTab1, targetTab2, otherTab], {
+        selectedTab: otherTab,
+      })
+    );
+
+    const createTabGroup = sb.stub(ToolUI, "createTabGroup").resolves({
+      operationId: "op-1",
+      failedTabs: [],
+      group: { id: "op-1", label: "Bears", color: "blue", tabCount: 2 },
+    });
+
+    const { toolResult: result, uiData } = await manageTabsAction(
+      {
+        action: GROUP_TABS,
+        validUrls: new Set([url1, url2]),
+        ask_confirmation: false,
+        label: "Bears",
+      },
+      makeConversation()
+    );
+
+    Assert.ok(
+      createTabGroup.calledOnce,
+      "createTabGroup is invoked in the direct-execute path"
+    );
+    const args = createTabGroup.firstCall.args[0];
+    Assert.ok(
+      args.tokenToKey?.size,
+      "tokenToKey is forwarded so #verifyAndCollectTabs can resolve tokens"
+    );
+    Assert.equal(args.tokenToKey.size, 2, "One entry per matched tab");
+    for (const t of args.tabs) {
+      Assert.equal(
+        args.tokenToKey.get(t.token),
+        t.url === url1 ? targetTab1.permanentKey : targetTab2.permanentKey,
+        `Token for ${t.url} maps to the matching tab's permanentKey`
+      );
+    }
+    Assert.equal(args.label, "Bears", "Model-supplied label is passed through");
+
+    Assert.equal(
+      uiData.uiType,
+      "ai-action-result",
+      "uiData uiType is ai-action-result"
+    );
+    Assert.deepEqual(
+      uiData.properties.confirmedData.operationIds,
+      ["op-1"],
+      "operationIds are propagated from ToolUI"
+    );
+    Assert.equal(
+      uiData.properties.confirmedData.actionType,
+      GROUP_TABS,
+      "actionType is group_tabs"
+    );
+
+    Assert.deepEqual(
+      result.selectedTabs.map(t => t.grouped),
+      [true, true],
+      "Every matched tab is marked grouped when nothing failed"
+    );
+  } finally {
+    sb.restore();
+  }
+});
+
+// When you type a grouping command in a fullpage chat, the chat tab is offered
+// as one of the tabs in the confirmation card, so the user can see it is going
+// into the group and can untick it (bug 2068714).
+add_task(async function test_manageTabsAction_offers_the_chat_tab() {
+  const sb = sinon.createSandbox();
+  try {
+    const url1 = "https://example.com/a";
+    const targetTab1 = createFakeTab(url1, "Example A", {
+      linkedPanel: "panel-1",
+    });
+    const chatTab = createFakeTab(
+      "chrome://browser/content/aiwindow/aiWindow.html",
+      "Smart Window"
+    );
+    setupBrowserWindowTracker(
+      sb,
+      createFakeWindow([chatTab, targetTab1], { selectedTab: chatTab })
+    );
+    sb.stub(ToolUI, "findChatTab").returns(chatTab);
+    const registerTabKeys = sb.stub(ToolUI, "registerTabKeys");
+
+    const { uiData } = await manageTabsAction(
+      {
+        action: GROUP_TABS,
+        validUrls: new Set([url1]),
+        ask_confirmation: true,
+        label: "Bears",
+        toolCallId: "tool-call-1",
+      },
+      makeConversation()
+    );
+
+    Assert.equal(
+      uiData.properties.tabs.length,
+      2,
+      "The card offers the matched tab and the chat tab"
+    );
+    const chatRow = uiData.properties.tabs.at(-1);
+    Assert.equal(
+      chatRow.title,
+      sanitizeUntrustedContent("Smart Window"),
+      "The chat tab is the row that was added"
+    );
+    Assert.ok(chatRow.checked, "The chat tab starts ticked");
+
+    const [, tokenToKey] = registerTabKeys.firstCall.args;
+    Assert.equal(
+      tokenToKey.get(chatRow.token),
+      chatTab.permanentKey,
+      "The chat tab's token resolves back to it when the user confirms"
+    );
+  } finally {
+    sb.restore();
+  }
+});
+
+// Without a card, the chat tab still goes into the group.
+add_task(async function test_manageTabsAction_direct_group_includes_chat_tab() {
+  const sb = sinon.createSandbox();
+  try {
+    const url1 = "https://example.com/a";
+    const targetTab1 = createFakeTab(url1, "Example A", {
+      linkedPanel: "panel-1",
+    });
+    const chatTab = createFakeTab(
+      "chrome://browser/content/aiwindow/aiWindow.html",
+      "Smart Window"
+    );
+    // An unrelated active tab, so none of the confirmation overrides fire.
+    const otherTab = createFakeTab("https://example.com/c", "Other");
+    setupBrowserWindowTracker(
+      sb,
+      createFakeWindow([chatTab, targetTab1, otherTab], {
+        selectedTab: otherTab,
+      })
+    );
+    sb.stub(ToolUI, "findChatTab").returns(chatTab);
+
+    const createTabGroup = sb.stub(ToolUI, "createTabGroup").resolves({
+      operationId: "op-1",
+      failedTabs: [],
+      group: { id: "op-1", label: "Bears", color: "blue", tabCount: 2 },
+    });
+
+    await manageTabsAction(
+      {
+        action: GROUP_TABS,
+        validUrls: new Set([url1]),
+        ask_confirmation: false,
+        label: "Bears",
+      },
+      makeConversation()
+    );
+
+    const args = createTabGroup.firstCall.args[0];
+    Assert.equal(args.tabs.length, 2, "The chat tab is grouped as well");
+    Assert.ok(
+      [...args.tokenToKey.values()].includes(chatTab.permanentKey),
+      "The chat tab is resolvable by its token"
     );
   } finally {
     sb.restore();
@@ -266,7 +459,7 @@ add_task(async function test_manageTabsAction_marks_failed_tabs() {
     );
 
     sb.stub(ToolUI, "closeSelectedTabs").resolves({
-      operationId: "op-1",
+      operationIds: ["op-1"],
       closedTabs: [],
       failedTabs: [{ tab: failedTab, reason: "already-closing" }],
     });

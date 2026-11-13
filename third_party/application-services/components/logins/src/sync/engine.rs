@@ -6,13 +6,13 @@ use super::merge::{LocalLogin, MirrorLogin, SyncLoginData};
 use super::update_plan::UpdatePlan;
 use super::SyncStatus;
 use crate::db::CLONE_ENTIRE_MIRROR_SQL;
-use crate::encryption::EncryptorDecryptor;
 use crate::error::*;
-use crate::login::EncryptedLogin;
+use crate::login::{EncryptedLogin, FXA_CREDENTIALS_ORIGIN};
 use crate::schema;
 use crate::util;
 use crate::LoginDb;
 use crate::LoginStore;
+use db_crypto::EncryptorDecryptor;
 use interrupt_support::SqlInterruptScope;
 use rusqlite::named_params;
 use sql_support::ConnExt;
@@ -24,18 +24,10 @@ use sync15::engine::{CollSyncIds, CollectionRequest, EngineSyncAssociation, Sync
 use sync15::{telemetry, ServerTimestamp};
 use sync_guid::Guid;
 
-// The Desktop FxA session-credentials pseudo-login. Firefox stores its account
-// credentials as a login under this origin; it must never be synced. This
-// mirrors the exclusion the JS `PasswordEngine` does via
-// `Utils.getSyncCredentialsHosts()`. Only relevant on Desktop (mobile never has
-// such a login), but it's harmless to filter everywhere.
-const FXA_CREDENTIALS_ORIGIN: &str = "chrome://FirefoxAccounts";
-
 // The sync engine.
 pub struct LoginsSyncEngine {
     pub store: Arc<LoginStore>,
     pub scope: SqlInterruptScope,
-    pub encdec: Arc<dyn EncryptorDecryptor>,
     // `Mutex` (rather than `RefCell`) so the engine is `Sync`, which the
     // Desktop `BridgedEngineAdaptor` requires. Only ever locked briefly.
     pub staged: Mutex<Vec<IncomingBso>>,
@@ -43,16 +35,20 @@ pub struct LoginsSyncEngine {
 
 impl LoginsSyncEngine {
     pub fn new(store: Arc<LoginStore>) -> Result<Self> {
-        let db = store.lock_db()?;
-        let scope = db.begin_interrupt_scope()?;
-        let encdec = db.encdec.clone();
-        drop(db);
+        let scope = store.lock_db()?.begin_interrupt_scope()?;
         Ok(Self {
             store,
-            encdec,
             scope,
             staged: Mutex::new(vec![]),
         })
+    }
+
+    // on Desktop the `EncryptorDecryptor` owns a foreign
+    // `PrimaryPasswordAuthenticator` callback, and a long-lived `Arc` clone
+    // held by the engine would keep that callback alive past
+    // `LoginDb::shutdown` (which drops the db's own reference).
+    fn encdec(&self) -> Result<Arc<dyn EncryptorDecryptor>> {
+        Ok(self.store.lock_db()?.encdec.clone())
     }
 
     fn reconcile(
@@ -62,6 +58,7 @@ impl LoginsSyncEngine {
         telem: &mut telemetry::EngineIncoming,
     ) -> Result<UpdatePlan> {
         let mut plan = UpdatePlan::default();
+        let encdec = self.encdec()?;
 
         for mut record in records {
             self.scope.err_if_interrupted()?;
@@ -83,7 +80,7 @@ impl LoginsSyncEngine {
                         upstream,
                         upstream_time,
                         server_now,
-                        self.encdec.as_ref(),
+                        encdec.as_ref(),
                     )?;
                     telem.reconciled(1);
                 }
@@ -143,10 +140,11 @@ impl LoginsSyncEngine {
     ) -> Result<Vec<SyncLoginData>> {
         let mut sync_data = Vec::with_capacity(records.len());
         {
+            let encdec = self.encdec()?;
             let mut seen_ids: HashSet<Guid> = HashSet::with_capacity(records.len());
             for incoming in records.into_iter() {
                 let id = incoming.envelope.id.clone();
-                match SyncLoginData::from_bso(incoming, self.encdec.as_ref()) {
+                match SyncLoginData::from_bso(incoming, encdec.as_ref()) {
                     Ok(v) => sync_data.push(v),
                     Err(e) => {
                         match e {
@@ -260,11 +258,25 @@ impl LoginsSyncEngine {
         ))?;
         let bsos = stmt.query_and_then(
             named_params! { ":fxa_origin": FXA_CREDENTIALS_ORIGIN },
-            |row| {
+            |row| -> Result<Option<OutgoingBso>> {
                 self.scope.err_if_interrupted()?;
-                Ok(if row.get::<_, bool>("is_deleted")? {
+                let guid: Guid = row.get::<_, String>("guid")?.into();
+                // A guid we consider invalid for the sync server used to panic the
+                // uploader (bug 2056116). We can't serialize such a record, so skip it
+                // rather than let a single login block the whole sync.
+                if !guid.is_valid_for_sync_server() {
+                    // Report the length rather than the guid itself, which is arbitrary
+                    // data we'd rather not send to Sentry.
+                    report_error!(
+                        "logins-invalid-outgoing-guid",
+                        "skipping outgoing login with a guid that is invalid for the sync server (len {})",
+                        guid.len()
+                    );
+                    return Ok(None);
+                }
+                Ok(Some(if row.get::<_, bool>("is_deleted")? {
                     let envelope = OutgoingEnvelope {
-                        id: row.get::<_, String>("guid")?.into(),
+                        id: guid,
                         sortindex: Some(TOMBSTONE_SORTINDEX),
                         ..Default::default()
                     };
@@ -272,13 +284,13 @@ impl LoginsSyncEngine {
                 } else {
                     let unknown = row.get::<_, Option<String>>("enc_unknown_fields")?;
                     let mut bso =
-                        EncryptedLogin::from_row(row)?.into_bso(self.encdec.as_ref(), unknown)?;
+                        EncryptedLogin::from_row(row)?.into_bso(db.encdec.as_ref(), unknown)?;
                     bso.envelope.sortindex = Some(DEFAULT_SORTINDEX);
                     bso
-                })
+                }))
             },
         )?;
-        bsos.collect::<Result<_>>()
+        bsos.filter_map(|r| r.transpose()).collect::<Result<_>>()
     }
 
     fn do_apply_incoming(
@@ -395,7 +407,8 @@ impl LoginsSyncEngine {
             .form_action_origin
             .as_ref()
             .and_then(|s| util::url_host_port(s));
-        let enc_fields = l.decrypt_fields(self.encdec.as_ref())?;
+        let encdec = self.encdec()?;
+        let enc_fields = l.decrypt_fields(encdec.as_ref())?;
         let args = named_params! {
             ":origin": l.fields.origin,
             ":http_realm": l.fields.http_realm,
@@ -420,7 +433,7 @@ impl LoginsSyncEngine {
             .query_and_then(args, EncryptedLogin::from_row)?
             .collect::<Result<Vec<EncryptedLogin>>>()?
         {
-            let this_enc_fields = login.decrypt_fields(self.encdec.as_ref())?;
+            let this_enc_fields = login.decrypt_fields(encdec.as_ref())?;
             if enc_fields.username == this_enc_fields.username {
                 return Ok(Some(login));
             }
@@ -451,7 +464,15 @@ impl SyncEngine for LoginsSyncEngine {
         telem: &mut telemetry::Engine,
     ) -> anyhow::Result<Vec<OutgoingBso>> {
         let inbound = self.staged.lock().unwrap().drain(..).collect();
-        Ok(self.do_apply_incoming(inbound, timestamp, telem)?)
+        let outgoing = self.do_apply_incoming(inbound, timestamp, telem)?;
+        // The engine owns its last-sync timestamp but during a sync, that
+        // value is known differently in desktop v mobile. Record a
+        // timestamp if we are given one.
+        if timestamp != ServerTimestamp(0) {
+            let db = self.store.lock_db()?;
+            self.set_last_sync(&db, timestamp)?;
+        }
+        Ok(outgoing)
     }
 
     fn set_uploaded(&self, new_timestamp: ServerTimestamp, ids: Vec<Guid>) -> anyhow::Result<()> {
@@ -459,6 +480,21 @@ impl SyncEngine for LoginsSyncEngine {
             &ids.iter().map(Guid::as_str).collect::<Vec<_>>(),
             new_timestamp,
         )?)
+    }
+
+    // For the Desktop bridge which makes the collection requests.
+    fn last_sync(&self) -> anyhow::Result<Option<ServerTimestamp>> {
+        let db = self.store.lock_db()?;
+        Ok(self.get_last_sync(&db)?)
+    }
+
+    // Force a full re-download next sync without a full reset. Desktop's bridged
+    // engine base calls this for every engine, so logins must implement it
+    // rather than fall back to the no-op default.
+    fn reset_last_sync(&self) -> anyhow::Result<()> {
+        let db = self.store.lock_db()?;
+        self.set_last_sync(&db, ServerTimestamp(0))?;
+        Ok(())
     }
 
     fn get_collection_request(
@@ -493,6 +529,10 @@ impl SyncEngine for LoginsSyncEngine {
         self.do_reset(assoc)?;
         Ok(())
     }
+
+    fn wipe(&self) -> anyhow::Result<()> {
+        self.store.wipe_local().map_err(Into::into)
+    }
 }
 
 #[cfg(not(feature = "keydb"))]
@@ -500,8 +540,8 @@ impl SyncEngine for LoginsSyncEngine {
 mod tests {
     use super::*;
     use crate::db::test_utils::insert_login;
-    use crate::encryption::test_utils::TEST_ENCDEC;
     use crate::login::test_utils::enc_login;
+    use crate::test_utils::TEST_ENCDEC;
     use crate::{LoginEntry, LoginFields, LoginMeta, SecureLoginFields};
     use nss_as::ensure_initialized;
     use std::collections::HashMap;
@@ -818,6 +858,31 @@ mod tests {
         assert!(changes["deleted"].get("deleted").is_some());
         assert!(changes["added"].get("deleted").is_none());
         assert!(changes["changed"].get("deleted").is_none());
+    }
+
+    #[test]
+    fn test_fetch_outgoing_skips_invalid_guid() {
+        ensure_initialized();
+        let store = LoginStore::new_in_memory();
+        // A local login with a guid we consider invalid for the sync server (contains
+        // a comma), inserted directly to mimic a record that was stored before guids
+        // were validated (bug 2056116).
+        insert_login(
+            &store.lock_db().unwrap(),
+            "invalid,guid",
+            Some("password"),
+            None,
+        );
+        // A normal local login that should still be uploaded.
+        insert_login(&store.lock_db().unwrap(), "valid", Some("password"), None);
+
+        // Must not panic, and must upload only the valid record.
+        let changeset = run_fetch_outgoing(store);
+        let ids: Vec<String> = changeset
+            .iter()
+            .map(|b| b.envelope.id.to_string())
+            .collect();
+        assert_eq!(ids, vec!["valid".to_string()]);
     }
 
     #[test]

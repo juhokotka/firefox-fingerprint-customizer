@@ -2,17 +2,52 @@
 <!-- This Source Code Form is subject to the terms of the Mozilla Public
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
 <html>
   <head>
-    <link rel="stylesheet" href="chrome://browser/content/sidebar/sidebar-containers.css" />
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src resource: chrome:; object-src 'none'; img-src data: chrome:;"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title data-l10n-id="sidebar-containers-title"></title>
     <link rel="localization" href="browser/containersSidebar.ftl" />
+    <link
+      rel="stylesheet"
+      href="chrome://browser/content/sidebar/sidebar.css"
+    />
+    <link
+      rel="stylesheet"
+      href="chrome://browser/content/sidebar/sidebar-containers.css"
+    />
+    <script
+      type="module"
+      src="chrome://browser/content/sidebar/sidebar-panel-header.mjs"
+    ></script>
+    <script src="chrome://browser/content/contentTheme.js"></script>
+    <script
+      type="module"
+      src="chrome://browser/content/sidebar/sidebar-containers.mjs"
+    ></script>
   </head>
+
   <body>
-    <div id="containers-list"></div>
-    <div id="containers-empty" hidden>
-      No containers yet. Create one to get started.
+    <div class="sidebar-panel">
+      <sidebar-panel-header
+        data-l10n-id="sidebar-menu-containers-header"
+        data-l10n-attrs="heading"
+        view="viewContainersSidebar"
+      ></sidebar-panel-header>
+      <div class="sidebar-panel-scrollable-content">
+        <div id="containers-list"></div>
+        <div id="containers-empty" hidden data-l10n-id="sidebar-containers-empty"></div>
+      </div>
+      <moz-button
+        id="new-container-btn"
+        type="primary"
+        data-l10n-id="sidebar-containers-new"
+      ></moz-button>
     </div>
-    <button id="new-container-btn">New Container</button>
-    <script src="chrome://browser/content/sidebar/sidebar-containers.mjs" type="module"></script>
   </body>
 </html>

@@ -209,7 +209,7 @@ bool nsMenuPopupFrame::IsNoAutoHide() const {
          mContent->AsElement()->GetBoolAttr(nsGkAtoms::noautohide);
 }
 
-widget::PopupLevel nsMenuPopupFrame::GetPopupLevel(bool aIsNoAutoHide) const {
+widget::PopupLevel nsMenuPopupFrame::GetPopupLevel() const {
   // The popup level is determined as follows, in this order:
   //   1. non-panels (menus and tooltips) are always topmost
   //   2. any specified level attribute
@@ -236,7 +236,7 @@ widget::PopupLevel nsMenuPopupFrame::GetPopupLevel(bool aIsNoAutoHide) const {
   }
 
   // If this panel is a noautohide panel, the default is the parent level.
-  if (aIsNoAutoHide) {
+  if (IsNoAutoHide()) {
     return PopupLevel::Parent;
   }
 
@@ -264,7 +264,7 @@ void nsMenuPopupFrame::PrepareWidget(bool aForceRecreate) {
 }
 
 already_AddRefed<nsIWidget> nsMenuPopupFrame::ComputeParentWidget() const {
-  auto popupLevel = GetPopupLevel(IsNoAutoHide());
+  auto popupLevel = GetPopupLevel();
   // Panels which have a parent level need a parent widget. This allows them to
   // always appear in front of the parent window but behind other windows that
   // should be in front of it.
@@ -302,10 +302,10 @@ void nsMenuPopupFrame::CreateWidget() {
 
   const bool remote = HasRemoteContent();
 
-  const auto mode = nsLayoutUtils::GetFrameTransparency(this, this);
+  const auto mode = WidgetTransparencyMode();
   widgetData.mHasRemoteContent = remote;
   widgetData.mTransparencyMode = mode;
-  widgetData.mPopupLevel = GetPopupLevel(IsNoAutoHide());
+  widgetData.mPopupLevel = GetPopupLevel();
 
   nsCOMPtr<nsIWidget> parentWidget = ComputeParentWidget();
   if (NS_WARN_IF(!parentWidget)) {
@@ -322,6 +322,15 @@ void nsMenuPopupFrame::CreateWidget() {
   // (maybe in BaseCreate?) then remove this call.
   mWidget->SetTransparencyMode(mode);
   PropagateStyleToWidget();
+}
+
+TransparencyMode nsMenuPopupFrame::WidgetTransparencyMode() const {
+#ifdef MOZ_WIDGET_GTK
+  if (!LookAndFeel::GetInt(LookAndFeel::IntID::GTKCSDTransparencyAvailable)) {
+    return TransparencyMode::Opaque;
+  }
+#endif
+  return nsLayoutUtils::GetFrameTransparency(this, this);
 }
 
 LayoutDeviceIntRect nsMenuPopupFrame::CalcWidgetBounds() const {
@@ -341,7 +350,7 @@ LayoutDeviceIntRect nsMenuPopupFrame::CalcWidgetBounds() const {
   // We use outside pixels for transparent windows if possible, so that we
   // don't truncate the contents. For opaque popups, we use nearest pixels
   // which prevents having pixels not drawn by the frame.
-  const auto transparency = nsLayoutUtils::GetFrameTransparency(this, this);
+  const auto transparency = WidgetTransparencyMode();
   const bool opaque = transparency == TransparencyMode::Opaque;
   const auto idealBounds = LayoutDeviceIntRect::FromUnknownRect(
       opaque ? bounds.ToNearestPixels(a2d) : bounds.ToOutsidePixels(a2d));
@@ -1142,20 +1151,24 @@ void nsMenuPopupFrame::SchedulePendingWidgetMoveResize() {
   SchedulePaint();
 }
 
+void nsMenuPopupFrame::FlipAnchorForRTL(int8_t& aPopupAnchor,
+                                        int8_t& aPopupAlignment) {
+  // no need to flip the centered anchor types vertically
+  if (aPopupAnchor <= POPUPALIGNMENT_LEFTCENTER) {
+    aPopupAnchor = -aPopupAnchor;
+  }
+  if (aPopupAlignment <= POPUPALIGNMENT_LEFTCENTER) {
+    aPopupAlignment = -aPopupAlignment;
+  }
+}
+
 nsPoint nsMenuPopupFrame::AdjustPositionForAnchorAlign(
     nsRect& anchorRect, const nsSize& aPrefSize, FlipStyle& aHFlip,
     FlipStyle& aVFlip) const {
-  // flip the anchor and alignment for right-to-left
   int8_t popupAnchor(mPopupAnchor);
   int8_t popupAlign(mPopupAlignment);
   if (IsDirectionRTL()) {
-    // no need to flip the centered anchor types vertically
-    if (popupAnchor <= POPUPALIGNMENT_LEFTCENTER) {
-      popupAnchor = -popupAnchor;
-    }
-    if (popupAlign <= POPUPALIGNMENT_LEFTCENTER) {
-      popupAlign = -popupAlign;
-    }
+    FlipAnchorForRTL(popupAnchor, popupAlign);
   }
 
   nsRect originalAnchorRect(anchorRect);
@@ -1517,8 +1530,7 @@ auto nsMenuPopupFrame::GetRects(const nsSize& aPrefSize) const -> Rects {
   // the screen rectangle of the root frame, in dev pixels.
   const nsRect rootScreenRect = rootFrame->GetScreenRectInAppUnits();
 
-  const bool isNoAutoHide = IsNoAutoHide();
-  const PopupLevel popupLevel = GetPopupLevel(isNoAutoHide);
+  const PopupLevel popupLevel = GetPopupLevel();
 
   Rects result;
 
@@ -2145,10 +2157,13 @@ nsresult nsMenuPopupFrame::AttributeChanged(int32_t aNameSpaceID,
     MoveToAttributePosition();
   }
 
-  if (aAttribute == nsGkAtoms::remote && GetWidget()) {
-    // When the remote attribute changes, we need to create a new widget to
-    // ensure that it has the correct compositor and transparency settings to
-    // match the new value. Do that only if we already have a widget.
+  if ((aAttribute == nsGkAtoms::remote || aAttribute == nsGkAtoms::level) &&
+      GetWidget() && !IsOpen()) {
+    // The remote and level attributes are only read when the widget is created,
+    // so recreate the widget to apply a changed value. The remote attribute
+    // affects the compositor and transparency settings, and the level attribute
+    // affects the popup's z-order. Only do this while the popup is closed to
+    // avoid tearing it down mid-display.
     // TODO(emilio): We should consider doing it only when we get re-shown or
     // so.
     PrepareWidget(true);
@@ -2307,8 +2322,10 @@ void nsMenuPopupFrame::MoveTo(const CSSPoint& aPos, bool aUpdateAttrs,
     nsAutoString left, top;
     left.AppendInt(RoundedToInt(aPos).x);
     top.AppendInt(RoundedToInt(aPos).y);
-    popup->SetAttr(kNameSpaceID_None, nsGkAtoms::left, left, false);
-    popup->SetAttr(kNameSpaceID_None, nsGkAtoms::top, top, false);
+    popup->SetAttr(kNameSpaceID_None, nsGkAtoms::left, left, false,
+                   dom::IsKnownNewAttr::No);
+    popup->SetAttr(kNameSpaceID_None, nsGkAtoms::top, top, false,
+                   dom::IsKnownNewAttr::No);
   }
 }
 
@@ -2548,8 +2565,10 @@ void nsMenuPopupFrame::WindowResized(nsIWidget* aWidget,
   nsAutoString width, height;
   width.AppendInt(newCSS.width);
   height.AppendInt(newCSS.height);
-  popup->SetAttr(kNameSpaceID_None, nsGkAtoms::width, width, true);
-  popup->SetAttr(kNameSpaceID_None, nsGkAtoms::height, height, true);
+  popup->SetAttr(kNameSpaceID_None, nsGkAtoms::width, width, true,
+                 dom::IsKnownNewAttr::No);
+  popup->SetAttr(kNameSpaceID_None, nsGkAtoms::height, height, true,
+                 dom::IsKnownNewAttr::No);
 }
 
 bool nsMenuPopupFrame::RequestWindowClose(nsIWidget* aWidget) {

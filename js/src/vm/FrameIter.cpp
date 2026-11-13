@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "vm/FrameIter-inl.h"
-
 #include "mozilla/Assertions.h"  // MOZ_ASSERT, MOZ_CRASH
 #include "mozilla/MaybeOneOf.h"  // mozilla::MaybeOneOf
 
@@ -29,6 +27,7 @@
 #include "wasm/WasmInstance.h"   // js::wasm::Instance
 
 #include "jit/JSJitFrameIter-inl.h"  // js::jit::JSJitFrameIter::baselineFrame{,NumValueSlots}
+#include "vm/FrameIter-inl.h"
 #include "vm/Stack-inl.h"  // js::AbstractFramePtr::*
 
 namespace JS {
@@ -558,6 +557,18 @@ bool FrameIter::isFunctionFrame() const {
       return false;
   }
   MOZ_CRASH("Unexpected state");
+}
+
+bool FrameIter::isResumingGenerator() const {
+  MOZ_ASSERT(!done());
+  if (isInterp()) {
+    return interpFrame()->isResumingGenerator();
+  }
+  if (isPhysicalJitFrame()) {
+    return physicalJitFrame()->isResumingGenerator();
+  }
+  // Wasm frames and inlined Ion frames are never resuming a generator.
+  return false;
 }
 
 JSAtom* FrameIter::maybeFunctionDisplayAtom() const {

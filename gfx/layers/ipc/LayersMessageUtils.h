@@ -10,9 +10,9 @@
 #include <utility>
 
 #include "FrameMetrics.h"
+#include "ImageContainer.h"
 #include "VsyncSource.h"
 #include "chrome/common/ipc_message_utils.h"
-#include "ImageContainer.h"
 #include "ipc/EnumSerializer.h"
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/RelativeTo.h"
@@ -21,11 +21,12 @@
 #include "mozilla/ipc/ByteBuf.h"
 #include "mozilla/ipc/ProtocolMessageUtils.h"
 #include "mozilla/ipc/RustMessageUtils.h"
-#include "mozilla/layers/APZInputBridge.h"
+#include "mozilla/layers/APZBridge.h"
 #include "mozilla/layers/AsyncDragMetrics.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/layers/CompositorScrollUpdate.h"
 #include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/DoubleTapToZoom.h"
 #include "mozilla/layers/FocusTarget.h"
 #include "mozilla/layers/GeckoContentControllerTypes.h"
 #include "mozilla/layers/GpuFence.h"
@@ -36,7 +37,6 @@
 #include "mozilla/layers/RepaintRequest.h"
 #include "mozilla/layers/ScrollbarData.h"
 #include "nsSize.h"
-#include "mozilla/layers/DoubleTapToZoom.h"
 
 // For ParamTraits, could be moved to cpp file
 #include "ipc/nsGUIEventIPC.h"
@@ -142,11 +142,11 @@ struct ParamTraits<mozilla::layers::RepaintRequest::ScrollOffsetUpdateType>
           mozilla::layers::RepaintRequest::sHighestScrollOffsetUpdateType> {};
 
 template <>
-struct ParamTraits<mozilla::layers::OverscrollBehavior>
+struct ParamTraits<mozilla::StyleOverscrollBehavior>
     : public ContiguousEnumSerializerInclusive<
-          mozilla::layers::OverscrollBehavior,
-          mozilla::layers::OverscrollBehavior::Auto,
-          mozilla::layers::kHighestOverscrollBehavior> {};
+          mozilla::StyleOverscrollBehavior,
+          mozilla::StyleOverscrollBehavior::Auto,
+          mozilla::StyleOverscrollBehavior::None> {};
 
 template <>
 struct ParamTraits<mozilla::StyleOverflow>
@@ -385,7 +385,7 @@ template <>
 struct ParamTraits<mozilla::ScrollUpdateType>
     : public ContiguousEnumSerializerInclusive<
           mozilla::ScrollUpdateType, mozilla::ScrollUpdateType::Absolute,
-          mozilla::ScrollUpdateType::PureRelative> {};
+          mozilla::ScrollUpdateType::ZeroDeltaLayoutScroll> {};
 
 template <>
 struct ParamTraits<mozilla::ScrollMode>
@@ -782,6 +782,13 @@ struct ParamTraits<mozilla::layers::GpuFence*> {
     return true;
   }
 };
+
+template <>
+struct ParamTraits<mozilla::layers::RemoteDecoderVideoType>
+    : public ContiguousEnumSerializerInclusive<
+          mozilla::layers::RemoteDecoderVideoType,
+          mozilla::layers::RemoteDecoderVideoType::TypeNone,
+          mozilla::layers::kHighestRemoteDecoderVideoType> {};
 
 } /* namespace IPC */
 

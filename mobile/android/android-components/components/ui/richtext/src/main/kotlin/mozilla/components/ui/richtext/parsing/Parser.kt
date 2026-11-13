@@ -6,24 +6,22 @@ package mozilla.components.ui.richtext.parsing
 
 import mozilla.components.ui.richtext.ir.RichDocument
 import org.intellij.markdown.flavours.commonmark.CommonMarkFlavourDescriptor
+import org.intellij.markdown.parser.CancellationToken
 import org.intellij.markdown.parser.MarkdownParser
 
-/**
- * Parser that delegates to Jetbrains [MarkdownParser]
- */
+/** Parser that delegates to Jetbrains [MarkdownParser] */
 class Parser {
     /**
-     * Parses a string into a [RichDocument].
+     * Parses text into a [RichDocument].
      *
-     * @param source the string to parse.
+     * @param source the text to parse.
      * @return a [RichDocument].
      */
-    fun parse(source: String): RichDocument {
+    fun parse(source: CharSequence): RichDocument {
         val flavour = CommonMarkFlavourDescriptor()
-        val parser = MarkdownParser(flavour)
-        val blocks = parser.buildMarkdownTreeFromString(source)
-            .children
-            .flatMap { node ->
+        val parser = MarkdownParser(flavour, cancellationToken = CancellationToken.NonCancellable)
+        val blocks =
+            parser.buildMarkdownTreeFromString(source).children.flatMap { node ->
                 node.toBlocks(source)
             }
         return RichDocument(blocks = blocks)

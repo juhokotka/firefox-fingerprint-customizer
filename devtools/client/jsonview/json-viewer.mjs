@@ -12,6 +12,7 @@ import TreeViewClass from "resource://devtools/client/shared/components/tree/Tre
 import { ObjectProvider } from "resource://devtools/client/shared/components/tree/ObjectProvider.mjs";
 import { JSON_NUMBER } from "resource://devtools/client/shared/components/reps/reps/constants.mjs";
 import { parseJsonLossless } from "resource://devtools/client/shared/components/reps/reps/rep-utils.mjs";
+import { parseJsonl } from "resource://devtools/client/shared/jsonl-utils.mjs";
 import { createSizeProfile } from "resource://devtools/client/jsonview/json-size-profiler.mjs";
 
 const { MainTabbedArea } = createFactories(MainTabbedAreaClass);
@@ -260,7 +261,11 @@ input.actions = {
       // Invalid URL encoding, leave filename undefined
     }
 
-    const profile = createSizeProfile(jsonString, filename);
+    const profile = createSizeProfile(
+      jsonString,
+      filename,
+      JSONView.isJsonlines
+    );
 
     // Wait for profiler to be ready and send the profile
     let isReady = false;
@@ -357,7 +362,11 @@ const promise = (async function parseJSON() {
   // If the JSON has been loaded, parse it immediately before loading the app.
   const jsonString = input.jsonText.textContent;
   try {
-    input.json = parseJsonLossless(jsonString);
+    if (JSONView.isJsonlines) {
+      input.json = parseJsonl(jsonString);
+    } else {
+      input.json = parseJsonLossless(jsonString);
+    }
 
     // Expose a clean public API for accessing JSON data from the console
     // This is not tied to internal implementation details

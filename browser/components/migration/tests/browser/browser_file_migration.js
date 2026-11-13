@@ -4,7 +4,7 @@
 "use strict";
 
 const { FileMigratorBase } = ChromeUtils.importESModule(
-  "resource:///modules/FileMigrators.sys.mjs"
+  "moz-src:///browser/components/migration/FileMigrators.sys.mjs"
 );
 
 const DUMMY_FILEMIGRATOR_KEY = "dummy-file-migrator";
@@ -135,11 +135,8 @@ add_task(async function test_file_migration() {
     EventUtils.synthesizeMouseAtCenter(selector, {}, prefsWin);
 
     info("Waiting for panel-list shown");
-    await new Promise(resolve => {
-      shadow
-        .querySelector("panel-list")
-        .addEventListener("shown", resolve, { once: true });
-    });
+    let panelList = shadow.querySelector("panel-list");
+    await waitForPanelListShown(panelList);
 
     info("Panel list shown. Clicking on panel-item");
     let panelItem = shadow.querySelector(
@@ -249,11 +246,8 @@ add_task(async function test_file_migration_error() {
     EventUtils.synthesizeMouseAtCenter(selector, {}, prefsWin);
 
     info("Waiting for panel-list shown");
-    await new Promise(resolve => {
-      shadow
-        .querySelector("panel-list")
-        .addEventListener("shown", resolve, { once: true });
-    });
+    let panelList = shadow.querySelector("panel-list");
+    await waitForPanelListShown(panelList);
 
     info("Panel list shown. Clicking on panel-item");
     let panelItem = shadow.querySelector(

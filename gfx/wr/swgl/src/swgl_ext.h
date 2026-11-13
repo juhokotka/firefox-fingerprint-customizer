@@ -213,6 +213,12 @@ static void blendTextureLinearUpscale(S sampler, vec2 uv, int span,
   ivec2 i(clamp(uv, min_uv, max_uv));
   ivec2 frac = i;
   i >>= 7;
+  int32_t maxX = int32_t(sampler->width) - swgl_StepSize;
+  if (i.x.x < 0 || i.x.x > maxX) {
+    blendTextureLinearFallback<BLEND>(sampler, uv, span, uv_step, min_uv,
+                                      max_uv, color, buf);
+    return;
+  }
   P* row0 = (P*)sampler->buf + computeRow(sampler, ivec2_scalar(0, i.y.x));
   P* row1 = row0 + computeNextRowOffset(sampler, ivec2_scalar(0, i.y.x));
   I16 fracx = computeFracX(sampler, i, frac);
@@ -227,10 +233,17 @@ static void blendTextureLinearUpscale(S sampler, vec2 uv, int span,
   // one. However, due to the complication of upscaling, we may not necessarily
   // shift in all the next set of samples.
   for (P* end = buf + span; buf < end; buf += 4) {
+    Float prevX = uv.x;
     uv.x += uv_step.x;
     I32 ixn = cast(uv.x);
     I16 fracn = computeFracNoClamp(ixn);
     ixn >>= 7;
+    // Accumulated UV rounding must not step outside the row.
+    if (uint32_t(ixn.x) > uint32_t(maxX)) {
+      blendTextureLinearFallback<BLEND>(sampler, {prevX, uv.y}, int(end - buf),
+                                        uv_step, min_uv, max_uv, color, buf);
+      return;
+    }
     auto src0n = CONVERT(unaligned_load<packed_type>(&row0[ixn.x]),
                          signed_unpacked_type);
     auto src1n = CONVERT(unaligned_load<packed_type>(&row1[ixn.x]),
@@ -401,8 +414,10 @@ static P* blendTextureLinearDispatch(S sampler, vec2 uv, int span,
     // data from before the start of the row and require clamping.
     float beforeDist = max(0.0f, min_uv.x) - uv.x.x;
     if (beforeDist > 0) {
-      int before = clamp(int(ceil(beforeDist / uv_step.x)) * swgl_StepSize, 0,
-                         int(end - buf));
+      // Bound step counts to the remaining span before integer arithmetic.
+      int before = int(clamp(ceil(beforeDist / uv_step.x), 0.0f,
+                             float(span / swgl_StepSize))) *
+                   swgl_StepSize;
       buf = blendTextureLinearFallback<BLEND>(sampler, uv, before, uv_step,
                                               min_uv, max_uv, color, buf);
       uv.x += (before / swgl_StepSize) * uv_step.x;
@@ -427,7 +442,9 @@ static P* blendTextureLinearDispatch(S sampler, vec2 uv, int span,
           uv.x += (inside / swgl_StepSize) * uv_step.x;
         }
       } else if (filter == LINEAR_FILTER_UPSCALE) {
-        inside = min(int(insideDist / uv_step.x) * swgl_StepSize, inside);
+        inside =
+            int(min(insideDist / uv_step.x, float(inside / swgl_StepSize))) *
+            swgl_StepSize;
         if (inside > 0) {
           blendTextureLinearUpscale<BLEND>(sampler, uv, inside, uv_step, min_uv,
                                            max_uv, color, buf);
@@ -1005,6 +1022,17 @@ static ALWAYS_INLINE PackedRGBA8 convertYUV(const YUVMatrix& rgb_from_ycbcr,
   return rgb_from_ycbcr.convert(yy, uv);
 }
 
+template <typename S0>
+static inline bool validYUVFormat(S0 sampler0) {
+  switch (sampler0->format) {
+    case TextureFormat::RGBA8:
+    case TextureFormat::YUY2:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Helper functions to sample from planar YUV textures before converting to RGB
 template <typename S0>
 static ALWAYS_INLINE PackedRGBA8 sampleYUV(S0 sampler0, ivec2 uv0,
@@ -1031,7 +1059,7 @@ static int blendYUV(P* buf, int span, S0 sampler0, vec2 uv0,
                     const vec4_scalar& uv_rect0, const vec3_scalar& ycbcr_bias,
                     const mat3_scalar& rgb_from_debiased_ycbcr,
                     int rescaleFactor, C color = C()) {
-  if (!swgl_isTextureLinear(sampler0)) {
+  if (!swgl_isTextureLinear(sampler0) || !validYUVFormat(sampler0)) {
     return 0;
   }
   LINEAR_QUANTIZE_UV(sampler0, uv0, uv_step0, uv_rect0, min_uv0, max_uv0);
@@ -1046,6 +1074,20 @@ static int blendYUV(P* buf, int span, S0 sampler0, vec2 uv0,
                         c));
   }
   return span;
+}
+
+template <typename S0, typename S1>
+static inline bool validYUVFormat(S0 sampler0, S1 sampler1) {
+  switch (sampler1->format) {
+    case TextureFormat::RG8:
+      return sampler0->format == TextureFormat::R8;
+    case TextureFormat::RGBA8:
+      return sampler0->format == TextureFormat::R8;
+    case TextureFormat::RG16:
+      return sampler0->format == TextureFormat::R16;
+    default:
+      return false;
+  }
 }
 
 template <typename S0, typename S1>
@@ -1096,7 +1138,8 @@ static int blendYUV(P* buf, int span, S0 sampler0, vec2 uv0,
                     const vec4_scalar& uv_rect1, const vec3_scalar& ycbcr_bias,
                     const mat3_scalar& rgb_from_debiased_ycbcr,
                     int rescaleFactor, C color = C()) {
-  if (!swgl_isTextureLinear(sampler0) || !swgl_isTextureLinear(sampler1)) {
+  if (!swgl_isTextureLinear(sampler0) || !swgl_isTextureLinear(sampler1) ||
+      !validYUVFormat(sampler0, sampler1)) {
     return 0;
   }
   LINEAR_QUANTIZE_UV(sampler0, uv0, uv_step0, uv_rect0, min_uv0, max_uv0);
@@ -1113,6 +1156,18 @@ static int blendYUV(P* buf, int span, S0 sampler0, vec2 uv0,
                         c));
   }
   return span;
+}
+
+template <typename S0, typename S1, typename S2>
+static inline bool validYUVFormat(S0 sampler0, S1 sampler1, S2 sampler2) {
+  switch (sampler0->format) {
+    case TextureFormat::R8:
+    case TextureFormat::R16:
+      return sampler0->format == sampler1->format &&
+             sampler0->format == sampler2->format;
+    default:
+      return false;
+  }
 }
 
 template <typename S0, typename S1, typename S2>
@@ -1185,7 +1240,8 @@ static int blendYUV(P* buf, int span, S0 sampler0, vec2 uv0,
                     const mat3_scalar& rgb_from_debiased_ycbcr,
                     int rescaleFactor, C color = C()) {
   if (!swgl_isTextureLinear(sampler0) || !swgl_isTextureLinear(sampler1) ||
-      !swgl_isTextureLinear(sampler2)) {
+      !swgl_isTextureLinear(sampler2) ||
+      !validYUVFormat(sampler0, sampler1, sampler2)) {
     return 0;
   }
   LINEAR_QUANTIZE_UV(sampler0, uv0, uv_step0, uv_rect0, min_uv0, max_uv0);
@@ -1216,7 +1272,8 @@ static int blendYUV(uint32_t* buf, int span, sampler2DRect sampler0, vec2 uv0,
                     const mat3_scalar& rgb_from_debiased_ycbcr,
                     int rescaleFactor, NoColor noColor = NoColor()) {
   if (!swgl_isTextureLinear(sampler0) || !swgl_isTextureLinear(sampler1) ||
-      !swgl_isTextureLinear(sampler2)) {
+      !swgl_isTextureLinear(sampler2) ||
+      !validYUVFormat(sampler0, sampler1, sampler2)) {
     return 0;
   }
   LINEAR_QUANTIZE_UV(sampler0, uv0, uv_step0, uv_rect0, min_uv0, max_uv0);
@@ -1306,49 +1363,10 @@ static int blendYUV(uint32_t* buf, int span, sampler2DRect sampler0, vec2 uv0,
 #define swgl_commitTextureLinearColorYUV(...) \
   swgl_commitTextureLinearYUV(__VA_ARGS__)
 
-// Each gradient stops entry is a pair of RGBA32F start color and end step.
-struct GradientStops {
-  Float startColor;
-  union {
-    Float stepColor;
-    vec4_scalar stepData;
-  };
-
-  // Whether this gradient entry can be merged with an adjacent entry. The
-  // step will be equal with the adjacent step if and only if they can be
-  // merged, or rather, that the stops are actually part of a single larger
-  // gradient.
-  bool can_merge(const GradientStops& next) const {
-    return stepData == next.stepData;
-  }
-
-  // Get the interpolated color within the entry based on the offset from its
-  // start.
-  Float interpolate(float offset) const {
-    return startColor + stepColor * offset;
-  }
-
-  // Get the end color of the entry where interpolation stops.
-  Float end_color() const { return startColor + stepColor; }
-};
-
-// Checks if a gradient table of the specified size exists at the UV coords of
-// the address within an RGBA32F texture. If so, a linear address within the
-// texture is returned that may be used to sample the gradient table later. If
-// the address doesn't describe a valid gradient, then a negative value is
-// returned.
-static inline int swgl_validateGradient(sampler2D sampler, ivec2_scalar address,
-                                        int entries) {
-  return sampler->format == TextureFormat::RGBA32F && address.y >= 0 &&
-                 address.y < int(sampler->height) && address.x >= 0 &&
-                 address.x < int(sampler->width) && entries > 0 &&
-                 address.x +
-                         int(sizeof(GradientStops) / sizeof(Float)) * entries <=
-                     int(sampler->width)
-             ? address.y * sampler->stride + address.x * 4
-             : -1;
-}
-
+// Checks that a gradient with the specified number of stops exists at the UV
+// coords of the address within an RGBA32F texture. If so, a linear address
+// within the texture is returned that may be used to sample the gradient
+// colors and stop offsets later, otherwise a negative value is returned.
 static inline int swgl_validateGradientFromStops(sampler2D sampler,
                                                  ivec2_scalar address,
                                                  int entries) {
@@ -1363,42 +1381,6 @@ static inline int swgl_validateGradientFromStops(sampler2D sampler,
              ? address.y * sampler->stride + address.x * 4
              : -1;
 }
-
-static inline WideRGBA8 sampleGradient(sampler2D sampler, int address,
-                                       Float entry) {
-  assert(sampler->format == TextureFormat::RGBA32F);
-  assert(address >= 0 && address < int(sampler->height * sampler->stride));
-  // Get the integer portion of the entry index to find the entry colors.
-  I32 index = cast(entry);
-  // Use the fractional portion of the entry index to control blending between
-  // entry colors.
-  Float offset = entry - cast(index);
-  // Every entry is a pair of colors blended by the fractional offset.
-  assert(test_all(index >= 0 &&
-                  index * int(sizeof(GradientStops) / sizeof(Float)) <
-                      int(sampler->width)));
-  GradientStops* stops = (GradientStops*)&sampler->buf[address];
-  // Blend between the colors for each SIMD lane, then pack them to RGBA8
-  // result. Since the layout of the RGBA8 framebuffer is actually BGRA while
-  // the gradient table has RGBA colors, swizzling is required.
-  return combine(
-      packRGBA8(round_pixel(stops[index.x].interpolate(offset.x).zyxw),
-                round_pixel(stops[index.y].interpolate(offset.y).zyxw)),
-      packRGBA8(round_pixel(stops[index.z].interpolate(offset.z).zyxw),
-                round_pixel(stops[index.w].interpolate(offset.w).zyxw)));
-}
-
-// Samples a gradient entry from the gradient at the provided linearized
-// address. The integer portion of the entry index is used to find the entry
-// within the table whereas the fractional portion is used to blend between
-// adjacent table entries.
-#define swgl_commitGradientRGBA8(sampler, address, entry) \
-  swgl_commitChunk(RGBA8, sampleGradient(sampler, address, entry))
-
-// Variant that allows specifying a color multiplier of the gradient result.
-#define swgl_commitGradientColorRGBA8(sampler, address, entry, color)         \
-  swgl_commitChunk(RGBA8, applyColor(sampleGradient(sampler, address, entry), \
-                                     packColor(swgl_OutRGBA, color)))
 
 // Precomputed noise for adding directly to four horizontally contiguous pixels
 // TODO: These should be updated for parity with the shader dither
@@ -1608,227 +1590,19 @@ static int32_t findGradientStopPair(float offset, float* stops,
     return index - 1;
 }
 
-
-// Samples an entire span of a linear gradient by crawling the gradient table
-// and looking for consecutive stops that can be merged into a single larger
-// gradient, then interpolating between those larger gradients within the span.
-template <bool BLEND, bool DITHER>
-static bool commitLinearGradient(sampler2D sampler, int address, float size,
-                                 bool tileRepeat, bool gradientRepeat, vec2 pos,
-                                 const vec2_scalar& scaleDir, float startOffset,
-                                 uint32_t* buf, int span,
-                                 vec4 fragCoord = vec4()) {
-  assert(sampler->format == TextureFormat::RGBA32F);
-  assert(address >= 0 && address < int(sampler->height * sampler->stride));
-  GradientStops* stops = (GradientStops*)&sampler->buf[address];
-  // Get the chunk delta from the difference in offset steps. This represents
-  // how far within the gradient table we advance for every step in output,
-  // normalized to gradient table size.
-  vec2_scalar posStep = dFdx(pos) * 4.0f;
-  float delta = dot(posStep, scaleDir);
-  if (!isfinite(delta)) {
-    return false;
+// Premultiplies the color components of 8-bit BGRA pixels by their alpha.
+// Gradient stops with unpremultiplied colors are interpolated first and
+// premultiplied afterwards.
+template <bool PREMULTIPLY>
+static ALWAYS_INLINE WideRGBA8 premultiplyGradientPixels(WideRGBA8 pixels) {
+  if (!PREMULTIPLY) {
+    return pixels;
   }
-
-  // Only incremented in the case of dithering
-  int32_t currentFragCoordX = int32_t(fragCoord.x.x);
-  const auto* ditherNoiseYIndexed =
-      DITHER ? getDitherNoise(int32_t(fragCoord.y.x)) : nullptr;
-
-  // If we have a repeating brush, then the position will be modulo the [0,1)
-  // interval. Compute coefficients that can be used to quickly evaluate the
-  // distance to the interval boundary where the offset will wrap.
-  vec2_scalar distCoeffsX = {0.25f * span, 0.0f};
-  vec2_scalar distCoeffsY = distCoeffsX;
-  if (tileRepeat) {
-    if (posStep.x != 0.0f) {
-      distCoeffsX = vec2_scalar{step(0.0f, posStep.x), 1.0f} * recip(posStep.x);
-    }
-    if (posStep.y != 0.0f) {
-      distCoeffsY = vec2_scalar{step(0.0f, posStep.y), 1.0f} * recip(posStep.y);
-    }
-  }
-
-  for (; span > 0;) {
-    // Try to process as many chunks as are within the span if possible.
-    float chunks = 0.25f * span;
-    vec2 repeatPos = pos;
-    if (tileRepeat) {
-      // If this is a repeating brush, then limit the chunks to not cross the
-      // interval boundaries.
-      repeatPos = fract(pos);
-      chunks = min(chunks, distCoeffsX.x - repeatPos.x.x * distCoeffsX.y);
-      chunks = min(chunks, distCoeffsY.x - repeatPos.y.x * distCoeffsY.y);
-    }
-    // Compute the gradient offset from the position.
-    Float offset =
-        repeatPos.x * scaleDir.x + repeatPos.y * scaleDir.y - startOffset;
-    // If repeat is desired, we need to limit the offset to a fractional value.
-    if (gradientRepeat) {
-      offset = fract(offset);
-    }
-    // To properly handle both clamping and repeating of the table offset, we
-    // need to ensure we don't run past the 0 and 1 points. Here we compute the
-    // intercept points depending on whether advancing forwards or backwards in
-    // the gradient table to ensure the chunk count is limited by the amount
-    // before intersection. If there is no delta, then we compute no intercept.
-    float startEntry;
-    int minIndex, maxIndex;
-    if (offset.x < 0) {
-      // If we're below the gradient table, use the first color stop. We can
-      // only intercept the table if walking forward.
-      startEntry = 0;
-      minIndex = int(startEntry);
-      maxIndex = minIndex;
-      if (delta > 0) {
-        chunks = min(chunks, -offset.x / delta);
-      }
-    } else if (offset.x < 1) {
-      // Otherwise, we're inside the gradient table. Depending on the direction
-      // we're walking the the table, we may intersect either the 0 or 1 offset.
-      // Compute the start entry based on our initial offset, and compute the
-      // end entry based on the available chunks limited by intercepts. Clamp
-      // them into the valid range of the table.
-      startEntry = 1.0f + offset.x * size;
-      if (delta < 0) {
-        chunks = min(chunks, -offset.x / delta);
-      } else if (delta > 0) {
-        chunks = min(chunks, (1 - offset.x) / delta);
-      }
-      float endEntry = clamp(1.0f + (offset.x + delta * int(chunks)) * size,
-                             0.0f, 1.0f + size);
-      // Now that we know the range of entries we need to sample, we want to
-      // find the largest possible merged gradient within that range. Depending
-      // on which direction we are advancing in the table, we either walk up or
-      // down the table trying to merge the current entry with the adjacent
-      // entry. We finally limit the chunks to only sample from this merged
-      // gradient.
-      minIndex = int(startEntry);
-      maxIndex = minIndex;
-      if (delta > 0) {
-        while (maxIndex + 1 < endEntry &&
-               stops[maxIndex].can_merge(stops[maxIndex + 1])) {
-          maxIndex++;
-        }
-        chunks = min(chunks, (maxIndex + 1 - startEntry) / (delta * size));
-      } else if (delta < 0) {
-        while (minIndex - 1 > endEntry &&
-               stops[minIndex - 1].can_merge(stops[minIndex])) {
-          minIndex--;
-        }
-        chunks = min(chunks, (minIndex - startEntry) / (delta * size));
-      }
-    } else {
-      // If we're above the gradient table, use the last color stop. We can
-      // only intercept the table if walking backward.
-      startEntry = 1.0f + size;
-      minIndex = int(startEntry);
-      maxIndex = minIndex;
-      if (delta < 0) {
-        chunks = min(chunks, (1 - offset.x) / delta);
-      }
-    }
-    // If there are any amount of whole chunks of a merged gradient found,
-    // then we want to process that as a single gradient span with the start
-    // and end colors from the min and max entries.
-    if (chunks >= 1.0f) {
-      int inside = int(chunks);
-      // Sample the start color from the min entry and the end color from the
-      // max entry of the merged gradient. These are scaled to a range of
-      // 0..0xFF00, as that is the largest shifted value that can fit in a U16.
-      // For dithering, this allows room to avoid overflow and underflow
-      // when applying the dither pattern. Since we are only doing addition with
-      // the step value, we can still represent negative step values without
-      // having to use an explicit sign bit, as the result will still come out
-      // the same, allowing us to gain an extra bit of precision. We will later
-      // shift these into 8 bit output range while committing the span, but
-      // stepping with higher precision to avoid banding. We convert from RGBA
-      // to BGRA here to avoid doing this in the inner loop.
-      auto minColorF = stops[minIndex].startColor.zyxw * float(0xFF00);
-      auto maxColorF = stops[maxIndex].end_color().zyxw * float(0xFF00);
-      // Get the color range of the merged gradient, normalized to its size.
-      auto colorRangeF =
-          (maxColorF - minColorF) * (1.0f / (maxIndex + 1 - minIndex));
-      // Compute the actual starting color of the current start offset within
-      // the merged gradient. The value 0.5 is added to the low bits (0x80) so
-      // that the color will effectively round to the nearest increment below.
-      auto colorF =
-          minColorF + colorRangeF * (startEntry - minIndex) + float(0x80);
-      // Compute the portion of the color range that we advance on each chunk.
-      Float deltaColorF = colorRangeF * (delta * size);
-      // Quantize the color delta and current color. These have already been
-      // scaled to the 0..0xFF00 range, so we just need to round them to U16.
-      auto deltaColor = repeat4(CONVERT(round_pixel(deltaColorF, 1), U16));
-      for (int remaining = inside;;) {
-        auto color =
-            combine(CONVERT(round_pixel(colorF, 1), U16),
-                    CONVERT(round_pixel(colorF + deltaColorF * 0.25f, 1), U16),
-                    CONVERT(round_pixel(colorF + deltaColorF * 0.5f, 1), U16),
-                    CONVERT(round_pixel(colorF + deltaColorF * 0.75f, 1), U16));
-        // Finally, step the current color through the output chunks, shifting
-        // it into 8 bit range and outputting as we go. Only process a segment
-        // at a time to avoid overflowing 8-bit precision due to rounding of
-        // deltas.
-        int segment = min(remaining, 256 / 4);
-        for (auto* end = buf + segment * 4; buf < end; buf += 4) {
-          if (DITHER) {
-            commit_blend_span<BLEND>(
-                buf,
-                dither(color, currentFragCoordX, ditherNoiseYIndexed) >> 8);
-            currentFragCoordX += 4;
-          } else {
-            commit_blend_span<BLEND>(buf, color >> 8);
-          }
-          color += deltaColor;
-        }
-        remaining -= segment;
-        if (remaining <= 0) {
-          break;
-        }
-        colorF += deltaColorF * segment;
-      }
-      // Deduct the number of chunks inside the gradient from the remaining
-      // overall span. If we exhausted the span, bail out.
-      span -= inside * 4;
-      if (span <= 0) {
-        break;
-      }
-      // Otherwise, assume we're in a transitional section of the gradient that
-      // will probably require per-sample table lookups, so fall through below.
-      // We need to re-evaluate the position and offset first, though.
-      pos += posStep * float(inside);
-      repeatPos = tileRepeat ? fract(pos) : pos;
-      offset =
-          repeatPos.x * scaleDir.x + repeatPos.y * scaleDir.y - startOffset;
-      if (gradientRepeat) {
-        offset = fract(offset);
-      }
-    }
-    // If we get here, there were no whole chunks of a merged gradient found
-    // that we could process, but we still have a non-zero amount of span left.
-    // That means we have segments of gradient that begin or end at the current
-    // entry we're on. For this case, we just fall back to sampleGradient which
-    // will calculate a table entry for each sample, assuming the samples may
-    // have different table entries.
-    Float entry = clamp(offset * size + 1.0f, 0.0f, 1.0f + size);
-    if (DITHER) {
-      auto gradientSample = sampleGradient(sampler, address, entry) << 8;
-      commit_blend_span<BLEND>(
-          buf,
-          dither(gradientSample, currentFragCoordX, ditherNoiseYIndexed) >> 8);
-      currentFragCoordX += 4;
-    } else {
-      commit_blend_span<BLEND>(buf, sampleGradient(sampler, address, entry));
-    }
-    span -= 4;
-    buf += 4;
-    pos += posStep;
-  }
-  return true;
+  return set_alphas(muldiv255(pixels, alphas(pixels)), pixels);
 }
 
 // Samples an entire span of a linear gradient.
-template <bool BLEND, bool DITHER>
+template <bool BLEND, bool DITHER, bool PREMULTIPLY>
 static bool commitLinearGradientFromStops(sampler2D sampler, int offsetsAddress,
                                           int colorsAddress, float stopCount,
                                           bool gradientRepeat, vec2 pos,
@@ -1954,11 +1728,14 @@ static bool commitLinearGradientFromStops(sampler2D sampler, int offsetsAddress,
         for (auto* end = buf + segment * 4; buf < end; buf += 4) {
           if (DITHER) {
             commit_blend_span<BLEND>(
-                buf,
-                dither(color, currentFragCoordX, ditherNoiseYIndexed) >> 8);
+                buf, premultiplyGradientPixels<PREMULTIPLY>(
+                         dither(color, currentFragCoordX, ditherNoiseYIndexed) >>
+                         8));
             currentFragCoordX += 4;
           } else {
-            commit_blend_span<BLEND>(buf, bit_cast<WideRGBA8>(color >> 8));
+            commit_blend_span<BLEND>(buf,
+                                     premultiplyGradientPixels<PREMULTIPLY>(
+                                         bit_cast<WideRGBA8>(color >> 8)));
           }
           color += deltaColor;
         }
@@ -1987,7 +1764,10 @@ static bool commitLinearGradientFromStops(sampler2D sampler, int offsetsAddress,
         color = dither(color, currentFragCoordX, ditherNoiseYIndexed),
         currentFragCoordX += remainder;
       }
-      commit_blend_span<BLEND>(buf, bit_cast<WideRGBA8>(color >> 8), remainder);
+      commit_blend_span<BLEND>(buf,
+                               premultiplyGradientPixels<PREMULTIPLY>(
+                                   bit_cast<WideRGBA8>(color >> 8)),
+                               remainder);
 
       buf += remainder;
       span -= remainder;
@@ -1997,66 +1777,32 @@ static bool commitLinearGradientFromStops(sampler2D sampler, int offsetsAddress,
   return true;
 }
 
-// Commits an entire span of a linear gradient, given the address of a table
-// previously resolved with swgl_validateGradient. The size of the inner portion
-// of the table is given, assuming the table start and ends with a single entry
-// each to deal with clamping. Repeating will be handled if necessary. The
-// initial offset within the table is used to designate where to start the span
-// and how to step through the gradient table.
-#define swgl_commitLinearGradientRGBA8(sampler, address, size, tileRepeat,   \
-                                       gradientRepeat, pos, scaleDir,        \
-                                       startOffset)                          \
-  do {                                                                       \
-    bool drawn = false;                                                      \
-    if (blend_key) {                                                         \
-      drawn = commitLinearGradient<true, false>(                             \
-          sampler, address, size, tileRepeat, gradientRepeat, pos, scaleDir, \
-          startOffset, swgl_OutRGBA8, swgl_SpanLength);                      \
-    } else {                                                                 \
-      drawn = commitLinearGradient<false, false>(                            \
-          sampler, address, size, tileRepeat, gradientRepeat, pos, scaleDir, \
-          startOffset, swgl_OutRGBA8, swgl_SpanLength);                      \
-    }                                                                        \
-    if (drawn) {                                                             \
-      swgl_OutRGBA8 += swgl_SpanLength;                                      \
-      swgl_SpanLength = 0;                                                   \
-    }                                                                        \
-  } while (0)
-
-#define swgl_commitDitheredLinearGradientRGBA8(sampler, address, size,       \
-                                               tileRepeat, gradientRepeat,   \
-                                               pos, scaleDir, startOffset)   \
-  do {                                                                       \
-    bool drawn = false;                                                      \
-    if (blend_key) {                                                         \
-      drawn = commitLinearGradient<true, true>(                              \
-          sampler, address, size, tileRepeat, gradientRepeat, pos, scaleDir, \
-          startOffset, swgl_OutRGBA8, swgl_SpanLength, gl_FragCoord);        \
-    } else {                                                                 \
-      drawn = commitLinearGradient<false, true>(                             \
-          sampler, address, size, tileRepeat, gradientRepeat, pos, scaleDir, \
-          startOffset, swgl_OutRGBA8, swgl_SpanLength, gl_FragCoord);        \
-    }                                                                        \
-    if (drawn) {                                                             \
-      swgl_OutRGBA8 += swgl_SpanLength;                                      \
-      swgl_SpanLength = 0;                                                   \
-    }                                                                        \
-  } while (0)
-
-#define swgl_commitLinearGradientFromStopsRGBA8(                             \
-    sampler, offsetsAddress, colorsAddress, size, gradientRepeat, pos,       \
-    scaleDir, startOffset)                                                   \
-  do {                                                                       \
-    bool drawn = false;                                                      \
-    if (blend_key) {                                                         \
-      drawn = commitLinearGradientFromStops<true, false>(                    \
-          sampler, offsetsAddress, colorsAddress, size, gradientRepeat, pos, \
-          scaleDir, startOffset, swgl_OutRGBA8, swgl_SpanLength);            \
-    } else {                                                                 \
-      drawn = commitLinearGradientFromStops<false, false>(                   \
-          sampler, offsetsAddress, colorsAddress, size, gradientRepeat, pos, \
-          scaleDir, startOffset, swgl_OutRGBA8, swgl_SpanLength);            \
-    }                                                                        \
+#define swgl_commitLinearGradientFromStopsRGBA8(                              \
+    sampler, offsetsAddress, colorsAddress, size, gradientRepeat, pos,        \
+    scaleDir, startOffset, premultiply)                                       \
+  do {                                                                        \
+    bool drawn = false;                                                       \
+    if (blend_key) {                                                          \
+      drawn = premultiply                                                     \
+                  ? commitLinearGradientFromStops<true, false, true>(         \
+                        sampler, offsetsAddress, colorsAddress, size,         \
+                        gradientRepeat, pos, scaleDir, startOffset,           \
+                        swgl_OutRGBA8, swgl_SpanLength)                       \
+                  : commitLinearGradientFromStops<true, false, false>(        \
+                        sampler, offsetsAddress, colorsAddress, size,         \
+                        gradientRepeat, pos, scaleDir, startOffset,           \
+                        swgl_OutRGBA8, swgl_SpanLength);                      \
+    } else {                                                                  \
+      drawn = premultiply                                                     \
+                  ? commitLinearGradientFromStops<false, false, true>(        \
+                        sampler, offsetsAddress, colorsAddress, size,         \
+                        gradientRepeat, pos, scaleDir, startOffset,           \
+                        swgl_OutRGBA8, swgl_SpanLength)                       \
+                  : commitLinearGradientFromStops<false, false, false>(       \
+                        sampler, offsetsAddress, colorsAddress, size,         \
+                        gradientRepeat, pos, scaleDir, startOffset,           \
+                        swgl_OutRGBA8, swgl_SpanLength);                      \
+    }                                                                         \
     if (drawn) {                                                             \
       swgl_OutRGBA8 += swgl_SpanLength;                                      \
       swgl_SpanLength = 0;                                                   \
@@ -2065,17 +1811,29 @@ static bool commitLinearGradientFromStops(sampler2D sampler, int offsetsAddress,
 
 #define swgl_commitDitheredLinearGradientFromStopsRGBA8(                      \
     sampler, offsetsAddress, colorsAddress, size, tileRepeat, gradientRepeat, \
-    pos, scaleDir, startOffset)                                               \
+    pos, scaleDir, startOffset, premultiply)                                  \
   do {                                                                        \
     bool drawn = false;                                                       \
     if (blend_key) {                                                          \
-      drawn = commitLinearGradientFromStops<true, true>(                      \
-          sampler, offsetsAddress, colorsAddress, size, gradientRepeat, pos,  \
-          scaleDir, startOffset, swgl_OutRGBA8, swgl_SpanLength, fragCoord);  \
+      drawn = premultiply                                                     \
+                  ? commitLinearGradientFromStops<true, true, true>(          \
+                        sampler, offsetsAddress, colorsAddress, size,         \
+                        gradientRepeat, pos, scaleDir, startOffset,           \
+                        swgl_OutRGBA8, swgl_SpanLength, fragCoord)            \
+                  : commitLinearGradientFromStops<true, true, false>(         \
+                        sampler, offsetsAddress, colorsAddress, size,         \
+                        gradientRepeat, pos, scaleDir, startOffset,           \
+                        swgl_OutRGBA8, swgl_SpanLength, fragCoord);           \
     } else {                                                                  \
-      drawn = commitLinearGradientFromStops<false, true>(                     \
-          sampler, offsetsAddress, colorsAddress, size, gradientRepeat, pos,  \
-          scaleDir, startOffset, swgl_OutRGBA8, swgl_SpanLength, fragCoord);  \
+      drawn = premultiply                                                     \
+                  ? commitLinearGradientFromStops<false, true, true>(         \
+                        sampler, offsetsAddress, colorsAddress, size,         \
+                        gradientRepeat, pos, scaleDir, startOffset,           \
+                        swgl_OutRGBA8, swgl_SpanLength, fragCoord)            \
+                  : commitLinearGradientFromStops<false, true, false>(        \
+                        sampler, offsetsAddress, colorsAddress, size,         \
+                        gradientRepeat, pos, scaleDir, startOffset,           \
+                        swgl_OutRGBA8, swgl_SpanLength, fragCoord);           \
     }                                                                         \
     if (drawn) {                                                              \
       swgl_OutRGBA8 += swgl_SpanLength;                                       \
@@ -2086,7 +1844,8 @@ static bool commitLinearGradientFromStops(sampler2D sampler, int offsetsAddress,
 template <bool CLAMP, typename V>
 static ALWAYS_INLINE V fastSqrt(V v) {
   if (CLAMP) {
-    // Clamp to avoid zero or negative.
+    // Clamp to avoid zero or negative: the reciprocal square root of zero is
+    // infinity, and the multiply below would then produce a NaN.
     v = max(v, V(1.0e-12f));
   }
 #if USE_SSE2 || USE_NEON
@@ -2096,246 +1855,8 @@ static ALWAYS_INLINE V fastSqrt(V v) {
 #endif
 }
 
-template <bool CLAMP, typename V>
-static ALWAYS_INLINE auto fastLength(V v) {
-  return fastSqrt<CLAMP>(dot(v, v));
-}
-
-// Samples an entire span of a radial gradient by crawling the gradient table
-// and looking for consecutive stops that can be merged into a single larger
-// gradient, then interpolating between those larger gradients within the span
-// based on the computed position relative to a radius.
-template <bool BLEND, bool DITHER>
-static bool commitRadialGradient(sampler2D sampler, int address, float size,
-                                 bool repeat, vec2 pos, float radius,
-                                 uint32_t* buf, int span,
-                                 vec4 fragCoord = vec4()) {
-  assert(sampler->format == TextureFormat::RGBA32F);
-  assert(address >= 0 && address < int(sampler->height * sampler->stride));
-  GradientStops* stops = (GradientStops*)&sampler->buf[address];
-  // clang-format off
-  // Given position p, delta d, and radius r, we need to repeatedly solve the
-  // following quadratic for the pixel offset t:
-  //    length(p + t*d) = r
-  //    (px + t*dx)^2 + (py + t*dy)^2 = r^2
-  // Rearranged into quadratic equation form (t^2*a + t*b + c = 0) this is:
-  //    t^2*(dx^2+dy^2) + t*2*(dx*px+dy*py) + (px^2+py^2-r^2) = 0
-  //    t^2*d.d + t*2*d.p + (p.p-r^2) = 0
-  // The solution of the quadratic formula t=(-b+-sqrt(b^2-4ac))/2a reduces to:
-  //    t = -d.p/d.d +- sqrt((d.p/d.d)^2 - (p.p-r^2)/d.d)
-  // Note that d.p, d.d, p.p, and r^2 are constant across the gradient, and so
-  // we cache them below for faster computation.
-  //
-  // The quadratic has two solutions, representing the span intersecting the
-  // given radius of gradient, which can occur at two offsets. If there is only
-  // one solution (where b^2-4ac = 0), this represents the point at which the
-  // span runs tangent to the radius. This middle point is significant in that
-  // before it, we walk down the gradient ramp, and after it, we walk up the
-  // ramp.
-  // clang-format on
-  vec2_scalar pos0 = {pos.x.x, pos.y.x};
-  vec2_scalar delta = {pos.x.y - pos.x.x, pos.y.y - pos.y.x};
-  float deltaDelta = dot(delta, delta);
-  if (!isfinite(deltaDelta) || !isfinite(radius)) {
-    return false;
-  }
-
-  // Only incremented in the case of dithering
-  int32_t currentFragCoordX = int32_t(fragCoord.x.x);
-  const auto* ditherNoiseYIndexed =
-      DITHER ? getDitherNoise(int32_t(fragCoord.y.x)) : nullptr;
-
-  float invDelta, middleT, middleB;
-  if (deltaDelta > 0) {
-    invDelta = 1.0f / deltaDelta;
-    middleT = -dot(delta, pos0) * invDelta;
-    middleB = middleT * middleT - dot(pos0, pos0) * invDelta;
-  } else {
-    // If position is invariant, just set the coefficients so the quadratic
-    // always reduces to the end of the span.
-    invDelta = 0.0f;
-    middleT = float(span);
-    middleB = 0.0f;
-  }
-  // We only want search for merged gradients up to the minimum of either the
-  // mid-point or the span length. Cache those offsets here as they don't vary
-  // in the inner loop.
-  Float middleEndRadius = fastLength<true>(
-      pos0 + delta * (Float){middleT, float(span), 0.0f, 0.0f});
-  float middleRadius = span < middleT ? middleEndRadius.y : middleEndRadius.x;
-  float endRadius = middleEndRadius.y;
-  // Convert delta to change in position per chunk.
-  delta *= 4;
-  deltaDelta *= 4 * 4;
-  // clang-format off
-  // Given current position p and delta d, we reduce:
-  //    length(p) = sqrt(dot(p,p)) = dot(p,p) * invsqrt(dot(p,p))
-  // where dot(p+d,p+d) can be accumulated as:
-  //    (x+dx)^2+(y+dy)^2 = (x^2+y^2) + 2(x*dx+y*dy) + (dx^2+dy^2)
-  //                      = p.p + 2p.d + d.d
-  // Since p increases by d every loop iteration, p.d increases by d.d, and thus
-  // we can accumulate d.d to calculate 2p.d, then allowing us to get the next
-  // dot-product by adding it to dot-product p.p of the prior iteration. This
-  // saves us some multiplications and an expensive sqrt inside the inner loop.
-  // clang-format on
-  Float dotPos = dot(pos, pos);
-  Float dotPosDelta = 2.0f * dot(pos, delta) + deltaDelta;
-  float deltaDelta2 = 2.0f * deltaDelta;
-  for (int t = 0; t < span;) {
-    // Compute the gradient table offset from the current position.
-    Float offset = fastSqrt<true>(dotPos) - radius;
-    float startRadius = radius;
-    // If repeat is desired, we need to limit the offset to a fractional value.
-    if (repeat) {
-      // The non-repeating radius at which the gradient table actually starts,
-      // radius + floor(offset) = radius + (offset - fract(offset)).
-      startRadius += offset.x;
-      offset = fract(offset);
-      startRadius -= offset.x;
-    }
-    // We need to find the min/max index in the table of the gradient we want to
-    // use as well as the intercept point where we leave this gradient.
-    float intercept = -1;
-    int minIndex = 0;
-    int maxIndex = int(1.0f + size);
-    if (offset.x < 0) {
-      // If inside the inner radius of the gradient table, then use the first
-      // stop. Set the intercept to advance forward to the start of the gradient
-      // table.
-      maxIndex = minIndex;
-      if (t >= middleT) {
-        intercept = radius;
-      }
-    } else if (offset.x < 1) {
-      // Otherwise, we're inside the valid part of the gradient table.
-      minIndex = int(1.0f + offset.x * size);
-      maxIndex = minIndex;
-      // Find the offset in the gradient that corresponds to the search limit.
-      // We only search up to the minimum of either the mid-point or the span
-      // length. Get the table index that corresponds to this offset, clamped so
-      // that we avoid hitting the beginning (0) or end (1 + size) of the table.
-      float searchOffset =
-          (t >= middleT ? endRadius : middleRadius) - startRadius;
-      int searchIndex = int(clamp(1.0f + size * searchOffset, 1.0f, size));
-      // If we are past the mid-point, walk up the gradient table trying to
-      // merge stops. If we're below the mid-point, we need to walk down the
-      // table. We note the table index at which we need to look for an
-      // intercept to determine a valid span.
-      if (t >= middleT) {
-        while (maxIndex + 1 <= searchIndex &&
-               stops[maxIndex].can_merge(stops[maxIndex + 1])) {
-          maxIndex++;
-        }
-        intercept = maxIndex + 1;
-      } else {
-        while (minIndex - 1 >= searchIndex &&
-               stops[minIndex - 1].can_merge(stops[minIndex])) {
-          minIndex--;
-        }
-        intercept = minIndex;
-      }
-      // Convert from a table index into units of radius from the center of the
-      // gradient.
-      intercept = clamp((intercept - 1.0f) / size, 0.0f, 1.0f) + startRadius;
-    } else {
-      // If outside the outer radius of the gradient table, then use the last
-      // stop. Set the intercept to advance toward the valid part of the
-      // gradient table if going in, or just run to the end of the span if going
-      // away from the gradient.
-      minIndex = maxIndex;
-      if (t < middleT) {
-        intercept = radius + 1;
-      }
-    }
-    // Solve the quadratic for t to find where the merged gradient ends. If no
-    // intercept is found, just go to the middle or end of the span.
-    float endT = t >= middleT ? span : min(span, int(middleT));
-    if (intercept >= 0) {
-      float b = middleB + intercept * intercept * invDelta;
-      if (b > 0) {
-        b = fastSqrt<false>(b);
-        endT = min(endT, t >= middleT ? middleT + b : middleT - b);
-      } else {
-        // Due to the imprecision of fastSqrt in offset calculations, solving
-        // the quadratic may fail. However, if the discriminant is still close
-        // to 0, then just assume it is 0.
-        endT = min(endT, middleT);
-      }
-    }
-    // Figure out how many chunks are actually inside the merged gradient.
-    if (t + 4.0f <= endT) {
-      int inside = int(endT - t) & ~3;
-      // Convert start and end colors to BGRA and scale to 0..0xFF00 range
-      // (for dithered) or 0..255 (for non-dithered) later.
-      auto minColorF =
-          stops[minIndex].startColor.zyxw * (DITHER ? float(0xFF00) : 255.0f);
-      auto maxColorF =
-          stops[maxIndex].end_color().zyxw * (DITHER ? float(0xFF00) : 255.0f);
-
-      // Compute the change in color per change in gradient offset.
-      auto deltaColorF =
-          (maxColorF - minColorF) * (size / (maxIndex + 1 - minIndex));
-      // Subtract off the color difference of the beginning of the current span
-      // from the beginning of the gradient.
-      Float colorF =
-          minColorF - deltaColorF * (startRadius + (minIndex - 1) / size);
-      // Finally, walk over the span accumulating the position dot product and
-      // getting its sqrt as an offset into the color ramp. At this point we
-      // just need to round to an integer and pack down to pixel format.
-      for (auto* end = buf + inside; buf < end; buf += 4) {
-        Float offsetG = fastSqrt<false>(dotPos);
-        if (DITHER) {
-          auto color = combine(
-              CONVERT(round_pixel(colorF + deltaColorF * offsetG.x, 1), U16),
-              CONVERT(round_pixel(colorF + deltaColorF * offsetG.y, 1), U16),
-              CONVERT(round_pixel(colorF + deltaColorF * offsetG.z, 1), U16),
-              CONVERT(round_pixel(colorF + deltaColorF * offsetG.w, 1), U16));
-          commit_blend_span<BLEND>(
-              buf, dither(color, currentFragCoordX, ditherNoiseYIndexed) >> 8);
-          currentFragCoordX += 4;
-        } else {
-          auto color = combine(
-              packRGBA8(round_pixel(colorF + deltaColorF * offsetG.x, 1),
-                        round_pixel(colorF + deltaColorF * offsetG.y, 1)),
-              packRGBA8(round_pixel(colorF + deltaColorF * offsetG.z, 1),
-                        round_pixel(colorF + deltaColorF * offsetG.w, 1)));
-          commit_blend_span<BLEND>(buf, color);
-        }
-
-        dotPos += dotPosDelta;
-        dotPosDelta += deltaDelta2;
-      }
-      // Advance past the portion of gradient we just processed.
-      t += inside;
-      // If we hit the end of the span, exit out now.
-      if (t >= span) {
-        break;
-      }
-      // Otherwise, we are most likely in a transitional section of the gradient
-      // between stops that will likely require doing per-sample table lookups.
-      // Rather than having to redo all the searching above to figure that out,
-      // just assume that to be the case and fall through below to doing the
-      // table lookups to hopefully avoid an iteration.
-      offset = fastSqrt<true>(dotPos) - radius;
-      if (repeat) {
-        offset = fract(offset);
-      }
-    }
-    // If we got here, that means we still have span left to process but did not
-    // have any whole chunks that fell within a merged gradient. Just fall back
-    // to doing a table lookup for each sample.
-    Float entry = clamp(offset * size + 1.0f, 0.0f, 1.0f + size);
-    commit_blend_span<BLEND>(buf, sampleGradient(sampler, address, entry));
-    buf += 4;
-    t += 4;
-    dotPos += dotPosDelta;
-    dotPosDelta += deltaDelta2;
-  }
-  return true;
-}
-
 // Samples an entire span of a radial gradient.
-template <bool BLEND, bool DITHER>
+template <bool BLEND, bool DITHER, bool PREMULTIPLY>
 static bool commitRadialGradientFromStops(sampler2D sampler, int offsetsAddress,
                                           int colorsAddress, float stopCount,
                                           bool repeat, vec2 pos,
@@ -2505,7 +2026,7 @@ static bool commitRadialGradientFromStops(sampler2D sampler, int offsetsAddress,
     // getting its sqrt as an offset into the color ramp. At this point we just
     // need to round to an integer and pack down to pixel format.
     for (auto* end = buf + inside; buf < end; buf += 4) {
-      Float offsetG = fastSqrt<false>(dotPos);
+      Float offsetG = fastSqrt<true>(dotPos);
       if (DITHER) {
         auto color = combine(
             CONVERT(round_pixel(colorF + deltaColorF * offsetG.x, 1), U16),
@@ -2513,7 +2034,8 @@ static bool commitRadialGradientFromStops(sampler2D sampler, int offsetsAddress,
             CONVERT(round_pixel(colorF + deltaColorF * offsetG.z, 1), U16),
             CONVERT(round_pixel(colorF + deltaColorF * offsetG.w, 1), U16));
         commit_blend_span<BLEND>(
-            buf, dither(color, currentFragCoordX, ditherNoiseYIndexed) >> 8);
+            buf, premultiplyGradientPixels<PREMULTIPLY>(
+                     dither(color, currentFragCoordX, ditherNoiseYIndexed) >> 8));
         currentFragCoordX += 4;
       } else {
         auto color = combine(
@@ -2521,7 +2043,8 @@ static bool commitRadialGradientFromStops(sampler2D sampler, int offsetsAddress,
                       round_pixel(colorF + deltaColorF * offsetG.y, 1)),
             packRGBA8(round_pixel(colorF + deltaColorF * offsetG.z, 1),
                       round_pixel(colorF + deltaColorF * offsetG.w, 1)));
-        commit_blend_span<BLEND>(buf, color);
+        commit_blend_span<BLEND>(buf,
+                                 premultiplyGradientPixels<PREMULTIPLY>(color));
       }
       dotPos += dotPosDelta;
       dotPosDelta += deltaDelta2;
@@ -2540,7 +2063,7 @@ static bool commitRadialGradientFromStops(sampler2D sampler, int offsetsAddress,
       assert(remainder < 4);
       // The logic here is similar to the full chunks loop above, but we do a
       // partial write instead of a pushing a full chunk.
-      Float offsetG = fastSqrt<false>(dotPos);
+      Float offsetG = fastSqrt<true>(dotPos);
       if (DITHER) {
         auto color = combine(
             CONVERT(round_pixel(colorF + deltaColorF * offsetG.x, 1), U16),
@@ -2548,7 +2071,9 @@ static bool commitRadialGradientFromStops(sampler2D sampler, int offsetsAddress,
             CONVERT(round_pixel(colorF + deltaColorF * offsetG.z, 1), U16),
             CONVERT(round_pixel(colorF + deltaColorF * offsetG.w, 1), U16));
         commit_blend_span<BLEND>(
-            buf, dither(color, currentFragCoordX, ditherNoiseYIndexed) >> 8,
+            buf,
+            premultiplyGradientPixels<PREMULTIPLY>(
+                dither(color, currentFragCoordX, ditherNoiseYIndexed) >> 8),
             remainder);
         currentFragCoordX += 4;
       } else {
@@ -2557,7 +2082,8 @@ static bool commitRadialGradientFromStops(sampler2D sampler, int offsetsAddress,
                       round_pixel(colorF + deltaColorF * offsetG.y, 1)),
             packRGBA8(round_pixel(colorF + deltaColorF * offsetG.z, 1),
                       round_pixel(colorF + deltaColorF * offsetG.w, 1)));
-        commit_blend_span<BLEND>(buf, color, remainder);
+        commit_blend_span<BLEND>(
+            buf, premultiplyGradientPixels<PREMULTIPLY>(color), remainder);
       }
       buf += remainder;
       t += remainder;
@@ -2595,87 +2121,63 @@ static bool commitRadialGradientFromStops(sampler2D sampler, int offsetsAddress,
 }
 
 // Commits an entire span of a radial gradient similar to
-// swglcommitLinearGradient, but given a varying 2D position scaled to
-// gradient-space and a radius at which the distance from the origin maps to the
-// start of the gradient table.
-#define swgl_commitRadialGradientRGBA8(sampler, address, size, repeat, pos, \
-                                       radius)                              \
-  do {                                                                      \
-    bool drawn = false;                                                     \
-    if (blend_key) {                                                        \
-      drawn = commitRadialGradient<true, false>(                            \
-          sampler, address, size, repeat, pos, radius, swgl_OutRGBA8,       \
-          swgl_SpanLength);                                                 \
-    } else {                                                                \
-      drawn = commitRadialGradient<false, false>(                           \
-          sampler, address, size, repeat, pos, radius, swgl_OutRGBA8,       \
-          swgl_SpanLength);                                                 \
-    }                                                                       \
-    if (drawn) {                                                            \
-      swgl_OutRGBA8 += swgl_SpanLength;                                     \
-      swgl_SpanLength = 0;                                                  \
-    }                                                                       \
+// swgl_commitLinearGradientFromStopsRGBA8, but given a varying 2D position
+// scaled to gradient-space and a radius at which the distance from the origin
+// maps to the start of the gradient.
+#define swgl_commitRadialGradientFromStopsRGBA8(                              \
+    sampler, offsetsAddress, colorsAddress, size, repeat, pos, startRadius,   \
+    premultiply)                                                              \
+  do {                                                                        \
+    bool drawn = false;                                                       \
+    if (blend_key) {                                                          \
+      drawn = premultiply                                                     \
+                  ? commitRadialGradientFromStops<true, false, true>(         \
+                        sampler, offsetsAddress, colorsAddress, size, repeat, \
+                        pos, startRadius, swgl_OutRGBA8, swgl_SpanLength)     \
+                  : commitRadialGradientFromStops<true, false, false>(        \
+                        sampler, offsetsAddress, colorsAddress, size, repeat, \
+                        pos, startRadius, swgl_OutRGBA8, swgl_SpanLength);    \
+    } else {                                                                  \
+      drawn = premultiply                                                     \
+                  ? commitRadialGradientFromStops<false, false, true>(        \
+                        sampler, offsetsAddress, colorsAddress, size, repeat, \
+                        pos, startRadius, swgl_OutRGBA8, swgl_SpanLength)     \
+                  : commitRadialGradientFromStops<false, false, false>(       \
+                        sampler, offsetsAddress, colorsAddress, size, repeat, \
+                        pos, startRadius, swgl_OutRGBA8, swgl_SpanLength);    \
+    }                                                                         \
+    if (drawn) {                                                              \
+      swgl_OutRGBA8 += swgl_SpanLength;                                       \
+      swgl_SpanLength = 0;                                                    \
+    }                                                                         \
   } while (0)
 
-#define swgl_commitDitheredRadialGradientRGBA8(sampler, address, size, repeat, \
-                                               pos, radius)                    \
-  do {                                                                         \
-    bool drawn = false;                                                        \
-    if (blend_key) {                                                           \
-      drawn = commitRadialGradient<true, true>(sampler, address, size, repeat, \
-                                               pos, radius, swgl_OutRGBA8,     \
-                                               swgl_SpanLength, gl_FragCoord); \
-    } else {                                                                   \
-      drawn = commitRadialGradient<false, true>(                               \
-          sampler, address, size, repeat, pos, radius, swgl_OutRGBA8,          \
-          swgl_SpanLength, gl_FragCoord);                                      \
-    }                                                                          \
-    if (drawn) {                                                               \
-      swgl_OutRGBA8 += swgl_SpanLength;                                        \
-      swgl_SpanLength = 0;                                                     \
-    }                                                                          \
-  } while (0)
-
-// Commits an entire span of a radial gradient similar to
-// swglcommitLinearGradient, but given a varying 2D position scaled to
-// gradient-space and a radius at which the distance from the origin maps to the
-// start of the gradient table.
-#define swgl_commitRadialGradientFromStopsRGBA8(                            \
-    sampler, offsetsAddress, colorsAddress, size, repeat, pos, startRadius) \
-  do {                                                                      \
-    bool drawn = false;                                                     \
-    if (blend_key) {                                                        \
-      drawn = commitRadialGradientFromStops<true, false>(                   \
-          sampler, offsetsAddress, colorsAddress, size, repeat, pos,        \
-          startRadius, swgl_OutRGBA8, swgl_SpanLength);                     \
-    } else {                                                                \
-      drawn = commitRadialGradientFromStops<false, false>(                  \
-          sampler, offsetsAddress, colorsAddress, size, repeat, pos,        \
-          startRadius, swgl_OutRGBA8, swgl_SpanLength);                     \
-    }                                                                       \
-    if (drawn) {                                                            \
-      swgl_OutRGBA8 += swgl_SpanLength;                                     \
-      swgl_SpanLength = 0;                                                  \
-    }                                                                       \
-  } while (0)
-
-#define swgl_commitDitheredRadialGradientFromStopsRGBA8(                    \
-    sampler, offsetsAddress, colorsAddress, size, repeat, pos, startRadius) \
-  do {                                                                      \
-    bool drawn = false;                                                     \
-    if (blend_key) {                                                        \
-      drawn = commitRadialGradientFromStops<true, true>(                    \
-          sampler, offsetsAddress, colorsAddress, size, repeat, pos,        \
-          startRadius, swgl_OutRGBA8, swgl_SpanLength, gl_FragCoord);       \
-    } else {                                                                \
-      drawn = commitRadialGradientFromStops<false, true>(                   \
-          sampler, offsetsAddress, colorsAddress, size, repeat, pos,        \
-          startRadius, swgl_OutRGBA8, swgl_SpanLength, gl_FragCoord);       \
-    }                                                                       \
-    if (drawn) {                                                            \
-      swgl_OutRGBA8 += swgl_SpanLength;                                     \
-      swgl_SpanLength = 0;                                                  \
-    }                                                                       \
+#define swgl_commitDitheredRadialGradientFromStopsRGBA8(                      \
+    sampler, offsetsAddress, colorsAddress, size, repeat, pos, startRadius,   \
+    premultiply)                                                              \
+  do {                                                                        \
+    bool drawn = false;                                                       \
+    if (blend_key) {                                                          \
+      drawn = premultiply                                                     \
+                  ? commitRadialGradientFromStops<true, true, true>(          \
+                        sampler, offsetsAddress, colorsAddress, size, repeat, \
+                        pos, startRadius, swgl_OutRGBA8, swgl_SpanLength, gl_FragCoord)\
+                  : commitRadialGradientFromStops<true, true, false>(         \
+                        sampler, offsetsAddress, colorsAddress, size, repeat, \
+                        pos, startRadius, swgl_OutRGBA8, swgl_SpanLength, gl_FragCoord);\
+    } else {                                                                  \
+      drawn = premultiply                                                     \
+                  ? commitRadialGradientFromStops<false, true, true>(         \
+                        sampler, offsetsAddress, colorsAddress, size, repeat, \
+                        pos, startRadius, swgl_OutRGBA8, swgl_SpanLength, gl_FragCoord)\
+                  : commitRadialGradientFromStops<false, true, false>(        \
+                        sampler, offsetsAddress, colorsAddress, size, repeat, \
+                        pos, startRadius, swgl_OutRGBA8, swgl_SpanLength, gl_FragCoord);\
+    }                                                                         \
+    if (drawn) {                                                              \
+      swgl_OutRGBA8 += swgl_SpanLength;                                       \
+      swgl_SpanLength = 0;                                                    \
+    }                                                                         \
   } while (0)
 
 // Extension to set a clip mask image to be sampled during blending. The offset

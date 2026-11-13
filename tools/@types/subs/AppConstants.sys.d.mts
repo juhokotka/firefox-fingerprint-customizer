@@ -11,8 +11,6 @@ export const AppConstants: Readonly<{
   // defines: https://wiki.mozilla.org/Platform/Channel-specific_build_defines
   NIGHTLY_BUILD: boolean;
 
-  ENABLE_EXPLICIT_RESOURCE_MANAGEMENT: boolean;
-
   RELEASE_OR_BETA: boolean;
 
   EARLY_BETA_OR_EARLIER: boolean;
@@ -172,9 +170,6 @@ export const AppConstants: Readonly<{
 
   // #ifdef MOZ_GECKOVIEW
   MOZ_GECKOVIEW: boolean;
-
-  // #ifdef MOZ_WIDGET_ANDROID
-  MOZ_ANDROID_CONTENT_SERVICE_ISOLATED_PROCESS: boolean;
 }>;
 
 type Platform = "linux" | "win" | "macosx" | "ios" | "android" | "other";

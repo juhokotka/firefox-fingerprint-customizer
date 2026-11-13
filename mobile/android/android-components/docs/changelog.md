@@ -4,7 +4,68 @@ title: Changelog
 permalink: /changelog/
 ---
 
-# 154.0 (In Development)
+# 160.0 (In Development)
+* **concept-engine**
+    * ⚠️ **Breaking change**: Removed `ServiceState.OptedOut`. Gecko does not report an opted-out IP Protection service state. [Bug 2082578](https://bugzilla.mozilla.org/show_bug.cgi?id=2082578)
+* **service-firefox-accounts**
+    * ⚠️ **Breaking change**: Removed `AccountState.Authenticating`. [Bug 2041509](https://bugzilla.mozilla.org/show_bug.cgi?id=2041509)
+* **feature-awesomebar**
+    * Suggestions from `HistoryStorageSuggestionProvider`, including those `CombinedHistorySuggestionProvider` gets from history storage, now have the `HISTORY` flag, like the other history and bookmark suggestions. [Bug 2047486](https://bugzilla.mozilla.org/show_bug.cgi?id=2047486)
+    * `SessionSuggestionProvider` falls back to the URL formatted by `URLStringUtils.toLosslessDisplayUrl` when a tab has no title. [Bug 2047486](https://bugzilla.mozilla.org/show_bug.cgi?id=2047486)
+* **compose-awesomebar**
+    * The descriptions of bookmark and history suggestions, and their titles when Places made them from the URL, are shown formatted by `URLStringUtils.toLosslessDisplayUrl`. [Bug 2047486](https://bugzilla.mozilla.org/show_bug.cgi?id=2047486)
+* **support-utils**
+    * `URLStringUtils.isURLLike` (and so `isSearchTerm` and `String.isUrl`) now accepts spaces in the path, query or fragment of an HTTP/S URL such as `https://example.com/a b`, and of a scheme-less one with a port, an IP address as its host, or a `?` or `#` after its first `/`. Spaces in the scheme or authority are still rejected. [Bug 1813919](https://bugzilla.mozilla.org/show_bug.cgi?id=1813919)
+    * `URLStringUtils.toNormalizedURL` and `String.toNormalizedUrl` now encode the spaces in the path, query and fragment of an HTTP/S URL as `%20`, using the new `URLStringUtils.encodeSpacesAfterAuthority`. [Bug 1813919](https://bugzilla.mozilla.org/show_bug.cgi?id=1813919)
+    * Added `URLStringUtils.toLosslessDisplayUrl` and `URLStringUtils.toLosslessEditableUrl`, which decode the path, query and fragment of an HTTP/S URL when that is lossless, following desktop's `losslessDecodeDisplaySpec`. `toLosslessDisplayUrl` keeps spaces as `%20`, and `URLStringUtils.toDisplayUrl` now applies it. [Bug 2047486](https://bugzilla.mozilla.org/show_bug.cgi?id=2047486)
+* **support-ktx**
+    * `String.toShortUrl` now decodes the URL it returns when it cannot shorten it, using `URLStringUtils.toLosslessDisplayUrl`. [Bug 2047486](https://bugzilla.mozilla.org/show_bug.cgi?id=2047486)
+* **ui-richtext**
+    * 🆕 Added `StreamingParser`, which parses a markdown document as it arrives in chunks, reparsing only the part of it that can still change. [Bug 2059255](https://bugzilla.mozilla.org/show_bug.cgi?id=2059255)
+* **browser-engine-gecko**
+    * Download filenames from `onExternalResponse` are now validated by Gecko with the same rules as desktop, so `GeckoEngineSession` no longer applies the `String.sanitizeFileName` helper from **support-ktx** to them. [Bug 1822968](https://bugzilla.mozilla.org/show_bug.cgi?id=1822968)
+* **compose-base**
+    * 🆕 Added `Slider`, an Acorn implementation of the M3 Slider component for Jetpack Compose. [Bug 2067129](https://bugzilla.mozilla.org/show_bug.cgi?id=2067129)
+
+# 159.0
+* **feature-readerview**
+    * 🆕 Added `ReaderViewFeature.colorSchemeOverride`, which forces reader view to be displayed with a given `ColorScheme` without overwriting the one the user configured. [Bug 2069110](https://bugzilla.mozilla.org/show_bug.cgi?id=2069110)
+* **concept-engine**, **browser-engine-gecko**, **browser-engine-system**, **browser-state**, **feature-app-links**
+    * ⚠️ **Breaking change**: `EngineSession.Observer.onLaunchIntentRequest` and `AppIntentState` take a `sourceUrl`, the URL of the page the launch was requested from, or null when the launch was not requested from a page. [Bug 2068801](https://bugzilla.mozilla.org/show_bug.cgi?id=2068801)
+* **compose-draggable**
+    * 🆕 Added `compose-draggable` component, which provides a common component for draggable and reorderable lists and grids. [Bug 2066533](https://bugzilla.mozilla.org/show_bug.cgi?id=2066533)
+
+# 158.0
+* **feature-accounts-push**
+    * 🆕 Added a `SendTabUseCases.SendToDeviceUseCase` overload that takes a list of devices, sending every tab to every device. [Bug 2056922](https://bugzilla.mozilla.org/show_bug.cgi?id=2056922)
+* **service-pocket**
+    * ⚠️ **Breaking change**: Removed `useMerinoClient` from `ContentRecommendationsRequestConfig`. The content recommendations are always fetched with the Merino client. [Bug 2069992](https://bugzilla.mozilla.org/show_bug.cgi?id=2069992)
+* **support-base**
+    * 🆕 Added `PowerManagerInfoProvider.isPowerSaveMode`, which reports whether the device is in power save (battery saver) mode. [Bug 2068693](https://bugzilla.mozilla.org/show_bug.cgi?id=2068693)
+
+# 157.0
+
+# 156.0
+* **browser-domains**
+    * ⚠️ **Breaking change**: Removed the deprecated `DomainAutoCompleteProvider` class. Use `ShippedDomainsProvider` or `CustomDomainsProvider` instead.
+* **browser-state**
+    * ⚠️ **Breaking change**: Removed `TabPartition` and `TabGroup` from `BrowserState`.
+* **feature-accounts**
+    * 🆕 Added `FxaCapability.PAIRING_V2`, which advertises `capabilities.pairingVersion` in the `fxaccounts:fxa_status` WebChannel response and enables the `fxaccounts:pair_oauth_start` WebChannel command.
+* **support-ktx**
+    * 🆕 Added `File.toSampledBitmap` and `InputStream.toSampledBitmap`, which subsample as they decode so an image is never allocated at full resolution. [Bug 2061502](https://bugzilla.mozilla.org/show_bug.cgi?id=2061502)
+    * ⚠️ **Breaking change**: `String.base64ToBitmap` now takes the target width and height, in pixels, and subsamples to suit. [Bug 2061502](https://bugzilla.mozilla.org/show_bug.cgi?id=2061502)
+* **feature-addons**, **feature-prompts**
+    * Add-on and identity credential icons are now decoded at the size they are displayed at. [Bug 2061502](https://bugzilla.mozilla.org/show_bug.cgi?id=2061502)
+* **compose-base**
+    * 🆕 Added `Modifier.debouncedToggleable`to prevent rapid successive toggles from calling `onValueChange`. [Bug 2064179](https://bugzilla.mozilla.org/show_bug.cgi?id=2064179)
+    * 🆕 `Modifier.debouncedClickable` now accepts a `Role` for accessibility services. [Bug 2064181](https://bugzilla.mozilla.org/show_bug.cgi?id=2064181)
+
+# 155.0
+* **feature-search**
+    * ⚠️ **Breaking change**: Removed the `readJson` parameter from `SerpTelemetryRepository`, along with the `search/search_telemetry_v2.json` asset it read. The `search-telemetry-v2` records now come exclusively from Remote Settings, which serves the dump packaged with application-services. [Bug 2063025](https://bugzilla.mozilla.org/show_bug.cgi?id=2063025)
+
+# 154.0
 * **browser-icons**
     * ⚠️ **Breaking change**: Removed the `useMerinoManifest` parameter from `BrowserIcons`. The Merino manifest is now always used as the icon source. Removed `TippyTopIconPreparer` and the `IconRequest.Resource.Type.TIPPY_TOP` resource type. [Bug 2047476](https://bugzilla.mozilla.org/show_bug.cgi?id=2047476)
 * **support-base**
@@ -13,6 +74,12 @@ permalink: /changelog/
     * 🆕 The media notification now emits `Action.NEXT` and `Action.PREVIOUS` facts when the next/previous track buttons are tapped.
 * **compose-base**
     * 🆕 Added a version of `FloatingActionButton` that accepts a custom icon composable. [Bug 2050581](https://bugzilla.mozilla.org/show_bug.cgi?id=2050581)
+* **browser-engine-gecko**
+    * Fixed the autocomplete selection prompts (login, credit card, and address) not being dismissed when the associated input field loses focus. [Bug 2040184](https://bugzilla.mozilla.org/show_bug.cgi?id=2040184)
+* **feature-webcompat-reporter**
+    * 🆕 Added `sendGleanBrokenSiteReport` which sends a broken site report using Glean. [Bug 2054543](https://bugzilla.mozilla.org/show_bug.cgi?id=2054543)).
+* **concept-engine**, **browser-engine-gecko**, **browser-engine-system**, **browser-state**, **support-test-fakes**
+    * ⚠️ **Breaking change**: Removed the cookie banner handling feature. Removed the `mozilla.components.concept.engine.cookiehandling` package (`CookieBannersStorage`) and `GeckoCookieBannersStorage`, `EngineSession.CookieBannerHandlingMode`, `EngineSession.CookieBannerHandlingStatus`, `EngineSession.Observer.onCookieBannerChange`, `EngineSession.hasCookieBannerRuleForSession`, the `Settings.cookieBannerHandling*` settings, the `cookieBanner*` parameters of `TrackingProtectionPolicy.toContentBlockingSetting`, `CookieBannerAction` and `SessionState.cookieBanner` (also removed from `SessionState.createCopy`). [Bug 2058143](https://bugzilla.mozilla.org/show_bug.cgi?id=2058143)
 
 # 153.0
 * **support-utils**

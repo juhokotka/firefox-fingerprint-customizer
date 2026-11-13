@@ -37,6 +37,10 @@ def strtobool(value: str):
     raise ValueError(f"Expected one of: {', '.join(true_vals + false_vals)}")
 
 
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def flatten(data, parent_dir, sep="/"):
     """
     Converts a dictionary with nested entries like this
@@ -75,7 +79,8 @@ def flatten(data, parent_dir, sep="/"):
     """
     result = {}
 
-    if not data:
+    # Stop on empty containers, but not on a measurement of zero.
+    if not data and not _is_number(data):
         return result
 
     if isinstance(data, list):
@@ -89,7 +94,7 @@ def flatten(data, parent_dir, sep="/"):
             if isinstance(v, Iterable) and not isinstance(v, str):
                 for x, y in flatten(v, current_dir, sep=sep).items():
                     result.setdefault(x, []).extend(y)
-            elif v or v == 0:
+            elif v or _is_number(v):
                 result.setdefault(subtest, []).append(v)
     else:
         result.setdefault(sep.join(parent_dir), []).append(data)
@@ -145,7 +150,7 @@ def view_gecko_profile_from_raptor():
     # automatically load the latest raptor gecko-profile archive in profiler.firefox.com
     LOG_GECKO = RaptorLogger(component="raptor-view-gecko-profile")
 
-    profile_zip_path = os.environ.get("RAPTOR_LATEST_GECKO_PROFILE_ARCHIVE", None)
+    profile_zip_path = os.environ.get("RAPTOR_LATEST_PROFILE", None)
     if profile_zip_path is None or not os.path.exists(profile_zip_path):
         LOG_GECKO.info(
             "No local raptor gecko profiles were found so not "

@@ -6,9 +6,23 @@ import React from "react";
 import { batch } from "react-redux";
 import { actionCreators as ac, actionTypes as at } from "common/Actions.mjs";
 import { SectionsMgmtPanel } from "../SectionsMgmtPanel/SectionsMgmtPanel";
+import { ThemesManagementPanel } from "../ThemesManagementPanel/ThemesManagementPanel";
 import { WallpaperCategories } from "../../WallpaperCategories/WallpaperCategories";
 // @nova-cleanup(move-directory): Update import path after WidgetsManagementPanel moves to components/CustomizeMenu/
 import { WidgetsManagementPanel } from "content-src/components/Nova/CustomizeMenu/WidgetsManagementPanel/WidgetsManagementPanel";
+
+const PREF_INFERRED_PERSONALIZATION =
+  "discoverystream.sections.personalization.inferred.user.enabled";
+
+// `theme-picker` is imported lazily, so it may still be an undefined custom element
+// when React renders it. In that state React sets props as attributes, and the lit
+// `showLabels` boolean (default true) can't be turned off via an attribute — so set the
+// property directly via a ref; lit preserves it across element upgrade.
+function hideThemePickerLabels(el) {
+  if (el) {
+    el.showLabels = false;
+  }
+}
 
 export class ContentSection extends React.PureComponent {
   constructor(props) {
@@ -56,6 +70,9 @@ export class ContentSection extends React.PureComponent {
           break;
         case "WIDGET_STOCKS":
           widgetName = "stocks";
+          break;
+        case "WIDGET_RECENT_SEARCHES":
+          widgetName = "recent_searches";
           break;
         case "WIDGET_PICTURE_OF_THE_DAY":
           widgetName = "picture_of_the_day";
@@ -182,32 +199,38 @@ export class ContentSection extends React.PureComponent {
       pocketRegion,
       mayHaveInferredPersonalization,
       mayHaveWeather,
+      mayHaveWebNotifications,
       mayHaveWidgets,
       mayHaveTimerWidget,
       mayHaveListsWidget,
-      mayHaveSportsWidget,
       mayHaveClocksWidget,
       mayHavePrivacyWidget,
       mayHaveCrosswordWidget,
       mayHaveStocksWidget,
       mayHavePictureOfTheDayWidget,
-      mayHaveWeatherForecast,
+      mayHaveRecentSearchesWidget,
       openPreferences,
       wallpapersUserEnabled,
       activeWallpaper,
       setPref,
       mayHaveTopicSections,
-      weatherDisplay,
-      exitEventFired,
-      onSubpanelToggle,
+      panelShowing,
       toggleSectionsMgmtPanel,
       showSectionsMgmtPanel,
       // @nova-cleanup(remove-conditional): Remove novaEnabled
       novaEnabled,
+      browserNovaEnabled,
+      toggleThemesPanel,
+      showThemesPanel,
+      showWallpapersPanel,
+      wallpapersPanelCategory,
+      openWallpapersPanel,
+      closeWallpapersPanel,
       wallpapersEnabled,
       toggleWidgetsManagementPanel,
       showWidgetsManagementPanel,
       widgetsEnabled,
+      lockedPrefs = [],
     } = this.props;
     const {
       topSitesEnabled,
@@ -215,6 +238,7 @@ export class ContentSection extends React.PureComponent {
       weatherEnabled,
       showInferredPersonalizationEnabled,
       topSitesRowsCount,
+      webNotificationsEnabled,
     } = enabledSections;
     const {
       timerEnabled,
@@ -224,6 +248,7 @@ export class ContentSection extends React.PureComponent {
       crosswordEnabled,
       stocksEnabled,
       pictureOfTheDayEnabled,
+      recentSearchesEnabled,
     } = enabledWidgets;
 
     // @nova-cleanup(remove-conditional): Remove novaEnabled check and newtab-custom-stories-toggle, default to newtab-recommended-stories-toggle
@@ -240,6 +265,20 @@ export class ContentSection extends React.PureComponent {
     return (
       <>
         <div className="home-section">
+          {browserNovaEnabled && (
+            <div className="appearance-section section">
+              <h2 data-l10n-id="newtab-custom-appearance-section-title"></h2>
+              <theme-picker
+                ref={hideThemePickerLabels}
+                layout="compact"
+                installsource="about:newtab"
+              ></theme-picker>
+              <ThemesManagementPanel
+                togglePanel={toggleThemesPanel}
+                showPanel={showThemesPanel}
+              />
+            </div>
+          )}
           {wallpapersEnabled && (
             <>
               <div className="wallpapers-section">
@@ -258,12 +297,24 @@ export class ContentSection extends React.PureComponent {
                 <WallpaperCategories
                   setPref={setPref}
                   activeWallpaper={activeWallpaper}
-                  exitEventFired={exitEventFired}
-                  onSubpanelToggle={onSubpanelToggle}
+                  panelShowing={panelShowing}
+                  showPanel={showWallpapersPanel}
+                  activeCategory={wallpapersPanelCategory}
+                  openPanel={openWallpapersPanel}
+                  closePanel={closeWallpapersPanel}
                 />
               </div>
             </>
           )}
+          {/* eslint-disable-next-line jsdoc/no-bad-blocks */}
+          {/* @nova-cleanup(remove-conditional): Delete this widget toggle block.
+              With it, delete the mayHave*Widget names and the per-widget
+              enabledWidgets destructure in render() above, and the
+              mayHave*Widget props and per-widget *Enabled members of
+              enabledWidgets that Base.jsx and CustomizeMenu.jsx pass down only
+              for this block. Keep the enabledWidgets prop itself: inputUserEvent
+              reads its widgetsMaximized and widgetsMayBeMaximized members
+              through this.props. */}
           {mayHaveWidgets && !novaEnabled && (
             <div className="widgets-section">
               <div className="category-header">
@@ -343,14 +394,13 @@ export class ContentSection extends React.PureComponent {
                 {/* Crossword */}
                 {mayHaveCrosswordWidget && (
                   <div id="crossword-widget-section" className="section">
-                    {/* TODO: Add in fluent string when correct preview files are set up */}
                     <moz-toggle
                       id="crossword-toggle"
                       pressed={!!crosswordEnabled}
                       ontoggle={this.onPreferenceSelect}
                       data-preference="widgets.crossword.enabled"
                       data-event-source="WIDGET_CROSSWORD"
-                      label="Crossword"
+                      data-l10n-id="newtab-custom-widget-crossword-toggle"
                     ></moz-toggle>
                   </div>
                 )}
@@ -364,7 +414,7 @@ export class ContentSection extends React.PureComponent {
                       ontoggle={this.onPreferenceSelect}
                       data-preference="widgets.stocks.enabled"
                       data-event-source="WIDGET_STOCKS"
-                      data-l10n-id="newtab-custom-widget-stocks-toggle"
+                      data-l10n-id="newtab-custom-widget-stocks-toggle2"
                     />
                   </div>
                 )}
@@ -378,6 +428,19 @@ export class ContentSection extends React.PureComponent {
                       data-preference="widgets.pictureOfTheDay.enabled"
                       data-event-source="WIDGET_PICTURE_OF_THE_DAY"
                       data-l10n-id="newtab-custom-widget-picture-toggle"
+                    />
+                  </div>
+                )}
+                {/* Recent searches */}
+                {mayHaveRecentSearchesWidget && (
+                  <div id="recent-searches-widget-section" className="section">
+                    <moz-toggle
+                      id="recent-searches-toggle"
+                      pressed={recentSearchesEnabled || null}
+                      ontoggle={this.onPreferenceSelect}
+                      data-preference="widgets.recentSearches.enabled"
+                      data-event-source="WIDGET_RECENT_SEARCHES"
+                      data-l10n-id="newtab-custom-widget-search-toggle"
                     />
                   </div>
                 )}
@@ -458,6 +521,17 @@ export class ContentSection extends React.PureComponent {
                         )}
                       </moz-select>
                     </div>
+                    {mayHaveWebNotifications && (
+                      <div className="more-information">
+                        <moz-toggle
+                          id="web-notifications-toggle"
+                          pressed={webNotificationsEnabled || null}
+                          ontoggle={this.onPreferenceSelect}
+                          data-preference="showWebNotifications"
+                          data-l10n-id="newtab-custom-web-notifications-toggle"
+                        ></moz-toggle>
+                      </div>
+                    )}
                   </div>
                 </div>
               </moz-toggle>
@@ -488,23 +562,7 @@ export class ContentSection extends React.PureComponent {
                           ref={this.widgetsMgmtDrawerRef}
                         >
                           <WidgetsManagementPanel
-                            enabledSections={enabledSections}
-                            enabledWidgets={enabledWidgets}
-                            mayHaveWeather={mayHaveWeather}
-                            mayHaveTimerWidget={mayHaveTimerWidget}
-                            mayHaveListsWidget={mayHaveListsWidget}
-                            mayHaveSportsWidget={mayHaveSportsWidget}
-                            mayHaveClocksWidget={mayHaveClocksWidget}
-                            mayHavePrivacyWidget={mayHavePrivacyWidget}
-                            mayHaveCrosswordWidget={mayHaveCrosswordWidget}
-                            mayHaveStocksWidget={mayHaveStocksWidget}
-                            mayHavePictureOfTheDayWidget={
-                              mayHavePictureOfTheDayWidget
-                            }
-                            mayHaveWeatherForecast={mayHaveWeatherForecast}
-                            weatherDisplay={weatherDisplay}
                             setPref={setPref}
-                            onSubpanelToggle={onSubpanelToggle}
                             togglePanel={toggleWidgetsManagementPanel}
                             showPanel={showWidgetsManagementPanel}
                           />
@@ -546,19 +604,26 @@ export class ContentSection extends React.PureComponent {
                             <moz-checkbox
                               id="inferred-personalization"
                               className="customize-menu-checkbox"
-                              disabled={!pocketEnabled}
+                              disabled={
+                                !pocketEnabled ||
+                                lockedPrefs.includes(
+                                  PREF_INFERRED_PERSONALIZATION
+                                )
+                              }
+                              // Renders its own `disabled`, so it opts out of
+                              // CustomizeMenu's lock sweep and applies the lock
+                              // itself.
+                              data-lock-managed=""
                               checked={showInferredPersonalizationEnabled}
                               onChange={this.onPreferenceSelect}
-                              data-preference="discoverystream.sections.personalization.inferred.user.enabled"
+                              data-preference={PREF_INFERRED_PERSONALIZATION}
                               data-event-source="INFERRED_PERSONALIZATION"
                               data-l10n-id="newtab-custom-stories-personalized-checkbox"
                             />
                           )}
                           {mayHaveTopicSections && (
                             <SectionsMgmtPanel
-                              exitEventFired={exitEventFired}
                               pocketEnabled={pocketEnabled}
-                              onSubpanelToggle={onSubpanelToggle}
                               togglePanel={toggleSectionsMgmtPanel}
                               showPanel={showSectionsMgmtPanel}
                               novaEnabled={novaEnabled}

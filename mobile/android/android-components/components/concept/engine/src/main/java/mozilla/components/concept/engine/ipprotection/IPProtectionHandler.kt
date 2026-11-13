@@ -16,59 +16,66 @@ interface IPProtectionHandler {
     /**
      * Activates the IP protection.
      *
-     * @param onResult Invoked once the activation request resolves. Receives `null` on success or
-     *  the [Throwable] that caused the failure.
+     * @param countryCode ISO 3166-1 alpha-2 country code.
+     * @param onResult Invoked once the activation request resolves. Receives `null` on success or the [Throwable] that
+     *   caused the failure.
      */
-    fun activate(onResult: (Throwable?) -> Unit = {})
+    fun activate(countryCode: String?, onResult: (Throwable?) -> Unit = {})
 
     /**
      * Deactivates the IP protection proxy.
      *
-     * @param onResult Invoked once the deactivation request resolves. Receives `null` on success or
-     *  the [Throwable] that caused the failure.
+     * @param onResult Invoked once the deactivation request resolves. Receives `null` on success or the [Throwable]
+     *   that caused the failure.
      */
     fun deactivate(onResult: (Throwable?) -> Unit = {})
 
     /**
-     * Triggers enrollment via the active auth provider. The [onResult] callback is invoked once
-     * the enrollment attempt has completed, with the final outcome.
+     * Triggers enrollment via the active auth provider. The [onResult] callback is invoked once the enrollment attempt
+     * has completed, with the final outcome.
      *
-     * @param onResult Called with the [EnrollResult] describing whether the user is now enrolled
-     *  and entitled, and the error string if not.
+     * @param onResult Called with the [EnrollResult] describing whether the user is now enrolled and entitled, and the
+     *   error string if not.
      */
     fun enroll(onResult: (EnrollResult) -> Unit)
 
-    /**
-     * Request for the current [ServiceState].
-     */
+    /** Request for the current [ServiceState]. */
     fun getState(onResult: (ServiceState) -> Unit)
 
     /**
-     * Initializes the proxy state machine.
+     * Requests an update for the list of countries available in the proxy server-list.
+     *
+     * @param onResult Invoked once the update request resolves. Receives `null` on success or the [Throwable] that
+     *   caused the failure.
      */
+    fun updateCountryList(onResult: (Throwable?) -> Unit = {})
+
+    /** Initializes the proxy state machine. */
     fun init()
 
-    /**
-     * Uninitializes the proxy state machine.
-     */
+    /** Uninitializes the proxy state machine. */
     fun uninit()
 
     /**
-     * Sets the [AuthProvider] used to supply authentication tokens to the IP protection service.
-     * Pass null to sign out.
+     * Sets the [AuthProvider] used to supply authentication tokens to the IP protection service. Pass null to sign out.
      *
      * @param provider The [AuthProvider], or null to deauthenticate.
      */
     // FIXME(IPP) move this to the IPProtectionDelegate.
-    fun setAuthProvider(
-        provider: AuthProvider?,
-    )
+    fun setAuthProvider(provider: AuthProvider?)
+
+    /**
+     * Sets the [GpiProvider] used to handle Google Play Integrity warm-up and token requests. Pass null to clear the
+     * provider.
+     *
+     * @param provider The [GpiProvider], or null to clear.
+     */
+    fun setGpiProvider(provider: GpiProvider?)
 
     /**
      * Result of an enrollment attempt.
      *
-     * @property isEnrolledAndEntitled Whether the user is now enrolled and entitled to use the
-     *  proxy.
+     * @property isEnrolledAndEntitled Whether the user is now enrolled and entitled to use the proxy.
      * @property error Error string describing why enrollment failed, or null on success.
      */
     data class EnrollResult(
@@ -76,62 +83,68 @@ interface IPProtectionHandler {
         val error: String? = null,
     )
 
-    /**
-     * Notify account state changed.
-     */
+    /** Notify account state changed. */
     fun notifyAccountStatus(signedIn: Boolean)
 
     /**
-     * Provides a fresh authentication token on demand. Invoked each time the engine needs to
-     * authenticate with the Guardian API.
+     * Provides a fresh authentication token on demand. Invoked each time the engine needs to authenticate with the
+     * Guardian API.
      */
     interface AuthProvider {
         /**
-         * Fetches a fresh authentication token and delivers it via [onComplete].
-         * Pass null to [onComplete] if the token could not be obtained.
+         * Fetches a fresh authentication token and delivers it via [onComplete]. Pass null to [onComplete] if the token
+         * could not be obtained.
+         */
+        fun getToken(onComplete: (String?) -> Unit)
+    }
+
+    /** Provides Google Play Integrity warm-up and token retrieval for the IP protection service. */
+    interface GpiProvider {
+        /** Warms up the GPI token provider. Calls [onComplete] with true on success, false on failure. */
+        fun warmUp(onComplete: (Boolean) -> Unit)
+
+        /**
+         * Fetches a GPI integrity token and delivers it via [onComplete]. Pass null to [onComplete] if the token could
+         * not be obtained.
          */
         fun getToken(onComplete: (String?) -> Unit)
     }
 
     /**
-     * Holds the current IP protection service and proxy state along with usage information.
+     * Represents a country from the IP protection proxy server list.
+     *
+     * @property code ISO 3166-1 alpha-2 country code.
+     * @property available Whether the country could be selected as the active proxy.
      */
-    // refactor to enum in https://bugzilla.mozilla.org/show_bug.cgi?id=2030410
-    data class StateInfo(
-        val serviceState: ServiceState = ServiceState.Uninitialized,
-        val proxyState: Int = PROXY_STATE_NOT_READY,
-        val lastError: String? = null,
-        val remaining: Long = -1L,
-        val max: Long = -1L,
-        val resetTime: String? = null,
-    ) {
-        val isEnrollmentNeeded: Boolean
-            get() = serviceState == ServiceState.Unauthenticated
+    data class Country(
+        val code: String,
+        val available: Boolean,
+    )
+}
 
-        companion object {
-            const val PROXY_STATE_NOT_READY = 0
-            const val PROXY_STATE_READY = 1
-            const val PROXY_STATE_ACTIVATING = 2
-            const val PROXY_STATE_ACTIVE = 3
-            const val PROXY_STATE_ERROR = 4
-            const val PROXY_STATE_PAUSED = 5
-        }
+/** The possible states of the IP protection proxy. */
+@ExperimentalAndroidComponentsApi
+enum class ProxyState {
+    /** The proxy is not ready. */
+    NOT_READY,
 
-        override fun toString(): String {
-            val proxy = when (proxyState) {
-                PROXY_STATE_NOT_READY -> "NOT_READY"
-                PROXY_STATE_READY -> "READY"
-                PROXY_STATE_ACTIVATING -> "ACTIVATING"
-                PROXY_STATE_ACTIVE -> "ACTIVE"
-                PROXY_STATE_ERROR -> "ERROR"
-                PROXY_STATE_PAUSED -> "PAUSED"
-                else -> "UNKNOWN($proxyState)"
-            }
-            return "StateInfo(serviceState=$serviceState, proxyState=$proxy," +
-                " remaining=$remaining, max=$max, resetTime=$resetTime," +
-                " lastError=$lastError)"
-        }
-    }
+    /** The proxy is ready to be activated. */
+    READY,
+
+    /** The proxy is in the process of activating. */
+    ACTIVATING,
+
+    /** The proxy is active. */
+    ACTIVE,
+
+    /** The proxy encountered an error. */
+    ERROR,
+
+    /** The proxy is paused (e.g. bandwidth limit reached). */
+    PAUSED,
+
+    /** The engine reported a proxy state that this version does not know. */
+    UNKNOWN,
 }
 
 /** The possible states of the IP protection service. */
@@ -146,9 +159,6 @@ enum class ServiceState {
 
     /** The user is signed out but eligible. */
     Unauthenticated,
-
-    /** The user has opted out from using VPN. */
-    OptedOut,
 
     /** The service is ready to be activated. */
     Ready,

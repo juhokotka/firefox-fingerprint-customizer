@@ -16,6 +16,10 @@ menu-application-settings =
     .label = Settings…
 menu-application-set-as-default =
     .label = Set { -brand-shorter-name } as Default Browser
+# This menu item opens the referral page, where the user can invite others to
+# use the browser. "Share" here means recommending or referring the browser
+menu-application-referrals2 =
+    .label = Share { -brand-product-name }
 menu-application-services =
     .label = Services
 menu-application-hide-this =
@@ -84,6 +88,11 @@ menu-file-close-tab =
            *[other] Close { $tabCount } Tabs
         }
     .accesskey = C
+# Replaces menu-file-close-tab in a window that can only ever hold one tab,
+# such as a popup, where closing the tab closes the window.
+menu-file-close =
+    .label = Close
+    .accesskey = C
 menu-file-close-window =
     .label = Close Window
     .accesskey = d
@@ -96,11 +105,8 @@ menu-file-email-link =
 menu-file-share-url =
     .label = Share
     .accesskey = h
-menu-file-share-qrcode =
-    .label = Generate QR Code…
-    .accesskey = Q
-menu-file-share-qrcode2 =
-    .label = Generate QR Code
+menu-file-share-qrcode3 =
+    .label = Create QR Code
     .accesskey = Q
 menu-file-print-setup =
     .label = Page Setup…
@@ -220,8 +226,8 @@ menu-history-show-all-history =
     .label = Show All History
 menu-history-clear-recent-history =
     .label = Clear Recent History…
-menu-history-synced-tabs =
-    .label = Synced Tabs
+menu-history-remote-tabs-promo =
+    .label = Tabs From Other Devices
 menu-history-restore-last-session =
     .label = Restore Previous Session
 menu-history-hidden-tabs =
@@ -233,6 +239,9 @@ menu-history-undo-window-menu =
 # "Search" is a verb, as in "Search in History"
 menu-history-search =
     .label = Search History
+# "Search" is a verb, as in "Search in Tabs"
+menu-history-search-tabs =
+    .label = Search Tabs
 
 ## Bookmarks Menu
 
@@ -241,6 +250,8 @@ menu-bookmarks-menu =
     .accesskey = B
 menu-bookmarks-manage =
     .label = Manage Bookmarks
+menu-bookmarks-remote-tabs-promo =
+    .label = Sync Bookmarks to Mobile
 menu-bookmark-tab =
     .label = Bookmark Current Tab…
 menu-edit-bookmark =
@@ -367,4 +378,8 @@ menu-help-not-deceptive =
     .label = This Isn’t a Deceptive Site…
     .accesskey = D
 menu-report-broken-site =
-  .label = Report Broken Site
+    .label = Report Broken Site
+# This menu item opens the referral page, where the user can invite others to
+# use the browser. "Share" here means recommending or referring the browser
+menu-referrals2 =
+    .label = Share { -brand-product-name }

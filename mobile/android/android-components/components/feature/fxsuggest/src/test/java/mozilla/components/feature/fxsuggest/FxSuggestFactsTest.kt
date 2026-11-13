@@ -20,7 +20,6 @@ class FxSuggestFactsTest {
     @Test
     fun `GIVEN interaction information for an AMP suggestion WHEN emitting a click fact THEN 1 click fact is collected`() {
         CollectionProcessor.withFactCollection { facts ->
-
             emitSuggestionClickedFact(
                 FxSuggestInteractionInfo.Amp(
                     blockId = 123,
@@ -28,6 +27,7 @@ class FxSuggestFactsTest {
                     reportingUrl = "https://example.com/reporting",
                     iabCategory = "22 - Shopping",
                     contextId = "c303282d-f2e6-46ca-a04a-35d3d873712d",
+                    suggestionId = "d303282d-f2e6-46ca-a04a-35d3d873712d",
                 ),
                 positionInAwesomeBar = 0,
                 clientCountry = "TZ",
@@ -48,12 +48,16 @@ class FxSuggestFactsTest {
                     metadata?.keys,
                 )
 
-                val clickInfo = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.INTERACTION_INFO) as? FxSuggestInteractionInfo.Amp)
+                val clickInfo =
+                    requireNotNull(
+                        metadata?.get(FxSuggestFacts.MetadataKeys.INTERACTION_INFO) as? FxSuggestInteractionInfo.Amp
+                    )
                 assertEquals(clickInfo.blockId, 123)
                 assertEquals(clickInfo.advertiser, "mozilla")
                 assertEquals(clickInfo.reportingUrl, "https://example.com/reporting")
                 assertEquals(clickInfo.iabCategory, "22 - Shopping")
                 assertEquals(clickInfo.contextId, "c303282d-f2e6-46ca-a04a-35d3d873712d")
+                assertEquals(clickInfo.suggestionId, "d303282d-f2e6-46ca-a04a-35d3d873712d")
 
                 val positionInAwesomebar = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.POSITION) as? Long)
                 assertEquals(0, positionInAwesomebar)
@@ -67,7 +71,6 @@ class FxSuggestFactsTest {
     @Test
     fun `GIVEN interaction information for an AMP suggestion WHEN emitting an impression fact THEN 1 impression fact is collected`() {
         CollectionProcessor.withFactCollection { facts ->
-
             emitSuggestionImpressedFact(
                 FxSuggestInteractionInfo.Amp(
                     blockId = 123,
@@ -75,6 +78,7 @@ class FxSuggestFactsTest {
                     reportingUrl = "https://example.com/reporting",
                     iabCategory = "22 - Shopping",
                     contextId = "c303282d-f2e6-46ca-a04a-35d3d873712d",
+                    suggestionId = "d303282d-f2e6-46ca-a04a-35d3d873712d",
                 ),
                 positionInAwesomeBar = 0,
                 isClicked = true,
@@ -99,12 +103,16 @@ class FxSuggestFactsTest {
                     metadata?.keys,
                 )
 
-                val impressionInfo = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.INTERACTION_INFO) as? FxSuggestInteractionInfo.Amp)
+                val impressionInfo =
+                    requireNotNull(
+                        metadata?.get(FxSuggestFacts.MetadataKeys.INTERACTION_INFO) as? FxSuggestInteractionInfo.Amp
+                    )
                 assertEquals(impressionInfo.blockId, 123)
                 assertEquals(impressionInfo.advertiser, "mozilla")
                 assertEquals(impressionInfo.reportingUrl, "https://example.com/reporting")
                 assertEquals(impressionInfo.iabCategory, "22 - Shopping")
                 assertEquals(impressionInfo.contextId, "c303282d-f2e6-46ca-a04a-35d3d873712d")
+                assertEquals(impressionInfo.suggestionId, "d303282d-f2e6-46ca-a04a-35d3d873712d")
 
                 val positionInAwesomebar = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.POSITION) as? Long)
                 assertEquals(0, positionInAwesomebar)
@@ -112,7 +120,8 @@ class FxSuggestFactsTest {
                 val isClicked = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.IS_CLICKED) as? Boolean)
                 assertTrue(isClicked)
 
-                val engagementAbandoned = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.ENGAGEMENT_ABANDONED) as? Boolean)
+                val engagementAbandoned =
+                    requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.ENGAGEMENT_ABANDONED) as? Boolean)
                 assertFalse(engagementAbandoned)
 
                 val clientCountry = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.CLIENT_COUNTRY) as? String)
@@ -124,11 +133,8 @@ class FxSuggestFactsTest {
     @Test
     fun `GIVEN interaction information for a Wikipedia suggestion WHEN emitting a click fact THEN 1 click fact is collected`() {
         CollectionProcessor.withFactCollection { facts ->
-
             emitSuggestionClickedFact(
-                FxSuggestInteractionInfo.Wikipedia(
-                    contextId = "c303282d-f2e6-46ca-a04a-35d3d873712d",
-                ),
+                FxSuggestInteractionInfo.Wikipedia(contextId = "c303282d-f2e6-46ca-a04a-35d3d873712d"),
                 positionInAwesomeBar = 0,
                 clientCountry = "TZ",
             )
@@ -148,7 +154,11 @@ class FxSuggestFactsTest {
                     metadata?.keys,
                 )
 
-                val clickInfo = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.INTERACTION_INFO) as? FxSuggestInteractionInfo.Wikipedia)
+                val clickInfo =
+                    requireNotNull(
+                        metadata?.get(FxSuggestFacts.MetadataKeys.INTERACTION_INFO)
+                            as? FxSuggestInteractionInfo.Wikipedia
+                    )
                 assertEquals(clickInfo.contextId, "c303282d-f2e6-46ca-a04a-35d3d873712d")
 
                 val positionInAwesomebar = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.POSITION) as? Long)
@@ -163,11 +173,8 @@ class FxSuggestFactsTest {
     @Test
     fun `GIVEN interaction information for a Wikipedia suggestion WHEN emitting an impression fact THEN 1 impression fact is collected`() {
         CollectionProcessor.withFactCollection { facts ->
-
             emitSuggestionImpressedFact(
-                FxSuggestInteractionInfo.Wikipedia(
-                    contextId = "c303282d-f2e6-46ca-a04a-35d3d873712d",
-                ),
+                FxSuggestInteractionInfo.Wikipedia(contextId = "c303282d-f2e6-46ca-a04a-35d3d873712d"),
                 positionInAwesomeBar = 0,
                 isClicked = true,
                 engagementAbandoned = false,
@@ -191,7 +198,11 @@ class FxSuggestFactsTest {
                     metadata?.keys,
                 )
 
-                val impressionInfo = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.INTERACTION_INFO) as? FxSuggestInteractionInfo.Wikipedia)
+                val impressionInfo =
+                    requireNotNull(
+                        metadata?.get(FxSuggestFacts.MetadataKeys.INTERACTION_INFO)
+                            as? FxSuggestInteractionInfo.Wikipedia
+                    )
                 assertEquals(impressionInfo.contextId, "c303282d-f2e6-46ca-a04a-35d3d873712d")
 
                 val positionInAwesomebar = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.POSITION) as? Long)
@@ -200,7 +211,8 @@ class FxSuggestFactsTest {
                 val isClicked = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.IS_CLICKED) as? Boolean)
                 assertTrue(isClicked)
 
-                val engagementAbandoned = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.ENGAGEMENT_ABANDONED) as? Boolean)
+                val engagementAbandoned =
+                    requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.ENGAGEMENT_ABANDONED) as? Boolean)
                 assertFalse(engagementAbandoned)
 
                 val clientCountry = requireNotNull(metadata?.get(FxSuggestFacts.MetadataKeys.CLIENT_COUNTRY) as? String)

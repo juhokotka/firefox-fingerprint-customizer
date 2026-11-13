@@ -469,9 +469,9 @@ add_task(async function dedupeAgainstURL_timestamps() {
         ],
         histories,
         context,
-        conditionalPayloadProperties: {
+        payloadRules: {
           url: {
-            custom: (index, result) => {
+            validate: (index, result) => {
               if (index != ampResultIndex) {
                 return false;
               }
@@ -483,7 +483,7 @@ add_task(async function dedupeAgainstURL_timestamps() {
             },
           },
           sponsoredClickUrl: {
-            custom: (index, result) => {
+            validate: (index, result) => {
               if (index != ampResultIndex) {
                 return false;
               }
@@ -743,9 +743,9 @@ add_task(async function dismissResult() {
           providers: [UrlbarProviderQuickSuggest.name],
           isPrivate: false,
         }),
-        conditionalPayloadProperties: {
+        payloadRules: {
           url: {
-            custom: (_index, result) => {
+            validate: (_index, result) => {
               QuickSuggestTestUtils.assertTimestampsReplaced(result, {
                 url: TIMESTAMP_SUGGESTION_URL,
               });
@@ -753,7 +753,7 @@ add_task(async function dismissResult() {
             },
           },
           sponsoredClickUrl: {
-            custom: (_index, result) => {
+            validate: (_index, result) => {
               QuickSuggestTestUtils.assertTimestampsReplaced(result, {
                 sponsoredClickUrl: TIMESTAMP_SUGGESTION_CLICK_URL,
               });
@@ -916,13 +916,27 @@ add_task(async function keywordLengthThreshold() {
           type: QuickSuggestTestUtils.RS_TYPE.AMP,
           attachment: [
             QuickSuggestTestUtils.ampRemoteSettings({
-              keywords: ["x", "xx"],
+              keywords: ["", "x", "xx"],
             }),
           ],
         },
       ],
     },
     tests: [
+      {
+        context: createContext("", {
+          providers: [UrlbarProviderQuickSuggest.name],
+          isPrivate: false,
+        }),
+        expected: [],
+      },
+      {
+        context: createContext(" ", {
+          providers: [UrlbarProviderQuickSuggest.name],
+          isPrivate: false,
+        }),
+        expected: [],
+      },
       {
         context: createContext("x", {
           providers: [UrlbarProviderQuickSuggest.name],
@@ -1200,7 +1214,7 @@ async function doAmpMatchingStrategyTest({
     "queryWithMetrics"
   );
 
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
   await controller.startQuery(
     createContext("amp", {
       providers: [UrlbarProviderQuickSuggest.name],
@@ -1263,7 +1277,9 @@ add_task(async function online_disabled() {
           QuickSuggestTestUtils.ampResult({
             source: "merino",
             provider: "adm",
-            icon: "https://example.com/amp-icon",
+            icon: UrlbarTestUtils.makeMozRemoteImageUrl(
+              "https://example.com/amp-icon"
+            ),
             iabCategory: "22 - Shopping",
             requestId: "request_id",
             suggestedIndex: -1,
@@ -1315,7 +1331,7 @@ add_task(async function online_enabled() {
   let expected = {
     source: "merino",
     provider: "adm",
-    icon: "https://example.com/amp-icon",
+    icon: UrlbarTestUtils.makeMozRemoteImageUrl("https://example.com/amp-icon"),
     iabCategory: "22 - Shopping",
     requestId: "request_id",
     suggestedIndex: -1,
@@ -1329,6 +1345,9 @@ add_task(async function online_enabled() {
 
   let noSuggestionId = structuredClone(MERINO_SUGGESTION);
   delete noSuggestionId.custom_details.amp.suggestion_id;
+
+  let noSuggestionIdResult = QuickSuggestTestUtils.ampResult(expected);
+  delete noSuggestionIdResult.payload.suggestionId;
 
   await doResultCheckTest({
     env: {
@@ -1456,12 +1475,7 @@ add_task(async function online_enabled() {
         context,
         description: "Missing custom_details",
         merinoSuggestions: [noCustomDetails],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
 
       {
@@ -1473,12 +1487,7 @@ add_task(async function online_enabled() {
             custom_details: undefined,
           },
         ],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
 
       {
@@ -1490,12 +1499,7 @@ add_task(async function online_enabled() {
             custom_details: null,
           },
         ],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
 
       {
@@ -1507,24 +1511,14 @@ add_task(async function online_enabled() {
             custom_details: {},
           },
         ],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
 
       {
         context,
         description: "Missing custom_details.amp",
         merinoSuggestions: [noCustomDetailsAmp],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
 
       {
@@ -1538,12 +1532,7 @@ add_task(async function online_enabled() {
             },
           },
         ],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
     ],
   });
@@ -1667,18 +1656,7 @@ async function doOnlineTopPickTest({ searchString, suggestion, expected }) {
       ],
       merinoSuggestions: [
         {
-          title: "Amp Suggestion",
-          url: "https://example.com/amp",
-          provider: "adm",
-          is_sponsored: true,
-          score: 0.31,
-          icon: "https://example.com/amp-icon",
-          iab_category: "22 - Shopping",
-          block_id: 1,
-          full_keyword: "amp",
-          advertiser: "Amp",
-          impression_url: "https://example.com/amp-impression",
-          click_url: "https://example.com/amp-click",
+          ...MERINO_SUGGESTION,
           ...suggestion,
         },
       ],
@@ -1693,7 +1671,9 @@ async function doOnlineTopPickTest({ searchString, suggestion, expected }) {
             // Usual properties
             source: "merino",
             provider: "adm",
-            icon: "https://example.com/amp-icon",
+            icon: UrlbarTestUtils.makeMozRemoteImageUrl(
+              "https://example.com/amp-icon"
+            ),
             iabCategory: "22 - Shopping",
             requestId: "request_id",
           }),

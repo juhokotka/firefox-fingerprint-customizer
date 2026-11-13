@@ -3,21 +3,24 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsDumpUtils.h"
+
+#include <errno.h>
+
+#include "SpecialSystemDirectory.h"
+#include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Services.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
-#include <errno.h>
-#include "prenv.h"
-#include "mozilla/Services.h"
 #include "nsIObserverService.h"
-#include "mozilla/ClearOnShutdown.h"
-#include "SpecialSystemDirectory.h"
+#include "prenv.h"
 
 #if defined(XP_UNIX) && !defined(XP_IOS)  // {
-#  include "mozilla/Preferences.h"
 #  include <fcntl.h>
-#  include <unistd.h>
 #  include <signal.h>
 #  include <sys/stat.h>
+#  include <unistd.h>
+
+#  include "mozilla/Preferences.h"
 
 using namespace mozilla;
 
@@ -398,8 +401,9 @@ void FifoWatcher::OnFileCanReadWithoutBlocking(int aFd) {
 // /data/local/tmp/"aFoldername".
 // Otherwise, it will open a file named aFilename under "NS_OS_TEMP_DIR".
 /* static */
-nsresult nsDumpUtils::OpenTempFile(const nsACString& aFilename, nsIFile** aFile,
-                                   const nsACString& aFoldername, Mode aMode) {
+nsresult nsDumpUtils::OpenTempFile(
+    const nsACString& aFilename, nsIFile** aFile,
+    [[maybe_unused]] const nsACString& aFoldername, Mode aMode) {
 #ifdef ANDROID
   // For Android, first try the downloads directory which is world-readable
   // rather than the temp directory which is not.

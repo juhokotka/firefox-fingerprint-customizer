@@ -18,13 +18,14 @@
     --header-text-color: transparent;
     /* TODO: Bug 2033070 - desaturated tokens only exist in Nova, remove after it becomes default */
     --card-text-color: light-dark(var(--color-violet-desaturated-90, #180e30), var(--color-violet-desaturated-0, #f2f0f8));
+    --card-text-color-selected: light-dark(var(--color-violet-desaturated-90, #180e30), var(--color-violet-desaturated-0, #f2f0f8));
     --card-subtitle-text-color: light-dark(var(--color-violet-60), var(--color-violet-20));
     --card-icon-bg: light-dark(var(--color-violet-0), var(--color-white-alpha-10));
     --button-icon-color: var(--card-text-color);
 
     /* TODO: Bug 2033070 - remove these media queries after Nova launch */
     @media not -moz-pref("browser.nova.enabled") {
-      /* stylelint-disable-next-line -- using linear gradient for text effect */
+      /* using linear gradient for text effect */
       --header-bg-image: light-dark(linear-gradient(91deg, #7630c0 22.04%, #5c66ee 78.7%), linear-gradient(65deg, #9165ff 18.85%, #d8c9ff 78.79%));
       --card-bg: light-dark(var(--color-white-alpha-50), var(--color-gray-80));
       --card-bg-hover: var(--background-color-box);
@@ -56,6 +57,7 @@
   @media (forced-colors) {
     --header-text-color: CanvasText;
     --card-text-color: CanvasText;
+    --button-icon-color: CanvasText;
     --card-subtitle-text-color: CanvasText;
     --card-icon-bg: transparent;
     --card-bg: Canvas;
@@ -63,6 +65,7 @@
     --card-border-color: CanvasText;
     --card-border-color-hover: SelectedItem;
     --card-border-color-gradient: SelectedItem;
+    --card-text-color-selected: SelectedItemText;
   }
 
   .main-content,
@@ -84,7 +87,7 @@
     @media not -moz-pref("browser.nova.enabled") {
       border: none;
       border-radius: var(--border-radius-medium);
-      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens -- custom gradient per Figma design */
+      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-paired-color-tokens -- custom gradient per Figma design; the button's text color comes from its default styles */
       background-image: var(--button-background-color-primary);
     }
 
@@ -110,7 +113,6 @@
 
     /* TODO: Bug 2033070 - remove these media queries after Nova launch */
     @media not -moz-pref("browser.nova.enabled") {
-      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
       background-color: var(--card-border-color);
     }
 
@@ -119,7 +121,6 @@
     }
 
     &:hover {
-      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens -- custom brand border per Figma design */
       border-color: var(--card-border-color-hover);
     }
   }
@@ -134,7 +135,7 @@
 #mainContentHeader {
   background-image: var(--header-bg-image);
   background-clip: text;
-  /* stylelint-disable-next-line -- transparent needed for gradient text effect */
+  /* transparent needed for gradient text effect */
   color: var(--header-text-color);
 
   .screen.AI_WINDOW_INTRO & {
@@ -159,7 +160,6 @@
     h2 {
       opacity: var(--opacity-deemphasized);
       margin-top: var(--space-medium);
-      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens -- custom subtitle size per Figma design */
       font-size: var(--font-size-root);
       font-weight: normal;
       /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens -- custom subtitle width per Figma design */
@@ -183,7 +183,6 @@
   p {
     letter-spacing: 0.3px;
     line-height: normal;
-    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens -- custom brand color per Figma design */
     color: var(--card-text-color);
   }
 }
@@ -282,14 +281,11 @@
       display: grid;
       grid-template-columns: 35px 1fr;
       padding: var(--space-medium) var(--space-large);
-      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens -- custom card background per Figma design */
       background: var(--card-bg);
-      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens -- custom border per Figma design */
       border-inline: var(--border-width) solid var(--card-border-color);
       border-block-end: var(--border-width) solid var(--card-border-color);
 
       &:first-of-type {
-        /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens -- custom border per Figma design */
         border-block-start: var(--border-width) solid var(--card-border-color);
         border-start-start-radius: var(--border-radius-medium);
         border-start-end-radius: var(--border-radius-medium);
@@ -354,7 +350,7 @@
 .screen.AI_WINDOW_CHOOSE_MODEL {
   .tiles-single-select-container {
     align-items: stretch;
-    /* stylelint-disable-next-line -- 550px per Figma */
+    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens -- 550px per Figma */
     max-width: 550px;
 
     > div {
@@ -373,12 +369,10 @@
 
   .select-item {
     align-items: center;
-    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
     background-color: var(--card-bg);
     border: var(--border-width) solid var(--card-border-color);
     border-radius: var(--border-radius-large);
     box-sizing: border-box;
-    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
     color: var(--card-text-color);
     column-gap: var(--space-medium);
     display: grid;
@@ -395,31 +389,32 @@
     width: 100%;
 
     /* TODO: Bug 2033070 - remove these media queries after Nova launch */
-    @media not (-moz-pref("browser.nova.enabled")) {
+    @media not -moz-pref("browser.nova.enabled") {
       /* outline color is the button background color, which is a gradient for MVP
       and doesn't work on outline */
+      /* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
       &:has(.input:focus-visible) {
         outline: var(--focus-outline-width) solid var(--focus-outline-color);
         outline-offset: var(--focus-outline-offset);
       }
     }
 
+    /* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
     &:hover:not(:has(.selected)) {
-      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
       background-color: var(--card-bg-hover);
-      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
       border: var(--border-width) solid var(--card-border-color-hover);
       box-shadow: var(--box-shadow-level-2);
     }
 
+    /* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
     &:has(.selected) {
       /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
       background:
         image(var(--card-bg-hover)) padding-box,
         var(--card-border-color-gradient) border-box;
-      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
       border: calc(2 * var(--border-width)) solid var(--border-color-transparent);
       box-shadow: var(--box-shadow-level-4);
+      color: var(--card-text-color-selected);
       padding: var(--space-large);
     }
 
@@ -428,15 +423,15 @@
       margin-bottom: 0;
       margin-top: 0;
       line-height: normal;
+      text-align: start;
     }
 
     .body-text {
-      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
-      color: var(--card-text-color);
       font-size: var(--font-size-small);
       grid-area: description;
       line-height: normal;
       margin: 0;
+      text-align: start;
     }
 
     .subtitle-text {
@@ -457,6 +452,32 @@
       height: var(--size-image-small);
       grid-area: icon;
       width: var(--size-image-small);
+    }
+
+    /* Render the "Recommended" badge as an inline pill in the right column,
+       vertically centered, rather than the shared top-corner banner. */
+    .flair {
+      --flair-background-color: light-dark(
+        var(--color-violet-desaturated-0, var(--color-violet-0)),
+        var(--color-violet-desaturated-50, var(--color-violet-50))
+      );
+      background-color: var(--flair-background-color);
+      border-radius: var(--border-radius-xlarge, var(--border-radius-large));
+      color: var(--text-color);
+      font-size: var(--font-size-small);
+      grid-area: model;
+      height: auto;
+      inset: unset;
+      line-height: normal;
+      padding: var(--space-xxsmall) var(--space-small);
+      position: static;
+      width: fit-content;
+    }
+
+    /* The recommended card shows the badge in place of the model subtitle. */
+    /* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
+    &:has(.flair) .subtitle-text {
+      display: none;
     }
   }
 }

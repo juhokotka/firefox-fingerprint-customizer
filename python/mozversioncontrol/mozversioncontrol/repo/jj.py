@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this,
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import json
 import re
 import string
@@ -23,6 +25,7 @@ from mozversioncontrol.errors import (
     CannotDeleteFromRootOfRepositoryException,
     MissingVCSExtension,
     MissingVCSInfo,
+    StaleWorkspaceError,
 )
 from mozversioncontrol.repo.base import Repository
 from mozversioncontrol.repo.git import GitRepository
@@ -46,27 +49,19 @@ class JujutsuRepository(Repository):
         super().__init__(path, tool=jj)
         self._git = GitRepository(path, git=git)
 
-        # Find git root. Newer jj has `jj git root`, but this should support
-        # older versions for now.
-        out = self._run("root")
-        if not out:
-            raise MissingVCSInfo("cannot find jj workspace root")
-
         try:
-            jj_ws_root = Path(out.rstrip())
-            jj_repo = jj_ws_root / ".jj" / "repo"
-            if not jj_repo.is_dir():
-                # Path / absolute discards the left operand, so this handles both relative and absolute paths.
-                jj_repo = jj_repo.parent / Path(jj_repo.read_text())
-        except Exception:
-            raise MissingVCSInfo("cannot find jj repo")
+            git_dir = self._run("git", "root", stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr or ""
+            if "working copy is stale" in stderr.lower():
+                raise StaleWorkspaceError(stderr.rstrip()) from e
+            print(stderr, end="", file=sys.stderr)
+            raise
 
-        try:
-            git_target = jj_repo / "store" / "git_target"
-            git_dir = git_target.parent / Path(git_target.read_text())
-        except Exception:
-            raise MissingVCSInfo("cannot find git dir")
+        if not git_dir:
+            raise MissingVCSInfo("cannot find `jj git root`")
 
+        git_dir = Path(git_dir.rstrip())
         if not git_dir.is_dir():
             raise MissingVCSInfo("cannot find git dir")
 
@@ -127,6 +122,10 @@ class JujutsuRepository(Repository):
     def head_rev(self):
         return self._resolve_to_commit(self.HEAD_REVSET)
 
+    @property
+    def is_shallow(self):
+        return self._git.is_shallow
+
     def is_cinnabar_repo(self) -> bool:
         return self._git.is_cinnabar_repo()
 
@@ -160,7 +159,9 @@ class JujutsuRepository(Repository):
             "--revisions",
             self.HEAD_REVSET,
             "--template",
-            'local_bookmarks.join("\n")',
+            # Use name() rather than the default RefName formatting, which
+            # decorates diverged ("*") and conflicted ("??") bookmarks.
+            'local_bookmarks.map(|b| b.name()).join("\n")',
         )
         bookmark = output.split("\n")[0].strip()
         return bookmark or None
@@ -323,14 +324,14 @@ class JujutsuRepository(Repository):
             return
 
         relative_paths = [self._repo_root_relative_path(p) for p in paths]
-        self._run("file", "track", *relative_paths)
+        self._run_batched("file", "track", paths=relative_paths)
 
     def forget_add_remove_files(self, *paths: Union[str, Path]):
         if not paths:
             return
 
         relative_paths = [self._repo_root_relative_path(p) for p in paths]
-        self._run("file", "untrack", *relative_paths)
+        self._run_batched("file", "untrack", paths=relative_paths)
 
     def get_tracked_files_finder(self, path=None):
         files = [mozpath.normsep(p) for p in self._run("file", "list").splitlines()]
@@ -665,13 +666,18 @@ class JujutsuRepository(Repository):
             return True
         return False
 
-    def configure(self, state_dir: Path, update_only: bool = False):
+    def configure(
+        self,
+        state_dir: Path,
+        update_only: bool = False,
+        no_system_changes: bool = False,
+    ):
         """Run the Jujutsu configuration steps."""
         print(
             "\nOur jj support currently relies on Git; checks will run for both jj and Git.\n"
         )
 
-        self._git.configure(state_dir, update_only)
+        self._git.configure(state_dir, update_only, no_system_changes=no_system_changes)
 
         topsrcdir = Path(self.path)
         if not update_only:
@@ -730,33 +736,25 @@ class JujutsuRepository(Repository):
 
             # This enables watchman if it's installed.
             if which("watchman"):
-                # Use appropriate config keys based on jj version. 0.32.0+ renamed these config keys
-                if jj_version >= Version("0.32"):
-                    # Remove deprecated config keys to prevent warnings
-                    for key in [
-                        "core.fsmonitor",
-                        "core.watchman.register-snapshot-trigger",
-                    ]:
-                        self._run(
-                            "config",
-                            "unset",
-                            "--repo",
-                            key,
-                            return_codes=[0, 1],
-                            stderr=subprocess.DEVNULL,
-                        )
+                # Remove deprecated config keys (renamed in 0.32.0) to prevent warnings
+                for key in [
+                    "core.fsmonitor",
+                    "core.watchman.register-snapshot-trigger",
+                ]:
+                    self._run(
+                        "config",
+                        "unset",
+                        "--repo",
+                        key,
+                        return_codes=[0, 1],
+                        stderr=subprocess.DEVNULL,
+                    )
 
-                    # Set 0.32.0+ config keys
-                    self._set_default_if_missing("fsmonitor.backend", "watchman")
-                    self._set_default_if_missing(
-                        "fsmonitor.watchman.register-snapshot-trigger", False
-                    )
-                else:
-                    # Set old config keys
-                    self._set_default_if_missing("core.fsmonitor", "watchman")
-                    self._set_default_if_missing(
-                        "core.watchman.register-snapshot-trigger", False
-                    )
+                # Set 0.32.0+ config keys
+                self._set_default_if_missing("fsmonitor.backend", "watchman")
+                self._set_default_if_missing(
+                    "fsmonitor.watchman.register-snapshot-trigger", False
+                )
 
                 print("Checking if watchman is enabled...")
                 output = self._run_read_only("debug", "watchman", "status")

@@ -5,27 +5,25 @@
 #ifndef GFX_PLATFORM_H
 #define GFX_PLATFORM_H
 
-#include "mozilla/gfx/Types.h"
-#include "mozilla/intl/UnicodeScriptCodes.h"
-#include "nsTArray.h"
-#include "nsString.h"
-#include "nsCOMPtr.h"
-
+#include "GfxInfoCollector.h"
+#include "X11UndefineNone.h"
+#include "gfxSkipChars.h"
 #include "gfxTelemetry.h"
 #include "gfxTypes.h"
-#include "gfxSkipChars.h"
-
-#include "qcms.h"
-
-#include "mozilla/RefPtr.h"
-#include "GfxInfoCollector.h"
-
 #include "mozilla/Maybe.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/gfx/Types.h"
+#include "mozilla/intl/UnicodeScriptCodes.h"
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/layers/MemoryPressureObserver.h"
 #include "mozilla/layers/OverlayInfo.h"
+#include "nsCOMPtr.h"
+#include "nsString.h"
+#include "nsTArray.h"
+#include "qcms.h"
 
+class FontData;
 class FontVisibilityProvider;
 class gfxASurface;
 class gfxFont;
@@ -47,7 +45,7 @@ struct StyleFontFamilyList;
 struct StyleFontFaceSourceTechFlags;
 enum class StyleFontFaceSourceFormatKeyword : uint8_t;
 class WeightRange;
-class StretchRange;
+class WidthRange;
 class SlantStyleRange;
 class LogModule;
 class VsyncDispatcher;
@@ -170,7 +168,7 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
 
  public:
   using WeightRange = mozilla::WeightRange;
-  using StretchRange = mozilla::StretchRange;
+  using WidthRange = mozilla::WidthRange;
   using SlantStyleRange = mozilla::SlantStyleRange;
   typedef mozilla::gfx::sRGBColor sRGBColor;
   typedef mozilla::gfx::DeviceColor DeviceColor;
@@ -251,29 +249,6 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
    */
   static already_AddRefed<DrawTarget> CreateDrawTargetForSurface(
       gfxASurface* aSurface, const mozilla::gfx::IntSize& aSize);
-
-  /*
-   * Creates a SourceSurface for a gfxASurface. This function does no caching,
-   * so the caller should cache the gfxASurface if it will be used frequently.
-   * The returned surface keeps a reference to aTarget, so it is OK to keep the
-   * surface, even if aTarget changes.
-   * aTarget should not keep a reference to the returned surface because that
-   * will cause a cycle.
-   *
-   * This function is static so that it can be accessed from outside the main
-   * process.
-   *
-   * aIsPlugin is used to tell the backend that they can optimize this surface
-   * specifically because it's used for a plugin. This is mostly for Skia.
-   */
-  static already_AddRefed<SourceSurface> GetSourceSurfaceForSurface(
-      RefPtr<mozilla::gfx::DrawTarget> aTarget, gfxASurface* aSurface,
-      bool aIsPlugin = false);
-
-  static void ClearSourceSurfaceForSurface(gfxASurface* aSurface);
-
-  static already_AddRefed<DataSourceSurface> GetWrappedDataSourceSurface(
-      gfxASurface* aSurface);
 
   already_AddRefed<DrawTarget> CreateOffscreenContentDrawTarget(
       const mozilla::gfx::IntSize& aSize, mozilla::gfx::SurfaceFormat aFormat,
@@ -402,8 +377,7 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   already_AddRefed<gfxFontEntry> LookupLocalFont(
       FontVisibilityProvider* aFontVisibilityProvider,
       const nsACString& aFontName, const WeightRange& aWeightForEntry,
-      const StretchRange& aStretchForEntry,
-      const SlantStyleRange& aStyleForEntry);
+      const WidthRange& aWidthForEntry, const SlantStyleRange& aStyleForEntry);
 
   /**
    * Activate a platform font.  (Needed to support @font-face src url().)
@@ -414,9 +388,8 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
    */
   already_AddRefed<gfxFontEntry> MakePlatformFont(
       const nsACString& aFontName, const WeightRange& aWeightForEntry,
-      const StretchRange& aStretchForEntry,
-      const SlantStyleRange& aStyleForEntry, const uint8_t* aFontData,
-      uint32_t aLength);
+      const WidthRange& aWidthForEntry, const SlantStyleRange& aStyleForEntry,
+      FontData* aFontData);
 
   /**
    * Whether to allow downloadable fonts via @font-face rules
@@ -974,7 +947,7 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
 
   static void InitOpenGLConfig();
 
-  static void VideoDecodingFailedChangedCallback(const char* aPref, void*);
+  static void HardwareVideoFailedChangedCallback(const char* aPref, void*);
 
   static void HWDRMFailedChangedCallback(const char* aPref, void*);
 
@@ -992,7 +965,7 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   void InitGPUProcessPrefs();
   virtual void InitPlatformGPUProcessPrefs() {}
   virtual void InitPlatformHardwareVideoConfig() {}
-  virtual void InitPlatformHardwarDRMConfig() {}
+  virtual void InitPlatformHardwareDRMConfig() {}
 
   // Gather telemetry data about the Gfx Platform and send it
   static void ReportTelemetry();
@@ -1018,6 +991,18 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   qcms_transform* mCMSRGBATransform = nullptr;
   qcms_transform* mCMSBGRATransform = nullptr;
   mozilla::Maybe<nsTArray<uint8_t>> mCMSOutputProfileData;
+
+  // How mCMSOutputProfile was chosen, reported in about:support.
+  enum class CMSOutputProfileStatus : uint8_t {
+    Uninitialized,
+    ForcedSRGB,
+    NoProfileData,
+    ParseFailed,
+    Bogus,
+    Loaded,
+  };
+  CMSOutputProfileStatus mCMSOutputProfileStatus =
+      CMSOutputProfileStatus::Uninitialized;
 
   RefPtr<gfxASurface> mScreenReferenceSurface;
   RefPtr<mozilla::layers::MemoryPressureObserver> mMemoryPressureObserver;

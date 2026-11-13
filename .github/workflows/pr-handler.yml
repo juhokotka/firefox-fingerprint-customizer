@@ -17,14 +17,6 @@ on:
 
 env:
   ALLOWED_TEAM: lando-github-pilot
-  ALLOWED_PATHS: |
-    gradle/
-    mobile/android/android-components
-    mobile/android/fenix
-    mobile/android/focus-android
-    taskcluster/config.yml
-    .*.ftl$
-    browser/base/content/test/static
 
   GH_REPO: ${{ github.repository }}
   PR: ${{ github.event.pull_request.number }}
@@ -40,7 +32,7 @@ jobs:
       # We use the Lando Web App to obtain a token with sufficient permissions.
       - name: Generate a Lando Web token
         id: generate-lando-web-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
         continue-on-error: true
         with:
           app-id: ${{ vars.LANDO_WEB_APP_ID }}
@@ -61,29 +53,20 @@ jobs:
             echo "is_member=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check allowed paths
-        id: paths
-        continue-on-error: true
-        if: steps.team.outputs.is_member == 'true'
-        run: |
-          PATTERN=$(echo "${ALLOWED_PATHS}" | xargs | tr ' ' '|')
-          if gh pr view "${PR}" --json files --jq '.files[].path' | grep -vE "^(${PATTERN})"; then
-            echo "only_allowed=false" >> $GITHUB_OUTPUT
-          else
-            echo "only_allowed=true" >> $GITHUB_OUTPUT
-          fi
-
       - name: Close PR
-        if: steps.team.outputs.is_member != 'true' || steps.paths.outputs.only_allowed != 'true'
+        if: steps.team.outputs.is_member != 'true'
         run: |
           gh pr close "${PR}" --comment "(Automated Close) Please do not file pull requests here, see https://firefox-source-docs.mozilla.org/contributing/how_to_submit_a_patch.html"
           gh pr lock "${PR}"
 
       - name: Check PR target
-        if: (steps.team.outputs.is_member == 'true' && steps.paths.outputs.only_allowed == 'true') && github.event.action == 'opened' && github.base_ref == 'main'
+        if: steps.team.outputs.is_member == 'true' && github.event.action == 'opened' && github.base_ref != 'autoland'
         run: |
+          gh pr edit "${PR}" --base "autoland"
           gh pr comment "${PR}" --body "> [!WARNING]
-          The base branch is currently set to \`main\`. Please Edit this PR and set the base to \`autoland\`."
+          The target branch has been automatically set to \`autoland\`.
+
+          Please [Edit this PR](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/changing-the-base-branch-of-a-pull-request) if this wasn't your intention."
 
       - name: Add Lando link
         if: (steps.team.outputs.is_member == 'true' && steps.paths.outputs.only_allowed == 'true') && github.event.action == 'opened'

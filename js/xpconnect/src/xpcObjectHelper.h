@@ -13,7 +13,9 @@
 #endif
 
 #include "mozilla/Attributes.h"
+
 #include <stdint.h>
+
 #include "nsCOMPtr.h"
 #include "nsIClassInfo.h"
 #include "nsISupports.h"
@@ -29,6 +31,8 @@ class xpcObjectHelper {
       CallQueryInterface(aObject, &mCache);
     }
   }
+
+  xpcObjectHelper(xpcObjectHelper& aOther) = delete;
 
   nsISupports* Object() { return mObject; }
 
@@ -53,8 +57,6 @@ class xpcObjectHelper {
   nsWrapperCache* GetWrapperCache() { return mCache; }
 
  private:
-  xpcObjectHelper(xpcObjectHelper& aOther) = delete;
-
   nsISupports* MOZ_UNSAFE_REF(
       "xpcObjectHelper has been specifically optimized "
       "to avoid unnecessary AddRefs and Releases. "

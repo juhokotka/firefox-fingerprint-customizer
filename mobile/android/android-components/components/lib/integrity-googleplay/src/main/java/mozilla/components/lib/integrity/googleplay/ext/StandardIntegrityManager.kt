@@ -8,11 +8,11 @@ import com.google.android.play.core.integrity.StandardIntegrityManager
 import com.google.android.play.core.integrity.StandardIntegrityManager.PrepareIntegrityTokenRequest
 import com.google.android.play.core.integrity.StandardIntegrityManager.StandardIntegrityTokenProvider
 import com.google.android.play.core.integrity.StandardIntegrityManager.StandardIntegrityTokenRequest
-import mozilla.components.concept.integrity.IntegrityToken
-import mozilla.components.lib.integrity.googleplay.RequestHashProvider
-import mozilla.components.lib.integrity.googleplay.TokenProvider
 import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
+import kotlinx.coroutines.suspendCancellableCoroutine
+import mozilla.components.concept.integrity.IntegrityToken
+import mozilla.components.concept.integrity.RequestHashProvider
+import mozilla.components.lib.integrity.googleplay.TokenProvider
 
 private val StandardIntegrityTokenProvider.tokenProvider
     get() = TokenProvider { requestHashProvider ->
@@ -20,22 +20,25 @@ private val StandardIntegrityTokenProvider.tokenProvider
     }
 
 internal suspend fun StandardIntegrityTokenProvider.request(requestHashProvider: RequestHashProvider) =
-    suspendCoroutine { continuation ->
-        val tokenRequest = StandardIntegrityTokenRequest.builder()
-            .setRequestHash(requestHashProvider.generateHash())
-            .build()
+    suspendCancellableCoroutine { continuation ->
+        val tokenRequest =
+            StandardIntegrityTokenRequest.builder().setRequestHash(requestHashProvider.generateHash()).build()
 
         request(tokenRequest)
             .addOnSuccessListener { continuation.resume(Result.success(IntegrityToken(it.token()))) }
             .addOnFailureListener { continuation.resume(Result.failure(it)) }
+        continuation.invokeOnCancellation {
+            // cancel the integrity token request when the Task API exposes a cancellation handle
+        }
     }
 
 internal suspend fun StandardIntegrityManager.prepare(cloudProjectNumber: Long) =
-    suspendCoroutine { continuation ->
-        val tokenRequest = PrepareIntegrityTokenRequest.builder()
-            .setCloudProjectNumber(cloudProjectNumber)
-            .build()
+    suspendCancellableCoroutine { continuation ->
+        val tokenRequest = PrepareIntegrityTokenRequest.builder().setCloudProjectNumber(cloudProjectNumber).build()
         prepareIntegrityToken(tokenRequest)
             .addOnSuccessListener { continuation.resume(Result.success(it.tokenProvider)) }
             .addOnFailureListener { continuation.resume(Result.failure(it)) }
+        continuation.invokeOnCancellation {
+            // cancel the prepare integrity token request when the Task API exposes a cancellation handle
+        }
     }

@@ -57,7 +57,8 @@ Each animation or transition is shown as a horizontal bar laid across the timeli
 - orange if a [@keyframes animation](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@keyframes) was used
 - green if the [Web Animations API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Animations_API) was used
 
-The bar contains a lightning bolt icon {{ image1 }} if the property was animated using the compositor thread (see more about the {ref}`cost of animating different CSS properties <performance-scenarios-animating_css_properties-css-property-cost>`).
+The bar contains a lightning bolt icon {{ image1 }} if the property was animated using the compositor thread (animating a property on the compositor thread is cheaper than animating one
+that forces layout or paint).
 
 The bar is shaped to reflect the easing effect used for the animation. In the example above you can see that the first bar is concave, representing ease-in, and the second is convex, representing ease-out.
 
@@ -195,4 +196,13 @@ The cubic Bézier editor includes a number of presets, grouped under "Ease-in", 
 <iframe width="560" height="315" src="https://www.youtube.com/embed/Jx-J2Yy0aSg" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 <br/>
 <br/>
+```
+
+```{toctree}
+:hidden:
+:maxdepth: 1
+
+animation_inspector_(firefox_41_and_42)/index
+animation_inspector_example_colon__css_transitions/index
+animation_inspector_example_colon__web_animations_api/index
 ```

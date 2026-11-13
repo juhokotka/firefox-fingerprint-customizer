@@ -5,12 +5,14 @@
 #ifndef mozilla_net_EarlyHintRegistrar_h_
 #define mozilla_net_EarlyHintRegistrar_h_
 
+#include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/RefCounted.h"
 #include "mozilla/dom/ipc/IdType.h"
 #include "nsRefPtrHashtable.h"
-#include "mozilla/AlreadyAddRefed.h"
 
+class nsILoadInfo;
 class nsIParentChannel;
+class nsIURI;
 
 namespace mozilla::net {
 
@@ -52,6 +54,14 @@ class EarlyHintRegistrar final : public RefCounted<EarlyHintRegistrar> {
   bool LinkParentChannel(dom::ContentParentId aCpId,
                          uint64_t aEarlyHintPreloaderId,
                          nsIParentChannel* aParent);
+
+  /*
+   * Returns true if an EarlyHintPreloader is registered for
+   * aEarlyHintPreloaderId and was started for the request described by aURI
+   * and aLoadInfo.
+   */
+  bool MatchesRequest(uint64_t aEarlyHintPreloaderId, nsIURI* aURI,
+                      nsILoadInfo* aLoadInfo);
 
   /*
    * Delete previous stored EarlyHintPreloader

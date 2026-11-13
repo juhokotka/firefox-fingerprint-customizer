@@ -11,11 +11,9 @@ import androidx.preference.Preference
 import androidx.preference.SwitchPreference
 import mozilla.components.lib.auth.canUseBiometricFeature
 import mozilla.telemetry.glean.private.NoExtras
-import org.mozilla.focus.GleanMetrics.CookieBanner
 import org.mozilla.focus.GleanMetrics.PrivacySettings
 import org.mozilla.focus.GleanMetrics.TrackingProtectionExceptions
 import org.mozilla.focus.R
-import org.mozilla.focus.cookiebanner.CookieBannerOption
 import org.mozilla.focus.engine.EngineSharedPreferencesListener
 import org.mozilla.focus.ext.requireComponents
 import org.mozilla.focus.ext.settings
@@ -26,12 +24,8 @@ import org.mozilla.focus.state.AppAction
 import org.mozilla.focus.state.Screen
 import org.mozilla.focus.widget.CookiesPreference
 
-/**
- * Settings fragment for privacy and security options.
- */
-class PrivacySecuritySettingsFragment :
-    BaseSettingsFragment(),
-    SharedPreferences.OnSharedPreferenceChangeListener {
+/** Settings fragment for privacy and security options. */
+class PrivacySecuritySettingsFragment : BaseSettingsFragment(), SharedPreferences.OnSharedPreferenceChangeListener {
 
     private val engineSharedPreferencesListener by lazy {
         EngineSharedPreferencesListener(requireContext())
@@ -40,18 +34,17 @@ class PrivacySecuritySettingsFragment :
     override fun onCreatePreferences(p0: Bundle?, p1: String?) {
         addPreferencesFromResource(R.xml.privacy_security_settings)
 
-        val biometricPreference: SwitchPreference? =
-            findPreference(getString(R.string.pref_key_biometric))
+        val biometricPreference: SwitchPreference? = findPreference(getString(R.string.pref_key_biometric))
         val appName = getString(R.string.app_name)
-        biometricPreference?.summary =
-            getString(R.string.preference_security_biometric_summary2, appName)
+        biometricPreference?.summary = getString(R.string.preference_security_biometric_summary2, appName)
 
         // Remove the biometric toggle if not supported
         if (!requireContext().canUseBiometricFeature()) {
             biometricPreference?.let { preferenceScreen.removePreference(it) }
         }
-        if (!FocusNimbus.features.onboarding.value().isCfrEnabled ||
-            !requireContext().settings.shouldShowPrivacySecuritySettingsToolTip
+        if (
+            !FocusNimbus.features.onboarding.value().isCfrEnabled ||
+                !requireContext().settings.shouldShowPrivacySecuritySettingsToolTip
         ) {
             val privacySecuritySettingsToolTip: PreferenceToolTipCompose? =
                 findPreference(getString(R.string.pref_key_tool_tip))
@@ -68,21 +61,11 @@ class PrivacySecuritySettingsFragment :
             findPreference(getString(R.string.pref_key_performance_block_javascript)) as? SwitchPreference
         val webFontsPreference =
             findPreference(getString(R.string.pref_key_performance_block_webfonts)) as? SwitchPreference
-        val cookieBannerPreference = findPreference<Preference>(getString(R.string.pref_key_cookie_banner_settings))
 
         cookiesPreference?.onPreferenceChangeListener = engineSharedPreferencesListener
         safeBrowsingSwitchPreference?.onPreferenceChangeListener = engineSharedPreferencesListener
         javaScriptPreference?.onPreferenceChangeListener = engineSharedPreferencesListener
         webFontsPreference?.onPreferenceChangeListener = engineSharedPreferencesListener
-
-        cookieBannerPreference?.isVisible = requireContext().settings.isCookieBannerEnable
-        if (requireContext().settings.getCurrentCookieBannerOptionFromSharePref() ==
-            CookieBannerOption.CookieBannerDisabled()
-        ) {
-            cookieBannerPreference?.summary = getString(R.string.preferences_cookie_banner_summary_off)
-        } else {
-            cookieBannerPreference?.summary = getString(R.string.preferences_cookie_banner_summary_on)
-        }
     }
 
     override fun onResume() {
@@ -111,21 +94,26 @@ class PrivacySecuritySettingsFragment :
 
     private fun recordTelemetry(key: String, newValue: Any?) {
         when (key) {
-            getString(R.string.pref_key_telemetry) -> PrivacySettings.telemetrySettingChanged.record(
-                PrivacySettings.TelemetrySettingChangedExtra(newValue as? Boolean),
-            )
-            getString(R.string.pref_key_safe_browsing) -> PrivacySettings.safeBrowsingSettingChanged.record(
-                PrivacySettings.SafeBrowsingSettingChangedExtra(newValue as? Boolean),
-            )
-            getString(R.string.pref_key_biometric) -> PrivacySettings.unlockSettingChanged.record(
-                PrivacySettings.UnlockSettingChangedExtra(newValue as? Boolean),
-            )
-            getString(R.string.pref_key_secure) -> PrivacySettings.stealthSettingChanged.record(
-                PrivacySettings.StealthSettingChangedExtra(newValue as? Boolean),
-            )
-            getString(R.string.pref_key_performance_enable_cookies) -> PrivacySettings.blockCookiesChanged.record(
-                PrivacySettings.BlockCookiesChangedExtra(newValue as? String),
-            )
+            getString(R.string.pref_key_telemetry) ->
+                PrivacySettings.telemetrySettingChanged.record(
+                    PrivacySettings.TelemetrySettingChangedExtra(newValue as? Boolean)
+                )
+            getString(R.string.pref_key_safe_browsing) ->
+                PrivacySettings.safeBrowsingSettingChanged.record(
+                    PrivacySettings.SafeBrowsingSettingChangedExtra(newValue as? Boolean)
+                )
+            getString(R.string.pref_key_biometric) ->
+                PrivacySettings.unlockSettingChanged.record(
+                    PrivacySettings.UnlockSettingChangedExtra(newValue as? Boolean)
+                )
+            getString(R.string.pref_key_secure) ->
+                PrivacySettings.stealthSettingChanged.record(
+                    PrivacySettings.StealthSettingChangedExtra(newValue as? Boolean)
+                )
+            getString(R.string.pref_key_performance_enable_cookies) ->
+                PrivacySettings.blockCookiesChanged.record(
+                    PrivacySettings.BlockCookiesChangedExtra(newValue as? String)
+                )
             else -> {
                 // Telemetry for the change is recorded elsewhere.
             }
@@ -134,8 +122,7 @@ class PrivacySecuritySettingsFragment :
 
     private fun updateBiometricsToggleAvailability() {
         val switch =
-            preferenceScreen.findPreference(resources.getString(R.string.pref_key_biometric))
-                as? SwitchPreference
+            preferenceScreen.findPreference(resources.getString(R.string.pref_key_biometric)) as? SwitchPreference
 
         if (!requireContext().canUseBiometricFeature()) {
             switch?.isChecked = false
@@ -149,8 +136,7 @@ class PrivacySecuritySettingsFragment :
     }
 
     private fun updateExceptionSettingAvailability() {
-        val exceptionsPreference: Preference? =
-            findPreference(getString(R.string.pref_key_screen_exceptions))
+        val exceptionsPreference: Preference? = findPreference(getString(R.string.pref_key_screen_exceptions))
         exceptionsPreference?.isEnabled = false
 
         requireComponents.trackingProtectionUseCases.fetchExceptions.invoke { exceptions ->
@@ -164,12 +150,11 @@ class PrivacySecuritySettingsFragment :
                 TrackingProtectionExceptions.allowListOpened.record(NoExtras())
 
                 requireComponents.appStore.dispatch(
-                    AppAction.OpenSettings(page = Screen.Settings.Page.PrivacyExceptions),
+                    AppAction.OpenSettings(page = Screen.Settings.Page.PrivacyExceptions)
                 )
             }
             resources.getString(R.string.pref_key_secure),
-            resources.getString(R.string.pref_key_biometric),
-            -> {
+            resources.getString(R.string.pref_key_biometric) -> {
                 // We need to recreate the activity to apply the SECURE flags.
                 requireActivity().recreate()
             }
@@ -201,37 +186,26 @@ class PrivacySecuritySettingsFragment :
                     EngineSharedPreferencesListener.TrackerChanged.CONTENT.tracker,
                     requireContext().settings.shouldBlockOtherTrackers(),
                 )
-            resources.getString(R.string.pref_key_cookie_banner_settings) -> {
-                CookieBanner.visitedSetting.record(NoExtras())
-                requireComponents.appStore.dispatch(
-                    AppAction.OpenSettings(
-                        page = Screen.Settings.Page.CookieBanner,
-                    ),
-                )
-            }
             resources.getString(R.string.pref_key_site_permissions) ->
-                requireComponents.appStore.dispatch(
-                    AppAction.OpenSettings(page = Screen.Settings.Page.SitePermissions),
-                )
+                requireComponents.appStore.dispatch(AppAction.OpenSettings(page = Screen.Settings.Page.SitePermissions))
         }
         return super.onPreferenceTreeClick(preference)
     }
 
     private fun updateStealthToggleAvailability() {
-        val switch =
-            preferenceScreen.findPreference(resources.getString(R.string.pref_key_secure)) as? SwitchPreference
+        val switch = preferenceScreen.findPreference(resources.getString(R.string.pref_key_secure)) as? SwitchPreference
 
         val sharedPreferences = preferenceManager.sharedPreferences
 
-        if (sharedPreferences?.getBoolean(
+        if (
+            sharedPreferences?.getBoolean(
                 resources.getString(R.string.pref_key_biometric),
                 false,
             ) == true
         ) {
-            sharedPreferences
-                .edit {
-                    putBoolean(resources.getString(R.string.pref_key_secure), true)
-                }
+            sharedPreferences.edit {
+                putBoolean(resources.getString(R.string.pref_key_secure), true)
+            }
 
             // Disable the stealth switch
             switch?.isChecked = true

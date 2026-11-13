@@ -5,9 +5,10 @@
 #ifndef MOZILLA_GFX_DRAWTARGETSKIA_H
 #define MOZILLA_GFX_DRAWTARGETSKIA_H
 
-#include "2D.h"
 #include <sstream>
 #include <vector>
+
+#include "2D.h"
 
 #ifdef XP_DARWIN
 #  include <CoreGraphics/CGColorSpace.h>
@@ -142,7 +143,7 @@ class DrawTargetSkia : public DrawTarget {
   bool Init(unsigned char* aData, const IntSize& aSize, int32_t aStride,
             SurfaceFormat aFormat, bool aUninitialized = false,
             bool aIsClear = false);
-  bool Init(SkCanvas* aCanvas);
+  bool Init(SkCanvas* aCanvas, bool aSupportsGlyphSourceText = false);
   bool Init(RefPtr<DataSourceSurface>&& aSurface);
 
   static void UpdateSurfaceProps();
@@ -171,7 +172,11 @@ class DrawTargetSkia : public DrawTarget {
                      const StrokeOptions* aStrokeOptions = nullptr,
                      const DrawOptions& aOptions = DrawOptions());
 
-  void AccessibleId(uint64_t aBrowsingContextId, uint64_t aAccId) final;
+  void AccessibleId(uint64_t aInnerWindowId, uint64_t aAccId) final;
+
+  bool SupportsGlyphSourceText() const final {
+    return mSupportsGlyphSourceText;
+  }
 
  private:
   friend class SourceSurfaceSkia;
@@ -187,10 +192,11 @@ class DrawTargetSkia : public DrawTarget {
                   SkShader* aShader = nullptr);
 
   struct PushedLayer {
-    PushedLayer(bool aOldPermitSubpixelAA, SourceSurface* aMask)
-        : mOldPermitSubpixelAA(aOldPermitSubpixelAA), mMask(aMask) {}
-    bool mOldPermitSubpixelAA;
     RefPtr<SourceSurface> mMask;
+    Matrix mMaskToDevice;
+    CompositionOp mCompositionOp = CompositionOp::OP_OVER;
+    bool mOldPermitSubpixelAA = false;
+    int mSaveCount = 0;
   };
   std::vector<PushedLayer> mPushedLayers;
 
@@ -201,6 +207,7 @@ class DrawTargetSkia : public DrawTarget {
   RefPtr<SourceSurfaceSkia> mSnapshot;
   Mutex mSnapshotLock MOZ_UNANNOTATED;
   bool mIsClear = false;
+  bool mSupportsGlyphSourceText = false;
 
 #ifdef XP_DARWIN
   friend class BorrowedCGContext;

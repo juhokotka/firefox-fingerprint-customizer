@@ -1117,9 +1117,9 @@ export class RemoteSettingsClient extends EventEmitter {
       );
     }
 
-    // We now that the list of signature is not empty, so if we are here
-    // it means that none was valid.
-    throw thrownErrors[0];
+    // We know that the list of signatures is not empty, so if we are here
+    // it means that none was valid, or that none was usable at all.
+    throw thrownErrors[0] ?? new MissingSignatureError(this.identifier);
   }
 
   /**
@@ -1191,7 +1191,15 @@ export class RemoteSettingsClient extends EventEmitter {
     if (remoteTimestamp < localTimestamp) {
       // This should never happen. Unless the CDN serves stale data.
       // If the local data is valid, then we can safely ignore this stage remote changeset.
-      const localTrustworthy = await new Promise(verifySignatureLocalData);
+      let localTrustworthy = false;
+      try {
+        localTrustworthy = await new Promise(verifySignatureLocalData);
+      } catch (exc) {
+        // Verifying the local data failed for another reason than an invalid
+        // signature (eg. its cert chain could not be fetched). Consider it
+        // untrustworthy and carry on with reset/import.
+        lazy.console.error(exc);
+      }
       if (localTrustworthy) {
         lazy.console.info(`${this.identifier} CDN served staled data, ignore.`);
         return {
@@ -1226,22 +1234,39 @@ export class RemoteSettingsClient extends EventEmitter {
         lazy.console.error(
           `${this.identifier} Signature failed ${retry ? "again" : ""} ${e}`
         );
-        if (!(e instanceof InvalidSignatureError)) {
-          // If it failed for any other kind of error (eg. shutdown)
-          // then give up quickly.
-          throw e;
-        }
 
-        // In order to distinguish signature errors that happen
-        // during sync, from hijacks of local DBs, we will verify
-        // the signature on the data that we had before syncing
-        // (if any).
+        // Any verification failure, invalid signature, malformed signature,
+        // or a failed x5u cert-chain fetch, must roll back the records just
+        // imported above, which are still unverified.
         if (!hasLocalData) {
           lazy.console.debug(`${this.identifier} No previous data to restore`);
         }
-        const localTrustworthy =
-          hasLocalData && (await new Promise(verifySignatureLocalData));
-        if (!localTrustworthy && !retry) {
+
+        let localTrustworthy = false;
+        if (hasLocalData) {
+          try {
+            localTrustworthy = await new Promise(verifySignatureLocalData);
+          } catch (_) {
+            // Verifying the data we had before syncing failed for another
+            // reason than an invalid signature (eg. its cert chain could not
+            // be fetched). Consider it untrustworthy, and fall back to the
+            // dump or an empty database below.
+          }
+        }
+
+        if (localTrustworthy) {
+          // The data we had before syncing is valid: restore it, dropping the
+          // unverified records imported above.
+          lazy.console.debug(`${this.identifier} restore previous local data`);
+          await this.db.importChanges(
+            localMetadata,
+            localTimestamp,
+            localRecords,
+            {
+              clear: true, // clear before importing.
+            }
+          );
+        } else if (!retry) {
           // Signature failed, clear local DB because it contains
           // bad data (local + remote changes).
           lazy.console.debug(`${this.identifier} clear local data`);
@@ -1249,26 +1274,14 @@ export class RemoteSettingsClient extends EventEmitter {
           // Local data was tampered, throw and it will retry from empty DB.
           lazy.console.error(`${this.identifier} local data was corrupted`);
           throw new CorruptedDataError(this.identifier);
-        } else if (retry) {
-          // We retried already, we will restore the previous local data
-          // before throwing eventually.
-          if (localTrustworthy) {
-            await this.db.importChanges(
-              localMetadata,
-              localTimestamp,
-              localRecords,
-              {
-                clear: true, // clear before importing.
-              }
-            );
-          } else {
-            // Restore the dump if available (no-op if no dump)
-            const imported = await this._importJSONDump();
-            // _importJSONDump() only clears DB if dump is available,
-            // therefore do it here!
-            if (imported < 0) {
-              await this.db.clear();
-            }
+        } else {
+          // We retried already and have nothing trustworthy to restore.
+          // Restore the dump if available (no-op if no dump)
+          const imported = await this._importJSONDump();
+          // _importJSONDump() only clears DB if dump is available,
+          // therefore do it here!
+          if (imported < 0) {
+            await this.db.clear();
           }
         }
         throw e;

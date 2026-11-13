@@ -5,12 +5,11 @@
 #ifndef nsIDNService_h_
 #define nsIDNService_h_
 
-#include "nsIIDNService.h"
-
 #include "mozilla/RWLock.h"
+#include "mozilla/Span.h"
 #include "mozilla/intl/UnicodeScriptCodes.h"
 #include "mozilla/net/IDNBlocklistUtils.h"
-#include "mozilla/Span.h"
+#include "nsIIDNService.h"
 #include "nsTHashSet.h"
 
 class nsIPrefBranch;
@@ -41,6 +40,7 @@ class nsIDNService final : public nsIIDNService {
   void InitDigitConfusables();
   void InitCyrillicLatinConfusables();
   void InitThaiLatinConfusables();
+  void InitAllowedLimitedUseScripts();
 
  public:
   /**
@@ -90,6 +90,7 @@ class nsIDNService final : public nsIIDNService {
   bool isCJKIdeograph(char32_t aChar);
 
   nsTArray<mozilla::net::BlocklistRange> mIDNBlocklist;
+  nsTArray<mozilla::intl::Script> mAllowedLimitedUseScripts;
 
   // Confusables that we would like to check for IDN spoofing detection.
   nsTHashSet<char32_t> mCJKSlashConfusables;

@@ -13,10 +13,11 @@ ChromeUtils.defineESModuleGetters(lazy, {
   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   ContentSharingUtils:
-    "moz-src:///browser/components/contentsharing/ContentSharingUtils.sys.mjs",
+    "moz-src:///browser/components/sharing/ContentSharingUtils.sys.mjs",
   CustomizableUI:
     "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
-  MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
+  MigrationUtils:
+    "moz-src:///browser/components/migration/MigrationUtils.sys.mjs",
   OpenInTabsUtils:
     "moz-src:///browser/components/tabbrowser/OpenInTabsUtils.sys.mjs",
   PlacesTransactions: "resource://gre/modules/PlacesTransactions.sys.mjs",
@@ -915,7 +916,11 @@ export var PlacesUIUtils = {
     aNode,
     aWhere,
     aWindow,
-    { aPrivate = false, userContextId = undefined } = {}
+    {
+      aPrivate = false,
+      userContextId = undefined,
+      eventDetail = undefined,
+    } = {}
   ) {
     if (
       aNode &&
@@ -954,6 +959,7 @@ export var PlacesUIUtils = {
         allowInheritPrincipal: isJavaScriptURL,
         private: aPrivate,
         userContextId,
+        eventDetail,
         resolveOnContentBrowserCreated,
       });
       if (aWindow.updateTelemetry) {
@@ -990,33 +996,46 @@ export var PlacesUIUtils = {
   },
 
   getBestTitle: function PUIU_getBestTitle(aNode, aDoNotCutTitle) {
-    var title;
+    let title;
     if (!aNode.title && lazy.PlacesUtils.nodeIsURI(aNode)) {
       // if node title is empty, try to set the label using host and filename
-      // Services.io.newURI will throw if aNode.uri is not a valid URI
-      try {
-        var uri = Services.io.newURI(aNode.uri);
-        var host = uri.host;
-        var fileName = uri.QueryInterface(Ci.nsIURL).fileName;
-        // if fileName is empty, use path to distinguish labels
-        if (aDoNotCutTitle) {
-          title = host + uri.pathQueryRef;
-        } else {
-          title =
-            host +
-            (fileName
-              ? (host ? "/" + Services.locale.ellipsis + "/" : "") + fileName
-              : uri.pathQueryRef);
-        }
-      } catch (e) {
-        // Use (no title) for non-standard URIs (data:, javascript:, ...)
-        title = "";
-      }
+      title = PlacesUIUtils.getBestTitleForUri(aNode.uri, aDoNotCutTitle);
     } else {
       title = aNode.title;
     }
-
+    // Use (no title) for non-standard URIs (data:, javascript:, ...)
     return title || this.promptLocalization.formatValueSync("places-no-title");
+  },
+
+  /**
+   * Generates a title for a URI from its host and file name.
+   *
+   * @param {string} uri
+   *   The URI to generate a title for.
+   * @param {boolean} doNotCutTitle
+   *   Whether to include the full path, query, and fragment in the title.
+   * @returns {string}
+   *   The generated title, or an empty string if the URI is invalid.
+   */
+  getBestTitleForUri(uri, doNotCutTitle) {
+    // Services.io.newURI will throw if aNode.uri is not a valid URI
+    try {
+      let parsedURI = Services.io.newURI(uri);
+      let host = parsedURI.host;
+      let fileName = parsedURI.QueryInterface(Ci.nsIURL).fileName;
+      // if fileName is empty, use path to distinguish labels
+      if (doNotCutTitle) {
+        return host + parsedURI.pathQueryRef;
+      }
+      return (
+        host +
+        (fileName
+          ? (host ? "/" + Services.locale.ellipsis + "/" : "") + fileName
+          : parsedURI.pathQueryRef)
+      );
+    } catch (e) {
+      return "";
+    }
   },
 
   shouldShowTabsFromOtherComputersMenuitem() {
@@ -1485,21 +1504,28 @@ export var PlacesUIUtils = {
     }
   },
 
-  createContainerTabMenu(event) {
+  createContainerTabMenu(event, source = "places_context_menu") {
     let window = event.target.documentGlobal;
-    return window.createUserContextMenu(event, { isContextMenu: true });
+    return window.createUserContextMenu(event, {
+      isContextMenu: true,
+      containerSource: source,
+    });
   },
 
-  openInContainerTab(event) {
+  openInContainerTab(event, source = "places_context_menu") {
     PlacesUIUtils.lastContextMenuCommand = "placesCmd_open:newcontainertab";
     let userContextId = parseInt(
       event.target.getAttribute("data-usercontextid")
     );
     let triggerNode = this.lastContextMenuTriggerNode;
     let isManaged = !!triggerNode?.closest("#managed-bookmarks");
+    let eventDetail = { containerSource: source };
     if (isManaged) {
       let window = triggerNode.documentGlobal;
-      window.openTrustedLinkIn(triggerNode.link, "tab", { userContextId });
+      window.openTrustedLinkIn(triggerNode.link, "tab", {
+        userContextId,
+        eventDetail,
+      });
       return;
     }
     let view = this.getViewForNode(triggerNode);
@@ -1509,6 +1535,7 @@ export var PlacesUIUtils = {
       view?.ownerWindow || triggerNode.documentGlobal.top,
       {
         userContextId,
+        eventDetail,
       }
     );
   },

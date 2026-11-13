@@ -3,76 +3,86 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "ErrorList.h"
-#include "HttpLog.h"
-
-#include "mozilla/ConsoleReportCollector.h"
-#include "mozilla/dom/BrowsingContext.h"
-#include "mozilla/ipc/IPCStreamUtils.h"
-#include "mozilla/net/EarlyHintRegistrar.h"
 #include "mozilla/net/HttpChannelParent.h"
-#include "mozilla/net/CacheEntryWriteHandleParent.h"
-#include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/ContentProcessManager.h"
-#include "mozilla/dom/Element.h"
-#include "mozilla/dom/ServiceWorkerUtils.h"
-#include "mozilla/dom/BrowserParent.h"
-#include "mozilla/dom/WindowGlobalParent.h"
-#include "mozilla/net/NeckoParent.h"
-#include "mozilla/net/ExecuteIfOnMainThreadEventTarget.h"
-#include "mozilla/net/CookieServiceParent.h"
-#include "nsIClassOfService.h"
+
+#include "ErrorList.h"
+#include "HttpBackgroundChannelParent.h"
+#include "HttpLog.h"
+#include "ParentChannelListener.h"
+#include "SerializedLoadContext.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/Components.h"
+#include "mozilla/ConsoleReportCollector.h"
 #include "mozilla/InputStreamLengthHelper.h"
 #include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/LoadInfo.h"
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/StoragePrincipalHelper.h"
-#include "HttpBackgroundChannelParent.h"
-#include "ParentChannelListener.h"
-#include "nsDebug.h"
-#include "nsICacheInfoChannel.h"
-#include "nsHttpHandler.h"
-#include "nsNetCID.h"
-#include "nsNetUtil.h"
-#include "nsISupportsPriority.h"
-#include "mozilla/net/BackgroundChannelRegistrar.h"
-#include "nsSerializationHelper.h"
-#include "nsISerializable.h"
+#include "mozilla/dom/BrowserParent.h"
+#include "mozilla/dom/BrowsingContext.h"
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/ContentProcessManager.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/ServiceWorkerUtils.h"
+#include "mozilla/dom/WindowGlobalParent.h"
+#include "mozilla/ipc/BackgroundUtils.h"
+#include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
-#include "SerializedLoadContext.h"
+#include "mozilla/net/BackgroundChannelRegistrar.h"
+#include "mozilla/net/CacheEntryWriteHandleParent.h"
+#include "mozilla/net/ChannelEventQueue.h"
+#include "mozilla/net/CookieServiceParent.h"
+#include "mozilla/net/EarlyHintRegistrar.h"
+#include "mozilla/net/ExecuteIfOnMainThreadEventTarget.h"
+#include "mozilla/net/NeckoParent.h"
+#include "mozilla/net/RedirectChannelRegistrar.h"
+#include "nsCORSListenerProxy.h"
+#include "nsDebug.h"
+#include "nsHttpHandler.h"
 #include "nsIAuthPrompt.h"
 #include "nsIAuthPrompt2.h"
-#include "mozilla/ipc/BackgroundUtils.h"
-#include "mozilla/LoadInfo.h"
-#include "nsQueryObject.h"
-#include "mozilla/BasePrincipal.h"
-#include "nsCORSListenerProxy.h"
+#include "nsICacheInfoChannel.h"
+#include "nsIClassOfService.h"
 #include "nsIIPCSerializableInputStream.h"
+#include "nsIMultiPartChannel.h"
 #include "nsIPrompt.h"
 #include "nsIPromptFactory.h"
-#include "mozilla/net/ChannelEventQueue.h"
-#include "mozilla/net/RedirectChannelRegistrar.h"
-#include "nsIWindowWatcher.h"
-#include "mozilla/dom/Document.h"
 #include "nsISecureBrowserUI.h"
+#include "nsISerializable.h"
+#include "nsISupportsPriority.h"
+#include "nsIViewSourceChannel.h"
+#include "nsIWindowWatcher.h"
+#include "nsNetCID.h"
+#include "nsNetUtil.h"
+#include "nsQueryObject.h"
+#include "nsSerializationHelper.h"
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
 #include "nsThreadUtils.h"
-#include "nsQueryObject.h"
-#include "nsIMultiPartChannel.h"
-#include "nsIViewSourceChannel.h"
 
 using namespace mozilla;
 
 namespace geckoprofiler::markers {
 
-struct ChannelMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("ChannelMarker");
-  }
+struct ChannelMarker : public BaseMarkerType<ChannelMarker> {
+  static constexpr const char* Name = "ChannelMarker";
+  static constexpr const char* Description =
+      "Timestamp capturing various phases of a network channel's lifespan.";
+  using MS = MarkerSchema;
+  static constexpr MS::Location Locations[] = {
+      MS::Location::MarkerChart,
+      MS::Location::MarkerTable,
+  };
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"url", MS::InputType::CString, nullptr, MS::Format::Url},
+      // Bug 1618687 - Use channelId to segment "Waiting for Socket Thread".
+      {"channelId", MS::InputType::Uint64, nullptr, MS::Format::Integer},
+  };
+  static constexpr const char* TableLabel = "{marker.data.url}";
   static void StreamJSONMarkerData(
       mozilla::baseprofiler::SpliceableJSONWriter& aWriter,
       const mozilla::ProfilerString8View& aURL, uint64_t aChannelId) {
@@ -80,18 +90,6 @@ struct ChannelMarker {
       aWriter.StringProperty("url", aURL);
     }
     aWriter.IntProperty("channelId", static_cast<int64_t>(aChannelId));
-  }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema(MS::Location::MarkerChart, MS::Location::MarkerTable);
-    schema.SetTableLabel("{marker.data.url}");
-    schema.AddKeyFormat("url", MS::Format::Url);
-    // Bug 1618687 - Use channelId to segment "Waiting for Socket Thread".
-    schema.AddKeyFormat("channelId", MS::Format::Integer);
-    schema.AddStaticLabelValue(
-        "Description",
-        "Timestamp capturing various phases of a network channel's lifespan.");
-    return schema;
   }
 };
 
@@ -161,24 +159,23 @@ bool HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs) {
     case HttpChannelCreationArgs::THttpChannelOpenArgs: {
       const HttpChannelOpenArgs& a = aArgs.get_HttpChannelOpenArgs();
       return DoAsyncOpen(
-          a.uri(), a.original(), a.doc(), a.referrerInfo(), a.apiRedirectTo(),
-          a.topWindowURI(), a.loadFlags(), a.requestHeaders(),
-          a.requestMethod(), a.uploadStream(), a.priority(), a.classOfService(),
-          a.redirectionLimit(), a.allowSTS(), a.thirdPartyFlags(), a.resumeAt(),
-          a.startPos(), a.entityID(), a.allowSpdy(), a.allowHttp3(),
-          a.allowAltSvc(), a.beConservative(), a.bypassProxy(), a.tlsFlags(),
-          a.loadInfo(), a.cacheKey(), a.requestContextID(), a.preflightArgs(),
-          a.initialRwin(), a.blockAuthPrompt(), a.allowStaleCacheContent(),
-          a.preferCacheLoadOverBypass(), a.contentTypeHint(), a.requestMode(),
-          a.redirectMode(), a.channelId(), a.contentWindowId(),
-          a.preferredAlternativeTypes(), a.browserId(),
+          a.uri(), a.original(), a.doc(), a.referrerInfo(), a.topWindowURI(),
+          a.loadFlags(), a.requestHeaders(), a.requestMethod(),
+          a.uploadStream(), a.uploadStreamIsStreaming(), a.priority(),
+          a.classOfService(), a.redirectionLimit(), a.thirdPartyFlags(),
+          a.resumeAt(), a.startPos(), a.entityID(), a.allowSpdy(),
+          a.allowHttp3(), a.allowAltSvc(), a.beConservative(), a.bypassProxy(),
+          a.tlsFlags(), a.loadInfo(), a.cacheKey(), a.requestContextID(),
+          a.preflightArgs(), a.initialRwin(), a.blockAuthPrompt(),
+          a.allowStaleCacheContent(), a.preferCacheLoadOverBypass(),
+          a.contentTypeHint(), a.requestMode(), a.redirectMode(), a.channelId(),
+          a.contentWindowId(), a.preferredAlternativeTypes(), a.browserId(),
           a.launchServiceWorkerStart(), a.launchServiceWorkerEnd(),
           a.dispatchFetchEventStart(), a.dispatchFetchEventEnd(),
           a.handleFetchEventStart(), a.handleFetchEventEnd(),
-          a.forceMainDocumentChannel(), a.navigationStartTimeStamp(),
-          a.earlyHintPreloaderId(), a.classicScriptHintCharset(),
-          a.documentCharacterSet(), a.isUserAgentHeaderModified(),
-          a.initiatorType());
+          a.navigationStartTimeStamp(), a.earlyHintPreloaderId(),
+          a.classicScriptHintCharset(), a.documentCharacterSet(),
+          a.isUserAgentHeaderModified(), a.initiatorType());
     }
     case HttpChannelCreationArgs::THttpChannelConnectArgs: {
       const HttpChannelConnectArgs& cArgs = aArgs.get_HttpChannelConnectArgs();
@@ -405,7 +402,7 @@ void HttpChannelParent::InvokeEarlyHintPreloader(
   MOZ_ASSERT(NS_IsMainThread());
 
   ContentParentId cpId =
-      static_cast<ContentParent*>(Manager()->Manager())->ChildID();
+      mozilla::ipc::ActorCast<ContentParent>(Manager()->Manager())->ChildID();
 
   RefPtr<EarlyHintRegistrar> ehr = EarlyHintRegistrar::GetOrCreate();
   if (NS_SUCCEEDED(rv)) {
@@ -422,17 +419,17 @@ void HttpChannelParent::InvokeEarlyHintPreloader(
 
 bool HttpChannelParent::DoAsyncOpen(
     nsIURI* aURI, nsIURI* aOriginalURI, nsIURI* aDocURI,
-    nsIReferrerInfo* aReferrerInfo, nsIURI* aAPIRedirectToURI,
-    nsIURI* aTopWindowURI, const uint32_t& aLoadFlags,
-    const RequestHeaderTuples& requestHeaders, const nsCString& requestMethod,
-    const Maybe<IPCStream>& uploadStream, const int16_t& priority,
+    nsIReferrerInfo* aReferrerInfo, nsIURI* aTopWindowURI,
+    const uint32_t& aLoadFlags, const RequestHeaderTuples& requestHeaders,
+    const nsCString& requestMethod, const Maybe<IPCStream>& uploadStream,
+    const bool& uploadStreamIsStreaming, const int16_t& priority,
     const ClassOfService& classOfService, const uint8_t& redirectionLimit,
-    const bool& allowSTS, const uint32_t& thirdPartyFlags,
-    const bool& doResumeAt, const uint64_t& startPos, const nsCString& entityID,
-    const bool& allowSpdy, const bool& allowHttp3, const bool& allowAltSvc,
-    const bool& beConservative, const bool& bypassProxy,
-    const uint32_t& tlsFlags, const LoadInfoArgs& aLoadInfoArgs,
-    const uint32_t& aCacheKey, const uint64_t& aRequestContextID,
+    const uint32_t& thirdPartyFlags, const bool& doResumeAt,
+    const uint64_t& startPos, const nsCString& entityID, const bool& allowSpdy,
+    const bool& allowHttp3, const bool& allowAltSvc, const bool& beConservative,
+    const bool& bypassProxy, const uint32_t& tlsFlags,
+    const LoadInfoArgs& aLoadInfoArgs, const uint32_t& aCacheKey,
+    const uint64_t& aRequestContextID,
     const Maybe<CorsPreflightArgs>& aCorsPreflightArgs,
     const uint32_t& aInitialRwin, const bool& aBlockAuthPrompt,
     const bool& aAllowStaleCacheContent, const bool& aPreferCacheLoadOverBypass,
@@ -447,7 +444,6 @@ bool HttpChannelParent::DoAsyncOpen(
     const TimeStamp& aDispatchFetchEventEnd,
     const TimeStamp& aHandleFetchEventStart,
     const TimeStamp& aHandleFetchEventEnd,
-    const bool& aForceMainDocumentChannel,
     const TimeStamp& aNavigationStartTimeStamp,
     const uint64_t& aEarlyHintPreloaderId,
     const nsAString& aClassicScriptHintCharset,
@@ -455,7 +451,23 @@ bool HttpChannelParent::DoAsyncOpen(
     const bool& aIsUserAgentHeaderModified, const nsString& aInitiatorType) {
   MOZ_ASSERT(aURI, "aURI should not be NULL");
 
-  if (aEarlyHintPreloaderId) {
+  dom::PContentParent* pcp = Manager()->Manager();
+  const dom::RemoteType& remoteType =
+      static_cast<dom::ContentParent*>(pcp)->GetRemoteType();
+
+  nsCOMPtr<nsILoadInfo> loadInfo;
+  nsresult rv = mozilla::ipc::LoadInfoArgsToLoadInfo(aLoadInfoArgs, remoteType,
+                                                     getter_AddRefs(loadInfo));
+  if (NS_FAILED(rv)) {
+    return SendFailedAsyncOpen(rv);
+  }
+
+  // If the early hint preload is gone or was made for a different request,
+  // ignore it and load the resource normally.
+  RefPtr<EarlyHintRegistrar> registrar =
+      aEarlyHintPreloaderId ? EarlyHintRegistrar::GetOrCreate() : nullptr;
+  if (registrar &&
+      registrar->MatchesRequest(aEarlyHintPreloaderId, aURI, loadInfo)) {
     // Wait for HttpBackgrounChannel to continue the async open procedure.
     mEarlyHintPreloaderId = aEarlyHintPreloaderId;
     RefPtr<HttpChannelParent> self = this;
@@ -480,6 +492,10 @@ bool HttpChannelParent::DoAsyncOpen(
     return false;
   }
 
+  if (!CanSend()) {
+    return false;
+  }
+
   LOG(("HttpChannelParent RecvAsyncOpen [this=%p uri=%s, gid=%" PRIu64
        " browserid=%" PRIx64 "]\n",
        this, aURI->GetSpecOrDefault().get(), aChannelId, aBrowserId));
@@ -488,18 +504,22 @@ bool HttpChannelParent::DoAsyncOpen(
                   MarkerThreadId::MainThread(), ChannelMarker,
                   aURI->GetSpecOrDefault(), aChannelId);
 
-  nsresult rv;
-  nsAutoCString remoteType;
-  rv = GetRemoteType(remoteType);
-  if (NS_FAILED(rv)) {
-    return SendFailedAsyncOpen(rv);
-  }
-
-  nsCOMPtr<nsILoadInfo> loadInfo;
-  rv = mozilla::ipc::LoadInfoArgsToLoadInfo(aLoadInfoArgs, remoteType,
-                                            getter_AddRefs(loadInfo));
-  if (NS_FAILED(rv)) {
-    return SendFailedAsyncOpen(rv);
+  // Document, subdocument and object/embed loads go through DocumentChannel,
+  // never PHttpChannel. Reject content-process attempts to open such a channel,
+  // including any carrying navigation- or object-load flags, to prevent forged
+  // navigation attacks. System-principal loads are exempt.
+  nsIPrincipal* loadingPrincipal = loadInfo->GetLoadingPrincipal();
+  bool isSystemPrincipal =
+      loadingPrincipal && loadingPrincipal->IsSystemPrincipal();
+  ExtContentPolicy extType = loadInfo->GetExternalContentPolicyType();
+  if (!isSystemPrincipal &&
+      (extType == ExtContentPolicy::TYPE_DOCUMENT ||
+       extType == ExtContentPolicy::TYPE_SUBDOCUMENT ||
+       extType == ExtContentPolicy::TYPE_OBJECT ||
+       (aLoadFlags & (nsIChannel::LOAD_DOCUMENT_URI |
+                      nsIRequest::LOAD_DOCUMENT_NEEDS_COOKIE |
+                      nsIRequest::LOAD_HTML_OBJECT_DATA)))) {
+    return SendFailedAsyncOpen(NS_ERROR_CONTENT_BLOCKED);
   }
 
   nsCOMPtr<nsIChannel> channel;
@@ -551,20 +571,12 @@ bool HttpChannelParent::DoAsyncOpen(
   httpChannel->SetClassicScriptHintCharset(aClassicScriptHintCharset);
   httpChannel->SetDocumentCharacterSet(aDocumentCharacterSet);
 
-  if (aAPIRedirectToURI) {
-    httpChannel->RedirectTo(aAPIRedirectToURI);
-  }
-
   if (aTopWindowURI) {
     httpChannel->SetTopWindowURI(aTopWindowURI);
   }
 
   if (aLoadFlags != nsIRequest::LOAD_NORMAL) {
     httpChannel->SetLoadFlags(aLoadFlags);
-  }
-
-  if (aForceMainDocumentChannel) {
-    httpChannel->SetIsMainDocumentChannel(true);
   }
 
   for (uint32_t i = 0; i < requestHeaders.Length(); i++) {
@@ -593,6 +605,9 @@ bool HttpChannelParent::DoAsyncOpen(
 
   nsCOMPtr<nsIInputStream> stream = DeserializeIPCStream(uploadStream);
   if (stream) {
+    if (uploadStreamIsStreaming) {
+      httpChannel->SetUploadStreamIsStreaming(true);
+    }
     rv = httpChannel->InternalSetUploadStream(stream);
     if (NS_FAILED(rv)) {
       return SendFailedAsyncOpen(rv);
@@ -626,7 +641,6 @@ bool HttpChannelParent::DoAsyncOpen(
     httpChannel->SetClassOfService(classOfService);
   }
   httpChannel->SetRedirectionLimit(redirectionLimit);
-  httpChannel->SetAllowSTS(allowSTS);
   httpChannel->SetThirdPartyFlags(thirdPartyFlags);
   httpChannel->SetAllowSpdy(allowSpdy);
   httpChannel->SetAllowHttp3(allowHttp3);
@@ -852,7 +866,6 @@ mozilla::ipc::IPCResult HttpChannelParent::RecvRedirect2Verify(
     const uint32_t& aSourceRequestBlockingReason,
     const Maybe<ChildLoadInfoForwarderArgs>& aTargetLoadInfoForwarder,
     const uint32_t& loadFlags, nsIReferrerInfo* aReferrerInfo,
-    nsIURI* aAPIRedirectURI,
     const Maybe<CorsPreflightArgs>& aCorsPreflightArgs) {
   LOG(("HttpChannelParent::RecvRedirect2Verify [this=%p result=%" PRIx32 "]\n",
        this, static_cast<uint32_t>(aResult)));
@@ -869,11 +882,6 @@ mozilla::ipc::IPCResult HttpChannelParent::RecvRedirect2Verify(
         do_QueryInterface(mRedirectChannel);
 
     if (newHttpChannel) {
-      if (aAPIRedirectURI) {
-        rv = newHttpChannel->RedirectTo(aAPIRedirectURI);
-        MOZ_ASSERT(NS_SUCCEEDED(rv));
-      }
-
       for (uint32_t i = 0; i < changedHeaders.Length(); i++) {
         if (changedHeaders[i].mEmpty) {
           rv = newHttpChannel->SetEmptyRequestHeader(changedHeaders[i].mHeader);
@@ -921,8 +929,8 @@ mozilla::ipc::IPCResult HttpChannelParent::RecvRedirect2Verify(
             return false;
           }
           nsCOMPtr<nsIPrincipal> principal = principalOrErr.unwrap();
-          if (!cp->ValidatePrincipal(principal,
-                                     {ValidatePrincipalOptions::AllowSystem})) {
+          if (!cp->ValidatePrincipal(
+                  principal, {ValidatePrincipalOptions::AllowSystemIfLoaded})) {
             ContentParent::LogAndAssertFailedPrincipalValidationInfo(principal,
                                                                      __func__);
             return false;
@@ -1271,6 +1279,11 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
     mCacheEntry = do_QueryInterface(cacheEntry);
     args.cacheEntryAvailable() = static_cast<bool>(mCacheEntry);
 
+    // Capture the load's principal origin now, while the channel is alive, to
+    // bind any alt-data written later (after the channel may have been
+    // cleared).
+    UpdateAltDataBindingOrigin(chan);
+
     httpChannelImpl->GetCacheKey(&args.cacheKey());
     httpChannelImpl->GetAlternativeDataType(args.altDataType());
   }
@@ -1376,7 +1389,11 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
         responseHead == &cleanedUpResponseHead ||
             responseHead == chan->GetResponseHead(),
         "mResponseHead changed between GetResponseHead and copy");
-    nsHttpResponseHead newResponseHead = *responseHead;
+    // The channel keeps its own head; the local one can be moved.
+    nsHttpResponseHead newResponseHead =
+        responseHead == &cleanedUpResponseHead
+            ? std::move(cleanedUpResponseHead)
+            : nsHttpResponseHead(*responseHead);
     if (!mBgParent->OnStartRequest(
             std::move(newResponseHead), useResponseHead,
             cleanedUpRequest ? cleanedUpRequestHeaders : requestHead->Headers(),
@@ -1797,7 +1814,7 @@ HttpChannelParent::Delete() {
 }
 
 NS_IMETHODIMP
-HttpChannelParent::GetRemoteType(nsACString& aRemoteType) {
+HttpChannelParent::GetRemoteType(dom::RemoteType& aRemoteType) {
   if (!CanSend()) {
     return NS_ERROR_UNEXPECTED;
   }
@@ -1953,7 +1970,9 @@ HttpChannelParent::StartRedirect(nsIChannel* newChannel, uint32_t redirectFlags,
   }
 
   if (!mIPCClosed) {
-    cleanedUpResponseHead = *responseHead;
+    if (responseHead != &cleanedUpResponseHead) {  // avoid self-assignment
+      cleanedUpResponseHead = *responseHead;
+    }
     if (!SendRedirect1Begin(mRedirectChannelId, newOriginalURI, newLoadFlags,
                             redirectFlags, loadInfoForwarderArg,
                             std::move(cleanedUpResponseHead), securityInfo,
@@ -2002,9 +2021,53 @@ NS_INTERFACE_MAP_BEGIN(CacheEntryWriteHandleParent)
   NS_INTERFACE_MAP_ENTRY(nsICacheEntryWriteHandle)
 NS_INTERFACE_MAP_END
 
+void HttpChannelParent::UpdateAltDataBindingOrigin(HttpBaseChannel* aChannel) {
+  mAltDataBindingOrigin.Truncate();
+
+  nsIPrincipal* principal = aChannel->GetAltDataBindingPrincipal();
+  if (!principal) {
+    return;
+  }
+
+  if (StaticPrefs::network_cache_alt_data_validate_binding_principal()) {
+    ContentParent* cp = nullptr;
+    if (Manager() && Manager()->Manager()) {
+      cp = static_cast<ContentParent*>(Manager()->Manager());
+    }
+    if (!cp ||
+        !cp->ValidatePrincipal(
+            principal, {ValidatePrincipalOptions::AllowSystemIfLoaded})) {
+      LOG(
+          ("HttpChannelParent::UpdateAltDataBindingOrigin [this=%p] principal "
+           "not valid for the content process",
+           this));
+      return;
+    }
+  }
+
+  principal->GetOrigin(mAltDataBindingOrigin);
+}
+
+// Records, atomically with the alt-data write, the origin of the principal
+// that produced the alt-data.
+static void RecordAltDataPrincipal(nsICacheEntry* aCacheEntry,
+                                   const nsACString& aOrigin) {
+  if (!aCacheEntry) {
+    return;
+  }
+  if (aOrigin.IsEmpty()) {
+    // Fail closed: without a known principal, clear any binding so that reads
+    // reject this alt-data.
+    aCacheEntry->SetMetaDataElement("alt-data-principal", nullptr);
+  } else {
+    aCacheEntry->SetMetaDataElement("alt-data-principal",
+                                    PromiseFlatCString(aOrigin).get());
+  }
+}
+
 CacheEntryWriteHandleParent::CacheEntryWriteHandleParent(
-    nsICacheEntry* aCacheEntry)
-    : mCacheEntry(aCacheEntry) {}
+    nsICacheEntry* aCacheEntry, const nsACString& aBindingOrigin)
+    : mCacheEntry(aCacheEntry), mBindingOrigin(aBindingOrigin) {}
 
 NS_IMETHODIMP
 CacheEntryWriteHandleParent::OpenAlternativeOutputStream(
@@ -2018,12 +2081,13 @@ CacheEntryWriteHandleParent::OpenAlternativeOutputStream(
       mCacheEntry->OpenAlternativeOutputStream(type, predictedSize, _retval);
   if (NS_SUCCEEDED(rv)) {
     mCacheEntry->SetMetaDataElement("alt-data-from-child", "1");
+    RecordAltDataPrincipal(mCacheEntry, mBindingOrigin);
   }
   return rv;
 }
 
 CacheEntryWriteHandleParent* HttpChannelParent::AllocCacheEntryWriteHandle() {
-  return new CacheEntryWriteHandleParent(mCacheEntry);
+  return new CacheEntryWriteHandleParent(mCacheEntry, mAltDataBindingOrigin);
 }
 
 nsresult HttpChannelParent::OpenAlternativeOutputStream(
@@ -2038,6 +2102,7 @@ nsresult HttpChannelParent::OpenAlternativeOutputStream(
       mCacheEntry->OpenAlternativeOutputStream(type, predictedSize, _retval);
   if (NS_SUCCEEDED(rv)) {
     mCacheEntry->SetMetaDataElement("alt-data-from-child", "1");
+    RecordAltDataPrincipal(mCacheEntry, mAltDataBindingOrigin);
   }
   return rv;
 }

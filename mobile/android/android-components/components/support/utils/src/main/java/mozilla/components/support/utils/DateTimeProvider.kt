@@ -8,31 +8,22 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /**
- * Interface for providing date and time information. This is useful for separating the
- * implementation of getting date and time from the rest of the code, making it easier to test
- * the code that uses date and time.
+ * Interface for providing date and time information. This is useful for separating the implementation of getting date
+ * and time from the rest of the code, making it easier to test the code that uses date and time.
  */
 interface DateTimeProvider {
 
-    /**
-     * Get the current local date.
-     */
+    /** Get the current local date. */
     fun currentLocalDate(): LocalDate
 
-    /**
-     * Get the current time zone.
-     */
+    /** Get the current time zone. */
     fun currentZoneId(): ZoneId
 
-    /**
-     * Get the current time in milliseconds.
-     */
+    /** Get the current time in milliseconds. */
     fun currentTimeMillis(): Long
 }
 
-/**
- * The default implementation of [DateTimeProvider].
- */
+/** The default implementation of [DateTimeProvider]. */
 class DefaultDateTimeProvider : DateTimeProvider {
 
     override fun currentLocalDate(): LocalDate {
@@ -43,6 +34,9 @@ class DefaultDateTimeProvider : DateTimeProvider {
         return ZoneId.systemDefault()
     }
 
+    // DefaultDateTimeProvider is the sanctioned wrapper around System.currentTimeMillis(): the whole
+    // point of DateTimeProvider is to be the single injectable seam, so this call is intentional.
+    @Suppress("NoSystemCurrentTimeMillis")
     override fun currentTimeMillis(): Long {
         return System.currentTimeMillis()
     }

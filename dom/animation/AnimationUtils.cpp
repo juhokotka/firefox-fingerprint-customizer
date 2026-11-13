@@ -7,7 +7,10 @@
 #include "mozilla/EffectSet.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/dom/AnimatableBinding.h"
 #include "mozilla/dom/Animation.h"
+#include "mozilla/dom/CSSKeywordValue.h"
+#include "mozilla/dom/CSSNumericValue.h"
 #include "mozilla/dom/CSSNumericValueBinding.h"
 #include "mozilla/dom/CSSUnitValue.h"
 #include "mozilla/dom/Document.h"
@@ -214,6 +217,138 @@ bool AnimationUtils::ValidateCSSNumberishTime(const CSSNumberish& aValue,
     }
   }
 
+  return true;
+}
+
+namespace {
+
+// Both the KeyframeAnimationOptions rangeStart/rangeEnd members and the
+// Animation.rangeStart/rangeEnd setters (which convert their `any` value first)
+// use this owning union.
+using TimelineRangeValue =
+    OwningTimelineRangeOffsetOrCSSNumericValueOrCSSKeywordValueOrUTF8String;
+
+// True if |aValue| is the default "normal" range boundary, in which case no
+// animation range needs to be applied. "normal" may be a string or a
+// CSSKeywordValue.
+bool IsNormalTimelineRange(const TimelineRangeValue& aValue) {
+  // The "normal" keyword is matched ASCII case-insensitively, like any CSS
+  // keyword.
+  if (aValue.IsUTF8String()) {
+    return aValue.GetAsUTF8String().LowerCaseEqualsLiteral("normal");
+  }
+  if (aValue.IsCSSKeywordValue()) {
+    nsAutoCString value;
+    aValue.GetAsCSSKeywordValue()->GetValue(value);
+    return value.LowerCaseEqualsLiteral("normal");
+  }
+  return false;
+}
+
+// Serializes a rangeStart/rangeEnd value. Returns false (the caller throws
+// a TypeError) for a CSSKeywordValue other than "normal", which the spec
+// disallows.
+bool TimelineRangeValueToCss(const TimelineRangeValue& aValue,
+                             nsACString& aOut) {
+  if (aValue.IsCSSKeywordValue()) {
+    // Only "normal" is a valid keyword, and it is handled by
+    // IsNormalTimelineRange, so any keyword reaching here is invalid.
+    return false;
+  }
+
+  if (aValue.IsUTF8String()) {
+    aOut = aValue.GetAsUTF8String();
+    return true;
+  }
+
+  if (aValue.IsCSSNumericValue()) {
+    // A bare CSSNumericValue is interpreted as an offset with no range name.
+    aValue.GetAsCSSNumericValue()->Stringify(aOut);
+    return true;
+  }
+
+  const TimelineRangeOffset& offset = aValue.GetAsTimelineRangeOffset();
+  nsAutoCString result;
+  if (offset.mRangeName.WasPassed() && !offset.mRangeName.Value().IsVoid()) {
+    result.Append(offset.mRangeName.Value());
+  }
+  // TimelineRangeOffset.offset is required per spec. However, it is still
+  // behind a pref so it's possible that we don't pass it. If that's the case,
+  // we just ignore it and fall back to "normal" below. This is just a tentative
+  // fallback before we finish CSS Typed OM.
+  if (offset.mOffset.WasPassed()) {
+    nsAutoCString offsetStr;
+    offset.mOffset.Value().Stringify(offsetStr);
+    if (!result.IsEmpty()) {
+      result.Append(' ');
+    }
+    result.Append(offsetStr);
+  }
+  // An empty TimelineRangeOffset (neither member present) is treated as
+  // "normal".
+  if (result.IsEmpty()) {
+    aOut.AssignLiteral("normal");
+  } else {
+    aOut = result;
+  }
+  return true;
+}
+
+}  // namespace
+
+/* static */
+bool AnimationUtils::SetAnimationRangeStart(const TimelineRangeValue& aValue,
+                                            AnimationRange& aRange,
+                                            ErrorResult& aRv) {
+  if (IsNormalTimelineRange(aValue)) {
+    aRange.mStart = StyleAnimationRangeStart::DefaultStart();
+    return true;
+  }
+  // Offsets are resolved without element context; values that would require it
+  // (e.g. em) are a parse error.
+  nsAutoCString css;
+  if (!TimelineRangeValueToCss(aValue, css) ||
+      !Servo_ParseAnimationRangeStart(&css, &aRange.mStart)) {
+    aRv.ThrowTypeError("Invalid animation range start: "_ns + css);
+    return false;
+  }
+  return true;
+}
+
+/* static */
+bool AnimationUtils::SetAnimationRangeEnd(const TimelineRangeValue& aValue,
+                                          AnimationRange& aRange,
+                                          ErrorResult& aRv) {
+  if (IsNormalTimelineRange(aValue)) {
+    aRange.mEnd = StyleAnimationRangeEnd::DefaultEnd();
+    return true;
+  }
+  nsAutoCString css;
+  if (!TimelineRangeValueToCss(aValue, css) ||
+      !Servo_ParseAnimationRangeEnd(&css, &aRange.mEnd)) {
+    aRv.ThrowTypeError("Invalid animation range end: "_ns + css);
+    return false;
+  }
+  return true;
+}
+
+/* static */
+bool AnimationUtils::ApplyKeyframeAnimationRange(
+    const KeyframeAnimationOptions& aOptions, Animation* aAnimation,
+    ErrorResult& aRv) {
+  const bool startIsNormal = IsNormalTimelineRange(aOptions.mRangeStart);
+  const bool endIsNormal = IsNormalTimelineRange(aOptions.mRangeEnd);
+  if (startIsNormal && endIsNormal) {
+    return true;
+  }
+
+  AnimationRange range;
+  if (!SetAnimationRangeStart(aOptions.mRangeStart, range, aRv) ||
+      !SetAnimationRangeEnd(aOptions.mRangeEnd, range, aRv)) {
+    return false;
+  }
+
+  aAnimation->SetTimelineRange(std::move(range), Animation::FromJS::Yes);
   return true;
 }
 

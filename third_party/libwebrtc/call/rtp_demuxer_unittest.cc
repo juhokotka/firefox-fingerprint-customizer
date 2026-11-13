@@ -17,10 +17,10 @@
 #include <string>
 
 #include "absl/strings/string_view.h"
+#include "api/rtp_header_extension_id.h"
 #include "call/test/mock_rtp_packet_sink_interface.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
-#include "rtc_base/checks.h"
 #include "rtc_base/numerics/safe_conversions.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
@@ -113,7 +113,7 @@ class RtpDemuxerTest : public ::testing::Test {
       uint32_t ssrc,
       absl::string_view mid) {
     RtpPacketReceived::ExtensionManager extension_manager;
-    extension_manager.Register<RtpMid>(11);
+    extension_manager.Register<RtpMid>(RtpHeaderExtensionId(11));
 
     auto packet = CreatePacket(ssrc, &extension_manager);
     packet->SetExtension<RtpMid>(mid);
@@ -124,7 +124,7 @@ class RtpDemuxerTest : public ::testing::Test {
       uint32_t ssrc,
       absl::string_view rsid) {
     RtpPacketReceived::ExtensionManager extension_manager;
-    extension_manager.Register<RtpStreamId>(6);
+    extension_manager.Register<RtpStreamId>(RtpHeaderExtensionId(6));
 
     auto packet = CreatePacket(ssrc, &extension_manager);
     packet->SetExtension<RtpStreamId>(rsid);
@@ -135,7 +135,7 @@ class RtpDemuxerTest : public ::testing::Test {
       uint32_t ssrc,
       absl::string_view rrid) {
     RtpPacketReceived::ExtensionManager extension_manager;
-    extension_manager.Register<RepairedRtpStreamId>(7);
+    extension_manager.Register<RepairedRtpStreamId>(RtpHeaderExtensionId(7));
 
     auto packet = CreatePacket(ssrc, &extension_manager);
     packet->SetExtension<RepairedRtpStreamId>(rrid);
@@ -147,8 +147,8 @@ class RtpDemuxerTest : public ::testing::Test {
       absl::string_view mid,
       absl::string_view rsid) {
     RtpPacketReceived::ExtensionManager extension_manager;
-    extension_manager.Register<RtpMid>(11);
-    extension_manager.Register<RtpStreamId>(6);
+    extension_manager.Register<RtpMid>(RtpHeaderExtensionId(11));
+    extension_manager.Register<RtpStreamId>(RtpHeaderExtensionId(6));
 
     auto packet = CreatePacket(ssrc, &extension_manager);
     packet->SetExtension<RtpMid>(mid);
@@ -161,8 +161,8 @@ class RtpDemuxerTest : public ::testing::Test {
       absl::string_view rsid,
       absl::string_view rrid) {
     RtpPacketReceived::ExtensionManager extension_manager;
-    extension_manager.Register<RtpStreamId>(6);
-    extension_manager.Register<RepairedRtpStreamId>(7);
+    extension_manager.Register<RtpStreamId>(RtpHeaderExtensionId(6));
+    extension_manager.Register<RepairedRtpStreamId>(RtpHeaderExtensionId(7));
 
     auto packet = CreatePacket(ssrc, &extension_manager);
     packet->SetExtension<RtpStreamId>(rsid);
@@ -174,8 +174,6 @@ class RtpDemuxerTest : public ::testing::Test {
   std::set<RtpPacketSinkInterface*> sinks_to_tear_down_;
   uint16_t next_sequence_number_ = 1;
 };
-
-class RtpDemuxerDeathTest : public RtpDemuxerTest {};
 
 MATCHER_P(SamePacketAs, other, "") {
   return arg.Ssrc() == other.Ssrc() &&
@@ -1484,37 +1482,33 @@ TEST_F(RtpDemuxerTest, ResolveSinkReturnsCorrectSink) {
   EXPECT_EQ(demuxer_.ResolveSink(*unknown_packet), nullptr);
 }
 
-#if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
-
-TEST_F(RtpDemuxerDeathTest, MidMustNotExceedMaximumLength) {
+TEST_F(RtpDemuxerTest, MidMustNotExceedMaximumLength) {
   MockRtpPacketSink sink1;
   std::string mid1(BaseRtpStringExtension::kMaxValueSizeBytes + 1, 'a');
-  EXPECT_DEATH(AddSinkOnlyMid(mid1, &sink1), "");
+  EXPECT_FALSE(AddSinkOnlyMid(mid1, &sink1));
 }
 
-TEST_F(RtpDemuxerDeathTest, CriteriaMustBeNonEmpty) {
+TEST_F(RtpDemuxerTest, CriteriaMustBeNonEmpty) {
   MockRtpPacketSink sink;
   RtpDemuxerCriteria criteria;
-  EXPECT_DEATH(AddSink(criteria, &sink), "");
+  EXPECT_FALSE(AddSink(criteria, &sink));
 }
 
-TEST_F(RtpDemuxerDeathTest, RsidMustBeAlphaNumeric) {
+TEST_F(RtpDemuxerTest, RsidMustBeAlphaNumeric) {
   MockRtpPacketSink sink;
-  EXPECT_DEATH(AddSinkOnlyRsid("a_3", &sink), "");
+  EXPECT_FALSE(AddSinkOnlyRsid("a_3", &sink));
 }
 
-TEST_F(RtpDemuxerDeathTest, MidMustBeToken) {
+TEST_F(RtpDemuxerTest, MidMustBeToken) {
   MockRtpPacketSink sink;
-  EXPECT_DEATH(AddSinkOnlyMid("a(3)", &sink), "");
+  EXPECT_FALSE(AddSinkOnlyMid("a(3)", &sink));
 }
 
-TEST_F(RtpDemuxerDeathTest, RsidMustNotExceedMaximumLength) {
+TEST_F(RtpDemuxerTest, RsidMustNotExceedMaximumLength) {
   MockRtpPacketSink sink;
   std::string rsid(BaseRtpStringExtension::kMaxValueSizeBytes + 1, 'a');
-  EXPECT_DEATH(AddSinkOnlyRsid(rsid, &sink), "");
+  EXPECT_FALSE(AddSinkOnlyRsid(rsid, &sink));
 }
-
-#endif
 
 }  // namespace
 }  // namespace webrtc

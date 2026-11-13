@@ -5,14 +5,13 @@
 #include "HTMLLinkAccessible.h"
 
 #include "CacheConstants.h"
-#include "nsCoreUtils.h"
-#include "mozilla/a11y/Role.h"
 #include "States.h"
-
-#include "nsContentUtils.h"
-#include "nsIMutationObserver.h"
 #include "mozilla/a11y/DocAccessible.h"
+#include "mozilla/a11y/Role.h"
 #include "mozilla/dom/Element.h"
+#include "nsContentUtils.h"
+#include "nsCoreUtils.h"
+#include "nsIMutationObserver.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -30,7 +29,12 @@ HTMLLinkAccessible::HTMLLinkAccessible(nsIContent* aContent,
 ////////////////////////////////////////////////////////////////////////////////
 // nsIAccessible
 
-role HTMLLinkAccessible::NativeRole() const { return roles::LINK; }
+role HTMLLinkAccessible::NativeRole() const {
+  if (mContent->IsMathMLElement(nsGkAtoms::a)) {
+    return roles::MATHML_LINK;
+  }
+  return roles::LINK;
+}
 
 uint64_t HTMLLinkAccessible::NativeState() const {
   return HyperTextAccessible::NativeState() & ~states::READONLY;

@@ -5,21 +5,24 @@
 #include "TextLeafRange.h"
 
 #include "HyperTextAccessible-inl.h"
+#include "Pivot.h"
+#include "TextAttrs.h"
+#include "TextRange.h"
+#include "mozilla/BinarySearch.h"
+#include "mozilla/Casting.h"
+#include "mozilla/PresShell.h"
+#include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/TextEditor.h"
 #include "mozilla/a11y/Accessible.h"
 #include "mozilla/a11y/CacheConstants.h"
 #include "mozilla/a11y/DocAccessible.h"
 #include "mozilla/a11y/DocAccessibleParent.h"
 #include "mozilla/a11y/LocalAccessible.h"
-#include "mozilla/BinarySearch.h"
-#include "mozilla/Casting.h"
 #include "mozilla/dom/AbstractRange.h"
 #include "mozilla/dom/CharacterData.h"
 #include "mozilla/dom/HTMLInputElement.h"
-#include "mozilla/PresShell.h"
 #include "mozilla/intl/Segmenter.h"
 #include "mozilla/intl/WordBreaker.h"
-#include "mozilla/StaticPrefs_layout.h"
-#include "mozilla/TextEditor.h"
 #include "nsAccUtils.h"
 #include "nsBlockFrame.h"
 #include "nsFocusManager.h"
@@ -31,9 +34,6 @@
 #include "nsTArray.h"
 #include "nsTextFrame.h"
 #include "nsUnicharUtils.h"
-#include "Pivot.h"
-#include "TextAttrs.h"
-#include "TextRange.h"
 
 using mozilla::intl::WordBreaker;
 using FindWordOptions = mozilla::intl::WordBreaker::FindWordOptions;
@@ -2341,7 +2341,7 @@ LayoutDeviceIntRect TextLeafRange::Bounds() const {
   // result rectangle.
   LayoutDeviceIntRect result;
   const bool succeeded = WalkLineRects(
-      [&result](TextLeafRange aLine, LayoutDeviceIntRect aLineRect) {
+      [&result](TextLeafRange /*aLine*/, LayoutDeviceIntRect aLineRect) {
         result.UnionRect(result, aLineRect);
       });
 
@@ -2360,7 +2360,7 @@ nsTArray<LayoutDeviceIntRect> TextLeafRange::LineRects() const {
   }
 
   nsTArray<LayoutDeviceIntRect> lineRects;
-  WalkLineRects([&lineRects, &contentBounds](TextLeafRange aLine,
+  WalkLineRects([&lineRects, &contentBounds](TextLeafRange /*aLine*/,
                                              LayoutDeviceIntRect aLineRect) {
     // Clip the bounds to the bounds of the content area.
     bool boundsVisible = true;
@@ -2470,11 +2470,11 @@ bool TextLeafRange::SetSelection(int32_t aSelectionNum, bool aSetFocus) const {
   } else {
     rangeCount = domSel->RangeCount();
   }
-  RefPtr<nsRange> domRange = nullptr;
+  RefPtr<dom::Range> domRange = nullptr;
   const bool newRange =
       aSelectionNum == static_cast<int32_t>(rangeCount) || aSelectionNum < 0;
   if (newRange) {
-    domRange = nsRange::Create(startContent);
+    domRange = dom::Range::Create(startContent);
   } else {
     domRange = domSel->GetRangeAt(AssertedCast<uint32_t>(aSelectionNum));
   }
@@ -2575,8 +2575,8 @@ void TextLeafRange::ScrollIntoView(uint32_t aScrollType) const {
   }
 
   ErrorResult er;
-  RefPtr<nsRange> domRange = nsRange::Create(startContent, startContentOffset,
-                                             endContent, endContentOffset, er);
+  RefPtr<dom::Range> domRange = dom::Range::Create(
+      startContent, startContentOffset, endContent, endContentOffset, er);
   if (er.Failed()) {
     return;
   }

@@ -74,6 +74,12 @@ bool RenderTextureHostWrapper::LockSWGLCompositeSurface(
   return mTextureHost->LockSWGLCompositeSurface(aContext, aInfo);
 }
 
+void RenderTextureHostWrapper::UnlockSWGLCompositeSurface() {
+  if (mTextureHost) {
+    mTextureHost->UnlockSWGLCompositeSurface();
+  }
+}
+
 void RenderTextureHostWrapper::ClearCachedResources() {
   if (mTextureHost) {
     mTextureHost->ClearCachedResources();
@@ -156,6 +162,14 @@ RenderDMABUFTextureHost* RenderTextureHostWrapper::AsRenderDMABUFTextureHost() {
   return mTextureHost->AsRenderDMABUFTextureHost();
 }
 
+RenderWaylandTextureHost*
+RenderTextureHostWrapper::AsRenderWaylandTextureHost() {
+  if (!mTextureHost) {
+    return nullptr;
+  }
+  return mTextureHost->AsRenderWaylandTextureHost();
+}
+
 RenderAndroidHardwareBufferTextureHost*
 RenderTextureHostWrapper::AsRenderAndroidHardwareBufferTextureHost() {
   if (!mTextureHost) {
@@ -194,6 +208,13 @@ RenderTextureHostSWGL* RenderTextureHostWrapper::EnsureRenderTextureHostSWGL()
     return nullptr;
   }
   return mTextureHost->AsRenderTextureHostSWGL();
+}
+
+void RenderTextureHostWrapper::SetReadFenceFd(UniqueFileHandle&& aFenceFd) {
+  if (!mTextureHost) {
+    return;
+  }
+  mTextureHost->SetReadFenceFd(std::move(aFenceFd));
 }
 
 void RenderTextureHostWrapper::SetIsSoftwareDecodedVideo() {

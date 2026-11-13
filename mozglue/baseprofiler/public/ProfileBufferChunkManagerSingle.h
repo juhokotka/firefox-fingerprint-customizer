@@ -6,6 +6,7 @@
 #define ProfileBufferChunkManagerSingle_h
 
 #include "mozilla/ProfileBufferChunkManager.h"
+#include "mozilla/Maybe.h"
 
 #ifdef DEBUG
 #  include "mozilla/Atomics.h"
@@ -73,7 +74,7 @@ class ProfileBufferChunkManagerSingle final : public ProfileBufferChunkManager {
     return std::move(mInitialChunk);
   }
 
-  void RequestChunk(std::function<void(UniquePtr<ProfileBufferChunk>)>&&
+  void RequestChunk(MoveOnlyFunction<void(UniquePtr<ProfileBufferChunk>)>&&
                         aChunkReceiver) final {
     MOZ_ASSERT(mUser, "Not registered yet");
     // Simple retrieval.

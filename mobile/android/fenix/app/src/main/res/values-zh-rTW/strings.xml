@@ -31,6 +31,8 @@
   <string name="history_search_hint">搜尋紀錄</string>
   <!-- Placeholder text shown in search bar when using bookmarks search -->
   <string name="bookmark_search_hint">搜尋書籤</string>
+  <!-- Content description for the toolbar back button while searching bookmarks -->
+  <string name="bookmark_close_search_description">返回並結束搜尋</string>
   <!-- Placeholder text shown in search bar when using tabs search -->
   <string name="tab_search_hint">搜尋分頁</string>
   <!-- Placeholder text shown in the search bar when using application search engines -->
@@ -75,7 +77,11 @@
   <string name="about_content" tools:ignore="BrandUsage">%1$s 是由 Mozilla 所打造。</string>
   <!-- Private Browsing -->
   <string name="private_browsing_common_myths">隱私瀏覽功能的常見迷思</string>
-  <!-- Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active. -->
+  <!--
+    Private Browsing
+
+    Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active.
+  -->
   <string name="private_browsing_a11y_session_announcement">隱私瀏覽階段</string>
   <!--
     True Private Browsing Mode
@@ -104,14 +110,6 @@
   <string name="open_in_app_cfr_positive_button_text">開啟設定</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">知道了！</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
-  <!--
-    Address bar swipe "contextual feature recommendation" (CFR)
-
-    Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar.
-  -->
-  <string name="address_bar_swipe_cfr_message_2">左右滑動工具列即可切換分頁。</string>
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">需要相機使用權限。請到 Android 系統設定點擊「權限」，然後點擊「允許」。</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -154,13 +152,11 @@
   <!--
     Recent Tabs
 
-    Header text for jumping back into the recent tab in the home screen
+    Header text on the homescreen for continuing to browse the most recent browser tab
   -->
-  <string name="recent_tabs_header">回到先前開啟頁面</string>
+  <string name="recent_tabs_header_2">繼續</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">顯示全部</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">顯示所有近期分頁按鈕</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">檢視所有同步的分頁</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -189,8 +185,10 @@
   <!--
     Browser Fragment
 
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
+    Label for popup button that appears when long-pressing the main menu. Tapping it allows the user to customize the main menu layout.
   -->
+  <string name="customize_menu">自訂選單</string>
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">上一頁</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">下一頁</string>
@@ -252,7 +250,7 @@
     Browser menu text shown in custom tabs to indicate this is a Fenix tab
     %1$s is the name of the app (for example "Firefox").
   -->
-  <string name="browser_menu_powered_by2">Powered by %1$s</string>
+  <string name="browser_menu_powered_by2">由 %1$s 提供</string>
   <!-- Browser menu button to put the current page in reader mode -->
   <string name="browser_menu_read">閱讀畫面</string>
   <!-- Browser menu button content description to close reader mode and return the user to the regular browser -->
@@ -281,6 +279,10 @@
   <string name="browser_main_menu_content_description_navigation_header">導覽</string>
   <!-- Content description (not visible, for screen readers etc.) for bottom sheet handlebar custom tab menu. -->
   <string name="browser_custom_tab_menu_handlebar_content_description">關閉自訂分頁選單表</string>
+  <!-- URL bar indicator shown on a cached version of the website, when the tab is reloading, but the content is not live yet -->
+  <string name="browser_toolbar_cached_page_indicator">快取頁面</string>
+  <!-- Message shown when a cached website has finished reloading and the tab is now showing the live version of the page -->
+  <string name="browser_toolbar_live_page_toast">即時頁面</string>
   <!-- Browser menu label that bookmarks the currently visited page -->
   <string name="browser_menu_bookmark_this_page_2">將頁面加入書籤</string>
   <!-- Browser menu label that navigates to the edit bookmark screen for the current bookmarked page -->
@@ -295,8 +297,12 @@
   <string name="browser_menu_summarize_page">摘要本頁</string>
   <!-- Browser menu badge text for summarization feature -->
   <string name="browser_menu_summarize_page_badge">新功能</string>
+  <!-- Browser menu badge text for new, highlighted feature -->
+  <string name="browser_menu_page_badge_text">新功能</string>
   <!-- Browser menu label for navigating to the Web Compat Reporter feature, which provides users the ability to send bug reports for broken sites. -->
   <string name="browser_menu_webcompat_reporter_2">回報網站問題</string>
+  <!-- Browser menu label for adding a tab to a tab group -->
+  <string name="browser_menu_add_to_tab_group">新增至群組</string>
   <!-- Browser menu label that is displayed when the current page has been translated by the translation feature. -->
   <string name="browser_menu_translated">已翻譯</string>
   <!-- Browser menu label for the print feature -->
@@ -313,18 +319,8 @@
   <string name="browser_menu_default_banner_title">將 %1$s 設為您的預設瀏覽器</string>
   <!-- Label text within the set as default banner -->
   <string name="browser_menu_default_banner_subtitle_2">快速上網，確保隱私，為您量身打造。</string>
-  <!-- Content description (not visible, for screen readers etc.) for the button that dismisses the set as default banner in the menu -->
-  <string name="browser_menu_default_banner_dismiss_promotion">關閉宣傳內容</string>
   <!-- Content description (not visible, for screen readers etc.) for recommended extensions in main menu -->
   <string name="browser_menu_recommended_extensions_content_description">更多資訊</string>
-  <!--
-    Menu "contextual feature recommendation" (CFR)
-
-    Text for the title in the contextual feature recommendation popup promoting the menu feature.
-  -->
-  <string name="menu_cfr_title">新功能：流線型選單</string>
-  <!-- Text for the message in the contextual feature recommendation popup promoting the menu feature. -->
-  <string name="menu_cfr_body">不論是隱私瀏覽模式還是儲存動作，讓您更快找到想要的功能。</string>
   <!--
     Extensions management fragment
 
@@ -370,13 +366,13 @@
   <!-- Link text for learning more about AI controls -->
   <string name="ai_controls_learn_more">更多資訊</string>
   <!-- Title for the block AI enhancements toggle -->
-  <string name="ai_controls_block_ai_title">封鎖 AI 功能</string>
+  <string name="ai_controls_block_ai_title">封鎖 AI 強化功能</string>
   <!-- Description for the block AI enhancements toggle. %s is the name of the app (for example "Firefox"). -->
-  <string name="ai_controls_block_ai_description">封鎖的話，代表您不會在 %s 看到目前已有，或新推出的 AI 擴充功能，或是任何有關這些功能的彈出提示。</string>
+  <string name="ai_controls_block_ai_description">封鎖的話，代表您不會在 %s 看到目前已有，或新推出的 AI 強化功能，或是任何有關這些功能的彈出提示。</string>
   <!-- Link text to see what AI enhancements are and aren’t included -->
   <string name="ai_controls_see_whats_included">看看包含哪些項目，又不含哪些項目</string>
   <!-- Banner text shown when AI enhancements are blocked -->
-  <string name="ai_controls_blocked_info_banner">預設會封鎖目前與新推出的 AI 擴充功能，可在下方解除封鎖特定功能。</string>
+  <string name="ai_controls_blocked_info_banner">預設會封鎖目前與新推出的 AI 強化功能，可在下方解除封鎖特定功能。</string>
   <!-- Section header for the AI-powered features list -->
   <string name="ai_controls_ai_powered_features">由 AI 驅動的功能</string>
   <!-- Title for the translations AI feature toggle -->
@@ -392,9 +388,9 @@
   <!-- Description for the voice search AI feature toggle -->
   <string name="ai_controls_voice_search_description">語音內容會透過 Google Speech Services 轉換為文字。</string>
   <!-- Title for the block AI enhancements confirmation dialog -->
-  <string name="ai_controls_block_dialog_title">要封鎖 AI 功能嗎？</string>
+  <string name="ai_controls_block_dialog_title">要封鎖 AI 強化功能嗎？</string>
   <!-- Body text for the block AI enhancements confirmation dialog. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="ai_controls_block_dialog_body">您不會在 %1$s 看到目前已有，或新推出的 AI 擴充功能，或是任何有關這些功能的彈出提示。但之後還是可以解除封鎖任何想要使用的功能。\n\n封鎖 AI 功能也會影響使用到 %1$s 提供的 AI 的擴充套件的相關功能。</string>
+  <string name="ai_controls_block_dialog_body">您不會在 %1$s 看到目前已有，或新推出的 AI 強化功能，或是任何有關這些功能的彈出提示。但之後還是可以解除封鎖任何想要使用的功能。\n\n封鎖也會影響使用到 %1$s 提供的 AI 的擴充套件。</string>
   <!-- Label shown above the list of features that will be blocked in the block AI dialog -->
   <string name="ai_controls_block_dialog_what_will_be_blocked">會封鎖哪些功能：</string>
   <!-- Cancel button text in the block AI enhancements confirmation dialog -->
@@ -555,8 +551,6 @@
   <string name="onboarding_marketing_body_1" tools:ignore="BrandUsage,UnusedResources">與 Mozilla 的行銷夥伴分享您如何發現 Firefox 以及是如何使用的，我們絕不會販售此資料。</string>
   <!-- Marketing onboarding page button label variant. Button to confirm choice and start browsing. -->
   <string name="onboarding_marketing_positive_button_1" tools:ignore="UnusedResources">同意並開始上網</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
   <!-- "Continue" onboarding button. -->
   <string name="nova_onboarding_continue_button">繼續</string>
   <!-- "Continue browsing" onboarding button. -->
@@ -626,7 +620,7 @@
   -->
   <string name="nova_onboarding_marketing_body" tools:ignore="BrandUsage,UnusedResources">與 Mozilla 的行銷夥伴分享您如何發現 Firefox 以及是如何使用的，我們絕不會販售此資料。%1$s</string>
   <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
-  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage">與 Mozilla 的行銷夥伴分享您如何發現 Firefox 以及是如何使用的，我們絕不會販售此資料。</string>
+  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage,UnusedResources">與 Mozilla 的行銷夥伴分享您如何發現 Firefox 以及是如何使用的，我們絕不會販售此資料。</string>
   <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
   <string name="nova_onboarding_marketing_body_3" tools:ignore="BrandUsage,UnusedResources">您可以透過讓 Mozilla 告知我們用來宣傳 Firefox 的平台您是 Firefox 使用者，幫助我們接觸更多人。</string>
   <!--
@@ -666,8 +660,6 @@
   <string name="nova_onboarding_marketing_primary_button_text" tools:ignore="BrandUsage,UnusedResources">幫助 Firefox</string>
   <!-- Marketing onboarding primary button text. -->
   <string name="nova_onboarding_marketing_primary_button_text_3">是</string>
-  <!-- Marketing onboarding primary button text. -->
-  <string name="nova_onboarding_marketing_primary_button_text_2">允許並繼續</string>
   <!-- Marketing onboarding secondary button text. -->
   <string name="nova_onboarding_marketing_secondary_button_text" tools:ignore="UnusedResources">不要，謝謝</string>
   <!-- Marketing onboarding secondary button text. -->
@@ -703,8 +695,6 @@
   <string name="nova_onboarding_app_icon_prompt_title" tools:ignore="UnusedResources">挑選自訂應用程式圖示</string>
   <!-- App icon onboarding body. -->
   <string name="nova_onboarding_app_icon_prompt_body" tools:ignore="UnusedResources">為您的主畫面加上個人風格。</string>
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Widget Picker
 
@@ -723,13 +713,25 @@
   <string name="search_widget_text_long">搜尋 Web</string>
   <!-- Content description (not visible, for screen readers etc.): Voice search -->
   <string name="search_widget_voice">語音搜尋</string>
+  <!-- Content description (not visible, for screen readers etc.): Button in the search widget that starts a search in a private tab -->
+  <string name="search_widget_private_search">隱私搜尋</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for private search and for voice search -->
+  <string name="search_bar_widget_description">含有隱私搜尋與語音搜尋功能的搜尋列</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for image search, private search and voice search -->
+  <string name="search_bar_with_lens_widget_description">含有圖片搜尋、隱私搜尋與語音搜尋功能的搜尋列</string>
+  <!-- Widget description in the widget picker screen for the compact search bar widget -->
+  <string name="compact_search_bar_widget_description">精簡搜尋列</string>
   <!--
     Preferences
 
     Title for the settings page
   -->
   <string name="settings">設定</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">一般</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">關於</string>
@@ -792,40 +794,6 @@
   <string name="preferences_pbm_lock_screen_title">使用螢幕鎖來隱藏隱私瀏覽模式中的分頁</string>
   <!-- Informs the user how to access the tabs when "Use screen lock to hide tabs in private browsing" is enabled -->
   <string name="preferences_pbm_lock_screen_summary_3">使用您的指紋、PIN 碼或表情來解鎖，開啟此功能也可防止畫面截圖與分享。</string>
-  <!-- Label for cookie banner section in quick settings panel. -->
-  <string name="cookie_banner_blocker">Cookie 橫幅封鎖器</string>
-  <!-- Preference for removing cookie/consent banners from sites automatically in private mode. See reduce_cookie_banner_summary for additional context. -->
-  <string name="preferences_cookie_banner_reduction_private_mode">隱私瀏覽模式中的 Cookie 橫幅封鎖器</string>
-  <!-- Text for indicating cookie banner handling is off this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_off_for_site">對此網站關閉</string>
-  <!-- Text for cancel button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_cancel_button">取消</string>
-  <!-- Text for request support button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_request_support_button_2">傳送請求</string>
-  <!-- Text for title indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_title_2">要請求支援此網站嗎？</string>
-  <!-- Label for the snackBar, after the user reports with success a website where cookie banner reducer did not work -->
-  <string name="cookie_banner_handling_report_site_snack_bar_text_2">已請求</string>
-  <!-- Text for indicating cookie banner handling is on this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_on_for_site">對此網站開啟</string>
-  <!-- Text for indicating that a request for unsupported site was sent to Nimbus (it's a Mozilla library for experiments), this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site_request_submitted_2">已送出支援請求</string>
-  <!-- Text for indicating cookie banner handling is currently not supported for this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site">目前不支援的網站</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is on this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_on_for_site_1">要為 %1$s 開啟 Cookie 橫幅封鎖器嗎？</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is off this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_off_for_site_1">要為 %1$s 關閉 Cookie 橫幅封鎖器嗎？</string>
-  <!-- Title text for a detail explanation indicating cookie banner reducer didn't work for the current site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_title_unsupported_site_request_2">%1$s 無法自動拒絕此網站上的 Cookie 請求。您可以請求我們未來支援此網站。</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is off for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_off_for_site_1">關閉封鎖器後，%1$s 將會清除此網站的 Cookie 並重新載入頁面。可能會導致您被登出或清空購物車。</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is on for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_on_for_site_3">開啟封鎖器後，%1$s 就會對此網站自動嘗試拒絕所有 Cookie 橫幅。</string>
-  <!-- Title for the cookie banner re-engagement CFR, the placeholder is replaced with app name. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="cookie_banner_cfr_title">%1$s 剛為您拒絕了 Cookie</string>
-  <!-- Message for the cookie banner re-engagement CFR -->
-  <string name="cookie_banner_cfr_message">少一分會追蹤您的 Cookie，也讓您更不用分心。</string>
   <!-- Description of the preference to enable "HTTPS-Only" mode. -->
   <string name="preferences_https_only_summary">自動嘗試使用加密過的 HTTPS 通訊協定連線到網站，以增加安全性。</string>
   <!-- Summary of https only preference if https only is set to off -->
@@ -854,6 +822,8 @@
   <string name="preferences_override_sync_tokenserver">自訂同步伺服器</string>
   <!-- Preference category for account information -->
   <string name="preferences_category_account">帳號</string>
+  <!-- Preference category for sync controls. Sync can be translated, it's just short for ”Synchronization” in English. -->
+  <string name="preferences_category_sync_controls">Sync</string>
   <!-- Preference for changing where the AddressBar is positioned -->
   <string name="preferences_toolbar_2">網址列位置</string>
   <!-- Preference for changing toolbar layout -->
@@ -870,6 +840,8 @@
   <string name="preferences_toolbar_shortcut">工具列捷徑</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_toolbar_select_shortcut">選擇捷徑</string>
+  <!-- Title of a menu option allowing to change the shortcut button shown in the toolbar -->
+  <string name="toolbar_shortcut_menu_edit_option">編輯捷徑</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_gestures">手勢</string>
   <!-- Preference for settings related to visual options -->
@@ -908,6 +880,8 @@
   <string name="preferences_search_synced_tabs">搜尋同步的分頁</string>
   <!-- Preference for account settings -->
   <string name="preferences_account_settings">帳號設定</string>
+  <!-- Preference for account and sync settings -->
+  <string name="preferences_account_and_sync_settings">帳號與同步</string>
   <!-- Preference for enabling url autocomplete -->
   <string name="preferences_enable_autocomplete_urls">自動完成網址</string>
   <!-- Preference title for switch preference to show sponsored Firefox Suggest search suggestions -->
@@ -944,6 +918,10 @@
   <string name="preferences_open_links_in_apps_ask">開啟前詢問我</string>
   <!-- Preference for open links in third party apps never open in apps option -->
   <string name="preferences_open_links_in_apps_never">永不</string>
+  <!-- Preference category header for media related open links in apps settings -->
+  <string name="preferences_media_category">媒體</string>
+  <!-- Preference label for choosing whether links open in the YouTube app -->
+  <string name="preferences_open_links_in_youtube">用 YouTube 應用程式開啟鏈結</string>
   <!-- Preference category for file storage. -->
   <string name="preferences_category_file_storage">檔案儲存空間</string>
   <!-- Preference title for downloads default location. -->
@@ -955,6 +933,8 @@
   <string name="preference_downloads_folder_permission_lost" tools:ignore="UnusedResources">您沒有使用此資料夾的權限，請改選其他資料夾。</string>
   <!-- Preference title for choosing an app to handle downloads -->
   <string name="preferences_choose_app_for_downloads">使用另一套應用程式管理下載項目</string>
+  <!-- Message shown when no app is available to let the user pick a download folder. -->
+  <string name="preferences_downloads_no_folder_picker_available">無法開啟此裝置的資料夾挑選器。</string>
   <!-- Preference category for deleting or removing downloads -->
   <string name="preferences_category_delete_or_remove_downloads">刪除或移除下載項目</string>
   <string name="preferences_downloads_delete_from_device">從裝置刪除</string>
@@ -978,6 +958,12 @@
   <string name="notifications_allowed_summary">允許</string>
   <!-- Summary for notification preference indicating notifications are not allowed -->
   <string name="notifications_not_allowed_summary">不允許</string>
+  <!-- Preference for local network access / nearby devices in Android 17 -->
+  <string name="preferences_local_network_access">存取區域網路／鄰近裝置</string>
+  <!-- Summary for local network access preference indicating access is allowed -->
+  <string name="local_network_access_allowed_summary">允許</string>
+  <!-- Summary for local network access preference indicating access is not allowed -->
+  <string name="local_network_access_not_allowed_summary">不允許</string>
   <!--
     Add-on Permissions
 
@@ -1022,8 +1008,8 @@
     Title for the customize home screen section with privacy report.
   -->
   <string name="customize_toggle_privacy_report">隱私權報告</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">回到先前開啟頁面</string>
+  <!-- Title for a customize home screen section. Continue is a section that displays the most recent browser tab, so users can continue browsing where they left off. -->
+  <string name="customize_toggle_continue">繼續</string>
   <!-- Title for the customize home screen section with bookmarks. -->
   <string name="customize_toggle_bookmarks">書籤</string>
   <!--
@@ -1037,12 +1023,10 @@
   <string name="customize_toggle_pocket_sponsored">贊助內容</string>
   <!-- Title for the opening wallpaper settings screen -->
   <string name="customize_wallpapers">背景圖</string>
-  <!-- Label for the menu item that opens the wallpaper settings screen. -->
-  <string name="browser_menu_change_wallpaper">更改背景圖</string>
+  <!-- Label for the menu item that opens the customize homepage settings screen. -->
+  <string name="browser_menu_customize_homepage">自訂首頁</string>
   <!-- Title for the customize home screen section with sponsored shortcuts. -->
   <string name="customize_toggle_contile">贊助捷徑</string>
-  <!-- Title for the customize home screen section that toggles the Homepage sports widget. -->
-  <string name="customize_toggle_world_cup">世界盃足球賽</string>
   <!--
     Wallpapers
 
@@ -1167,6 +1151,8 @@
   <string name="extension_process_crash_dialog_retry_button_text" tools:ignore="UnusedResources">可嘗試重新啟動擴充套件</string>
   <!-- Button text on the extension crash dialog to prompt the user to continue with all extensions disabled. -->
   <string name="extension_process_crash_dialog_disable_extensions_button_text">繼續使用，但停用擴充套件</string>
+  <!-- Text shown in the snackbar action button that lets the user retry an add-on operation that just failed. -->
+  <string name="addon_failure_retry_action">重試</string>
   <!--
     Account Preferences
 
@@ -1179,6 +1165,12 @@
   <string name="preferences_sync_now">立即同步</string>
   <!-- Preference category for sync -->
   <string name="preferences_sync_category">選擇要同步的內容</string>
+  <!-- Preference category for sync controls -->
+  <string name="preferences_category_sync">同步資料</string>
+  <!-- Summary for the sync preference category. -->
+  <string name="preferences_sync_category_summary">管理要在您連結的裝置間同步哪些資料</string>
+  <!-- Summary for the sync preference category, when user has disabled all synchronisation items. -->
+  <string name="preferences_sync_category_no_engine_selected_summary">您目前未同步任何項目。請選擇要在各裝置間同步的內容。</string>
   <!-- Preference for syncing history -->
   <string name="preferences_sync_history">瀏覽紀錄</string>
   <!-- Preference for syncing bookmarks -->
@@ -1191,6 +1183,10 @@
   <string name="preferences_sign_out">登出</string>
   <!-- Preference displays and allows changing current FxA device name -->
   <string name="preferences_sync_device_name">裝置名稱</string>
+  <!-- Preference category for Device name -->
+  <string name="preferences_device_name_category">裝置名稱</string>
+  <!-- Label for the Preference that displays and allows changing current device name on Mozilla Account -->
+  <string name="preferences_sync_change_device_name">更改裝置名稱</string>
   <!-- Text shown when user enters empty device name -->
   <string name="empty_device_name_error">裝置名稱不得為空白。</string>
   <!-- Label indicating that sync is in progress -->
@@ -1310,8 +1306,12 @@
   <string name="preference_simple_toolbar">簡單</string>
   <!-- Preference for using expanded toolbar -->
   <string name="preference_expanded_toolbar">展開</string>
-  <!-- Preference description indicating the toolbar location preference is disabled when the tab strip is enabled -->
-  <string name="preference_toolbar_pref_disabled_explanation">顯示分頁列時，網址列必須在頂端。</string>
+  <!-- Preference for changing where the search bar is positioned on the homepage, shown when the user has set the address bar to be displayed at the top of the screen -->
+  <string name="preferences_homepage_search_location">首頁搜尋位置</string>
+  <!-- Preference for showing the homepage search bar in the middle of the homepage -->
+  <string name="preference_homepage_search_location_middle">中間</string>
+  <!-- Preference for showing the homepage search bar at the top of the homepage (combined with the address bar, already displayed at the top) -->
+  <string name="preference_homepage_search_location_top">頂端</string>
   <!-- New tab shortcut in toolbar customization -->
   <string name="toolbar_customize_shortcut_new_tab">開啟新分頁</string>
   <!-- Share shortcut in toolbar customization -->
@@ -1340,6 +1340,11 @@
   <string name="preference_light_theme">亮色</string>
   <!-- Preference for using dark theme -->
   <string name="preference_dark_theme">暗色</string>
+  <!--
+    Preference for using the OLED theme. For localization, this can be translated as "True Black", "Maximum Darkness",
+    or "Full dark" if needed.
+  -->
+  <string name="preference_oled_theme">最暗</string>
   <!-- Preference for using using dark or light theme automatically set by battery -->
   <string name="preference_auto_battery_theme">由系統省電模式設定</string>
   <!-- Preference for using following device theme -->
@@ -1350,6 +1355,12 @@
     Preferences for showing tab strip
   -->
   <string name="preference_tab_strip_show">顯示分頁列</string>
+  <!-- Preference for tab bar placement (top or bottom of the screen) -->
+  <string name="preference_tab_strip_location_header">分頁列位置</string>
+  <!-- Preference for using top tab strip -->
+  <string name="preference_top_tab_strip">頂端</string>
+  <!-- Preference for using bottom tab strip -->
+  <string name="preference_bottom_tab_strip">底端</string>
   <!--
     Gestures Preferences
 
@@ -1382,6 +1393,8 @@
   <string name="library_desktop_bookmarks_unfiled">其他書籤</string>
   <!-- Option in Library to open History page -->
   <string name="library_history">瀏覽紀錄</string>
+  <!-- Content description (not visible, for screen readers etc.) for the check mark that replaces a site's icon in History and Recently closed tabs when the item is selected -->
+  <string name="library_item_selected_content_description">已選擇</string>
   <!-- Settings Page Title -->
   <string name="settings_title">設定</string>
   <!-- Content description (not visible, for screen readers etc.): "Close button for library settings" -->
@@ -1432,8 +1445,8 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">分頁</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">分頁檢視</string>
+  <!-- Title of preference that allows a user to specify the tab layout -->
+  <string name="preferences_tab_layout">分頁版面</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">清單</string>
   <!-- Option for a grid tab view -->
@@ -1452,6 +1465,8 @@
   <string name="preference_auto_close_tabs" tools:ignore="UnusedResources">自動關閉分頁</string>
   <!-- Content description (not visible, for screen readers etc.): Close tab button -->
   <string name="tab_manager_close_tabs">關閉</string>
+  <!-- Content description for the media playback indicator in the tabs tray. -->
+  <string name="tab_indicator_media_playing">正在播放媒體內容</string>
   <!--
     Opening screen
 
@@ -1479,13 +1494,27 @@
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">關閉超過四小時後開啟首頁</string>
   <!--
-    Inactive tabs
+    Tab organization
 
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
+    Category header for the preferences that control how tabs are organized
   -->
-  <string name="preferences_inactive_tabs">將舊分頁移動到獨立區塊</string>
-  <!-- Title of inactive tabs preference -->
+  <string name="preferences_tab_organization">分頁管理方式</string>
+  <!-- Title of the preference that allows a user to enable or disable the inactive tabs feature -->
+  <string name="preferences_inactive_tabs_toggle_title">閒置分頁</string>
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">將超過兩週沒有檢視過的分頁，移動至「閒置分頁」區塊。</string>
+  <!-- Title of the preference that allows a user to enable or disable the tab groups feature -->
+  <string name="preferences_tab_groups_title">分頁群組</string>
+  <!-- Summary of the preference that allows a user to enable or disable the tab groups feature -->
+  <string name="preferences_tab_groups_description">將分頁放入可命名並儲存的群組來整理。</string>
+  <!--
+    Privacy report
+
+    Category header of a preference that allows a user to enable or disable the privacy report feature
+  -->
+  <string name="preferences_privacy_report">隱私權報告</string>
+  <!-- Title of the privacy report preference that allows a user to enable or disable the feature -->
+  <string name="preferences_privacy_report_title">開啟隱私權報告功能</string>
   <!--
     Studies
 
@@ -1540,6 +1569,8 @@
   <string name="add_tab">新增分頁</string>
   <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
   <string name="add_private_tab">開新隱私瀏覽分頁</string>
+  <!-- Content description (not visible, for screen readers etc.): Create tab group button. Opens the create tab group sheet when pressed -->
+  <string name="create_tab_group_content_description">建立分頁群組</string>
   <!-- Text for the tab search bar placeholder -->
   <string name="tab_manager_search_bar_placeholder">搜尋您的分頁</string>
   <!-- Text shown in the menu to view recently closed tabs -->
@@ -1660,14 +1691,6 @@
     -->
     <item quantity="other">新增至 %1$s 分頁群組、%2$d 個分頁、色彩為 %3$s</item>
   </plurals>
-  <plurals name="share_tab_group_button_content_description">
-    <!--
-      Content Description for share tab group button.
-      %1$s is the name of the tab group.
-      %2$d is the number of tabs in a tab group.
-    -->
-    <item quantity="other">已分享 %2$d 個分頁到 %1$s 分頁群組。</item>
-  </plurals>
   <!-- Content description for the grabber/handle of the tab group bottom sheet. -->
   <string name="tab_group_sheet_dismiss_description">檢視分頁群組，摺疊拖曳手把</string>
   <plurals name="expanded_tab_group_header_description">
@@ -1693,6 +1716,41 @@
   <string name="close_tab_and_delete_group_confirmation_dialog_confirm">刪除群組</string>
   <!-- Text shown on the cancel button in the Close last tab and delete tab group confirmation dialog. -->
   <string name="close_tab_and_delete_group_confirmation_dialog_cancel">取消</string>
+  <!-- Content description for the three dot button next to a tab group" -->
+  <string name="tab_group_three_dot_button_content_description">更多選項</string>
+  <!--
+    Content description for the Expand button on the contracted menu for a tab group:
+    when tapped, tabs are displayed in an expanded grid or list view, taking up the full screen.
+  -->
+  <string name="tab_groups_strip_expand_group_content_description">展開用全螢幕顯示分頁</string>
+  <!-- Text shown on the edit button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_edit">編輯</string>
+  <!-- Text shown on the ungroup button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_ungroup">取消群組</string>
+  <!-- Text shown on the delete button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_delete">刪除</string>
+  <!-- Text shown on the share button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_share">分享</string>
+  <!-- Text shown on the close button for a tab group on the three dot menu -->
+  <string name="tab_group_three_dot_menu_close">關閉</string>
+  <!-- Title for the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_title">要取消分頁群組嗎？</string>
+  <!-- Text shown in the body of the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_body">將刪除群組，但在本裝置維持開啟分頁。</string>
+  <!-- Text shown on the Don't Ask Again checkbox button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_dont_ask_again">不要再問我</string>
+  <!-- Text shown on the confirm button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_confirm">取消群組</string>
+  <!-- Text shown on the cancel button in the Ungroup tab group confirmation dialog. -->
+  <string name="ungroup_tab_group_confirmation_dialog_cancel">取消</string>
+  <!-- Custom accessibility action to reorder a tab up rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_up">向上移動分頁</string>
+  <!-- Custom accessibility action to reorder a tab left rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_left">向左移動分頁</string>
+  <!-- Custom accessibility action to reorder a tab right rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_right">向右移動分頁</string>
+  <!-- Custom accessibility action to reorder a tab down rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_down">向下移動分頁</string>
   <!--
     Color labels for tab groups, used for accessibility and selection UI.
 
@@ -1707,8 +1765,6 @@
   <string name="tab_group_color_pink">粉紅色</string>
   <!-- Tab group color: Purple -->
   <string name="tab_group_color_purple">紫色</string>
-  <!-- Tab group color: Violet -->
-  <string name="tab_group_color_violet">紫羅蘭色</string>
   <!-- Tab group color: Blue -->
   <string name="tab_group_color_blue">藍色</string>
   <!-- Tab group color: Cyan -->
@@ -1725,8 +1781,6 @@
   <string name="history_search_1">輸入搜尋詞彙</string>
   <!-- Text for the button to clear all history -->
   <string name="history_delete_all">刪除瀏覽紀錄</string>
-  <!-- Text for the snackbar to confirm that multiple browsing history items has been deleted -->
-  <string name="history_delete_multiple_items_snackbar">已刪除瀏覽紀錄</string>
   <!-- Text for the snackbar to confirm that a single browsing history item has been deleted. %1$s is the shortened URL of the deleted history item. -->
   <string name="history_delete_single_item_snackbar">已刪除 %1$s</string>
   <!-- Context description text for the button to delete a single history item -->
@@ -1736,16 +1790,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">已選擇 %1$d 筆瀏覽紀錄</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">今天</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">昨天</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">7 天內</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">30 天內</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">更久之前</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">沒有紀錄</string>
   <!--
@@ -1924,6 +1968,8 @@
   <string name="download_search_no_results_found">找不到結果</string>
   <!-- Text for the "Select all" button, which selects all downloaded items in the downloads list. -->
   <string name="download_select_all_items">選擇全部</string>
+  <!-- Shown in the downloads list in place of a website name when a file came from a data: or blob: URL that has no website address. "data" refers to the data: URL scheme. -->
+  <string name="download_item_source_data">（資料）</string>
   <!--
     Downloads Content Type Filters
 
@@ -1968,40 +2014,24 @@
   <string name="webcompat_reporter_clear_reason_content_description">清除選擇的原因</string>
   <!-- The error message of the description when the user selects "Something else" as the reason, but left the description empty or too short. -->
   <string name="webcompat_reporter_description_error">請輸入至少 10 個字元</string>
-  <!-- The label/title of a field in the Web Compat Reporter feature for explaining a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_label_whats_broken_2">哪個部分故障了？</string>
-  <!-- The placeholder text for the dropdown where a user selects a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_2">選擇原因</string>
-  <!-- The error message of the dropdown, prompting the user to select a high-level reason why the site is broken. -->
-  <string name="webcompat_reporter_choose_reason_error">請選擇原因</string>
-  <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
-  <string name="webcompat_reporter_label_description_2">請詳細描述問題，幫助我們調查（選填）</string>
-  <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
-  <string name="webcompat_reporter_label_description">請描述問題（選填）</string>
-  <!-- The button text for navigating away from the feature to provide more information on the broken site's bug report. -->
-  <string name="webcompat_reporter_add_more_info">加入更多資訊</string>
+  <!-- The label/title of a mandatory field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_mandatory_description">請詳細描述問題，幫助我們調查問題</string>
+  <!-- The label/title of a optional field in the Web Compat Reporter feature for adding additional information. -->
+  <string name="webcompat_reporter_label_optional_description">請詳細描述問題，幫助我們調查（選填）</string>
   <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
   <string name="webcompat_reporter_cancel">取消</string>
   <!-- The button text for the send button to submit the provided form data. -->
-  <string name="webcompat_reporter_send">傳送</string>
+  <string name="webcompat_reporter_send_report">傳送報告</string>
   <!-- Text for a snackbar to confirm the successful submission of a WebCompat report. -->
   <string name="webcompat_reporter_success_snackbar_text_2">已送出報告</string>
   <!-- Placeholder text for the description field to prompt the user on what they should type. -->
   <string name="webcompat_reporter_problem_description_placeholder_text_2">發生了什麼事？您認為應該發生什麼？請提供重現問題的步驟。</string>
-  <!-- Placeholder text for the description field to prompt the user on what they should type. -->
-  <string name="webcompat_reporter_problem_description_placeholder_text">應該發生什麼事，卻又實際發生什麼事？</string>
   <!-- Label of the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. -->
   <string name="webcompat_reporter_etp_checkbox_text_2">傳送被追蹤保護功能封鎖的項目清單</string>
-  <!-- Label of the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. -->
-  <string name="webcompat_reporter_etp_checkbox_text">傳送被追蹤保護功能封鎖的網址</string>
-  <!-- Description text for the checkbox on the “Report broken site” screen for sending URLS blocked by Enhanced Tracking Protection. It informs the user when checked, the report will include the list of URLs that were blocked by Enhanced Tracking Protection on the current page. -->
-  <string name="webcompat_reporter_etp_checkbox_description">「加強型追蹤保護」功能可能會封鎖某些網站正常運作所必需的追蹤器與指令碼。</string>
   <!-- The button text for the preview report button to view a preview of the report. -->
   <string name="webcompat_reporter_preview_report">預覽回報內容</string>
   <!-- The title shown at the top of the WebCompat Report preview panel. This appears after the user taps the “Preview” button before sending a report. -->
-  <string name="webcompat_reporter_preview_bottom_sheet_header">回報預覽</string>
-  <!-- Label for the “Send” button shown in the WebCompat Report preview panel, which the user taps to submit the report. -->
-  <string name="webcompat_reporter_preview_bottom_sheet_send">傳送</string>
+  <string name="webcompat_reporter_preview_bottom_sheet_header">預覽回報內容</string>
   <!-- Title for the Edit URL confirmation dialog in the WebCompatReporter -->
   <string name="webcompat_reporter_edit_url_dialog_title">編輯網址</string>
   <!-- Text shown on the save button for the Edit URL confirmation dialog in the WebCompatReporter. -->
@@ -2030,8 +2060,6 @@
   <string name="webcompat_reporter_reason_notsupported_2">不支援或無法使用瀏覽器</string>
   <!-- Broken site reason text for the site being deceptive -->
   <string name="webcompat_reporter_reason_site_is_deceptive">是詐騙網站</string>
-  <!-- Broken site reason text for browser isn’t supported or blocked -->
-  <string name="webcompat_reporter_reason_notsupported">不支援或無法使用瀏覽器</string>
   <!-- Broken site reason text for something else -->
   <string name="webcompat_reporter_reason_other">其他原因</string>
   <!--
@@ -2193,18 +2221,16 @@
   <string name="bookmark_select_folder_new_folder_button_title">新增資料夾</string>
   <!-- Bookmark snackbar message for moving a single item. %1$s is the title of the item being moved and %2$s is the new parent folder of the bookmark -->
   <string name="bookmark_moved_single_item">已將 %1$s 移動至 %2$s</string>
+  <!-- Text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results">找不到符合的項目。</string>
+  <!-- Additional text for bookmark search page when there are no results. -->
+  <string name="bookmark_no_search_results_additional_text">再搜尋一次！</string>
   <!--
     Site Permissions
 
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">開啟設定</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">快速設定表</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">推薦</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -2396,6 +2422,10 @@
   <string name="sync_send_to_all">傳送到所有裝置</string>
   <!-- An option from the share dialog to reconnect to sync -->
   <string name="sync_reconnect">重新連線到 Sync</string>
+  <!-- Label for the button in the share dialog that sends the tab to the selected sync devices -->
+  <string name="sync_send_to_selected_devices">傳送</string>
+  <!-- Content description announced when a device is selected in the share dialog -->
+  <string name="send_to_devices_device_selected_content_description">已選擇</string>
   <!-- Text displayed when sync is offline and cannot be accessed -->
   <string name="sync_offline">離線</string>
   <!-- An option to connect additional devices -->
@@ -2418,6 +2448,24 @@
   <string name="sent_from_firefox_template" tools:ignore="UnusedResources">%1$s\n\n此訊息是使用 %2$s 🦊傳送。來試用行動瀏覽器：%3$s</string>
   <!-- A short message template for the shared link with a footer. %1$s is the shared link, %2$s is the app name (e.g. Firefox) and %3$s is a download link for the app. -->
   <string name="sent_from_firefox_template_short" tools:ignore="UnusedResources">%1$s\n\n此訊息是使用 %2$s 🦊傳送 %3$s</string>
+  <!-- Send tab to synced devices: Authentication error title - Message asking the user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_title">再次登入，即可在裝置間傳送分頁</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_button">登入</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to remove the currently connected account -->
+  <string name="sync_send_tab_error_auth_remove_account">移除帳號</string>
+  <!-- Send tab to synced devices: Empty state title - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_title">沒有已連結的裝置</string>
+  <!-- Send tab to synced devices: Empty state message - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_description" tools:ignore="BrandUsage">請在至少另一台裝置上的 Firefox 登入才能傳送分頁。</string>
+  <!-- Send tab to synced devices: Empty state link - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_link">瞭解如何連結其他裝置</string>
+  <!-- Send tab to synced devices: Connectivity Error title -->
+  <string name="sync_send_tab_error_connection_title">請檢查您的網際網路連線是否正常</string>
+  <!-- Send tab to synced devices: Connectivity Error message - Suggested user action after internet connection has been established -->
+  <string name="sync_send_tab_error_connection_text">然後試著重新傳送一次分頁。</string>
+  <!-- Send tab to synced devices: Connectivity Error button - When tapped, refreshes the list of connected devices. -->
+  <string name="sync_send_tab_error_connection_button">重試</string>
   <!--
     Notifications
 
@@ -2439,6 +2487,18 @@
     The app name is in the text, due to limitations with localizing Nimbus experiments
   -->
   <string name="nimbus_notification_default_browser_text" tools:ignore="BrandUsage,UnusedResources">將 Firefox 設成您的預設瀏覽器</string>
+  <!--
+    Privacy report notification
+
+    Name of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app.
+  -->
+  <string name="notification_privacy_report_channel_name">隱私權報告</string>
+  <!-- Description of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_channel_description">%1$s 會顯示在您上網過程中，封鎖了多少追蹤器。</string>
+  <!-- Body text for the weekly privacy report notification for when trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_body_has_trackers">請繼續上網，%1$s 將持續封鎖追蹤器。</string>
+  <!-- Headline text of the weekly privacy report notification for when no trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_headline_no_trackers">隨您上網，%1$s 會自動封鎖追蹤器。您會在此處看到封鎖資訊。</string>
   <!--
     Survey
 
@@ -2527,7 +2587,7 @@
   <!-- Title for the Delete browsing data on quit preference -->
   <string name="preferences_delete_browsing_data_on_quit">離開時刪除瀏覽資料</string>
   <!-- Summary for the Delete browsing data on quit preference. "Quit" translation should match delete_browsing_data_on_quit_action translation. -->
-  <string name="preference_summary_delete_browsing_data_on_quit_2">點擊主選單中的「離開」時，自動清除上網資料</string>
+  <string name="preference_summary_delete_browsing_data_on_quit_2">點擊主選單中的「離開」時，自動清除瀏覽資料</string>
   <!-- Title text of a delete browsing data dialog. -->
   <string name="delete_history_prompt_title">要清除的時間範圍</string>
   <!-- Body text of a delete browsing data dialog. -->
@@ -2547,7 +2607,7 @@
   <!-- Text for the snackbar confirmation that the data was deleted -->
   <string name="preferences_delete_browsing_data_snackbar">已刪除瀏覽資料</string>
   <!-- Text for the snackbar to show the user that the deletion of browsing data is in progress -->
-  <string name="deleting_browsing_data_in_progress">正在刪除上網資料…</string>
+  <string name="deleting_browsing_data_in_progress">正在刪除瀏覽資料…</string>
   <!-- Dialog message to the user asking to delete all history items inside the opened group. %s is a history group name. -->
   <string name="delete_all_history_group_prompt_message">要刪除「%s」中的所有網站？</string>
   <!-- Text for the cancel button for the history group deletion dialog -->
@@ -2588,6 +2648,12 @@
   <string name="sign_in_create_account_text" tools:ignore="BrandUsage"><![CDATA[沒有帳號嗎？<u>註冊一組</u>就能在不同裝置間同步 Firefox。]]></string>
   <!-- Text shown in confirmation dialog to sign out of account. %s is the name of the app (for example "Firefox"). -->
   <string name="sign_out_confirmation_message_2">%s 將會停止與您帳號間的同步，但不會刪除此裝置上的任何瀏覽資料。</string>
+  <!-- Title of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_title">要登出帳號嗎？</string>
+  <!-- Body of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_message">已同步的資料將保留在您的帳號中。</string>
+  <!-- Text for the primary action button of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_confirm_button">登出</string>
   <!-- Option to continue signing out of account shown in confirmation dialog to sign out of account -->
   <string name="sign_out_disconnect">取消連線</string>
   <!-- Option to cancel signing out shown in confirmation dialog to sign out of account -->
@@ -2597,10 +2663,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">保護設定</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">加強型追蹤保護</string>
   <!-- Preference summary for enhanced tracking protection settings on/off switch -->
   <string name="preference_enhanced_tracking_protection_summary">現在提供 Total Cookie Protection 功能，這是我們針對跨網站追蹤器迄今最強大的屏障。</string>
@@ -2609,14 +2673,6 @@
   <!-- Text displayed that links to website about enhanced tracking protection -->
   <string name="preference_enhanced_tracking_protection_explanation_learn_more">了解更多</string>
   <plurals name="trackers_blocked_count_2">
-    <!--
-      Trackers blocked card on homepage
-
-      Text shown on the trackers blocked card. %d is the number of trackers blocked.
-    -->
-    <item quantity="other">已封鎖 %d 組追蹤器</item>
-  </plurals>
-  <plurals name="trackers_blocked_count">
     <!--
       Trackers blocked card on homepage
 
@@ -2696,12 +2752,8 @@
   <string name="preference_enhanced_tracking_protection_custom_cryptominers">加密貨幣採礦程式</string>
   <!-- Preference for enhanced tracking protection for the custom protection settings -->
   <string name="preference_enhanced_tracking_protection_custom_known_fingerprinters">已知的數位指紋追蹤程式</string>
-  <!-- Button label for navigating to the Enhanced Tracking Protection details -->
-  <string name="enhanced_tracking_protection_details">詳細資訊</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">已封鎖</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">已允許</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">社交媒體追蹤器</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -2711,7 +2763,7 @@
   <!-- Category of trackers (cross-site tracking cookies) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_cookies_title_2">跨網站 Cookie</string>
   <!-- Description of cross-site tracking cookies that can be blocked by Enhanced Tracking Protection -->
-  <string name="etp_cookies_description">封鎖廣告網與分析公司用來在各個網站中收集您的上網資料的 Cookie。</string>
+  <string name="etp_cookies_description">封鎖廣告網與分析公司用來在各個網站中收集您的瀏覽資料的 Cookie。</string>
   <!-- Description of cross-site tracking cookies that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_cookies_description_2">全方位 Cookie 保護功能會將 Cookie 隔離於您所在的網站當中，這樣廣告網所送出的追蹤器就無法透過 Cookie 在不同網站間追蹤您。</string>
   <!-- Category of trackers (cryptominers) that can be blocked by Enhanced Tracking Protection -->
@@ -2724,10 +2776,6 @@
   <string name="etp_tracking_content_title">追蹤用內容</string>
   <!-- Description of tracking content that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_description">防止載入含有追蹤碼的外部廣告、影片及其他內容。可能會影響某些網站功能。</string>
-  <!-- Enhanced Tracking Protection message that protection is currently on for this site -->
-  <string name="etp_panel_on">已開啟此網站的追蹤保護</string>
-  <!-- Enhanced Tracking Protection message that protection is currently off for this site -->
-  <string name="etp_panel_off">已關閉此網站的追蹤保護</string>
   <!-- Header for exceptions list for which sites enhanced tracking protection is always off -->
   <string name="enhanced_tracking_protection_exceptions">針對下列網站關閉加強型追蹤保護</string>
   <!--
@@ -2753,13 +2801,6 @@
   <!-- Category of trackers (fingerprinters) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_known_fingerprinters_title">已知的數位指紋追蹤程式</string>
   <!--
-    Description of the SmartBlock Enhanced Tracking Protection feature. The * symbol is intentionally hardcoded here,
-    as we use it on the UI to indicate which trackers have been partially unblocked.
-  -->
-  <string name="preference_etp_smartblock_description">由於您已與此頁面中的部分追蹤器互動過，已解除封鎖下列標示的追蹤器 *。</string>
-  <!-- Text displayed that links to website about enhanced tracking protection SmartBlock -->
-  <string name="preference_etp_smartblock_learn_more">了解更多</string>
-  <!--
     Content description (not visible, for screen readers etc.):
     Enhanced tracking protection exception preference icon for ETP settings.
   -->
@@ -2783,11 +2824,11 @@
   <!-- Title displayed for "Default Protection" option under "DNS over HTTPS" -->
   <string name="preference_doh_default_protection">預設保護</string>
   <!-- Summary displayed for "Default Protection" option under "DNS over HTTPS". %1$s is the name of the application (e.g. Fenix). -->
-  <string name="preference_doh_default_protection_summary">%1$s 會為您決定使用安全的 DNS 的時機，以保護您的隱私。</string>
+  <string name="preference_doh_default_protection_summary">%1$s 會為您決定使用安全 DNS 的時機，以保護您的隱私。</string>
   <!-- Bullet point 1 for "Default Protection" information page under "DNS over HTTPS" -->
   <string name="preference_doh_default_protection_info_1">使用您選擇的提供者</string>
   <!-- Bullet point 2 for "Default Protection" information page under "DNS over HTTPS" -->
-  <string name="preference_doh_default_protection_info_2">若無法使用安全的 DNS 提供者，就使用您的預設 DNS 解析器。</string>
+  <string name="preference_doh_default_protection_info_2">若無法使用安全 DNS 提供者，就使用您的預設 DNS 解析器</string>
   <!-- Bullet point 3 for "Default Protection" information page under "DNS over HTTPS". %1$s is replaced by a link using `preference_doh_learn_more` at text ("Learn More"). -->
   <string name="preference_doh_default_protection_info_3">盡可能使用本機提供者。%1$s</string>
   <!-- Bullet point 4 for "Default Protection" information page under "DNS over HTTPS" -->
@@ -2801,7 +2842,7 @@
   <!-- Bullet point 1 for "Increased Protection" information page under "DNS over HTTPS" -->
   <string name="preference_doh_increased_protection_info_1">使用您選擇的提供者</string>
   <!-- Bullet point 2 for "Increased Protection" information page under "DNS over HTTPS" -->
-  <string name="preference_doh_increased_protection_info_2">只在無法使用安全的 DNS 提供者時，使用您的預設 DNS 解析器。</string>
+  <string name="preference_doh_increased_protection_info_2">只在無法使用安全 DNS 提供者時，使用您的預設 DNS 解析器</string>
   <!-- Title displayed for "Max Protection" option under "DNS over HTTPS" -->
   <string name="preference_doh_max_protection">最大保護</string>
   <!-- Summary displayed for "Max Protection" option under "DNS over HTTPS". %1$s is the name of the application (e.g. Fenix). -->
@@ -2837,7 +2878,7 @@
   <!-- Preference to access list of login exceptions that we don't use DNS over HTTPS -->
   <string name="preference_doh_exceptions">例外網站</string>
   <!-- Description of "exceptions" for "DNS over HTTPS". %1$s is the name of the app (for example "Firefox"). -->
-  <string name="preference_doh_exceptions_summary">%1$s 不會對下列網站與子網域網站，使用安全的 DNS 進行查詢。</string>
+  <string name="preference_doh_exceptions_summary">%1$s 不會對下列網站與子網域網站，使用安全 DNS 進行查詢。</string>
   <!-- Text displayed that links to adding website domain for "DNS over HTTPS" exceptions. -->
   <string name="preference_doh_exceptions_add">新增網站</string>
   <!-- Text displayed above the input field when adding exceptions for "DNS over HTTPS". -->
@@ -2888,12 +2929,8 @@
   <string name="add_to_homescreen_cancel">取消</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">新增</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">繼續前往網站</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">捷徑名稱</string>
-  <!-- Describes the add to homescreen functionality -->
-  <string name="add_to_homescreen_description_2">您可將此網站加到裝置主畫面，方便快速開啟，或是以類似 App 的方式使用。</string>
   <!-- Preference for managing the settings for logins and passwords in Fenix -->
   <string name="preferences_passwords_logins_and_passwords_2">密碼</string>
   <!-- Preference for managing the saving of logins and passwords in Fenix -->
@@ -3035,14 +3072,14 @@
   <!-- Label for the BETA badge for the browser VPN entry in the settings list -->
   <string name="preferences_ip_protection_beta_badge_label">BETA 測試</string>
   <!-- Title for the browser VPN settings screen (displayed in the app bar) -->
-  <string name="ip_protection_title">VPN</string>
+  <string name="ip_protection_settings_title">內建 VPN</string>
   <!-- Label for the browser VPN toggle on the settings screen -->
   <string name="ip_protection_toggle_label">VPN</string>
   <!-- Content description for the browser VPN settings screen top bar back button -->
   <string name="ip_protection_navigate_back_button_content_description">瀏覽上一頁</string>
   <!-- Headline for the browser VPN promo card. %s is the name of the app (for example "Firefox"). -->
   <string name="ip_protection_promo_headline">%s 內建的 VPN</string>
-  <!-- Body text for the browser VPN promo card . %s is a learn more link using ip_protection_learn_more as text. -->
+  <!-- Body text for the browser VPN settings header, shown when no promo is running. %s is a learn more link using ip_protection_learn_more as text. -->
   <string name="ip_protection_promo_body_2">隱藏您的實際所在位置，就算是使用公共 Wi-Fi 也能獲得額外保護。%s</string>
   <!-- Link text that opens additional information about the browser VPN -->
   <string name="ip_protection_learn_more">更多資訊</string>
@@ -3053,7 +3090,7 @@
     %1$.1f is the data remaining in GB (for example "8.3").
     %2$.1f is the total monthly allowance in GB (for example "50.0").
   -->
-  <string name="ip_protection_data_limit_value">已用 %1$.1f GB，剩餘 %2$.1f GB</string>
+  <string name="ip_protection_data_limit_value">可用 %2$.1f GB，剩餘 %1$.1f GB</string>
   <!--
     Text shown below the data usage bar describing when the monthly allowance resets.
     %1$.0f is the total monthly data allowance in GB (for example "50").
@@ -3063,8 +3100,6 @@
   <string name="ip_protection_location_section">位置</string>
   <!-- Label for the recommended automatic location option on the browser VPN settings screen -->
   <string name="ip_protection_location_recommended_label">推薦</string>
-  <!-- Description for the recommended automatic location option on the browser VPN settings screen -->
-  <string name="ip_protection_location_recommended_description">為您選擇最快的 VPN 連線地點。</string>
   <!-- Badge label shown in the menu item when the browser VPN is active -->
   <string name="preferences_ip_protection_on">開啟</string>
   <!-- Badge label shown in the menu item when the browser VPN is off -->
@@ -3075,8 +3110,8 @@
   <string name="ip_protection_menu_paused">已暫停</string>
   <!-- Badge label shown in the menu item when the browser VPN has an error -->
   <string name="ip_protection_menu_error">錯誤</string>
-  <!-- Badge label shown in the menu item when the user is eligible to use the browser VPN but should authenticate or authorize it first. -->
-  <string name="ip_protection_menu_auth_required">試試看</string>
+  <!-- Badge label shown in the VPN menu item when the user is eligible for the feature but needs to authenticate / authorize to enable it -->
+  <string name="ip_protection_menu_try_vpn_cta">免費試用</string>
   <!-- Content description for the chevron button that opens the browser VPN settings screen -->
   <string name="ip_protection_navigate_settings">開啟 VPN 設定</string>
   <!--
@@ -3093,6 +3128,10 @@
   <string name="ip_protection_toolbar_pill_label">VPN 開啟</string>
   <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has been activated -->
   <string name="ip_protection_toolbar_pill_description">已開啟 VPN。</string>
+  <!-- Label shown next to the browser protection icon in the address bar when the browser VPN turns off -->
+  <string name="ip_protection_toolbar_pill_label_off">VPN 關閉</string>
+  <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has turned off -->
+  <string name="ip_protection_toolbar_pill_description_off">已關閉 VPN。</string>
   <!-- Label for the button that starts the browser VPN authentication or authorization flow on the settings screen -->
   <string name="ip_protection_get_started">開始使用</string>
   <!-- Label for the "connecting" state of the button that starts the browser VPN authentication or authorization flow on the settings screen -->
@@ -3119,13 +3158,45 @@
   <string name="ip_protection_onboarding_not_now_button">現在不要</string>
   <!-- Snackbar (in-app pop-up notification) text to signal the browser VPN connection error -->
   <string name="ip_protection_connection_error_snackbar">無法連線至 VPN，請稍候再試。</string>
+  <!-- Snackbar (in-app pop-up notification) text to signal the VPN location has been reset due to the previously selected VPN location being no longer available. -->
+  <string name="ip_protection_location_selection_reset_snackbar">選擇的 VPN 連線位置無法使用，已切換至建議位置。</string>
   <!--
     Snackbar (in-app pop-up notification) text to signal the browser VPN has reached the monthly data limit.
     %1$d is the total monthly allowance in GB (for example "50").
   -->
   <string name="ip_protection_data_limit_reached_snackbar">已使用 %1$d GB VPN 流量。將於下個月重設存取權限。</string>
   <!-- Snackbar (in-app pop-up notification) action button text that takes the user to the VPN settings screen. -->
-  <string name="ip_protection_data_limit_reached_snackbar_action">設定</string>
+  <string name="ip_protection_open_settings_snackbar_action">設定</string>
+  <!-- Description shown on the browser VPN settings screen prompting the user to turn the VPN on. -->
+  <string name="ip_protection_settings_description" tools:ignore="UnusedResources">開啟 VPN，讓您的上網過程更有隱私、更難被追蹤。</string>
+  <!-- Title shown on the browser VPN settings screen for location selection section. -->
+  <string name="ip_protection_location_title" tools:ignore="UnusedResources">位置</string>
+  <!-- Label for the Recommended server location option which is automatically selected by the browser. -->
+  <string name="ip_protection_recommended_location" tools:ignore="UnusedResources">推薦</string>
+  <!-- Headline for the card that promotes the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_headline" tools:ignore="UnusedResources,BrandUsage">使用 Mozilla VPN 獲得更多保護</string>
+  <!-- Body for the card that promotes the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_body" tools:ignore="UnusedResources">超過 300 個位置任選，並可於最多 5 台裝置保護您的所有應用程式。</string>
+  <!-- Label for the button that takes the user to get the standalone Mozilla VPN product. -->
+  <string name="ip_protection_mozilla_vpn_upsell_button" tools:ignore="UnusedResources,BrandUsage">下載 Mozilla VPN</string>
+  <!-- Title for the browser VPN location picker screen. -->
+  <string name="ip_protection_location_picker_title" tools:ignore="UnusedResources">選擇 VPN 連線位置</string>
+  <!-- Description for what it means to use the Recommended setting and let the app automatically pick the best server location. -->
+  <string name="ip_protection_location_fastest_description" tools:ignore="BrandUsage">Firefox 會自動尋找最快位置</string>
+  <!-- Description for an unavailable VPN location in the location list. -->
+  <string name="ip_protection_location_unavailable_description">無法使用</string>
+  <!-- Error message shown when the selected browser VPN location is unavailable. -->
+  <string name="ip_protection_location_unavailable" tools:ignore="UnusedResources">無法使用此位置，請改選其他位置。</string>
+  <!-- Snackbar (in-app pop-up notification) text shown when the previously selected browser VPN location is unavailable and the recommended location was used instead. -->
+  <string name="ip_protection_location_unavailable_recommended_snackbar" tools:ignore="UnusedResources">選擇的 VPN 連線位置無法使用，已改連線至建議位置。</string>
+  <!-- Title for the card shown to the user when we are unable to fetch server locations -->
+  <string name="ip_protection_locations_unavailable_title">無法取得位置資訊</string>
+  <!-- Description for the card shown to the user when we are unable to fetch server locations -->
+  <string name="ip_protection_locations_unavailable_description">已將連線切換至建議位置。</string>
+  <!-- Title for the browser VPN location selection screen (displayed in the app bar) -->
+  <string name="ip_protection_locations_title">選擇 VPN 連線位置</string>
+  <!-- Content description for the browser VPN location selection screen top bar back button -->
+  <string name="ip_protection_locations_navigate_back_button_content_description">瀏覽上一頁</string>
   <!--
     Autofill
 
@@ -3151,7 +3222,7 @@
   <!-- Preference option for adding an address -->
   <string name="preferences_addresses_add_address">新增地址</string>
   <!-- Preference option for managing saved addresses -->
-  <string name="preferences_addresses_manage_addresses">管理已存地址</string>
+  <string name="preferences_addresses_manage_addresses">管理已儲存的地址</string>
   <!-- Preference for saving and filling addresses -->
   <string name="preferences_addresses_save_and_autofill_addresses_2">儲存並自動填寫地址</string>
   <!-- Preference summary for saving and filling address data -->
@@ -3206,6 +3277,14 @@
   <string name="credit_cards_warning_dialog_set_up_now">立即設定</string>
   <!-- Negative button to ignore warning dialog if users have no device authentication set up -->
   <string name="credit_cards_warning_dialog_later">稍後再設</string>
+  <!-- Title of the dialog shown on Android Automotive OS (in cars) when users have no device authentication set up and try to access their saved passwords, payment methods, or sign in to their account -->
+  <string name="automotive_authentication_setup_dialog_title">加密您的敏感資料</string>
+  <!-- Message of the dialog shown on Android Automotive OS (in cars) when users have no device authentication set up and try to access their saved passwords, payment methods, or sign in to their account -->
+  <string name="automotive_authentication_setup_dialog_message">設定裝置解鎖圖形、PIN 碼或密碼來保護您儲存的敏感資料，避免別人在駕駛您的車輛時存取。</string>
+  <!-- Primary button on the dialog shown on Android Automotive OS (in cars). Tapping it directs users to the device settings to set up a device lock -->
+  <string name="automotive_authentication_setup_dialog_set_up_now">立即設定</string>
+  <!-- Secondary button of the dialog shown on Android Automotive OS (in cars). Tapping closes the dialogue and cancels the action that triggered the dialogue. -->
+  <string name="automotive_authentication_setup_dialog_cancel">取消</string>
   <!-- Title of PIN verification dialog to direct users to re-enter their device credentials to access their credit cards -->
   <string name="credit_cards_biometric_prompt_message_pin">裝置解鎖</string>
   <!-- Message displayed in biometric prompt for authentication, before allowing users to use their stored payment method information -->
@@ -3215,7 +3294,7 @@
   <!-- Title of the "Edit address" screen -->
   <string name="addresses_edit_address">編輯地址</string>
   <!-- Title of the "Manage addresses" screen -->
-  <string name="addresses_manage_addresses">管理已存地址</string>
+  <string name="addresses_manage_addresses">管理已儲存的地址</string>
   <!-- The header for the name of an address. Name represents a person's full name, typically made up of a first, middle and last name, e.g. John Joe Doe. -->
   <string name="addresses_name">姓名</string>
   <!-- Label for an address field (e.g. mailing address) used as part of the form autofill feature. The organization's name related to the address helps in distinguishing addresses used for business or personal purposes. -->
@@ -3278,8 +3357,6 @@
   <string name="addresses_save_button">儲存</string>
   <!-- The text for the "Cancel" button for cancelling adding, updating or deleting an address -->
   <string name="addresses_cancel_button">取消</string>
-  <!-- The text for the "Delete address" button for deleting an address -->
-  <string name="addressess_delete_address_button">刪除地址</string>
   <!-- The title for the "Delete address" confirmation dialog -->
   <string name="addressess_confirm_dialog_message_2">要刪除這筆地址嗎？</string>
   <!-- The text for the positive button on "Delete address" dialog -->
@@ -3334,16 +3411,8 @@
   <string name="phone_feature_blocked_step_permissions"><![CDATA[2. 點擊<b>權限</b>]]></string>
   <!-- Third step for the allowing a permission (%1$s is the permission name, for example "Camera"). -->
   <string name="phone_feature_blocked_step_feature"><![CDATA[3. 開啟<b>%1$s</b>權限]]></string>
-  <!-- Label that indicates a site is using a secure connection -->
-  <string name="quick_settings_sheet_secure_connection_2">安全連線</string>
-  <!-- Label that indicates a site is using a insecure connection -->
-  <string name="quick_settings_sheet_insecure_connection_2">連線不安全</string>
-  <!-- Label that indicates a site is displaying a local document -->
-  <string name="quick_settings_sheet_local_page">此頁面位於您的裝置上。</string>
   <!-- Label to clear site data -->
   <string name="clear_site_data">清除 Cookie 與網站資料</string>
-  <!-- Confirmation message for a dialog confirming if the user wants to delete all data for current site. %s is the domain of the site. -->
-  <string name="confirm_clear_site_data"><![CDATA[您確定要清除 <b>%s</b> 網站的所有 Cookie 與儲存資料嗎？]]></string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for all sites -->
   <string name="confirm_clear_permissions_on_all_sites">您確定要清除所有網站的所有權限嗎？</string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for a site -->
@@ -3356,11 +3425,6 @@
   <string name="browser_menu_add_to_shortcuts">新增為捷徑</string>
   <!-- Browser menu button that removes a shortcut from the home fragment -->
   <string name="browser_menu_remove_from_shortcuts">已從捷徑刪除</string>
-  <!--
-    text shown before the issuer name to indicate who its verified by, %1$s is the name of
-    the certificate authority that verified the ticket
-  -->
-  <string name="certificate_info_verified_by">驗證機構: %1$s</string>
   <!-- Message in delete confirmation dialog for password -->
   <string name="login_deletion_confirmation_2">你確定要刪除這筆密碼嗎？</string>
   <!-- Positive action of a dialog asking to delete -->
@@ -3424,6 +3488,16 @@
     which navigates the user to a screen displaying all the shortcuts.
   -->
   <string name="homepage_shortcuts_show_all_content_description">顯示所有捷徑</string>
+  <!--
+    Label for the button in the shortcuts home screen section that expands the section to show
+    every shortcut.
+  -->
+  <string name="homepage_shortcuts_show_all">顯示全部</string>
+  <!--
+    Label for the button in the shortcuts home screen section that collapses the section back
+    to showing only the first shortcuts.
+  -->
+  <string name="homepage_shortcuts_show_less">顯示更少</string>
   <!-- Label for the "Add shortcut" button displayed as a tile. -->
   <string name="homepage_shortcuts_add_shortcut">新增捷徑</string>
   <!-- Title for the "Add to homepage" bottom sheet. -->
@@ -3555,8 +3629,6 @@
   <string name="a11y_action_label_expand">展開</string>
   <!-- Action label for links to a website containing documentation about a wallpaper collection. Talkback will append this to say "Double tap to open link to learn more about this collection". -->
   <string name="a11y_action_label_wallpaper_collection_learn_more">開啟鏈結，了解此收藏集的更多資訊</string>
-  <!-- Translations feature -->
-
   <!--
     Translation request dialog
 
@@ -3833,8 +3905,6 @@
     and there are no trackers blocked.
   -->
   <string name="protection_panel_banner_protected_no_blocked_trackers_description">讓我們保護您。</string>
-  <!-- Description text for the protection panel banner when tracking protection is enabled. -->
-  <string name="protection_panel_banner_protected_description">您已受到保護，若我們發現某些不安全的地方會再通知您。</string>
   <!-- Label text for the Enhanced Tracking Protection toggle. -->
   <string name="protection_panel_etp_toggle_label">加強型追蹤保護</string>
   <!-- Toggle if Enhanced Tracking Protection is turned on -->
@@ -3850,8 +3920,6 @@
     %d is a placeholder for the number of trackers blocked.
   -->
   <string name="protection_panel_num_trackers_blocked">追蹤器封鎖數量：%d</string>
-  <!-- Text for when no trackers have been blocked. -->
-  <string name="protection_panel_no_trackers_blocked">找不到追蹤器</string>
   <!-- Text for when tracking protection is disabled and no trackers are blocked. -->
   <string name="protection_panel_etp_disabled_no_trackers_blocked">不會封鎖追蹤器</string>
   <!-- Link text to navigate to privacy and security settings from the protection panel. -->
@@ -3907,17 +3975,6 @@
     -->
     <item quantity="other">本週已封鎖 %1$d 組追蹤器</item>
   </plurals>
-  <!--
-    Text for displaying the total number of trackers blocked in the trackers blocked panel.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_total_num_trackers_blocked">追蹤器封鎖數量：%d</string>
-  <!--
-    Text for displaying the number of trackers blocked for a specific tracker category in the trackers blocked panel.
-    %s is a placeholder for the name of the tracker category.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="trackers_blocked_panel_categorical_num_trackers_blocked">%s：%d 組</string>
   <!--
     Description text for a dialog confirming whether the user wants to delete all data for current site.
     %s is a placeholder for the base domain of website.
@@ -4070,17 +4127,17 @@
   -->
   <string name="microsurvey_uninstall_survey_title">您的意見對我們很重要。請讓我們知道移除原因？</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_1">網頁問題</string>
+  <string name="uninstall_survey_option_1_v2">網站速度很慢或不穩定</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_2">影片或檔案下載問題</string>
+  <string name="uninstall_survey_option_2_v2">網站無法正常運作</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_3">效能問題</string>
+  <string name="uninstall_survey_option_3_v2">缺少我需要的功能</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_4">功能或設計問題</string>
+  <string name="uninstall_survey_option_4_v2">無法影片、下載檔案或播放媒體內容</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_5">與隱私權相關的問題</string>
+  <string name="uninstall_survey_option_5_v2">很難使用，或設計不良</string>
   <!-- Uninstall survey answer option -->
-  <string name="uninstall_survey_option_6">付款與訂閱問題</string>
+  <string name="uninstall_survey_option_6_v2">有隱私權或安全性疑慮</string>
   <!-- Button label shown at the bottom of the uninstall survey -->
   <string name="uninstall_survey_button_label">送出意見回饋並移除</string>
   <!--
@@ -4118,7 +4175,7 @@
   <!-- The title of the section header for the list of debug locales that can be enabled and disabled. -->
   <string name="debug_drawer_addresses_debug_locales_header">要開啟的除錯語系</string>
   <!-- The title of the header for the section for managing addresses. -->
-  <string name="debug_drawer_addresses_management_header">管理已存地址</string>
+  <string name="debug_drawer_addresses_management_header">管理已儲存的地址</string>
   <!-- The title of the button in the debug drawer for adding a new address. -->
   <string name="debug_drawer_add_new_address">新增所選語系的新地址</string>
   <!-- The title of the button for deleting in the debug drawer all addresses. -->
@@ -4231,8 +4288,6 @@
   <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">請於 3 月 14 日前更新，以繼續使用附加元件與其他功能。</string>
   <!-- Push notification message about old Firefox version -->
   <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">某些功能將於明天失效。</string>
-  <!-- TextField Design System Component -->
-
   <!--
     Setup checklist feature
 
@@ -4391,8 +4446,6 @@
   <string name="settings_search_no_results_message">試試不同的搜尋條件？</string>
   <!-- Content Description for the button to open Settings Search (to search through settings). -->
   <string name="settings_search_button_content_description">搜尋選項按鈕</string>
-  <!-- ==== Terms of use pop up prompt ==== -->
-
   <!-- Title for the pop up prompt -->
   <string name="terms_of_use_prompt_title">這裡有點新鮮事</string>
   <!--
@@ -4417,8 +4470,6 @@
   <string name="terms_of_use_prompt_accept">接受</string>
   <!-- Label for a button to postpone accepting the terms of use -->
   <string name="terms_of_use_prompt_postpone">待會提醒我</string>
-  <!-- ==== Experiment strings. ==== -->
-
   <!-- A title for the popup prompt. -->
   <string name="terms_of_use_prompt_title_option_a" tools:ignore="UnusedResources">使用條款</string>
   <!--
@@ -4434,223 +4485,6 @@
   <!-- Link text for terms_of_use_prompt_body_line_two_alternative that links to a site with more information about the Terms of Use -->
   <string name="terms_of_use_prompt_body_line_two_alternative_link" tools:ignore="UnusedResources">這裡</string>
   <!--
-    Sports widget
-
-    Title text shown at the top of the sports widget country selector, encouraging the user to pick a national team to follow.
-  -->
-  <string name="sports_widget_country_selector_title">關注您支持的隊伍</string>
-  <!-- Section header for the North America region in the sports widget country selector. -->
-  <string name="sports_widget_confederation_north_america">北美洲</string>
-  <!-- Section header for the Africa confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_africa">非洲</string>
-  <!-- Section header for the Asia confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_asia">亞洲</string>
-  <!-- Section header for the CONCACAF confederation group in the sports widget country selector. "CONCACAF" is the abbreviation for "Confederation of North, Central America and Caribbean Association Football". -->
-  <string name="sports_widget_confederation_concacaf">中北美洲及加勒比海足協</string>
-  <!-- Section header for the Europe confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_europe">歐洲</string>
-  <!-- Section header for the Oceania confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_oceania">大洋洲</string>
-  <!-- Section header for the South America confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_south_america">南美洲</string>
-  <!-- Country name for England in the sports widget. England cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_england">英格蘭</string>
-  <!-- Country name for Scotland in the sports widget. Scotland cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_scotland">蘇格蘭</string>
-  <!-- Label shown on the sports widget scoreboard when a match is currently being played live. -->
-  <string name="sports_widget_match_live">進行中</string>
-  <!-- Title shown on the sports widget champion scoreboard row celebrating the soccer tournament winner. -->
-  <string name="sports_widget_champions_title">2026 年世界盃足球賽冠軍</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament runners-up. Runners-up means second place. -->
-  <string name="sports_widget_runner_up_title" tools:ignore="UnusedResources">亞軍</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament third place winners. -->
-  <string name="sports_widget_third_place_title">季軍</string>
-  <!-- Round name shown on the sports widget for the Round of 32 stage in the soccer tournament. -->
-  <string name="sports_widget_round_of_32">32 強賽</string>
-  <!-- Round name shown on the sports widget for the Round of 16 stage in the soccer tournament. -->
-  <string name="sports_widget_round_of_16">16 強賽</string>
-  <!-- Round name shown on the sports widget for the quarter-finals stage in the soccer tournament. -->
-  <string name="sports_widget_quarter_final">8 強賽</string>
-  <!-- Round name shown on the sports widget for the semi-finals stage in the soccer tournament. -->
-  <string name="sports_widget_semi_final">準決賽</string>
-  <!-- Round name shown on the sports widget for the final stage in the soccer tournament. -->
-  <string name="sports_widget_final">決賽</string>
-  <!-- Round name shown on the sports widget for the bronze final stage in the soccer tournament. -->
-  <string name="sports_widget_bronze_final">銅牌戰</string>
-  <!-- Sports widget error card message shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed" tools:ignore="UnusedResources">目前暫時無法提供賽事資訊，請稍候幾分鐘再重新整理頁面。</string>
-  <!-- Sports widget error card message shown when the network connection is interrupted and live updates pause. -->
-  <string name="sports_widget_error_connection_interrupted" tools:ignore="UnusedResources">連線中斷 — 即時更新已暫停。</string>
-  <!-- Sports widget action label to refresh match data after an error. -->
-  <string name="sports_widget_error_refresh">重新整理</string>
-  <!-- Sports widget group stage label for group A in the soccer tournament. -->
-  <string name="sports_widget_group_a">A 組</string>
-  <!-- Sports widget group stage label for group B in the soccer tournament. -->
-  <string name="sports_widget_group_b">B 組</string>
-  <!-- Sports widget group stage label for group C in the soccer tournament. -->
-  <string name="sports_widget_group_c">C 組</string>
-  <!-- Sports widget group stage label for group D in the soccer tournament. -->
-  <string name="sports_widget_group_d">D 組</string>
-  <!-- Sports widget group stage label for group E in the soccer tournament. -->
-  <string name="sports_widget_group_e">E 組</string>
-  <!-- Sports widget group stage label for group F in the soccer tournament. -->
-  <string name="sports_widget_group_f">F 組</string>
-  <!-- Sports widget group stage label for group G in the soccer tournament. -->
-  <string name="sports_widget_group_g">G 組</string>
-  <!-- Sports widget group stage label for group H in the soccer tournament. -->
-  <string name="sports_widget_group_h">H 組</string>
-  <!-- Sports widget group stage label for group I in the soccer tournament. -->
-  <string name="sports_widget_group_i">I 組</string>
-  <!-- Sports widget group stage label for group J in the soccer tournament. -->
-  <string name="sports_widget_group_j">J 組</string>
-  <!-- Sports widget group stage label for group K in the soccer tournament. -->
-  <string name="sports_widget_group_k">K 組</string>
-  <!-- Sports widget group stage label for group L in the soccer tournament. -->
-  <string name="sports_widget_group_l">L 組</string>
-  <!-- Sports widget button label to see match results. -->
-  <string name="sports_widget_see_results" tools:ignore="UnusedResources">看比賽結果</string>
-  <!-- Sports widget button label to view details of a soccer match results. -->
-  <string name="sports_widget_view_match_details" tools:ignore="UnusedResources">檢視比賽結果</string>
-  <!-- Sports widget section header for related soccer matches in the same group. -->
-  <string name="sports_widget_related_matches" tools:ignore="UnusedResources">相關比賽</string>
-  <!-- Sports widget section header for a list of upcoming soccer matches that have not yet started. -->
-  <string name="sports_widget_upcoming" tools:ignore="UnusedResources">即將到來</string>
-  <!-- Sports widget match status suffix appended to match scores (e.g., "3 - 2 (Full time)") to indicate the match has been completed. -->
-  <string name="sports_widget_match_full_time_suffix">（終場）</string>
-  <!-- Sports widget match status to indicate the match has been completed. -->
-  <string name="sports_widget_match_full_time_2">終場</string>
-  <!--
-    Sports widget card title encouraging the user to follow the soccer tournament. “Keep tabs on” is an informal expression
-    meaning to stay updated on or regularly follow something (in this case, World Cup matches and updates).
-    It’s playfully related to Firefox in that “tabs” are a browser feature.
-    It suggests ongoing awareness rather than active monitoring or control. Not to be translated literally as physical “tabs”
-    or tracking in a technical sense; the meaning is about staying informed.
-  -->
-  <string name="sports_widget_card_title">獲得世界盃賽事的最新資訊</string>
-  <!-- Sports widget card description shown below the title on the homepage entry point. -->
-  <string name="sports_widget_card_description">獲得即時比賽資訊與更多資訊。</string>
-  <!-- Sports widget menu item to change the selected team. -->
-  <string name="sports_widget_change_team">更換隊伍</string>
-  <!-- Sports widget menu item to get a custom wallpaper for the widget. -->
-  <string name="sports_widget_get_custom_wallpaper">獲得自訂背景圖</string>
-  <!-- Sports widget menu item to remove the widget from the homepage. -->
-  <string name="sports_widget_remove">移除</string>
-  <!-- Sports widget card title shown after a team is eliminated, asking if the user still wants to continue following the soccer tournament. -->
-  <string name="sports_widget_still_want_to_follow">還是想要關注嗎？</string>
-  <!-- Sports widget card description shown after a team is eliminated, suggesting to choose another team. -->
-  <string name="sports_widget_choose_another_team">選擇另一隊繼續關注世界盃競賽。</string>
-  <!-- Sports widget button label to follow another team after the current team is eliminated. -->
-  <string name="sports_widget_follow_another_team">關注另一隊</string>
-  <!-- Sports widget card title shown before the soccer tournament begins on top of a timer that is counting down. -->
-  <string name="sports_widget_countdown_to_world_cup">世界盃足球賽倒數計時</string>
-  <!-- Sports widget button label that navigates the user to the full soccer tournament match schedule. -->
-  <string name="sports_widget_view_schedule">檢視賽程</string>
-  <!-- Sports widget button label that dismisses the step of choosing a team to follow. -->
-  <string name="sports_widget_skip">略過</string>
-  <!-- Sports widget match status label shown during halftime of a match. -->
-  <string name="sports_widget_halftime" tools:ignore="UnusedResources">中場休息</string>
-  <!-- Sports widget match status label shown during extra time of a match. -->
-  <string name="sports_widget_extra_time">加時</string>
-  <!-- Sports widget match status label shown during penalties of a match. -->
-  <string name="sports_widget_penalties">PK 大戰</string>
-  <!--
-    Sports widget countdown label for days. D is short for Day. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that (e.g. T for German).
-    Your translation will be automatically truncated at 2 characters to avoid layout issues.
-  -->
-  <string name="sports_widget_countdown_days">天</string>
-  <!--
-    Sports widget countdown pill abbreviated label for hours. H is short for Hour. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that (e.g. S for German).
-    Your translation will be automatically truncated at 2 characters to avoid layout issues.
-  -->
-  <string name="sports_widget_countdown_hours">小時</string>
-  <!--
-    Sports widget countdown pill abbreviated label for minutes. M is short for Minute. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that.
-    Your translation will be automatically truncated at 2 characters to avoid layout issues
-  -->
-  <string name="sports_widget_countdown_minutes">分鐘</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget team / country selector. -->
-  <string name="sports_widget_close_team_selection_sheet_content_description">關閉隊伍選擇表單</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget card. -->
-  <string name="sports_widget_close_content_description">關閉</string>
-  <!-- Content description (for accessibility, not displayed) for the overflow (more options) menu button on the sports widget card. -->
-  <string name="sports_widget_more_options_content_description">更多選項</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing the time remaining until the soccer tournament kickoff.
-    %1$d is the number of days, %2$d is the number of hours, and %3$d is the number of minutes.
-  -->
-  <string name="sports_widget_countdown_remaining_content_description">剩餘時間。%1$d 天，%2$d 小時，%3$d 分鐘。</string>
-  <!-- Content description (for accessibility, not displayed)  for the action that navigates to the World Cup website. -->
-  <string name="sports_widget_go_to_world_cup_site_content_description" tools:ignore="UnusedResources">前往世界盃足球賽官方網站</string>
-  <!--
-    Content description (for accessibility, not displayed)  announcing an upcoming soccer match.
-    %1$s is the home team name, %2$s is the away team name, %3$s is the match date, %4$s is the kickoff time.
-  -->
-  <string name="sports_widget_upcoming_match_content_description">即將到來：%3$s 的 %4$s，%1$s 對 %2$s</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing a soccer match.
-    %1$s is the home team name, %2$s is the away team name, %3$s is trailing context
-    (e.g. formatted score "1 - 2 (Full time)", upcoming match info "Jun 19 5:00 PM",
-    or a match status like "Full time").
-  -->
-  <string name="sports_widget_match_content_description">%1$s對%2$s，%3$s</string>
-  <!--
-    Content description (for accessibility, not displayed)  used for the sports widget card header announcing a live match for a group or stage.
-    %s is the soccer tournament group name or stage (e.g. Group A represented by sports_widget_group_a, Round of 32 represented by sports_widget_round_of_32,
-    or Final represented by sports_widget_final).
-  -->
-  <string name="sports_widget_live_game_content_description">%s，比賽進行中</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing a live score.
-    %1$s is the home team name, %2$d is the home team score, %3$s is the away team name, %4$d is the away team score,
-    and %5$s is the match elapsed time (e.g. 72 minutes).
-  -->
-  <string name="sports_widget_live_score_content_description">%1$s 得 %2$d 分，%3$s 得 %4$d 分，比賽時間 %5$s，進行中</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing the elapsed minutes of a live match.
-    %1$s is the clock value, which may be a plain number (e.g. "72") or include extra time (e.g. "90+3").
-  -->
-  <string name="sports_widget_match_elapsed_minutes">比賽時間（分鐘）：%1$s</string>
-  <!--
-    Content description (for accessibility, not displayed) for a paginated item.
-    %1$s is the soccer tournament group name or stage (e.g. Group A represented by sports_widget_group_a, Round of 32 represented by sports_widget_round_of_32),
-    %2$d is the current page number, and %3$d is the total number of pages.
-  -->
-  <string name="sports_widget_page_position_content_description">%1$s，第 %2$d 頁，共 %3$d 頁</string>
-  <!--
-    Content description (for accessibility, not displayed) for a page within the World Cup final results carousel.
-    %1$d is the current page number, and %2$d is the total number of pages.
-  -->
-  <string name="sports_widget_final_results_page_content_description" tools:ignore="UnusedResources">世界盃足球賽最終成績，第 %1$d 頁，共 %2$d 頁</string>
-  <!-- Content description (for accessibility, not displayed) for the World Cup final results page. -->
-  <string name="sports_widget_final_results_content_description">世界盃足球賽最終成績</string>
-  <!-- Content description (for accessibility, not displayed) for the remove button that removes the sports widget from the homepage. -->
-  <string name="sports_widget_remove_content_description" tools:ignore="UnusedResources">從首頁移除世界盃足球賽相關資訊</string>
-  <!-- Title shown on the sports widget immediately after the user has followed a team. %s is the selected team (e.g., "USA"). -->
-  <string name="sports_widget_team_followed_title">關注中：\n%s</string>
-  <!-- Description shown on the sports widget immediately after the user has followed a team -->
-  <string name="sports_widget_team_followed_description">接近比賽時間時，請再回來獲得賽事最新資訊。</string>
-  <!-- Sports widget match status label shown during first half of a match. -->
-  <string name="sports_widget_first_half" tools:ignore="UnusedResources">上半場</string>
-  <!-- Sports widget match status label shown during second half of a match. -->
-  <string name="sports_widget_second_half" tools:ignore="UnusedResources">下半場</string>
-  <!-- Sports widget error card title shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_title">看來您的網路不通。</string>
-  <!-- Sports widget error card description shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_description">請確認網路連線正常後再試一次。</string>
-  <!-- Sports widget general group stage label in the soccer tournament. -->
-  <string name="sports_widget_group_stage">小組賽</string>
-  <!-- Sports widget error card title shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed_title">目前暫時無法取得賽事資訊。</string>
-  <!-- Sports widget error card description shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed_description">請稍候幾分鐘再重新整理。</string>
-  <!-- Content description (for accessibility, not displayed) for teams which have not yet been determined in the match schedule. -->
-  <string name="sports_widget_team_to_be_determined">隊伍尚未決定</string>
-  <!-- ==== End of Terms of use popup prompt. ==== -->
-
-  <!--
     Privacy notice homepage banner
 
     A message we show the user on the homepage when there is a new version of the privacy notice. 'Firefox' is intentionally hardcoded.
@@ -4662,6 +4496,16 @@
   <string name="privacy_notice_updated_homepage_message_privacy_notice" tools:ignore="UnusedResources">隱私權公告</string>
   <!-- The second active link used in privacy_notice_updated_homepage_message -->
   <string name="privacy_notice_updated_homepage_message_learn_more" tools:ignore="UnusedResources">更多資訊</string>
+  <!--
+    Collections migration homepage card
+
+    Title shown on the collections to tab groups migration card on the homepage.
+  -->
+  <string name="collections_migration_homepage_banner_title">收藏集改名為群組了</string>
+  <!-- Message shown on the collections to tab groups migration card on the homepage. -->
+  <string name="collections_migration_homepage_card_message">用更簡單的方式讓分頁更有條理</string>
+  <!-- Link text shown on the collections to tab groups migration card that opens the tab groups page in the tab manager. -->
+  <string name="collections_migration_homepage_card_link">檢視我的分頁群組</string>
   <!-- Google Lens prototype related strings -->
   <string name="preferences_debug_settings_google_lens_integration">開啟 Google 智慧鏡頭整合</string>
   <!-- Lens image search button content description -->
@@ -4674,16 +4518,50 @@
   <string name="context_menu_open_image_with_google_lens">使用 Google 智慧鏡頭搜尋</string>
   <!-- Toast shown when the user denies the camera permission requested by the Lens camera screen -->
   <string name="lens_camera_permission_denied">存取被拒</string>
-  <!-- Title for the Google Lens AI feature toggle -->
-  <string name="ai_controls_google_lens_title">Google 智慧鏡頭</string>
-  <!-- Description for the Google Lens AI feature toggle -->
-  <string name="ai_controls_google_lens_description">將圖片或照片傳送到 Google 進行圖片搜尋。</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the photo they capture will be sent to Google Lens for a visual search.
+  -->
+  <string name="lens_camera_title_lens">Google 智慧鏡頭</string>
+  <!--
+    Title shown at the top of the camera screen, next to the close button, telling the
+    user that the camera is being used to scan a QR code.
+  -->
+  <string name="lens_camera_title_qr">QR Code</string>
+  <!-- Title for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_title">開啟 Google 智慧鏡頭搜尋功能</string>
+  <!-- Description for the Google Lens Search Settings page feature toggle -->
+  <string name="search_settings_google_lens_description">將圖片或照片傳送到 Google 進行圖片搜尋。</string>
+  <!-- Caption shown under the Google Lens toggle clarifying when the feature is available -->
+  <string name="preferences_google_lens_availability_caption">僅在上方有開啟 Google，且 Google 也是您當下選用的搜尋引擎時可以使用。</string>
   <!-- Content description for the Google Lens half of the camera mode toggle -->
   <string name="lens_camera_mode_lens">Google 智慧鏡頭</string>
   <!-- Content description for the QR scanner half of the camera mode toggle -->
   <string name="lens_camera_mode_qr">QR Code 掃描器</string>
   <!-- Toast shown when the user picks an image from the gallery in QR mode but no QR code is found in it -->
   <string name="lens_camera_qr_no_code_found">圖片中找不到 QR Code</string>
+  <!-- Status shown under an image picked from the gallery or taken with the camera while it is being sent to Google Lens for a visual search -->
+  <string name="lens_camera_loading_status">正在搜尋這張這張圖片</string>
+  <!-- Button shown under an image picked from the gallery or taken with the camera while it is being sent to Google Lens. Tapping it stops the search and returns to the camera. -->
+  <string name="lens_camera_loading_cancel_button">取消</string>
+  <!-- Snackbar message shown when an image picked from the gallery or taken with the camera could not be opened or read, so it was never sent to Google Lens. Shown after returning to the camera. -->
+  <string name="lens_camera_image_load_failed_v2">無法載入此圖片。</string>
+  <!-- Snackbar message shown when an image picked from the gallery could not be opened or read, so it was never sent to Google Lens. Shown after returning to the camera. -->
+  <string name="lens_camera_image_load_failed">無法載入這張圖片，請改用其他圖片。</string>
+  <!-- Snackbar message shown when an image picked from the gallery or taken with the camera could not be searched because of a network problem or an error from Google Lens. Shown after returning to the camera, next to the lens_camera_upload_failed_retry_button action. -->
+  <string name="lens_camera_upload_failed">無法取得 Google 智慧鏡頭的搜尋結果</string>
+  <!-- Action in the snackbar shown when an image picked from the gallery or taken with the camera could not be searched with Google Lens. Tapping it searches the same image again. -->
+  <string name="lens_camera_upload_failed_retry_button">重試</string>
+  <!-- Title of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
+  <string name="lens_opt_out_title">使用 Google 智慧鏡頭搜尋</string>
+  <!-- Description of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
+  <string name="lens_opt_out_description">挑選一張圖片，或使用攝影機拍照來使用 Google 智慧鏡頭搜尋。</string>
+  <!-- Text of the link in the first-run Google Lens bottom sheet that opens the Search settings page -->
+  <string name="lens_opt_out_settings_link">Google 智慧鏡頭選項</string>
+  <!-- Button in the first-run Google Lens bottom sheet that dismisses it and starts the camera -->
+  <string name="lens_opt_out_try_it_now_button">立刻試試</string>
+  <!-- Button in the first-run Google Lens bottom sheet that leaves Google Lens without using it -->
+  <string name="lens_opt_out_not_now_button">現在不要</string>
   <!--
     Firefox Labs
 
@@ -4724,4 +4602,60 @@
   <string name="firefox_labs_feature_conflict">無法試用此功能。</string>
   <!-- Text displayed on the Firefox Labs screen when there are no Labs experimental features present. -->
   <string name="firefox_labs_no_labs_available_description">目前沒有可以嘗試的實驗性功能</string>
+  <!-- Title of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_title" tools:ignore="UnusedResources">網站隔離</string>
+  <!-- Description of the Firefox Labs Sandboxing experiment. -->
+  <string name="firefox_labs_website_isolation_description" tools:ignore="UnusedResources">在不同網站間再加入一道屏障，幫助保護您跨分頁間的資料。可能會影響效能、穩定性、網站相容性以及瀏覽紀錄的儲存方式。</string>
+  <!--
+    PDF viewer toolbar and buttons
+
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description_2">加入簽章</string>
+  <!--
+    PDF viewer toolbar and buttons
+
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description">簽署 PDF</string>
+  <!-- Content description for accessibility (used by screen readers): Description of the button that downloads the PDF displayed on the screen to the user's device. -->
+  <string name="pdf_tools_download_content_description">下載 PDF</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the printing dialogue window for the PDF displayed on the screen. -->
+  <string name="pdf_tools_print_content_description">列印 PDF</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the sharing options for the PDF being displayed on the screen. -->
+  <string name="pdf_tools_share_content_description">分享 PDF</string>
+  <!--
+    PDF viewer add a signature dialog
+
+    The title of the dialog for adding a signature to a PDF.
+  -->
+  <string name="pdf_tools_signature_title">加入簽章</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that closes the dialog for adding a signature to a PDF. -->
+  <string name="pdf_tools_signature_close_content_description">關閉 PDF 簽章面板</string>
+  <!-- The placeholder text shown in the empty text input field where users can enter the signature they wish to add to a PDF. -->
+  <string name="pdf_tools_signature_placeholder">輸入簽章</string>
+  <!-- The text for the button that erases the text the user entered in the "add a signature" field. -->
+  <string name="pdf_tools_signature_clear_button">清除</string>
+  <!-- The text for the button that adds the signature the user has typed to the PDF. -->
+  <string name="pdf_tools_signature_add_button">新增</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the loading indicator when a signature is in the process of being added to a PDF. -->
+  <string name="pdf_tools_signature_adding_content_description">正在加入簽名檔</string>
+  <!--
+    Listen to page
+
+    Content description for the reader view panel: a group of buttons floating over the content, which allow customizing the reader view or activating the Listen to Page feature
+  -->
+  <string name="reader_mode_panel_content_description_2">閱讀畫面選項</string>
+  <!--
+    Listen to page
+
+    Content description for the reader mode panel: a group of buttons floating over the content
+  -->
+  <string name="reader_mode_panel_content_description">閱讀模式選項</string>
+  <!-- Content description for the button in the reader view panel that turns on the Listen to Page feature (playback of content begins when button is pressed) -->
+  <string name="reader_mode_panel_listen_content_description">大聲朗讀</string>
+  <!-- Content description for media player displayed in Reader view when the Listen to Page (Read Aloud) feature is selected -->
+  <string name="reader_mode_panel_media_player_content_description">媒體播放器</string>
+  <!-- Content description for the reader view button Reader view facilitates readability and has a Listen to Page feature. Button icon is a document with headphones, and is displayed next to the page URL when the feature is available. -->
+  <string name="browser_menu_read_or_listen">閱讀畫面，閱讀或聆聽頁面內容</string>
 </resources>

@@ -2,9 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsDragService.h"
 #include "nsDragServiceWayland.h"
+
 #include "AsyncClipboardRequest.h"
+#include "nsDragService.h"
 #ifdef MOZ_ENABLE_DBUS
 #  include "FileTransferPortal.h"
 #endif
@@ -100,7 +101,7 @@ void nsDragSessionWayland::ReplyToDragMotion(RefPtr<DataOffer> aDataOffer) {
     LOGDRAGSERVICE("  Wayland: switch copy to move");
     action = GDK_ACTION_MOVE;
   }
-  aDataOffer->SetDragStatus(mCanDrop, action);
+  aDataOffer->SetDragStatus(action && mCanDrop, action);
 }
 
 void nsDragSessionWayland::EndDragSessionImplBackend() {
@@ -195,6 +196,11 @@ bool nsDragSessionWayland::DragDataReceived(ClipboardData& aData,
       return false;
     }
 
+    // Build the spec from the received bytes with an explicit length, so the
+    // URI parse and the log line below use exactly what was received rather
+    // than relying on a NUL terminator.
+    nsDependentCSubstring spec(span.data(), span.Length());
+
     // A workaround for https://gitlab.gnome.org/GNOME/gtk/-/issues/6563
     //
     // For the vnd.portal.filetransfer and vnd.portal.files we receive numeric
@@ -209,13 +215,13 @@ bool nsDragSessionWayland::DragDataReceived(ClipboardData& aData,
     // we try to use the gtk_selection_data_get_uris. We ignore the valid uris
     // for the vnd.portal.file* targets.
     nsCOMPtr<nsIURI> sourceURI;
-    nsresult rv = NS_NewURI(getter_AddRefs(sourceURI),
-                            (const gchar*)span.data(), nullptr);
+    nsresult rv = NS_NewURI(getter_AddRefs(sourceURI), spec);
     if (NS_SUCCEEDED(rv)) {
       LOGDRAGSERVICE(
           "  TargetDataReceived(): got valid uri for MIME %s - this is bug "
           "in GTK - expected numeric value for portal, got %s\n",
-          GUniquePtr<gchar>(gdk_atom_name(aTarget)).get(), span.data());
+          GUniquePtr<gchar>(gdk_atom_name(aTarget)).get(),
+          PromiseFlatCString(spec).get());
       return false;
     }
     GUniquePtr<char*> uriList(GetURIsFromPortal(span.data(), span.Length()));

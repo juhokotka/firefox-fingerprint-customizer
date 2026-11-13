@@ -1,4 +1,4 @@
-// |jit-test| skip-if: !hasDisassembler() || wasmCompileMode() != "ion" || !getBuildConfiguration("riscv64"); include:codegen-riscv64-test.js
+// |jit-test| test-also=--wasm-compiler=optimizing --disable-wasm-huge-memory; skip-if: !hasDisassembler() || wasmCompileMode() != "ion" || !getBuildConfiguration("riscv64"); include:codegen-riscv64-test.js
 
 // Test that loads/stores at friendly constant offsets yield expected code.
 //
@@ -89,7 +89,8 @@ codegenTestRISCV64_adhoc(
     "f",
     `lui       t4, 0x7ffff
      add       t4, s7, t4
-     lw        a0, 2047\\(t4\\)`);
+     lw        a0, 2047\\(t4\\)`,
+    {no_prefix: true});
 
 // Offset is smallest positive Int32 which requires full materialization.
 codegenTestRISCV64_adhoc(
@@ -101,7 +102,8 @@ codegenTestRISCV64_adhoc(
     `lui       t4, 0xfff80000
      addiw     t4, t4, -2048
      add       t4, s7, t4
-     lw        a0, 0\\(t4\\)`);
+     lw        a0, 0\\(t4\\)`,
+    {no_prefix: true});
 
 // Offset is INT32_MAX.
 codegenTestRISCV64_adhoc(
@@ -113,7 +115,8 @@ codegenTestRISCV64_adhoc(
     `lui       t4, 0xfff80000
      addiw     t4, t4, -1
      add       t4, s7, t4
-     lw        a0, 0\\(t4\\)`);
+     lw        a0, 0\\(t4\\)`,
+    {no_prefix: true});
 
 // Static offset and dynamic offset are INT32_MAX.
 codegenTestRISCV64_adhoc(
@@ -122,11 +125,14 @@ codegenTestRISCV64_adhoc(
        (func (export "f") (result i32)
          (i32.load offset=0x7fff_ffff (i32.const 0x7fff_ffff))))`,
     "f",
-    `li        t4, 1
+    `(li        t4, 1
      slli      t4, t4, 32
-     addi      t4, t4, -2
+     addi      t4, t4, -2)
+  | (li        t4, -2
+     zext.w    t4, t4)
      add       t5, s7, t4
-     lw        a0, 0\\(t5\\)`);
+     lw        a0, 0\\(t5\\)`,
+    {no_prefix: true});
 
 // Offset is negative.
 codegenTestRISCV64_adhoc(
@@ -135,11 +141,11 @@ codegenTestRISCV64_adhoc(
        (func (export "f") (result i32)
          (i32.load (i32.const -1))))`,
     "f",
-    `li        t4, 1
-     slli      t4, t4, 32
-     addi      t4, t4, -1
+    `li        t4, -1
+     srli      t4, t4, 32
      add       t5, s7, t4
-     lw        a0, 0\\(t5\\)`);
+     lw        a0, 0\\(t5\\)`,
+    {no_prefix: true});
 
 // Offset is INT32_MIN.
 codegenTestRISCV64_adhoc(
@@ -148,7 +154,9 @@ codegenTestRISCV64_adhoc(
        (func (export "f") (result i32)
          (i32.load (i32.const 0x8000_0000))))`,
     "f",
-    `li        t4, 1
-     slli      t4, t4, 31
+    `(li        t4, 1
+     slli      t4, t4, 31)
+  | (bseti     t4, zero, 31)
      add       t5, s7, t4
-     lw        a0, 0\\(t5\\)`);
+     lw        a0, 0\\(t5\\)`,
+     {no_prefix: true});

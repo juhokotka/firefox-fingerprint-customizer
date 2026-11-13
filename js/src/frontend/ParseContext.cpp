@@ -2,11 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "frontend/ParseContext-inl.h"
-
 #include "frontend/CompilationStencil.h"  // ScopeContext
 #include "frontend/Parser.h"              // ParserBase
 #include "js/friend/ErrorMessages.h"      // JSMSG_*
+
+#include "frontend/ParseContext-inl.h"
 
 using mozilla::Maybe;
 using mozilla::Nothing;
@@ -31,12 +31,10 @@ const char* DeclarationKindString(DeclarationKind kind) {
       return "let";
     case DeclarationKind::Const:
       return "const";
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
     case DeclarationKind::Using:
       return "using";
     case DeclarationKind::AwaitUsing:
       return "await using";
-#endif
     case DeclarationKind::Class:
       return "class";
     case DeclarationKind::Import:

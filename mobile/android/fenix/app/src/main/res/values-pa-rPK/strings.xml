@@ -75,8 +75,6 @@
   <string name="open_in_app_cfr_positive_button_text">سیٹنگاں نوں جاؤ</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">بند کرو</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">کیمرے لئی پہنچ چاہیدی اے۔ فون دیاں سیٹنگاں تے جاؤ، اجازتاں نوں چھوہو تے اجازت دیݨ دی چوݨ نوں چھوہو۔</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -114,16 +112,8 @@
   <string name="home_screen_shortcut_open_new_private_tab_2">نجی ٹیب کھولھو</string>
   <!-- Shortcut action to open Passwords screen -->
   <string name="home_screen_shortcut_passwords">پاس‌ورڈ</string>
-  <!--
-    Recent Tabs
-
-    Header text for jumping back into the recent tab in the home screen
-  -->
-  <string name="recent_tabs_header">واپس جاؤ</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">سبھ ویکھو</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">ساریاں حالیہ ٹیباں دا بٹن ویکھاؤ</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">ساریاں جوڑیاں ٹیباں ویکھو</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -149,11 +139,7 @@
   <string name="recently_visited_menu_item_remove">ہٹاؤ</string>
   <!-- Content description for the button which navigates the user to show all of their history. -->
   <string name="past_explorations_show_all_content_description_2">ساریاں پچھلیاں چھاݨ بیݨاں ویکھاؤ</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">پچھے</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">اگے</string>
@@ -272,10 +258,6 @@
     Content description (not visible, for screen readers etc.): Close button for the home onboarding dialog
   -->
   <string name="onboarding_home_content_description_close_button">بند کرو</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Search Widget
 
@@ -294,7 +276,11 @@
     Title for the settings page
   -->
   <string name="settings">سیٹنگاں</string>
-  <!-- Preference category for general settings -->
+  <!--
+    Preferences
+
+    Preference category for general settings
+  -->
   <string name="preferences_category_general">عام</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">بارے</string>
@@ -343,40 +329,6 @@
   <string name="preferences_add_private_browsing_shortcut">نجی براؤز کرن شارٹ‌کٹ جوڑو</string>
   <!-- Preference for enabling "HTTPS-Only" mode -->
   <string name="preferences_https_only_title">سرف HTTPS ڈھنگ</string>
-  <!-- Label for cookie banner section in quick settings panel. -->
-  <string name="cookie_banner_blocker">کوکی جھنڈا روکو</string>
-  <!-- Preference for removing cookie/consent banners from sites automatically in private mode. See reduce_cookie_banner_summary for additional context. -->
-  <string name="preferences_cookie_banner_reduction_private_mode">نجی براؤز کرن وچ کوکی جھنڈا روکو</string>
-  <!-- Text for indicating cookie banner handling is off this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_off_for_site">ایس سائیٹ لئی بند اے</string>
-  <!-- Text for cancel button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_cancel_button">رد کرو</string>
-  <!-- Text for request support button indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_request_support_button_2">بینتی بھیجیں</string>
-  <!-- Text for title indicating that cookie banner reduction is not supported for the current site, this is shown as part of the cookie banner details view. -->
-  <string name="cookie_banner_handling_details_site_is_not_supported_title_2">ایس سائیٹ لئی سہایتا دی بینتی کرنی اے؟</string>
-  <!-- Label for the snackBar, after the user reports with success a website where cookie banner reducer did not work -->
-  <string name="cookie_banner_handling_report_site_snack_bar_text_2">ںینتی بھیجی ہوئی</string>
-  <!-- Text for indicating cookie banner handling is on this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_on_for_site">ایس سائیٹ لئی چالو</string>
-  <!-- Text for indicating that a request for unsupported site was sent to Nimbus (it's a Mozilla library for experiments), this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site_request_submitted_2">سہایتا بینتی بھیجی</string>
-  <!-- Text for indicating cookie banner handling is currently not supported for this site, this is shown as part of the protections panel with the tracking protection toggle -->
-  <string name="reduce_cookie_banner_unsupported_site">سائیٹ ایس ویلے سہایک نہیں اے</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is on this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_on_for_site_1">کیہہ %1$s لئی کوکی جھنڈا روکو چالو کرنا اے؟</string>
-  <!-- Title text for a detail explanation indicating cookie banner handling is off this site, this is shown as part of the cookie banner panel in the toolbar. %1$s is a shortened URL of the current site. -->
-  <string name="reduce_cookie_banner_details_panel_title_off_for_site_1">کیہہ %1$s لئی کوکی جھنڈا روکو بند کرنا اے؟</string>
-  <!-- Title text for a detail explanation indicating cookie banner reducer didn't work for the current site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_title_unsupported_site_request_2">%1$s ایس سائیٹ لئی آپݨے آپ کوکی بینتیاں نوں بند نہیں کر سکدا اے۔ تسیں مستقبل وچ ایس سائیٹ واسطے سہایتا لئی بینتی کر سکدے او۔</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is off for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_off_for_site_1">بند کرن نال %1$s ایس سائیٹ لئی کوکیاں مٹا کے ایس نوں مڑ لوڈ کرےگا۔ ایہہ تہانوں لاگ آؤٹ جاں تہاڈی خرید داری کارٹاں نوں خالی کرےگا۔</string>
-  <!-- Long text for a detail explanation indicating what will happen if cookie banner handling is on for a site, this is shown as part of the cookie banner panel in the toolbar. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="reduce_cookie_banner_details_panel_description_on_for_site_3">چاکو کرو تے %1$s ایس سائیٹ واسطے کوکی جھنڈے نوں آپݨے آپ انکار کرن دی کوشش کرےگا۔</string>
-  <!-- Title for the cookie banner re-engagement CFR, the placeholder is replaced with app name. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="cookie_banner_cfr_title">%1$s نے ہݨے تہاڈے لئی کوکیاں توں انکار کیتا اے</string>
-  <!-- Message for the cookie banner re-engagement CFR -->
-  <string name="cookie_banner_cfr_message">ایس سائیٹ لئی تہاڈے لئی گھٹ دھیان بھٹکݨا، گھٹ کوکیاں ٹریک کرن اے۔</string>
   <!-- Description of the preference to enable "HTTPS-Only" mode. -->
   <string name="preferences_https_only_summary">وادھا کیتی سرکھیا لئی HTTPS انکرپشن پروٹوکال ورت کے سائیٹاں نال کنیکٹ کرن دی آپݨے آپ کوشش کرو۔</string>
   <!-- Summary of https only preference if https only is set to off -->
@@ -507,8 +459,6 @@
   <string name="customize_addon_collection_user_hint">بھنڈار مالک (ورتونکار ID)</string>
   <!-- Toast shown after confirming the custom extension collection configuration -->
   <string name="toast_customize_extension_collection_done">پھیلاؤ بھنڈار نوں سودھیا گیا۔ تبدیلیاں لاگو کرن لئی ایپلیکیشن نوں بند کیتا جا رہا اے…</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">واپس جاؤ</string>
   <!-- Title for the customize home screen section with bookmarks. -->
   <string name="customize_toggle_bookmarks">اتے پتے</string>
   <!--
@@ -768,8 +718,6 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">ٹیباں</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">ٹیب دا نظارہ</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">فہرست</string>
   <!-- Option for a grid tab view -->
@@ -812,13 +760,7 @@
   <string name="opening_screen_last_tab_summary">پچھلی ٹیب اُتے کھولھو</string>
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">چار گھنٹیاں بعدے مکھ صفحے اُتے کھولھو</string>
-  <!--
-    Inactive tabs
-
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
-  -->
-  <string name="preferences_inactive_tabs">پراݨیاں ٹیباں نوں غیرفعال چ بھیجو</string>
-  <!-- Title of inactive tabs preference -->
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">پچھلے دو ہفتیاں وچ تہاڈے ولوں نہ ویکھیاں ٹیباں نوں غیرفعال بھاگ وچ بھیجیا جاندا اے۔</string>
   <!--
     Studies
@@ -878,8 +820,6 @@
   <string name="history_search_1">کھوج دی لکھت پایو</string>
   <!-- Text for the button to clear all history -->
   <string name="history_delete_all">تاریخ ہٹاؤ</string>
-  <!-- Text for the snackbar to confirm that multiple browsing history items has been deleted -->
-  <string name="history_delete_multiple_items_snackbar">تاریخ ہٹایا گیا</string>
   <!-- Text for the snackbar to confirm that a single browsing history item has been deleted. %1$s is the shortened URL of the deleted history item. -->
   <string name="history_delete_single_item_snackbar">%1$s مٹا گیا</string>
   <!-- Context description text for the button to delete a single history item -->
@@ -889,16 +829,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d چݨیاں</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">اج</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">کل</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">پچھلے ۷ دن</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">پچھلے ۳۰ دن</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">پراݨے</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">اتھے کوئی تاریخ نہیں اے</string>
   <!--
@@ -976,12 +906,6 @@
     Button label that take the user to the Android App setting
   -->
   <string name="phone_feature_go_to_settings">سیٹنگاں نوں جاؤ</string>
-  <!--
-    Content description (not visible, for screen readers etc.): Quick settings sheet
-    to give users access to site specific information / settings. For example:
-    Secure settings status and a button to modify site permissions
-  -->
-  <string name="quick_settings_sheet">ترنت سیٹنگاں شیٹ</string>
   <!-- Label that indicates that this option it the recommended one -->
   <string name="phone_feature_recommended">سفارشی</string>
   <!-- Button label for clearing all the information of site permissions -->
@@ -1251,10 +1175,8 @@
   <!--
     Enhanced Tracking Protection
 
-    Link displayed in enhanced tracking protection panel to access tracking protection settings
+    Preference title for enhanced tracking protection settings
   -->
-  <string name="etp_settings">سرکھیا سیٹنگاں</string>
-  <!-- Preference title for enhanced tracking protection settings -->
   <string name="preference_enhanced_tracking_protection">بہتر حفاظت والا</string>
   <!-- Preference summary for enhanced tracking protection settings on/off switch -->
   <string name="preference_enhanced_tracking_protection_summary">نویں آئی کُل کوکی سرکھیا، انتر سائیٹ ٹریکراں خلاف ساڈی سبھ توں مظبوط ڈھال اے۔</string>
@@ -1308,12 +1230,8 @@
   <string name="preference_enhanced_tracking_protection_custom_cryptominers">بجلئی پیسے لاوݨ والے</string>
   <!-- Preference for enhanced tracking protection for the custom protection settings -->
   <string name="preference_enhanced_tracking_protection_custom_known_fingerprinters">جاݨے پچھاݨے پیڑاں راکھے</string>
-  <!-- Button label for navigating to the Enhanced Tracking Protection details -->
-  <string name="enhanced_tracking_protection_details">ویروے</string>
   <!-- Header for categories that are being being blocked by current Enhanced Tracking Protection settings -->
   <string name="enhanced_tracking_protection_blocked">پابندی لگائے</string>
-  <!-- Header for categories that are being not being blocked by current Enhanced Tracking Protection settings -->
-  <string name="enhanced_tracking_protection_allowed">اجازت دتے</string>
   <!-- Category of trackers (social media trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_social_media_trackers_title">سماجک میڈیا ٹریکر</string>
   <!-- Description of social media trackers that can be blocked by Enhanced Tracking Protection -->
@@ -1334,12 +1252,6 @@
   <string name="etp_tracking_content_title">ٹوہا ٹوہی دے نشان</string>
   <!-- Description of tracking content that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_tracking_content_description">باہری اشتہار، ویڈیو تے ہورناں مواداں نوں روکدا اے، جس چ ٹریک کرن والا کوڈ ہندا اے۔ کجھ ویب‌سائیٹاں دا کم کاج متاثر ہو سکدا اے۔</string>
-  <!-- Enhanced Tracking Protection message that protection is currently on for this site -->
-  <string name="etp_panel_on">ایس سائیٹ لئی حفاظتاں چالو ہن</string>
-  <!-- Enhanced Tracking Protection message that protection is currently off for this site -->
-  <string name="etp_panel_off">ایسں سائیٹ لئی حفاظتاں بند ہن</string>
-  <!-- Text displayed that links to website about enhanced tracking protection SmartBlock -->
-  <string name="preference_etp_smartblock_learn_more">ہور جاݨو</string>
   <!--
     Browser long press popup menu
 
@@ -1382,8 +1294,6 @@
   <string name="addresses_save_button">سامبھو</string>
   <!-- The text for the "Cancel" button for cancelling adding, updating or deleting an address -->
   <string name="addresses_cancel_button">رد کرو</string>
-  <!-- The text for the "Delete address" button for deleting an address -->
-  <string name="addressess_delete_address_button">پتہ مٹاؤ</string>
   <!-- The text for the positive button on "Delete address" dialog -->
   <string name="addressess_confirm_dialog_ok_button">مٹاؤ</string>
   <!-- The text for the negative button on "Delete address" dialog -->
@@ -1406,13 +1316,4 @@
   <string name="top_sites_menu_settings">سیٹنگاں</string>
   <!-- Snackbar button text to navigate to telemetry settings. -->
   <string name="experiments_snackbar_button">سیٹنگاں نوں جاؤ</string>
-  <!-- Translations feature -->
-
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

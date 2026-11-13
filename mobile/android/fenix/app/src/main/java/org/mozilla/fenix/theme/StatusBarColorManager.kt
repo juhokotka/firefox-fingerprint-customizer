@@ -23,6 +23,7 @@ import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.customtabs.ExternalAppBrowserFragment
 import org.mozilla.fenix.home.HomeFragment
 import org.mozilla.fenix.home.HomepageEdgeToEdgeFeature
+import org.mozilla.fenix.tabstray.ui.TabManagementFragment
 import org.mozilla.fenix.utils.Settings
 import org.mozilla.fenix.wallpapers.Wallpaper
 
@@ -33,8 +34,8 @@ import org.mozilla.fenix.wallpapers.Wallpaper
  * @param activity The [Activity] to set the status bar color on.
  * @param appStore The [AppStore] used to observe the wallpaper state.
  * @param settings The [Settings] used to read whether the tab strip is enabled.
- * @param tabStripStatusBarView View class that sets the status bar background with the tab strip
- * gradient when the tab strip is visible.
+ * @param tabStripStatusBarView View class that sets the status bar background with the tab strip gradient when the tab
+ *   strip is visible.
  * @param mainDispatcher The [CoroutineDispatcher] used to observe wallpaper changes.
  */
 class StatusBarColorManager(
@@ -49,10 +50,13 @@ class StatusBarColorManager(
     private var wallpaperScope: CoroutineScope? = null
 
     override fun onFragmentResumed(fragmentManager: FragmentManager, fragment: Fragment) {
-        if (fragment is NavHostFragment ||
-            fragment is DialogFragment ||
-            fragment is ExternalAppBrowserFragment
-        ) {
+        if (fragment is NavHostFragment || fragment is DialogFragment) {
+            return
+        }
+
+        // These fragments theme their own system bars independently of the browsing mode,
+        // so the browsing-mode status bar theming must not run for them.
+        if (fragment is ExternalAppBrowserFragment || fragment is TabManagementFragment) {
             return
         }
 
@@ -66,8 +70,9 @@ class StatusBarColorManager(
         wallpaperScope = null
 
         when {
-            // Don't show the gradient if tab strip is not enabled or private mode is enabled.
-            !settings.isTabStripEnabled || themeManager.currentTheme.isPrivate -> {
+            // Don't show the status bar gradient if tab strip is not enabled, shown at the bottom
+            // or private mode is enabled.
+            !settings.isTabStripEnabled || settings.shouldUseBottomTabStrip || themeManager.currentTheme.isPrivate -> {
                 tabStripStatusBarView.hide()
             }
 
@@ -90,27 +95,35 @@ class StatusBarColorManager(
     /**
      * Observe the wallpaper and search state while on the homepage and show the tab strip gradient accordingly.
      *
-     * For edge-to-edge wallpaper, show the tab strip gradient only when a search is active.
-     * Otherwise, [HomepageEdgeToEdgeFeature] allows the wallpaper to show through the status bar.
-     * For any other wallpaper, the gradient is always shown.
+     * For edge-to-edge wallpaper, show the tab strip gradient only when a search is active. Otherwise,
+     * [HomepageEdgeToEdgeFeature] allows the wallpaper to show through the status bar. With universal edge-to-edge
+     * wallpapers, show it only when a search is active, as the tab strip has no background of its own and the wallpaper
+     * shows through the status bar otherwise.
      */
     private fun observeHomepageGradient() {
-        wallpaperScope = appStore.flowScoped(
-            owner = activity as? LifecycleOwner,
-            dispatcher = mainDispatcher,
-        ) { flow ->
-            flow.map { state ->
-                state.wallpaperState.currentWallpaper != Wallpaper.EdgeToEdge ||
-                    (state.searchState.isSearchActive && state.searchState.sourceTabId != null)
-            }
-                .distinctUntilChanged()
-                .collect { shouldShowGradient ->
-                    if (shouldShowGradient) {
-                        tabStripStatusBarView.show()
-                    } else {
-                        tabStripStatusBarView.hide()
+        wallpaperScope =
+            appStore.flowScoped(
+                owner = activity as? LifecycleOwner,
+                dispatcher = mainDispatcher,
+            ) { flow ->
+                flow
+                    .map { state ->
+                        val wallpaper = state.wallpaperState.currentWallpaper
+                        if (settings.enableUniversalEdgeToEdgeWallpapers) {
+                            state.searchState.isSearchActive
+                        } else {
+                            wallpaper != Wallpaper.EdgeToEdge ||
+                                (state.searchState.isSearchActive && state.searchState.sourceTabId != null)
+                        }
                     }
-                }
-        }
+                    .distinctUntilChanged()
+                    .collect { shouldShowGradient ->
+                        if (shouldShowGradient) {
+                            tabStripStatusBarView.show()
+                        } else {
+                            tabStripStatusBarView.hide()
+                        }
+                    }
+            }
     }
 }

@@ -20,10 +20,12 @@
 #include "nsIClassifiedChannel.h"
 #include "nsIContentClassifierService.h"
 #include "nsIContentClassifierRemoteSettingsClient.h"
+#include "nsIMemoryReporter.h"
 #include "nsISupportsImpl.h"
 #include "nsLiteralString.h"
 #include "nsTArray.h"
 #include "nsTHashMap.h"
+#include "nsCharSeparatedTokenizer.h"
 
 #include "mozilla/ContentClassifierEngine.h"
 
@@ -77,16 +79,23 @@ struct ContentClassifierFeature {
   // except in the engines pref.
   bool mExceptionOnly;
 
+  // If true, the engine is called with the top-window site as the source
+  // site (and third-party-to-top-window as the third-party bit) instead of
+  // the loading frame's site. Used by features that expect to key on the top
+  // level, rather than the requesting frame- specifically all rules emulating
+  // the old behavior.
+  bool mUseTopWindowAsSource;
+
   // The scoped pref that gates this feature's blocking decision. When the
   // scoped pref is set to false, blocking is suppressed for the channel's site.
   // Only consulted on the blocking path.
   Maybe<nsIScopedPrefs::Pref> mReferencedScopedPref;
 
   // Optional predicate evaluated before classification. When non-null, the
-  // feature's engine is skipped for any request where this returns false.
-  // Allows features to restrict classification to a request subset without
-  // needing per-request engine variants.
-  bool (*mRequestFilter)(const ContentClassifierRequest&);
+  // feature's engine is skipped for any request where this returns false for
+  // the given mode. Allows features to restrict classification to a request
+  // subset without needing per-request engine variants.
+  bool (*mRequestFilter)(const ContentClassifierRequest&, ClassifyMode);
 
   // Optional callback invoked just before a matched channel is cancelled, after
   // SetBlockedContent and before aChannel->Cancel(). Null for most features.
@@ -101,26 +110,18 @@ enum class InitPhase {
   ShutdownEnded
 };
 
-// Aggregated status across all engines consulted for a single
-// classification. Ordering is significant: higher values supersede
-// lower ones in ContentClassifierResult::Accumulate, so any Exception
-// promotes the aggregate over a Hit, and an Important variant pins the
-// status against later non-Important results.
-enum class ContentClassifierResultStatus : uint8_t {
-  Miss = 0,
-  Hit = 1,
-  Exception = 2,
-  ImportantHit = 3,
-  ImportantException = 4,
-};
-
 // Aggregated outcome across the engines consulted for one classification.
 // Records every engine result that contributed (a match or an exception),
 // so the caller can attribute the channel-side annotation / block to the
 // right feature definitions.
 class ContentClassifierResult {
  public:
-  using Status = ContentClassifierResultStatus;
+  // Aggregation ordering follows the numeric
+  // value of nsIContentClassifierService::ProbeStatus: higher values
+  // supersede lower ones in Accumulate, so any Exception promotes the
+  // aggregate over a Hit, and an Important variant pins the status against
+  // later non-Important results.
+  using Status = nsIContentClassifierService::ProbeStatus;
 
   ContentClassifierResult() = default;
 
@@ -193,12 +194,57 @@ struct EnginesPrefsSnapshot {
   nsTArray<nsCString> mAnnotatePBM;
 };
 
+class ContentClassifierProbeResult final
+    : public nsIContentClassifierProbeResult {
+ public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_NSICONTENTCLASSIFIERPROBERESULT
+
+  ContentClassifierProbeResult(const nsACString& aFeatureName, bool aMatched,
+                               bool aException, bool aImportant,
+                               nsresult aEngineResult)
+      : mFeatureName(aFeatureName),
+        mMatched(aMatched),
+        mException(aException),
+        mImportant(aImportant),
+        mEngineResult(aEngineResult) {}
+
+ private:
+  ~ContentClassifierProbeResult() = default;
+
+  nsCString mFeatureName;
+  bool mMatched;
+  bool mException;
+  bool mImportant;
+  nsresult mEngineResult;
+};
+
+class ContentClassifierProbeReport final
+    : public nsIContentClassifierProbeReport {
+ public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_NSICONTENTCLASSIFIERPROBEREPORT
+
+  ContentClassifierProbeReport(
+      nsIContentClassifierService::ProbeStatus aStatus,
+      nsTArray<RefPtr<nsIContentClassifierProbeResult>>&& aResults)
+      : mStatus(aStatus), mResults(std::move(aResults)) {}
+
+ private:
+  ~ContentClassifierProbeReport() = default;
+
+  nsIContentClassifierService::ProbeStatus mStatus;
+  nsTArray<RefPtr<nsIContentClassifierProbeResult>> mResults;
+};
+
 class ContentClassifierService final : public nsIAsyncShutdownBlocker,
-                                       public nsIContentClassifierService {
+                                       public nsIContentClassifierService,
+                                       public nsIMemoryReporter {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIASYNCSHUTDOWNBLOCKER
   NS_DECL_NSICONTENTCLASSIFIERSERVICE
+  NS_DECL_NSIMEMORYREPORTER
 
   static already_AddRefed<ContentClassifierService> GetInstance();
 
@@ -240,14 +286,15 @@ class ContentClassifierService final : public nsIAsyncShutdownBlocker,
   void RemoveBlocker();
   already_AddRefed<nsIAsyncShutdownClient> GetAsyncShutdownBarrier() const;
 
-  // aIndependentEngines makes every engine evaluate its own rules in
-  // isolation; matched_rule is not threaded across engines. Used by the
-  // annotate phase so MaybeAnnotateChannel can attribute matches to every
-  // feature whose rules actually fired. The cancel phase passes false so
-  // trailing exception engines see the propagated matched_rule.
+  // Cancel threads matched_rule across engines so trailing exception engines
+  // see an earlier hit. Annotate evaluates every engine in isolation so
+  // MaybeAnnotateChannel can attribute matches to every feature whose rules
+  // fired, and also classifies top-level documents. Which requests a feature
+  // considers in each mode is decided by its mRequestFilter.
   ContentClassifierResult ClassifyWithEngines(
       const nsTArray<RefPtr<ContentClassifierEngine>>& aEngines,
-      const ContentClassifierRequest& aRequest, bool aIndependentEngines);
+      const ContentClassifierRequest& aRequest, ClassifyMode aMode)
+      MOZ_REQUIRES(mLock);
 
   // Take a fresh pref snapshot, decide which active features need to be
   // (re)built — either because they have no engine yet, or because one of
@@ -352,8 +399,9 @@ class ContentClassifierService final : public nsIAsyncShutdownBlocker,
 
   // Serial background task queue used for the CPU-heavy half of engine
   // rebuilds (BuildEngineFromRules) plus the lock-holding install /
-  // populate / prune phase. Created in Init(); drained and cleared in
-  // BlockShutdown before RemoveBlocker runs.
+  // populate / prune phase. Created in Init(); cleared in BlockShutdown.
+  // Shutdown does not wait for it to drain: closures already on it are no-ops
+  // once mInitPhase leaves InitSucceeded.
   nsCOMPtr<nsISerialEventTarget> mBuildThread;
 };
 

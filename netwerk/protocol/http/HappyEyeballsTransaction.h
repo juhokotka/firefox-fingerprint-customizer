@@ -7,9 +7,9 @@
 
 #include <functional>
 
-#include "mozilla/Maybe.h"
 #include "SpeculativeTransaction.h"
 #include "ZeroRttHandle.h"
+#include "mozilla/Maybe.h"
 
 namespace mozilla {
 namespace net {

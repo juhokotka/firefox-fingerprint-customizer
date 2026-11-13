@@ -32,7 +32,6 @@ error_help.set_prefix(f"*** ERROR *** {script_name} did not complete successfull
 repo_type = detect_repo_type()
 
 
-@atexit.register
 def early_exit_handler():
     error_help.print_help()
 
@@ -142,7 +141,9 @@ def handle_missing_files(patch_directory):
             m[0] for m in (re.findall(r"^ D (.*)", line) for line in stdout_lines) if m
         ]
         if len(stdout_lines) != 0:
-            cmd = f"git rm {' '.join(stdout_lines)}"
+            cmd = (
+                f"git -c core.fsmonitor=false -c gc.auto=0 rm {' '.join(stdout_lines)}"
+            )
             run_git(cmd, ".")
     else:
         cmd = f"hg status --no-status --deleted {patch_directory}"
@@ -162,7 +163,9 @@ def handle_unknown_files(patch_directory):
             if m
         ]
         if len(stdout_lines) != 0:
-            cmd = f"git add {' '.join(stdout_lines)}"
+            cmd = (
+                f"git -c core.fsmonitor=false -c gc.auto=0 add {' '.join(stdout_lines)}"
+            )
             run_git(cmd, ".")
     else:
         cmd = f"hg status --no-status --unknown {patch_directory}"
@@ -182,7 +185,7 @@ def handle_modified_files(patch_directory):
         m[0] for m in (re.findall(r"^ M (.*)", line) for line in stdout_lines) if m
     ]
     if len(stdout_lines) != 0:
-        cmd = f"git add {' '.join(stdout_lines)}"
+        cmd = f"git -c core.fsmonitor=false -c gc.auto=0 add {' '.join(stdout_lines)}"
         run_git(cmd, ".")
 
 
@@ -195,6 +198,12 @@ def save_patch_stack(
     bug_number,
     no_pre_stack,
 ):
+    if repo_type == RepoType.GIT:
+        verify_git_repo_configuration()
+
+    # register the exit handler so a failure reports the error help.
+    atexit.register(early_exit_handler)
+
     # remove the current patch files
     files_to_remove = os.listdir(patch_directory)
     for file in files_to_remove:
@@ -264,6 +273,10 @@ def save_patch_stack(
                 f"patch stack' {patch_directory}"
             )
             stdout_lines = run_shell(cmd)
+
+    # unregister the exit handler so the normal exit doesn't falsely
+    # report as an error.
+    atexit.unregister(early_exit_handler)
 
 
 def verify_git_repo_configuration():
@@ -350,8 +363,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if repo_type == RepoType.GIT:
-        verify_git_repo_configuration()
+    # setup the exit handler to deal with error messages here in the
+    # startup sanity code
+    atexit.register(early_exit_handler)
 
     if not args.skip_startup_sanity:
         # make sure the mercurial repo is clean before beginning
@@ -375,6 +389,10 @@ if __name__ == "__main__":
         print("Verifying vendoring before saving patch-stack...")
         run_shell(f"bash {args.script_path}/verify_vendoring.sh", False)
 
+    # the save_patch_stack function registers (and unregisters) its own
+    # exit handler so we can unregister the handler
+    atexit.unregister(early_exit_handler)
+
     save_patch_stack(
         args.repo_path,
         args.branch,
@@ -384,7 +402,3 @@ if __name__ == "__main__":
         args.separate_commit_bug_number,
         args.no_pre_stack,
     )
-
-    # unregister the exit handler so the normal exit doesn't falsely
-    # report as an error.
-    atexit.unregister(early_exit_handler)

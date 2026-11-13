@@ -9,12 +9,12 @@
 
 #include "mozilla/WeakPtr.h"
 
-#include "nsStubMutationObserver.h"
 #include "nsHashKeys.h"
 #include "nsIObserver.h"
 #include "nsMenuBarX.h"
-#include "nsTHashMap.h"
 #include "nsString.h"
+#include "nsStubMutationObserver.h"
+#include "nsTHashMap.h"
 
 class nsMenuItemX;
 class nsChangeObserver;
@@ -36,7 +36,8 @@ enum {
   eCommand_ID_TouchBar = 8,
   eCommand_ID_Account = 9,
   eCommand_ID_SetAsDefault = 10,
-  eCommand_ID_Last = 11
+  eCommand_ID_ReferralsPage = 11,
+  eCommand_ID_Last = 12
 };
 
 // The menu group owner observes DOM mutations, notifies registered

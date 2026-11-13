@@ -13,13 +13,14 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   ASRouter: "resource:///modules/asrouter/ASRouter.sys.mjs",
-  BackupService: "resource:///modules/backup/BackupService.sys.mjs",
+  BackupService: "moz-src:///browser/components/backup/BackupService.sys.mjs",
   EveryWindow: "resource:///modules/EveryWindow.sys.mjs",
   formAutofillStorage: "resource://autofill/FormAutofillStorage.sys.mjs",
   LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
   PlacesDBUtils: "resource://gre/modules/PlacesDBUtils.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
+  getThemesList: "moz-src:///browser/themes/ThemesList.sys.mjs",
 });
 
 /**
@@ -46,6 +47,7 @@ export class ProfilesParent extends JSWindowActorParent {
       profiles: await Promise.all(profiles.map(p => p.toContentSafeObject())),
       profileCreated: await profileAge.created,
       themes,
+      novaEnabled: Services.prefs.getBoolPref("browser.nova.enabled", false),
     };
   }
 
@@ -197,9 +199,11 @@ export class ProfilesParent extends JSWindowActorParent {
         let historyCount = visitCount + cookieCount;
 
         await lazy.formAutofillStorage.initialize();
-        let autofillCount =
-          lazy.formAutofillStorage.addresses._data.length +
-          lazy.formAutofillStorage.creditCards?._data.length;
+        const [addresses, creditCards] = await Promise.all([
+          lazy.formAutofillStorage.addresses.getAll(),
+          lazy.formAutofillStorage.creditCards.getAll(),
+        ]);
+        let autofillCount = addresses.length + creditCards.length;
 
         return {
           profile: profileObj,
@@ -246,6 +250,16 @@ export class ProfilesParent extends JSWindowActorParent {
         // theme is up to date at this point.
         return SelectableProfileService.currentProfile.toContentSafeObject();
       }
+      case "Profiles:RecordThemeTelemetry": {
+        // Record telemetry when theme is updated via theme-picker (Nova mode)
+        let themeId = message.data;
+        if (source === "about:editprofile") {
+          Glean.profilesExisting.theme.record({ value: themeId });
+        } else if (source === "about:newprofile") {
+          Glean.profilesNew.theme.record({ value: themeId });
+        }
+        break;
+      }
       case "Profiles:CloseProfileTab": {
         if (source === "about:editprofile") {
           Glean.profilesExisting.closed.record({ value: "done_editing" });
@@ -279,6 +293,15 @@ export class ProfilesParent extends JSWindowActorParent {
   }
 
   async getSafeForContentThemes(isDark) {
+    let novaEnabled = Services.prefs.getBoolPref("browser.nova.enabled", false);
+
+    if (novaEnabled) {
+      let themesList = await lazy.getThemesList({
+        installSource: "about:newprofile",
+      });
+      return themesList.getThemesInfo();
+    }
+
     let lightDark = isDark ? "dark" : "light";
     let themes = [];
     for (let [themeId, themeObj] of PROFILE_THEMES_MAP) {

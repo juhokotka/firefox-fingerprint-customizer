@@ -7,12 +7,12 @@
 
 #include "HttpBaseChannel.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
-#include "nsINetworkInterceptController.h"
-#include "nsIInputStream.h"
 #include "nsICacheInfoChannel.h"
-#include "nsInputStreamPump.h"
+#include "nsIInputStream.h"
+#include "nsINetworkInterceptController.h"
 #include "nsIThreadRetargetableRequest.h"
 #include "nsIThreadRetargetableStreamListener.h"
+#include "nsInputStreamPump.h"
 
 namespace mozilla::net {
 
@@ -72,6 +72,8 @@ class InterceptedHttpChannel final
   nsCOMPtr<nsIInputStream> mBodyReader;
   nsCOMPtr<nsISupports> mReleaseHandle;
   nsCOMPtr<nsIProgressEventSink> mProgressSink;
+  // Lets the retargeted OnDataAvailable avoid reading mProgressSink.
+  Atomic<bool> mHasProgressSink{false};
   nsCOMPtr<nsIInterceptedBodyCallback> mBodyCallback;
   nsCOMPtr<nsICacheInfoChannel> mSynthesizedCacheInfo;
   RefPtr<nsInputStreamPump> mPump;

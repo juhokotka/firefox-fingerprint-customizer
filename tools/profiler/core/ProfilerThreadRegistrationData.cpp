@@ -24,30 +24,41 @@ namespace geckoprofiler::markers {
 
 using namespace mozilla;
 
-struct ThreadCpuUseMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("ThreadCpuUse");
-  }
+struct ThreadCpuUseMarker : public BaseMarkerType<ThreadCpuUseMarker> {
+  static constexpr const char* Name = "ThreadCpuUse";
+
+  using MS = MarkerSchema;
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"threadId", MS::InputType::Int64, nullptr, MS::Format::Integer,
+       MS::PayloadFlags::Hidden},
+      {"time", MS::InputType::Int64, "CPU Time", MS::Format::Milliseconds},
+      {"wakeups", MS::InputType::Int64, "Wake ups", MS::Format::Integer},
+      {"label", MS::InputType::CString, nullptr, MS::Format::String,
+       MS::PayloadFlags::Hidden},
+  };
+  static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
+                                               MS::Location::MarkerTable};
+  static constexpr const char* TooltipLabel =
+      "{marker.name} - {marker.data.label}";
+  static constexpr const char* TableLabel =
+      "{marker.data.label}: {marker.data.time} of CPU time, "
+      "{marker.data.wakeups} wake ups";
+
   static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
                                    ProfilerThreadId aThreadId,
                                    int64_t aCpuTimeMs, int64_t aWakeUps,
                                    const ProfilerString8View& aThreadName) {
-    aWriter.IntProperty("threadId", static_cast<int64_t>(aThreadId.ToNumber()));
-    aWriter.IntProperty("time", aCpuTimeMs);
-    aWriter.IntProperty("wakeups", aWakeUps);
-    aWriter.StringProperty("label", aThreadName);
+    StreamJSONMarkerDataImpl(aWriter,
+                             static_cast<int64_t>(aThreadId.ToNumber()),
+                             aCpuTimeMs, aWakeUps, aThreadName);
   }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.AddKeyLabelFormat("time", "CPU Time", MS::Format::Milliseconds);
-    schema.AddKeyLabelFormat("wakeups", "Wake ups", MS::Format::Integer);
-    schema.AddKeyFormat("label", MS::Format::String, MS::PayloadFlags::Hidden);
-    schema.SetTooltipLabel("{marker.name} - {marker.data.label}");
-    schema.SetTableLabel(
-        "{marker.data.label}: {marker.data.time} of CPU time, "
-        "{marker.data.wakeups} wake ups");
-    return schema;
+
+  static void TranslateMarkerInputToSchema(
+      void* aContext, ProfilerThreadId aThreadId, int64_t aCpuTimeMs,
+      int64_t aWakeUps, const ProfilerString8View& aThreadName) {
+    ETW::OutputMarkerSchema(aContext, ThreadCpuUseMarker{},
+                            static_cast<int64_t>(aThreadId.ToNumber()),
+                            aCpuTimeMs, aWakeUps, aThreadName);
   }
 };
 
@@ -149,40 +160,48 @@ static void profiler_add_js_terminating_flow(mozilla::MarkerCategory aCategory,
       Flow::ProcessScoped(aFlowId));
 }
 
+struct JsAllocationMarker : public mozilla::BaseMarkerType<JsAllocationMarker> {
+  static constexpr const char* Name = "JS allocation";
+  static constexpr bool UseSpecialFrontendLocation = true;
+
+  using MS = mozilla::MarkerSchema;
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"typeName", MS::InputType::String, nullptr, MS::Format::String},
+      {"className", MS::InputType::CString, nullptr, MS::Format::String},
+      {"descriptiveTypeName", MS::InputType::String, nullptr,
+       MS::Format::String},
+      {"coarseType", MS::InputType::CString, nullptr, MS::Format::String},
+      {"size", MS::InputType::Uint64, nullptr, MS::Format::Bytes},
+      {"inNursery", MS::InputType::Boolean, nullptr, MS::Format::Integer},
+  };
+
+  static void StreamJSONMarkerData(
+      mozilla::baseprofiler::SpliceableJSONWriter& aWriter,
+      const mozilla::ProfilerString16View& aTypeName,
+      const mozilla::ProfilerString8View& aClassName,
+      const mozilla::ProfilerString16View& aDescriptiveTypeName,
+      const mozilla::ProfilerString8View& aCoarseType, uint64_t aSize,
+      bool aInNursery) {
+    if (aClassName.Length() != 0) {
+      aWriter.StringProperty("className", aClassName);
+    }
+    if (aTypeName.Length() != 0) {
+      aWriter.StringProperty("typeName", NS_ConvertUTF16toUTF8(aTypeName));
+    }
+    if (aDescriptiveTypeName.Length() != 0) {
+      aWriter.StringProperty("descriptiveTypeName",
+                             NS_ConvertUTF16toUTF8(aDescriptiveTypeName));
+    }
+    aWriter.StringProperty("coarseType", aCoarseType);
+    aWriter.IntProperty("size", aSize);
+    aWriter.BoolProperty("inNursery", aInNursery);
+  }
+};
+
 static void profiler_add_js_allocation_marker(JS::RecordAllocationInfo&& info) {
   if (!profiler_thread_is_being_profiled_for_markers()) {
     return;
   }
-
-  struct JsAllocationMarker {
-    static constexpr mozilla::Span<const char> MarkerTypeName() {
-      return mozilla::MakeStringSpan("JS allocation");
-    }
-    static void StreamJSONMarkerData(
-        mozilla::baseprofiler::SpliceableJSONWriter& aWriter,
-        const mozilla::ProfilerString16View& aTypeName,
-        const mozilla::ProfilerString8View& aClassName,
-        const mozilla::ProfilerString16View& aDescriptiveTypeName,
-        const mozilla::ProfilerString8View& aCoarseType, uint64_t aSize,
-        bool aInNursery) {
-      if (aClassName.Length() != 0) {
-        aWriter.StringProperty("className", aClassName);
-      }
-      if (aTypeName.Length() != 0) {
-        aWriter.StringProperty("typeName", NS_ConvertUTF16toUTF8(aTypeName));
-      }
-      if (aDescriptiveTypeName.Length() != 0) {
-        aWriter.StringProperty("descriptiveTypeName",
-                               NS_ConvertUTF16toUTF8(aDescriptiveTypeName));
-      }
-      aWriter.StringProperty("coarseType", aCoarseType);
-      aWriter.IntProperty("size", aSize);
-      aWriter.BoolProperty("inNursery", aInNursery);
-    }
-    static mozilla::MarkerSchema MarkerTypeDisplay() {
-      return mozilla::MarkerSchema::SpecialFrontendLocation{};
-    }
-  };
 
   profiler_add_marker(
       "JS allocation", geckoprofiler::category::JS,
@@ -286,9 +305,13 @@ void ThreadRegistrationLockedRWOnThread::ClearCycleCollectedJSContext() {
              !!mJsFrameBuffer);
 }
 
-void ThreadRegistrationLockedRWOnThread::PollJSSampling() {
+ThreadRegistrationLockedRWOnThread::JSSamplingChange
+ThreadRegistrationLockedRWOnThread::TakeJSSamplingChange() {
+  JSSamplingChange change;
   // We can't start/stop profiling until we have the thread's JSContext.
   if (mCCJSContext) {
+    change.mContext = mCCJSContext->Context();
+    change.mAllocationsEnabled = JSAllocationsEnabled();
     // It is possible for mJSSampling to go through the following sequences.
     //
     // - INACTIVE, ACTIVE_REQUESTED, INACTIVE_REQUESTED, INACTIVE
@@ -298,29 +321,43 @@ void ThreadRegistrationLockedRWOnThread::PollJSSampling() {
     // Therefore, the if and else branches here aren't always interleaved.
     // This is ok because the JS engine can handle that.
     //
-    JSContext* cx = mCCJSContext->Context();
     if (mJSSampling == ACTIVE_REQUESTED) {
       mJSSampling = ACTIVE;
-      js::EnableContextProfilingStack(cx, true);
-
-      if (JSAllocationsEnabled()) {
-        // TODO - This probability should not be hardcoded. See Bug 1547284.
-        JS::EnableRecordingAllocations(cx, profiler_add_js_allocation_marker,
-                                       0.01);
-      }
-      js::RegisterContextProfilerMarkers(
-          cx, profiler_add_js_marker, profiler_add_js_interval,
-          profiler_add_js_flow, profiler_add_js_terminating_flow);
-
+      change.mAction = JSSamplingChange::Action::Start;
     } else if (mJSSampling == INACTIVE_REQUESTED) {
       mJSSampling = INACTIVE;
-      js::EnableContextProfilingStack(cx, false);
-
-      if (JSAllocationsEnabled()) {
-        JS::DisableRecordingAllocations(cx);
-      }
+      change.mAction = JSSamplingChange::Action::Stop;
     }
   }
+  return change;
+}
+
+/* static */ void ThreadRegistrationLockedRWOnThread::ApplyJSSamplingChange(
+    const JSSamplingChange& aChange) {
+  JSContext* cx = aChange.mContext;
+  if (aChange.mAction == JSSamplingChange::Action::Start) {
+    js::EnableContextProfilingStack(cx, true);
+
+    if (aChange.mAllocationsEnabled) {
+      // TODO - This probability should not be hardcoded. See Bug 1547284.
+      JS::EnableRecordingAllocations(cx, profiler_add_js_allocation_marker,
+                                     0.01);
+    }
+    js::RegisterContextProfilerMarkers(
+        cx, profiler_add_js_marker, profiler_add_js_interval,
+        profiler_add_js_flow, profiler_add_js_terminating_flow);
+
+  } else if (aChange.mAction == JSSamplingChange::Action::Stop) {
+    js::EnableContextProfilingStack(cx, false);
+
+    if (aChange.mAllocationsEnabled) {
+      JS::DisableRecordingAllocations(cx);
+    }
+  }
+}
+
+void ThreadRegistrationLockedRWOnThread::PollJSSampling() {
+  ApplyJSSamplingChange(TakeJSSamplingChange());
 }
 
 #ifdef NIGHTLY_BUILD

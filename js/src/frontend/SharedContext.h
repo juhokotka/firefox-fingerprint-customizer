@@ -8,6 +8,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Span.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -63,6 +64,7 @@ enum class StatementKind : uint8_t {
   Class,
 
   // Used only by BytecodeEmitter.
+  Destructuring,
   Spread,
   YieldStar,
 };
@@ -94,10 +96,7 @@ class Directives {
     strict_ = rhs.strict_;
     return *this;
   }
-  bool operator==(const Directives& rhs) const {
-    return strict_ == rhs.strict_;
-  }
-  bool operator!=(const Directives& rhs) const { return !(*this == rhs); }
+  bool operator==(const Directives& rhs) const = default;
 };
 
 // The kind of this-binding for the current scope. Note that arrow functions
@@ -311,6 +310,11 @@ inline EvalSharedContext* SharedContext::asEvalContext() {
 
 enum class HasHeritage { No, Yes };
 
+struct InlinedZeroField {
+  TaggedParserAtomIndex name;
+  bool isPrivate;
+};
+
 class SuspendableContext : public SharedContext {
  public:
   SuspendableContext(FrontendContext* fc, Kind kind,
@@ -380,6 +384,9 @@ class FunctionBox : public SuspendableContext {
   // This field is copied to ScriptStencil, and shouldn't be modified after the
   // copy.
   MemberInitializers memberInitializers_ = MemberInitializers::Invalid();
+
+  // See: MemberInitializers::hasInlinedZeroFields
+  mozilla::Span<const InlinedZeroField> inlinedZeroFields_;
 
  public:
   // True if bytecode will be emitted for this function in the current
@@ -678,6 +685,13 @@ class FunctionBox : public SuspendableContext {
       copyUpdatedImmutableFlags();
       copyUpdatedMemberInitializers();
     }
+  }
+
+  mozilla::Span<const InlinedZeroField> inlinedZeroFields() const {
+    return inlinedZeroFields_;
+  }
+  void setInlinedZeroFields(mozilla::Span<const InlinedZeroField> fields) {
+    inlinedZeroFields_ = fields;
   }
 
   ScriptIndex index() const { return funcDataIndex_; }

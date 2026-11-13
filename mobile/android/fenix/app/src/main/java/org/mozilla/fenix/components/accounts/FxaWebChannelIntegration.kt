@@ -6,6 +6,7 @@ package org.mozilla.fenix.components.accounts
 
 import android.app.Activity
 import androidx.navigation.findNavController
+import java.lang.ref.WeakReference
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.concept.engine.webextension.WebExtensionRuntime
 import mozilla.components.feature.accounts.FxaCapability
@@ -20,16 +21,16 @@ import org.mozilla.fenix.browser.BrowserFragmentDirections
 import org.mozilla.fenix.customtabs.ExternalAppBrowserActivity
 import org.mozilla.fenix.ext.isIntentInternal
 import org.mozilla.fenix.ext.nav
-import java.lang.ref.WeakReference
 
 /**
- * An integration class that connects the [FxaWebChannelFeature] with custom web command handling
- * for Fenix UI affordances. For example, "log out" messages from web content will close the view.
+ * An integration class that connects the [FxaWebChannelFeature] with custom web command handling for Fenix UI
+ * affordances. For example, "log out" messages from web content will close the view.
  *
  * @param customTabSessionId see [FxaWebChannelFeature.customTabSessionId].
- * @param runtime  see [FxaWebChannelFeature.runtime].
+ * @param runtime see [FxaWebChannelFeature.runtime].
  * @param store see [FxaWebChannelFeature.store].
  * @param serverConfig see [FxaWebChannelFeature.serverConfig].
+ * @param fxaCapabilities see [FxaWebChannelFeature.fxaCapabilities].
  * @param accountManager see [FxaWebChannelFeature.accountManager].
  * @param activityRef a reference to provide the [Activity] to dismiss.
  */
@@ -38,6 +39,7 @@ class FxaWebChannelIntegration(
     runtime: WebExtensionRuntime,
     store: BrowserStore,
     serverConfig: ServerConfig,
+    fxaCapabilities: Set<FxaCapability>,
     private val accountManager: FxaAccountManager,
     private val activityRef: WeakReference<Activity?>,
 ) : LifecycleAwareFeature {
@@ -49,7 +51,7 @@ class FxaWebChannelIntegration(
             store = store,
             accountManager = accountManager,
             serverConfig = serverConfig,
-            fxaCapabilities = setOf(FxaCapability.CHOOSE_WHAT_TO_SYNC),
+            fxaCapabilities = fxaCapabilities,
             onCommandExecuted = ::commandRouter,
         )
     }
@@ -62,18 +64,17 @@ class FxaWebChannelIntegration(
         feature.stop()
     }
 
-    private fun commandRouter(command: WebChannelCommand) = when (command) {
-        WebChannelCommand.SYNC_PREFERENCES,
-            -> handleWebCommandSyncPreferences()
+    private fun commandRouter(command: WebChannelCommand) =
+        when (command) {
+            WebChannelCommand.SYNC_PREFERENCES -> handleWebCommandSyncPreferences()
 
-        WebChannelCommand.LOGOUT,
-        WebChannelCommand.DELETE_ACCOUNT,
-            -> handleWebCommandLogOut()
+            WebChannelCommand.LOGOUT,
+            WebChannelCommand.DELETE_ACCOUNT -> handleWebCommandLogOut()
 
-        else -> {
-            // noop
+            else -> {
+                // noop
+            }
         }
-    }
 
     private fun handleWebCommandSyncPreferences() {
         val hasAuthAccount = accountManager.authenticatedAccount() != null

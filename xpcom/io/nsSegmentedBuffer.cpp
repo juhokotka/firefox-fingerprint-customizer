@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsSegmentedBuffer.h"
+
 #include "nsNetCID.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
@@ -38,16 +39,13 @@ char* nsSegmentedBuffer::AppendNewSegment(
     // copy wrapped content to new extension
     if (mFirstSegmentIndex > mLastSegmentIndex) {
       // deal with wrap around case
-      memcpy(&mSegmentArray[mSegmentArrayCount], mSegmentArray,
-             mLastSegmentIndex * sizeof(char*));
-      memset(mSegmentArray, 0, mLastSegmentIndex * sizeof(char*));
+      std::copy(mSegmentArray, mSegmentArray + mLastSegmentIndex,
+                mSegmentArray + mSegmentArrayCount);
+      std::fill(mSegmentArray, mSegmentArray + mLastSegmentIndex, nullptr);
       mLastSegmentIndex += mSegmentArrayCount;
-      memset(&mSegmentArray[mLastSegmentIndex], 0,
-             (newArraySize.value() - mLastSegmentIndex) * sizeof(char*));
-    } else {
-      memset(&mSegmentArray[mLastSegmentIndex], 0,
-             (newArraySize.value() - mLastSegmentIndex) * sizeof(char*));
     }
+    std::fill(mSegmentArray + mLastSegmentIndex,
+              mSegmentArray + newArraySize.value(), nullptr);
     mSegmentArrayCount = newArraySize.value();
   }
 

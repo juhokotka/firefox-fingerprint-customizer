@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CompositorWidgetChild.h"
-#include "gfxPlatform.h"
 
 namespace mozilla {
 namespace widget {
@@ -15,7 +14,6 @@ CompositorWidgetChild::CompositorWidgetChild(
     : mVsyncDispatcher(std::move(aVsyncDispatcher)),
       mVsyncObserver(std::move(aVsyncObserver)) {
   MOZ_ASSERT(XRE_IsParentProcess());
-  MOZ_ASSERT(!gfxPlatform::IsHeadless());
 }
 
 CompositorWidgetChild::~CompositorWidgetChild() = default;

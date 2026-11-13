@@ -237,10 +237,39 @@ export class Region {
   #xOffset;
   #yOffset;
   #windowDimensions;
+  #confineToViewport = false;
 
   constructor(windowDimensions) {
     this.resetDimensions();
     this.#windowDimensions = windowDimensions;
+  }
+
+  /**
+   * When true, coordinates are confined to the currently visible viewport
+   * instead of the whole page.
+   *
+   * @param {boolean} val
+   */
+  set confineToViewport(val) {
+    this.#confineToViewport = !!val;
+  }
+
+  #clampX(val) {
+    if (this.#confineToViewport) {
+      let viewportLeft = this.#windowDimensions.scrollX;
+      let viewportRight = viewportLeft + this.#windowDimensions.clientWidth;
+      return Math.min(viewportRight, Math.max(viewportLeft, val));
+    }
+    return Math.min(this.#windowDimensions.scrollWidth, Math.max(0, val));
+  }
+
+  #clampY(val) {
+    if (this.#confineToViewport) {
+      let viewportTop = this.#windowDimensions.scrollY;
+      let viewportBottom = viewportTop + this.#windowDimensions.clientHeight;
+      return Math.min(viewportBottom, Math.max(viewportTop, val));
+    }
+    return Math.min(this.#windowDimensions.scrollHeight, Math.max(0, val));
   }
 
   /**
@@ -273,6 +302,32 @@ export class Region {
     if (dims.bottom != null) {
       this.bottom = dims.bottom;
     }
+  }
+
+  /**
+   * Sets the dimensions from a given DOMRect. This will offset the rect
+   * relative to the screenshots container before setting the dimensions.
+   *
+   * @param {DOMRect} rect The DOMRect to set the dimensions from
+   */
+  setDimensionsFromDOMRect(rect) {
+    if (rect == null) {
+      this.resetDimensions();
+      return;
+    }
+
+    // eslint-disable-next-line no-shadow
+    let { scrollX, scrollY } = this.#windowDimensions.dimensions;
+    // eslint-disable-next-line no-shadow
+    let { left, top, right, bottom } = rect;
+    let dims = {
+      left: left + scrollX,
+      top: top + scrollY,
+      right: right + scrollX,
+      bottom: bottom + scrollY,
+    };
+
+    this.dimensions = dims;
   }
 
   get dimensions() {
@@ -361,28 +416,28 @@ export class Region {
     return Math.min(this.#y1, this.#y2);
   }
   set top(val) {
-    this.#y1 = Math.min(this.#windowDimensions.scrollHeight, Math.max(0, val));
+    this.#y1 = this.#clampY(val);
   }
 
   get left() {
     return Math.min(this.#x1, this.#x2);
   }
   set left(val) {
-    this.#x1 = Math.min(this.#windowDimensions.scrollWidth, Math.max(0, val));
+    this.#x1 = this.#clampX(val);
   }
 
   get right() {
     return Math.max(this.#x1, this.#x2);
   }
   set right(val) {
-    this.#x2 = Math.min(this.#windowDimensions.scrollWidth, Math.max(0, val));
+    this.#x2 = this.#clampX(val);
   }
 
   get bottom() {
     return Math.max(this.#y1, this.#y2);
   }
   set bottom(val) {
-    this.#y2 = Math.min(this.#windowDimensions.scrollHeight, Math.max(0, val));
+    this.#y2 = this.#clampY(val);
   }
 
   get width() {

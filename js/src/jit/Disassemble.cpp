@@ -22,6 +22,8 @@
 #    include "jit/arm/disasm/Disasm-arm.h"  // js::jit::disasm::*
 #  elif defined(JS_CODEGEN_RISCV64)
 #    include "jit/riscv64/disasm/Disasm-riscv64.h"  // js::jit::disasm::*
+#  elif defined(JS_CODEGEN_LOONG64)
+#    include "jit/loong64/disasm/Disasm-loong64.h"  // js::jit::disasm::*
 #  endif
 #endif
 
@@ -102,9 +104,7 @@ void Disassemble(uint8_t* code, size_t length, InstrCallback callback) {
     buffer[0] = '\0';
     uint8_t* next_instr = instr + d.InstructionDecode(buffer, instr);
 
-    JS::UniqueChars formatted =
-        JS_smprintf("0x%p  %08x  %s", instr, *reinterpret_cast<int32_t*>(instr),
-                    buffer.start());
+    JS::UniqueChars formatted = JS_smprintf("0x%p  %s", instr, buffer.start());
     callback(formatted.get());
 
     instr = next_instr;
@@ -131,6 +131,30 @@ void Disassemble(uint8_t* code, size_t length, InstrCallback callback) {
     callback(formatted.get());
 
     instr = next_instr;
+  }
+}
+
+#elif defined(JS_JITSPEW) && defined(JS_CODEGEN_LOONG64)
+
+bool HasDisassembler() { return true; }
+
+void Disassemble(uint8_t* code, size_t length, InstrCallback callback) {
+  disasm::NameConverter converter;
+  disasm::Disassembler disassembler(converter);
+
+  uint8_t* instr = code;
+  uint8_t* end = code + length;
+
+  while (instr < end) {
+    char buffer[disasm::ReasonableBufferSize];
+    buffer[0] = '\0';
+    uint8_t* nextInstr =
+        instr + disassembler.disassemble(mozilla::Span<char>(buffer), instr);
+
+    JS::UniqueChars formatted = JS_smprintf("0x%p  %s", instr, buffer);
+    callback(formatted.get());
+
+    instr = nextInstr;
   }
 }
 

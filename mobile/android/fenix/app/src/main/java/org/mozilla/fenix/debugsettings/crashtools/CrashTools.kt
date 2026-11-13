@@ -29,12 +29,12 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import mozilla.components.compose.base.annotation.FlexibleWindowPreview
 import mozilla.components.compose.base.button.FilledButton
+import mozilla.components.compose.base.theme.PreviewThemeProvider
+import mozilla.components.compose.base.theme.Theme
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.components
 import org.mozilla.fenix.startupCrash.StartupCrashActivity
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.PreviewThemeProvider
-import org.mozilla.fenix.theme.Theme
 import org.mozilla.fenix.utils.Settings
 
 private const val SECOND_IN_MILLISECOND = 1000L
@@ -42,30 +42,28 @@ private const val SECOND_IN_MILLISECOND = 1000L
 @Composable
 internal fun CrashTools(
     settings: Settings = components.settings,
+    currentTimeMillis: () -> Long = { System.currentTimeMillis() },
 ) {
     val appContext = LocalContext.current.applicationContext
 
-    var now = System.currentTimeMillis()
+    var now = currentTimeMillis()
     var genericDeferPeriod by remember { mutableLongStateOf(settings.crashReportDeferredUntil - now) }
     LaunchedEffect(Unit) {
         while (true) {
-            now = System.currentTimeMillis()
+            now = currentTimeMillis()
             genericDeferPeriod = settings.crashReportDeferredUntil - now
             delay(SECOND_IN_MILLISECOND)
         }
     }
 
     Surface {
-        Column(
-            modifier = Modifier
-                .padding(all = 16.dp)
-                .verticalScroll(state = rememberScrollState()),
-        ) {
+        Column(modifier = Modifier.padding(all = 16.dp).verticalScroll(state = rememberScrollState())) {
             Text(
-                text = stringResource(
-                    R.string.crash_debug_deferral_timer,
-                    convertMillisToDHMS(maxOf(genericDeferPeriod, 0)),
-                ),
+                text =
+                    stringResource(
+                        R.string.crash_debug_deferral_timer,
+                        convertMillisToDHMS(maxOf(genericDeferPeriod, 0)),
+                    ),
                 style = FirefoxTheme.typography.body2,
             )
             FilledButton(
@@ -114,9 +112,7 @@ internal fun convertMillisToDHMS(milliseconds: Long): String {
 
 @FlexibleWindowPreview
 @Composable
-private fun CrashToolsPreview(
-    @PreviewParameter(PreviewThemeProvider::class) theme: Theme,
-) {
+private fun CrashToolsPreview(@PreviewParameter(PreviewThemeProvider::class) theme: Theme) {
     FirefoxTheme(theme) {
         CrashTools(Settings(LocalContext.current))
     }

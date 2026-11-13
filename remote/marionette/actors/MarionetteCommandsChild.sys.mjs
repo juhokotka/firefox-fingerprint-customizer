@@ -14,7 +14,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
   evaluate: "chrome://remote/content/marionette/evaluate.sys.mjs",
   event: "chrome://remote/content/shared/webdriver/Event.sys.mjs",
-  executeSoon: "chrome://remote/content/shared/Sync.sys.mjs",
   interaction: "chrome://remote/content/marionette/interaction.sys.mjs",
   json: "chrome://remote/content/marionette/json.sys.mjs",
   Log: "chrome://remote/content/shared/Log.sys.mjs",
@@ -91,8 +90,8 @@ export class MarionetteCommandsChild extends JSWindowActorChild {
             win
           );
           break;
-        case "synthesizeMultiTouch":
-          lazy.event.synthesizeMultiTouch(details.eventData, win);
+        case "synthesizeTouchAtPoint":
+          await lazy.event.synthesizeTouchAtPoint(details.eventData, win);
           break;
         case "synthesizeWheelAtPoint":
           await lazy.event.synthesizeWheelAtPoint(
@@ -108,11 +107,16 @@ export class MarionetteCommandsChild extends JSWindowActorChild {
           );
       }
     } catch (e) {
-      if (e.message.includes("NS_ERROR_FAILURE")) {
+      // An XPCOM exception reports the result code via "name" and can have an
+      // empty message, so both properties have to be checked.
+      if (
+        e.name === "NS_ERROR_FAILURE" ||
+        e.message?.includes("NS_ERROR_FAILURE")
+      ) {
         // Event dispatch failed. Re-throwing as AbortError to allow retrying
         // to dispatch the event.
         throw new DOMException(
-          `Failed to dispatch event "${eventName}": ${e.message}`,
+          `Failed to dispatch event "${eventName}": ${e.message || e.name}`,
           "AbortError"
         );
       }
@@ -134,7 +138,7 @@ export class MarionetteCommandsChild extends JSWindowActorChild {
 
     // Wait until the main thread has processed all already queued-up
     // runnables to ensure that dispatched input events have been handled.
-    await new Promise(resolve => lazy.executeSoon(resolve));
+    await new Promise(resolve => Services.tm.dispatchToMainThread(resolve));
   }
 
   #getClientRects(options, _context) {
@@ -288,7 +292,7 @@ export class MarionetteCommandsChild extends JSWindowActorChild {
       // Inform the content process that the command has completed. It allows
       // it to process async follow-up tasks before the reply is sent.
       if (waitForNextTick) {
-        await new Promise(resolve => lazy.executeSoon(resolve));
+        await new Promise(resolve => Services.tm.dispatchToMainThread(resolve));
       }
 
       const { seenNodeIds, serializedValue, hasSerializedWindows } =
@@ -329,12 +333,12 @@ export class MarionetteCommandsChild extends JSWindowActorChild {
    * Click an element.
    */
   async clickElement(options = {}) {
-    const { capabilities, elem } = options;
+    const { accessibilityChecks, elem, webdriverClick } = options;
 
     return lazy.interaction.clickElement(
       elem,
-      capabilities["moz:accessibilityChecks"],
-      capabilities["moz:webdriverClick"]
+      accessibilityChecks,
+      webdriverClick
     );
   }
 
@@ -488,12 +492,23 @@ export class MarionetteCommandsChild extends JSWindowActorChild {
   }
 
   /**
-   * Get the tagName for the given element.
+   * Get the qualified name of the given element.
+   *
+   * Elements without a namespace prefix are represented by their local name.
+   * For elements with a namespace prefix, return the qualified name in the
+   * form `prefix:localName`.
+   *
+   * This preserves the casing of local names, such as for SVG and XML
+   * elements.
    */
   async getElementTagName(options = {}) {
     const { elem } = options;
 
-    return elem.tagName.toLowerCase();
+    if (elem.prefix === null) {
+      return elem.localName;
+    }
+
+    return `${elem.prefix}:${elem.localName}`;
   }
 
   /**
@@ -602,8 +617,10 @@ export class MarionetteCommandsChild extends JSWindowActorChild {
       rect = new DOMRect(
         win.pageXOffset,
         win.pageYOffset,
-        win.innerWidth,
-        win.innerHeight
+        // Bug 2055445 made system calls to innerWidth/innerHeight return non-rounded
+        // values. So round them up again to keep the behavior the same as it was before.
+        Math.round(win.innerWidth),
+        Math.round(win.innerHeight)
       );
     }
 
@@ -623,48 +640,45 @@ export class MarionetteCommandsChild extends JSWindowActorChild {
    * Determine the element displayedness of the given web element.
    */
   async isElementDisplayed(options = {}) {
-    const { capabilities, elem } = options;
+    const { accessibilityChecks, elem } = options;
 
-    return lazy.interaction.isElementDisplayed(
-      elem,
-      capabilities["moz:accessibilityChecks"]
-    );
+    return lazy.interaction.isElementDisplayed(elem, accessibilityChecks);
   }
 
   /**
    * Check if element is enabled.
    */
   async isElementEnabled(options = {}) {
-    const { capabilities, elem } = options;
+    const { accessibilityChecks, elem } = options;
 
-    return lazy.interaction.isElementEnabled(
-      elem,
-      capabilities["moz:accessibilityChecks"]
-    );
+    return lazy.interaction.isElementEnabled(elem, accessibilityChecks);
   }
 
   /**
    * Determine whether the referenced element is selected or not.
    */
   async isElementSelected(options = {}) {
-    const { capabilities, elem } = options;
+    const { accessibilityChecks, elem } = options;
 
-    return lazy.interaction.isElementSelected(
-      elem,
-      capabilities["moz:accessibilityChecks"]
-    );
+    return lazy.interaction.isElementSelected(elem, accessibilityChecks);
   }
 
   /*
    * Send key presses to element after focusing on it.
    */
   async sendKeysToElement(options = {}) {
-    const { capabilities, elem, text } = options;
+    const {
+      accessibilityChecks,
+      elem,
+      strictFileInteractability,
+      text,
+      webdriverClick,
+    } = options;
 
     const opts = {
-      strictFileInteractability: capabilities.strictFileInteractability,
-      accessibilityChecks: capabilities["moz:accessibilityChecks"],
-      webdriverClick: capabilities["moz:webdriverClick"],
+      strictFileInteractability,
+      accessibilityChecks,
+      webdriverClick,
     };
 
     return lazy.interaction.sendKeysToElement(elem, text, opts);

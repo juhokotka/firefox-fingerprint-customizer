@@ -20,17 +20,17 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class OnboardingTelemetryRecorderTest {
 
-    @get:Rule
-    val gleanTestRule = FenixGleanTestRule(testContext)
+    @get:Rule val gleanTestRule = FenixGleanTestRule(testContext)
 
     private lateinit var telemetryRecorder: OnboardingTelemetryRecorder
 
     @Before
     fun setup() {
-        telemetryRecorder = OnboardingTelemetryRecorder(
-            onboardingReason = OnboardingReason.NEW_USER,
-            installSource = "source",
-        )
+        telemetryRecorder =
+            OnboardingTelemetryRecorder(
+                onboardingReason = OnboardingReason.NEW_USER,
+                installSource = "source",
+            )
     }
 
     @Test
@@ -60,11 +60,26 @@ class OnboardingTelemetryRecorderTest {
     }
 
     @Test
+    fun `WHEN the notification card impression is recorded THEN the turn on notifications card event is triggered`() {
+        telemetryRecorder.onNotificationCardImpression(sequenceId = "notification", sequencePosition = "0")
+
+        val event = Onboarding.turnOnNotificationsCard.testGetValue()!!.single()
+
+        assertEquals("impression", event.extra?.getValue("action"))
+        assertEquals("onboarding_card", event.extra?.getValue("element_type"))
+        assertEquals("notification", event.extra?.getValue("sequence_id"))
+        assertEquals("0", event.extra?.getValue("sequence_position"))
+        assertEquals("source", event.extra?.getValue("install_source"))
+        assertEquals(OnboardingReason.NEW_USER.value, event.extra?.getValue("onboarding_reason"))
+    }
+
+    @Test
     fun `WHEN onboarding is complete THEN the onboarding ping is sent`() {
         var sent = false
-        val job = Pings.onboarding.testBeforeNextSubmit {
-            sent = true
-        }
+        val job =
+            Pings.onboarding.testBeforeNextSubmit {
+                sent = true
+            }
 
         telemetryRecorder.onOnboardingComplete("", "")
 
@@ -75,9 +90,10 @@ class OnboardingTelemetryRecorderTest {
     @Test
     fun `WHEN navigating to the next onboarding page THEN the onboarding ping is sent`() {
         var sent = false
-        val job = Pings.onboarding.testBeforeNextSubmit {
-            sent = true
-        }
+        val job =
+            Pings.onboarding.testBeforeNextSubmit {
+                sent = true
+            }
 
         telemetryRecorder.onNavigatedToNextPage()
 

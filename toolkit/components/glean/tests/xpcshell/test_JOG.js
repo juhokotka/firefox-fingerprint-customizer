@@ -27,6 +27,34 @@ add_task(
   }
 );
 
+add_task(
+  {
+    skip_if: () =>
+      !Services.prefs.getBoolPref("telemetry.fog.artifact_build", false),
+  },
+  function test_jog_object_does_not_validate_schema() {
+    // Bug 2050219: document the limitation until runtime schema validation exists.
+    // See https://firefox-source-docs.mozilla.org/toolkit/components/glean/user/instrumentation_tests.html#tests-and-artifact-builds
+    const balloons = [{ colour: "red", diameter: 5 }];
+    Glean.testOnly.balloons.set(balloons);
+    Assert.deepEqual(balloons, Glean.testOnly.balloons.testGetValue());
+
+    const invalidValues = [
+      [{ color: "red" }],
+      [{ colour: "red", diameter: "small" }],
+      [{ colour: "red", diameter: 5, extra: "field" }],
+    ];
+    for (const value of invalidValues) {
+      Glean.testOnly.balloons.set(value);
+      Assert.deepEqual(
+        value,
+        Glean.testOnly.balloons.testGetValue(),
+        "Artifact builds currently store schema-invalid objects without an invalid_value error"
+      );
+    }
+  }
+);
+
 add_task(function test_jog_counter_works() {
   Services.fog.testRegisterRuntimeMetric(
     "counter",
@@ -1142,4 +1170,39 @@ add_task(function test_jog_dual_labeled_counter_works() {
       .get("__other__", "somecat")
       .testGetValue()
   );
+});
+
+add_task(async function test_jog_ping_works_across_registration() {
+  const kReason = "reason-1";
+  let pingArgs = [
+    "twice-ping",
+    true,
+    true,
+    true,
+    true,
+    true,
+    [],
+    [kReason],
+    true,
+    [],
+  ];
+  Services.fog.testRegisterRuntimePing(...pingArgs);
+  await GleanPings.twicePing.testSubmission(
+    reason => {
+      Assert.equal(kReason, reason);
+    },
+    () => {
+      GleanPings.twicePing.submit(kReason);
+    }
+  );
+  // Ensure that a re-registered ping with the same name (but different id)
+  // will still call the callback from the first ping.
+  let submitted = false;
+  GleanPings.twicePing.testBeforeNextSubmit(reason => {
+    submitted = true;
+    Assert.equal(kReason, reason);
+  });
+  Services.fog.testRegisterRuntimePing(...pingArgs);
+  GleanPings.twicePing.submit(kReason);
+  Assert.ok(submitted, "Ping was submitted!");
 });

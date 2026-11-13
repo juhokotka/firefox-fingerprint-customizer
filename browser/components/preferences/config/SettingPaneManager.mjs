@@ -4,18 +4,6 @@
 
 /** @import {SettingPaneConfig, SettingPaneFullConfig, SettingPaneId, SettingPane} from "chrome://browser/content/preferences/widgets/setting-pane.mjs" */
 
-const XPCOMUtils = ChromeUtils.importESModule(
-  "resource://gre/modules/XPCOMUtils.sys.mjs"
-).XPCOMUtils;
-
-const lazy = XPCOMUtils.declareLazy({
-  srdPromoDismissed: {
-    pref: "browser.settings-redesign.promo.dismissed",
-    default: false,
-  },
-  srdEnabled: { pref: "browser.settings-redesign.enabled", default: false },
-});
-
 /**
  * Converts a friendly category name to internal pane name.
  *
@@ -61,6 +49,11 @@ export const SettingPaneManager = {
    */
   importPane(id) {
     for (let config of this.getWithParents(id)) {
+      // Each import spins the event loop, so the window can be closed part way
+      // through this loop; the remaining panes have nothing left to set up.
+      if (window.closed) {
+        return;
+      }
       if (config.module) {
         ChromeUtils.importESModule(config.module, { global: "current" });
       }
@@ -89,8 +82,6 @@ export const SettingPaneManager = {
     settingPane.config = fullConfig;
     settingPane.isSubPane = !!config.parent;
 
-    settingPane.showRedesignPromo = this.shouldShowRedesignPromo;
-
     document.getElementById("mainPrefPane").append(settingPane);
     window.register_module(subPane, {
       init() {
@@ -107,17 +98,4 @@ export const SettingPaneManager = {
       this.registerPane(id, paneConfigs[id]);
     }
   },
-
-  get shouldShowRedesignPromo() {
-    return lazy.srdEnabled && !lazy.srdPromoDismissed;
-  },
 };
-
-/**
- * Placement of this listener may seem a little odd, but is the only place
- * where it will run once while still having this and its related
- * dismissal logic be isolated all to this one file.
- */
-document.addEventListener("settings-redesign-promo-dismiss", () => {
-  Services.prefs.setBoolPref("browser.settings-redesign.promo.dismissed", true);
-});

@@ -5,26 +5,28 @@
 #ifndef MOZILLA_GFX_TEXTUREHOST_H
 #define MOZILLA_GFX_TEXTUREHOST_H
 
-#include <stddef.h>              // for size_t
-#include <stdint.h>              // for uint64_t, uint32_t, uint8_t
+#include <stddef.h>  // for size_t
+#include <stdint.h>  // for uint64_t, uint32_t, uint8_t
+
 #include "mozilla/Assertions.h"  // for MOZ_ASSERT, etc
 #include "mozilla/Attributes.h"  // for override
-#include "mozilla/RefPtr.h"      // for RefPtr, already_AddRefed, etc
+#include "mozilla/Range.h"
+#include "mozilla/RefPtr.h"               // for RefPtr, already_AddRefed, etc
+#include "mozilla/UniquePtr.h"            // for UniquePtr
+#include "mozilla/UniquePtrExtensions.h"  // for UniqueFileHandle
 #include "mozilla/dom/ipc/IdType.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/Matrix.h"
 #include "mozilla/gfx/Point.h"  // for IntSize, IntPoint
 #include "mozilla/gfx/Rect.h"
-#include "mozilla/gfx/Types.h"               // for SurfaceFormat, etc
+#include "mozilla/gfx/Types.h"  // for SurfaceFormat, etc
+#include "mozilla/layers/AtomicRefCountedWithFinalize.h"
 #include "mozilla/layers/CompositorTypes.h"  // for TextureFlags, etc
-#include "mozilla/layers/LayersTypes.h"      // for LayerRenderState, etc
 #include "mozilla/layers/LayersMessages.h"
 #include "mozilla/layers/LayersSurfaces.h"
+#include "mozilla/layers/LayersTypes.h"  // for LayerRenderState, etc
 #include "mozilla/layers/TextureSourceProvider.h"
 #include "mozilla/mozalloc.h"  // for operator delete
-#include "mozilla/Range.h"
-#include "mozilla/UniquePtr.h"            // for UniquePtr
-#include "mozilla/UniquePtrExtensions.h"  // for UniqueFileHandle
 #include "mozilla/webrender/WebRenderTypes.h"
 #include "nsCOMPtr.h"         // for already_AddRefed
 #include "nsDebug.h"          // for NS_WARNING
@@ -33,7 +35,6 @@
 #include "nsRegion.h"       // for nsIntRegion
 #include "nsTraceRefcnt.h"  // for MOZ_COUNT_CTOR, etc
 #include "nscore.h"         // for nsACString
-#include "mozilla/layers/AtomicRefCountedWithFinalize.h"
 
 class MacIOSurface;
 namespace mozilla {
@@ -665,10 +666,10 @@ class TextureHost : public AtomicRefCountedWithFinalize<TextureHost> {
   };
 
   // Add all necessary TextureHost informations to the resource update queue.
-  virtual void PushResourceUpdates(wr::TransactionBuilder& aResources,
-                                   ResourceUpdateOp aOp,
-                                   const Range<wr::ImageKey>& aImageKeys,
-                                   const wr::ExternalImageId& aExtID) {
+  virtual void PushResourceUpdates(
+      wr::TransactionBuilder& aResources, ResourceUpdateOp aOp,
+      const mozilla::Range<wr::ImageKey>& aImageKeys,
+      const wr::ExternalImageId& aExtID) {
     MOZ_ASSERT_UNREACHABLE("Unimplemented");
   }
 
@@ -692,7 +693,7 @@ class TextureHost : public AtomicRefCountedWithFinalize<TextureHost> {
                                 const wr::LayoutRect& aBounds,
                                 const wr::LayoutRect& aClip,
                                 wr::ImageRendering aFilter,
-                                const Range<wr::ImageKey>& aKeys,
+                                const mozilla::Range<wr::ImageKey>& aKeys,
                                 PushDisplayItemFlagSet aFlags) {
     MOZ_ASSERT_UNREACHABLE(
         "No PushDisplayItems() implementation for this TextureHost type.");
@@ -716,6 +717,10 @@ class TextureHost : public AtomicRefCountedWithFinalize<TextureHost> {
   virtual TextureHostType GetTextureHostType() { return mTextureHostType; }
 
   virtual void SetReadFence(Fence* aReadFence) {}
+
+  virtual SurfaceDescriptor GetSurfaceDescriptor() {
+    return SurfaceDescriptor();
+  }
 
   // Our WebRender backend may impose restrictions on whether textures are
   // prepared as native textures or not, or it may have no restriction at
@@ -848,13 +853,13 @@ class BufferTextureHost : public TextureHost {
 
   void PushResourceUpdates(wr::TransactionBuilder& aResources,
                            ResourceUpdateOp aOp,
-                           const Range<wr::ImageKey>& aImageKeys,
+                           const mozilla::Range<wr::ImageKey>& aImageKeys,
                            const wr::ExternalImageId& aExtID) override;
 
   void PushDisplayItems(wr::DisplayListBuilder& aBuilder,
                         const wr::LayoutRect& aBounds,
                         const wr::LayoutRect& aClip, wr::ImageRendering aFilter,
-                        const Range<wr::ImageKey>& aImageKeys,
+                        const mozilla::Range<wr::ImageKey>& aImageKeys,
                         PushDisplayItemFlagSet aFlags) override;
 
   bool IsYCbCr() const;

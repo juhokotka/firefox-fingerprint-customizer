@@ -7,15 +7,15 @@
 #define mozilla_image_ProgressTracker_h
 
 #include "CopyOnWrite.h"
+#include "IProgressObserver.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/WeakPtr.h"
-#include "nsTHashMap.h"
 #include "nsCOMPtr.h"
+#include "nsRect.h"
+#include "nsTHashMap.h"
 #include "nsTObserverArray.h"
 #include "nsThreadUtils.h"
-#include "nsRect.h"
-#include "IProgressObserver.h"
 
 class nsIRunnable;
 
@@ -110,11 +110,7 @@ class ProgressTracker : public mozilla::SupportsWeakPtr {
     MutexAutoLock lock(mMutex);
     return mImage;
   }
-  already_AddRefed<Image> GetImage() const {
-    MutexAutoLock lock(mMutex);
-    RefPtr<Image> image = mImage;
-    return image.forget();
-  }
+  already_AddRefed<Image> GetImage() const;
 
   // Get the current image status (as in imgIRequest).
   uint32_t GetImageStatus() const;

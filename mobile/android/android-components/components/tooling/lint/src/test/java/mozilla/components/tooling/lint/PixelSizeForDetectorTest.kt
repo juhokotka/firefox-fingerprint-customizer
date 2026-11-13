@@ -18,34 +18,75 @@ class PixelSizeForDetectorTest : LintDetectorTest() {
 
     override fun getIssues(): List<Issue> = listOf(PixelSizeForDetector.ISSUE_USE_PIXEL_SIZE_FOR)
 
-    private val resourcesStub = TestFiles.java(
-        """
+    private val resourcesStub =
+        TestFiles.java(
+                """
         package android.content.res;
         public class Resources {
             public int getDimensionPixelSize(int id) { return 0; }
             public float getDimension(int id) { return 0f; }
         }
-        """,
-    ).indented()
-
-    private val contextStub = TestFiles.java(
         """
+            )
+            .indented()
+
+    private val contextStub =
+        TestFiles.java(
+                """
         package android.content;
         import android.content.res.Resources;
         public class Context {
             public Resources getResources() { return null; }
         }
-        """,
-    ).indented()
+        """
+            )
+            .indented()
+
+    private val viewStub =
+        TestFiles.java(
+                """
+        package android.view;
+        import android.content.res.Resources;
+        public class View {
+            public Resources getResources() { return null; }
+        }
+        """
+            )
+            .indented()
 
     @Test
-    fun `getDimensionPixelSize in fenix package reports warning`() {
+    fun `getDimensionPixelSize on a View receiver reports warning`() {
+        lint()
+            .files(
+                resourcesStub,
+                viewStub,
+                TestFiles.kotlin(
+                        """
+                    package mozilla.components.browser.toolbar
+                    import android.view.View
+
+                    class MyView(private val view: View) {
+                        fun foo() {
+                            view.resources.getDimensionPixelSize(42)
+                        }
+                    }
+                    """
+                    )
+                    .indented(),
+            )
+            .run()
+            .expectWarningCount(1)
+            .expectContains("Use the pixelSizeFor() extension on Context/View/Fragment")
+    }
+
+    @Test
+    fun `getDimensionPixelSize reports warning`() {
         lint()
             .files(
                 resourcesStub,
                 contextStub,
                 TestFiles.kotlin(
-                    """
+                        """
                     package org.mozilla.fenix.foo
                     import android.content.Context
 
@@ -54,8 +95,9 @@ class PixelSizeForDetectorTest : LintDetectorTest() {
                             context.resources.getDimensionPixelSize(42)
                         }
                     }
-                    """,
-                ).indented(),
+                    """
+                    )
+                    .indented(),
             )
             .run()
             .expectWarningCount(1)
@@ -63,13 +105,13 @@ class PixelSizeForDetectorTest : LintDetectorTest() {
     }
 
     @Test
-    fun `getDimensionPixelSize outside fenix package is clean`() {
+    fun `getDimensionPixelSize outside fenix package also reports warning`() {
         lint()
             .files(
                 resourcesStub,
                 contextStub,
                 TestFiles.kotlin(
-                    """
+                        """
                     package mozilla.components.browser.icons
                     import android.content.Context
 
@@ -78,11 +120,13 @@ class PixelSizeForDetectorTest : LintDetectorTest() {
                             context.resources.getDimensionPixelSize(42)
                         }
                     }
-                    """,
-                ).indented(),
+                    """
+                    )
+                    .indented(),
             )
             .run()
-            .expectClean()
+            .expectWarningCount(1)
+            .expectContains("Use the pixelSizeFor() extension on Context/View/Fragment")
     }
 
     @Test
@@ -92,7 +136,7 @@ class PixelSizeForDetectorTest : LintDetectorTest() {
                 resourcesStub,
                 contextStub,
                 TestFiles.kotlin(
-                    """
+                        """
                     package org.mozilla.fenix.foo
                     import android.content.Context
 
@@ -101,8 +145,9 @@ class PixelSizeForDetectorTest : LintDetectorTest() {
                             context.resources.getDimension(42)
                         }
                     }
-                    """,
-                ).indented(),
+                    """
+                    )
+                    .indented(),
             )
             .run()
             .expectClean()
@@ -113,7 +158,7 @@ class PixelSizeForDetectorTest : LintDetectorTest() {
         lint()
             .files(
                 TestFiles.kotlin(
-                    """
+                        """
                     package org.mozilla.fenix.foo
 
                     class NotResources {
@@ -123,8 +168,9 @@ class PixelSizeForDetectorTest : LintDetectorTest() {
                     fun foo() {
                         NotResources().getDimensionPixelSize(42)
                     }
-                    """,
-                ).indented(),
+                    """
+                    )
+                    .indented()
             )
             .run()
             .expectClean()
@@ -137,7 +183,7 @@ class PixelSizeForDetectorTest : LintDetectorTest() {
                 resourcesStub,
                 contextStub,
                 TestFiles.java(
-                    """
+                        """
                     package org.mozilla.fenix.foo;
                     import android.content.Context;
 
@@ -148,8 +194,9 @@ class PixelSizeForDetectorTest : LintDetectorTest() {
                             context.getResources().getDimensionPixelSize(42);
                         }
                     }
-                    """,
-                ).indented(),
+                    """
+                    )
+                    .indented(),
             )
             .run()
             .expectWarningCount(1)

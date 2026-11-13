@@ -5,11 +5,11 @@
 
 #include "nsIconProtocolHandler.h"
 
+#include "nsCOMPtr.h"
+#include "nsCRT.h"
 #include "nsContentUtils.h"
 #include "nsIconChannel.h"
 #include "nsIconURI.h"
-#include "nsCRT.h"
-#include "nsCOMPtr.h"
 #include "nsNetCID.h"
 
 ///////////////////////////////////////////////////////////////////////////////

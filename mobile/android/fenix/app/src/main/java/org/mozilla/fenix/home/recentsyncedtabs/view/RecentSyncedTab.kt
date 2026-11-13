@@ -46,6 +46,7 @@ import mozilla.components.compose.base.text.Text
 import mozilla.components.concept.base.images.ImageLoadRequest
 import mozilla.components.concept.sync.DeviceType
 import mozilla.components.support.ktx.kotlin.trimmed
+import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.Image
 import org.mozilla.fenix.compose.ThumbnailCard
@@ -53,7 +54,7 @@ import org.mozilla.fenix.home.recentsyncedtabs.RecentSyncedTab
 import org.mozilla.fenix.home.topsites.ui.HomepageCard
 import org.mozilla.fenix.home.topsites.ui.homepageCardImageShape
 import org.mozilla.fenix.theme.FirefoxTheme
-import mozilla.components.ui.icons.R as iconsR
+import org.mozilla.fenix.wallpapers.WallpaperTheme
 
 private const val THUMBNAIL_SIZE = 108
 
@@ -72,7 +73,7 @@ private const val THUMBNAIL_SIZE = 108
 @Composable
 fun RecentSyncedTab(
     tab: RecentSyncedTab?,
-    backgroundColor: Color = MaterialTheme.colorScheme.surfaceBright,
+    backgroundColor: Color = WallpaperTheme.cardBackgroundColor,
     buttonBackgroundColor: Color = ButtonDefaults.buttonColors().containerColor,
     buttonTextColor: Color = ButtonDefaults.buttonColors().contentColor,
     onRecentSyncedTabClick: (RecentSyncedTab) -> Unit,
@@ -87,12 +88,12 @@ fun RecentSyncedTab(
     }
 
     HomepageCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = { tab?.let { onRecentSyncedTabClick(tab) } },
-                onLongClick = { isDropdownExpanded = true },
-            ),
+        modifier =
+            Modifier.fillMaxWidth()
+                .combinedClickable(
+                    onClick = { tab?.let { onRecentSyncedTabClick(tab) } },
+                    onLongClick = { isDropdownExpanded = true },
+                ),
         backgroundColor = backgroundColor,
     ) {
         Column(modifier = Modifier.padding(FirefoxTheme.layout.space.static200)) {
@@ -100,9 +101,7 @@ fun RecentSyncedTab(
                 if (tab == null) {
                     RecentTabImagePlaceholder()
                 } else {
-                    val imageModifier = Modifier
-                        .size(108.dp, 80.dp)
-                        .clip(homepageCardImageShape)
+                    val imageModifier = Modifier.size(108.dp, 80.dp).clip(homepageCardImageShape)
 
                     if (tab.previewImageUrl != null) {
                         Image(
@@ -113,11 +112,12 @@ fun RecentSyncedTab(
                     } else {
                         ThumbnailCard(
                             url = tab.url,
-                            request = ImageLoadRequest(
-                                id = tab.url.hashCode().toString(),
-                                size = LocalDensity.current.run { THUMBNAIL_SIZE.dp.toPx().toInt() },
-                                isPrivate = false,
-                            ),
+                            request =
+                                ImageLoadRequest(
+                                    id = tab.url.hashCode().toString(),
+                                    size = LocalDensity.current.run { THUMBNAIL_SIZE.dp.toPx().toInt() },
+                                    isPrivate = false,
+                                ),
                             modifier = imageModifier,
                         )
                     }
@@ -141,21 +141,17 @@ fun RecentSyncedTab(
                         )
                     }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         if (tab == null) {
                             Box(
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                                    .size(18.dp),
+                                modifier =
+                                    Modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest).size(18.dp)
                             )
                         } else {
                             Icon(
                                 painter = painterResource(iconsR.drawable.mozac_ic_sync_tabs_24),
-                                contentDescription = stringResource(
-                                    R.string.recent_tabs_synced_device_icon_content_description,
-                                ),
+                                contentDescription =
+                                    stringResource(R.string.recent_tabs_synced_device_icon_content_description),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -180,11 +176,12 @@ fun RecentSyncedTab(
             Spacer(modifier = Modifier.height(32.dp))
 
             FilledButton(
-                text = if (tab != null) {
-                    stringResource(R.string.recent_tabs_see_all_synced_tabs_button_text)
-                } else {
-                    ""
-                },
+                text =
+                    if (tab != null) {
+                        stringResource(R.string.recent_tabs_see_all_synced_tabs_button_text)
+                    } else {
+                        ""
+                    },
                 modifier = Modifier.fillMaxWidth(),
                 contentColor = buttonTextColor,
                 containerColor = buttonBackgroundColor,
@@ -194,32 +191,29 @@ fun RecentSyncedTab(
     }
 
     DropdownMenu(
-        menuItems = listOf(
-            MenuItem.TextItem(Text.Resource(R.string.recent_synced_tab_menu_item_remove)) {
-                tab?.let { removeSyncedTab(it) }
-            },
-        ),
+        menuItems =
+            listOf(
+                MenuItem.TextItem(Text.Resource(R.string.recent_synced_tab_menu_item_remove)) {
+                    tab?.let { removeSyncedTab(it) }
+                }
+            ),
         expanded = isDropdownExpanded && tab != null,
         onDismissRequest = { isDropdownExpanded = false },
     )
 }
 
-/**
- * A placeholder for a recent tab image.
- */
+/** A placeholder for a recent tab image. */
 @Composable
 private fun RecentTabImagePlaceholder() {
     Box(
-        modifier = Modifier
-            .size(108.dp, 80.dp)
-            .clip(homepageCardImageShape)
-            .background(color = MaterialTheme.colorScheme.surfaceContainerHighest),
+        modifier =
+            Modifier.size(108.dp, 80.dp)
+                .clip(homepageCardImageShape)
+                .background(color = MaterialTheme.colorScheme.surfaceContainerHighest)
     )
 }
 
-/**
- * A placeholder for a tab title.
- */
+/** A placeholder for a tab title. */
 @Composable
 private fun RecentTabTitlePlaceholder() {
     Column {
@@ -231,29 +225,23 @@ private fun RecentTabTitlePlaceholder() {
     }
 }
 
-/**
- * A placeholder for a single line of text.
- */
+/** A placeholder for a single line of text. */
 @Composable
 private fun TextLinePlaceHolder() {
-    Box(
-        modifier = Modifier
-            .height(12.dp)
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-    )
+    Box(modifier = Modifier.height(12.dp).fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerHighest))
 }
 
 @PreviewLightDark
 @Composable
 private fun LoadedRecentSyncedTab() {
-    val tab = RecentSyncedTab(
-        deviceDisplayName = "Firefox on MacBook",
-        deviceType = DeviceType.DESKTOP,
-        title = "This is a long site title",
-        url = "https://mozilla.org",
-        previewImageUrl = "https://mozilla.org",
-    )
+    val tab =
+        RecentSyncedTab(
+            deviceDisplayName = "Firefox on MacBook",
+            deviceType = DeviceType.DESKTOP,
+            title = "This is a long site title",
+            url = "https://mozilla.org",
+            previewImageUrl = "https://mozilla.org",
+        )
     FirefoxTheme {
         RecentSyncedTab(
             tab = tab,

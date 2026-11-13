@@ -45,7 +45,7 @@ add_task(async function test_context_menu_populate_password_noSchemeUpgrades() {
 
       // Check the content of the password manager popup
       let popupMenu = document.getElementById("fill-login-popup");
-      checkMenu(popupMenu, 2);
+      await checkMenu(popupMenu, 2);
 
       await closePopup(CONTEXT_MENU);
     }
@@ -68,7 +68,7 @@ add_task(async function test_context_menu_populate_password_schemeUpgrades() {
 
       // Check the content of the password manager popup
       let popupMenu = document.getElementById("fill-login-popup");
-      checkMenu(popupMenu, 3);
+      await checkMenu(popupMenu, 3);
 
       await closePopup(CONTEXT_MENU);
     }
@@ -95,7 +95,7 @@ add_task(
 
         // Check the content of the password manager popup
         let popupMenu = document.getElementById("fill-login-popup");
-        checkMenu(popupMenu, 2);
+        await checkMenu(popupMenu, 2);
 
         await closePopup(CONTEXT_MENU);
       }
@@ -122,7 +122,7 @@ add_task(
 
         // Check the content of the password manager popup
         let popupMenu = document.getElementById("fill-login-popup");
-        checkMenu(popupMenu, 3);
+        await checkMenu(popupMenu, 3);
 
         await closePopup(CONTEXT_MENU);
       }
@@ -150,7 +150,7 @@ add_task(
 
         // Check the content of the password manager popup
         let popupMenu = document.getElementById("fill-login-popup");
-        checkMenu(popupMenu, 2);
+        await checkMenu(popupMenu, 2);
 
         await closePopup(CONTEXT_MENU);
       }
@@ -177,7 +177,7 @@ add_task(
 
         // Check the content of the password manager popup
         let popupMenu = document.getElementById("fill-login-popup");
-        checkMenu(popupMenu, 3);
+        await checkMenu(popupMenu, 3);
 
         await closePopup(CONTEXT_MENU);
       }
@@ -462,6 +462,7 @@ add_task(async function test_context_menu_username_login_fill() {
  * from the context menu
  */
 add_task(async function test_context_menu_open_management() {
+  Services.fog.testResetFOG();
   Services.prefs.setBoolPref("signon.schemeUpgrades", false);
   await BrowserTestUtils.withNewTab(
     {
@@ -476,16 +477,71 @@ add_task(async function test_context_menu_open_management() {
       let passwordManager = await openPasswordManager(openingFunc);
       info("Management UI dialog was opened");
 
-      TelemetryTestUtils.assertEvents(
-        [["pwmgr", "open_management", "contextmenu"]],
-        { category: "pwmgr", method: "open_management" },
-        { clear: true, process: "content" }
+      await Services.fog.testFlushAllChildren();
+      Assert.equal(
+        Glean.pwmgr.openManagementContextmenu.testGetValue().length,
+        1,
+        "One contextmenu event"
       );
 
       await passwordManager.close();
       await closePopup(CONTEXT_MENU);
     }
   );
+});
+
+/**
+ * A menu can be dismissed while the logins for it are still being looked up.
+ * The result has to be dropped rather than added to the menu after the fact.
+ */
+add_task(async function test_context_menu_dismissed_before_logins_arrive() {
+  const { LoginManagerContextMenu } = ChromeUtils.importESModule(
+    "resource://gre/modules/LoginManagerContextMenu.sys.mjs"
+  );
+  const findLogins = LoginManagerContextMenu._findLogins;
+  let releaseLogins;
+  LoginManagerContextMenu._findLogins = formOrigin =>
+    new Promise(resolve => {
+      releaseLogins = () =>
+        resolve(findLogins.call(LoginManagerContextMenu, formOrigin));
+    });
+
+  try {
+    await BrowserTestUtils.withNewTab(
+      {
+        gBrowser,
+        url: TEST_ORIGIN + MULTIPLE_FORMS_PAGE_PATH,
+      },
+      async function (browser) {
+        const input = "#test-password-1";
+        const shown = BrowserTestUtils.waitForEvent(CONTEXT_MENU, "popupshown");
+        await BrowserTestUtils.synthesizeMouseAtCenter(
+          input,
+          { button: 2 },
+          browser.browsingContext
+        );
+        await BrowserTestUtils.synthesizeMouseAtCenter(
+          input,
+          { type: "contextmenu", button: 2 },
+          browser.browsingContext
+        );
+        await shown;
+
+        const itemsReady = gContextMenu.passwordItemsReady;
+        await closePopup(CONTEXT_MENU);
+        releaseLogins();
+        await itemsReady;
+
+        Assert.equal(
+          CONTEXT_MENU.getElementsByClassName("context-login-item").length,
+          0,
+          "The logins of the dismissed menu were not added to it"
+        );
+      }
+    );
+  } finally {
+    LoginManagerContextMenu._findLogins = findLogins;
+  }
 });
 
 /**
@@ -607,7 +663,7 @@ async function assertContextMenuFill(
  * @param {number} expectedCount - Number of logins expected in the context menu. Used to ensure
  *                                  we continue testing something useful.
  */
-function checkMenu(contextMenu, expectedCount) {
+async function checkMenu(contextMenu, expectedCount) {
   let logins = loginList().filter(login => {
     return LoginHelper.isOriginMatching(login.origin, TEST_ORIGIN, {
       schemeUpgrades: Services.prefs.getBoolPref("signon.schemeUpgrades"),

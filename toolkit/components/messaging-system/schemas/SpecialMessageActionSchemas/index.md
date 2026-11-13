@@ -70,7 +70,13 @@ Example:
 }
 ```
 
-Opens a given about page
+Opens a given about page.
+
+Only pages in the `ALLOWED_ABOUT_PAGES` allowlist are permitted; any other
+page throws an error. As of writing, the allowed pages are: `addons`,
+`profiles`, `translations`, `keyboard`, `logins`, `preferences`,
+`privatebrowsing`, `protections`, `referrals`, `settings`, `welcome`,
+`newtab`, `home`, and `robots`.
 
 Example:
 
@@ -84,12 +90,19 @@ Example:
 ### `OPEN_PREFERENCES_PAGE`
 
 * args:
-```
+```ts
 {
-  args?: string, // (a category accessible via a `#`)
-  entrypoint?: string // URL search param used to referrals
+  // Top-level category, optionally with a "-subcategory" (e.g.
+  // "general-cfrfeatures"). Passed as `category` (preferred) or `args`.
+  category?: string,
+  entrypoint?: string, // URL search param used for referrals
+}
+```
 
 Opens `about:preferences` with an optional category accessible via a `#` in the URL (e.g. `about:preferences#home`).
+
+Only real top-level categories and subcategories that map to a named pane will
+route; unknown values silently fall back to the default pane.
 
 Example:
 
@@ -149,11 +162,22 @@ Opens a customized AI Window Firefox accounts sign-up or sign-in flow, and redir
 Returns a Promise that resolves to `true` if sign-in succeeded, or to `false` if the sign-in
 window or tab closed before sign-in could be completed.
 
-- args: (none)
+- args:
+```ts
+{
+  data?: {
+    // Identifies the surface that requested the launch, recorded as the
+    // `trigger` extra key on Smart Window telemetry. Defaults to "asrouter".
+    source?: string;
+  }
+}
+```
 
 ### `SHOW_MIGRATION_WIZARD`
 
-* args: (none)
+* args:
+  * `source` (optional): key of the browser to pre-select, e.g. `"chrome"`
+  * `tabModal` (optional): `true` to open the wizard as a dialog over the current tab instead of in about:preferences
 
 Opens import wizard to bring in settings and data from another browser.
 
@@ -188,6 +212,12 @@ Opens `about:protections`
 ### `OPEN_PROTECTION_PANEL`
 
 Opens the protection panel behind on the lock icon of the awesomebar
+
+### `OPEN_SMARTWINDOW_MONITOR_CREATE`
+
+Opens the Smart Window Monitor toolbar panel straight to the create form.
+
+* args: (none)
 
 ### `DISABLE_STP_DOORHANGERS`
 
@@ -241,7 +271,14 @@ Action for configuring the user homepage and restoring defaults.
 
 Action for pinning Firefox to the user's taskbar.
 
-* args: (none)
+- args:
+
+```ts
+{
+  privatePin?: boolean; // Pin private browsing mode
+  fireAndForget?: boolean; // Don't wait for user confirmation before resolving the action
+}
+```
 
 ### `PIN_FIREFOX_TO_START_MENU`
 
@@ -249,9 +286,32 @@ Action for pinning Firefox to the user's Windows Start Menu in Windows MSIX buil
 
 - args: (none)
 
+### `PIN_AND_DEFAULT`
+Action for pinning Firefox to the user's taskbar and setting it as the default browser.
+
+- args:
+
+```ts
+{
+  privatePin?: boolean; // Pin private browsing mode
+  fireAndForget?: boolean; // Don't wait for user confirmation before resolving the action
+}
+```
+
 ### `SET_DEFAULT_BROWSER`
 
 Action for setting the default browser to Firefox on the user's system.
+
+- args: (none)
+
+### `SET_DEFAULT_BROWSER_OPEN_WITH`
+
+Action for setting Firefox as the default browser via the OS "Open with" picker
+(IOpenWithLauncher), which guarantees an OS-level prompt. Claiming the `https`
+handler this way sets the whole web-browser default (both `http` and `https`)
+with a single picker.
+
+Windows only.
 
 - args: (none)
 
@@ -493,6 +553,14 @@ Any message that uses this action should have `canCreateSelectableProfiles` as p
 
 - args: (none)
 
+### `RESET_PROFILE`
+
+Opens the refresh confirmation dialog, which resets the current profile and restarts the browser
+
+Any message that uses this action should have `canResetProfile` as part of the targeting, to ensure we don't show a message where the action will not work.
+
+- args: (none)
+
 ### `SUBMIT_ONBOARDING_OPT_OUT_PING`
 
 Submits a Glean `onboarding-opt-out` ping.  Should only be used during preonboarding (but this is not enforced).
@@ -544,6 +612,22 @@ interface SearchMode {
 Summarize current page content.
 
 * args: optional `string` entry value to identify initiator default "message"
+
+### `OPEN_ORGANIZE_TABS_PANEL`
+
+Opens the Smart Window "Organize Tabs" panel. Unlike `OPEN_PANEL`, the panel is
+built on demand rather than already present in the DOM.
+
+- args:
+```ts
+{
+  data?: {
+    // Identifies the surface that opened the panel, recorded as the `source`
+    // extra key on the panel's telemetry. Defaults to "message".
+    source?: string;
+  }
+}
+```
 
 ### `OPEN_PANEL`
 
@@ -618,3 +702,55 @@ Configures Firefox to launch on Windows login.
 Removes Firefox from Windows login items.
 
 - args: (none)
+
+### `ENABLE_CLOSED_BROWSER_NOTIFICATIONS`
+
+Turns on web notifications delivered while Firefox is closed, by setting the user-owned pref `app.backgroundNotifications.helper.enabled`.
+
+The helper that delivers them also needs `app.backgroundNotifications.helper.available`, which Nimbus owns, so this action has no effect unless the feature is available to the client.
+
+Windows only; a no-op on other platforms.
+
+- args: (none)
+
+### `DISABLE_CLOSED_BROWSER_NOTIFICATIONS`
+
+Turns off web notifications delivered while Firefox is closed, and stops the helper that delivers them.
+
+This writes only the user-owned pref, never the Nimbus-owned one, so a user opting out is not unenrolled from an experiment that made the feature available.
+
+Windows only; a no-op on other platforms.
+
+- args: (none)
+
+### `SET_BROWSER_ICON`
+
+Changes the browser icon to the one identified by `id` using `CustomIconManager`. Icon ids that are not present in the catalog are ignored. The `"default"` id reverts to the browser's own icon. Windows only, and not supported on MSIX (packaged) builds.
+
+- args:
+```ts
+{
+  id: string;  // The id of the icon to switch to, as listed in the CustomIconManager ICON_CATALOG
+}
+```
+
+### `GET_REFERRAL_CODE`
+
+Gets the user's referral code (or generates one if it doesn't exist), and opens about:referrals with the code as a param. Throws an error if referrals are not enabled.
+
+### `SELECT_AND_MARK_MENU_ITEM`
+
+Open the app menu and mark an item inside it, to point the user at a feature.
+Marking of a nested item is cancelled if the user opens a different subview.
+
+* args:
+```ts
+{
+  data: {
+    // ids of the items to select and mark. The first is in the app menu's
+    // main view; each later id is marked once the user opens the subview
+    // holding it.
+    itemIds: string[],
+  }
+}
+```

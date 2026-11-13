@@ -16,7 +16,7 @@ async function waitForPasteContextMenu() {
     pasteButton,
     { attributeFilter: ["disabled"] },
     () => !pasteButton.disabled,
-    "Wait for paste button enabled"
+    { msg: "Wait for paste button enabled" }
   );
 }
 
@@ -372,10 +372,8 @@ if (
         mustHaveAccessibleRule: false,
       });
       await SpecialPowers.spawn(browser, [], async () => {
-        EventUtils.synthesizeMouse(
+        EventUtils.synthesizeMouseAtCenter(
           content.document.documentElement,
-          1,
-          1,
           { button: 1 },
           content.window
         );

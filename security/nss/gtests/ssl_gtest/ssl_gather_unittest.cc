@@ -13,7 +13,7 @@ class GatherV2ClientHelloTest : public TlsConnectTestBase {
  public:
   GatherV2ClientHelloTest() : TlsConnectTestBase(ssl_variant_stream, 0) {}
 
-  void ConnectExpectMalformedClientHello(const DataBuffer &data) {
+  void ConnectExpectMalformedClientHello(const DataBuffer& data) {
     EnsureTlsSetup();
     server_->SetOption(SSL_ENABLE_V2_COMPATIBLE_HELLO, PR_TRUE);
     server_->ExpectSendAlert(kTlsAlertIllegalParameter);
@@ -52,10 +52,14 @@ TEST_P(TlsConnectDatagram, DtlsGatherCIDRecord) {
   Connect();
   client_->SendRecordDirect(cidRecord);
 
-  // CIDs are not supported, invalid records in DTLS should be silently
-  // discarded.
-  server_->WaitForErrorCode(0, 1000);
-  client_->WaitForErrorCode(0, 1000);
+  // CIDs are not supported; invalid records in DTLS are silently discarded.
+  // Records are delivered in order over the loopback transport, so a valid
+  // exchange after the CID record proves it was dropped without breaking the
+  // connection -- and this completes as soon as the data arrives rather than
+  // waiting out a timeout for an error that never comes.
+  SendReceive();
+  EXPECT_EQ(0, server_->error_code());
+  EXPECT_EQ(0, client_->error_code());
 }
 
 // Gather a 3-byte v2 header, with a fragment length of 2.

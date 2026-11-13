@@ -18,7 +18,9 @@
 namespace webrtc {
 
 struct ScreamV2Parameters {
+  ScreamV2Parameters();
   explicit ScreamV2Parameters(const FieldTrialsView& trials);
+  explicit ScreamV2Parameters(const FieldTrialsView* trials);
   ScreamV2Parameters(const ScreamV2Parameters& params) = default;
 
   // Minimum Reference Window
@@ -95,6 +97,15 @@ struct ScreamV2Parameters {
   // Thresholds for average latency difference. Used for limiting ref_window
   // increase.
   FieldTrialParameter<TimeDelta> latency_diff_threshold;
+  // Minimum (base) window from the latest sent packet in feedback to compute
+  // min and max one-way delay.
+  FieldTrialParameter<TimeDelta> burst_window_min;
+  // Maximum window from the latest sent packet in feedback to bound burst
+  // continuation when consecutive packets are closely spaced.
+  FieldTrialParameter<TimeDelta> burst_window_max;
+  // Maximum send time gap between consecutive packets to extend the burst
+  // window beyond `burst_window_min` up to `burst_window_max`.
+  FieldTrialParameter<TimeDelta> burst_window_max_gap;
 
   // Determines the length of the base delay history when estimating one way
   // delay (owd)
@@ -135,6 +146,8 @@ struct ScreamV2Parameters {
 
   // Factor multiplied by the current target rate to decide the pacing rate.
   FieldTrialParameter<double> pacing_factor;
+  // Minimum pacing rate relative to received_rate.
+  FieldTrialParameter<double> pacing_rate_received_factor;
 
   // Exponentially Weighted Moving Average (EWMA) factor for calculating average
   // time feedback is delayed by the receiver. I.e the time from a packet is
@@ -150,6 +163,22 @@ struct ScreamV2Parameters {
   // Enable application-limited (ALR) state tracking.
   // In ALR, reference window can not increase, and RTT is updated slower.
   FieldTrialParameter<bool> enable_alr;
+  // An application is deemed application-limited (ALR) if the reference window
+  // exceeds the maximum allowed based on data in flight, and the received rate
+  // is less than alr_threshold * target_rate.
+  FieldTrialParameter<double> alr_threshold;
+
+  // Window over which received rate is calculated.
+  FieldTrialParameter<TimeDelta> received_rate_window;
+
+  // Minimum pacing delay before starting cwnd pushback reduction.
+  FieldTrialParameter<TimeDelta> min_pacing_delay_for_pushback;
+  // Maximum pacing delay for full cwnd pushback reduction.
+  FieldTrialParameter<TimeDelta> max_pacing_delay_for_pushback;
+
+  // On route change with restart_bwe = true, cap the starting rate to
+  // min(current_target_rate, starting_rate).
+  FieldTrialParameter<bool> safe_reset_on_route_change;
 };
 
 }  // namespace webrtc

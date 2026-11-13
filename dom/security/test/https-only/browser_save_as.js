@@ -6,11 +6,11 @@ Services.scriptloader.loadSubScript(
 );
 
 // Using insecure HTTP URL for a test cases around HTTP/HTTPS download interaction
-// eslint-disable-next-line @microsoft/sdl/no-insecure-url
+// eslint-disable-next-line sdl/no-insecure-url
 const HTTP_LINK = `http://example.org/`;
 const HTTPS_LINK = `https://example.org/`;
 const TEST_PATH =
-  // eslint-disable-next-line @microsoft/sdl/no-insecure-url
+  // eslint-disable-next-line sdl/no-insecure-url
   "http://example.com/browser/dom/security/test/https-only/file_save_as.html";
 
 let MockFilePicker = SpecialPowers.MockFilePicker;
@@ -19,10 +19,6 @@ const tempDir = createTemporarySaveDirectory();
 MockFilePicker.displayDirectory = tempDir;
 
 add_setup(async function () {
-  await SpecialPowers.pushPrefEnv({
-    set: [["test.wait300msAfterTabSwitch", true]],
-  });
-
   info("Setting MockFilePicker.");
   mockTransferRegisterer.register();
 

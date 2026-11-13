@@ -48,12 +48,14 @@ linux64-cctools-port:
         script: build-cctools-port.sh
         resources:
             - taskcluster/scripts/misc/cctools-ld64-dead-strip-compiler-builtins.patch
+            - taskcluster/scripts/misc/cctools-llvm-c-headers.patch
+            - taskcluster/scripts/misc/libdispatch-unused-but-set-global.patch
             - taskcluster/scripts/misc/libtapi.patch
         toolchain-artifact: public/build/cctools.tar.zst
     fetches:
         toolchain:
             - linux64-clang-toolchain
-            - linux64-toolchain-sysroot-gcc10
+            - linux64-toolchain-sysroot-gcc11
         fetch:
             - cctools-port
             - libtapi
@@ -76,6 +78,7 @@ linux64-hfsplus:
             - hfsplus-tools
         toolchain:
             - linux64-clang-toolchain
+            - linux64-toolchain-sysroot-gcc11
 
 linux64-libdmg:
     description: "libdmg-hfsplus toolchain build"
@@ -93,6 +96,48 @@ linux64-libdmg:
         toolchain:
             - linux64-clang-toolchain
             - linux64-toolchain-sysroot
+
+macosx64-libdmg:
+    description: "libdmg-hfsplus toolchain build"
+    attributes:
+        local-toolchain: true
+    treeherder:
+        symbol: TM(libdmg-hfs+)
+    run:
+        script: build-dmg-hfsplus-macosx.sh
+        arguments: ['x86_64-apple-darwin']
+        resources:
+            - 'taskcluster/scripts/misc/macos-setup.sh'
+        toolchain-artifact: public/build/dmg.tar.zst
+        toolchain-alias: macosx64-dmg
+    fetches:
+        fetch:
+            - libdmg-hfsplus
+            - xz
+        toolchain:
+            - linux64-clang-toolchain
+            - macosx64-sdk-toolchain
+
+macosx64-aarch64-libdmg:
+    description: "libdmg-hfsplus toolchain build"
+    attributes:
+        local-toolchain: true
+    treeherder:
+        symbol: TMA64(libdmg-hfs+)
+    run:
+        script: build-dmg-hfsplus-macosx.sh
+        arguments: ['aarch64-apple-darwin']
+        resources:
+            - 'taskcluster/scripts/misc/macos-setup.sh'
+        toolchain-artifact: public/build/dmg.tar.zst
+        toolchain-alias: macosx64-aarch64-dmg
+    fetches:
+        fetch:
+            - libdmg-hfsplus
+            - xz
+        toolchain:
+            - linux64-clang-toolchain
+            - macosx64-sdk-toolchain
 
 linux64-mkbom:
     description: "mkbom toolchain build"
@@ -133,6 +178,7 @@ linux64-mar-tools:
     fetches:
         toolchain:
             - linux64-clang-toolchain
+            - sysroot-x86_64-linux-gnu
     run:
         script: build-mar-tools.sh
         sparse-profile: null
@@ -153,6 +199,7 @@ linux64-zucchini-bin:
     fetches:
         toolchain:
             - linux64-clang-toolchain
+            - sysroot-x86_64-linux-gnu
     run:
         script: build-zucchini.sh
         sparse-profile: null
@@ -219,7 +266,6 @@ linux64-marannon:
 
 macosx64-xz:
     description: "xz development library"
-    worker-type: b-osx-1015
     treeherder:
         symbol: TM(xz)
     worker:
@@ -227,151 +273,50 @@ macosx64-xz:
     use-python: system  # dependency of taskcluster python
     run:
         script: build-xz.sh
+        arguments: ['x86_64-apple-darwin']
         toolchain-artifact: public/build/xz.tar.zst
     fetches:
         fetch:
             - xz
         toolchain:
-            - macosx64-clang-toolchain
+            - linux64-clang-toolchain
             - macosx64-sdk-toolchain
 
-macosx-arm64-custom-car:
-    description: "Custom chromium-as-release build for mac (apple silicon)"
-    worker-type: b-osx-arm64
-    attributes:
-        cached_task: false
+macosx64-aarch64-xz:
+    description: "xz development library"
     treeherder:
-        symbol: TM(custom-car-arm)
-        tier: 2
+        symbol: TMA64(xz)
     worker:
-        max-run-time: 15000
-    use-python: "3.11"
-    run-on-projects: []
-    run:
-        script: build-custom-car.sh
-        arguments: [
-            car_macosx_arm.tar.zst,
-            blink_symbol_level=0,
-            chrome_pgo_phase=2,
-            dcheck_always_on=false,
-            enable_nacl=false,
-            enable_resource_allowlist_generation=false,
-            is_chrome_branded=false,
-            is_clang=true,
-            is_component_build=false,
-            is_debug=false,
-            is_official_build=true,
-            symbol_level=0,
-            target_cpu="arm64",
-            use_clang_modules=false,
-            use_v8_context_snapshot=false,
-            v8_symbol_level=0
-        ]
-        toolchain-artifact: public/build/car_macosx_arm.tar.zst
-    fetches:
-        toolchain:
-            - MacOSX26.5.sdk
-
-android-custom-car:
-    description: "Custom chromium-as-release build for Android"
-    worker-type: b-linux-docker-xlarge-amd
-    attributes:
-        cached_task: false
-    treeherder:
-        symbol: TL(custom-car-android)
-    worker:
-        docker-image: {in-tree: custom-car-android}
         max-run-time: 30000
-    use-python: "3.11"
-    run-on-projects: []
+    use-python: system  # dependency of taskcluster python
     run:
-        script: build-custom-car.sh
-        arguments: [
-            car_android.tar.zst,
-            chrome_pgo_phase=2,
-            dcheck_always_on=false,
-            enable_nacl=false,
-            enable_resource_allowlist_generation=false,
-            is_chrome_branded=false,
-            is_clang=true,
-            is_component_build=false,
-            is_debug=false,
-            is_official_build=true,
-            symbol_level=2,
-            target_cpu="arm64",
-            target_os="android",
-            is_android=true,
-            is_high_end_android=true
-        ]
-        toolchain-artifact: public/build/car_android.tar.zst
-
-linux64-custom-car:
-    description: "Custom chromium-as-release build for Linux"
-    worker-type: b-linux-docker-xlarge-amd
-    attributes:
-        cached_task: false
-    treeherder:
-        symbol: TL(custom-car)
-    worker:
-        docker-image: {in-tree: custom-car-linux}
-        max-run-time: 25000
-    use-python: "3.11"
-    run-on-projects: []
-    run:
-        script: build-custom-car.sh
-        arguments: [
-            car_linux.tar.zst,
-            blink_symbol_level=0,
-            chrome_pgo_phase=2,
-            dcheck_always_on=false,
-            enable_nacl=false,
-            enable_resource_allowlist_generation=false,
-            is_chrome_branded=false,
-            is_clang=true,
-            is_component_build=false,
-            is_debug=false,
-            is_official_build=true,
-            symbol_level=0,
-            target_cpu="x64",
-            use_v8_context_snapshot=false,
-            v8_symbol_level=0
-        ]
-        toolchain-artifact: public/build/car_linux.tar.zst
-
-win64-custom-car:
-    description: "Custom chromium-as-release build for Windows"
-    attributes:
-        cached_task: false
-    treeherder:
-        symbol: TW64(custom-car)
-    worker-type: b-win2022-xxlarge
-    worker:
-        max-run-time: 10000
-        env:
-            MSYSTEM: "MINGW64"
-    use-python: "3.11"
-    run-on-projects: []
-    run:
-        script: build-custom-car.sh
-        arguments: [
-            car_win64.tar.zst,
-            chrome_pgo_phase=2,
-            dcheck_always_on=false,
-            enable_nacl=false,
-            enable_resource_allowlist_generation=false,
-            is_chrome_branded=false,
-            is_clang=true,
-            is_component_build=false,
-            is_debug=false,
-            is_official_build=true,
-            symbol_level=2,
-            target_cpu=\"x64\",
-            use_v8_context_snapshot=false
-        ]
-        toolchain-artifact: public/build/car_win64.tar.zst
+        script: build-xz.sh
+        arguments: ['aarch64-apple-darwin']
+        toolchain-artifact: public/build/xz.tar.zst
     fetches:
+        fetch:
+            - xz
         toolchain:
-            - win64-vs2026
+            - linux64-clang-toolchain
+            - macosx64-sdk-toolchain
+
+macosx64-aarch64-openssl:
+    description: "openssl development library"
+    treeherder:
+        symbol: TMA64(openssl)
+    worker:
+        max-run-time: 30000
+    use-python: system  # dependency of taskcluster python
+    run:
+        script: build-openssl.sh
+        arguments: ['aarch64-apple-darwin']
+        toolchain-artifact: public/build/openssl.tar.zst
+    fetches:
+        fetch:
+            - openssl-1.1.1w
+        toolchain:
+            - linux64-clang-toolchain
+            - macosx64-sdk-toolchain
 
 browsertime:
     description: "npm install browsertime node_modules"
@@ -549,6 +494,9 @@ linux64-wine:
     fetches:
         fetch:
             - wine
+        toolchain:
+            - linux64-gcc-11
+            - linux64-toolchain-sysroot-gcc11
 
 linux64-winchecksec:
     description: "winchecksec"
@@ -564,6 +512,9 @@ linux64-winchecksec:
     fetches:
         fetch:
             - winchecksec
+        toolchain:
+            - linux64-clang-toolchain
+            - linux64-toolchain-sysroot
 
 win64-winchecksec:
     description: "winchecksec"
@@ -692,7 +643,6 @@ win32-WindowsAppSDK:
     description: "WindowsAppSDK headers and libraries (x86)"
     attributes:
         local-toolchain: true
-    worker-type: b-win2022
     treeherder:
         symbol: TW32(WindowsAppSDK)
     run:
@@ -708,7 +658,6 @@ win64-aarch64-WindowsAppSDK:
     description: "WindowsAppSDK headers and libraries (aarch64)"
     attributes:
         local-toolchain: true
-    worker-type: b-win2022
     treeherder:
         symbol: TWA64(WindowsAppSDK)
     run:

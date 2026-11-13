@@ -5,7 +5,6 @@
 #define GFX_VR_PROCESS_MANAGER_H
 
 #include "VRProcessParent.h"
-
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "nsIObserver.h"
 
@@ -79,7 +78,7 @@ class VRProcessManager final : public VRProcessParent::Listener {
   friend class Observer;
 
   RefPtr<Observer> mObserver;
-  VRProcessParent* mProcess;
+  RefPtr<VRProcessParent> mProcess;
   VRChild* mVRChild;
   // Collects any pref changes that occur during process launch (after
   // the initial map is passed in command-line arguments) to be sent

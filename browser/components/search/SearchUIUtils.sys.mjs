@@ -33,6 +33,7 @@ const lazy = XPCOMUtils.declareLazy({
     "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
   SearchService: "moz-src:///toolkit/components/search/SearchService.sys.mjs",
   SearchUtils: "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
+  UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
   SearchUIUtilsL10n: () => {
     return new Localization(["browser/search.ftl", "branding/brand.ftl"]);
   },
@@ -45,6 +46,10 @@ export var SearchUIUtils = {
     if (!this.initialized) {
       Services.obs.addObserver(this, "browser-search-engine-modified");
       this.initialized = true;
+
+      // On startup, cache urlbar placeholder for regular and private windows.
+      this.updatePlaceholderNamePreference(false);
+      this.updatePlaceholderNamePreference(true);
     }
   },
 
@@ -56,10 +61,10 @@ export var SearchUIUtils = {
   observe(subject, topic, data) {
     switch (data) {
       case "engine-default":
-        this.updatePlaceholderNamePreference(subject.wrappedJSObject, false);
+        this.updatePlaceholderNamePreference(false);
         break;
       case "engine-default-private":
-        this.updatePlaceholderNamePreference(subject.wrappedJSObject, true);
+        this.updatePlaceholderNamePreference(true);
         break;
     }
   },
@@ -105,49 +110,39 @@ export var SearchUIUtils = {
       allowFromInactiveWorkspace: true,
     });
 
-    let buttons = [
-      {
-        "l10n-id": "remove-search-engine-button",
-        primary: true,
-        callback() {
-          const notificationBox = win.gNotificationBox.getNotificationWithValue(
-            "search-engine-removal"
-          );
-          win.gNotificationBox.removeNotification(notificationBox);
+    if (win) {
+      let buttons = [
+        {
+          "l10n-id": "remove-search-engine-button",
+          primary: true,
+          callback() {
+            const notificationBox =
+              win.gNotificationBox.getNotificationWithValue(
+                "search-engine-removal"
+              );
+            win.gNotificationBox.removeNotification(notificationBox);
+          },
         },
-      },
-      {
-        supportPage: "search-engine-removal",
-      },
-    ];
-
-    await win.gNotificationBox.appendNotification(
-      "search-engine-removal",
-      {
-        label: {
-          "l10n-id": "removed-search-engine-message2",
-          "l10n-args": { oldEngine, newEngine },
+        {
+          supportPage: "search-engine-removal",
         },
-        priority: win.gNotificationBox.PRIORITY_SYSTEM,
-      },
-      buttons
-    );
+      ];
 
-    // _updatePlaceholderFromDefaultEngine only updates the pref if the search service
-    // hasn't finished initializing, so we explicitly update it here to be sure.
-    SearchUIUtils.updatePlaceholderNamePreference(
-      await lazy.SearchService.getDefault(),
-      false
-    );
-    SearchUIUtils.updatePlaceholderNamePreference(
-      await lazy.SearchService.getDefaultPrivate(),
-      true
-    );
+      await win.gNotificationBox.appendNotification(
+        "search-engine-removal",
+        {
+          label: {
+            "l10n-id": "removed-search-engine-message2",
+            "l10n-args": { oldEngine, newEngine },
+          },
+          priority: win.gNotificationBox.PRIORITY_SYSTEM,
+        },
+        buttons
+      );
+    }
 
     for (let openWin of lazy.BrowserWindowTracker.orderedWindows) {
-      openWin.gURLBar
-        ?._updatePlaceholderFromDefaultEngine()
-        .catch(console.error);
+      openWin.gURLBar?.updatePlaceholder();
     }
   },
 
@@ -269,14 +264,24 @@ export var SearchUIUtils = {
   },
 
   /**
-   * Update the placeholderName preference for the default search engine.
+   * Update the placeholderName preference for the urlbar's placeholder.
    *
-   * @param {SearchEngine} engine The new default search engine.
    * @param {boolean} isPrivate Whether this change applies to private windows.
    */
-  updatePlaceholderNamePreference(engine, isPrivate) {
-    const prefName =
+  async updatePlaceholderNamePreference(isPrivate) {
+    let prefName =
       "browser.urlbar.placeholderName" + (isPrivate ? ".private" : "");
+    try {
+      await lazy.SearchService.init();
+    } catch {
+      // Search service failed.
+      Services.prefs.clearUserPref(prefName);
+      return;
+    }
+
+    let engine = isPrivate
+      ? lazy.SearchService.defaultPrivateEngine
+      : lazy.SearchService.defaultEngine;
     if (engine instanceof lazy.ConfigSearchEngine) {
       Services.prefs.setStringPref(prefName, engine.name);
     } else {
@@ -441,7 +446,7 @@ export var SearchUIUtils = {
         : await lazy.SearchService.getDefault();
     }
 
-    let submission = engine.getSubmission(searchText, searchUrlType);
+    let submission = engine.getSubmission(searchText, searchUrlType, sapSource);
 
     // getSubmission can return null if the engine doesn't have a URL
     // for the given response type. This is an error if it occurs, since
@@ -469,7 +474,7 @@ export var SearchUIUtils = {
       window.gBrowser.selectedBrowser,
       engine,
       sapSource,
-      { searchUrlType }
+      { searchUrlType, submission }
     );
   },
 
@@ -550,6 +555,11 @@ export var SearchUIUtils = {
 
 /**
  * A registrant that adds the handoff search bar to about:newtab / about:home.
+ * It stands down while the urlbar's `newtabFeatureGate` Nimbus variable is
+ * enabled, which puts `<moz-urlbar>` on those pages instead. New Tab admits only
+ * one component per type, so both sides have to honor the gate: without this one
+ * standing down, whichever registrant the category happens to enumerate first
+ * would win.
  */
 export class SearchNewTabComponentsRegistrant extends BaseAboutNewTabComponentRegistrant {
   constructor() {
@@ -565,9 +575,30 @@ export class SearchNewTabComponentsRegistrant extends BaseAboutNewTabComponentRe
         },
       },
     });
+    lazy.UrlbarPrefs.addObserver(this);
+  }
+
+  destroy() {
+    lazy.UrlbarPrefs.removeObserver(this);
+  }
+
+  onNimbusChanged(variable) {
+    if (variable == "newtabFeatureGate") {
+      this.updated();
+    }
+  }
+
+  onPrefChanged(pref) {
+    if (pref == "browser.nova.enabled") {
+      this.updated();
+    }
   }
 
   getComponents() {
+    if (lazy.UrlbarPrefs.get("newtabFeatureGate")) {
+      return [];
+    }
+
     const { caretBlinkCount, caretBlinkTime } = Services.appinfo;
 
     return [

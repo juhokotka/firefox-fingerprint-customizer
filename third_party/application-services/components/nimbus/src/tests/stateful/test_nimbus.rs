@@ -906,7 +906,7 @@ fn event_store_on_targeting_attributes_is_updated_after_an_event_is_recorded() -
             "last_modified": 1_602_197_324_372i64,
         }
     ]}))?;
-    client.set_experiments_locally(experiment_json)?;
+    client.set_experiments_locally(experiment_json.clone())?;
     client.apply_pending_experiments()?;
 
     let active_experiments = client.get_active_experiments()?;
@@ -914,7 +914,8 @@ fn event_store_on_targeting_attributes_is_updated_after_an_event_is_recorded() -
 
     client.record_event("app.foregrounded".to_string(), 1)?;
 
-    client.set_experiment_participation(true)?;
+    client.set_experiments_locally(experiment_json)?;
+    client.apply_pending_experiments()?;
 
     // The number of non-zero days in our event store is 2, so the first experiment
     // should be applied, but the second experiment will not be.
@@ -1031,7 +1032,7 @@ fn test_active_enrollment_in_targeting() -> Result<()> {
     assert_eq!(active_experiments.len(), 1);
 
     let targeting_helper = client.create_targeting_helper(None)?;
-    assert!(targeting_helper.eval_jexl("'test-1' in active_experiments".to_string())?);
+    assert!(targeting_helper.eval_jexl("'test-1' in active_experiments")?);
 
     // Apply experiment that targets the above experiment is in enrollments
     let exp = get_targeted_experiment("test-2", "'test-1' in enrollments");
@@ -1042,12 +1043,12 @@ fn test_active_enrollment_in_targeting() -> Result<()> {
     assert_eq!(active_experiments.len(), 1);
 
     let targeting_helper = client.create_targeting_helper(None)?;
-    assert!(!targeting_helper.eval_jexl("'test-1' in active_experiments".to_string())?);
-    assert!(targeting_helper.eval_jexl("'test-2' in active_experiments".to_string())?);
-    assert!(targeting_helper.eval_jexl("'test-1' in enrollments".to_string())?);
-    assert!(targeting_helper.eval_jexl("'test-2' in enrollments".to_string())?);
-    assert!(targeting_helper.eval_jexl("enrollments_map['test-1'] == 'treatment'".to_string())?);
-    assert!(targeting_helper.eval_jexl("enrollments_map['test-2'] == 'control'".to_string())?);
+    assert!(!targeting_helper.eval_jexl("'test-1' in active_experiments")?);
+    assert!(targeting_helper.eval_jexl("'test-2' in active_experiments")?);
+    assert!(targeting_helper.eval_jexl("'test-1' in enrollments")?);
+    assert!(targeting_helper.eval_jexl("'test-2' in enrollments")?);
+    assert!(targeting_helper.eval_jexl("enrollments_map['test-1'] == 'treatment'")?);
+    assert!(targeting_helper.eval_jexl("enrollments_map['test-2'] == 'control'")?);
 
     Ok(())
 }
@@ -1104,16 +1105,16 @@ fn test_previous_enrollments_in_targeting() -> Result<()> {
     assert_eq!(active_experiments.len(), 5);
 
     let targeting_helper = client.create_targeting_helper(None)?;
-    assert!(targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_1))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_2))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_3))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_4))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_5))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in enrollments", slug_1))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in enrollments", slug_2))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in enrollments", slug_3))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in enrollments", slug_4))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in enrollments", slug_5))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_1))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_2))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_3))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_4))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_5))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in enrollments", slug_1))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in enrollments", slug_2))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in enrollments", slug_3))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in enrollments", slug_4))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in enrollments", slug_5))?);
 
     // Apply empty first experiment, disqualifying second experiment, and decreased bucket rollout
     let exp_2 = get_targeted_experiment_with_feature(slug_2, "false", "feature-2");
@@ -1184,16 +1185,16 @@ fn test_previous_enrollments_in_targeting() -> Result<()> {
     ));
 
     let targeting_helper = client.create_targeting_helper(None)?;
-    assert!(!targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_1))?);
-    assert!(!targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_2))?);
-    assert!(!targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_3))?);
-    assert!(!targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_4))?);
-    assert!(!targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_5))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in enrollments", slug_1))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in enrollments", slug_2))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in enrollments", slug_3))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in enrollments", slug_4))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in enrollments", slug_5))?);
+    assert!(!targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_1))?);
+    assert!(!targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_2))?);
+    assert!(!targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_3))?);
+    assert!(!targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_4))?);
+    assert!(!targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_5))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in enrollments", slug_1))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in enrollments", slug_2))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in enrollments", slug_3))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in enrollments", slug_4))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in enrollments", slug_5))?);
 
     Ok(())
 }
@@ -1234,20 +1235,20 @@ fn test_opt_out_multiple_experiments_same_feature_does_not_re_enroll() -> Result
     client.apply_pending_experiments()?;
 
     let targeting_helper = client.create_targeting_helper(None)?;
-    assert!(targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_1))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_2))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_1))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_2))?);
 
     client.opt_out(slug_1.into())?;
 
     let targeting_helper = client.create_targeting_helper(None)?;
-    assert!(!targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_1))?);
-    assert!(targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_2))?);
+    assert!(!targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_1))?);
+    assert!(targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_2))?);
 
     client.opt_out(slug_2.into())?;
 
     let targeting_helper = client.create_targeting_helper(None)?;
-    assert!(!targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_1))?);
-    assert!(!targeting_helper.eval_jexl(format!("'{}' in active_experiments", slug_2))?);
+    assert!(!targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_1))?);
+    assert!(!targeting_helper.eval_jexl(&format!("'{}' in active_experiments", slug_2))?);
 
     Ok(())
 }
@@ -2597,6 +2598,17 @@ fn test_firefox_labs_enroll_unenroll() -> Result<()> {
             .patch(json!({ "firefoxLabsDescription": null })),
         get_firefox_lab_with_feature("lab-different-channel", "lab-feature-7")
             .patch(json!({ "channel": "mystery" })),
+        get_firefox_lab_with_feature("false-targeting", "lab-feature-8")
+            .patch(json!({ "targeting": "false" })),
+        get_firefox_lab_with_feature("false-bucketing", "lab-feature-9").patch(json!({
+            "bucketConfig": {
+                "randomizationUnit": "nimbus_id",
+                "start": 0,
+                "count": 0,
+                "total": 10000,
+                "namespace": "firefox-labs-test",
+            }
+        })),
     ])?;
 
     assert_eq!(
@@ -2637,6 +2649,18 @@ fn test_firefox_labs_enroll_unenroll() -> Result<()> {
                 status: Some("Enrolled".into()),
                 reason: Some("Qualified".into()),
                 branch: Some("control".into()),
+                ..Default::default()
+            },
+            EnrollmentStatusExtraDef {
+                slug: Some("false-bucketing".into()),
+                status: Some("NotEnrolled".into()),
+                reason: Some("FirefoxLabs".into()),
+                ..Default::default()
+            },
+            EnrollmentStatusExtraDef {
+                slug: Some("false-targeting".into()),
+                status: Some("NotEnrolled".into()),
+                reason: Some("FirefoxLabs".into()),
                 ..Default::default()
             },
             EnrollmentStatusExtraDef {

@@ -7,14 +7,14 @@
 
 #include "GLConsts.h"
 #include "GLTypes.h"
-#include "nsISupportsImpl.h"
 #include "mozilla/Atomics.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/layers/LayersSurfaces.h"
 #include "mozilla/layers/OverlayInfo.h"
-#include "mozilla/RefPtr.h"
-#include "mozilla/webrender/webrender_ffi.h"
 #include "mozilla/webrender/WebRenderTypes.h"
+#include "mozilla/webrender/webrender_ffi.h"
+#include "nsISupportsImpl.h"
 
 namespace mozilla {
 
@@ -41,6 +41,7 @@ class RenderBufferTextureHost;
 class RenderTextureHostSWGL;
 class RenderTextureHostWrapper;
 class RenderDMABUFTextureHost;
+class RenderWaylandTextureHost;
 
 void ActivateBindAndTexParameteri(gl::GLContext* aGL, GLenum aActiveTexture,
                                   GLenum aBindTarget, GLuint aBindTexture);
@@ -100,6 +101,8 @@ class RenderTextureHost {
                                         wr::SWGLCompositeSurfaceInfo* aInfo) {
     return false;
   }
+
+  virtual void UnlockSWGLCompositeSurface() {}
 
   virtual RefPtr<layers::TextureSource> CreateTextureSource(
       layers::TextureSourceProvider* aProvider);
@@ -166,6 +169,10 @@ class RenderTextureHost {
     return nullptr;
   }
 
+  virtual RenderWaylandTextureHost* AsRenderWaylandTextureHost() {
+    return nullptr;
+  }
+
   virtual void Destroy();
 
   virtual void SetIsSoftwareDecodedVideo() {
@@ -185,6 +192,8 @@ class RenderTextureHost {
 
   virtual RefPtr<RenderTextureHostUsageInfo> GetTextureHostUsageInfo(
       const MutexAutoLock& aProofOfMapLock);
+
+  virtual void SetReadFenceFd(UniqueFileHandle&& aFenceFd) {}
 
   void SetDestroyedCallback(std::function<void()>&& aDestroyedCallback) {
     MOZ_ASSERT(!mDestroyedCallback);

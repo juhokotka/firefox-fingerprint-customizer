@@ -15,6 +15,7 @@ add_task(async function test_tools_prefs() {
   );
 
   // Open customize sidebar
+  await SidebarTestUtils.ensureLauncherVisible(win);
   await SidebarTestUtils.showPanel(win, "viewCustomizeSidebar");
 
   // Set tools
@@ -211,12 +212,6 @@ add_task(async function test_flip_revamp_pref() {
     set: [["sidebar.revamp", true]],
   });
   await sidebarMain.updateComplete;
-  info("Waiting for sidebar container to be visible");
-  await BrowserTestUtils.waitForMutationCondition(
-    sidebarContainer,
-    { attributes: true, attributeFilter: ["hidden"] },
-    () => !sidebarContainer.hidden
-  );
   info("Waiting for sidebar header to be hidden");
   await BrowserTestUtils.waitForMutationCondition(
     sidebarHeader,
@@ -224,6 +219,16 @@ add_task(async function test_flip_revamp_pref() {
     () => sidebarHeader.hidden
   );
   ok(true, "The old sidebar is hidden and the new sidebar is shown.");
+  // Horizontal tabs are back, where the launcher is the user's to reveal, and
+  // re-opening the panel doesn't do it for them.
+  ok(
+    sidebarContainer.hidden,
+    "The launcher stays hidden until the user reveals it"
+  );
+  await SidebarTestUtils.ensureLauncherVisible(
+    win,
+    "The launcher can still be revealed with the toolbar button"
+  );
 
   await BrowserTestUtils.closeWindow(win);
 });
@@ -245,6 +250,10 @@ add_task(async function test_flip_revamp_pref_with_panel() {
     set: [["sidebar.revamp", true]],
   });
 
+  await TestUtils.waitForCondition(
+    () => SidebarController.isOpen,
+    "Waiting for the panel to reopen."
+  );
   ok(SidebarController.isOpen, "panel still open after new");
 
   await SidebarController.hide();
@@ -287,4 +296,56 @@ add_task(async function test_opening_panel_flips_has_used_pref() {
     Services.prefs.getBoolPref("sidebar.new-sidebar.has-used"),
     "has-used pref enabled for revamped sidebar."
   );
+});
+
+add_task(async function test_visibility_normalization_preserves_valid_value() {
+  const { SidebarManager } = SidebarController;
+
+  info("A visibility already valid for vertical tabs is preserved.");
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["sidebar.verticalTabs", true],
+      ["sidebar.visibility", "hide-sidebar"],
+    ],
+  });
+  // Simulates a (possibly spurious) re-run of the vertical-tabs normalization,
+  // which must not clobber an explicit, orientation-valid choice.
+  SidebarManager.handleVerticalTabsPrefChange(true);
+  is(
+    Services.prefs.getStringPref("sidebar.visibility"),
+    "hide-sidebar",
+    "Valid vertical visibility is preserved."
+  );
+  await SpecialPowers.popPrefEnv();
+
+  info("A visibility invalid for the orientation is reset to its default.");
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["sidebar.verticalTabs", true],
+      // hide-on-close is a horizontal-only value.
+      ["sidebar.visibility", "hide-on-close"],
+    ],
+  });
+  SidebarManager.handleVerticalTabsPrefChange(true);
+  is(
+    Services.prefs.getStringPref("sidebar.visibility"),
+    "always-show",
+    "Visibility invalid for vertical tabs is reset to the vertical default."
+  );
+  await SpecialPowers.popPrefEnv();
+
+  info("A visibility already valid for horizontal tabs is preserved.");
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["sidebar.verticalTabs", false],
+      ["sidebar.visibility", "hide-launcher"],
+    ],
+  });
+  SidebarManager.handleVerticalTabsPrefChange(false);
+  is(
+    Services.prefs.getStringPref("sidebar.visibility"),
+    "hide-launcher",
+    "Valid horizontal visibility is preserved."
+  );
+  await SpecialPowers.popPrefEnv();
 });

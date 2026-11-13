@@ -52,15 +52,29 @@ runNetworkTest(async function (options) {
     },
     async function PC_LOCAL_ACTIVE_FALSE_STOPS_TRANSMIT() {
       await setActive(false);
-      const received = await packetsReceivedDuring(2000);
-      // Allow for a small number of packets still in flight from before the
-      // encoding was deactivated.
-      ok(received <= 5,
-        `Packets stop being received while active is false (${received})`);
+      // Wait for the deactivation to propagate to the receiver.
+      let received;
+      for (let i = 0; i < 50 && received !== 0; i++) {
+        received = await packetsReceivedDuring(100);
+      }
+      is(received, 0,
+        "Packets stop being received while active is false");
+    },
+    async function PC_LOCAL_INSERT_DTMF_WHILE_INACTIVE() {
+      // While inactive the send stream is torn down. Inserting DTMF must not
+      // crash the conduit (bug 2054208).
+      ok(sender.dtmf, "Audio sender has a DTMFSender");
+      sender.dtmf.insertDTMF("1");
+      await wait(500);
+      ok(true, "Inserting DTMF while inactive does not crash");
     },
     async function PC_LOCAL_ACTIVE_TRUE_RESUMES_TRANSMIT() {
       await setActive(true);
-      const received = await packetsReceivedDuring(2000);
+      // Wait for the reactivation to propagate to the receiver.
+      let received = 0;
+      for (let i = 0; i < 50 && received === 0; i++) {
+        received = await packetsReceivedDuring(100);
+      }
       ok(received > 0,
         `Packets resume being received when active is set back to true ` +
         `(${received})`);

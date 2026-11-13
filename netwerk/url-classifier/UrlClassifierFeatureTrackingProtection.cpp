@@ -6,14 +6,14 @@
 
 #include "mozilla/AntiTrackingUtils.h"
 #include "mozilla/ScopedPrefs.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/net/ChannelClassifierUtils.h"
 #include "mozilla/net/UrlClassifierCommon.h"
 #include "nsIChannel.h"
 #include "nsILoadContext.h"
-#include "nsNetUtil.h"
-#include "mozilla/StaticPtr.h"
-#include "nsXULAppAPI.h"
 #include "nsIWebProgressListener.h"
+#include "nsNetUtil.h"
+#include "nsXULAppAPI.h"
 
 namespace mozilla {
 namespace net {

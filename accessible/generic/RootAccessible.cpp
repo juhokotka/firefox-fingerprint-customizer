@@ -8,38 +8,35 @@
 
 #define CreateEvent CreateEventA
 
-#include "LocalAccessible-inl.h"
 #include "DocAccessible-inl.h"
-#include "mozilla/a11y/DocAccessibleParent.h"
-#include "nsAccessibilityService.h"
-#include "nsAccUtils.h"
-#include "nsCoreUtils.h"
-#include "nsEventShell.h"
+#include "LocalAccessible-inl.h"
 #include "Relation.h"
-#include "mozilla/a11y/Role.h"
 #include "States.h"
 #include "XULTreeAccessible.h"
-
+#include "mozilla/a11y/DocAccessibleParent.h"
+#include "mozilla/a11y/Role.h"
 #include "mozilla/dom/BindingUtils.h"
-#include "mozilla/dom/CustomEvent.h"
-#include "mozilla/dom/Element.h"
-#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/BrowserHost.h"
-#include "mozilla/dom/VisualViewport.h"
-
-#include "nsIDocShellTreeOwner.h"
+#include "mozilla/dom/CustomEvent.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/EventTarget.h"
+#include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/VisualViewport.h"
+#include "nsAccUtils.h"
+#include "nsAccessibilityService.h"
+#include "nsCoreUtils.h"
+#include "nsEventShell.h"
+#include "nsFocusManager.h"
 #include "nsGlobalWindowInner.h"
+#include "nsIAppWindow.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
-#include "mozilla/dom/Document.h"
+#include "nsIDocShellTreeOwner.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIPropertyBag2.h"
-#include "nsPIDOMWindow.h"
 #include "nsIWebBrowserChrome.h"
-#include "nsFocusManager.h"
-
-#include "nsIAppWindow.h"
+#include "nsPIDOMWindow.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -132,7 +129,8 @@ const char* const kEventTypes[] = {
     // tree.xml)
     "OpenStateChange", "popupshown", "popuphiding", "DOMMenuInactive",
     "DOMMenuItemActive", "DOMMenuItemInactive", "DOMMenuBarActive",
-    "DOMMenuBarInactive", "scroll", "DOMTitleChanged"};
+    "DOMMenuBarInactive", "scroll", "MozScrolledAreaChanged",
+    "DOMTitleChanged"};
 
 nsresult RootAccessible::AddEventListeners() {
   // EventTarget interface allows to register event listeners to
@@ -239,6 +237,12 @@ RootAccessible::HandleEvent(Event* aDOMEvent) {
       // 2. Since this doesn't necessarily touch layout, we are not
       //    guaranteed to have a WillRefresh tick any time soon.
       document->HandleScroll(origTargetNode);
+    } else if (eventType.EqualsLiteral("MozScrolledAreaChanged")) {
+      // The initial cache push omits scroll position if the document
+      // wasn't scrollable at creation. If the doc becomes scrollable
+      // during reflow, we'll get this event and should update. This
+      // can happen without a bounds change or style change.
+      document->QueueCacheUpdate(document, CacheDomain::ScrollPosition);
     } else {
       // Root accessible exists longer than any of its descendant documents so
       // that we are guaranteed notification is processed before root accessible

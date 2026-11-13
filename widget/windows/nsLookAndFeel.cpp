@@ -3,19 +3,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsLookAndFeel.h"
+
+#include <shellapi.h>
 #include <stdint.h>
 #include <windows.h>
-#include <shellapi.h>
-#include "nsStyleConsts.h"
-#include "nsUXThemeConstants.h"
-#include "nsWindowDefs.h"
-#include "nsWindowsHelpers.h"
+
 #include "WinUtils.h"
 #include "WindowsUIUtils.h"
 #include "mozilla/FontPropertyTypes.h"
 #include "mozilla/glean/WidgetWindowsMetrics.h"
 #include "mozilla/intl/LocaleService.h"
 #include "mozilla/widget/WinRegistry.h"
+#include "nsStyleConsts.h"
+#include "nsUXThemeConstants.h"
+#include "nsWindowDefs.h"
+#include "nsWindowsHelpers.h"
 
 #define AVG2(a, b) (((a) + (b) + 1) >> 1)
 
@@ -117,13 +119,8 @@ uint32_t nsLookAndFeel::SystemColorFilter() {
   return key.GetValueAsDword(u"FilterType"_ns).valueOr(0);
 }
 
-nsLookAndFeel::nsLookAndFeel() {
-  glean::widget::touch_enabled_device
-      .EnumGet(static_cast<glean::widget::TouchEnabledDeviceLabel>(
-          WinUtils::IsTouchDeviceSupportPresent()))
-      .Add();
-}
-
+// {Con/De}structor in .cpp as mColorFilterWatcher needs KeyWatcher definition
+nsLookAndFeel::nsLookAndFeel() = default;
 nsLookAndFeel::~nsLookAndFeel() = default;
 
 void nsLookAndFeel::NativeInit() { EnsureInit(); }
@@ -255,7 +252,10 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme aScheme,
                                                 : NS_RGB(0xf9, 0xf9, 0xfb);
         }
       } else {
-        aColor = GetColorForSysColorIndex(COLOR_MENU);
+        // Map Menu to Window to match Windows explorer rendering of menus, and
+        // to allow users to customize menu backgrounds in Settings dialog. This
+        // color is set with Background. (See Bug 2037167 for context)
+        aColor = GetColorForSysColorIndex(COLOR_WINDOW);
       }
       return NS_OK;
     }
@@ -411,7 +411,10 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme aScheme,
         aColor = kNonNativeMenuText;
         return NS_OK;
       }
-      idx = COLOR_MENUTEXT;
+      // Map MenuText to WindowText to match Windows explorer rendering of
+      // menus, and to allow users to customize menu backgrounds in Settings
+      // dialog. This color is set with Text. (See Bug 2037167 for context)
+      idx = COLOR_WINDOWTEXT;
       break;
     case ColorID::Scrollbar:
       idx = COLOR_SCROLLBAR;
@@ -544,8 +547,9 @@ nsresult nsLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
       aResult = GetSystemParam(SPI_GETMENUSHOWDELAY, 400);
       break;
     case IntID::MenusCanOverlapOSBar:
-      // we want XUL popups to be able to overlap the task bar.
-      aResult = 1;
+      // Context menus should not overlap the OS taskbar (default Windows
+      // behavior).
+      aResult = 0;
       break;
     case IntID::DragThresholdX:
       // The system metric is the number of pixels at which a drag should

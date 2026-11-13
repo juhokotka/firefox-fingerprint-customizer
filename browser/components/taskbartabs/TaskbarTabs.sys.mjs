@@ -8,14 +8,10 @@
  * the Taskbar Tabs systems should interact with it through this interface.
  */
 
-import {
-  TaskbarTabsRegistry,
-  TaskbarTabsRegistryStorage,
-  kTaskbarTabsRegistryEvents,
-} from "resource:///modules/taskbartabs/TaskbarTabsRegistry.sys.mjs";
-import { TaskbarTabsWindowManager } from "resource:///modules/taskbartabs/TaskbarTabsWindowManager.sys.mjs";
-import { TaskbarTabsPin } from "resource:///modules/taskbartabs/TaskbarTabsPin.sys.mjs";
-import { TaskbarTabsUtils } from "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs";
+import { TaskbarTabsRegistryStorage } from "moz-src:///browser/components/taskbartabs/TaskbarTabsRegistry.sys.mjs";
+import { TaskbarTabsWindowManager } from "moz-src:///browser/components/taskbartabs/TaskbarTabsWindowManager.sys.mjs";
+import { TaskbarTabsPin } from "moz-src:///browser/components/taskbartabs/TaskbarTabsPin.sys.mjs";
+import { TaskbarTabsUtils } from "moz-src:///browser/components/taskbartabs/TaskbarTabsUtils.sys.mjs";
 
 let lazy = {};
 
@@ -84,6 +80,9 @@ export const TaskbarTabs = new (class {
    * attempted even if the Taskbar Tab already exists.
    * @param {DOMWindow?} [aDetails.window] - The window to associate any UI
    * with, if applicable.
+   * @returns {Promise<{created: boolean, taskbarTab: TaskbarTab,
+   * pin: ?Promise<{rejected: boolean}>}>} `pin` settles once the pin attempt,
+   * including any OS prompt, completes, or is null if no pin was attempted.
    */
   async findOrCreateTaskbarTab(aUrl, aUserContextId, aDetails = {}) {
     if (aDetails.manifest) {
@@ -107,25 +106,32 @@ export const TaskbarTabs = new (class {
       aDetails
     );
 
+    let pin = null;
     if (result.created || aDetails.ensurePinned) {
       // Don't wait for the pinning to complete.
-      TaskbarTabsPin.pinTaskbarTab(
-        result.taskbarTab,
-        this.#registry,
-        result.icon,
-        { window: aDetails.window ?? null }
-      );
+      pin = this.#pinTaskbarTab(result.taskbarTab, result.icon, {
+        window: aDetails.window ?? null,
+      });
     }
 
     return {
       created: result.created,
       taskbarTab: result.taskbarTab,
+      pin,
     };
   }
 
   // Used internally; can expose non-public members in its result.
   async #findOrCreateTaskbarTab(aUrl, aUserContextId, aDetails = {}) {
     await this.#ready;
+
+    if (!aDetails.manifest?.name && aUrl.scheme === "moz-extension") {
+      aDetails.manifest = {
+        ...aDetails.manifest,
+        name: WebExtensionPolicy.getByURI(aUrl)?.name,
+      };
+    }
+
     let result = this.#registry.findOrCreateTaskbarTab(
       aUrl,
       aUserContextId,
@@ -141,6 +147,18 @@ export const TaskbarTabs = new (class {
       result.icon = await loadSavedTaskbarTabIcon(result.taskbarTab.id);
     }
 
+    return result;
+  }
+
+  async #pinTaskbarTab(aTaskbarTab, aIcon, aDetails) {
+    let result = await TaskbarTabsPin.pinTaskbarTab(
+      aTaskbarTab,
+      aIcon,
+      aDetails
+    );
+    this.#registry.patchTaskbarTab(aTaskbarTab, {
+      shortcutRelativePath: result.shortcut,
+    });
     return result;
   }
 
@@ -197,12 +215,13 @@ export const TaskbarTabs = new (class {
     if (created) {
       // Don't wait for pinning to complete. (This is separate so we can call
       // it with the newly-created window.)
-      TaskbarTabsPin.pinTaskbarTab(taskbarTab, this.#registry, icon, win);
+      this.#pinTaskbarTab(taskbarTab, icon, win);
     }
 
     return {
-      window: win,
+      created,
       taskbarTab,
+      window: win,
     };
   }
 
@@ -218,7 +237,7 @@ export const TaskbarTabs = new (class {
     this.#updateMetrics();
 
     // Don't wait for unpinning to finish.
-    TaskbarTabsPin.unpinTaskbarTab(taskbarTab, this.#registry);
+    TaskbarTabsPin.unpinTaskbarTab(taskbarTab);
   }
 
   async openWindow(aTaskbarTab) {
@@ -257,26 +276,7 @@ async function initRegistry() {
   let registryFile = TaskbarTabsUtils.getTaskbarTabsFolder();
   registryFile.append(kRegistryFilename);
 
-  let init = {};
-  if (registryFile.exists()) {
-    init.loadFile = registryFile;
-  }
-
-  let registry = await TaskbarTabsRegistry.create(init);
-
-  // Initialize persistent storage.
-  let storage = new TaskbarTabsRegistryStorage(registry, registryFile);
-  registry.on(kTaskbarTabsRegistryEvents.created, () => {
-    storage.save();
-  });
-  registry.on(kTaskbarTabsRegistryEvents.patched, () => {
-    storage.save();
-  });
-  registry.on(kTaskbarTabsRegistryEvents.removed, () => {
-    storage.save();
-  });
-
-  return registry;
+  return await new TaskbarTabsRegistryStorage(registryFile).load();
 }
 
 /**

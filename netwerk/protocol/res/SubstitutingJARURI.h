@@ -6,11 +6,11 @@
 #define SubstitutingJARURI_h
 
 #include "nsIIPCSerializableURI.h"
-#include "nsIStandardURL.h"
-#include "nsIURL.h"
-#include "nsIURIWithSizeOf.h"
-#include "nsJARURI.h"
 #include "nsISerializable.h"
+#include "nsIStandardURL.h"
+#include "nsIURIWithSizeOf.h"
+#include "nsIURL.h"
+#include "nsJARURI.h"
 
 namespace mozilla {
 namespace net {
@@ -199,6 +199,9 @@ class SubstitutingJARURI : public nsIJARURI,
   }
   bool Deserialize(const mozilla::ipc::URIParams& aParams);
   nsresult ReadPrivate(nsIObjectInputStream* aStream);
+
+  // Builds the URI aSource resolves to
+  static nsresult ResolveSource(nsIURI* aSource, SubstitutingJARURI** aResult);
 
  public:
   class Mutator final : public nsIURIMutator,

@@ -13,12 +13,12 @@
 #include "IDecodingTask.h"
 #include "Image.h"
 #include "ImageMetadata.h"
+#include "OrientedImage.h"
+#include "SourceBuffer.h"
 #include "imgIContainer.h"
 #include "mozilla/gfx/2D.h"
 #include "nsNetUtil.h"  // for NS_NewBufferedInputStream
 #include "nsStreamUtils.h"
-#include "OrientedImage.h"
-#include "SourceBuffer.h"
 
 using namespace mozilla::gfx;
 
@@ -39,7 +39,7 @@ already_AddRefed<imgIContainer> ImageOps::Freeze(imgIContainer* aImage) {
 
 /* static */
 already_AddRefed<Image> ImageOps::Clip(Image* aImage, nsIntRect aClip,
-                                       const Maybe<nsSize>& aSVGViewportSize) {
+                                       const Maybe<CSSSize>& aSVGViewportSize) {
   RefPtr<Image> clippedImage =
       new ClippedImage(aImage, aClip, aSVGViewportSize);
   return clippedImage.forget();
@@ -48,7 +48,7 @@ already_AddRefed<Image> ImageOps::Clip(Image* aImage, nsIntRect aClip,
 /* static */
 already_AddRefed<imgIContainer> ImageOps::Clip(
     imgIContainer* aImage, nsIntRect aClip,
-    const Maybe<nsSize>& aSVGViewportSize) {
+    const Maybe<CSSSize>& aSVGViewportSize) {
   nsCOMPtr<imgIContainer> clippedImage =
       new ClippedImage(static_cast<Image*>(aImage), aClip, aSVGViewportSize);
   return clippedImage.forget();

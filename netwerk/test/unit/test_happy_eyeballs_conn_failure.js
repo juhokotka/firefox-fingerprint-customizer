@@ -8,10 +8,6 @@ var { setTimeout } = ChromeUtils.importESModule(
   "resource://gre/modules/Timer.sys.mjs"
 );
 
-const { HTTP3Server } = ChromeUtils.importESModule(
-  "resource://testing-common/NodeServer.sys.mjs"
-);
-
 let trrServer;
 let h3NoResponsePort;
 let tcpNoResponseSocket;
@@ -22,20 +18,13 @@ add_setup(async function () {
   Assert.notEqual(h3NoResponsePort, null);
   Assert.notEqual(h3NoResponsePort, "");
 
-  let h3ServerPath = Services.env.get("MOZ_HTTP3_SERVER_PATH");
-  let h3DBPath = Services.env.get("MOZ_HTTP3_CERT_DB_PATH");
-
-  let server = new HTTP3Server();
-  await server.start(h3ServerPath, h3DBPath);
-
-  tcpNoResponsePort = server.no_response_port();
-
   // A TCP server socket that listens but never accepts connections.
   // TCP handshake completes (OS handles SYN/SYN-ACK) but TLS never starts.
   tcpNoResponseSocket = Cc[
     "@mozilla.org/network/server-socket;1"
   ].createInstance(Ci.nsIServerSocket);
-  tcpNoResponseSocket.init(tcpNoResponsePort, true, -1);
+  tcpNoResponseSocket.init(-1, true, -1);
+  tcpNoResponsePort = tcpNoResponseSocket.port;
 
   let certdb = Cc["@mozilla.org/security/x509certdb;1"].getService(
     Ci.nsIX509CertDB
@@ -66,13 +55,14 @@ add_setup(async function () {
     if (tcpNoResponseSocket) {
       tcpNoResponseSocket.close();
     }
-    await server.stop();
   });
 });
 
 async function resetConnections() {
   Services.obs.notifyObservers(null, "net:cancel-all-connections");
-  let nssComponent = Cc["@mozilla.org/psm;1"].getService(Ci.nsINSSComponent);
+  let nssComponent = Cc["@mozilla.org/network/ssl-tokens-cache;1"].getService(
+    Ci.nsISSLTokensCache
+  );
   await nssComponent.asyncClearSSLExternalAndInternalSessionCache();
   Services.dns.clearCache(true);
   // eslint-disable-next-line mozilla/no-arbitrary-setTimeout

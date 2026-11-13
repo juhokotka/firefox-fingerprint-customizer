@@ -11,6 +11,7 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/EventTargetCapability.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/StaticPrefs_media.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 
@@ -30,16 +31,7 @@ class AudioSinkWrapper : public MediaSink {
   AudioSinkWrapper(AbstractThread* aOwnerThread,
                    MediaQueue<AudioData>& aAudioQueue, SinkCreator aFunc,
                    double aVolume, double aPlaybackRate, bool aPreservesPitch,
-                   RefPtr<AudioDeviceInfo> aAudioDevice)
-      : mOwnerThread(aOwnerThread),
-        mAsyncInitTaskQueue(CreateAsyncInitTaskQueue()),
-        mSinkCreator(std::move(aFunc)),
-        mAudioDevice(std::move(aAudioDevice)),
-        mParams(aVolume, aPlaybackRate, aPreservesPitch),
-        mAudioQueue(aAudioQueue),
-        mRetrySinkTime(TimeStamp::Now()) {
-    MOZ_ASSERT(mAsyncInitTaskQueue);
-  }
+                   RefPtr<AudioDeviceInfo> aAudioDevice);
 
   RefPtr<EndedPromise> OnEnded(TrackType aType) override;
   media::TimeUnit GetEndTime(TrackType aType) const override;
@@ -52,7 +44,8 @@ class AudioSinkWrapper : public MediaSink {
   void SetStreamName(const nsAString& aStreamName) override;
   void SetPlaybackRate(double aPlaybackRate) override;
   void SetPreservesPitch(bool aPreservesPitch) override;
-  void SetPlaying(bool aPlaying) override;
+  void SetPlaying(bool aPlaying,
+                  StopReason aReason = StopReason::Regular) override;
   RefPtr<GenericPromise> SetAudioDevice(
       RefPtr<AudioDeviceInfo> aDevice) override;
 
@@ -60,7 +53,7 @@ class AudioSinkWrapper : public MediaSink {
 
   nsresult Start(const media::TimeUnit& aStartTime, const MediaInfo& aInfo,
                  StartType aStartType = StartType::Initial) override;
-  void Stop() override;
+  void Stop(StopReason aReason = StopReason::Regular) override;
   bool IsStarted() const override;
   bool IsPlaying() const override;
 
@@ -79,6 +72,13 @@ class AudioSinkWrapper : public MediaSink {
     // The stream is paused, a constant time is reported.
     Paused
   } mLastClockSource = ClockSource::Paused;
+
+  // True while a seek resume is in progress. The reported clock is paused at
+  // the seek target and then follows the audio stream's play cursor, which
+  // trails the write cursor by the output latency, rather than advancing on the
+  // system clock, so it does not lead the audible audio. Cleared once the audio
+  // callback is running and driving the clock.
+  bool mClockPausedDuringSeek = false;
   static already_AddRefed<TaskQueue> CreateAsyncInitTaskQueue();
   bool IsMuted() const;
   void OnMuted(bool aMuted);
@@ -92,6 +92,11 @@ class AudioSinkWrapper : public MediaSink {
   void StartAudioSink(UniquePtr<AudioSink> aAudioSink,
                       const media::TimeUnit& aStartTime);
   void ShutDownAudioSink();
+  // Take over the stashed sink and reset it, along with its still-running audio
+  // stream, to the given start time in place.
+  nsresult ResumeStashedAudioSink(const media::TimeUnit& aStartTime);
+  // Shut down and clear a sink stashed for seek reuse, if any.
+  void DiscardStashedAudioSink();
   // Create and start mAudioSink.
   // An AudioSink can be started synchronously from the MDSM thread, or
   // asynchronously.
@@ -114,6 +119,11 @@ class AudioSinkWrapper : public MediaSink {
   // the audio is muted, or when the media has no audio track. Otherwise, the
   // media's position is based on the clock of the AudioStream.
   media::TimeUnit GetSystemClockPosition(TimeStamp aNow) const;
+
+  // Compute the reported position while an audio sink exists: use the audio
+  // stream clock, or the system clock until the stream's callback starts, and
+  // re-anchor the sink start time on that handoff.
+  media::TimeUnit PositionFromAudioSink(TimeStamp aNow);
   bool CheckIfEnded() const;
 
   void OnAudioEnded(const EndedPromise::ResolveOrRejectValue& aValue);
@@ -124,6 +134,15 @@ class AudioSinkWrapper : public MediaSink {
   const RefPtr<TaskQueue> mAsyncInitTaskQueue;
   SinkCreator mSinkCreator;
   UniquePtr<AudioSink> mAudioSink;
+
+  // A sink kept alive, with its stream still running, across a seek so the next
+  // start can reuse it instead of creating a fresh one.
+  UniquePtr<AudioSink> mStashedAudioSink;
+
+  // Whether the audio stream is reused across a seek rather than recreated.
+  // Captured once at construction.
+  const bool mReuseStreamOnSeek;
+
   // The output device this AudioSink is playing data to. The system's default
   // device is used if this is null.
   RefPtr<AudioDeviceInfo> mAudioDevice;

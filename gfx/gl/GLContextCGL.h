@@ -6,7 +6,6 @@
 #define GLCONTEXTCGL_H_
 
 #include "GLContext.h"
-
 #include "OpenGL/OpenGL.h"
 
 #ifdef __OBJC__

@@ -26,7 +26,7 @@ import mozilla.components.support.base.feature.LifecycleAwareFeature
 import mozilla.components.ui.widgets.DefaultSnackbarDelegate
 import org.mozilla.samples.browser.databinding.FragmentBrowserBinding
 
-@Suppress("LongParameterList", "UndocumentedPublicClass")
+@Suppress("UndocumentedPublicClass")
 class ContextMenuIntegration(
     context: Context,
     fragmentManager: FragmentManager,
@@ -54,21 +54,23 @@ class ContextMenuIntegration(
                     contextMenuUseCases = contextMenuUseCases,
                     downloadsLocation = {
                         Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).path
-                },
-                    ),
+                    },
+                ),
                 createCopyImageLocationCandidate(context, parentView, snackbarDelegate),
                 createAddContactCandidate(context),
                 createShareEmailAddressCandidate(context),
                 createCopyEmailAddressCandidate(context, parentView, snackbarDelegate),
             )
         } else {
-            val appLinksCandidate = ContextMenuCandidate.createOpenInExternalAppCandidate(
-                context = context,
-                appLinksUseCases = AppLinksUseCases(
+            val appLinksCandidate =
+                ContextMenuCandidate.createOpenInExternalAppCandidate(
                     context = context,
-                    launchInApp = { true },
-                ),
-            )
+                    appLinksUseCases =
+                        AppLinksUseCases(
+                            context = context,
+                            launchInApp = { true },
+                        ),
+                )
             ContextMenuCandidate.defaultCandidates(
                 context = context,
                 tabsUseCases = tabsUseCases,
@@ -81,13 +83,14 @@ class ContextMenuIntegration(
         }
     }
 
-    private val feature = ContextMenuFeature(
-        fragmentManager,
-        browserStore,
-        candidates,
-        FragmentBrowserBinding.bind(parentView).engineView,
-        contextMenuUseCases,
-    )
+    private val feature =
+        ContextMenuFeature(
+            fragmentManager,
+            browserStore,
+            candidates,
+            FragmentBrowserBinding.bind(parentView).engineView,
+            contextMenuUseCases,
+        )
 
     override fun start() {
         feature.start()

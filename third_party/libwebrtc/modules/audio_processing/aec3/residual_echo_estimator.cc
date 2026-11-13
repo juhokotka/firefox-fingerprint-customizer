@@ -29,6 +29,7 @@
 #include "modules/audio_processing/aec3/reverb_model.h"
 #include "modules/audio_processing/aec3/spectrum_buffer.h"
 #include "rtc_base/checks.h"
+#include "system_wrappers/include/metrics.h"
 
 namespace webrtc {
 namespace {
@@ -206,15 +207,37 @@ void ResidualEchoEstimator::Estimate(
 
   const size_t num_capture_channels = R2.size();
 
-  is_ml_ree_active_ = neural_residual_echo_estimator_ != nullptr &&
-                      aec_state.UsableLinearEstimate();
+  if (neural_residual_echo_estimator_ != nullptr &&
+      neural_residual_echo_estimator_->IsInitialized()) {
+    ml_ree_state_ = aec_state.UsableLinearEstimate() ? MlReeState::kActive
+                                                     : MlReeState::kInitialized;
+  }
+
+  // Log or count capture blocks processed between leaving nonlinear mode and
+  // until the neural residual echo estimator is initialized.
+  if (neural_residual_echo_estimator_ != nullptr &&
+      !has_logged_neural_echo_estimator_status_) {
+    if (aec_state.UsableLinearEstimate()) {
+      if (ml_ree_state_ == MlReeState::kActive) {
+        has_logged_neural_echo_estimator_status_ = true;
+        RTC_HISTOGRAM_COUNTS_1000(
+            "WebRTC.Audio.NeuralResidualEchoEstimator."
+            "LinearModeBlocksUntilInit",
+            linear_mode_blocks_until_neural_estimator_init_);
+      } else {
+        ++linear_mode_blocks_until_neural_estimator_init_;
+      }
+    }
+  }
+
   // Estimate the power of the stationary noise in the render signal.
   UpdateRenderNoisePower(render_buffer);
 
   // The neural residual echo estimation always runs, even if the estimated
   // spectra |R2| and |R2_unbounded| are overwritten later. This ensures the
   // estimator sees continuous signals at a constant time rate.
-  if (neural_residual_echo_estimator_ != nullptr) {
+  if (ml_ree_state_ != MlReeState::kUninitialized) {
+    RTC_DCHECK(neural_residual_echo_estimator_);
     constexpr int kNeuralDelayHeadroomMs = 12;
     constexpr int kNeuralDelayHeadroomBlocks =
         kNeuralDelayHeadroomMs / kBlockSizeMs;
@@ -238,7 +261,7 @@ void ResidualEchoEstimator::Estimate(
   }
 
   // Estimate the residual echo power, used when ml_ree is not active.
-  if (!is_ml_ree_active_) {
+  if (ml_ree_state_ != MlReeState::kActive) {
     if (aec_state.UsableLinearEstimate()) {
       // When there is saturated echo, assume the same spectral content as is
       // present in the microphone signal.

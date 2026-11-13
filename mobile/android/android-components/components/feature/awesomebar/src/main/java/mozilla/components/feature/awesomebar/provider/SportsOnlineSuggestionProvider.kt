@@ -6,6 +6,12 @@ package mozilla.components.feature.awesomebar.provider
 
 import android.graphics.Bitmap
 import androidx.annotation.VisibleForTesting
+import java.time.DateTimeException
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import java.util.UUID
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.take
@@ -13,35 +19,32 @@ import kotlinx.coroutines.flow.toList
 import mozilla.components.browser.icons.BrowserIcons
 import mozilla.components.browser.icons.IconRequest
 import mozilla.components.concept.awesomebar.AwesomeBar
-import mozilla.components.concept.awesomebar.optimizedsuggestions.SportSuggestionCategory
-import mozilla.components.concept.awesomebar.optimizedsuggestions.SportSuggestionDate
-import mozilla.components.concept.awesomebar.optimizedsuggestions.SportSuggestionStatus
-import mozilla.components.concept.awesomebar.optimizedsuggestions.SportSuggestionStatusType
-import mozilla.components.concept.awesomebar.optimizedsuggestions.SportSuggestionTeam
 import mozilla.components.feature.awesomebar.facts.SuggestionCardType
 import mozilla.components.feature.awesomebar.facts.emitOptimizedSuggestionCardClickedFact
 import mozilla.components.feature.awesomebar.facts.emitOptimizedSuggestionCardDisplayedFact
+import mozilla.components.feature.awesomebar.optimizedsuggestions.CombinedSuggestionsDataSource
+import mozilla.components.feature.awesomebar.optimizedsuggestions.SportItem
+import mozilla.components.feature.awesomebar.optimizedsuggestions.SportSuggestion
+import mozilla.components.feature.awesomebar.optimizedsuggestions.SportSuggestionCategory
+import mozilla.components.feature.awesomebar.optimizedsuggestions.SportSuggestionDate
+import mozilla.components.feature.awesomebar.optimizedsuggestions.SportSuggestionStatus
+import mozilla.components.feature.awesomebar.optimizedsuggestions.SportSuggestionStatusType
+import mozilla.components.feature.awesomebar.optimizedsuggestions.SportSuggestionTeam
 import mozilla.components.feature.search.SearchUseCases
-import java.time.DateTimeException
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
-import java.util.UUID
 
 internal const val DEFAULT_SPORT_SUGGESTION_LIMIT = 1
 
 /**
  * [AwesomeBar.SuggestionProvider] implementation that provides suggestions based on online sports.
  *
- * @property dataSource the [AwesomeBar.CombinedSuggestionsDataSource] to be used.
+ * @property dataSource the [CombinedSuggestionsDataSource] to be used.
  * @property suggestionsHeader optional parameter to specify if the suggestion should have a header.
  * @property maxNumberOfSuggestions the maximum number of suggestions to be provided.
  */
 class SportsOnlineSuggestionProvider(
     private val icons: BrowserIcons,
     private val searchUseCase: SearchUseCases.SearchUseCase,
-    private val dataSource: AwesomeBar.CombinedSuggestionsDataSource,
+    private val dataSource: CombinedSuggestionsDataSource,
     private val suggestionsHeader: String? = null,
     @get:VisibleForTesting internal val maxNumberOfSuggestions: Int = DEFAULT_SPORT_SUGGESTION_LIMIT,
 ) : AwesomeBar.SuggestionProvider {
@@ -55,17 +58,18 @@ class SportsOnlineSuggestionProvider(
         return false
     }
 
-    override suspend fun onInputChanged(text: String): List<AwesomeBar.SportSuggestion> {
+    override suspend fun onInputChanged(text: String): List<SportSuggestion> {
         if (text.isBlank()) return emptyList()
 
         val items = dataSource.fetchSports(text)
-        val suggestions = items
-            .asFlow()
-            .mapNotNull { item ->
-                item.toSuggestionOrNull()?.let { it to item.sportCategory }
-            }
-            .take(maxNumberOfSuggestions)
-            .toList()
+        val suggestions =
+            items
+                .asFlow()
+                .mapNotNull { item ->
+                    item.toSuggestionOrNull()?.let { it to item.sportCategory }
+                }
+                .take(maxNumberOfSuggestions)
+                .toList()
 
         suggestions.forEach {
             emitOptimizedSuggestionCardDisplayedFact(
@@ -77,9 +81,8 @@ class SportsOnlineSuggestionProvider(
         return suggestions.map { it.first }
     }
 
-    private suspend fun AwesomeBar.SportItem.toSuggestionOrNull(): AwesomeBar.SportSuggestion? {
-        val hasRequiredFields =
-            query.isNotBlank() && sport.isNotBlank()
+    private suspend fun SportItem.toSuggestionOrNull(): SportSuggestion? {
+        val hasRequiredFields = query.isNotBlank() && sport.isNotBlank()
         val sportCategory = parseSportCategory(sportCategory)
         val date = parseDate(date)
         val status = parseStatus(status)
@@ -89,7 +92,7 @@ class SportsOnlineSuggestionProvider(
         val hasAllFields = date != null && homeTeam != null && awayTeam != null
 
         return if (hasRequiredFields && hasAllFields) {
-            AwesomeBar.SportSuggestion(
+            SportSuggestion(
                 onSuggestionClicked = {
                     emitOptimizedSuggestionCardClickedFact(
                         cardType = SuggestionCardType.SPORTS,
@@ -133,11 +136,7 @@ class SportsOnlineSuggestionProvider(
                     SportSuggestionDate.Tomorrow(time)
                 }
                 else -> {
-                    val date = parsedDate.format(
-                        DateTimeFormatter
-                            .ofPattern("d MMM yyyy")
-                            .withLocale(locale),
-                    )
+                    val date = parsedDate.format(DateTimeFormatter.ofPattern("d MMM yyyy").withLocale(locale))
                     SportSuggestionDate.General(date)
                 }
             }
@@ -157,8 +156,7 @@ class SportsOnlineSuggestionProvider(
             "Canceled" -> SportSuggestionStatus.Canceled
             "Final",
             "Final - Over Time",
-            "Final - Shoot Out",
-            -> SportSuggestionStatus.Final
+            "Final - Shoot Out" -> SportSuggestionStatus.Final
             "Forfeit" -> SportSuggestionStatus.Forfeit
             "Not Necessary" -> SportSuggestionStatus.NotNecessary
             else -> SportSuggestionStatus.Unknown
@@ -176,11 +174,13 @@ class SportsOnlineSuggestionProvider(
     }
 
     @VisibleForTesting
-    internal suspend fun parseTeam(team: AwesomeBar.SportItem.Team): SportSuggestionTeam? {
+    internal suspend fun parseTeam(team: SportItem.Team): SportSuggestionTeam? {
         val icon = fetchTeamIcon(icons, team.icon)
-        return team.name.takeIf { it.isNotBlank() }?.let {
-            SportSuggestionTeam(it, team.score, icon)
-        }
+        return team.name
+            .takeIf { it.isNotBlank() }
+            ?.let {
+                SportSuggestionTeam(it, team.score, icon)
+            }
     }
 
     @VisibleForTesting
@@ -204,12 +204,13 @@ class SportsOnlineSuggestionProvider(
         if (url.isNullOrBlank()) return null
 
         val resources = listOf(IconRequest.Resource(url, IconRequest.Resource.Type.IMAGE_SRC))
-        val request = IconRequest(
-            url = url,
-            size = IconRequest.Size.LAUNCHER_ADAPTIVE,
-            resources = resources,
-            isPrivate = true,
-        )
+        val request =
+            IconRequest(
+                url = url,
+                size = IconRequest.Size.LAUNCHER_ADAPTIVE,
+                resources = resources,
+                isPrivate = true,
+            )
 
         val icon = icons.loadIcon(request).await()
         return icon.bitmap

@@ -24,6 +24,11 @@ and required versions of Selenium and Firefox:
  </thead>
  </thead>
  <tr>
+  <td>0.37.1
+  <td>≥ 3.11 (3.14 Python)
+  <td>115 ESR
+  <td>n/a
+ <tr>
   <td>0.37.0
   <td>≥ 3.11 (3.14 Python)
   <td>115 ESR
@@ -186,8 +191,8 @@ supports versions of Fennec up to 68 ESR, which is the last officially
 supported release from Mozilla.
 
 To run tests on Android specific capabilities under `moz:firefoxOptions`
-have to be set when requesting a new session. See the Android section under
-[Firefox Capabilities](Capabilities.md#android) for more details.
+have to be set when requesting a new session. See
+[Firefox Capabilities] for more details.
 
 [geckodriver releases]: https://github.com/mozilla/geckodriver/releases
 [Selenium]: https://github.com/seleniumhq/selenium
@@ -200,3 +205,4 @@ have to be set when requesting a new session. See the Android section under
 [GeckoView]: https://wiki.mozilla.org/Mobile/GeckoView
 [Firefox Preview]: https://play.google.com/store/apps/details?id=org.mozilla.fenix
 [Firefox Reality]: https://play.google.com/store/apps/details?id=org.mozilla.vrbrowser
+[Firefox Capabilities]: https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/Capabilities/firefoxOptions#android

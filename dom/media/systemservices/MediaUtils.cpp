@@ -5,10 +5,12 @@
 #include "MediaUtils.h"
 
 #include "mozilla/AppShutdown.h"
+#include "mozilla/Components.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/dom/WorkerRef.h"
+#include "nsCharSeparatedTokenizer.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsNetUtil.h"
@@ -70,7 +72,7 @@ bool HostnameInPref(const char* aPref, const nsCString& aHostName) {
 }
 
 nsCOMPtr<nsIAsyncShutdownClient> GetShutdownBarrier() {
-  nsCOMPtr<nsIAsyncShutdownService> svc = services::GetAsyncShutdownService();
+  nsCOMPtr<nsIAsyncShutdownService> svc = components::AsyncShutdown::Service();
   if (!svc) {
     // We can fail to get the shutdown service if we're already shutting down.
     return nullptr;

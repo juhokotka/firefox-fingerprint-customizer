@@ -29,6 +29,7 @@
 #  ifdef MOZ_WIDGET_ANDROID
 #    include <android/native_window.h>
 #    include <android/native_window_jni.h>
+
 #    include "mozilla/jni/Utils.h"
 #    include "mozilla/widget/AndroidCompositorWidget.h"
 #  endif
@@ -46,33 +47,35 @@
 #  error "Platform not recognized"
 #endif
 
-#include "gfxCrashReporterUtils.h"
-#include "gfxFailure.h"
-#include "gfxPlatform.h"
-#include "gfxUtils.h"
 #include "GLBlitHelper.h"
 #include "GLContextEGL.h"
 #include "GLContextProvider.h"
 #include "GLLibraryEGL.h"
 #include "GLLibraryLoader.h"
+#include "ScopedGLHelpers.h"
+#include "gfxCrashReporterUtils.h"
+#include "gfxFailure.h"
+#include "gfxPlatform.h"
+#include "gfxUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs_gfx.h"
-#include "mozilla/gfx/gfxVars.h"
+#include "mozilla/StaticPrefs_gl.h"
 #include "mozilla/gfx/BuildConstants.h"
 #include "mozilla/gfx/Logging.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/widget/CompositorWidget.h"
 #include "nsDebug.h"
 #include "nsIWidget.h"
 #include "nsThreadUtils.h"
-#include "ScopedGLHelpers.h"
 
 #if defined(MOZ_WIDGET_GTK)
 #  include "mozilla/widget/GtkCompositorWidget.h"
 #  if defined(MOZ_WAYLAND)
 #    include <gdk/gdkwayland.h>
 #    include <wayland-egl.h>
+
 #    include "mozilla/WidgetUtilsGtk.h"
 #    include "mozilla/widget/nsWaylandDisplay.h"
 #  endif
@@ -182,8 +185,8 @@ static EGLSurface CreateSurfaceFromNativeWindow(
     gfxCriticalNote << "Failed to obtain native window from Surface";
     return EGL_NO_SURFACE;
   }
-  const auto& display = egl.mLib->fGetDisplay(EGL_DEFAULT_DISPLAY);
-  newSurface = egl.mLib->fCreateWindowSurface(display, config, nativeWindow, 0);
+  newSurface =
+      egl.mLib->fCreateWindowSurface(egl.mDisplay, config, nativeWindow, 0);
   ANativeWindow_release(nativeWindow);
 #else
   newSurface = egl.fCreateWindowSurface(config, window, nullptr);
@@ -221,7 +224,8 @@ already_AddRefed<GLContext> GLContextEGLFactory::CreateImpl(
     gfxCriticalNote << "Failed[3] to load EGL library: " << failureId.get();
     return nullptr;
   }
-  const auto egl = lib->CreateDisplay(true, false, &failureId);
+  const auto egl = lib->CreateDisplay(
+      EGLCreateDisplayFlags{.mForceAccel = true}, &failureId);
   if (!egl) {
     gfxCriticalNote << "Failed[3] to create EGL library  display: "
                     << failureId.get();
@@ -319,16 +323,8 @@ already_AddRefed<GLContext> GLContextEGLFactory::Create(
   return glContext.forget();
 }
 
-/* static */
 EGLSurface GLContextEGL::CreateEGLSurfaceForCompositorWidget(
     widget::CompositorWidget* aCompositorWidget, const EGLConfig aConfig) {
-  nsCString discardFailureId;
-  const auto egl = DefaultEglDisplay(&discardFailureId);
-  if (!egl) {
-    gfxCriticalNote << "Failed to load EGL library 6!";
-    return EGL_NO_SURFACE;
-  }
-
   MOZ_ASSERT(aCompositorWidget);
   EGLNativeWindowType window =
       GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aCompositorWidget);
@@ -336,8 +332,7 @@ EGLSurface GLContextEGL::CreateEGLSurfaceForCompositorWidget(
     gfxCriticalNote << "window is null";
     return EGL_NO_SURFACE;
   }
-
-  return mozilla::gl::CreateSurfaceFromNativeWindow(*egl, window, aConfig);
+  return mozilla::gl::CreateSurfaceFromNativeWindow(*mEgl, window, aConfig);
 }
 
 GLContextEGL::GLContextEGL(const std::shared_ptr<EglDisplay> egl,
@@ -620,8 +615,6 @@ GLint GLContextEGL::GetBufferAge() const {
   return 0;
 }
 
-#define LOCAL_EGL_CONTEXT_PROVOKING_VERTEX_DONT_CARE_MOZ 0x6000
-
 RefPtr<GLContextEGL> GLContextEGL::CreateGLContext(
     const std::shared_ptr<EglDisplay> egl, const GLContextDesc& desc,
     EGLConfig surfaceConfig, EGLSurface surface, const bool useGles,
@@ -677,14 +670,6 @@ RefPtr<GLContextEGL> GLContextEGL::CreateGLContext(
   if (!debugFlags && flags & CreateContextFlags::NO_VALIDATION &&
       egl->IsExtensionSupported(EGLExtension::KHR_create_context_no_error)) {
     required_attribs.push_back(LOCAL_EGL_CONTEXT_OPENGL_NO_ERROR_KHR);
-    required_attribs.push_back(LOCAL_EGL_TRUE);
-  }
-
-  if (flags & CreateContextFlags::PROVOKING_VERTEX_DONT_CARE &&
-      egl->IsExtensionSupported(
-          EGLExtension::MOZ_create_context_provoking_vertex_dont_care)) {
-    required_attribs.push_back(
-        LOCAL_EGL_CONTEXT_PROVOKING_VERTEX_DONT_CARE_MOZ);
     required_attribs.push_back(LOCAL_EGL_TRUE);
   }
 
@@ -1258,9 +1243,18 @@ already_AddRefed<GLContext> GLContextProviderEGL::CreateHeadless(
     const GLContextCreateDesc& desc, nsACString* const out_failureId) {
   bool useSoftwareDisplay =
       static_cast<bool>(desc.flags & CreateContextFlags::FORBID_HARDWARE);
-  const auto display = useSoftwareDisplay
-                           ? CreateSoftwareEglDisplay(out_failureId)
-                           : DefaultEglDisplay(out_failureId);
+  const bool useHighPowerDisplay =
+      (desc.flags & CreateContextFlags::HIGH_POWER) &&
+      StaticPrefs::gl_allow_high_power();
+
+  std::shared_ptr<EglDisplay> display;
+  if (useSoftwareDisplay) {
+    display = CreateSoftwareEglDisplay(out_failureId);
+  } else if (useHighPowerDisplay) {
+    display = CreateHighPowerEglDisplay(out_failureId);
+  } else {
+    display = DefaultEglDisplay(out_failureId);
+  }
   if (!display) {
     return nullptr;
   }

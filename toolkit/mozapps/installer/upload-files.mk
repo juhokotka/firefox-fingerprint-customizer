@@ -31,47 +31,6 @@ ifeq ($(MOZ_PKG_FORMAT),APK)
 MAKE_PACKAGE = true
 endif
 
-INNER_MAKE_PACKAGE = $(MAKE_PACKAGE)
-
-NO_PKG_FILES += \
-	core \
-	bsdecho \
-	js \
-	js-config \
-	jscpucfg \
-	nsinstall \
-	viewer \
-	TestGtkEmbed \
-	elf-dynstr-gc \
-	mangle* \
-	maptsv* \
-	mfc* \
-	msdump* \
-	msmap* \
-	nm2tsv* \
-	nsinstall* \
-	res/samples \
-	res/throbber \
-	shlibsign* \
-	certutil* \
-	pk12util* \
-	BadCertAndPinningServer* \
-	DelegatedCredentialsServer* \
-	EncryptedClientHelloServer* \
-	FaultyServer* \
-	OCSPStaplingServer* \
-	SanctionsTestServer* \
-	GenerateOCSPResponse* \
-	chrome/chrome.rdf \
-	chrome/app-chrome.manifest \
-	chrome/overlayinfo \
-	components/compreg.dat \
-	components/xpti.dat \
-	content_unit_tests \
-	necko_unit_tests \
-	*.dSYM \
-	$(NULL)
-
 # If a manifest has not been supplied, the following
 # files should be excluded from the package too
 ifndef MOZ_PKG_MANIFEST
@@ -82,30 +41,10 @@ ifdef MOZ_DMD
   NO_PKG_FILES += SmokeDMD
 endif
 
-DEFINES += -DDLL_PREFIX=$(DLL_PREFIX) -DDLL_SUFFIX=$(DLL_SUFFIX) -DBIN_SUFFIX=$(BIN_SUFFIX)
-
-ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
-  DEFINES += -DDIR_MACOS=Contents/MacOS/ -DDIR_RESOURCES=Contents/Resources/
-else
-  DEFINES += -DDIR_MACOS= -DDIR_RESOURCES=
-endif
-
-ifdef MOZ_FOLD_LIBS
-  DEFINES += -DMOZ_FOLD_LIBS=1
-endif
-
-# The following target stages files into two directories: one directory for
-# core files, and one for optional extensions based on the information in
-# the MOZ_PKG_MANIFEST file.
-
-PKG_ARG = , '$(pkg)'
+DEFINES += $(PACKAGE_TOOLKIT_DEFINES)
 
 ifndef MOZ_PACKAGER_FORMAT
   MOZ_PACKAGER_FORMAT = $(error MOZ_PACKAGER_FORMAT is not set)
-endif
-
-ifneq (android,$(MOZ_WIDGET_TOOLKIT))
-  JAR_COMPRESSION ?= none
 endif
 
 ifeq ($(OS_TARGET), WINNT)
@@ -118,8 +57,6 @@ endif
 empty :=
 space = $(empty) $(empty)
 QUOTED_WILDCARD = $(if $(wildcard $(subst $(space),?,$(1))),'$(1)')
-ESCAPE_SPACE = $(subst $(space),\$(space),$(1))
-ESCAPE_WILDCARD = $(subst $(space),?,$(1))
 
 # This variable defines which OpenSSL algorithm to use to
 # generate checksums for files that we upload
@@ -157,7 +94,10 @@ UPLOAD_FILES= \
   $(call QUOTED_WILDCARD,$(topobjdir)/$(MOZ_BUILD_APP)/installer/windows/instgen/setup.exe) \
   $(call QUOTED_WILDCARD,$(topobjdir)/$(MOZ_BUILD_APP)/installer/windows/instgen/setup-stub.exe) \
   $(call QUOTED_WILDCARD,$(topsrcdir)/toolchains.json) \
+  $(call QUOTED_WILDCARD,$(topobjdir)/sbom.json) \
+  $(call QUOTED_WILDCARD,$(topobjdir)/sbom-build-tooling.json) \
   $(call QUOTED_WILDCARD,$(topobjdir)/config.status) \
+  $(call QUOTED_WILDCARD,$(topobjdir)/licenses.json) \
   $(if $(UPLOAD_EXTRA_FILES), $(foreach f, $(UPLOAD_EXTRA_FILES), $(wildcard $(DIST)/$(f))))
 
 ifneq ($(filter-out en-US,$(AB_CD)),)
@@ -188,21 +128,14 @@ ifdef MOZ_STUB_INSTALLER
   UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(PKG_STUB_BASENAME).exe)
 endif
 
+ifdef MOZ_APPSERVICES_IN_TREE
+# Upload `libmegazord.so` artifacts for use in artifact builds.
+UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME).zip)
+endif
+
 # Upload `.xpt` artifacts for use in artifact builds.
 UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(XPT_ARTIFACTS_ARCHIVE_BASENAME).zip)
 # Upload update-related macOS framework artifacts for use in artifact builds.
 ifeq ($(OS_ARCH),Darwin)
 UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(UPDATE_FRAMEWORK_ARTIFACTS_ARCHIVE_BASENAME).zip)
 endif # Darwin
-
-HG_BUNDLE_FILE = $(DIST)/$(PKG_SRCPACK_PATH)$(PKG_BUNDLE_BASENAME).bundle
-
-HG ?= hg
-CREATE_HG_BUNDLE_CMD  = $(HG) -v -R $(topsrcdir) bundle --base null
-ifdef HG_BUNDLE_REVISION
-  CREATE_HG_BUNDLE_CMD += -r $(HG_BUNDLE_REVISION)
-endif
-CREATE_HG_BUNDLE_CMD += $(HG_BUNDLE_FILE)
-ifdef UPLOAD_HG_BUNDLE
-  SOURCE_UPLOAD_FILES  += $(HG_BUNDLE_FILE)
-endif

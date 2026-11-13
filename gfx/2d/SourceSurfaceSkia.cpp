@@ -2,15 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Logging.h"
 #include "SourceSurfaceSkia.h"
-#include "HelpersSkia.h"
+
 #include "DrawTargetSkia.h"
+#include "HelpersSkia.h"
+#include "Logging.h"
+#include "mozilla/CheckedInt.h"
 #include "skia/include/core/SkData.h"
 #include "skia/include/core/SkImage.h"
 #include "skia/include/core/SkSurface.h"
 #include "skia/include/private/base/SkMalloc.h"
-#include "mozilla/CheckedInt.h"
 
 namespace mozilla::gfx {
 
@@ -159,7 +160,12 @@ bool SourceSurfaceSkia::InitFromImage(const sk_sp<SkImage>& aImage,
 
 already_AddRefed<SourceSurface> SourceSurfaceSkia::ExtractSubrect(
     const IntRect& aRect) {
-  if (!mImage || aRect.IsEmpty() || !GetRect().Contains(aRect)) {
+  if (aRect.IsEmpty() || !GetRect().Contains(aRect)) {
+    return nullptr;
+  }
+  // Shared snapshot pixels must remain stable until the copy completes.
+  MutexAutoLock lock(mChangeMutex);
+  if (!mImage) {
     return nullptr;
   }
   SkImageInfo info = MakeSkiaImageInfo(aRect.Size(), mFormat);

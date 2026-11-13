@@ -19,7 +19,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/search/SearchSERPTelemetry.sys.mjs",
   SearchSERPTelemetryUtils:
     "moz-src:///browser/components/search/SearchSERPTelemetry.sys.mjs",
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
   TabMetrics: "moz-src:///browser/components/tabbrowser/TabMetrics.sys.mjs",
   WindowsInstallsInfo:
     "resource://gre/modules/components-utils/WindowsInstallsInfo.sys.mjs",
@@ -67,6 +68,7 @@ const TELEMETRY_SUBSESSIONSPLIT_TOPIC =
 const DOMWINDOW_OPENED_TOPIC = "domwindowopened";
 const SESSION_STORE_SAVED_TAB_GROUPS_TOPIC =
   "sessionstore-saved-tab-groups-changed";
+const IDLE_DAILY_TOPIC = "idle-daily";
 
 export const MINIMUM_TAB_COUNT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes, in ms
 
@@ -276,6 +278,10 @@ function getOpenTabsAndWinsCounts() {
 
   for (let win of Services.wm.getEnumerator("navigator:browser")) {
     winCount++;
+    // Windows that are still opening don't have a gBrowser yet.
+    if (!win.gBrowser) {
+      continue;
+    }
     tabCount += win.gBrowser.tabs.length;
     for (const tab of win.gBrowser.tabs) {
       if (tab.getAttribute("pending") !== "true") {
@@ -303,6 +309,9 @@ function getPinnedTabsCount() {
   let pinnedTabs = 0;
 
   for (let win of Services.wm.getEnumerator("navigator:browser")) {
+    if (!win.gBrowser) {
+      continue;
+    }
     pinnedTabs += [...win.gBrowser.tabs].filter(t => t.pinned).length;
   }
 
@@ -533,10 +542,10 @@ export let BrowserUsageTelemetry = {
     this._inited = true;
 
     Services.prefs.addObserver("browser.tabs.inTitlebar", this);
-    Services.prefs.addObserver("idle-daily", this);
+    Services.obs.addObserver(this, IDLE_DAILY_TOPIC, true);
 
     this._recordUITelemetry();
-    this._recordInitialPrefValues();
+    this._recordPrefValues();
     this.recordPinnedTabsCount();
 
     this._onTabsOpenedTask = new lazy.DeferredTask(
@@ -623,6 +632,7 @@ export let BrowserUsageTelemetry = {
     Services.obs.removeObserver(this, DOMWINDOW_OPENED_TOPIC);
     Services.obs.removeObserver(this, TELEMETRY_SUBSESSIONSPLIT_TOPIC);
     Services.obs.removeObserver(this, SESSION_STORE_SAVED_TAB_GROUPS_TOPIC);
+    Services.obs.removeObserver(this, IDLE_DAILY_TOPIC);
   },
 
   observe(subject, topic, data) {
@@ -636,6 +646,9 @@ export let BrowserUsageTelemetry = {
       case SESSION_STORE_SAVED_TAB_GROUPS_TOPIC:
         this._onSavedTabGroupsChange();
         break;
+      case IDLE_DAILY_TOPIC:
+        this._recordPrefValues();
+        break;
       case "nsPref:changed":
         switch (data) {
           case "browser.tabs.inTitlebar":
@@ -644,9 +657,6 @@ export let BrowserUsageTelemetry = {
               Services.appinfo.drawInTitlebar ? "off" : "on",
               "pref"
             );
-            break;
-          case "idle-daily":
-            this._recordInitialPrefValues();
             break;
         }
         break;
@@ -846,8 +856,8 @@ export let BrowserUsageTelemetry = {
       return "microsoft-system-share";
     }
 
-    if (node.hasAttribute("data-share-name")) {
-      return "share-macos-provider";
+    if (node.classList?.contains("share-mac-picker-item")) {
+      return "macos-share-picker";
     }
 
     // See if this is a customizable widget.
@@ -1274,11 +1284,13 @@ export let BrowserUsageTelemetry = {
   },
 
   /**
-   * Records the startup values of prefs that govern important browser behavior
-   * options.
+   * Records the current values of prefs that govern important browser behavior
+   * options. Runs at startup and again on each daily idle, so mid-session
+   * changes are picked up.
    */
-  _recordInitialPrefValues() {
+  _recordPrefValues() {
     this._recordOpenNextToActiveTabSettingValue();
+    this._recordNovaEnabledValue();
   },
 
   /**
@@ -1297,6 +1309,12 @@ export let BrowserUsageTelemetry = {
   _recordOpenNextToActiveTabSettingValue() {
     Glean.linkHandling.openNextToActiveTabSettingsEnabled.set(
       this._isOpenNextToActiveTabSettingEnabled()
+    );
+  },
+
+  _recordNovaEnabledValue() {
+    Glean.nova.enabled.set(
+      Services.prefs.getBoolPref("browser.nova.enabled", false)
     );
   },
 
@@ -1400,6 +1418,7 @@ export let BrowserUsageTelemetry = {
     if (userContextId) {
       Glean.containers.containerTabOpened.record({
         container_id: String(userContextId),
+        source: event.detail?.containerSource ?? "unknown",
       });
     }
 
@@ -1575,6 +1594,9 @@ export let BrowserUsageTelemetry = {
     let tabGroupLengths = [];
 
     for (let win of Services.wm.getEnumerator("navigator:browser")) {
+      if (!win.gBrowser) {
+        continue;
+      }
       totalTabs += win.gBrowser.tabs.length;
       for (let group of win.gBrowser.tabGroups) {
         totalTabsInGroups += group.tabs.length;
@@ -1621,6 +1643,9 @@ export let BrowserUsageTelemetry = {
       collapsed = 0;
 
     for (let win of Services.wm.getEnumerator("navigator:browser")) {
+      if (!win.gBrowser) {
+        continue;
+      }
       for (let group of win.gBrowser.tabGroups) {
         if (group.collapsed) {
           collapsed += 1;
@@ -2039,25 +2064,15 @@ export let BrowserUsageTelemetry = {
       extra.other_inst = (!!install_data.installPaths.size).toString();
       extra.other_msix_inst = (!!install_data.msixInstalls.size).toString();
     } else {
-      let dataPath = dataPathOverride;
-      if (!dataPath) {
-        dataPath = Services.dirsvc.get("GreD", Ci.nsIFile);
-        dataPath.append("installation_telemetry.json");
+      const data =
+        await lazy.WindowsInstallsInfo.readInstallationTelemetry(
+          dataPathOverride
+        );
+      if (!data) {
+        // Many systems will not have the data file, return silently if not found as
+        // there is nothing to record.
+        return {};
       }
-
-      let dataBytes;
-      try {
-        dataBytes = await IOUtils.read(dataPath.path);
-      } catch (ex) {
-        if (ex.name == "NotFoundError") {
-          // Many systems will not have the data file, return silently if not found as
-          // there is nothing to record.
-          return {};
-        }
-        throw ex;
-      }
-      const dataString = new TextDecoder("utf-16").decode(dataBytes);
-      const data = JSON.parse(dataString);
 
       if (lastInstallTime && data.install_timestamp == lastInstallTime) {
         // We've already seen this install
@@ -2114,7 +2129,7 @@ export let BrowserUsageTelemetry = {
       if (data?.installer_type) {
         let { installer_type, extra } = data;
 
-        // Record the event (mirrored to legacy telemetry using GIFFT)
+        // Record the event
         if (installer_type == "full") {
           Glean.installation.firstSeenFull.record(extra);
         } else if (installer_type == "stub") {

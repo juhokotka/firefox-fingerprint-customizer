@@ -108,7 +108,7 @@ browser/config/mozconfigs/linux64/code-coverage,
 browser/config/mozconfigs/win64/code-coverage,
 browser/config/mozconfigs/macosx64/code-coverage.
 
-Make sure you are not running with {ref}`artifact build <Understanding Artifact Builds>`
+Make sure you are not running with {doc}`artifact build </contributing/build/artifact_builds>`
 enabled, as it can prevent coverage artifacts from being created.
 
 You can then create your build as usual. Once the build is complete, you
@@ -132,13 +132,13 @@ coverage data, open the file
 and add the following line,
 
 ```python
-test['mozharness'].setdefault('extra-options', []).append('--disable-ccov-upload')
+test["mozharness"].setdefault("extra-options", []).append("--disable-ccov-upload")
 ```
 
 right after this line of code:
 
 ```python
-test['mozharness'].setdefault('extra-options', []).append('--code-coverage')
+test["mozharness"].setdefault("extra-options", []).append("--code-coverage")
 ```
 
 Now when you push to try to debug some failing tests, or anything else,

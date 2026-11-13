@@ -26,7 +26,8 @@ class BrowserBridgeChild : public PBrowserBridgeChild {
 
   BrowserChild* Manager() {
     MOZ_ASSERT(CanSend());
-    return static_cast<BrowserChild*>(PBrowserBridgeChild::Manager());
+    return mozilla::ipc::ActorCast<BrowserChild>(
+        PBrowserBridgeChild::Manager());
   }
 
   TabId GetTabId() { return mId; }
@@ -46,10 +47,9 @@ class BrowserBridgeChild : public PBrowserBridgeChild {
   already_AddRefed<BrowserBridgeHost> FinishInit(nsFrameLoader* aFrameLoader);
 
 #if defined(ACCESSIBILITY)
-  void SetEmbedderAccessible(PDocAccessibleChild* aDoc, uint64_t aID) {
-    MOZ_ASSERT((aDoc && aID) || (!aDoc && !aID));
+  void SetEmbedderAccessible(uint64_t aID) {
     mEmbedderAccessibleID = aID;
-    (void)SendSetEmbedderAccessible(aDoc, aID);
+    (void)SendSetEmbedderAccessible(aID);
   }
 
   uint64_t GetEmbedderAccessibleID() { return mEmbedderAccessibleID; }
@@ -88,6 +88,9 @@ class BrowserBridgeChild : public PBrowserBridgeChild {
       const nsRect& aRect, const AxisScrollParams& aVertical,
       const AxisScrollParams& aHorizontal, const ScrollFlags& aScrollFlags,
       const int32_t& aAppUnitsPerDevPixel);
+
+  mozilla::ipc::IPCResult RecvScrollForKeyboard(
+      const mozilla::layers::KeyboardScrollAction& aAction);
 
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvSubFrameCrashed();

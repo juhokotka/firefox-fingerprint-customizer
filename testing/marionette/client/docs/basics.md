@@ -13,8 +13,7 @@ passing in a command line option to Gecko, or by using a Marionette-enabled
 build. The server listens for connections from various clients. Clients can
 then control Gecko by sending commands to the server.
 
-This is the official Python client for Marionette. There also exists a
-[NodeJS client] maintained by the Firefox OS automation team.
+This is the official Python client for Marionette.
 
 ## Getting the Client
 
@@ -35,7 +34,7 @@ a python shell and follow along with the
 
 ## Using the Client for Testing
 
-Please visit the [Marionette Tests] section on MDN for information regarding
+Please visit the [Marionette Tests] documentation for information regarding
 testing with Marionette.
 
 ## Session Management
@@ -47,7 +46,7 @@ with {func}`start_session() <Marionette.start_session>`:
 ```python
 from marionette_driver.marionette import Marionette
 
-client = Marionette('127.0.0.1', port=2828)
+client = Marionette("127.0.0.1", port=2828)
 client.start_session()
 ```
 
@@ -82,7 +81,7 @@ Similarly, use {func}`~Marionette.switch_to_frame` to execute commands in the
 context of a new frame (e.g an \<iframe> element):
 
 ```python
-iframe = client.find_element(By.TAG_NAME, 'iframe')
+iframe = client.find_element(By.TAG_NAME, "iframe")
 client.switch_to_frame(iframe)
 ```
 
@@ -95,7 +94,7 @@ Content scope is where things like webpages live. You can switch between
 client.set_context(client.CONTEXT_CONTENT)
 # content scope
 with client.using_context(client.CONTEXT_CHROME):
-    #chrome scope
+    # chrome scope
     pass  # ... do stuff ...
 # content scope restored
 ```
@@ -108,7 +107,7 @@ move through the back/forward cache using {func}`~Marionette.go_forward` and
 open website, use {func}`~Marionette.get_url`:
 
 ```python
-url = 'http://mozilla.org'
+url = "http://mozilla.org"
 client.navigate(url)
 client.go_back()
 client.go_forward()
@@ -123,9 +122,10 @@ methods:
 
 ```python
 from marionette_driver.marionette import WebElement
-element = client.find_element(By.ID, 'my-id')
+
+element = client.find_element(By.ID, "my-id")
 assert type(element) == WebElement
-elements = client.find_elements(By.TAG_NAME, 'a')
+elements = client.find_elements(By.TAG_NAME, "a")
 assert type(elements) == list
 ```
 
@@ -135,8 +135,8 @@ Now that an element has been found, it's possible to manipulate it:
 
 ```python
 element.click()
-element.send_keys('hello!')
-print(element.get_attribute('style'))
+element.send_keys("hello!")
+print(element.get_attribute("style"))
 ```
 
 For the full list of possible commands, see the {class}`WebElement`
@@ -156,8 +156,9 @@ synchronous JavaScript, while the latter provides a callback mechanism for
 running asynchronous JavaScript:
 
 ```python
-result = client.execute_script("return arguments[0] + arguments[1];",
-                               script_args=[2, 3])
+result = client.execute_script(
+    "return arguments[0] + arguments[1];", script_args=[2, 3]
+)
 assert result == 5
 ```
 
@@ -165,12 +166,15 @@ The async method works the same way, except it won't return until the
 `resolve()` function is called:
 
 ```python
-result = client.execute_async_script("""
+result = client.execute_async_script(
+    """
     let [resolve] = arguments;
     setTimeout(function() {
       resolve("all done");
     }, arguments[0]);
-""", script_args=[1000])
+""",
+    script_args=[1000],
+)
 assert result == "all done"
 ```
 
@@ -180,8 +184,7 @@ set a script timeout using {func}`~Marionette.timeout.script` and handling
 `ScriptTimeoutException`.
 
 [marionette]: https://developer.mozilla.org/en-US/docs/Marionette
-[marionette tests]: https://developer.mozilla.org/en/Marionette/Tests
+[marionette tests]: https://firefox-source-docs.mozilla.org/remote/marionette/PythonTests.html
 [marionette-enabled instance of firefox]: https://developer.mozilla.org/en-US/docs/Mozilla/QA/Marionette/Builds
-[nodejs client]: https://github.com/mozilla-b2g/gaia/tree/master/tests/jsmarionette
 [pip installed]: https://pip.pypa.io/en/latest/installing.html
 [virtualenv]: http://virtualenv.readthedocs.org/en/latest/

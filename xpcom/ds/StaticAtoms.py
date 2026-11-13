@@ -9,7 +9,7 @@ import sys
 from Atom import Atom
 from HTMLAtoms import HTML_PARSER_ATOMS
 
-# Static atom definitions, used to generate nsGkAtomList.h.
+# Static atom definitions, used to generate various files below.
 #
 # Each atom is defined by a call to Atom
 #
@@ -284,9 +284,13 @@ STATIC_ATOMS = [
     Atom("comment", "comment"),
     Atom("compact", "compact"),
     Atom("concat", "concat"),
+    Atom("connection_allowlist", "connection-allowlist"),
     Atom("constructor", "constructor"),
     Atom("consumeoutsideclicks", "consumeoutsideclicks"),
     Atom("container", "container"),
+    Atom("containertiming", "containertiming"),
+    Atom("containerTimingIgnore", "containertimingignore"),
+    Atom("containerTimingRoot", "containertiming-root"),
     Atom("contains", "contains"),
     Atom("content", "content"),
     Atom("contenteditable", "contenteditable"),
@@ -462,7 +466,7 @@ STATIC_ATOMS = [
     Atom("fallback", "fallback"),
     Atom("_false", "false"),
     Atom("farthest", "farthest"),
-    Atom("featurePolicyViolation", "feature-policy-violation"),
+    Atom("permissionsPolicyViolation", "permissions-policy-violation"),
     Atom("fetchpriority", "fetchpriority"),
     Atom("field", "field"),
     Atom("fieldset", "fieldset"),
@@ -896,7 +900,6 @@ STATIC_ATOMS = [
     Atom("onmouseout", "onmouseout"),
     Atom("onmouseover", "onmouseover"),
     Atom("onMozMouseHittest", "onMozMouseHittest"),
-    Atom("onMozMouseExploreByTouch", "onMozMouseExploreByTouch"),
     Atom("onmouseup", "onmouseup"),
     Atom("onMozAfterPaint", "onMozAfterPaint"),
     Atom("onmozfullscreenchange", "onmozfullscreenchange"),
@@ -921,6 +924,7 @@ STATIC_ATOMS = [
     Atom("onpagehide", "onpagehide"),
     Atom("onpagereveal", "onpagereveal"),
     Atom("onpageshow", "onpageshow"),
+    Atom("onpageswap", "onpageswap"),
     Atom("onpaste", "onpaste"),
     Atom("onpayerdetailchange", "onpayerdetailchange"),
     Atom("onpaymentmethodchange", "onpaymentmethodchange"),
@@ -947,6 +951,7 @@ STATIC_ATOMS = [
     Atom("onscroll", "onscroll"),
     Atom("onsecuritypolicyviolation", "onsecuritypolicyviolation"),
     Atom("onselect", "onselect"),
+    Atom("onselectedcandidatepairchange", "onselectedcandidatepairchange"),
     Atom("onselectionchange", "onselectionchange"),
     Atom("onselectend", "onselectend"),
     Atom("onselectstart", "onselectstart"),
@@ -1017,6 +1022,7 @@ STATIC_ATOMS = [
     Atom("otherwise", "otherwise"),
     Atom("outerHTML", "outerHTML"),
     Atom("output", "output"),
+    Atom("outside", "outside"),
     Atom("overflow", "overflow"),
     Atom("overflowBlock", "overflow-block"),
     Atom("overflowInline", "overflow-inline"),
@@ -1079,6 +1085,7 @@ STATIC_ATOMS = [
     Atom("preload", "preload"),
     Atom("preserve", "preserve"),
     Atom("preserveSpace", "preserve-space"),
+    Atom("preserveundohistory", "preserveundohistory"),
     Atom("preventdefault", "preventdefault"),
     Atom("previewDiv", "preview-div"),
     Atom("primary", "primary"),
@@ -1241,6 +1248,7 @@ STATIC_ATOMS = [
     Atom("start", "start"),
     Atom("startsWith", "starts-with"),
     Atom("state", "state"),
+    Atom("staticclonecssrandomseed", "staticclonecssrandomseed"),
     Atom("statusbar", "statusbar"),
     Atom("step", "step"),
     Atom("stop", "stop"),
@@ -1514,7 +1522,6 @@ STATIC_ATOMS = [
     Atom("grad", "grad"),
     Atom("gradientTransform", "gradientTransform"),
     Atom("gradientUnits", "gradientUnits"),
-    Atom("gtktiledwindow", "gtktiledwindow"),
     Atom("hardLight", "hard-light"),
     Atom("hue", "hue"),
     Atom("hueRotate", "hueRotate"),
@@ -1774,7 +1781,6 @@ STATIC_ATOMS = [
     Atom("displaystyle", "displaystyle"),
     Atom("divergence", "divergence"),
     Atom("divide", "divide"),
-    Atom("dom_viewTransitions_enabled", "dom.viewTransitions.enabled"),
     Atom("domain", "domain"),
     Atom("domainofapplication", "domainofapplication"),
     Atom("edge", "edge"),
@@ -1952,6 +1958,7 @@ STATIC_ATOMS = [
     Atom("tanh", "tanh"),
     Atom("tan", "tan"),
     Atom("tendsto", "tendsto"),
+    Atom("tiled", "tiled"),
     Atom("times", "times"),
     Atom("transpose", "transpose"),
     Atom("union_", "union"),
@@ -2486,7 +2493,6 @@ STATIC_ATOMS = [
     Atom("dom_image_sizes_auto_enabled", "dom.image.sizes_auto.enabled"),
     Atom("mathml_legacy_mathvariant_attribute_disabled", "mathml.legacy_mathvariant_attribute.disabled"),
     Atom("mathml_font_family_math_enabled", "mathml.font_family_math.enabled"),
-    Atom("layout_css_always_underline_links", "layout.css.always_underline_links"),
     Atom("layout_css_android_pip_enabled", "layout.css.android-pip.enabled"),
     Atom("layout_css_appearance_base_enabled", "layout.css.appearance-base.enabled"),
     Atom("layout_css_cached_scrollbar_styles_enabled", "layout.css.cached-scrollbar-styles.enabled"),
@@ -2681,17 +2687,71 @@ def verify():
         sys.exit(1)
 
 
-def generate_nsgkatomlist_h(output, *ignore):
+def generate_staticatomlist_h(output, *ignore):
     verify()
-    output.write(
-        "/* THIS FILE IS AUTOGENERATED BY StaticAtoms.py.  DO NOT EDIT */\n\n"
-        "#ifdef small\n"
-        "#undef small\n"
-        "#endif\n\n"
-        "// GK_ATOM(identifier, string)\n"
-        + "".join(['GK_ATOM(%s, "%s")\n' % (a.ident, a.string) for a in STATIC_ATOMS])
+    output.write("/* THIS FILE IS AUTOGENERATED BY StaticAtoms.py.  DO NOT EDIT */\n\n")
+    char_offset = 0
+    for i, a in enumerate(STATIC_ATOMS):
+        output.write(f'STATIC_ATOM({a.ident}, "{a.string}", {i}, {char_offset})\n')
+        # +1 for the null terminator
+        char_offset += len(a.string) + 1
+
+
+def generate_staticatoms_h(output, *ignore):
+    verify()
+    atoms = "\n".join([
+        f"static inline constexpr nsStaticAtom* {a.ident} = const_cast<nsStaticAtom*>(&detail::gGkAtoms.mAtoms[{i}]);"
+        for i, a in enumerate(STATIC_ATOMS)
+    ])
+
+    # +1 for the null terminator.
+    char_count = sum(len(a.string) + 1 for a in STATIC_ATOMS)
+
+    # This extra character is not technically needed, but simplifies the macro usage in
+    # nsGkAtoms.cpp
+    char_count += 1
+
+    output.write(f"""
+/* THIS FILE IS AUTOGENERATED BY StaticAtoms.py.  DO NOT EDIT */
+
+#include "nsAtom.h"
+
+#ifdef small
+#undef small
+#endif
+
+namespace nsGkAtoms {{
+
+static inline constexpr size_t kStaticAtomCount = {len(STATIC_ATOMS)};
+
+namespace detail {{
+struct GkAtoms {{
+  char16_t mStrings[{char_count}];
+  nsStaticAtom mAtoms[nsGkAtoms::kStaticAtomCount];
+}};
+extern const GkAtoms gGkAtoms;
+}} // namespace detail
+
+{atoms}
+
+}} // namespace nsGkAtoms
+""")
+
+
+def generate_static_atoms_rs(output, *ignore):
+    verify()
+    body = "".join(
+        f'    ("{a.string}") => {{ {i} }};\n' for i, a in enumerate(STATIC_ATOMS)
     )
+    output.write(f"""
+/* THIS FILE IS AUTOGENERATED BY StaticAtoms.py.  DO NOT EDIT */
+#[doc(hidden)]
+#[macro_export]
+macro_rules! static_atom_index {{
+{body}
+}}
+""")
 
 
 if __name__ == "__main__":
-    generate_nsgkatomlist_h(sys.stdout)
+    generate_staticatomlist_h(sys.stdout)

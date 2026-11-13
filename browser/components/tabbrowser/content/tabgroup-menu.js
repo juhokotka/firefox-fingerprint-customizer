@@ -11,11 +11,18 @@
     "moz-src:///browser/components/tabbrowser/TabMetrics.sys.mjs"
   );
   const { TabStateFlusher } = ChromeUtils.importESModule(
-    "resource:///modules/sessionstore/TabStateFlusher.sys.mjs"
+    "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs"
   );
   const { ContentSharingUtils } = ChromeUtils.importESModule(
-    "moz-src:///browser/components/contentsharing/ContentSharingUtils.sys.mjs"
+    "moz-src:///browser/components/sharing/ContentSharingUtils.sys.mjs"
   );
+  const lazy = {};
+  ChromeUtils.defineESModuleGetters(lazy, {
+    AIWindow:
+      "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
+    AIWindowMenu:
+      "moz-src:///browser/components/aiwindow/ui/modules/AIWindowMenu.sys.mjs",
+  });
 
   ChromeUtils.importESModule(
     "chrome://browser/content/genai/content/model-optin.mjs",
@@ -88,8 +95,24 @@
         </toolbarbutton>
         <toolbarbutton
           tabindex="0"
+          id="tabGroupEditor_shareTabGroup"
+          class="subviewbutton"
+          badged="true"
+          data-l10n-id="tab-group-editor-action-share-group"
+          hidden="">
+          <html:moz-badge type="new" move-after-stack="true"></html:moz-badge>
+        </toolbarbutton>
+        <toolbarbutton
+          tabindex="0"
           id="tabGroupEditor_copyAllLinks"
           class="subviewbutton">
+        </toolbarbutton>
+        <toolbarbutton
+          tabindex="0"
+          id="tabGroupEditor_createAITab"
+          class="subviewbutton"
+          data-l10n-id="tab-group-editor-action-create-aitab"
+          hidden="">
         </toolbarbutton>
         <toolbarbutton
           tabindex="0"
@@ -102,15 +125,6 @@
           id="tabGroupEditor_ungroupTabs"
           class="subviewbutton"
           data-l10n-id="tab-group-editor-action-ungroup">
-        </toolbarbutton>
-        <toolbarbutton
-          tabindex="0"
-          id="tabGroupEditor_shareTabGroup"
-          class="subviewbutton"
-          badged="true"
-          data-l10n-id="tab-group-editor-action-share-tab-group"
-          hidden="">
-          <html:moz-badge type="new" move-after-stack="true"></html:moz-badge>
         </toolbarbutton>
         <toolbarseparator class="tab-group-edit-mode-only" />
         <toolbarbutton
@@ -213,7 +227,7 @@
     static markup = /*html*/ `
       <panel
         type="arrow"
-        class="tab-group-editor-panel panel-no-padding"
+        class="tab-group-editor-panel"
         orient="vertical"
         role="dialog"
         ignorekeys="true"
@@ -313,6 +327,7 @@
     #createButton;
     #createMode;
     #keepNewlyCreatedGroup;
+    #nameContainer;
     #nameField;
     #panel;
     #swatches;
@@ -400,6 +415,7 @@
       );
       this.#panel = this.querySelector("panel");
       this.#nameField = this.querySelector("#tab-group-name");
+      this.#nameContainer = this.querySelector(".tab-group-editor-name");
       this.#panel.addEventListener("click", e => {
         if (e.target !== this.#nameField) {
           this.#nameField.blur();
@@ -463,6 +479,7 @@
           "tabGroupEditor_moveGroupToNewWindow"
         ),
         copyAllLinks: document.getElementById("tabGroupEditor_copyAllLinks"),
+        createAITab: document.getElementById("tabGroupEditor_createAITab"),
         ungroupTabs: document.getElementById("tabGroupEditor_ungroupTabs"),
         saveAndCloseGroup: document.getElementById(
           "tabGroupEditor_saveAndCloseGroup"
@@ -521,6 +538,15 @@
 
       this.#commandButtons.shareTabGroup.addEventListener("command", () => {
         ContentSharingUtils.handleShareTabGroup(this.activeGroup);
+        this.close();
+      });
+
+      this.#commandButtons.createAITab.addEventListener("command", () => {
+        lazy.AIWindow.createAITab(
+          window,
+          this.activeGroup.tabs.map(tab => tab.linkedBrowser.currentURI.spec),
+          "tab_group"
+        );
         this.close();
       });
 
@@ -886,6 +912,8 @@
         ? MozTabbrowserTabGroupMenu.State.CREATE_AI_INITIAL
         : MozTabbrowserTabGroupMenu.State.CREATE_STANDARD_INITIAL;
 
+      this.#maybeUpdateLayoutForNova();
+
       this.#panel.openPopup(group.firstChild, {
         position: this.#panelPosition,
       });
@@ -929,6 +957,8 @@
         ? MozTabbrowserTabGroupMenu.State.EDIT_AI_INITIAL
         : MozTabbrowserTabGroupMenu.State.EDIT_STANDARD_INITIAL;
 
+      this.#maybeUpdateLayoutForNova();
+
       this.#panel.openPopup(group.firstChild, {
         position: this.#panelPosition,
       });
@@ -942,6 +972,18 @@
       );
       this.#commandButtons.copyAllLinks.disabled = !linkCount;
       this.#maybeDisableOrHideSaveButton();
+    }
+
+    #maybeUpdateLayoutForNova() {
+      const isNovaEnabled = Services.prefs.getBoolPref(
+        "browser.nova.enabled",
+        false
+      );
+      if (isNovaEnabled) {
+        this.#nameContainer.before(this.#swatchesContainer);
+      } else {
+        this.#tabGroupPropertiesActions.prepend(this.#swatchesContainer);
+      }
     }
 
     #maybeDisableOrHideSaveButton() {
@@ -988,6 +1030,11 @@
 
       this.#commandButtons.shareTabGroup.hidden =
         !ContentSharingUtils.isEnabled;
+      this.#commandButtons.createAITab.hidden =
+        !lazy.AIWindowMenu.canShowAITabMenu(
+          window,
+          this.activeGroup?.tabs.map(tab => tab.linkedBrowser.currentURI) ?? []
+        );
     }
 
     on_popuphidden() {

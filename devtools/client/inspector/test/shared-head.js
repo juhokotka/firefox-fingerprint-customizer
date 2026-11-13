@@ -698,11 +698,12 @@ function getRuleViewSelector(view, selectorText) {
  *        The instance of the rule-view panel
  * @param {number} index
  *        The index of the link to get
- * @return {DOMNode|null} The link if any at this rule index, or null if it doesn't exist
+ * @return {DOMNode|null} The anchor, which is where the click handler lives, or
+ *         null if this rule has no source link
  */
 function getRuleViewLinkByIndex(view, index) {
   const ruleEl = view.styleDocument.querySelectorAll(".ruleview-rule")[index];
-  return ruleEl?.querySelector(".ruleview-rule-source") || null;
+  return ruleEl?.querySelector(".ruleview-rule-source-label") || null;
 }
 
 /**
@@ -715,8 +716,7 @@ function getRuleViewLinkByIndex(view, index) {
  * @return {string} The string at this index
  */
 function getRuleViewLinkTextByIndex(view, index) {
-  const link = getRuleViewLinkByIndex(view, index);
-  return link.querySelector(".ruleview-rule-source-label").textContent;
+  return getRuleViewLinkByIndex(view, index).textContent;
 }
 
 /**
@@ -1232,4 +1232,26 @@ async function assertDisplayedRulesCount(
 ) {
   const ruleElements = view.element.querySelectorAll(".ruleview-rule");
   is(ruleElements.length, expected, message);
+}
+
+/**
+ * Open a customizable <select> picker and wait for the markup mutation (which should
+ * be triggered by the addition of ::checkmark pseudo elements in the markup view).
+ * Note that this will close any dialog that is displayed on the content page.
+ *
+ * @param {Inspector} inspector
+ * @param {string} selector: The selector for the <select> element we want to open
+ */
+async function showCustomizableSelectPicker(inspector, selector) {
+  const onMarkupMutation = inspector.once("markupmutation");
+  await SpecialPowers.spawn(gBrowser.selectedBrowser, [selector], slctr => {
+    // Hide any opened modal (e.g. <dialog>) so we can actually click the <select>
+    for (const modal of content.document.querySelectorAll(":modal")) {
+      modal.close();
+    }
+    const selectEl = content.document.querySelector(slctr);
+    selectEl.scrollIntoView({ behavior: "instant" });
+    EventUtils.synthesizeMouseAtCenter(selectEl, {}, content);
+  });
+  await onMarkupMutation;
 }

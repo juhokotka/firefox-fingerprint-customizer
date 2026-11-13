@@ -44,10 +44,13 @@ const Template = ({
   iconSrc,
   disabled,
   readonly,
+  required,
+  invalid,
   l10nId,
   description,
   supportPage,
   accessKey,
+  title,
   hasSlottedDescription,
   hasSlottedSupportLink,
   ellipsized,
@@ -58,9 +61,12 @@ const Template = ({
     iconsrc=${ifDefined(iconSrc || null)}
     ?disabled=${disabled}
     ?readonly=${readonly}
+    ?required=${required}
+    ?invalid=${invalid}
     data-l10n-id=${l10nId}
     support-page=${ifDefined(supportPage || null)}
     accesskey=${ifDefined(accessKey || null)}
+    title=${ifDefined(title || null)}
     class=${classMap({ "text-truncated-ellipsis": ellipsized })}
   >
     ${hasSlottedDescription
@@ -79,9 +85,12 @@ Default.args = {
   iconSrc: "",
   disabled: false,
   readonly: false,
+  required: false,
+  invalid: false,
   l10nId: "moz-input-text-label",
   supportPage: "",
   accessKey: "",
+  title: "",
   hasSlottedDescription: false,
   hasSlottedSupportLink: false,
 };
@@ -123,6 +132,21 @@ Readonly.args = {
   ...Default.args,
   l10nId: "moz-input-text-description",
   readonly: true,
+};
+
+export const Required = Template.bind({});
+Required.args = {
+  ...Default.args,
+  l10nId: "moz-input-text-description",
+  required: true,
+};
+
+export const Invalid = Template.bind({});
+Invalid.args = {
+  ...Default.args,
+  l10nId: "moz-input-text-description",
+  value: "Invalid value",
+  invalid: true,
 };
 
 export const WithAccesskey = Template.bind({});

@@ -5,8 +5,6 @@
 #ifndef vm_Shape_h
 #define vm_Shape_h
 
-#include "js/shadow/Shape.h"  // JS::shadow::Shape, JS::shadow::BaseShape
-
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
 
@@ -20,6 +18,7 @@
 #include "js/MemoryMetrics.h"
 #include "js/Printer.h"  // js::GenericPrinter
 #include "js/RootingAPI.h"
+#include "js/shadow/Shape.h"  // JS::shadow::Shape, JS::shadow::BaseShape
 #include "js/UbiNode.h"
 #include "util/EnumFlags.h"
 #include "vm/ObjectFlags.h"

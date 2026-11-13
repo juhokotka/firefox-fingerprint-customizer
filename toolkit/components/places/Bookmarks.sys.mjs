@@ -314,6 +314,9 @@ export var Bookmarks = Object.freeze({
       if (!parent) {
         throw new Error("parentGuid must be valid");
       }
+      if (parent.type != this.TYPE_FOLDER) {
+        throw new Error("parentGuid must be a folder");
+      }
 
       // Set index in the appending case.
       if (
@@ -614,6 +617,10 @@ export var Bookmarks = Object.freeze({
         throw new Error("Can't use insertTree to insert tags.");
       }
 
+      if (treeParent.type != Bookmarks.TYPE_FOLDER) {
+        throw new Error("The parent you specified must be a folder.");
+      }
+
       await insertBookmarkTree(
         insertInfos,
         source,
@@ -831,6 +838,9 @@ export var Bookmarks = Object.freeze({
             parent = await fetchBookmark({ guid: updateInfo.parentGuid });
             if (!parent) {
               throw new Error("No bookmarks found for the provided parentGuid");
+            }
+            if (parent.type != this.TYPE_FOLDER) {
+              throw new Error("parentGuid must be a folder");
             }
           }
 
@@ -1147,6 +1157,13 @@ export var Bookmarks = Object.freeze({
             { db }
           );
 
+          if (!newParent) {
+            throw new Error("No bookmarks found for the provided parentGuid");
+          }
+          if (newParent.type != this.TYPE_FOLDER) {
+            throw new Error("parentGuid must be a folder");
+          }
+
           if (newParent._grandParentId == lazy.PlacesUtils.tagsFolderId) {
             throw new Error("Can't move to a tags folder");
           }
@@ -1363,9 +1380,17 @@ export var Bookmarks = Object.freeze({
 
       await removeBookmarks(removeItems, options);
 
+      let untaggedURLs = new Set();
+      for (let item of removeItems) {
+        if (item.url && item._grandParentId == lazy.PlacesUtils.tagsFolderId) {
+          untaggedURLs.add(item.url.href);
+        }
+      }
+      let entriesByURL = untaggedURLs.size
+        ? await fetchBookmarksByURLs([...untaggedURLs], { concurrent: true })
+        : new Map();
       // Notify bookmark-removed to listeners.
       let notifications = [];
-
       for (let item of removeItems) {
         let isUntagging = item._grandParentId == lazy.PlacesUtils.tagsFolderId;
         let url = "";
@@ -1390,9 +1415,7 @@ export var Bookmarks = Object.freeze({
         );
 
         if (isUntagging) {
-          for (let entry of await fetchBookmarksByURL(item, {
-            concurrent: true,
-          })) {
+          for (let entry of entriesByURL.get(url) || []) {
             notifications.push(
               new PlacesBookmarkTags({
                 id: entry._id,
@@ -2463,7 +2486,9 @@ async function fetchBookmark(info, options = {}) {
     );
 
     return rows.length
-      ? rowsToItemsArray(rows, !!options.ignoreInvalidURLs)[0]
+      ? rowsToItemsArray(rows, {
+          ignoreInvalidURLs: !!options.ignoreInvalidURLs,
+        })[0]
       : null;
   };
   if (options.concurrent) {
@@ -2546,7 +2571,7 @@ async function fetchBookmarksByTags(info, options = {}) {
       info.tags.map(t => t.toLowerCase())
     );
 
-    return rows.length ? rowsToItemsArray(rows) : null;
+    return rows.length ? rowsToItemsArray(rows, { includesTags: true }) : null;
   };
 
   if (options.concurrent) {
@@ -2589,7 +2614,6 @@ async function fetchBookmarksByGUIDPrefix(info, options = {}) {
   );
 }
 
-// eslint-disable-next-line no-unused-vars
 async function fetchBookmarksByURLs(urls, options = {}) {
   if (!urls.length) {
     throw new Error("URLs array must not be empty");
@@ -2626,7 +2650,7 @@ async function fetchBookmarksByURLs(urls, options = {}) {
     );
 
     let map = new Map();
-    for (let item of rowsToItemsArray(rows)) {
+    for (let item of rowsToItemsArray(rows, { includesTags: true })) {
       let href = item.url.href;
       let arr = map.get(href);
       if (!arr) {
@@ -2676,7 +2700,7 @@ async function fetchBookmarksByURL(info, options = {}) {
       }
     );
 
-    return rows.length ? rowsToItemsArray(rows) : null;
+    return rows.length ? rowsToItemsArray(rows, { includesTags: true }) : null;
   };
 
   if (options.concurrent) {
@@ -3035,12 +3059,18 @@ function removeSameValueProperties(dest, src) {
  *
  * @param {Array} rows
  *        the array of mozIStorageRow objects.
- * @param {boolean} ignoreInvalidURLs
+ * @param {object} [options]
+ * @param {boolean} [options.ignoreInvalidURLs]
  *        whether to ignore invalid urls (leaving the url property undefined)
  *        or throw.
+ * @param {boolean} [options.includesTags]
+ *        whether the rows include the `_tags` column.
  * @returns {object[]} An array of bookmark objects.
  */
-function rowsToItemsArray(rows, ignoreInvalidURLs = false) {
+function rowsToItemsArray(
+  rows,
+  { ignoreInvalidURLs = false, includesTags = false } = {}
+) {
   return rows.map(row => {
     let item = {};
     for (let prop of ["guid", "index", "type", "title"]) {
@@ -3089,7 +3119,7 @@ function rowsToItemsArray(rows, ignoreInvalidURLs = false) {
       }
     }
 
-    try {
+    if (includesTags) {
       let tags = row.getResultByName("_tags");
       Object.defineProperty(item, "_tags", {
         value: tags
@@ -3100,8 +3130,6 @@ function rowsToItemsArray(rows, ignoreInvalidURLs = false) {
         enumerable: false,
         configurable: true,
       });
-    } catch (ex) {
-      // `tags` not fetched, don't add it.
     }
 
     return item;
@@ -3213,7 +3241,9 @@ var removeFoldersContents = async function (db, folderGuids, options) {
        LEFT JOIN moz_places h ON b.fk = h.id`,
       { folderGuid }
     );
-    itemsRemoved = itemsRemoved.concat(rowsToItemsArray(rows, true));
+    itemsRemoved = itemsRemoved.concat(
+      rowsToItemsArray(rows, { ignoreInvalidURLs: true })
+    );
   }
 
   if (itemsRemoved.length) {
@@ -3239,8 +3269,22 @@ var removeFoldersContents = async function (db, folderGuids, options) {
 
   // Notify listeners in reverse order to serve children before parents.
   let { source = Bookmarks.SOURCES.DEFAULT } = options;
+  itemsRemoved.reverse();
+
+  let untaggedUrls = new Set();
+  for (let item of itemsRemoved) {
+    if (item.url && item._grandParentId == lazy.PlacesUtils.tagsFolderId) {
+      untaggedUrls.add(item.url.href);
+    }
+  }
+  let entriesByUrl = untaggedUrls.size
+    ? // Cannot use {concurrent: true} here because removeFolderContents is invoked inside eraseEverything transaction,
+      // which is already using a connection. Using {concurrent: true} would try to use a different connection and fail.
+      await fetchBookmarksByURLs([...untaggedUrls])
+    : new Map();
   let notifications = [];
-  for (let item of itemsRemoved.reverse()) {
+
+  for (let item of itemsRemoved) {
     let isUntagging = item._grandParentId == lazy.PlacesUtils.tagsFolderId;
     let url = "";
     if (item.type == Bookmarks.TYPE_BOOKMARK) {
@@ -3266,7 +3310,7 @@ var removeFoldersContents = async function (db, folderGuids, options) {
     );
 
     if (isUntagging) {
-      for (let entry of await fetchBookmarksByURL(item, true)) {
+      for (let entry of entriesByUrl.get(url) || []) {
         notifications.push(
           new PlacesBookmarkTags({
             id: entry._id,

@@ -4,9 +4,13 @@
 
 package org.mozilla.fenix.ui
 
+import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 import androidx.test.espresso.Espresso.closeSoftKeyboard
+import java.time.LocalDate
 import org.junit.Rule
 import org.junit.Test
+import org.mozilla.fenix.customannotations.Converted
+import org.mozilla.fenix.customannotations.Critical
 import org.mozilla.fenix.customannotations.SkipLeaks
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.AppAndSystemHelper.bringAppToForeground
@@ -23,8 +27,6 @@ import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.clickPageObject
 import org.mozilla.fenix.ui.robots.homeScreen
 import org.mozilla.fenix.ui.robots.navigationToolbar
-import java.time.LocalDate
-import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 
 class CreditCardAutofillTest {
     object MockCreditCard1 {
@@ -36,10 +38,10 @@ class CreditCardAutofillTest {
         val MOCK_EXPIRATION_MONTH_AND_YEAR = "02/${(LocalDate.now().year + 1)}"
     }
 
-    @get:Rule(order = 0)
-    val fenixTestRule: FenixTestRule = FenixTestRule()
+    @get:Rule(order = 0) val fenixTestRule: FenixTestRule = FenixTestRule()
 
-    private val mockWebServer get() = fenixTestRule.mockWebServer
+    private val mockWebServer
+        get() = fenixTestRule.mockWebServer
 
     object MockCreditCard2 {
         const val MOCK_CREDIT_CARD_NUMBER = "2720994326581252"
@@ -52,128 +54,150 @@ class CreditCardAutofillTest {
 
     @get:Rule(order = 1)
     val composeTestRule =
-        AndroidComposeTestRuleV2(
-            HomeActivityIntentTestRule.withDefaultSettingsOverrides(),
-        ) { it.activity }
+        AndroidComposeTestRuleV2(HomeActivityIntentTestRule.withDefaultSettingsOverrides()) { it.activity }
 
-    @get:Rule(order = 2)
-    val memoryLeaksRule = DetectMemoryLeaksRule(composeTestRule = { composeTestRule })
+    @get:Rule(order = 2) val memoryLeaksRule = DetectMemoryLeaksRule(composeTestRule = { composeTestRule })
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1512792
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.CreditCardAutofillTest#verifyCreditCardAutofillTest"],
+        bug = 2063262,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyCreditCardAutofillTest() {
         val creditCardFormPage = mockWebServer.creditCardFormAsset
 
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-            // Opening Manage cards to dismiss here the Secure your credit prompt
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-        }.goBackToAutofillSettings {
-        }.goBack {
-        }.goBack(composeTestRule) {
-        }
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(creditCardFormPage.url) {
-            clickCreditCardNumberTextBox()
-            clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
-            clickPageObject(
-                composeTestRule,
-                itemWithResIdContainingText(
-                    "$packageName:id/credit_card_number",
-                    MockCreditCard1.MOCK_LAST_CARD_DIGITS,
-                ),
-            )
-            verifyAutofilledCreditCard(MockCreditCard1.MOCK_CREDIT_CARD_NUMBER)
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+                // Opening Manage cards to dismiss here the Secure your credit prompt
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+            }
+            .goBackToAutofillSettings {}
+            .goBack {}
+            .goBack(composeTestRule) {}
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(creditCardFormPage.url) {
+                clickCreditCardNumberTextBox()
+                clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
+                clickPageObject(
+                    composeTestRule,
+                    itemWithResIdContainingText(
+                        "$packageName:id/credit_card_number",
+                        MockCreditCard1.MOCK_LAST_CARD_DIGITS,
+                    ),
+                )
+                verifyAutofilledCreditCard(MockCreditCard1.MOCK_CREDIT_CARD_NUMBER)
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1512798
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.CreditCardAutofillTest#deleteSavedCreditCardUsingToolbarButtonTest"
+            ],
+        bug = 2063262,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun deleteSavedCreditCardUsingToolbarButtonTest() {
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-            clickSavedCreditCard()
-            clickDeleteCreditCardToolbarButton()
-            clickCancelDeleteCreditCardButton()
-            verifyEditCreditCardToolbarTitle()
-            clickDeleteCreditCardToolbarButton()
-            clickConfirmDeleteCreditCardButton()
-            verifyAddCreditCardsButton()
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+                clickSavedCreditCard()
+                clickDeleteCreditCardToolbarButton()
+                clickCancelDeleteCreditCardButton()
+                verifyEditCreditCardToolbarTitle()
+                clickDeleteCreditCardToolbarButton()
+                clickConfirmDeleteCreditCardButton()
+                verifyAddCreditCardsButton()
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2271192
+    @Converted(
+        replacedBy =
+            ["org.mozilla.fenix.ui.efficiency.tests.CreditCardAutofillTest#deleteSavedCreditCardUsingMenuButtonTest"],
+        bug = 2060406,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun deleteSavedCreditCardUsingMenuButtonTest() {
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-            clickSavedCreditCard()
-            clickDeleteCreditCardMenuButton()
-            clickCancelDeleteCreditCardButton()
-            verifyEditCreditCardToolbarTitle()
-            clickDeleteCreditCardMenuButton()
-            clickConfirmDeleteCreditCardButton()
-            verifyAddCreditCardsButton()
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+                clickSavedCreditCard()
+                clickDeleteCreditCardMenuButton()
+                clickCancelDeleteCreditCardButton()
+                verifyEditCreditCardToolbarTitle()
+                clickDeleteCreditCardMenuButton()
+                clickConfirmDeleteCreditCardButton()
+                verifyAddCreditCardsButton()
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1512788
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.CreditCardAutofillTest#verifyCreditCardsSectionTest"],
+        bug = 2074465,
+        since = "2026-09",
+    )
+    @Critical
     @Test
     fun verifyCreditCardsSectionTest() {
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, false)
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-            verifySavedCreditCardsSection(
-                MockCreditCard1.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, false)
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+                verifySavedCreditCardsSection(
+                    MockCreditCard1.MOCK_LAST_CARD_DIGITS,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1859917
@@ -181,29 +205,30 @@ class CreditCardAutofillTest {
     fun verifyManageCreditCardsPromptOptionTest() {
         val creditCardFormPage = mockWebServer.creditCardFormAsset
 
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+            }
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(creditCardFormPage.url) {
-            clickCreditCardNumberTextBox()
-            clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
-        }.clickManageCreditCardsButton {
-        }.goBackToBrowser(composeTestRule) {
-            verifySelectCreditCardPromptExists(false)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(creditCardFormPage.url) {
+                clickCreditCardNumberTextBox()
+                clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
+            }
+            .clickManageCreditCardsButton {}
+            .goBackToBrowser(composeTestRule) {
+                verifySelectCreditCardPromptExists(false)
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1512790
@@ -211,78 +236,80 @@ class CreditCardAutofillTest {
     fun verifyCreditCardsAutofillToggleTest() {
         val creditCardFormPage = mockWebServer.creditCardFormAsset
 
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, false)
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, false)
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+            }
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(creditCardFormPage.url) {
-            clickCreditCardNumberTextBox()
-            verifySelectCreditCardPromptExists(true)
-            closeSoftKeyboard()
-            waitForAppWindowToBeUpdated()
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            clickSaveAndAutofillCreditCardsOption()
-            verifyCreditCardsAutofillSection(false, true)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(creditCardFormPage.url) {
+                clickCreditCardNumberTextBox()
+                verifySelectCreditCardPromptExists(true)
+                closeSoftKeyboard()
+                waitForAppWindowToBeUpdated()
+            }
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                clickSaveAndAutofillCreditCardsOption()
+                verifyCreditCardsAutofillSection(false, true)
+            }
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(creditCardFormPage.url) {
-            clickCreditCardNumberTextBox()
-            verifySelectCreditCardPromptExists(false)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(creditCardFormPage.url) {
+                clickCreditCardNumberTextBox()
+                verifySelectCreditCardPromptExists(false)
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1512795
     @Test
     fun verifyEditCardsViewTest() {
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, false)
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-            verifySavedCreditCardsSection(
-                MockCreditCard1.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-            clickSavedCreditCard()
-            verifyEditCreditCardView(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-        }.goBackToSavedCreditCards {
-            verifySavedCreditCardsSection(
-                MockCreditCard1.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, false)
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+                verifySavedCreditCardsSection(
+                    MockCreditCard1.MOCK_LAST_CARD_DIGITS,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+                clickSavedCreditCard()
+                verifyEditCreditCardView(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+            }
+            .goBackToSavedCreditCards {
+                verifySavedCreditCardsSection(
+                    MockCreditCard1.MOCK_LAST_CARD_DIGITS,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1512796
@@ -290,84 +317,85 @@ class CreditCardAutofillTest {
     fun verifyEditedCardIsSavedTest() {
         val creditCardFormPage = mockWebServer.creditCardFormAsset
 
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, false)
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-            verifySavedCreditCardsSection(
-                MockCreditCard1.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-            clickSavedCreditCard()
-            fillAndSaveCreditCard(
-                MockCreditCard2.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard2.MOCK_NAME_ON_CARD,
-                MockCreditCard2.MOCK_EXPIRATION_MONTH,
-                MockCreditCard2.MOCK_EXPIRATION_YEAR,
-            )
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, false)
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+                verifySavedCreditCardsSection(
+                    MockCreditCard1.MOCK_LAST_CARD_DIGITS,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+                clickSavedCreditCard()
+                fillAndSaveCreditCard(
+                    MockCreditCard2.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard2.MOCK_NAME_ON_CARD,
+                    MockCreditCard2.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard2.MOCK_EXPIRATION_YEAR,
+                )
+            }
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(creditCardFormPage.url) {
-            clickCreditCardNumberTextBox()
-            clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
-            clickPageObject(
-                composeTestRule,
-                itemWithResIdContainingText(
-                    "$packageName:id/credit_card_number",
-                    MockCreditCard2.MOCK_LAST_CARD_DIGITS,
-                ),
-            )
-            verifyAutofilledCreditCard(MockCreditCard2.MOCK_CREDIT_CARD_NUMBER)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(creditCardFormPage.url) {
+                clickCreditCardNumberTextBox()
+                clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
+                clickPageObject(
+                    composeTestRule,
+                    itemWithResIdContainingText(
+                        "$packageName:id/credit_card_number",
+                        MockCreditCard2.MOCK_LAST_CARD_DIGITS,
+                    ),
+                )
+                verifyAutofilledCreditCard(MockCreditCard2.MOCK_CREDIT_CARD_NUMBER)
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1512797
     @Test
     @SkipLeaks(reasons = ["https://bugzilla.mozilla.org/show_bug.cgi?id=1935999"])
     fun verifyCreditCardCannotBeSavedWithoutCardNumberOrNameTest() {
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, false)
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-            verifySavedCreditCardsSection(
-                MockCreditCard1.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-            clickSavedCreditCard()
-            clearCreditCardNumber()
-            clickSaveCreditCardToolbarButton()
-            verifyEditCreditCardToolbarTitle()
-            verifyCreditCardNumberErrorMessage()
-        }.goBackToSavedCreditCards {
-            clickSavedCreditCard()
-            clearNameOnCreditCard()
-            clickSaveCreditCardToolbarButton()
-            verifyEditCreditCardToolbarTitle()
-            verifyNameOnCreditCardErrorMessage()
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, false)
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+                verifySavedCreditCardsSection(
+                    MockCreditCard1.MOCK_LAST_CARD_DIGITS,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+                clickSavedCreditCard()
+                clearCreditCardNumber()
+                clickSaveCreditCardToolbarButton()
+                verifyEditCreditCardToolbarTitle()
+                verifyCreditCardNumberErrorMessage()
+            }
+            .goBackToSavedCreditCards {
+                clickSavedCreditCard()
+                clearNameOnCreditCard()
+                clickSaveCreditCardToolbarButton()
+                verifyEditCreditCardToolbarTitle()
+                verifyNameOnCreditCardErrorMessage()
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1512794
@@ -375,56 +403,56 @@ class CreditCardAutofillTest {
     fun verifyMultipleCreditCardsCanBeAddedTest() {
         val creditCardFormPage = mockWebServer.creditCardFormAsset
 
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, false)
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard2.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard2.MOCK_NAME_ON_CARD,
-                MockCreditCard2.MOCK_EXPIRATION_MONTH,
-                MockCreditCard2.MOCK_EXPIRATION_YEAR,
-            )
-            verifySavedCreditCardsSection(
-                MockCreditCard1.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-            verifySavedCreditCardsSection(
-                MockCreditCard2.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard2.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, false)
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard2.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard2.MOCK_NAME_ON_CARD,
+                    MockCreditCard2.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard2.MOCK_EXPIRATION_YEAR,
+                )
+                verifySavedCreditCardsSection(
+                    MockCreditCard1.MOCK_LAST_CARD_DIGITS,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+                verifySavedCreditCardsSection(
+                    MockCreditCard2.MOCK_LAST_CARD_DIGITS,
+                    MockCreditCard2.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+            }
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(creditCardFormPage.url) {
-            clickCreditCardNumberTextBox()
-            clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
-            verifyCreditCardSuggestion(
-                MockCreditCard1.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard2.MOCK_LAST_CARD_DIGITS,
-            )
-            clickPageObject(
-                composeTestRule,
-                itemWithResIdContainingText(
-                    "$packageName:id/credit_card_number",
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(creditCardFormPage.url) {
+                clickCreditCardNumberTextBox()
+                clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
+                verifyCreditCardSuggestion(
+                    MockCreditCard1.MOCK_LAST_CARD_DIGITS,
                     MockCreditCard2.MOCK_LAST_CARD_DIGITS,
-                ),
-            )
-            verifyAutofilledCreditCard(MockCreditCard2.MOCK_CREDIT_CARD_NUMBER)
-        }
+                )
+                clickPageObject(
+                    composeTestRule,
+                    itemWithResIdContainingText(
+                        "$packageName:id/credit_card_number",
+                        MockCreditCard2.MOCK_LAST_CARD_DIGITS,
+                    ),
+                )
+                verifyAutofilledCreditCard(MockCreditCard2.MOCK_CREDIT_CARD_NUMBER)
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2271304
@@ -432,20 +460,21 @@ class CreditCardAutofillTest {
     fun verifyDoNotSaveCreditCardFromPromptTest() {
         val creditCardFormPage = mockWebServer.creditCardFormAsset
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(creditCardFormPage.url) {
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-            clickNegativeSaveCreditCardPromptButton()
-            verifyUpdateOrSaveCreditCardPromptExists(exists = false)
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, false)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(creditCardFormPage.url) {
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+                clickNegativeSaveCreditCardPromptButton()
+                verifyUpdateOrSaveCreditCardPromptExists(exists = false)
+            }
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, false)
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1779194
@@ -453,26 +482,27 @@ class CreditCardAutofillTest {
     fun verifySaveCreditCardFromPromptTest() {
         val creditCardFormPage = mockWebServer.creditCardFormAsset
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(creditCardFormPage.url) {
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-            clickPageObject(composeTestRule, itemWithResId("$packageName:id/save_confirm"))
-            verifyUpdateOrSaveCreditCardPromptExists(exists = false)
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, true)
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-            verifySavedCreditCardsSection(
-                MockCreditCard1.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(creditCardFormPage.url) {
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+                clickPageObject(composeTestRule, itemWithResId("$packageName:id/save_confirm"))
+                verifyUpdateOrSaveCreditCardPromptExists(exists = false)
+            }
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, true)
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+                verifySavedCreditCardsSection(
+                    MockCreditCard1.MOCK_LAST_CARD_DIGITS,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2271305
@@ -480,51 +510,52 @@ class CreditCardAutofillTest {
     fun verifyCancelCreditCardUpdatePromptTest() {
         val creditCardFormPage = mockWebServer.creditCardFormAsset
 
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, false)
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard2.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard2.MOCK_NAME_ON_CARD,
-                MockCreditCard2.MOCK_EXPIRATION_MONTH,
-                MockCreditCard2.MOCK_EXPIRATION_YEAR,
-            )
-            // Opening Manage cards to dismiss here the Secure your credit prompt
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, false)
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard2.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard2.MOCK_NAME_ON_CARD,
+                    MockCreditCard2.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard2.MOCK_EXPIRATION_YEAR,
+                )
+                // Opening Manage cards to dismiss here the Secure your credit prompt
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+            }
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(creditCardFormPage.url) {
-            clickCreditCardNumberTextBox()
-            clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
-            clickPageObject(
-                composeTestRule,
-                itemWithResIdContainingText(
-                    "$packageName:id/credit_card_number",
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(creditCardFormPage.url) {
+                clickCreditCardNumberTextBox()
+                clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
+                clickPageObject(
+                    composeTestRule,
+                    itemWithResIdContainingText(
+                        "$packageName:id/credit_card_number",
+                        MockCreditCard2.MOCK_LAST_CARD_DIGITS,
+                    ),
+                )
+                verifyAutofilledCreditCard(MockCreditCard2.MOCK_CREDIT_CARD_NUMBER)
+                changeCreditCardExpiryDate(MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR)
+                clickCreditCardFormSubmitButton()
+                clickNegativeSaveCreditCardPromptButton()
+                verifyUpdateOrSaveCreditCardPromptExists(false)
+            }
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, true)
+                clickManageSavedCreditCardsButton()
+                verifySavedCreditCardsSection(
                     MockCreditCard2.MOCK_LAST_CARD_DIGITS,
-                ),
-            )
-            verifyAutofilledCreditCard(MockCreditCard2.MOCK_CREDIT_CARD_NUMBER)
-            changeCreditCardExpiryDate(MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR)
-            clickCreditCardFormSubmitButton()
-            clickNegativeSaveCreditCardPromptButton()
-            verifyUpdateOrSaveCreditCardPromptExists(false)
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, true)
-            clickManageSavedCreditCardsButton()
-            verifySavedCreditCardsSection(
-                MockCreditCard2.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard2.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-        }
+                    MockCreditCard2.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1779195
@@ -532,82 +563,83 @@ class CreditCardAutofillTest {
     fun verifyConfirmCreditCardUpdatePromptTest() {
         val creditCardFormPage = mockWebServer.creditCardFormAsset
 
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, false)
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard2.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard2.MOCK_NAME_ON_CARD,
-                MockCreditCard2.MOCK_EXPIRATION_MONTH,
-                MockCreditCard2.MOCK_EXPIRATION_YEAR,
-            )
-            // Opening Manage cards to dismiss here the Secure your credit prompt
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, false)
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard2.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard2.MOCK_NAME_ON_CARD,
+                    MockCreditCard2.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard2.MOCK_EXPIRATION_YEAR,
+                )
+                // Opening Manage cards to dismiss here the Secure your credit prompt
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+            }
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(creditCardFormPage.url) {
-            clickCreditCardNumberTextBox()
-            clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
-            clickPageObject(
-                composeTestRule,
-                itemWithResIdContainingText(
-                    "$packageName:id/credit_card_number",
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(creditCardFormPage.url) {
+                clickCreditCardNumberTextBox()
+                clickPageObject(composeTestRule, itemWithResId("$packageName:id/select_credit_card_header"))
+                clickPageObject(
+                    composeTestRule,
+                    itemWithResIdContainingText(
+                        "$packageName:id/credit_card_number",
+                        MockCreditCard2.MOCK_LAST_CARD_DIGITS,
+                    ),
+                )
+                verifyAutofilledCreditCard(MockCreditCard2.MOCK_CREDIT_CARD_NUMBER)
+                changeCreditCardExpiryDate(MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR)
+                clickCreditCardFormSubmitButton()
+                clickPageObject(composeTestRule, itemWithResId("$packageName:id/save_confirm"))
+                verifyUpdateOrSaveCreditCardPromptExists(false)
+            }
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, true)
+                clickManageSavedCreditCardsButton()
+                verifySavedCreditCardsSection(
                     MockCreditCard2.MOCK_LAST_CARD_DIGITS,
-                ),
-            )
-            verifyAutofilledCreditCard(MockCreditCard2.MOCK_CREDIT_CARD_NUMBER)
-            changeCreditCardExpiryDate(MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR)
-            clickCreditCardFormSubmitButton()
-            clickPageObject(composeTestRule, itemWithResId("$packageName:id/save_confirm"))
-            verifyUpdateOrSaveCreditCardPromptExists(false)
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, true)
-            clickManageSavedCreditCardsButton()
-            verifySavedCreditCardsSection(
-                MockCreditCard2.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-        }
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1512791
     @Test
     fun verifyCreditCardRedirectionsToAutofillSectionAfterInterruptionTest() {
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyCreditCardsAutofillSection(true, false)
-            clickAddCreditCardButton()
-            fillAndSaveCreditCard(
-                MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
-                MockCreditCard1.MOCK_NAME_ON_CARD,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH,
-                MockCreditCard1.MOCK_EXPIRATION_YEAR,
-            )
-            clickManageSavedCreditCardsButton()
-            clickSecuredCreditCardsLaterButton()
-            clickSavedCreditCard()
-            putAppToBackground()
-            bringAppToForeground()
-            verifyAutofillToolbarTitle()
-            clickManageSavedCreditCardsButton()
-            verifySavedCreditCardsSection(
-                MockCreditCard1.MOCK_LAST_CARD_DIGITS,
-                MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
-            )
-            putAppToBackground()
-            bringAppToForeground()
-            verifyAutofillToolbarTitle()
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyCreditCardsAutofillSection(true, false)
+                clickAddCreditCardButton()
+                fillAndSaveCreditCard(
+                    MockCreditCard1.MOCK_CREDIT_CARD_NUMBER,
+                    MockCreditCard1.MOCK_NAME_ON_CARD,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH,
+                    MockCreditCard1.MOCK_EXPIRATION_YEAR,
+                )
+                clickManageSavedCreditCardsButton()
+                clickSecuredCreditCardsLaterButton()
+                clickSavedCreditCard()
+                putAppToBackground()
+                bringAppToForeground()
+                verifyAutofillToolbarTitle()
+                clickManageSavedCreditCardsButton()
+                verifySavedCreditCardsSection(
+                    MockCreditCard1.MOCK_LAST_CARD_DIGITS,
+                    MockCreditCard1.MOCK_EXPIRATION_MONTH_AND_YEAR,
+                )
+                putAppToBackground()
+                bringAppToForeground()
+                verifyAutofillToolbarTitle()
+            }
     }
 }

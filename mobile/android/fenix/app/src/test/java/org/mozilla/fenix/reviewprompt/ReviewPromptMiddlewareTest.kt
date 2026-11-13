@@ -4,6 +4,7 @@
 
 package org.mozilla.fenix.reviewprompt
 
+import kotlin.test.assertIs
 import mozilla.components.support.test.assertUnused
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -17,35 +18,41 @@ import org.mozilla.fenix.nimbus.FakeNimbusEventStore
 import org.mozilla.fenix.nimbus.RecordEventMode.CompleteSuccessfully
 import org.mozilla.fenix.nimbus.RecordEventMode.ThrowException
 import org.mozilla.fenix.reviewprompt.ReviewPromptState.Eligible.Type
-import kotlin.test.assertIs
 
 class ReviewPromptMiddlewareTest {
 
     private val eventStore = FakeNimbusEventStore()
 
+    private var continuousOnboardingInProgress = false
     private var shouldShowCustomPrompt = true
     private lateinit var mainCriteria: Sequence<Boolean>
     private lateinit var subCriteria: Sequence<Boolean>
 
-    private val store = AppStore(
-        middlewares = listOf(
-            ReviewPromptMiddleware(
-                shouldShowCustomPrompt = { shouldShowCustomPrompt },
-                disableCustomPrompt = { shouldShowCustomPrompt = false },
-                createJexlHelper = {
-                    object : NimbusMessagingHelperInterface {
-                        override fun evalJexl(expression: String) = assertUnused()
-                        override fun evalJexlDebug(expression: String) = assertUnused()
-                        override fun getUuid(template: String) = assertUnused()
-                        override fun stringFormat(template: String, uuid: String?) = assertUnused()
-                    }
-                },
-                buildTriggerMainCriteria = { mainCriteria },
-                buildTriggerSubCriteria = { subCriteria },
-                nimbusEventStore = eventStore,
-            ),
-        ),
-    )
+    private val store =
+        AppStore(
+            middlewares =
+                listOf(
+                    ReviewPromptMiddleware(
+                        continuousOnboardingInProgress = { continuousOnboardingInProgress },
+                        shouldShowCustomPrompt = { shouldShowCustomPrompt },
+                        disableCustomPrompt = { shouldShowCustomPrompt = false },
+                        createJexlHelper = {
+                            object : NimbusMessagingHelperInterface {
+                                override fun evalJexl(expression: String) = assertUnused()
+
+                                override fun evalJexlDebug(expression: String) = assertUnused()
+
+                                override fun getUuid(template: String) = assertUnused()
+
+                                override fun stringFormat(template: String, uuid: String?) = assertUnused()
+                            }
+                        },
+                        buildTriggerMainCriteria = { mainCriteria },
+                        buildTriggerSubCriteria = { subCriteria },
+                        nimbusEventStore = eventStore,
+                    )
+                )
+        )
 
     @Test
     fun `WHEN check requested THEN main and sub-criteria are checked`() {
@@ -168,6 +175,44 @@ class ReviewPromptMiddlewareTest {
         store.dispatch(ReviewPromptAction.CheckIfEligibleForReviewPrompt)
 
         assertEquals(expectedState, store.state)
+    }
+
+    @Test
+    fun `GIVEN continuous onboarding in progress WHEN check requested THEN sets not eligible without checking criteria`() {
+        continuousOnboardingInProgress = true
+        var criteriaChecked = false
+        mainCriteria = sequence {
+            criteriaChecked = true
+            yield(true)
+        }
+        subCriteria = sequence {
+            criteriaChecked = true
+            yield(true)
+        }
+
+        store.dispatch(ReviewPromptAction.CheckIfEligibleForReviewPrompt)
+
+        assertFalse(criteriaChecked)
+        assertEquals(
+            AppState(reviewPrompt = ReviewPromptState.NotEligible),
+            store.state,
+        )
+    }
+
+    @Test
+    fun `GIVEN check ran while continuous onboarding in progress WHEN onboarding completes AND check requested again THEN stays not eligible`() {
+        continuousOnboardingInProgress = true
+        mainCriteria = sequenceOf(true)
+        subCriteria = sequenceOf(true)
+        store.dispatch(ReviewPromptAction.CheckIfEligibleForReviewPrompt)
+
+        continuousOnboardingInProgress = false
+        store.dispatch(ReviewPromptAction.CheckIfEligibleForReviewPrompt)
+
+        assertEquals(
+            AppState(reviewPrompt = ReviewPromptState.NotEligible),
+            store.state,
+        )
     }
 
     @Test

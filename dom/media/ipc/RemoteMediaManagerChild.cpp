@@ -76,13 +76,21 @@ static EnumeratedArray<RemoteMediaIn, StaticRefPtr<RemoteMediaManagerChild>,
 
 static StaticAutoPtr<nsTArray<RefPtr<Runnable>>> sRecreateTasks;
 
+// Per-location codec support state collected from the remote processes.
+// mSupported holds the snapshot delivered over IPC (Nothing until the remote
+// process reports in); mHolder fulfills any pending EnsureCodecSupportFor()
+// promises once that snapshot arrives.
+struct CodecSupportState {
+  Maybe<media::MediaCodecsSupported> mSupported;
+  MozPromiseHolder<RemoteMediaManagerChild::CodecSupportPromise> mHolder;
+};
+
 // Used for protecting codec support information collected from different remote
 // processes.
 StaticMutex sProcessSupportedMutex;
-MOZ_GLOBINIT static EnumeratedArray<RemoteMediaIn,
-                                    Maybe<media::MediaCodecsSupported>,
+MOZ_GLOBINIT static EnumeratedArray<RemoteMediaIn, CodecSupportState,
                                     size_t(RemoteMediaIn::SENTINEL)>
-    sProcessSupported MOZ_GUARDED_BY(sProcessSupportedMutex);
+    sCodecSupportState MOZ_GUARDED_BY(sProcessSupportedMutex);
 
 class ShutdownObserver final : public nsIObserver {
  public:
@@ -158,6 +166,13 @@ void RemoteMediaManagerChild::Shutdown() {
   if (sObserver) {
     nsContentUtils::UnregisterShutdownObserver(sObserver);
     sObserver = nullptr;
+  }
+
+  {
+    StaticMutexAutoLock lock(sProcessSupportedMutex);
+    for (auto& state : sCodecSupportState) {
+      state.mHolder.RejectIfExists(NS_ERROR_ABORT, __func__);
+    }
   }
 
   nsCOMPtr<nsIThread> childThread;
@@ -238,9 +253,9 @@ nsCOMPtr<nsISerialEventTarget> RemoteMediaManagerChild::GetManagerThread() {
 }
 
 /* static */
-bool RemoteMediaManagerChild::Supports(RemoteMediaIn aLocation,
-                                       const SupportDecoderParams& aParams,
-                                       DecoderDoctorDiagnostics* aDiagnostics) {
+media::DecodeSupportSet RemoteMediaManagerChild::Supports(
+    RemoteMediaIn aLocation, const SupportDecoderParams& aParams,
+    DecoderDoctorDiagnostics* aDiagnostics) {
   Maybe<media::MediaCodecsSupported> supported;
   switch (aLocation) {
     case RemoteMediaIn::GpuProcess:
@@ -250,11 +265,11 @@ bool RemoteMediaManagerChild::Supports(RemoteMediaIn aLocation,
     case RemoteMediaIn::UtilityProcess_WMF:
     case RemoteMediaIn::UtilityProcess_MFMediaEngineCDM: {
       StaticMutexAutoLock lock(sProcessSupportedMutex);
-      supported = sProcessSupported[aLocation];
+      supported = sCodecSupportState[aLocation].mSupported;
       break;
     }
     default:
-      return false;
+      return {};
   }
   if (!supported) {
     // We haven't received the correct information yet from either the GPU or
@@ -272,7 +287,8 @@ bool RemoteMediaManagerChild::Supports(RemoteMediaIn aLocation,
     }
 
     // Assume the format is supported to prevent false negative, if the remote
-    // process supports that specific track type.
+    // process supports that specific track type. HW support is unknown until
+    // the process reports in, so conservatively report SW-only.
     const bool isVideo = aParams.mConfig.IsVideo();
     const bool isAudio = aParams.mConfig.IsAudio();
     const auto trackSupport = GetTrackSupport(aLocation);
@@ -282,29 +298,39 @@ bool RemoteMediaManagerChild::Supports(RemoteMediaIn aLocation,
       // to report support for it arbitrarily.
       if (MP4Decoder::IsHEVC(aParams.mConfig.mMimeType)) {
         if (!StaticPrefs::media_hevc_enabled()) {
-          return false;
+          return {};
         }
 #if defined(XP_WIN)
-        return aLocation == RemoteMediaIn::UtilityProcess_MFMediaEngineCDM ||
-               aLocation == RemoteMediaIn::GpuProcess;
+        if (aLocation == RemoteMediaIn::UtilityProcess_MFMediaEngineCDM ||
+            aLocation == RemoteMediaIn::GpuProcess) {
+          // No software support in most cases for HEVC so guess hardware.
+          return {media::DecodeSupport::HardwareDecode};
+        }
+        return {};
 #else
-        return trackSupport.contains(TrackSupport::DecodeVideo);
+        return trackSupport.contains(TrackSupport::DecodeVideo)
+                   ? media::
+                         DecodeSupportSet{media::DecodeSupport::SoftwareDecode}
+                   : media::DecodeSupportSet{};
 #endif
       }
-      return trackSupport.contains(TrackSupport::DecodeVideo);
+      return trackSupport.contains(TrackSupport::DecodeVideo)
+                 ? media::DecodeSupportSet{media::DecodeSupport::SoftwareDecode}
+                 : media::DecodeSupportSet{};
     }
     if (isAudio) {
-      return trackSupport.contains(TrackSupport::DecodeAudio);
+      return trackSupport.contains(TrackSupport::DecodeAudio)
+                 ? media::DecodeSupportSet{media::DecodeSupport::SoftwareDecode}
+                 : media::DecodeSupportSet{};
     }
     MOZ_ASSERT_UNREACHABLE("Not audio and video?!");
-    return false;
+    return {};
   }
 
   // We can ignore the SupportDecoderParams argument for now as creation of the
   // decoder will actually fail later and fallback PDMs will be tested on later.
-  return !PDMFactory::SupportsMimeType(aParams.MimeType(), *supported,
-                                       aLocation)
-              .isEmpty();
+  return PDMFactory::SupportsMimeType(aParams.MimeType(), *supported,
+                                      aLocation);
 }
 
 /* static */
@@ -438,9 +464,6 @@ RemoteMediaManagerChild::CreateVideoDecoder(const CreateDecoderParams& aParams,
         auto child = MakeRefPtr<RemoteVideoDecoderChild>(aLocation);
         MediaResult result = child->InitIPDL(
             params.VideoConfig(), params.mRate.mValue, params.mOptions,
-            params.mKnowsCompositor
-                ? Some(params.mKnowsCompositor->GetTextureFactoryIdentifier())
-                : Nothing(),
             params.mMediaEngineId, params.mTrackingId, params.mCDM);
         if (NS_FAILED(result)) {
           return PlatformDecoderModule::CreateDecoderPromise::CreateAndReject(
@@ -556,7 +579,7 @@ EncodeSupportSet RemoteMediaManagerChild::Supports(RemoteMediaIn aLocation,
     case RemoteMediaIn::UtilityProcess_WMF:
     case RemoteMediaIn::UtilityProcess_MFMediaEngineCDM: {
       StaticMutexAutoLock lock(sProcessSupportedMutex);
-      supported = sProcessSupported[aLocation];
+      supported = sCodecSupportState[aLocation].mSupported;
       break;
     }
     default:
@@ -890,13 +913,14 @@ TrackSupportSet RemoteMediaManagerChild::GetTrackSupport(
   switch (aLocation) {
     case RemoteMediaIn::GpuProcess:
       s = TrackSupport::DecodeVideo;
-      if (StaticPrefs::media_use_remote_encoder_video()) {
+      if (StaticPrefs::media_use_remote_encoder_video_platform()) {
         s += TrackSupport::EncodeVideo;
       }
       break;
     case RemoteMediaIn::RddProcess:
       s = TrackSupport::DecodeVideo;
-      if (StaticPrefs::media_use_remote_encoder_video()) {
+      if (StaticPrefs::media_use_remote_encoder_video_software() ||
+          StaticPrefs::media_use_remote_encoder_video_platform()) {
         s += TrackSupport::EncodeVideo;
       }
 #ifndef ANDROID
@@ -908,7 +932,7 @@ TrackSupportSet RemoteMediaManagerChild::GetTrackSupport(
 #endif
       {
         s += TrackSupport::DecodeAudio;
-        if (StaticPrefs::media_use_remote_encoder_audio()) {
+        if (StaticPrefs::media_use_remote_encoder_audio_software()) {
           s += TrackSupport::EncodeAudio;
         }
       }
@@ -918,7 +942,7 @@ TrackSupportSet RemoteMediaManagerChild::GetTrackSupport(
     case RemoteMediaIn::UtilityProcess_WMF:
       if (StaticPrefs::media_utility_process_enabled()) {
         s = TrackSupport::DecodeAudio;
-        if (StaticPrefs::media_use_remote_encoder_audio()) {
+        if (StaticPrefs::media_use_remote_encoder_audio_software()) {
           s += TrackSupport::EncodeAudio;
         }
       }
@@ -1192,8 +1216,27 @@ void RemoteMediaManagerChild::HandleFatalError(const char* aMsg) {
   dom::ContentChild::FatalErrorIfNotUsingGPUProcess(aMsg, OtherChildID());
 }
 
+void RemoteMediaManagerChild::ActorDestroy(ActorDestroyReason aWhy) {
+  // A stale actor that has already been replaced must not reject the wait
+  // for its successor.
+  if (GetSingleton(mLocation) != this) {
+    return;
+  }
+  StaticMutexAutoLock lock(sProcessSupportedMutex);
+  CodecSupportState& state = sCodecSupportState[mLocation];
+  if (state.mHolder.IsEmpty()) {
+    return;
+  }
+  LOGE("Remote process '{}' went away before reporting codec support",
+       RemoteMediaInToStr(mLocation));
+  state.mHolder.Reject(aWhy == NormalShutdown ? NS_ERROR_ILLEGAL_DURING_SHUTDOWN
+                                              : NS_ERROR_FAILURE,
+                       __func__);
+}
+
 void RemoteMediaManagerChild::SetSupported(
     RemoteMediaIn aLocation, const media::MediaCodecsSupported& aSupported) {
+  MozPromiseHolder<CodecSupportPromise> holder;
   switch (aLocation) {
     case RemoteMediaIn::GpuProcess:
     case RemoteMediaIn::RddProcess:
@@ -1202,12 +1245,75 @@ void RemoteMediaManagerChild::SetSupported(
     case RemoteMediaIn::UtilityProcess_WMF:
     case RemoteMediaIn::UtilityProcess_MFMediaEngineCDM: {
       StaticMutexAutoLock lock(sProcessSupportedMutex);
-      sProcessSupported[aLocation] = Some(aSupported);
+      CodecSupportState& state = sCodecSupportState[aLocation];
+      state.mSupported = Some(aSupported);
+      holder = std::move(state.mHolder);
       break;
     }
     default:
       MOZ_CRASH("Not to be used for any other process");
   }
+  holder.ResolveIfExists(true, __func__);
+}
+
+/* static */
+RefPtr<RemoteMediaManagerChild::CodecSupportPromise>
+RemoteMediaManagerChild::EnsureCodecSupportFor(RemoteMediaIn aLocation,
+                                               bool aForceRefresh) {
+  RefPtr<CodecSupportPromise> promise;
+  {
+    StaticMutexAutoLock lock(sProcessSupportedMutex);
+    CodecSupportState& state = sCodecSupportState[aLocation];
+    if (!aForceRefresh && state.mSupported) {
+      return CodecSupportPromise::CreateAndResolve(true, __func__);
+    }
+    // Cache is empty or a refresh was requested. Obtain the promise under the
+    // lock so SetSupported() cannot resolve the holder before we return it.
+    // The cache is intentionally not cleared on refresh so that sync callers
+    // continue to see the current value until the next update arrives.
+    promise = state.mHolder.Ensure(__func__);
+  }
+
+  // Only reached when we are going to wait. Launch the process so
+  // SetSupported() will eventually fire and resolve the promise.
+  RefPtr<GenericNonExclusivePromise> launchPromise;
+  switch (aLocation) {
+    case RemoteMediaIn::UtilityProcess_Generic:
+    case RemoteMediaIn::UtilityProcess_AppleMedia:
+    case RemoteMediaIn::UtilityProcess_WMF:
+    case RemoteMediaIn::UtilityProcess_MFMediaEngineCDM:
+      launchPromise = LaunchUtilityProcessIfNeeded(aLocation);
+      break;
+    case RemoteMediaIn::RddProcess:
+      launchPromise = LaunchRDDProcessIfNeeded();
+      break;
+    default:
+      break;
+  }
+
+  nsCOMPtr<nsISerialEventTarget> managerThread = GetManagerThread();
+  if (!launchPromise || !managerThread) {
+    LOGE("Failed to launch remote process '{}'", RemoteMediaInToStr(aLocation));
+    StaticMutexAutoLock lock(sProcessSupportedMutex);
+    CodecSupportState& state = sCodecSupportState[aLocation];
+    state.mHolder.RejectIfExists(NS_ERROR_FAILURE, __func__);
+    return promise;
+  }
+
+  launchPromise->Then(
+      managerThread, __func__,
+      [] {
+        // If launched successfully, the promise is resolved in SetSupported().
+      },
+      [aLocation](nsresult aRv) {
+        LOGE("Launch of remote process '{}' was rejected with {}",
+             RemoteMediaInToStr(aLocation), aRv);
+        StaticMutexAutoLock lock(sProcessSupportedMutex);
+        CodecSupportState& state = sCodecSupportState[aLocation];
+        state.mHolder.RejectIfExists(aRv, __func__);
+      });
+
+  return promise;
 }
 
 #undef LOG

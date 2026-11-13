@@ -5,8 +5,9 @@
 #include "LayersTypes.h"
 
 #include <cinttypes>
-#include "nsPrintfCString.h"
+
 #include "mozilla/gfx/gfxVars.h"
+#include "nsPrintfCString.h"
 
 #ifdef XP_WIN
 #  include "gfxConfig.h"
@@ -86,7 +87,7 @@ GpuProcessTextureId GpuProcessTextureId::GetNext() {
 
 /* static */
 CompositeProcessFencesHolderId CompositeProcessFencesHolderId::GetNext() {
-  if (!XRE_IsGPUProcess()) {
+  if (!XRE_IsGPUProcess() && !XRE_IsParentProcess()) {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     return CompositeProcessFencesHolderId{};
   }

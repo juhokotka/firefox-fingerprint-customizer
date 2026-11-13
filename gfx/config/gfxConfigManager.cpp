@@ -3,13 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/gfx/gfxConfigManager.h"
-#include "mozilla/gfx/gfxVars.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/Components.h"
-#include "mozilla/StaticPrefs_gfx.h"
-#include "mozilla/StaticPrefs_layers.h"
+
 #include "gfxConfig.h"
 #include "gfxPlatform.h"
+#include "mozilla/Components.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs_gfx.h"
+#include "mozilla/StaticPrefs_layers.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "nsIGfxInfo.h"
 #include "nsPrintfCString.h"
 #include "nsXULAppAPI.h"
@@ -26,6 +27,7 @@ void gfxConfigManager::Init() {
   MOZ_ASSERT(XRE_IsParentProcess());
 
   EmplaceUserPref("gfx.webrender.compositor", mWrCompositorEnabled);
+  mWrLayerCompositorEnabled = StaticPrefs::gfx_webrender_layer_compositor();
   mWrForceEnabled = gfxPlatform::WebRenderPrefEnabled();
   mWrSoftwareForceEnabled = StaticPrefs::gfx_webrender_software_AtStartup();
   mWrCompositorForceEnabled =
@@ -42,12 +44,11 @@ void gfxConfigManager::Init() {
       StaticPrefs::gfx_webrender_scissored_cache_clears_enabled_AtStartup();
   mWrScissoredCacheClearsForceEnabled = StaticPrefs::
       gfx_webrender_scissored_cache_clears_force_enabled_AtStartup();
+  EmplaceUserPref(StaticPrefs::GetPrefName_gfx_webrender_enable_angle(),
+                  mWrAngleEnabled);
 #ifdef XP_WIN
-  mWrForceAngle = StaticPrefs::gfx_webrender_force_angle_AtStartup();
-  mWrForceAngleNoGPUProcess = StaticPrefs::
-      gfx_webrender_enabled_no_gpu_process_with_angle_win_AtStartup();
-  mWrDCompWinEnabled =
-      Preferences::GetBool("gfx.webrender.dcomp-win.enabled", false);
+  mWrRequireAngle = StaticPrefs::gfx_webrender_require_angle_AtStartup();
+  mWrDCompWinEnabled = StaticPrefs::gfx_webrender_dcomp_win_enabled_AtStartup();
 #endif
 
   mWrEnvForceEnabled = gfxPlatform::WebRenderEnvvarEnabled();
@@ -89,7 +90,14 @@ void gfxConfigManager::Init() {
   mFeatureHwCompositing = &gfxConfig::GetFeature(Feature::HW_COMPOSITING);
 #ifdef XP_WIN
   mFeatureD3D11HwAngle = &gfxConfig::GetFeature(Feature::D3D11_HW_ANGLE);
+  mFeatureWrAngleBackend = mFeatureD3D11HwAngle;
   mFeatureD3D11Compositing = &gfxConfig::GetFeature(Feature::D3D11_COMPOSITING);
+#elif defined(XP_MACOSX)
+  mFeatureMetalAngle = &gfxConfig::GetFeature(Feature::WEBRENDER_ANGLE_METAL);
+  mFeatureWrAngleBackend = mFeatureMetalAngle;
+#elif defined(MOZ_WIDGET_ANDROID)
+  mFeatureGlAngle = &gfxConfig::GetFeature(Feature::WEBRENDER_ANGLE_GL);
+  mFeatureWrAngleBackend = mFeatureGlAngle;
 #endif
   mFeatureGPUProcess = &gfxConfig::GetFeature(Feature::GPU_PROCESS);
   mFeatureGLNorm16Textures =
@@ -154,11 +162,6 @@ void gfxConfigManager::ConfigureWebRender() {
   if (mWrCompositorForceEnabled) {
     mFeatureWrCompositor->UserForceEnable("Force enabled by pref");
   }
-#ifdef MOZ_WAYLAND
-  else if (gfxPlatform::UseHDR()) {
-    mFeatureWrCompositor->UserForceEnable("Force enabled by HDR pref");
-  }
-#endif
 
   ConfigureFromBlocklist(nsIGfxInfo::FEATURE_WEBRENDER_COMPOSITOR,
                          mFeatureWrCompositor);
@@ -166,7 +169,9 @@ void gfxConfigManager::ConfigureWebRender() {
   // Disable native compositor when hardware stretching is not supported. It is
   // for avoiding a problem like Bug 1618370.
   // XXX Is there a better check for Bug 1618370?
-  if (!mHwStretchingSupport.IsFullySupported() && mScaledResolution) {
+  // Skip this restriction when the layer compositor is enabled.
+  if (!mWrLayerCompositorEnabled && !mHwStretchingSupport.IsFullySupported() &&
+      mScaledResolution) {
     nsPrintfCString failureId(
         "FEATURE_FAILURE_NO_HARDWARE_STRETCHING_B%uW%uF%uN%uE%u",
         mHwStretchingSupport.mBoth, mHwStretchingSupport.mWindowOnly,
@@ -206,30 +211,32 @@ void gfxConfigManager::ConfigureWebRender() {
                              "FEATURE_FAILURE_SAFE_MODE"_ns);
   }
 
-  mFeatureWrAngle->EnableByDefault();
-  if (mFeatureD3D11HwAngle) {
-    if (mWrForceAngle) {
-      if (!mFeatureD3D11HwAngle->IsEnabled()) {
-        mFeatureWrAngle->ForceDisable(FeatureStatus::UnavailableNoAngle,
-                                      "ANGLE is disabled",
-                                      mFeatureD3D11HwAngle->GetFailureId());
-      } else if (!mFeatureGPUProcess->IsEnabled() &&
-                 !mWrForceAngleNoGPUProcess) {
-        // WebRender with ANGLE relies on the GPU process when on Windows
-        mFeatureWrAngle->ForceDisable(
-            FeatureStatus::UnavailableNoGpuProcess, "GPU Process is disabled",
-            "FEATURE_FAILURE_GPU_PROCESS_DISABLED"_ns);
-      }
-    } else {
-      mFeatureWrAngle->Disable(FeatureStatus::Disabled, "ANGLE is not forced",
-                               "FEATURE_FAILURE_ANGLE_NOT_FORCED"_ns);
-    }
-  } else {
-    mFeatureWrAngle->Disable(FeatureStatus::Unavailable, "OS not supported",
-                             "FEATURE_FAILURE_OS_NOT_SUPPORTED"_ns);
+  if (mFeatureMetalAngle) {
+    mFeatureMetalAngle->EnableByDefault();
+    ConfigureFromBlocklist(nsIGfxInfo::FEATURE_WEBRENDER_ANGLE_METAL,
+                           mFeatureMetalAngle);
   }
 
-  if (mWrForceAngle && mFeatureWr->IsEnabled() &&
+  if (mFeatureGlAngle) {
+    mFeatureGlAngle->EnableByDefault();
+    ConfigureFromBlocklist(nsIGfxInfo::FEATURE_WEBRENDER_ANGLE_GL,
+                           mFeatureGlAngle);
+  }
+
+  mFeatureWrAngle->SetDefaultFromPref(
+      StaticPrefs::GetPrefName_gfx_webrender_enable_angle(), true,
+      StaticPrefs::GetPrefDefault_gfx_webrender_enable_angle(),
+      mWrAngleEnabled);
+  if (!mFeatureWrAngleBackend) {
+    mFeatureWrAngle->Disable(FeatureStatus::Unavailable, "OS not supported",
+                             "FEATURE_FAILURE_OS_NOT_SUPPORTED"_ns);
+  } else if (!mFeatureWrAngleBackend->IsEnabled()) {
+    mFeatureWrAngle->ForceDisable(FeatureStatus::UnavailableNoAngle,
+                                  "ANGLE backend is disabled",
+                                  mFeatureWrAngleBackend->GetFailureId());
+  }
+
+  if (mWrRequireAngle && mFeatureWr->IsEnabled() &&
       !mFeatureWrAngle->IsEnabled()) {
     // Ensure we disable WebRender if ANGLE is unavailable and it is required.
     mFeatureWr->ForceDisable(FeatureStatus::UnavailableNoAngle,

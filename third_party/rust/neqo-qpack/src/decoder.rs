@@ -33,6 +33,7 @@ pub struct Decoder {
     max_blocked_streams: usize,
     blocked_streams: Vec<(StreamId, u64)>, // stream_id and requested inserts count.
     stats: Stats,
+    recv_stream_id: Option<StreamId>,
 }
 
 impl Decoder {
@@ -56,6 +57,7 @@ impl Decoder {
             max_blocked_streams,
             blocked_streams: Vec::with_capacity(max_blocked_streams),
             stats: Stats::default(),
+            recv_stream_id: None,
         }
     }
 
@@ -70,10 +72,9 @@ impl Decoder {
     ///
     /// May return: `ClosedCriticalStream` if stream has been closed or `EncoderStream`
     /// in case of any other transport error.
-    pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<Vec<StreamId>> {
+    pub fn receive(&mut self, conn: &mut Connection) -> Res<Vec<StreamId>> {
         let base_old = self.table.base();
-        self.read_instructions(conn, stream_id)
-            .map_err(|e| map_error(&e))?;
+        self.read_instructions(conn).map_err(map_error)?;
         let base_new = self.table.base();
         if base_old == base_new {
             return Ok(Vec::new());
@@ -86,7 +87,11 @@ impl Decoder {
             .collect())
     }
 
-    fn read_instructions(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
+    fn read_instructions(&mut self, conn: &mut Connection) -> Res<()> {
+        let Some(stream_id) = self.recv_stream_id else {
+            debug_assert!(false, "receive() before add_recv_stream()");
+            return Err(Error::Internal);
+        };
         let mut recv = ReceiverConnWrapper::new(conn, stream_id);
         self.process_instructions(&mut recv)
     }
@@ -216,16 +221,16 @@ impl Decoder {
 
         match decoder.decode_header_block(&self.table, self.max_entries, self.table.base()) {
             Ok(HeaderDecoderResult::Blocked(req_insert_cnt)) => {
-                if self.blocked_streams.len() > self.max_blocked_streams {
+                let found = self
+                    .blocked_streams
+                    .iter()
+                    .any(|(id, _req)| *id == stream_id);
+                if found {
+                    Ok(None)
+                } else if self.blocked_streams.len() >= self.max_blocked_streams {
                     Err(Error::Decompression)
                 } else {
-                    let found = self
-                        .blocked_streams
-                        .iter()
-                        .any(|(id, _req)| *id == stream_id);
-                    if !found {
-                        self.blocked_streams.push((stream_id, req_insert_cnt));
-                    }
+                    self.blocked_streams.push((stream_id, req_insert_cnt));
                     Ok(None)
                 }
             }
@@ -240,20 +245,33 @@ impl Decoder {
         }
     }
 
-    /// # Panics
+    /// # Errors
     ///
     /// When a stream has already been added.
-    pub fn add_send_stream(&mut self, stream_id: StreamId) {
-        assert!(
-            self.local_stream_id.is_none(),
-            "Adding multiple local streams"
-        );
+    pub const fn add_send_stream(&mut self, stream_id: StreamId) -> Res<()> {
+        if self.local_stream_id.is_some() {
+            return Err(Error::Internal);
+        }
         self.local_stream_id = Some(stream_id);
+        Ok(())
     }
 
     #[must_use]
     pub const fn local_stream_id(&self) -> Option<StreamId> {
         self.local_stream_id
+    }
+
+    /// Encoder stream has been created. Add the stream id.
+    ///
+    /// # Errors
+    ///
+    /// When a stream has already been added.
+    pub const fn add_recv_stream(&mut self, stream_id: StreamId) -> Res<()> {
+        if self.recv_stream_id.is_some() {
+            return Err(Error::Internal);
+        }
+        self.recv_stream_id = Some(stream_id);
+        Ok(())
     }
 
     #[must_use]
@@ -268,22 +286,21 @@ impl Display for Decoder {
     }
 }
 
-fn map_error(err: &Error) -> Error {
-    if *err == Error::ClosedCriticalStream {
-        Error::ClosedCriticalStream
-    } else {
-        Error::EncoderStream
+pub(crate) fn map_error(err: Error) -> Error {
+    match err {
+        Error::ClosedCriticalStream | Error::Internal => err,
+        _ => Error::EncoderStream,
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Header;
+    use neqo_common::{Header, to_u64};
     use neqo_transport::{StreamId, StreamType};
     use test_fixture::now;
 
-    use super::{Connection, Decoder, Error, Res};
+    use super::{Connection, Decoder, Error, Res, map_error};
     use crate::Settings;
 
     const STREAM_0: StreamId = StreamId::new(0);
@@ -308,8 +325,10 @@ mod tests {
             max_table_size_encoder: 0,
             max_table_size_decoder: 300,
             max_blocked_streams: 100,
+            max_tracked_streams: 4096,
         });
-        decoder.add_send_stream(send_stream_id);
+        decoder.add_send_stream(send_stream_id).unwrap();
+        decoder.add_recv_stream(recv_stream_id).unwrap();
 
         TestDecoder {
             decoder,
@@ -327,12 +346,7 @@ mod tests {
             .unwrap();
         let out = decoder.peer_conn.process_output(now());
         drop(decoder.conn.process(out.dgram(), now()));
-        assert_eq!(
-            decoder
-                .decoder
-                .read_instructions(&mut decoder.conn, decoder.recv_stream_id),
-            *res
-        );
+        assert_eq!(decoder.decoder.read_instructions(&mut decoder.conn), *res);
     }
 
     fn send_instructions_and_check(decoder: &mut TestDecoder, decoder_instruction: &[u8]) {
@@ -681,7 +695,7 @@ mod tests {
                 &mut decoder,
                 t.header_block,
                 &t.headers,
-                StreamId::from(u64::try_from(i).unwrap()),
+                StreamId::from(to_u64(i)),
             );
         }
 
@@ -760,7 +774,7 @@ mod tests {
                 &mut decoder,
                 t.header_block,
                 &t.headers,
-                StreamId::from(u64::try_from(i).unwrap()),
+                StreamId::from(to_u64(i)),
             );
         }
 
@@ -825,5 +839,69 @@ mod tests {
         recv_instruction(&mut decoder, ENCODER_INST, &Ok(()));
 
         decode_headers(&mut decoder, HEADER_BLOCK, &headers, STREAM_0);
+    }
+
+    #[test]
+    fn blocked_stream_limit_enforced() {
+        // A header block whose Required Insert Count refers to a dynamic table
+        // entry that has not been inserted yet leaves the stream blocked. RFC 9204
+        // Section 2.1.2 allows no more blocked streams than the advertised
+        // SETTINGS_QPACK_BLOCKED_STREAMS value; exceeding it is a connection error
+        // of type QPACK_DECOMPRESSION_FAILED (Error::Decompression here).
+        const BLOCKING_HEADER_BLOCK: &[u8] = &[0x02, 0x80, 0x10];
+
+        let mut decoder = Decoder::new(&Settings {
+            max_table_size_encoder: 0,
+            max_table_size_decoder: 300,
+            max_blocked_streams: 1,
+            max_tracked_streams: 4096,
+        });
+        // One blocked stream is within the advertised limit.
+        assert!(
+            decoder
+                .decode_header_block(BLOCKING_HEADER_BLOCK, StreamId::new(0))
+                .unwrap()
+                .is_none()
+        );
+        // A second, distinct stream is one more than advertised.
+        assert!(
+            decoder
+                .decode_header_block(BLOCKING_HEADER_BLOCK, StreamId::new(4))
+                .is_err()
+        );
+
+        // A limit of zero leaves no room for any blocked stream.
+        let mut decoder = Decoder::new(&Settings {
+            max_table_size_encoder: 0,
+            max_table_size_decoder: 300,
+            max_blocked_streams: 0,
+            max_tracked_streams: 4096,
+        });
+        assert!(
+            decoder
+                .decode_header_block(BLOCKING_HEADER_BLOCK, StreamId::new(0))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn duplicate_recv_stream() {
+        let mut decoder = Decoder::new(&Settings::default());
+        decoder.add_recv_stream(StreamId::new(3)).unwrap();
+        assert_eq!(
+            decoder.add_recv_stream(StreamId::new(7)),
+            Err(Error::Internal)
+        );
+    }
+
+    /// A missing registration must not be blamed on the peer as a stream error.
+    #[test]
+    fn map_error_covers_all_arms() {
+        assert_eq!(map_error(Error::Internal), Error::Internal);
+        assert_eq!(
+            map_error(Error::ClosedCriticalStream),
+            Error::ClosedCriticalStream
+        );
+        assert_eq!(map_error(Error::ChangeCapacity), Error::EncoderStream);
     }
 }

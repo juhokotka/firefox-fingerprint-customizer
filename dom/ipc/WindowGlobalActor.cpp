@@ -26,17 +26,6 @@
 
 namespace mozilla::dom {
 
-// CORPP 3.1.3 https://mikewest.github.io/corpp/#integration-html
-static nsILoadInfo::CrossOriginEmbedderPolicy InheritedPolicy(
-    dom::BrowsingContext* aBrowsingContext) {
-  WindowContext* inherit = aBrowsingContext->GetParentWindowContext();
-  if (inherit) {
-    return inherit->GetEmbedderPolicy();
-  }
-
-  return nsILoadInfo::EMBEDDER_POLICY_NULL;
-}
-
 // Common WindowGlobalInit creation code used by both `AboutBlankInitializer`
 // and `WindowInitializer`.
 WindowGlobalInit WindowGlobalActor::BaseInitializer(
@@ -44,23 +33,29 @@ WindowGlobalInit WindowGlobalActor::BaseInitializer(
     uint64_t aOuterWindowId) {
   MOZ_DIAGNOSTIC_ASSERT(aBrowsingContext);
 
-  using Indexes = WindowContext::FieldIndexes;
-
   WindowGlobalInit init;
   auto& ctx = init.context();
   ctx.mInnerWindowId = aInnerWindowId;
   ctx.mOuterWindowId = aOuterWindowId;
   ctx.mBrowsingContextId = aBrowsingContext->Id();
-
-  // If any synced fields need to be initialized from our BrowsingContext, we
-  // can initialize them here.
-  auto& fields = ctx.mFields;
-  fields.Get<Indexes::IDX_EmbedderPolicy>() = InheritedPolicy(aBrowsingContext);
-  fields.Get<Indexes::IDX_AutoplayPermission>() =
-      nsIPermissionManager::UNKNOWN_ACTION;
-  fields.Get<Indexes::IDX_AllowJavascript>() = true;
-  fields.Get<Indexes::IDX_IsFramebustingAllowed>() = aBrowsingContext->IsTop();
+  ctx.mFields = ComputeInitialFields(aBrowsingContext);
   return init;
+}
+
+/* static */
+WindowContext::FieldValues WindowGlobalActor::ComputeInitialFields(
+    dom::BrowsingContext* aBrowsingContext) {
+  MOZ_DIAGNOSTIC_ASSERT(aBrowsingContext);
+
+  WindowContext::FieldValues fields;
+  if (WindowContext* parent = aBrowsingContext->GetParentWindowContext()) {
+    // CORPP 3.1.3 https://mikewest.github.io/corpp/#integration-html
+    fields.Get<WindowContext::IDX_EmbedderPolicy>() =
+        parent->GetEmbedderPolicy();
+  }
+  fields.Get<WindowContext::IDX_IsFramebustingAllowed>() =
+      aBrowsingContext->IsTop();
+  return fields;
 }
 
 WindowGlobalInit WindowGlobalActor::AboutBlankInitializer(
@@ -74,10 +69,11 @@ WindowGlobalInit WindowGlobalActor::AboutBlankInitializer(
                       nsContentUtils::GenerateWindowId());
 
   init.principal() = aPrincipal;
-  init.storagePrincipal() = aPrincipal;
+  init.partitionedPrincipal() = aPrincipal;
   (void)NS_NewURI(getter_AddRefs(init.documentURI()), "about:blank");
   init.isInitialDocument() = true;
   init.isUncommittedInitialDocument() = true;
+  init.partitionStoragePrincipal() = false;
 
   return init;
 }
@@ -89,8 +85,11 @@ WindowGlobalInit WindowGlobalActor::WindowInitializer(
                       aWindow->GetOuterWindow()->WindowID());
 
   init.principal() = aWindow->GetPrincipal();
-  init.storagePrincipal() = aWindow->GetEffectiveStoragePrincipal();
+  init.partitionedPrincipal() = aWindow->PartitionedPrincipal();
   init.documentURI() = aWindow->GetDocumentURI();
+
+  MOZ_RELEASE_ASSERT(VerifyPartitionedPrincipalMatchesDocumentPrincipal(
+      init.principal(), init.partitionedPrincipal()));
 
   Document* doc = aWindow->GetDocument();
 
@@ -103,6 +102,7 @@ WindowGlobalInit WindowGlobalActor::WindowInitializer(
       doc->MediaDocumentKind() == Document::MediaDocumentKind::Video;
   init.blockAllMixedContent() = doc->GetBlockAllMixedContent(false);
   init.upgradeInsecureRequests() = doc->GetUpgradeInsecureRequests(false);
+  init.partitionStoragePrincipal() = !doc->UseRegularPrincipal();
   init.sandboxFlags() = doc->GetSandboxFlags();
   net::CookieJarSettings::Cast(doc->CookieJarSettings())
       ->Serialize(init.cookieJarSettings());
@@ -176,6 +176,31 @@ WindowGlobalInit WindowGlobalActor::WindowInitializer(
   // description should also be synchronized in
   // WindowGlobalChild::OnNewDocument.
   return init;
+}
+
+bool WindowGlobalActor::VerifyPartitionedPrincipalMatchesDocumentPrincipal(
+    nsIPrincipal* aPrincipal, nsIPrincipal* aPartitionedPrincipal) {
+  if (!aPrincipal || !aPartitionedPrincipal) {
+    return false;
+  }
+
+  // OAs must match, with an exemption for the partition key.
+  if (!aPrincipal->OriginAttributesRef().EqualsIgnoringPartitionKey(
+          aPartitionedPrincipal->OriginAttributesRef())) {
+    return false;
+  }
+
+  // The document principal shouldn't have a partition key set.
+  if (!aPrincipal->OriginAttributesRef().mPartitionKey.IsEmpty()) {
+    return false;
+  }
+
+  // The rest of the origin must perfectly match.
+  nsCString noSuffix, partitionedNoSuffix;
+  MOZ_ALWAYS_SUCCEEDS(aPrincipal->GetOriginNoSuffix(noSuffix));
+  MOZ_ALWAYS_SUCCEEDS(
+      aPartitionedPrincipal->GetOriginNoSuffix(partitionedNoSuffix));
+  return noSuffix == partitionedNoSuffix;
 }
 
 already_AddRefed<JSActorProtocol> WindowGlobalActor::MatchingJSActorProtocol(

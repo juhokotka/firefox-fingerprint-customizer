@@ -5,14 +5,14 @@
 #ifndef mozilla_BufferList_h
 #define mozilla_BufferList_h
 
-#include "mozilla/Assertions.h"
-#include "mozilla/MemoryReporting.h"
-#include "mozilla/Vector.h"
-
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <utility>
+
+#include "mozilla/Assertions.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/Vector.h"
 #ifdef DEBUG
 #  include <type_traits>
 #endif
@@ -156,7 +156,13 @@ class BufferList : private AllocPolicy {
     return size;
   }
 
+#ifdef DEBUG
+  bool isStorageConsistent() const { return mSegments.isStorageConsistent(); }
+#endif
+
   void Clear() {
+    MOZ_ASSERT(isStorageConsistent());
+
     if (mOwning) {
       for (Segment& segment : mSegments) {
         this->free_(segment.mData, segment.mCapacity);
@@ -369,7 +375,7 @@ class BufferList : private AllocPolicy {
   [[nodiscard]] bool WriteBytesZeroCopy(char* aData, size_t aSize,
                                         size_t aCapacity) {
     MOZ_ASSERT(mOwning);
-    MOZ_ASSERT(aSize <= aCapacity);
+    MOZ_RELEASE_ASSERT(aSize <= aCapacity);
 
     // Don't create zero-length segments; that can cause problems for
     // consumers of the data (bug 1595453).
@@ -458,6 +464,7 @@ char* BufferList<AllocPolicy>::AllocateBytes(size_t aMaxSize, size_t* aSize) {
   if (!mSegments.empty()) {
     Segment& lastSegment = mSegments.back();
 
+    MOZ_RELEASE_ASSERT(lastSegment.mCapacity >= lastSegment.mSize);
     size_t capacity = lastSegment.mCapacity - lastSegment.mSize;
     if (capacity) {
       size_t size = std::min(aMaxSize, capacity);

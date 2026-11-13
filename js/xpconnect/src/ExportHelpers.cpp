@@ -2,24 +2,27 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "xpcprivate.h"
-#include "WrapperFactory.h"
-#include "AccessCheck.h"
-#include "jsfriendapi.h"
-#include "js/CallAndConstruct.h"  // JS::IsConstructor, JS::Call, JS::Construct, JS::IsCallable
-#include "js/Exception.h"
-#include "js/PropertyAndElement.h"  // JS_DefineProperty, JS_DefinePropertyById
-#include "js/Proxy.h"
-#include "js/Wrapper.h"
-#include "mozilla/ErrorResult.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/BlobImpl.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/StructuredCloneHolder.h"
+#include "mozilla/ErrorResult.h"
+
+#include "AccessCheck.h"
+#include "jsapi.h"
+#include "jsfriendapi.h"
 #include "nsContentUtils.h"
 #include "nsJSUtils.h"
-#include "js/Object.h"  // JS::GetCompartment
+#include "WrapperFactory.h"
+#include "xpcprivate.h"
+
+#include "js/CallAndConstruct.h"  // JS::IsConstructor, JS::Call, JS::Construct, JS::IsCallable
+#include "js/Exception.h"
+#include "js/Object.h"              // JS::GetCompartment
+#include "js/PropertyAndElement.h"  // JS_DefineProperty, JS_DefinePropertyById
+#include "js/Proxy.h"
+#include "js/Wrapper.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -501,13 +504,13 @@ bool ExportFunction(JSContext* cx, HandleValue vfunction, HandleValue vscope,
       if (!funName) {
         funName = JS_GetEmptyString(cx);
       }
-      JS_MarkCrossZoneIdValue(cx, StringValue(funName));
 
       if (!JS_StringToId(cx, funName, &id)) {
         return false;
       }
-    } else {
-      JS_MarkCrossZoneId(cx, id);
+    }
+    if (!JS_WrapId(cx, &id)) {
+      return false;
     }
 
     if (!id.isString()) {
@@ -576,7 +579,9 @@ bool CreateObjectIn(JSContext* cx, HandleValue vobj,
   RootedObject obj(cx);
   {
     JSAutoRealm ar(cx, scope);
-    JS_MarkCrossZoneId(cx, options.defineAs);
+    if (!JS_WrapId(cx, &options.defineAs)) {
+      return false;
+    }
 
     obj = JS_NewPlainObject(cx);
     if (!obj) {

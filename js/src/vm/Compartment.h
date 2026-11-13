@@ -116,9 +116,9 @@ class ObjectWrapperMap {
   class Ptr : public InnerMap::Ptr {
     friend class ObjectWrapperMap;
 
-    InnerMap* map;
+    InnerMap* map{nullptr};
 
-    Ptr() : map(nullptr) {}
+    Ptr() = default;
     Ptr(const InnerMap::Ptr& p, InnerMap& m) : InnerMap::Ptr(p), map(&m) {}
   };
 
@@ -409,11 +409,8 @@ class JS::Compartment {
    * dangling (full GCs naturally follow pointers across compartments) and
    * when compacting to update cross-compartment pointers.
    */
-  enum EdgeSelector { AllEdges, NonGrayEdges, GrayEdges, BlackEdges };
   void traceWrapperTargetsInCollectedZones(JSTracer* trc,
-                                           EdgeSelector whichEdges);
-  static void traceIncomingCrossCompartmentEdgesForZoneGC(
-      JSTracer* trc, EdgeSelector whichEdges);
+                                           js::gc::EdgeSelector whichEdges);
 
   void sweepRealms(JS::GCContext* gcx, bool keepAtleastOne,
                    bool destroyingRuntime);

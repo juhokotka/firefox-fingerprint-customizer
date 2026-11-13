@@ -13,17 +13,17 @@
 
 #include "vm/BuiltinObjectKind.h"
 #include "vm/CheckIsObjectKind.h"  // CheckIsObjectKind
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-#  include "vm/ErrorObject.h"
-#  include "vm/UsingHint.h"
-#endif
+#include "vm/ErrorObject.h"
+#include "vm/GeneratorResumeKind.h"  // GeneratorResumeKind
 #include "vm/Stack.h"
+#include "vm/UsingHint.h"
 
 namespace js {
 
 class WithScope;
 class EnvironmentIter;
 class PlainObject;
+class AbstractGeneratorObject;
 
 /*
  * Convert null/undefined |thisv| into the global lexical's |this| object, and
@@ -221,13 +221,14 @@ extern bool Execute(JSContext* cx, HandleScript script, HandleObject envChain,
 
 class ExecuteState;
 class InvokeState;
+class GeneratorResumeState;
 
 // RunState is passed to RunScript and RunScript then either passes it to the
 // interpreter or to the JITs. RunState contains all information we need to
 // construct an interpreter or JIT frame.
 class MOZ_RAII RunState {
  protected:
-  enum Kind { Execute, Invoke };
+  enum Kind { Execute, Invoke, GeneratorResume };
   Kind kind_;
 
   RootedScript script_;
@@ -238,6 +239,7 @@ class MOZ_RAII RunState {
  public:
   bool isExecute() const { return kind_ == Execute; }
   bool isInvoke() const { return kind_ == Invoke; }
+  bool isGeneratorResume() const { return kind_ == GeneratorResume; }
 
   ExecuteState* asExecute() const {
     MOZ_ASSERT(isExecute());
@@ -246,6 +248,10 @@ class MOZ_RAII RunState {
   InvokeState* asInvoke() const {
     MOZ_ASSERT(isInvoke());
     return (InvokeState*)this;
+  }
+  GeneratorResumeState* asGeneratorResume() const {
+    MOZ_ASSERT(isGeneratorResume());
+    return (GeneratorResumeState*)this;
   }
 
   JS::HandleScript script() const { return script_; }
@@ -301,11 +307,34 @@ class MOZ_RAII InvokeState final : public RunState {
   void setReturnValue(const Value& v) { args_.rval().set(v); }
 };
 
+// Used to resume a suspended generator or async function/module.
+class MOZ_RAII GeneratorResumeState final : public RunState {
+  Handle<AbstractGeneratorObject*> genObj_;
+  HandleValue resumeValue_;
+  GeneratorResumeKind resumeKind_;
+  MutableHandleValue result_;
+
+ public:
+  GeneratorResumeState(JSContext* cx, Handle<AbstractGeneratorObject*> genObj,
+                       HandleValue resumeValue, GeneratorResumeKind resumeKind,
+                       MutableHandleValue result);
+
+  Handle<AbstractGeneratorObject*> generator() const { return genObj_; }
+  HandleValue resumeValue() const { return resumeValue_; }
+  GeneratorResumeKind resumeKind() const { return resumeKind_; }
+
+  InterpreterFrame* pushInterpreterFrame(JSContext* cx);
+
+  void setReturnValue(const Value& v) { result_.set(v); }
+};
+
 inline void RunState::setReturnValue(const Value& v) {
   if (isInvoke()) {
     asInvoke()->setReturnValue(v);
-  } else {
+  } else if (isExecute()) {
     asExecute()->setReturnValue(v);
+  } else {
+    asGeneratorResume()->setReturnValue(v);
   }
 }
 
@@ -347,83 +376,6 @@ class MOZ_STACK_CLASS BaseTryNoteIter {
   void settle() {
     for (; tn_ != tnEnd_; ++tn_) {
       if (!pcInRange()) {
-        continue;
-      }
-
-      /*  Try notes cannot be disjoint. That is, we can't have
-       *  multiple notes with disjoint pc ranges jumping to the same
-       *  catch block. This interacts awkwardly with for-of loops, in
-       *  which calls to IteratorClose emitted due to abnormal
-       *  completion (break, throw, return) are emitted inline, at the
-       *  source location of the break, throw, or return
-       *  statement. For example:
-       *
-       *      for (x of iter) {
-       *        try { return; } catch (e) { }
-       *      }
-       *
-       *  From the try-note nesting's perspective, the IteratorClose
-       *  resulting from |return| is covered by the inner try, when it
-       *  should not be. If IteratorClose throws, we don't want to
-       *  catch it here.
-       *
-       *  To make this work, we use TryNoteKind::ForOfIterClose try-notes,
-       *  which cover the range of the abnormal completion. When
-       *  looking up trynotes, a for-of iterclose note indicates that
-       *  the enclosing for-of has just been terminated. As a result,
-       *  trynotes within that for-of are no longer active. When we
-       *  see a for-of-iterclose, we skip ahead in the trynotes list
-       *  until we see the matching for-of.
-       *
-       *  Breaking out of multiple levels of for-of at once is handled
-       *  using nested TryNoteKind::ForOfIterClose try-notes. Consider this
-       * code:
-       *
-       *  try {
-       *    loop: for (i of first) {
-       *      <A>
-       *      for (j of second) {
-       *        <B>
-       *        break loop; // <C1/2>
-       *      }
-       *    }
-       *  } catch {...}
-       *
-       *  Here is the mapping from various PCs to try-notes that we
-       *  want to return:
-       *
-       *        A     B     C1     C2
-       *        |     |     |      |
-       *        |     |     |  [---|---]     ForOfIterClose (outer)
-       *        |     | [---|------|---]     ForOfIterClose (inner)
-       *        |  [--X-----|------|----]    ForOf (inner)
-       *    [---X-----------X------|-----]   ForOf (outer)
-       *  [------------------------X------]  TryCatch
-       *
-       *  - At A, we find the outer for-of.
-       *  - At B, we find the inner for-of.
-       *  - At C1, we find one TryNoteKind::ForOfIterClose, skip past one
-       *    TryNoteKind::ForOf, and find the outer for-of. (This occurs if an
-       *    exception is thrown while closing the inner iterator.)
-       *  - At C2, we find two TryNoteKind::ForOfIterClose, skip past two
-       *    TryNoteKind::ForOf, and reach the outer try-catch. (This occurs if
-       *    an exception is thrown while closing the outer iterator.)
-       */
-      if (tn_->kind() == TryNoteKind::ForOfIterClose) {
-        uint32_t iterCloseDepth = 1;
-        do {
-          ++tn_;
-          MOZ_ASSERT(tn_ != tnEnd_);
-          if (pcInRange()) {
-            if (tn_->kind() == TryNoteKind::ForOfIterClose) {
-              iterCloseDepth++;
-            } else if (tn_->kind() == TryNoteKind::ForOf) {
-              iterCloseDepth--;
-            }
-          }
-        } while (iterCloseDepth > 0);
-
-        // Advance to trynote following the enclosing for-of.
         continue;
       }
 
@@ -516,9 +468,6 @@ class MOZ_STACK_CLASS TryNoteIterAllNoGC
   TryNoteIterAllNoGC(JSScript* script, jsbytecode* pc)
       : Base(script, pc, NoOpTryNoteFilter()) {}
 };
-
-bool HandleClosingGeneratorReturn(JSContext* cx, AbstractFramePtr frame,
-                                  bool ok);
 
 /************************************************************************/
 
@@ -645,7 +594,6 @@ bool OptimizeSpreadCall(JSContext* cx, HandleValue arg,
 
 bool OptimizeGetIterator(Value arg, JSContext* cx);
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
 enum class SyncDisposalClosureSlots : uint8_t {
   Method,
 };
@@ -658,7 +606,6 @@ bool AddDisposableResourceToCapability(JSContext* cx, JS::Handle<JSObject*> env,
                                        JS::Handle<JS::Value> val,
                                        JS::Handle<JS::Value> method,
                                        bool needsClosure, UsingHint hint);
-#endif
 
 ArrayObject* ArrayFromArgumentsObject(JSContext* cx,
                                       Handle<ArgumentsObject*> args);

@@ -487,6 +487,24 @@
 #endif
 
 /**
+ * MOZ_LIFETIME_CAPTURE_BY_THIS is the equivalent of
+ * MOZ_LIFETIME_CAPTURE_BY(this). It needs to be spelled differently because
+ * clang 23 deprecated passing `this` to lifetime_capture_by in favor of the
+ * dedicated lifetime_capture_by_this attribute.
+ */
+#if defined(__clang__) && defined(__has_cpp_attribute)
+#  if __has_cpp_attribute(clang::lifetime_capture_by_this)
+#    define MOZ_LIFETIME_CAPTURE_BY_THIS [[clang::lifetime_capture_by_this]]
+#  elif __has_cpp_attribute(clang::lifetime_capture_by)
+#    define MOZ_LIFETIME_CAPTURE_BY_THIS [[clang::lifetime_capture_by(this)]]
+#  else
+#    define MOZ_LIFETIME_CAPTURE_BY_THIS /* nothing */
+#  endif
+#else
+#  define MOZ_LIFETIME_CAPTURE_BY_THIS /* nothing */
+#endif
+
+/**
  * MOZ_REINITIALIZES tells static analyser that a call to the associated
  * method leave it in an initialized state, typically after a std::move.
  */
@@ -858,6 +876,19 @@
  *   Suppresses the EnumSerializer checker warning about the min template
  *   argument not matching the first (lowest-valued) enumerator. Use when
  *   deliberately excluding lower enumerators from being serialized.
+ * MOZ_BINDING(direction, language, kind, symbol): Applies to items which are a
+ *   binding to or bound from the item described by symbol in the target
+ *   language. This is used by the Mozsearch Clang plugin for cross-language
+ *   analysis.
+ *
+ *   Arguments are:
+ *   - direction: binding_to or bound_as
+ *   - language: cpp, java or idl
+ *   - kind: class, method, getter, setter or const
+ *   - symbol: the expected Mozsearch symbol
+ *
+ *   See build/clang-plugin/mozsearch-plugin/BindingOperations.cpp for more
+ *   details.
  */
 
 // gcc emits a nuisance warning -Wignored-attributes because attributes do not
@@ -955,18 +986,22 @@
 #      define MOZ_RUNINIT __attribute__((annotate("moz_global_var")))
 #      define MOZ_GLOBINIT \
         MOZ_RUNINIT __attribute__((annotate("moz_generated")))
+#      define MOZ_BINDING(direction, language, kind, symbol) \
+        __attribute__((annotate(#direction, #language, #kind, #symbol)))
 #    else
-#      define MOZ_UNANNOTATED /* nothing */
-#      define MOZ_ANNOTATED   /* nothing */
-#      define MOZ_RUNINIT     /* nothing */
-#      define MOZ_GLOBINIT    /* nothing */
+#      define MOZ_UNANNOTATED  /* nothing */
+#      define MOZ_ANNOTATED    /* nothing */
+#      define MOZ_RUNINIT      /* nothing */
+#      define MOZ_GLOBINIT     /* nothing */
+#      define MOZ_BINDING(...) /* nothing */
 #    endif
 
 /*
  * Should be constinit per C++20 standard, but we sometimes link with an older
  * libstdc++
  */
-#    if defined(__GLIBCXX__) && (__GLIBCXX__ <= 20230707)
+#    if defined(__GLIBCXX__) && (__cpp_lib_constexpr_string < 201907L || \
+                                 __cpp_lib_constexpr_vector < 201907L)
 #      define MOZ_GLIBCXX_CONSTINIT MOZ_RUNINIT
 #    else
 #      define MOZ_GLIBCXX_CONSTINIT constinit
@@ -993,6 +1028,7 @@
 #    define MOZ_STATIC_CLASS                                /* nothing */
 #    define MOZ_RUNINIT                                     /* nothing */
 #    define MOZ_GLOBINIT                                    /* nothing */
+#    define MOZ_BINDING(...)                                /* nothing */
 #    define MOZ_GLIBCXX_CONSTINIT                           /* nothing */
 #    define MOZ_RELEASE_CONSTINIT                           /* nothing */
 #    define MOZ_STATIC_LOCAL_CLASS                          /* nothing */

@@ -5,15 +5,17 @@
 #ifndef js_loader_ModuleLoadRequest_h
 #define js_loader_ModuleLoadRequest_h
 
-#include "LoadContextBase.h"
-#include "ScriptLoadRequest.h"
-#include "ModuleLoaderBase.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/HoldDropJSObjects.h"
+
+#include "LoadContextBase.h"
+#include "ModuleLoaderBase.h"
+#include "nsTHashtable.h"
+#include "nsURIHashKey.h"
+#include "ScriptLoadRequest.h"
+
 #include "js/RootingAPI.h"
 #include "js/Value.h"
-#include "nsURIHashKey.h"
-#include "nsTHashtable.h"
 
 namespace JS::loader {
 
@@ -55,6 +57,8 @@ class ModuleLoadRequest final : public ScriptLoadRequest {
   bool IsStaticImport() const { return mKind == Kind::StaticImport; }
   bool IsDynamicImport() const { return mKind == Kind::DynamicImport; }
 
+  bool IsSourcePhaseRequest(JSContext* aCx) const;
+
   bool IsErrored() const;
 
   nsIGlobalObject* GetGlobalObject();
@@ -62,13 +66,17 @@ class ModuleLoadRequest final : public ScriptLoadRequest {
   void SetReady() override;
   void Cancel() override { mLoader->Cancel(this); };
 
-  void SetImport(Handle<JSScript*> aReferrerScript,
-                 Handle<JSObject*> aModuleRequestObj, Handle<Value> aPayload);
+  void SetImport(Handle<Value> aReferrer, Handle<JSObject*> aModuleRequestObj,
+                 Handle<Value> aPayload);
   void ClearImport();
 
   void ModuleLoaded();
   void ModuleErrored();
-  void LoadFailed();
+
+  // Tells the load context that this request stopped waiting on an in-progress
+  // fetch of the same URL. Must be called whenever that happens, whether the
+  // fetch resolved or was canceled.
+  void NotifyModuleWaitFinished();
 
   ModuleLoadRequest* GetRootModule() {
     if (!mRootModule) {
@@ -90,9 +98,7 @@ class ModuleLoadRequest final : public ScriptLoadRequest {
 #endif
   nsresult StartModuleLoad() { return mLoader->StartModuleLoad(this); }
   nsresult RestartModuleLoad() { return mLoader->RestartModuleLoad(this); }
-  nsresult OnFetchComplete(nsresult aRv) {
-    return mLoader->OnFetchComplete(this, aRv);
-  }
+  void OnFetchComplete(nsresult aRv) { mLoader->OnFetchComplete(this, aRv); }
   bool InstantiateModuleGraph() {
     return mLoader->InstantiateModuleGraph(this);
   }
@@ -112,6 +118,8 @@ class ModuleLoadRequest final : public ScriptLoadRequest {
     MOZ_ASSERT(IsFetching() || IsCompiling());
     mErroredLoadingImports = true;
   }
+
+  bool IsErroredLoadingImports() const { return mErroredLoadingImports; }
 
   void UpdateReferrerPolicy(mozilla::dom::ReferrerPolicy aReferrerPolicy) {
     FetchInfo()->UpdateReferrerPolicy(aReferrerPolicy);
@@ -148,7 +156,9 @@ class ModuleLoadRequest final : public ScriptLoadRequest {
   // failure.
   RefPtr<ModuleScript> mModuleScript;
 
-  Heap<JSScript*> mReferrerScript;
+  // The referrer value passed to the HostLoadImportedModule hook, to be passed
+  // back to FinishLoadingImportedModule.
+  Heap<Value> mReferrerValue;
   Heap<JSObject*> mModuleRequestObj;
   Heap<Value> mPayload;
 };

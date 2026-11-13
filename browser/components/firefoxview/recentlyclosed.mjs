@@ -18,7 +18,8 @@ import "chrome://browser/content/firefoxview/fxview-tab-list.mjs";
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
   AppConstants: "resource://gre/modules/AppConstants.sys.mjs",
 });
 
@@ -164,8 +165,9 @@ class RecentlyClosedTabsInView extends ViewPage {
   }
 
   updateRecentlyClosedTabs() {
-    let recentlyClosedTabsData =
-      lazy.SessionStore.getClosedTabData(getWindow());
+    let recentlyClosedTabsData = lazy.SessionStore.getClosedTabData({
+      sourceWindow: getWindow(),
+    });
     if (Services.prefs.getBoolPref(INCLUDE_CLOSED_TABS_FROM_CLOSED_WINDOWS)) {
       recentlyClosedTabsData.push(
         ...lazy.SessionStore.getClosedTabDataFromClosedWindows()
@@ -306,14 +308,20 @@ class RecentlyClosedTabsInView extends ViewPage {
   }
 
   emptyMessageTemplate() {
+    const nova = Services.prefs.getBoolPref("browser.nova.enabled", false);
     let descriptionHeader;
     let descriptionLabels;
     let descriptionLink;
+
     if (Services.prefs.getBoolPref(NEVER_REMEMBER_HISTORY_PREF, false)) {
       // History pref set to never remember history
-      descriptionHeader = "firefoxview-dont-remember-history-empty-header-2";
+      descriptionHeader = nova
+        ? "firefoxview-dont-remember-history-empty-header-3"
+        : "firefoxview-dont-remember-history-empty-header-2";
       descriptionLabels = [
-        "firefoxview-dont-remember-history-empty-description-one",
+        nova
+          ? "firefoxview-dont-remember-history-empty-description-2"
+          : "firefoxview-dont-remember-history-empty-description-one",
       ];
       descriptionLink = {
         url: "about:preferences#privacy",
@@ -331,6 +339,9 @@ class RecentlyClosedTabsInView extends ViewPage {
         sameTarget: "true",
       };
     }
+    let asset = nova
+      ? "chrome://browser/skin/sidebar/kit-page-history.svg"
+      : "chrome://browser/content/firefoxview/history-empty.svg";
     return html`
       <fxview-empty-state
         headerLabel=${descriptionHeader}
@@ -339,7 +350,7 @@ class RecentlyClosedTabsInView extends ViewPage {
         class="empty-state recentlyclosed"
         ?isInnerCard=${this.recentBrowsing}
         ?isSelectedTab=${this.selectedTab}
-        mainImageUrl="chrome://browser/content/firefoxview/history-empty.svg"
+        mainImageUrl=${asset}
       >
       </fxview-empty-state>
     `;

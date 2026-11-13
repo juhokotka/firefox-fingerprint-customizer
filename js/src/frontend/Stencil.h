@@ -670,7 +670,7 @@ class StencilModuleEntry {
  public:
   // clang-format off
   //
-  // (+/- = required/null, ns = *namespace*, abd = *all-but-default*,
+  // (+/- = required/null, ns = *namespace*, all = *all star exports*,
   //  src = *source*)
   //
   //                     | moduleRequest | localName | importName | exportName |
@@ -679,13 +679,20 @@ class StencilModuleEntry {
   // ImportEntry         | +             | +         | +/ns/src   | -          |
   // ExportAs            | -             | +         | -          | +          |
   // ExportFrom          | +             | -         | +/ns       | +          |
-  // ExportBatchFrom     | +             | -         | abd        | -          |
+  // ExportBatchFrom     | +             | -         | all        | -          |
+  //
+  // The ns/src/all forms above are recorded by importNameValueType. The all form
+  // represents `export * from` and includes the default export when the export
+  // star default preference is enabled; otherwise it preserves the historical
+  // all-but-default behavior. importName is null when importNameValueType is
+  // not String.
   //
   // clang-format on
   MaybeModuleRequestIndex moduleRequest;
   TaggedParserAtomIndex localName;
   TaggedParserAtomIndex importName;
   TaggedParserAtomIndex exportName;
+  js::ImportNameValueType importNameValueType = js::ImportNameValueType::String;
 
   // Location used for error messages. If this is for a module request entry
   // then it is the module specifier string, otherwise the import/export spec
@@ -715,6 +722,7 @@ class StencilModuleEntry {
         localName(other.localName),
         importName(other.importName),
         exportName(other.exportName),
+        importNameValueType(other.importNameValueType),
         lineno(other.lineno),
         column(other.column) {}
 
@@ -725,6 +733,7 @@ class StencilModuleEntry {
     localName = other.localName;
     importName = other.importName;
     exportName = other.exportName;
+    importNameValueType = other.importNameValueType;
     lineno = other.lineno;
     column = other.column;
     return *this;
@@ -739,17 +748,22 @@ class StencilModuleEntry {
     return entry;
   }
 
-  static StencilModuleEntry importEntry(MaybeModuleRequestIndex moduleRequest,
-                                        TaggedParserAtomIndex localName,
-                                        TaggedParserAtomIndex importName,
-                                        uint32_t lineno,
-                                        JS::ColumnNumberOneOrigin column) {
+  static StencilModuleEntry importEntry(
+      MaybeModuleRequestIndex moduleRequest, TaggedParserAtomIndex localName,
+      TaggedParserAtomIndex importName,
+      js::ImportNameValueType importNameValueType, uint32_t lineno,
+      JS::ColumnNumberOneOrigin column) {
     MOZ_ASSERT(moduleRequest.isSome());
-    MOZ_ASSERT(localName && importName);
+    MOZ_ASSERT(localName);
+    MOZ_ASSERT_IF(importNameValueType != js::ImportNameValueType::String,
+                  !importName);
+    MOZ_ASSERT_IF(importNameValueType == js::ImportNameValueType::String,
+                  importName);
     StencilModuleEntry entry(lineno, column);
     entry.moduleRequest = moduleRequest;
     entry.localName = localName;
     entry.importName = importName;
+    entry.importNameValueType = importNameValueType;
     return entry;
   }
 
@@ -766,14 +780,20 @@ class StencilModuleEntry {
 
   static StencilModuleEntry exportFromEntry(
       MaybeModuleRequestIndex moduleRequest, TaggedParserAtomIndex importName,
-      TaggedParserAtomIndex exportName, uint32_t lineno,
+      TaggedParserAtomIndex exportName,
+      js::ImportNameValueType importNameValueType, uint32_t lineno,
       JS::ColumnNumberOneOrigin column) {
     MOZ_ASSERT(moduleRequest.isSome());
-    MOZ_ASSERT(importName && exportName);
+    MOZ_ASSERT(exportName);
+    MOZ_ASSERT_IF(importNameValueType != js::ImportNameValueType::String,
+                  !importName);
+    MOZ_ASSERT_IF(importNameValueType == js::ImportNameValueType::String,
+                  importName);
     StencilModuleEntry entry(lineno, column);
     entry.moduleRequest = moduleRequest;
     entry.importName = importName;
     entry.exportName = exportName;
+    entry.importNameValueType = importNameValueType;
     return entry;
   }
 
@@ -783,8 +803,7 @@ class StencilModuleEntry {
     MOZ_ASSERT(moduleRequest.isSome());
     StencilModuleEntry entry(lineno, column);
     entry.moduleRequest = MaybeModuleRequestIndex(moduleRequest);
-    entry.importName =
-        TaggedParserAtomIndex::WellKnown::star_all_but_default_star_();
+    entry.importNameValueType = js::ImportNameValueType::All;
     return entry;
   }
 };
@@ -980,9 +999,7 @@ class TaggedScriptThingIndex {
 
   Kind tag() const { return Kind((data_ & TagMask) >> TagShift); }
 
-  bool operator==(const TaggedScriptThingIndex& rhs) const {
-    return data_ == rhs.data_;
-  }
+  bool operator==(const TaggedScriptThingIndex& rhs) const = default;
 };
 
 // Data generated by frontend that will be used to create a js::BaseScript.

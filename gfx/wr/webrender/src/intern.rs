@@ -38,7 +38,7 @@ use malloc_size_of::MallocSizeOf;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
-use std::{ops, u64};
+use std::ops;
 use crate::util::VecHelper;
 use crate::profiler::TransactionProfile;
 use peek_poke::PeekPoke;
@@ -106,6 +106,15 @@ impl ItemUid {
     // Intended for debug usage only
     pub fn get_uid(&self) -> u64 {
         self.uid
+    }
+
+    /// Wrap an id from a counter the caller guarantees is unique, for interning
+    /// schemes that mint their own rather than deriving one from a handle.
+    /// `Handle::uid` packs an index and an epoch, which only works because one
+    /// interner owns the whole index space; see `DlStore::uid` for a scheme that
+    /// cannot make that assumption.
+    pub fn from_counter(id: u64) -> Self {
+        ItemUid { uid: id }
     }
 }
 
@@ -182,12 +191,16 @@ impl<I: Internable> Default for DataStore<I> {
 
 impl<I: Internable> DataStore<I> {
     /// Apply any updates from the scene builder thread to
-    /// this data store.
+    /// this data store. Returns the (insertion, removal) counts, which the
+    /// caller aggregates across every interner into `INTERN_INSERTIONS` /
+    /// `INTERN_REMOVALS`.
     pub fn apply_updates(
         &mut self,
         update_list: UpdateList<I::Key>,
         profile: &mut TransactionProfile,
-    ) {
+    ) -> (usize, usize) {
+        let counts = (update_list.insertions.len(), update_list.removals.len());
+
         for insertion in update_list.insertions {
             self.items
                 .entry(insertion.index)
@@ -199,6 +212,8 @@ impl<I: Internable> DataStore<I> {
         }
 
         profile.set(I::PROFILE_COUNTER, self.items.len());
+
+        counts
     }
 }
 
@@ -339,6 +354,12 @@ impl<I: Internable> Interner<I> {
         handle
     }
 
+    /// Retrieve the pending list of updates without running a GC step or
+    /// advancing the epoch.
+    pub fn take_pending_updates(&mut self) -> UpdateList<I::Key> {
+        self.update_list.take_and_preallocate()
+    }
+
     /// Retrieve the pending list of updates for an interner
     /// that need to be applied to the data store. Also run
     /// a GC step that removes old entries.
@@ -377,6 +398,29 @@ impl<I: Internable> Interner<I> {
 
         update_list
     }
+
+    /// Ensure that `store` has an entry for every item currently interned.
+    ///
+    /// The interner (scene builder thread) and the data store (render backend
+    /// thread) are serialized independently and at slightly different points
+    /// when saving a capture. As a result the data store snapshot can lag the
+    /// interner by a scene build: an item interned on the last frame is present
+    /// in the interner's map but its insertion hasn't been applied to the saved
+    /// data store yet. When such a capture is loaded and the scene is rebuilt,
+    /// re-interning that item returns the existing handle without emitting a new
+    /// insertion, leaving the data store slot empty. Reconstruct the missing
+    /// slots from the interned keys so the loaded frame is self-consistent.
+    #[cfg(feature = "replay")]
+    pub fn reconcile_datastore(&self, store: &mut DataStore<I>) {
+        for (key, details) in self.map.iter() {
+            if store.items.len() <= details.index {
+                store.items.resize_with(details.index + 1, || None);
+            }
+            if store.items[details.index].is_none() {
+                store.items[details.index] = Some(key.clone().into());
+            }
+        }
+    }
 }
 
 /// Retrieve the local data for an item from the interner via handle
@@ -389,8 +433,10 @@ impl<I: Internable> ops::Index<Handle<I>> for Interner<I> {
 
 /// Meta-macro to enumerate the various interner identifiers and types.
 ///
-/// IMPORTANT: Keep this synchronized with the list in mozilla-central located at
-/// gfx/webrender_bindings/webrender_ffi.h
+/// This list drives the interners and data stores that exist. The memory
+/// report's field list is `enumerate_interning_report_fields!` below, kept
+/// separate so that a type can leave this list without changing the report's
+/// layout, which C++ mirrors by hand.
 ///
 /// Note that this could be a lot less verbose if concat_idents! were stable. :-(
 #[macro_export]
@@ -398,7 +444,8 @@ macro_rules! enumerate_interners {
     ($macro_name: ident) => {
         $macro_name! {
             clip: ClipIntern,
-            prim: RectanglePrim,
+            // Rectangles are interned by the content display list builder, so
+            // they have no slot here. See doc/dl-builder-interning.md.
             normal_border: NormalBorderPrim,
             image_border: ImageBorder,
             image: Image,
@@ -418,8 +465,41 @@ macro_rules! enumerate_interners {
     }
 }
 
+/// The fields of the per-type interning memory report, one per interned type.
+///
+/// A superset of `enumerate_interners!`, in the same order, since a type's
+/// entry here outlives its interner: the report is `#[repr(C)]` and mirrored by
+/// hand in C++, so its layout must not change when a type stops being interned
+/// on the scene builder. A field nothing writes reports zero.
+///
+/// IMPORTANT: Keep this synchronized with the list in mozilla-central located at
+/// gfx/webrender_bindings/webrender_ffi.h
+macro_rules! enumerate_interning_report_fields {
+    ($macro_name: ident) => {
+        $macro_name! {
+            clip,
+            prim,
+            normal_border,
+            image_border,
+            image,
+            yuv_image,
+            line_decoration,
+            linear_grad,
+            radial_grad,
+            conic_grad,
+            picture,
+            text_run,
+            filter_data,
+            backdrop_capture,
+            backdrop_render,
+            polygon,
+            box_shadow,
+        }
+    }
+}
+
 macro_rules! declare_interning_memory_report {
-    ( $( $name:ident: $ty:ident, )+ ) => {
+    ( $( $name:ident, )+ ) => {
         ///
         #[repr(C)]
         #[derive(AddAssign, Clone, Debug, Default)]
@@ -432,7 +512,7 @@ macro_rules! declare_interning_memory_report {
     }
 }
 
-enumerate_interners!(declare_interning_memory_report);
+enumerate_interning_report_fields!(declare_interning_memory_report);
 
 /// Memory report for interning-related data structures.
 /// cbindgen:derive-eq=false
@@ -444,12 +524,17 @@ pub struct InterningMemoryReport {
     pub interners: InternerSubReport,
     ///
     pub data_stores: InternerSubReport,
+    /// The follower stores for types interned by the content display list
+    /// builder rather than by a scene builder interner. Same field list; a
+    /// type is accounted under one or the other.
+    pub dl_stores: InternerSubReport,
 }
 
 impl ::std::ops::AddAssign for InterningMemoryReport {
     fn add_assign(&mut self, other: InterningMemoryReport) {
         self.interners += other.interners;
         self.data_stores += other.data_stores;
+        self.dl_stores += other.dl_stores;
     }
 }
 

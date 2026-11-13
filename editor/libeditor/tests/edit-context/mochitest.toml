@@ -3,12 +3,21 @@ prefs = [
   "dom.editcontext.enabled=true",
   "dom.editcontext.allow_canvas=true",
 ]
+support-files = ["common.js"]
 
 ["test_editcontext_allow_canvas_pref.html"]
 
+["test_editcontext_anonymous_content_flow.html"]
+
 ["test_editcontext_blur_in_textupdate.html"]
 
+["test_editcontext_characterboundsupdate_focus.html"]
+
+["test_editcontext_characterboundsupdate_range.html"]
+
 ["test_editcontext_composition.html"]
+
+["test_editcontext_compositionend.html"]
 
 ["test_editcontext_content_command_replace_text.html"]
 
@@ -18,14 +27,22 @@ prefs = [
 
 ["test_editcontext_format_commands.html"]
 
+["test_editcontext_ime_notifications.html"]
+
+["test_editcontext_ime_state.html"]
+
 ["test_editcontext_query_characters.html"]
 
 ["test_editcontext_query_editor.html"]
 
 ["test_editcontext_query_selection.html"]
 
+["test_editcontext_redundant_characterboundsupdate.html"]
+
 ["test_editcontext_resist_fingerprinting.html"]
 support-files = ["file_editcontext_resist_fingerprinting.html"]
+
+["test_editcontext_set_selection.html"]
 
 ["test_editcontext_spellcheck.html"]
 skip-if = [

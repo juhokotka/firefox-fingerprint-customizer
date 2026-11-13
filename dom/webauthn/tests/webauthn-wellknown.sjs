@@ -40,11 +40,26 @@ function handleRequest(request, response) {
     return;
   }
 
+  // Emulates a server that uses Fetch Metadata to reject requests that a web
+  // page could have made (bug 2085450).
+  if (state === "require_fetch_metadata") {
+    const header = name =>
+      request.hasHeader(name) ? request.getHeader(name) : null;
+    if (
+      header("Sec-Fetch-Site") !== "none" ||
+      header("Sec-Fetch-Mode") !== "no-cors" ||
+      header("Sec-Fetch-Dest") !== "empty"
+    ) {
+      response.setStatusLine(request.httpVersion, 400, "Bad Request");
+      return;
+    }
+  }
+
   if (state === "http_redirect") {
     response.setStatusLine(request.httpVersion, 302, "Found");
     response.setHeader(
       "Location",
-      "http://example.org/tests/dom/webauthn/tests/webauthn-wellknown.sjs?direct" // eslint-disable-line @microsoft/sdl/no-insecure-url
+      "http://example.org/tests/dom/webauthn/tests/webauthn-wellknown.sjs?direct" // eslint-disable-line sdl/no-insecure-url
     );
     return;
   }
@@ -53,7 +68,7 @@ function handleRequest(request, response) {
     response.setStatusLine(request.httpVersion, 302, "Found");
     response.setHeader(
       "Location",
-      "http://example.org/tests/dom/webauthn/tests/webauthn-wellknown.sjs?http_to_https" // eslint-disable-line @microsoft/sdl/no-insecure-url
+      "http://example.org/tests/dom/webauthn/tests/webauthn-wellknown.sjs?http_to_https" // eslint-disable-line sdl/no-insecure-url
     );
     return;
   }

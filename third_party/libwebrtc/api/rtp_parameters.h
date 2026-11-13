@@ -23,12 +23,13 @@
 #include <stdint.h>
 
 #include <cstddef>
+#include <initializer_list>
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "absl/base/macros.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
@@ -46,7 +47,43 @@ namespace webrtc {
 class RTCError;
 class StringBuilder;
 
-using CodecParameterMap = std::map<std::string, std::string>;
+struct RTC_EXPORT CodecParameterMap
+    : public std::map<std::string, std::string> {
+  using std::map<std::string, std::string>::map;
+
+  CodecParameterMap() = default;
+  CodecParameterMap(const CodecParameterMap&) = default;
+  CodecParameterMap(CodecParameterMap&&) = default;
+  CodecParameterMap& operator=(const CodecParameterMap&) = default;
+  CodecParameterMap& operator=(CodecParameterMap&&) = default;
+
+  // TODO(bugs.webrtc.org/42223790): Remove these implicit converters when
+  // downstream projects have been updated to not rely on them.
+  CodecParameterMap(
+      const std::map<std::string, std::string>& o)  // NOLINT(runtime/explicit)
+      : std::map<std::string, std::string>(o) {}
+  CodecParameterMap(
+      std::map<std::string, std::string>&& o)  // NOLINT(runtime/explicit)
+      : std::map<std::string, std::string>(std::move(o)) {}
+
+  CodecParameterMap(
+      std::initializer_list<std::pair<absl::string_view, absl::string_view>>
+          il) {
+    for (const auto& p : il) {
+      emplace(p.first, p.second);
+    }
+  }
+
+  CodecParameterMap& operator=(
+      std::initializer_list<std::pair<absl::string_view, absl::string_view>>
+          il) {
+    clear();
+    for (const auto& p : il) {
+      emplace(p.first, p.second);
+    }
+    return *this;
+  }
+};
 
 enum class FecMechanism {
   RED,
@@ -180,7 +217,7 @@ struct RTC_EXPORT RtpCodec {
   virtual ~RtpCodec();
 
   // Build MIME "type/subtype" string from `name` and `kind`.
-  std::string mime_type() const { return MediaTypeToString(kind) + "/" + name; }
+  std::string mime_type() const;
 
   // Used to identify the codec. Equivalent to MIME subtype.
   std::string name;
@@ -206,7 +243,7 @@ struct RTC_EXPORT RtpCodec {
   //
   // Corresponds to "a=fmtp" parameters in SDP. The keys are lowercase strings.
   // Boolean values are represented by the string "1".
-  std::map<std::string, std::string> parameters;
+  CodecParameterMap parameters;
 
   bool operator==(const RtpCodec& o) const {
     return name == o.name && kind == o.kind && clock_rate == o.clock_rate &&
@@ -304,6 +341,11 @@ struct RTC_EXPORT RtpHeaderExtensionCapability {
   RtpHeaderExtensionCapability();
   explicit RtpHeaderExtensionCapability(absl::string_view uri);
   RtpHeaderExtensionCapability(absl::string_view uri,
+                               RtpTransceiverDirection direction);
+  RtpHeaderExtensionCapability(absl::string_view uri,
+                               bool preferred_encrypt,
+                               RtpTransceiverDirection direction);
+  RtpHeaderExtensionCapability(absl::string_view uri,
                                RtpHeaderExtensionId preferred_id);
   RtpHeaderExtensionCapability(absl::string_view uri,
                                RtpHeaderExtensionId preferred_id,
@@ -312,27 +354,7 @@ struct RTC_EXPORT RtpHeaderExtensionCapability {
                                RtpHeaderExtensionId preferred_id,
                                bool preferred_encrypt,
                                RtpTransceiverDirection direction);
-  // Backwards compatibility overloads.
-  // TODO: bugs.webrtc.org/514817938 - Remove when downstream is updated.
-  ABSL_DEPRECATE_AND_INLINE()
-  RtpHeaderExtensionCapability(absl::string_view uri, int preferred_id)
-      : RtpHeaderExtensionCapability(uri, RtpHeaderExtensionId(preferred_id)) {}
-  ABSL_DEPRECATE_AND_INLINE()
-  RtpHeaderExtensionCapability(absl::string_view uri,
-                               int preferred_id,
-                               RtpTransceiverDirection direction)
-      : RtpHeaderExtensionCapability(uri,
-                                     RtpHeaderExtensionId(preferred_id),
-                                     direction) {}
-  ABSL_DEPRECATE_AND_INLINE()
-  RtpHeaderExtensionCapability(absl::string_view uri,
-                               int preferred_id,
-                               bool preferred_encrypt,
-                               RtpTransceiverDirection direction)
-      : RtpHeaderExtensionCapability(uri,
-                                     RtpHeaderExtensionId(preferred_id),
-                                     preferred_encrypt,
-                                     direction) {}
+
   ~RtpHeaderExtensionCapability();
 
   bool operator==(const RtpHeaderExtensionCapability& o) const {
@@ -372,17 +394,11 @@ struct RTC_EXPORT RtpExtension {
   RtpExtension();
   RtpExtension(absl::string_view uri, RtpHeaderExtensionId id);
   RtpExtension(absl::string_view uri, RtpHeaderExtensionId id, bool encrypt);
-  // Backwards compatibility overloads.
-  // TODO: bugs.webrtc.org/514817938 - Remove when downstream is updated.
-  ABSL_DEPRECATE_AND_INLINE()
-  RtpExtension(absl::string_view uri, int id)
-      : RtpExtension(uri, RtpHeaderExtensionId(id)) {}
-  ABSL_DEPRECATE_AND_INLINE()
-  RtpExtension(absl::string_view uri, int id, bool encrypt)
-      : RtpExtension(uri, RtpHeaderExtensionId(id), encrypt) {}
+
   ~RtpExtension();
 
   std::string ToString() const;
+  std::string SanitizedUriForLogging() const;
   bool operator==(const RtpExtension& rhs) const {
     return uri == rhs.uri && id == rhs.id && encrypt == rhs.encrypt;
   }
@@ -506,16 +522,7 @@ struct RTC_EXPORT RtpExtension {
   static constexpr char kCorruptionDetectionUri[] =
       "http://www.webrtc.org/experiments/rtp-hdrext/corruption-detection";
 
-  // Inclusive min and max IDs for two-byte header extensions and one-byte
-  // header extensions, per RFC8285 Section 4.2-4.3.
-  ABSL_DEPRECATE_AND_INLINE()
-  static constexpr RtpHeaderExtensionId kMinId = RtpHeaderExtensionId::kMinId;
-  ABSL_DEPRECATE_AND_INLINE()
-  static constexpr RtpHeaderExtensionId kMaxId = RtpHeaderExtensionId::kMaxId;
   static constexpr int kMaxValueSize = 255;
-  ABSL_DEPRECATE_AND_INLINE()
-  static constexpr RtpHeaderExtensionId kOneByteHeaderExtensionMaxId =
-      RtpHeaderExtensionId::kOneByteHeaderExtensionMaxId;
   static constexpr int kOneByteHeaderExtensionMaxValueSize = 16;
 
   std::string uri;
@@ -525,9 +532,11 @@ struct RTC_EXPORT RtpExtension {
   template <typename Sink>
   friend void AbslStringify(Sink& sink, const RtpExtension& extension) {
     if (extension.encrypt) {
-      absl::Format(&sink, "[%v %s (encrypted)]", extension.id, extension.uri);
+      absl::Format(&sink, "[%v %s (encrypted)]", extension.id,
+                   extension.SanitizedUriForLogging());
     } else {
-      absl::Format(&sink, "[%v %s]", extension.id, extension.uri);
+      absl::Format(&sink, "[%v %s]", extension.id,
+                   extension.SanitizedUriForLogging());
     }
   }
 };

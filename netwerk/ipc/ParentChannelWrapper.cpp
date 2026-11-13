@@ -3,13 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ParentChannelWrapper.h"
-#include "mozilla/net/HttpBaseChannel.h"
+
+#include "mozilla/dom/RemoteType.h"
 #include "mozilla/net/ChannelClassifierUtils.h"
+#include "mozilla/net/HttpBaseChannel.h"
 #include "mozilla/net/RedirectChannelRegistrar.h"
 #include "nsIViewSourceChannel.h"
 #include "nsNetUtil.h"
 #include "nsQueryObject.h"
-#include "mozilla/dom/RemoteType.h"
 
 namespace mozilla {
 namespace net {
@@ -92,8 +93,8 @@ NS_IMETHODIMP
 ParentChannelWrapper::Delete() { return NS_OK; }
 
 NS_IMETHODIMP
-ParentChannelWrapper::GetRemoteType(nsACString& aRemoteType) {
-  aRemoteType = NOT_REMOTE_TYPE;
+ParentChannelWrapper::GetRemoteType(mozilla::dom::RemoteType& aRemoteType) {
+  aRemoteType = mozilla::dom::RemoteType::NotRemote();
   return NS_OK;
 }
 

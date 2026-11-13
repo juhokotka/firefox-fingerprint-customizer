@@ -13,7 +13,6 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/dom/EncodedVideoChunk.h"
 #include "mozilla/dom/EncodedVideoChunkBinding.h"
-#include "mozilla/dom/ImageUtils.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/VideoColorSpace.h"
 #include "mozilla/dom/VideoColorSpaceBinding.h"
@@ -56,7 +55,9 @@ namespace mozilla::dom {
 #define LOGV(msg, ...) LOG_INTERNAL(Verbose, msg, ##__VA_ARGS__)
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(VideoEncoder, DOMEventTargetHelper,
-                                   mErrorCallback, mOutputCallback)
+                                   mErrorCallback, mOutputCallback,
+                                   mPendingFlushPromises,
+                                   mPendingDebugInfoPromises)
 NS_IMPL_ADDREF_INHERITED(VideoEncoder, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(VideoEncoder, DOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(VideoEncoder)

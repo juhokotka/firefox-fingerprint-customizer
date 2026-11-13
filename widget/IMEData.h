@@ -5,19 +5,20 @@
 #ifndef mozilla_widget_IMEData_h_
 #define mozilla_widget_IMEData_h_
 
+#include <fmt/format.h>
+
+#include "Units.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/EnumSet.h"
 #include "mozilla/EnumTypeTraits.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/NativeKeyBindingsType.h"
-
 #include "nsCOMPtr.h"
 #include "nsIURI.h"
 #include "nsPoint.h"
 #include "nsRect.h"
 #include "nsString.h"
 #include "nsXULAppAPI.h"
-#include "Units.h"
 
 class nsIWidget;
 
@@ -43,6 +44,9 @@ class MOZ_STACK_CLASS PrintStringDetail : public nsAutoCString {
   template <typename StringType>
   explicit PrintStringDetail(const Maybe<StringType>& aMaybeString,
                              uint32_t aMaxLength = UINT32_MAX);
+
+  friend std::string format_as(const PrintStringDetail&);
+  friend std::ostream& operator<<(std::ostream&, const PrintStringDetail&);
 
  private:
   static nsCString PrintCharData(char32_t aChar);
@@ -373,12 +377,16 @@ struct NativeIMEContext final {
   }
   void InitWithRawNativeIMEContext(void* aRawNativeIMEContext);
 
-  bool operator==(const NativeIMEContext& aOther) const {
-    return mRawNativeIMEContext == aOther.mRawNativeIMEContext &&
-           mOriginProcessID == aOther.mOriginProcessID;
+  bool operator==(const NativeIMEContext& aOther) const = default;
+
+  friend auto format_as(const NativeIMEContext& aContext) {
+    return fmt::format("{{ mRawNativeIMEContext={}, mOriginProcessID={} }}",
+                       reinterpret_cast<void*>(aContext.mRawNativeIMEContext),
+                       aContext.mOriginProcessID);
   }
-  bool operator!=(const NativeIMEContext& aOther) const {
-    return !(*this == aOther);
+  friend std::ostream& operator<<(std::ostream& aStream,
+                                  const NativeIMEContext& aContext) {
+    return aStream << format_as(aContext);
   }
 };
 
@@ -766,6 +774,7 @@ struct IMENotification final {
 
     bool mIsInitialized;
     bool mHasRange;
+    // FIXME: Use RangeDirection enum class.
     bool mReversed;
     bool mCausedByComposition;
     bool mCausedBySelectionEvent;

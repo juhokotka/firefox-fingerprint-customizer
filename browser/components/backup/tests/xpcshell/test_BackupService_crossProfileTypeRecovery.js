@@ -4,7 +4,7 @@ https://creativecommons.org/publicdomain/zero/1.0/ */
 "use strict";
 
 const { SelectableProfileBackupResource } = ChromeUtils.importESModule(
-  "resource:///modules/backup/SelectableProfileBackupResource.sys.mjs"
+  "moz-src:///browser/components/backup/resources/SelectableProfileBackupResource.sys.mjs"
 );
 
 const lazy = {};
@@ -210,7 +210,7 @@ async function createBackupAndRecover(
     !recoveryIsLegacy && !profilesDisabled
   );
 
-  await bs.getBackupFileInfo(archivePath);
+  await bs.loadBackupFileInfo(archivePath);
   const restoreID = bs.state.restoreID;
 
   let restoreStartedEvents;

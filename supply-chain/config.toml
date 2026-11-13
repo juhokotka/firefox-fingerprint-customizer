@@ -29,23 +29,34 @@ notes = "This is the upstream code plus the ARM intrinsics workaround from qcms,
 
 [policy.authenticator]
 audit-as-crates-io = false
-notes = "This is a first-party crate which is no longer published through crates.io."
+notes = "This is a first-party crate which is developed in mozilla-central, see dom/webauthn/authenticator."
 
 [policy.autocfg]
 audit-as-crates-io = true
 notes = "This is the upstream code plus a few local fixes, see bug 1685697."
 
-[policy."bindgen:0.72.0@git:5274da5a06411accb266c10819b989ac25a81b7d"]
+[policy."bindgen:0.73.1"]
 audit-as-crates-io = true
-notes = "This is the upstream code not yet released plus a local fix"
+notes = "Upstream code with a backported fix"
+
+[policy.cc]
+audit-as-crates-io = true
+notes = "This is the upstream code plus a fix for https://github.com/rust-lang/cc-rs/issues/1883"
 
 [policy.cose]
 audit-as-crates-io = true
 notes = "This is upstream plus a warning fix from bug 1823866."
 
-[policy.encoding_rs]
+[policy."crash-context:0.8.0@git:3ab1604f91db05ec3f3a84d779a2871df7d9afd7"]
 audit-as-crates-io = true
-notes = "This is upstream plus a build fix for bug 2033279."
+
+[policy.cssparser]
+audit-as-crates-io = true
+notes = "Upstream not yet published changes"
+
+[policy.cssparser-macros]
+audit-as-crates-io = true
+notes = "Upstream not yet published changes"
 
 [policy.firefox-on-glean]
 audit-as-crates-io = false
@@ -63,6 +74,10 @@ notes = "Used for testing."
 [policy.gkrust-shared]
 dependency-criteria = { tokio-reactor = [], tokio-threadpool = [] }
 notes = "The dependencies on tokio-reactor and tokio-threadpools are just a hack to pin the version used by audioipc-{client,server}. Suppress vetting on those for the same reasons behind the policy entries."
+
+[policy."gl_generator:0.14.0@git:71c792dbfe0ec5caeb242fc90937e19098386342"]
+audit-as-crates-io = true
+notes = "This is upstream plus a build fix from rust-windowing/gl-rs#566. Can be removed once PR is merged upstream and gleam is updated to include the fix."
 
 [policy.gluesmith]
 criteria = "safe-to-run"
@@ -120,21 +135,13 @@ notes = "Patched version of upstream"
 audit-as-crates-io = true
 notes = "Patched version of upstream"
 
-[policy.jxl]
-audit-as-crates-io = true
-notes = "Vendored from libjxl/jxl-rs git, a few commits past the 0.4.3 tag."
-
-[policy.jxl_macros]
-audit-as-crates-io = true
-notes = "Vendored from libjxl/jxl-rs git, a few commits past the 0.4.3 tag."
-
 [policy.jxl_simd]
 audit-as-crates-io = true
-notes = "Vendored from libjxl/jxl-rs git, a few commits past the 0.4.3 tag, with a local Mac/x86_64 workaround patched in (see bug 2043090) and path-sourced via a [patch] block in the root Cargo.toml."
+notes = "Upstream 0.8.0 with a local Mac/x86_64 workaround patched in (see bug 2043090) and path-sourced via a [patch.crates-io] entry in the root Cargo.toml."
 
-[policy.jxl_transforms]
+[policy."khronos_api:3.1.0@git:71c792dbfe0ec5caeb242fc90937e19098386342"]
 audit-as-crates-io = true
-notes = "Vendored from libjxl/jxl-rs git, a few commits past the 0.4.3 tag."
+notes = "Vendored from same repository as gl_generator."
 
 [policy.l10nregistry]
 dependency-criteria = { fluent-testing = "safe-to-run", tokio = "safe-to-run" }
@@ -143,6 +150,10 @@ notes = "This crate has two testing-only dependencies which are specified as reg
 [policy.libcrux-traits]
 audit-as-crates-io = true
 notes = "Patched version of upstream to avoid unnecessary unused dependencies and conflicts."
+
+[policy.libdbus-sys]
+audit-as-crates-io = true
+notes = "Patched version of upstream to avoid vendoring unnecessary massive libdbus source."
 
 [policy.libudev-sys]
 audit-as-crates-io = false
@@ -221,6 +232,10 @@ notes = "Part of the wgpu repository, pinned as the rest of wgpu crates."
 audit-as-crates-io = false
 notes = "This lives in application-services but was pushed to crates.io a very long time ago."
 
+[policy.nss-rs]
+audit-as-crates-io = false
+notes = "Fetched from mozilla/nss-rs on GitHub. The crates.io name only holds a 0.0.0 placeholder reserved by an nss-rs maintainer."
+
 [policy.objc]
 audit-as-crates-io = true
 notes = "This is the upstream code plus a backported fix."
@@ -237,6 +252,17 @@ notes = "This is a first-party crate that happens to have been pushed to crates.
 audit-as-crates-io = false
 
 [policy.peek-poke-derive]
+audit-as-crates-io = false
+
+[policy."process-backend:0.1.0@git:3ab1604f91db05ec3f3a84d779a2871df7d9afd7"]
+audit-as-crates-io = false
+notes = """
+This was originally intended to be a minidump-writer internal crate (and thus
+audited as part of minidump-writer), however an author accidentally published
+it publicly (so it is on crates.io now).
+"""
+
+[policy."process-reader:0.1.0@git:3ab1604f91db05ec3f3a84d779a2871df7d9afd7"]
 audit-as-crates-io = false
 
 [policy.pulse]
@@ -258,6 +284,10 @@ notes = "This is a first-party crate which is also published to crates.io, but w
 [policy.servo_arc]
 audit-as-crates-io = true
 notes = "This is a first-party crate which is also published to crates.io, but we should publish audits for it for the benefit of the ecosystem."
+
+[policy.simdutf8]
+audit-as-crates-io = true
+notes = "Patched version of upstream"
 
 [policy.storage]
 audit-as-crates-io = false
@@ -320,10 +350,6 @@ audit-as-crates-io = true
 notes = "Upstream project which we pin."
 
 [policy.wgpu-core-deps-apple]
-audit-as-crates-io = true
-notes = "Upstream project which we pin."
-
-[policy.wgpu-core-deps-windows-linux-android]
 audit-as-crates-io = true
 notes = "Upstream project which we pin."
 
@@ -450,10 +476,6 @@ criteria = "safe-to-deploy"
 version = "2.3.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.dbus]]
-version = "0.6.5"
-criteria = "safe-to-deploy"
-
 [[exemptions.devd-rs]]
 version = "0.3.4"
 criteria = "safe-to-deploy"
@@ -550,10 +572,6 @@ criteria = "safe-to-deploy"
 version = "3.1.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.libdbus-sys]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.libloading]]
 version = "0.7.3"
 criteria = "safe-to-deploy"
@@ -634,10 +652,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.quick-error]]
 version = "1.2.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.remove_dir_all]]
-version = "0.5.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.replace_with]]

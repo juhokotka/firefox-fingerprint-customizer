@@ -14,8 +14,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   Subprocess: "resource://gre/modules/Subprocess.sys.mjs",
   WindowsSetDefaultRedirect:
     "moz-src:///browser/components/shell/WindowsSetDefaultRedirect.sys.mjs",
-  WindowsVersionInfo:
-    "resource://gre/modules/components-utils/WindowsVersionInfo.sys.mjs",
 });
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -58,6 +56,20 @@ XPCOMUtils.defineLazyServiceGetter(
   "gioService",
   "@mozilla.org/gio-service;1",
   Ci.nsIGIOService
+);
+
+XPCOMUtils.defineLazyServiceGetter(
+  lazy,
+  "mimeService",
+  "@mozilla.org/mime;1",
+  Ci.nsIMIMEService
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "DESKTOP_ENTRY_API",
+  "browser.shell.desktop-entry-api",
+  "disabled"
 );
 
 ChromeUtils.defineLazyGetter(lazy, "log", () => {
@@ -165,6 +177,11 @@ let ShellServiceInternal = {
     );
   },
 
+  _attemptedSetDefaultThisSession: false,
+  get attemptedSetDefaultThisSession() {
+    return this._attemptedSetDefaultThisSession;
+  },
+
   isDefaultBrowser(startupCheck, forAllTypes) {
     // If this is the first browser window, maintain internal state that we've
     // checked this session (so that subsequent window opens don't show the
@@ -174,6 +191,27 @@ let ShellServiceInternal = {
     }
     if (this.shellService) {
       return this.shellService.isDefaultBrowser(forAllTypes);
+    }
+    return false;
+  },
+
+  /**
+   * Asynchronously determines whether Firefox is the default browser.
+   *
+   * New callers should prefer this method over isDefaultBrowser(). The
+   * synchronous version may be removed once existing callers have been
+   * migrated to the asynchronous API. See bug 2074009.
+   *
+   */
+  isDefaultBrowserAsync(startupCheck, forAllTypes) {
+    // If this is the first browser window, maintain internal state that we've
+    // checked this session (so that subsequent window opens don't show the
+    // default browser dialog).
+    if (startupCheck) {
+      this._checkedThisSession = true;
+    }
+    if (this.shellService) {
+      return this.shellService.isDefaultBrowserAsync(forAllTypes);
     }
     return false;
   },
@@ -197,6 +235,57 @@ let ShellServiceInternal = {
       return "ErrHash";
     }
     return null;
+  },
+
+  /**
+   * Whether Firefox can currently make itself the default browser by writing
+   * the Windows UserChoice registry keys, instead of having to send the user
+   * into the Windows Settings app to do it manually. `true` means a set-default
+   * request would be honored or that Firefox is already the default (the
+   * latter is a shortcut to `true` to avoid the risk of a UserChoice write
+   * when we don't need to attempt to set to default anyway).
+   *
+   * If the UserChoice Protection Driver (UCPD) is running and Firefox isn't
+   * already the default, this temporarily renames the `http` association key
+   * and renames it back. UCPD versions where one-click still works permit
+   * this rename, while those where it doesn't do not.
+   *
+   * Always `false` on macOS and Linux. Neither goes through UserChoice, and
+   * neither is reliably one-click, since both can (but don't always) defer to
+   * an OS consent prompt. Supporting them needs its own handling (see bug
+   * 2060879).
+   *
+   * @returns {boolean}
+   */
+  isOneClickSetDefaultEnabled() {
+    if (AppConstants.platform != "win" || !this.shellService) {
+      return false;
+    }
+    if (
+      !Services.prefs.getBoolPref(
+        "browser.shell.setDefaultBrowserUserChoice",
+        false
+      )
+    ) {
+      return false;
+    }
+    if (this._userChoiceImpossibleTelemetryResult() !== null) {
+      return false;
+    }
+    if (!this.isUserChoiceProtectionDriverRunning()) {
+      return true;
+    }
+    if (this.isDefaultBrowser(false)) {
+      return true;
+    }
+    // A running UCPD doesn't always block the rename a UserChoice write needs,
+    // so try renaming it to determine if it's actually blocked.
+    return (
+      Services.prefs.getBoolPref(
+        "browser.shell.setDefaultBrowserUserChoice.regRename",
+        false
+      ) && this.canRenameUserChoiceAssociationKey("http")
+    );
   },
 
   /**
@@ -391,6 +480,13 @@ let ShellServiceInternal = {
 
   // override nsIShellService.setDefaultBrowser() on the ShellService proxy.
   async setDefaultBrowser(forAllUsers) {
+    if (!Services.policies.isAllowed("setDefaultBrowser")) {
+      lazy.log.warn("Setting the default browser is disallowed by policy");
+      return;
+    }
+
+    this._attemptedSetDefaultThisSession = true;
+
     // On Windows, our best chance is to set UserChoice, so try that first.
     if (
       AppConstants.platform == "win" &&
@@ -429,10 +525,13 @@ let ShellServiceInternal = {
     Glean.browser.setDefaultError[setAsDefaultError ? "true" : "false"].add();
   },
 
+  /**
+   * Returns whether the current operating system is Windows 11.
+   *
+   * This is used so it can be mocked out in tests.
+   */
   _isWindows11() {
-    return (
-      lazy.WindowsVersionInfo.get({ throwOnError: false }).buildNumber >= 22000
-    );
+    return Services.sysinfo.isWindows10BuildOrLater(22000);
   },
 
   /**
@@ -1054,16 +1153,20 @@ let ShellServiceInternal = {
       argv.map(arg => `"${escapeArg(arg)}"`).join(" ")
     );
 
-    if (
-      lazy.gioService.isRunningUnderFlatpak ||
-      lazy.gioService.isRunningUnderSnap
-    ) {
-      await ShellService.requestInstallDynamicLauncher(appId, ini, window);
-    } else {
-      await IOUtils.writeUTF8(
-        ShellService._getLinuxDesktopEntryPath(appId),
-        ini.writeToString()
-      );
+    switch (this.desktopEntryApi) {
+      case "filesystem":
+        await IOUtils.writeUTF8(
+          ShellService._getLinuxDesktopEntryPath(appId),
+          ini.writeToString()
+        );
+        return;
+      case "dynamiclauncher":
+        await ShellService.requestInstallDynamicLauncher(appId, ini, window);
+        return;
+      default:
+        throw new Error(
+          "createLinuxDesktopEntry called when managing desktop entries is disabled"
+        );
     }
   },
 
@@ -1177,14 +1280,43 @@ let ShellServiceInternal = {
       );
     }
 
-    if (
-      lazy.gioService.isRunningUnderFlatpak ||
-      lazy.gioService.isRunningUnderSnap
-    ) {
-      await ShellService.requestUninstallDynamicLauncher(appId);
-    } else {
-      await IOUtils.remove(ShellService._getLinuxDesktopEntryPath(appId));
+    switch (this.desktopEntryApi) {
+      case "filesystem":
+        await IOUtils.remove(ShellService._getLinuxDesktopEntryPath(appId));
+        return;
+      case "dynamiclauncher":
+        await ShellService.requestUninstallDynamicLauncher(appId);
+        return;
+      default:
+        throw new Error(
+          "deleteLinuxDesktopEntry called when managing desktop entries is disabled"
+        );
     }
+  },
+
+  get desktopEntryApi() {
+    if (AppConstants.platform !== "linux") {
+      throw new Error("desktopEntryApi is only relevant on Unix-like systems");
+    }
+
+    let pref = lazy.DESKTOP_ENTRY_API;
+    if (["filesystem", "dynamiclauncher"].includes(pref)) {
+      return pref;
+    }
+
+    if (pref === "disabled") {
+      return null;
+    }
+
+    // If we don't recognize the pref, use the default for the current sandbox.
+    if (lazy.gioService.isRunningUnderSnap) {
+      // bug 2019115
+      return null;
+    } else if (lazy.gioService.isRunningUnderFlatpak) {
+      return "dynamiclauncher";
+    }
+
+    return "filesystem";
   },
 
   /**
@@ -1194,10 +1326,7 @@ let ShellServiceInternal = {
    * @returns {string} The path to the desktop entry.
    */
   _getLinuxDesktopEntryPath(appId) {
-    if (
-      lazy.gioService.isRunningUnderFlatpak ||
-      lazy.gioService.isRunningUnderSnap
-    ) {
+    if (this.desktopEntryApi !== "filesystem") {
       throw new Error(
         "Use DynamicLauncher instead of _getLinuxDesktopEntryPath when sandboxed"
       );
@@ -1251,6 +1380,56 @@ let ShellServiceInternal = {
         resolver.reject(error);
       },
     };
+  },
+
+  /**
+   * Sets the desktop background for the current user to the given image.
+   *
+   * Note that this doesn't check enterprise policies, etc.; that's considered
+   * the caller's responsibility.
+   *
+   * @param {CanvasImageSource} drawable - The image to set.
+   * @param {number} width - The width of `drawable`.
+   * @param {number} height - The height of `drawable`.
+   * @param {number} position - The position of the desktop background on the
+   * display. This should be one of the BACKGROUND_* properties in
+   * nsIShellService. (Note that macOS ignores this value.)
+   */
+  async setDesktopBackground(drawable, width, height, position) {
+    let canvas = new OffscreenCanvas(width, height);
+    let ctx = canvas.getContext("2d");
+    ctx.drawImage(drawable, 0, 0);
+
+    let [bytes, file] = await Promise.all([
+      canvas.convertToBlob({ type: "image/png" }).then(blob => blob.bytes()),
+      this._getDesktopBackgroundFile(),
+    ]);
+
+    await IOUtils.write(file.path, bytes);
+    this.setDesktopBackgroundFile(file, position);
+  },
+
+  /**
+   * Gets the path which will be used for the image saved by
+   * setDesktopBackground. This is mainly separated so it can be used and
+   * stubbed out by tests.
+   *
+   * @returns {nsIFile} The file which will be used for the background image.
+   */
+  async _getDesktopBackgroundFile() {
+    let leafName = await new Localization([
+      "browser/setDesktopBackground.ftl",
+    ]).formatValue("set-desktop-background-filename");
+
+    leafName = lazy.mimeService.validateFileNameForSaving(
+      leafName + ".png",
+      "image/png",
+      Ci.nsIMIMEService.VALIDATE_SANITIZE_ONLY
+    );
+
+    let file = Services.dirsvc.get("AppRegD", Ci.nsIFile);
+    file.append(leafName);
+    return file;
   },
 };
 

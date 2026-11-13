@@ -10,8 +10,10 @@
 
 #include "LayoutLogging.h"
 #include "RubyUtils.h"
+#include "mozilla/AbsoluteContainingBlock.h"
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/SVGTextFrame.h"
+#include "mozilla/StaticPrefs_layout.h"
 #include "nsBidiPresUtils.h"
 #include "nsBlockFrame.h"
 #include "nsContainerFrame.h"
@@ -19,6 +21,7 @@
 #include "nsFontMetrics.h"
 #include "nsGkAtoms.h"
 #include "nsIContent.h"
+#include "nsInlineFrame.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
 #include "nsRubyFrame.h"
@@ -986,6 +989,22 @@ void nsLineLayout::ReflowFrame(nsIFrame* aFrame, nsReflowStatus& aReflowStatus,
     // a next-in-flow where it ends up).
     if (aReflowStatus.IsComplete()) {
       if (nsIFrame* kidNextInFlow = aFrame->GetNextInFlow()) {
+        if (StaticPrefs::layout_abspos_fragment_aware_inline_cb_enabled()) {
+          if (nsInlineFrame* inlineFrame = do_QueryFrame(aFrame)) {
+            // Before removing aFrame's next-in-flows, pull all the absolute
+            // children in those next-in-flows into the first inline
+            // continuation in the current fragmentainer.
+            nsIFrame* first =
+                AbsoluteContainingBlock::FirstInlineContinuationInFragmentainer(
+                    inlineFrame);
+            if (AbsoluteContainingBlock* absCB =
+                    first->GetAbsoluteContainingBlock()) {
+              absCB->PrepareAbsoluteFrames(
+                  static_cast<nsInlineFrame*>(first),
+                  AbsoluteContainingBlock::PrepareReason::Destroy);
+            }
+          }
+        }
         // Remove all of the childs next-in-flows. Make sure that we ask
         // the right parent to do the removal (it's possible that the
         // parent is not this because we are executing pullup code)
@@ -1566,7 +1585,7 @@ static TextBoxEdgeMetrics ResolveTextBoxEdgeMetrics(
       break;
     default:
     case StyleTextEdgeKeyword::Text:
-      result.mOver = aFontMetrics->TrimmedAscent();
+      result.mOver = aFontMetrics->MaxAscent();
       break;
   }
 
@@ -1582,7 +1601,7 @@ static TextBoxEdgeMetrics ResolveTextBoxEdgeMetrics(
       break;
     default:
     case StyleTextEdgeKeyword::Text:
-      result.mUnder = aFontMetrics->TrimmedDescent();
+      result.mUnder = aFontMetrics->MaxDescent();
       break;
   }
 
@@ -1616,9 +1635,22 @@ void nsLineLayout::ApplyBlockTextBoxTrim(PerSpanData* psd, WritingMode aLineWM,
   // how much to trim on each side.
   nscoord totalOver = *aBaselineBCoord - mBStartEdge;
   nscoord totalUnder = *aLineBSize - totalOver;
-  const StyleTextBoxEdge& textBoxEdge = blockFrame->StyleText()->mTextBoxEdge;
+
+  // The line should be trimmed to the specified font metric from the block's
+  // root inline box. Gecko doesn't construct an actual frame for the root
+  // inline box (which is generally unstyleable), so the metric normally comes
+  // from the block itself. However, a ::first-line declaration block *can*
+  // style the fragment of the root inline box that it contains and should be
+  // used to determine the trim metric.
+  nsIFrame* metricsFrame = blockFrame;
+  if (psd->mFirstFrame && psd->mFirstFrame->mFrame->Style()->GetPseudoType() ==
+                              PseudoStyleType::FirstLine) {
+    metricsFrame = psd->mFirstFrame->mFrame;
+  }
+
+  const StyleTextBoxEdge& textBoxEdge = metricsFrame->StyleText()->mTextBoxEdge;
   RefPtr<nsFontMetrics> fm =
-      nsLayoutUtils::GetInflatedFontMetricsForFrame(blockFrame);
+      nsLayoutUtils::GetInflatedFontMetricsForFrame(metricsFrame);
   const auto [trimmedOver, trimmedUnder] =
       ResolveTextBoxEdgeMetrics(textBoxEdge, fm);
 
@@ -1875,7 +1907,7 @@ void nsLineLayout::AdjustLeadings(nsIFrame* spanFrame, PerSpanData* psd,
   if (aStyleText->HasEffectiveTextEmphasis()) {
     nscoord bsize = GetBSizeOfEmphasisMarks(spanFrame, aInflation);
     LogicalSide side = aStyleText->TextEmphasisSide(
-        mRootSpan->mWritingMode, spanFrame->StyleFont()->mLanguage);
+        mRootSpan->mWritingMode, spanFrame->StyleFont()->GetLangAtom());
     if (spanFrame->PresContext()->NormalizeRubyMetrics()) {
       // Add extra leading for emphasis marks only if their bsize exceeds the
       // space built in to the font (difference between its max ascent/descent
@@ -2593,7 +2625,7 @@ void nsLineLayout::VerticalAlignFrames(PerSpanData* psd) {
               delta = emphasisHeight;
             }
             LogicalSide side = mStyleText->TextEmphasisSide(
-                lineWM, spanFrame->StyleFont()->mLanguage);
+                lineWM, spanFrame->StyleFont()->GetLangAtom());
             if (side == LogicalSide::BStart) {
               blockStart -= delta;
             } else {
@@ -2749,9 +2781,11 @@ void nsLineLayout::VerticalAlignFrames(PerSpanData* psd) {
       // Identify the current total height above and below the baseline,
       // to be compared against the target text-box-edge metrics to determine
       // how much to trim on each side.
-      nscoord contentOver = spanFramePFD->mAscent;
-      nscoord contentUnder =
-          spanFramePFD->mBounds.BSize(lineWM) - spanFramePFD->mAscent;
+      nscoord contentOver =
+          spanFramePFD->mAscent - spanFramePFD->mBorderPadding.BStart(lineWM);
+      nscoord contentUnder = spanFramePFD->mBounds.BSize(lineWM) -
+                             spanFramePFD->mAscent -
+                             spanFramePFD->mBorderPadding.BEnd(lineWM);
       const StyleTextBoxEdge& textBoxEdge =
           spanFrame->StyleText()->mTextBoxEdge;
       RefPtr<nsFontMetrics> fm =
@@ -2774,6 +2808,7 @@ void nsLineLayout::VerticalAlignFrames(PerSpanData* psd) {
         }
         minBCoord -= trimAmount;
         maxBCoord -= trimAmount;
+        *psd->mBaseline -= trimAmount;
       }
 
       if (shouldApplyTrimEnd) {

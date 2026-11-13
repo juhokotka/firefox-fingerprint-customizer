@@ -195,6 +195,8 @@ let interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "AudioScheduledSourceNode", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "AudioSession", insecureContext: true, nightly: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "AudioWorklet", insecureContext: false },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "AudioWorkletNode", insecureContext: false },
@@ -977,6 +979,8 @@ let interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "MIDIPort", android: false },
   // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "MathMLAnchorElement", insecureContext: true, nightly: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "MathMLElement", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "MediaCapabilities", insecureContext: true },
@@ -1247,6 +1251,8 @@ let interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   "PushSubscriptionOptions",
   // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "QuotaExceededError", insecureContext: true, nightly: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "RTCCertificate", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "RTCDTMFSender", insecureContext: true },
@@ -1268,6 +1274,8 @@ let interfaceNamesInGlobalScope = [
   { name: "RTCErrorEvent", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "RTCIceCandidate", insecureContext: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "RTCIceCandidatePair", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "RTCIceTransport", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1533,7 +1541,7 @@ let interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "ScrollAreaEvent", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "ScrollTimeline", insecureContext: true, nightly: true },
+  { name: "ScrollTimeline", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "SecurityPolicyViolationEvent", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1558,6 +1566,66 @@ let interfaceNamesInGlobalScope = [
   { name: "SourceBufferList", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "SpecialPowers", insecureContext: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "SpeechGrammar",
+    insecureContext: true,
+    android: false,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "SpeechGrammarList",
+    insecureContext: true,
+    android: false,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "SpeechRecognition",
+    insecureContext: false,
+    android: false,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "SpeechRecognitionAlternative",
+    insecureContext: false,
+    android: false,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "SpeechRecognitionErrorEvent",
+    insecureContext: false,
+    android: false,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "SpeechRecognitionErrorEvent",
+    insecureContext: false,
+    android: false,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "SpeechRecognitionEvent",
+    insecureContext: false,
+    android: false,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "SpeechRecognitionPhrase",
+    insecureContext: false,
+    android: false,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "SpeechRecognitionResult",
+    insecureContext: false,
+    android: false,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "SpeechRecognitionResultList",
+    insecureContext: false,
+    android: false,
+  },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "SpeechSynthesis", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1681,7 +1749,7 @@ let interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "VideoPlaybackQuality", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "ViewTimeline", insecureContext: true, nightly: true },
+  { name: "ViewTimeline", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "ViewTransition", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1749,9 +1817,13 @@ let interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "WebTransportDatagramDuplexStream", insecureContext: false },
   // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "WebTransportDatagramsWritable", insecureContext: false },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "WebTransportError", insecureContext: false },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "WebTransportReceiveStream", insecureContext: false },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "WebTransportSendGroup", insecureContext: false },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "WebTransportSendStream", insecureContext: false },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -2263,6 +2335,24 @@ let interfaceNamesInGlobalScope = [
   { name: "updateCommands", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "visualViewport", insecureContext: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "webkitSpeechGrammar",
+    insecureContext: true,
+    android: false,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "webkitSpeechGrammarList",
+    insecureContext: true,
+    android: false,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "webkitSpeechRecognition",
+    insecureContext: false,
+    android: false,
+  },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "webkitURL", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!

@@ -56,6 +56,10 @@ class BaselineFrame {
     // Frame is executing Realm-independent Jitcode, which requires
     // a valid interpreterScript_ field.
     REALM_INDEPENDENT = 1 << 7,
+
+    // The frame has a pending return through a DebugModeOSRReturnSite
+    // preserved in the JitRuntime.
+    HAS_PENDING_DEBUG_MODE_OSR_RETURN = 1 << 8,
   };
 
  protected:  // Silence Clang warning about unused private fields.
@@ -113,6 +117,9 @@ class BaselineFrame {
   bool isConstructing() const {
     return CalleeTokenIsConstructing(calleeToken());
   }
+  bool isResumingGenerator() const {
+    return framePrefix()->isResumingGenerator();
+  }
   JSScript* script() const {
     return MaybeForwardedScriptFromCalleeToken(calleeToken());
   }
@@ -139,6 +146,8 @@ class BaselineFrame {
     }
     return UndefinedValue();
   }
+
+  Value* resumeArgs() { return framePrefix()->resumeArgs(); }
 
 #ifdef DEBUG
   size_t debugNumValueSlots() const { return numValueSlots(debugFrameSize()); }
@@ -309,6 +318,18 @@ class BaselineFrame {
 
   void setFlag(uint32_t flag) { flags_ |= flag; }
   void setFlags(uint32_t flags) { flags_ = flags; }
+
+  bool hasPendingDebugModeOSRReturn() const {
+    return flags_ & HAS_PENDING_DEBUG_MODE_OSR_RETURN;
+  }
+  void setPendingDebugModeOSRReturn() {
+    MOZ_ASSERT(!hasPendingDebugModeOSRReturn());
+    flags_ |= HAS_PENDING_DEBUG_MODE_OSR_RETURN;
+  }
+  void clearPendingDebugModeOSRReturn() {
+    MOZ_ASSERT(hasPendingDebugModeOSRReturn());
+    flags_ &= ~HAS_PENDING_DEBUG_MODE_OSR_RETURN;
+  }
 
   [[nodiscard]] inline bool pushLexicalEnvironment(JSContext* cx,
                                                    Handle<LexicalScope*> scope);

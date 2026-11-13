@@ -12,10 +12,12 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/quota/QuotaManagerService.h"
 #include "mozilla/dom/quota/ResultExtensions.h"
+#include "mozilla/dom/quota/StreamUtils.h"
 #include "mozilla/dom/quota/UsageInfo.h"
 #include "mozilla/gtest/MozAssertions.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
+#include "nsIBinaryInputStream.h"
 #include "nsIPrefBranch.h"
 #include "nsIPrefService.h"
 #include "nsIQuotaCallbacks.h"
@@ -442,32 +444,35 @@ QuotaManagerDependencyFixture::GetOriginStateMetadata(
 Maybe<OriginStateMetadata>
 QuotaManagerDependencyFixture::LoadDirectoryMetadataHeader(
     const OriginMetadata& aOriginMetadata) {
-  auto result =
-      PerformOnIOThread([aOriginMetadata]() -> Maybe<OriginStateMetadata> {
-        QuotaManager* quotaManager = QuotaManager::Get();
-        MOZ_RELEASE_ASSERT(quotaManager);
+  auto result = PerformOnIOThread([aOriginMetadata]()
+                                      -> Maybe<OriginStateMetadata> {
+    QuotaManager* quotaManager = QuotaManager::Get();
+    MOZ_RELEASE_ASSERT(quotaManager);
 
-        auto directoryRes = quotaManager->GetOriginDirectory(aOriginMetadata);
-        MOZ_RELEASE_ASSERT(directoryRes.isOk());
+    auto directoryRes = quotaManager->GetOriginDirectory(aOriginMetadata);
+    MOZ_RELEASE_ASSERT(directoryRes.isOk());
 
-        auto directory = directoryRes.unwrap();
+    auto directory = directoryRes.unwrap();
 
-        bool exists;
-        nsresult rv = directory->Exists(&exists);
-        MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
+    bool exists;
+    nsresult rv = directory->Exists(&exists);
+    MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
 
-        if (!exists) {
-          return Nothing();
-        }
+    if (!exists) {
+      return Nothing();
+    }
 
-        auto originStateMetadataRes =
-            quota::LoadDirectoryMetadataHeader(*directory);
-        MOZ_RELEASE_ASSERT(originStateMetadataRes.isOk());
+    auto streamResult = GetBinaryInputStream(
+        *directory, nsLiteralString(METADATA_V2_FILE_NAME));
+    MOZ_RELEASE_ASSERT(streamResult.isOk());
+    const auto& stream = streamResult.unwrap();
 
-        auto originStateMetadata = originStateMetadataRes.unwrap();
+    FullOriginMetadata fullOriginMetadata;
+    MOZ_RELEASE_ASSERT(
+        quota::ReadDirectoryMetadataHeader(*stream, fullOriginMetadata).isOk());
 
-        return Some(originStateMetadata);
-      });
+    return Some(OriginStateMetadata(fullOriginMetadata));
+  });
 
   return result;
 }

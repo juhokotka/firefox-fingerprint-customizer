@@ -23,10 +23,10 @@
 #include "OCSPCache.h"
 
 #include "NSSCertDBTrustDomain.h"
-#include "pk11pub.h"
+#include "ScopedNSSTypes.h"
 #include "mozilla/Logging.h"
 #include "mozpkix/pkixnss.h"
-#include "ScopedNSSTypes.h"
+#include "pk11pub.h"
 #include "secerr.h"
 
 extern mozilla::LazyLogModule gCertVerifierLog;
@@ -137,8 +137,6 @@ Result OCSPCache::Entry::Init(const CertID& aCertID,
   }
   return Success;
 }
-
-OCSPCache::OCSPCache() : mMutex("OCSPCache-mutex") {}
 
 OCSPCache::~OCSPCache() { Clear(); }
 

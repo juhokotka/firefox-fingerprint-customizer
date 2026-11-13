@@ -7,15 +7,11 @@
 #include "jsapi.h"
 #include "jsfriendapi.h"
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-#  include "builtin/AsyncDisposableStackObject.h"
-#endif
+#include "builtin/AsyncDisposableStackObject.h"
 #include "builtin/AtomicsObject.h"
 #include "builtin/BigInt.h"
 #include "builtin/DataViewObject.h"
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-#  include "builtin/DisposableStackObject.h"
-#endif
+#include "builtin/DisposableStackObject.h"
 #ifdef JS_HAS_INTL_API
 #  include "builtin/intl/Collator.h"
 #  include "builtin/intl/DateTimeFormat.h"
@@ -73,6 +69,7 @@
 #include "vm/StringObject.h"
 #include "wasm/WasmFeatures.h"
 #include "wasm/WasmJS.h"
+
 #include "gc/GCContext-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/Realm-inl.h"
@@ -179,6 +176,7 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
     case JSProto_WasmModule:
 #ifdef ENABLE_WASM_COMPONENTS
     case JSProto_WasmComponent:
+    case JSProto_WasmComponentInstance:
 #endif
     case JSProto_WasmInstance:
     case JSProto_WasmMemory:
@@ -207,8 +205,6 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
     case JSProto_PluralRules:
     case JSProto_RelativeTimeFormat:
     case JSProto_Segmenter:
-      return false;
-
     case JSProto_Temporal:
     case JSProto_Duration:
     case JSProto_Instant:
@@ -219,7 +215,7 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
     case JSProto_PlainYearMonth:
     case JSProto_TemporalNow:
     case JSProto_ZonedDateTime:
-      return !JS::Prefs::experimental_temporal();
+      return false;
 #endif
 
     // Return true if the given constructor has been disabled at run-time.
@@ -230,12 +226,10 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
     case JSProto_AsyncIterator:
       return !IsAsyncIteratorHelpersEnabled();
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
     case JSProto_SuppressedError:
     case JSProto_DisposableStack:
     case JSProto_AsyncDisposableStack:
-      return !JS::Prefs::experimental_explicit_resource_management();
-#endif
+      return false;
 
     case JSProto_AbstractModuleSource:
       return !JS::Prefs::experimental_source_phase_imports();

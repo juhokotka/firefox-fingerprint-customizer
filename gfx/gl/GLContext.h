@@ -5,8 +5,9 @@
 #ifndef GLCONTEXT_H_
 #define GLCONTEXT_H_
 
-#include <bitset>
 #include <stdint.h>
+
+#include <bitset>
 #include <stack>
 #include <vector>
 
@@ -24,23 +25,23 @@
 #  define MOZ_GL_DEBUG_BUILD 1
 #endif
 
-#include "mozilla/IntegerRange.h"
-#include "mozilla/RefPtr.h"
-#include "mozilla/UniquePtr.h"
-#include "mozilla/ThreadLocal.h"
-
-#include "MozFramebuffer.h"
-#include "nsTArray.h"
 #include "GLConsts.h"
+#include "GLContextSymbols.h"
+#include "GLContextTypes.h"
 #include "GLDefs.h"
 #include "GLTypes.h"
-#include "nsRegionFwd.h"
-#include "nsString.h"
-#include "GLContextTypes.h"
-#include "GLContextSymbols.h"
+#include "MozFramebuffer.h"
 #include "base/platform_thread.h"  // for PlatformThreadId
 #include "mozilla/GenericRefCounted.h"
+#include "mozilla/IntegerRange.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/ThreadLocal.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
+#include "mozilla/gfx/Point.h"
+#include "nsRegionFwd.h"
+#include "nsString.h"
+#include "nsTArray.h"
 
 template <class ElemT, class... More>
 constexpr inline std::array<ElemT, 1 + sizeof...(More)> make_array(
@@ -79,6 +80,7 @@ enum class GLFeature {
   bind_buffer_offset,
   blend_minmax,
   clear_buffers,
+  clip_control,
   copy_buffer,
   copy_image,
   debug,
@@ -112,6 +114,7 @@ enum class GLFeature {
   occlusion_query_boolean,
   occlusion_query2,
   packed_depth_stencil,
+  polygon_offset_clamp,
   prim_restart,
   prim_restart_fixed,
   provoking_vertex,
@@ -139,6 +142,7 @@ enum class GLFeature {
   texture_float_linear,
   texture_half_float,
   texture_half_float_linear,
+  texture_mirror_clamp_to_edge,
   texture_non_power_of_two,
   texture_norm16,
   texture_rg,
@@ -178,6 +182,7 @@ enum class GLRenderer {
   GalliumLlvmpipe,
   MicrosoftBasicRenderDriver,
   SamsungXclipse,
+  RadeonGFX10,
   Other
 };
 
@@ -230,6 +235,18 @@ class GLContext : public GenericAtomicRefCounted, public SupportsWeakPtr {
    * for an ANGLE implementation.
    */
   virtual bool IsWARP() const { return false; }
+
+  /**
+   * Returns true if the context is using ANGLE's D3D backend. This should only
+   * be overridden for an ANGLE implementation.
+   */
+  virtual bool IsD3DANGLE() const { return false; }
+
+  /**
+   * Returns true if the context is using ANGLE's Metal backend. This should
+   * only be overridden for an ANGLE implementation.
+   */
+  virtual bool IsMetalANGLE() const { return false; }
 
   virtual void GetWSIInfo(nsCString* const out) const = 0;
 
@@ -389,6 +406,7 @@ class GLContext : public GenericAtomicRefCounted, public SupportsWeakPtr {
     APPLE_vertex_array_object,
     ARB_ES2_compatibility,
     ARB_ES3_compatibility,
+    ARB_clip_control,
     ARB_color_buffer_float,
     ARB_compatibility,
     ARB_copy_buffer,
@@ -407,6 +425,7 @@ class GLContext : public GenericAtomicRefCounted, public SupportsWeakPtr {
     ARB_map_buffer_range,
     ARB_occlusion_query2,
     ARB_pixel_buffer_object,
+    ARB_polygon_offset_clamp,
     ARB_provoking_vertex,
     ARB_robust_buffer_access_behavior,
     ARB_robustness,
@@ -418,6 +437,7 @@ class GLContext : public GenericAtomicRefCounted, public SupportsWeakPtr {
     ARB_texture_compression_bptc,
     ARB_texture_compression_rgtc,
     ARB_texture_float,
+    ARB_texture_mirror_clamp_to_edge,
     ARB_texture_non_power_of_two,
     ARB_texture_rectangle,
     ARB_texture_rg,
@@ -431,6 +451,7 @@ class GLContext : public GenericAtomicRefCounted, public SupportsWeakPtr {
     CHROMIUM_color_buffer_float_rgba,
     EXT_bgra,
     EXT_blend_minmax,
+    EXT_clip_control,
     EXT_color_buffer_float,
     EXT_color_buffer_half_float,
     EXT_copy_texture,
@@ -450,6 +471,7 @@ class GLContext : public GenericAtomicRefCounted, public SupportsWeakPtr {
     EXT_multisampled_render_to_texture,
     EXT_occlusion_query_boolean,
     EXT_packed_depth_stencil,
+    EXT_polygon_offset_clamp,
     EXT_provoking_vertex,
     EXT_read_format_bgra,
     EXT_robustness,
@@ -463,6 +485,7 @@ class GLContext : public GenericAtomicRefCounted, public SupportsWeakPtr {
     EXT_texture_compression_s3tc_srgb,
     EXT_texture_filter_anisotropic,
     EXT_texture_format_BGRA8888,
+    EXT_texture_mirror_clamp_to_edge,
     EXT_texture_norm16,
     EXT_texture_sRGB,
     EXT_texture_storage,
@@ -1595,6 +1618,20 @@ class GLContext : public GenericAtomicRefCounted, public SupportsWeakPtr {
   void fPolygonOffset(GLfloat factor, GLfloat bias) {
     BEFORE_GL_CALL;
     mSymbols.fPolygonOffset(factor, bias);
+    AFTER_GL_CALL;
+  }
+
+  void fPolygonOffsetClamp(GLfloat factor, GLfloat units, GLfloat clamp) {
+    BEFORE_GL_CALL;
+    ASSERT_SYMBOL_PRESENT(fPolygonOffsetClamp);
+    mSymbols.fPolygonOffsetClamp(factor, units, clamp);
+    AFTER_GL_CALL;
+  }
+
+  void fClipControl(GLenum origin, GLenum depth) {
+    BEFORE_GL_CALL;
+    ASSERT_SYMBOL_PRESENT(fClipControl);
+    mSymbols.fClipControl(origin, depth);
     AFTER_GL_CALL;
   }
 
@@ -4030,10 +4067,7 @@ class GLContext : public GenericAtomicRefCounted, public SupportsWeakPtr {
       if (name < aOther.name) return true;
       return false;
     }
-    bool operator==(const NamedResource& aOther) const {
-      return origin == aOther.origin && name == aOther.name &&
-             originDeleted == aOther.originDeleted;
-    }
+    bool operator==(const NamedResource& aOther) const = default;
   };
 
   nsTArray<NamedResource> mTrackedPrograms;

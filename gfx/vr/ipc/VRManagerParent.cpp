@@ -4,15 +4,16 @@
 
 #include "VRManagerParent.h"
 
+#include "VRManager.h"
+#include "VRThread.h"
 #include "ipc/VRLayerParent.h"
+#include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/TimeStamp.h"  // for TimeStamp
 #include "mozilla/gfx/PVRManagerParent.h"
 #include "mozilla/ipc/Endpoint.h"
 #include "mozilla/ipc/ProtocolTypes.h"
-#include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/ipc/ProtocolUtils.h"  // for IToplevelProtocol
-#include "mozilla/TimeStamp.h"          // for TimeStamp
-#include "VRManager.h"
-#include "VRThread.h"
+#include "mozilla/layers/LayerTreeLog.h"
 
 using mozilla::dom::GamepadHandle;
 
@@ -96,6 +97,8 @@ void VRManagerParent::Bind(Endpoint<PVRManagerParent>&& aEndpoint) {
   mCompositorThreadHolder = CompositorThreadHolder::GetSingleton();
 
   RegisterWithManager();
+  LAYERTREE_LOG("VR manager bound, namespace {}, content {}", mNamespace,
+                mChildId);
 }
 
 /*static*/
@@ -147,6 +150,8 @@ void VRManagerParent::Shutdown() {
 }
 
 void VRManagerParent::ActorDestroy(ActorDestroyReason why) {
+  LAYERTREE_LOG("VR manager namespace {} destroyed, reason {}", mNamespace,
+                fmt::enums::format_as(why));
   UnregisterFromManager();
   mCompositorThreadHolder = nullptr;
 }

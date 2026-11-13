@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { render, fireEvent } from "@testing-library/react";
+import { act, render, fireEvent } from "@testing-library/react";
 import { Provider } from "react-redux";
 import { combineReducers, createStore } from "redux";
 import { INITIAL_STATE, reducers } from "common/Reducers.sys.mjs";
@@ -16,10 +16,13 @@ const mockState = {
     values: {
       ...INITIAL_STATE.Prefs.values,
       "widgets.system.enabled": true,
+      "widgets.enabled": true,
       "widgets.system.pictureOfTheDay.enabled": true,
       "widgets.pictureOfTheDay.enabled": true,
       "widgets.pictureOfTheDay.size": "medium",
+      "widgets.pictureOfTheDay.setAsWallpaper.enabled": true,
       "newtabWallpapers.enabled": true,
+      "newtabWallpapers.user.enabled": true,
       "newtabWallpapers.customWallpaper.enabled": true,
     },
   },
@@ -60,7 +63,7 @@ describe("PictureOfTheDay widget", () => {
       container.querySelector('[data-l10n-id="newtab-picture-check-back"]')
     ).toBeTruthy();
     expect(
-      container.querySelector('[data-l10n-id="newtab-picture-show-button"]')
+      container.querySelector('[data-l10n-id="newtab-picture-show-button2"]')
     ).toBeTruthy();
   });
 
@@ -165,7 +168,7 @@ describe("PictureOfTheDay widget", () => {
     ).toBeTruthy();
 
     const hidePhoto = container.querySelector(
-      '[data-l10n-id="newtab-picture-menu-hide-photo"]'
+      '[data-l10n-id="newtab-picture-menu-hide-photo2"]'
     );
     expect(hidePhoto).toBeTruthy();
     fireEvent.click(hidePhoto);
@@ -199,6 +202,7 @@ describe("PictureOfTheDay widget", () => {
       PictureOfTheDay: {
         ...INITIAL_STATE.PictureOfTheDay,
         imageUrl: "https://example.com/potd.jpg",
+        thumbnailUrl: "https://example.com/potd-thumb.jpg",
         title: "Test picture",
         description: "A test picture description.",
         publishedDate: "2026-07-01",
@@ -219,10 +223,13 @@ describe("PictureOfTheDay widget", () => {
       expect(root.className).toContain("has-picture");
       const img = container.querySelector("img.picture-of-the-day-image");
       expect(img).toBeTruthy();
-      expect(img.getAttribute("src")).toBe("https://example.com/potd.jpg");
+      // The widget renders the thumbnail, never the high-res imageUrl.
+      expect(img.getAttribute("src")).toBe(
+        "https://example.com/potd-thumb.jpg"
+      );
       expect(img.getAttribute("alt")).toBe("A test picture description.");
       expect(
-        container.querySelector('[data-l10n-id="newtab-picture-header-main"]')
+        container.querySelector('[data-l10n-id="newtab-picture-header-date"]')
       ).toBeTruthy();
       expect(
         container.querySelector(".picture-of-the-day-description").textContent
@@ -234,6 +241,113 @@ describe("PictureOfTheDay widget", () => {
       expect(
         container.querySelector(".picture-of-the-day-show-button")
       ).toBeFalsy();
+    });
+
+    it("shows the empty state (never the high-res URL) when the thumbnail is absent", () => {
+      const { container } = renderWidget(
+        jest.fn(),
+        {},
+        {
+          ...populatedState,
+          PictureOfTheDay: {
+            ...populatedState.PictureOfTheDay,
+            thumbnailUrl: "",
+          },
+        }
+      );
+      expect(
+        container.querySelector("img.picture-of-the-day-image")
+      ).toBeFalsy();
+      expect(
+        container.querySelector('[data-l10n-id="newtab-picture-check-back"]')
+      ).toBeTruthy();
+      expect(
+        container.querySelector("article.picture-of-the-day").className
+      ).not.toContain("has-picture");
+    });
+
+    it("renders the New badge until the widget has been interacted with", () => {
+      const { container } = renderWidget(jest.fn(), {}, populatedState);
+      const badge = container.querySelector(".picture-of-the-day-new-badge");
+      expect(badge).toBeTruthy();
+      // type="new" logs a missing-string error on newtab, so it must stay off.
+      expect(badge.hasAttribute("type")).toBe(false);
+      expect(badge.getAttribute("data-l10n-id")).toBe(
+        "newtab-widget-lists-label-new"
+      );
+    });
+
+    it("hides the New badge once the interaction pref is set", () => {
+      const { container } = renderWidget(
+        jest.fn(),
+        {},
+        withPrefs({ "widgets.pictureOfTheDay.interaction": true })
+      );
+      expect(
+        container.querySelector(".picture-of-the-day-new-badge")
+      ).toBeFalsy();
+    });
+
+    it("marks the picture loaded only after it loads (bug 2071112)", () => {
+      const { container } = renderWidget(jest.fn(), {}, populatedState);
+      const img = container.querySelector("img.picture-of-the-day-image");
+      expect(img.classList.contains("loaded")).toBe(false);
+
+      fireEvent.load(img);
+
+      expect(img.classList.contains("loaded")).toBe(true);
+    });
+
+    const widgetWithState = state => (
+      <WrapWithProvider state={state}>
+        <PictureOfTheDay
+          dispatch={jest.fn()}
+          handleUserInteraction={jest.fn()}
+          widgetsMayBeMaximized={true}
+          widgetEnabledMap={{}}
+        />
+      </WrapWithProvider>
+    );
+
+    it("starts the picture hidden again after it is hidden and shown", () => {
+      const { container, rerender } = render(widgetWithState(populatedState));
+      fireEvent.load(container.querySelector("img.picture-of-the-day-image"));
+
+      rerender(
+        widgetWithState(
+          withPrefs({ "widgets.pictureOfTheDay.dismissedDate": "2026-07-01" })
+        )
+      );
+      expect(
+        container.querySelector("img.picture-of-the-day-image")
+      ).toBeFalsy();
+
+      rerender(widgetWithState(populatedState));
+      expect(
+        container
+          .querySelector("img.picture-of-the-day-image")
+          .classList.contains("loaded")
+      ).toBe(false);
+    });
+
+    it("keeps the current picture showing while a new picture loads", () => {
+      const { container, rerender } = render(widgetWithState(populatedState));
+      fireEvent.load(container.querySelector("img.picture-of-the-day-image"));
+
+      rerender(
+        widgetWithState({
+          ...populatedState,
+          PictureOfTheDay: {
+            ...populatedState.PictureOfTheDay,
+            thumbnailUrl: "https://example.com/potd-thumb-2.jpg",
+          },
+        })
+      );
+      const img = container.querySelector("img.picture-of-the-day-image");
+      expect(img.getAttribute("src")).toBe(
+        "https://example.com/potd-thumb-2.jpg"
+      );
+      expect(img.classList.contains("loaded")).toBe(true);
     });
 
     it("falls back to the empty state when the picture fails to load", () => {
@@ -267,17 +381,195 @@ describe("PictureOfTheDay widget", () => {
       ).toBeTruthy();
     });
 
-    it("collapses the Set wallpaper button once it is set as wallpaper", () => {
+    it("keeps the Set wallpaper button collapsed with a checkmark while the current picture is the active wallpaper", () => {
       const { container } = renderWidget(
         jest.fn(),
         {},
-        withPrefs({ "widgets.pictureOfTheDay.setAsWallpaper": true })
+        withPrefs({ "widgets.pictureOfTheDay.wallpaperActive": "2026-07-01" })
+      );
+      const button = container.querySelector(
+        ".picture-of-the-day-set-wallpaper"
+      );
+      expect(button.classList.contains("is-collapsed")).toBe(true);
+      expect(button.classList.contains("no-expand")).toBe(true);
+      expect(button.getAttribute("iconsrc")).toBe(
+        "chrome://global/skin/icons/check.svg"
+      );
+    });
+
+    it("does nothing when the checkmark (already-set) button is clicked", () => {
+      const dispatch = jest.fn();
+      const { container } = renderWidget(
+        dispatch,
+        {},
+        withPrefs({ "widgets.pictureOfTheDay.wallpaperActive": "2026-07-01" })
+      );
+      fireEvent.click(
+        container.querySelector(".picture-of-the-day-set-wallpaper")
       );
       expect(
-        container.querySelector(
-          ".picture-of-the-day-set-wallpaper.is-collapsed"
+        dispatch.mock.calls.find(
+          ([action]) => action.type === at.WIDGETS_PICTURE_SET_WALLPAPER
         )
-      ).toBeTruthy();
+      ).toBeFalsy();
+    });
+
+    it("hides the checkmark while wallpapers are toggled off, keeping the stored date", () => {
+      const { container } = renderWidget(
+        jest.fn(),
+        {},
+        withPrefs({
+          "widgets.pictureOfTheDay.wallpaperActive": "2026-07-01",
+          "newtabWallpapers.user.enabled": false,
+        })
+      );
+      const button = container.querySelector(
+        ".picture-of-the-day-set-wallpaper"
+      );
+      expect(button.classList.contains("is-collapsed")).toBe(false);
+      expect(button.getAttribute("iconsrc")).toBe(
+        "chrome://browser/skin/canvas.svg"
+      );
+    });
+
+    it("re-offers the Set wallpaper CTA when the active-wallpaper date is for a different picture", () => {
+      const { container } = renderWidget(
+        jest.fn(),
+        {},
+        withPrefs({ "widgets.pictureOfTheDay.wallpaperActive": "2026-06-30" })
+      );
+      const button = container.querySelector(
+        ".picture-of-the-day-set-wallpaper"
+      );
+      expect(button.classList.contains("is-collapsed")).toBe(false);
+      expect(button.getAttribute("iconsrc")).toBe(
+        "chrome://browser/skin/canvas.svg"
+      );
+    });
+
+    describe("when today's picture is the wallpaper (bug 2065871)", () => {
+      const previous = {
+        imageUrl: "https://example.com/previous.jpg",
+        thumbnailUrl: "https://example.com/previous-thumb.jpg",
+        title: "Previous picture",
+        description: "The previous picture.",
+        publishedDate: "2026-06-30",
+      };
+      const withPrevious = extraPrefs => {
+        const state = withPrefs(extraPrefs);
+        return {
+          ...state,
+          PictureOfTheDay: { ...state.PictureOfTheDay, previous },
+        };
+      };
+      const shownSrc = container =>
+        container
+          .querySelector("img.picture-of-the-day-image")
+          .getAttribute("src");
+
+      it("shows the previous picture, dated, with Set wallpaper for it", () => {
+        const dispatch = jest.fn();
+        const { container } = renderWidget(
+          dispatch,
+          {},
+          withPrevious({
+            "widgets.pictureOfTheDay.wallpaperActive": "2026-07-01",
+          })
+        );
+        expect(shownSrc(container)).toBe(previous.thumbnailUrl);
+        const header = container.querySelector(
+          '[data-l10n-id="newtab-picture-header-date"]'
+        );
+        expect(JSON.parse(header.getAttribute("data-l10n-args"))).toEqual({
+          date: new Date(2026, 5, 30).getTime(),
+        });
+        const button = container.querySelector(
+          ".picture-of-the-day-set-wallpaper"
+        );
+        expect(button.classList.contains("is-collapsed")).toBe(false);
+        fireEvent.click(button);
+        expect(
+          dispatch.mock.calls.find(
+            ([action]) => action.type === at.WIDGETS_PICTURE_SET_WALLPAPER
+          )[0].data
+        ).toEqual({ publishedDate: "2026-06-30" });
+      });
+
+      it("shows today's picture once the previous one is the wallpaper", () => {
+        const { container } = renderWidget(
+          jest.fn(),
+          {},
+          withPrevious({
+            "widgets.pictureOfTheDay.wallpaperActive": "2026-06-30",
+          })
+        );
+        expect(shownSrc(container)).toBe("https://example.com/potd-thumb.jpg");
+      });
+
+      it("shows today's picture while wallpapers are toggled off", () => {
+        const { container } = renderWidget(
+          jest.fn(),
+          {},
+          withPrevious({
+            "widgets.pictureOfTheDay.wallpaperActive": "2026-07-01",
+            "newtabWallpapers.user.enabled": false,
+          })
+        );
+        expect(shownSrc(container)).toBe("https://example.com/potd-thumb.jpg");
+      });
+
+      it("swaps to the previous picture in the same widget once today's is set", () => {
+        const dispatch = jest.fn();
+        const store = createStore(combineReducers(reducers), withPrevious({}));
+        const { container } = render(
+          <Provider store={store}>
+            <PictureOfTheDay
+              dispatch={dispatch}
+              handleUserInteraction={jest.fn()}
+              widgetsMayBeMaximized={true}
+              widgetEnabledMap={{}}
+            />
+          </Provider>
+        );
+        const button = () =>
+          container.querySelector(".picture-of-the-day-set-wallpaper");
+        fireEvent.click(button());
+        expect(button().getAttribute("iconsrc")).toBe(
+          "chrome://global/skin/icons/check.svg"
+        );
+
+        act(() => {
+          store.dispatch({
+            type: at.PREF_CHANGED,
+            data: {
+              name: "widgets.pictureOfTheDay.wallpaperActive",
+              value: "2026-07-01",
+            },
+          });
+        });
+
+        expect(shownSrc(container)).toBe(previous.thumbnailUrl);
+        expect(button().classList.contains("is-collapsed")).toBe(false);
+        expect(button().getAttribute("iconsrc")).toBe(
+          "chrome://browser/skin/canvas.svg"
+        );
+        dispatch.mockClear();
+        fireEvent.click(button());
+        expect(
+          dispatch.mock.calls.find(
+            ([action]) => action.type === at.WIDGETS_PICTURE_SET_WALLPAPER
+          )[0].data
+        ).toEqual({ publishedDate: "2026-06-30" });
+      });
+
+      it("keeps today's picture when there is no previous one", () => {
+        const { container } = renderWidget(
+          jest.fn(),
+          {},
+          withPrefs({ "widgets.pictureOfTheDay.wallpaperActive": "2026-07-01" })
+        );
+        expect(shownSrc(container)).toBe("https://example.com/potd-thumb.jpg");
+      });
     });
 
     it("hides the Set wallpaper button when custom wallpapers are disabled", () => {
@@ -302,12 +594,72 @@ describe("PictureOfTheDay widget", () => {
       ).toBeFalsy();
     });
 
+    it("hides the Set wallpaper button when the feature is disabled", () => {
+      const { container } = renderWidget(
+        jest.fn(),
+        {},
+        withPrefs({ "widgets.pictureOfTheDay.setAsWallpaper.enabled": false })
+      );
+      expect(
+        container.querySelector(".picture-of-the-day-set-wallpaper")
+      ).toBeFalsy();
+    });
+
+    it("shows the Set wallpaper button when a trainhopConfig override enables the feature despite the pref being off", () => {
+      const { container } = renderWidget(
+        jest.fn(),
+        {},
+        withPrefs({
+          "widgets.pictureOfTheDay.setAsWallpaper.enabled": false,
+          trainhopConfig: {
+            widgets: { pictureOfTheDaySetAsWallpaperEnabled: true },
+          },
+        })
+      );
+      expect(
+        container.querySelector(".picture-of-the-day-set-wallpaper")
+      ).toBeTruthy();
+    });
+
+    it("shows the Set wallpaper button when the dedicated widgetPictureOfTheDay namespace enables the feature", () => {
+      const { container } = renderWidget(
+        jest.fn(),
+        {},
+        withPrefs({
+          "widgets.pictureOfTheDay.setAsWallpaper.enabled": false,
+          trainhopConfig: {
+            widgetPictureOfTheDay: { setAsWallpaperEnabled: true },
+          },
+        })
+      );
+      expect(
+        container.querySelector(".picture-of-the-day-set-wallpaper")
+      ).toBeTruthy();
+    });
+
+    it("lets the dedicated widgetPictureOfTheDay namespace win over the shared widgets key", () => {
+      const { container } = renderWidget(
+        jest.fn(),
+        {},
+        withPrefs({
+          "widgets.pictureOfTheDay.setAsWallpaper.enabled": true,
+          trainhopConfig: {
+            widgetPictureOfTheDay: { setAsWallpaperEnabled: false },
+            widgets: { pictureOfTheDaySetAsWallpaperEnabled: true },
+          },
+        })
+      );
+      expect(
+        container.querySelector(".picture-of-the-day-set-wallpaper")
+      ).toBeFalsy();
+    });
+
     it("dismisses by setting dismissedDate to the picture's date", () => {
       const dispatch = jest.fn();
       const { container } = renderWidget(dispatch, {}, populatedState);
       fireEvent.click(
         container.querySelector(
-          '[data-l10n-id="newtab-picture-menu-hide-photo"]'
+          '[data-l10n-id="newtab-picture-menu-hide-photo2"]'
         )
       );
       const setPref = dispatch.mock.calls.find(
@@ -371,7 +723,7 @@ describe("PictureOfTheDay widget", () => {
       );
       fireEvent.click(
         container.querySelector(
-          '[data-l10n-id="newtab-picture-menu-hide-photo"]'
+          '[data-l10n-id="newtab-picture-menu-hide-photo2"]'
         )
       );
       const setPref = dispatch.mock.calls.find(
@@ -392,6 +744,7 @@ describe("PictureOfTheDay widget", () => {
       PictureOfTheDay: {
         ...INITIAL_STATE.PictureOfTheDay,
         imageUrl: "https://example.com/potd.jpg",
+        thumbnailUrl: "https://example.com/potd-thumb.jpg",
         description: "A test picture description.",
         publishedDate: "2026-07-01",
         author: "Jane Doe",
@@ -400,9 +753,6 @@ describe("PictureOfTheDay widget", () => {
         licenseUrl: LICENSE_URL,
       },
     };
-
-    const findOpenLink = dispatch =>
-      dispatch.mock.calls.find(([action]) => action.type === at.OPEN_LINK);
 
     it("renders the author credit, source link, and license link", () => {
       const { container } = renderWidget(jest.fn(), {}, attributedState);
@@ -428,34 +778,29 @@ describe("PictureOfTheDay widget", () => {
     it("keeps the title and description as plain (non-link) text", () => {
       const { container } = renderWidget(jest.fn(), {}, attributedState);
       expect(
-        container.querySelector('p[data-l10n-id="newtab-picture-header-main"]')
+        container.querySelector('p[data-l10n-id="newtab-picture-header-date"]')
       ).toBeTruthy();
       expect(
         container.querySelector("p.picture-of-the-day-description")
       ).toBeTruthy();
     });
 
-    it("opens the source page in a new tab from the attribution link", () => {
-      const dispatch = jest.fn();
-      const { container } = renderWidget(dispatch, {}, attributedState);
+    it("links the source page via the anchor href for same-tab navigation", () => {
+      const { container } = renderWidget(jest.fn(), {}, attributedState);
       const sourceLink = container.querySelector(
         '[data-l10n-id="newtab-picture-attribution-source-link"]'
       );
-      fireEvent.click(sourceLink);
-      const openLink = findOpenLink(dispatch);
-      expect(openLink[0].data.url).toBe(SOURCE_URL);
-      expect(openLink[0].data.where).toBe("tab");
+      expect(sourceLink.tagName).toBe("A");
+      expect(sourceLink.getAttribute("href")).toBe(SOURCE_URL);
     });
 
-    it("opens the license page in a new tab from the license link", () => {
-      const dispatch = jest.fn();
-      const { container } = renderWidget(dispatch, {}, attributedState);
-      fireEvent.click(
-        container.querySelector(
-          '[data-l10n-id="newtab-picture-attribution-license"]'
-        )
+    it("links the license page via the anchor href for same-tab navigation", () => {
+      const { container } = renderWidget(jest.fn(), {}, attributedState);
+      const licenseLink = container.querySelector(
+        '[data-l10n-id="newtab-picture-attribution-license"]'
       );
-      expect(findOpenLink(dispatch)[0].data.url).toBe(LICENSE_URL);
+      expect(licenseLink.tagName).toBe("A");
+      expect(licenseLink.getAttribute("href")).toBe(LICENSE_URL);
     });
 
     it("records an open_license user event when the license link is clicked", () => {
@@ -475,13 +820,13 @@ describe("PictureOfTheDay widget", () => {
       expect(evt[0].data.widget_name).toBe("picture_of_the_day");
     });
 
-    it("opens the source when the image is clicked", () => {
-      const dispatch = jest.fn();
-      const { container } = renderWidget(dispatch, {}, attributedState);
-      fireEvent.click(
-        container.querySelector(".picture-of-the-day-image-link")
+    it("links the image to the source page via the anchor href", () => {
+      const { container } = renderWidget(jest.fn(), {}, attributedState);
+      const imageLink = container.querySelector(
+        ".picture-of-the-day-image-link"
       );
-      expect(findOpenLink(dispatch)[0].data.url).toBe(SOURCE_URL);
+      expect(imageLink.tagName).toBe("A");
+      expect(imageLink.getAttribute("href")).toBe(SOURCE_URL);
     });
 
     it("omits attribution parts and links whose fields are absent", () => {
@@ -506,7 +851,7 @@ describe("PictureOfTheDay widget", () => {
         container.querySelector(".picture-of-the-day-image-link")
       ).toBeFalsy();
       expect(
-        container.querySelector('p[data-l10n-id="newtab-picture-header-main"]')
+        container.querySelector('p[data-l10n-id="newtab-picture-header-date"]')
       ).toBeTruthy();
     });
   });
@@ -517,6 +862,7 @@ describe("PictureOfTheDay widget", () => {
       PictureOfTheDay: {
         ...INITIAL_STATE.PictureOfTheDay,
         imageUrl: "https://example.com/potd.jpg",
+        thumbnailUrl: "https://example.com/potd-thumb.jpg",
         title: "Test picture",
         description: "A test picture description.",
         publishedDate: "2026-07-01",
@@ -586,6 +932,7 @@ describe("PictureOfTheDay widget", () => {
       PictureOfTheDay: {
         ...INITIAL_STATE.PictureOfTheDay,
         imageUrl: "https://example.com/potd.jpg",
+        thumbnailUrl: "https://example.com/potd-thumb.jpg",
         title: "Test picture",
         description: "A test picture description.",
         publishedDate: "2026-07-01",
@@ -623,7 +970,7 @@ describe("PictureOfTheDay widget", () => {
       [
         "hide today's picture",
         populated,
-        '[data-l10n-id="newtab-picture-menu-hide-photo"]',
+        '[data-l10n-id="newtab-picture-menu-hide-photo2"]',
       ],
       ["open source", sourced, ".picture-of-the-day-source-link"],
       [

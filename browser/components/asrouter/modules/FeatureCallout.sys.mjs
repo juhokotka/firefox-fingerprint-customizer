@@ -878,17 +878,17 @@ export class FeatureCallout {
         ? this.doc.querySelector(preTokenSelector.trim())
         : this.doc;
 
-      const match = [
+      const bookmarkItems = [
         ...rootScope.querySelectorAll("#PlacesToolbarItems .bookmark-item"),
-      ].find(el => {
-        const node = el._placesNode;
-        return (
-          node &&
-          (node.uri === url ||
-            [this.browser.contentTitle, url].includes(node.title) ||
-            el.getAttribute("label") === label)
+      ];
+      const match =
+        bookmarkItems.find(el => el._placesNode?.uri === url) ??
+        bookmarkItems.find(
+          el =>
+            el._placesNode &&
+            ([this.browser.contentTitle, url].includes(el._placesNode?.title) ||
+              el.getAttribute("label") === label)
         );
-      });
 
       if (!match) {
         lazy.log.debug(
@@ -1101,18 +1101,22 @@ export class FeatureCallout {
       }
     }
 
+    const flip = ["none", "both", "slide"].includes(panel_position?.flip)
+      ? panel_position?.flip
+      : "slide";
+
     if (!this._container?.parentElement) {
       if (needsPanel) {
         let fragment = this.win.MozXULElement.parseXULToFragment(`<panel
             class="panel-no-padding"
             orient="vertical"
             noautofocus="true"
-            flip='${panel_position.flip ?? "slide"}'
+            flip='${flip}'
             type="arrow"
             consumeoutsideclicks="never"
             norolluponanchor="true"
             nonnative=""
-            position="${panel_position.panel_position_string}"
+            position="${panel_position?.panel_position_string}"
             ${hide_arrow ? "" : 'show-arrow=""'}
             ${autohide ? "" : 'noautohide="true"'}
             ${ignorekeys ? 'ignorekeys="true"' : ""}

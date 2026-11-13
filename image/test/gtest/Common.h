@@ -7,20 +7,19 @@
 
 #include <vector>
 
-#include "gtest/gtest.h"
-
-#include "mozilla/Attributes.h"
-#include "mozilla/gtest/MozAssertions.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/UniquePtr.h"
-#include "mozilla/gfx/2D.h"
 #include "Decoder.h"
-#include "gfxColor.h"
-#include "gfxPlatform.h"
-#include "nsCOMPtr.h"
 #include "SurfaceFlags.h"
 #include "SurfacePipe.h"
 #include "SurfacePipeFactory.h"
+#include "gfxColor.h"
+#include "gfxPlatform.h"
+#include "gtest/gtest.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/UniquePtr.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gtest/MozAssertions.h"
+#include "nsCOMPtr.h"
 
 class nsIInputStream;
 
@@ -565,6 +564,7 @@ ImageTestCase DownscaledBMPTestCase();
 ImageTestCase DownscaledICOTestCase();
 ImageTestCase DownscaledIconTestCase();
 ImageTestCase DownscaledWebPTestCase();
+ImageTestCase DownscaledLossyWebPTestCase();
 ImageTestCase DownscaledTransparentICOWithANDMaskTestCase();
 
 ImageTestCase TruncatedSmallGIFTestCase();
@@ -597,15 +597,19 @@ ImageTestCase GreenJXLTestCase();
 ImageTestCase ProgressiveJXLTestCase();
 ImageTestCase DownscaledJXLTestCase();
 ImageTestCase LargeJXLTestCase();
+ImageTestCase LargeJXLReferenceWebPTestCase();
 ImageTestCase TransparentJXLTestCase();
 ImageTestCase CorruptJXLTestCase();
 ImageTestCase PerfRgbLosslessJXLTestCase();
 ImageTestCase PerfRgbAlphaLosslessJXLTestCase();
 ImageTestCase PerfRgbLossyJXLTestCase();
 ImageTestCase PerfRgbAlphaLossyJXLTestCase();
+ImageTestCase ProgressiveAlphaMultiGroupJXLTestCase();
 #endif
 
 ImageTestCase ExifResolutionTestCase();
+
+ImageTestCase ExifOrientationDownscaleJPGTestCase();
 
 RefPtr<Image> TestCaseToDecodedImage(const ImageTestCase&);
 

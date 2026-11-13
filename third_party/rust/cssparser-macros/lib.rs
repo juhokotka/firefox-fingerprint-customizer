@@ -26,14 +26,12 @@ fn parse_pat_to_table<'a>(
     pat: &'a syn::Pat,
     case_id: u8,
     wildcard: &mut Option<&'a syn::Ident>,
-    table: &mut [u8; 256],
+    table: &mut [Option<u8>; 256],
 ) {
     match pat {
         syn::Pat::Lit(syn::PatLit { ref lit, .. }) => {
             let value = get_byte_from_lit(lit);
-            if table[value as usize] == 0 {
-                table[value as usize] = case_id;
-            }
+            table[value as usize].get_or_insert(case_id);
         }
         syn::Pat::Range(syn::PatRange {
             ref start, ref end, ..
@@ -41,28 +39,20 @@ fn parse_pat_to_table<'a>(
             let lo = get_byte_from_expr_lit(start.as_ref().unwrap());
             let hi = get_byte_from_expr_lit(end.as_ref().unwrap());
             for value in lo..hi {
-                if table[value as usize] == 0 {
-                    table[value as usize] = case_id;
-                }
+                table[value as usize].get_or_insert(case_id);
             }
-            if table[hi as usize] == 0 {
-                table[hi as usize] = case_id;
-            }
+            table[hi as usize].get_or_insert(case_id);
         }
         syn::Pat::Wild(_) => {
             for byte in table.iter_mut() {
-                if *byte == 0 {
-                    *byte = case_id;
-                }
+                byte.get_or_insert(case_id);
             }
         }
         syn::Pat::Ident(syn::PatIdent { ref ident, .. }) => {
             assert_eq!(*wildcard, None);
             *wildcard = Some(ident);
             for byte in table.iter_mut() {
-                if *byte == 0 {
-                    *byte = case_id;
-                }
+                byte.get_or_insert(case_id);
             }
         }
         syn::Pat::Or(syn::PatOr { ref cases, .. }) => {
@@ -71,7 +61,7 @@ fn parse_pat_to_table<'a>(
             }
         }
         _ => {
-            panic!("Unexpected pattern: {:?}. Buggy code ?", pat);
+            panic!("Unexpected or unsupported pattern: {:?}. Buggy code ?", pat);
         }
     }
 }
@@ -80,7 +70,7 @@ fn parse_pat_to_table<'a>(
 ///
 /// ## Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// match_byte! { tokenizer.next_byte_unchecked(),
 ///     b'a'..b'z' => { ... }
 ///     b'0'..b'9' => { ... }
@@ -109,7 +99,6 @@ pub fn match_byte(input: TokenStream) -> TokenStream {
                     let mut arms = Vec::new();
                     while !input.is_empty() {
                         let arm = input.call(syn::Arm::parse)?;
-                        assert!(arm.guard.is_none(), "match_byte doesn't support guards");
                         assert!(
                             arm.attrs.is_empty(),
                             "match_byte doesn't support attributes"
@@ -124,17 +113,16 @@ pub fn match_byte(input: TokenStream) -> TokenStream {
     let MatchByte { expr, arms } = syn::parse_macro_input!(input);
 
     let mut cases = Vec::new();
-    let mut table = [0u8; 256];
+    let mut table = [None; 256];
     let mut match_body = Vec::new();
     let mut wildcard = None;
     for (i, ref arm) in arms.iter().enumerate() {
-        let case_id = i + 1;
-        let index = case_id as isize;
+        let case_id = i as isize;
         let name = syn::Ident::new(&format!("Case{case_id}"), arm.span());
         let pat = &arm.pat;
-        parse_pat_to_table(pat, case_id as u8, &mut wildcard, &mut table);
+        parse_pat_to_table(pat, i as u8, &mut wildcard, &mut table);
 
-        cases.push(quote::quote!(#name = #index));
+        cases.push(quote::quote!(#name = #case_id));
         let body = &arm.body;
         match_body.push(quote::quote!(Case::#name => { #body }))
     }
@@ -144,8 +132,12 @@ pub fn match_byte(input: TokenStream) -> TokenStream {
     });
 
     let mut table_content = Vec::new();
-    for entry in table.iter() {
-        let name: syn::Path = syn::parse_str(&format!("Case::Case{entry}")).unwrap();
+    for (byte, entry) in table.iter().enumerate() {
+        let case_id = match entry {
+            Some(id) => id,
+            None => panic!("Uncovered byte {:?} (add a wildcard pattern?)", byte),
+        };
+        let name: syn::Path = syn::parse_str(&format!("Case::Case{case_id}")).unwrap();
         table_content.push(name);
     }
     let table = quote::quote!(static __CASES: [Case; 256] = [#(#table_content),*];);

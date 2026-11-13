@@ -8,45 +8,35 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import org.mozilla.fenix.Config
 import org.mozilla.fenix.nimbus.FxNimbus
 
-/**
- * Feature helper for managing the release of the Tabs Tray UI enhancements.
- */
+/** Feature helper for managing the release of the Tabs Tray UI enhancements. */
 interface TabManagementFeatureHelper {
 
-    /**
-     * Whether the Tab Manager opening animation is enabled.
-     */
+    /** Whether the Tab Manager opening animation is enabled. */
     val openingAnimationEnabled: Boolean
 
-    /**
-     * Whether the Tab Groups feature is enabled.
-     */
+    /** Whether the Tab Groups feature is enabled. */
     val tabGroupsEnabled: Boolean
 
-    /**
-     * Whether drag and drop is enabled for the Tab Groups feature.
-     */
+    /** Whether drag and drop is enabled for the Tab Groups feature. */
     val tabGroupsDragAndDropEnabled: Boolean
 
-    /**
-     * Determines whether the "Share" button is displayed for tab groups in the tabs tray.
-     */
-    val shareTabGroupEnabled: Boolean
+    /** Determines whether the "Ungroup" item is displayed in a tab group's three dot menu. */
+    val ungroupTabGroupEnabled: Boolean
 
-    /**
-     * Whether onboarding is enabled for the Tab Groups feature.
-     */
+    /** Whether onboarding is enabled for the Tab Groups feature. */
     val tabGroupsOnboardingEnabled: Boolean
 
-    /**
-     * Control whether reorder happens live during a drag and drop action for Tab Groups.
-     */
+    /** Control whether reorder happens live during a drag and drop action for Tab Groups. */
     val tabGroupsLiveReorderEnabled: Boolean
+
+    /** Whether the Tab Groups strip is shown while the active tab is in a group. */
+    val tabGroupsStripEnabled: Boolean
+
+    /** Control whether Tab Group options show up in the browser menu. */
+    val showTabGroupsInMenu: Boolean
 }
 
-/**
- * The default implementation of [TabManagementFeatureHelper].
- */
+/** The default implementation of [TabManagementFeatureHelper]. */
 data object DefaultTabManagementFeatureHelper : TabManagementFeatureHelper {
 
     override val openingAnimationEnabled: Boolean
@@ -61,13 +51,22 @@ data object DefaultTabManagementFeatureHelper : TabManagementFeatureHelper {
     override val tabGroupsLiveReorderEnabled: Boolean
         get() = FxNimbus.features.tabGroupsLiveReorder.value().enabled
 
-    override val shareTabGroupEnabled: Boolean
-        get() = false
+    override val ungroupTabGroupEnabled: Boolean
+        get() = Config.channel.isDebug || FxNimbus.features.tabGroupsUngroup.value().enabled
 
     override val tabGroupsOnboardingEnabled: Boolean
         get() = Config.channel.isDebug || FxNimbus.features.tabGroupsOnboarding.value().enabled
+
+    override val tabGroupsStripEnabled: Boolean
+        get() = FxNimbus.features.tabGroupsStrip.value().enabled
+
+    // Opt in via Secret Settings. Defaulting this on adds a browser menu row that pushes Print out
+    // of the main menu's visible area, which the Print UI tests rely on.
+    override val showTabGroupsInMenu: Boolean
+        get() = false
 }
 
-val LocalTabManagementFeatureHelper = staticCompositionLocalOf<TabManagementFeatureHelper> {
-    DefaultTabManagementFeatureHelper
-}
+val LocalTabManagementFeatureHelper =
+    staticCompositionLocalOf<TabManagementFeatureHelper> {
+        DefaultTabManagementFeatureHelper
+    }

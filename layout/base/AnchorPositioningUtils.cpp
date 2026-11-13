@@ -10,6 +10,7 @@
 #include "mozilla/OverflowChangedTracker.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/StaticPrefs_apz.h"
+#include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/dom/DOMIntersectionObserver.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
@@ -170,33 +171,56 @@ bool IsFullyStyleableTreeAbidingOrNotPseudoElement(const nsIFrame* aFrame) {
          pseudoElementType == PseudoStyleType::Marker;
 }
 
-size_t GetTopLayerIndex(const nsIFrame* aFrame) {
-  MOZ_ASSERT(aFrame);
+class TopLayerChecker {
+  AutoTArray<dom::Element*, 1> mTopLayer;
+  size_t mPositionedTopLayerIndex;
 
-  const nsIContent* frameContent = aFrame->GetContent();
+  static size_t GetIndex(const nsIFrame* aFrame,
+                         const nsTArray<dom::Element*>& aTopLayers) {
+    MOZ_ASSERT(aFrame);
 
-  if (!frameContent) {
+    const nsIContent* frameContent = aFrame->GetContent();
+
+    if (!frameContent) {
+      return 0;
+    }
+
+    // Within the array returned by Document::GetTopLayer,
+    // a higher index means the layer sits higher in the stack,
+    // matching Document::GetTopLayerTop()’s top-to-bottom logic.
+    // See https://drafts.csswg.org/css-position-4/#in-a-higher-top-layer
+
+    for (size_t index = 0; index < aTopLayers.Length(); ++index) {
+      const auto& topLayer = aTopLayers.ElementAt(index);
+      if (nsContentUtils::ContentIsFlattenedTreeDescendantOfForStyle(
+              /* aPossibleDescendant */ frameContent,
+              /* aPossibleAncestor */ topLayer)) {
+        return 1 + index;
+      }
+    }
+
     return 0;
   }
 
-  // Within the array returned by Document::GetTopLayer,
-  // a higher index means the layer sits higher in the stack,
-  // matching Document::GetTopLayerTop()’s top-to-bottom logic.
-  // See https://drafts.csswg.org/css-position-4/#in-a-higher-top-layer
-  const nsTArray<dom::Element*>& topLayers =
-      frameContent->OwnerDoc()->GetTopLayer();
-
-  for (size_t index = 0; index < topLayers.Length(); ++index) {
-    const auto& topLayer = topLayers.ElementAt(index);
-    if (nsContentUtils::ContentIsFlattenedTreeDescendantOfForStyle(
-            /* aPossibleDescendant */ frameContent,
-            /* aPossibleAncestor */ topLayer)) {
-      return 1 + index;
-    }
+ public:
+  size_t IndexFor(const nsIFrame* aFrame) const {
+    return GetIndex(aFrame, mTopLayer);
   }
 
-  return 0;
-}
+  explicit TopLayerChecker(const nsIFrame* aPositionedFrame)
+      : mTopLayer{aPositionedFrame->GetContent()->OwnerDoc()->GetTopLayer()},
+        mPositionedTopLayerIndex{GetIndex(aPositionedFrame, mTopLayer)} {}
+
+  int32_t Compare(const nsIFrame* aPossibleAnchorFrame,
+                  Maybe<size_t> aCachedAnchorTopLayerIndex) {
+    const auto anchorTopLayerIndex = aCachedAnchorTopLayerIndex.valueOrFrom(
+        [&]() { return GetIndex(aPossibleAnchorFrame, mTopLayer); });
+    if (mPositionedTopLayerIndex == anchorTopLayerIndex) {
+      return 0;
+    }
+    return anchorTopLayerIndex < mPositionedTopLayerIndex ? 1 : -1;
+  }
+};
 
 bool IsInitialContainingBlock(const nsIFrame* aContainingBlock) {
   // Initial containing block: The containing block of the root element.
@@ -214,15 +238,18 @@ bool IsContainingBlockGeneratedByElement(const nsIFrame* aContainingBlock) {
 }
 
 bool IsAnchorLaidOutStrictlyBeforeElement(
-    const nsIFrame* aPossibleAnchorFrame, const nsIFrame* aPositionedFrame,
-    const nsTArray<const nsIFrame*>& aPositionedFrameAncestors) {
+    const AnchorPosAnchorInfo& aPossibleAnchor,
+    const nsIFrame* aPositionedFrame, uint32_t aPositionedFrameTreeDepth,
+    const nsTArray<const nsIFrame*>& aPositionedFrameAncestors,
+    TopLayerChecker& aTopLayerChecker,
+    Maybe<size_t> aCachedAnchorTopLayerIndex) {
   // 1. positioned el is in a higher top layer than possible anchor,
   // see https://drafts.csswg.org/css-position-4/#in-a-higher-top-layer
-  const size_t positionedTopLayerIndex = GetTopLayerIndex(aPositionedFrame);
-  const size_t anchorTopLayerIndex = GetTopLayerIndex(aPossibleAnchorFrame);
+  const auto topLayerResult = aTopLayerChecker.Compare(
+      aPossibleAnchor.mAnchor, aCachedAnchorTopLayerIndex);
 
-  if (anchorTopLayerIndex != positionedTopLayerIndex) {
-    return anchorTopLayerIndex < positionedTopLayerIndex;
+  if (topLayerResult != 0) {
+    return topLayerResult > 0;
   }
 
   // Note: The containing block of an absolutely positioned element
@@ -235,37 +262,42 @@ bool IsAnchorLaidOutStrictlyBeforeElement(
   // have inline elements as a containing block). Some WPT rely on inline
   // containing blocks as well.
   // See also: https://github.com/w3c/csswg-drafts/issues/12674
-  const nsIFrame* anchorContainingBlock = aPossibleAnchorFrame->GetParent();
+  const nsIFrame* anchorContainingBlock = aPossibleAnchor.mAnchor->GetParent();
+  const auto* positionedContainingBlockFirstContinuation =
+      nsLayoutUtils::FirstContinuationOrIBSplitSibling(
+          positionedContainingBlock);
 
   // 2. Both elements are in the same top layer but have different
   // containing blocks and positioned el's containing block is an
   // ancestor of possible anchor's containing block in the containing
   // block chain, aka one of the following:
   if (nsLayoutUtils::FirstContinuationOrIBSplitSibling(anchorContainingBlock) !=
-      nsLayoutUtils::FirstContinuationOrIBSplitSibling(
-          positionedContainingBlock)) {
+      positionedContainingBlockFirstContinuation) {
     // 2.1 positioned el's containing block is the viewport, and
     // possible anchor's containing block isn't.
     if (positionedContainingBlock->IsViewportFrame() &&
         !anchorContainingBlock->IsViewportFrame()) {
       return !nsLayoutUtils::IsProperAncestorFrame(aPositionedFrame,
-                                                   aPossibleAnchorFrame);
+                                                   aPossibleAnchor.mAnchor);
     }
-
-    auto isLastContainingBlockOrderable =
-        [&aPositionedFrame, &aPositionedFrameAncestors, &anchorContainingBlock,
-         &positionedContainingBlock]() -> bool {
+    auto isLastContainingBlockOrderable = [&]() -> bool {
+      const auto positionedContainingBlockFrameDepth =
+          aPositionedFrameTreeDepth - 1;
       const nsIFrame* it = anchorContainingBlock;
+      auto itFrameDepth = aPossibleAnchor.mFrameTreeDepth - 1;
       while (it) {
         const nsIFrame* parentContainingBlock = it->GetParent();
         if (!parentContainingBlock) {
           return false;
         }
+        itFrameDepth--;
+        if (itFrameDepth < positionedContainingBlockFrameDepth) {
+          return false;
+        }
 
         if (nsLayoutUtils::FirstContinuationOrIBSplitSibling(
                 parentContainingBlock) ==
-            nsLayoutUtils::FirstContinuationOrIBSplitSibling(
-                positionedContainingBlock)) {
+            positionedContainingBlockFirstContinuation) {
           return !it->IsAbsolutelyPositioned() ||
                  nsLayoutUtils::CompareTreePosition(it, aPositionedFrame,
                                                     aPositionedFrameAncestors,
@@ -308,12 +340,12 @@ bool IsAnchorLaidOutStrictlyBeforeElement(
   // containing block, and are both absolutely positioned, and possible
   // anchor is earlier in flat tree order than positioned el.
   const bool isAnchorAbsolutelyPositioned =
-      aPossibleAnchorFrame->IsAbsolutelyPositioned();
+      aPossibleAnchor.mAnchor->IsAbsolutelyPositioned();
   if (isAnchorAbsolutelyPositioned) {
     // We must have checked that the positioned element is absolutely
     // positioned by now.
     return nsLayoutUtils::CompareTreePosition(
-               aPossibleAnchorFrame, aPositionedFrame,
+               aPossibleAnchor.mAnchor, aPositionedFrame,
                aPositionedFrameAncestors, nullptr) < 0;
   }
 
@@ -382,10 +414,12 @@ class LazyAncestorHolder {
 };
 
 bool IsAcceptableAnchorElement(
-    const nsIFrame* aPossibleAnchorFrame, const ScopedNameRef* aName,
-    const nsIFrame* aPositionedFrame,
-    LazyAncestorHolder& aPositionedFrameAncestorHolder) {
-  MOZ_ASSERT(aPossibleAnchorFrame);
+    const AnchorPosAnchorInfo& aPossibleAnchor, const ScopedNameRef* aName,
+    const nsIFrame* aPositionedFrame, uint32_t aPositionedFrameTreeDepth,
+    LazyAncestorHolder& aPositionedFrameAncestorHolder,
+    TopLayerChecker& aTopLayerChecker,
+    Maybe<size_t> aCachedAnchorTopLayerIndex) {
+  MOZ_ASSERT(aPossibleAnchor.mAnchor);
   MOZ_ASSERT(aPositionedFrame);
 
   // An element possible anchor is an acceptable anchor element for an
@@ -401,26 +435,30 @@ bool IsAcceptableAnchorElement(
   // The phrase "element or a fully styleable tree-abiding pseudo-element"
   // used by the spec is taken to mean
   // "either not a pseudo-element or a pseudo-element of a specific kind".
-  if (!IsFullyStyleableTreeAbidingOrNotPseudoElement(aPossibleAnchorFrame)) {
+  if (!IsFullyStyleableTreeAbidingOrNotPseudoElement(aPossibleAnchor.mAnchor)) {
     return false;
   }
   if (!IsAnchorLaidOutStrictlyBeforeElement(
-          aPossibleAnchorFrame, aPositionedFrame,
-          aPositionedFrameAncestorHolder.GetAncestors())) {
+          aPossibleAnchor, aPositionedFrame, aPositionedFrameTreeDepth,
+          aPositionedFrameAncestorHolder.GetAncestors(), aTopLayerChecker,
+          aCachedAnchorTopLayerIndex)) {
     return false;
   }
   if (aName && !IsAnchorInScopeForPositionedElement(
-                   *aName, aPossibleAnchorFrame, aPositionedFrame)) {
+                   *aName, aPossibleAnchor.mAnchor, aPositionedFrame)) {
     return false;
   }
-  if (!IsPositionedElementAlsoSkippedWhenAnchorIsSkipped(aPossibleAnchorFrame,
-                                                         aPositionedFrame)) {
+  if (!IsPositionedElementAlsoSkippedWhenAnchorIsSkipped(
+          aPossibleAnchor.mAnchor, aPositionedFrame)) {
     return false;
   }
   return true;
 }
 
 }  // namespace
+
+AnchorPosAnchorInfo::AnchorPosAnchorInfo(nsIFrame* aAnchor)
+    : mAnchor{aAnchor}, mFrameTreeDepth{aAnchor->GetDepthInFrameTree()} {}
 
 AnchorPosReferenceData::Result AnchorPosReferenceData::InsertOrModify(
     const ScopedNameRef& aKey, const bool aNeedOffset) {
@@ -456,6 +494,47 @@ const AnchorPosReferenceData::Value* AnchorPosReferenceData::Lookup(
   return mMap.Lookup(aKey).DataPtrOrNull();
 }
 
+void AnchorPosReferenceData::RememberScrollOffset() {
+  if (mDefaultAnchorName) {
+    mRememberedScrollOffset = Some(RememberedScrollOffset{
+        mDefaultAnchorName, mAnchorTreeScope, AppliedScrollShift()});
+    mDefaultScrollShift = nsPoint();
+  }
+}
+
+void AnchorPosReferenceData::MaybeRememberScrollOffset() {
+  if (!mRememberedScrollOffset) {
+    RememberScrollOffset();
+  }
+}
+
+void AnchorPosReferenceData::
+    ForgetRememberedScrollOffsetIfDefaultAnchorChanged() {
+  if (mRememberedScrollOffset &&
+      (mRememberedScrollOffset->mAnchorName != mDefaultAnchorName ||
+       mRememberedScrollOffset->mAnchorTreeScope != mAnchorTreeScope)) {
+    // Per spec, "if abspos has a default anchor element, it always calculates a
+    // remembered scroll offset for it, even if abspos doesn't actually have an
+    // anchor reference to it." Even though changing the default anchor is not
+    // an anchor recalculation point, we clear the old remembered scroll offset
+    // so that we'll remember one for the new default anchor.
+    // https://drafts.csswg.org/css-anchor-position-1/#anchor-recalculation-point
+    mRememberedScrollOffset.reset();
+  }
+}
+
+nsPoint AnchorPosReferenceData::AppliedScrollShift() const {
+  return mRememberedScrollOffset
+             ? mRememberedScrollOffset->mOffset + mDefaultScrollShift
+             : mDefaultScrollShift;
+}
+
+void AnchorPosReferenceData::Reset() {
+  auto rememberedScrollOffset = std::move(mRememberedScrollOffset);
+  *this = AnchorPosReferenceData();
+  mRememberedScrollOffset = std::move(rememberedScrollOffset);
+}
+
 AnchorPosDefaultAnchorCache::AnchorPosDefaultAnchorCache(
     const nsIFrame* aAnchor, const nsIFrame* aScrollContainer)
     : mAnchor{aAnchor}, mScrollContainer{aScrollContainer} {
@@ -469,22 +548,45 @@ AnchorPosDefaultAnchorCache::AnchorPosDefaultAnchorCache(
 
 nsIFrame* AnchorPositioningUtils::FindFirstAcceptableAnchor(
     const ScopedNameRef& aName, const nsIFrame* aPositionedFrame,
-    const nsTArray<nsIFrame*>& aPossibleAnchorFrames) {
+    const nsTArray<AnchorPosAnchorInfo>& aPossibleAnchorFrames,
+    uint32_t aPositionedFrameTreeDepth, nsTArray<size_t>* aTopLayerIndexCache) {
   LazyAncestorHolder positionedFrameAncestorHolder(aPositionedFrame);
+  TopLayerChecker topLayerHolder{aPositionedFrame};
 
   for (auto it = aPossibleAnchorFrames.rbegin();
        it != aPossibleAnchorFrames.rend(); ++it) {
-    const nsIFrame* possibleAnchorFrame = *it;
+    nsIFrame* possibleAnchorFrame = it->mAnchor;
+    const auto anchorTopLayerIndex = [&]() -> Maybe<size_t> {
+      // Instead of pushing to front, work with the index cache in the reverse
+      // order.
+      const auto i = std::distance(it, aPossibleAnchorFrames.rend());
+      MOZ_ASSERT(i >= 0);
+      if (!aTopLayerIndexCache) {
+        return Nothing{};
+      }
+      if (static_cast<size_t>(i) >= aTopLayerIndexCache->Length()) {
+        const auto topLayer = topLayerHolder.IndexFor(possibleAnchorFrame);
+        aTopLayerIndexCache->AppendElement(topLayer);
+        return Some(topLayer);
+      }
+
+      return Some((*aTopLayerIndexCache)[i]);
+    }();
     if (!DoTreeScopedPropertiesOfElementApplyToContent(
             aName, possibleAnchorFrame, aPositionedFrame)) {
       // Skip anchors in different shadow trees.
       continue;
     }
 
+    MOZ_ASSERT(aPositionedFrame->GetContent()->OwnerDoc() ==
+                   possibleAnchorFrame->GetContent()->OwnerDoc(),
+               "Anchor and positiond frames in different documents?");
     // Check if the possible anchor is an acceptable anchor element.
     if (IsAcceptableAnchorElement(*it, &aName, aPositionedFrame,
-                                  positionedFrameAncestorHolder)) {
-      return *it;
+                                  aPositionedFrameTreeDepth,
+                                  positionedFrameAncestorHolder, topLayerHolder,
+                                  anchorTopLayerIndex)) {
+      return possibleAnchorFrame;
     }
   }
 
@@ -493,10 +595,12 @@ nsIFrame* AnchorPositioningUtils::FindFirstAcceptableAnchor(
 }
 
 static const nsIFrame* GetAnchorOf(const nsIFrame* aPositioned,
-                                   const ScopedNameRef& aAnchorName) {
+                                   const ScopedNameRef& aAnchorName,
+                                   uint32_t aFrameTreeDepth) {
   const auto* presShell = aPositioned->PresShell();
   MOZ_ASSERT(presShell, "No PresShell for frame?");
-  return presShell->GetAnchorPosAnchor(aAnchorName, aPositioned);
+  return presShell->GetAnchorPosAnchor(aAnchorName, aPositioned,
+                                       aFrameTreeDepth);
 }
 
 Maybe<nsRect> AnchorPositioningUtils::GetAnchorPosRect(
@@ -514,9 +618,10 @@ Maybe<nsRect> AnchorPositioningUtils::GetAnchorPosRect(
             aAbsoluteContainingBlock, aAnchor)) {
       return Nothing{};
     }
-    return Some(
-        nsLayoutUtils::GetCombinedFragmentRects(aAnchor).mRect +
-        aAnchor->GetOffsetToIgnoringScrolling(aAbsoluteContainingBlock));
+    return Some(GetCombinedFragmentRects(aAnchor, aAbsoluteContainingBlock,
+                                         UnionFragments::All,
+                                         ApplyTransform::Yes)
+                    .mRect);
   }();
   return rect.map([&](const nsRect& aRect) {
     // We need to position the border box of the anchor within the abspos
@@ -564,8 +669,12 @@ Maybe<AnchorPosInfo> AnchorPositioningUtils::ResolveAnchorPosRect(
     }
     entry = result.mEntry;
   }
+  uint32_t frameTreeDepth =
+      !aResolutionCache || !aResolutionCache->mReferenceData
+          ? aPositioned->GetDepthInFrameTree()
+          : aResolutionCache->mReferenceData->mFrameTreeDepth;
 
-  const auto* anchor = GetAnchorOf(aPositioned, *anchorName);
+  const auto* anchor = GetAnchorOf(aPositioned, *anchorName, frameTreeDepth);
   if (!anchor) {
     // If we have a cached entry, just check that it resolved to nothing last
     // time as well.
@@ -625,7 +734,8 @@ Maybe<AnchorPosInfo> AnchorPositioningUtils::ResolveAnchorPosRect(
 }
 
 Maybe<nsSize> AnchorPositioningUtils::ResolveAnchorPosSize(
-    const nsIFrame* aPositioned, const ScopedNameRef& aAnchorName,
+    const nsIFrame* aPositioned, const nsIFrame* aAbsoluteContainingBlock,
+    const ScopedNameRef& aAnchorName,
     AnchorPosResolutionCache* aResolutionCache) {
   auto anchorName = GetUsedAnchorName(aPositioned, aAnchorName);
   if (!anchorName) {
@@ -643,12 +753,17 @@ Maybe<nsSize> AnchorPositioningUtils::ResolveAnchorPosSize(
     }
     entry = result.mEntry;
   }
-  const auto* anchor = GetAnchorOf(aPositioned, *anchorName);
+  uint32_t frameTreeDepth = referencedAnchors
+                                ? referencedAnchors->mFrameTreeDepth
+                                : aPositioned->GetDepthInFrameTree();
+  const auto* anchor = GetAnchorOf(aPositioned, *anchorName, frameTreeDepth);
   if (!anchor) {
     return Nothing{};
   }
   const auto size =
-      nsLayoutUtils::GetCombinedFragmentRects(anchor).mRect.Size();
+      GetCombinedFragmentRects(anchor, aAbsoluteContainingBlock,
+                               UnionFragments::All, ApplyTransform::Yes)
+          .mRect.Size();
   if (entry) {
     *entry =
         Some(AnchorPosResolutionData{size, Nothing{}, aAnchorName.mTreeScope});
@@ -778,36 +893,18 @@ nsPoint AnchorPositioningUtils::GetScrollOffsetFor(
     PhysicalAxes aAxes, const nsIFrame* aPositioned,
     const AnchorPosDefaultAnchorCache& aDefaultAnchorCache) {
   MOZ_ASSERT(aPositioned);
-  if (!aDefaultAnchorCache.mAnchor || aAxes.isEmpty()) {
+  const nsIFrame* anchor = aDefaultAnchorCache.mAnchor;
+  if (!anchor || aAxes.isEmpty()) {
     return nsPoint{};
   }
-  nsPoint offset;
-  const bool trackHorizontal = aAxes.contains(PhysicalAxis::Horizontal);
-  const bool trackVertical = aAxes.contains(PhysicalAxis::Vertical);
-  // TODO(dshin, bug 1991489): Traverse properly, in case anchor and positioned
-  // elements are in different continuation frames of the absolute containing
-  // block.
-  const auto* absoluteContainingBlock = aPositioned->GetParent();
-  if (GetNearestScrollFrame(aPositioned).mScrollContainer ==
-      aDefaultAnchorCache.mScrollContainer) {
-    // Would scroll together anyway, skip.
-    return nsPoint{};
-  }
-  // Grab the accumulated offset up to, but not including, the abspos
-  // container.
-  for (const auto* f = aDefaultAnchorCache.mScrollContainer;
-       f && f != absoluteContainingBlock; f = f->GetParent()) {
-    if (const ScrollContainerFrame* scrollFrame = do_QueryFrame(f)) {
-      const auto o = scrollFrame->GetScrollPosition();
-      if (trackHorizontal) {
-        offset.x += o.x;
-      }
-      if (trackVertical) {
-        offset.y += o.y;
-      }
-    }
-  }
-  return offset;
+
+  // aPositioned was placed against the anchor's scroll-ignored position, so the
+  // scroll offset is how far the anchor has since scrolled relative to the
+  // absolute containing block.
+  const auto* absCB = aPositioned->GetParent();
+  const nsPoint offset = anchor->GetScrollOffsetTo(absCB);
+  return nsPoint(aAxes.contains(PhysicalAxis::Horizontal) ? offset.x : 0,
+                 aAxes.contains(PhysicalAxis::Vertical) ? offset.y : 0);
 }
 
 // Out of line to avoid having to include AnchorPosReferenceData from nsIFrame.h
@@ -886,8 +983,11 @@ auto AnchorPositioningUtils::GetAnchorPosImplicitAnchor(const nsIFrame* aFrame)
     return {};
   }
   LazyAncestorHolder ancestorHolder(aFrame);
-  if (!IsAcceptableAnchorElement(anchorFrame, /* aName = */ nullptr, aFrame,
-                                 ancestorHolder)) {
+  TopLayerChecker topLayerHolder{aFrame};
+  if (!IsAcceptableAnchorElement(AnchorPosAnchorInfo{anchorFrame},
+                                 /* aName = */ nullptr, aFrame,
+                                 aFrame->GetDepthInFrameTree(), ancestorHolder,
+                                 topLayerHolder, Nothing{})) {
     return {};
   }
   return {anchorFrame, kind};
@@ -918,7 +1018,7 @@ bool AnchorPositioningUtils::FitsInContainingBlock(
   MOZ_ASSERT(aPositioned->FirstInFlow()->GetProperty(
                  nsIFrame::AnchorPosReferences()) == &aReferenceData);
 
-  const auto& scrollShift = aReferenceData.mDefaultScrollShift;
+  const nsPoint scrollShift = aReferenceData.AppliedScrollShift();
   const auto scrollCompensatedSides = aReferenceData.mScrollCompensatedSides;
   nsSize checkSize = [&]() {
     const auto& adjustedCB = aReferenceData.mAdjustedContainingBlock;
@@ -984,7 +1084,8 @@ nsIFrame* AnchorPositioningUtils::GetAnchorThatFrameScrollsWith(
   StyleCascadeLevel anchorTreeScope = pos->mPositionAnchor.scope;
   nsIFrame* anchor =
       const_cast<nsIFrame*>(aFrame->PresShell()->GetAnchorPosAnchor(
-          {defaultAnchorName, anchorTreeScope}, aFrame));
+          {defaultAnchorName, anchorTreeScope}, aFrame,
+          aFrame->GetDepthInFrameTree()));
   // TODO Bug 1997026 We need to update the anchor finding code so this can't
   // happen. For now we just detect it and reject it.
   if (anchor && !nsLayoutUtils::IsProperAncestorFrameConsideringContinuations(
@@ -1014,10 +1115,12 @@ struct ScrollShifts {
 
   nsPoint Sum() const { return mChainedDelta + mScrollCompensatedDelta; }
 };
+
 static ScrollShifts FindScrollCompensatedAnchorShift(
     const PresShell* aPresShell, const nsIFrame* aPositioned,
     const AnchorPosReferenceData& aReferenceData,
-    const AppliedShifts& aAppliedShifts) {
+    const AppliedShifts& aAppliedShifts,
+    AnchorPosAnchorTopLayerIndexCache& aTopLayerIndexCache) {
   MOZ_ASSERT(aPositioned->IsAbsolutelyPositioned(),
              "Anchor positioned frame is not absolutely positioned?");
   const auto* defaultAnchorName = aReferenceData.mDefaultAnchorName.get();
@@ -1026,11 +1129,11 @@ static ScrollShifts FindScrollCompensatedAnchorShift(
   }
   const StyleCascadeLevel& anchorTreeScope = aReferenceData.mAnchorTreeScope;
   auto* defaultAnchor = aPresShell->GetAnchorPosAnchor(
-      {defaultAnchorName, anchorTreeScope}, aPositioned);
+      {defaultAnchorName, anchorTreeScope}, aPositioned,
+      aReferenceData.mFrameTreeDepth, &aTopLayerIndexCache);
   if (!defaultAnchor) {
     return {};
   }
-  const auto compensatingForScroll = aReferenceData.CompensatingForScrollAxes();
   // HACK(dshin, Bug 1999954): This is a workaround. While we try to lay out
   // against the scroll-ignored position of an anchor, chain anchored frames
   // end up containing scroll offset in their position. For now, walk the chain
@@ -1051,11 +1154,14 @@ static ScrollShifts FindScrollCompensatedAnchorShift(
       return *delta;
     }
     return FindScrollCompensatedAnchorShift(aPresShell, defaultAnchor,
-                                            *referenceData, aAppliedShifts)
+                                            *referenceData, aAppliedShifts,
+                                            aTopLayerIndexCache)
         .Sum();
   }();
 
   const nsPoint scrollCompensatedDelta = [&]() -> nsPoint {
+    const auto compensatingForScroll =
+        aReferenceData.CompensatingForScrollAxes();
     if (compensatingForScroll.isEmpty()) {
       return {};
     }
@@ -1068,20 +1174,23 @@ static ScrollShifts FindScrollCompensatedAnchorShift(
     const auto offset = AnchorPositioningUtils::GetScrollOffsetFor(
         compensatingForScroll, aPositioned,
         AffectedAnchor{defaultAnchor, scrollContainer});
-    return offset - aReferenceData.mDefaultScrollShift;
+    return offset - aReferenceData.AppliedScrollShift();
   }();
   return {scrollCompensatedDelta, chainedDelta};
 }
 
 // https://drafts.csswg.org/css-anchor-position-1/#default-scroll-shift
-static void UpdateScrollShift(PresShell* aPresShell, nsIFrame* aPositioned,
-                              AnchorPosReferenceData& aReferenceData,
-                              OverflowChangedTracker& aOct,
-                              AppliedShifts& aAppliedShifts) {
-  const auto scrollShifts = FindScrollCompensatedAnchorShift(
-      aPresShell, aPositioned, aReferenceData, aAppliedShifts);
+static void UpdateScrollShift(
+    PresShell* aPresShell, nsIFrame* aPositioned,
+    AnchorPosReferenceData& aReferenceData, OverflowChangedTracker& aOct,
+    AppliedShifts& aAppliedShifts,
+    AnchorPosAnchorTopLayerIndexCache& aTopLayerIndexCache) {
+  const auto scrollShifts =
+      FindScrollCompensatedAnchorShift(aPresShell, aPositioned, aReferenceData,
+                                       aAppliedShifts, aTopLayerIndexCache);
   auto delta = scrollShifts.Sum();
   if (delta == nsPoint()) {
+    aReferenceData.MaybeRememberScrollOffset();
     return;
   }
   aAppliedShifts.InsertOrUpdate(aPositioned, delta);
@@ -1095,6 +1204,7 @@ static void UpdateScrollShift(PresShell* aPresShell, nsIFrame* aPositioned,
   if (!aReferenceData.CompensatingForScrollAxes().isEmpty()) {
     aReferenceData.mDefaultScrollShift += scrollShifts.mScrollCompensatedDelta;
   }
+  aReferenceData.MaybeRememberScrollOffset();
 #ifdef ACCESSIBILITY
   if (nsAccessibilityService* accService = GetAccService()) {
     accService->NotifyAnchorPositionedScrollUpdate(aPresShell, aPositioned);
@@ -1104,17 +1214,14 @@ static void UpdateScrollShift(PresShell* aPresShell, nsIFrame* aPositioned,
   // but we don't want to trigger a full reflow as a response to scrolling, and
   // it seems to match other browsers and test expectations, see bug 1950251.
   aPositioned->SetPosition(aPositioned->GetPosition() - delta);
-  aPositioned->UpdateOverflow();
-  // Ensure that we propagate the overflow change up
-  // the ancestor chain.
-  // TODO: I think we can just use aPositioned, TRANSFORM_CHANGED and remove the
-  // explicit UpdateOverflow() call above.
+  // Moving aPositioned changes only its parent's overflow areas, not its own.
   aOct.AddFrame(aPositioned->GetParent(),
                 OverflowChangedTracker::CHILDREN_CHANGED);
 }
 
 static bool TriggerFallbackReflow(PresShell* aPresShell, nsIFrame* aPositioned,
                                   AnchorPosReferenceData& aReferencedAnchors,
+                                  OverflowChangedTracker& aOct,
                                   bool aEvaluateAllFallbacksIfNeeded) {
   auto totalFallbacks =
       aPositioned->StylePosition()->mPositionTryFallbacks.value._0.Length();
@@ -1143,6 +1250,15 @@ static bool TriggerFallbackReflow(PresShell* aPresShell, nsIFrame* aPositioned,
   if (!needsRetry) {
     // Record our last successful fallback.
     if (lastSuccessfulPosition) {
+      if (lastSuccessfulPosition->mLastIndex !=
+          lastSuccessfulPosition->mRecordedIndex) {
+        // Changing position fallbacks is an anchor recalculation point, so
+        // remember the scroll offset for the new fallback, and update the
+        // parent's overflow areas.
+        aReferencedAnchors.RememberScrollOffset();
+        aOct.AddFrame(aPositioned->GetParent(),
+                      OverflowChangedTracker::CHILDREN_CHANGED);
+      }
       if (lastSuccessfulPosition->mLastIndex) {
         lastSuccessfulPosition->mRecordedIndex =
             lastSuccessfulPosition->mLastIndex;
@@ -1171,7 +1287,8 @@ static bool AnchorIsEffectivelyHidden(nsIFrame* aAnchor) {
 
 static bool ComputePositionVisibility(
     PresShell* aPresShell, nsIFrame* aPositioned,
-    AnchorPosReferenceData& aReferencedAnchors) {
+    AnchorPosReferenceData& aReferencedAnchors,
+    AnchorPosAnchorTopLayerIndexCache& aTopLayerIndexCache) {
   auto vis = aPositioned->StylePosition()->mPositionVisibility;
   if (vis & StylePositionVisibility::ALWAYS) {
     MOZ_ASSERT(vis == StylePositionVisibility::ALWAYS,
@@ -1198,33 +1315,41 @@ static bool ComputePositionVisibility(
     auto anchorTreeScope = aReferencedAnchors.mAnchorTreeScope;
     if (defaultAnchorName) {
       auto* defaultAnchor = aPresShell->GetAnchorPosAnchor(
-          {defaultAnchorName, anchorTreeScope}, aPositioned);
+          {defaultAnchorName, anchorTreeScope}, aPositioned,
+          aReferencedAnchors.mFrameTreeDepth, &aTopLayerIndexCache);
       if (defaultAnchor && AnchorIsEffectivelyHidden(defaultAnchor)) {
         return false;
       }
-      auto* containingBlock = aPositioned->GetParent()->FirstInFlow();
+      auto* containingBlock = nsLayoutUtils::FirstContinuationOrIBSplitSibling(
+          aPositioned->GetParent());
       // If both are in the same cb the expectation is that this doesn't apply
       // because there are no intervening clips. I think that's broken, see
       // https://github.com/w3c/csswg-drafts/issues/13176
-      if (defaultAnchor &&
-          defaultAnchor->GetParent()->FirstInFlow() != containingBlock) {
+      if (defaultAnchor && nsLayoutUtils::FirstContinuationOrIBSplitSibling(
+                               defaultAnchor->GetParent()) != containingBlock) {
+        // Initially, get containingBlock's rect in intersectionRoot's
+        // coordinate space.
         auto* intersectionRoot = containingBlock;
-        nsRect rootRect = nsLayoutUtils::GetAllInFlowRectsUnion(
-            intersectionRoot, containingBlock,
-            nsLayoutUtils::GetAllInFlowRectsFlag::UseInkOverflowAsBox);
-        if (IsScrolled(intersectionRoot)) {
-          intersectionRoot = intersectionRoot->GetParent();
+        nsRect rootRect;
+        if (IsScrolled(containingBlock)) {
+          intersectionRoot = containingBlock->GetParent();
           ScrollContainerFrame* sc = do_QueryFrame(intersectionRoot);
           rootRect = sc->GetScrollPortRectAccountingForDynamicToolbar();
+        } else {
+          rootRect = nsLayoutUtils::GetAllInFlowRectsUnion(
+              containingBlock, intersectionRoot,
+              nsLayoutUtils::GetAllInFlowRectsFlag::UseInkOverflowAsBox);
         }
+        // Then, transform it to the root frame's coordinate space.
+        rootRect = nsLayoutUtils::TransformFrameRectToAncestor(
+            intersectionRoot, rootRect,
+            nsLayoutUtils::GetContainingBlockForClientRect(intersectionRoot));
+
         const auto* doc = aPositioned->PresContext()->Document();
         const nsINode* root =
             intersectionRoot->GetContent()
                 ? static_cast<nsINode*>(intersectionRoot->GetContent())
                 : doc;
-        rootRect = nsLayoutUtils::TransformFrameRectToAncestor(
-            intersectionRoot, rootRect,
-            nsLayoutUtils::GetContainingBlockForClientRect(intersectionRoot));
         const auto input = dom::IntersectionInput{
             .mIsImplicitRoot = false,
             .mRootNode = root,
@@ -1254,6 +1379,7 @@ bool AnchorPositioningUtils::TriggerLayoutOnOverflow(PresShell* aPresShell,
 
   OverflowChangedTracker oct;
   AppliedShifts appliedShifts;
+  AnchorPosAnchorTopLayerIndexCache topLayerCache;
   for (auto* positioned : aPresShell->GetAnchorPosPositioned()) {
     AnchorPosReferenceData* referencedAnchors =
         positioned->GetProperty(nsIFrame::AnchorPosReferences());
@@ -1263,10 +1389,10 @@ bool AnchorPositioningUtils::TriggerLayoutOnOverflow(PresShell* aPresShell,
 
     if (aFirstIteration) {
       UpdateScrollShift(aPresShell, positioned, *referencedAnchors, oct,
-                        appliedShifts);
+                        appliedShifts, topLayerCache);
     }
 
-    if (TriggerFallbackReflow(aPresShell, positioned, *referencedAnchors,
+    if (TriggerFallbackReflow(aPresShell, positioned, *referencedAnchors, oct,
                               aFirstIteration)) {
       didLayoutPositionedItems = true;
     }
@@ -1275,8 +1401,8 @@ bool AnchorPositioningUtils::TriggerLayoutOnOverflow(PresShell* aPresShell,
       // We'll come back to evaluate position-visibility later.
       continue;
     }
-    const bool shouldBeVisible =
-        ComputePositionVisibility(aPresShell, positioned, *referencedAnchors);
+    const bool shouldBeVisible = ComputePositionVisibility(
+        aPresShell, positioned, *referencedAnchors, topLayerCache);
     const bool isVisible =
         !positioned->HasAnyStateBits(NS_FRAME_POSITION_VISIBILITY_HIDDEN);
     if (shouldBeVisible != isVisible) {
@@ -1289,7 +1415,7 @@ bool AnchorPositioningUtils::TriggerLayoutOnOverflow(PresShell* aPresShell,
   return didLayoutPositionedItems;
 }
 
-static const nsIFrame* GetMatchingContainingBlock(
+const nsIFrame* AnchorPositioningUtils::GetMatchingContainingBlock(
     const nsIFrame* aAnchor, const nsIFrame* aContainingBlock) {
   MOZ_ASSERT(nsLayoutUtils::IsProperAncestorFrameConsideringContinuations(
       aContainingBlock, aAnchor));
@@ -1323,6 +1449,83 @@ static nscoord BSizeFromPhysicalSize(const nsSize& aSize,
   return LogicalSize{aWritingMode, aSize}.BSize(aWritingMode);
 }
 
+auto AnchorPositioningUtils::GetCombinedFragmentRects(
+    const nsIFrame* aFrame, const nsIFrame* aContainingBlock,
+    UnionFragments aUnionFragments, ApplyTransform aApplyTransform)
+    -> CombinedFragments {
+  MOZ_ASSERT(aFrame);
+  MOZ_ASSERT(aContainingBlock);
+  MOZ_ASSERT(aUnionFragments == UnionFragments::All ||
+                 nsLayoutUtils::IsProperAncestorFrame(aContainingBlock, aFrame),
+             "aContainingBlock must be a proper ancestor of aFrame when using "
+             "UnionFragments::SameContainingBlockOnly!");
+
+  bool isPaginated = aFrame->PresContext()->IsPaginated();
+
+  const bool applyTransform =
+      StaticPrefs::layout_css_anchor_positioning_follows_transforms_enabled() &&
+      aApplyTransform == ApplyTransform::Yes &&
+      nsLayoutUtils::IsProperAncestorFrame(aContainingBlock, aFrame) &&
+      nsLayoutUtils::IsTransformed(aFrame, aContainingBlock);
+
+  // Lazy getter for aFrame's page-frame ancestor, if any.
+  Maybe<const nsIFrame*> maybePageFrame;
+  auto currPageFrame = [=, &maybePageFrame]() -> const nsIFrame* {
+    MOZ_ASSERT(isPaginated);
+    if (!maybePageFrame) {
+      maybePageFrame.emplace(nsLayoutUtils::GetPageFrame(aFrame));
+    }
+    return maybePageFrame.ref();
+  };
+
+  // A continuation is considered "on the same page" if the context is not
+  // paginated, or if it has the same page-frame ancestor.
+  auto onSamePage = [=](const nsIFrame* aContinuation) -> bool {
+    return !isPaginated ||
+           nsLayoutUtils::GetPageFrame(aContinuation) == currPageFrame();
+  };
+
+  auto inSameCBFragment = [&](const nsIFrame* aContinuation) {
+    // When applying transforms, also restrict to continuations under
+    // aContainingBlock. A continuation in a different CB continuation cannot be
+    // transformed into aContainingBlock's coordinate space.
+    if (aUnionFragments == UnionFragments::SameContainingBlockOnly ||
+        applyTransform) {
+      return nsLayoutUtils::IsProperAncestorFrame(aContainingBlock,
+                                                  aContinuation);
+    }
+    return true;
+  };
+
+  auto GetRectInContainingBlockSpace = [&](const nsIFrame* aContinuation) {
+    if (applyTransform) {
+      return nsLayoutUtils::TransformFrameRectToAncestor(
+          aContinuation, aContinuation->GetRectRelativeToSelf(),
+          aContainingBlock, nullptr, nullptr,
+          TransformMatrixFlag::IgnoreScrolling);
+    }
+    return aContinuation->GetRectRelativeToSelf() +
+           aContinuation->GetOffsetToIgnoringScrollingAndSticky(
+               aContainingBlock);
+  };
+
+  // Collect rects from our continuations and IB-split siblings (limited to
+  // those that are on the same page if the context is paginated).
+  nsRect rect = GetRectInContainingBlockSpace(aFrame);
+  const auto* next = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(aFrame);
+  for (; next && onSamePage(next) && inSameCBFragment(next);
+       next = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(next)) {
+    rect = rect.Union(GetRectInContainingBlockSpace(next));
+  }
+  const auto* prev = nsLayoutUtils::GetPrevContinuationOrIBSplitSibling(aFrame);
+  for (; prev && onSamePage(prev) && inSameCBFragment(prev);
+       prev = nsLayoutUtils::GetPrevContinuationOrIBSplitSibling(prev)) {
+    rect = rect.Union(GetRectInContainingBlockSpace(prev));
+  }
+
+  return CombinedFragments{prev, next, rect};
+}
+
 nsRect AnchorPositioningUtils::ReassembleAnchorRect(
     const nsIFrame* aAnchor, const nsIFrame* aContainingBlock) {
   const nsIFrame* matchingCB =
@@ -1332,8 +1535,9 @@ nsRect AnchorPositioningUtils::ReassembleAnchorRect(
     return nsRect{};
   }
   // Union fragments of the anchor within this containing block.
-  const auto fragRect =
-      nsLayoutUtils::GetCombinedFragmentRects(aAnchor, matchingCB);
+  auto fragRect = GetCombinedFragmentRects(
+      aAnchor, matchingCB, UnionFragments::SameContainingBlockOnly,
+      ApplyTransform::Yes);
   // This anchor is contained within this CB fragment, or the containing block
   // is inline.
   // TODO(dshin, bug 2014554): Handle inline containing blocks properly. Inline
@@ -1346,10 +1550,14 @@ nsRect AnchorPositioningUtils::ReassembleAnchorRect(
     // fragRect.mRect is in matching containing block's coordinate space.
     // Translate the rect back to aContainingBlock's coordinate space.
     return fragRect.mRect +
-           matchingCB->GetOffsetToIgnoringScrolling(aContainingBlock);
+           matchingCB->GetOffsetToIgnoringScrollingAndSticky(aContainingBlock);
   }
   // Ok, we need to reassemble the unfragmented size and position of the anchor,
   // by stacking up the containing block in block direction.
+  // TODO(TYLin, Bug 2063761): the rects need to take transforms into account.
+  fragRect = GetCombinedFragmentRects(aAnchor, matchingCB,
+                                      UnionFragments::SameContainingBlockOnly,
+                                      ApplyTransform::No);
   const auto cbwm = matchingCB->GetWritingMode();
   // Note the use of ink overflow, since the anchor may overflow it.
   const auto cbSize = InkOverflowSize(matchingCB);
@@ -1364,7 +1572,9 @@ nsRect AnchorPositioningUtils::ReassembleAnchorRect(
                "block-start?");
     MOZ_ASSERT(nsLayoutUtils::IsProperAncestorFrame(prevCb, prev));
 
-    const auto r = nsLayoutUtils::GetCombinedFragmentRects(prev, prevCb);
+    const auto r = GetCombinedFragmentRects(
+        prev, prevCb, UnionFragments::SameContainingBlockOnly,
+        ApplyTransform::No);
     const auto inkOverflowSize = InkOverflowSize(prevCb);
     const auto prevCBBSize = BSizeFromPhysicalSize(inkOverflowSize, cbwm);
 
@@ -1405,7 +1615,9 @@ nsRect AnchorPositioningUtils::ReassembleAnchorRect(
         unfragmentedAnchorRect.BEnd(cbwm) == relevantCbSize.BSize(cbwm),
         "Next continuation exists this continuation didn't hit block-end?");
     MOZ_ASSERT(nsLayoutUtils::IsProperAncestorFrame(nextCb, next));
-    const auto r = nsLayoutUtils::GetCombinedFragmentRects(next, nextCb);
+    const auto r = GetCombinedFragmentRects(
+        next, nextCb, UnionFragments::SameContainingBlockOnly,
+        ApplyTransform::No);
 
     const auto inkOverflowSize = InkOverflowSize(nextCb);
     relevantCbSize.BSize(cbwm) += BSizeFromPhysicalSize(inkOverflowSize, cbwm);

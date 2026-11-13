@@ -112,8 +112,7 @@ void MacroAssembler::move32ZeroExtendToPtr(Register src, Register dest) {
 // Load instructions
 
 void MacroAssembler::load32SignExtendToPtr(const Address& src, Register dest) {
-  load32(src, dest);
-  move32To64SignExtend(dest, Register64(dest));
+  Ldrsw(ARMRegister(dest, 64), toMemOperand(src));
 }
 
 void MacroAssembler::loadAbiReturnAddress(Register dest) { movePtr(lr, dest); }
@@ -170,6 +169,15 @@ void MacroAssembler::andPtr(Imm32 imm, Register src, Register dest) {
   And(ARMRegister(dest, 64), ARMRegister(src, 64), Operand(imm.value));
 }
 
+void MacroAssembler::andPtr(Imm32 imm, const Address& dest) {
+  vixl::UseScratchRegisterScope temps(this);
+  const ARMRegister scratch64 = temps.AcquireX();
+  MOZ_ASSERT(scratch64.asUnsized() != dest.base);
+  loadPtr(dest, scratch64.asUnsized());
+  And(scratch64, scratch64, Operand(imm.value));
+  storePtr(scratch64.asUnsized(), dest);
+}
+
 void MacroAssembler::and64(Imm64 imm, Register64 dest) {
   And(ARMRegister(dest.reg, 64), ARMRegister(dest.reg, 64), Operand(imm.value));
 }
@@ -223,8 +231,14 @@ void MacroAssembler::xor64(Register64 src, Register64 dest) {
 }
 
 void MacroAssembler::xor32(Register src, Register dest) {
-  Eor(ARMRegister(dest, 32), ARMRegister(dest, 32),
-      Operand(ARMRegister(src, 32)));
+  // Unlike on x86, eor r,r,r is not a recognized zeroing idiom: it carries a
+  // dependency on the old value. Zero through wzr instead.
+  if (src == dest) {
+    Mov(ARMRegister(dest, 32), vixl::wzr);
+  } else {
+    Eor(ARMRegister(dest, 32), ARMRegister(dest, 32),
+        Operand(ARMRegister(src, 32)));
+  }
 }
 
 void MacroAssembler::xor32(Imm32 imm, Register dest) { xor32(imm, dest, dest); }
@@ -251,8 +265,12 @@ void MacroAssembler::xor32(const Address& src, Register dest) {
 }
 
 void MacroAssembler::xorPtr(Register src, Register dest) {
-  Eor(ARMRegister(dest, 64), ARMRegister(dest, 64),
-      Operand(ARMRegister(src, 64)));
+  if (src == dest) {
+    Mov(ARMRegister(dest, 64), vixl::xzr);
+  } else {
+    Eor(ARMRegister(dest, 64), ARMRegister(dest, 64),
+        Operand(ARMRegister(src, 64)));
+  }
 }
 
 void MacroAssembler::xorPtr(Imm32 imm, Register dest) {
@@ -265,6 +283,11 @@ void MacroAssembler::xorPtr(Imm32 imm, Register src, Register dest) {
 
 void MacroAssembler::xor64(Imm64 imm, Register64 dest) {
   Eor(ARMRegister(dest.reg, 64), ARMRegister(dest.reg, 64), Operand(imm.value));
+}
+
+void MacroAssembler::nor32(Imm32 imm, Register src, Register dest) {
+  or32(imm, src, dest);
+  not32(dest);
 }
 
 // ===============================================================
@@ -309,9 +332,15 @@ void MacroAssembler::add32(Imm32 imm, const Address& dest) {
   const ARMRegister scratch32 = temps.AcquireW();
   MOZ_ASSERT(scratch32.asUnsized() != dest.base);
 
-  Ldr(scratch32, toMemOperand(dest));
+  // Add needs the other scratch register for an unencodable immediate.
+  MemOperand mem = toMemOperand(dest);
+  if (IsImmAddSub(imm.value) || IsImmAddSub(-int64_t(imm.value))) {
+    mem = toSharedMemOperand(dest, mozilla::FloorLog2(sizeof(int32_t)),
+                             temps.AcquireX());
+  }
+  Ldr(scratch32, mem);
   Add(scratch32, scratch32, Operand(imm.value));
-  Str(scratch32, toMemOperand(dest));
+  Str(scratch32, mem);
 }
 
 void MacroAssembler::add32(const Address& src, Register dest) {
@@ -348,9 +377,15 @@ void MacroAssembler::addPtr(Imm32 imm, const Address& dest) {
   const ARMRegister scratch64 = temps.AcquireX();
   MOZ_ASSERT(scratch64.asUnsized() != dest.base);
 
-  Ldr(scratch64, toMemOperand(dest));
+  // Add needs the other scratch register for an unencodable immediate.
+  MemOperand mem = toMemOperand(dest);
+  if (IsImmAddSub(imm.value) || IsImmAddSub(-int64_t(imm.value))) {
+    mem = toSharedMemOperand(dest, mozilla::FloorLog2(sizeof(intptr_t)),
+                             temps.AcquireX());
+  }
+  Ldr(scratch64, mem);
   Add(scratch64, scratch64, Operand(imm.value));
-  Str(scratch64, toMemOperand(dest));
+  Str(scratch64, mem);
 }
 
 void MacroAssembler::addPtr(const Address& src, Register dest) {
@@ -435,9 +470,11 @@ void MacroAssembler::subPtr(Register src, const Address& dest) {
   const ARMRegister scratch64 = temps.AcquireX();
   MOZ_ASSERT(scratch64.asUnsized() != dest.base);
 
-  Ldr(scratch64, toMemOperand(dest));
+  MemOperand mem = toSharedMemOperand(
+      dest, mozilla::FloorLog2(sizeof(intptr_t)), temps.AcquireX());
+  Ldr(scratch64, mem);
   Sub(scratch64, scratch64, Operand(ARMRegister(src, 64)));
-  Str(scratch64, toMemOperand(dest));
+  Str(scratch64, mem);
 }
 
 void MacroAssembler::subPtr(Imm32 imm, Register dest) {
@@ -782,6 +819,11 @@ void MacroAssembler::lshift64(Imm32 imm, Register64 dest) {
   lshiftPtr(imm, dest.reg);
 }
 
+void MacroAssembler::lshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  lshiftPtr(imm, src.reg, dest.reg);
+}
+
 void MacroAssembler::lshift64(Register shift, Register64 srcDest) {
   Lsl(ARMRegister(srcDest.reg, 64), ARMRegister(srcDest.reg, 64),
       ARMRegister(shift, 64));
@@ -880,6 +922,11 @@ void MacroAssembler::rshift64(Imm32 imm, Register64 dest) {
   rshiftPtr(imm, dest.reg);
 }
 
+void MacroAssembler::rshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  rshiftPtr(imm, src.reg, dest.reg);
+}
+
 void MacroAssembler::rshift64(Register shift, Register64 srcDest) {
   Lsr(ARMRegister(srcDest.reg, 64), ARMRegister(srcDest.reg, 64),
       ARMRegister(shift, 64));
@@ -887,6 +934,12 @@ void MacroAssembler::rshift64(Register shift, Register64 srcDest) {
 
 void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 dest) {
   Asr(ARMRegister(dest.reg, 64), ARMRegister(dest.reg, 64), imm.value);
+}
+
+void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 src,
+                                        Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  rshiftPtrArithmetic(imm, src.reg, dest.reg);
 }
 
 void MacroAssembler::rshift64Arithmetic(Register shift, Register64 srcDest) {
@@ -1045,6 +1098,41 @@ void MacroAssembler::rotateRight64(Imm32 count, Register64 input,
   MOZ_ASSERT(temp == Register::Invalid());
 
   Ror(ARMRegister(dest.reg, 64), ARMRegister(input.reg, 64), count.value & 63);
+}
+
+// ===============================================================
+// Shift or rotate, then combine with another register
+
+void MacroAssembler::lshift32ThenAdd(Imm32 shift, Register rhs,
+                                     Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  MOZ_ASSERT(0 <= shift.value && shift.value < 32);
+  Add(ARMRegister(srcDest, 32), ARMRegister(rhs, 32),
+      Operand(ARMRegister(srcDest, 32), vixl::LSL, shift.value));
+}
+
+void MacroAssembler::lshift32ThenOr(Imm32 shift, Register rhs,
+                                    Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  MOZ_ASSERT(0 <= shift.value && shift.value < 32);
+  Orr(ARMRegister(srcDest, 32), ARMRegister(rhs, 32),
+      Operand(ARMRegister(srcDest, 32), vixl::LSL, shift.value));
+}
+
+void MacroAssembler::rshiftPtrThenXor(Imm32 shift, Register rhs,
+                                      Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  MOZ_ASSERT(0 <= shift.value && shift.value < 64);
+  Eor(ARMRegister(srcDest, 64), ARMRegister(rhs, 64),
+      Operand(ARMRegister(srcDest, 64), vixl::LSR, shift.value));
+}
+
+void MacroAssembler::rotateLeft64ThenXor(Imm32 count, Register64 rhs,
+                                         Register64 srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  Eor(ARMRegister(srcDest.reg, 64), ARMRegister(rhs.reg, 64),
+      Operand(ARMRegister(srcDest.reg, 64), vixl::ROR,
+              (64 - count.value) & 63));
 }
 
 // ===============================================================
@@ -1947,8 +2035,12 @@ void MacroAssembler::branchTestInt32Impl(Condition cond, const T& t,
 void MacroAssembler::branchTestInt32Truthy(bool truthy,
                                            const ValueOperand& value,
                                            Label* label) {
-  Condition c = testInt32Truthy(truthy, value);
-  B(label, c);
+  ARMRegister payload32(value.valueReg(), 32);
+  if (truthy) {
+    Cbnz(payload32, label);
+  } else {
+    Cbz(payload32, label);
+  }
 }
 
 void MacroAssembler::branchTestDouble(Condition cond, Register tag,
@@ -2044,8 +2136,12 @@ void MacroAssembler::branchTestBooleanImpl(Condition cond, const T& tag,
 void MacroAssembler::branchTestBooleanTruthy(bool truthy,
                                              const ValueOperand& value,
                                              Label* label) {
-  Condition c = testBooleanTruthy(truthy, value);
-  B(label, c);
+  ARMRegister payload32(value.valueReg(), 32);
+  if (truthy) {
+    Cbnz(payload32, label);
+  } else {
+    Cbz(payload32, label);
+  }
 }
 
 void MacroAssembler::branchTestString(Condition cond, Register tag,
@@ -2536,31 +2632,31 @@ void MacroAssembler::spectreBoundsCheckPtr(Register index,
 
 // ========================================================================
 // Memory access primitives.
-FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
-                                               const Address& dest) {
+FaultingCodeRange MacroAssembler::storeDouble(FloatRegister src,
+                                              const Address& dest) {
   return Str(ARMFPRegister(src, 64), toMemOperand(dest));
 }
-FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
-                                               const BaseIndex& dest) {
+FaultingCodeRange MacroAssembler::storeDouble(FloatRegister src,
+                                              const BaseIndex& dest) {
   return doBaseIndex(ARMFPRegister(src, 64), dest, vixl::STR_d);
 }
 
-FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
-                                                const Address& addr) {
+FaultingCodeRange MacroAssembler::storeFloat32(FloatRegister src,
+                                               const Address& addr) {
   return Str(ARMFPRegister(src, 32), toMemOperand(addr));
 }
-FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
-                                                const BaseIndex& addr) {
+FaultingCodeRange MacroAssembler::storeFloat32(FloatRegister src,
+                                               const BaseIndex& addr) {
   return doBaseIndex(ARMFPRegister(src, 32), addr, vixl::STR_s);
 }
 
-FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
-                                                const Address& dest, Register) {
+FaultingCodeRange MacroAssembler::storeFloat16(FloatRegister src,
+                                               const Address& dest, Register) {
   return Str(ARMFPRegister(src, 16), toMemOperand(dest));
 }
-FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
-                                                const BaseIndex& dest,
-                                                Register) {
+FaultingCodeRange MacroAssembler::storeFloat16(FloatRegister src,
+                                               const BaseIndex& dest,
+                                               Register) {
   return doBaseIndex(ARMFPRegister(src, 16), dest, vixl::STR_h);
 }
 
@@ -2684,11 +2780,53 @@ void MacroAssembler::moveSimd128(FloatRegister src, FloatRegister dest) {
   }
 }
 
+// Whether Movi materializes |imm| in every 64-bit lane with one movi or mvni.
+static inline bool IsSingleInstructionMovi(uint64_t imm) {
+  bool all0orff = true;
+  for (int i = 0; i < 8; i++) {
+    uint8_t b = imm >> (i * 8);
+    all0orff &= b == 0x00 || b == 0xff;
+  }
+  if (all0orff) {
+    return true;
+  }
+  if ((imm >> 32) != (imm & 0xffffffff)) {
+    return false;
+  }
+  uint32_t imm32 = imm;
+  for (int i = 0; i < 4; i++) {
+    uint32_t byteMask = uint32_t(0xff) << (i * 8);
+    if ((imm32 & ~byteMask) == 0 || (imm32 | byteMask) == 0xffffffff) {
+      return true;
+    }
+  }
+  if ((imm32 & 0xff00ffff) == 0x0000ffff ||
+      (imm32 & 0xffff00ff) == 0x000000ff ||
+      (imm32 & 0xff00ffff) == 0xff000000 ||
+      (imm32 & 0xffff00ff) == 0xffff0000) {
+    return true;
+  }
+  if ((imm32 >> 16) != (imm32 & 0xffff)) {
+    return false;
+  }
+  uint8_t byte1 = imm32;
+  uint8_t byte2 = imm32 >> 8;
+  return byte1 == byte2 || byte1 == 0 || byte2 == 0 || byte1 == 0xff ||
+         byte2 == 0xff;
+}
+
 void MacroAssembler::loadConstantSimd128(const SimdConstant& v,
                                          FloatRegister dest) {
-  // Movi does not yet generate good code for many cases, bug 1664397.
   SimdConstant c = SimdConstant::CreateX2((const int64_t*)v.bytes());
-  Movi(SimdReg(dest), c.asInt64x2()[1], c.asInt64x2()[0]);
+  uint64_t lo = c.asInt64x2()[0];
+  uint64_t hi = c.asInt64x2()[1];
+  if (hi == lo && IsSingleInstructionMovi(lo)) {
+    Movi(SimdReg(dest), hi, lo);
+    return;
+  }
+  // Anything else takes Movi two to ten instructions through a general
+  // register, so load it from the literal pool instead.
+  fImmPool128(SimdReg(dest), reinterpret_cast<const uint8_t*>(v.bytes()));
 }
 
 // Splat
@@ -3669,6 +3807,12 @@ void MacroAssembler::bitmaskInt8x16(FloatRegister src, Register dest,
   Mov(ARMRegister(dest, 32), Simd8H(temp), 0);
 }
 
+void MacroAssemblerCompat::nibbleMaskInt8x16(FloatRegister src, Register dest,
+                                             FloatRegister temp) {
+  Shrn(Simd8B(temp), Simd8H(src), 4);
+  Fmov(ARMRegister(dest, 64), ARMFPRegister(temp, 64));
+}
+
 void MacroAssembler::bitmaskInt16x8(FloatRegister src, Register dest,
                                     FloatRegister temp) {
   ScratchSimd128Scope scratch(*this);
@@ -3712,6 +3856,18 @@ void MacroAssembler::compareInt8x16(Assembler::Condition cond,
   compareSimd128Int(cond, Simd16B(dest), Simd16B(lhs), Simd16B(rhs));
 }
 
+void MacroAssembler::compareInt8x16(Assembler::Condition cond,
+                                    FloatRegister lhs, const SimdConstant& rhs,
+                                    FloatRegister dest) {
+  if (rhs.isZeroBits()) {
+    compareSimd128IntWithZero(cond, Simd16B(dest), Simd16B(lhs));
+    return;
+  }
+  ScratchSimd128Scope scratch(*this);
+  loadConstantSimd128(rhs, scratch);
+  compareInt8x16(cond, lhs, scratch, dest);
+}
+
 void MacroAssembler::compareInt16x8(Assembler::Condition cond,
                                     FloatRegister rhs, FloatRegister lhsDest) {
   compareSimd128Int(cond, Simd8H(lhsDest), Simd8H(lhsDest), Simd8H(rhs));
@@ -3721,6 +3877,18 @@ void MacroAssembler::compareInt16x8(Assembler::Condition cond,
                                     FloatRegister lhs, FloatRegister rhs,
                                     FloatRegister dest) {
   compareSimd128Int(cond, Simd8H(dest), Simd8H(lhs), Simd8H(rhs));
+}
+
+void MacroAssembler::compareInt16x8(Assembler::Condition cond,
+                                    FloatRegister lhs, const SimdConstant& rhs,
+                                    FloatRegister dest) {
+  if (rhs.isZeroBits()) {
+    compareSimd128IntWithZero(cond, Simd8H(dest), Simd8H(lhs));
+    return;
+  }
+  ScratchSimd128Scope scratch(*this);
+  loadConstantSimd128(rhs, scratch);
+  compareInt16x8(cond, lhs, scratch, dest);
 }
 
 void MacroAssembler::compareInt32x4(Assembler::Condition cond,
@@ -3734,6 +3902,18 @@ void MacroAssembler::compareInt32x4(Assembler::Condition cond,
   compareSimd128Int(cond, Simd4S(dest), Simd4S(lhs), Simd4S(rhs));
 }
 
+void MacroAssembler::compareInt32x4(Assembler::Condition cond,
+                                    FloatRegister lhs, const SimdConstant& rhs,
+                                    FloatRegister dest) {
+  if (rhs.isZeroBits()) {
+    compareSimd128IntWithZero(cond, Simd4S(dest), Simd4S(lhs));
+    return;
+  }
+  ScratchSimd128Scope scratch(*this);
+  loadConstantSimd128(rhs, scratch);
+  compareInt32x4(cond, lhs, scratch, dest);
+}
+
 void MacroAssembler::compareInt64x2(Assembler::Condition cond,
                                     FloatRegister rhs, FloatRegister lhsDest) {
   compareSimd128Int(cond, Simd2D(lhsDest), Simd2D(lhsDest), Simd2D(rhs));
@@ -3743,6 +3923,38 @@ void MacroAssembler::compareInt64x2(Assembler::Condition cond,
                                     FloatRegister lhs, FloatRegister rhs,
                                     FloatRegister dest) {
   compareSimd128Int(cond, Simd2D(dest), Simd2D(lhs), Simd2D(rhs));
+}
+
+void MacroAssembler::compareInt64x2(Assembler::Condition cond,
+                                    FloatRegister lhs, const SimdConstant& rhs,
+                                    FloatRegister dest) {
+  if (rhs.isZeroBits()) {
+    compareSimd128IntWithZero(cond, Simd2D(dest), Simd2D(lhs));
+    return;
+  }
+  ScratchSimd128Scope scratch(*this);
+  loadConstantSimd128(rhs, scratch);
+  compareInt64x2(cond, lhs, scratch, dest);
+}
+
+void MacroAssembler::testBitsInt8x16(FloatRegister lhs, FloatRegister rhs,
+                                     FloatRegister dest) {
+  Cmtst(Simd16B(dest), Simd16B(lhs), Simd16B(rhs));
+}
+
+void MacroAssembler::testBitsInt16x8(FloatRegister lhs, FloatRegister rhs,
+                                     FloatRegister dest) {
+  Cmtst(Simd8H(dest), Simd8H(lhs), Simd8H(rhs));
+}
+
+void MacroAssembler::testBitsInt32x4(FloatRegister lhs, FloatRegister rhs,
+                                     FloatRegister dest) {
+  Cmtst(Simd4S(dest), Simd4S(lhs), Simd4S(rhs));
+}
+
+void MacroAssembler::testBitsInt64x2(FloatRegister lhs, FloatRegister rhs,
+                                     FloatRegister dest) {
+  Cmtst(Simd2D(dest), Simd2D(lhs), Simd2D(rhs));
 }
 
 void MacroAssembler::compareFloat32x4(Assembler::Condition cond,
@@ -3757,6 +3969,19 @@ void MacroAssembler::compareFloat32x4(Assembler::Condition cond,
   compareSimd128Float(cond, Simd4S(dest), Simd4S(lhs), Simd4S(rhs));
 }
 
+void MacroAssembler::compareFloat32x4(Assembler::Condition cond,
+                                      FloatRegister lhs,
+                                      const SimdConstant& rhs,
+                                      FloatRegister dest) {
+  if (rhs.isZeroBits()) {
+    compareSimd128FloatWithZero(cond, Simd4S(dest), Simd4S(lhs));
+    return;
+  }
+  ScratchSimd128Scope scratch(*this);
+  loadConstantSimd128(rhs, scratch);
+  compareFloat32x4(cond, lhs, scratch, dest);
+}
+
 void MacroAssembler::compareFloat64x2(Assembler::Condition cond,
                                       FloatRegister rhs,
                                       FloatRegister lhsDest) {
@@ -3769,27 +3994,40 @@ void MacroAssembler::compareFloat64x2(Assembler::Condition cond,
   compareSimd128Float(cond, Simd2D(dest), Simd2D(lhs), Simd2D(rhs));
 }
 
+void MacroAssembler::compareFloat64x2(Assembler::Condition cond,
+                                      FloatRegister lhs,
+                                      const SimdConstant& rhs,
+                                      FloatRegister dest) {
+  if (rhs.isZeroBits()) {
+    compareSimd128FloatWithZero(cond, Simd2D(dest), Simd2D(lhs));
+    return;
+  }
+  ScratchSimd128Scope scratch(*this);
+  loadConstantSimd128(rhs, scratch);
+  compareFloat64x2(cond, lhs, scratch, dest);
+}
+
 // Load
 
-FaultingCodeOffset MacroAssembler::loadUnalignedSimd128(const Address& src,
-                                                        FloatRegister dest) {
+FaultingCodeRange MacroAssembler::loadUnalignedSimd128(const Address& src,
+                                                       FloatRegister dest) {
   return Ldr(ARMFPRegister(dest, 128), toMemOperand(src));
 }
 
-FaultingCodeOffset MacroAssembler::loadUnalignedSimd128(
-    const BaseIndex& address, FloatRegister dest) {
+FaultingCodeRange MacroAssembler::loadUnalignedSimd128(const BaseIndex& address,
+                                                       FloatRegister dest) {
   return doBaseIndex(ARMFPRegister(dest, 128), address, vixl::LDR_q);
 }
 
 // Store
 
-FaultingCodeOffset MacroAssembler::storeUnalignedSimd128(FloatRegister src,
-                                                         const Address& dest) {
+FaultingCodeRange MacroAssembler::storeUnalignedSimd128(FloatRegister src,
+                                                        const Address& dest) {
   return Str(ARMFPRegister(src, 128), toMemOperand(dest));
 }
 
-FaultingCodeOffset MacroAssembler::storeUnalignedSimd128(
-    FloatRegister src, const BaseIndex& dest) {
+FaultingCodeRange MacroAssembler::storeUnalignedSimd128(FloatRegister src,
+                                                        const BaseIndex& dest) {
   return doBaseIndex(ARMFPRegister(src, 128), dest, vixl::STR_q);
 }
 

@@ -6,8 +6,8 @@
 #ifndef WinTaskbar_h_
 #define WinTaskbar_h_
 
-#include <windows.h>
 #include <shobjidl.h>
+#include <windows.h>
 #undef LogSeverity  // SetupAPI.h #defines this as DWORD
 #include "nsIWinTaskbar.h"
 
@@ -18,7 +18,7 @@ class WinTaskbar final : public nsIWinTaskbar {
   ~WinTaskbar();
 
  public:
-  WinTaskbar();
+  WinTaskbar() = default;
 
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIWINTASKBAR
@@ -39,7 +39,7 @@ class WinTaskbar final : public nsIWinTaskbar {
  private:
   bool Initialize();
 
-  ITaskbarList4* mTaskbar;
+  ITaskbarList4* mTaskbar = nullptr;
 };
 
 }  // namespace widget

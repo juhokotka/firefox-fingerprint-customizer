@@ -5,12 +5,12 @@
 #ifndef mozilla_image_SVGDrawingParameters_h
 #define mozilla_image_SVGDrawingParameters_h
 
+#include "ImageRegion.h"
 #include "gfxContext.h"
 #include "gfxTypes.h"
-#include "ImageRegion.h"
+#include "mozilla/SVGImageContext.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/gfx/Types.h"
-#include "mozilla/SVGImageContext.h"
 #include "nsSize.h"
 
 namespace mozilla {
@@ -31,12 +31,12 @@ struct SVGDrawingParameters {
         region(aRegion),
         samplingFilter(aSamplingFilter),
         svgContext(aSVGContext),
-        viewportSize(aRasterSize),
+        viewportSize(aRasterSize.width, aRasterSize.height),
         animationTime(aAnimationTime),
         flags(aFlags),
         opacity(aOpacity) {
     if (auto sz = aSVGContext.GetViewportSize()) {
-      viewportSize = nsIntSize(sz->width, sz->height);  // XXX losing unit
+      viewportSize = *sz;
     }
   }
 
@@ -46,7 +46,7 @@ struct SVGDrawingParameters {
   ImageRegion region;
   SamplingFilter samplingFilter;
   const SVGImageContext& svgContext;
-  nsIntSize viewportSize;
+  CSSSize viewportSize;
   float animationTime;
   uint32_t flags;
   gfxFloat opacity;

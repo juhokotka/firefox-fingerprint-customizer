@@ -161,10 +161,6 @@ RTCRtpSender::RTCRtpSender(nsPIDOMWindowInner* aWindow, PeerConnectionImpl* aPc,
   mParameters.mCodecs.Construct();
   UpdateParametersRtcp();
   mParameters.mHeaderExtensions.Construct();
-
-  if (mDtmf) {
-    mWatchManager.Watch(mTransmitting, &RTCRtpSender::UpdateDtmfSender);
-  }
 }
 
 #undef INIT_CANONICAL
@@ -351,192 +347,234 @@ nsTArray<RefPtr<dom::RTCStatsPromise>> RTCRtpSender::GetStatsInternal(
               };
 
           asAudio.apply([&](auto& aConduit) {
-            Maybe<webrtc::AudioSendStream::Stats> audioStats =
-                aConduit->GetSenderStats();
-            if (audioStats.isNothing()) {
+            if (!isSendStable) {
+              // https://www.w3.org/TR/webrtc-stats/#the-rtp-statistics-hierarchy
+              // The lifetime of all RTP monitored objects are tied to SSRCs.
+              // The RTCOutboundRtpStreamStats is created when the RTP sender
+              // is configured by setting a local or remote SDP answer (via
+              // setLocalDescription() or setRemoteDescription() and the
+              // signaling state returning to "stable").
               return;
             }
 
-            if (!isSendStable) {
-              // See
-              // https://www.w3.org/TR/webrtc-stats/#the-rtp-statistics-hierarchy
-              // for a complete description of the RTP statistics lifetime
-              // rules.
-              return;
-            }
+            Maybe<webrtc::AudioSendStream::Stats> audioStats =
+                aConduit->GetSenderStats();
 
             // First, fill in remote stat with rtcp receiver data, if present.
             // ReceiverReports have less information than SenderReports, so fill
             // in what we can.
-            Maybe<webrtc::ReportBlockData> reportBlockData;
-            for (auto& data : audioStats->report_block_datas) {
-              if (data.source_ssrc() == ssrc) {
-                reportBlockData.emplace(data);
-                break;
+            if (audioStats) {
+              Maybe<webrtc::ReportBlockData> reportBlockData;
+              for (auto& data : audioStats->report_block_datas) {
+                if (data.source_ssrc() == ssrc) {
+                  reportBlockData.emplace(data);
+                  break;
+                }
               }
+              reportBlockData.apply([&](auto& aReportBlockData) {
+                RTCRemoteInboundRtpStreamStats remote;
+                constructCommonRemoteInboundRtpStats(remote, aReportBlockData);
+                if (aReportBlockData.jitter() >= 0 && audioCodec) {
+                  remote.mJitter.Construct(
+                      aReportBlockData.jitter(audioCodec->mFreq)
+                          .template ms<double>() /
+                      1000.0);
+                }
+                if (!report->mRemoteInboundRtpStreamStats.AppendElement(
+                        std::move(remote), fallible)) {
+                  mozalloc_handle_oom(0);
+                }
+              });
             }
-            reportBlockData.apply([&](auto& aReportBlockData) {
-              RTCRemoteInboundRtpStreamStats remote;
-              constructCommonRemoteInboundRtpStats(remote, aReportBlockData);
-              if (aReportBlockData.jitter() >= 0 && audioCodec) {
-                remote.mJitter.Construct(
-                    aReportBlockData.jitter(audioCodec->mFreq)
-                        .template ms<double>() /
-                    1000.0);
-              }
-              if (!report->mRemoteInboundRtpStreamStats.AppendElement(
-                      std::move(remote), fallible)) {
-                mozalloc_handle_oom(0);
-              }
-            });
 
             // Then, fill in local side (with cross-link to remote only if
-            // present)
+            // present). Counters that require conduit data default to 0 until
+            // the conduit begins reporting.
+            // https://www.w3.org/TR/webrtc-stats/#guidelines-for-implementing-stats-objects
+            // When a feature is a cumulative measure and it has not been
+            // sampled yet, but is likely to increment in the future, report a
+            // count of zero.
             RTCOutboundRtpStreamStats local;
             constructCommonOutboundRtpStats(local);
-            local.mPacketsSent.Construct(audioStats->packets_sent);
-            local.mBytesSent.Construct(audioStats->payload_bytes_sent);
-            local.mNackCount.Construct(
-                audioStats->rtcp_packet_type_counts.nack_packets);
-            local.mHeaderBytesSent.Construct(
-                audioStats->header_and_padding_bytes_sent);
-            local.mRetransmittedPacketsSent.Construct(
-                audioStats->retransmitted_packets_sent);
-            local.mRetransmittedBytesSent.Construct(
-                audioStats->retransmitted_bytes_sent);
-            /*
-             * Potential new stats that are now available upstream.
-             * Note: when we last tried exposing this we were getting
-             * targetBitrate for audio was ending up as 0. We did not
-             * investigate why.
-            local.mTargetBitrate.Construct(audioStats->target_bitrate_bps);
-             */
+            if (audioStats) {
+              local.mPacketsSent.Construct(audioStats->packets_sent);
+              local.mBytesSent.Construct(audioStats->payload_bytes_sent);
+              local.mNackCount.Construct(
+                  audioStats->rtcp_packet_type_counts.nack_packets);
+              local.mHeaderBytesSent.Construct(
+                  audioStats->header_and_padding_bytes_sent);
+              local.mRetransmittedPacketsSent.Construct(
+                  audioStats->retransmitted_packets_sent);
+              local.mRetransmittedBytesSent.Construct(
+                  audioStats->retransmitted_bytes_sent);
+              if (audioStats->target_bitrate_bps > 0) {
+                local.mTargetBitrate.Construct(
+                    static_cast<double>(audioStats->target_bitrate_bps));
+              }
+            } else {
+              local.mPacketsSent.Construct(0);
+              local.mBytesSent.Construct(0);
+              local.mNackCount.Construct(0);
+              local.mHeaderBytesSent.Construct(0);
+              local.mRetransmittedPacketsSent.Construct(0);
+              local.mRetransmittedBytesSent.Construct(0);
+            }
             if (!report->mOutboundRtpStreamStats.AppendElement(std::move(local),
                                                                fallible)) {
               mozalloc_handle_oom(0);
             }
 
             // TODO(bug 1804678): Use RTCAudioSourceStats
-            RTCMediaSourceStats mediaSourceStats;
-            constructCommonMediaSourceStats(mediaSourceStats);
-            if (!report->mMediaSourceStats.AppendElement(
-                    std::move(mediaSourceStats), fallible)) {
-              mozalloc_handle_oom(0);
+            if (audioStats) {
+              RTCMediaSourceStats mediaSourceStats;
+              constructCommonMediaSourceStats(mediaSourceStats);
+              if (!report->mMediaSourceStats.AppendElement(
+                      std::move(mediaSourceStats), fallible)) {
+                mozalloc_handle_oom(0);
+              }
             }
           });
 
           asVideo.apply([&](auto& aConduit) {
+            if (!isSendStable) {
+              // https://www.w3.org/TR/webrtc-stats/#the-rtp-statistics-hierarchy
+              // The lifetime of all RTP monitored objects are tied to SSRCs.
+              // The RTCOutboundRtpStreamStats is created when the RTP sender
+              // is configured by setting a local or remote SDP answer (via
+              // setLocalDescription() or setRemoteDescription() and the
+              // signaling state returning to "stable").
+              return;
+            }
+
             Maybe<webrtc::VideoSendStream::Stats> videoStats =
                 aConduit->GetSenderStats();
-            if (videoStats.isNothing()) {
-              return;
-            }
 
             Maybe<webrtc::VideoSendStream::StreamStats> streamStats;
-            auto kv = videoStats->substreams.find(ssrc);
-            if (kv != videoStats->substreams.end()) {
-              streamStats = Some(kv->second);
+            if (videoStats) {
+              auto kv = videoStats->substreams.find(ssrc);
+              if (kv != videoStats->substreams.end()) {
+                streamStats = Some(kv->second);
+              }
             }
 
-            if (!streamStats || !isSendStable) {
-              // By spec: "The lifetime of all RTP monitored objects starts
-              // when the RTP stream is first used: When the first RTP packet
-              // is sent or received on the SSRC it represents"
-              return;
-            }
+            if (streamStats) {
+              aConduit->GetAssociatedLocalRtxSSRC(ssrc).apply(
+                  [&](const auto rtxSsrc) {
+                    auto kv = videoStats->substreams.find(rtxSsrc);
+                    if (kv != videoStats->substreams.end()) {
+                      streamStats->rtp_stats.Add(kv->second.rtp_stats);
+                    }
+                  });
 
-            aConduit->GetAssociatedLocalRtxSSRC(ssrc).apply(
-                [&](const auto rtxSsrc) {
-                  auto kv = videoStats->substreams.find(rtxSsrc);
-                  if (kv != videoStats->substreams.end()) {
-                    streamStats->rtp_stats.Add(kv->second.rtp_stats);
-                  }
-                });
-
-            // First, fill in remote stat with rtcp receiver data, if present.
-            // ReceiverReports have less information than SenderReports, so fill
-            // in what we can.
-            if (streamStats->report_block_data) {
-              const webrtc::ReportBlockData& rtcpReportData =
-                  *streamStats->report_block_data;
-              RTCRemoteInboundRtpStreamStats remote;
-              remote.mJitter.Construct(
-                  static_cast<double>(rtcpReportData.jitter()) /
-                  webrtc::kVideoPayloadTypeFrequency);
-              constructCommonRemoteInboundRtpStats(remote, rtcpReportData);
-              if (!report->mRemoteInboundRtpStreamStats.AppendElement(
-                      std::move(remote), fallible)) {
-                mozalloc_handle_oom(0);
+              // First, fill in remote stat with rtcp receiver data, if present.
+              // ReceiverReports have less information than SenderReports, so
+              // fill in what we can.
+              if (streamStats->report_block_data) {
+                const webrtc::ReportBlockData& rtcpReportData =
+                    *streamStats->report_block_data;
+                RTCRemoteInboundRtpStreamStats remote;
+                remote.mJitter.Construct(
+                    static_cast<double>(rtcpReportData.jitter()) /
+                    webrtc::kVideoPayloadTypeFrequency);
+                constructCommonRemoteInboundRtpStats(remote, rtcpReportData);
+                if (!report->mRemoteInboundRtpStreamStats.AppendElement(
+                        std::move(remote), fallible)) {
+                  mozalloc_handle_oom(0);
+                }
               }
             }
 
             // Then, fill in local side (with cross-link to remote only if
-            // present)
+            // present). Non-counter fields that require conduit data are only
+            // filled in once the conduit reports substream stats.
+            //
+            // https://www.w3.org/TR/webrtc-stats/#guidelines-for-implementing-stats-objects
+            // When a feature is a cumulative measure and it has not been
+            // sampled yet, but is likely to increment in the future, report a
+            // count of zero.
             RTCOutboundRtpStreamStats local;
             constructCommonOutboundRtpStats(local);
             if (auto it = videoSsrcToRidMap.find(ssrc);
                 it != videoSsrcToRidMap.end() && it->second != "") {
               local.mRid.Construct(NS_ConvertUTF8toUTF16(it->second).get());
             }
-            local.mPacketsSent.Construct(
-                streamStats->rtp_stats.transmitted.packets);
-            local.mBytesSent.Construct(
-                streamStats->rtp_stats.transmitted.payload_bytes);
-            local.mNackCount.Construct(
-                streamStats->rtcp_packet_type_counts.nack_packets);
-            local.mFirCount.Construct(
-                streamStats->rtcp_packet_type_counts.fir_packets);
-            local.mPliCount.Construct(
-                streamStats->rtcp_packet_type_counts.pli_packets);
-            local.mFramesEncoded.Construct(streamStats->frames_encoded);
-            local.mKeyFramesEncoded.Construct(
-                streamStats->frame_counts.key_frames);
-            if (streamStats->qp_sum) {
-              local.mQpSum.Construct(*streamStats->qp_sum);
+            if (streamStats) {
+              local.mPacketsSent.Construct(
+                  streamStats->rtp_stats.transmitted.packets);
+              local.mBytesSent.Construct(
+                  streamStats->rtp_stats.transmitted.payload_bytes);
+              local.mNackCount.Construct(
+                  streamStats->rtcp_packet_type_counts.nack_packets);
+              local.mFirCount.Construct(
+                  streamStats->rtcp_packet_type_counts.fir_packets);
+              local.mPliCount.Construct(
+                  streamStats->rtcp_packet_type_counts.pli_packets);
+              local.mFramesEncoded.Construct(streamStats->frames_encoded);
+              local.mKeyFramesEncoded.Construct(
+                  streamStats->frame_counts.key_frames);
+              if (streamStats->qp_sum) {
+                local.mQpSum.Construct(*streamStats->qp_sum);
+              }
+              local.mHeaderBytesSent.Construct(
+                  streamStats->rtp_stats.transmitted.header_bytes +
+                  streamStats->rtp_stats.transmitted.padding_bytes);
+              local.mRetransmittedPacketsSent.Construct(
+                  streamStats->rtp_stats.retransmitted.packets);
+              local.mRetransmittedBytesSent.Construct(
+                  streamStats->rtp_stats.retransmitted.payload_bytes);
+              local.mFrameWidth.Construct(streamStats->width);
+              local.mFrameHeight.Construct(streamStats->height);
+              local.mFramesPerSecond.Construct(streamStats->encode_frame_rate);
+              local.mFramesSent.Construct(streamStats->frames_encoded);
+              local.mHugeFramesSent.Construct(streamStats->huge_frames_sent);
+              local.mTotalEncodeTime.Construct(
+                  double(streamStats->total_encode_time_ms) / 1000.);
+              if (streamStats->target_bitrate) {
+                local.mTargetBitrate.Construct(
+                    streamStats->target_bitrate->bps<double>());
+              }
+            } else {
+              local.mPacketsSent.Construct(0);
+              local.mBytesSent.Construct(0);
+              local.mNackCount.Construct(0);
+              local.mFirCount.Construct(0);
+              local.mPliCount.Construct(0);
+              local.mFramesEncoded.Construct(0);
+              local.mKeyFramesEncoded.Construct(0);
+              local.mHeaderBytesSent.Construct(0);
+              local.mRetransmittedPacketsSent.Construct(0);
+              local.mRetransmittedBytesSent.Construct(0);
+              local.mFramesSent.Construct(0);
+              local.mHugeFramesSent.Construct(0);
+              local.mTotalEncodeTime.Construct(0);
             }
-            local.mHeaderBytesSent.Construct(
-                streamStats->rtp_stats.transmitted.header_bytes +
-                streamStats->rtp_stats.transmitted.padding_bytes);
-            local.mRetransmittedPacketsSent.Construct(
-                streamStats->rtp_stats.retransmitted.packets);
-            local.mRetransmittedBytesSent.Construct(
-                streamStats->rtp_stats.retransmitted.payload_bytes);
-            local.mTotalEncodedBytesTarget.Construct(
-                videoStats->total_encoded_bytes_target);
-            local.mFrameWidth.Construct(streamStats->width);
-            local.mFrameHeight.Construct(streamStats->height);
-            local.mFramesPerSecond.Construct(streamStats->encode_frame_rate);
-            local.mFramesSent.Construct(streamStats->frames_encoded);
-            local.mHugeFramesSent.Construct(streamStats->huge_frames_sent);
-            local.mTotalEncodeTime.Construct(
-                double(streamStats->total_encode_time_ms) / 1000.);
-            /*
-             * Potential new stats that are now available upstream.
-            local.mTargetBitrate.Construct(videoStats->target_media_bitrate_bps);
-             */
+            aConduit->GetAssociatedLocalRtxSSRC(ssrc).apply(
+                [&](const auto rtxSsrc) { local.mRtxSsrc.Construct(rtxSsrc); });
             if (!report->mOutboundRtpStreamStats.AppendElement(std::move(local),
                                                                fallible)) {
               mozalloc_handle_oom(0);
             }
 
-            RTCVideoSourceStats videoSourceStats;
-            constructCommonMediaSourceStats(videoSourceStats);
-            // webrtc::VideoSendStream::Stats does not have width/height. We
-            // might be able to get this somewhere else?
-            // videoStats->frames is not documented, but looking at the
-            // implementation it appears to be the number of frames inputted to
-            // the encoder, which ought to work.
-            videoSourceStats.mFrames.Construct(videoStats->frames);
-            videoSourceStats.mFramesPerSecond.Construct(
-                videoStats->input_frame_rate);
-            auto resolution = aConduit->GetLastResolution();
-            resolution.apply([&](const auto& aResolution) {
-              videoSourceStats.mWidth.Construct(aResolution.width);
-              videoSourceStats.mHeight.Construct(aResolution.height);
-            });
-            if (!report->mVideoSourceStats.AppendElement(
-                    std::move(videoSourceStats), fallible)) {
-              mozalloc_handle_oom(0);
+            if (videoStats) {
+              RTCVideoSourceStats videoSourceStats;
+              constructCommonMediaSourceStats(videoSourceStats);
+              // webrtc::VideoSendStream::Stats does not have width/height. We
+              // might be able to get this somewhere else?
+              // videoStats->frames is not documented, but looking at the
+              // implementation it appears to be the number of frames inputted
+              // to the encoder, which ought to work.
+              videoSourceStats.mFrames.Construct(videoStats->frames);
+              videoSourceStats.mFramesPerSecond.Construct(
+                  videoStats->input_frame_rate);
+              auto resolution = aConduit->GetLastResolution();
+              resolution.apply([&](const auto& aResolution) {
+                videoSourceStats.mWidth.Construct(aResolution.width);
+                videoSourceStats.mHeight.Construct(aResolution.height);
+              });
+              if (!report->mVideoSourceStats.AppendElement(
+                      std::move(videoSourceStats), fallible)) {
+                mozalloc_handle_oom(0);
+              }
             }
           });
         }
@@ -773,7 +811,7 @@ already_AddRefed<Promise> RTCRtpSender::SetParameters(
   // Coverts a list of JsepCodecDescription to a list of
   // dom::RTCRtpCodecParameters
   auto toDomCodecParametersList =
-      [](const std::vector<UniquePtr<JsepCodecDescription>>& aJsepCodec)
+      [](const nsTArray<UniquePtr<JsepCodecDescription>>& aJsepCodec)
       -> dom::Sequence<RTCRtpCodecParameters> {
     dom::Sequence<RTCRtpCodecParameters> codecs;
     for (const auto& codec : aJsepCodec) {
@@ -848,15 +886,11 @@ already_AddRefed<Promise> RTCRtpSender::SetParameters(
   if (choosableCodecs.Length() == 0) {
     // If choosableCodecs is still an empty list, set choosableCodecs to the
     // list of implemented send codecs for transceiver's kind.
-    std::vector<UniquePtr<JsepCodecDescription>> codecs;
+    AutoTArray<UniquePtr<JsepCodecDescription>, 16> codecs;
     if (mTransceiver->IsVideo()) {
-      auto useRtx =
-          Preferences::GetBool("media.peerconnection.video.use_rtx", false)
-              ? OverrideRtxPreference::OverrideWithEnabled
-              : OverrideRtxPreference::OverrideWithDisabled;
-      PeerConnectionImpl::GetDefaultVideoCodecs(codecs, useRtx);
+      EnumerateDefaultVideoCodecs(&codecs, mPc->mPrefs);
     } else {
-      PeerConnectionImpl::GetDefaultAudioCodecs(codecs);
+      EnumerateDefaultAudioCodecs(&codecs, mPc->mPrefs);
     }
     choosableCodecs = toDomCodecParametersList(codecs);
   }
@@ -969,6 +1003,7 @@ struct ParametersAndLevel {
   Maybe<std::set<std::tuple<FmtpParamKey, FmtpParamValue>>> mSet = Nothing();
   Maybe<uint32_t> mLevel = Nothing();
   Maybe<uint32_t> mSubprofile = Nothing();
+  Maybe<uint32_t> mProfile = Nothing();
 
   // Helper function to get the default level for a codec.
   static Maybe<uint32_t> DefaultLevelForCodec(const nsString& aMimeType) {
@@ -994,6 +1029,15 @@ struct ParametersAndLevel {
     // See DefaultLevelCodec for comments on the default level.
     if (aMimeType.LowerCaseEqualsASCII("video/h264")) {
       return Some(JsepVideoCodecDescription::GetSubprofile(0x420010));
+    }
+    return Nothing();
+  }
+
+  // AV1 has a defined default profile of 0, which is omittable by spec.
+  // https://aomediacodec.github.io/av1-rtp-spec/#72-sdp-parameters
+  static Maybe<uint32_t> DefaultProfileForCodec(const nsString& aMimeType) {
+    if (aMimeType.LowerCaseEqualsASCII("video/av1")) {
+      return Some(0);
     }
     return Nothing();
   }
@@ -1041,6 +1085,26 @@ struct ParametersAndLevel {
     }
     return Nothing();
   }
+
+  // AV1's "profile" is, like level, an asymmetric/declarative parameter (see
+  // https://aomediacodec.github.io/av1-rtp-spec/#723-usage-with-the-sdp-offeranswer-model),
+  // but unlike H264, it's a separate fmtp key from the level ("level-idx"),
+  // not encoded together with it. So it needs its own extraction, independent
+  // of ExtractLevel.
+  static Maybe<uint32_t> ExtractProfile(const nsString& aMimeType,
+                                        const FmtpParamKey& aKey,
+                                        const FmtpParamValue& aValue) {
+    if (aMimeType.LowerCaseEqualsASCII("video/av1") &&
+        aKey.EqualsLiteral("profile")) {
+      nsresult rv;
+      auto val = aValue.ToUnsignedInteger(&rv);
+      if (NS_FAILED(rv)) {
+        return Nothing();
+      }
+      return Some(val);
+    }
+    return Nothing();
+  }
 };
 
 // We can not directly compare H264 or AV1 FMTP parameter sets, since the level
@@ -1055,6 +1119,7 @@ ParametersAndLevel FmtpToParametersAndLevel(const nsString& aMimeType,
   auto resultParams = std::set<std::tuple<FmtpParamKey, FmtpParamValue>>();
   Maybe<uint32_t> resultLevel = Nothing();
   Maybe<uint32_t> resultSubprofile = Nothing();
+  Maybe<uint32_t> resultProfile = Nothing();
   nsTArray<nsString> parts;
   for (const auto& kvp : aFmtp.Split(';')) {
     auto parts = nsTArray<nsString>();
@@ -1066,11 +1131,12 @@ ParametersAndLevel FmtpToParametersAndLevel(const nsString& aMimeType,
       // Check to see if it is the level parameter.
       auto level =
           ParametersAndLevel::ExtractLevel(aMimeType, parts[0], parts[1]);
-      if (level.isNothing()) {
-        // If it is not the level parameter, then it is a regular parameter.
-        // We store the key-value pair in the result parameter set.
-        resultParams.insert(std::make_tuple(parts[0], parts[1]));
-      } else {
+      // Check to see if it is AV1's profile parameter. Unlike H264's
+      // subprofile, this is a separate key from the level, not encoded
+      // together with it, so it's checked independently.
+      auto profile =
+          ParametersAndLevel::ExtractProfile(aMimeType, parts[0], parts[1]);
+      if (level.isSome()) {
         // It is the level parameter, so we do not store it in the result
         // parameter set. Instead we store it in the result level, and
         // subprofile (if provided).
@@ -1078,6 +1144,13 @@ ParametersAndLevel FmtpToParametersAndLevel(const nsString& aMimeType,
             aMimeType, parts[0], parts[1]);
         // Store the level separately
         resultLevel = level;
+      } else if (profile.isSome()) {
+        // It is AV1's profile parameter, so store it separately too.
+        resultProfile = profile;
+      } else {
+        // It is a regular parameter.
+        // We store the key-value pair in the result parameter set.
+        resultParams.insert(std::make_tuple(parts[0], parts[1]));
       }
     } else {
       // This is not a valid key-value pair FMTP line, so we do not have
@@ -1088,6 +1161,9 @@ ParametersAndLevel FmtpToParametersAndLevel(const nsString& aMimeType,
             return ParametersAndLevel::DefaultLevelForCodec(aMimeType);
           }),
           .mSubprofile = resultSubprofile,
+          .mProfile = resultProfile.orElse([&]() -> Maybe<uint32_t> {
+            return ParametersAndLevel::DefaultProfileForCodec(aMimeType);
+          }),
       };
     }
   }
@@ -1097,6 +1173,9 @@ ParametersAndLevel FmtpToParametersAndLevel(const nsString& aMimeType,
         return ParametersAndLevel::DefaultLevelForCodec(aMimeType);
       }),
       .mSubprofile = resultSubprofile,
+      .mProfile = resultProfile.orElse([&]() -> Maybe<uint32_t> {
+        return ParametersAndLevel::DefaultProfileForCodec(aMimeType);
+      }),
   };
 }
 
@@ -1145,7 +1224,8 @@ bool DoesCodecParameterMatchCodec(const RTCRtpCodec& aCodec1,
         return false;
       }
       if (!aIgnoreLevels && (pset1.mLevel != pset2.mLevel ||
-                             pset1.mSubprofile != pset2.mSubprofile)) {
+                             pset1.mSubprofile != pset2.mSubprofile ||
+                             pset1.mProfile != pset2.mProfile)) {
         return false;
       }
       // Compare pair-wise the two parameter sets.
@@ -1875,6 +1955,12 @@ void RTCRtpSender::SyncFromJsep(const JsepTransceiver& aJsepTransceiver) {
 }
 
 void RTCRtpSender::SyncToJsep(JsepTransceiver& aJsepTransceiver) const {
+  if (!mTransceiver->GetPreferredCodecs().IsEmpty()) {
+    aJsepTransceiver.mSendTrack.PopulatePreferredCodecs(
+        mTransceiver->GetPreferredCodecs(),
+        mTransceiver->GetPreferredCodecsInUse());
+  }
+
   std::vector<std::string> streamIds;
   for (const auto& stream : mStreams) {
     nsString wideStreamId;
@@ -2184,7 +2270,8 @@ void RTCRtpSender::UpdateBaseConfig(BaseConfig* aConfig) {
       // @@NG read extmap from track
       details.ForEachRTPHeaderExtension(
           [&extmaps](const SdpExtmapAttributeList::Extmap& extmap) {
-            extmaps.emplace_back(extmap.extensionname, extmap.entry);
+            extmaps.emplace_back(extmap.extensionname,
+                                 webrtc::RtpHeaderExtensionId(extmap.entry));
           });
       aConfig->mLocalRtpExtensions = std::move(extmaps);
     }
@@ -2253,18 +2340,6 @@ std::string RTCRtpSender::GetMid() const { return mTransceiver->GetMidAscii(); }
 
 JsepTransceiver& RTCRtpSender::GetJsepTransceiver() {
   return mTransceiver->GetJsepTransceiver();
-}
-
-void RTCRtpSender::UpdateDtmfSender() {
-  if (!mDtmf) {
-    return;
-  }
-
-  if (mTransmitting) {
-    return;
-  }
-
-  mDtmf->StopPlayout();
 }
 
 void RTCRtpSender::SetTransform(RTCRtpScriptTransform* aTransform,

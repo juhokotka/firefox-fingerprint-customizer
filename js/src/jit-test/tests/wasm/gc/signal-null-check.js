@@ -1,3 +1,5 @@
+// |jit-test| test-also=--no-avx; test-also=--setpref=wasm_baseline_debug=true; skip-variant-if: --setpref=wasm_baseline_debug=true, wasmCompileMode() == "ion"
+
 // Checks if null dereference works.
 
 for (let [fieldType, signedness, defaultValue] of [

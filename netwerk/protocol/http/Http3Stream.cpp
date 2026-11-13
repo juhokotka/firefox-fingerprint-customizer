@@ -3,21 +3,22 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
-#include "Http3Session.h"
 #include "Http3Stream.h"
+
+#include <stdio.h>
+
+#include "Http3Session.h"
+#include "HttpLog.h"
+#include "mozilla/StaticPrefs_network.h"
+#include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
+#include "nsHttpHandler.h"
 #include "nsHttpRequestHead.h"
 #include "nsHttpTransaction.h"
 #include "nsIClassOfService.h"
+#include "nsIOService.h"
 #include "nsISocketTransport.h"
 #include "nsISupportsPriority.h"
 #include "nsSocketTransportService2.h"
-#include "mozilla/StaticPrefs_network.h"
-#include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
-#include "nsIOService.h"
-#include "nsHttpHandler.h"
-
-#include <stdio.h>
 
 namespace mozilla {
 namespace net {
@@ -111,6 +112,7 @@ nsresult Http3Stream::TryActivating() {
     int64_t len;
     if (nsHttp::ParseInt64(contentLength.get(), nullptr, &len)) {
       mRequestBodyLenExpected = len;
+      mRequestBodyLenKnown = true;
     }
   }
 #endif
@@ -394,9 +396,11 @@ nsresult Http3Stream::ReadSegments() {
       glean::http3::sending_blocked_by_flow_control_per_trans
           .AccumulateSingleSample(mSendingBlockedByFlowControlCount);
 
-#ifdef DEBUG
-      MOZ_ASSERT(mRequestBodyLenSent == mRequestBodyLenExpected);
-#endif
+      // For streaming uploads the request body has no Content-Length, so the
+      // number of bytes sent isn't known in advance; only cross-check when it
+      // is.
+      MOZ_ASSERT(!mRequestBodyLenKnown ||
+                 mRequestBodyLenSent == mRequestBodyLenExpected);
       rv = NS_OK;
       again = false;
     }

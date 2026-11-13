@@ -14,15 +14,17 @@
 #include <unordered_set>
 #include <utility>
 
+#include "mozilla/Monitor.h"
+#include "mozilla/StaticPtr.h"
+#include "mozilla/ThreadSafeWeakPtr.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/gfx/Point.h"  // for IntSize
 #include "mozilla/gfx/Types.h"  // for SurfaceFormat
 #include "mozilla/ipc/Shmem.h"
 #include "mozilla/layers/CompositorTypes.h"  // for TextureFlags, etc
 #include "mozilla/layers/LayersSurfaces.h"   // for SurfaceDescriptor
+#include "mozilla/layers/TextureClient.h"
 #include "mozilla/layers/TextureHost.h"
-#include "mozilla/Monitor.h"
-#include "mozilla/StaticPtr.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/webrender/WebRenderTypes.h"
 
 class nsISerialEventTarget;
@@ -45,8 +47,6 @@ namespace layers {
 
 class CompositableHost;
 class RemoteTextureHostWrapper;
-class TextureData;
-class TextureHost;
 
 struct RemoteTextureInfo {
   RemoteTextureInfo(const RemoteTextureId aTextureId,
@@ -123,6 +123,8 @@ class SharedResourceWrapper {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     return nullptr;
   }
+
+  void ClearTextureHost();
 };
 
 class RemoteTextureRecycleBin final {
@@ -134,7 +136,7 @@ class RemoteTextureRecycleBin final {
  private:
   friend class RemoteTextureMap;
 
-  ~RemoteTextureRecycleBin();
+  ~RemoteTextureRecycleBin() = default;
 
   struct RecycledTextureHolder {
     gfx::IntSize mSize;
@@ -163,12 +165,15 @@ class RemoteTextureRecycleBin final {
  * a given top-level protocol, without having to directly refer to the original
  * top-level protocol.
  */
-class RemoteTextureTxnScheduler final {
+class RemoteTextureTxnScheduler final
+    : public SupportsThreadSafeWeakPtr<RemoteTextureTxnScheduler> {
  public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(RemoteTextureTxnScheduler)
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(RemoteTextureTxnScheduler)
 
   static already_AddRefed<RemoteTextureTxnScheduler> Create(
       mozilla::ipc::IProtocol* aProtocol);
+
+  ~RemoteTextureTxnScheduler();
 
   void NotifyTxn(RemoteTextureTxnId aTxnId);
 
@@ -177,7 +182,6 @@ class RemoteTextureTxnScheduler final {
 
   RemoteTextureTxnScheduler(base::ProcessId aForPid, RemoteTextureTxnType aType)
       : mForPid(aForPid), mType(aType) {}
-  ~RemoteTextureTxnScheduler();
 
   bool WaitForTxn(const MonitorAutoLock& aProofOfLock,
                   RemoteTextureOwnerId aOwnerId, RemoteTextureTxnId aTxnId);
@@ -258,7 +262,7 @@ class RemoteTextureOwnerClient final {
   const base::ProcessId mForPid;
 
  protected:
-  ~RemoteTextureOwnerClient();
+  ~RemoteTextureOwnerClient() = default;
 
   RemoteTextureOwnerIdSet mOwnerIds;
   RefPtr<RemoteTextureRecycleBin> mSharedRecycleBin;
@@ -274,8 +278,8 @@ class RemoteTextureMap {
   static void Shutdown();
   static RemoteTextureMap* Get() { return sInstance; }
 
-  RemoteTextureMap();
-  ~RemoteTextureMap();
+  RemoteTextureMap() = default;
+  ~RemoteTextureMap() = default;
 
   // Push remote texture data and gl::SharedSurface from texture owner.
   // The texture data is used for creating TextureHost.
@@ -477,7 +481,7 @@ class RemoteTextureMap {
   void UnregisterTxnScheduler(base::ProcessId aForPid,
                               RemoteTextureTxnType aType);
 
-  Monitor mMonitor MOZ_UNANNOTATED;
+  Monitor mMonitor MOZ_UNANNOTATED{"RemoteTextureMap::mMonitor"};
 
   std::map<std::pair<base::ProcessId, RemoteTextureOwnerId>,
            UniquePtr<WaitingTextureOwner>>
@@ -492,7 +496,7 @@ class RemoteTextureMap {
       mRemoteTextureHostWrapperHolders;
 
   std::map<std::pair<base::ProcessId, RemoteTextureTxnType>,
-           RemoteTextureTxnScheduler*>
+           ThreadSafeWeakPtr<RemoteTextureTxnScheduler>>
       mTxnSchedulers;
 
   static StaticAutoPtr<RemoteTextureMap> sInstance;

@@ -8,7 +8,6 @@ import { AIWindowUI } from "moz-src:///browser/components/aiwindow/ui/modules/AI
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
-  URILoadingHelper: "resource:///modules/URILoadingHelper.sys.mjs",
 });
 
 const MAX_RECENT_CHATS = 4;
@@ -17,6 +16,15 @@ const MAX_RECENT_CHATS = 4;
  * Adds the AI Window menuitems to the app menu
  */
 export class AIWindowMenu {
+  static canShowAITabMenu(win, uris) {
+    return (
+      Services.prefs.getBoolPref("browser.smartwindow.aitab.menus", false) &&
+      Services.prefs.getBoolPref("browser.smartwindow.aitab.enabled", false) &&
+      AIWindow.isAIWindowActiveAndEnabled(win) &&
+      uris.some(uri => uri.schemeIs("http") || uri.schemeIs("https"))
+    );
+  }
+
   constructor() {}
 
   /**
@@ -122,17 +130,6 @@ export class AIWindowMenu {
     }
 
     const win = event.target.documentGlobal;
-    const mostRecentPage = conversation.getMostRecentPageVisited();
-    const url = mostRecentPage?.href ?? win.BROWSER_NEW_TAB_URL;
-
-    lazy.URILoadingHelper.openTrustedLinkIn(win, url, where, {
-      resolveOnContentBrowserCreated: async targetBrowser => {
-        if (url === win.BROWSER_NEW_TAB_URL) {
-          AIWindowUI.openInFullWindow(targetBrowser, conversation);
-        } else {
-          AIWindowUI.openSidebar(targetBrowser.documentGlobal, conversation);
-        }
-      },
-    });
+    AIWindowUI.reopenConversationInTab(win, conversation, where);
   }
 }

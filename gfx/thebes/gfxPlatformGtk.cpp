@@ -7,52 +7,53 @@
 
 #include "gfxPlatformGtk.h"
 
-#include <gtk/gtk.h>
 #include <fontconfig/fontconfig.h>
+#include <gtk/gtk.h>
 
+#include "GLContextProvider.h"
+#include "VsyncSource.h"
+#include "base/message_loop.h"
 #include "base/task.h"
 #include "base/thread.h"
-#include "base/message_loop.h"
 #include "cairo.h"
 #include "gfx2DGlue.h"
-#include "gfxFcPlatformFontList.h"
 #include "gfxConfig.h"
 #include "gfxContext.h"
+#include "gfxFT2FontBase.h"
+#include "gfxFcPlatformFontList.h"
 #include "gfxImageSurface.h"
+#include "gfxTextRun.h"
 #include "gfxUserFontSet.h"
 #include "gfxUtils.h"
-#include "gfxFT2FontBase.h"
-#include "gfxTextRun.h"
-#include "GLContextProvider.h"
 #include "mozilla/Components.h"
-#include "mozilla/dom/ContentChild.h"
 #include "mozilla/FontPropertyTypes.h"
-#include "mozilla/gfx/2D.h"
-#include "mozilla/gfx/Logging.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/StaticPrefs_layers.h"
 #include "mozilla/StaticPrefs_media.h"
+#include "mozilla/WidgetUtilsGtk.h"
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/Logging.h"
 #include "nsAppRunner.h"
 #include "nsIGfxInfo.h"
 #include "nsMathUtils.h"
 #include "nsUnicharUtils.h"
 #include "nsUnicodeProperties.h"
 #include "prenv.h"
-#include "VsyncSource.h"
-#include "mozilla/WidgetUtilsGtk.h"
 
 #ifdef MOZ_X11
-#  include "mozilla/gfx/XlibDisplay.h"
-#  include <gdk/gdkx.h>
 #  include <X11/extensions/Xrandr.h>
-#  include "cairo-xlib.h"
-#  include "gfxXlibSurface.h"
+#  include <gdk/gdkx.h>
+
 #  include "GLContextGLX.h"
 #  include "GLXLibrary.h"
-#  include "mozilla/X11Util.h"
 #  include "SoftwareVsyncSource.h"
+#  include "cairo-xlib.h"
+#  include "gfxXlibSurface.h"
+#  include "mozilla/X11Util.h"
+#  include "mozilla/gfx/XlibDisplay.h"
 
 /* Undefine the Status from Xlib since it will conflict with system headers on
  * OSX */
@@ -63,11 +64,12 @@
 
 #ifdef MOZ_WAYLAND
 #  include <gdk/gdkwayland.h>
+
 #  include "mozilla/widget/nsWaylandDisplay.h"
 #endif
 #ifdef MOZ_WIDGET_GTK
-#  include "mozilla/widget/DMABufDevice.h"
 #  include "mozilla/StaticPrefs_widget.h"
+#  include "mozilla/widget/DMABufDevice.h"
 #endif
 
 #define GDK_PIXMAP_SIZE_MAX 32767
@@ -238,6 +240,13 @@ void gfxPlatformGtk::InitPlatformHardwareVideoConfig() {
                             FeatureStatus::Unavailable, "Requires EGL",
                             "FEATURE_FAILURE_REQUIRES_EGL"_ns);
   }
+  if (!gfxVars::UseDMABuf()) {
+    featureDec.ForceDisable(FeatureStatus::Unavailable, "Requires DMABUF",
+                            "FEATURE_FAILURE_REQUIRES_DMABUF"_ns);
+    gfxConfig::ForceDisable(Feature::HARDWARE_VIDEO_ENCODING,
+                            FeatureStatus::Unavailable, "Requires DMABUF",
+                            "FEATURE_FAILURE_REQUIRES_DMABUF"_ns);
+  }
 
   if (!featureDec.IsEnabled()) {
     return;
@@ -247,6 +256,7 @@ void gfxPlatformGtk::InitPlatformHardwareVideoConfig() {
   FeatureState& featureZeroCopy =
       gfxConfig::GetFeature(Feature::HW_DECODED_VIDEO_ZERO_COPY);
 
+  featureZeroCopy.Reset();
   featureZeroCopy.EnableByDefault();
   uint32_t state =
       StaticPrefs::media_ffmpeg_vaapi_force_surface_zero_copy_AtStartup();
@@ -492,7 +502,7 @@ static nsTArray<uint8_t> GetDisplayICCProfile(Display* dpy, Window& root) {
 
   if (XGetWindowProperty(dpy, root, iccAtom, 0, INT_MAX /* length */, X11False,
                          AnyPropertyType, &retAtom, &retFormat, &retLength,
-                         &retAfter, &retProperty) != Success) {
+                         &retAfter, &retProperty) != X11Success) {
     return nsTArray<uint8_t>();
   }
 
@@ -561,7 +571,7 @@ nsTArray<uint8_t> gfxPlatformGtk::GetPlatformCMSOutputProfileData() {
 
   if (XGetWindowProperty(dpy, root, edidAtom, 0, 32, X11False, AnyPropertyType,
                          &retAtom, &retFormat, &retLength, &retAfter,
-                         &retProperty) != Success) {
+                         &retProperty) != X11Success) {
     return nsTArray<uint8_t>();
   }
 

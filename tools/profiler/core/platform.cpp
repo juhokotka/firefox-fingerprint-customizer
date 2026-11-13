@@ -68,6 +68,7 @@
 #include "mozilla/ArrayAlgorithm.h"
 #include "mozilla/BaseAndGeckoProfilerDetail.h"
 #include "mozilla/BaseProfiler.h"
+#include "mozilla/ChromeProfilerCounter.h"
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/ExtensionPolicyService.h"
 #include "mozilla/extensions/WebExtensionPolicy.h"
@@ -219,11 +220,12 @@ BOOL WINAPI GetThreadInformation(
 #endif
 
 // Linux/BSD builds use LUL, which uses DWARF info to unwind stacks.
-#if defined(GP_PLAT_amd64_linux) || defined(GP_PLAT_x86_linux) ||       \
-    defined(GP_PLAT_amd64_android) || defined(GP_PLAT_x86_android) ||   \
-    defined(GP_PLAT_mips64_linux) || defined(GP_PLAT_arm64_linux) ||    \
-    defined(GP_PLAT_arm64_android) || defined(GP_PLAT_amd64_freebsd) || \
-    defined(GP_PLAT_arm64_freebsd)
+#if defined(GP_PLAT_amd64_linux) || defined(GP_PLAT_x86_linux) ||           \
+    defined(GP_PLAT_amd64_android) || defined(GP_PLAT_x86_android) ||       \
+    defined(GP_PLAT_mips64_linux) || defined(GP_PLAT_arm64_linux) ||        \
+    defined(GP_PLAT_arm64_android) || defined(GP_PLAT_amd64_freebsd) ||     \
+    defined(GP_PLAT_arm64_freebsd) || defined(GP_PLAT_loongarch64_linux) || \
+    defined(GP_PLAT_riscv64_linux)
 #  define HAVE_NATIVE_UNWIND
 #  define USE_LUL_STACKWALK
 #  include "lul/LulMain.h"
@@ -893,10 +895,16 @@ class CorePS {
       aProfSize += registeredPage->SizeOfIncludingThis(aMallocSizeOf);
     }
 
+    aProfSize += sInstance->mChromeCounters.sizeOfExcludingThis(aMallocSizeOf);
+    for (auto& chromeCounter : sInstance->mChromeCounters) {
+      aProfSize += chromeCounter->SizeOfIncludingThis(aMallocSizeOf);
+    }
+
     // Measurement of the following things may be added later if DMD finds it
     // is worthwhile:
     // - CorePS::mRegisteredPages itself (its elements' children are
     // measured above)
+    // - CorePS::mCounters (non-owning pointers, measured by their owners)
 
 #if defined(USE_LUL_STACKWALK)
     if (lul::LUL* lulPtr = sInstance->mLul; lulPtr) {
@@ -912,17 +920,23 @@ class CorePS {
 
   PS_GET(Vector<RefPtr<PageInformation>>&, RegisteredPages)
 
-  static void AppendRegisteredPage(PSLockRef,
-                                   RefPtr<PageInformation>&& aRegisteredPage) {
+  // Takes the page fields rather than a PageInformation, so that the common
+  // case of re-registering an already-known page doesn't have to allocate one
+  // only to throw it away.
+  static void AppendRegisteredPage(PSLockRef, uint64_t aTabID,
+                                   uint64_t aInnerWindowID,
+                                   const nsCString& aUrl,
+                                   uint64_t aEmbedderInnerWindowID,
+                                   bool aIsPrivateBrowsing) {
     MOZ_ASSERT(sInstance);
-    struct RegisteredPageComparator {
-      PageInformation* aA;
-      bool operator()(PageInformation* aB) const { return aA->Equals(aB); }
-    };
 
+    // Inner window IDs are unique for each page, so they are enough to
+    // identify an already-registered page.
     auto foundPageIter = std::find_if(
         sInstance->mRegisteredPages.begin(), sInstance->mRegisteredPages.end(),
-        RegisteredPageComparator{aRegisteredPage.get()});
+        [aInnerWindowID](const RefPtr<PageInformation>& aPage) {
+          return aPage->InnerWindowID() == aInnerWindowID;
+        });
 
     if (foundPageIter != sInstance->mRegisteredPages.end()) {
       if ((*foundPageIter)->Url().EqualsLiteral("about:blank")) {
@@ -938,7 +952,9 @@ class CorePS {
     }
 
     MOZ_RELEASE_ASSERT(
-        sInstance->mRegisteredPages.append(std::move(aRegisteredPage)));
+        sInstance->mRegisteredPages.append(MakeRefPtr<PageInformation>(
+            aTabID, aInnerWindowID, aUrl, aEmbedderInnerWindowID,
+            aIsPrivateBrowsing)));
   }
 
   static void RemoveRegisteredPage(PSLockRef,
@@ -971,6 +987,34 @@ class CorePS {
                                 sInstance->mCounters.end(), aCounter);
       MOZ_RELEASE_ASSERT(counter != sInstance->mCounters.end());
       sInstance->mCounters.erase(counter);
+    }
+  }
+
+  static void AddChromeCounter(
+      PSLockRef, already_AddRefed<ChromeProfilerCounter> aCounter) {
+    MOZ_ASSERT(sInstance);
+    MOZ_RELEASE_ASSERT(
+        sInstance->mChromeCounters.append(RefPtr(std::move(aCounter))));
+  }
+
+  static already_AddRefed<ChromeProfilerCounter> ReleaseChromeCounter(
+      PSLockRef, ChromeProfilerCounter* aCounter) {
+    if (!sInstance) {
+      // This mirrors RemoveCounter assumption that sInstance may not exist.
+      return nullptr;
+    }
+    auto* it = std::find(sInstance->mChromeCounters.begin(),
+                         sInstance->mChromeCounters.end(), aCounter);
+    MOZ_RELEASE_ASSERT(it != sInstance->mChromeCounters.end());
+    RefPtr<ChromeProfilerCounter> owned = std::move(*it);
+    sInstance->mChromeCounters.erase(it);
+    return owned.forget();
+  }
+
+  static void ClearChromeCounters(PSLockRef) {
+    MOZ_ASSERT(sInstance);
+    for (RefPtr<ChromeProfilerCounter>& counter : sInstance->mChromeCounters) {
+      counter->Clear();
     }
   }
 
@@ -1054,6 +1098,14 @@ class CorePS {
 
   // Non-owning pointers to all active counters
   Vector<BaseProfilerCount*> mCounters;
+
+  // The profiler holds a strong reference here for each Chrome-originated
+  // counter while that counter is registered and being sampled. The profiler
+  // must own the counter itself, because the counter's JS wrapper can be
+  // garbage collected at any time. The profiler releases the reference when JS
+  // unregisters the counter, or moves it to mDeadCounters if a session is
+  // still active.
+  Vector<RefPtr<ChromeProfilerCounter>> mChromeCounters;
 
 #if defined(GECKO_PROFILER_ASYNC_POSIX_SIGNAL_CONTROL)
   // Background thread for communicating with async signal handlers
@@ -1414,6 +1466,11 @@ class ActivePS {
     size_t n = aMallocSizeOf(sInstance);
 
     n += sInstance->mProfileBuffer.SizeOfExcludingThis(aMallocSizeOf);
+
+    n += sInstance->mDeadCounters.sizeOfExcludingThis(aMallocSizeOf);
+    for (auto& deadCounter : sInstance->mDeadCounters) {
+      n += deadCounter->SizeOfIncludingThis(aMallocSizeOf);
+    }
 
     // Measurement of the following members may be added later if DMD finds it
     // is worthwhile:
@@ -1896,6 +1953,13 @@ class ActivePS {
   }
 #endif
 
+  static void AddDeadCounter(PSLockRef,
+                             already_AddRefed<ChromeProfilerCounter> aCounter) {
+    MOZ_ASSERT(sInstance);
+    MOZ_RELEASE_ASSERT(
+        sInstance->mDeadCounters.append(RefPtr(std::move(aCounter))));
+  }
+
  private:
   // The singleton instance.
   static ActivePS* sInstance;
@@ -1997,6 +2061,13 @@ class ActivePS {
 #if defined(MOZ_MEMORY) && defined(MOZ_PROFILER_MEMORY)
   UniquePtr<BaseProfilerCount> mMemoryCounter;
 #endif
+
+  // The profiler moves a counter here when JS unregisters it during an active
+  // session. The profiler cannot free the counter yet, because the profile
+  // buffer still holds raw pointers to it in recorded samples. The profiler
+  // releases these references when it destroys this ActivePS, after it has
+  // serialized the profile.
+  Vector<RefPtr<ChromeProfilerCounter>> mDeadCounters;
 };
 
 ActivePS* ActivePS::sInstance = nullptr;
@@ -2120,6 +2191,8 @@ static const char* const kMainThreadName = "GeckoMain";
     defined(GP_PLAT_arm64_freebsd) || defined(GP_ARCH_arm64) ||         \
     defined(__aarch64__)
 #  define UNWINDING_REGS_HAVE_LR_R11
+#elif defined(GP_PLAT_loongarch64_linux) || defined(GP_PLAT_riscv64_linux)
+#  define UNWINDING_REGS_HAVE_RA_T3
 #endif
 
 // The registers used for stack unwinding and a few other sampling purposes.
@@ -2148,6 +2221,9 @@ class Registers {
 #elif defined(UNWINDING_REGS_HAVE_LR_R11)
   Address mLR{nullptr};   // ARM link register, or temp for return address.
   Address mR11{nullptr};  // Temp for frame pointer.
+#elif defined(UNWINDING_REGS_HAVE_RA_T3)
+  Address mRA{nullptr};  // Return address register.
+  Address mT3{nullptr};  // Temp for frame pointer.
 #endif
 
 #if defined(GP_OS_linux) || defined(GP_OS_android) || defined(GP_OS_freebsd)
@@ -2295,6 +2371,9 @@ static uint32_t ExtractJsFrames(
 #elif defined(UNWINDING_REGS_HAVE_LR_R11)
       registerState.lr = aRegs.mLR;
       registerState.tempFP = aRegs.mR11;
+#elif defined(UNWINDING_REGS_HAVE_RA_T3)
+      registerState.tempRA = aRegs.mRA;
+      registerState.tempFP = aRegs.mT3;
 #endif
 
       // Non-periodic sampling passes Nothing() as the buffer write position to
@@ -2765,23 +2844,6 @@ static void DoEHABIBacktrace(
 
 #ifdef USE_LUL_STACKWALK
 
-// See the comment at the callsite for why this function is necessary.
-#  if defined(MOZ_HAVE_ASAN_IGNORE)
-MOZ_ASAN_IGNORE static void ASAN_memcpy(void* aDst, const void* aSrc,
-                                        size_t aLen) {
-  // The obvious thing to do here is call memcpy(). However, although
-  // ASAN_memcpy() is not instrumented by ASAN, memcpy() still is, and the
-  // false positive still manifests! So we must implement memcpy() ourselves
-  // within this function.
-  char* dst = static_cast<char*>(aDst);
-  const char* src = static_cast<const char*>(aSrc);
-
-  for (size_t i = 0; i < aLen; i++) {
-    dst[i] = src[i];
-  }
-}
-#  endif
-
 static void DoLULBacktrace(
     const ThreadRegistration::UnlockedReaderAndAtomicRWOnThread& aThreadData,
     const Registers& aRegs, NativeStack& aNativeStack,
@@ -2830,6 +2892,17 @@ static void DoLULBacktrace(
   startRegs.pc = lul::TaggedUWord(mc->pc);
   startRegs.sp = lul::TaggedUWord(mc->gregs[29]);
   startRegs.fp = lul::TaggedUWord(mc->gregs[30]);
+#  elif defined(GP_PLAT_loongarch64_linux)
+  startRegs.ra = lul::TaggedUWord(mc->__gregs[1]);
+  startRegs.sp = lul::TaggedUWord(mc->__gregs[3]);
+  startRegs.fp = lul::TaggedUWord(mc->__gregs[22]);
+  startRegs.s0 = lul::TaggedUWord(mc->__gregs[23]);
+  startRegs.pc = lul::TaggedUWord(mc->__pc);
+#  elif defined(GP_PLAT_riscv64_linux)
+  startRegs.ra = lul::TaggedUWord(mc->__gregs[1]);
+  startRegs.sp = lul::TaggedUWord(mc->__gregs[2]);
+  startRegs.fp = lul::TaggedUWord(mc->__gregs[8]);
+  startRegs.pc = lul::TaggedUWord(mc->__gregs[0]);  // REG_PC
 #  else
 #    error "Unknown plat"
 #  endif
@@ -2839,31 +2912,12 @@ static void DoLULBacktrace(
   // assumes that the TaggedUWord holding the stack pointer value is valid, but
   // it should be, since it was constructed that way in the code just above.
 
-  // We could construct |stackImg| so that LUL reads directly from the stack in
-  // question, rather than from a copy of it.  That would reduce overhead and
-  // space use a bit.  However, it gives a problem with dynamic analysis tools
-  // (ASan, TSan, Valgrind) which is that such tools will report invalid or
-  // racing memory accesses, and such accesses will be reported deep inside LUL.
-  // By taking a copy here, we can either sanitise the copy (for Valgrind) or
-  // copy it using an unchecked memcpy (for ASan, TSan).  That way we don't have
-  // to try and suppress errors inside LUL.
-  //
-  // N_STACK_BYTES is set to 160KB.  This is big enough to hold all stacks
-  // observed in some minutes of testing, whilst keeping the size of this
-  // function (DoNativeBacktrace)'s frame reasonable.  Most stacks observed in
-  // practice are small, 4KB or less, and so the copy costs are insignificant
-  // compared to other profiler overhead.
-  //
-  // |stackImg| is allocated on this (the sampling thread's) stack.  That
-  // implies that the frame for this function is at least N_STACK_BYTES large.
-  // In general it would be considered unacceptable to have such a large frame
-  // on a stack, but it only exists for the unwinder thread, and so is not
-  // expected to be a problem.  Allocating it on the heap is troublesome because
-  // this function runs whilst the sampled thread is suspended, so any heap
-  // allocation risks deadlock.  Allocating it as a global variable is not
-  // thread safe, which would be a problem if we ever allow multiple sampler
-  // threads.  Hence allocating it on the stack seems to be the least-worst
-  // option.
+  // Point the StackImage directly at the target thread's stack, avoiding
+  // memcpy. This is safe because the target thread is
+  // suspended for the duration of the unwind (periodic path) or we are
+  // unwinding our own stack (synchronous path). Sanitizer tools (ASan,
+  // TSan, Valgrind) may report false positives from LUL reading the
+  // stack directly; suppress with appropriate annotations if needed.
 
   lul::StackImage stackImg;
 
@@ -2885,6 +2939,12 @@ static void DoLULBacktrace(
 #  elif defined(GP_PLAT_mips64_linux)
     uintptr_t REDZONE_SIZE = 0;
     uintptr_t start = startRegs.sp.Value() - REDZONE_SIZE;
+#  elif defined(GP_PLAT_loongarch64_linux)
+    uintptr_t REDZONE_SIZE = 0;
+    uintptr_t start = startRegs.sp.Value() - REDZONE_SIZE;
+#  elif defined(GP_PLAT_riscv64_linux)
+    uintptr_t REDZONE_SIZE = 0;
+    uintptr_t start = startRegs.sp.Value() - REDZONE_SIZE;
 #  else
 #    error "Unknown plat"
 #  endif
@@ -2896,9 +2956,6 @@ static void DoLULBacktrace(
     if (start < end) {
       nToCopy = end - start;
       if (nToCopy >= 1024u * 1024u) {
-        // start is abnormally far from end, possibly due to some special code
-        // that uses a separate stack elsewhere (e.g.: rr). In this case we just
-        // give up on this sample.
         nToCopy = 0;
       } else if (nToCopy > lul::N_STACK_BYTES) {
         nToCopy = lul::N_STACK_BYTES;
@@ -2907,23 +2964,7 @@ static void DoLULBacktrace(
     MOZ_ASSERT(nToCopy <= lul::N_STACK_BYTES);
     stackImg.mLen = nToCopy;
     stackImg.mStartAvma = start;
-    if (nToCopy > 0) {
-      // If this is a vanilla memcpy(), ASAN makes the following complaint:
-      //
-      //   ERROR: AddressSanitizer: stack-buffer-underflow ...
-      //   ...
-      //   HINT: this may be a false positive if your program uses some custom
-      //   stack unwind mechanism or swapcontext
-      //
-      // This code is very much a custom stack unwind mechanism! So we use an
-      // alternative memcpy() implementation that is ignored by ASAN.
-#  if defined(MOZ_HAVE_ASAN_IGNORE)
-      ASAN_memcpy(&stackImg.mContents[0], (void*)start, nToCopy);
-#  else
-      memcpy(&stackImg.mContents[0], (void*)start, nToCopy);
-#  endif
-      (void)VALGRIND_MAKE_MEM_DEFINED(&stackImg.mContents[0], nToCopy);
-    }
+    stackImg.mContents = reinterpret_cast<uint8_t*>(start);
   }
 
   size_t framePointerFramesAcquired = 0;
@@ -3038,11 +3079,11 @@ void DoNativeBacktraceDirect(const void* stackTop, NativeStack& aNativeStack,
 
 // Writes some components shared by periodic and synchronous profiles to
 // ActivePS's ProfileBuffer. (This should only be called from DoSyncSample()
-// and DoPeriodicSample().)
+// and DoPeriodicSample().) Returns whether JitReturnAddr entries were written.
 //
 // The grammar for entry sequences is in a comment above
 // ProfileBuffer::StreamSamplesToJSON.
-static inline void DoSharedSample(
+static inline bool DoSharedSample(
     bool aIsSynchronous, uint32_t aFeatures,
     const ThreadRegistration::UnlockedReaderAndAtomicRWOnThread& aThreadData,
     JsFrame* aJsFrames, const Registers& aRegs, uint64_t aSamplePos,
@@ -3088,6 +3129,8 @@ static inline void DoSharedSample(
       aBuffer.AddEntry(ProfileBufferEntry::NativeLeafAddr((void*)aRegs.mPC));
     }
   }
+
+  return collector.HasCollectedJitReturnAddr();
 }
 
 // Writes the components of a synchronous sample to the given ProfileBuffer.
@@ -3133,7 +3176,8 @@ static void DoSyncSample(
 // Writes the components of a periodic sample to ActivePS's ProfileBuffer.
 // The ThreadId entry is already written in the main ProfileBuffer, its location
 // is `aSamplePos`, we can write the rest to `aBuffer` (which may be different).
-static inline void DoPeriodicSample(
+// Returns whether JitReturnAddr entries were written.
+static inline bool DoPeriodicSample(
     PSLockRef aLock,
     const ThreadRegistration::UnlockedReaderAndAtomicRWOnThread& aThreadData,
     const Registers& aRegs, uint64_t aSamplePos, uint64_t aBufferRangeStart,
@@ -3143,15 +3187,16 @@ static inline void DoPeriodicSample(
   MOZ_RELEASE_ASSERT(ActivePS::Exists(aLock));
 
   JsFrameBuffer& jsFrames = CorePS::JsFrames(aLock);
-  DoSharedSample(/* aIsSynchronous = */ false, ActivePS::Features(aLock),
-                 aThreadData, jsFrames, aRegs, aSamplePos, aBufferRangeStart,
-                 aBuffer);
+  return DoSharedSample(/* aIsSynchronous = */ false, ActivePS::Features(aLock),
+                        aThreadData, jsFrames, aRegs, aSamplePos,
+                        aBufferRangeStart, aBuffer);
 }
 
 #undef UNWINDING_REGS_HAVE_ECX_EDX
 #undef UNWINDING_REGS_HAVE_R10_R12
 #undef UNWINDING_REGS_HAVE_LR_R7
 #undef UNWINDING_REGS_HAVE_LR_R11
+#undef UNWINDING_REGS_HAVE_RA_T3
 
 // END sampling/unwinding code
 ////////////////////////////////////////////////////////////////////////
@@ -3361,8 +3406,8 @@ static PreRecordedMetaInformation PreRecordMetaInformation(
 #if defined(GP_OS_windows)
       // On Windows, the http "oscpu" is capped at Windows 10, so we need to get
       // the real OS version directly.
-      OSVERSIONINFO ovi = {sizeof(OSVERSIONINFO)};
-    if (GetVersionEx(&ovi)) {
+      OSVERSIONINFOW ovi = {sizeof(OSVERSIONINFOW)};
+    if (GetVersionExW(&ovi)) {
       info.mHttpOscpu.AppendLiteral("Windows ");
       // The major version returned for Windows 11 is 10, but we can
       // identify it from the build number.
@@ -3668,42 +3713,34 @@ static JS::ProfilingCategoryPair InferJavaCategory(nsACString& aName) {
 }
 
 // Marker type for Java markers without any details.
-struct JavaMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("Java");
-  }
-  static void StreamJSONMarkerData(
-      baseprofiler::SpliceableJSONWriter& aWriter) {}
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::TimelineOverview, MS::Location::MarkerChart,
-              MS::Location::MarkerTable};
-    schema.SetAllLabels("{marker.name}");
-    return schema;
-  }
+struct JavaMarker : public BaseMarkerType<JavaMarker> {
+  static constexpr const char* Name = "Java";
+  // The Java marker's own name is the only information these markers carry, so
+  // ETW must keep it.
+  static constexpr bool ETWStoreName = true;
+
+  using MS = MarkerSchema;
+  static constexpr MS::Location Locations[] = {MS::Location::TimelineOverview,
+                                               MS::Location::MarkerChart,
+                                               MS::Location::MarkerTable};
+  static constexpr const char* AllLabels = "{marker.name}";
 };
 
 // Marker type for Java markers with a detail field.
-struct JavaMarkerWithDetails {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("JavaWithDetails");
-  }
-  static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
-                                   const ProfilerString8View& aText) {
-    // This (currently) needs to be called "name" to be searchable on the
-    // front-end.
-    aWriter.StringProperty("name", aText);
-  }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::TimelineOverview, MS::Location::MarkerChart,
-              MS::Location::MarkerTable};
-    schema.SetTooltipLabel("{marker.name}");
-    schema.SetChartLabel("{marker.data.name}");
-    schema.SetTableLabel("{marker.data.name}");
-    schema.AddKeyLabelFormat("name", "Details", MS::Format::String);
-    return schema;
-  }
+struct JavaMarkerWithDetails : public BaseMarkerType<JavaMarkerWithDetails> {
+  static constexpr const char* Name = "JavaWithDetails";
+  // Call sites pass the Java marker's own name, so ETW must keep that name.
+  static constexpr bool ETWStoreName = true;
+
+  using MS = MarkerSchema;
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"details", MS::InputType::CString, "Details", MS::Format::String}};
+  static constexpr MS::Location Locations[] = {MS::Location::TimelineOverview,
+                                               MS::Location::MarkerChart,
+                                               MS::Location::MarkerTable};
+  static constexpr const char* TooltipLabel = "{marker.name}";
+  static constexpr const char* ChartLabel = "{marker.data.details}";
+  static constexpr const char* TableLabel = "{marker.data.details}";
 };
 
 static void CollectJavaThreadProfileData(
@@ -4614,22 +4651,18 @@ class SamplerThread {
 };
 
 namespace geckoprofiler::markers {
-struct CPUSpeedMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("CPUSpeed");
-  }
-  static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
-                                   uint32_t aCPUSpeedMHz) {
-    aWriter.DoubleProperty("speed", double(aCPUSpeedMHz) / 1000);
-  }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.SetTableLabel("{marker.name} Speed = {marker.data.speed}GHz");
-    schema.AddKeyLabelFormat("speed", "CPU Speed (GHz)", MS::Format::String);
-    schema.AddChartColor("speed", MS::GraphType::Bar, MS::GraphColor::Ink);
-    return schema;
-  }
+struct CPUSpeedMarker : public BaseMarkerType<CPUSpeedMarker> {
+  static constexpr const char* Name = "CPUSpeed";
+
+  using MS = MarkerSchema;
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"speed", MS::InputType::Double, "CPU Speed (GHz)", MS::Format::String}};
+  static constexpr MS::GraphField GraphFields[] = {
+      {"speed", MS::GraphType::Bar, Some(MS::GraphColor::Ink)}};
+  static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
+                                               MS::Location::MarkerTable};
+  static constexpr const char* TableLabel =
+      "{marker.name} Speed = {marker.data.speed}GHz";
 };
 }  // namespace geckoprofiler::markers
 
@@ -4781,7 +4814,8 @@ void SamplerThread::Run() {
       PROFILER_MARKER(name, OTHER,
                       MarkerOptions(MarkerThreadId::MainThread(),
                                     MarkerTiming::IntervalStart(now)),
-                      CPUSpeedMarker, CPUSpeeds[i]);
+                      CPUSpeedMarker,
+                      double(CPUSpeeds[i]) / 1000 /* MHz to GHz */);
     }
   }
 #endif
@@ -4874,7 +4908,8 @@ void SamplerThread::Run() {
             PROFILER_MARKER(name, OTHER,
                             MarkerOptions(MarkerThreadId::MainThread(),
                                           MarkerTiming::IntervalStart(now)),
-                            CPUSpeedMarker, newSpeed[i]);
+                            CPUSpeedMarker,
+                            double(newSpeed[i]) / 1000 /* MHz to GHz */);
 
             CPUSpeeds[i] = newSpeed[i];
           }
@@ -4980,7 +5015,9 @@ void SamplerThread::Run() {
                  runningTimesDiff.GetThreadCPUDelta() == Some(uint64_t(0)))) {
               const bool dup_ok = ActivePS::Buffer(lock).DuplicateLastSample(
                   threadId, threadSampleDeltaMs,
-                  profiledThreadData->LastSample(), runningTimesDiff);
+                  profiledThreadData->LastSample(),
+                  profiledThreadData->LastSampleHasJitReturnAddrs(),
+                  runningTimesDiff);
               if (dup_ok) {
                 continue;
               }
@@ -4997,6 +5034,7 @@ void SamplerThread::Run() {
             // (DoPeriodicSample only knows about the temporary local buffer.)
             const uint64_t samplePos = buffer.AddThreadIdEntry(threadId);
             profiledThreadData->LastSample() = Some(samplePos);
+            profiledThreadData->LastSampleHasJitReturnAddrs() = false;
 
             // Also add the time, so it's always there after the thread ID, as
             // expected by the parser. (Other stack data is optional.)
@@ -5021,9 +5059,10 @@ void SamplerThread::Run() {
               mSampler.SuspendAndSampleAndResumeThread(
                   lock, lockedThreadData.DataCRef(), now,
                   [&](const Registers& aRegs, const TimeStamp& aNow) {
-                    DoPeriodicSample(lock, lockedThreadData.DataCRef(), aRegs,
-                                     samplePos, bufferRangeStart,
-                                     localProfileBuffer);
+                    profiledThreadData->LastSampleHasJitReturnAddrs() =
+                        DoPeriodicSample(lock, lockedThreadData.DataCRef(),
+                                         aRegs, samplePos, bufferRangeStart,
+                                         localProfileBuffer);
 
                     // For "eventDelay", we want the input delay - but if
                     // there are no events in the input queue (or even if there
@@ -5407,61 +5446,88 @@ void SamplerThread::Run() {
 
 namespace geckoprofiler::markers {
 
-struct UnregisteredThreadLifetimeMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("UnregisteredThreadLifetime");
+struct UnregisteredThreadLifetimeMarker
+    : public BaseMarkerType<UnregisteredThreadLifetimeMarker> {
+  static constexpr const char* Name = "UnregisteredThreadLifetime";
+  static constexpr const char* Description =
+      "Start and end are approximate, based on first and last appearances.";
+
+  using MS = MarkerSchema;
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"threadId", MS::InputType::Int64, "Thread Id", MS::Format::Integer},
+      {"threadName", MS::InputType::CString, "Thread Name", MS::Format::String},
+      {"endEvent", MS::InputType::CString, "End Event", MS::Format::String},
+  };
+  static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
+                                               MS::Location::MarkerTable};
+  static constexpr const char* ChartLabel =
+      "{marker.data.threadName} (tid {marker.data.threadId})";
+  static constexpr const char* TableLabel = "{marker.name} lifetime";
+
+  static ProfilerString8View ThreadName(const ProfilerString8View& aName) {
+    return aName.Length() != 0 ? ProfilerString8View(aName.StringView())
+                               : ProfilerString8View("~Unnamed~");
   }
+
   static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
                                    base::ProcessId aThreadId,
                                    const ProfilerString8View& aName,
                                    const ProfilerString8View& aEndEvent) {
-    aWriter.IntProperty("Thread Id", aThreadId);
-    aWriter.StringProperty("Thread Name", aName.Length() != 0
-                                              ? aName.AsSpan()
-                                              : MakeStringSpan("~Unnamed~"));
+    StreamJSONMarkerDataImpl(aWriter, static_cast<int64_t>(aThreadId),
+                             ThreadName(aName));
     if (aEndEvent.Length() != 0) {
-      aWriter.StringProperty("End Event", aEndEvent);
+      aWriter.StringProperty("endEvent", aEndEvent);
     }
   }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.AddKeyFormat("Thread Id", MS::Format::Integer);
-    schema.AddKeyFormat("Thread Name", MS::Format::String);
-    schema.AddKeyFormat("End Event", MS::Format::String);
-    schema.AddStaticLabelValue(
-        "Note",
-        "Start and end are approximate, based on first and last appearances.");
-    schema.SetChartLabel(
-        "{marker.data.Thread Name} (tid {marker.data.Thread Id})");
-    schema.SetTableLabel("{marker.name} lifetime");
-    return schema;
+
+  static void TranslateMarkerInputToSchema(
+      void* aContext, base::ProcessId aThreadId,
+      const ProfilerString8View& aName, const ProfilerString8View& aEndEvent) {
+    ETW::OutputMarkerSchema(aContext, UnregisteredThreadLifetimeMarker{},
+                            static_cast<int64_t>(aThreadId), ThreadName(aName),
+                            aEndEvent);
   }
 };
 
-struct UnregisteredThreadCPUMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("UnregisteredThreadCPU");
+struct UnregisteredThreadCPUMarker
+    : public BaseMarkerType<UnregisteredThreadCPUMarker> {
+  static constexpr const char* Name = "UnregisteredThreadCPU";
+
+  using MS = MarkerSchema;
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"threadId", MS::InputType::Int64, "Thread Id", MS::Format::Integer},
+      {"cpuTime", MS::InputType::Int64, "CPU Time", MS::Format::Nanoseconds},
+      {"cpuUtilization", MS::InputType::Double, "CPU Utilization",
+       MS::Format::Percentage},
+  };
+  static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
+                                               MS::Location::MarkerTable};
+  static constexpr const char* ChartLabel = "{marker.data.cpuUtilization}";
+  static constexpr const char* TableLabel =
+      "Activity: {marker.data.cpuUtilization}";
+
+  static double CPUUtilization(int64_t aCPUDiffNs, const TimeStamp& aStart,
+                               const TimeStamp& aEnd) {
+    return double(aCPUDiffNs) / ((aEnd - aStart).ToMicroseconds() * 1000.0);
   }
+
   static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
                                    base::ProcessId aThreadId,
                                    int64_t aCPUDiffNs, const TimeStamp& aStart,
                                    const TimeStamp& aEnd) {
-    aWriter.IntProperty("Thread Id", aThreadId);
-    aWriter.IntProperty("CPU Time", aCPUDiffNs);
-    aWriter.DoubleProperty(
-        "CPU Utilization",
-        double(aCPUDiffNs) / ((aEnd - aStart).ToMicroseconds() * 1000.0));
+    StreamJSONMarkerDataImpl(aWriter, static_cast<int64_t>(aThreadId),
+                             aCPUDiffNs,
+                             CPUUtilization(aCPUDiffNs, aStart, aEnd));
   }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.AddKeyFormat("Thread Id", MS::Format::Integer);
-    schema.AddKeyFormat("CPU Time", MS::Format::Nanoseconds);
-    schema.AddKeyFormat("CPU Utilization", MS::Format::Percentage);
-    schema.SetChartLabel("{marker.data.CPU Utilization}");
-    schema.SetTableLabel("Activity: {marker.data.CPU Utilization}");
-    return schema;
+
+  static void TranslateMarkerInputToSchema(void* aContext,
+                                           base::ProcessId aThreadId,
+                                           int64_t aCPUDiffNs,
+                                           const TimeStamp& aStart,
+                                           const TimeStamp& aEnd) {
+    ETW::OutputMarkerSchema(aContext, UnregisteredThreadCPUMarker{},
+                            static_cast<int64_t>(aThreadId), aCPUDiffNs,
+                            CPUUtilization(aCPUDiffNs, aStart, aEnd));
   }
 };
 
@@ -5994,10 +6060,8 @@ void profiler_start_from_signal() {
   // write any data that we gather anyway.
   if (XRE_IsParentProcess()) {
     // Start the profiler here directly, as we're on a background thread.
-    // set of preferences, configuration of them is TODO, see Bug 1866007
-    // Enabling the JS feature leaks an 8-byte object during testing, but is too
-    // useful to disable. See Bug 1904897, Bug 1699681, and browser.toml for
-    // more details.
+    // We use a default set of preferences, configuring them is TODO, see
+    // Bug 1913297.
     uint32_t features = ProfilerFeature::JS | ProfilerFeature::StackWalk;
     // as we often don't know what threads we'll care about, tell the
     // profiler to profile all threads.
@@ -6120,17 +6184,23 @@ void profiler_init_signal_handlers() {
 #endif
 
 static void PollJSSamplingForCurrentThread() {
-  // Don't call into the JS engine with the global profiler mutex held as this
-  // can deadlock.
+  // Don't call into the JS engine with a profiler lock held as this can
+  // deadlock: the js::Enable* calls can block waiting on the JS helper threads,
+  // which in turn need the profiler locks. Besides the global profiler mutex
+  // asserted below, that includes the thread's own data lock -- so take that
+  // lock only to flip the sampling state (TakeJSSamplingChange), then apply the
+  // JS-engine change (ApplyJSSamplingChange) with no lock held.
   MOZ_ASSERT(!PSAutoLock::IsLockedOnCurrentThread());
 
+  ThreadRegistration::LockedRWOnThread::JSSamplingChange change;
   ThreadRegistration::WithOnThreadRef(
-      [](ThreadRegistration::OnThreadRef aOnThreadRef) {
+      [&change](ThreadRegistration::OnThreadRef aOnThreadRef) {
         aOnThreadRef.WithLockedRWOnThread(
-            [](ThreadRegistration::LockedRWOnThread& aThreadData) {
-              aThreadData.PollJSSampling();
+            [&change](ThreadRegistration::LockedRWOnThread& aThreadData) {
+              change = aThreadData.TakeJSSamplingChange();
             });
       });
+  ThreadRegistration::LockedRWOnThread::ApplyJSSamplingChange(change);
 }
 
 void profiler_init(void* aStackTop) {
@@ -7024,6 +7094,10 @@ static void locked_profiler_start(PSLockRef aLock, PowerOfTwo32 aCapacity,
   }
 #endif
 
+  // Reset Chrome-originated counters so each session's samples measure only the
+  // adds made during that session, not values carried over from earlier ones.
+  CorePS::ClearChromeCounters(aLock);
+
 #if defined(MOZ_MEMORY) && defined(MOZ_PROFILER_MEMORY)
   if (ActivePS::FeatureMemory(aLock)) {
     auto counter = mozilla::profiler::create_memory_counter();
@@ -7564,6 +7638,25 @@ void profiler_remove_sampled_counter(BaseProfilerCount* aCounter) {
   locked_profiler_remove_sampled_counter(lock, aCounter);
 }
 
+void profiler_add_sampled_chrome_counter(ChromeProfilerCounter* aCounter) {
+  PSAutoLock lock;
+  CorePS::AddChromeCounter(lock, do_AddRef(aCounter));
+  locked_profiler_add_sampled_counter(lock, aCounter);
+}
+
+void profiler_remove_sampled_chrome_counter(ChromeProfilerCounter* aCounter) {
+  PSAutoLock lock;
+  locked_profiler_remove_sampled_counter(lock, aCounter);
+  RefPtr<ChromeProfilerCounter> owned =
+      CorePS::ReleaseChromeCounter(lock, aCounter);
+  if (owned && ActivePS::Exists(lock)) {
+    // The profile buffer may still hold raw pointers to this counter in
+    // already-recorded samples. Keep it alive until the active session (and
+    // its buffer) is destroyed, after the profile has been serialized.
+    ActivePS::AddDeadCounter(lock, owned.forget());
+  }
+}
+
 void profiler_count_bandwidth_bytes(int64_t aCount) {
   NS_ASSERTION(profiler_feature_active(ProfilerFeature::Bandwidth),
                "Should not call profiler_count_bandwidth_bytes when the "
@@ -7682,9 +7775,8 @@ void profiler_register_page(uint64_t aTabID, uint64_t aInnerWindowID,
   // When a Browsing context is first loaded, the first url loaded in it will be
   // about:blank. Because of that, this call keeps the first non-about:blank
   // registration of window and discards the previous one.
-  RefPtr<PageInformation> pageInfo = new PageInformation(
-      aTabID, aInnerWindowID, aUrl, aEmbedderInnerWindowID, aIsPrivateBrowsing);
-  CorePS::AppendRegisteredPage(lock, std::move(pageInfo));
+  CorePS::AppendRegisteredPage(lock, aTabID, aInnerWindowID, aUrl,
+                               aEmbedderInnerWindowID, aIsPrivateBrowsing);
 
   // After appending the given page to CorePS, look for the expired
   // pages and remove them if there are any.
@@ -7753,10 +7845,58 @@ Maybe<uint64_t> profiler_get_inner_window_id_from_docshell(
 
 namespace geckoprofiler::markers {
 
-struct CPUAwakeMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("Awake");
+struct CPUAwakeMarker : public BaseMarkerType<CPUAwakeMarker> {
+  static constexpr const char* Name = "Awake";
+
+  using MS = MarkerSchema;
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"cpuTime", MS::InputType::Double, "CPU Time", MS::Format::Duration},
+#if !defined(GP_PLAT_unknown) && !defined(GP_PLAT_arm64_darwin)
+      {"cpuId", MS::InputType::Int64, "CPU Id", MS::Format::Integer},
+#endif
+#ifdef GP_OS_windows
+      {"priority", MS::InputType::Int32, "Relative Thread Priority",
+       MS::Format::Integer},
+      {"absPriority", MS::InputType::Int32, "Base Thread Priority",
+       MS::Format::Integer},
+      {"curPriority", MS::InputType::Int32, "Current Thread Priority",
+       MS::Format::Integer},
+#endif
+#ifdef GP_OS_darwin
+      {"QoS", MS::InputType::CString, "Quality of Service", MS::Format::String},
+#endif
+  };
+  static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
+                                               MS::Location::MarkerTable};
+#if !defined(GP_PLAT_unknown) && !defined(GP_PLAT_arm64_darwin)
+  static constexpr const char* TableLabel =
+      "Awake - CPU Id = {marker.data.cpuId}";
+#endif
+
+  static double ToMilliseconds(int64_t aCPUTimeNs) {
+    constexpr double NS_PER_MS = 1'000'000;
+    return double(aCPUTimeNs) / NS_PER_MS;
   }
+
+#ifdef GP_OS_darwin
+  static ProfilerString8View QoSString(uint32_t aQoS) {
+    switch (aQoS) {
+      case QOS_CLASS_USER_INTERACTIVE:
+        return "User Interactive";
+      case QOS_CLASS_USER_INITIATED:
+        return "User Initiated";
+      case QOS_CLASS_DEFAULT:
+        return "Default";
+      case QOS_CLASS_UTILITY:
+        return "Utility";
+      case QOS_CLASS_BACKGROUND:
+        return "Background";
+      default:
+        return "Unspecified";
+    }
+  }
+#endif
+
   static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
                                    int64_t aCPUTimeNs
 #if !defined(GP_PLAT_unknown) && !defined(GP_PLAT_arm64_darwin)
@@ -7775,15 +7915,14 @@ struct CPUAwakeMarker {
 #endif
   ) {
     if (aCPUTimeNs) {
-      constexpr double NS_PER_MS = 1'000'000;
-      aWriter.DoubleProperty("CPU Time", double(aCPUTimeNs) / NS_PER_MS);
+      aWriter.DoubleProperty("cpuTime", ToMilliseconds(aCPUTimeNs));
       // CPU Time is only provided for the end marker, the other fields are for
       // the start marker.
       return;
     }
 
 #if !defined(GP_PLAT_unknown) && !defined(GP_PLAT_arm64_darwin)
-    aWriter.IntProperty("CPU Id", aCPUId);
+    aWriter.IntProperty("cpuId", aCPUId);
 #endif
 #ifdef GP_OS_windows
     if (aAbsolutePriority) {
@@ -7795,52 +7934,41 @@ struct CPUAwakeMarker {
     aWriter.IntProperty("priority", aRelativePriority);
 #endif
 #ifdef GP_OS_darwin
-    const char* QoS = "";
-    switch (aQoS) {
-      case QOS_CLASS_USER_INTERACTIVE:
-        QoS = "User Interactive";
-        break;
-      case QOS_CLASS_USER_INITIATED:
-        QoS = "User Initiated";
-        break;
-      case QOS_CLASS_DEFAULT:
-        QoS = "Default";
-        break;
-      case QOS_CLASS_UTILITY:
-        QoS = "Utility";
-        break;
-      case QOS_CLASS_BACKGROUND:
-        QoS = "Background";
-        break;
-      default:
-        QoS = "Unspecified";
-    }
-
-    aWriter.StringProperty("QoS",
-                           ProfilerString8View::WrapNullTerminatedString(QoS));
+    aWriter.StringProperty("QoS", QoSString(aQoS));
 #endif
   }
 
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.AddKeyFormat("CPU Time", MS::Format::Duration);
+  static void TranslateMarkerInputToSchema(void* aContext, int64_t aCPUTimeNs
 #if !defined(GP_PLAT_unknown) && !defined(GP_PLAT_arm64_darwin)
-    schema.AddKeyFormat("CPU Id", MS::Format::Integer);
-    schema.SetTableLabel("Awake - CPU Id = {marker.data.CPU Id}");
-#endif
-#ifdef GP_OS_windows
-    schema.AddKeyLabelFormat("priority", "Relative Thread Priority",
-                             MS::Format::Integer);
-    schema.AddKeyLabelFormat("absPriority", "Base Thread Priority",
-                             MS::Format::Integer);
-    schema.AddKeyLabelFormat("curPriority", "Current Thread Priority",
-                             MS::Format::Integer);
+                                           ,
+                                           int64_t aCPUId
 #endif
 #ifdef GP_OS_darwin
-    schema.AddKeyLabelFormat("QoS", "Quality of Service", MS::Format::String);
+                                           ,
+                                           uint32_t aQoS
 #endif
-    return schema;
+#ifdef GP_OS_windows
+                                           ,
+                                           int32_t aAbsolutePriority,
+                                           int32_t aRelativePriority,
+                                           int32_t aCurrentPriority
+#endif
+  ) {
+    ETW::OutputMarkerSchema(
+        aContext, CPUAwakeMarker{}, ToMilliseconds(aCPUTimeNs)
+#if !defined(GP_PLAT_unknown) && !defined(GP_PLAT_arm64_darwin)
+                                        ,
+        aCPUId
+#endif
+#ifdef GP_OS_windows
+        ,
+        aRelativePriority, aAbsolutePriority, aCurrentPriority
+#endif
+#ifdef GP_OS_darwin
+        ,
+        QoSString(aQoS)
+#endif
+    );
   }
 };
 
@@ -7903,25 +8031,21 @@ static mozilla::Atomic<uint64_t, mozilla::MemoryOrdering::Relaxed> gWakeCount(
     0);
 
 namespace geckoprofiler::markers {
-struct WakeUpCountMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("WakeUpCount");
-  }
-  static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
-                                   int32_t aCount,
-                                   const ProfilerString8View& aType) {
-    aWriter.IntProperty("Count", aCount);
-    aWriter.StringProperty("label", aType);
-  }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.AddKeyFormat("Count", MS::Format::Integer);
-    schema.AddKeyFormat("label", MS::Format::String, MS::PayloadFlags::Hidden);
-    schema.SetTooltipLabel("{marker.name} - {marker.data.label}");
-    schema.SetTableLabel("{marker.data.label}: {marker.data.count}");
-    return schema;
-  }
+struct WakeUpCountMarker : public BaseMarkerType<WakeUpCountMarker> {
+  static constexpr const char* Name = "WakeUpCount";
+
+  using MS = MarkerSchema;
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"count", MS::InputType::Int32, "Count", MS::Format::Integer},
+      {"label", MS::InputType::CString, nullptr, MS::Format::String,
+       MS::PayloadFlags::Hidden},
+  };
+  static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
+                                               MS::Location::MarkerTable};
+  static constexpr const char* TooltipLabel =
+      "{marker.name} - {marker.data.label}";
+  static constexpr const char* TableLabel =
+      "{marker.data.label}: {marker.data.count}";
 };
 }  // namespace geckoprofiler::markers
 
@@ -8004,7 +8128,7 @@ void profiler_mark_thread_awake() {
   LONG priority;
   static const auto get_thread_information_fn =
       reinterpret_cast<decltype(&::GetThreadInformation)>(::GetProcAddress(
-          ::GetModuleHandle(L"Kernel32.dll"), "GetThreadInformation"));
+          ::GetModuleHandleW(L"Kernel32.dll"), "GetThreadInformation"));
 
   if (!get_thread_information_fn ||
       !get_thread_information_fn(GetCurrentThread(), ThreadAbsoluteCpuPriority,
@@ -8014,7 +8138,7 @@ void profiler_mark_thread_awake() {
 
   static const auto nt_query_information_thread_fn =
       reinterpret_cast<decltype(&::NtQueryInformationThread)>(::GetProcAddress(
-          ::GetModuleHandle(L"ntdll.dll"), "NtQueryInformationThread"));
+          ::GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread"));
 
   LONG currentPriority = 0;
   if (nt_query_information_thread_fn) {
@@ -8152,16 +8276,17 @@ UniquePtr<ProfileChunkedBuffer> profiler_capture_backtrace() {
     return nullptr;
   }
 
-  auto buffer = MakeUnique<ProfileChunkedBuffer>(
+  ProfileChunkedBuffer captureBuffer(
       ProfileChunkedBuffer::ThreadSafety::WithoutMutex,
       MakeUnique<ProfileBufferChunkManagerSingle>(
           ProfileBufferChunkManager::scExpectedMaximumStackSize));
 
-  if (!profiler_capture_backtrace_into(*buffer, StackCaptureOptions::Full)) {
+  if (!profiler_capture_backtrace_into(captureBuffer,
+                                       StackCaptureOptions::Full)) {
     return nullptr;
   }
 
-  return buffer;
+  return mozilla::profiler::detail::CopyToRightSizedBuffer(captureBuffer);
 }
 
 UniqueProfilerBacktrace profiler_get_backtrace() {

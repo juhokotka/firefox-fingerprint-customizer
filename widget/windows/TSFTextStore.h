@@ -5,23 +5,21 @@
 #ifndef TSFTextStore_h
 #define TSFTextStore_h
 
-#include "nsIWidget.h"
-#include "nsWindow.h"
+#include <msctf.h>
+#include <textstor.h>
 
 #include "TSFTextStoreBase.h"
 #include "TSFUtils.h"
 #include "WinUtils.h"
 #include "WritingModes.h"
-
 #include "mozilla/Attributes.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TextRange.h"
 #include "mozilla/widget/IMEData.h"
-
-#include <msctf.h>
-#include <textstor.h>
+#include "nsIWidget.h"
+#include "nsWindow.h"
 
 struct ITfThreadMgr;
 struct ITfDocumentMgr;
@@ -600,7 +598,7 @@ class TSFTextStore final : public TSFTextStoreBase,
     // For eKeyboardEvent
     MSG mKeyMsg;
     // For eSetSelection
-    bool mSelectionReversed;
+    RangeDirection mSelectionRangeDirection;
     // For eCompositionUpdate
     bool mIncomplete;
     // For eCompositionStart
@@ -795,7 +793,7 @@ class TSFTextStore final : public TSFTextStoreBase,
     }
 
    private:
-    AutoPendingActionAndContentFlusher() {}
+    AutoPendingActionAndContentFlusher() = default;
 
     RefPtr<TSFTextStore> mTextStore;
   };
@@ -951,7 +949,7 @@ class TSFTextStore final : public TSFTextStoreBase,
    public:
     static const DWORD kInvalidCookie = static_cast<DWORD>(-1);
 
-    MouseTracker();
+    MouseTracker() = default;
 
     HRESULT Init(TSFTextStore* aTextStore);
     HRESULT AdviseSink(TSFTextStore* aTextStore, ITfRangeACP* aTextRange,
@@ -966,7 +964,7 @@ class TSFTextStore final : public TSFTextStoreBase,
    private:
     RefPtr<ITfMouseSink> mSink;
     Maybe<StartAndEndOffsets<LONG>> mRange;
-    DWORD mCookie;
+    DWORD mCookie{kInvalidCookie};
   };
   // mMouseTrackers is an array to store each information of installed
   // ITfMouseSink instance.
@@ -979,6 +977,9 @@ class TSFTextStore final : public TSFTextStoreBase,
   // calculated yet, these methods return TS_E_NOLAYOUT.  At that time,
   // mHasReturnedNoLayoutError is set to true.
   bool mHasReturnedNoLayoutError = false;
+  // Set to true if a layout change occurred during a document lock. Then, when
+  // we notifying TSF of the layout change, this is set to false.
+  bool mNeedsToNotifyTSFOfLayoutChange = false;
   // When we need to create native caret with the latest selection, but we're
   // initializing selection, this is set to true.
   bool mPendingToCreateNativeCaret = false;

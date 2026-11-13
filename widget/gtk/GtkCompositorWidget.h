@@ -6,11 +6,11 @@
 #define widget_gtk_GtkCompositorWidget_h
 
 #include "GLDefs.h"
-#include "mozilla/DataMutex.h"
-#include "mozilla/widget/CompositorWidget.h"
-#include "WindowSurfaceProvider.h"
-#include "mozilla/UniquePtr.h"
 #include "WaylandSurfaceLock.h"
+#include "WindowSurfaceProvider.h"
+#include "mozilla/DataMutex.h"
+#include "mozilla/UniquePtr.h"
+#include "mozilla/widget/CompositorWidget.h"
 
 class nsIWidget;
 class nsWindow;
@@ -25,8 +25,6 @@ namespace widget {
 
 class PlatformCompositorWidgetDelegate : public CompositorWidgetDelegate {
  public:
-  virtual void NotifyClientSizeChanged(
-      const LayoutDeviceIntSize& aClientSize) = 0;
   virtual void NotifyFullscreenChanged(bool aIsFullscreen) = 0;
   virtual GtkCompositorWidget* AsGtkCompositorWidget() { return nullptr; };
 

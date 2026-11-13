@@ -4,6 +4,9 @@
 
 #include "gfxSVGGlyphs.h"
 
+#include "gfxContext.h"
+#include "gfxFont.h"
+#include "harfbuzz/hb.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/NullPrincipal.h"
@@ -14,22 +17,19 @@
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/SVGDocument.h"
+#include "nsContentUtils.h"
 #include "nsError.h"
-#include "nsString.h"
 #include "nsICategoryManager.h"
 #include "nsIDocumentLoaderFactory.h"
 #include "nsIDocumentViewer.h"
-#include "nsIStreamListener.h"
-#include "nsServiceManagerUtils.h"
-#include "nsNetUtil.h"
 #include "nsIInputStream.h"
-#include "nsStringStream.h"
-#include "nsStreamUtils.h"
 #include "nsIPrincipal.h"
-#include "nsContentUtils.h"
-#include "gfxFont.h"
-#include "gfxContext.h"
-#include "harfbuzz/hb.h"
+#include "nsIStreamListener.h"
+#include "nsNetUtil.h"
+#include "nsServiceManagerUtils.h"
+#include "nsStreamUtils.h"
+#include "nsString.h"
+#include "nsStringStream.h"
 #include "zlib.h"
 
 #define SVG_CONTENT_TYPE "image/svg+xml"_ns
@@ -118,7 +118,9 @@ gfxSVGGlyphsDocument* gfxSVGGlyphs::FindOrCreateGlyphsDocument(
     auto doc = MakeUnique<gfxSVGGlyphsDocument>(
         data + mHeader->mDocIndexOffset + entry->mDocOffset, entry->mDocLength,
         this);
-    return mGlyphDocs.InsertOrUpdate(entry->mDocOffset, std::move(doc)).get();
+    // Similarly to the Lookup() call above, if we've already created a separate
+    // document, keep it rather than overriding it.
+    return mGlyphDocs.LookupOrInsert(entry->mDocOffset, std::move(doc)).get();
   }
 
   return nullptr;
@@ -321,8 +323,8 @@ gfxSVGGlyphsDocument::gfxSVGGlyphsDocument(const uint8_t* aBuffer,
 }
 
 gfxSVGGlyphsDocument::~gfxSVGGlyphsDocument() {
-  if (mDocument) {
-    mDocument->OnPageHide(false, nullptr);
+  if (const RefPtr<Document> doc = std::move(mDocument)) {
+    doc->OnPageHide(false, nullptr);
   }
   if (mPresShell) {
     mPresShell->RemovePostRefreshObserver(this);

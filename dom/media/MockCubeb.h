@@ -207,6 +207,11 @@ class MockCubebStream {
   Maybe<cubeb_state> State() const MOZ_EXCLUDES(mMutex);
 
   void SetDriftFactor(float aDriftFactor) MOZ_EXCLUDES(mMutex);
+  // Simulate a backend whose play cursor lags the write cursor by the output
+  // latency, as real cubeb backends do, whether they compute the latency
+  // themselves or read it from an OS API. Position() then reports the play
+  // cursor, clamped to 0 while fewer than aFrames have been written.
+  void SetOutputLatencyFrames(uint32_t aFrames) MOZ_EXCLUDES(mMutex);
   void ForceError() MOZ_EXCLUDES(mMutex);
   void ForceDeviceChanged() MOZ_EXCLUDES(mMutex);
   void Thaw() MOZ_EXCLUDES(mMutex);
@@ -308,6 +313,9 @@ class MockCubebStream {
   bool mForceDeviceChanged MOZ_GUARDED_BY(mMutex) = false;
   bool mDestroyed MOZ_GUARDED_BY(mMutex) = false;
   uint64_t mPosition MOZ_GUARDED_BY(mMutex) = 0;
+  // Output latency in frames by which the reported play cursor lags mPosition,
+  // the write cursor. 0 means the play cursor equals the write cursor.
+  uint32_t mOutputLatencyFrames MOZ_GUARDED_BY(mMutex) = 0;
   AudioGenerator<AudioDataValue> mAudioGenerator MOZ_GUARDED_BY(mMutex);
   AudioVerifier<AudioDataValue> mAudioVerifier MOZ_GUARDED_BY(mMutex);
 
@@ -485,6 +493,13 @@ class MockCubeb {
   void StartStream(MockCubebStream* aStream);
   void StopStream(MockCubebStream* aStream);
 
+  // Output latency in frames applied to every stream this context creates, so
+  // their reported play cursor lags the write cursor like a real device. Set it
+  // before the streams under test are created.
+  void SetDefaultOutputLatencyFrames(uint32_t aFrames) {
+    mDefaultOutputLatencyFrames = aFrames;
+  }
+
   // Simulates the audio thread. The thread is created at Start and destroyed
   // at Stop. At next StreamStart a new thread is created.
   static void ThreadFunction_s(MockCubeb* aContext) {
@@ -513,6 +528,8 @@ class MockCubeb {
   int mInputProcessingParamsApplyRv = CUBEB_OK;
   const RunningMode mRunningMode;
   Atomic<bool> mStreamInitErrorState;
+  // Output latency applied to each stream created by this context.
+  Atomic<uint32_t> mDefaultOutputLatencyFrames{0};
   // Whether new MockCubebStreams should be frozen on start.
   Atomic<bool> mStreamStartFreezeEnabled{false};
   // Whether the audio thread is forced, i.e., whether it remains active even

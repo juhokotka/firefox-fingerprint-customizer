@@ -3,11 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // HttpLog.h should generally be included first
-#include "HttpLog.h"
-
 #include "ObliviousHttpChannel.h"
 
 #include "BinaryHttpRequest.h"
+#include "HttpLog.h"
 #include "nsIHttpHeaderVisitor.h"
 #include "nsStringStream.h"
 

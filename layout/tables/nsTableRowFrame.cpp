@@ -264,14 +264,13 @@ void nsTableRowFrame::RemoveFrame(DestroyContext& aContext, ChildListID aListID,
   // remove the cell from the cell map
   nsTableFrame* tableFrame = GetTableFrame();
   tableFrame->RemoveCell(cellFrame, GetRowIndex());
-
-  // Remove the frame and destroy it
-  mFrames.DestroyFrame(aContext, aOldFrame);
+  tableFrame->SetGeometryDirty();
 
   PresShell()->FrameNeedsReflow(this, IntrinsicDirty::FrameAndAncestors,
                                 NS_FRAME_HAS_DIRTY_CHILDREN);
 
-  tableFrame->SetGeometryDirty();
+  // Remove the frame and destroy it
+  nsContainerFrame::RemoveFrame(aContext, aListID, aOldFrame);
 }
 
 /* virtual */
@@ -1235,6 +1234,21 @@ nsTableRowFrame* nsTableRowFrame::GetNextRow() const {
       !nextSibling || static_cast<nsTableRowFrame*>(do_QueryFrame(nextSibling)),
       "How do we have a non-row sibling?");
   return static_cast<nsTableRowFrame*>(nextSibling);
+}
+
+nsTableRowFrame* nsTableRowFrame::GetNextRowAcrossFragments() const {
+  if (nsTableRowFrame* next = GetNextRow()) {
+    return next;
+  }
+  for (auto* nif = GetParent()->GetNextInFlow(); nif;
+       nif = nif->GetNextInFlow()) {
+    if (auto* sibling = nif->PrincipalChildList().FirstChild()) {
+      MOZ_ASSERT(static_cast<nsTableRowFrame*>(do_QueryFrame(sibling)),
+                 "How do we have a non-row sibling?");
+      return static_cast<nsTableRowFrame*>(sibling);
+    }
+  }
+  return nullptr;
 }
 
 // This property is only set on the first-in-flow of nsTableRowFrame.

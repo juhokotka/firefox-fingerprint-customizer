@@ -30,6 +30,7 @@ export class MigrationWizard extends HTMLElement {
   #expandedDetails = false;
   #extensionsSuccessLink = null;
   #supportTextLinks = null;
+  #safariPasswordImportInstructions = null;
 
   static get markup() {
     return `
@@ -49,14 +50,14 @@ export class MigrationWizard extends HTMLElement {
             </moz-button-group>
           </div>
 
-          <div name="page-selection">
+          <div name="page-selection" part="page-selection">
             <h1 class="migration-wizard-header" data-l10n-id="migration-wizard-selection-header" part="header"></h1>
             <p class="migration-wizard-subheader" part="subheader" hidden=""></p>
-            <button id="browser-profile-selector" aria-haspopup="menu" aria-labelledby="migrator-name profile-name">
+            <button id="browser-profile-selector" part="profile-selector" aria-haspopup="menu" aria-labelledby="migrator-name profile-name">
               <span class="migrator-icon" role="presentation"></span>
               <div class="migrator-description" role="presentation">
                 <div id="migrator-name">&nbsp;</div>
-                <div id="profile-name" class="text-deemphasized"></div>
+                <div id="profile-name" class="text-deemphasized" part="profile-name"></div>
               </div>
               <span class="dropdown-icon" role="presentation"></span>
             </button>
@@ -72,20 +73,20 @@ export class MigrationWizard extends HTMLElement {
               </p>
               <ol>
                 <li data-l10n-id="migration-no-permissions-instructions-step1"></li>
-                <li class="migration-no-permissions-instructions-step2" data-l10n-id="migration-no-permissions-instructions-step2" data-l10n-args='{"permissionsPath": "" }'>
+                <li class="migration-no-permissions-instructions-step2" data-l10n-id="migration-no-permissions-instructions-step2-2" data-l10n-args='{"permissionsPath": "" }'>
                   <code></code>
                 </li>
               </ol>
             </div>
 
-            <div data-l10n-id="migration-wizard-selection-list" class="resource-selection-preamble text-deemphasized hide-on-error"></div>
-            <details class="resource-selection-details hide-on-error">
+            <div id="migration-wizard-selection-list" data-l10n-id="migration-wizard-selection-list" class="resource-selection-preamble text-deemphasized hide-on-error"></div>
+            <details class="resource-selection-details hide-on-error" part="resource-selection-details">
               <summary id="resource-selection-summary">
                 <div class="selected-data-header" data-l10n-id="migration-all-available-data-label"></div>
                 <div class="selected-data text-deemphasized">&nbsp;</div>
                 <span class="expand-collapse-icon" role="img"></span>
               </summary>
-              <fieldset id="resource-type-list">
+              <fieldset id="resource-type-list" part="resource-type-list" aria-labelledby="migration-wizard-selection-list">
                 <label id="select-all">
                   <input type="checkbox" class="select-all-checkbox"/><span data-l10n-id="migration-select-all-option-label"></span>
                 </label>
@@ -118,12 +119,12 @@ export class MigrationWizard extends HTMLElement {
             <moz-button-group class="buttons" part="buttons">
               <button class="cancel-close" data-l10n-id="migration-cancel-button-label"></button>
               <button id="import-from-file" class="primary" data-l10n-id="migration-import-from-file-button-label"></button>
-              <button id="import" class="primary migration-import-button" data-l10n-id="migration-import-button-label"></button>
+              <button id="import" part="import-primary" class="primary migration-import-button" data-l10n-id="migration-import-button-label"></button>
               <button id="get-permissions" class="primary" data-l10n-id="migration-continue-button-label"></button>
             </moz-button-group>
           </div>
 
-          <div name="page-progress">
+          <div name="page-progress" part="page-progress">
             <h1 id="progress-header" data-l10n-id="migration-wizard-progress-header" part="header"></h1>
             <div class="resource-progress">
               <div data-resource-type="BOOKMARKS" class="resource-progress-group">
@@ -193,7 +194,7 @@ export class MigrationWizard extends HTMLElement {
             <moz-button-group class="buttons" part="buttons">
               <button class="cancel-close" data-l10n-id="migration-cancel-button-label" disabled></button>
               <button class="primary finish-button done-button" data-l10n-id="migration-done-button-label"></button>
-              <button class="primary finish-button continue-button" data-l10n-id="migration-continue-button-label"></button>
+              <button class="primary finish-button continue-button" part="continue-primary" data-l10n-id="migration-continue-button-label"></button>
             </moz-button-group>
           </div>
 
@@ -227,11 +228,11 @@ export class MigrationWizard extends HTMLElement {
             <moz-button-group class="buttons" part="buttons">
               <button class="cancel-close" data-l10n-id="migration-cancel-button-label" disabled></button>
               <button class="primary finish-button done-button" data-l10n-id="migration-done-button-label"></button>
-              <button class="primary finish-button continue-button" data-l10n-id="migration-continue-button-label"></button>
+              <button class="primary finish-button continue-button" part="continue-primary" data-l10n-id="migration-continue-button-label"></button>
             </moz-button-group>
           </div>
 
-          <div name="page-safari-password-permission">
+          <div name="page-safari-password-permission-pre-sequoia">
             <h1 data-l10n-id="migration-safari-password-import-header" part="header"></h1>
             <span data-l10n-id="migration-safari-password-import-steps-header"></span>
             <ol>
@@ -245,6 +246,20 @@ export class MigrationWizard extends HTMLElement {
             </ol>
             <moz-button-group class="buttons" part="buttons">
               <button class="manual-password-import-skip" data-l10n-id="migration-manual-password-import-skip-button"></button>
+              <button class="manual-password-import-select primary" data-l10n-id="migration-manual-password-import-select-button"></button>
+            </moz-button-group>
+          </div>
+
+          <div name="page-safari-password-permission">
+            <h1 data-l10n-id="migration-safari-password-import-header" part="header"></h1>
+            <ol id="migration-safari-password-import-instructions">
+              <li data-l10n-id="migration-safari-password-import-post-sequoia-step1"><a id="launch-macos-passwords-app" data-l10n-name="macos-passwords-app"></a></li>
+              <li data-l10n-id="migration-safari-password-import-post-sequoia-step2"></li>
+              <li data-l10n-id="migration-safari-password-import-post-sequoia-step3"></li>
+              <li data-l10n-id="migration-safari-password-import-post-sequoia-step4"></li>
+            </ol>
+            <moz-button-group class="buttons" part="buttons">
+              <button class="manual-password-import-skip" data-l10n-id="migration-manual-password-import-cancel-button"></button>
               <button class="manual-password-import-select primary" data-l10n-id="migration-manual-password-import-select-button"></button>
             </moz-button-group>
           </div>
@@ -384,6 +399,14 @@ export class MigrationWizard extends HTMLElement {
       link.addEventListener("click", this)
     );
 
+    // We put the click event listener on the instructions list rather than
+    // directly on the launch-macos-passwords-app node, since Fluent will
+    // replace that node after this constructor has run.
+    this.#safariPasswordImportInstructions = shadow.querySelector(
+      "#migration-safari-password-import-instructions"
+    );
+    this.#safariPasswordImportInstructions.addEventListener("click", this);
+
     this.#shadowRoot = shadow;
   }
 
@@ -472,6 +495,10 @@ export class MigrationWizard extends HTMLElement {
       this.#shadowRoot.appendChild(panel);
     } else {
       this.#shadowRoot.appendChild(this.#browserProfileSelectorList);
+      // The list opens on mousedown, so without this the mouse release on the
+      // selector would light dismiss the popover right away.
+      this.#browserProfileSelector.popoverTargetElement =
+        this.#browserProfileSelectorList;
     }
   }
 
@@ -700,7 +727,9 @@ export class MigrationWizard extends HTMLElement {
       let panelItem = this.#browserProfileSelectorList.querySelector(
         `panel-item[key="${state.migratorKey}"]`
       );
-      this.#onBrowserProfileSelectionChanged(panelItem);
+      if (panelItem) {
+        this.#onBrowserProfileSelectionChanged(panelItem);
+      }
     }
 
     let fileImportErrorMessageEl = selectionPage.querySelector(
@@ -1485,6 +1514,12 @@ export class MigrationWizard extends HTMLElement {
           },
         })
       );
+    } else if (event.target.id == "launch-macos-passwords-app") {
+      this.dispatchEvent(
+        new CustomEvent("MigrationWizard:LaunchMacOSPasswordsApp", {
+          bubbles: true,
+        })
+      );
     } else if (event.target.classList.contains("manual-password-import-skip")) {
       // If the user chose to skip importing passwords manually from a CSV, we
       // programmatically uncheck the PASSWORDS resource type and re-request
@@ -1564,6 +1599,11 @@ export class MigrationWizard extends HTMLElement {
   }
 
   handleEvent(event) {
+    if (event.target == this.#browserProfileSelector && event.type == "click") {
+      // The panel-list opens and closes itself, so keep the selector from
+      // also toggling it as its popover target.
+      event.preventDefault();
+    }
     if (
       event.target == this.#browserProfileSelector &&
       (event.type == "mousedown" ||

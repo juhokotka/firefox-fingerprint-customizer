@@ -1,31 +1,51 @@
-From: Nico Grunbaum <ngrunbaum@mozilla.com>
-Date: Tue, 16 Jun 2026 15:40:00 -0700
-Subject: Bug 2047265 - (fix-8703bc12a1) disable new testonly av1 qp parser
- library
+From: Michael Froman <mfroman@mozilla.com>
+Date: Fri, 21 Aug 2026 11:59:00 -0500
+Subject: Bug 2064200 - (fix-ce3d64be6a) support
+ AudioReceiveStreamInterface::Config.Copy()
 
-Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/8e18fa212189c66b060f0217757c99eea14c3883
-Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/d619aaf26629db4f31eb76e09e7663314c2ef5c3
+Mirrors VideoReceiveStreamInterface::Config.Copy().
+Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/af2661e1040fbe7653b8133a8a9c7ce887791c0b
 ---
- modules/video_coding/BUILD.gn | 2 ++
- 1 file changed, 2 insertions(+)
+ call/audio_receive_stream.cc |  1 +
+ call/audio_receive_stream.h  | 10 +++++++++-
+ 2 files changed, 10 insertions(+), 1 deletion(-)
 
-diff --git a/modules/video_coding/BUILD.gn b/modules/video_coding/BUILD.gn
-index 5d2b795f6b..d21ac2187c 100644
---- a/modules/video_coding/BUILD.gn
-+++ b/modules/video_coding/BUILD.gn
-@@ -391,6 +391,7 @@ rtc_library("video_coding_utility") {
- }
+diff --git a/call/audio_receive_stream.cc b/call/audio_receive_stream.cc
+index f2e80eef92..c8e818a1d0 100644
+--- a/call/audio_receive_stream.cc
++++ b/call/audio_receive_stream.cc
+@@ -16,6 +16,7 @@ AudioReceiveStreamInterface::Stats::Stats() = default;
+ AudioReceiveStreamInterface::Stats::~Stats() = default;
  
- rtc_library("av1_qp_parser") {
-+if (!build_with_mozilla) {
-   testonly = true
-   sources = [
-     "utility/av1_qp_parser.cc",
-@@ -404,6 +405,7 @@ rtc_library("av1_qp_parser") {
-   ]
-   public_configs = [ "//third_party/libgav1:libgav1_public_config" ]
- }
-+}
+ AudioReceiveStreamInterface::Config::Config() = default;
++AudioReceiveStreamInterface::Config::Config(const Config&) = default;
+ AudioReceiveStreamInterface::Config::Config(Config&&) = default;
+ AudioReceiveStreamInterface::Config&
+ AudioReceiveStreamInterface::Config::operator=(Config&&) = default;
+diff --git a/call/audio_receive_stream.h b/call/audio_receive_stream.h
+index 7d4ceaa20f..757ea3be88 100644
+--- a/call/audio_receive_stream.h
++++ b/call/audio_receive_stream.h
+@@ -121,13 +121,21 @@ class AudioReceiveStreamInterface : public MediaReceiveStreamInterface {
+     int round_trip_time_measurements = 0;
+   };
+   struct Config {
++   private:
++    // Access to the copy constructor is private to force use of the Copy()
++    // method for those exceptional cases where we do use it.
++    Config(const Config&);
++
++   public:
+     Config();
+-    Config(const Config&) = delete;
+     Config& operator=(const Config&) = delete;
+     Config(Config&&);
+     Config& operator=(Config&&);
+     ~Config();
  
- rtc_library("encoder_speed_controller_impl") {
-   visibility = [ "*" ]
++    // Mostly used by tests.  Avoid creating copies if you can.
++    Config Copy() const { return Config(*this); }
++
+     std::string ToString() const;
+ 
+     // Receive-stream specific RTP settings.
