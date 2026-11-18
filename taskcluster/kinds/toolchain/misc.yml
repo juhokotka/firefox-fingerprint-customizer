@@ -425,22 +425,6 @@ terser:
         toolchain:
             - linux64-node
 
-newtab-node-modules:
-    description: "npm install newtab node_modules"
-    treeherder:
-        symbol: TL(newtab-node)
-    run:
-        script: generic-node-modules.sh
-        arguments: ['newtab', 'browser/extensions/newtab/']
-        sparse-profile: null
-        resources:
-            - 'browser/extensions/newtab/package.json'
-            - 'browser/extensions/newtab/package-lock.json'
-        toolchain-artifact: public/build/newtab-node-modules.tar.zst
-    fetches:
-        toolchain:
-            - linux64-node
-
 node-modules:
     description: "npm install top-level node_modules"
     treeherder:

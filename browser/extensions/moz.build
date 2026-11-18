@@ -8,7 +8,6 @@ DIRS += [
     "webcompat",
     "pictureinpicture",
     "search-detection",
-    "newtab",
 ]
 
 JAR_MANIFESTS += ["jar.mn"]

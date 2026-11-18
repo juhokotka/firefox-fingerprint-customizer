@@ -33,6 +33,7 @@
 class gfxFontGroup;
 class nsGlobalWindowInner;
 class nsXULElement;
+class FontVisibilityProvider;
 
 namespace mozilla {
 class ErrorResult;
@@ -507,6 +508,9 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
    * Gets the pres shell from either the canvas element or the doc shell
    */
   PresShell* GetPresShell() final;
+  // Main-thread canvases must use their document's nsPresContext as the font
+  // visibility provider; only worker-owned canvases use the OffscreenCanvas.
+  FontVisibilityProvider* GetFontVisibilityProvider();
   nsresult Initialize() override;
   NS_IMETHOD SetDimensions(int32_t aWidth, int32_t aHeight) override;
   NS_IMETHOD InitializeWithDrawTarget(

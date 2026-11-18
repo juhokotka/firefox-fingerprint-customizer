@@ -165,7 +165,7 @@ class gfxFT2FontList final : public gfxPlatformFontList {
       mozilla::fontlist::Face* aFace,
       const mozilla::fontlist::Family* aFamily) override;
 
-  already_AddRefed<gfxFontEntry> LookupLocalFont(
+  already_AddRefed<gfxFontEntry> LookupLocalFontInternal(
       FontVisibilityProvider* aFontVisibilityProvider,
       const nsACString& aFontName, WeightRange aWeightForEntry,
       WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry) override;

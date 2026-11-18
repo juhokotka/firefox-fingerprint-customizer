@@ -8,7 +8,9 @@
 #include "GeckoProfiler.h"
 #include "SharedFontList-impl.h"
 #include "base/eintr_wrapper.h"
+#include "gfxFontMetricDatabase.h"
 #include "gfxScriptItemizer.h"
+#include "gfxTextFingerprint.h"
 #include "gfxTextRun.h"
 #include "gfxUserFontSet.h"
 #include "mozilla/AppShutdown.h"
@@ -21,6 +23,7 @@
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/StaticPrefs_mathml.h"
+#include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/TextUtils.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/BlobImpl.h"
@@ -307,6 +310,8 @@ gfxPlatformFontList::gfxPlatformFontList(bool aNeedFullnamePostscriptNames)
     : mLock("gfxPlatformFontList lock"),
       mFontFamilies(64),
       mOtherFamilyNames(16),
+      mSpoofedFamiliesLock("gfxPlatformFontList::mSpoofedFamiliesLock"),
+      mSpoofedFamilies(8),
       mSharedCmaps(8) {
   if (aNeedFullnamePostscriptNames) {
     mExtraNames = MakeUnique<ExtraNames>();
@@ -1189,6 +1194,174 @@ bool gfxPlatformFontList::IsVisibleToCSS(const fontlist::Family& aFamily,
     }
   }
   return aFamily.Visibility() <= aVisibility || IsFontFamilyWhitelistActive();
+}
+
+already_AddRefed<gfxFontEntry> gfxPlatformFontList::LookupLocalFont(
+    FontVisibilityProvider* aProvider, const nsACString& aFontName,
+    WeightRange aWeightForEntry, WidthRange aWidthForEntry,
+    SlantStyleRange aStyleForEntry) {
+  if (aFontName.IsEmpty()) {
+    return nullptr;
+  }
+  // Strict roster first: this closes the "host-only family probed via
+  // local()" direction on every platform, not just CoreText. When
+  // profileMode is off, providers report true here.
+  if (aProvider && !aProvider->IsFontInTargetRoster(aFontName)) {
+    gfxTextFingerprint::DebugLogOnce("blocked-local", aProvider->GetUserContextId(),
+                                     aFontName);
+    return nullptr;
+  }
+
+  RefPtr<gfxFontEntry> entry = LookupLocalFontInternal(
+      aProvider, aFontName, aWeightForEntry, aWidthForEntry, aStyleForEntry);
+  if (entry || !aProvider) {
+    return entry.forget();
+  }
+
+  // The name belongs to the target OS's roster but is not installed on the
+  // host. Synthesize a metric-compatible host face so the page still renders;
+  // CJK is left to the ordinary fallback machinery (see P1-4: there is no
+  // metric-compatible clone for YaHei/PingFang).
+  if (gfxFontMetricDatabase::IsCJKFamilyName(aFontName)) {
+    return nullptr;
+  }
+  uint32_t userContextId = aProvider->GetUserContextId();
+  auto targetOS = gfxFontMetricDatabase::PlatformToOS(
+      gfxTextFingerprint::GetTargetPlatform(userContextId));
+  auto hostOS = gfxFontMetricDatabase::HostOS();
+  if (targetOS == gfxFontMetricDatabase::TargetOS::None || targetOS == hostOS) {
+    return nullptr;
+  }
+  nsCString substitute =
+      gfxFontMetricDatabase::GetHostSubstitute(aFontName, hostOS);
+  if (substitute.IsEmpty() ||
+      substitute.Equals(aFontName, nsCaseInsensitiveCStringComparator)) {
+    // Preserve the previous macOS fallback; other hosts simply fail the probe.
+    if (hostOS != gfxFontMetricDatabase::TargetOS::MacOS) {
+      return nullptr;
+    }
+    substitute.AssignLiteral("Helvetica Neue");
+  }
+  // nullptr provider: the substitute is a host face outside the target roster
+  // by definition, so it must bypass the CSS visibility gate.
+  entry = LookupLocalFontInternal(nullptr, substitute, aWeightForEntry,
+                                  aWidthForEntry, aStyleForEntry);
+  if (!entry) {
+    return nullptr;
+  }
+  // Keep the original probe name for the metric hooks: gfxUserFontSet
+  // overwrites FamilyName() with the @font-face family, so Name() must not
+  // become the substitute's name either.
+  nsCString probeName(aFontName);
+  entry->SetOriginalLocalName(probeName);
+  entry->SetFamilyName(probeName);
+  return entry.forget();
+}
+
+already_AddRefed<gfxFontFamily> gfxPlatformFontList::CreateSpoofedFamily(
+    FontVisibilityProvider* aProvider, const nsACString& aFamilyName) {
+  if (!aProvider || !StaticPrefs::privacy_fingerprint_profileMode()) {
+    return nullptr;
+  }
+  uint32_t userContextId = aProvider->GetUserContextId();
+  if (aFamilyName.IsEmpty()) {
+    return nullptr;
+  }
+  // Visibility remains strict: only a name that the target-OS roster claims
+  // may be synthesized.
+  if (!aProvider->IsFontInTargetRoster(aFamilyName)) {
+    return nullptr;
+  }
+  nsCString targetPlatform =
+      gfxTextFingerprint::GetTargetPlatform(userContextId);
+  auto targetOS = gfxFontMetricDatabase::PlatformToOS(targetPlatform);
+  if (targetOS == gfxFontMetricDatabase::TargetOS::None ||
+      targetOS == gfxFontMetricDatabase::HostOS()) {
+    return nullptr;
+  }
+  // A Latin substitute for a CJK family would have no glyphs for the script;
+  // let the ordinary fallback machinery handle those.
+  if (gfxFontMetricDatabase::IsCJKFamilyName(aFamilyName)) {
+    return nullptr;
+  }
+
+  nsAutoCString key;
+  key.AppendInt(userContextId);
+  key.Append(':');
+  key.Append(aFamilyName);
+  {
+    mozilla::MutexAutoLock lock(mSpoofedFamiliesLock);
+    if (auto entry = mSpoofedFamilies.Lookup(key)) {
+      RefPtr<gfxFontFamily> cached = entry.Data();
+      return cached.forget();
+    }
+  }
+
+  // On macOS LookupLocalFont substitutes a metric-compatible host face while
+  // keeping aFamilyName as the entry name, so the metric hooks still resolve
+  // the target-OS metrics for this family.
+  RefPtr<gfxFontEntry> entry = LookupLocalFont(
+      aProvider, aFamilyName, WeightRange(FontWeight::NORMAL),
+      WidthRange(FontWidth::NORMAL), SlantStyleRange(FontSlantStyle::NORMAL));
+  if (!entry) {
+    return nullptr;
+  }
+
+  RefPtr<gfxFontFamily> family =
+      new gfxFontFamily(aFamilyName, FontVisibility::User);
+  family->AddFontEntry(entry);
+  family->SetHasStyles(true);
+
+  {
+    mozilla::MutexAutoLock lock(mSpoofedFamiliesLock);
+    mSpoofedFamilies.InsertOrUpdate(key, family);
+  }
+  return family.forget();
+}
+
+already_AddRefed<gfxFontFamily>
+gfxPlatformFontList::CreateSpoofedGenericFamily(
+    FontVisibilityProvider* aProvider,
+    mozilla::StyleGenericFontFamily aGeneric) {
+  if (!aProvider) {
+    return nullptr;
+  }
+  const char* genericName = GetGenericName(aGeneric);
+  if (!genericName) {
+    return nullptr;
+  }
+  uint32_t userContextId = aProvider->GetUserContextId();
+  nsCString targetPlatform =
+      gfxTextFingerprint::GetTargetPlatform(userContextId);
+  auto targetOS = gfxFontMetricDatabase::PlatformToOS(targetPlatform);
+  if (targetOS == gfxFontMetricDatabase::TargetOS::None ||
+      targetOS == gfxFontMetricDatabase::HostOS()) {
+    return nullptr;
+  }
+  nsCString targetFamily = gfxFontMetricDatabase::MapFontFamily(
+      nsDependentCString(genericName), targetOS);
+  if (targetFamily.IsEmpty() || targetFamily.Equals(genericName)) {
+    return nullptr;
+  }
+  return CreateSpoofedFamily(aProvider, targetFamily);
+}
+
+void gfxPlatformFontList::ClearSpoofedFamilies(uint32_t aUserContextId) {
+  nsAutoCString prefix;
+  prefix.AppendInt(aUserContextId);
+  prefix.Append(':');
+  AutoTArray<nsCString, 8> toRemove;
+  {
+    mozilla::MutexAutoLock lock(mSpoofedFamiliesLock);
+    for (auto iter = mSpoofedFamilies.Iter(); !iter.Done(); iter.Next()) {
+      if (StringBeginsWith(iter.Key(), prefix)) {
+        toRemove.AppendElement(iter.Key());
+      }
+    }
+    for (const auto& key : toRemove) {
+      mSpoofedFamilies.Remove(key);
+    }
+  }
 }
 
 void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,

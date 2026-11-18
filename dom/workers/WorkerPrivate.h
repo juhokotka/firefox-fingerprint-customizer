@@ -241,7 +241,6 @@ class WorkerPrivate final
   // access from a worker (e.g. OffscreenCanvas.measureText()) bypassed the
   // container roster entirely.
   uint32_t GetUserContextId() const override;
-  bool IsFontAllowedByProfile(const nsACString& aFamilyName) const override;
   bool IsFontInTargetRoster(const nsACString& aFamilyName) const override;
 
   static already_AddRefed<WorkerPrivate> Constructor(

@@ -45,6 +45,26 @@ class gfxFontMetricDatabase {
   static TargetOS PlatformToOS(const nsACString& aPlatform);
 
   /**
+   * The OS this binary is running on.
+   */
+  static TargetOS HostOS();
+
+  /**
+   * True for family names that belong to a CJK script family. Used to avoid
+   * substituting a Latin-only host face for a target CJK family, which would
+   * leave the text without glyphs.
+   */
+  static bool IsCJKFamilyName(const nsACString& aFamily);
+
+  /**
+   * Host-OS family to render when aFamily belongs to another OS and the host
+   * has no face with that name. Returns an empty string when no good
+   * substitute is known.
+   */
+  static nsCString GetHostSubstitute(const nsACString& aFamily,
+                                     TargetOS aHostOS);
+
+  /**
    * Map a font family name to the target OS equivalent.
    * e.g., on macOS target: "Segoe UI" -> "Helvetica Neue"
    *       on Windows target: "Helvetica Neue" -> "Segoe UI"

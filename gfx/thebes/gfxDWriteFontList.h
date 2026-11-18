@@ -402,7 +402,7 @@ class gfxDWriteFontList final : public gfxPlatformFontList {
       nsTArray<mozilla::fontlist::Face::InitData>& aFaces,
       bool aLoadCmaps) const override;
 
-  already_AddRefed<gfxFontEntry> LookupLocalFont(
+  already_AddRefed<gfxFontEntry> LookupLocalFontInternal(
       FontVisibilityProvider* aFontVisibilityProvider,
       const nsACString& aFontName, WeightRange aWeightForEntry,
       WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry) override;

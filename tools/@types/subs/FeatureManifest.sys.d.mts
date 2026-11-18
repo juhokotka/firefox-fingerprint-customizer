@@ -4435,21 +4435,6 @@ export const FeatureManifest: {
             };
         };
     };
-    legacyHeartbeat: {
-        description: string;
-        owner: string;
-        hasExposure: boolean;
-        schema: {
-            uri: string;
-            path: string;
-        };
-        variables: {
-            survey: {
-                type: string;
-                description: string;
-            };
-        };
-    };
     fingerprintingProtection: {
         description: string;
         owner: string;

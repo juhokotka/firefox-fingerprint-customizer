@@ -876,6 +876,17 @@ BrowserGlue.prototype = {
     // this yet, load the MigrationUtils so that the wizard is ready to be
     // used.
     lazy.MigrationUtils;
+
+    // profileMode: non-container tabs (userContextId 0) also need a Profile,
+    // otherwise the per-container font roster fails open and exposes the
+    // host's full font list.
+    if (Services.prefs.getBoolPref("privacy.fingerprint.profileMode", false)) {
+      ChromeUtils.importESModule(
+        "resource://gre/modules/FingerprintProfileStore.sys.mjs"
+      )
+        .FingerprintProfileStore.ensureDefaultProfile()
+        .catch(Cu.reportError);
+    }
   },
 
   /**

@@ -73,6 +73,5 @@ node:
     when:
         files-changed:
             - 'third_party/node/**'
-            - 'browser/extensions/newtab/package.json'
             - 'python/mozbuild/mozbuild/vendor/vendor_node.py'
             - 'taskcluster/kinds/fetch/pnpm.yml'

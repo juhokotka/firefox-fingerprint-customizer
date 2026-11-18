@@ -3264,9 +3264,12 @@ gfxFont::RunMetrics gfxFont::Measure(const gfxTextRun* aTextRun,
   // identifies the container; we override the ascent/descent with the
   // target OS's font metrics from the metric database.
   uint32_t userContextId = aTextRun->GetUserContextId();
-  if (userContextId != 0) {
+  {
     nsCString fontFamily = GetFontEntry()->FamilyName();
-    nsCString entryName = GetFontEntry()->Name();
+    nsCString entryName = GetFontEntry()->OriginalLocalName();
+    if (entryName.IsEmpty()) {
+      entryName = GetFontEntry()->Name();
+    }
     float fontSize = GetAdjustedSize();
     gfxTextFingerprint::VerticalMetrics spoofed;
     if (gfxTextFingerprint::GetSpoofedVerticalMetrics(
@@ -3423,7 +3426,8 @@ bool gfxFont::ProcessShapedWordInternal(
     gfxTextPerfMetrics* aTextPerf GFX_MAYBE_UNUSED, Func aCallback,
     uint32_t aUserContextId) {
   WordCacheKey key(aText, aLength, aHash, aRunScript, aLanguage,
-                   aAppUnitsPerDevUnit, aFlags, aRounding, aUserContextId);
+                   aAppUnitsPerDevUnit, aFlags, aRounding, aUserContextId,
+                   gfxTextFingerprint::GetProfileEpoch(aUserContextId));
   {
     // If we have a word cache, attempt to look up the word in it.
     AutoReadLock lock(mLock);
@@ -3513,7 +3517,8 @@ bool gfxFont::WordCacheKey::HashPolicy::match(const Key& aKey,
       aKey.mAppUnitsPerDevUnit != aLookup.mAppUnitsPerDevUnit ||
       aKey.mScript != aLookup.mScript ||
       aKey.mLanguage != aLookup.mLanguage ||
-      aKey.mUserContextId != aLookup.mUserContextId) {
+      aKey.mUserContextId != aLookup.mUserContextId ||
+      aKey.mEpoch != aLookup.mEpoch) {
     return false;
   }
 

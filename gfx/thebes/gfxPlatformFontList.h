@@ -16,6 +16,7 @@
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/FontPropertyTypes.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/Mutex.h"
 #include "mozilla/RangedArray.h"
 #include "mozilla/RecursiveMutex.h"
 #include "mozilla/ipc/SharedMemoryHandle.h"
@@ -493,11 +494,16 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
    * Note that the style attributes (weight, width, style) are NOT used in
    * selecting the platform font, which is looked up by name only; these are
    * values to be recorded in the new font entry.
+   *
+   * profileMode: this shared entry point enforces the container's target
+   * roster in both directions (host-only names are rejected, target-only
+   * names fall through to a host substitute) before delegating to the
+   * platform-specific LookupLocalFontInternal().
    */
-  virtual already_AddRefed<gfxFontEntry> LookupLocalFont(
+  already_AddRefed<gfxFontEntry> LookupLocalFont(
       FontVisibilityProvider* aFontVisibilityProvider,
       const nsACString& aFontName, WeightRange aWeightForEntry,
-      WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry) = 0;
+      WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry);
 
   /**
    * Create a new platform font from downloaded data (@font-face).
@@ -845,6 +851,34 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
                                          aDevToCssSize));
   }
 
+ public:
+  // profileMode: build (and cache) a transient family for a target-OS family
+  // that the host lacks. The family is deliberately not inserted into
+  // mFontFamilies, so the alias only exists for the container that requested
+  // it and cannot leak into another container's font list.
+  already_AddRefed<gfxFontFamily> CreateSpoofedFamily(
+      FontVisibilityProvider* aProvider, const nsACString& aFamilyName);
+
+  // profileMode: like CreateSpoofedFamily, but resolves a CSS generic (e.g.
+  // sans-serif) to the target OS's default family first.
+  already_AddRefed<gfxFontFamily> CreateSpoofedGenericFamily(
+      FontVisibilityProvider* aProvider,
+      mozilla::StyleGenericFontFamily aGeneric);
+
+  // profileMode: drop cached transient families for one container after its
+  // Profile has been updated, so the next lookup uses the new target OS.
+  void ClearSpoofedFamilies(uint32_t aUserContextId);
+
+ protected:
+  // Platform-specific raw local-face lookup. Implementations must not apply
+  // the profile roster or synthesize host substitutes; the shared
+  // LookupLocalFont() wrapper handles both.
+  virtual already_AddRefed<gfxFontEntry> LookupLocalFontInternal(
+      FontVisibilityProvider* aFontVisibilityProvider,
+      const nsACString& aFontName, WeightRange aWeightForEntry,
+      WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry) = 0;
+
+
   // Lookup family name in global family list without substitutions or
   // localized family name lookup. Used for common font fallback families.
   gfxFontFamily* FindFamilyByCanonicalName(const nsACString& aFamily)
@@ -1034,6 +1068,11 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
   // other family name ==> family entry (not unique, can have multiple names per
   // family entry, only names *other* than the canonical names are stored here)
   FontFamilyTable mOtherFamilyNames MOZ_GUARDED_BY(mLock);
+
+  // profileMode: "<userContextId>:<family>" ==> synthesized transient family.
+  mozilla::Mutex mSpoofedFamiliesLock;
+  nsTHashMap<nsCStringHashKey, RefPtr<gfxFontFamily>> mSpoofedFamilies
+      MOZ_GUARDED_BY(mSpoofedFamiliesLock);
 
   // flag set after InitOtherFamilyNames is called upon first name lookup miss
   mozilla::Atomic<bool> mOtherFamilyNamesInitialized;

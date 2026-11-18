@@ -28,6 +28,17 @@ struct ContainerTextState {
 
 static nsTHashMap<nsUint32HashKey, ContainerTextState>* gStateMap = nullptr;
 
+// profile revision per container, bumped on every SetSeed/ClearSeed.
+static nsTHashMap<nsUint32HashKey, uint32_t>* gEpochMap = nullptr;
+static uint32_t gNextEpoch = 1;
+
+static void BumpEpochLocked(uint32_t aUserContextId) {
+  if (!gEpochMap) {
+    gEpochMap = new nsTHashMap<nsUint32HashKey, uint32_t>();
+  }
+  gEpochMap->InsertOrUpdate(aUserContextId, gNextEpoch++);
+}
+
 // Rate-limiting state for DebugLogOnce(). Guarded by gTextFpLock; capped so a
 // page that probes thousands of families cannot flood stderr.
 static nsTHashSet<nsCString>* gDebugLogged = nullptr;
@@ -61,6 +72,7 @@ void gfxTextFingerprint::SetSeed(uint32_t aUserContextId,
   state.seedHash = hash;
   state.targetPlatform = aTargetPlatform;
   gStateMap->InsertOrUpdate(aUserContextId, std::move(state));
+  BumpEpochLocked(aUserContextId);
 }
 
 /* static */
@@ -69,6 +81,7 @@ void gfxTextFingerprint::ClearSeed(uint32_t aUserContextId) {
   if (gStateMap) {
     gStateMap->Remove(aUserContextId);
   }
+  BumpEpochLocked(aUserContextId);
 }
 
 /* static */
@@ -92,10 +105,20 @@ nsCString gfxTextFingerprint::GetTargetPlatform(uint32_t aUserContextId) {
 }
 
 /* static */
+uint32_t gfxTextFingerprint::GetProfileEpoch(uint32_t aUserContextId) {
+  StaticMutexAutoLock lock(gTextFpLock);
+  if (!gEpochMap) {
+    return 0;
+  }
+  auto entry = gEpochMap->Lookup(aUserContextId);
+  return entry ? entry.Data() : 0;
+}
+
+/* static */
 bool gfxTextFingerprint::GetSpoofedVerticalMetrics(
     uint32_t aUserContextId, const nsACString& aFontFamily,
     const nsACString& aEntryName, float aFontSize, VerticalMetrics& aOut) {
-  if (aUserContextId == 0 || aFontFamily.IsEmpty() || aFontSize <= 0) {
+  if (aFontFamily.IsEmpty() || aFontSize <= 0) {
     return false;
   }
 

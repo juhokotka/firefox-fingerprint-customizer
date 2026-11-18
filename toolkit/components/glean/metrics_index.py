@@ -85,7 +85,6 @@ gecko_metrics = [
     "toolkit/components/mediasniffer/metrics.yaml",
     "toolkit/components/messaging-system/metrics.yaml",
     "toolkit/components/ml/metrics.yaml",
-    "toolkit/components/normandy/metrics.yaml",
     "toolkit/components/pageextractor/metrics.yaml",
     "toolkit/components/passwordmgr/metrics.yaml",
     "toolkit/components/pdfjs/metrics.yaml",
@@ -131,7 +130,6 @@ firefox_desktop_metrics = [
     "browser/components/metrics.yaml",
     "browser/components/migration/metrics.yaml",
     "browser/components/miniwindow/metrics.yaml",
-    "browser/components/newtab/metrics.yaml",
     "browser/components/places/metrics.yaml",
     "browser/components/preferences/metrics.yaml",
     "browser/components/privatebrowsing/metrics.yaml",
@@ -228,7 +226,6 @@ gecko_pings = [
 firefox_desktop_pings = [
     "browser/components/asrouter/pings.yaml",
     "browser/components/backup/pings.yaml",
-    "browser/components/newtab/pings.yaml",
     "browser/components/profiles/pings.yaml",
     "browser/components/referrals/pings.yaml",
     "browser/components/search/pings.yaml",

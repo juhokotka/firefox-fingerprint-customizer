@@ -2406,7 +2406,7 @@ FontFamily gfxFcPlatformFontList::GetDefaultFontForPlatform(
   return FontFamily();
 }
 
-already_AddRefed<gfxFontEntry> gfxFcPlatformFontList::LookupLocalFont(
+already_AddRefed<gfxFontEntry> gfxFcPlatformFontList::LookupLocalFontInternal(
     FontVisibilityProvider* aFontVisibilityProvider,
     const nsACString& aFontName, WeightRange aWeightForEntry,
     WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry) {

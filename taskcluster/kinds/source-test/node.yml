@@ -16,56 +16,6 @@ task-defaults:
         cwd: '{checkout}'
         use-caches: [checkout, npm]
 
-newtab-unit-tests:
-    description: newtab unit tests
-    treeherder:
-        symbol: node(newtab)
-    fetches:
-        toolchain:
-            - linux64-node
-            - node-modules
-            - newtab-node-modules
-    run:
-        command: >
-            cd /builds/worker/checkouts/gecko &&
-            cp -r $MOZ_FETCHES_DIR/node_modules node_modules &&
-            cd /builds/worker/checkouts/gecko/browser/extensions/newtab &&
-            cp -r $MOZ_FETCHES_DIR/newtab/node_modules node_modules &&
-            PATH=$PATH:$MOZ_FETCHES_DIR/node/bin node bin/try-runner.js
-    when:
-        files-changed:
-            - "browser/extensions/newtab/**"
-
-newtab-unit-tests-ccov:
-    description: newtab unit tests code coverage
-    attributes:
-        ccov: true
-    treeherder:
-        symbol: node(newtab-ccov)
-    worker:
-        artifacts:
-            - name: public/code-coverage-grcov.zip
-              path: /builds/worker/checkouts/gecko/browser/extensions/newtab/logs/coverage/code-coverage-grcov.zip
-              type: file
-    fetches:
-        toolchain:
-            - linux64-node
-            - node-modules
-            - newtab-node-modules
-    run:
-        command: >
-            cd /builds/worker/checkouts/gecko &&
-            cp -r $MOZ_FETCHES_DIR/node_modules node_modules &&
-            cd /builds/worker/checkouts/gecko/browser/extensions/newtab &&
-            cp -r $MOZ_FETCHES_DIR/newtab/node_modules node_modules &&
-            PATH=$PATH:$MOZ_FETCHES_DIR/node/bin node bin/try-runner.js
-    # This should only run on mozilla-central, as the bot will only parse mozilla-central
-    # coverage anyways.
-    run-on-projects: ["mozilla-central"]
-    # Note the lack of a "when" rule here. This is to avoid seeing fluctuating
-    # coverage on searchfox depending on whether the latest
-    # push contained patches touching these files or not.
-
 messagingsystem-unit-tests:
     description: messagingsystem unit tests
     treeherder:

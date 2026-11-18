@@ -4278,18 +4278,6 @@ fxaAvatarMenuItem:
           - mobile
       type: string
 
-legacyHeartbeat:
-  description: Normandy Heartbeat exposed to Nimbus
-  owner: beth@mozilla.com
-  hasExposure: false
-  schema:
-    uri: "resource://normandy/schemas/LegacyHeartbeat.schema.json"
-    path: "toolkit/components/normandy/schemas/LegacyHeartbeat.schema.json"
-  variables:
-    survey:
-      type: json
-      description: The Heartbeat survey parameters.
-
 fingerprintingProtection:
   description: Control Fingerprinting Protection
   owner: tihuang@mozilla.com

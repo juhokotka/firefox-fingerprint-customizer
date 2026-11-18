@@ -1503,7 +1503,7 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
   //    exact metrics as a fallback, and adds a small per-container variation
   //    on top of the substituted values when both are active.
   uint32_t userContextId = aShapedText->GetUserContextId();
-  if (userContextId != 0) {
+  {
     uint32_t seedHash = gfxTextFingerprint::GetSeedHash(userContextId);
     nsCString targetPlatform =
         gfxTextFingerprint::GetTargetPlatform(userContextId);
@@ -1526,7 +1526,10 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
         // original local() probe name (e.g. "Segoe UI"). Fall back to it so
         // that "font exists" and "font metrics" stay in sync.
         if (fontFamily.Equals(family, nsCaseInsensitiveCStringComparator)) {
-          nsCString entryName = entry->Name();
+          nsCString entryName = entry->OriginalLocalName();
+          if (entryName.IsEmpty()) {
+            entryName = entry->Name();
+          }
           nsCString mappedName =
               gfxFontMetricDatabase::MapFontFamily(entryName, targetOS);
           if (!mappedName.Equals(entryName,

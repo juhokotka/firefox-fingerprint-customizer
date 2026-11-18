@@ -2035,7 +2035,15 @@ void gfxFontGroup::EnsureFontList() {
           generic != StyleGenericFontFamily::SystemUi) {
         mFallbackGeneric = generic;
       }
+      const size_t beforeGenerics = fonts.Length();
       pfl->AddGenericFonts(mFontVisibilityProvider, generic, mLanguage, fonts);
+      if (fonts.Length() == beforeGenerics) {
+        if (RefPtr<gfxFontFamily> spoofed =
+                pfl->CreateSpoofedGenericFamily(mFontVisibilityProvider,
+                                                generic)) {
+          fonts.AppendElement(std::move(spoofed));
+        }
+      }
       if (mTextPerf) {
         mTextPerf->current.genericLookups++;
       }
@@ -2046,8 +2054,15 @@ void gfxFontGroup::EnsureFontList() {
   if (mFallbackGeneric == StyleGenericFontFamily::None && !mStyle.systemFont) {
     auto defaultLanguageGeneric = GetDefaultGeneric(mLanguage);
 
+    const size_t beforeDefault = fonts.Length();
     pfl->AddGenericFonts(mFontVisibilityProvider, defaultLanguageGeneric,
                          mLanguage, fonts);
+    if (fonts.Length() == beforeDefault) {
+      if (RefPtr<gfxFontFamily> spoofed = pfl->CreateSpoofedGenericFamily(
+              mFontVisibilityProvider, defaultLanguageGeneric)) {
+        fonts.AppendElement(std::move(spoofed));
+      }
+    }
     if (mTextPerf) {
       mTextPerf->current.genericLookups++;
     }
@@ -2083,12 +2098,23 @@ void gfxFontGroup::AddPlatformFont(const nsACString& aName, bool aQuotedName,
   }
 
   // Not known in the user font set ==> check system fonts
-  gfxPlatformFontList::PlatformFontList()->FindAndAddFamilies(
+  gfxPlatformFontList* pfl = gfxPlatformFontList::PlatformFontList();
+  const size_t beforeSystem = aFamilyList.Length();
+  pfl->FindAndAddFamilies(
       mFontVisibilityProvider, StyleGenericFontFamily::None, aName,
       &aFamilyList,
       aQuotedName ? gfxPlatformFontList::FindFamiliesFlags::eQuotedFamilyName
                   : gfxPlatformFontList::FindFamiliesFlags(0),
       &mStyle, mLanguage.get(), mDevToCssSize);
+  if (aFamilyList.Length() == beforeSystem) {
+    // profileMode: the requested family belongs to the spoofed OS but is not
+    // installed on the host; synthesize it so the page still renders (and the
+    // metric hooks see the target-OS family name).
+    if (RefPtr<gfxFontFamily> spoofed =
+            pfl->CreateSpoofedFamily(mFontVisibilityProvider, aName)) {
+      aFamilyList.AppendElement(std::move(spoofed));
+    }
+  }
 }
 
 void gfxFontGroup::AddFamilyToFontList(gfxFontFamily* aFamily,
@@ -4211,9 +4237,12 @@ gfxFont::Metrics gfxFontGroup::GetMetricsForCSSUnits(
   // Substitutes maxAscent, maxDescent, xHeight, capHeight, zeroWidth from
   // the target OS metric database, covering CSS 'ch'/'ex' units.
   uint32_t userContextId = GetUserContextId();
-  if (userContextId != 0 && aOrientation == nsFontMetrics::eHorizontal) {
+  if (aOrientation == nsFontMetrics::eHorizontal) {
     nsCString fontFamily = font->GetFontEntry()->FamilyName();
-    nsCString entryName = font->GetFontEntry()->Name();
+    nsCString entryName = font->GetFontEntry()->OriginalLocalName();
+    if (entryName.IsEmpty()) {
+      entryName = font->GetFontEntry()->Name();
+    }
     float fontSize = font->GetAdjustedSize();
     gfxTextFingerprint::VerticalMetrics spoofed;
     if (gfxTextFingerprint::GetSpoofedVerticalMetrics(

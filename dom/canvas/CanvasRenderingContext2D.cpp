@@ -2125,6 +2125,16 @@ PresShell* CanvasRenderingContext2D::GetPresShell() {
   return nullptr;
 }
 
+FontVisibilityProvider* CanvasRenderingContext2D::GetFontVisibilityProvider() {
+  if (mOffscreenCanvas) {
+    return mOffscreenCanvas.get();
+  }
+  if (PresShell* presShell = GetPresShell()) {
+    return presShell->GetPresContext();
+  }
+  return nullptr;
+}
+
 NS_IMETHODIMP
 CanvasRenderingContext2D::SetDimensions(int32_t aWidth, int32_t aHeight) {
   // Zero sized surfaces can cause problems.
@@ -4518,7 +4528,8 @@ bool CanvasRenderingContext2D::SetFontInternalDisconnected(
   // fontGroup so we can create a new one later and store it in the
   // cache.
   if (state.fontGroup &&
-      state.fontGroup->GetFontVisibilityProvider() != mOffscreenCanvas) {
+      state.fontGroup->GetFontVisibilityProvider() !=
+          GetFontVisibilityProvider()) {
     state.fontGroup = nullptr;
   }
 
@@ -4661,8 +4672,8 @@ bool CanvasRenderingContext2D::SetFontInternalDisconnected(
       (fontFaceSetImpl && fontFaceSetImpl->GetRebuildGeneration() !=
                               state.fontGroup->GetRebuildGeneration())) {
     state.fontGroup = MakeRefPtr<gfxFontGroup>(
-        mOffscreenCanvas,  // aFontVisibilityProvider
-        list,              // aFontFamilyList
+        GetFontVisibilityProvider(),  // aFontVisibilityProvider
+        list,                         // aFontFamilyList
         &fontStyle,        // aStyle
         CurrentState().resolvedFontLang, CurrentState().explicitLang,
         nullptr,          // aTextPerf
@@ -5598,12 +5609,7 @@ gfxFontGroup* CanvasRenderingContext2D::GetCurrentFontStyle() {
   nsPresContext* presContext =
       presShell ? presShell->GetPresContext() : nullptr;
 
-  FontVisibilityProvider* visProvider = nullptr;
-  if (presContext) {
-    visProvider = presContext;
-  } else {
-    visProvider = mOffscreenCanvas;
-  }
+  FontVisibilityProvider* visProvider = GetFontVisibilityProvider();
 
   if (ResolveFontLang()) {
     // If lang has changed, any cached fontGroup needs to be replaced.
@@ -5645,11 +5651,7 @@ gfxFontGroup* CanvasRenderingContext2D::GetCurrentFontStyle() {
     fontWasSet = false;
     presShell = GetPresShell();
     presContext = presShell ? presShell->GetPresContext() : nullptr;
-    if (presContext) {
-      visProvider = presContext;
-    } else {
-      visProvider = mOffscreenCanvas;
-    }
+    visProvider = GetFontVisibilityProvider();
   }
 
   if (!fontWasSet) {

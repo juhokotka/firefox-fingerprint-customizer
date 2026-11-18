@@ -70,6 +70,14 @@ class gfxTextFingerprint {
   static nsCString GetTargetPlatform(uint32_t aUserContextId);
 
   /**
+   * Monotonically increasing revision for a container's profile state.
+   * Bumped by SetSeed/ClearSeed; part of the shaped-word cache key so that
+   * stale word caches (with the old metrics) cannot be reused after a
+   * profile update. Returns 0 when the container was never updated.
+   */
+  static uint32_t GetProfileEpoch(uint32_t aUserContextId);
+
+  /**
    * Emit a rate-limited diagnostic on stderr, prefixed with "[FONTSPOOF]".
    * No-op unless privacy.fingerprint.debugFontProfile is enabled.
    *

@@ -1032,7 +1032,7 @@ FontFamily gfxDWriteFontList::GetDefaultFontForPlatform(
   return ff;
 }
 
-already_AddRefed<gfxFontEntry> gfxDWriteFontList::LookupLocalFont(
+already_AddRefed<gfxFontEntry> gfxDWriteFontList::LookupLocalFontInternal(
     FontVisibilityProvider* aFontVisibilityProvider,
     const nsACString& aFontName, WeightRange aWeightForEntry,
     WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry) {

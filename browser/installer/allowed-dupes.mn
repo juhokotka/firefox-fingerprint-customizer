@@ -93,18 +93,5 @@ browser/defaults/settings/main/search-config-icons/f312610a-ebfb-a106-ea92-fd643
 browser/defaults/settings/main/search-config-icons/47da97b5-600f-c450-fd15-a52bb2169c11
 browser/defaults/settings/main/search-config-icons/fed4f021-ff3e-942a-010e-afa43fda2136
 
-browser/chrome/browser/builtin-addons/newtab/data/data/content/assets/glyph-mail-16.svg
-
-# Bug 2022304 - activity-stream-debug.html is intentionally identical to
-# activity-stream.html now that vendor bundling replaces separate dev/prod builds
-browser/chrome/browser/builtin-addons/newtab/prerendered/activity-stream-debug.html
-browser/chrome/browser/builtin-addons/newtab/prerendered/activity-stream.html
-
 # Bug 2031302 - allow duplicate css/js files which are used as content scripts by our built-in web compatibility addon.
 browser/chrome/browser/builtin-addons/webcompat/injections/*
-
-# Bug 2034982 - kit-in-circle.svg is shared between the about:pdf landing page
-# (toolkit global skin, used by the promo) and browser/extensions/newtab, which
-# ship in separate packaging domains.
-browser/chrome/browser/builtin-addons/newtab/data/data/content/assets/kit-in-circle.svg
-chrome/toolkit/skin/classic/global/illustrations/kit-in-circle.svg

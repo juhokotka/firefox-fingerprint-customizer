@@ -78,7 +78,6 @@ class OffscreenCanvas final : public DOMEventTargetHelper,
   // overrides the base class defaults return true for every family, which let a
   // page enumerate the host's fonts through OffscreenCanvas.measureText().
   uint32_t GetUserContextId() const override;
-  bool IsFontAllowedByProfile(const nsACString& aFamilyName) const override;
   bool IsFontInTargetRoster(const nsACString& aFamilyName) const override;
 
   OffscreenCanvas(nsIGlobalObject* aGlobal, uint32_t aWidth, uint32_t aHeight);

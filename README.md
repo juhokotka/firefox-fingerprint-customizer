@@ -26,6 +26,7 @@
 - [Getting Started](#getting-started)
 - [How It Works](#how-it-works)
 - [Configuration](#configuration)
+- [Downstream Simplification](#downstream-simplification)
 - [Project Structure](#project-structure)
 - [Contributing](#contributing)
 - [License](#license)
@@ -470,6 +471,77 @@ privacy.fingerprint.profileMode       = true
 ```
 
 ---
+
+## Downstream Simplification
+
+This tree is not a stock Firefox build. Features that do not serve the
+per-container fingerprint use case are removed at the module level, and the
+removal list is kept here so that it can be re-applied when the tree is
+rebased onto a newer Firefox release.
+
+The design rule is simple: delete whole features, not individual lines. A
+removal is allowed to touch a small, fixed set of "seams" (build registration
+and a handful of compatibility shims), but it must not scatter edits across
+unrelated upstream files.
+
+### Removed in this tree
+
+| Feature | Removed paths | Why | Seams left behind |
+| --- | --- | --- | --- |
+| New Tab Page (Activity Stream) | `browser/extensions/newtab` (15 MB)<br>`browser/components/newtab` implementation files | Default recommendations, sponsored tiles, remote feeds, its own telemetry ping and a privileged about: page that loaded on every new tab. | `browser/components/newtab` keeps five small files: `AboutNewTabRedirector.sys.mjs` (resolves `about:newtab` / `about:home` to the blank tab), `AboutHomeStartupCache.sys.mjs` (no-op), `AboutNewTabComponents.sys.mjs` and `SponsorProtection.sys.mjs` (still imported by the address bar and search UI), plus `components.conf` / `moz.build`.<br>`browser/modules/AboutNewTab.sys.mjs` is now a neutral shim.<br>`browser/actors/{moz.build,BrowserProcessChild.sys.mjs}` no longer reference the removed actors. |
+| Normandy | `toolkit/components/normandy` | Remote configuration and experiment delivery; not used by this product. | `toolkit/components/moz.build`, `browser/moz.configure` (`MOZ_NORMANDY = False`), `toolkit/components/glean/metrics_index.py`. |
+| Crash reporter | build configuration only | No crash submission to Mozilla. | `mozconfig`: `ac_add_options --disable-crashreporter`. Note: local minidumps are no longer written, so keep this off only if you do not need native crash debugging. |
+| Background reporting and recommendations | preferences only | Disables data submission, experiments, region lookups, MITM priming, Contile, Merino, Firefox Suggest, AI and Smart Window surfaces. | The `Privacy Browser: downstream defaults` block at the end of `browser/app/profile/firefox.js`. |
+
+New Tab removal changes the default startup page:
+
+```text
+browser.startup.homepage = about:blank
+browser.newtabpage.enabled = false
+```
+
+### Pending: ASRouter / about:welcome and AI / Smart Window
+
+These two feature families are intentionally left for a separate pass. They
+are coupled to more than twenty upstream files (`browser.js`,
+`browser-sync.js`, `panelUI.js`, `PageActions`, Firefox View, Sanitizer,
+built-in themes, and the `genai` link-preview code), so removing them together
+with New Tab would have turned this change into a large, hard-to-audit patch.
+
+Until that pass lands, they are disabled by the downstream defaults above:
+
+```text
+browser.aboutwelcome.enabled = false
+app.normandy.enabled = false
+browser.ml.chat.enabled = false
+browser.ml.linkPreview.enabled = false
+browser.smartwindow.enabled = false
+browser.tabs.groups.smart.enabled = false
+```
+
+The intended follow-up is to delete `browser/components/asrouter`,
+`browser/components/aboutwelcome`, `browser/components/aiwindow`,
+`browser/components/genai` and the two built-in AI themes, keeping only the
+minimum no-op shims that the browser chrome still imports.
+
+### Porting this list to a newer Firefox
+
+1. Replace the source tree with the new release.
+2. Delete the paths listed above, in the same order.
+3. Copy the remaining shim files from this repository back into place.
+4. Re-apply the build and preference changes (`mozconfig`, `moz.configure`,
+   `toolkit/components/moz.build`, `metrics_index.py`, `firefox.js`).
+5. Run `./mach build faster` and fix only the seams listed in the table.
+6. Verify:
+   - a fresh profile opens `about:blank` for both startup and new tabs;
+   - `about:config` shows the downstream defaults;
+   - `about:networking#dns` no longer resolves Contile, Merino or the region
+     service;
+   - `./mach build` completes.
+
+Keep this table as the single source of truth. If a removal needs edits in
+more than a handful of unrelated files, it is a sign that the feature should
+be disabled by preference instead of deleted.
 
 ## Project Structure
 

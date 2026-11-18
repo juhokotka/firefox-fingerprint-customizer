@@ -129,6 +129,96 @@ gfxFontMetricDatabase::TargetOS gfxFontMetricDatabase::PlatformToOS(
 }
 
 // ---------------------------------------------------------------------------
+// Host OS / script helpers
+// ---------------------------------------------------------------------------
+
+// static
+gfxFontMetricDatabase::TargetOS gfxFontMetricDatabase::HostOS() {
+#if defined(XP_MACOSX)
+  return TargetOS::MacOS;
+#elif defined(XP_WIN)
+  return TargetOS::Windows;
+#else
+  return TargetOS::Linux;
+#endif
+}
+
+// static
+bool gfxFontMetricDatabase::IsCJKFamilyName(const nsACString& aFamily) {
+  static const char* const kCJKTokens[] = {
+      "gothic",  "mincho",  "yahei",     "simsun",     "simhei",
+      "songti",  "heiti",   "kaiti",     "malgun",     "gulim",
+      "batang",  "meiryo",  "mingliu",   "hiragino",   "noto sans cjk",
+      "noto serif cjk",      "source han", "droid sans fallback",
+  };
+  for (const char* token : kCJKTokens) {
+    if (aFamily.LowerCaseFindASCII(token) != kNotFound) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Host substitution for target-OS families
+// ---------------------------------------------------------------------------
+
+namespace {
+struct HostSubstitute {
+  const char* mFamily;
+  const char* mMacOS;
+  const char* mWindows;
+  const char* mLinux;
+};
+}  // namespace
+
+// static
+nsCString gfxFontMetricDatabase::GetHostSubstitute(const nsACString& aFamily,
+                                                   TargetOS aHostOS) {
+  // Rows where MapFontFamily keeps the original name but the family is not
+  // actually installed on the other OS.
+  static const HostSubstitute kSubstitutes[] = {
+      {"consolas", "Menlo", "Consolas", "DejaVu Sans Mono"},
+      {"lucida console", "Monaco", "Lucida Console", "DejaVu Sans Mono"},
+      {"courier new", "Courier", "Courier New", "Liberation Mono"},
+      {"calibri", "Helvetica Neue", "Calibri", "Carlito"},
+      {"cambria", "Times", "Cambria", "Caladea"},
+      {"segoe ui", "Helvetica Neue", "Segoe UI", "Liberation Sans"},
+      {"tahoma", "Geneva", "Tahoma", "DejaVu Sans"},
+      {"palatino linotype", "Palatino", "Palatino Linotype",
+       "URW Palladio L"},
+      {"book antiqua", "Palatino", "Book Antiqua", "URW Palladio L"},
+      {"franklin gothic medium", "Helvetica Neue", "Franklin Gothic Medium",
+       "DejaVu Sans"},
+      {"ms gothic", "Hiragino Kaku Gothic ProN", "MS Gothic", "IPAGothic"},
+  };
+  for (const auto& row : kSubstitutes) {
+    if (aFamily.Equals(row.mFamily, nsCaseInsensitiveCStringComparator)) {
+      const char* candidate = nullptr;
+      switch (aHostOS) {
+        case TargetOS::MacOS:
+          candidate = row.mMacOS;
+          break;
+        case TargetOS::Windows:
+          candidate = row.mWindows;
+          break;
+        case TargetOS::Linux:
+          candidate = row.mLinux;
+          break;
+        default:
+          return ""_ns;
+      }
+      return nsCString(candidate);
+    }
+  }
+  nsCString mapped = MapFontFamily(aFamily, aHostOS);
+  if (!mapped.Equals(aFamily, nsCaseInsensitiveCStringComparator)) {
+    return mapped;
+  }
+  return ""_ns;
+}
+
+// ---------------------------------------------------------------------------
 // Font family mapping
 // ---------------------------------------------------------------------------
 

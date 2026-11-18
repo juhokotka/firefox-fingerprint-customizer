@@ -7161,30 +7161,11 @@ uint32_t WorkerPrivate::GetUserContextId() const {
   return mLoadInfo.mOriginAttributes.mUserContextId;
 }
 
-bool WorkerPrivate::IsFontAllowedByProfile(
-    const nsACString& aFamilyName) const {
-  // Without this override the base class allows every family, so font access
-  // from a worker (e.g. OffscreenCanvas.measureText()) bypassed the container
-  // roster entirely.
-  if (!mozilla::StaticPrefs::privacy_fingerprint_profileMode()) {
-    return true;
-  }
-  uint32_t userContextId = GetUserContextId();
-  if (userContextId == 0) {
-    return true;
-  }
-  return dom::WindowGlobalChild::IsFamilyAllowedByProfile(userContextId,
-                                                          aFamilyName, ""_ns);
-}
-
 bool WorkerPrivate::IsFontInTargetRoster(const nsACString& aFamilyName) const {
   if (!mozilla::StaticPrefs::privacy_fingerprint_profileMode()) {
     return true;
   }
   uint32_t userContextId = GetUserContextId();
-  if (userContextId == 0) {
-    return true;
-  }
   return dom::WindowGlobalChild::IsFamilyInTargetRoster(userContextId,
                                                         aFamilyName);
 }

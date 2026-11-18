@@ -335,8 +335,9 @@ pref("browser.shell.setDefaultPDFHandler.attemptWaitTimeMs", 30000);
 // 0 = blank, 1 = home (browser.startup.homepage), 2 = last visited page, 3 = resume previous browser session
 // The behavior of option 3 is detailed at: http://wiki.mozilla.org/Session_Restore
 pref("browser.startup.page",                1);
-pref("browser.startup.homepage",            "about:home");
-pref("browser.startup.homepage.abouthome_cache.enabled", true);
+pref("browser.startup.homepage",            "about:blank");
+pref("browser.newtabpage.enabled",          false);
+pref("browser.startup.homepage.abouthome_cache.enabled", false);
 pref("browser.startup.homepage.abouthome_cache.loglevel", "Warn");
 
 // Whether we should skip the homepage when opening the first-run page
@@ -3920,3 +3921,39 @@ pref("distribution.mozillaonline.ignore", true);
 #ifdef XP_MACOSX
   pref("browser.macAppMenu.setAsDefaultShown", false);
 #endif
+
+// ---------------------------------------------------------------------------
+// Privacy Browser: downstream defaults
+//
+// Keep this block at the end of the file so it wins over upstream defaults.
+// These prefs disable background reporting, experiments, recommendations and
+// AI surfaces that are not part of the container fingerprint feature set.
+// ---------------------------------------------------------------------------
+
+// Data reporting, crash submission and experiments.
+pref("datareporting.policy.dataSubmissionEnabled", false);
+pref("datareporting.telemetry.enabled", false);
+pref("toolkit.telemetry.reportingpolicy.firstRun", false);
+pref("app.normandy.enabled", false);
+pref("app.shield.optoutstudies.enabled", false);
+pref("browser.discovery.enabled", false);
+pref("browser.crashReports.unsubmittedCheck.autoSubmit2", false);
+
+// Remote lookups used by the default home pages and the address bar.
+pref("browser.region.network.url", "");
+pref("browser.region.update.enabled", false);
+pref("security.certerrors.mitm.priming.enabled", false);
+pref("browser.topsites.contile.enabled", false);
+pref("browser.urlbar.merino.enabled", false);
+pref("browser.urlbar.quicksuggest.enabled", false);
+pref("browser.urlbar.suggest.quicksuggest.sponsored", false);
+pref("browser.urlbar.suggest.quicksuggest.nonsponsored", false);
+
+// AI, Smart Window and onboarding surfaces.
+pref("browser.ml.chat.enabled", false);
+pref("browser.ml.linkPreview.enabled", false);
+pref("browser.smartwindow.enabled", false);
+pref("browser.smartwindow.autoTabGrouping.enabled", false);
+pref("browser.smartwindow.autoTabGrouping.preloadModels", false);
+pref("browser.tabs.groups.smart.enabled", false);
+pref("browser.aboutwelcome.enabled", false);

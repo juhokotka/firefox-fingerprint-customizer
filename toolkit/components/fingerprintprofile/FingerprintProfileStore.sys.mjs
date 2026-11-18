@@ -1204,7 +1204,10 @@ export const FingerprintProfileStore = {
     this._cache.set(userContextId, profileDict);
 
     // Store in ContextualIdentityService (persists across sessions).
-    lazy.ContainerAdapter.setFingerprintProfile(userContextId, profileDict);
+    // userContextId 0 has no container identity, so only disk is used.
+    if (userContextId !== 0) {
+      lazy.ContainerAdapter.setFingerprintProfile(userContextId, profileDict);
+    }
 
     // Push to content processes via PWindowGlobal IPC (synchronous — must
     // happen before any await so the profile takes effect immediately).
@@ -1223,7 +1226,9 @@ export const FingerprintProfileStore = {
    */
   async removeProfile(userContextId) {
     this._cache.delete(userContextId);
-    lazy.ContainerAdapter.removeFingerprintProfile(userContextId);
+    if (userContextId !== 0) {
+      lazy.ContainerAdapter.removeFingerprintProfile(userContextId);
+    }
     try {
       await lazy.StorageAdapter.remove(userContextId);
     } catch (e) {
@@ -1231,5 +1236,66 @@ export const FingerprintProfileStore = {
     }
     // Clear in content processes.
     lazy.ProfileSyncAdapter.syncProfileToContentProcesses(userContextId, null);
+  },
+
+  /**
+   * profileMode: the Profile used by non-container tabs (userContextId 0).
+   *
+   * Containers get their Profile from ContextualIdentityService; there is no
+   * container identity 0, so without this those tabs have no Profile at all
+   * and every font-roster check fails open, exposing the host's full font
+   * table. The default is generated once (fixed Windows device + en-US),
+   * persisted, and re-synced on every startup.
+   *
+   * @returns {Promise<object|null>} the default profile, or null when
+   *   profileMode is off.
+   */
+  async ensureDefaultProfile() {
+    if (!Services.prefs.getBoolPref("privacy.fingerprint.profileMode", false)) {
+      return null;
+    }
+    this._installDefaultProfileObserver();
+    if (this._cache.has(0)) {
+      return this._cache.get(0);
+    }
+    let stored = null;
+    try {
+      stored = await lazy.StorageAdapter.read(0);
+    } catch (e) {
+      // Unreadable or missing: regenerate below.
+    }
+    if (!stored) {
+      stored = this._buildProfile(
+        DEVICE_DATABASE.Windows[0],
+        LOCATION_DATABASE[0],
+        "Windows"
+      );
+      try {
+        await lazy.StorageAdapter.write(0, stored);
+      } catch (e) {
+        Cu.reportError(
+          `FingerprintProfileStore: failed to write default profile: ${e}`
+        );
+      }
+    }
+    this._cache.set(0, stored);
+    lazy.ProfileSyncAdapter.syncProfileToContentProcesses(0, stored);
+    return stored;
+  },
+
+  _defaultProfileObserverInstalled: false,
+
+  _installDefaultProfileObserver() {
+    if (this._defaultProfileObserverInstalled) {
+      return;
+    }
+    this._defaultProfileObserverInstalled = true;
+    Services.prefs.addObserver("privacy.fingerprint.profileMode", () => {
+      if (Services.prefs.getBoolPref("privacy.fingerprint.profileMode", false)) {
+        this.ensureDefaultProfile().catch(Cu.reportError);
+      } else {
+        this.removeProfile(0).catch(Cu.reportError);
+      }
+    });
   },
 };

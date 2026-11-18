@@ -243,6 +243,16 @@ class gfxFontEntry {
     mFamilyName = aName;
   }
 
+  // profileMode: when this entry was created as a host substitute for a
+  // local() probe whose family only exists on the target OS, this keeps the
+  // original probe name (FamilyName() is overwritten by gfxUserFontSet with
+  // the @font-face family). The metric hooks use it to resolve target-OS
+  // metrics for the correct family.
+  const nsCString& OriginalLocalName() const { return mOriginalLocalName; }
+  void SetOriginalLocalName(const nsACString& aName) {
+    mOriginalLocalName = aName;
+  }
+
   // The following two methods may be relatively expensive, as they
   // will (usually, except on Linux) load and parse the 'name' table;
   // they are intended only for the font-inspection API, not for
@@ -580,6 +590,7 @@ class gfxFontEntry {
 
   nsCString mName;
   nsCString mFamilyName MOZ_GUARDED_BY(mLock);
+  nsCString mOriginalLocalName;
 
   // These are mutable so that we can take a read lock within a const method.
   mutable mozilla::RWLock mLock;

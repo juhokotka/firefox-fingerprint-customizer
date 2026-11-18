@@ -166,7 +166,7 @@ class CoreTextFontList : public gfxPlatformFontList {
 
   static int32_t AppleWeightToCSSWeight(int32_t aAppleWeight);
 
-  already_AddRefed<gfxFontEntry> LookupLocalFont(
+  already_AddRefed<gfxFontEntry> LookupLocalFontInternal(
       FontVisibilityProvider* aFontVisibilityProvider,
       const nsACString& aFontName, WeightRange aWeightForEntry,
       WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry) override;

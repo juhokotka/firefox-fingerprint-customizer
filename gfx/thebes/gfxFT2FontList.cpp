@@ -1835,7 +1835,7 @@ already_AddRefed<gfxFontEntry> gfxFT2FontList::CreateFontEntry(
 // called for each family name, based on the assumption that the
 // first part of the full name is the family name
 
-already_AddRefed<gfxFontEntry> gfxFT2FontList::LookupLocalFont(
+already_AddRefed<gfxFontEntry> gfxFT2FontList::LookupLocalFontInternal(
     FontVisibilityProvider* aFontVisibilityProvider,
     const nsACString& aFontName, WeightRange aWeightForEntry,
     WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry) {

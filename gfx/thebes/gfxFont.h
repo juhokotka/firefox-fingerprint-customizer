@@ -2277,6 +2277,9 @@ class gfxFont {
     PLDHashNumber mHashKey;
     bool mTextIs8Bit;
     uint32_t mUserContextId = 0;
+    // Profile revision: a profile update re-shapes with new metrics, so words
+    // cached under the old epoch must not match.
+    uint32_t mEpoch = 0;
     // (padding to alignment)
 
     static constexpr PLDHashNumber ComputeHash(uint32_t aStringHash,
@@ -2293,7 +2296,8 @@ class gfxFont {
     WordCacheKey(const uint8_t* aText, uint8_t aLength, uint32_t aStringHash,
                  Script aScriptCode, nsAtom* aLanguage,
                  uint16_t aAppUnitsPerDevUnit, ShapedTextFlags aFlags,
-                 RoundingFlags aRounding, uint32_t aUserContextId = 0)
+                 RoundingFlags aRounding, uint32_t aUserContextId = 0,
+                 uint32_t aEpoch = 0)
         : mLanguage(aLanguage),
           mFlags(aFlags),
           mScript(aScriptCode),
@@ -2303,9 +2307,10 @@ class gfxFont {
           mHashKey(ComputeHash(aStringHash, aScriptCode,
                                aLanguage ? aLanguage->hash() : 0,
                                aAppUnitsPerDevUnit, aFlags, aRounding) +
-                   aUserContextId * 0x1000000),
+                   aUserContextId * 0x1000000u + aEpoch * 0x9E3779B1u),
           mTextIs8Bit(true),
-          mUserContextId(aUserContextId) {
+          mUserContextId(aUserContextId),
+          mEpoch(aEpoch) {
       NS_ASSERTION(aFlags & ShapedTextFlags::TEXT_IS_8BIT,
                    "8-bit flag should have been set");
       mText.mSingle = aText;
@@ -2314,7 +2319,8 @@ class gfxFont {
     WordCacheKey(const char16_t* aText, uint8_t aLength, uint32_t aStringHash,
                  Script aScriptCode, nsAtom* aLanguage,
                  uint16_t aAppUnitsPerDevUnit, ShapedTextFlags aFlags,
-                 RoundingFlags aRounding, uint32_t aUserContextId = 0)
+                 RoundingFlags aRounding, uint32_t aUserContextId = 0,
+                 uint32_t aEpoch = 0)
         : mLanguage(aLanguage),
           mFlags(aFlags),
           mScript(aScriptCode),
@@ -2324,9 +2330,10 @@ class gfxFont {
           mHashKey(ComputeHash(aStringHash, aScriptCode,
                                aLanguage ? aLanguage->hash() : 0,
                                aAppUnitsPerDevUnit, aFlags, aRounding) +
-                   aUserContextId * 0x1000000),
+                   aUserContextId * 0x1000000u + aEpoch * 0x9E3779B1u),
           mTextIs8Bit(false),
-          mUserContextId(aUserContextId) {
+          mUserContextId(aUserContextId),
+          mEpoch(aEpoch) {
       // We can NOT assert that TEXT_IS_8BIT is false in aFlags here,
       // because this might be an 8bit-only word from a 16-bit textrun,
       // in which case the text we're passed is still in 16-bit form,

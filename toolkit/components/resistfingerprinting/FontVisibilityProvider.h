@@ -43,11 +43,11 @@ class FontVisibilityProvider {
   virtual mozilla::Maybe<FontVisibility> MaybeInheritFontVisibility() const = 0;
   virtual void UserFontSetUpdated(gfxUserFontEntry* aUpdatedFont = nullptr) = 0;
 
-  // profileMode: returns true if the font family name is allowed by the
-  // current container's Profile device.fontSet. Default returns true (no
-  // filtering). Overridden by nsPresContext to check the Profile cache.
+  // profileMode: visibility gate for the current container. Delegates to the
+  // strict target-roster check so that "does this family exist" has exactly
+  // one answer per container, regardless of which API the page uses.
   virtual bool IsFontAllowedByProfile(const nsACString& aFamilyName) const {
-    return true;
+    return IsFontInTargetRoster(aFamilyName);
   }
 
   // profileMode: strict membership test against the Profile's device.fontSet

@@ -685,30 +685,12 @@ uint32_t OffscreenCanvas::GetUserContextId() const {
   return 0;
 }
 
-bool OffscreenCanvas::IsFontAllowedByProfile(
-    const nsACString& aFamilyName) const {
-  // Without this override the base class allows every family, so
-  // OffscreenCanvas.measureText() could be used to enumerate the host's fonts.
-  if (!mozilla::StaticPrefs::privacy_fingerprint_profileMode()) {
-    return true;
-  }
-  uint32_t userContextId = GetUserContextId();
-  if (userContextId == 0) {
-    return true;
-  }
-  return dom::WindowGlobalChild::IsFamilyAllowedByProfile(userContextId,
-                                                          aFamilyName, ""_ns);
-}
-
 bool OffscreenCanvas::IsFontInTargetRoster(
     const nsACString& aFamilyName) const {
   if (!mozilla::StaticPrefs::privacy_fingerprint_profileMode()) {
     return true;
   }
   uint32_t userContextId = GetUserContextId();
-  if (userContextId == 0) {
-    return true;
-  }
   return dom::WindowGlobalChild::IsFamilyInTargetRoster(userContextId,
                                                         aFamilyName);
 }

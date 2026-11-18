@@ -3130,61 +3130,6 @@ bool nsPresContext::ShouldResistFingerprinting(RFPTarget aTarget) const {
   return Document()->ShouldResistFingerprinting(aTarget);
 }
 
-bool nsPresContext::IsFontAllowedByProfile(const nsACString& aFamilyName) const {
-  // profileMode: check if the font family name is in the container's
-  // Profile device.fontSet. If profileMode is inactive or no Profile is
-  // available, allow all fonts (return true).
-  if (!mozilla::StaticPrefs::privacy_fingerprint_profileMode()) {
-    return true;
-  }
-  dom::BrowsingContext* bc = mDocument ? mDocument->GetBrowsingContext() : nullptr;
-  if (!bc) {
-    return true;
-  }
-  uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
-  if (userContextId == 0) {
-    return true;
-  }
-  ProfileArgs profile;
-  if (!dom::WindowGlobalChild::GetProfileForUserContextId(userContextId,
-                                                          &profile) ||
-      profile.device().isNothing()) {
-    // Observability: with no Profile in this content process the roster filter
-    // cannot run at all, so EVERY family is allowed. This used to fail silently,
-    // which made "the whitelist is not being applied" impossible to tell apart
-    // from "the whitelist allows this font".
-    gfxTextFingerprint::DebugLogOnce("allow-no-profile", userContextId,
-                                     aFamilyName);
-    return true;
-  }
-  // The roster membership test and the host->target mapping live in
-  // WindowGlobalChild::IsFamilyAllowedByProfile so that every
-  // FontVisibilityProvider implementation (nsPresContext, OffscreenCanvas,
-  // WorkerPrivate) applies the same policy.
-  nsCString targetPlatform;
-  if (dom::BrowsingContext* top = bc->Top()) {
-    nsAutoCString ua8;
-    top->GetCustomUserAgent(ua8);
-    if (ua8.Find("Macintosh") != kNotFound) {
-      targetPlatform.AssignLiteral("MacIntel");
-    } else if (ua8.Find("Windows NT") != kNotFound) {
-      targetPlatform.AssignLiteral("Win32");
-    } else if (ua8.Find("Linux") != kNotFound) {
-      targetPlatform.AssignLiteral("Linux x86_64");
-    }
-  }
-
-  bool allowed = dom::WindowGlobalChild::IsFamilyAllowedByProfile(
-      userContextId, aFamilyName, targetPlatform);
-  if (!allowed) {
-    // Observability: rejected by the container roster -- neither the family
-    // itself nor any host->target mapping of it is listed. Previously silent.
-    gfxTextFingerprint::DebugLogOnce("blocked-by-roster", userContextId,
-                                     aFamilyName);
-  }
-  return allowed;
-}
-
 bool nsPresContext::IsFontInTargetRoster(const nsACString& aFamilyName) const {
   // Strict membership test against the Profile's device.fontSet (no
   // host→target mapping). @font-face { src: local() } probes use this so the
@@ -3199,13 +3144,14 @@ bool nsPresContext::IsFontInTargetRoster(const nsACString& aFamilyName) const {
     return true;
   }
   uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
-  if (userContextId == 0) {
-    return true;
-  }
   ProfileArgs profile;
   if (!dom::WindowGlobalChild::GetProfileForUserContextId(userContextId,
                                                           &profile) ||
       profile.device().isNothing()) {
+    // With no Profile in this content process the roster filter cannot run,
+    // so every family is allowed. Keep the failure observable.
+    gfxTextFingerprint::DebugLogOnce("allow-no-profile", userContextId,
+                                     aFamilyName);
     return true;
   }
   // Strict membership test, shared with the other FontVisibilityProvider

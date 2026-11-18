@@ -7,8 +7,10 @@
 #include "GeckoProfiler.h"
 #include "Navigator.h"
 #include "Units.h"
+#include "gfxFont.h"
 #include "gfxFontMetricDatabase.h"
 #include "gfxPlatform.h"
+#include "gfxPlatformFontList.h"
 #include "gfxTextFingerprint.h"
 #include "mozilla/AntiTrackingUtils.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -26,6 +28,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "mozilla/dom/IdentityCredential.h"
@@ -44,6 +47,7 @@
 #include "mozilla/dom/SecurityPolicyViolationEvent.h"
 #include "mozilla/dom/SessionStoreRestoreData.h"
 #include "mozilla/dom/WindowContext.h"
+#include "nsPresContext.h"
 #include "mozilla/dom/WindowGlobalActorsBinding.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/gfx/2D.h"
@@ -1487,48 +1491,6 @@ bool WindowGlobalChild::IsFamilyInTargetRoster(
   return false;
 }
 
-/* static */
-bool WindowGlobalChild::IsFamilyAllowedByProfile(
-    uint32_t aUserContextId, const nsACString& aFamilyName,
-    const nsACString& aTargetPlatformOverride) {
-  ProfileArgs profile;
-  if (!GetProfileForUserContextId(aUserContextId, &profile) ||
-      profile.device().isNothing()) {
-    return true;  // fail-open, see IsFamilyInTargetRoster
-  }
-  const auto& fontSet = profile.device().ref().fontSet();
-  for (const auto& allowed : fontSet) {
-    if (aFamilyName.Equals(allowed, nsCaseInsensitiveCStringComparator)) {
-      return true;
-    }
-  }
-
-  // The family name isn't in the target OS's fontSet. But when the page renders
-  // with a host-OS font (e.g. "Menlo" on macOS) whose metrics are being spoofed
-  // against a target-OS equivalent (e.g. "Consolas" on Windows), the name may
-  // map to a target-OS font that IS allowed. Allow it so text renders with the
-  // host font rather than falling back to an arbitrary decorative font.
-  nsCString targetPlatform(aTargetPlatformOverride);
-  if (targetPlatform.IsEmpty()) {
-    targetPlatform = gfxTextFingerprint::GetTargetPlatform(aUserContextId);
-  }
-  if (targetPlatform.IsEmpty()) {
-    targetPlatform = profile.device().ref().platform();
-  }
-  auto targetOS = mozilla::gfx::gfxFontMetricDatabase::PlatformToOS(
-      targetPlatform);
-  if (targetOS != mozilla::gfx::gfxFontMetricDatabase::TargetOS::None) {
-    nsCString mapped = mozilla::gfx::gfxFontMetricDatabase::MapFontFamily(
-        aFamilyName, targetOS);
-    for (const auto& allowed : fontSet) {
-      if (mapped.Equals(allowed, nsCaseInsensitiveCStringComparator)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 mozilla::ipc::IPCResult WindowGlobalChild::RecvUpdateProfile(
     const Maybe<ProfileArgs>& aProfile) {
   // Extract userContextId from this WindowGlobal's BrowsingContext.
@@ -1561,6 +1523,24 @@ mozilla::ipc::IPCResult WindowGlobalChild::RecvUpdateProfile(
   } else {
     cache.Remove(userContextId);
     gfxTextFingerprint::ClearSeed(userContextId);
+  }
+
+  // profileMode: the container's target OS and/or roster just changed, so every
+  // artifact derived from the old Profile has to go. SetSeed/ClearSeed bumped
+  // the epoch, which makes previously cached shaped words unmatchable; the
+  // transient families and font instances still need explicit flushing, and
+  // documents must restyle/reflow to pick up the new metrics.
+  if (gfxPlatformFontList* pfl = gfxPlatformFontList::PlatformFontList(false)) {
+    pfl->ClearSpoofedFamilies(userContextId);
+  }
+  if (gfxFontCache* fontCache = gfxFontCache::GetCache()) {
+    fontCache->Flush();
+    fontCache->FlushShapedWordCaches();
+  }
+  if (dom::Document* doc = bc->GetDocument()) {
+    if (nsPresContext* pc = doc->GetPresContext()) {
+      pc->ForceReflowForFontInfoUpdate(false);
+    }
   }
   return IPC_OK();
 }

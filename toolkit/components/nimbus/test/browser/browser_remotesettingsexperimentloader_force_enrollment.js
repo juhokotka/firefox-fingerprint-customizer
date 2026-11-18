@@ -199,7 +199,7 @@ add_task(async function test_invalid_branch_schema() {
         slug: "control",
         features: [
           {
-            featureId: "legacyHeartbeat",
+            featureId: "prefFlips",
             value: {
               foo: "bar",
             },
