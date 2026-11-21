@@ -93,6 +93,8 @@ class gfxTextFingerprint {
    *  - the same codepoint gets different residuals in different fonts
    *    (family is part of the PRF input);
    *  - the residual cannot be reproduced from the 32-bit seedHash;
+   *  - different styles (weight/slant/stretch) of one family get distinct
+   *    residuals, so a bold or italic face never reuses the regular one;
    *  - the perturbation lands on the font's design-unit grid, which keeps the
    *    shaped advance exactly proportional to font size (W(2s) == 2W(s)),
    *    unlike a fixed pixel delta.
@@ -101,7 +103,8 @@ class gfxTextFingerprint {
    */
   static int32_t GetAdvanceJitterDU(const ProfileState& aState,
                                     const nsACString& aFontFamily,
-                                    uint32_t aCodepoint, uint32_t aUnitsPerEm);
+                                    uint32_t aCodepoint, uint32_t aUnitsPerEm,
+                                    uint32_t aStyleSalt = 0);
 
   /**
    * True when privacy.fingerprint.debugFontProfile is enabled; used to gate

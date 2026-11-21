@@ -21,6 +21,7 @@
 ## Table of Contents
 
 - [Why This Project?](#why-this-project)
+- [Threat Model & Non-goals](#threat-model--non-goals)
 - [Key Features](#key-features)
 - [Architecture](#architecture)
 - [Getting Started](#getting-started)
@@ -38,20 +39,58 @@
 Traditional privacy browsers (Tor Browser, LibreWolf with RFP) pursue a **uniform fingerprint** — every user looks identical. But this approach has limitations:
 
 - **Entropy paradox** — the rarer the uniform profile, the easier it is to identify as a privacy-conscious user.
-- **No per-site control** — you can't present different identities to different websites.
-- **No isolation** — cookies, cache, and storage are shared across all browsing.
+- **No per-site control** — every site sees the same identity; you cannot present different platforms or locales to different sites.
+- **One global identity** — Tor Browser and LibreWolf do isolate storage per first party (first-party isolation), but the UA, platform, timezone, WebGL and font profile are still global. Containers cannot hold independent, stable identities.
 
 **Firefox Fingerprint Customizer takes the opposite approach:**
 
-|              Traditional RFP              |       Firefox Fingerprint Customizer       |
-| :---------------------------------------: | :----------------------------------------: |
-|        One fingerprint for everyone       |      One fingerprint **per container**     |
-| Hardcoded timezone (`Atlantic/Reykjavik`) |        Choose timezone per container       |
-|      Hardcoded UA (`Windows NT 10.0`)     |  Real device pools (Mac / Linux / Windows) |
-|         Shared storage across tabs        | **Storage partitioned** by `userContextId` |
-|            Binary on/off switch           |  Two modes: **Normal** vs **Privacy Mode** |
+|                       Uniform RFP (Tor / LibreWolf)                       |        Firefox Fingerprint Customizer        |
+| :----------------------------------------------------------------------: | :------------------------------------------: |
+|              One global identity, identical for every user               | One identity **per container**, chosen per site |
+|              One global profile, stable across sessions                  | Per-container profile, persisted and stable across sessions |
+|           Timezone forced to UTC, language to `en-US`                    |        Choose timezone and language per container        |
+|      Platform token forced to Windows on every host OS                   | Realistic, platform-appropriate UA per emulated device (macOS `10.15`, Windows `10.0`, Linux `X11`) |
+|             Binary on/off; no per-site configuration                     |  Device / location / noise configured independently per container |
+| Storage isolated per first party (FPI), same fingerprint everywhere       | Container partitioning plus a per-container fingerprint (FPI remains complementary, not replaced) |
+
+The comparison is about the **identity model**, not storage granularity: first-party isolation is finer-grained than container partitioning, and this project does not claim stronger storage isolation. The difference is per-site identity selection plus cross-session stability: each container is a **stable pseudonym** — linkable to itself over time, isolated from the others.
 
 Each container gets its own **device fingerprint (hardware + storage estimate), location, and noise seed (Canvas/WebGL/Text)** — persisted across sessions, with cookies, storage and cache partitioned per container.
+
+---
+
+## Threat Model & Non-goals
+
+This project reduces **web-visible fingerprint linkability between containers**. It is not an anonymity system: a container profile is a **stable pseudonym** — linkable to itself over time, not anonymous.
+
+### Assumed adversary
+
+A website running JavaScript and reading standard Web APIs; a passive network observer; a fingerprinting service correlating page-level signals. We do **not** assume a browser 0-day, a malicious extension, or OS-level compromise.
+
+### In scope
+
+- Device surfaces: UA/oscpu/platform, screen geometry, hardware concurrency, touch points, `devicePixelRatio`, media devices, audio sample rate.
+- Graphics and text: WebGL vendor/renderer, canvas/WebGL noise, font roster, font metrics and text-metric perturbation.
+- Locale and time: timezone, `navigator.languages`, `Accept-Language`.
+- Storage estimate `quota` (Firefox best-effort semantics). `usage` stays per-origin and real.
+- Per-container isolation of the above, with seeds that persist across sessions.
+
+### Non-goals
+
+- **Network anonymity.** No proxy or Tor is bundled. All containers share the host's public IP unless the user configures a proxy; the exit is the user's responsibility. Align `location.timezone` / `languages` with the exit IP region — timezone vs IP geolocation is the easiest cross-check.
+- **Transport and traffic analysis.** TLS, TCP/IP and HTTP/2 fingerprints, packet timing and sizes are untouched.
+- **DNS and other side channels** beyond what the browser already normalizes.
+- **Compromised components.** Malicious extensions, browser exploits, a compromised OS, or user-installed fonts and input methods can expose far more than this project can mask.
+- **Cross-device and account-level correlation.** Logging into the same account from two containers, or using the same device offline, links them regardless of fingerprint settings.
+- **Guarantees under active probing.** A site that deliberately compares storage across origins, or cross-checks locale against IP, can still detect misconfiguration.
+- **CAPTCHA / bot-detection evasion**, or making logged-in accounts anonymous.
+- **`webrtcHideIP` scope.** It hides local/private ICE candidates; the public IP is unchanged.
+
+### Operational notes
+
+- One container = one persona. Avoid reusing an account across containers.
+- Keep timezone, languages and `Accept-Language` coherent with the exit IP.
+- Clearing or regenerating a profile resets the pseudonym and loses cross-session stability.
 
 ---
 
@@ -68,24 +107,24 @@ Each container carries an independent `FingerprintProfile` with a complete devic
 
 | Surface              | Example                                           | Source                               |
 | -------------------- | ------------------------------------------------- | ------------------------------------ |
-| User Agent           | `Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:160.0) Gecko/20100101 Firefox/160.0` | `profile.device.userAgent` |
+| User Agent           | `Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0` | `profile.device.userAgent` |
 | Platform             | `MacIntel` / `Win32` / `Linux x86_64`             | `profile.device.platform`            |
-| OS CPU               | `Intel Mac OS X 26.5`                             | `profile.device.oscpu`               |
+| OS CPU               | `Intel Mac OS X 10.15`                            | `profile.device.oscpu`               |
 | Screen               | `2560 × 1600`, `pixelDepth: 30` (laptop: fixed; desktop: randomized) | `profile.device.screen` |
 | Hardware Concurrency | `8` / `10` / `12` / `14` / `16` / `24`             | `profile.device.hardwareConcurrency` |
 | Touch Points         | `0` (every bundled device is a laptop or desktop) | `profile.device.maxTouchPoints`      |
 | Device Pixel Ratio   | `2.0` (Retina) / `1.5` / `1.25` / `1.0`           | `profile.device.devicePixelRatio`    |
-| WebGL Vendor         | `Google Inc. (Apple)`                             | `profile.device.webglVendor`         |
-| WebGL Renderer       | `Apple GPU`                                       | `profile.device.webglRenderer`       |
+| WebGL Vendor         | `Apple` (macOS native GL)                         | `profile.device.webglVendor`         |
+| WebGL Renderer       | `Apple M1` / `Apple M2 Pro` / `Apple M3 Max` / …  | `profile.device.webglRenderer`       |
 | Font Set             | Per-OS stock roster (see `FontRosterData.sys.mjs`) | `profile.device.fontSet`             |
 | Media Devices        | Microphone, Camera, Speakers                      | `profile.device.mediaDevices`        |
 | Audio Sample Rate    | `44100` / `48000`                                 | `profile.device.audioSampleRate`     |
 | Disk Size            | `256` / `500` / `512` / `1000` / `1024` / `2000` GB | `profile.device.diskSizeGB`      |
-| Storage Estimate     | `128 GB` quota / `47 MB` usage                    | `profile.storage.quota` / `profile.storage.usage` |
+| Storage Estimate     | `10 GiB` quota / real per-origin usage            | `profile.storage.quota`             |
 
 The claimed **Firefox version** is pinned in each device profile — the current data reports `Firefox/160.0` (see `FingerprintProfileStore.sys.mjs`). An out-of-date UA is itself a fingerprint signal: it triggers "your browser is out of date" detection and makes the profile statistically rare. When the engine baseline moves, update the device UA strings together with the device database instead of leaving them frozen at an older release.
 
-**Storage estimate** — `navigator.storage.estimate()` reports a `quota` derived from the device's `diskSizeGB` (20–80%, simulating realistic free-space variation) and an `usage` that is an independent log-uniform 5–500 MB value (simulating per-site storage use; capped at 1% of `quota`). Both persist per container, stable across sessions, and report identically from main thread and workers. Storage spoofing lives in the device layer because `quota` derives from the device's disk size — it is a device-property API surface, not a separate random dimension.
+**Storage estimate** — `navigator.storage.estimate()` reports Firefox's real best-effort `quota`: `min(10% of the device's disk, 10 GiB)`, which is a constant **10 GiB** for every device in the pool and matches what Firefox reports on real hardware. `usage` is **not spoofed**: the API is scoped to the current origin group, so the real (already container-partitioned) value is passed through; a container-wide constant would be detectable by writing a few bytes and re-reading it. Results are consistent between main thread and workers.
 
 </details>
 
@@ -133,10 +172,10 @@ Unlike Canvas/WebGL noise (which randomizes pixel output), the **Text Seed** mod
 
 **How it defeats fingerprinting:**
 
-- **Per-glyph deltas** — Each glyph receives a deterministic ±0.05px perturbation derived from `textSeedHash ^ glyphCodepoint`, not a uniform offset. This defeats linear-regression attacks that can crack a constant-offset scheme (like Camoufox's approach).
+- **Per-glyph deltas** — Each `(font family, codepoint, style)` tuple receives a deterministic residual in **integer font design units**, produced by SipHash-2-4 keyed with the container's full 128-bit text seed. The residual sits on the em's integer grid and scales with font size, so measurements stay linear (`W(2s) == 2W(s)`) instead of gaining a size-independent pixel offset, and it cannot be recovered from a 32-bit hash. This defeats both constant-offset and brute-force attacks.
 - **Per-container isolation** — The `textSeed` is unique per container (`userContextId`), so different containers produce different metric values. The word cache (`WordCacheKey`) includes `userContextId` in its hash to prevent cross-container cache leakage.
 - **Cross-surface consistency** — Because perturbation happens at the HarfBuzz shaping layer (before any API consumes the metrics), all downstream surfaces (`CanvasRenderingContext2D.measureText()`, `Element.getBoundingClientRect()`, `Element.offsetWidth`, layout reflow) see identical perturbed values.
-- **No anomalous values** — Perturbations are small (±0.05px) and deterministic, so the reported metrics remain plausible and don't trigger anomaly detection in risk engines.
+- **No anomalous values** — Residuals are bounded to roughly ±1/256 em and deterministic, so the reported metrics remain plausible and don't trigger anomaly detection in risk engines.
 
 ### Font Metric Spoofing (OS Masking)
 
@@ -215,7 +254,7 @@ Switch instantly via the **container button** next to the URL bar.
 │  FingerprintProfileStore (JS Runtime, Parent Process)        │
 │  - Stores Profile by userContextId (JSON, persisted to disk) │
 │  - 3-layer random generator: Device + Location + Noise           │
-│  - Device layer includes storage quota/usage (disk-derived)      │
+│  - Storage quota (Firefox semantics); usage is real          │
 │  - Noise: canvasSeed + webglSeed + textSeed (16 bytes each)      │
 │  - Generated once at container creation, fixed across sessions│
 │  - Depends only on Adapter interfaces (no direct Firefox API)│
@@ -244,8 +283,8 @@ Switch instantly via the **container button** next to the URL bar.
 │  gfxHarfBuzzShaper (Two-Layer Font Metric Spoofing)          │
 │  - Layer 1: OS metric substitution (primary)                 │
 │    advance widths & vertical metrics from target-OS DB       │
-│  - Layer 2: Per-glyph ±0.05px delta from textSeedHash        │
-│    (fallback when no target-OS data; overlay when both)      │
+│  - Layer 2: design-unit residual from 128-bit seed PRF       │
+│    (SipHash over family/codepoint/style; fallback/overlay)   │
 │  - WordCacheKey includes userContextId (cache isolation)     │
 └────────────────────────────┬─────────────────────────────────┘
                              │
@@ -270,7 +309,7 @@ Switch instantly via the **container button** next to the URL bar.
 │  + Navigator / nsScreen / MediaDevices / AudioContext API    │
 │  + measureText() / getBoundingClientRect() / offsetWidth     │
 │  + @font-face local() probes / document.fonts.check()        │
-│  + navigator.storage.estimate() (quota / usage)              │
+│  + navigator.storage.estimate() (quota override; usage real) │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -406,7 +445,7 @@ When a user creates a container via the panel UI:
 1. `ContainerEditor.mjs` calls `ContextualIdentityService.create(name, icon, color)`
 2. A new `userContextId` is assigned (monotonically increasing)
 3. `FingerprintProfileStore.generateProfile()` creates a 3-layer profile:
-   - **Device**: randomly picked from `DEVICE_DATABASE` (34 real device variants across Mac/Linux/Windows), applying the built-in vs. external screen-resolution policy described in [Screen Resolution Handling](#screen-resolution-handling); includes **storage spoofing** — `quota` (20–80% of `diskSizeGB`) and `usage` (5–500 MB log-uniform) reported via `navigator.storage.estimate()`
+   - **Device**: randomly picked from `DEVICE_DATABASE` (34 real device variants across Mac/Linux/Windows), applying the built-in vs. external screen-resolution policy described in [Screen Resolution Handling](#screen-resolution-handling); includes a **storage estimate** — `quota = min(10% of the device disk, 10 GiB)` reported via `navigator.storage.estimate()`, while `usage` is passed through untouched
    - **Location**: randomly picked from `LOCATION_DATABASE` (12 countries)
    - **Noise**: fresh random seeds for Canvas/WebGL/Text
 4. Profile is persisted to disk (`containers.json` + profile store)
@@ -440,7 +479,7 @@ In Privacy Mode, `nsRFPService::ShouldResistFingerprinting()` returns `true` for
 | CSS `ch` / `ex` units             | `gfxTextRun.cpp`                 | OS metric DB (zeroWidth / xHeight)              |
 | `@font-face { src: local() }`     | `gfxPlatformFontList.cpp`        | Font roster substitution (Gap 3)                |
 | `document.fonts.check()`          | `gfxPlatformFontList.cpp`        | Font roster substitution (Gap 3)                |
-| `navigator.storage.estimate()`    | `StorageManager.cpp`             | `profile.storage.quota` / `profile.storage.usage` |
+| `navigator.storage.estimate()`    | `StorageManager.cpp`             | `profile.storage.quota` (usage real) |
 | `AudioContext.sampleRate`         | `AudioContext.cpp`               | `profile.device.audioSampleRate` |
 | `Intl.DateTimeFormat`             | `browser.js` (`_applyOverrides`) | `profile.location.timezone`      |
 | `MediaDevices.enumerateDevices()` | `MediaDevices.cpp`               | `profile.device.mediaDevices`    |
@@ -586,7 +625,7 @@ firefox-fingerprint-customizer/
 │   └── chrome-webidl/
 │       └── FingerprintProfile.webidl    # WebIDL dictionary definitions (incl. textSeed + storage)
 ├── gfx/thebes/
-│   ├── gfxTextFingerprint.{h,cpp}       # Per-container text seed storage (FNV-1a hash, thread-safe)
+│   ├── gfxTextFingerprint.{h,cpp}       # Per-container text seed store (128-bit, thread-safe)
 │   ├── gfxHarfBuzzShaper.cpp            # Two-layer metric spoofing: OS substitution + per-glyph perturbation
 │   ├── gfxFontMetricDatabase.{h,cpp}    # Target-OS metric DB + cross-OS font name mapping
 │   ├── CoreTextFontList.cpp             # macOS font lookup backend (LookupLocalFontInternal)
@@ -641,10 +680,10 @@ JS/CSS-only changes only need `./mach build faster` — see [Getting Started](#g
 - **Static imports in xpcshell tests** — `import` with `moz-src:///` URLs don't resolve; use `ChromeUtils.defineESModuleGetters` with `resource://gre/modules/` URLs.
 - **Container tab binding** — Tabs are permanently bound to their container at creation. Switching containers opens a new tab (Firefox architectural constraint).
 - **Vertical metric call sites** — `gfxFont::Metrics` is computed once at font init from platform APIs (`CTFontGetAscent`, DWrite, FreeType) and cached, so it cannot be modified per-container at the cached struct level. Vertical spoofing must copy and override at each of the 3 call sites: `gfxTextRun::GetMetricsForCSSUnits` (CSS `ch`/`ex`), `CanvasRenderingContext2D::DrawOrMeasureText` (TextMetrics vertical), and `gfxFont::Measure` (`actualBoundingBoxAscent/Descent`). Derived metrics (`emAscent`, `emDescent`, `maxHeight`, `internalLeading`) must be recomputed after overriding `maxAscent`/`maxDescent`.
-- **Storage quota worker consistency** — `navigator.storage.estimate()` is callable from both main thread and Web Workers. The `userContextId` must be extracted from the principal (`BasePrincipal::Cast(principal)->OriginAttributesRef().mUserContextId`) and passed to `RequestResolver` at creation time. For workers, the principal is captured at spawn time in `WorkerPrivate::mLoadInfo` and remains immutable for the worker's lifetime — even for detached workers whose original document is gone. Never fall back to `userContextId = 0` (real values) in Privacy Mode, as this leaks the host's real disk size and creates a detectable main-thread-vs-worker inconsistency.
+- **Storage quota worker consistency** — `navigator.storage.estimate()` is callable from both main thread and Web Workers. The `userContextId` must be extracted from the principal (`BasePrincipal::Cast(principal)->OriginAttributesRef().mUserContextId`) and passed to `RequestResolver` at creation time. For workers, the principal is captured at spawn time in `WorkerPrivate::mLoadInfo` and remains immutable for the worker's lifetime — even for detached workers whose original document is gone. Never fall back to `userContextId = 0` for a container: that would hand it the default profile (or real values) and create a detectable main-thread-vs-worker inconsistency.
 - **Don't re-`Construct()` already-built Optional members** — `mStorageEstimate.mUsage`/`mQuota` are `Optional<uint64_t>` that the stock quota-result code already `Construct()`s before the profile override runs. Overwriting them via `.Value()` (never `.Construct()` again) avoids tripping `MOZ_RELEASE_ASSERT(!isSome())`, which silently crashed the content process on sites that call `navigator.storage.estimate()` (e.g. amiunique.org).
-- **Storage quota safe fallback** — On profile-cache miss (race at container creation), return conservative consumer defaults (50 MB usage / 100 GB quota) — a server-room host's real disk size would instantly expose the spoofing.
-- **Storage quota derivation bounds** — `quota` must be 20–80% of `diskSizeGB`; `usage` must be 5–500 MB log-uniform and never exceed 1% of `quota`. These bounds prevent anomalous combinations even with full per-container randomization.
+- **Storage quota on profile-cache miss** — Leave the real `quota`/`usage` untouched instead of inventing a fallback. The previous 50 MB / 100 GB pair was itself a Chrome-style signal; with Firefox semantics the real quota is `min(10% disk, 10 GiB)`, i.e. 10 GiB on any realistic host, so there is nothing to hide.
+- **Storage quota semantics** — Use Firefox's formula, `min(10% of disk, 10 GiB)`, not a fraction of disk, and never inject a per-container `usage`: `estimate().usage` is scoped to the current origin, so a constant baseline is detectable by writing a few bytes and re-reading it.
 
 </details>
 

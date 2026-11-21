@@ -493,16 +493,18 @@ nsresult RequestResolver::GetStorageEstimate(nsIVariant* aResult) {
   // mUsage/mQuota are already constructed by the quota result above; only
   // overwrite their values here (calling Construct() again would trip the
   // MOZ_RELEASE_ASSERT(!isSome()) in Maybe/Nullable).
-  if (StaticPrefs::privacy_fingerprint_profileMode() && mUserContextId != 0) {
+  // Override only quota: estimate().usage describes the current origin
+  // group, not the whole container, so a profile-level constant would be
+  // detectable by writing a few bytes and re-reading it. Containers are
+  // already storage-partitioned, so the real per-origin usage is low-entropy
+  // and can be passed through unchanged.
+  if (StaticPrefs::privacy_fingerprint_profileMode()) {
     ProfileArgs profile;
     if (WindowGlobalChild::GetProfileForUserContextId(mUserContextId,
                                                       &profile) &&
-        profile.storage().isSome()) {
-      mStorageEstimate.mUsage.Value() = profile.storage().ref().usage();
+        profile.storage().isSome() &&
+        profile.storage().ref().quota() > 0) {
       mStorageEstimate.mQuota.Value() = profile.storage().ref().quota();
-    } else {
-      mStorageEstimate.mUsage.Value() = 50ULL * 1024 * 1024;
-      mStorageEstimate.mQuota.Value() = 100ULL * 1024 * 1024 * 1024;
     }
   }
 

@@ -225,14 +225,16 @@ gfxTextFingerprint::ProfileState gfxTextFingerprint::GetProfileState(
 int32_t gfxTextFingerprint::GetAdvanceJitterDU(const ProfileState& aState,
                                                const nsACString& aFontFamily,
                                                uint32_t aCodepoint,
-                                               uint32_t aUnitsPerEm) {
+                                               uint32_t aUnitsPerEm,
+                                               uint32_t aStyleSalt) {
   if (!aState.hasSeed || aUnitsPerEm == 0) {
     return 0;
   }
 
-  // PRF input: normalised family name, a separator, and the codepoint in
-  // little-endian order. Family names compare case-insensitively, so fold
-  // case to keep one residual per family regardless of how it was spelled.
+  // PRF input: normalised family name, a separator, the codepoint and the
+  // coarse style discriminator, all little-endian. Family names compare
+  // case-insensitively, so fold case to keep one residual per family
+  // regardless of how it was spelled.
   nsAutoCString msg;
   msg.Assign(aFontFamily);
   // ASCII case-fold: family names compare case-insensitively, so the residual
@@ -244,9 +246,11 @@ int32_t gfxTextFingerprint::GetAdvanceJitterDU(const ProfileState& aState,
     }
   }
   msg.Append('\x1f');
-  uint8_t cpBytes[4] = {uint8_t(aCodepoint), uint8_t(aCodepoint >> 8),
-                        uint8_t(aCodepoint >> 16), uint8_t(aCodepoint >> 24)};
-  msg.Append(reinterpret_cast<const char*>(cpBytes), 4);
+  uint8_t tail[8] = {uint8_t(aCodepoint),      uint8_t(aCodepoint >> 8),
+                     uint8_t(aCodepoint >> 16), uint8_t(aCodepoint >> 24),
+                     uint8_t(aStyleSalt),      uint8_t(aStyleSalt >> 8),
+                     uint8_t(aStyleSalt >> 16), uint8_t(aStyleSalt >> 24)};
+  msg.Append(reinterpret_cast<const char*>(tail), sizeof(tail));
 
   uint64_t k0 = 0;
   uint64_t k1 = 0;

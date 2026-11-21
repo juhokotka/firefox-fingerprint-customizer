@@ -205,11 +205,6 @@ function buildEditor(host, profile, userContextId) {
         "fingerprint-editor-storage-quota",
         buildNumberInput(doc, "storageQuota", storage.quota)
       ),
-      buildRow(
-        doc,
-        "fingerprint-editor-storage-usage",
-        buildNumberInput(doc, "storageUsage", storage.usage)
-      ),
     ])
   );
 
@@ -315,19 +310,11 @@ function buildEditor(host, profile, userContextId) {
     let diskSizeGB =
       parseInt(container.querySelector('[name="diskSizeGB"]')?.value, 10) || 256;
     let diskBytes = diskSizeGB * 1024 * 1024 * 1024;
-    let quotaFraction = 0.2 + Math.random() * 0.6;
-    let quota = Math.floor(diskBytes * quotaFraction);
-    let usageMB = 5 * Math.pow(10, Math.random() * 2);
-    let usage = Math.floor(usageMB * 1024 * 1024);
-    usage = Math.min(usage, Math.floor(quota * 0.01));
-    usage = Math.max(usage, 5 * 1024 * 1024);
+    // Firefox best-effort quota: min(10% of disk, 10 GiB).
+    let quota = Math.min(Math.floor(diskBytes * 0.10), 10 * 1024 * 1024 * 1024);
     let quotaEl = container.querySelector('[name="storageQuota"]');
-    let usageEl = container.querySelector('[name="storageUsage"]');
     if (quotaEl) {
       quotaEl.value = quota;
-    }
-    if (usageEl) {
-      usageEl.value = usage;
     }
   });
 
@@ -494,9 +481,10 @@ document.addEventListener("dialogaccept", () => {
   profile.device.diskSizeGB = parseInt(getVal(form, "diskSizeGB"), 10);
   profile.device.fontSet = getVal(form, "fontSet").split(",").map(s => s.trim()).filter(s => s);
 
+  // usage is not persisted: estimate().usage is per-origin and passed
+  // through unchanged, so a container-level constant would be a signal.
   profile.storage = {
     quota: parseInt(getVal(form, "storageQuota"), 10),
-    usage: parseInt(getVal(form, "storageUsage"), 10),
   };
 
   profile.location.country = getVal(form, "country");

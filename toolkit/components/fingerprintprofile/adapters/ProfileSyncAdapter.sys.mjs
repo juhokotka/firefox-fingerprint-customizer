@@ -19,8 +19,12 @@ export const ProfileSyncAdapter = {
    * @param {number} userContextId
    * @param {object|null} profileDict - A FingerprintProfileDict-shaped plain
    *   object, or null to clear the profile.
+   * @returns {boolean} true if the profile was pushed to at least one live
+   *   WindowGlobal (and therefore also landed in the parent-side cache that
+   *   WindowGlobalParent::Init() replays to future windows).
    */
   syncProfileToContentProcesses(userContextId, profileDict) {
+    let pushed = false;
     for (let win of Services.wm.getEnumerator("navigator:browser")) {
       let gBrowser = win.gBrowser;
       if (!gBrowser) {
@@ -41,6 +45,7 @@ export const ProfileSyncAdapter = {
         if (wgp) {
           try {
             wgp.updateProfile(profileDict);
+            pushed = true;
           } catch (e) {
             Cu.reportError(
               `ProfileSyncAdapter: failed to sync profile to WGP for userContextId ${userContextId}: ${e}`
@@ -54,6 +59,7 @@ export const ProfileSyncAdapter = {
         }
       }
     }
+    return pushed;
   },
 
   /**

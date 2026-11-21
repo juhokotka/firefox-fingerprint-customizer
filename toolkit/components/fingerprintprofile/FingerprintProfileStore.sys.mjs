@@ -33,8 +33,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M1",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 8,
@@ -56,8 +56,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M1",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 8,
@@ -79,8 +79,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M2",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.1",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 8,
@@ -102,8 +102,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M2",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.1",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 8,
@@ -125,8 +125,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M2 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.1",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 12,
@@ -148,8 +148,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M3",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 8,
@@ -171,8 +171,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M3",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 8,
@@ -194,8 +194,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M3 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 12,
@@ -217,8 +217,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M3 Max",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 16,
@@ -240,8 +240,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Air M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 10,
@@ -263,8 +263,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 10,
@@ -286,8 +286,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M4 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 14,
@@ -309,8 +309,8 @@ const DEVICE_DATABASE = {
     {
       name: "MacBook Pro M4 Max",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 16,
@@ -332,8 +332,8 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M2",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.1",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 8,
@@ -355,8 +355,8 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M2 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.1",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 10,
@@ -378,8 +378,8 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 10,
@@ -401,8 +401,8 @@ const DEVICE_DATABASE = {
     {
       name: "Mac mini M4 Pro",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 12,
@@ -424,8 +424,8 @@ const DEVICE_DATABASE = {
     {
       name: "iMac 24-inch M3",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 8,
@@ -447,8 +447,8 @@ const DEVICE_DATABASE = {
     {
       name: "iMac 24-inch M4",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.2; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.2",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 8,
@@ -470,8 +470,8 @@ const DEVICE_DATABASE = {
     {
       name: "Mac Studio M2 Max",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.1",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 12,
@@ -493,8 +493,8 @@ const DEVICE_DATABASE = {
     {
       name: "Mac Studio M2 Ultra",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.1",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 24,
@@ -516,8 +516,8 @@ const DEVICE_DATABASE = {
     {
       name: "Mac Pro M2 Ultra",
       platform: "MacIntel",
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5.1; rv:160.0) Gecko/20100101 Firefox/160.0",
-      oscpu: "Intel Mac OS X 26.5.1",
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:160.0) Gecko/20100101 Firefox/160.0",
+      oscpu: "Intel Mac OS X 10.15",
       appVersion: "5.0 (Macintosh)",
       navigatorPlatform: "MacIntel",
       hardwareConcurrency: 24,
@@ -541,7 +541,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Ubuntu, NVIDIA RTX 3060)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
+      userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -564,7 +564,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Ubuntu, Intel UHD 770)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
+      userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -587,7 +587,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Ubuntu, AMD RX 7600)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
+      userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -610,7 +610,7 @@ const DEVICE_DATABASE = {
     {
       name: "Linux Desktop (Fedora, NVIDIA RTX 4070)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
+      userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -633,7 +633,7 @@ const DEVICE_DATABASE = {
     {
       name: "Laptop (Ubuntu, Intel Iris Xe)",
       platform: "Linux x86_64",
-      userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
+      userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0",
       oscpu: "Linux x86_64",
       appVersion: "5.0 (X11)",
       navigatorPlatform: "Linux x86_64",
@@ -892,6 +892,14 @@ function generateRandomBytes(length) {
 export const FingerprintProfileStore = {
   _cache: new Map(),
 
+  // Containers whose Profile is known to be in the parent-side cache that
+  // WindowGlobalParent::Init() replays to every new WindowGlobal. A sync only
+  // fills that cache when a live WindowGlobal exists at the time, so this set
+  // tracks which containers still need the fallback push from
+  // _installWindowGlobalObserver().
+  _parentCachePrimed: new Set(),
+  _windowGlobalObserverInstalled: false,
+
   getAvailableDeviceTypes() {
     return Object.keys(DEVICE_DATABASE);
   },
@@ -1006,6 +1014,18 @@ export const FingerprintProfileStore = {
       screen = { ...device.screen };
       devicePixelRatio = device.devicePixelRatio;
     }
+    // macOS Firefox uses native GL (no ANGLE), so it reports vendor "Apple"
+    // and a renderer naming the GPU family. "Google Inc. (Apple)" is Chrome's
+    // ANGLE string and "Apple GPU" is Safari's, so replaying them verbatim
+    // would be a synthetic mixture. Derive a coherent chip string from the
+    // device name instead (M1/M2 Pro/M3 Max/...).
+    let webglVendor = device.webglVendor;
+    let webglRenderer = device.webglRenderer;
+    if (device.platform === "MacIntel") {
+      webglVendor = "Apple";
+      let chip = /\bM[0-9](?:\s+(?:Pro|Max|Ultra))?\b/.exec(device.name);
+      webglRenderer = chip ? `Apple ${chip[0]}` : "Apple GPU";
+    }
     return {
       type: deviceType || "",
       name: device.name,
@@ -1019,8 +1039,8 @@ export const FingerprintProfileStore = {
       doNotTrack: device.doNotTrack,
       screen,
       devicePixelRatio,
-      webglVendor: device.webglVendor,
-      webglRenderer: device.webglRenderer,
+      webglVendor,
+      webglRenderer,
       audioSampleRate: device.audioSampleRate,
       diskSizeGB: device.diskSizeGB,
       fontSet: [...device.fontSet],
@@ -1029,15 +1049,19 @@ export const FingerprintProfileStore = {
   },
 
   _generateStorage(device) {
+    // Firefox's best-effort quota is min(10% of disk, 10 GiB): the temporary
+    // storage limit is half the disk and the group limit is a fifth of that,
+    // capped at 10 GiB (see QuotaManager). For any realistic disk this is a
+    // constant 10 GiB, so diskSizeGB is no longer web-visible. The old 20–80%
+    // fraction was Chrome's semantics and produced 100–800 GB, i.e. an
+    // impossible value for Firefox.
     let diskSizeGB = device.diskSizeGB || 256;
     let diskBytes = diskSizeGB * 1024 * 1024 * 1024;
-    let quotaFraction = 0.20 + Math.random() * 0.60;
-    let quota = Math.floor(diskBytes * quotaFraction);
-    let usageMB = 5 * Math.pow(10, Math.random() * 2);
-    let usage = Math.floor(usageMB * 1024 * 1024);
-    usage = Math.min(usage, Math.floor(quota * 0.01));
-    usage = Math.max(usage, 5 * 1024 * 1024);
-    return { quota, usage };
+    let quota = Math.min(Math.floor(diskBytes * 0.10), 10 * 1024 * 1024 * 1024);
+    // usage is intentionally not spoofed: estimate().usage is scoped to the
+    // current origin, so a container-wide constant is trivially detectable by
+    // re-reading it after writing a few bytes.
+    return { quota };
   },
 
   _buildProfile(device, location, deviceType) {
@@ -1211,7 +1235,14 @@ export const FingerprintProfileStore = {
 
     // Push to content processes via PWindowGlobal IPC (synchronous — must
     // happen before any await so the profile takes effect immediately).
-    lazy.ProfileSyncAdapter.syncProfileToContentProcesses(userContextId, profileDict);
+    let pushed =
+      lazy.ProfileSyncAdapter.syncProfileToContentProcesses(userContextId, profileDict);
+    if (pushed) {
+      this._parentCachePrimed.add(userContextId);
+    } else {
+      this._parentCachePrimed.delete(userContextId);
+      this._installWindowGlobalObserver();
+    }
 
     // Also persist to disk as a backup (async, non-critical).
     try {
@@ -1255,6 +1286,7 @@ export const FingerprintProfileStore = {
       return null;
     }
     this._installDefaultProfileObserver();
+    this._installWindowGlobalObserver();
     if (this._cache.has(0)) {
       return this._cache.get(0);
     }
@@ -1279,7 +1311,15 @@ export const FingerprintProfileStore = {
       }
     }
     this._cache.set(0, stored);
-    lazy.ProfileSyncAdapter.syncProfileToContentProcesses(0, stored);
+    let pushed = lazy.ProfileSyncAdapter.syncProfileToContentProcesses(0, stored);
+    if (pushed) {
+      this._parentCachePrimed.add(0);
+    } else {
+      // No tab has a WindowGlobal yet (typical at startup), so the parent
+      // cache is still empty; the observer installed above will push this
+      // profile as soon as the first WindowGlobal for this container exists.
+      this._parentCachePrimed.delete(0);
+    }
     return stored;
   },
 
@@ -1297,5 +1337,43 @@ export const FingerprintProfileStore = {
         this.removeProfile(0).catch(Cu.reportError);
       }
     });
+  },
+
+  /**
+   * Fallback for the startup race: syncProfileToContentProcesses() can run
+   * before any tab in the container has a WindowGlobal, in which case nothing
+   * lands in the parent-side cache and WindowGlobalParent::Init() has nothing
+   * to replay to the first real document. Push the cached profile from here
+   * as soon as such a WindowGlobal appears, which also primes the parent cache
+   * for all later windows.
+   */
+  _installWindowGlobalObserver() {
+    if (this._windowGlobalObserverInstalled) {
+      return;
+    }
+    this._windowGlobalObserverInstalled = true;
+    Services.obs.addObserver(subject => {
+      let wgp = subject;
+      let bc = wgp?.browsingContext;
+      if (!bc) {
+        return;
+      }
+      let userContextId = bc.originAttributes.userContextId;
+      if (this._parentCachePrimed.has(userContextId)) {
+        return;
+      }
+      let profile = this._cache.get(userContextId);
+      if (!profile) {
+        return;
+      }
+      try {
+        wgp.updateProfile(profile);
+        this._parentCachePrimed.add(userContextId);
+      } catch (e) {
+        Cu.reportError(
+          `FingerprintProfileStore: failed to push cached profile to a new WindowGlobal: ${e}`
+        );
+      }
+    }, "window-global-created");
   },
 };

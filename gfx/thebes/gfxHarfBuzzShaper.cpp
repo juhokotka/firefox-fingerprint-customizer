@@ -1498,6 +1498,9 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
   //    the target OS's real metric values from the font metric database.
   //    This achieves true OS-masking — measureText/boundingRect return the
   //    target OS's actual values, not the host OS's values with noise.
+  //    Applied to normal style only: the database has no style axis, so
+  //    substituting bold/italic with regular widths would be trivially
+  //    detectable; those styles fall back to Layer 2 on the host em grid.
   //
   // 2. Per-glyph perturbation (fallback/overlay): When target OS metric
   //    data is unavailable for a font/codepoint, apply a deterministic
@@ -1522,7 +1525,6 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
               : gfxFontMetricDatabase::PlatformToOS(targetPlatform);
 
       // Get the font family name for metric lookup
-      gfxFontEntry* entry = GetFont()->GetFontEntry();
       nsAutoCString fontFamily;
       if (targetOS != gfxFontMetricDatabase::TargetOS::None) {
         nsCString family = entry->FamilyName();
@@ -1560,6 +1562,30 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
       // Get font size for design-unit → pixel conversion
       // The font's adjusted size is in device pixels
       float fontSizePx = GetFont()->GetAdjustedSize();
+
+      // The metric database has no style axis yet: regular, bold and italic
+      // share one advance row, so substituting metrics for a non-normal style
+      // would collapse bold/italic widths onto regular and hand detectors a
+      // one-line "measureText(bold) == measureText(regular)" test. Restrict
+      // Layer 1 to normal style; other styles keep the host advance and only
+      // receive the Layer 2 residual on the host em grid.
+      const bool normalStyle = style->IsNormalStyle();
+      uint32_t styleSalt = 0;
+      if (!normalStyle) {
+        // Coarse style discriminator for the residual key: different weight
+        // classes, slants and stretches must never share a residual.
+        if (!style->style.IsNormal()) {
+          styleSalt |= 1u;
+        }
+        if (!style->width.IsNormal()) {
+          styleSalt |= 2u;
+        }
+        if (style->weight < FontWeight::NORMAL) {
+          styleSalt |= 4u;
+        } else if (style->weight > FontWeight::NORMAL) {
+          styleSalt |= 8u;
+        }
+      }
 
       uint32_t numGlyphs;
       hb_glyph_position_t* glyphPositions =
@@ -1612,9 +1638,16 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
         if (i + 1 < numGlyphs && glyphInfos[i + 1].cluster == cluster) {
           singletonCluster = false;
         }
-        uint32_t clusterEnd =
-            (i + 1 < numGlyphs) ? glyphInfos[i + 1].cluster : aLength;
-        if (clusterEnd != cluster + 1) {
+        // Verify this glyph covers exactly one input character. HarfBuzz
+        // returns RTL runs in visual order — the buffer is only reversed after
+        // this loop — so cluster values decrease there and the adjacent glyph
+        // to compare against is the previous one, not the next. aLength is the
+        // sentinel at the logical end of the run in both directions.
+        uint32_t adjacentCluster =
+            isRightToLeft
+                ? (i > 0 ? glyphInfos[i - 1].cluster : aLength)
+                : (i + 1 < numGlyphs ? glyphInfos[i + 1].cluster : aLength);
+        if (adjacentCluster != cluster + 1) {
           // Ligature spanning several codepoints, surrogate pair, or a
           // reordered cluster.
           singletonCluster = false;
@@ -1627,8 +1660,10 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
         uint32_t gridUpem = hostGridUpem;
 
         // Layer 1: Try metric substitution from the target OS database
+        // (normal style only; see the style gate above).
         if (targetOS != gfxFontMetricDatabase::TargetOS::None &&
-            hasCodepoint && !fontFamily.IsEmpty() && canSpoofAdvance) {
+            hasCodepoint && !fontFamily.IsEmpty() && normalStyle &&
+            canSpoofAdvance) {
           uint32_t targetUnitsPerEm = 0;
           mozilla::Maybe<int32_t> targetAdvance =
               gfxFontMetricDatabase::GetAdvanceWidth(
@@ -1669,7 +1704,7 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
         if (profileState.hasSeed && canSpoofAdvance && gridUpem != 0) {
           uint32_t cpKey = hasCodepoint ? codepoint : glyphInfos[i].codepoint;
           int32_t jitterDU = gfxTextFingerprint::GetAdvanceJitterDU(
-              profileState, fontFamily, cpKey, gridUpem);
+              profileState, fontFamily, cpKey, gridUpem, styleSalt);
           if (jitterDU != 0) {
             int64_t delta =
                 (int64_t(jitterDU) * int64_t(FloatToFixed(fontSizePx))) /
