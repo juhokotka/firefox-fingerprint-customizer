@@ -51,7 +51,7 @@ Traditional privacy browsers (Tor Browser, LibreWolf with RFP) pursue a **unifor
 |         Shared storage across tabs        | **Storage partitioned** by `userContextId` |
 |            Binary on/off switch           |  Two modes: **Normal** vs **Privacy Mode** |
 
-Each container gets its own **device fingerprint (hardware + storage estimate), location, and noise seed (Canvas/WebGL/Text)** — persisted across sessions, isolated at the process level.
+Each container gets its own **device fingerprint (hardware + storage estimate), location, and noise seed (Canvas/WebGL/Text)** — persisted across sessions, with cookies, storage and cache partitioned per container.
 
 ---
 
@@ -68,22 +68,22 @@ Each container carries an independent `FingerprintProfile` with a complete devic
 
 | Surface              | Example                                           | Source                               |
 | -------------------- | ------------------------------------------------- | ------------------------------------ |
-| User Agent           | `Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5...)` | `profile.device.userAgent`           |
+| User Agent           | `Mozilla/5.0 (Macintosh; Intel Mac OS X 26.5; rv:160.0) Gecko/20100101 Firefox/160.0` | `profile.device.userAgent` |
 | Platform             | `MacIntel` / `Win32` / `Linux x86_64`             | `profile.device.platform`            |
-| OS CPU               | `Intel Mac OS X 14.5`                             | `profile.device.oscpu`               |
-| Screen               | `2560 × 1440`, `pixelDepth: 30` (laptop: fixed; desktop: randomized) | `profile.device.screen` |
-| Hardware Concurrency | `8` / `10` / `12` / `16`                          | `profile.device.hardwareConcurrency` |
-| Touch Points         | `0` (desktop) / `5` / `10` (mobile)               | `profile.device.maxTouchPoints`      |
-| Device Pixel Ratio   | `2.0` (Retina) / `1.0` / `1.25`                   | `profile.device.devicePixelRatio`    |
+| OS CPU               | `Intel Mac OS X 26.5`                             | `profile.device.oscpu`               |
+| Screen               | `2560 × 1600`, `pixelDepth: 30` (laptop: fixed; desktop: randomized) | `profile.device.screen` |
+| Hardware Concurrency | `8` / `10` / `12` / `14` / `16` / `24`             | `profile.device.hardwareConcurrency` |
+| Touch Points         | `0` (every bundled device is a laptop or desktop) | `profile.device.maxTouchPoints`      |
+| Device Pixel Ratio   | `2.0` (Retina) / `1.5` / `1.25` / `1.0`           | `profile.device.devicePixelRatio`    |
 | WebGL Vendor         | `Google Inc. (Apple)`                             | `profile.device.webglVendor`         |
 | WebGL Renderer       | `Apple GPU`                                       | `profile.device.webglRenderer`       |
 | Font Set             | Per-OS stock roster (see `FontRosterData.sys.mjs`) | `profile.device.fontSet`             |
 | Media Devices        | Microphone, Camera, Speakers                      | `profile.device.mediaDevices`        |
 | Audio Sample Rate    | `44100` / `48000`                                 | `profile.device.audioSampleRate`     |
-| Disk Size            | `256` / `512` / `1024` GB                         | `profile.device.diskSizeGB`          |
+| Disk Size            | `256` / `500` / `512` / `1000` / `1024` / `2000` GB | `profile.device.diskSizeGB`      |
 | Storage Estimate     | `128 GB` quota / `47 MB` usage                    | `profile.storage.quota` / `profile.storage.usage` |
 
-The claimed **Firefox version** is aligned with the current **latest stable** release (e.g. `Firefox/153.0`), not frozen at an older one. An out-of-date UA is itself a fingerprint signal — it triggers "your browser is out of date" detection and makes the profile statistically rare. Presenting the latest stable keeps the claimed version as close as possible to the (much newer) engine, minimizing both out-of-date warnings and feature-mismatch detection.
+The claimed **Firefox version** is pinned in each device profile — the current data reports `Firefox/160.0` (see `FingerprintProfileStore.sys.mjs`). An out-of-date UA is itself a fingerprint signal: it triggers "your browser is out of date" detection and makes the profile statistically rare. When the engine baseline moves, update the device UA strings together with the device database instead of leaving them frozen at an older release.
 
 **Storage estimate** — `navigator.storage.estimate()` reports a `quota` derived from the device's `diskSizeGB` (20–80%, simulating realistic free-space variation) and an `usage` that is an independent log-uniform 5–500 MB value (simulating per-site storage use; capped at 1% of `quota`). Both persist per container, stable across sessions, and report identically from main thread and workers. Storage spoofing lives in the device layer because `quota` derives from the device's disk size — it is a device-property API surface, not a separate random dimension.
 
@@ -151,7 +151,7 @@ Text perturbation alone hides the *exact* machine metrics but preserves the host
 
 | Target OS  | Source                                                                          |
 | ---------- | ------------------------------------------------------------------------------- |
-| **macOS**  | Generated locally at build time from the host's system fonts via `fonttools` (no Apple font data committed to the repo) |
+| **macOS**  | Checked-in metric JSON (`browser/fonts/font_metrics_macos.json`), generated from the host's system fonts with `tools/extract_font_metrics.py` (fonttools). Regenerate on macOS when the target font set changes. |
 | **Windows**| Open-source metric-compatible fonts (Carlito → Calibri, Liberation → Arial/Times, etc.) |
 | **Linux**  | Open-source metric-compatible fonts (Liberation, Noto, etc.)                   |
 
@@ -159,9 +159,11 @@ Text perturbation alone hides the *exact* machine metrics but preserves the host
 
 **Cross-OS font mapping** — A name-mapping table (`gfxFontMetricDatabase::MapFontFamily`) translates between equivalent family names across platforms (e.g. `Segoe UI` ↔ `Helvetica Neue` ↔ `DejaVu Sans`), so a request for "Segoe UI" on a macOS host resolves to the correct target-OS metric record.
 
+**Visibility is stricter than mapping** — `IsFontAllowedByProfile` delegates to `IsFontInTargetRoster`, a strict membership test against `device.fontSet`. Unlike the metric mapping, the visibility path deliberately does **not** map host families into the target OS, so a `local()` probe cannot enumerate a font that a real machine of the spoofed OS would not have.
+
 **Font enumeration consistency (Gap 3)** — Advanced detectors probe `@font-face { src: local('Segoe UI') }` and `document.fonts.check()` to enumerate the *installed* font roster. To keep "font exists" and "font metrics" in sync:
 
-- When a container spoofs a non-host OS and a `local()` probe names a font that doesn't exist on the host, `CoreTextFontList::LookupLocalFont` substitutes a metric-compatible macOS font (e.g. Helvetica Neue) but **labels the entry with the original probe name** (e.g. "Segoe UI"). This makes the probe resolve successfully while the metric hooks below look up the target-OS metrics.
+- When a container spoofs a non-host OS and a `local()` probe names a font that doesn't exist on the host, `gfxPlatformFontList::LookupLocalFont` substitutes a metric-compatible host font (e.g. `Segoe UI` → Helvetica Neue, `Consolas` → Menlo) but **labels the entry with the original probe name** (e.g. "Segoe UI"). This makes the probe resolve successfully while the metric hooks below look up the target-OS metrics.
 - All four metric-spoofing call sites (shaping advance widths, `gfxFont::Measure`, `gfxTextRun` CSS units, Canvas `TextMetrics`) key off the font's **entry name** (`gfxFontEntry::Name()`, which holds the original probe name) as a fallback when the family name (overwritten to the `@font-face` alias) doesn't map in the DB. This ensures aliased probes like `@font-face { font-family: "probe"; src: local("Segoe UI") }` resolve to spoofed Segoe UI metrics, not the substitute's real Mac metrics.
 
 ### Screen Resolution Handling
@@ -176,7 +178,7 @@ A device's screen resolution is treated differently depending on whether it has 
 
 **Why this matters:** A MacBook Air M1 has the same 2560×1600 screen whether it's in Tokyo or Berlin. Randomizing its resolution would produce a combination that exists on **no real device**, making the fingerprint trivially detectable as synthetic. Conversely, a Mac mini has no built-in display — its resolution depends entirely on the external monitor the user connects, so fixing it to a single value would narrow the fingerprint population unrealistically.
 
-**Implementation:** During profile generation, `_deviceToDict` checks `deviceHasBuiltInDisplay()` (name-based: MacBook/iMac/Laptop → true, all others → false). For desktops, a random entry is picked from `EXTERNAL_DISPLAYS` (per-OS pool of common monitor resolutions with matching `devicePixelRatio`, `pixelDepth`, and `colorDepth`). The `availTop`/`availHeight` chrome is computed from the OS (macOS menu bar = 23–24 px, Windows taskbar = 40 px, Linux top bar = 24 px). The `screen` and `devicePixelRatio` fields in `DEVICE_DATABASE` for desktop entries serve only as fallback defaults and are always overridden.
+**Implementation:** During profile generation, `_deviceToDict` checks `deviceHasBuiltInDisplay()` (name-based: MacBook/iMac/Laptop → true, all others → false). For desktops, a random entry is picked from `EXTERNAL_DISPLAYS` (per-OS pool of common monitor resolutions with matching `devicePixelRatio`, `pixelDepth`, and `colorDepth`). The `availTop`/`availHeight` chrome is computed from the OS (macOS/Linux top bar = 23–24 px, Windows taskbar = 40 px). The `screen` and `devicePixelRatio` fields in `DEVICE_DATABASE` for desktop entries serve only as fallback defaults and are always overridden.
 
 ### Storage Isolation
 
@@ -184,8 +186,8 @@ Built on Firefox's native **Containers** (`ContextualIdentityService`):
 
 - Each container has a unique `userContextId`
 - **Cookies, localStorage, IndexedDB, cache, network cache** — all partitioned by `userContextId`
-- Content processes are isolated by container (Fission-compatible)
-- Geolocation API returns `PERMISSION_DENIED` in Privacy Mode
+- Process isolation follows Firefox's site isolation (Fission); a container is not a separate process boundary by itself.
+- Geolocation is denied with `PERMISSION_DENIED` for profiles whose `geolocation` field is `blocked` (the default for new container profiles; the editor can switch it to `allowed`).
 
 ### Two Modes, Not One
 
@@ -250,15 +252,15 @@ Switch instantly via the **container button** next to the URL bar.
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  gfxFontMetricDatabase (Target-OS Metric DB)                 │
-│  - font_metrics_{macos,windows,linux}.json (generated)       │
+│  - font_metrics_{macos,windows,linux}.json (checked in)      │
 │  - MapFontFamily: cross-OS name equivalence                  │
 │  - GetAdvanceWidth / GetFontMetrics (design-unit → px)       │
 └────────────────────────────┬─────────────────────────────────┘
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  CoreTextFontList::LookupLocalFont (Gap 3: Font Enumeration) │
-│  - local('Segoe UI') probe → substitute macOS font           │
+│  gfxPlatformFontList::LookupLocalFont (Gap 3: local() probes) │
+│  - local('Segoe UI') probe → metric-compatible host font     │
 │  - Entry labeled with original probe name (metric sync)      │
 └────────────────────────────┬─────────────────────────────────┘
                              │
@@ -339,28 +341,24 @@ Building from source is the way to go if you want to modify the code, debug, or 
 
 #### Prerequisites
 
-- **macOS 11+** (Apple Silicon or Intel), **Linux**, or **Windows 10+**
+- **macOS 10.15+** (Intel) or **macOS 11+** (Apple Silicon), **Linux**, or **Windows 10+**
 - [Mozilla build dependencies](https://firefox-source-docs.mozilla.org/setup/macos_build.html)
-- Python 3.8+, Rust toolchain, Ninja
-- ~20 GB free disk space
+- Python 3.10+, Rust toolchain, Ninja
+- ~35 GB free disk space (the full build, including debug info, can exceed this)
 
 #### Build
 
 ```bash
 # Clone the repository
 git clone https://github.com/juhokotka/firefox-fingerprint-customizer.git
-cd firefox-fingerprint-customizer/firefox-main
+cd firefox-fingerprint-customizer
 
 # Bootstrap dependencies (first time only)
 ./mach bootstrap
 
-# Create a Mozconfig (first time only)
-cat > mozconfig << 'EOF'
-ac_add_options --enable-application=browser
-ac_add_options --disable-debug
-ac_add_options --enable-optimize
-ac_add_options --enable-audit-allocs
-EOF
+# Review the mozconfig shipped with the repository. It already disables the
+# crash reporter; only edit it if you need a different build configuration.
+cat mozconfig
 
 # Build (first build takes ~30-60 min; incremental builds are faster)
 ./mach build
@@ -440,8 +438,8 @@ In Privacy Mode, `nsRFPService::ShouldResistFingerprinting()` returns `true` for
 | `Element.offsetWidth`             | `gfxHarfBuzzShaper.cpp`          | `profile.noise.textSeed` + OS metric DB         |
 | `TextMetrics` vertical fields     | `gfxFont.cpp` / `CanvasRenderingContext2D.cpp` | OS metric DB (ascent/descent/xHeight) |
 | CSS `ch` / `ex` units             | `gfxTextRun.cpp`                 | OS metric DB (zeroWidth / xHeight)              |
-| `@font-face { src: local() }`     | `CoreTextFontList.cpp`           | Font roster substitution (Gap 3)                |
-| `document.fonts.check()`          | `CoreTextFontList.cpp`           | Font roster substitution (Gap 3)                |
+| `@font-face { src: local() }`     | `gfxPlatformFontList.cpp`        | Font roster substitution (Gap 3)                |
+| `document.fonts.check()`          | `gfxPlatformFontList.cpp`        | Font roster substitution (Gap 3)                |
 | `navigator.storage.estimate()`    | `StorageManager.cpp`             | `profile.storage.quota` / `profile.storage.usage` |
 | `AudioContext.sampleRate`         | `AudioContext.cpp`               | `profile.device.audioSampleRate` |
 | `Intl.DateTimeFormat`             | `browser.js` (`_applyOverrides`) | `profile.location.timezone`      |
@@ -457,7 +455,7 @@ In Privacy Mode, `nsRFPService::ShouldResistFingerprinting()` returns `true` for
 | -------------------------------------------------------- | ------- | ---------------------------------------------- |
 | `privacy.browser.containerMode`                          | `false` | Master switch for Privacy Mode                 |
 | `privacy.userContext.enabled`                            | `false` | Enable Firefox container tabs                  |
-| `privacy.userContext.ui.enabled`                         | `false` | Show container UI in new-tab button            |
+| `privacy.userContext.ui.enabled`                         | `false` | Show container UI in the URL bar               |
 | `privacy.fingerprint.profileMode`                        | `false` | Enable per-container fingerprint spoofing      |
 | `privacy.userContext.newTabContainerOnLeftClick.enabled` | `false` | Left-click new-tab button opens container menu |
 
@@ -488,8 +486,8 @@ unrelated upstream files.
 
 | Feature | Removed paths | Why | Seams left behind |
 | --- | --- | --- | --- |
-| New Tab Page (Activity Stream) | `browser/extensions/newtab` (15 MB)<br>`browser/components/newtab` implementation files | Default recommendations, sponsored tiles, remote feeds, its own telemetry ping and a privileged about: page that loaded on every new tab. | `browser/components/newtab` keeps five small files: `AboutNewTabRedirector.sys.mjs` (resolves `about:newtab` / `about:home` to the blank tab), `AboutHomeStartupCache.sys.mjs` (no-op), `AboutNewTabComponents.sys.mjs` and `SponsorProtection.sys.mjs` (still imported by the address bar and search UI), plus `components.conf` / `moz.build`.<br>`browser/modules/AboutNewTab.sys.mjs` is now a neutral shim.<br>`browser/actors/{moz.build,BrowserProcessChild.sys.mjs}` no longer reference the removed actors. |
-| Normandy | `toolkit/components/normandy` | Remote configuration and experiment delivery; not used by this product. | `toolkit/components/moz.build`, `browser/moz.configure` (`MOZ_NORMANDY = False`), `toolkit/components/glean/metrics_index.py`. |
+| New Tab Page (Activity Stream) | `browser/extensions/newtab` (15 MB)<br>`browser/components/newtab` implementation files | Default recommendations, sponsored tiles, remote feeds, its own telemetry ping and a privileged about: page that loaded on every new tab. | `browser/components/newtab` keeps seven small files: `AboutNewTabRedirector.sys.mjs` (resolves `about:newtab` / `about:home` to the blank tab), `AboutHomeStartupCache.sys.mjs` (no-op), `AboutNewTabResourceMapping.sys.mjs` (no-op add-on version used by ASRouter targeting), `AboutNewTabComponents.sys.mjs` and `SponsorProtection.sys.mjs` (still imported by the address bar and search UI), plus `components.conf` / `moz.build`.<br>`browser/modules/AboutNewTab.sys.mjs` is now a neutral shim.<br>`browser/actors/{moz.build,BrowserProcessChild.sys.mjs}` no longer reference the removed actors. |
+| Normandy | `toolkit/components/normandy` | Remote configuration and experiment delivery; not used by this product. | `toolkit/components/moz.build`, `browser/moz.configure` (`MOZ_NORMANDY = False`), `toolkit/components/glean/metrics_index.py`.<br>Nimbus and FirstStartup still referenced Normandy internals, so their UUID fallback now uses `Services.uuid` and the first-startup hook no longer calls Normandy: `toolkit/components/utils/ClientEnvironment.sys.mjs`, `toolkit/components/nimbus/lib/ExperimentManager.sys.mjs`, `browser/components/nimbus/AboutStudies.sys.mjs`, `toolkit/modules/FirstStartup.sys.mjs`. |
 | Crash reporter | build configuration only | No crash submission to Mozilla. | `mozconfig`: `ac_add_options --disable-crashreporter`. Note: local minidumps are no longer written, so keep this off only if you do not need native crash debugging. |
 | Background reporting and recommendations | preferences only | Disables data submission, experiments, region lookups, MITM priming, Contile, Merino, Firefox Suggest, AI and Smart Window surfaces. | The `Privacy Browser: downstream defaults` block at the end of `browser/app/profile/firefox.js`. |
 
@@ -546,7 +544,7 @@ be disabled by preference instead of deleted.
 ## Project Structure
 
 ```
-firefox-main/
+firefox-fingerprint-customizer/
 ├── browser/
 │   ├── base/content/
 │   │   ├── browser-init.js              # Container panel UI & switching logic
@@ -591,11 +589,11 @@ firefox-main/
 │   ├── gfxTextFingerprint.{h,cpp}       # Per-container text seed storage (FNV-1a hash, thread-safe)
 │   ├── gfxHarfBuzzShaper.cpp            # Two-layer metric spoofing: OS substitution + per-glyph perturbation
 │   ├── gfxFontMetricDatabase.{h,cpp}    # Target-OS metric DB + cross-OS font name mapping
-│   ├── CoreTextFontList.cpp             # Gap 3: local() probe substitution (font enumeration consistency)
+│   ├── CoreTextFontList.cpp             # macOS font lookup backend (LookupLocalFontInternal)
 │   ├── gfxFont.h                        # userContextId threading (gfxShapedText, WordCacheKey)
 │   ├── gfxFont.cpp                      # Vertical metric spoofing (gfxFont::Measure)
 │   ├── gfxTextRun.{h,cpp}               # userContextId propagation + CSS ch/ex spoofing
-│   ├── gfxPlatformFontList.cpp          # Profile fontSet whitelist (IsFontAllowedByProfile)
+│   ├── gfxPlatformFontList.cpp          # Visibility gate + local() probe substitution (Gap 3)
 │   └── moz.build                        # Build config (gfxTextFingerprint + gfxFontMetricDatabase added)
 ├── layout/base/
 │   └── nsPresContext.{h,cpp}            # GetUserContextId() override (reads BrowsingContext OriginAttributes)

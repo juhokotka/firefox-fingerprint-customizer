@@ -128,7 +128,7 @@ child:
   // Push fingerprint Profile from parent to content process. The content
   // process caches it keyed by userContextId for all RFP interception points.
   // A null profile clears the cache for this WindowGlobal's container.
-  async UpdateProfile(ProfileArgs? profile);
+  async UpdateProfile(ProfileArgs? profile, bool isInitialSync);
 
 both:
   async RawMessage(JSActorMessageMeta aMetadata, JSIPCValue aData,

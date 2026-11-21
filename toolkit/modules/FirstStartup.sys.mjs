@@ -9,7 +9,6 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
-  Normandy: "resource://normandy/Normandy.sys.mjs",
   TaskScheduler: "resource://gre/modules/TaskScheduler.sys.mjs",
 });
 
@@ -67,15 +66,6 @@ export var FirstStartup = {
     let promises = [];
 
     let normandyInitEndTime = null;
-    let normandyInitPromise = null;
-    if (AppConstants.MOZ_NORMANDY) {
-      normandyInitPromise = lazy.Normandy.init({ runAsync: false }).finally(
-        () => {
-          normandyInitEndTime = ChromeUtils.now();
-        }
-      );
-      promises.push(normandyInitPromise);
-    }
 
     let deleteTasksEndTime = null;
     if (AppConstants.MOZ_UPDATE_AGENT) {

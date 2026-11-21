@@ -70,6 +70,47 @@ class gfxTextFingerprint {
   static nsCString GetTargetPlatform(uint32_t aUserContextId);
 
   /**
+   * Snapshot of the per-container state needed for text shaping, fetched with
+   * a single lock acquisition (shaping runs once per word, so two independent
+   * getters plus an nsCString copy is avoidable overhead).
+   */
+  struct ProfileState {
+    uint32_t seedHash = 0;
+    nsCString targetPlatform;
+    // Full 128-bit seed material (expanded from the profile's textSeed).
+    // Used as the key of the per-(family, codepoint) advance PRF; seedHash is
+    // only a 32-bit value and must not be used for that purpose, as it is
+    // small enough to brute-force offline from observed residuals.
+    uint8_t textSeed[16] = {0};
+    bool hasSeed = false;
+  };
+  static ProfileState GetProfileState(uint32_t aUserContextId);
+
+  /**
+   * Deterministic per-(family, codepoint) advance jitter, in integer font
+   * design units (em grid of aUnitsPerEm). Keyed with the container's full
+   * 128-bit textSeed via SipHash-2-4, so:
+   *  - the same codepoint gets different residuals in different fonts
+   *    (family is part of the PRF input);
+   *  - the residual cannot be reproduced from the 32-bit seedHash;
+   *  - the perturbation lands on the font's design-unit grid, which keeps the
+   *    shaped advance exactly proportional to font size (W(2s) == 2W(s)),
+   *    unlike a fixed pixel delta.
+   *
+   * Returns 0 when the container has no seed or the em size is unusable.
+   */
+  static int32_t GetAdvanceJitterDU(const ProfileState& aState,
+                                    const nsACString& aFontFamily,
+                                    uint32_t aCodepoint, uint32_t aUnitsPerEm);
+
+  /**
+   * True when privacy.fingerprint.debugFontProfile is enabled; used to gate
+   * diagnostics that need to print values (DebugLogOnce handles its own
+   * dedup/rate limit).
+   */
+  static bool DiagnosticsEnabled();
+
+  /**
    * Monotonically increasing revision for a container's profile state.
    * Bumped by SetSeed/ClearSeed; part of the shaped-word cache key so that
    * stale word caches (with the old metrics) cannot be reused after a

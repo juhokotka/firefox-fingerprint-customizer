@@ -66,7 +66,7 @@ class GetProfilePlatformRunnable final : public WorkerMainThreadRunnable {
     WorkerPrivate* workerPrivate = mWorkerRef->Private();
     uint32_t userContextId =
         workerPrivate->GetOriginAttributes().mUserContextId;
-    if (userContextId != 0) {
+    {
       ProfileArgs profile;
       if (WindowGlobalChild::GetProfileForUserContextId(
               userContextId, &profile) &&
@@ -102,7 +102,7 @@ class GetProfileAppVersionRunnable final : public WorkerMainThreadRunnable {
     WorkerPrivate* workerPrivate = mWorkerRef->Private();
     uint32_t userContextId =
         workerPrivate->GetOriginAttributes().mUserContextId;
-    if (userContextId != 0) {
+    {
       ProfileArgs profile;
       if (WindowGlobalChild::GetProfileForUserContextId(
               userContextId, &profile) &&
@@ -138,7 +138,7 @@ class GetProfileHwConcurrencyRunnable final : public WorkerMainThreadRunnable {
     WorkerPrivate* workerPrivate = mWorkerRef->Private();
     uint32_t userContextId =
         workerPrivate->GetOriginAttributes().mUserContextId;
-    if (userContextId != 0) {
+    {
       ProfileArgs profile;
       if (WindowGlobalChild::GetProfileForUserContextId(
               userContextId, &profile) &&
@@ -258,9 +258,12 @@ void WorkerNavigator::GetAppVersion(nsString& aAppVersion,
   // profileMode: honor the per-container appVersion override.
   nsString profileAppVersion;
   bool found = false;
-  RefPtr<GetProfileAppVersionRunnable> runnable =
-      new GetProfileAppVersionRunnable(workerPrivate, profileAppVersion, found);
-  runnable->Dispatch(workerPrivate, Canceling, aRv);
+  if (WindowGlobalChild::HasProfileForUserContextId(
+          workerPrivate->GetOriginAttributes().mUserContextId)) {
+    RefPtr<GetProfileAppVersionRunnable> runnable = new GetProfileAppVersionRunnable(
+        workerPrivate, profileAppVersion, found);
+    runnable->Dispatch(workerPrivate, Canceling, aRv);
+  }
   if (found) {
     aAppVersion = std::move(profileAppVersion);
     return;
@@ -291,9 +294,12 @@ void WorkerNavigator::GetPlatform(nsString& aPlatform, CallerType aCallerType,
   // profileMode: honor the per-container platform override.
   nsString profilePlatform;
   bool found = false;
-  RefPtr<GetProfilePlatformRunnable> runnable =
-      new GetProfilePlatformRunnable(workerPrivate, profilePlatform, found);
-  runnable->Dispatch(workerPrivate, Canceling, aRv);
+  if (WindowGlobalChild::HasProfileForUserContextId(
+          workerPrivate->GetOriginAttributes().mUserContextId)) {
+    RefPtr<GetProfilePlatformRunnable> runnable = new GetProfilePlatformRunnable(
+        workerPrivate, profilePlatform, found);
+    runnable->Dispatch(workerPrivate, Canceling, aRv);
+  }
   if (found) {
     aPlatform = std::move(profilePlatform);
     return;
@@ -343,7 +349,7 @@ class GetUserAgentRunnable final : public WorkerMainThreadRunnable {
     // fingerprint Profile before falling back to the generic path.
     uint32_t userContextId =
         workerPrivate->GetOriginAttributes().mUserContextId;
-    if (userContextId != 0) {
+    {
       ProfileArgs profile;
       if (WindowGlobalChild::GetProfileForUserContextId(
               userContextId, &profile) &&
@@ -393,7 +399,10 @@ uint64_t WorkerNavigator::HardwareConcurrency() const {
 
   // profileMode: return the per-container hardwareConcurrency from the
   // fingerprint Profile, so the worker value matches the main-thread value.
-  if (workerPrivate->GetOriginAttributes().mUserContextId != 0) {
+  // Only pay for the cross-thread round trip when a Profile actually exists;
+  // the default profile (userContextId 0) counts when profileMode is on.
+  if (WindowGlobalChild::HasProfileForUserContextId(
+          workerPrivate->GetOriginAttributes().mUserContextId)) {
     // Fetch the profile value synchronously on the main thread.
     uint64_t profileVal = 0;
     bool found = false;

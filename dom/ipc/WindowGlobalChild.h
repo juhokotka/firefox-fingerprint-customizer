@@ -230,7 +230,8 @@ class WindowGlobalChild final : public WindowGlobalActor,
       const nsCString& aToolName, NotNull<StructuredCloneData*> aInput,
       InvokeModelContextToolResolver&& aResolver);
 
-  mozilla::ipc::IPCResult RecvUpdateProfile(const Maybe<ProfileArgs>& aProfile);
+  mozilla::ipc::IPCResult RecvUpdateProfile(const Maybe<ProfileArgs>& aProfile,
+                                            const bool& aIsInitialSync);
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
@@ -241,6 +242,9 @@ public:
   // Returns true if a Profile was found for the given userContextId.
   static bool GetProfileForUserContextId(uint32_t aUserContextId,
                                          ProfileArgs* aOutProfile);
+  // Cheap presence check for worker-thread getters that would otherwise pay
+  // for a cross-thread round trip on every property read.
+  static bool HasProfileForUserContextId(uint32_t aUserContextId);
   static void ClearProfileForUserContextId(uint32_t aUserContextId);
 
   // ── Per-container font roster checks ─────────────────────────────────

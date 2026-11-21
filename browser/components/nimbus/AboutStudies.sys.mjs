@@ -9,7 +9,6 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   NimbusTelemetry: "resource://nimbus/lib/Telemetry.sys.mjs",
-  RecipeRunner: "resource://normandy/lib/RecipeRunner.sys.mjs",
   UnenrollmentCause: "resource://nimbus/lib/ExperimentManager.sys.mjs",
 });
 
@@ -108,8 +107,7 @@ ChromeUtils.defineLazyGetter(
        * content processes safely.
        */
       async getStudiesEnabled() {
-        await lazy.RecipeRunner.initializedPromise.promise;
-        return lazy.RecipeRunner.enabled && lazy.gOptOutStudiesEnabled;
+        return false;
       }
 
       async removeMessagingSystemExperiment(slug) {

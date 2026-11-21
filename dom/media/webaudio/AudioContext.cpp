@@ -156,7 +156,7 @@ static float GetSampleRateForAudioContext(bool aIsOffline, float aSampleRate,
     BrowsingContext* bc = aWindow->GetBrowsingContext();
     if (bc) {
       uint32_t userContextId = bc->OriginAttributesRef().mUserContextId;
-      if (userContextId != 0) {
+      {
         ProfileArgs profile;
         if (WindowGlobalChild::GetProfileForUserContextId(userContextId,
                                                           &profile) &&

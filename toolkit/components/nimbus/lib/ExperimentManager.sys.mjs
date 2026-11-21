@@ -14,7 +14,6 @@ const lazy = XPCOMUtils.declareLazy({
   NimbusEnrollments: "resource://nimbus/lib/Enrollments.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   NimbusTelemetry: "resource://nimbus/lib/Telemetry.sys.mjs",
-  NormandyUtils: "resource://normandy/lib/NormandyUtils.sys.mjs",
   PrefFlipsFeature: "resource://nimbus/lib/PrefFlipsFeature.sys.mjs",
   PrefUtils: "moz-src:///toolkit/modules/PrefUtils.sys.mjs",
   EnrollmentsContext:
@@ -1420,7 +1419,7 @@ export class ExperimentManager {
     }
 
     while (Object.keys(branchValues).length < branches.length + includeNot) {
-      const id = lazy.NormandyUtils.generateUuid();
+      const id = Services.uuid.generateUUID().toString().replace(/[{}]/g, "");
       const enrolls = await lazy.Sampling.bucketSample(
         [id, namespace],
         start,

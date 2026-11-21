@@ -303,7 +303,10 @@ void WindowGlobalParent::Init() {
     uint32_t userContextId = BrowsingContext()->OriginAttributesRef().mUserContextId;
     ProfileArgs cachedProfile;
     if (GetCachedProfile(userContextId, &cachedProfile)) {
-      (void)SendUpdateProfile(Some(cachedProfile));
+      // Initial sync for a newly-created WindowGlobal: nothing has been
+      // rendered with the previous state in this process, so the receiver
+      // must not invalidate caches.
+      (void)SendUpdateProfile(Some(cachedProfile), true);
     }
   }
 
@@ -2861,7 +2864,7 @@ void WindowGlobalParent::UpdateProfile(
   if (aProfile.mDevice.mName.IsEmpty()) {
     RemoveCachedProfile(userContextId);
     if (CanSend()) {
-      (void)SendUpdateProfile(Maybe<ProfileArgs>());
+      (void)SendUpdateProfile(Maybe<ProfileArgs>(), false);
     }
     return;
   }
@@ -2874,7 +2877,7 @@ void WindowGlobalParent::UpdateProfile(
 
   // Push to the content process.
   if (CanSend()) {
-    (void)SendUpdateProfile(Some(profileArgs));
+    (void)SendUpdateProfile(Some(profileArgs), false);
   }
 }
 

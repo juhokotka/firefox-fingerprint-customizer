@@ -18,6 +18,7 @@
 #include "mozilla/MozPrintCallbackRunner.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/dom/AudioSession.h"
 #include "mozilla/dom/BrowserBridgeChild.h"
@@ -1441,6 +1442,11 @@ namespace {
 // stored behind a UniquePtr because its inline size exceeds the 255-byte
 // PLDHashTable entry limit (see WindowGlobalParent.cpp for the same
 // pattern on the parent side).
+// ProfileCache is read from worker threads (WorkerPrivate / OffscreenCanvas
+// font visibility checks) and written on the main thread by
+// RecvUpdateProfile, so every access must be serialized.
+static mozilla::StaticMutex sProfileCacheMutex;
+
 nsTHashMap<uint32_t, UniquePtr<ProfileArgs>>& ProfileCache() {
   static nsTHashMap<uint32_t, UniquePtr<ProfileArgs>> sCache;
   return sCache;
@@ -1450,6 +1456,7 @@ nsTHashMap<uint32_t, UniquePtr<ProfileArgs>>& ProfileCache() {
 /* static */
 bool WindowGlobalChild::GetProfileForUserContextId(
     uint32_t aUserContextId, ProfileArgs* aOutProfile) {
+  mozilla::StaticMutexAutoLock lock(sProfileCacheMutex);
   auto& cache = ProfileCache();
   auto entry = cache.Lookup(aUserContextId);
   if (!entry) {
@@ -1460,8 +1467,15 @@ bool WindowGlobalChild::GetProfileForUserContextId(
 }
 
 /* static */
+bool WindowGlobalChild::HasProfileForUserContextId(uint32_t aUserContextId) {
+  mozilla::StaticMutexAutoLock lock(sProfileCacheMutex);
+  return ProfileCache().Contains(aUserContextId);
+}
+
+/* static */
 void WindowGlobalChild::ClearProfileForUserContextId(
     uint32_t aUserContextId) {
+  mozilla::StaticMutexAutoLock lock(sProfileCacheMutex);
   ProfileCache().Remove(aUserContextId);
 }
 
@@ -1492,7 +1506,7 @@ bool WindowGlobalChild::IsFamilyInTargetRoster(
 }
 
 mozilla::ipc::IPCResult WindowGlobalChild::RecvUpdateProfile(
-    const Maybe<ProfileArgs>& aProfile) {
+    const Maybe<ProfileArgs>& aProfile, const bool& aIsInitialSync) {
   // Extract userContextId from this WindowGlobal's BrowsingContext.
   dom::BrowsingContext* bc = BrowsingContext();
   if (!bc) {
@@ -1502,8 +1516,11 @@ mozilla::ipc::IPCResult WindowGlobalChild::RecvUpdateProfile(
 
   auto& cache = ProfileCache();
   if (aProfile.isSome()) {
-    cache.InsertOrUpdate(userContextId,
-                         MakeUnique<ProfileArgs>(aProfile.ref()));
+    {
+      mozilla::StaticMutexAutoLock lock(sProfileCacheMutex);
+      cache.InsertOrUpdate(userContextId,
+                           MakeUnique<ProfileArgs>(aProfile.ref()));
+    }
     // Register text-metric spoofing state (content process side).
     // Pass both the textSeed (for perturbation) and the target platform
     // (for OS metric substitution) to the gfxTextFingerprint layer.
@@ -1521,25 +1538,37 @@ mozilla::ipc::IPCResult WindowGlobalChild::RecvUpdateProfile(
       gfxTextFingerprint::ClearSeed(userContextId);
     }
   } else {
-    cache.Remove(userContextId);
+    {
+      mozilla::StaticMutexAutoLock lock(sProfileCacheMutex);
+      cache.Remove(userContextId);
+    }
     gfxTextFingerprint::ClearSeed(userContextId);
   }
 
-  // profileMode: the container's target OS and/or roster just changed, so every
-  // artifact derived from the old Profile has to go. SetSeed/ClearSeed bumped
-  // the epoch, which makes previously cached shaped words unmatchable; the
-  // transient families and font instances still need explicit flushing, and
-  // documents must restyle/reflow to pick up the new metrics.
-  if (gfxPlatformFontList* pfl = gfxPlatformFontList::PlatformFontList(false)) {
-    pfl->ClearSpoofedFamilies(userContextId);
-  }
-  if (gfxFontCache* fontCache = gfxFontCache::GetCache()) {
-    fontCache->Flush();
-    fontCache->FlushShapedWordCaches();
-  }
-  if (dom::Document* doc = bc->GetDocument()) {
-    if (nsPresContext* pc = doc->GetPresContext()) {
-      pc->ForceReflowForFontInfoUpdate(false);
+  // profileMode: on a real Profile change the container's target OS and/or
+  // roster just changed, so every artifact derived from the old Profile has to
+  // go. SetSeed/ClearSeed bumped the epoch, which makes previously cached
+  // shaped words unmatchable; the transient families and font instances still
+  // need explicit flushing, and documents must restyle/reflow to pick up the
+  // new metrics.
+  //
+  // An initial sync only seeds a newly-created WindowGlobal (nothing has been
+  // shaped with the old state in this process), so it must not trigger the
+  // process-wide flush: doing so on every new tab/iframe would evict every
+  // container's font instances and shaped words.
+  if (!aIsInitialSync) {
+    if (gfxPlatformFontList* pfl =
+            gfxPlatformFontList::PlatformFontList(false)) {
+      pfl->ClearSpoofedFamilies(userContextId);
+    }
+    if (gfxFontCache* fontCache = gfxFontCache::GetCache()) {
+      fontCache->Flush();
+      fontCache->FlushShapedWordCaches();
+    }
+    if (dom::Document* doc = bc->GetDocument()) {
+      if (nsPresContext* pc = doc->GetPresContext()) {
+        pc->ForceReflowForFontInfoUpdate(false);
+      }
     }
   }
   return IPC_OK();

@@ -6,7 +6,9 @@
 
 #include "gfxTextFingerprint.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 #include "gfxFontMetricDatabase.h"
 #include "mozilla/Atomics.h"
@@ -24,6 +26,9 @@ static StaticMutex gTextFpLock MOZ_UNANNOTATED;
 struct ContainerTextState {
   uint32_t seedHash = 0;
   nsCString targetPlatform;
+  // Full 128-bit key material derived from the profile's textSeed.
+  uint8_t textSeed[16] = {0};
+  bool hasSeed = false;
 };
 
 static nsTHashMap<nsUint32HashKey, ContainerTextState>* gStateMap = nullptr;
@@ -55,6 +60,93 @@ static uint32_t ComputeSeedHash(const nsTArray<uint8_t>& aSeed) {
   return hash == 0 ? 1 : hash;
 }
 
+// ---------------------------------------------------------------------------
+// SipHash-2-4 (Aumasson & Bernstein), keyed PRF used to derive per-glyph
+// residuals from the full 128-bit textSeed. Self-contained to avoid depending
+// on MFBT internals; input sizes here are tiny (family + codepoint).
+// ---------------------------------------------------------------------------
+
+static inline uint64_t Rotl64(uint64_t aX, int aShift) {
+  return (aX << aShift) | (aX >> (64 - aShift));
+}
+
+#define SIPROUND(v0, v1, v2, v3)          \
+  do {                                    \
+    (v0) += (v1);                         \
+    (v1) = Rotl64((v1), 13);              \
+    (v1) ^= (v0);                         \
+    (v0) = Rotl64((v0), 32);              \
+    (v2) += (v3);                         \
+    (v3) = Rotl64((v3), 16);              \
+    (v3) ^= (v2);                         \
+    (v0) += (v3);                         \
+    (v3) = Rotl64((v3), 21);              \
+    (v3) ^= (v0);                         \
+    (v2) += (v1);                         \
+    (v1) = Rotl64((v1), 17);              \
+    (v1) ^= (v2);                         \
+    (v2) = Rotl64((v2), 32);              \
+  } while (0)
+
+static uint64_t SipHash24(const uint8_t* aData, size_t aLen, uint64_t aK0,
+                          uint64_t aK1) {
+  uint64_t v0 = aK0 ^ 0x736f6d6570736575ULL;
+  uint64_t v1 = aK1 ^ 0x646f72616e646f6dULL;
+  uint64_t v2 = aK0 ^ 0x6c7967656e657261ULL;
+  uint64_t v3 = aK1 ^ 0x7465646279746573ULL;
+
+  size_t i = 0;
+  for (; i + 8 <= aLen; i += 8) {
+    uint64_t m = 0;
+    for (int b = 0; b < 8; b++) {
+      m |= uint64_t(aData[i + b]) << (8 * b);
+    }
+    v3 ^= m;
+    SIPROUND(v0, v1, v2, v3);
+    SIPROUND(v0, v1, v2, v3);
+    v0 ^= m;
+  }
+
+  uint64_t b = uint64_t(aLen & 0xff) << 56;
+  for (size_t j = 0; i + j < aLen; j++) {
+    b |= uint64_t(aData[i + j]) << (8 * j);
+  }
+  v3 ^= b;
+  SIPROUND(v0, v1, v2, v3);
+  SIPROUND(v0, v1, v2, v3);
+  v0 ^= b;
+  v2 ^= 0xff;
+  SIPROUND(v0, v1, v2, v3);
+  SIPROUND(v0, v1, v2, v3);
+  SIPROUND(v0, v1, v2, v3);
+  SIPROUND(v0, v1, v2, v3);
+  return v0 ^ v1 ^ v2 ^ v3;
+}
+
+#undef SIPROUND
+
+// Expand an arbitrary-length profile seed into the 16 bytes of key material
+// the PRF uses. Seeds of 16+ bytes feed directly (first 16 bytes); shorter
+// seeds are XORed over a keyed 128-bit expansion so every byte of key material
+// depends on the whole seed. The entropy bound is the original seed length
+// either way; this only avoids weak low-entropy key layout.
+static void DeriveTextSeed(const nsTArray<uint8_t>& aSeed, uint8_t aOut[16]) {
+  std::memset(aOut, 0, 16);
+  size_t n = std::min<size_t>(aSeed.Length(), 16);
+  const uint8_t* data = aSeed.Elements();
+  uint64_t h0 = SipHash24(data, aSeed.Length(), 0x9e3779b97f4a7c15ULL,
+                          0xc2b2ae3d27d4eb4fULL);
+  uint64_t h1 = SipHash24(data, aSeed.Length(), 0x85ebca6b2f7c7c1dULL,
+                          0x27d4eb2f165667c5ULL);
+  for (int i = 0; i < 8; i++) {
+    aOut[i] = uint8_t(h0 >> (8 * i));
+    aOut[8 + i] = uint8_t(h1 >> (8 * i));
+  }
+  for (size_t i = 0; i < n; i++) {
+    aOut[i] ^= data[i];
+  }
+}
+
 /* static */
 void gfxTextFingerprint::SetSeed(uint32_t aUserContextId,
                                  const nsTArray<uint8_t>& aSeed,
@@ -71,6 +163,10 @@ void gfxTextFingerprint::SetSeed(uint32_t aUserContextId,
   ContainerTextState state;
   state.seedHash = hash;
   state.targetPlatform = aTargetPlatform;
+  if (!aSeed.IsEmpty()) {
+    DeriveTextSeed(aSeed, state.textSeed);
+    state.hasSeed = true;
+  }
   gStateMap->InsertOrUpdate(aUserContextId, std::move(state));
   BumpEpochLocked(aUserContextId);
 }
@@ -102,6 +198,75 @@ nsCString gfxTextFingerprint::GetTargetPlatform(uint32_t aUserContextId) {
   }
   auto entry = gStateMap->Lookup(aUserContextId);
   return entry ? nsCString(entry.Data().targetPlatform) : ""_ns;
+}
+
+/* static */
+gfxTextFingerprint::ProfileState gfxTextFingerprint::GetProfileState(
+    uint32_t aUserContextId) {
+  ProfileState state;
+  StaticMutexAutoLock lock(gTextFpLock);
+  if (!gStateMap) {
+    return state;
+  }
+  auto entry = gStateMap->Lookup(aUserContextId);
+  if (entry) {
+    state.seedHash = entry.Data().seedHash;
+    state.targetPlatform = entry.Data().targetPlatform;
+    state.hasSeed = entry.Data().hasSeed;
+    if (state.hasSeed) {
+      std::memcpy(state.textSeed, entry.Data().textSeed,
+                  sizeof(state.textSeed));
+    }
+  }
+  return state;
+}
+
+/* static */
+int32_t gfxTextFingerprint::GetAdvanceJitterDU(const ProfileState& aState,
+                                               const nsACString& aFontFamily,
+                                               uint32_t aCodepoint,
+                                               uint32_t aUnitsPerEm) {
+  if (!aState.hasSeed || aUnitsPerEm == 0) {
+    return 0;
+  }
+
+  // PRF input: normalised family name, a separator, and the codepoint in
+  // little-endian order. Family names compare case-insensitively, so fold
+  // case to keep one residual per family regardless of how it was spelled.
+  nsAutoCString msg;
+  msg.Assign(aFontFamily);
+  // ASCII case-fold: family names compare case-insensitively, so the residual
+  // must not depend on how the family happened to be spelled.
+  for (uint32_t i = 0; i < msg.Length(); i++) {
+    char c = msg.CharAt(i);
+    if (c >= 'A' && c <= 'Z') {
+      msg.SetCharAt(i, char(c + ('a' - 'A')));
+    }
+  }
+  msg.Append('\x1f');
+  uint8_t cpBytes[4] = {uint8_t(aCodepoint), uint8_t(aCodepoint >> 8),
+                        uint8_t(aCodepoint >> 16), uint8_t(aCodepoint >> 24)};
+  msg.Append(reinterpret_cast<const char*>(cpBytes), 4);
+
+  uint64_t k0 = 0;
+  uint64_t k1 = 0;
+  for (int i = 0; i < 8; i++) {
+    k0 |= uint64_t(aState.textSeed[i]) << (8 * i);
+    k1 |= uint64_t(aState.textSeed[8 + i]) << (8 * i);
+  }
+  uint64_t h = SipHash24(reinterpret_cast<const uint8_t*>(msg.get()),
+                         msg.Length(), k0, k1);
+
+  // Keep the residual on the em's design-unit grid and scale it with the font
+  // size: about +-1/256 em, so roughly the same on-screen magnitude as the
+  // old fixed 0.05px offset at typical sizes, but without breaking
+  // W(2s) == 2W(s).
+  int32_t range = int32_t(aUnitsPerEm / 256);
+  if (range < 1) {
+    range = 1;
+  }
+  uint32_t span = uint32_t(2 * range + 1);
+  return int32_t(h % span) - range;
 }
 
 /* static */
@@ -179,10 +344,9 @@ bool gfxTextFingerprint::GetSpoofedVerticalMetrics(
   return true;
 }
 
-/* static */
-void gfxTextFingerprint::DebugLogOnce(const char* aKind,
-                                      uint32_t aUserContextId,
-                                      const nsACString& aDetail) {
+// Cached read of the diagnostics pref. Returns true only when
+// privacy.fingerprint.debugFontProfile is enabled.
+static bool DebugPrefEnabled() {
   // Read by name rather than through StaticPrefs: adding an entry to
   // StaticPrefList.yaml does not necessarily regenerate the generated
   // StaticPrefList_*.h in an existing objdir, which makes the accessor miss at
@@ -197,7 +361,17 @@ void gfxTextFingerprint::DebugLogOnce(const char* aKind,
                   : 0;
     sEnabled = enabled;
   }
-  if (enabled != 1) {
+  return enabled == 1;
+}
+
+/* static */
+bool gfxTextFingerprint::DiagnosticsEnabled() { return DebugPrefEnabled(); }
+
+/* static */
+void gfxTextFingerprint::DebugLogOnce(const char* aKind,
+                                      uint32_t aUserContextId,
+                                      const nsACString& aDetail) {
+  if (!DebugPrefEnabled()) {
     return;
   }
 

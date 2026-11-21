@@ -78,7 +78,6 @@ export default [
   )),
   ...(await convertConfigurationFile("browser/components/search")),
   ...(await convertConfigurationFile("browser/components/urlbar")),
-  ...(await convertConfigurationFile("browser/extensions/newtab")),
   ...(await convertConfigurationFile(
     "browser/extensions/pictureinpicture/tests/browser"
   )),

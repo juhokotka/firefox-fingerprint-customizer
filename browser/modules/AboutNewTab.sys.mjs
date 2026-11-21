@@ -61,6 +61,10 @@ export const AboutNewTab = {
     return false;
   },
 
+  get willNotifyUser() {
+    return false;
+  },
+
   resetNewTabURL() {
     this._newTabURLOverridden = false;
     this._newTabURL = ABOUT_BLANK;

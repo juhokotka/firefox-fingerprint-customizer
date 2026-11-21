@@ -5,6 +5,7 @@
 #include "gfxHarfBuzzShaper.h"
 
 #include <algorithm>
+#include <atomic>
 
 #include "gfxContext.h"
 #include "gfxFontConstants.h"
@@ -14,6 +15,7 @@
 #include "gfxTextRun.h"
 #include "harfbuzz/hb-ot.h"
 #include "harfbuzz/hb.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/intl/String.h"
@@ -1499,14 +1501,18 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
   //
   // 2. Per-glyph perturbation (fallback/overlay): When target OS metric
   //    data is unavailable for a font/codepoint, apply a deterministic
-  //    ±0.05px perturbation from the textSeed. This hides the real machine's
-  //    exact metrics as a fallback, and adds a small per-container variation
-  //    on top of the substituted values when both are active.
+  //    design-unit residual keyed by the container's full 128-bit textSeed.
+  //    This hides the real machine's exact metrics as a fallback, and adds a
+  //    small per-container variation on top of the substituted values when
+  //    both are active. Because the residual is an integer number of design
+  //    units scaled with the font size, W(2s) == 2W(s) still holds.
   uint32_t userContextId = aShapedText->GetUserContextId();
   {
-    uint32_t seedHash = gfxTextFingerprint::GetSeedHash(userContextId);
-    nsCString targetPlatform =
-        gfxTextFingerprint::GetTargetPlatform(userContextId);
+    // Single lock acquisition for the per-word shaping data (#11).
+    gfxTextFingerprint::ProfileState profileState =
+        gfxTextFingerprint::GetProfileState(userContextId);
+    uint32_t seedHash = profileState.seedHash;
+    const nsCString& targetPlatform = profileState.targetPlatform;
 
     if (seedHash != 0 || !targetPlatform.IsEmpty()) {
       using mozilla::gfx::gfxFontMetricDatabase;
@@ -1516,9 +1522,9 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
               : gfxFontMetricDatabase::PlatformToOS(targetPlatform);
 
       // Get the font family name for metric lookup
+      gfxFontEntry* entry = GetFont()->GetFontEntry();
       nsAutoCString fontFamily;
       if (targetOS != gfxFontMetricDatabase::TargetOS::None) {
-        gfxFontEntry* entry = GetFont()->GetFontEntry();
         nsCString family = entry->FamilyName();
         fontFamily = gfxFontMetricDatabase::MapFontFamily(family, targetOS);
         // Gap 3: for substitute local() fonts, FamilyName() is the @font-face
@@ -1537,8 +1543,20 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
             fontFamily = mappedName;
           }
         }
+      } else {
+        // No target-OS mapping: still key the residual by the host family so
+        // that the same codepoint gets a different residual in different
+        // fonts instead of a single global offset.
+        fontFamily = entry->FamilyName();
       }
 
+      // Design-unit grid used for the Layer 2 residual when Layer 1 has no
+      // data for this glyph. Resolved per glyph because a substituted advance
+      // lives on the target font's em grid, not the host's.
+      uint16_t hostUpem = entry->UnitsPerEm();
+      uint32_t hostGridUpem =
+          (hostUpem > 0 && hostUpem != gfxFontEntry::kInvalidUPEM) ? hostUpem
+                                                                   : 0;
       // Get font size for design-unit → pixel conversion
       // The font's adjusted size is in device pixels
       float fontSizePx = GetFont()->GetAdjustedSize();
@@ -1581,9 +1599,36 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
         int32_t origAdvance = glyphPositions[i].x_advance;
         bool didSubstitute = false;
 
+        // Only touch 1:1 character/glyph clusters. Under
+        // MONOTONE_CHARACTERS a ligature such as "fi" reports the first
+        // character's index for the whole glyph, and decomposed sequences
+        // share one cluster across several glyphs; substituting either with a
+        // single character's advance produces an obviously synthetic
+        // measurement. Zero-advance glyphs are marks and must stay at zero.
+        bool singletonCluster = true;
+        if (i > 0 && glyphInfos[i - 1].cluster == cluster) {
+          singletonCluster = false;
+        }
+        if (i + 1 < numGlyphs && glyphInfos[i + 1].cluster == cluster) {
+          singletonCluster = false;
+        }
+        uint32_t clusterEnd =
+            (i + 1 < numGlyphs) ? glyphInfos[i + 1].cluster : aLength;
+        if (clusterEnd != cluster + 1) {
+          // Ligature spanning several codepoints, surrogate pair, or a
+          // reordered cluster.
+          singletonCluster = false;
+        }
+        // Vertical (TTB) runs carry the advance on y_advance and keep
+        // x_advance at zero; there is no horizontal width to spoof, so the
+        // whole block below is skipped explicitly rather than relying on the
+        // zero-advance test alone.
+        bool canSpoofAdvance = !aVertical && singletonCluster && origAdvance != 0;
+        uint32_t gridUpem = hostGridUpem;
+
         // Layer 1: Try metric substitution from the target OS database
         if (targetOS != gfxFontMetricDatabase::TargetOS::None &&
-            hasCodepoint && !fontFamily.IsEmpty()) {
+            hasCodepoint && !fontFamily.IsEmpty() && canSpoofAdvance) {
           uint32_t targetUnitsPerEm = 0;
           mozilla::Maybe<int32_t> targetAdvance =
               gfxFontMetricDatabase::GetAdvanceWidth(
@@ -1598,6 +1643,9 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
                 fontSizePx;
             glyphPositions[i].x_advance = FloatToFixed(advancePx);
             didSubstitute = true;
+            // The substituted advance is on the target font's em grid, so the
+            // residual must be quantised against that grid, not the host's.
+            gridUpem = targetUnitsPerEm;
           } else {
             // Observability: the family backing this text run has no entry in
             // the target-OS metric database, so Layer 1 does not apply and only
@@ -1608,28 +1656,43 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
           }
         }
 
-        // Layer 2: Per-glyph perturbation (fallback or overlay)
-        if (seedHash != 0) {
-          uint32_t h = seedHash ^ (hasCodepoint ? codepoint : glyphInfos[i].codepoint);
-          h *= 0x9e3779b9u;  // golden ratio constant for good diffusion
-          h ^= h >> 16;
-          float deltaPx = ((int32_t)h / 2147483648.0f) * 0.05f;
-          glyphPositions[i].x_advance += FloatToFixed(deltaPx);
+        // Layer 2: per-glyph residual (fallback when Layer 1 has no data, and
+        // a small overlay when it does). The residual is an integer number of
+        // font design units, derived from the container's full 128-bit seed
+        // and the (family, codepoint) pair, then scaled by the same em size as
+        // the advance itself. That keeps shaped text linear in font size —
+        // W(2s) == 2W(s) — instead of adding a size-independent pixel offset,
+        // and keeps every advance on the em's integer grid.
+        //
+        // Skipped for vertical runs (see canSpoofAdvance) and for zero-advance
+        // marks, whose advance must stay exactly zero.
+        if (profileState.hasSeed && canSpoofAdvance && gridUpem != 0) {
+          uint32_t cpKey = hasCodepoint ? codepoint : glyphInfos[i].codepoint;
+          int32_t jitterDU = gfxTextFingerprint::GetAdvanceJitterDU(
+              profileState, fontFamily, cpKey, gridUpem);
+          if (jitterDU != 0) {
+            int64_t delta =
+                (int64_t(jitterDU) * int64_t(FloatToFixed(fontSizePx))) /
+                int64_t(gridUpem);
+            glyphPositions[i].x_advance += int32_t(delta);
+          }
         }
 
         // DIAGNOSTIC:
         // 1) Always log the first few substitutions so we can see the normal
         //    values being applied (family, size, cp, orig->new).
         // 2) Log any suspicious advance (zero/negative/4x distortion) always.
-        static int sDiagLogged = 0;
+        // Pref-gated like DebugLogOnce; threshold is 1px in HarfBuzz's 16.16
+        // fixed point (65536), not an arbitrary 64.
+        static std::atomic<int> sDiagLogged(0);
         bool suspicious =
             glyphPositions[i].x_advance <= 0 ||
-            (origAdvance > 64 &&
+            (origAdvance > 65536 &&
              glyphPositions[i].x_advance < origAdvance / 4) ||
-            (origAdvance > 64 &&
+            (origAdvance > 65536 &&
              glyphPositions[i].x_advance > origAdvance * 4);
-        if ((didSubstitute && sDiagLogged < 30) || suspicious) {
-          sDiagLogged++;
+        if (gfxTextFingerprint::DiagnosticsEnabled() &&
+            (suspicious || (didSubstitute && sDiagLogged.fetch_add(1) < 30))) {
           printf_stderr(
               "[TEXTSPOOF] ua=C%u os=%s fam=%s cp=%u adv=%d->%d size=%.1f%s\n",
               userContextId, targetPlatform.get(), fontFamily.get(), codepoint,
