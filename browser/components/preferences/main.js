@@ -302,7 +302,7 @@ Preferences.addSetting({
   id: "containersPane",
   onUserClick(e) {
     e.preventDefault();
-    gotoPref("paneContainers2");
+    gotoPref("containers");
   },
 });
 Preferences.addSetting({ id: "containersPlaceholder" });

@@ -1250,6 +1250,12 @@ tab-split-view-wrapper[dragtarget] {
   }
 }
 
+/* The fork marks container identity with the per-tab badge; the colored
+   stroke above the tab is redundant. */
+.tab-context-line {
+  display: none !important;
+}
+
 /* Pinned tabs */
 
 .tabbrowser-tab:is([image], [pinned]) > .tab-stack > .tab-content[attention]:not([selected]),

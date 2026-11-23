@@ -69,7 +69,7 @@ document.addEventListener("paneshown", event => {
 function openContainerDialog(userContextId) {
   let identity = {
     name: "",
-    icon: lazy.ContextualIdentityService.containerIcons[0],
+    icon: "fingerprint",
     color: lazy.ContextualIdentityService.containerColors[0],
   };
   if (userContextId) {
@@ -92,35 +92,79 @@ function openSiteContainerDialog() {
   );
 }
 
+const HTML_NS = "http://www.w3.org/1999/xhtml";
+
+/**
+ * Asks the user to confirm removing a container that still has open tabs.
+ * Uses an in-page <dialog> so the confirmation matches the rest of the
+ * settings UI instead of the native macOS prompt window.
+ *
+ * @param {number} count Number of open tabs in the container.
+ * @returns {Promise<boolean>} Whether the removal should proceed.
+ */
+async function confirmRemoveContainer(count) {
+  let [title, message, okButton, cancelButton] =
+    await document.l10n.formatValues([
+      { id: "containers-remove-alert-title" },
+      { id: "containers-remove-alert-msg", args: { count } },
+      { id: "containers-remove-ok-button" },
+      { id: "containers-remove-cancel-button" },
+    ]);
+
+  let dialog = document.createElementNS(HTML_NS, "dialog");
+  dialog.className = "container-confirm-dialog";
+
+  let icon = document.createElementNS(HTML_NS, "span");
+  icon.className = "container-confirm-icon";
+
+  let heading = document.createElementNS(HTML_NS, "h2");
+  heading.className = "container-confirm-title";
+  heading.textContent = title;
+
+  let body = document.createElementNS(HTML_NS, "p");
+  body.className = "container-confirm-message";
+  body.textContent = message;
+
+  let content = document.createElementNS(HTML_NS, "div");
+  content.className = "container-confirm-content";
+  content.append(heading, body);
+
+  let layout = document.createElementNS(HTML_NS, "div");
+  layout.className = "container-confirm-layout";
+  layout.append(icon, content);
+
+  let actions = document.createElementNS(HTML_NS, "moz-button-group");
+  actions.className = "container-confirm-actions";
+
+  let cancel = document.createElementNS(HTML_NS, "moz-button");
+  cancel.textContent = cancelButton;
+  cancel.addEventListener("click", () => dialog.close("cancel"));
+
+  let remove = document.createElementNS(HTML_NS, "moz-button");
+  remove.setAttribute("type", "destructive");
+  remove.textContent = okButton;
+  remove.addEventListener("click", () => dialog.close("remove"));
+
+  actions.append(cancel, remove);
+  dialog.append(layout, actions);
+  document.body.appendChild(dialog);
+
+  let confirmed = await new Promise(resolve => {
+    dialog.addEventListener(
+      "close",
+      () => resolve(dialog.returnValue === "remove"),
+      { once: true }
+    );
+    dialog.showModal();
+  });
+  dialog.remove();
+  return confirmed;
+}
+
 async function removeContainer(userContextId) {
   let count = lazy.ContextualIdentityService.countContainerTabs(userContextId);
-  if (count > 0) {
-    let [title, message, okButton, cancelButton] =
-      await document.l10n.formatValues([
-        { id: "containers-remove-alert-title" },
-        { id: "containers-remove-alert-msg", args: { count } },
-        { id: "containers-remove-ok-button" },
-        { id: "containers-remove-cancel-button" },
-      ]);
-
-    let buttonFlags =
-      Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_0 +
-      Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_1;
-
-    let rv = Services.prompt.confirmEx(
-      window,
-      title,
-      message,
-      buttonFlags,
-      okButton,
-      cancelButton,
-      null,
-      null,
-      {}
-    );
-    if (rv != 0) {
-      return;
-    }
+  if (count > 0 && !(await confirmRemoveContainer(count))) {
+    return;
   }
   // If the deleted container is the active privacy persona, clear the
   // persona state so the toolbar button doesn't point at a dead container.
@@ -420,7 +464,6 @@ Preferences.addSetting(
 SettingGroupManager.registerGroups({
   containers: {
     l10nId: "containers-card-header2",
-    supportPage: "containers",
     headingLevel: 2,
     items: [
       {

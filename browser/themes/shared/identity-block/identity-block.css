@@ -183,11 +183,11 @@
 }
 
 #identity-box[pageproxystate="valid"].chromeUI #identity-icon {
-  list-style-image: url(chrome://branding/content/icon16.png);
+  list-style-image: url(chrome://global/skin/icons/security.svg);
 }
 @media (min-resolution: 1.1dppx) {
   #identity-box[pageproxystate="valid"].chromeUI #identity-icon {
-    list-style-image: url(chrome://branding/content/icon32.png);
+    list-style-image: url(chrome://global/skin/icons/security.svg);
   }
 }
 

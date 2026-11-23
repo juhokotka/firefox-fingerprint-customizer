@@ -247,6 +247,9 @@ tabs-browsing-section =
 pane-tabs-browsing-title2 = Tabs and browsing
   .title = Tabs and browsing
 
+pane-containers-title = Containers
+  .title = Containers
+
 tabs-group-header2 =
   .label = Tabs
 

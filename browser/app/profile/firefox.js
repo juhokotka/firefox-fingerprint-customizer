@@ -2848,10 +2848,13 @@ pref("privacy.usercontext.about_newtab_segregation.enabled", true);
 pref("privacy.userContext.enabled", false);
 pref("privacy.userContext.ui.enabled", false);
 // Privacy Browser: when true, the current window is in "container mode"
-// (container button shows green "on"). When false, it's in "normal mode"
-// (container button shows red "off"). Toggled by clicking the URL bar
-// container button.
-pref("privacy.browser.containerMode", false);
+// (the address-bar chip shows the active container). When false, it's in
+// "normal mode" (the chip stays visible and shows "Normal"). Toggled by
+// clicking the chip. Container mode is the product default.
+pref("privacy.browser.containerMode", true);
+// Privacy Browser: one-time flag used to apply the default-on container
+// mode to profiles created before this default existed.
+pref("privacy.browser.containerDefaultApplied", false);
 // Privacy Browser: the currently selected container.  When > 0 and
 // containerMode is on, all new tabs inherit this container until the user
 // manually selects a different one (or switches back to Normal Mode).

@@ -35,7 +35,9 @@ export class ContainerEditor {
     this.userContextId = userContextId;
     this.identity = identity || {
       name: "",
-      icon: lazy.ContextualIdentityService.containerIcons[0],
+      // The fingerprint is the product's identity mark, so containers no
+      // longer expose an icon picker.
+      icon: "fingerprint",
       color: lazy.ContextualIdentityService.containerColors[0],
     };
     this._profile = null;
@@ -57,10 +59,7 @@ export class ContainerEditor {
     this._colorPicker = this._createPicker("color", "containers-color-label2");
     this._colorPicker.classList.add("color-swatches");
 
-    this._iconPicker = this._createPicker("icon", "containers-icon-label2");
-    this._iconPicker.classList.add("icon-swatches");
-
-    this.form.append(this._name, this._colorPicker, this._iconPicker);
+    this.form.append(this._name, this._colorPicker);
 
     // Fingerprint Settings section.
     this._buildFingerprintSection(doc);
@@ -75,14 +74,6 @@ export class ContainerEditor {
       color => `identity-icon-circle identity-color-${color}`,
       color => lazy.ContextualIdentityService.getContainerColorLabel(color)
     );
-    this._buildSwatches(
-      this._iconPicker,
-      this.identity.icon,
-      lazy.ContextualIdentityService.containerIcons,
-      icon => `identity-icon-${icon}`,
-      icon => lazy.ContextualIdentityService.getContainerIconLabel(icon)
-    );
-
     // Load existing profile or auto-generate one.
     this._initProfile();
   }
@@ -293,13 +284,11 @@ export class ContainerEditor {
     let formData = new FormData(this.form);
     let containerName = formData.get("name").trim();
     let color = formData.get("color");
-    let icon = formData.get("icon");
+    // Fingerprint is the fixed container mark; there is no icon picker.
+    let icon = "fingerprint";
 
     if (!lazy.ContextualIdentityService.getContainerColorCode(color)) {
       throw new Error("Internal error. The color value doesn't match.");
-    }
-    if (!lazy.ContextualIdentityService.getContainerIconURL(icon)) {
-      throw new Error("Internal error. The icon value doesn't match.");
     }
 
     let userContextId = this.userContextId;

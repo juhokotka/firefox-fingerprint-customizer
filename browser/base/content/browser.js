@@ -1674,6 +1674,22 @@ var ContainerStatusUI = {
         }
 
         button.classList.toggle("mismatch", mismatch);
+        button.classList.toggle("is-active", isActive);
+
+        // Feed the container color to the chip background; the pill is tinted
+        // while a persona is active.
+        if (isActive) {
+          let colorCode = ContextualIdentityService.getContainerColorCode(
+            state.persona.color
+          );
+          if (colorCode) {
+            button.style.setProperty("--container-chip-color", colorCode);
+          } else {
+            button.style.removeProperty("--container-chip-color");
+          }
+        } else {
+          button.style.removeProperty("--container-chip-color");
+        }
 
         if (icon) {
           if (mismatch) {
@@ -1692,13 +1708,14 @@ var ContainerStatusUI = {
         }
         if (text) {
           if (mismatch) {
-            document.l10n.setAttributes(text, "container-status-mismatch",
-              { target });
+            document.l10n.setAttributes(text, "container-status-mismatch");
           } else if (isActive) {
-            document.l10n.setAttributes(text, "container-status-active",
-              { name: state.persona.name });
+            // The chip shows just the container name; the tooltip carries
+            // the longer "Privacy Container" description.
+            text.removeAttribute("data-l10n-id");
+            text.textContent = state.persona.name;
           } else {
-            document.l10n.setAttributes(text, "container-status-off");
+            document.l10n.setAttributes(text, "container-status-normal");
           }
         }
 

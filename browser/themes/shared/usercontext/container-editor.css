@@ -84,11 +84,6 @@
     }
   }
 
-  .icon-swatches .userContext-icon {
-    fill: var(--icon-color);
-    background-size: var(--icon-size-small);
-  }
-
   @media -moz-pref("browser.nova.enabled") {
     .color-swatches .userContext-icon {
       background-image: none;
@@ -107,8 +102,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-medium);
-  padding-block-start: var(--space-large);
-  border-top: 1px solid var(--border-color);
 }
 
 .fingerprint-heading {
@@ -151,28 +144,58 @@
   display: none;
 }
 
-/* ══ Toolbar button: container status ═════════════════════════════════ */
+/* ══ URL bar control: container status ═══════════════════════════════ */
 
+/* The fork's chip replaces the passive container indicator (dot + label) on
+   the right side of the address bar; keeping both would double the signal. */
+#userContext-icons {
+  display: none;
+}
+
+/* Persistent pill so the control is recognizable even before it is hovered:
+   a plain status label was easy to miss as the entry point for containers. */
 .container-status-button {
   -moz-box-align: center;
-  padding-inline: var(--space-xsmall);
-  border: none;
-  border-radius: var(--toolbarbutton-border-radius);
-  background-color: transparent;
+  -moz-box-pack: center;
+  block-size: 26px;
+  margin-inline: 2px;
+  padding-inline: var(--space-small);
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 99px;
+  background-color: color-mix(in srgb, currentColor 6%, transparent);
   color: inherit;
   appearance: none;
 }
 
 .container-status-button:hover:not([open="true"]) {
-  background-color: var(--toolbarbutton-background-color-hover);
+  background-color: var(--urlbar-box-hover-bgcolor,
+    color-mix(in srgb, currentColor 12%, transparent));
 }
 
 .container-status-button:hover:active,
 .container-status-button[open="true"] {
-  background-color: var(--toolbarbutton-background-color-active);
+  background-color: var(--urlbar-box-active-bgcolor,
+    color-mix(in srgb, currentColor 16%, transparent));
+}
+
+/* Active persona: tint the pill with the container color so the current
+   identity is visible at a glance.  --container-chip-color is set by JS. */
+.container-status-button.is-active {
+  border-color: color-mix(in srgb, var(--container-chip-color) 45%, transparent);
+  background-color: color-mix(in srgb, var(--container-chip-color) 14%, transparent);
+}
+
+.container-status-button.is-active:hover:not([open="true"]) {
+  background-color: color-mix(in srgb, var(--container-chip-color) 22%, transparent);
+}
+
+.container-status-button.is-active:hover:active,
+.container-status-button.is-active[open="true"] {
+  background-color: color-mix(in srgb, var(--container-chip-color) 28%, transparent);
 }
 
 .container-status-button.mismatch {
+  border-color: transparent;
   background-color: color-mix(in srgb, var(--container-status-warn-color) 15%, transparent);
   outline: 1px dashed color-mix(in srgb, var(--container-status-warn-color) 80%, transparent);
   outline-offset: -2px;
@@ -196,7 +219,22 @@
 
 .container-status-icon.off {
   background-image: url("resource://usercontext-content/fingerprint.svg");
-  fill: color-mix(in srgb, currentColor 45%, transparent);
+  fill: currentColor;
+  opacity: .8;
+}
+
+/* Dropdown affordance at the end of the chip. */
+.container-status-caret {
+  inline-size: 10px;
+  block-size: 10px;
+  flex: none;
+  background-image: url("chrome://global/skin/icons/arrow-down.svg");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  -moz-context-properties: fill;
+  fill: currentColor;
+  opacity: .65;
 }
 
 .container-status-icon.warn {
@@ -218,10 +256,7 @@
 }
 
 .container-status-dot {
-  inline-size: var(--space-small);
-  block-size: var(--space-small);
-  flex: none;
-  border-radius: var(--border-radius-circle);
+  display: none;
 }
 
 .container-status-dot.on {
@@ -244,15 +279,22 @@
 
 .container-status-text {
   margin: 0;
-  font-size: var(--font-size-small);
+  max-inline-size: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
   white-space: nowrap;
   color: inherit;
 }
 
 /* ══ Containers panel ════════════════════════════════════════════════ */
 
+/* Fixed width: panels size to content, and the mismatch sentence used to
+   stretch the whole popup horizontally. */
 #containers-panel {
-  min-inline-size: 24em;
+  inline-size: 24em;
+  max-inline-size: 24em;
 }
 
 /* .panel-subview-body already supplies the block padding; the inline gutter
@@ -314,10 +356,10 @@
   min-inline-size: 0;
 }
 
-/* Leading icon: container entries use the identity icon, action rows a
-   neutral glyph.  Both sit inside a round, tinted badge — the same shape
-   Nova uses for container icons in menus and the preferences list. */
-.containers-panel-item > :is(.userContext-icon, .containers-panel-action-icon) {
+/* Leading icon: container entries use the identity icon inside a round,
+   tinted badge — the same shape Nova uses for container icons in menus and
+   the preferences list. */
+.containers-panel-item > .userContext-icon {
   box-sizing: border-box;
   inline-size: var(--icon-size-large);
   block-size: var(--icon-size-large);
@@ -334,12 +376,6 @@
 .containers-panel-item > .userContext-icon {
   background-color: var(--identity-fill-tint, transparent);
   fill: var(--identity-fill-color, var(--identity-icon-color));
-}
-
-.containers-panel-item > .containers-panel-action-icon {
-  background-color: var(--button-background-color-hover);
-  background-image: url("chrome://global/skin/icons/close.svg");
-  fill: currentColor;
 }
 
 .containers-panel-name {
@@ -370,9 +406,9 @@
 .containers-panel-edit-btn {
   flex: none;
   margin-inline-start: auto;
+  --button-icon-fill: currentColor;
 }
 
-.containers-panel-clear-btn,
 .containers-panel-mode-btn {
   font-weight: var(--font-weight-semibold);
 }
@@ -476,10 +512,15 @@
   gap: var(--space-small);
   padding: var(--space-medium);
   margin: var(--space-xsmall) var(--panel-menuitem-margin-inline) var(--space-small);
+  border: 1px solid color-mix(in srgb, var(--container-status-warn-color) 45%, transparent);
   border-radius: var(--border-radius-medium);
-  background-color: color-mix(in srgb, var(--container-status-warn-color) 12%, transparent);
-  outline: 1px dashed color-mix(in srgb, var(--container-status-warn-color) 70%, transparent);
+  background-color: color-mix(in srgb, var(--container-status-warn-color) 10%, transparent);
   animation: persona-card-in 180ms ease-out;
+}
+
+/* One clear primary resolution, then the secondary actions share a row. */
+.persona-mismatch-card > moz-button {
+  inline-size: 100%;
 }
 
 @keyframes persona-card-in {
@@ -517,6 +558,7 @@
   font-size: var(--font-size-small);
   line-height: 1.6;
   color: var(--text-color-deemphasized);
+  overflow-wrap: anywhere;
 }
 
 .pmc-pill {
@@ -536,63 +578,141 @@
 }
 
 .pmc-actions > moz-button {
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  min-inline-size: 0;
 }
 
 /* ══ Detailed fingerprint editor (standalone dialog) ══════════════════ */
 
-.detailed-fingerprint-editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-large);
-  padding: var(--space-large);
-  min-inline-size: 38em;
-  max-block-size: calc(100vh - 10em);
-  overflow-y: auto;
+/* The dialog fills the window; its native focus ring shows up as a stray
+   blue frame around the whole page. */
+#fingerprint-detailed-editor-dialog {
+  border: none;
+  outline: none !important;
 }
 
-.detailed-section {
+#fingerprint-detailed-editor-dialog:is(:focus, :focus-visible, :-moz-focusring),
+:root[dialogroot] {
+  outline: none !important;
+}
+
+.detailed-fingerprint-editor {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  gap: var(--space-medium);
+  /* Horizontal padding lives on the cards so the sticky action bar can span
+     the full width without negative margins. */
+  padding-block-start: var(--space-large);
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-block-size: calc(100vh - 8em);
+  overflow-y: auto;
+  font-size: var(--font-size-root);
+}
+
+/* Scrollable content is keyboard-focusable; its focus ring reads as a stray
+   frame around the editor. */
+.detailed-fingerprint-editor:is(:focus, :focus-visible) {
+  outline: none;
+}
+
+/* Each group is a card whose header toggles the fields, so the dialog opens
+   to a compact overview instead of a wall of inputs. */
+.detailed-section {
+  margin-inline: var(--space-large);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-medium);
+  background-color: var(--background-color-box);
+}
+
+.detailed-section-header {
+  display: flex;
+  align-items: center;
   gap: var(--space-small);
+  margin: 0;
+  padding: var(--space-medium) var(--space-large);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  -moz-context-properties: fill;
+  fill: currentColor;
+}
+
+.detailed-section-header::-webkit-details-marker {
+  display: none;
+}
+
+.detailed-section-header::before {
+  content: "";
+  inline-size: 6px;
+  block-size: 6px;
+  flex: none;
+  border-inline-end: 1.5px solid currentColor;
+  border-block-end: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  opacity: 0.6;
+  transition: transform 120ms ease;
+}
+
+.detailed-section[open] > .detailed-section-header::before {
+  transform: rotate(45deg);
 }
 
 .detailed-section-title {
   margin: 0;
   font-size: var(--font-size-root);
-  font-weight: var(--font-weight-heading);
-  color: var(--text-color-deemphasized);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-color);
+}
+
+.detailed-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-medium) var(--space-large);
+  padding: 0 var(--space-large) var(--space-large);
 }
 
 .detailed-row {
   display: flex;
-  align-items: center;
-  gap: var(--space-small);
+  flex-direction: column;
+  gap: var(--space-xxsmall);
+  min-inline-size: 0;
 
   > label {
-    flex: 0 0 14em;
-    font-size: var(--font-size-small);
-    color: var(--text-color-deemphasized);
+    font-size: var(--font-size-root);
+    color: var(--text-color);
   }
 
-  > :is(moz-input-text, moz-input-number, moz-textarea) {
-    flex: 1 1 auto;
+  > :is(moz-input-text, moz-input-number, moz-textarea, moz-select) {
+    inline-size: 100%;
     min-inline-size: 0;
   }
 
   > moz-select {
-    flex: 1 1 auto;
-    min-inline-size: 0;
     --select-margin-inline: 0;
     --select-min-width: 100%;
   }
 }
 
-.detailed-checkbox {
-  flex: none;
+/* Long free-form values (font list, language list, hex seeds) need the full
+   width of the card. */
+.detailed-row-wide {
+  grid-column: 1 / -1;
 }
 
-.detailed-btn-row {
-  padding-block-start: var(--space-small);
-  border-top: 1px solid var(--border-color);
+.detailed-checkbox {
+  align-self: start;
+}
+
+/* Sits after the last card in normal flow: a sticky bar overlapped the cards
+   while scrolling, which read as broken occlusion. */
+.detailed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-small);
+  margin: 0;
+  padding: var(--space-medium) var(--space-large);
+  border-block-start: 1px solid var(--border-color);
+  background-color: var(--background-color-box);
 }

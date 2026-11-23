@@ -1640,3 +1640,64 @@ setting-pane[onsearchpane] {
     grid-template-columns: 1fr;
   }
 }
+
+/* Container removal confirmation.  Replaces the native prompt so the
+   destructive step matches the settings UI. */
+.container-confirm-dialog {
+  box-sizing: border-box;
+  inline-size: min(28em, 90vw);
+  max-inline-size: none;
+  padding: var(--space-large);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-medium);
+  background-color: var(--background-color-box);
+  color: var(--text-color);
+  box-shadow: var(--popup-box-shadow);
+  font: message-box;
+}
+
+.container-confirm-dialog::backdrop {
+  background-color: color-mix(in srgb, black 40%, transparent);
+}
+
+.container-confirm-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-medium);
+}
+
+.container-confirm-icon {
+  flex: none;
+  inline-size: var(--icon-size-large);
+  block-size: var(--icon-size-large);
+  background-image: url("chrome://global/skin/icons/warning.svg");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  -moz-context-properties: fill;
+  fill: var(--icon-color-warning);
+}
+
+.container-confirm-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-small);
+  min-inline-size: 0;
+}
+
+.container-confirm-title {
+  margin: 0;
+  font-size: var(--font-size-root);
+  font-weight: var(--font-weight-semibold);
+}
+
+.container-confirm-message {
+  margin: 0;
+  font-size: var(--font-size-root);
+  line-height: 1.5;
+  color: var(--text-color-deemphasized);
+}
+
+.container-confirm-actions {
+  margin-block-start: var(--space-large);
+}

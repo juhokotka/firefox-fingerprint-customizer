@@ -1175,9 +1175,11 @@ void gfxPlatformFontList::UpdateFontList(bool aFullRebuild) {
 
 bool gfxPlatformFontList::IsVisibleToCSS(const gfxFontFamily& aFamily,
                                          FontVisibility aVisibility,
-                                         const FontVisibilityProvider* aProvider) const {
+                                         const FontVisibilityProvider* aProvider,
+                                         bool aEnforceProfileRoster) const {
   // profileMode: when a provider is given, check the Profile's device.fontSet.
-  if (aProvider && !aProvider->IsFontAllowedByProfile(aFamily.Name())) {
+  if (aProvider && aEnforceProfileRoster &&
+      !aProvider->IsFontAllowedByProfile(aFamily.Name())) {
     return false;
   }
   return aFamily.Visibility() <= aVisibility || IsFontFamilyWhitelistActive();
@@ -1185,9 +1187,10 @@ bool gfxPlatformFontList::IsVisibleToCSS(const gfxFontFamily& aFamily,
 
 bool gfxPlatformFontList::IsVisibleToCSS(const fontlist::Family& aFamily,
                                          FontVisibility aVisibility,
-                                         const FontVisibilityProvider* aProvider) const {
+                                         const FontVisibilityProvider* aProvider,
+                                         bool aEnforceProfileRoster) const {
   // profileMode: when a provider is given, check the Profile's device.fontSet.
-  if (aProvider) {
+  if (aProvider && aEnforceProfileRoster) {
     const nsCString& name = aFamily.DisplayName().AsString(SharedFontList());
     if (!aProvider->IsFontAllowedByProfile(name)) {
       return false;
@@ -1531,6 +1534,10 @@ already_AddRefed<gfxFont> gfxPlatformFontList::CommonFontFallback(
     FontVisibilityProvider* aFontVisibilityProvider, uint32_t aCh,
     uint32_t aNextCh, Script aRunScript, FontPresentation aPresentation,
     const gfxFontStyle* aMatchStyle, FontFamily& aMatchedFamily) {
+  // Glyph fallback deliberately ignores the profile's target-OS roster: the
+  // roster is an enumeration boundary, not a rendering one. A Windows-target
+  // profile names CJK families (YaHei, SimSun, ...) that a macOS host does not
+  // ship; blocking the host's CJK fonts here would render CJK text as tofu.
   AutoTArray<const char*, NUM_FALLBACK_FONTS> defaultFallbacks;
   gfxPlatform::GetPlatform()->GetCommonFallbackFonts(
       aCh, aRunScript, aPresentation, defaultFallbacks);
@@ -1565,7 +1572,8 @@ already_AddRefed<gfxFont> gfxPlatformFontList::CommonFontFallback(
     for (const auto name : defaultFallbacks) {
       fontlist::Family* family =
           FindSharedFamily(aFontVisibilityProvider, nsDependentCString(name));
-      if (!family || !IsVisibleToCSS(*family, level, aFontVisibilityProvider)) {
+      if (!family ||
+          !IsVisibleToCSS(*family, level, aFontVisibilityProvider, false)) {
         continue;
       }
       // XXX(jfkthame) Should we fire the async cmap-loader here, or let it
@@ -1582,7 +1590,8 @@ already_AddRefed<gfxFont> gfxPlatformFontList::CommonFontFallback(
     for (const auto name : defaultFallbacks) {
       gfxFontFamily* fallback =
           FindFamilyByCanonicalName(nsDependentCString(name));
-      if (!fallback || !IsVisibleToCSS(*fallback, level, aFontVisibilityProvider)) {
+      if (!fallback ||
+          !IsVisibleToCSS(*fallback, level, aFontVisibilityProvider, false)) {
         continue;
       }
       fallback->FindFontForChar(&data);
@@ -1622,7 +1631,8 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
         aFontVisibilityProvider, aCh, aRunScript, aMatchStyle, aMatchedFamily);
     if (fe) {
       if (aMatchedFamily.mShared) {
-        if (IsVisibleToCSS(*aMatchedFamily.mShared, level, aFontVisibilityProvider)) {
+        if (IsVisibleToCSS(*aMatchedFamily.mShared, level,
+                           aFontVisibilityProvider, false)) {
           RefPtr<gfxFont> font = fe->FindOrMakeFont(aMatchStyle);
           if (font) {
             if (aPresentation == FontPresentation::Any) {
@@ -1635,7 +1645,8 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
           }
         }
       } else {
-        if (IsVisibleToCSS(*aMatchedFamily.mUnshared, level, aFontVisibilityProvider)) {
+        if (IsVisibleToCSS(*aMatchedFamily.mUnshared, level,
+                           aFontVisibilityProvider, false)) {
           RefPtr<gfxFont> font = fe->FindOrMakeFont(aMatchStyle);
           if (font) {
             if (aPresentation == FontPresentation::Any) {
@@ -1658,7 +1669,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
     if (families) {
       for (uint32_t i = 0; i < SharedFontList()->NumFamilies(); i++) {
         fontlist::Family& family = families[i];
-        if (!IsVisibleToCSS(family, level, aFontVisibilityProvider)) {
+        if (!IsVisibleToCSS(family, level, aFontVisibilityProvider, false)) {
           continue;
         }
         if (!family.IsFullyInitialized() &&
@@ -1684,7 +1695,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
     // iterate over all font families to find a font that support the
     // character
     for (const RefPtr<gfxFontFamily>& family : mFontFamilies.Values()) {
-      if (!IsVisibleToCSS(*family, level, aFontVisibilityProvider)) {
+      if (!IsVisibleToCSS(*family, level, aFontVisibilityProvider, false)) {
         continue;
       }
       // evaluate all fonts in this family for a match

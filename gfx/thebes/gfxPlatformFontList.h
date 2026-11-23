@@ -679,12 +679,20 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
   // The provider must be passed explicitly (no default): when it is null the
   // profile-based fontSet check (profileMode) is skipped entirely, so a missing
   // argument silently disables per-container font filtering.
+  //
+  // aEnforceProfileRoster may be false only for glyph fallback: rendering must
+  // keep working when the target-OS roster names CJK families that the host
+  // does not ship (e.g. a Windows-looking container on a macOS host).
+  // Enumeration and CSS/local() name lookup always keep the strict roster, so
+  // "listed" still implies "exposed".
   bool IsVisibleToCSS(const gfxFontFamily& aFamily,
                       FontVisibility aVisibility,
-                      const FontVisibilityProvider* aProvider) const;
+                      const FontVisibilityProvider* aProvider,
+                      bool aEnforceProfileRoster = true) const;
   bool IsVisibleToCSS(const mozilla::fontlist::Family& aFamily,
                       FontVisibility aVisibility,
-                      const FontVisibilityProvider* aProvider) const;
+                      const FontVisibilityProvider* aProvider,
+                      bool aEnforceProfileRoster = true) const;
 
   // (Re-)initialize the set of codepoints that we know cannot be rendered.
   void InitializeCodepointsWithNoFonts() MOZ_REQUIRES(mLock);

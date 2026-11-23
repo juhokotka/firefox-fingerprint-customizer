@@ -528,7 +528,9 @@ const CONFIG_PANES = Object.freeze({
     replaces: "privacy",
   },
   containers: {
-    parent: srdSectionEnabled("tabsBrowsing") ? "tabsBrowsing" : "general",
+    // Standalone top-level pane (not a child of tabsBrowsing) so that
+    // openPreferences("containers") lands directly on the Containers page.
+    parent: null,
     l10nId: "containers-section-header2",
     groupIds: ["containers", "siteContainers"],
     module: "chrome://browser/content/preferences/config/containers.mjs",

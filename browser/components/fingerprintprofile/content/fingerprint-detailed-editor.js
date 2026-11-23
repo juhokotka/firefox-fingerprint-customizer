@@ -120,7 +120,7 @@ function buildEditor(host, profile, userContextId) {
         "fingerprint-editor-disk-size",
         buildNumberInput(doc, "diskSizeGB", profile.device?.diskSizeGB)
       ),
-    ])
+    ], true)
   );
 
   // Section: Screen
@@ -285,7 +285,7 @@ function buildEditor(host, profile, userContextId) {
 
   // Regenerate buttons
   let btnRow = doc.createElementNS(HTML_NS, "moz-button-group");
-  btnRow.className = "detailed-btn-row";
+  btnRow.className = "detailed-actions";
 
   let rerollDeviceBtn = makeButton(doc, "fingerprint-editor-reroll-device");
   rerollDeviceBtn.addEventListener("click", () => {
@@ -342,24 +342,37 @@ function toHex(bytes) {
   return (bytes || []).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-function buildSection(doc, titleId, rows) {
-  let section = doc.createElementNS(HTML_NS, "div");
+function buildSection(doc, titleId, rows, open = false) {
+  let section = doc.createElementNS(HTML_NS, "details");
   section.className = "detailed-section";
+  if (open) {
+    section.setAttribute("open", "");
+  }
 
-  let title = doc.createElementNS(HTML_NS, "h2");
+  let header = doc.createElementNS(HTML_NS, "summary");
+  header.className = "detailed-section-header";
+
+  let title = doc.createElementNS(HTML_NS, "span");
   title.className = "detailed-section-title";
   doc.l10n.setAttributes(title, titleId);
-  section.appendChild(title);
+  header.appendChild(title);
+  section.appendChild(header);
 
+  let grid = doc.createElementNS(HTML_NS, "div");
+  grid.className = "detailed-grid";
   for (let row of rows) {
-    section.appendChild(row);
+    grid.appendChild(row);
   }
+  section.appendChild(grid);
   return section;
 }
 
 function buildRow(doc, labelId, control) {
   let row = doc.createElementNS(HTML_NS, "div");
   row.className = "detailed-row";
+  if (control.localName === "moz-textarea") {
+    row.classList.add("detailed-row-wide");
+  }
 
   let label = doc.createElementNS(HTML_NS, "label");
   doc.l10n.setAttributes(label, labelId);

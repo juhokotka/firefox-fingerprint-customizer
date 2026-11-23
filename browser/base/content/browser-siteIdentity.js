@@ -862,10 +862,9 @@ var gIdentityHandler = {
         PrivateBrowsingUtils.isWindowPrivate(window));
 
     if (this._isSecureInternalUI) {
-      // This is a secure internal Firefox page.
+      // This is a secure internal Firefox page. Keep the address bar
+      // neutral: no product brand label next to the identity icon.
       this._identityBox.className = "chromeUI";
-      let brandBundle = document.getElementById("bundle_brand");
-      icon_label = brandBundle.getString("brandShorterName");
     } else if (this._pageExtensionPolicy) {
       // This is a WebExtension page.
       this._identityBox.className = "extensionPage";

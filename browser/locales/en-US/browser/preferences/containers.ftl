@@ -153,10 +153,10 @@ container-status-button =
 # $name (String) - name of the active container (persona).
 container-status-active = Privacy Container: { $name }
 # Label of the toolbar button when no privacy container is active.
-container-status-off = Privacy Containers Off
-# $target (String) - the container the selected tab is actually browsing as,
-# or a description of a normal tab.
-container-status-mismatch = Mismatch — { $target }
+container-status-off = Containers
+container-status-normal = Containers
+# Short chip label; the tooltip and panel carry the details.
+container-status-mismatch = Mismatch
 # $name (String) - name of the active container (persona).
 container-status-tooltip-active =
     .tooltiptext = Active persona: { $name }
@@ -170,7 +170,6 @@ container-status-tooltip-mismatch =
 
 containers-list-title = Privacy Containers
 containers-list-normal-mode = Normal Mode
-containers-list-clear = Clear Container
 containers-list-empty = No containers yet.
 containers-list-add =
     .label = New Container

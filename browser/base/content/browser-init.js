@@ -756,12 +756,12 @@ var gBrowserInit = {
       }
 
         if (navBarTarget && urlbarContainer) {
-          // Create the button element — styled like identity-box buttons
-          // (tracking protection, permissions) inside the URL bar.
+          // Create the button element — sits inside the URL bar, right after
+          // the site identity box, so it shares the address bar's leading
+          // area instead of taking space from the nav-bar.
           let btn = document.createXULElement("toolbarbutton");
           btn.id = "urlbar-container-button";
-          btn.className = "toolbarbutton-1 chromeclass-toolbar-additional container-status-button";
-          btn.setAttribute("removable", "false");
+          btn.className = "container-status-button";
           btn.setAttribute("data-l10n-attrs", "tooltiptext");
           document.l10n.setAttributes(btn, "container-status-button");
 
@@ -780,13 +780,26 @@ var gBrowserInit = {
           let dot = document.createXULElement("image");
           dot.className = "container-status-dot off";
 
+          // Menu affordance: makes the chip read as a control that opens a
+          // list, not as a passive status label.
+          let caret = document.createXULElement("image");
+          caret.className = "container-status-caret";
+
           content.appendChild(icon);
           content.appendChild(label);
           content.appendChild(dot);
+          content.appendChild(caret);
           btn.appendChild(content);
 
-          // Insert the button DIRECTLY BEFORE the urlbar-container.
-          navBarTarget.insertBefore(btn, urlbarContainer);
+          // Insert inside the URL bar, directly after the identity box.
+          let identityBox = document.getElementById("identity-box");
+          if (identityBox) {
+            identityBox.after(btn);
+          } else {
+            // Fallback for a URL bar whose slots have not been populated yet.
+            btn.setAttribute("urlbar-slot", "site-info");
+            navBarTarget.insertBefore(btn, urlbarContainer);
+          }
 
           // ── Panel builder ──────────────────────────────────────────
           function buildContainerPanel(panel) {
@@ -1014,39 +1027,6 @@ var gBrowserInit = {
             });
             vbox.appendChild(normalRow);
 
-            // ── Clear Container row (only when a container is active) ──
-            if (hasActiveContainer) {
-              let clearRow = makeRow("containers-panel-clear-btn");
-              let clearIcon = html("span");
-              clearIcon.className = "containers-panel-action-icon";
-              let clearName = html("span");
-              clearName.className = "containers-panel-name";
-              l10n(clearName, "containers-list-clear");
-              clearRow.appendChild(clearIcon);
-              clearRow.appendChild(clearName);
-              clearRow.addEventListener("click", function () {
-                try {
-                  // Open the fresh normal-mode tab FIRST: it is not in the
-                  // container so it survives the tab sweep below, and it
-                  // guarantees the window never runs out of tabs mid-close.
-                  let newTab = gBrowser.addTrustedTab(BROWSER_NEW_TAB_URL);
-                  gBrowser.selectedTab = newTab;
-
-                  // Close all tabs in the active container
-                  ContextualIdentityService.closeContainerTabs(activeUcId);
-                } catch (e) {
-                  console.error("[ContainerButton] closeContainerTabs error:", e);
-                }
-                // Switch back to normal mode
-                Services.prefs.setBoolPref("privacy.browser.containerMode", false);
-                Services.prefs.setBoolPref("privacy.fingerprint.profileMode", false);
-                Services.prefs.setIntPref("privacy.browser.selectedUserContextId", 0);
-                ContainerStatusUI._updateButtonStatus();
-                panel.hidePopup();
-              });
-              vbox.appendChild(clearRow);
-            }
-
             vbox.appendChild(document.createXULElement("toolbarseparator"));
 
             // ── Container list ──
@@ -1140,8 +1120,12 @@ var gBrowserInit = {
                 editBtn.className = "containers-panel-edit-btn";
                 editBtn.setAttribute("type", "icon ghost");
                 editBtn.setAttribute("size", "small");
-                editBtn.setAttribute("iconSrc",
-                  "chrome://global/skin/icons/edit.svg");
+                // browser.xhtml is an XML document, so attribute names stay
+                // case-sensitive; moz-button observes the lowercase "iconsrc".
+                editBtn.setAttribute(
+                  "iconsrc",
+                  "chrome://global/skin/icons/edit.svg"
+                );
                 editBtn.setAttribute("data-l10n-id", "containers-list-edit");
                 editBtn.addEventListener("click", function (event) {
                   event.stopPropagation();
@@ -1244,14 +1228,17 @@ var gBrowserInit = {
                   vbox.appendChild(errMsg);
                   panel.appendChild(vbox);
                 }
-                panel.openPopup(btn, "after_start", 0, 0, false, false);
+                let anchor = btn.getBoundingClientRect().width
+                  ? btn
+                  : document.getElementById("urlbar") || btn;
+                panel.openPopup(anchor, "after_start", 0, 0, false, false);
               }
             } catch (e) {
               console.error("[ContainerButton] Click handler error:", e);
             }
           });
 
-          console.log("[ContainerButton] Button created and inserted before urlbar-container");
+          console.log("[ContainerButton] Button created and inserted inside the urlbar");
         } else {
           console.error("[ContainerButton] navBarTarget or urlbarContainer not found!");
         }
@@ -1280,6 +1267,71 @@ var gBrowserInit = {
       });
       console.log("[ContainerButton] Menu item wired up");
     }
+
+    // Default-on container mode. New profiles get the pref default; this
+    // one-time migration applies it to profiles created before the default
+    // existed, then makes sure a real container + fingerprint profile is
+    // selected so the address-bar chip always has a meaningful identity.
+    (async () => {
+      const MODE_PREF = "privacy.browser.containerMode";
+      const SELECTED_PREF = "privacy.browser.selectedUserContextId";
+      const MIGRATED_PREF = "privacy.browser.containerDefaultApplied";
+      try {
+        if (!Services.prefs.getBoolPref(MIGRATED_PREF, false)) {
+          Services.prefs.setBoolPref(MIGRATED_PREF, true);
+          if (Services.prefs.getIntPref(SELECTED_PREF, 0) === 0) {
+            Services.prefs.setBoolPref(MODE_PREF, true);
+          }
+        }
+        if (!Services.prefs.getBoolPref(MODE_PREF, false)) {
+          return;
+        }
+
+        Services.prefs.setBoolPref("privacy.userContext.enabled", true);
+        Services.prefs.setBoolPref("privacy.userContext.ui.enabled", true);
+
+        let identities = ContextualIdentityService.getPublicIdentities();
+        let selected = Services.prefs.getIntPref(SELECTED_PREF, 0);
+        let identity = identities.find(i => i.userContextId === selected);
+        if (!identity) {
+          identity =
+            identities[0] ||
+            ContextualIdentityService.create("Personal", "fingerprint", "blue");
+          selected = identity.userContextId;
+          Services.prefs.setIntPref(SELECTED_PREF, selected);
+        }
+
+        if (!FingerprintProfileStore.getProfile(selected)) {
+          let profile = FingerprintProfileStore.generateProfile();
+          await FingerprintProfileStore.saveProfile(selected, profile);
+        }
+        Services.prefs.setBoolPref("privacy.fingerprint.profileMode", true);
+
+        // If the selected tab is a normal tab showing a chrome/about page,
+        // move it into the container on startup. These pages have no state
+        // to lose, and this keeps the default experience free of a
+        // mismatch warning on Settings/New Tab. Web pages are left alone
+        // so the user does not lose form data; the chip flags them instead.
+        if (gBrowser.selectedTab?.userContextId === 0) {
+          let uri = gBrowser.currentURI?.spec || "";
+          let canReopen = uri.startsWith("about:") ||
+            uri.startsWith("chrome:");
+          if (canReopen) {
+            let oldTab = gBrowser.selectedTab;
+            let newTab = gBrowser.addTrustedTab(uri, {
+              userContextId: selected,
+            });
+            gBrowser.selectedTab = newTab;
+            gBrowser.removeTab(oldTab);
+            ContainerProfileSync.syncToTab(newTab);
+          }
+        }
+
+        ContainerStatusUI._updateButtonStatus();
+      } catch (e) {
+        console.error("[ContainerButton] default container bootstrap failed:", e);
+      }
+    })();
 
       // Update button status
       ContainerStatusUI._updateButtonStatus();
